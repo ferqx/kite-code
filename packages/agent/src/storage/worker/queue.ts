@@ -5,7 +5,10 @@ type Category = 'control' | 'body' | 'query';
 const schedule: Category[] = ['control', 'control', 'control', 'control', 'body', 'query'];
 /** Bounded weighted scheduling between transactions. Running SQL is never interrupted. */
 export class WorkerQueue {
-  private readonly queues: Record<Category, { request: WorkerRequest; bytes: number }[]> = {
+  private readonly queues: Record<
+    Category,
+    { request: WorkerRequest; bytes: number; readyAt?: number }[]
+  > = {
     control: [],
     body: [],
     query: [],
@@ -25,12 +28,24 @@ export class WorkerQueue {
     this.count++;
     this.bytes += bytes;
   }
+  deferUnstartedWrite(request: WorkerRequest): void {
+    // Called synchronously after next(), before another message can consume its slot.
+    const bytes = new TextEncoder().encode(JSON.stringify(request)).byteLength;
+    this.queues[categoryOf(request.method)].unshift({
+      request,
+      bytes,
+      readyAt: Date.now() + 25,
+    });
+    this.count++;
+    this.bytes += bytes;
+  }
   next(): WorkerRequest | undefined {
     for (let i = 0; i < schedule.length; i++) {
       const category = schedule[this.position]!;
       this.position = (this.position + 1) % schedule.length;
       const queue = this.queues[category];
       let item = queue[0];
+      if (item?.readyAt !== undefined && item.readyAt > Date.now()) continue;
       // close drains every previously accepted message, regardless of its priority.
       if (
         item?.request.method === 'close' &&

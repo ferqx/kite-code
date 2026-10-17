@@ -40,7 +40,7 @@ function fixture() {
     ({
       kind: 'tool',
       definitionId: id,
-      definitionVersion: '1',
+      definitionVersion: id === 'files.read_path' ? '2' : '1',
       input,
       signal: new AbortController().signal,
     }) as AuthorizationRequest;
@@ -349,7 +349,7 @@ for (const decision of ['full', 'approve', 'deny'] as const) {
           type: 'tool_call',
           id: 'large',
           name: 'files.read_path',
-          arguments: JSON.stringify({ path: largePath }),
+          arguments: JSON.stringify({ path: largePath, limit: 120002 }),
         },
         { ...finish, reason: 'tool_calls' },
       ],
@@ -565,6 +565,93 @@ test('protected root sets retain exact snapshot identity and actual denial acros
     for (const root of [f.profile, runtime, f.home])
       expect(readFileSync(join(root, 'original'), 'utf8')).toBe('original protected bytes');
     expect(() => build([f.profile, f.profile, 'relative'])).toThrow('file_boundary_invalid');
+  } finally {
+    f.close();
+  }
+});
+
+test('absolute read defaults to 200 lines with exact continuation, explicit ranges and complete baseline', async () => {
+  const f = fixture();
+  try {
+    const path = join(f.home, 'paged.txt');
+    const lines = Array.from(
+      { length: 405 },
+      (_, index) => `${index === 0 ? '\ufeff' : ''}line ${index + 1}\r\n`,
+    );
+    const text = lines.join('');
+    writeFileSync(path, text);
+    expect(f.api.tools.find((tool) => tool.id === 'files.read_path')!.version).toBe('2');
+    expect(f.api.snapshot).toMatchObject({
+      tools: f.api.tools.map(({ id, version }) => ({ id, definitionVersion: version })),
+    });
+    for (const id of ['files.write_path', 'files.edit_path'])
+      expect(f.api.tools.find((tool) => tool.id === id)!.version).toBe('1');
+    const page = async (range: Record<string, number>) => {
+      const result = await f.execute('files.read_path', { path, ...range });
+      expect(result.outcome).toBe('succeeded');
+      return JSON.parse(result.content);
+    };
+    const first = await page({});
+    expect(first.path).toBe(path);
+    expect(first.content).toBe(lines.slice(0, 200).join(''));
+    expect(first.selection).toEqual({ fromLine: 1, toLine: 200, totalLines: 405, nextOffset: 201 });
+    expect(first.baseline.hash).toBe(createHash('sha256').update(text).digest('hex'));
+    expect(first.baseline.size).toBe(Buffer.byteLength(text));
+    const second = await page({ offset: first.selection.nextOffset });
+    const last = await page({ offset: second.selection.nextOffset });
+    expect(second.selection).toEqual({
+      fromLine: 201,
+      toLine: 400,
+      totalLines: 405,
+      nextOffset: 401,
+    });
+    expect(last.selection).toEqual({
+      fromLine: 401,
+      toLine: 405,
+      totalLines: 405,
+      nextOffset: null,
+    });
+    expect(first.content + second.content + last.content).toBe(text);
+    for (const result of [second, last]) expect(result.baseline).toEqual(first.baseline);
+    const explicit = await page({ offset: 2, limit: 300 });
+    expect(explicit.content).toBe(lines.slice(1, 301).join(''));
+    expect(explicit.selection).toEqual({
+      fromLine: 2,
+      toLine: 301,
+      totalLines: 405,
+      nextOffset: 302,
+    });
+    expect(explicit.baseline).toEqual(first.baseline);
+  } finally {
+    f.close();
+  }
+});
+
+test('absolute read rejects stale definition versions in classification and dispatch proof', async () => {
+  const f = fixture();
+  try {
+    const input = { path: join(f.home, 'version.txt') };
+    writeFileSync(input.path, 'exact');
+    const request = f.request('files.read_path', input);
+    const current = await f.api.describeRequest(request);
+    expect(current).toMatchObject({ definitionVersion: '2', hardAllowed: true });
+    const stale = await f.api.describeRequest({ ...request, definitionVersion: '1' });
+    expect(stale).toMatchObject({ hardAllowed: false, denialReason: 'file_input_invalid' });
+    const proof = await f.proof('files.read_path', input);
+    const staleProof = {
+      ...proof,
+      snapshot: {
+        ...proof.snapshot,
+        data: {
+          ...proof.snapshot.data,
+          capability: { ...current, definitionVersion: '1' },
+        },
+      },
+    };
+    expect(await f.execute('files.read_path', input, staleProof)).toMatchObject({
+      outcome: 'failed',
+      details: { code: 'file_dispatch_scope_changed' },
+    });
   } finally {
     f.close();
   }

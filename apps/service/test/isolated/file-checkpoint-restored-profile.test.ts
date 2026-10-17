@@ -84,7 +84,7 @@ test('default Files original capture survives public offline restore to a new pr
       modelId: 'fixed',
       models: [model],
       tools: [
-        { id: 'files.read', definitionVersion: '3' },
+        { id: 'files.read', definitionVersion: '4' },
         { id: 'files.write', definitionVersion: '2' },
       ],
     }),

@@ -27,6 +27,7 @@ import {
   type RunRecord,
   type SessionRecord,
 } from '../types';
+import { markStorageTransactionUnconfirmed } from '../worker/error';
 import { acceptAgentInput, interruptAgent } from './agent-input-operations';
 import {
   getAgentMessage,
@@ -47,6 +48,7 @@ import { readBackgroundExecutions } from './background-directory';
 import { cancel } from './cancel-operations';
 import { activateChildRun, ensureAgent, inspectChildSettlement } from './child-operations';
 import { getAgentSummary, listAgentSummaries } from './child-query-operations';
+import { compressionDisplay } from './compression-display';
 import {
   beginCompression,
   commitCompression,
@@ -118,6 +120,7 @@ import {
   sessionHistoryCollectedAt,
   workspaceRemoval,
 } from './workspace-removal';
+import { UnstartedSqliteWrite } from './write-lock';
 
 type Input = {
   modelOutput?: import('../../model-output').ModelOutputReference;
@@ -160,6 +163,59 @@ export class SqliteOperations {
   }
   private sqlDurationMs = 0;
   private commitMs: number | undefined;
+  private mayWaitForWriter = false;
+  private transactionFailure: Error | undefined;
+  assertAvailable(): void {
+    if (this.transactionFailure) throw this.transactionFailure;
+  }
+  /** No result may cross the Worker boundary while an operation still owns a transaction. */
+  assertRequestSettled(error?: unknown): void {
+    if (this.transactionFailure) throw this.transactionFailure;
+    if (this.db.inTransaction) {
+      const unfinished = new AgentError('storage_transaction_unconfirmed');
+      this.transactionFailure =
+        error === undefined
+          ? unfinished
+          : Object.assign(
+              new AggregateError(
+                [error, unfinished],
+                `storage_transaction_unconfirmed: ${error instanceof Error ? error.message : String(error)}`,
+                { cause: error },
+              ),
+              { code: 'storage_transaction_unconfirmed' },
+            );
+      markStorageTransactionUnconfirmed(this.transactionFailure);
+      throw this.transactionFailure;
+    }
+  }
+  rollback(error: unknown): never {
+    try {
+      this.db.run('ROLLBACK');
+    } catch (cleanup) {
+      const failure = Object.assign(
+        new AggregateError(
+          [error, cleanup],
+          `${this.db.inTransaction ? 'storage_transaction_unconfirmed' : 'storage_rollback_failed'}: SQLite transaction failed: ${error instanceof Error ? error.message : String(error)}; rollback failed: ${cleanup instanceof Error ? cleanup.message : String(cleanup)}`,
+          { cause: error },
+        ),
+        {
+          code: this.db.inTransaction
+            ? 'storage_transaction_unconfirmed'
+            : 'storage_rollback_failed',
+        },
+      );
+      if (this.db.inTransaction)
+        this.transactionFailure = markStorageTransactionUnconfirmed(failure);
+      throw failure;
+    }
+    this.assertRequestSettled(error);
+    throw error;
+  }
+  beginRequest(): void {
+    this.assertAvailable();
+    this.resetTiming();
+    this.mayWaitForWriter = true;
+  }
   resetTiming(): void {
     this.sqlDurationMs = 0;
     this.commitMs = undefined;
@@ -194,9 +250,13 @@ export class SqliteOperations {
         if (typeof value !== 'function') return value;
         if (key === 'run' || key === 'exec')
           return (...args: unknown[]) =>
-            measure(String(args[0]), () => Reflect.apply(value, target, args));
+            measure(String(args[0]), () => {
+              this.assertAvailable();
+              return Reflect.apply(value, target, args);
+            });
         if (key === 'query' || key === 'prepare')
           return (...args: unknown[]) => {
+            this.assertAvailable();
             const statement = measure(String(args[0]), () =>
               Reflect.apply(value, target, args),
             ) as Statement;
@@ -252,18 +312,30 @@ export class SqliteOperations {
     );
   }
   tx<T>(work: () => T): T {
+    this.assertAvailable();
     if (this.readonly) throw new AgentError('read_only');
-    this.db.run('BEGIN IMMEDIATE');
+    try {
+      this.db.run('BEGIN IMMEDIATE');
+    } catch (error) {
+      if (
+        this.mayWaitForWriter &&
+        !this.db.inTransaction &&
+        error instanceof Error &&
+        'code' in error &&
+        error.code === 'SQLITE_BUSY'
+      )
+        throw new UnstartedSqliteWrite(error);
+      throw error;
+    }
+    // A later transaction in the same request must never replay an earlier commit.
+    this.mayWaitForWriter = false;
     try {
       const value = work();
       this.recoveryAudit.flush();
       this.db.run('COMMIT');
       return value;
     } catch (error) {
-      try {
-        this.db.run('ROLLBACK');
-      } catch {}
-      throw error;
+      return this.rollback(error);
     }
   }
   identity(expected: string): string {
@@ -647,6 +719,7 @@ export class SqliteOperations {
   }
   message(row: Row): MessageRecord {
     const source = parse(row.source_json) as Record<string, Json>;
+    const compression = compressionDisplay(this, row, source);
     let content = String(source.content ?? '');
     if (row.role === 'user' && row.run_id !== null && content.includes('"decisionContext"')) {
       const run = this.row(
@@ -674,6 +747,7 @@ export class SqliteOperations {
       status: row.status as MessageRecord['status'],
       role: row.role as MessageRecord['role'],
       content,
+      ...(compression ? { compression } : {}),
       ...(['content', 'reasoning', 'tool_calls'].includes(String(source.firstOutput))
         ? { firstOutput: source.firstOutput as MessageRecord['firstOutput'] }
         : {}),
@@ -1798,8 +1872,7 @@ export class SqliteOperations {
           this.db.run('COMMIT');
           return value;
         } catch (error) {
-          this.db.run('ROLLBACK');
-          throw error;
+          return this.rollback(error);
         }
       }
       case 'setRunResultWait':
@@ -1931,8 +2004,7 @@ export class SqliteOperations {
           this.db.run('COMMIT');
           return { metadata: meta, events };
         } catch (error) {
-          this.db.run('ROLLBACK');
-          throw error;
+          return this.rollback(error);
         }
       }
 

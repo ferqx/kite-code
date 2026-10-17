@@ -14,9 +14,13 @@ Execution 的可选 `authorization` 由 [原授权 owner](sqlite/authorization-r
 
 ## Store 关闭未确认时的锁归属
 
-[公共 SQLite Store](../sqlite.ts)的 `close()` 同步封住新请求并缓存原完成 Promise。Worker 排空原请求、释放语句且 `db.close(true)` 返回成功 ACK后，macOS 还须由[原 Worker owner](../platform/process/owned-worker.ts)确认原 Mach thread right 已变死名且准确释放，才能归还原 Session owner、恢复 lease 和 Profile 使用锁。打开失败的成功构造 Worker 也先完成这一收尾再归还 Profile。关闭错误、Worker 不可用或关闭请求未被接纳时，仍请求 terminate 并拒绝 pending，但保留原锁与 ownership；原业务错误和收尾错误同时存在时保两者及原 cause。重复关闭不重试、不补造确认，未确认锁由原宿主进程实际退出归还。
+[公共 SQLite Store](../sqlite.ts)的 `close()` 同步封住新请求并缓存原完成 Promise。Worker 排空原请求、释放语句且 `db.close(true)` 返回成功 ACK后，macOS 还须由[原 Worker owner](../platform/process/owned-worker.ts)确认原 Mach thread right 已变死名且准确释放，才能归还原 Session owner、恢复 lease 和 Profile 使用锁。打开失败的成功构造 Worker 也先完成这一收尾再归还 Profile。关闭错误、Worker 不可用或关闭请求未被接纳时，仍请求 terminate 并拒绝 pending，但保留原锁与 ownership；原业务错误和收尾错误同时存在时保两者及原 cause。这类未确认关闭保持同一失败 Promise，不补造确认，未确认锁由原宿主进程实际退出归还。
+
+DB ACK 和原 Worker 退出均已确认后，若仅原生解锁失败，Store 保留尚未释放的准确锁；再次 `close()` 只重试这项剩余清理，不重新打开 Worker、数据库或业务准入。Session owner 的 SQL 逻辑释放与 OS 解锁也分别记录：SQL 已释放的旧 generation 不能再次写入或重取；原锁实际释放成功后才删除持有记录。Runtime 保留准确 OwnerRef 的失败事实并显示 cleanup busy，关闭时只进行一次准确释放重试；持续失败明确 `shutdown_cleanup_unconfirmed / drain_failed`，不改写已经完成的 Run，也不重放模型、工具或 disposer。[真实 OS 解锁故障回归](../../test/isolated/storage/session-owner-release.test.ts)核单次与持续失败、另一 Store 的实际锁竞争、准确重试和原完成正文。
 
 固定可信 preload 保持原 Worker main 与消息协议，只向其唯一父 owner 交接原身份。原身份取得与退出观察共用五秒收尾预算；缺身份、查询错误、超时或原权释放失败保 `worker_exit_unconfirmed`／清理错误，Bun close 不授死亡。源码的 preload、native leaf 和 owner，或 built 的共享 chunk／bundled preload均由准确 loader metadata 进入保护范围。Win/Linux 原调用路径保持，原线程与平台资格仍未闭合，不从 macOS 结果推定。
+
+Run resume／Job recovery lease同样分开记录SQL逻辑释放与原OS锁：逻辑释放后禁止旧lease commit/dispatch，重复exact release只重试物理解锁，确认成功才删除登记。resume commit先封住并发release，移交给普通owner的锁不能再由旧lease释放。begin恢复失败、recoverSession已提交后的finally、acquire owner失败等局部锁保留准确清理权。migration unlock也属于启动收尾：先确认原Worker终止，再释放migration/profile；持续失败保原业务与清理错误及准确retryCleanup，未知Worker不重复发terminate。[真实恢复锁回归](../../test/isolated/storage/recovery-lock-release.test.ts)核实际双Store排他、SQL一次、旧lease拒绝、启动失败及未知Worker保留。没有新增锁或修改SQL格式。
 
 [真实 Service 关闭回归](../../../../apps/service/test/isolated/store-close-ownership.test.ts)经共用装配和 Client 完成普通 Model 任务，在真实 Worker strict-close 前注入错误；核原完整正文、`drain_failed`、原关闭 Promise，以及进程存活时公开维护 EX 被拒绝。随后等原 owned child 实际退出，公开备份和冷 readonly 的 metadata／完整 View／cursor／Model 正文保持，冷 Model 零调用。这项交接不补齐正常 Worker 物理退出、原 RSS 或全 Runtime 资源资格。
 
@@ -36,11 +40,21 @@ Execution 的可选 `authorization` 由 [原授权 owner](sqlite/authorization-r
 
 Worker 的首次和积压 pump 使用 `setImmediate`，每个宏任务至多执行一个同步事务后让出。原控制/正文/查询加权队列、容量预留和 close 排空此前已接纳请求保持；不把积压改成连续 microtask。原长 Run 的有界 DbTiming 诊断显示 7850 个请求累计排队约 11.95s、SQL 约 2.06s、COMMIT 约 0.31s，原 `setTimeout(0)` 的排队中位数约 1.26ms；取消和关闭确认。原[双 Worker timing](../../test/isolated/storage/timing.test.ts)继续核 control/body 早于末尾 query及观察异常不影响写入，不能以纯 queue 测试替代。该调度修复不证明 RSS 或完整资源资格。
 
-## 写锁的有界等待
+## 写锁竞争的正常等待
 
-正式 SQLite 写连接使用原生 `busy_timeout=1000`，只读连接与启动格式 preflight 保留 100ms。两个 Worker 共享 WAL 时，持锁 peer 被调度延迟不应在原 100ms 实验窗口内直接使普通 Run 失败；当前值让短竞争在原具名事务上等待。它是 SQLite busy handler 的累计等待预算，不是 HTTP wall-time 承诺。
+成功打开的 SQLite 写 Worker 对正常请求使用 25ms 原生等待，再在原队列内短暂让出。Core 仅在本请求首个 `BEGIN IMMEDIATE` 返回 `SQLITE_BUSY`、数据库确认不在事务且回调尚未开始时，产生私有的未开始证明；Worker 保留准确 request ID、容量、原 arrival 和同类别队首位置后继续等待，不设置累计锁等待期限。其他类别的只读观察可以继续，close 仍须排空此前已接纳请求。打开及初始化沿原 1000ms 原生等待，只读连接与启动格式 preflight 保留 100ms；这些启动路径没有取得上述请求重试资格。
 
-等待耗尽仍返回原 `SQLITE_BUSY`，不自动重发 Worker 请求、事务回调、Command 或外部效果。原 `BEGIN IMMEDIATE`、事务失败回滚、原 ID 回执和提交未知时查询规则保持。真实 Store 测试以独立连接持锁 300ms 核一次原 Command 及零重试事件；持续持锁核有限失败、原意图缺席及释放后的准确同 ID 受理。当前取舍见[写锁等待 Note](../../../../.agents/notes/implemented/bug-fix/2026-10-07-bounded-sqlite-writer-lock-wait.md)。这不证明 Worker crash/提交未知的全部 T095 或 formal 连续负载资格。
+进入过事务回调、先前事务已经提交、COMMIT 失败、结果未知及非竞争错误都不取得重排资格，原请求不由父 Store 再次发送。准备语句清理失败返回真实失败 ACK，不能丢失出队请求、重试业务或发送成功。`DbTiming.totalMs` 包含整个等待，`sqlDurationMs` 仅覆盖最终尝试。真实 [Store 竞争](../../test/isolated/storage/store.test.ts)、[Run 结果保存](../../test/isolated/storage/writer-wait-runtime.test.ts)与[队列回归](../../test/isolated/storage/queue.test.ts)核超过旧 1 秒窗口后原意图准确受理、等待中读取、Tool 效果一次和 close barrier。新的取舍见[正常 Loop 决定](../../../../.agents/notes/implemented/bug-fix/2026-10-17-normal-loop-checkpoints.md)；[原生短等待决定](../../../../.agents/notes/implemented/bug-fix/2026-10-07-bounded-sqlite-writer-lock-wait.md)继续解释启动等待与不重放已开始事务的理由。该切片没有执行数天或数周的连续负载，也不证明 crash/提交未知的全部恢复资格。
+
+## 事务收尾未确认
+
+`SqliteOperations.tx`和手工只读快照共用`rollback(error)`，回滚失败保业务错误、rollback错误及cause，不静默吞掉。Worker在响应前核真实`inTransaction`；请求虽返回值但事务未结束也不能ACK成功。污染连接拒绝后继普通读写、owner释放写入与事务复用，不把未提交数据作为正常视图，不通过重发业务恢复。私有Worker错误交接保code/message/cause/errors，最多64节点/16层并防循环。
+
+可信事务未结束由Core实际状态标记并跨Worker恢复为私有品牌，普通同code或自报字段不取得资格。Runtime确认本机效果、后台与disposer均已结束后，只有剩余owner释放失败全部来自该真实污染，才允许进入原Store strict close；DB ACK和原Worker终止均成功后交接OS锁，不补写owner release或改未结算ledger。实际OS解锁失败、未知Worker或外部清理未确认仍阻止成功关闭。[真实事务隔离](../../test/isolated/storage/transaction-isolation.test.ts)核写/读/辅助快照、脏读拒绝、peer实际BUSY、COMMIT后异常不重放，以及Tool效果和最终Run已完成后owner污染的准确strict close；[错误边界](../../test/isolated/storage/worker-errors.test.ts)核双错、品牌与循环。数天soak及其他平台物理退出仍没有据此取得资格。
+
+## 累计执行组观察
+
+Run安全观察完整流式扫描递归成员，执行组安全观察完整流式扫描历史Session、complete Message与Part并计算原canonical revision/contextDependencyDigest；不因成功执行4096项或消息／片段／子会话8192项拒绝正常检查。父链、subject/root/Workspace、reviewer准确排除、真实未确认Execution及活跃安全域的原边界继续核实，不能截断历史当作完整证明。[Run历史](../../test/isolated/storage/run-execution-safety-history.test.ts)与[执行组历史](../../test/isolated/storage/execution-group-history.test.ts)分别核尾部变化、foreign/cycle及真实unsafe反例；MCP Query和Action guard消费同一准确观察。
 
 ## 原 Message 的恢复出处
 
@@ -148,9 +162,9 @@ Windows x64／Bun 1.4.2 的真实强杀、原审批、并行结果与完整历�
 
 ## 普通 Action 的完整执行组边界
 
-可信 `ReadContext.readExecutionGroupSafety()` 绑定实际 Store、调用 Session 和 root 创建主体；`requireExecutionGroupQuiescent()` 仅在普通 Action 的实际 prepare 中注册当前静止谓词。它遍历实际 root 父子树并交叉核 root 标记，读取所有 active Run、accepted/needs-review Command 与各类 planned/dispatching/running/unknown Execution，包括 runless 和 detached 工作；既有准确 Job reconciliation 证明沿原条件复用。只排除原 Action intake 与最后核验的准确 carrier，不接受扩展提供 root、主体或任意 exclusion。旧 `readRunExecutionSafety` 的单 Run 语义保持。每类当前关联事实最多读取 8192 项，超出或树关系不可闭合返回 unavailable/denied，不以局部结果宣称完整静止。
+可信 `ReadContext.readExecutionGroupSafety()` 绑定实际 Store、调用 Session 和 root 创建主体；`requireExecutionGroupQuiescent()` 仅在普通 Action 的实际 prepare 中注册当前静止谓词。它遍历实际 root 父子树并交叉核 root 标记，读取所有 active Run、accepted/needs-review Command 与各类 planned/dispatching/running/unknown Execution，包括 runless 和 detached 工作；既有准确 Job reconciliation 证明沿原条件复用。只排除原 Action intake 与最后核验的准确 carrier，不接受扩展提供 root、主体或任意 exclusion。旧 `readRunExecutionSafety` 的单 Run 语义保持。累计Session/Message/Part完整流式读取；每类实际active Run、pending Command、unfinished Execution保持8192项安全边界，超出或树关系不可闭合返回unavailable/denied，不以局部结果宣称完整静止。
 
-Host 自动封存 prepare 中 session namespace 的 `records.get/list` 完整原投影摘要和 revision，缺失与分页 absence 也属于最终依赖。getter 随 prepare 结束关闭。Ask、权限和普通 freshness 完成后，只刷新已注册的当前执行组静止谓词，原记录读集与原 `contextRevision` 不替换；`markDispatching` 在原 OwnedWrite 的短事务内重复检查记录与完整组事实。`contextRevision` 绑定全组真实 Session/selection、完整消息和 Part revision，不把本 Action 的 Command/Ask 分配水位当上下文变化。先拒绝非静止组，再拒绝原上下文漂移；重新读到“目前静止”不能批准未在原 prepare 中消费的新历史。每类读集保持 8192 项有限闭合边界。
+Host 自动封存 prepare 中 session namespace 的 `records.get/list` 完整原投影摘要和 revision，缺失与分页 absence 也属于最终依赖。getter 随 prepare 结束关闭。Ask、权限和普通 freshness 完成后，只刷新已注册的当前执行组静止谓词，原记录读集与原 `contextRevision` 不替换；`markDispatching` 在原 OwnedWrite 的短事务内重复检查记录与完整组事实。`contextRevision` 绑定全组真实 Session/selection、完整消息和 Part revision，不把本 Action 的 Command/Ask 分配水位当上下文变化。先拒绝非静止组，再拒绝原上下文漂移；重新读到“目前静止”不能批准未在原 prepare 中消费的新历史。原active/pending/unfinished安全域保持8192项有限闭合边界；累计已完成Session/Message/Part不以该数额拒绝。
 
 本 guarded Action 的准确私有 reviewer 可以提供中立审阅上下文，但须已完成真实纯用途闭包：原 sealed request、唯一 completed Run/成功 Model、原两 Command/两完整 Message 及 parts、原 selector、无额外工作或后代。重建审核消息时逐字保留正式 Model producer 已保存的合法 `firstOutput` 等字段，继续核完整 canonical JSON、原正文和消息 parts；缺失或陌生字段不取得资格。`authorizationReviewContextSession` 只在这些条件和原 target 绑定均有效时排除该 Session 的 context 摘要；原完整父子树、全部 group safety、unknown 与最终审批证明仍参与核验。额外 Run/Command/Message/part/selector/后代或正文漂移使排除失效，原 pin 拒绝派发，不重写原 prepare。真实 [reviewer 上下文回归](../../test/isolated/execution/guarded-review-context.test.ts)明确区分实际 Model/Ask 与 owned SQLite 故障注入。
 

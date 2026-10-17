@@ -355,8 +355,7 @@ function read<T>(db: SqliteOperations, fn: () => T): T {
     db.db.run('COMMIT');
     return value;
   } catch (error) {
-    db.db.run('ROLLBACK');
-    throw error;
+    return db.rollback(error);
   }
 }
 function verify(db: SqliteOperations, input: Scope, expected: SessionExportManifest) {

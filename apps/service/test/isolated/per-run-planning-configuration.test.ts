@@ -147,7 +147,7 @@ async function fixture(script: (step: number, f: Fixture) => Promise<Call>) {
       },
     ],
     tools: [
-      { id: 'files.read', definitionVersion: '3' },
+      { id: 'files.read', definitionVersion: '4' },
       { id: 'files.write', definitionVersion: '2' },
     ],
   };
@@ -164,7 +164,7 @@ async function fixture(script: (step: number, f: Fixture) => Promise<Call>) {
         revision: `current-policy-${revision}`,
         allowed: [
           { kind: 'model', definitionId: 'local', definitionVersion: '1' },
-          { kind: 'tool', definitionId: 'files.read', definitionVersion: '3' },
+          { kind: 'tool', definitionId: 'files.read', definitionVersion: '4' },
           { kind: 'tool', definitionId: 'files.write', definitionVersion: '2' },
           ...['planning.read', 'planning.write', 'planning.review', 'planning.update'].map(
             (id) => ({

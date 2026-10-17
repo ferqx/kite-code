@@ -201,8 +201,7 @@ export function callJob(
     db.db.run('COMMIT');
     return { items, highWaterSeq: String(highWater) };
   } catch (error) {
-    db.db.run('ROLLBACK');
-    throw error;
+    return db.rollback(error);
   }
 }
 export function finishJobDelivery(

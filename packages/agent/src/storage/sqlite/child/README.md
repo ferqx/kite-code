@@ -6,7 +6,9 @@
 
 可信 fresh resolver 的 namespace 观察自动保存为 `childConfiguration.recordReads`，最多 64 个唯一 extension/key 与 32 KiB canonical metadata；每项含完整原记录投影 digest、revision 和 origin，absence 同样封存。新 carrier 创建与 `activateChildRun` 最终短事务沿实际 parent Execution 定位原 Run manifest，只允许该 Session 已绑定 namespace，重新核全部投影及缺失事实。普通扩展/Model/HTTP 没有这些字段或读取权限。getter 随 resolver 结束关闭；同 key 的历史回执先返回原关联，不重新解析或授予执行。空数组不扩大任何 namespace，也不要求 runless Action 虚构祖先 Run。真实 [配置读集测试](../../../../test/isolated/child/configuration-reads.test.ts)覆盖 preflight 后变化、最终事务拒绝、missing/namespace/origin 与 resolver lifetime；原普通 runless child 链仍保持。
 
-`ensureOperation` 原子建立 operation Command、planned Job、新 child Session、已应用创建命令及 accepted `child.start` 命令。全部继承原主体、rootWorkCommandId/seq 和父 Job 决策来源，交付目标仍为原创建 Session/contextSelection。父工具响应丢失查回同一个 childSessionId/executionId，不重建。最多 256 个 Session 属于一个 root group；关系深度最多 64，不扫描整个库。
+`ensureOperation` 原子建立 operation Command、planned Job、新 child Session、已应用创建命令及 accepted `child.start` 命令。全部继承原主体、rootWorkCommandId/seq 和父 Job 决策来源，交付目标仍为原创建 Session/contextSelection。父工具响应丢失查回同一个 childSessionId/executionId，不重建。root group 不设累计历史 Session 配额；关系深度最多 64，实际并发与每 Run 固定期限仍独立核实，不扫描整个库。
+
+[真实累计回归](../../../../test/isolated/child/history-runtime.test.ts)在同一 root Run、一个模型槽与一个普通 child 槽下创建1003个普通 child和1001个真实自动审核 child，包含实际模型失败、准确 interrupt 取消和历史 key复用。父 Run completed、全部 child终态、Runtime closed；这项加速本机回归不代替数天或数周 soak，不放宽 unknown、owner、deadline 或跨 root取消边界。
 
 `activateChildRun` 是唯一受控 child.start 激活入口，输入 rootOwner、executionId、configuration、可增加的 requirements、required requirementEvaluations 与 freshness。Job 必须已真实 dispatched 且仍 dispatching/running；configuration 必须等于原 snapshot，freshness.checked 必须是宿主当前重新读取并比较来源后的 true，source 精确等于父 Job 原 decisionSource。Store 不读取磁盘、不调用模型，只复核已封存来源和当前必要记录 revision/evaluation。继承父必要 refs 不可省略；同事务创建原 child Run/用户输入消息/命令回执，重复返回同一 Run，绝不另启模型。
 

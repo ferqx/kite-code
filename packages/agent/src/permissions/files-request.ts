@@ -121,7 +121,8 @@ export async function describePathFileRequest(
     definitionVersion: request.definitionVersion,
   };
   try {
-    if (request.definitionVersion !== '1') throw new AgentError('file_input_invalid');
+    if (request.definitionVersion !== (request.definitionId === 'files.read_path' ? '2' : '1'))
+      throw new AgentError('file_input_invalid');
     const target = await inspectPathFileTarget(request.definitionId, request.input, boundary);
     request.signal.throwIfAborted();
     const read = request.definitionId === 'files.read_path';
@@ -166,7 +167,7 @@ export function verifyPathFileDispatch(
       Array.isArray(capability) ||
       capability.kind !== 'tool' ||
       capability.definitionId !== definitionId ||
-      capability.definitionVersion !== '1' ||
+      capability.definitionVersion !== (definitionId === 'files.read_path' ? '2' : '1') ||
       capability.hardAllowed !== true ||
       capability.revision !== revision
     )

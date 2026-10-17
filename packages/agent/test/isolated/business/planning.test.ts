@@ -1049,7 +1049,7 @@ test('immutable file expectation survives repeated same-Run repair and actual fu
   const f = await fixture(
     {
       requiredValidation: true,
-      fileHashChecker: { definitionId: 'files.read', definitionVersion: '3' },
+      fileHashChecker: { definitionId: 'files.read', definitionVersion: '4' },
     },
     async (step, f) => {
       if (step === 0) {

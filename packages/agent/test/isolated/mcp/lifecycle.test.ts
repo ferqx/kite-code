@@ -142,7 +142,7 @@ async function fixture(
       const step = steps.get(route) ?? 0;
       steps.set(route, step + 1);
       const tools = body.tools as { function: { name: string } }[];
-      const remote = tools.find((tool) => tool.function.name.startsWith('mcp.local.'))?.function
+      const remote = tools.find((tool) => tool.function.name.startsWith('mcp_local_'))?.function
         .name;
       const tool =
         step === 0 && route !== 'use-b'
@@ -296,7 +296,7 @@ test('durable connection Job precedes network; next actual compatible Model sees
     expect(f.connections).toBe(1);
     expect(f.calls).toBe(1);
     expect(f.modelRequests[0]!.tools as unknown[]).toHaveLength(1);
-    expect(JSON.stringify(f.modelRequests[1]!.tools)).toContain('mcp.local.');
+    expect(JSON.stringify(f.modelRequests[1]!.tools)).toContain('mcp_local_');
     const execution = (await f.store.listExecutions('a')).find((item) =>
       item.definitionId.startsWith('mcp.local.'),
     )!;

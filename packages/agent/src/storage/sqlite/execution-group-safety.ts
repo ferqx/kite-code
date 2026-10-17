@@ -19,6 +19,48 @@ const hash = (value: unknown) =>
   createHash('sha256')
     .update(canonicalJson(value as Json))
     .digest('hex');
+/** Keep cumulative lineage in SQLite cursors; the returned frontier arrays remain explicitly bounded. */
+function rows(
+  db: SqliteOperations,
+  sql: string,
+  ...bindings: (string | number | bigint | null)[]
+): Iterable<Row> {
+  const statement = db.db.prepare<Row, (string | number | bigint | null)[]>(sql);
+  (statement as typeof statement & { safeIntegers(value: boolean): typeof statement }).safeIntegers(
+    true,
+  );
+  return statement.iterate(...bindings);
+}
+/** Canonical object/array hashing compatible with the original materialized digest. */
+function hashStreams(scalars: Record<string, Json>, streams: Record<string, () => Iterable<Row>>) {
+  const digest = createHash('sha256').update('{');
+  let firstKey = true;
+  for (const key of Object.keys({ ...scalars, ...streams }).sort()) {
+    if (!firstKey) digest.update(',');
+    firstKey = false;
+    digest.update(canonicalJson(key)).update(':');
+    if (streams[key]) {
+      digest.update('[');
+      let firstRow = true;
+      for (const row of streams[key]!()) {
+        if (!firstRow) digest.update(',');
+        firstRow = false;
+        digest.update(
+          canonicalJson(
+            Object.fromEntries(
+              Object.entries(row).map(([name, value]) => [
+                name,
+                typeof value === 'bigint' ? String(value) : value,
+              ]),
+            ) as Json,
+          ),
+        );
+      }
+      digest.update(']');
+    } else digest.update(canonicalJson(scalars[key]!));
+  }
+  return digest.update('}').digest('hex');
+}
 const finite = (rows: Row[]) => {
   if (rows.length > 8192) throw new AgentError('execution_group_safety_unavailable');
   return rows;
@@ -220,18 +262,17 @@ export function readExecutionGroupSafety(
     )
       throw new AgentError('execution_group_boundary_invalid');
   }
-  const sessions = finite(
-    db.rows(
+  const sessions = () =>
+    rows(
+      db,
       `WITH RECURSIVE descendants(id) AS (SELECT id FROM session WHERE id=? UNION SELECT s.id FROM session s JOIN descendants d ON s.parent_id=d.id)
       SELECT s.id,s.parent_id,s.root_id,s.workspace_id,s.delete_requested,s.context_selection_id,c.request_json AS selection_json
       FROM session s LEFT JOIN context_snapshot c ON c.id=s.context_selection_id AND c.session_id=s.id AND c.kind='selection'
-      WHERE s.root_id=? OR s.id IN (SELECT id FROM descendants) ORDER BY s.id LIMIT 8193`,
+      WHERE s.root_id=? OR s.id IN (SELECT id FROM descendants) ORDER BY s.id`,
       root.id!,
       root.id!,
-    ),
-  );
-  const byId = new Map(sessions.map((row) => [String(row.id), row]));
-  for (const row of sessions) {
+    );
+  for (const row of sessions()) {
     if (row.workspace_id !== session.workspace_id || row.root_id !== root.id)
       throw new AgentError('execution_group_scope_denied');
     let node = row;
@@ -240,28 +281,15 @@ export function readExecutionGroupSafety(
       if (seen.size >= 32 || seen.has(String(node.id)) || !node.parent_id)
         throw new AgentError('execution_group_scope_denied');
       seen.add(String(node.id));
-      const parent = byId.get(String(node.parent_id));
-      if (!parent) throw new AgentError('execution_group_scope_denied');
+      const parent = db.row(
+        'SELECT id,parent_id,root_id,workspace_id FROM session WHERE id=?',
+        node.parent_id,
+      );
+      if (!parent || parent.root_id !== root.id || parent.workspace_id !== session.workspace_id)
+        throw new AgentError('execution_group_scope_denied');
       node = parent;
     }
   }
-  // Complete messages and their parts are the neutral lineage facts. Session.next_seq also
-  // allocates Action/answer Commands, so it cannot represent a Message boundary dependency.
-  const messages = finite(
-    db.rows(
-      `SELECT m.id,m.session_id,m.seq,m.role,m.status FROM message m JOIN session s ON s.id=m.session_id
-      WHERE s.root_id=? AND m.status='complete' ORDER BY m.id LIMIT 8193`,
-      root.id!,
-    ),
-  );
-  const messageParts = finite(
-    db.rows(
-      `SELECT p.message_id,p.ordinal,p.revision,p.kind,p.content_version FROM message_part p
-      JOIN message m ON m.id=p.message_id JOIN session s ON s.id=m.session_id
-      WHERE s.root_id=? AND m.status='complete' ORDER BY p.message_id,p.ordinal LIMIT 8193`,
-      root.id!,
-    ),
-  );
   // Only this Action's sealed, tools-free reviewer has no business context to consume.
   // Its work still participates in all group safety and final reviewer proof checks.
   const reviewContextSessions = new Set<string>();
@@ -292,23 +320,36 @@ export function readExecutionGroupSafety(
       }
     }
   }
-  const contextMessages = messages.filter(
-    (message) => !reviewContextSessions.has(String(message.session_id)),
-  );
-  const contextMessageIds = new Set(contextMessages.map((message) => String(message.id)));
-  const contextRevision = hash(
-    JSON.parse(
-      JSON.stringify(
-        {
-          sessions: sessions.filter((session) => !reviewContextSessions.has(String(session.id))),
-          messages: contextMessages,
-          messageParts: messageParts.filter((part) =>
-            contextMessageIds.has(String(part.message_id)),
-          ),
-        },
-        (_, value) => (typeof value === 'bigint' ? String(value) : value),
-      ),
-    ),
+  // Completed messages and their parts are immutable context lineage, regardless of history size.
+  // Do not substitute Session.next_seq, which also allocates Action/answer Commands.
+  const messages = function* () {
+    for (const row of rows(
+      db,
+      `SELECT m.id,m.session_id,m.seq,m.role,m.status FROM message m JOIN session s ON s.id=m.session_id
+       WHERE s.root_id=? AND m.status='complete' ORDER BY m.id`,
+      root.id!,
+    ))
+      if (!reviewContextSessions.has(String(row.session_id))) yield row;
+  };
+  const messageParts = () =>
+    rows(
+      db,
+      `SELECT p.message_id,p.ordinal,p.revision,p.kind,p.content_version FROM message_part p
+     JOIN message m ON m.id=p.message_id JOIN session s ON s.id=m.session_id
+     WHERE s.root_id=? AND m.status='complete' AND m.session_id NOT IN(SELECT value FROM json_each(?))
+     ORDER BY p.message_id,p.ordinal`,
+      root.id!,
+      JSON.stringify([...reviewContextSessions]),
+    );
+  const contextRevision = hashStreams(
+    {},
+    {
+      sessions: function* () {
+        for (const row of sessions()) if (!reviewContextSessions.has(String(row.id))) yield row;
+      },
+      messages,
+      messageParts,
+    },
   );
   const runs = finite(
     db.rows(
@@ -350,28 +391,22 @@ export function readExecutionGroupSafety(
     )
       throw new AgentError('execution_group_scope_denied');
   const unconfirmed = executions.filter((row) => row.reconciled !== 1n && row.reconciled !== 1);
-  const facts = JSON.parse(
-    JSON.stringify(
-      {
-        storeId: input.expectedStoreId,
-        sessionId: input.sessionId,
-        rootSessionId: root.id,
-        boundaryCommandId: input.boundaryCommandId ?? null,
-        excludedExecutionId: input.excludeExecutionId ?? null,
-        sessions,
-        contextRevision,
-        runs,
-        commands,
-        executions,
-      },
-      (_, value) => (typeof value === 'bigint' ? String(value) : value),
-    ),
+  const revision = hashStreams(
+    {
+      storeId: input.expectedStoreId,
+      sessionId: input.sessionId,
+      rootSessionId: String(root.id),
+      boundaryCommandId: input.boundaryCommandId ?? null,
+      excludedExecutionId: input.excludeExecutionId ?? null,
+      contextRevision,
+    },
+    { sessions, runs: () => runs, commands: () => commands, executions: () => executions },
   );
   return {
     originStoreId: input.expectedStoreId,
     sessionId: input.sessionId,
     rootSessionId: String(root.id),
-    revision: hash(facts),
+    revision,
     contextRevision,
     excludedExecutionId: input.excludeExecutionId ?? null,
     quiescent: runs.length === 0 && commands.length === 0 && unconfirmed.length === 0,
@@ -390,7 +425,6 @@ export function readExecutionGroupSafetySnapshot(
     db.db.run('COMMIT');
     return value;
   } catch (error) {
-    db.db.run('ROLLBACK');
-    throw error;
+    return db.rollback(error);
   }
 }

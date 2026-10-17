@@ -256,8 +256,7 @@ export function listPendingJobReports(
     db.db.run('COMMIT');
     return result;
   } catch (error) {
-    db.db.run('ROLLBACK');
-    throw error;
+    return db.rollback(error);
   }
 }
 export interface JobReportRecovery {
@@ -366,8 +365,7 @@ export function verifyJobReportRecovery(
     prepareReportRecovery(db, report, input.recovery);
     db.db.run('COMMIT');
   } catch (error) {
-    db.db.run('ROLLBACK');
-    throw error;
+    db.rollback(error);
   }
 }
 function recordReportRecovery(

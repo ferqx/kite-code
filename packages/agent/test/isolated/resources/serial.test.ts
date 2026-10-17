@@ -4,8 +4,10 @@ import { pathToFileURL } from 'node:url';
 import { createFixedModel, type ModelEvent } from '@kite-ai/ai';
 import { temporaryDirectory } from '../../../../../tests/fixtures/test-filesystem';
 import { createRuntime } from '../../../src';
-import type { ExecutionResources } from '../../../src/execution/resources';
+import { ExecutionResources } from '../../../src/execution/resources';
 import type { ResourceRequest } from '../../../src/extensions';
+import { createShellJob } from '../../../src/jobs/shell';
+import { createMcpLifecycle } from '../../../src/mcp';
 import { openSqliteStore } from '../../../src/sqlite';
 
 function gate() {
@@ -224,3 +226,64 @@ test('ordinary serial Tool completion and cancellation preserve original cold re
   if (failures.length === 1) throw failures[0];
   if (failures.length) throw new AggregateError(failures, 'serial fixture cleanup failed');
 });
+
+for (const transport of ['static-stdio', 'scoped-source'] as const)
+  test(`four idle ${transport} connection Job lifetimes do not starve Shell or a fifth connection in the default resource manager`, async () => {
+    const lifecycle = createMcpLifecycle({
+      servers:
+        transport === 'static-stdio'
+          ? [
+              {
+                id: 'owned',
+                transport: {
+                  type: 'stdio',
+                  command: process.execPath,
+                  args: [],
+                  cwd: process.cwd(),
+                  env: {},
+                },
+              },
+            ]
+          : [],
+      ...(transport === 'scoped-source'
+        ? {
+            scopedSources: {
+              async resolve() {
+                throw Error('factory inspection must not resolve or open a transport');
+              },
+            },
+          }
+        : {}),
+    });
+    const job = lifecycle.extension.jobs![0]!;
+    const shell = createShellJob({ cwd: process.cwd(), env: {} });
+    const resources = new ExecutionResources();
+    const scope = { sessionId: 'owned-session', workspaceId: 'owned-workspace' };
+    const held: (() => void)[] = [];
+    const controller = new AbortController();
+    try {
+      expect(shell.resources).toEqual({ slot: 'process' });
+      // Keep the permits for the complete connection lifetimes, just as ExecutionCoordinator does.
+      for (let index = 0; index < 4; index++)
+        held.push(await resources.acquire(job.resources, scope, controller.signal));
+      const shellPermit = await resources.acquire(shell.resources, scope, AbortSignal.timeout(250));
+      shellPermit();
+      const fifthConnection = await resources.acquire(
+        job.resources,
+        scope,
+        AbortSignal.timeout(250),
+      );
+      fifthConnection();
+      // Four independent ordinary Shell permits are still available while every connection stays idle.
+      for (let index = 0; index < 4; index++)
+        held.push(await resources.acquire(shell.resources, scope, AbortSignal.timeout(250)));
+      const cancelled = new AbortController();
+      const queued = resources.acquire(shell.resources, scope, cancelled.signal);
+      cancelled.abort(Error('owned waiting Shell cancellation'));
+      await expect(queued).rejects.toThrow('owned waiting Shell cancellation');
+    } finally {
+      controller.abort();
+      for (const release of held.reverse()) release();
+      await lifecycle.close();
+    }
+  });

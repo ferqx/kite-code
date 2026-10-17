@@ -129,7 +129,7 @@ async function fixture(
     allowed: [
       { kind: 'model', definitionId: 'local', definitionVersion: '1' },
       { kind: 'tool', definitionId: 'files.write', definitionVersion: '2' },
-      { kind: 'tool', definitionId: 'files.read', definitionVersion: '3' },
+      { kind: 'tool', definitionId: 'files.read', definitionVersion: '4' },
     ],
   };
   const host = createDefaultProcessConfiguration({

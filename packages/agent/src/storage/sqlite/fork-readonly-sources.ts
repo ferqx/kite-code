@@ -528,8 +528,7 @@ export function prepareForkReadonlySources(
     db.db.run('COMMIT');
     return p;
   } catch (e) {
-    db.db.run('ROLLBACK');
-    throw e;
+    return db.rollback(e);
   }
 }
 export function forkSourceProjection(
@@ -657,8 +656,7 @@ export function readForkSourceProjection(
     db.db.run('COMMIT');
     return p;
   } catch (e) {
-    db.db.run('ROLLBACK');
-    throw e;
+    return db.rollback(e);
   }
 }
 
@@ -693,7 +691,6 @@ export function readForkSourceMessage(
     db.db.run('COMMIT');
     return result;
   } catch (e) {
-    db.db.run('ROLLBACK');
-    throw e;
+    return db.rollback(e);
   }
 }

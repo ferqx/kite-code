@@ -32,3 +32,22 @@ test('reserved control capacity is real and close drains earlier work', () => {
   expect(rest.at(-1)!.method).toBe('close');
   expect(rest).toHaveLength(225);
 });
+
+test('an unstarted writer retains its queue position, capacity and close barrier while reads progress', async () => {
+  const queue = new WorkerQueue();
+  const writer = request(1, 'acceptCommand');
+  queue.push(writer);
+  queue.push(request(2, 'cancelCommand'));
+  queue.push(request(3, 'getMetadata'));
+  queue.push(request(4, 'close'));
+  expect(queue.next()).toBe(writer);
+  queue.deferUnstartedWrite(writer);
+  expect(queue.size).toBe(4);
+  expect(queue.next()?.method).toBe('getMetadata');
+  expect(queue.next()).toBeUndefined();
+  await Bun.sleep(30);
+  expect(queue.next()).toBe(writer);
+  expect(queue.next()?.method).toBe('cancelCommand');
+  expect(queue.next()?.method).toBe('close');
+  expect(queue.size).toBe(0);
+});

@@ -146,7 +146,7 @@ test('actual packaged default SDK three scopes seal durable raw digests, indepen
         },
       ],
       tools: [
-        { id: 'files.read', definitionVersion: '3' },
+        { id: 'files.read', definitionVersion: '4' },
         { id: 'files.write', definitionVersion: '2' },
       ],
     }),

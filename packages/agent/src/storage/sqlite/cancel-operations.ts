@@ -4,7 +4,27 @@ import type { CancelCommandInput, CancelWorkInput } from '../port';
 import { AgentError, type Json } from '../types';
 import type { SqliteOperations } from './operations';
 
-const bound = 4096;
+/** Page a complete effect set inside the caller's single cancellation transaction. */
+function* rows(db: SqliteOperations, sql: string, ...args: (string | number | bigint | null)[]) {
+  const statement = db.db.prepare<
+    ReturnType<SqliteOperations['rows']>[number],
+    (string | number | bigint | null)[]
+  >(`SELECT * FROM (${sql}) WHERE id>? ORDER BY id LIMIT 256`);
+  (statement as typeof statement & { safeIntegers(value: boolean): typeof statement }).safeIntegers(
+    true,
+  );
+  try {
+    let after = '';
+    for (;;) {
+      const page = statement.all(...args, after);
+      for (const row of page) yield row;
+      if (page.length < 256) return;
+      after = String(page.at(-1)!.id);
+    }
+  } finally {
+    statement.finalize();
+  }
+}
 function digest(request: Json) {
   return createHash('sha256').update(canonicalJson(request)).digest('hex');
 }
@@ -20,25 +40,24 @@ function commandCancelled(db: SqliteOperations, id: string, now: number) {
 function expand(db: SqliteOperations, rootId: string, seeds: string[]): string[] {
   const seen = new Set<string>();
   const pending = [...seeds];
-  while (pending.length) {
-    const id = pending.shift()!;
+  for (let cursor = 0; cursor < pending.length; cursor++) {
+    const id = pending[cursor]!;
     if (seen.has(id)) continue;
-    if (seen.size >= bound) throw new AgentError('cancel_scope_too_large');
     seen.add(id);
-    for (const child of db.rows(
-      'SELECT id FROM execution WHERE parent_execution_id=? AND root_session_id=? AND cancel_with_parent=1 ORDER BY id LIMIT 4097',
+    for (const child of rows(
+      db,
+      'SELECT id FROM execution WHERE parent_execution_id=? AND root_session_id=? AND cancel_with_parent=1 ORDER BY id',
       id,
       rootId,
     ))
       pending.push(String(child.id));
-    if (pending.length > bound) throw new AgentError('cancel_scope_too_large');
   }
   return [...seen];
 }
 export function cancel(db: SqliteOperations, input: CancelCommandInput | CancelWorkInput) {
   return db.tx(() => cancelWorkBody(db, input));
 }
-/** Internal finite cancellation body; callers hold the same final transaction. */
+/** Complete cancellation body; callers hold the same final transaction. */
 export function cancelWorkBody(db: SqliteOperations, input: CancelCommandInput | CancelWorkInput) {
   db.identity(input.expectedStoreId);
   const isCommand = 'targetCommandId' in input;
@@ -93,8 +112,9 @@ export function cancelWorkBody(db: SqliteOperations, input: CancelCommandInput |
     subject(String(run.origin_command_id), exact);
     commandIds.add(String(run.origin_command_id));
     runIds.push(runId);
-    for (const execution of db.rows(
-      "SELECT id FROM execution e WHERE run_id=? AND session_id=? AND (state IN ('planned','dispatching','running','outcome_unknown') OR EXISTS(SELECT 1 FROM execution child WHERE child.parent_execution_id=e.id AND child.cancel_with_parent=1)) ORDER BY id LIMIT 4097",
+    for (const execution of rows(
+      db,
+      "SELECT id FROM execution e WHERE run_id=? AND session_id=? AND (state IN ('planned','dispatching','running','outcome_unknown') OR EXISTS(SELECT 1 FROM execution child WHERE child.parent_execution_id=e.id AND child.cancel_with_parent=1)) ORDER BY id",
       runId,
       run.session_id!,
     ))
@@ -103,14 +123,16 @@ export function cancelWorkBody(db: SqliteOperations, input: CancelCommandInput |
   if (isCommand) {
     subject(input.targetCommandId);
     commandIds.add(input.targetCommandId);
-    for (const run of db.rows(
+    for (const run of rows(
+      db,
       'SELECT id FROM run WHERE origin_command_id=? AND session_id=?',
       input.targetCommandId,
       input.sessionId,
     ))
       runSeed(String(run.id));
-    for (const execution of db.rows(
-      'SELECT id FROM execution WHERE origin_command_id=? AND session_id=? LIMIT 4097',
+    for (const execution of rows(
+      db,
+      'SELECT id FROM execution WHERE origin_command_id=? AND session_id=?',
       input.targetCommandId,
       input.sessionId,
     ))
@@ -134,41 +156,47 @@ export function cancelWorkBody(db: SqliteOperations, input: CancelCommandInput |
     subject(String(creator.id), true, false);
     if (input.includeBackground) {
       const root = db.row('SELECT next_seq FROM session WHERE id=?', session.root_id!)!;
-      const scopes = db.rows(
-        'WITH RECURSIVE subtree(id) AS (SELECT id FROM session WHERE id=? UNION ALL SELECT s.id FROM session s JOIN subtree t ON s.parent_id=t.id) SELECT id FROM subtree LIMIT 257',
+      const scopes = rows(
+        db,
+        'WITH RECURSIVE subtree(id) AS (SELECT id FROM session WHERE id=? AND root_id=? AND workspace_id=? UNION SELECT s.id FROM session s JOIN subtree t ON s.parent_id=t.id WHERE s.root_id=? AND s.workspace_id=?) SELECT id FROM subtree',
         input.sessionId,
+        session.root_id!,
+        session.workspace_id!,
+        session.root_id!,
+        session.workspace_id!,
       );
-      if (scopes.length > 256) throw new AgentError('cancel_scope_too_large');
       for (const current of scopes) {
         stopBoundaries.push({ id: String(current.id), seq: String(root.next_seq) });
-        for (const command of db.rows(
-          "SELECT id FROM command WHERE session_id=? AND root_work_seq<=? AND status='accepted' LIMIT 4097",
+        for (const command of rows(
+          db,
+          "SELECT id FROM command WHERE session_id=? AND root_work_seq<=? AND status='accepted'",
           current.id!,
           root.next_seq!,
         ))
           commandIds.add(String(command.id));
-        for (const execution of db.rows(
-          "SELECT id FROM execution WHERE session_id=? AND root_work_seq<=? AND state IN ('planned','dispatching','running','outcome_unknown') LIMIT 4097",
+        for (const execution of rows(
+          db,
+          "SELECT id FROM execution WHERE session_id=? AND root_work_seq<=? AND state IN ('planned','dispatching','running','outcome_unknown')",
           current.id!,
           root.next_seq!,
         ))
           seedIds.push(String(execution.id));
-        for (const run of db.rows(
+        for (const run of rows(
+          db,
           'SELECT id FROM run WHERE session_id=? AND is_active=1',
           current.id!,
         ))
           runSeed(String(run.id), false);
       }
     } else
-      for (const run of db.rows(
+      for (const run of rows(
+        db,
         'SELECT id FROM run WHERE session_id=? AND is_active=1',
         input.sessionId,
       ))
         runSeed(String(run.id));
   }
   const uniqueSeeds = [...new Set(seedIds)];
-  if (uniqueSeeds.length > bound || commandIds.size > bound)
-    throw new AgentError('cancel_scope_too_large');
   const executions = expand(db, String(session.root_id), uniqueSeeds);
   // Resolve the entire effect set before the first write. Prior receipts above stay read-only.
   for (const id of executions) {
@@ -181,7 +209,8 @@ export function cancelWorkBody(db: SqliteOperations, input: CancelCommandInput |
       throw new AgentError('permission_denied');
     const own = subject(String(execution.origin_command_id), false);
     if (execution.child_session_id !== null) {
-      for (const childRun of db.rows(
+      for (const childRun of rows(
+        db,
         'SELECT id,origin_command_id FROM run WHERE session_id=? AND origin_command_id=? AND is_active=1',
         execution.child_session_id!,
         `child-start-${execution.id}`,
@@ -189,7 +218,8 @@ export function cancelWorkBody(db: SqliteOperations, input: CancelCommandInput |
         if (!runIds.includes(String(childRun.id))) runIds.push(String(childRun.id));
         commandIds.add(String(childRun.origin_command_id));
       }
-      for (const childCommand of db.rows(
+      for (const childCommand of rows(
+        db,
         "SELECT id FROM command WHERE session_id=? AND id=? AND status='accepted'",
         execution.child_session_id!,
         `child-start-${execution.id}`,
@@ -206,11 +236,11 @@ export function cancelWorkBody(db: SqliteOperations, input: CancelCommandInput |
     const run = db.row('SELECT origin_store_id FROM run WHERE id=?', id);
     if (!run || run.origin_store_id !== input.expectedStoreId)
       throw new AgentError('permission_denied');
-    const pending = db.rows(
-      "SELECT id FROM command WHERE kind IN ('input.steer','result.include') AND input_target_run_id=? AND status IN ('accepted','applied') LIMIT 4097",
+    const pending = rows(
+      db,
+      "SELECT id FROM command WHERE kind IN ('input.steer','result.include') AND input_target_run_id=? AND status IN ('accepted','applied')",
       id,
     );
-    if (pending.length > bound) throw new AgentError('cancel_scope_too_large');
     for (const command of pending) subject(String(command.id), false);
   }
   const now = Date.now();
@@ -227,10 +257,13 @@ export function cancelWorkBody(db: SqliteOperations, input: CancelCommandInput |
       now,
       id,
     );
-    const interactions = db.rows(
-      "SELECT id,presentation_session_id FROM interaction WHERE execution_id=? AND state IN ('pending','answered') AND accepted_decision_revision IS NULL",
-      id,
-    );
+    const interactions = [
+      ...rows(
+        db,
+        "SELECT id,presentation_session_id FROM interaction WHERE execution_id=? AND state IN ('pending','answered') AND accepted_decision_revision IS NULL",
+        id,
+      ),
+    ];
     db.run(
       "UPDATE interaction SET state='cancelled' WHERE execution_id=? AND state IN ('pending','answered') AND accepted_decision_revision IS NULL",
       id,
@@ -248,11 +281,11 @@ export function cancelWorkBody(db: SqliteOperations, input: CancelCommandInput |
     commandCancelled(db, id, now);
   }
   for (const id of runIds) {
-    const inputs = db.rows(
-      "SELECT id FROM command WHERE kind IN ('input.steer','result.include') AND input_target_run_id=? AND status IN ('accepted','applied') LIMIT 4097",
+    const inputs = rows(
+      db,
+      "SELECT id FROM command WHERE kind IN ('input.steer','result.include') AND input_target_run_id=? AND status IN ('accepted','applied')",
       id,
     );
-    if (inputs.length > 4096) throw new AgentError('cancel_scope_too_large');
     for (const pending of inputs) {
       commandCancelled(db, String(pending.id), now);
       db.event(String(session.id), String(pending.id), 'input.cancel_requested');

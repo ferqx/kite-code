@@ -346,6 +346,18 @@ export class NativeToolMessages {
         )
           continue;
         const call = this.callInput(message, execution.definitionId, scope);
+        const details = object(result.details);
+        const decisionRefresh =
+          execution.status === 'failed' &&
+          execution.authorization?.dispatched === false &&
+          details?.adapterAttempted === false &&
+          details.dispatchCommitted === false &&
+          ['context_refresh_required', 'capability_refresh_required'].includes(
+            String(details.code),
+          ) &&
+          result.content === details.code
+            ? (details.code as 'context_refresh_required' | 'capability_refresh_required')
+            : undefined;
         entries.push({
           messageId: message.id,
           executionId: execution.id,
@@ -353,6 +365,7 @@ export class NativeToolMessages {
           definitionVersion: execution.definitionVersion,
           status: execution.status,
           resultRevision: execution.resultRevision,
+          ...(decisionRefresh ? { decisionRefresh } : {}),
           target: this.target(call, execution.definitionId, execution.definitionVersion),
           ...(!message.originMessage && execution.authorization
             ? { authorization: execution.authorization }

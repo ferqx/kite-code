@@ -12,6 +12,8 @@ Session pump 在取得原 OS owner 前即计入派发工作，直到 owner 释�
 
 cancel 路径封住新工作，并复用原 owner 范围内的清理链。封门前已接纳的 Command 可以留给仍存活的合法 owner 推进；接纳事实本身不能证明关闭实例拥有该执行。提交准备在实际接纳前再次检查封门状态。写入已经提交、响应仍在途时，保留其耐久 receipt，不因观察该事实的实例关闭就取消它。
 
+正常写锁竞争不阻断本机停止信号。新取消意图先只读排除已存在的command ID，再仅对本实例准确Store/主体/Session/目标的live handle收缩；background子树还核root/Workspace祖先，查询失败不扩域，也不阻止原耐久取消事务核实。API仍等待真实取消ACK；本地abort不证明耐久成功或外部效果已停止，失败沿原未确认结果保存。旧取消ID重放不能停止后来启动的工作，`execution.cancel`仍只停止原Execution，根Run可接收该取消结果正常收尾。shutdown在等已接纳写入之前先停止本实例准确handle，但原写入、效果和清理仍须完整排空。[真实写锁取消回归](../test/isolated/execution/cancel-writer-wait.test.ts)核提前signal、尚无durable标记、错误身份与旧ID重放。
+
 本地任务、Extension、Job 和绑定排空后，首次请求捕获的 `beforeResourceClose` 回调让 Service 封住剩余 HTTP 读取/控制接纳，并等待自身在途资源使用者结束。随后 Runtime 封住剩余资源接纳，等待已接纳观察结束，最后关闭 artifacts 和 Store。重复请求不能替换或重复执行该回调。
 
 只有资源关闭完成，状态才变为 `closed`。Job 清理未确认、绑定清理失败或宿主回调失败时，状态变为 `drain_failed`，保留底层 Store/profile 资源，并拒绝共享完成 Promise。宿主不能将该拒绝解释为实际进程退出，也不能因此释放 daemon 所有权。此独立入口不实现 daemon stop/restart 策略、endpoint 锁、HTTP 认证或失败关闭的重试/重置。

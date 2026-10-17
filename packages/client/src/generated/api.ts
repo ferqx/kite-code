@@ -1799,6 +1799,11 @@ export type Message = {
   role: 'system' | 'user' | 'assistant' | 'tool';
   content: string;
   firstOutput?: 'content' | 'reasoning' | 'tool_calls';
+  compression?: {
+    id: string;
+    trigger: 'manual' | 'automatic';
+    status: 'running' | 'completed' | 'failed' | 'cancelled' | 'unpublished';
+  };
   originMessage?: { storeId: string; sessionId: string; messageId: string; runId: string | null };
   contentFormat?: 'unsupported';
   outputBody?: {
@@ -2525,6 +2530,11 @@ export type SelectedContextPage = {
     role: 'system' | 'user' | 'assistant' | 'tool';
     content: string;
     firstOutput?: 'content' | 'reasoning' | 'tool_calls';
+    compression?: {
+      id: string;
+      trigger: 'manual' | 'automatic';
+      status: 'running' | 'completed' | 'failed' | 'cancelled' | 'unpublished';
+    };
     originMessage?: { storeId: string; sessionId: string; messageId: string; runId: string | null };
     contentFormat?: 'unsupported';
     outputBody?: {
@@ -2869,6 +2879,11 @@ export type MessageList = Array<{
   role: 'system' | 'user' | 'assistant' | 'tool';
   content: string;
   firstOutput?: 'content' | 'reasoning' | 'tool_calls';
+  compression?: {
+    id: string;
+    trigger: 'manual' | 'automatic';
+    status: 'running' | 'completed' | 'failed' | 'cancelled' | 'unpublished';
+  };
   originMessage?: { storeId: string; sessionId: string; messageId: string; runId: string | null };
   contentFormat?: 'unsupported';
   outputBody?: {
@@ -3000,6 +3015,11 @@ export type SessionView = {
     role: 'system' | 'user' | 'assistant' | 'tool';
     content: string;
     firstOutput?: 'content' | 'reasoning' | 'tool_calls';
+    compression?: {
+      id: string;
+      trigger: 'manual' | 'automatic';
+      status: 'running' | 'completed' | 'failed' | 'cancelled' | 'unpublished';
+    };
     originMessage?: { storeId: string; sessionId: string; messageId: string; runId: string | null };
     contentFormat?: 'unsupported';
     outputBody?: {
@@ -3024,6 +3044,7 @@ export type SessionView = {
     runId: string;
     originStoreId: string;
     phase: 'preparing' | 'summarizing' | 'validating';
+    executionId?: string;
   };
 };
 type CommandRequest___schema0 =

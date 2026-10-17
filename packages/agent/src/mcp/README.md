@@ -16,6 +16,10 @@
 
 多个 scope 共享一条连接。`release()` 幂等，只废弃本 scope 的后续调用；其他 scope 继续使用。最后一个 scope 等有界在途请求结束后关闭连接。`close()` 是明确宿主关闭整个 adapter 的动作，不能把一个页面卸载当全局 close。失联后，只有下一次显式目录/读取操作可建立新连接；既有工具调用不会自动重连重发。
 
+连接 Job 不占 Shell 的短任务 process slot，避免默认四条空闲长连接耗尽普通执行许可。连接自身的 key、scope、权限、原 Job 监督和真实 stop 证明保持独立；移除共享槽位声明不授予 wire 权限，也不把未知停止当成释放。[资源组合回归](../../test/isolated/resources/serial.test.ts)使用实际 MCP/Shell factory 和资源管理器验证长连接持有期间 Shell 与另一连接可继续申请，而普通 Shell 的并发上限与等待取消仍生效。
+
+已确认ended的连接仅在Core dispose成功、且transition不再引用原holder时回收Entry；精确ticket释放同时断开holder/newEntry回链，并只在live仍指向该原对象时删除。旧dispose不能删除新连接，unknown、未确认停止和publication quarantine仍保原owner/proof。512只约束同时保留的实际热资源，不成为已关闭历史连接总数门槛。[完整生命周期回归](../../test/isolated/mcp/completed-lifetimes.test.ts)分别通过514次真实本机connect/stop和514次reconnect，并核原冷历史proof可读且零新RPC；没有据此取得数周soak或其他平台资格。
+
 具名只读接口为 `listResources`、`readResource(uri)`、`listPrompts` 和 `getPrompt(name,args)`。结果是远端来源数据，不自动成为 system instruction 或 executable Action。调用与认证失败局部返回；错误 server 不影响历史读取或无 MCP 的普通 Agent。
 
 默认单消息/HTTP response body 1 MiB（可配置至 64 MiB）、目录最多 1024 项/32 页、在途请求 16、每请求 10 秒；scope 与 stdio 排队写入也有上限。重复分页 cursor、超限和无效帧准确拒绝，不静默裁剪有效目录。HTTP 长 SSE response 达到总 body 上限会终止该连接，不能据此确认远端 effect。stdlib [bounded transport](transport.ts) 不使用 SDK 的无界 stdio ReadBuffer；后台排空 stderr，不转发未处理日志或秘密。stdio close 清本 adapter 拥有的直接客户端进程，不宣称取消远端工作或 POSIX 后代监督资格。
@@ -45,7 +49,7 @@
 
 `mcp.tools.snapshots@1` 和 `mcp.tools@1` 都是同 builtin.mcp namespace 的只读 Query，完整 display envelope≤32 KiB、每页≤32项。明确选择原 record/generation，续页固定原 indexDigest；不连接、不查凭据、不调用远端、不授 Tool grant。只实读原 index，缺失/损坏/scope/hash/size不等则 unavailable 或有限失败。当前 live/generation 单独投影，旧 snapshot 不改标。
 
-`sourceRecordKey` 不单独证明 writer。读取核实际 publisher 已保存 result（去 metadata pointer 后与完整 source value 全等）、原输入 digest/版本/Session/Store，以及真实 connection command/parent/root-work；原 operation key A 与合法复用时的新 source key B 分别绑定，不依赖可变 A head。Artifact 再核实际 publisher scope。私有 bootstrap 的 Job 全文不由公共 Execution 投影重建。直接 Query 使用已有只读 `readExecutionGroupSafety` 核当前 Store/Session/subject，保留其8192记录上限，超限仍有限失败。取舍及代价见[原 metadata 决定](../../../../.agents/notes/implemented/architecture/2026-10-05-original-mcp-tool-metadata-artifacts.md)。
+`sourceRecordKey` 不单独证明 writer。读取核实际 publisher 已保存 result（去 metadata pointer 后与完整 source value 全等）、原输入 digest/版本/Session/Store，以及真实 connection command/parent/root-work；原 operation key A 与合法复用时的新 source key B 分别绑定，不依赖可变 A head。Artifact 再核实际 publisher scope。私有 bootstrap 的 Job 全文不由公共 Execution 投影重建。直接 Query 使用已有只读 `readExecutionGroupSafety` 核当前 Store/Session/subject，完整流式检查累计已完成Session/Message/Part；实际活跃和未确认安全域仍有明确边界，历史不被截断成安全证明。当前实现与回归归[Store owner](../storage/README.md#累计执行组观察)，原metadata封存、私有正文和引用资格理由继续见[原决定](../../../../.agents/notes/implemented/architecture/2026-10-05-original-mcp-tool-metadata-artifacts.md)。
 
 [实际 metadata 测试](../../test/isolated/mcp/tools-metadata.test.ts) 当前13/952/0：真实 SQLite/Artifact/local SDK peer，65工具、3,660,270 bytes/56chunks全文等价、两代刷新与冷 removed-server，普通 Model Tool connect/refresh、自身 publisher scope、fork/foreign、物理缺失/损坏/256KiB node、缺 Artifact host、发布失败、SQL commit 后丢回执、非法预览及 warm B复用A。公共 maintenance 实际 create/inspect/restore 生成新 Store B，当前 B 准入仍核原 A snapshot/index/descriptor，旧 expected A 与 foreign subject 拒绝；冷读取零新增 RPC/Model/publish/cursor，历史不产生 Tool grant。当前原六邻接28/301/0；完整 Client与真实80×24消费者分别归对应 owner，不由本片推导三平台/全部累计阈值资格。
 
@@ -78,7 +82,7 @@ root 原字节 SHA 即 indexDigest，节点不含自身 digest。Entry 的 label
 | snapshot record | 8 KiB，不携全文 |
 | Query | 完整32 KiB envelope，每页最多32项 |
 
-超限使整份 metadata unavailable，不截断为 complete。顺序发布与读取不扩大 Worker pending/ordinary/control 预算；部分 Artifact 未形成完整 root 不构成可用快照。上述累计极限、8192记录大组及恢复失败/异常清理窗口没有因有限成功例取得全部资格。
+超限使整份 metadata unavailable，不截断为 complete。顺序发布与读取不扩大 Worker pending/ordinary/control 预算；部分 Artifact 未形成完整 root 不构成可用快照。metadata自身的工程极限、实际活跃安全域及恢复失败/异常清理窗口没有因有限成功例取得全部资格；正常累计历史观察沿Store流式合同。
 
 显式生命周期 owner 调用 `invalidateCatalogue()` 立即提升代次并清缓存，零 I/O；随后只能通过显式 `scope.snapshotTools()` 连接/刷新。完整 descriptor 内容变化发布新代次；未变化的同连接刷新保留代次。刷新期间发生失效/断连会拒绝该旧刷新，不能恢复已失效目录。低层 adapter 本身不订阅通知自动连接；下文的显式 lifecycle 将其已发现目录投影给 Runtime 的下一安全 Step。
 
@@ -104,7 +108,7 @@ root 原字节 SHA 即 indexDigest，节点不含自身 digest。Entry 的 label
 
 ## 原连接申请的有限事实
 
-`builtin.mcp` 的只读 `mcp.connection@1` Query 由 [connection-query.ts](connection-query.ts) 实现，输入闭合为 `{executionId,serverId,key}`。它沿现有 `readExecutionGroupSafety` 核当前 Store、Session 与主体，保留8192 records准入上限；读取准确原 Action、其准确 operation Job 及原 parent，不读取整组 Execution 正文或完整 catalogue Query 再裁剪。既有 `getExecution` 会加载准确原 Action result，仍受原 Worker/result 上限；当前 live callback 读取既有缓存 projection，不声称内部完全没有 definitions 处理。
+`builtin.mcp` 的只读 `mcp.connection@1` Query 由 [connection-query.ts](connection-query.ts) 实现，输入闭合为 `{executionId,serverId,key}`。它沿现有 `readExecutionGroupSafety` 核当前 Store、Session 与主体，累计已完成历史沿Store完整流式观察，实际活跃安全域保持有界；读取准确原 Action、其准确 operation Job 及原 parent，不读取整组 Execution 正文或完整 catalogue Query 再裁剪。既有 `getExecution` 会加载准确原 Action result，仍受原 Worker/result 上限；当前 live callback 读取既有缓存 projection，不声称内部完全没有 definitions 处理。
 
 完整 `builtin.mcp.connection@1` DisplayContent envelope≤16KiB，actions/artifactRefs为空。有限 payload 保存当前准入 Store、原 Session、Action 与 Job 身份、phase、准确六字段 operationRef、原 ready、当前 live/currentGeneration、created 和有限 reason。本 Runtime 的无模型 Action 保存为 kind=job，definition 为 `builtin.mcp/mcp.connect@1`；connection Job 的 definition 是 `mcp.source.connection@1`，或准确 static `mcp.connection.<serverId>` 及原 configDigest。原 inputDigest、origin Store/Command、真实 parent、root-work和版本均核对，不以 record key 单独证明关系。
 

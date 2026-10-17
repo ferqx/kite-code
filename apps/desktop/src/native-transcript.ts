@@ -267,6 +267,7 @@ export function desktopTranscript({
   storeId,
   sessionId,
   fullReply,
+  compressionProgress,
 }: {
   messages: readonly Message[];
   runs: readonly NativeRunFact[];
@@ -274,6 +275,7 @@ export function desktopTranscript({
   storeId: string;
   sessionId: string;
   fullReply?: (message: Message) => string | undefined;
+  compressionProgress?: NativeSelection['compressionProgress'];
 }): { messages: DesktopMessage[]; turnActivity?: TurnActivity } {
   const observed = new Map(
     runs.filter((run) => presentableRun(run, storeId, sessionId)).map((run) => [run.id, run]),
@@ -311,7 +313,8 @@ export function desktopTranscript({
     if (
       fact &&
       run &&
-      ((fact.definitionId === 'files.read' && ['2', '3'].includes(fact.definitionVersion)) ||
+      ((fact.definitionId === 'files.read' && ['2', '3', '4'].includes(fact.definitionVersion)) ||
+        (fact.definitionId === 'files.read_path' && ['1', '2'].includes(fact.definitionVersion)) ||
         (['files.glob', 'files.search'].includes(fact.definitionId) &&
           fact.definitionVersion === '2') ||
         (fact.definitionId === 'files.list' && fact.definitionVersion === '1'))
@@ -323,6 +326,41 @@ export function desktopTranscript({
       };
     return result;
   });
+  const compressing = compressionProgress && observed.get(compressionProgress.runId);
+  const progressMessage =
+    compressionProgress?.executionId &&
+    messages.find(
+      (message) =>
+        message.runId === compressionProgress.runId &&
+        !message.originMessage &&
+        message.compression &&
+        message.sourceIds?.length === 1 &&
+        message.sourceIds[0] === compressionProgress.executionId,
+    );
+  if (compressing?.isActive && compressing.originStoreId === compressionProgress?.originStoreId) {
+    if (progressMessage) {
+      // A published or failed SQL fact wins over an older hot phase observation.
+      if (['running', 'unpublished'].includes(progressMessage.compression!.status)) {
+        const index = messages.indexOf(progressMessage);
+        modeled[index] = {
+          ...modeled[index]!,
+          title: '正在压缩上下文',
+          status: 'running',
+          settled: false,
+        };
+      }
+    } else
+      modeled.push({
+        id: `native-compression:${identity(compressing.id)}`,
+        turnId: identity(compressing.id),
+        role: 'system',
+        systemKind: 'compaction',
+        title: '正在压缩上下文',
+        text: '',
+        status: 'running',
+        settled: false,
+      });
+  }
   for (const run of observed.values()) {
     const turnId = identity(run.id);
     modeled.push({

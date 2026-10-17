@@ -206,7 +206,7 @@ test('real UnifiedExecution dispatches paged read/glob; denied requests have zer
     const records = await store.listExecutions('s');
     const read = records.find((value) => value.definitionId === 'files.read')!;
     const glob = records.find((value) => value.definitionId === 'files.glob')!;
-    expect(read).toMatchObject({ status: 'succeeded', definitionVersion: '3' });
+    expect(read).toMatchObject({ status: 'succeeded', definitionVersion: '4' });
     expect(JSON.parse((read.result as { content: string }).content).content).toBe('two\n');
     expect(JSON.parse((read.result as { content: string }).content).baseline).toEqual(
       (await f.files.read('root.ts')).baseline,
@@ -236,7 +236,7 @@ test('glob traverses formerly capped directory count; paged large read keeps ful
     writeFileSync(join(f.root, 'large'), content);
     const tool = createFileTools(f.files).find((value) => value.id === 'files.read')!;
     const context = { signal: new AbortController().signal } as Parameters<typeof tool.execute>[1];
-    const full = await tool.execute({ path: 'large' }, context);
+    const full = await tool.execute({ path: 'large', limit: 200000 }, context);
     expect(full).toMatchObject({
       outcome: 'failed',
       details: { code: 'artifact_publication_unavailable' },

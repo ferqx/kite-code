@@ -154,12 +154,19 @@ export function createFileTools(
       properties: {
         path,
         offset: { type: 'integer', minimum: 1, maximum: Number.MAX_SAFE_INTEGER },
-        limit: { type: 'integer', minimum: 1, maximum: Number.MAX_SAFE_INTEGER },
+        limit: {
+          type: 'integer',
+          minimum: 1,
+          maximum: Number.MAX_SAFE_INTEGER,
+          default: 200,
+          description:
+            'Maximum lines to return; defaults to 200. Continue at selection.nextOffset to read the next page, or request an explicit limit.',
+        },
       },
       call: (i) =>
         files.read(string(i.path), {
           ...(i.offset === undefined ? {} : { offset: Number(i.offset) }),
-          ...(i.limit === undefined ? {} : { limit: Number(i.limit) }),
+          limit: i.limit === undefined ? 200 : Number(i.limit),
         }),
     },
     {
@@ -270,8 +277,8 @@ export function createFileTools(
       ? { resources: { serial: { scope: 'workspace' as const, key: 'files.mutation' } } }
       : {}),
     version:
-      d.name === 'read' ? '3' : ['write', 'edit', 'search', 'glob'].includes(d.name) ? '2' : '1',
-    description: `Workspace ${d.name}; paths are relative to the fixed workspace root or absolute within it, never relative to Shell cwd. UTF-8, exact baseline for modifications, complete bodies or explicit immutable Artifact references.`,
+      d.name === 'read' ? '4' : ['write', 'edit', 'search', 'glob'].includes(d.name) ? '2' : '1',
+    description: `Workspace ${d.name}; paths are relative to the fixed workspace root or absolute within it, never relative to Shell cwd. UTF-8, exact baseline for modifications, complete bodies or explicit immutable Artifact references.${d.name === 'read' ? ' Read up to 200 lines by default; continue at selection.nextOffset or specify offset/limit. The baseline describes the complete file.' : ''}`,
     inputSchema: {
       type: 'object',
       additionalProperties: false,
@@ -295,6 +302,9 @@ export function createFileTools(
           }
         : {}),
     },
+    ...(['read', 'list', 'glob', 'search'].includes(d.name)
+      ? { contextDiscovery: 'read_only' as const }
+      : {}),
     async execute(input, context) {
       if (context.signal.aborted)
         return { outcome: 'cancelled', content: 'cancelled_before_file_io' };

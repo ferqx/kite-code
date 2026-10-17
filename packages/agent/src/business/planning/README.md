@@ -30,7 +30,7 @@
 
 `validation.define@1` 在准确当前 Run 保存不可变检查 spec。`requiredReceiptDefinitions` 是可信宿主选定的定义 ID/version 集合，封存在 Run 义务中；模型可以增加检查，不能删掉或改成其他定义。receipt check 只证明准确调用已有成功回执，不证明代码、文件或任务语义正确。在 plan 工作中，检查目标还须匹配当前计划真实来源。`validation.check@1` 保存不可变 attempt 及 CAS current pointer；最后条件再次核对实际 Execution，拒绝 missing、failed、inconclusive、unknown、范围/attempt/定义/input digest/result revision 不符。
 
-`file_hash` 固定相对路径与完整 SHA-256 期待值，宿主必须显式配置 `fileHashChecker: { definitionId: 'files.read', definitionVersion: '3' }`，并在实际 Run manifest 装配该可信定义。检查由 `operations.ensure` 派发普通 Tool；传入首行分页以限制正文，但比较实际 v3 baseline 的完整全字节 hash，不把首行当全文。每次真实检查的 operation key 包含原 checker execution identity，重试保留身份，新重验不会重绑定旧 parent。缺 checker、读取失败、超大小或无完整 baseline 返回 `inconclusive`。没有自动默认 Files I/O，也不在业务叶子直接读文件。
+`file_hash` 固定相对路径与完整 SHA-256 期待值，宿主必须显式配置 `fileHashChecker: { definitionId: 'files.read', definitionVersion: '4' }`，并在实际 Run manifest 装配该可信定义。检查由 `operations.ensure` 派发普通 Tool；传入首行分页以限制正文，但比较实际 v4 baseline 的完整全字节 hash，不把首行当全文。每次真实检查的 operation key 包含原 checker execution identity，重试保留身份，新重验不会重绑定旧 parent。缺 checker、读取失败、超大小或无完整 baseline 返回 `inconclusive`。没有自动默认 Files I/O，也不在业务叶子直接读文件。
 
 `artifact_schema` 固定对象根 JSON Schema 期待值，读取准确成功工作 Execution 返回的 ArtifactRef；字符串 ID、模型自报 literal、错 scope 或不存在的引用不能通过。实际 reader 继续核对宿主原 Session/Store/subject/scope。纯检查器允许有限 type/properties/required/items/enum/const/数值与长度边界，不支持远程 `$ref`、pattern、组合或自定义关键字；schema 最大 32 KiB、512 节点/16 层，Artifact 最大 1 MiB、10,000 值/32 层。schema 不满足为 `failed`，缺 reader/引用/schema 能力或超预算为 `inconclusive`，不启动模型或网络。
 
@@ -76,7 +76,7 @@ checker 配置、期待值与 schema 封存在 immutable spec；attempt 保存�
 [semantic-verification.test.ts](../../../test/isolated/business/semantic-verification.test.ts) 使用真实 SQLite/Core、固定模型、已构建 guardian 的无害 Shell 和真实本机 HTTP MCP SDK：退出码匹配/不匹配、独立 Job 拒权零 spawn、MCP schema 失败后同 spec 修复、新版本零 RPC、纯文本成功不能通过。连接仍先经普通 connection Action/Job 的持久派发，再 discovery；每个未来 Model Step 只读已缓存目录。该本机测试 transport 是明确测试资格，未证明生产 DNS/TLS/proxy/只读远端语义，也不把远端状态与 SQLite commit 视为原子快照。当前 Shell/MCP 仍只装配显式宿主 checker，不将它们视为自动 mutation checker 的生产资格。
 
 
-可选 `automaticValidation` 由可信宿主声明实际 mutation definition/version/effects 与完整基线 checker；缺省关闭。当前资格限定于正式 Files 的 `files.write@2`、`files.edit@2` 和 `files.read@3`。`initializeRequirements` 在首个 Execution 前创建不可替换的 `agent.mutation-policy@1` metadata，并登记一个 Run 级 `mutation.required` completion requirement。每次受治理 Tool 在真实派发前登记准确 intent，实际结果结算与台账更新同一 SQLite 事务提交；单个 requirement 配合 keyset 事实页和 CAS head，不将 64 refs 上限变成累计 mutation 次数上限。普通已登记计划、批准、显式 validation/waiver 的权威和原证据路径保持独立。
+可选 `automaticValidation` 由可信宿主声明实际 mutation definition/version/effects 与完整基线 checker；缺省关闭。当前资格限定于正式 Files 的 `files.write@2`、`files.edit@2` 和 `files.read@4`。`initializeRequirements` 在首个 Execution 前创建不可替换的 `agent.mutation-policy@1` metadata，并登记一个 Run 级 `mutation.required` completion requirement。每次受治理 Tool 在真实派发前登记准确 intent，实际结果结算与台账更新同一 SQLite 事务提交；单个 requirement 配合 keyset 事实页和 CAS head，不将 64 refs 上限变成累计 mutation 次数上限。普通已登记计划、批准、显式 validation/waiver 的权威和原证据路径保持独立。
 
 原 Run 中的普通工具通过 `operations.ensure` 再调用 Files write/edit 时，runless 子 Tool 保留真实父执行与原义务快照，派发前 intent 和结果结算使用同一持久引用。最终 checker 沿有限真实父链核原 Run，而不要求每个子 Tool 直接保存 Run ID；不同 Store/Session/root work、旧 owner 写入或未知效果仍不能通过。合法恢复后的新 checker 可核原已知终态，保留 target 的历史代次与结果，不重新执行效果。[真实 Service/Client/Files 回归](../../../../../apps/service/test/isolated/automatic-validation-nested-tools.test.ts)保普通 wrapper 一次、write/edit 各一次，核最新完整正文 hash、旧事实 superseded、原 Run 完成及冷 GET 零重放。
 

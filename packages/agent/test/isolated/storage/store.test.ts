@@ -91,7 +91,7 @@ describe('real unified SQLite Store', () => {
       competing.close(true);
     }
   });
-  test('retained writer contention fails within a bounded wait and leaves the unaccepted intent absent', async () => {
+  test('retained writer contention waits without failing the original intent and keeps reads available', async () => {
     const { store, options, expectedStoreId } = await setup();
     const competing = new Database(join(options.dataRoot, options.profile, 'core.db'));
     let held = false;
@@ -106,14 +106,28 @@ describe('real unified SQLite Store', () => {
         subjectId: 'user',
         request: { kind: 'run.start' as const, content: 'original blocked intent' },
       };
-      const started = performance.now();
-      await rejects(store.acceptCommand(request), 'SQLITE_BUSY');
-      expect(performance.now() - started).toBeLessThan(2500);
+      let outcome = 'pending';
+      const accepted = store.acceptCommand(request).then(
+        (value) => {
+          outcome = 'succeeded';
+          return { value };
+        },
+        (error: unknown) => {
+          outcome = 'failed';
+          return { error };
+        },
+      );
+      await Bun.sleep(1350);
+      expect(outcome).toBe('pending');
       expect(await store.getCommand('blocked')).toBeNull();
       expect((await store.getView('s')).snapshotCursor).toBe(before);
       competing.run('ROLLBACK');
       held = false;
-      const original = await store.acceptCommand(request);
+      const result = await accepted;
+      expect('error' in result ? result.error : undefined).toBeUndefined();
+      const original = 'value' in result ? result.value : undefined;
+      expect(original?.id).toBe('blocked');
+      if (!original) throw new Error('Original acceptance missing');
       expect(await store.acceptCommand(request)).toEqual(original);
     } finally {
       if (held) competing.run('ROLLBACK');

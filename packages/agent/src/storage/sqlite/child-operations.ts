@@ -305,13 +305,6 @@ export function ensureAgent(
         : ['dispatching', 'running'].includes(String(parent.state)))
     )
       throw new AgentError('invalid_operation_parent');
-    if (
-      !continuation &&
-      Number(
-        db.row('SELECT count(*) AS n FROM session WHERE root_id=?', input.owner.sessionId)!.n,
-      ) >= 256
-    )
-      throw new AgentError('child_scope_too_large');
     const commandId = randomUUID(),
       executionId = randomUUID(),
       childSessionId = reusedChild ? String(reusedChild.id) : randomUUID(),
@@ -668,7 +661,6 @@ export function inspectChildSettlement(
     db.db.run('COMMIT');
     return { pending, cursor };
   } catch (error) {
-    db.db.run('ROLLBACK');
-    throw error;
+    return db.rollback(error);
   }
 }

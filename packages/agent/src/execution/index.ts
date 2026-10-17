@@ -57,6 +57,22 @@ export interface ToolExecutionResult {
   result: ToolResult;
   dispatched?: boolean;
 }
+/** Core-observed metadata, kept separate from an evaluator's claimed proof. */
+interface RequirementObservation {
+  phase: 'dispatch' | 'completion';
+  references: RequirementRef[];
+  records: { extensionId: string; sessionId: string; read: RequirementRecordRead }[];
+  safety: {
+    requirement: RequirementRef;
+    read: import('../storage/types').RequirementExecutionSafetyRead;
+  }[];
+}
+/** Only Core's own inconsistent read-set observation qualifies for a fresh read. */
+class ConditionSnapshotChangedError extends AgentError {
+  constructor() {
+    super('necessary_condition_snapshot_changed');
+  }
+}
 export interface ExecutionScope {
   toolAdmission?: ToolDispatchAdmission;
   modelRetry?: import('../model-attempt').ModelRetrySource;
@@ -274,6 +290,33 @@ export class UnifiedExecution {
     phase: 'dispatch' | 'completion',
     executionId?: string,
     allowUnsatisfied = false,
+  ): Promise<RequirementEvaluation[]> {
+    return (await this.requirementEvaluation(scope, phase, executionId, allowUnsatisfied))
+      .evaluations;
+  }
+  async requirementEvaluation(
+    scope: ToolScope,
+    phase: 'dispatch' | 'completion',
+    executionId?: string,
+    allowUnsatisfied = false,
+  ): Promise<{ evaluations: RequirementEvaluation[]; observation: RequirementObservation }> {
+    for (;;) {
+      scope.signal.throwIfAborted();
+      try {
+        return await this.evaluateRequirements(scope, phase, executionId, allowUnsatisfied);
+      } catch (error) {
+        if (!(error instanceof ConditionSnapshotChangedError)) throw error;
+        // A concurrent writer invalidated this read-only evaluation. Yield and re-read
+        // current facts; never replay a Model, Tool, approval or external effect.
+        await new Promise<void>((resolve) => setTimeout(resolve, 0));
+      }
+    }
+  }
+  private async evaluateRequirements(
+    scope: ToolScope,
+    phase: 'dispatch' | 'completion',
+    executionId?: string,
+    allowUnsatisfied = false,
   ) {
     if ('run' in scope) {
       const current = await this.options.store.getRun(scope.run.id);
@@ -284,7 +327,41 @@ export class UnifiedExecution {
     const references = (
       'run' in scope ? scope.run.requirements : (scope.requirements ?? [])
     ).filter((ref) => ref.phase === phase || ref.phase === 'both');
-    if (!references.length) return [];
+    const observedRecords = new Map<string, RequirementObservation['records'][number]>();
+    const observeRecord = (reference: RequirementRef, read: RequirementRecordRead) => {
+      const key = JSON.stringify([reference.extensionId, reference.sessionId, read.key]);
+      const previous = observedRecords.get(key)?.read;
+      if (
+        previous &&
+        (previous.revision !== read.revision || previous.originStoreId !== read.originStoreId)
+      )
+        // Different requirements can depend on the same record. Preserve every
+        // dependency by restarting this pure evaluation when their snapshots differ.
+        throw new ConditionSnapshotChangedError();
+      observedRecords.set(key, {
+        extensionId: reference.extensionId,
+        sessionId: reference.sessionId,
+        read: structuredClone(read),
+      });
+    };
+    for (const reference of references) {
+      scope.signal.throwIfAborted();
+      const record = await this.options.store.getExtensionRecord({
+        extensionId: reference.extensionId,
+        sessionId: reference.sessionId,
+        key: reference.recordKey,
+      });
+      observeRecord(reference, {
+        key: reference.recordKey,
+        revision: record?.revision ?? null,
+        originStoreId: record?.originStoreId ?? null,
+      });
+    }
+    if (!references.length)
+      return {
+        evaluations: [],
+        observation: { phase, references: [], records: [], safety: [] },
+      };
     const fallback = scope.bindings?.conditions ?? this.options.conditions;
     const providers = new Map(
       (scope.bindings?.extensions ?? [])
@@ -386,8 +463,9 @@ export class UnifiedExecution {
                     canonicalJson(previous as unknown as Json) !==
                       canonicalJson(read as unknown as Json)
                   )
-                    throw new AgentError('necessary_condition_snapshot_changed');
+                    throw new ConditionSnapshotChangedError();
                   reads!.set(recordKey, read);
+                  observeRecord(reference, read);
                 },
                 boundary,
               );
@@ -410,7 +488,7 @@ export class UnifiedExecution {
                     canonicalJson(prior as unknown as Json) !==
                       canonicalJson(observed as unknown as Json)
                   )
-                    throw new AgentError('necessary_condition_snapshot_changed');
+                    throw new ConditionSnapshotChangedError();
                   safetySets.set(key, [observed]);
                   return fact;
                 },
@@ -431,7 +509,7 @@ export class UnifiedExecution {
       )
     )
       throw new AgentError('necessary_condition_unsatisfied');
-    return evaluations.map((original) => {
+    const prepared = evaluations.map((original) => {
       const safety = safetySets.get(referenceKey(original.requirement));
       if (
         original.executionSafetyReads !== undefined &&
@@ -454,6 +532,65 @@ export class UnifiedExecution {
       }
       return { ...evaluation, recordReads: [...merged.values()] };
     });
+    return {
+      evaluations: prepared,
+      observation: {
+        phase,
+        references: structuredClone(references),
+        records: [...observedRecords.values()],
+        safety: references.flatMap((requirement) =>
+          (safetySets.get(referenceKey(requirement)) ?? []).map((read) => ({
+            requirement: structuredClone(requirement),
+            read: structuredClone(read),
+          })),
+        ),
+      },
+    };
+  }
+  async requirementsChanged(
+    scope: ToolScope,
+    observation: RequirementObservation,
+  ): Promise<boolean> {
+    const work = identity(scope);
+    if ('run' in scope) {
+      const current = await this.options.store.getRun(scope.run.id);
+      const refs = (current?.requirements ?? []).filter(
+        (ref) => ref.phase === observation.phase || ref.phase === 'both',
+      );
+      const keys = (values: RequirementRef[]) =>
+        values.map((value) => canonicalJson(value as unknown as Json)).sort();
+      if (canonicalJson(keys(refs)) !== canonicalJson(keys(observation.references))) return true;
+    }
+    for (const { extensionId, sessionId, read } of observation.records) {
+      scope.signal.throwIfAborted();
+      const current = await this.options.store.getExtensionRecord({
+        extensionId,
+        sessionId,
+        key: read.key,
+      });
+      if (
+        (current?.revision ?? null) !== read.revision ||
+        (current?.originStoreId ?? null) !== read.originStoreId
+      )
+        return true;
+    }
+    const command = observation.safety.length
+      ? await this.options.store.getCommand(work.originCommandId)
+      : null;
+    for (const { requirement, read } of observation.safety) {
+      scope.signal.throwIfAborted();
+      if (!command) throw new AgentError('command_not_found');
+      const current = await this.options.store.readRunExecutionSafety({
+        expectedStoreId: work.originStoreId,
+        sessionId: requirement.sessionId,
+        subjectId: command.subjectId,
+        runId: requirement.runId,
+        ...(read.excludedExecutionId ? { excludeExecutionId: read.excludedExecutionId } : {}),
+      });
+      if (current.revision !== read.revision || current.unconfirmed !== read.unconfirmed)
+        return true;
+    }
+    return false;
   }
   private async prepare(
     scope: ToolScope,
@@ -880,7 +1017,8 @@ export class UnifiedExecution {
       failure = error;
       throw error;
     } finally {
-      if ('run' in scope) scope.toolAdmission?.settled(outcome?.result, failure);
+      if ('run' in scope)
+        scope.toolAdmission?.settled(outcome?.result, failure, outcome?.dispatched);
     }
   }
   private async performTool(

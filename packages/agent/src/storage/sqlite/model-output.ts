@@ -115,7 +115,6 @@ export function getModelOutputSnapshot(
     db.db.run('COMMIT');
     return snapshot;
   } catch (error) {
-    db.db.run('ROLLBACK');
-    throw error;
+    return db.rollback(error);
   }
 }

@@ -225,6 +225,37 @@ test('explicit model capacity survives real configuration loading and freezing w
   }
 });
 
+test('explicit compression token thresholds are frozen, validated and preserve absent-field hashes', () => {
+  const baseline = { modelId: 'x', models: [{ id: 'x', provider: 'compatible', model: 'm' }] };
+  const original = createConfigurationSnapshot(resolveConfiguration({ defaults: baseline }));
+  const effective = resolveConfiguration({
+    defaults: { ...baseline, compression: { thresholdTokens: 10000 } },
+    user: { compression: { thresholdTokens: 20000 } },
+    workspace: { compression: { thresholdTokens: 30000 } },
+    explicit: { compression: { thresholdTokens: 40000 } },
+  });
+  const saved = createConfigurationSnapshot(effective);
+  expect(saved.configuration.compression).toEqual({ thresholdTokens: 40000 });
+  expect(Object.isFrozen(saved.configuration.compression)).toBe(true);
+  effective.compression!.thresholdTokens = 50000;
+  expect(saved.configuration.compression!.thresholdTokens).toBe(40000);
+  expect(createConfigurationSnapshot(effective).digest).not.toBe(saved.digest);
+  expect(saved.digest).not.toBe(original.digest);
+  expect(
+    createConfigurationSnapshot(
+      resolveConfiguration({
+        defaults: { ...baseline, compression: { automatic: true, validateExpanded: true } },
+      }),
+    ).digest,
+  ).toBe(original.digest);
+  for (const thresholdTokens of [0, -1, 1.5, '32768', null, Number.MAX_SAFE_INTEGER + 1])
+    expect(() =>
+      createConfigurationSnapshot(
+        resolveConfiguration({ defaults: { ...baseline, compression: { thresholdTokens } } }),
+      ),
+    ).toThrow('invalid_compression_threshold');
+});
+
 test('real JSONC field set/remove preserves unrelated comments and unknown fields and IfMatch checks exact bytes', () => {
   const f = create();
   try {

@@ -27,6 +27,7 @@ export function createWorkspaceSerialLocks(
     ('windowsPathSecurity' in profile ? profile.windowsPathSecurity : undefined) ??
     defaultWindowsPathSecurity();
   const active = new Map<string, FileLock>();
+  const releaseFailures = new Map<string, unknown>();
   const waiters: Waiter[] = [];
   let bytes = 0;
   let timer: ReturnType<typeof setTimeout> | undefined;
@@ -34,11 +35,30 @@ export function createWorkspaceSerialLocks(
   let closed = false;
   let closePromise: Promise<void> | undefined;
   let finishClose: (() => void) | undefined;
+  let failClose: ((error: unknown) => void) | undefined;
+  const rejectClose = (error: unknown) => {
+    const reject = failClose;
+    closePromise = undefined;
+    finishClose = undefined;
+    failClose = undefined;
+    reject?.(error);
+  };
   const drain = () => {
-    if (!closing || active.size || closed) return;
-    closed = true;
-    access.lock.release();
-    finishClose?.();
+    if (!closing || closed) return;
+    if (releaseFailures.size) {
+      rejectClose(releaseFailures.values().next().value);
+      return;
+    }
+    if (active.size) return;
+    try {
+      access.lock.release();
+      closed = true;
+      finishClose?.();
+      finishClose = undefined;
+      failClose = undefined;
+    } catch (error) {
+      rejectClose(error);
+    }
   };
   const remove = (waiter: Waiter) => {
     const index = waiters.indexOf(waiter);
@@ -72,8 +92,17 @@ export function createWorkspaceSerialLocks(
         let released = false;
         waiter.resolve(() => {
           if (released) return;
+          try {
+            lock.release();
+          } catch (error) {
+            // The original permit retains its lock and retry authority. No waiter may
+            // pass this identity until release is positively confirmed.
+            releaseFailures.set(waiter.identity, error);
+            if (closing) rejectClose(error);
+            throw error;
+          }
           released = true;
-          lock.release();
+          releaseFailures.delete(waiter.identity);
           active.delete(waiter.identity);
           pump();
           drain();
@@ -131,18 +160,21 @@ export function createWorkspaceSerialLocks(
     },
     close() {
       if (closePromise) return closePromise;
+      if (closed) return Promise.resolve();
       closing = true;
       if (timer) clearTimeout(timer);
       timer = undefined;
-      closePromise = new Promise((resolve) => {
+      const pending = new Promise<void>((resolve, reject) => {
         finishClose = resolve;
+        failClose = reject;
       });
+      closePromise = pending;
       for (const waiter of [...waiters]) {
         remove(waiter);
         waiter.reject(new AgentError('resource_coordinator_closed'));
       }
       drain();
-      return closePromise;
+      return pending;
     },
   };
 }

@@ -685,3 +685,402 @@ test('same reading identity retains terminal Conversation nodes and manual proce
     await f.close();
   }
 });
+
+test('automatic compression is a live separator only for the matching active Run and disappears without inventing completion', async () => {
+  const f = fixture();
+  const input = {
+    messages: [message('u-compress', 'user', '1', '了解项目')],
+    runs: [{ ...run(), status: 'running' as const, isActive: true, finishedAt: null }],
+    tools: [],
+    storeId: 'store',
+    sessionId: 's',
+  };
+  const progress = { runId: 'r', originStoreId: 'store', phase: 'summarizing' as const };
+  const render = async (compressionProgress?: NativeSelection['compressionProgress']) => {
+    const transcript = desktopTranscript({ ...input, compressionProgress });
+    await act(async () =>
+      f.root.render(
+        <SessionPage
+          workspaces={[]}
+          sessionLabel="compression"
+          readingKey="s"
+          loading={false}
+          connected
+          connectionLabel="local"
+          actions={{}}
+          messages={transcript.messages}
+          turnActivity={transcript.turnActivity}
+          renderMessageContent={(model) => <p>{model.text}</p>}
+        />,
+      ),
+    );
+    return transcript;
+  };
+  try {
+    for (const phase of ['preparing', 'summarizing', 'validating'] as const) {
+      const transcript = await render({ ...progress, phase });
+      expect(f.host.querySelector('.context-compacted')?.textContent).toBe('正在压缩上下文');
+      expect(transcript.messages.some((model) => model.finalReply)).toBe(false);
+    }
+    await render({ ...progress, originStoreId: 'other-store' });
+    expect(f.host.querySelector('.context-compacted')).toBeNull();
+    await render({ ...progress, runId: 'other-run' });
+    expect(f.host.querySelector('.context-compacted')).toBeNull();
+    await render();
+    expect(f.host.querySelector('.context-compacted')).toBeNull();
+    expect(f.host.textContent).not.toContain('压缩完成');
+    const cold = desktopTranscript({ ...input, runs: [run()], compressionProgress: progress });
+    expect(cold.messages.some((model) => model.systemKind === 'compaction')).toBe(false);
+  } finally {
+    await f.close();
+  }
+});
+
+test('real Core compression, later tool work and completion remain distinct through HTTP, generated Client and Native transcript', async () => {
+  const { mkdtempSync, realpathSync, rmSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
+  const { pathToFileURL } = await import('node:url');
+  const { createRuntime } = await import('@kite-ai/agent');
+  const { openSqliteStore } = await import('@kite-ai/agent/sqlite');
+  const { createClient } = await import('@kite-ai/client');
+  const { startService } = await import('@kite-ai/service');
+  const { selectProfile } = await import('@kite-ai/agent/profile');
+  const root = realpathSync(mkdtempSync(join(tmpdir(), 'native-compression-transcript-')));
+  const profile = selectProfile({ dataRoot: join(root, 'data'), profile: 'test' });
+  const store = await openSqliteStore({ dataRoot: profile.dataRoot, profile: profile.profile });
+  const storeId = (await store.getMetadata()).storeId;
+  const gate = () => {
+    let release!: () => void;
+    const promise = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    return { release, promise };
+  };
+  const toolGate = gate(),
+    finalGate = gate();
+  let normalCalls = 0,
+    toolCalls = 0,
+    completionEntered = false;
+  const finishRun = store.finishRun.bind(store);
+  store.finishRun = async (input) => {
+    if (input.status === 'completed') {
+      completionEntered = true;
+      await finalGate.promise;
+    }
+    return finishRun(input);
+  };
+  const runtime = createRuntime({
+    store,
+    modelId: 'local-fixed',
+    permissions: {
+      async authorize() {
+        return { allowed: true, revision: 'owned' };
+      },
+    },
+    compressor: {
+      id: 'fixture.compression',
+      version: '1',
+      async shouldCompress(input) {
+        return (
+          normalCalls > 0 &&
+          !input.messages.some((entry) =>
+            entry.sourceIds?.some((id) => id.startsWith('compression-')),
+          )
+        );
+      },
+      async prepare() {
+        return { instructions: 'OWNED_SUMMARIZE', snapshot: {} };
+      },
+      async validateSummary() {
+        return true;
+      },
+    },
+    model: {
+      async *stream(request) {
+        if (request.messages.some((entry) => entry.content.includes('OWNED_SUMMARIZE'))) {
+          yield {
+            type: 'text_delta',
+            text: 'This is an internal compression summary, not an answer.',
+          };
+          yield { type: 'finish', reason: 'stop', usage: { inputTokens: 1, outputTokens: 1 } };
+        } else if (++normalCalls <= 2) {
+          yield {
+            type: 'tool_call',
+            id: `call-${normalCalls}`,
+            name: 'local.check',
+            arguments: '{}',
+          };
+          yield {
+            type: 'finish',
+            reason: 'tool_calls',
+            usage: { inputTokens: 1, outputTokens: 1 },
+          };
+        } else {
+          yield { type: 'text_delta', text: 'Actual final answer after both tools.' };
+          yield { type: 'finish', reason: 'stop', usage: { inputTokens: 1, outputTokens: 1 } };
+        }
+      },
+    },
+    extensions: [
+      {
+        id: 'fixture',
+        version: '1',
+        apiMajor: 1,
+        tools: [
+          {
+            id: 'local.check',
+            version: '1',
+            description: 'Local fixed check',
+            inputSchema: { type: 'object' },
+            async execute() {
+              if (++toolCalls === 2) await toolGate.promise;
+              return { outcome: 'succeeded', content: 'checked' };
+            },
+          },
+        ],
+      },
+    ],
+  });
+  const target = {
+    dataRoot: profile.dataRoot,
+    name: profile.profile,
+    accessKey: profile.profileAccessKey,
+  };
+  const service = await startService({
+    runtime,
+    profile: target,
+    buildId: 'compression-native',
+    subjectId: 'owner',
+  });
+  const client = createClient({
+    endpoint: service.endpoint,
+    token: service.bootstrap.token,
+    expected: { profile: target, apiMajor: 1, requiredCapabilities: ['commands', 'sessions'] },
+  });
+  const until = async (read: () => boolean) => {
+    const deadline = Date.now() + 5000;
+    while (!read()) {
+      if (Date.now() > deadline) throw Error('compression_native_timeout');
+      await Bun.sleep(5);
+    }
+  };
+  const read = async () => {
+    const view = await client.getView('s');
+    return {
+      view,
+      transcript: desktopTranscript({
+        messages: view.messages,
+        runs: view.runs,
+        tools: [],
+        storeId,
+        sessionId: 's',
+        compressionProgress: view.compressionProgress,
+      }),
+    };
+  };
+  try {
+    await client.connect();
+    await client.createWorkspace({
+      expectedStoreId: storeId,
+      id: 'w',
+      name: 'w',
+      rootUri: pathToFileURL(root).href,
+    });
+    await client.createSession({
+      expectedStoreId: storeId,
+      sessionId: 's',
+      workspaceId: 'w',
+      commandId: 'create',
+      title: 'compression',
+    });
+    await client.startRun('s', {
+      expectedStoreId: storeId,
+      commandId: 'work',
+      kind: 'run.start',
+      content: 'Finish both local checks and report.',
+    });
+    await until(() => toolCalls === 2);
+    const middle = await read();
+    const summary = middle.view.messages.find((entry) => entry.compression)!;
+    expect(summary.compression?.status).toBe('completed');
+    expect(middle.view.runs[0]?.isActive).toBe(true);
+    expect(middle.transcript.messages.find((entry) => entry.id === summary.id)).toMatchObject({
+      role: 'system',
+      systemKind: 'compaction',
+      title: '上下文压缩完成',
+    });
+    expect(middle.transcript.messages.some((entry) => entry.finalReply)).toBe(false);
+    toolGate.release();
+    await until(() => completionEntered);
+    const candidate = await read();
+    expect(
+      candidate.view.messages.find((entry) => entry.content.includes('Actual final answer'))
+        ?.status,
+    ).toBe('complete');
+    expect(candidate.transcript.messages.some((entry) => entry.finalReply)).toBe(false);
+    finalGate.release();
+    await runtime.waitForCommand('work');
+    const completed = await read();
+    expect(
+      completed.transcript.messages.filter((entry) => entry.finalReply).map((entry) => entry.text),
+    ).toEqual(['Actual final answer after both tools.']);
+    expect(
+      completed.transcript.messages.find((entry) => entry.id === summary.id)?.finalReply,
+    ).toBeUndefined();
+    const finalMessage = completed.view.messages.find(
+      (entry) => !entry.compression && entry.content.includes('Actual final answer'),
+    )!;
+    const verified = await client.getModelOutput('s', finalMessage.sourceIds![0]!);
+    const copyReady = desktopTranscript({
+      messages: completed.view.messages,
+      runs: completed.view.runs,
+      tools: [],
+      storeId,
+      sessionId: 's',
+      fullReply: (entry) => (entry.id === finalMessage.id ? verified.output.content : undefined),
+    });
+    expect(copyReady.messages.find((entry) => entry.id === finalMessage.id)?.copyText).toBe(
+      'Actual final answer after both tools.',
+    );
+    expect(copyReady.messages.find((entry) => entry.id === summary.id)?.copyText).toBeUndefined();
+    expect(normalCalls).toBe(3);
+    expect(toolCalls).toBe(2);
+  } finally {
+    toolGate.release();
+    finalGate.release();
+    client.disposeNetwork();
+    await service.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+}, 15000);
+
+test('cold compression outcomes stay separators without summary prose or final-copy controls; validating deduplicates its in-flight Model', async () => {
+  const f = fixture();
+  const labels = {
+    running: '上下文压缩上次确认为进行中',
+    completed: '上下文压缩完成',
+    failed: '上下文压缩失败',
+    cancelled: '上下文压缩已取消',
+    unpublished: '上下文压缩未发布',
+  };
+  const project = (
+    status: keyof typeof labels,
+    progress?: NativeSelection['compressionProgress'],
+  ) =>
+    desktopTranscript({
+      storeId: 'store',
+      sessionId: 's',
+      tools: [],
+      runs: [
+        {
+          ...run(),
+          ...(progress ? { status: 'running' as const, isActive: true, finishedAt: null } : {}),
+        },
+      ],
+      messages: [
+        {
+          ...message('summary-status', 'assistant', '1', 'Internal summary must stay hidden'),
+          sourceIds: ['summary-execution'],
+          compression: { id: 'c', trigger: 'automatic', status },
+        },
+      ],
+      compressionProgress: progress,
+    });
+  try {
+    for (const status of Object.keys(labels) as (keyof typeof labels)[]) {
+      const transcript = project(status);
+      await act(async () =>
+        f.root.render(
+          <SessionPage
+            workspaces={[]}
+            sessionLabel="compression"
+            readingKey={status}
+            loading={false}
+            connected
+            connectionLabel="local"
+            actions={{}}
+            messages={transcript.messages}
+          />,
+        ),
+      );
+      const summary = f.host.querySelector<HTMLButtonElement>('.agent-turn-summary');
+      if (summary?.getAttribute('aria-expanded') === 'false')
+        await act(async () => summary.click());
+      expect(f.host.querySelectorAll('.context-compacted')).toHaveLength(1);
+      expect(f.host.querySelector('.context-compacted')?.textContent).toBe(labels[status]);
+      expect(f.host.textContent).not.toContain('Internal summary must stay hidden');
+      expect(f.host.querySelector('[aria-label="复制本轮Agent回复"]')).toBeNull();
+      expect(transcript.messages.some((entry) => entry.finalReply)).toBe(false);
+    }
+    const validating = project('unpublished', {
+      runId: 'r',
+      originStoreId: 'store',
+      phase: 'validating',
+      executionId: 'summary-execution',
+    });
+    expect(validating.messages.filter((entry) => entry.systemKind === 'compaction')).toHaveLength(
+      1,
+    );
+    expect(validating.messages.find((entry) => entry.id === 'summary-status')).toMatchObject({
+      status: 'running',
+      settled: false,
+      title: '正在压缩上下文',
+    });
+    for (const status of ['completed', 'failed', 'cancelled'] as const) {
+      const terminal = project(status, {
+        runId: 'r',
+        originStoreId: 'store',
+        phase: 'validating',
+        executionId: 'summary-execution',
+      });
+      expect(terminal.messages.filter((entry) => entry.systemKind === 'compaction')).toHaveLength(
+        1,
+      );
+      expect(terminal.messages.find((entry) => entry.id === 'summary-status')).toMatchObject({
+        status,
+        settled: true,
+        title: labels[status],
+      });
+    }
+    const nextAttempt = project('unpublished', {
+      runId: 'r',
+      originStoreId: 'store',
+      phase: 'preparing',
+    });
+    expect(nextAttempt.messages.filter((entry) => entry.systemKind === 'compaction')).toHaveLength(
+      2,
+    );
+    expect(nextAttempt.messages.find((entry) => entry.id === 'summary-status')?.status).toBe(
+      'unknown',
+    );
+  } finally {
+    await f.close();
+  }
+});
+
+test('paged file read versions retain known lightweight exploration presentation alongside historical versions', () => {
+  for (const [definitionId, versions] of [
+    ['files.read', ['2', '3', '4']],
+    ['files.read_path', ['1', '2']],
+  ] as const) {
+    for (const definitionVersion of versions) {
+      const receipt = {
+        ...message('read-version', 'tool', '1', 'original paged result'),
+        sourceIds: ['e-read-version'],
+      };
+      const projection = desktopTranscript({
+        storeId: 'store',
+        sessionId: 's',
+        runs: [run()],
+        messages: [receipt],
+        tools: [{ ...tool('read-version'), definitionId, definitionVersion }],
+      });
+      expect(projection.messages[0]).toMatchObject({
+        title: '读取',
+        toolName: 'read_file',
+        presentation: 'exploration',
+      });
+    }
+  }
+});

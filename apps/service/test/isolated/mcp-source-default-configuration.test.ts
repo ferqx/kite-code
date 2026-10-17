@@ -211,7 +211,7 @@ process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:rpc.id,result})+'\\n');}})
           credentialRef: 'credential:12345678-1234-1234-1234-123456789abc',
         },
       ],
-      tools: [{ id: 'files.read', definitionVersion: '3' }],
+      tools: [{ id: 'files.read', definitionVersion: '4' }],
       ...(options.disabled ? { mcp: [] } : {}),
     }),
   );

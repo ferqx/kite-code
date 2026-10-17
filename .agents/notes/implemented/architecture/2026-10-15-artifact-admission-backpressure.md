@@ -8,6 +8,8 @@ Status: implemented
 
 ## Decision
 
+正常拥塞超出正式票据预算后直接 `artifact_busy` 的决定，已由[正常Loop检查点决定](../bug-fix/2026-10-17-normal-loop-checkpoints.md)部分取代：额外调用等待共享容量，bytes便利入口以私有snapshot维持调用时封存。本文的8/6活动上限、64/32正式票据、16MiB内存预算、公平和不重放理由继续适用；当前行为与验证以[Artifact owner](../../../../packages/agent/src/artifacts/README.md)为准，以下原实施证据不代表当前仍对正常拥塞直接失败。
+
 保留8个活动 Artifact 操作，读取最多占6个；新增有界、可取消的排队，等候总数64、读取32、metadata与已知字节数组16MiB。发布获得有限优先权，每批最多连续交接4次后让等待读取前进。超出接纳预算返回可重试的 `artifact_busy`，不裁剪完整正文，不把排队预算变成 Artifact 总大小限制。
 
 排队票据在调用时固定 metadata与scope，字节数组发布在取得接纳资格后复制调用时 bytes。取消立即移除等候读取且不查询 Store；Runtime 的原正文取消信号沿 Artifact 中立端口传递，不进入 Worker。close 拒绝新工作，排空此前接受的活动与排队操作后释放 Profile 使用权。完整 EOF／hash／size、准确引用授权、不可变文件身份和原发布顺序保持。

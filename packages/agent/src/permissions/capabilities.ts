@@ -99,7 +99,7 @@ export function builtinCapability(
   )
     return { effects: ['record_write'], safeRead: false, internalRecordOnly: true };
   if (extensionId === 'builtin.files.path')
-    return definitionVersion === '1' && toolId === 'files.read_path'
+    return ['1', '2'].includes(definitionVersion ?? '') && toolId === 'files.read_path'
       ? { effects: ['read'], safeRead: true }
       : { effects: ['external'], safeRead: false };
   if (extensionId === 'builtin.task') return taskToolCapability(toolId);

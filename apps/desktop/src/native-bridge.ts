@@ -19,6 +19,7 @@ import type {
   SelectedContextPage,
   Session,
   SessionDirectoryActivity,
+  SessionView,
   StartCommandRequest,
   Workspace,
   WorkspaceRemoval,
@@ -152,6 +153,7 @@ export type NativeSelection = {
   readonly session: Session;
   readonly runs: readonly Run[];
   readonly activeCommand?: Command;
+  readonly compressionProgress?: SessionView['compressionProgress'];
   readonly executions: readonly Execution[];
   readonly interactions: readonly Interaction[];
   readonly interactionsAfterId: string | null;

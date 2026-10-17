@@ -58,6 +58,8 @@ export interface Message {
   };
   /** Host-confirmed dispatch fact; approval alone does not prove execution. */
   readonly dispatchCommitted?: boolean;
+  /** Host-verified Core freshness rejection before adapter dispatch; never inferred from text. */
+  readonly decisionRefresh?: 'context_refresh_required' | 'capability_refresh_required';
   readonly ask?: {
     /** Information cancellation is independent of the Tool or Run terminal state. */
     readonly cancelled?: boolean;
@@ -114,7 +116,8 @@ export interface Message {
     | 'rejected'
     | 'cancelled'
     | 'recovery_required'
-    | 'unknown';
+    | 'unknown'
+    | 'not_executed';
   readonly parentToolCallId?: string;
   readonly steps?: readonly {
     readonly id: string;

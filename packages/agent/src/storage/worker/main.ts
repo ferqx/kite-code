@@ -5,7 +5,9 @@ import { SqliteOperations } from '../sqlite/operations';
 import { hasUnsettledOwnerGroup } from '../sqlite/owner-dispatch';
 import { readRecoveryToolHistory } from '../sqlite/recovery-history';
 import { getRecoveryReceipt } from '../sqlite/recovery-operations';
+import { UnstartedSqliteWrite } from '../sqlite/write-lock';
 import { AgentError, type OwnerRef } from '../types';
+import { deserializeStorageError, type StorageWorkerError, serializeStorageError } from './error';
 import type { WorkerRequest } from './protocol';
 import { WorkerQueue } from './queue';
 import type { DbTiming } from './timing';
@@ -21,7 +23,8 @@ function pump(): void {
   if (request) execute(request);
   if (queue.size) {
     scheduled = true;
-    setImmediate(pump);
+    if (request) setImmediate(pump);
+    else setTimeout(pump, 25);
   }
 }
 self.onmessage = (event: MessageEvent<WorkerRequest>) => {
@@ -45,16 +48,48 @@ self.onmessage = (event: MessageEvent<WorkerRequest>) => {
 function execute(request: WorkerRequest): void {
   const { id, method, args } = request;
   const arrived = arrivals.get(id) ?? performance.now();
-  arrivals.delete(id);
   const began = performance.now();
   const tracked = operations;
-  tracked?.resetTiming();
-  const post = (message: {
-    id: number;
-    result?: unknown;
-    error?: { code: string; message: string };
-  }): void => {
-    (operations ?? tracked)?.releaseStatements();
+  const failure = serializeStorageError;
+  let closeFinalizationAttempted = false;
+  const post = (
+    message: {
+      id: number;
+      result?: unknown;
+      error?: StorageWorkerError;
+    },
+    finalized = closeFinalizationAttempted,
+  ): void => {
+    if (!finalized) {
+      try {
+        (operations ?? tracked)?.releaseStatements();
+      } catch (error) {
+        // Cleanup failure is a real failed ACK, even when the business transaction
+        // committed. Never finalize a second time here or retry that transaction.
+        message = {
+          id,
+          error: failure(
+            message.error
+              ? new AggregateError(
+                  [deserializeStorageError(message.error), error],
+                  'Database operation and statement cleanup failed.',
+                  { cause: deserializeStorageError(message.error) },
+                )
+              : error,
+          ),
+        };
+      }
+    }
+    if (method !== 'close') {
+      try {
+        (operations ?? tracked)?.assertRequestSettled(
+          message.error ? deserializeStorageError(message.error) : undefined,
+        );
+      } catch (error) {
+        if (!message.error) message = { id, error: failure(error) };
+      }
+    }
+    arrivals.delete(id);
     const timing: DbTiming = {
       operation: method,
       requestId: id,
@@ -66,6 +101,8 @@ function execute(request: WorkerRequest): void {
     self.postMessage({ ...message, timing });
   };
   try {
+    if (method === 'close') tracked?.resetTiming();
+    else tracked?.beginRequest();
     if (method === 'open') {
       const input = args[0] as {
         access: ProfileAccess;
@@ -78,6 +115,9 @@ function execute(request: WorkerRequest): void {
         openDatabase(input.access, input.readOnly, input.engine),
         input.readOnly,
       );
+      // Live requests yield between short native waits. Startup retains its own
+      // bounded format/initialization checks before any request is admitted.
+      if (!input.readOnly) operations.db.run('PRAGMA busy_timeout=25');
       post({ id, result: operations.metadata() });
       return;
     }
@@ -86,6 +126,7 @@ function execute(request: WorkerRequest): void {
     if (method === 'close') {
       // Release outstanding prepared statements and the SQLite handle before close ACK.
       // close(false) can leave a zombie connection until Worker garbage collection.
+      closeFinalizationAttempted = true;
       operations.releaseStatements();
       operations.db.close(true);
       operations = undefined;
@@ -163,19 +204,32 @@ function execute(request: WorkerRequest): void {
         return true;
       });
     else result = operations.call(method, args);
+    if (method !== 'close') operations?.assertRequestSettled();
     post({ id, result });
   } catch (error) {
+    if (error instanceof UnstartedSqliteWrite) {
+      // No callback, SQL commit, adapter or external effect has run. Keep the exact
+      // request ID and admission slot; other queue categories may continue observing.
+      try {
+        operations!.releaseStatements();
+      } catch (cleanup) {
+        post({ id, error: failure(cleanup) }, true);
+        return;
+      }
+      queue.deferUnstartedWrite(request);
+      return;
+    }
+    let rejected = error;
+    if (method !== 'close') {
+      try {
+        (operations ?? tracked)?.assertRequestSettled(error);
+      } catch (unsettled) {
+        rejected = unsettled;
+      }
+    }
     post({
       id,
-      error: {
-        code:
-          error instanceof AgentError
-            ? error.code
-            : error && typeof error === 'object' && 'code' in error
-              ? String(error.code)
-              : 'storage_error',
-        message: error instanceof Error ? error.message : String(error),
-      },
+      error: failure(rejected),
     });
   }
 }

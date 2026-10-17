@@ -14,7 +14,7 @@ import { startService } from '@kite-ai/service';
 import { createDefaultProcessConfiguration } from '@kite-ai/service/configuration';
 
 for (const window of [4096, undefined])
-  test(`default SDK assembly compresses one task after an interrupted summary; declared window=${window ?? 'unknown'}`, async () => {
+  test(`SDK assembly repeatedly compresses one task after an interrupted summary; ${window ? `declared window=${window}` : 'unknown window with explicit threshold=32768'}`, async () => {
     const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-default-long-compression-')));
     const workspace = join(root, 'workspace');
     mkdirSync(workspace);
@@ -81,7 +81,8 @@ for (const window of [4096, undefined])
       join(profile.profilePath, 'config.jsonc'),
       JSON.stringify({
         modelId: 'fixed',
-        tools: [{ id: 'files.read', definitionVersion: '3' }],
+        ...(window === undefined ? { compression: { thresholdTokens: 32768 } } : {}),
+        tools: [{ id: 'files.read', definitionVersion: '4' }],
         models: [
           {
             id: 'fixed',

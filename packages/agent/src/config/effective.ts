@@ -108,6 +108,19 @@ export function createConfigurationSnapshot(
     throw new ConfigurationError('invalid_configuration');
   const configuration: EffectiveConfiguration = {};
   if (effective.modelId !== undefined) configuration.modelId = effective.modelId;
+  if (effective.compression !== undefined) {
+    const compression = object(effective.compression);
+    if (compression.thresholdTokens !== undefined) {
+      const thresholdTokens = compression.thresholdTokens;
+      if (
+        typeof thresholdTokens !== 'number' ||
+        !Number.isSafeInteger(thresholdTokens) ||
+        thresholdTokens <= 0
+      )
+        throw new ConfigurationError('invalid_compression_threshold');
+      configuration.compression = { thresholdTokens };
+    }
+  }
   const fields: Record<(typeof namedKeys)[number], readonly string[]> = {
     models: [
       'id',

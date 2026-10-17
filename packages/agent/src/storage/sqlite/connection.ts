@@ -221,7 +221,11 @@ function initialize(database: Database): void {
   } catch (error) {
     try {
       database.run('ROLLBACK');
-    } catch {}
+    } catch (cleanup) {
+      throw new AggregateError([error, cleanup], 'Database initialization and rollback failed.', {
+        cause: error,
+      });
+    }
     throw error;
   }
 }

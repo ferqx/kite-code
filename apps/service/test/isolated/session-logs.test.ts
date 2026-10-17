@@ -468,7 +468,7 @@ test('default paired main exposes actual Model logs and complete original >64KiB
       { id: 'files.edit', definitionVersion: '2' },
       { id: 'files.glob', definitionVersion: '2' },
       { id: 'files.list', definitionVersion: '1' },
-      { id: 'files.read', definitionVersion: '3' },
+      { id: 'files.read', definitionVersion: '4' },
       { id: 'files.search', definitionVersion: '2' },
       { id: 'files.write', definitionVersion: '2' },
       { id: 'web_fetch', definitionVersion: '1' },

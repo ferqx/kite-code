@@ -95,7 +95,7 @@ export async function fileRecoveryProfile(input: { secondMutation?: boolean } = 
         { id: 'fixed', provider: 'compatible', model: 'fixed', baseURL: `${provider.url.href}v1` },
       ],
       tools: [
-        { id: 'files.read', definitionVersion: '3' },
+        { id: 'files.read', definitionVersion: '4' },
         { id: 'files.write', definitionVersion: '2' },
       ],
     }),

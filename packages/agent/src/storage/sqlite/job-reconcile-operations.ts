@@ -124,8 +124,7 @@ export function callJobReconciliation(
       db.db.run('COMMIT');
       return result;
     } catch (error) {
-      db.db.run('ROLLBACK');
-      throw error;
+      return db.rollback(error);
     }
   }
   return db.tx(() => {

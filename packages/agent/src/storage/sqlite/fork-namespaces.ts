@@ -117,8 +117,7 @@ export function readForkNamespacePage(db: SqliteOperations, input: Input) {
     db.db.run('COMMIT');
     return result;
   } catch (error) {
-    db.db.run('ROLLBACK');
-    throw error;
+    return db.rollback(error);
   }
 }
 /** Compile trusted closed output schemas before the write transaction. No callback runs in SQL. */

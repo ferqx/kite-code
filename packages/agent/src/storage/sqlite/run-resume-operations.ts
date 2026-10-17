@@ -567,8 +567,7 @@ function readExecutionPage(
     db.db.run('COMMIT');
     return result;
   } catch (error) {
-    db.db.run('ROLLBACK');
-    throw error;
+    return db.rollback(error);
   }
 }
 export function callRunResume(db: SqliteOperations, method: string, value: unknown): unknown {
@@ -590,8 +589,7 @@ export function callRunResume(db: SqliteOperations, method: string, value: unkno
         });
       return result.state;
     } catch (error) {
-      db.db.run('ROLLBACK');
-      throw error;
+      return db.rollback(error);
     }
   }
   return db.tx(() => {

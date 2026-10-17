@@ -629,3 +629,29 @@ test('restored Files observation rejects wrong Run provenance and later immutabl
     f.close();
   }
 });
+
+test('paged files.read v4 retains the original baseline-based file target while v3 history stays readable', async () => {
+  const f = fixture();
+  try {
+    f.add('historical-read', 'files.read', 'succeeded', true, '3');
+    f.add('paged-read', 'files.read', 'succeeded', true, '4');
+    const targets = await f.manager.list(
+      {
+        readId: 'paged-targets',
+        viewSelection: 1,
+        historyEpoch: 0,
+        messageIds: ['historical-read', 'paged-read'],
+      },
+      true,
+    );
+    expect(targets.entries.map((entry) => entry.operation)).toEqual(['read', 'read']);
+    expect(targets.entries.every((entry) => entry.openable)).toBe(true);
+    const opened: string[] = [];
+    await f.manager.open(targets.entries[1]!.changeId, 'vscode', async (_editor, path) => {
+      opened.push(path);
+    });
+    expect(opened).toEqual([join(f.workspace, f.path)]);
+  } finally {
+    f.close();
+  }
+});

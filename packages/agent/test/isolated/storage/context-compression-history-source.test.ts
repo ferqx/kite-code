@@ -90,6 +90,10 @@ test('an ordinary command sharing a prior compression Model ID remains an actual
       (message) => message.role === 'assistant' && message.sourceIds?.includes(compression.id),
     )!;
     expect(compressionAssistant.status).toBe('complete');
+    expect(compressionAssistant.compression).toMatchObject({
+      status: 'completed',
+      trigger: 'manual',
+    });
     const originalInput = await runtime.readModelInput({ ...base, executionId: compression.id });
     const content = 'ordinary user with a legitimate Command/Execution namespace collision';
     await runtime.submitCommand({
@@ -127,6 +131,7 @@ test('an ordinary command sharing a prior compression Model ID remains an actual
       ),
     ).toHaveLength(1);
     expect(raw.sourceIds).toEqual([compression.id]);
+    expect(raw.compression).toBeUndefined();
     expect(raw.status).toBe('complete');
     expect(page.messages.map((message) => message.id)).toContain(raw.id);
     expect(snapshot.request.messages).toContainEqual({

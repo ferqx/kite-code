@@ -26,7 +26,9 @@ Host 在父 Loop 重入前把全部原操作登记到同一 operation 目录，�
 
 ## 持久 continuation 与历史成本
 
-每个新 Model 尝试在原 `decision_source_json` 封存 version 2 continuation：原 Run/selection、当前完整来源请求集合和同工具相同参数失败 streak。版本2绑定 Core 派发事实下的刷新中性分类；版本1摘要按旧规则计数，恢复时保其来源请求并从原历史派发事实重建 streak，不直接沿用或清零旧计数。下一新 Model 保存版本2，压缩尝试使用同一状态。超过正文传输阈值时使用既有不可变 sourceBody Artifact，预览不复制 checkpoint。Runtime 从完整原作用域核验并恢复该状态，当前 Model 的 Tool 批次再按声明顺序结算一次；恢复不会重置五次失败规则。没有该字段的旧记录继续完整历史重建，未知版本或范围拒绝。
+有Artifact宿主的新Model在原 `decision_source_json` 封存version3 continuation：原Run/selection、[完整来源请求增量链](../../source-request-journal.ts)的准确链头和同工具相同参数失败streak。每批只发布首次出现的完整输入，后续Model/摘要/重试不重复保存累计输入；压缩不清除早期请求。恢复按原顺序完整核链的Artifact metadata/hash/size、Store/Session/subject/Workspace/Run、重复输入与无环关系；可信Model封存链头不由Provider opaque continuation或扩展Artifact提供。热Model共享Core冻结值，host每次capture得到独立输入副本；现行captureBatch仍保一个完整准确集合，不承诺常量RSS。
+
+版本2的原完整inline集合和准确派发失败分类仍可读；版本1按旧规则计数，恢复时保来源请求并从原历史派发事实重建streak，不直接沿用或清零。具备Artifact时旧集合迁入首个增量节点，无Artifact的Core继续v2小型checkpoint。sourceBody仍承担大来源正文传输，预览不复制checkpoint。当前Model的Tool批次按声明顺序结算一次，恢复不重置五次真实失败规则；缺continuation的旧记录继续完整历史重建，未知版本/范围拒绝。[增量回归](../../../test/isolated/context/source-request-journal.test.ts)与原SIGKILL回归分别核保存增长、完整捕获和准确恢复。
 
 这里的 Core continuation 与 Adapter 的 opaque continuation 分属不同字段。尚未派发 Model 的恢复读取经过原 scope/hash 核验的私有完整请求，不能使用已移除 opaque 字段的公开 Inspector 投影；中断或失败尝试仍创建新的 Execution，并从完整已确认历史恢复 Adapter 状态。公开 Inspector、reviewer 语义历史继续不暴露此私有字段。[真实强杀回归](../../../test/isolated/recovery/run-resume-runtime.test.ts)覆盖带大 opaque 状态的 planned/running/failed 边界、原效果只执行一次及恢复前后的公开投影。
 

@@ -734,3 +734,125 @@ test('known ask_user receipts keep the actual human answer and information cance
   f.executions.get('execution-answered')!.definitionVersion = 'future';
   expect((await f.list(['answered'])).entries[0]!.ask).toBeUndefined();
 });
+
+test('only exact Core pre-dispatch freshness receipts gain neutral display facts, including cold original history', async () => {
+  const f = fixture();
+  const make = (id: string, code = 'context_refresh_required') => {
+    f.add(id, 'failed', id, 'files.read');
+    const message = f.messages.get(id)!,
+      execution = f.executions.get(`execution-${id}`)!;
+    message.content = code;
+    execution.result = {
+      outcome: 'failed',
+      content: code,
+      details: { code, adapterAttempted: false, dispatchCommitted: false },
+    };
+    execution.authorization = { dispatched: false };
+    return { message, execution };
+  };
+  try {
+    make('context');
+    make('capability', 'capability_refresh_required');
+    make('forged-dispatched').execution.authorization = { dispatched: true };
+    delete make('missing-dispatch').execution.authorization;
+    make('missing-adapter-proof').execution.result = {
+      outcome: 'failed',
+      content: 'context_refresh_required',
+      details: { code: 'context_refresh_required', dispatchCommitted: false },
+    };
+    make('wrong-code', 'approval_denied');
+    make('body-only').execution.result = { outcome: 'failed', content: 'context_refresh_required' };
+    const inconsistent = make('inconsistent');
+    inconsistent.execution.result = {
+      outcome: 'failed',
+      content: 'context_refresh_required',
+      details: {
+        code: 'capability_refresh_required',
+        adapterAttempted: false,
+        dispatchCommitted: false,
+      },
+    };
+    const unknown = make('unknown');
+    unknown.execution.status = 'outcome_unknown';
+    unknown.execution.result = {
+      outcome: 'outcome_unknown',
+      content: unknown.message.content,
+      details: {
+        code: 'context_refresh_required',
+        adapterAttempted: false,
+        dispatchCommitted: false,
+      },
+    };
+    const cancelled = make('cancelled-refresh');
+    cancelled.execution.status = 'cancelled';
+    cancelled.execution.result = {
+      outcome: 'cancelled',
+      content: cancelled.message.content,
+      details: {
+        code: 'context_refresh_required',
+        adapterAttempted: false,
+        dispatchCommitted: false,
+      },
+    };
+    const success = make('successful-refresh');
+    success.execution.status = 'succeeded';
+    success.execution.result = {
+      outcome: 'succeeded',
+      content: success.message.content,
+      details: {
+        code: 'context_refresh_required',
+        adapterAttempted: false,
+        dispatchCommitted: false,
+      },
+    };
+    for (const id of ['cancelled-refresh', 'successful-refresh'])
+      expect((await f.list([id])).entries[0]?.decisionRefresh).toBeUndefined();
+    const ids = [
+      'context',
+      'capability',
+      'forged-dispatched',
+      'missing-dispatch',
+      'missing-adapter-proof',
+      'wrong-code',
+      'body-only',
+      'inconsistent',
+      'unknown',
+    ];
+    const original = structuredClone([...f.executions.values()]);
+    const entries = (await f.list(ids)).entries;
+    expect(entries.map((entry) => entry.decisionRefresh)).toEqual([
+      'context_refresh_required',
+      'capability_refresh_required',
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+    ]);
+    expect(entries.map((entry) => entry.status)).toEqual([
+      ...Array(8).fill('failed'),
+      'outcome_unknown',
+    ]);
+    expect([...f.executions.values()]).toEqual(original);
+    // A cold restored view proves the original Execution, without gaining current approval authority.
+    f.scope = { ...f.scope, storeId: 'restored' };
+    f.messages.get('context')!.originMessage = {
+      storeId: 'store',
+      sessionId: 's',
+      messageId: 'original-context',
+      runId: 'context',
+    };
+    const cold = (await f.list(['context'])).entries[0]!;
+    expect(cold.decisionRefresh).toBe('context_refresh_required');
+    expect(cold.status).toBe('failed');
+    expect(cold.authorization).toBeUndefined();
+    f.executions.get('execution-context')!.runId = 'unrelated-run';
+    await expect(f.list(['context'])).rejects.toMatchObject({
+      code: 'tool_message_identity_mismatch',
+    });
+  } finally {
+    f.manager.release();
+  }
+});

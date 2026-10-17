@@ -260,7 +260,6 @@ export function readBackgroundExecutions(
     db.db.run('COMMIT');
     return result;
   } catch (error) {
-    db.db.run('ROLLBACK');
-    throw error;
+    return db.rollback(error);
   }
 }

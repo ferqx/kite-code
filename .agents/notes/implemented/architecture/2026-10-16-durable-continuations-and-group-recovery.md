@@ -10,6 +10,8 @@ Status: implemented
 
 首次全历史扫描、固定 canonical 摘要及未新增持久表/迁移的格式边界现由[事务内增量恢复证明](2026-10-16-incremental-recovery-certificates.md)部分替代；本篇任务意图、来源、未知效果、租约与组恢复边界保持。
 
+每个Model重复封存完整来源集合的v2写入方式由[正常Loop决定](../bug-fix/2026-10-17-normal-loop-checkpoints.md)的v3增量Artifact链部分取代，保原来源与失败streak语义、v1/v2读取兼容和同一恢复协议；当前格式与验证归[协议owner](../../../../packages/agent/src/storage/sqlite/run-resume.README.md)。
+
 采用同一恢复协议，分开持久任务意图、可替换 Model 尝试、已确认效果和进程监督。主入口仍是同 Store、真实 root 主体的显式 run.resume；原 OS root 锁与唯一 generation 是执行权，不增加第二个调度器或恢复执行引擎。所选原 Run 的实际 carrier/parent 链闭合后，沿父到子核原派发 Model 的能力快照与完整工具目录，再准备全部可信配置、动态 ceiling、权限交集和记录读集；组摘要与最终事务成功后才交给普通 owner，沿唯一 Loop、Job 观察与 ChildSlots 继续。
 
 纯 Model 无派生 Tool/Job 时允许保留 partial、关闭旧未结算尝试并创建新 Execution/retry lineage，末尾 failed/incomplete 也可继续。旧片段不变为完整消息。自动压缩使用同一 Model 尝试规则；pending 和完整但未发布摘要不成为上下文，已发布点保持，下一安全边界可重新摘要。原执行初始化三态和未知外部效果约束继续适用。

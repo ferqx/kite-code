@@ -294,3 +294,62 @@ test('scheduled tasks is a first-class page below workbench without inventing sa
   expect(html).not.toContain('每日检查 CI');
   expect(html).not.toContain('conversation-footer');
 });
+
+test('tool groups count freshness reevaluations separately from actual reads and retain real failures', async () => {
+  const { ToolActivity } = await import('../src/desktop/ToolActivity');
+  const deferred = Array.from({ length: 4 }, (_, index) => ({
+    id: `deferred-${index}`,
+    role: 'tool' as const,
+    settled: true,
+    toolName: 'read_file',
+    title: '读取',
+    text: 'context_refresh_required',
+    status: 'not_executed' as const,
+    decisionRefresh:
+      index < 2 ? ('context_refresh_required' as const) : ('capability_refresh_required' as const),
+  }));
+  const failed = {
+    id: 'actual-failed',
+    role: 'tool' as const,
+    settled: true,
+    toolName: 'read_file',
+    title: '读取',
+    text: 'permission_denied',
+    status: 'failed' as const,
+  };
+  const closed = renderToStaticMarkup(
+    <ToolActivity
+      onToggle={() => {}}
+      messages={[...deferred, failed]}
+      renderChildren={() => null}
+    />,
+  );
+  expect(closed).toContain('读取 1 次');
+  expect(closed).toContain('重新评估 4 项');
+  expect(closed).toContain('失败 1 项');
+  expect(closed).not.toContain('失败 5 项');
+  const open = renderToStaticMarkup(
+    <ToolActivity
+      onToggle={() => {}}
+      messages={[...deferred, failed]}
+      expanded
+      renderChildren={() => null}
+    />,
+  );
+  expect(open.match(/上下文已更新，此次未执行/g)).toHaveLength(2);
+  expect(open.match(/工具信息已更新，此次未执行/g)).toHaveLength(2);
+  expect(open.match(/data-status="failed"/g)).toHaveLength(1);
+  expect(open).not.toContain('context_refresh_required');
+  const neutral = renderToStaticMarkup(
+    <ToolActivity onToggle={() => {}} messages={deferred} renderChildren={() => null} />,
+  );
+  expect(neutral).toContain('重新评估 4 项');
+  expect(neutral).not.toContain('读取 4 次');
+  expect(neutral).not.toContain('data-status="issue"');
+  const single = renderToStaticMarkup(
+    <ToolActivity onToggle={() => {}} messages={[deferred[0]!]} renderChildren={() => null} />,
+  );
+  expect(single).toContain('上下文已更新，此次未执行');
+  expect(single).not.toContain('context_refresh_required');
+  expect(single).not.toContain('data-status="issue"');
+});

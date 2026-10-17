@@ -11,8 +11,15 @@ import {
 /** Fixed native media policy. Import is inert on Node/POSIX; no supplied HANDLE, SID or DLL. */
 export interface WindowsArtifactTemporary {
   write(bytes: Uint8Array): void;
+  /** Private unpublished snapshot; reads the original temporary under unchanged ACL and identity. */
+  sealSnapshot(): { chunks(): Generator<Uint8Array>; close(): void };
   publish(hash: string, size: string): void;
   close(): void;
+}
+export class WindowsArtifactSnapshotCleanupUnknownError extends AggregateError {
+  constructor(errors: unknown[]) {
+    super(errors, 'artifact_snapshot_close_unknown');
+  }
 }
 export interface WindowsGcArtifact {
   readonly metadata: Readonly<{ size: bigint; ctimeMs: number; mtimeMs: number }>;
@@ -237,7 +244,13 @@ function native() {
       fail();
   };
   const readonlyAcl = (handle: bigint | number) => roleAcl(handle, true);
-  const verifyFile = (handle: bigint | number, path: string, readOnly: boolean, size?: string) => {
+  const verifyFile = (
+    handle: bigint | number,
+    path: string,
+    readOnly: boolean,
+    size?: string,
+    closeProbe = close,
+  ) => {
     defaultWindowsPathSecurity()!.verifyPath(path);
     const before = info(handle);
     if (
@@ -259,7 +272,7 @@ function native() {
         fail();
       if (readOnly) readonlyAcl(current);
     } finally {
-      close(current);
+      closeProbe(current);
     }
     return before;
   };
@@ -349,6 +362,7 @@ function native() {
     } finally {
       kernel.symbols.LocalFree(sd);
     }
+    let snapshotCleanupUnknown: WindowsArtifactSnapshotCleanupUnknownError | undefined;
     let closed = false,
       published = false,
       count = 0n;
@@ -375,6 +389,142 @@ function native() {
             fail();
           offset += written[0]!;
         }
+      },
+      sealSnapshot() {
+        live();
+        const closeProbe = (probe: bigint | number) => {
+          try {
+            close(probe);
+          } catch (error) {
+            snapshotCleanupUnknown = new WindowsArtifactSnapshotCleanupUnknownError([error]);
+            throw snapshotCleanupUnknown;
+          }
+        };
+        const original = identity(verifyFile(handle, path, false, String(count), closeProbe));
+        dirs.verify();
+        let originalChange: bigint;
+        let writerClosed = false;
+        let probe: bigint | number | undefined;
+        let probeCloseAttempted = false;
+        let dirsCloseAttempted = false;
+        try {
+          close(handle);
+          writerClosed = true;
+          closed = true;
+          // Windows may finalize write timestamps when the last writer closes.
+          probe = open(path, 0x20080, 7);
+          if (identity(verifyFile(probe, path, false, String(count), closeProbe)) !== original)
+            fail();
+          originalChange = change(probe);
+          probeCloseAttempted = true;
+          close(probe);
+          probe = undefined;
+          dirsCloseAttempted = true;
+          dirs.close();
+        } catch (error) {
+          const failures = [error];
+          let unknown =
+            !writerClosed || (probe !== undefined && probeCloseAttempted) || dirsCloseAttempted;
+          if (probe !== undefined && !probeCloseAttempted) {
+            try {
+              close(probe);
+            } catch (cleanup) {
+              failures.push(cleanup);
+              unknown = true;
+            }
+          }
+          if (!dirsCloseAttempted) {
+            try {
+              dirs.close();
+            } catch (cleanup) {
+              failures.push(cleanup);
+              unknown = true;
+            }
+          }
+          if (unknown) {
+            snapshotCleanupUnknown = new WindowsArtifactSnapshotCleanupUnknownError(failures);
+            throw snapshotCleanupUnknown;
+          }
+          throw error;
+        }
+        let removed = false;
+        const closeSnapshot = (...cleanups: (() => void)[]) => {
+          const failures: unknown[] = [];
+          for (const cleanup of cleanups) {
+            try {
+              cleanup();
+            } catch (error) {
+              failures.push(error);
+            }
+          }
+          if (failures.length) {
+            snapshotCleanupUnknown = new WindowsArtifactSnapshotCleanupUnknownError(failures);
+            throw snapshotCleanupUnknown;
+          }
+        };
+        const verify = (reader: bigint | number) => {
+          if (
+            identity(verifyFile(reader, path, false, String(count), closeProbe)) !== original ||
+            change(reader) !== originalChange
+          )
+            fail();
+        };
+        return {
+          *chunks() {
+            if (snapshotCleanupUnknown) throw snapshotCleanupUnknown;
+            if (removed) throw new AgentError('artifact_closed');
+            const retained = directories(profile);
+            let reader: bigint | number | undefined;
+            try {
+              reader = open(path, 0x80020000, 7);
+              verify(reader);
+              let received = 0n;
+              for (;;) {
+                const bytes = new Uint8Array(chunkBytes),
+                  length = new Uint32Array(1);
+                if (!kernel.symbols.ReadFile(reader, ptr(bytes), bytes.length, ptr(length), null))
+                  fail();
+                if (!length[0]) break;
+                if (length[0] > bytes.length) fail();
+                received += BigInt(length[0]);
+                if (received > count) fail();
+                yield bytes.subarray(0, length[0]);
+              }
+              retained.verify();
+              verify(reader);
+              if (received !== count) fail();
+            } finally {
+              closeSnapshot(
+                () => {
+                  if (reader !== undefined) close(reader);
+                },
+                () => retained.close(),
+              );
+            }
+          },
+          close() {
+            if (snapshotCleanupUnknown) throw snapshotCleanupUnknown;
+            if (removed) return;
+            const retained = directories(profile);
+            let cleanup: bigint | number | undefined;
+            try {
+              cleanup = open(path, 0x30080, 7);
+              retained.verify();
+              verify(cleanup);
+              const disposition = new Uint8Array([1]);
+              if (!kernel.symbols.SetFileInformationByHandle(cleanup, 4, ptr(disposition), 1))
+                fail();
+              removed = true;
+            } finally {
+              closeSnapshot(
+                () => {
+                  if (cleanup !== undefined) close(cleanup);
+                },
+                () => retained.close(),
+              );
+            }
+          },
+        };
       },
       publish(hash, size) {
         live();
@@ -448,6 +598,7 @@ function native() {
         }
       },
       close() {
+        if (snapshotCleanupUnknown) throw snapshotCleanupUnknown;
         if (closed) return;
         closed = true;
         try {

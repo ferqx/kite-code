@@ -32,7 +32,7 @@ export function completeRunReplies({
           message.sessionId === sessionId && !message.originMessage && message.runId === run.id,
       )
       .sort((a, b) => (BigInt(a.seq) < BigInt(b.seq) ? -1 : BigInt(a.seq) > BigInt(b.seq) ? 1 : 0));
-    const assistant = own.filter((message) => message.role === 'assistant');
+    const assistant = own.filter((message) => message.role === 'assistant' && !message.compression);
     const last = assistant.at(-1);
     if (
       last?.status !== 'complete' ||

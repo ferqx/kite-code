@@ -9837,6 +9837,27 @@
         "type": "string",
         "enum": ["content", "reasoning", "tool_calls"]
       },
+      "compression": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "pattern": "^[A-Za-z0-9_-]+$"
+          },
+          "trigger": {
+            "type": "string",
+            "enum": ["manual", "automatic"]
+          },
+          "status": {
+            "type": "string",
+            "enum": ["running", "completed", "failed", "cancelled", "unpublished"]
+          }
+        },
+        "required": ["id", "trigger", "status"],
+        "additionalProperties": false
+      },
       "originMessage": {
         "type": "object",
         "properties": {
@@ -13905,6 +13926,27 @@
               "type": "string",
               "enum": ["content", "reasoning", "tool_calls"]
             },
+            "compression": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128,
+                  "pattern": "^[A-Za-z0-9_-]+$"
+                },
+                "trigger": {
+                  "type": "string",
+                  "enum": ["manual", "automatic"]
+                },
+                "status": {
+                  "type": "string",
+                  "enum": ["running", "completed", "failed", "cancelled", "unpublished"]
+                }
+              },
+              "required": ["id", "trigger", "status"],
+              "additionalProperties": false
+            },
             "originMessage": {
               "type": "object",
               "properties": {
@@ -16037,6 +16079,27 @@
           "type": "string",
           "enum": ["content", "reasoning", "tool_calls"]
         },
+        "compression": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "pattern": "^[A-Za-z0-9_-]+$"
+            },
+            "trigger": {
+              "type": "string",
+              "enum": ["manual", "automatic"]
+            },
+            "status": {
+              "type": "string",
+              "enum": ["running", "completed", "failed", "cancelled", "unpublished"]
+            }
+          },
+          "required": ["id", "trigger", "status"],
+          "additionalProperties": false
+        },
         "originMessage": {
           "type": "object",
           "properties": {
@@ -16715,6 +16778,27 @@
               "type": "string",
               "enum": ["content", "reasoning", "tool_calls"]
             },
+            "compression": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128,
+                  "pattern": "^[A-Za-z0-9_-]+$"
+                },
+                "trigger": {
+                  "type": "string",
+                  "enum": ["manual", "automatic"]
+                },
+                "status": {
+                  "type": "string",
+                  "enum": ["running", "completed", "failed", "cancelled", "unpublished"]
+                }
+              },
+              "required": ["id", "trigger", "status"],
+              "additionalProperties": false
+            },
             "originMessage": {
               "type": "object",
               "properties": {
@@ -16881,6 +16965,12 @@
           "phase": {
             "type": "string",
             "enum": ["preparing", "summarizing", "validating"]
+          },
+          "executionId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "pattern": "^[A-Za-z0-9_-]+$"
           }
         },
         "required": ["runId", "originStoreId", "phase"],

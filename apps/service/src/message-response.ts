@@ -11,6 +11,7 @@ export function messageResponse(
     origin && origin.message.id !== message.id
       ? {
           ...message,
+          ...(origin.message.compression ? { compression: origin.message.compression } : {}),
           originMessage: {
             storeId: origin.storeId,
             sessionId: origin.message.sessionId,

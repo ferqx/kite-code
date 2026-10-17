@@ -35,7 +35,7 @@ Agent／Service／Desktop typecheck、原包边界与 API／测试归属、文�
 
 ## 绝对用户文件
 
-同一公开入口的 [createPathFileTools](../path-files.ts) 新增 `files.read_path/files.write_path/files.edit_path`，定义版本1，由正式宿主注册为 `builtin.files.path`。原 WorkspaceFiles IO 的 relative-only 路径合同不变；绝对 Tool 不是 Model 自报 root 或回退旧 filesystem authority。工厂冻结可信 `qualifiedPlatforms/protectedRoots`；保护根先逐项通过原路径校验，再按精确字符串去重、稳定排序，classifier 和快照使用同一集合边界。排列或重复不改变保护目标，真正增删目标仍改变快照；不宽松比较 Run 配置或自动迁移旧快照。只有显式合格的当前 native 平台才能执行；源码存在不提供 Win/Linux 实测资格。
+同一公开入口的 [createPathFileTools](../path-files.ts) 新增 `files.read_path/files.write_path/files.edit_path`，read_path 定义版本2、write_path/edit_path 版本1，由正式宿主注册为 `builtin.files.path`。原 WorkspaceFiles IO 的 relative-only 路径合同不变；绝对 Tool 不是 Model 自报 root 或回退旧 filesystem authority。工厂冻结可信 `qualifiedPlatforms/protectedRoots`；保护根先逐项通过原路径校验，再按精确字符串去重、稳定排序，classifier 和快照使用同一集合边界。排列或重复不改变保护目标，真正增删目标仍改变快照；不宽松比较 Run 配置或自动迁移旧快照。只有显式合格的当前 native 平台才能执行；源码存在不提供 Win/Linux 实测资格。
 
 [路径 request classifier](../../permissions/files-request.ts) 选择 canonical 绝对路径的真实物理父目录，通过 `WorkspaceFiles.inspectIdentity` 从实际 native IO 核 parent device/inode、目标 regular file 身份、本人 owner、单链接及完整原输入，并将其与可信边界一起纳入 revision。该可信 host 方法只检查元数据，不读取正文，不是新增 Model Tool；Windows 使用与 baseline 相同的 volume／128-bit FileID，不与 Node stat 的 dev/ino 混比，也不截断 FileID。父链符号链接、目标 symlink／hardlink、私有 Profile／凭据／控制资产和危险系统写入目标在 Full 模式也拒绝。实际派发证明由 UnifiedExecution 注入，Tool 逐项核全部父子 policy snapshot 的准确定义、版本、信任、hardAllowed 和同一 revision，再打开 native parent，并直接在这个已锚定的引擎上重核身份；独立探针不能代替实际 IO 对象，宿主或 Model 输入不能伪造该证明。
 
@@ -49,7 +49,7 @@ read 请求的固定效果是安全 `read`；write/edit 是 `external`。请求�
 
 同轮相邻验证覆盖9个叶文件、63个不同用例，包括 [native path lifetime](../../../test/isolated/files/native-path-lifetime.test.ts) 在真实 `NtSetInformationFile(FileRenameInformation=10)` 前强制 GC，保原 rename／disposition 的借用内存。首轮与三个 typecheck 并行时，一个旧检查点恢复用例触发5秒超时；资源释放后单独重跑 capture 整文件19项267断言全部通过，该用例4.31秒，没有提高时限或修改恢复实现。其余44项在首轮全部通过；Agent／Service／Desktop typecheck、文档、测试归属与执行边界检查通过。这些分批结果不写成单次全套通过。
 
-`read(path,{offset?,limit?})` 缺省返回完整 UTF-8 正文，offset 从 1 开始；省略 limit 读取全部剩余行，显式 limit 按行选择。页内容保留 BOM/CRLF/最终换行，并返回 fromLine/toLine/totalLines/nextOffset；超出末尾返回空正文和 null toLine，空文件为 0 行。每页仍读取并校验完整字节，以完整 SHA256/字节大小/device/inode 建立基线，绝不以页正文替代文件基线。read Tool 版本为 3，write/edit/search/glob 为 2，list 为 1；旧 schema/执行历史保持自己的版本。非法 UTF-8 明确错误；BOM 与 CRLF 保留，写入不进行编码猜测。`write` 的 `base` 必填，null 只准创建，其他值必须与当前完整字节和文件对象完全一致。`edit` 使用同一基线，并要求非重叠字面匹配数量精确等于 occurrences。写入先在同一目录创建独有临时文件、写全并同步，再次验证基线，最后原子替换或 create-only 发布并核实原对象。POSIX 使用文件 fsync、create-only hardlink 和目录 fsync；Windows 的同步与发布边界见下节。失败不保证没有效果，例如原子发布后的同步或外部改写可能导致错误。
+低层 `WorkspaceFiles.read(path,{offset?,limit?})` 缺省返回完整 UTF-8 正文，offset 从 1 开始；省略 limit 读取全部剩余行，显式 limit 按行选择。页内容保留 BOM/CRLF/最终换行，并返回 fromLine/toLine/totalLines/nextOffset；超出末尾返回空正文和 null toLine，空文件为 0 行。每页仍读取并校验完整字节，以完整 SHA256/字节大小/device/inode 建立基线，绝不以页正文替代文件基线。read Tool 版本为 4，缺省页为 200 行，write/edit/search/glob 为 2，list 为 1；旧 schema/执行历史保持自己的版本。非法 UTF-8 明确错误；BOM 与 CRLF 保留，写入不进行编码猜测。`write` 的 `base` 必填，null 只准创建，其他值必须与当前完整字节和文件对象完全一致。`edit` 使用同一基线，并要求非重叠字面匹配数量精确等于 occurrences。写入先在同一目录创建独有临时文件、写全并同步，再次验证基线，最后原子替换或 create-only 发布并核实原对象。POSIX 使用文件 fsync、create-only hardlink 和目录 fsync；Windows 的同步与发布边界见下节。失败不保证没有效果，例如原子发布后的同步或外部改写可能导致错误。
 
 POSIX 使用目录 FD 与 no-follow openat 逐段锚定路径，macOS 调用非 variadic `__openat`。相对路径禁止 `..`、`.`、绝对路径和反斜线；根与目标链均不跟随符号链接，不读取设备/FIFO/目录作为正文。根目录替换后原对象不被重新解释成另一权限目标。临时文件清理不会覆盖原发布结果。目录描述符设置 close-on-exec。Windows x64 的独立原 HANDLE 后端见下节，其他不支持的平台仍明确 `file_platform_unsupported`。
 
@@ -68,6 +68,8 @@ Windows 工厂当前接受 x64 本地盘符下的 canonical Workspace，其他�
 同日本机 [capture 整文件](../../../test/isolated/file-checkpoints/capture.test.ts)19项267断言通过，首个绝对路径与后续相对路径保同一个准确文件及原检查点。冷回放夹具显式关闭自己创建的 serial-lock owner 后再删目录，修复原 Windows `EBUSY` 收尾失败；没有改变生产关闭顺序或把清理失败算作通过。
 
 [Windows 完整能力用例](../../../test/isolated/files/windows.test.ts)在 actual win32 强制运行六工具、真实 Core 大正文、binary 恢复与 Windows 路径保护，不作 backend availability skip。2026-10-16 在 Windows x64／Bun1.4.2，基于 `84b17867` 的本轮未提交 diff，本次路径、变更预览、检查点与 Native 工具展示六文件43项535断言通过（正常用户权限，51.69秒，包含实际会话的重复反斜杠输入），包含原生六工具、字节恢复、绝对路径 Core／完整 Artifact 和真实组件 DOM。原用例的 CRLF 搜索断言改为保留实际 `\r`，大正文夹具明确超过1MiB后才断言 Artifact，未降低验证要求。该结果不证明正式安装、完整 Service／客户端或其他平台。共享默认装配及恢复后新 Store 的原验证范围由[当前进度](../../../../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-10windows-普通-files-与检查点恢复源码)记录。取舍与剩余原生验收见[原 HANDLE 提案](../../../../../.agents/notes/proposed/architecture/2026-10-10-windows-workspace-files-owned-handles.md)。
+
+Model 可调用的 `files.read/files.read_path` 缺省 `limit=200`，通过 `selection.nextOffset` 续读；显式 limit 保原请求。该默认页仅控制返回范围，不改变低层全文读取、完整文件验证或累计读取能力。
 
 默认没有整文件、原文、搜索匹配数或长行总额度。读取使用固定 64 KiB 字节块，严格增量 UTF-8 解码、完整 hash 与前后 FD 事实校验；默认 read 返回全部剩余行。宿主显式 `maxFileBytes` 可声明该宿主的单文件能力约束，未设置时不回退为旧 8 MiB。真实内存、磁盘、IO 与字符串表示能力仍可能局部失败，不把它们假装 Provider 窗口。二进制控制字节采样检查和严格 UTF-8 保留，BOM/CRLF 不规范化；search 不将已识别二进制当文本。
 

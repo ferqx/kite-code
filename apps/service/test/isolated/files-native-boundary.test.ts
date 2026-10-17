@@ -89,7 +89,10 @@ test('actual default Service keeps native loader/assets protected in Full while 
           baseURL: `http://127.0.0.1:${provider.port}/v1`,
         },
       ],
-      tools: ['files.read_path', 'files.write_path'].map((id) => ({ id, definitionVersion: '1' })),
+      tools: ['files.read_path', 'files.write_path'].map((id) => ({
+        id,
+        definitionVersion: id === 'files.read_path' ? '2' : '1',
+      })),
     }),
   );
   const host = createDefaultProcessConfiguration({

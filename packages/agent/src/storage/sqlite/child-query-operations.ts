@@ -142,7 +142,6 @@ export function listAgentSummaries(
       snapshotCursor,
     };
   } catch (error) {
-    db.db.run('ROLLBACK');
-    throw error;
+    return db.rollback(error);
   }
 }

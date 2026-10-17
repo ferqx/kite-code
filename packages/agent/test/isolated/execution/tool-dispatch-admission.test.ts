@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { createFixedModel, type ModelEvent } from '@kite-ai/ai';
 import { createRuntime } from '../../../src';
+import { createToolDispatchBatch } from '../../../src/execution/tool-dispatch-admission';
 import type { ToolDefinition } from '../../../src/extensions';
 import { createPermissionPolicy } from '../../../src/permissions';
 import { openSqliteStore } from '../../../src/sqlite';
@@ -118,6 +119,69 @@ const definition = (id: string, execute: ToolDefinition['execute']): ToolDefinit
   execute,
 });
 
+for (const content of ['superseded_by_user_input', 'cancelled_before_dispatch'])
+  test(`only a trusted undispatched ${content} retirement releases ordered admission`, async () => {
+    for (const dispatched of [false, true, undefined]) {
+      const controller = new AbortController();
+      const batch = createToolDispatchBatch(['old', 'sibling'], controller.signal, (reason) =>
+        controller.abort(reason),
+      );
+      try {
+        await batch.forCall('old')!.wait();
+        batch.forCall('old')!.settled(
+          {
+            outcome: 'cancelled',
+            content,
+            details: { adapterAttempted: false, dispatchCommitted: false },
+          },
+          undefined,
+          dispatched,
+        );
+        if (dispatched === false) {
+          await batch.forCall('sibling')!.wait();
+          expect(controller.signal.aborted).toBe(false);
+        } else expect(controller.signal.aborted).toBe(true);
+      } finally {
+        batch.finish();
+      }
+    }
+  });
+
+test('ordinary cancellation, denial, unknown outcome and errors still stop ordered admission', async () => {
+  for (const [outcome, content, error] of [
+    ['cancelled', 'cancel_requested', undefined],
+    ['failed', 'approval_denied', undefined],
+    ['outcome_unknown', 'unknown', undefined],
+    ['cancelled', 'superseded_by_user_input', new Error('persistence failed')],
+  ] as const) {
+    const controller = new AbortController();
+    const batch = createToolDispatchBatch(['old'], controller.signal, (reason) =>
+      controller.abort(reason),
+    );
+    try {
+      await batch.forCall('old')!.wait();
+      batch.forCall('old')!.settled({ outcome, content }, error, false);
+      expect(controller.signal.aborted).toBe(true);
+    } finally {
+      batch.finish();
+    }
+  }
+});
+
+test('restored undispatched retirement releases the original sibling admission', async () => {
+  const controller = new AbortController();
+  const batch = createToolDispatchBatch(['old', 'sibling'], controller.signal, (reason) =>
+    controller.abort(reason),
+  );
+  try {
+    batch.settled('old', { outcome: 'cancelled', content: 'superseded_by_user_input' }, false);
+    await batch.forCall('sibling')!.wait();
+    expect(controller.signal.aborted).toBe(false);
+  } finally {
+    batch.finish();
+  }
+});
+
 test('default policy holds an actual planned sibling behind approval and denial records cancellation without effects', async () => {
   const effects: string[] = [];
   const f = await fixture(
@@ -216,6 +280,78 @@ test('default ordered admission releases the next Tool after dispatch while the 
     expect(f.model.requests).toHaveLength(2);
   } finally {
     release();
+    await f.close();
+  }
+});
+test('steer retires approved-waiting ordered decisions and their sibling without failing the Run', async () => {
+  const effects: string[] = [];
+  const f = await fixture(
+    ['external', 'read'].map((name) =>
+      definition(`fixture.${name}`, async () => {
+        effects.push(name);
+        return { outcome: 'succeeded', content: name };
+      }),
+    ),
+    true,
+  );
+  try {
+    const interaction = await eventually(
+      async () =>
+        (
+          await f.runtime.listInteractions({
+            expectedStoreId: f.expectedStoreId,
+            sessionId: 's',
+            state: 'pending',
+          })
+        ).interactions[0],
+    );
+    await eventually(async () =>
+      (await f.store.listExecutions('s')).find(
+        (row) => row.callId === 'call-1' && row.status === 'planned',
+      ),
+    );
+    const run = (await f.store.getView('s')).runs[0]!;
+    expect(run.configuration).toMatchObject({ toolDispatchOrder: 'model' });
+    await f.runtime.submitCommand({
+      expectedStoreId: f.expectedStoreId,
+      subjectId: 'owner',
+      commandId: 'steer',
+      sessionId: 's',
+      request: {
+        kind: 'input.steer',
+        targetRunId: run.id,
+        contextSelectionId: run.contextSelectionId,
+        content: 'Stop the old effects and summarize instead',
+      },
+    });
+    await f.runtime.waitForCommand('work', { timeoutMs: 3000 });
+    expect(await f.store.getRun(run.id)).toMatchObject({
+      status: 'completed',
+      isActive: false,
+    });
+    const tools = (await f.store.listExecutions('s')).filter((row) => row.kind === 'tool');
+    expect(tools).toHaveLength(2);
+    for (const old of tools)
+      expect(old).toMatchObject({
+        status: 'cancelled',
+        authorization: { dispatched: false },
+        result: { content: 'superseded_by_user_input' },
+      });
+    expect(effects).toEqual([]);
+    expect(f.model.requests).toHaveLength(2);
+    expect(
+      f.model.requests[1]!.messages.some((message) => message.sourceIds?.includes('steer')),
+    ).toBe(true);
+    expect(
+      (
+        await f.runtime.getInteraction({
+          expectedStoreId: f.expectedStoreId,
+          sessionId: 's',
+          interactionId: interaction.id,
+        })
+      )?.state,
+    ).toBe('cancelled');
+  } finally {
     await f.close();
   }
 });

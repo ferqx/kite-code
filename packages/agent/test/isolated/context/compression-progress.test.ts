@@ -22,7 +22,7 @@ async function eventually(read: () => Promise<boolean>) {
     await Bun.sleep(5);
   }
 }
-async function fixture() {
+async function fixture(outcome: 'completed' | 'failed' | 'unpublished' = 'completed') {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-compression-ui-'))),
     profile = { dataRoot: join(root, 'data'), profile: 'test' };
   const store = await openSqliteStore(profile),
@@ -33,7 +33,8 @@ async function fixture() {
   let compressionModel = false;
   const model: ModelAdapter = {
     async *stream(_request, { signal }) {
-      if (compressionModel)
+      if (compressionModel) {
+        yield { type: 'text_delta', text: 'original summary' };
         await Promise.race([
           summarizing.promise,
           new Promise<never>((_resolve, reject) => {
@@ -41,8 +42,10 @@ async function fixture() {
             else signal.addEventListener('abort', () => reject(signal.reason), { once: true });
           }),
         ]);
+      }
       signal.throwIfAborted();
-      yield { type: 'text_delta', text: compressionModel ? 'original summary' : 'original answer' };
+      if (compressionModel && outcome === 'failed') throw Error('owned summary failure');
+      if (!compressionModel) yield { type: 'text_delta', text: 'original answer' };
       yield { type: 'finish', reason: 'stop', usage: { inputTokens: 1, outputTokens: 1 } };
     },
   };
@@ -61,7 +64,7 @@ async function fixture() {
       },
       async validateSummary() {
         await validating.promise;
-        return true;
+        return outcome !== 'unpublished';
       },
     },
     permissions: {
@@ -96,6 +99,7 @@ async function fixture() {
     storeId,
     base,
     selection,
+    profile,
     preparing,
     summarizing,
     validating,
@@ -133,9 +137,17 @@ test('actual compression phases are hot readonly facts and clear after normal pu
       async () => (await f.runtime.getView('s')).compressionProgress?.phase === 'validating',
     );
     expect((await f.runtime.getView('s')).compressionProgress?.runId).toBe(initial.runId);
+    expect(
+      (await f.runtime.listMessages('s')).find((message) => message.compression)?.compression
+        ?.status,
+    ).toBe('unpublished');
     f.validating.release();
     await f.runtime.waitForCommand('compact');
     expect((await f.runtime.getView('s')).compressionProgress).toBeUndefined();
+    expect(
+      (await f.runtime.listMessages('s')).find((message) => message.compression)?.compression
+        ?.status,
+    ).toBe('completed');
   } finally {
     await f.close();
   }
@@ -152,13 +164,65 @@ test('cancelling an actual summary clears its phase and does not retain input in
     await eventually(
       async () => (await f.runtime.getView('s')).compressionProgress?.phase === 'summarizing',
     );
+    await eventually(async () =>
+      (await f.runtime.listMessages('s')).some(
+        (message) => message.compression?.status === 'running',
+      ),
+    );
     await f.runtime.cancelCommand({ ...f.base, commandId: 'cancel', targetCommandId: 'compact' });
     await f.runtime.waitForCommand('compact');
     expect((await f.runtime.getView('s')).compressionProgress).toBeUndefined();
     expect(
       (await f.store.getView('s')).runs.find((run) => run.originCommandId === 'compact')?.status,
     ).toBe('cancelled');
+    expect(
+      (await f.runtime.listMessages('s')).find((message) => message.compression)?.compression
+        ?.status,
+    ).toBe('cancelled');
+    const cold = await openSqliteStore({ ...f.profile, mode: 'readonly' });
+    try {
+      expect(
+        (await cold.listMessages('s')).find((message) => message.compression)?.compression?.status,
+      ).toBe('cancelled');
+    } finally {
+      await cold.close();
+    }
   } finally {
     await f.close();
   }
 });
+
+for (const outcome of ['completed', 'failed', 'unpublished'] as const)
+  test(`compression ${outcome} is SQL-proven and remains accurate through a cold readonly Store`, async () => {
+    const f = await fixture(outcome);
+    try {
+      f.preparing.release();
+      f.summarizing.release();
+      f.validating.release();
+      await f.runtime.compressContext({
+        ...f.base,
+        commandId: 'compact',
+        expectedContextSelectionId: f.selection,
+      });
+      await f.runtime.waitForCommand('compact');
+      const messages = await f.runtime.listMessages('s');
+      const summary = messages.find((message) => message.compression)!;
+      expect(summary.compression).toMatchObject({ trigger: 'manual', status: outcome });
+      expect(messages.filter((message) => message.compression)).toHaveLength(1);
+      expect(
+        messages
+          .filter((message) => message.role === 'user')
+          .every((message) => !message.compression),
+      ).toBe(true);
+      const cold = await openSqliteStore({ ...f.profile, mode: 'readonly' });
+      try {
+        expect(
+          (await cold.listMessages('s')).find((message) => message.id === summary.id)?.compression,
+        ).toEqual(summary.compression);
+      } finally {
+        await cold.close();
+      }
+    } finally {
+      await f.close();
+    }
+  });

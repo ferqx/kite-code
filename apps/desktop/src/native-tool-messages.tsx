@@ -5,7 +5,8 @@ import type { NativeBridge, NativeSelection } from './native-bridge';
 import type { NativeToolMessageFact } from './tool-messages-bridge';
 
 const labels: Record<string, readonly [readonly string[], string]> = {
-  'files.read': [['2', '3'], '读取'],
+  'files.read': [['2', '3', '4'], '读取'],
+  'files.read_path': [['1', '2'], '读取'],
   'files.write': [['2'], '写入'],
   'files.edit': [['2'], '修改'],
   'files.glob': [['2'], '查找文件'],
@@ -75,7 +76,7 @@ export function authorizationApproval(
 
 export function desktopToolMessage(
   fact: Pick<NativeToolMessageFact, 'definitionId' | 'definitionVersion' | 'status' | 'target'> &
-    Pick<Partial<NativeToolMessageFact>, 'ask' | 'authorization'>,
+    Pick<Partial<NativeToolMessageFact>, 'ask' | 'authorization' | 'decisionRefresh'>,
   id: string,
   text: string,
 ): DesktopMessage {
@@ -90,6 +91,7 @@ export function desktopToolMessage(
       ? ((
           {
             'files.read': 'read_file',
+            'files.read_path': 'read_file',
             'files.write': 'write_file',
             'files.edit': 'edit_file',
           } as Record<string, string>
@@ -98,6 +100,9 @@ export function desktopToolMessage(
     title: known ? label![1] : `${fact.definitionId} · ${fact.definitionVersion}`,
     target: fact.target,
     ...(fact.ask ? { ask: fact.ask } : {}),
+    ...(fact.status === 'failed' && fact.decisionRefresh
+      ? { decisionRefresh: fact.decisionRefresh }
+      : {}),
     ...(fact.authorization
       ? {
           approval: authorizationApproval(fact.authorization),
@@ -105,13 +110,15 @@ export function desktopToolMessage(
         }
       : {}),
     status:
-      fact.status === 'succeeded'
-        ? 'completed'
-        : fact.status === 'outcome_unknown'
-          ? 'unknown'
-          : fact.status === 'planned' || fact.status === 'dispatching'
-            ? 'queued'
-            : fact.status,
+      fact.status === 'failed' && fact.decisionRefresh
+        ? 'not_executed'
+        : fact.status === 'succeeded'
+          ? 'completed'
+          : fact.status === 'outcome_unknown'
+            ? 'unknown'
+            : fact.status === 'planned' || fact.status === 'dispatching'
+              ? 'queued'
+              : fact.status,
   };
 }
 export function NativeToolMessage({ message }: { message: DesktopMessage }) {

@@ -41,8 +41,7 @@ export function getRecoveryReceipt(db: SqliteOperations, input: Input): Recovery
     db.db.run('COMMIT');
     return result;
   } catch (error) {
-    db.db.run('ROLLBACK');
-    throw error;
+    return db.rollback(error);
   }
 }
 export function recoverSession(db: SqliteOperations, input: Input): RecoveryReport {

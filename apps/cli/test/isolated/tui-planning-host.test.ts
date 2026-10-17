@@ -157,7 +157,7 @@ for (const entrance of ['slash-task', 'draft-mode', 'active-queued', 'scope-draf
             },
           ],
           tools: [
-            { id: 'files.read', definitionVersion: '3' },
+            { id: 'files.read', definitionVersion: '4' },
             { id: 'files.write', definitionVersion: '2' },
           ],
         }),

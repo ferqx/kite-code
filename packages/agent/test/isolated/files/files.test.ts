@@ -1,4 +1,5 @@
 import { afterEach, expect, test } from 'bun:test';
+import { createHash } from 'node:crypto';
 import {
   mkdirSync,
   mkdtempSync,
@@ -167,4 +168,53 @@ test('UTF-8 filenames preserve BOM and unpaired path input is never silently rep
   writeFileSync(join(root, '\ufeff你好'), 'bytes');
   expect((await files.list()).entries.map((entry) => entry.name)).toEqual(['\ufeff你好']);
   await code(files.read('\ud800'), 'file_path_invalid');
+});
+
+test('read tool defaults to 200-line pages and preserves explicit ranges and full-byte baseline', async () => {
+  const { root, files } = fixture();
+  const lines = Array.from(
+    { length: 451 },
+    (_, index) => `${index === 0 ? '\ufeff' : ''}line ${index + 1}\r\n`,
+  );
+  const text = lines.join('');
+  writeFileSync(join(root, 'paged'), text);
+  const read = createFileTools(files).find((tool) => tool.id === 'files.read')!;
+  const context = { signal: new AbortController().signal } as ToolContext;
+  const page = async (input: Record<string, string | number>) => {
+    const result = await read.execute({ path: 'paged', ...input }, context);
+    expect(result.outcome).toBe('succeeded');
+    return JSON.parse(result.content);
+  };
+  expect(read.version).toBe('4');
+  expect(read.description).toContain('200 lines');
+  const first = await page({});
+  expect(first.content).toBe(lines.slice(0, 200).join(''));
+  expect(first.selection).toEqual({ fromLine: 1, toLine: 200, totalLines: 451, nextOffset: 201 });
+  expect(first.baseline.hash).toBe(createHash('sha256').update(text).digest('hex'));
+  expect(first.baseline.size).toBe(Buffer.byteLength(text));
+  const second = await page({ offset: first.selection.nextOffset });
+  expect(second.content).toBe(lines.slice(200, 400).join(''));
+  expect(second.selection).toEqual({
+    fromLine: 201,
+    toLine: 400,
+    totalLines: 451,
+    nextOffset: 401,
+  });
+  const last = await page({ offset: second.selection.nextOffset });
+  expect(last.selection).toEqual({ fromLine: 401, toLine: 451, totalLines: 451, nextOffset: null });
+  expect(first.content + second.content + last.content).toBe(text);
+  for (const result of [second, last]) expect(result.baseline).toEqual(first.baseline);
+  const explicit = await page({ offset: 2, limit: 300 });
+  expect(explicit.content).toBe(lines.slice(1, 301).join(''));
+  expect(explicit.selection).toEqual({
+    fromLine: 2,
+    toLine: 301,
+    totalLines: 451,
+    nextOffset: 302,
+  });
+  expect(explicit.baseline).toEqual(first.baseline);
+  const full = await page({ limit: 1000 });
+  expect(full.content).toBe(text);
+  expect(full.selection.nextOffset).toBeNull();
+  expect((await files.read('paged')).content).toBe(text);
 });

@@ -145,3 +145,7 @@ TUI Markdown 根布局约束实际正文列宽，普通及流式回复的长段�
 
 
 [completeRunReplies](src/run-reply-copy.ts)是两个正式宿主共用的纯回复资格与正文投影；宿主交准确原 Run、完整已读 Message 和当前 verified full-content callback。它以准确 completed／inactive 及完整最终回复核资格；Web 使用 `copyScope=run` 按严格 Decimal64 顺序合并同 Session／同 Run 的未封存助手正文，以空行连接。Native 显式 `copyScope=final` 保桌面手册只复制完整最终回复、不含同轮工具前说明的合同。两者均不加入 Tool 参数、结果、reasoning、其他 Run 或子消息；各自复制范围内非零 body-backed 段均须由宿主当前 reader 提供完整正文，缺失／不完整／未来格式不拿预览补齐。该 leaf 没有 I/O、cache、剪贴板或新 authority；[纯契约](test/run-reply-copy.test.ts)与两个宿主的实际消费分别证明选择和读取边界。
+
+桌面 [ToolActivity](src/desktop/ToolActivity.tsx)消费宿主已核实的 `decisionRefresh/not_executed`，将正常未派发的重新评估与真实执行失败分别计数，并保留逐项原因；该状态不由原正文或通用错误字符串推断。[桌面契约](test/desktop-page.test.tsx)与 [Native 实际 Main→transcript→组件](../../apps/desktop/test/isolated/native-tool-messages-dom.test.tsx)验证混合状态，缺少派发证据不隐藏失败。
+
+共享 [completeRunReplies](src/run-reply-copy.ts)仅对准确 completed 且非 active 的 Run 建立最终回复资格，排除带原压缩身份的 assistant 消息；Native 最终复制与 Web 整轮复制均不包含压缩摘要。完整模型消息仍可能是候选或维护输出，不能先于真实 Run 完成显示为最终结果。回归见[最终回复复制](test/run-reply-copy.test.ts)与[Native 实际链路](../../apps/desktop/test/isolated/native-transcript-dom.test.tsx)。

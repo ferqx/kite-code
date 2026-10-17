@@ -141,8 +141,7 @@ export function callArtifact(ops: SqliteOperations, method: string, args: unknow
       ops.db.run('COMMIT');
       return result;
     } catch (error) {
-      ops.db.run('ROLLBACK');
-      throw error;
+      return ops.rollback(error);
     }
   }
   if (method !== 'registerArtifact') throw new AgentError('storage_method_invalid');

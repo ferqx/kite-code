@@ -50,7 +50,7 @@ nativeTest(
     const f = fixture();
     try {
       expect(createFileTools(f.files).map((tool) => [tool.id, tool.version])).toEqual([
-        ['files.read', '3'],
+        ['files.read', '4'],
         ['files.write', '2'],
         ['files.edit', '2'],
         ['files.list', '1'],
@@ -197,7 +197,7 @@ nativeTest(
         (row) => row.definitionId === 'files.read',
       )!;
       expect(execution.status).toBe('succeeded');
-      expect(execution.definitionVersion).toBe('3');
+      expect(execution.definitionVersion).toBe('4');
       const result = execution.result as {
         content: string;
         artifactRefs: { id: string; scope: { kind: 'execution'; id: string } }[];

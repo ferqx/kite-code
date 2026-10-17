@@ -151,7 +151,7 @@ test('real UnifiedExecution writes from a scoped large Artifact, reads complete 
       (value) => value.definitionId === 'files.read',
     )!;
     expect(execution.status).toBe('succeeded');
-    expect(execution.definitionVersion).toBe('3');
+    expect(execution.definitionVersion).toBe('4');
     const result = execution.result as { content: string; artifactRefs: (typeof publicSource)[] };
     const summary = JSON.parse(result.content);
     expect(summary.inlineBody).toBe(false);

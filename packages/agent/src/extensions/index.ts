@@ -71,6 +71,9 @@ export interface ToolDefinition {
   readonly description: string;
   readonly inputSchema: JsonSchema;
   readonly resources?: ResourceRequest;
+  /** Trusted I/O factory opt-in: an observation may discover new host project instructions.
+   * Existing decision sources and all permissions still require fresh verification. */
+  readonly contextDiscovery?: 'read_only';
   /** Trusted durable continuation contract. resume must reuse original operation keys;
    * it must not repeat external effects. Captured before the original dispatch. */
   readonly recovery?: { readonly version: string };

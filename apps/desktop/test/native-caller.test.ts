@@ -1986,3 +1986,28 @@ test('Native close drains an in-flight scheduled save before releasing private d
     await caller.close();
   }
 });
+
+test('Native state forwards current compression progress from the public View and never persists a missing progress as completion', async () => {
+  const connection = client();
+  const getView = connection.getView.bind(connection);
+  connection.getView = async (id) => ({
+    ...(await getView(id)),
+    compressionProgress: { runId: 'compressing-run', originStoreId: 'store', phase: 'summarizing' },
+  });
+  const caller = new NativeCaller(connection, () => {}, memoryPrivateData());
+  try {
+    await caller.invoke({ method: 'attach' });
+    await caller.invoke({ method: 'select', generation: 1, sessionId: 'compression-session' });
+    expect(caller.state().selection?.compressionProgress).toEqual({
+      runId: 'compressing-run',
+      originStoreId: 'store',
+      phase: 'summarizing',
+    });
+    connection.getView = getView;
+    await caller.invoke({ method: 'select', generation: 1, sessionId: 'cold-session' });
+    expect(caller.state().selection?.compressionProgress).toBeUndefined();
+    expect(connection.writes).toBe(0);
+  } finally {
+    await caller.close();
+  }
+});

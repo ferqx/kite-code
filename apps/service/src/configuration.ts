@@ -70,7 +70,10 @@ import {
   readSkillSelection,
   type SkillSelection,
 } from './child-configuration';
-import { createSummaryCompressor } from './compression-configuration';
+import {
+  createSummaryCompressor,
+  DEFAULT_CONTEXT_WINDOW_TOKENS,
+} from './compression-configuration';
 import { defaultConfiguration, ordinaryHostConfigurationDefaults } from './configuration-defaults';
 import { createConfigurationManagement } from './configuration-management';
 import { createDefaultFileCheckpointConfiguration } from './file-checkpoint-configuration';
@@ -714,6 +717,12 @@ export function createDefaultProcessConfiguration(options: {
       // adapters. Skill rows are validated locally by discovery, then the exact
       // selected subset is included in the final immutable snapshot below.
       createConfigurationSnapshot({ ...effective, skills: [] });
+      // Freeze the host's declared default along with this Run's actual model.
+      // Core's generic configuration leaf still preserves absent metadata verbatim.
+      selected.modelCapabilities = {
+        contextWindowTokens: DEFAULT_CONTEXT_WINDOW_TOKENS,
+        ...selected.modelCapabilities,
+      };
       const toolIds =
         effective.tools?.filter((tool) => tool.enabled !== false).map((tool) => tool.id) ?? [];
       if (selection?.toolIds) {
@@ -1358,6 +1367,7 @@ export function createDefaultProcessConfiguration(options: {
             createSummaryCompressor({
               automatic: {
                 ...selected.modelCapabilities,
+                thresholdTokens: snapshot.configuration.compression?.thresholdTokens,
                 requestMaxOutputTokens: actualOptions.maxOutputTokens,
                 tools: assembly.extensions.flatMap((extension) =>
                   (extension.tools ?? [])

@@ -1,13 +1,16 @@
 import { createHash, randomUUID } from 'node:crypto';
 import {
+  type BigIntStats,
   closeSync,
   constants,
   fchmodSync,
+  fstatSync,
   fsyncSync,
   linkSync,
   lstatSync,
   mkdirSync,
   openSync,
+  readSync,
   unlinkSync,
   writeSync,
 } from 'node:fs';
@@ -22,7 +25,10 @@ import {
 } from './artifacts-files';
 import { canonicalJson } from './json';
 import { acquireProfileAccess, assertNoSymlinkPath, type ProfileOptions } from './platform/profile';
-import { createWindowsArtifactTemporary } from './platform/windows-artifact-files';
+import {
+  createWindowsArtifactTemporary,
+  WindowsArtifactSnapshotCleanupUnknownError,
+} from './platform/windows-artifact-files';
 import type { Store } from './storage/port';
 import { AgentError, type ArtifactReference, type ArtifactScope, type Json } from './storage/types';
 
@@ -64,6 +70,28 @@ export function createArtifactStore(options: {
   let queuedBytes = 0;
   let queuedReads = 0;
   let publisherBurst = 0;
+  let pendingAdmission = 0;
+  let snapshots = 0;
+  let snapshotCleanupFailure: unknown;
+  const retainedSnapshotResources: unknown[] = [];
+  function retainSnapshotCleanup(error: unknown, resource: unknown): never {
+    snapshotCleanupFailure ??= error;
+    retainedSnapshotResources.push(resource);
+    closing = true;
+    notifyCapacity();
+    throw error;
+  }
+  let capacityChanged!: () => void;
+  let capacity = new Promise<void>((resolve) => {
+    capacityChanged = resolve;
+  });
+  function notifyCapacity() {
+    const notify = capacityChanged;
+    capacity = new Promise<void>((resolve) => {
+      capacityChanged = resolve;
+    });
+    notify();
+  }
   type Kind = 'read' | 'publish';
   type Waiting = {
     kind: Kind;
@@ -95,6 +123,7 @@ export function createArtifactStore(options: {
     queuedBytes -= entry.bytes;
     if (entry.kind === 'read') queuedReads--;
     entry.signal?.removeEventListener('abort', entry.abort);
+    notifyCapacity();
     return true;
   }
   function pump() {
@@ -109,7 +138,8 @@ export function createArtifactStore(options: {
       publisherBurst = entry.kind === 'publish' ? publisherBurst + 1 : 0;
       entry.resolve(permit(entry.kind));
     }
-    if (!active && !waiting.length) done?.();
+    notifyCapacity();
+    if (!active && !waiting.length && !pendingAdmission && !snapshots) done?.();
   }
   function metadataBytes(input: ArtifactReadInput) {
     return (
@@ -125,40 +155,73 @@ export function createArtifactStore(options: {
       ].reduce((sum, value) => sum + value.length * 2, 0)
     );
   }
-  /** Queue bounds cover retained ticket metadata and known byte-array publications, not lazy source closures. */
-  function enter(kind: Kind, bytes: number, signal?: AbortSignal): Promise<() => void> {
+  function canEnter(kind: Kind, bytes: number) {
+    return (
+      (!waiting.length && active < 8 && (kind === 'publish' || activeReads < 6)) ||
+      (waiting.length < 64 &&
+        (kind !== 'read' || queuedReads < 32) &&
+        queuedBytes + bytes <= 16 * 1024 * 1024)
+    );
+  }
+  async function waitForCapacity(signal?: AbortSignal) {
+    const changed = capacity;
+    if (!signal) return changed;
+    signal.throwIfAborted();
+    let abort!: () => void;
+    try {
+      await Promise.race([
+        changed,
+        new Promise<never>((_, reject) => {
+          abort = () => {
+            reject(signal.reason);
+            notifyCapacity();
+          };
+          signal.addEventListener('abort', abort, { once: true });
+          if (signal.aborted) abort();
+        }),
+      ]);
+    } finally {
+      signal.removeEventListener('abort', abort);
+    }
+  }
+  /** Overflow callers wait on one capacity generation without retaining queue tickets or copied payloads. */
+  async function enter(kind: Kind, bytes: number, signal?: AbortSignal): Promise<() => void> {
     if (closing) throw new AgentError('artifact_closed');
     signal?.throwIfAborted();
-    if (!waiting.length && active < 8 && (kind === 'publish' || activeReads < 6))
-      return Promise.resolve(permit(kind));
-    // Reader floods cannot consume all pending admission positions needed by producers.
-    if (
-      waiting.length >= 64 ||
-      (kind === 'read' && queuedReads >= 32) ||
-      queuedBytes + bytes > 16 * 1024 * 1024
-    )
-      throw new AgentError('artifact_busy', 'artifact_busy', true);
-    const promise = new Promise<() => void>((resolve, reject) => {
-      const entry: Waiting = {
-        kind,
-        bytes,
-        signal,
-        resolve,
-        reject,
-        abort() {
-          if (!remove(entry)) return;
-          reject(signal!.reason);
-          pump();
-        },
-      };
-      waiting.push(entry);
-      queuedBytes += bytes;
-      if (kind === 'read') queuedReads++;
-      signal?.addEventListener('abort', entry.abort, { once: true });
-      if (signal?.aborted) entry.abort();
-    });
-    pump();
-    return promise;
+    pendingAdmission++;
+    try {
+      while (!canEnter(kind, bytes)) {
+        await waitForCapacity(signal);
+        if (closing) throw new AgentError('artifact_closed');
+        signal?.throwIfAborted();
+      }
+      if (!waiting.length && active < 8 && (kind === 'publish' || activeReads < 6))
+        return permit(kind);
+      const promise = new Promise<() => void>((resolve, reject) => {
+        const entry: Waiting = {
+          kind,
+          bytes,
+          signal,
+          resolve,
+          reject,
+          abort() {
+            if (!remove(entry)) return;
+            reject(signal!.reason);
+            pump();
+          },
+        };
+        waiting.push(entry);
+        queuedBytes += bytes;
+        if (kind === 'read') queuedReads++;
+        signal?.addEventListener('abort', entry.abort, { once: true });
+        if (signal?.aborted) entry.abort();
+      });
+      pump();
+      return await promise;
+    } finally {
+      pendingAdmission--;
+      if (!active && !waiting.length && !pendingAdmission && !snapshots) done?.();
+    }
   }
   async function use<T>(admission: Promise<() => void>, work: () => Promise<T>): Promise<T> {
     const release = await admission;
@@ -179,6 +242,133 @@ export function createArtifactStore(options: {
     )
       throw new AgentError('artifact_directory_invalid');
   }
+  function snapshot(content: Uint8Array): { chunks(): Iterable<Uint8Array>; close(): void } {
+    if (process.platform === 'win32') {
+      const temporary = createWindowsArtifactTemporary(access.profilePath);
+      try {
+        for (let offset = 0; offset < content.byteLength; offset += artifactChunkBytes)
+          temporary.write(content.subarray(offset, offset + artifactChunkBytes));
+        const sealed = temporary.sealSnapshot();
+        return {
+          *chunks() {
+            try {
+              yield* sealed.chunks();
+            } catch (error) {
+              if (error instanceof WindowsArtifactSnapshotCleanupUnknownError)
+                retainSnapshotCleanup(error, sealed);
+              throw error;
+            }
+          },
+          close() {
+            try {
+              sealed.close();
+            } catch (error) {
+              if (error instanceof WindowsArtifactSnapshotCleanupUnknownError)
+                retainSnapshotCleanup(error, sealed);
+              throw error;
+            }
+          },
+        };
+      } catch (error) {
+        if (error instanceof WindowsArtifactSnapshotCleanupUnknownError)
+          retainSnapshotCleanup(error, temporary);
+        temporary.close();
+        throw error;
+      }
+    }
+    privateDirectory(access.profilePath);
+    privateDirectory(join(access.profilePath, 'blobs'));
+    const path = join(access.profilePath, 'blobs', `.publish-${randomUUID()}`);
+    const fd = openSync(
+      path,
+      constants.O_CREAT | constants.O_EXCL | constants.O_RDWR | constants.O_NOFOLLOW,
+      0o600,
+    );
+    let writerClosed = false;
+    let writerCloseAttempted = false;
+    let removed = false;
+    let readerCloseFailure: AggregateError | undefined;
+    try {
+      for (let offset = 0; offset < content.byteLength; ) {
+        const part = content.subarray(offset, offset + artifactChunkBytes);
+        const written = writeSync(fd, part);
+        if (!written) throw new AgentError('artifact_write_failed');
+        offset += written;
+      }
+      const size = content.byteLength;
+      const identity = fstatSync(fd, { bigint: true });
+      writerCloseAttempted = true;
+      closeSync(fd);
+      writerClosed = true;
+      const same = (stat: BigIntStats) =>
+        stat.isFile() &&
+        stat.ino === identity.ino &&
+        stat.dev === identity.dev &&
+        stat.size === identity.size &&
+        stat.ctimeNs === identity.ctimeNs &&
+        stat.mode === identity.mode;
+      return {
+        *chunks() {
+          if (readerCloseFailure) throw readerCloseFailure;
+          if (removed) throw new AgentError('artifact_closed');
+          assertNoSymlinkPath(path);
+          const reader = openSync(
+            path,
+            constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK,
+          );
+          try {
+            if (!same(fstatSync(reader, { bigint: true })))
+              throw new AgentError('artifact_content_mismatch');
+            for (let offset = 0; offset < size; ) {
+              const part = new Uint8Array(Math.min(artifactChunkBytes, size - offset));
+              const count = readSync(reader, part, 0, part.byteLength, offset);
+              if (!count) throw new AgentError('artifact_content_mismatch');
+              offset += count;
+              yield part.subarray(0, count);
+            }
+            if (!same(fstatSync(reader, { bigint: true })))
+              throw new AgentError('artifact_content_mismatch');
+          } finally {
+            try {
+              closeSync(reader);
+            } catch (error) {
+              readerCloseFailure = new AggregateError([error], 'artifact_snapshot_close_unknown');
+              retainSnapshotCleanup(readerCloseFailure, { reader, path });
+            }
+          }
+        },
+        close() {
+          if (readerCloseFailure) throw readerCloseFailure;
+          if (removed) return;
+          if (!same(lstatSync(path, { bigint: true })))
+            throw new AgentError('artifact_content_mismatch');
+          unlinkSync(path);
+          removed = true;
+        },
+      };
+    } catch (error) {
+      if (!writerClosed) {
+        if (writerCloseAttempted)
+          retainSnapshotCleanup(new AggregateError([error], 'artifact_snapshot_close_unknown'), {
+            fd,
+            path,
+          });
+        writerCloseAttempted = true;
+        try {
+          closeSync(fd);
+          writerClosed = true;
+        } catch (cleanup) {
+          retainSnapshotCleanup(
+            new AggregateError([error, cleanup], 'artifact_snapshot_close_unknown'),
+            { fd, path },
+          );
+        }
+        unlinkSync(path);
+      }
+      throw error;
+    }
+  }
+
   function publishStream(
     input: ArtifactPublishInput & {
       content: AsyncIterable<Uint8Array> | Iterable<Uint8Array>;
@@ -302,15 +492,28 @@ export function createArtifactStore(options: {
       if (!(input.content instanceof Uint8Array))
         return Promise.reject(new AgentError('artifact_content_invalid'));
       try {
-        // Reserve the retained payload budget before copying, but seal bytes at the call boundary.
-        const admission = enter(
-          'publish',
-          metadataBytes(input) + input.content.byteLength,
-          input.signal,
-        );
-        let bytes: Uint8Array;
+        input.signal?.throwIfAborted();
+        if (closing) throw new AgentError('artifact_closed');
+        const { content: originalContent, ...metadata } = input;
+        const sealed = { ...metadata, scope: { ...metadata.scope } };
+        const bytes = metadataBytes(sealed) + originalContent.byteLength;
+        if (!canEnter('publish', bytes)) {
+          const spool = snapshot(originalContent);
+          snapshots++;
+          const admission = enter('publish', metadataBytes(sealed), input.signal);
+          return publishStream({ ...sealed, content: spool.chunks() }, admission).finally(() => {
+            try {
+              spool.close();
+            } finally {
+              snapshots--;
+              pump();
+            }
+          });
+        }
+        const admission = enter('publish', bytes, input.signal);
+        let content: Uint8Array;
         try {
-          bytes = Uint8Array.from(input.content);
+          content = Uint8Array.from(originalContent);
         } catch (error) {
           void admission.then(
             (release) => release(),
@@ -318,7 +521,7 @@ export function createArtifactStore(options: {
           );
           return Promise.reject(error);
         }
-        return publishStream({ ...input, content: [bytes] }, admission);
+        return publishStream({ ...sealed, content: [content] }, admission);
       } catch (error) {
         return Promise.reject(error);
       }
@@ -393,11 +596,17 @@ export function createArtifactStore(options: {
     close() {
       if (!closePromise) {
         closing = true;
+        notifyCapacity();
         closePromise = (async () => {
-          if (active || waiting.length)
+          if (active || waiting.length || pendingAdmission || snapshots)
             await new Promise<void>((resolve) => {
               done = resolve;
             });
+          if (snapshotCleanupFailure)
+            throw new AggregateError(
+              [snapshotCleanupFailure],
+              'artifact_snapshot_cleanup_unconfirmed',
+            );
           access.lock.release();
         })();
       }

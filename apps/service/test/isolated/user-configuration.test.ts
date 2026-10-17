@@ -3,8 +3,10 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'nod
 import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import type { JsonObject } from '@kite-ai/agent/config';
+import type { CompressionInput } from '@kite-ai/agent';
+import { createConfigurationSnapshot, type JsonObject } from '@kite-ai/agent/config';
 import { privateDirectory } from '@kite-ai/agent/windows-path-security';
+import { createSummaryCompressor } from '../../src/compression-configuration';
 import { createUserConfiguration } from '../../src/user-configuration';
 import { ownedUserConfiguration } from '../fixtures/user-configuration-fixture';
 
@@ -73,6 +75,76 @@ test('one user file projects existing provider aliases and selection without exp
   } finally {
     f.close();
   }
+});
+for (const metadata of [
+  { contextWindow: 1048576 },
+  { contextWindowTokens: 1048576 },
+  { contextWindow: 4096, contextWindowTokens: 1048576 },
+])
+  test(`declared 1M window survives user normalization and applies its 75 percent trigger: ${JSON.stringify(metadata)}`, async () => {
+    const f = fixture();
+    try {
+      const raw = JSON.parse(readFileSync(f.path, 'utf8').replace('// keep user comment\n', ''));
+      raw.provider.deepseek.models = [{ name: 'first', ...metadata }];
+      writeFileSync(f.path, JSON.stringify(raw), { mode: 0o600 });
+      const original = readFileSync(f.path, 'utf8');
+      const before = f.source.read();
+      const snapshot = createConfigurationSnapshot(before.value);
+      const selected = snapshot.configuration.models!.find(
+        (model) => model.id === snapshot.configuration.modelId,
+      )!;
+      expect(selected.modelCapabilities).toEqual({ contextWindowTokens: 1048576 });
+      const compressor = createSummaryCompressor({ automatic: selected.modelCapabilities });
+      const messages = [
+        { role: 'user' as const, content: 'Understand this project' },
+        { role: 'assistant' as const, content: 'Collected actual project evidence' },
+      ];
+      const request = { modelId: selected.id, messages, tools: [] };
+      for (const inputTokens of [32768, 196608, 786431, 786432])
+        expect(
+          await compressor.shouldCompress!({
+            modelId: selected.id,
+            messages,
+            tools: [],
+            sources: [],
+            tokenBaseline: { executionId: 'original', request, inputTokens },
+          } as unknown as CompressionInput),
+        ).toBe(inputTokens >= 786432);
+      f.source.update({
+        ifMatch: before.etag,
+        operations: [{ kind: 'set', path: ['theme'], value: 'light' }],
+      });
+      expect(JSON.parse(readFileSync(f.path, 'utf8')).provider.deepseek.models[0]).toEqual({
+        name: 'first',
+        ...metadata,
+      });
+      expect(original).toContain('1048576');
+    } finally {
+      f.close();
+    }
+  });
+
+test('malformed explicit context windows fail preflight instead of silently selecting a fallback', () => {
+  const source = createUserConfiguration();
+  for (const contextWindow of [0, -1, 1.5, '1m', null, Number.MAX_SAFE_INTEGER + 1])
+    expect(() =>
+      createConfigurationSnapshot(
+        source.normalize({
+          provider: { deepseek: { models: [{ name: 'first', contextWindow }] } },
+        }),
+      ),
+    ).toThrow();
+  expect(() =>
+    createConfigurationSnapshot(
+      source.normalize({
+        provider: {
+          deepseek: {
+            models: [{ name: 'first', contextWindow: 1048576, contextWindowTokens: 0 }],
+          },
+        },
+      }),
+    ),
+  ).toThrow('invalid_model_capabilities');
 });
 test('switch and default writes preserve the existing schema, comments, metadata and keys with exact byte CAS', () => {
   const f = fixture();

@@ -47,8 +47,8 @@ export const defaultTaskRoles: readonly TrustedTaskRole[] = Object.freeze([
 
 /** Exact existing builtin definitions with read-only behavior; unknown IDs fail closed. */
 const readOnlyBindings = [
-  ['builtin.files', 'files.read', '3'],
-  ['builtin.files.path', 'files.read_path', '1'],
+  ['builtin.files', 'files.read', '4'],
+  ['builtin.files.path', 'files.read_path', '2'],
   ['builtin.files', 'files.list', '1'],
   ['builtin.files', 'files.glob', '2'],
   ['builtin.files', 'files.search', '2'],

@@ -143,7 +143,7 @@ for (const mode of ['complete'] as readonly string[]) {
           modelId: 'local',
           tools: [
             { id: 'files.write', definitionVersion: '2' },
-            { id: 'files.read', definitionVersion: '3' },
+            { id: 'files.read', definitionVersion: '4' },
           ],
           models: [
             {

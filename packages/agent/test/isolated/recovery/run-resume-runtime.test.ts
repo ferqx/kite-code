@@ -509,6 +509,8 @@ for (const mode of [
           // Controlled old-format fixture: four genuine failures and four
           // pre-dispatch refreshes were indistinguishable in v1 checkpoints.
           source.continuation.version = 1;
+          source.continuation.sourceRequests = [];
+          delete source.continuation.sourceRequestJournal;
           source.continuation.toolFailureStreak = {
             signature: JSON.stringify(['effect', '{}']),
             count: 4,

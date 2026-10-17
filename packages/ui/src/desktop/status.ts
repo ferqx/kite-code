@@ -8,6 +8,7 @@ const labels: Readonly<Record<string, string>> = {
   completed: '已完成',
   interrupted: '已中断',
   failed: '失败',
+  not_executed: '未执行',
   rejected: '已拒绝',
   cancelled: '已停止',
   unavailable: '暂不可用',

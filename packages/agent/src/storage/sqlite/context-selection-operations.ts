@@ -449,8 +449,7 @@ export function callContextSelection(
       db.db.run('COMMIT');
       return result;
     } catch (error) {
-      db.db.run('ROLLBACK');
-      throw error;
+      return db.rollback(error);
     }
   }
   if (method === 'listPendingJobResults') {
@@ -492,8 +491,7 @@ export function callContextSelection(
       db.db.run('COMMIT');
       return result;
     } catch (error) {
-      db.db.run('ROLLBACK');
-      throw error;
+      return db.rollback(error);
     }
   }
   if (['getSelectedContext', 'getExpandedContext', 'getModelContext'].includes(method)) {
@@ -604,8 +602,7 @@ export function callContextSelection(
       db.db.run('COMMIT');
       return value;
     } catch (error) {
-      db.db.run('ROLLBACK');
-      throw error;
+      return db.rollback(error);
     }
   }
   const mutate = () => {

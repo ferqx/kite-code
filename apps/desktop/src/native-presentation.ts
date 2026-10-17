@@ -88,9 +88,28 @@ export function desktopDirectory(
 export function desktopMessages(messages: readonly Message[]): DesktopMessage[] {
   return messages.map((message) => ({
     id: message.id,
-    role: message.role,
-    text: message.content,
-    settled: message.status === 'complete',
+    role: message.compression ? 'system' : message.role,
+    ...(message.compression
+      ? {
+          systemKind: 'compaction' as const,
+          title:
+            message.compression.status === 'completed'
+              ? '上下文压缩完成'
+              : message.compression.status === 'failed'
+                ? '上下文压缩失败'
+                : message.compression.status === 'cancelled'
+                  ? '上下文压缩已取消'
+                  : message.compression.status === 'running'
+                    ? '上下文压缩上次确认为进行中'
+                    : '上下文压缩未发布',
+          status:
+            message.compression.status === 'unpublished' || message.compression.status === 'running'
+              ? ('unknown' as const)
+              : message.compression.status,
+        }
+      : {}),
+    text: message.compression ? '' : message.content,
+    settled: message.compression ? true : message.status === 'complete',
     // Public Message completion does not establish a final Run reply or legacy tool presentation.
   }));
 }

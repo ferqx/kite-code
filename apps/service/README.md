@@ -36,7 +36,7 @@ Context 提供 `POST /v1/sessions/{id}/context/compress` 和 `/context/compressi
 
 [默认 compatible SDK 压缩](test/isolated/compression-configuration.test.ts)与[自动分支](test/isolated/compression-automatic-configuration.test.ts)两个完整文件在本机 Windows x64/Bun 1.4.2 为 6 项／134 条断言通过，包含五个实际 SDK 场景与一个纯准备资格场景：45KiB 自定义说明完整进入实际请求、真实摘要与覆盖来源、后续 Model 精确采用摘要、可信摘要拒绝后的旧输入继续、两种 reset 预检、压缩/reset 物理丢 202 回复只查原命令且各一次 POST、冷只读零 Provider，以及单任务已结算 Tool 历史可压缩。Profile 由真实 Store 创建私有 ACL，不以 POSIX mkdir mode 代替 Windows 权限。该资格使用临时 profile、固定本地模型与临时凭据 backend，不代替真实模型压缩质量、目标窗口计数、正式调用者或完整平台资格。
 
-默认 Run binding 现按原选中模型元数据启用自动压缩：已知窗口扣除已知输出预留后的约 80% 估算水位触发，未知窗口使用 32768 个估算输入 token 作为维护触发点，均不拒绝普通执行。自定义可信 compressor 的显式手动／自动选择保留。用户模型条目的 `contextWindowTokens/maxOutputTokens` 进入冻结 `modelCapabilities`；工具 schema 同样参与触发估算。单个长任务可反复压缩，已知摘要失败后原工作继续，下一安全边界可重试；半份摘要和无法核实的发布不能生效。[默认长任务整例](test/isolated/long-running-compression.test.ts)以真实本地 SDK、Files 和 SQLite 验证已知／未知窗口、第一次摘要 HTTP 500、后续两次发布、原目标／历史／Run 与完整大输入封存。
+默认 Run binding 按原选中模型元数据启用自动压缩。用户模型条目兼容 `contextWindow`，同时提供时优先采用 `contextWindowTokens`；选中模型未声明窗口时，在该 Run 快照封存前明确写入 256K（262144 token）默认值。输入达到总窗口 75% 时触发，默认阈值 196608，1M 窗口阈值 786432。可选 JSONC `compression.thresholdTokens` 为正安全整数，随配置快照冻结并覆盖比例。触发与摘要后验证采用同一阈值；系统／可信来源／实际工具目录本身已超阈值，或缩小后仍达阈值时，以 `compression_insufficient_space` 结束原 Run。自动摘要按相同本地估算验证真实缩小，非缩小返回 `compression_not_reducing`；这两种错误保原历史、终止原执行，不走已知临时摘要失败的降级重试。摘要指令只保真正未完成的用户要求，不将未读参考文件变成义务。自定义可信 compressor 和手动选择保原合同。边界与真实 Core 停机分别见[窗口回归](test/isolated/compression-window.test.ts)、[原 Run 停机](test/isolated/compression-window-runtime.test.ts)；[用户窗口接线](test/isolated/user-window-compression.test.ts)覆盖真实本地 SDK 的 1M 别名、256K 缺省与自定义阈值；[长任务](test/isolated/long-running-compression.test.ts)继续覆盖完整 Files 和临时摘要失败。
 
 公共 `modelRetry` 接受无本地上限的 `maxAttempts:null` 和任意实际正 attempt；旧有限上界仍可读取。Service 不替 Core 决定重试次数，生成 Client/OpenAPI 与 TUI 显示同源更新。主／子 Run 的五次相同工具失败规则由唯一 Loop 负责，来源数量不再由装配层另设 256 门槛。权限、格式、namespace、真实来源 read-set 与未知效果守卫保持。
 
@@ -684,4 +684,4 @@ SQLite 增量恢复证明由 Agent Store 的正常事务维护，公开 HTTP 保
 
 ## 上下文统计观察
 
-`GET /v1/sessions/{id}/context/estimate?storeId=...&executionId=...` 复用原 Model 输入的主体／Store／Session 权限，以完整当前所选历史和已保存来源布局返回下一请求预测及本会话累计实际用量。查询不初始化 Provider、不捕获现在来源、不写 Store；Client 验证目标、基线与加总关系。默认压缩沿 Core 当次实际工具与已核实输入基线加新增估算，沿用约 80%／未知窗口 32768 的维护阈值；摘要快照保存数字投影出处。口径与失效规则见 [Core owner](../../packages/agent/src/context-estimate.README.md)，验证见[完整会话与冷读取](test/isolated/context-token-estimate.test.ts)。
+`GET /v1/sessions/{id}/context/estimate?storeId=...&executionId=...` 复用原 Model 输入的主体／Store／Session 权限，以完整当前所选历史和已保存来源布局返回下一请求预测及本会话累计实际用量。查询不初始化 Provider、不捕获现在来源、不写 Store；Client 验证目标、基线与加总关系。默认压缩沿 Core 当次实际工具与已核实输入基线加新增估算，采用明确窗口或 256K 缺省的总量 75%，显式 `compression.thresholdTokens` 覆盖比例；摘要快照保存数字投影及阈值出处。口径与失效规则见 [Core owner](../../packages/agent/src/context-estimate.README.md)，验证见[完整会话与冷读取](test/isolated/context-token-estimate.test.ts)。

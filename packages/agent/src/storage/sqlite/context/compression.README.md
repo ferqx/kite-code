@@ -23,3 +23,6 @@ Fork 可复制当前活动压缩点的 SQL 来源引用，保持原 `originSessi
 排队 Command 与实际输入的最终事务边界由稳定 commit barrier 验证：摘要完整后仅受理 follow-up，Messages 不变时压缩与后继 Run 都完成，后继 Provider 实际收到完整摘要；两个独立 SQL writer 对照分别添加真实 Message/result_ref，均拒绝发布、保原上下文且零下一 Provider。compression/source collision/restored-media 三文件本机 24 tests/298 assertions；实际 TUI 与其他平台仍需对应消费者证据。
 
 自动压缩冷恢复使用统一的[长任务恢复协议](../run-resume.README.md)：未闭合 Model 尝试保留 partial 并保存中断结果，完整但未提交摘要仍属 pending，不成为 selected 上下文；旧已发布点继续有效，普通安全边界允许新摘要尝试。压缩 Model 同样封存来源请求和工具失败 streak 的 continuation。连续两次压缩强杀后仍可由第三进程恢复同一 Run，原工具效果只发生一次，见[真实多次强杀](../../../../test/isolated/recovery/run-resume-repeated-runtime.test.ts)。这不重放任意半完成初始化或外部效果，也不把测试等同于数周运行资格。
+## 会话消息中的压缩身份
+
+[只读显示投影](../compression-display.ts)从准确 assistant Message、同 Session/Run 的 Model Execution 和原压缩 snapshot 推导 `MessageRecord.compression`，不信任 Message 自报字段或 UUID 前缀。只有已发布 snapshot 显示 completed；Model succeeded 但未发布为 unpublished，失败／取消保原事实。User source 碰撞不获得压缩身份。没有新增 SQL 表、迁移或恢复权限；Fork 的公共消息沿原只读出处传递标记。Native 沿准确 Run/Model 进度显示维护状态，压缩摘要永不作为最终回复。实际[进度与冷历史回归](../../../../test/isolated/context/compression-progress.test.ts)覆盖原归属、已发布、未发布、失败、取消与零新 Model；公共传输和最终回复资格归 [Service](../../../../../../apps/service/README.md)与 [Native](../../../../../../apps/desktop/README.md)。

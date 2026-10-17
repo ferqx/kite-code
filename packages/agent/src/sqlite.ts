@@ -12,6 +12,7 @@ import {
   type OwnerRef,
   type RunResumeLease,
 } from './storage/types';
+import { deserializeStorageError, isStorageTransactionUnconfirmed } from './storage/worker/error';
 import { storeMethods } from './storage/worker/protocol';
 import type { DbTiming } from './storage/worker/timing';
 
@@ -21,6 +22,28 @@ export interface OpenSqliteStoreOptions extends ProfileOptions {
   onTiming?: (observation: DbTiming) => void;
 }
 export type SqliteStorePreflight = import('./storage/sqlite/connection').StorePreflight;
+
+// Failed startup has no returned Store to own native cleanup. Retain the exact
+// capability and attach its retry to the error; never recreate or re-send work.
+const retainedStartupCleanups = new Set<() => Promise<void>>();
+async function failedOpenCleanup(original: unknown, cleanup: () => Promise<void>): Promise<never> {
+  try {
+    await cleanup();
+  } catch (failure) {
+    const retryCleanup = async () => {
+      await cleanup();
+      retainedStartupCleanups.delete(retryCleanup);
+    };
+    retainedStartupCleanups.add(retryCleanup);
+    throw Object.assign(
+      new AggregateError([original, failure], 'Database open and resource cleanup failed.', {
+        cause: original,
+      }),
+      { retryCleanup },
+    );
+  }
+  throw original;
+}
 
 /** Exact loader assets; pure metadata, no database or filesystem access. */
 export function sqliteStorageAssets() {
@@ -89,18 +112,51 @@ export async function openSqliteStore(options: OpenSqliteStoreOptions): Promise<
     owned = createOwnedWorker(sqliteStorageAssets().worker.href);
     worker = owned.worker;
   } catch (error) {
-    access.lock.release();
-    throw error;
+    return failedOpenCleanup(error, async () => access.lock.release());
   }
   const pending = new Map<
     number,
     { resolve(value: unknown): void; reject(error: Error): void; bytes: number }
   >();
-  const owners = new Map<string, { owner: OwnerRef; lock: FileLock }>();
+  const owners = new Map<
+    string,
+    { owner: OwnerRef; lock: FileLock; sqlReleased?: boolean; releasing?: Promise<boolean> }
+  >();
   const recoveryLeases = new Map<
     string,
-    { lease: JobRecoveryLease | RunResumeLease; lock: FileLock }
+    {
+      lease: JobRecoveryLease | RunResumeLease;
+      lock: FileLock;
+      sqlReleased?: boolean;
+      releasing?: Promise<void>;
+      committing?: boolean;
+    }
   >();
+  const retainedLocalLocks = new Map<FileLock, string>();
+  const localLockHeld = (sessionId: string) => [...retainedLocalLocks.values()].includes(sessionId);
+  const releaseLocalLock = (lock: FileLock, sessionId: string) => {
+    try {
+      lock.release();
+      retainedLocalLocks.delete(lock);
+    } catch (error) {
+      retainedLocalLocks.set(lock, sessionId);
+      throw error;
+    }
+  };
+  const failedLocalCleanup = (lock: FileLock, sessionId: string, original: unknown): never => {
+    if (failed || isStorageTransactionUnconfirmed(original)) {
+      retainedLocalLocks.set(lock, sessionId);
+      throw original;
+    }
+    try {
+      releaseLocalLock(lock, sessionId);
+    } catch (cleanup) {
+      throw new AggregateError([original, cleanup], 'Database operation and lock cleanup failed.', {
+        cause: original,
+      });
+    }
+    throw original;
+  };
   let sequence = 0;
   let queuedBytes = 0;
   let closed = false;
@@ -108,6 +164,9 @@ export async function openSqliteStore(options: OpenSqliteStoreOptions): Promise<
   let failure: Error | undefined;
   let closing = false;
   let closePromise: Promise<void> | undefined;
+  // Present only after DB acknowledgement and confirmed Worker termination. A retry
+  // can finish retained native cleanup without reopening the Store or owner authority.
+  let cleanupAfterClose: (() => void) | undefined;
   let activeRequests = 0;
   let drained: (() => void) | undefined;
   const waiting = { ordinary: new Map<number, number>(), critical: new Map<number, number>() };
@@ -144,8 +203,7 @@ export async function openSqliteStore(options: OpenSqliteStoreOptions): Promise<
     pending.delete(event.data.id);
     queuedBytes -= item.bytes;
     wakeCapacity();
-    if (event.data.error)
-      item.reject(new AgentError(event.data.error.code, event.data.error.message));
+    if (event.data.error) item.reject(deserializeStorageError(event.data.error));
     else item.resolve(event.data.result);
     if (event.data.timing && options.onTiming) {
       try {
@@ -170,6 +228,8 @@ export async function openSqliteStore(options: OpenSqliteStoreOptions): Promise<
       const held = recoveryLeases.get(recovery.lease.sessionId);
       if (
         !held ||
+        held.sqlReleased ||
+        held.releasing ||
         canonicalJson(held.lease as unknown as Json) !==
           canonicalJson(recovery.lease as unknown as Json)
       )
@@ -180,6 +240,7 @@ export async function openSqliteStore(options: OpenSqliteStoreOptions): Promise<
       const held = owners.get(owned.owner.sessionId);
       if (
         !held ||
+        held.sqlReleased ||
         held.owner.instanceId !== owned.owner.instanceId ||
         held.owner.generation !== owned.owner.generation
       )
@@ -290,19 +351,48 @@ export async function openSqliteStore(options: OpenSqliteStoreOptions): Promise<
     await request('open', [
       { access: { ...access, lock: undefined }, readOnly: options.mode === 'readonly', engine },
     ]);
-  } catch (error) {
-    try {
-      await owned.terminate();
-      access.lock.release();
-    } catch (cleanup) {
-      throw new AggregateError([error, cleanup], 'Database open and Worker cleanup failed.', {
-        cause: error,
-      });
-    }
-    throw error;
-  } finally {
     migration?.release();
+    migration = undefined;
+  } catch (error) {
+    let termination: Promise<void> | undefined;
+    return failedOpenCleanup(error, async () => {
+      termination ??= owned.terminate();
+      await termination;
+      closed = true;
+      rejectAll(new AgentError('store_closed'));
+      migration?.release();
+      migration = undefined;
+      access.lock.release();
+    });
   }
+  const releaseRecoveryLease = async (
+    lease: RunResumeLease | JobRecoveryLease,
+    method: 'releaseRunResumeLease' | 'releaseJobRecoveryLease',
+  ) => {
+    const held = recoveryLeases.get(lease.sessionId);
+    if (!held) return;
+    if (
+      lease.kind !== (method === 'releaseRunResumeLease' ? 'run_resume' : 'job_reconciliation') ||
+      held.committing ||
+      canonicalJson(held.lease as unknown as Json) !== canonicalJson(lease as unknown as Json)
+    )
+      throw new AgentError('recovery_lease_changed');
+    if (held.releasing) return held.releasing;
+    const attempt = (async () => {
+      if (!held.sqlReleased) {
+        await request(method, [lease]);
+        held.sqlReleased = true;
+      }
+      held.lock.release();
+      recoveryLeases.delete(lease.sessionId);
+    })();
+    held.releasing = attempt;
+    try {
+      await attempt;
+    } finally {
+      if (held.releasing === attempt) held.releasing = undefined;
+    }
+  };
   const special = {
     async beginRunResume(input: Parameters<Store['beginRunResume']>[0]) {
       if (options.mode === 'readonly') throw new AgentError('read_only');
@@ -311,7 +401,11 @@ export async function openSqliteStore(options: OpenSqliteStoreOptions): Promise<
       >;
       if (state.command)
         return { command: state.command, lease: null, state, started: false as const };
-      if (owners.has(input.sessionId) || recoveryLeases.has(input.sessionId))
+      if (
+        owners.has(input.sessionId) ||
+        recoveryLeases.has(input.sessionId) ||
+        localLockHeld(input.sessionId)
+      )
         throw new AgentError('owner_busy');
       let lock: FileLock;
       try {
@@ -320,44 +414,43 @@ export async function openSqliteStore(options: OpenSqliteStoreOptions): Promise<
         if (error instanceof LockBusyError) throw new AgentError('owner_busy');
         throw error;
       }
+      let result: Awaited<ReturnType<Store['beginRunResume']>>;
       try {
-        const result = (await request('beginRunResume', [input])) as Awaited<
+        result = (await request('beginRunResume', [input])) as Awaited<
           ReturnType<Store['beginRunResume']>
         >;
-        if (result.lease) recoveryLeases.set(input.sessionId, { lease: result.lease, lock });
-        else lock.release();
-        return result;
       } catch (error) {
-        lock.release();
-        throw error;
+        return failedLocalCleanup(lock, input.sessionId, error);
       }
+      if (result.lease) recoveryLeases.set(input.sessionId, { lease: result.lease, lock });
+      else releaseLocalLock(lock, input.sessionId);
+      return result;
     },
     async commitRunResume(input: Parameters<Store['commitRunResume']>[0]) {
       const held = recoveryLeases.get(input.lease.sessionId);
       if (
         held?.lease.kind !== 'run_resume' ||
+        held.sqlReleased ||
+        held.releasing ||
+        held.committing ||
         canonicalJson(held.lease as unknown as Json) !==
           canonicalJson(input.lease as unknown as Json)
       )
         throw new AgentError('recovery_lease_changed');
-      const result = (await request('commitRunResume', [input])) as Awaited<
-        ReturnType<Store['commitRunResume']>
-      >;
-      recoveryLeases.delete(input.lease.sessionId);
-      owners.set(input.lease.sessionId, { owner: result.owner, lock: held.lock });
-      return result;
+      held.committing = true;
+      try {
+        const result = (await request('commitRunResume', [input])) as Awaited<
+          ReturnType<Store['commitRunResume']>
+        >;
+        recoveryLeases.delete(input.lease.sessionId);
+        owners.set(input.lease.sessionId, { owner: result.owner, lock: held.lock });
+        return result;
+      } finally {
+        held.committing = false;
+      }
     },
     async releaseRunResumeLease(lease: RunResumeLease) {
-      const held = recoveryLeases.get(lease.sessionId);
-      if (!held) return;
-      if (
-        held.lease.kind !== 'run_resume' ||
-        canonicalJson(held.lease as unknown as Json) !== canonicalJson(lease as unknown as Json)
-      )
-        throw new AgentError('recovery_lease_changed');
-      await request('releaseRunResumeLease', [lease]);
-      recoveryLeases.delete(lease.sessionId);
-      held.lock.release();
+      return releaseRecoveryLease(lease, 'releaseRunResumeLease');
     },
     async beginJobReconciliation(input: Parameters<Store['beginJobReconciliation']>[0]) {
       if (options.mode === 'readonly') throw new AgentError('read_only');
@@ -372,7 +465,11 @@ export async function openSqliteStore(options: OpenSqliteStoreOptions): Promise<
             input.executionId,
           ])) as import('./storage/types').ExecutionRecord,
         };
-      if (owners.has(input.sessionId) || recoveryLeases.has(input.sessionId))
+      if (
+        owners.has(input.sessionId) ||
+        recoveryLeases.has(input.sessionId) ||
+        localLockHeld(input.sessionId)
+      )
         throw new AgentError('owner_busy');
       let lock: FileLock;
       try {
@@ -381,32 +478,31 @@ export async function openSqliteStore(options: OpenSqliteStoreOptions): Promise<
         if (error instanceof LockBusyError) throw new AgentError('owner_busy');
         throw error;
       }
+      let result: Awaited<ReturnType<Store['beginJobReconciliation']>>;
       try {
-        const result = (await request('beginJobReconciliation', [input])) as Awaited<
+        result = (await request('beginJobReconciliation', [input])) as Awaited<
           ReturnType<Store['beginJobReconciliation']>
         >;
-        if (result.lease) recoveryLeases.set(input.sessionId, { lease: result.lease, lock });
-        else lock.release();
-        return result;
       } catch (error) {
-        lock.release();
-        throw error;
+        return failedLocalCleanup(lock, input.sessionId, error);
       }
+      if (result.lease) recoveryLeases.set(input.sessionId, { lease: result.lease, lock });
+      else releaseLocalLock(lock, input.sessionId);
+      return result;
     },
     async releaseJobRecoveryLease(lease: JobRecoveryLease) {
-      const held = recoveryLeases.get(lease.sessionId);
-      if (!held) return;
-      if (canonicalJson(held.lease as unknown as Json) !== canonicalJson(lease as unknown as Json))
-        throw new AgentError('recovery_lease_changed');
-      await request('releaseJobRecoveryLease', [lease]);
-      recoveryLeases.delete(lease.sessionId);
-      held.lock.release();
+      return releaseRecoveryLease(lease, 'releaseJobRecoveryLease');
     },
 
     async recoverSession(input: Parameters<Store['recoverSession']>[0]) {
       if (options.mode === 'readonly') throw new AgentError('read_only');
       const prior = await request('getRecoveryReceipt', [input]);
-      if (prior) return prior;
+      if (prior) {
+        for (const [lock, sessionId] of retainedLocalLocks)
+          if (sessionId === input.sessionId) releaseLocalLock(lock, sessionId);
+        return prior;
+      }
+      if (localLockHeld(input.sessionId)) throw new AgentError('owner_busy');
       const recoverySession = (await request('getSession', [input.sessionId])) as
         | import('./storage/types').SessionRecord
         | null;
@@ -418,11 +514,14 @@ export async function openSqliteStore(options: OpenSqliteStoreOptions): Promise<
         if (error instanceof LockBusyError) throw new AgentError('owner_busy');
         throw error;
       }
+      let result: unknown;
       try {
-        return await request('recoverSession', [input]);
-      } finally {
-        lock.release();
+        result = await request('recoverSession', [input]);
+      } catch (error) {
+        return failedLocalCleanup(lock, input.sessionId, error);
       }
+      releaseLocalLock(lock, input.sessionId);
+      return result;
     },
     async acquireSessionOwner(sessionId: string, instanceId: string): Promise<OwnerRef | null> {
       if (options.mode === 'readonly') throw new AgentError('read_only');
@@ -430,9 +529,11 @@ export async function openSqliteStore(options: OpenSqliteStoreOptions): Promise<
         | import('./storage/types').SessionRecord
         | null;
       if (selectedSession?.parentSessionId) throw new AgentError('group_root_required');
-      if (recoveryLeases.has(sessionId)) throw new AgentError('owner_busy');
+      if (recoveryLeases.has(sessionId) || localLockHeld(sessionId))
+        throw new AgentError('owner_busy');
       const prior = owners.get(sessionId);
       if (prior) {
+        if (prior.sqlReleased) throw new AgentError('owner_busy');
         if (prior.owner.instanceId !== instanceId) throw new AgentError('owner_busy');
         return prior.owner;
       }
@@ -448,8 +549,7 @@ export async function openSqliteStore(options: OpenSqliteStoreOptions): Promise<
         owners.set(sessionId, { owner, lock });
         return owner;
       } catch (error) {
-        lock.release();
-        throw error;
+        return failedLocalCleanup(lock, sessionId, error);
       }
     },
     async releaseSessionOwner(owner: OwnerRef): Promise<boolean> {
@@ -457,17 +557,34 @@ export async function openSqliteStore(options: OpenSqliteStoreOptions): Promise<
       if (!held) return true;
       if (held.owner.generation !== owner.generation || held.owner.instanceId !== owner.instanceId)
         throw new AgentError('owner_changed');
-      const released = await request('releaseSessionOwner', [owner]);
-      if (released) {
-        owners.delete(owner.sessionId);
+      if (held.releasing) return held.releasing;
+      const attempt = (async () => {
+        if (!held.sqlReleased) {
+          const released = await request('releaseSessionOwner', [owner]);
+          if (!released) return false;
+          // SQL release ends execution authority even if the original OS lock's
+          // eventual release fails. Keep that physical capability for exact cleanup.
+          held.sqlReleased = true;
+        }
         held.lock.release();
+        owners.delete(owner.sessionId);
+        return true;
+      })();
+      held.releasing = attempt;
+      try {
+        return await attempt;
+      } finally {
+        if (held.releasing === attempt) held.releasing = undefined;
       }
-      return Boolean(released);
     },
     close(): Promise<void> {
       if (closePromise) return closePromise;
       closing = true;
       closePromise = (async () => {
+        if (cleanupAfterClose) {
+          cleanupAfterClose();
+          return;
+        }
         let acknowledged = false;
         let failedClose = false;
         let closeError: unknown;
@@ -490,11 +607,19 @@ export async function openSqliteStore(options: OpenSqliteStoreOptions): Promise<
           // DB ACK and the macOS original thread/right are separate closure facts.
           // Deferred platforms retain their existing, explicitly unqualified path.
           if (acknowledged) {
-            for (const held of owners.values()) held.lock.release();
-            owners.clear();
-            for (const held of recoveryLeases.values()) held.lock.release();
-            recoveryLeases.clear();
-            access.lock.release();
+            cleanupAfterClose = () => {
+              for (const [sessionId, held] of owners) {
+                held.lock.release();
+                owners.delete(sessionId);
+              }
+              for (const [sessionId, held] of recoveryLeases) {
+                held.lock.release();
+                recoveryLeases.delete(sessionId);
+              }
+              for (const [lock, sessionId] of retainedLocalLocks) releaseLocalLock(lock, sessionId);
+              access.lock.release();
+            };
+            cleanupAfterClose();
           }
         } catch (cleanup) {
           if (failedClose)
@@ -505,7 +630,11 @@ export async function openSqliteStore(options: OpenSqliteStoreOptions): Promise<
         }
         if (failedClose) throw closeError;
       })();
-      return closePromise;
+      const attempt = closePromise;
+      void attempt.catch(() => {
+        if (cleanupAfterClose && closePromise === attempt) closePromise = undefined;
+      });
+      return attempt;
     },
   };
   return new Proxy(special, {

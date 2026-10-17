@@ -171,7 +171,7 @@ async function fixture(
       credentialRef: 'credential:12345678-1234-1234-1234-123456789abc',
     })),
     tools: [
-      { id: 'files.read', definitionVersion: '3' },
+      { id: 'files.read', definitionVersion: '4' },
       { id: 'files.write', definitionVersion: '2' },
       ...['task', 'task_wait', 'task_read'].map((id) => ({ id, definitionVersion: '1' })),
       ...(scenario === 'pending_job'
@@ -233,7 +233,7 @@ async function fixture(
           ].map((id) => ({ kind: 'tool' as const, definitionId: id, definitionVersion: '1' })),
           { kind: 'job', definitionId: 'agent/worker', definitionVersion: '1' },
           { kind: 'job', definitionId: 'shell.command', definitionVersion: '1' },
-          { kind: 'tool', definitionId: 'files.read', definitionVersion: '3' },
+          { kind: 'tool', definitionId: 'files.read', definitionVersion: '4' },
           { kind: 'tool', definitionId: 'files.write', definitionVersion: '2' },
           ...['planning.read', 'planning.write', 'planning.review', 'planning.update'].map(
             (id) => ({

@@ -8,6 +8,8 @@ Status: implemented
 
 ## Decision
 
+仅主体准入观察的累计Session/Message/Part 8192条门槛由[正常Loop决定](../bug-fix/2026-10-17-normal-loop-checkpoints.md)部分取代，当前完整流式观察归[Store owner](../../../../packages/agent/src/storage/README.md#累计执行组观察)。本文的metadata工程边界、原publisher封存、恢复出处和读取不授执行权理由继续适用。
+
 实际 dispatched connect/refresh Tool 或 Action 在执行成功尾部同步捕获同一个冻结 SDK metadata generation，与原 saved catalogue 匹配；按实际 publisher Execution scope 保存 canonical UTF-8 的64 KiB chunks、manifest、32项 index pages 和 root。root 原字节 hash 即 indexDigest，节点不含自身 digest。getter、冷 Query 和缓存读取不发布、不 discovery、不联网。
 
 两种 builtin.mcp Query 只读原 snapshot/index，完整 display envelope≤32 KiB/32 rows。公共 Client 沿现有 ArtifactReader 单次读取原 manifest，按准确 refs 顺序核完整 EOF/size/hash/fatal UTF-8/JSON/schema 后才交付整个原 SDK Tool；accepted 字段与省略保留，有限 label 明示截短。共享 TUI 保存原 generation 与 scope，可在空目录或 Server 已移除后选择旧页并滚至全文尾部；关闭或切scope只取消自身读取。

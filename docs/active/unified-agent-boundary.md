@@ -94,6 +94,8 @@ Native Skills 目录只经 [Main 的有限 reader](../../apps/desktop/electron/s
 
 [本实例生命周期](../../packages/agent/src/lifecycle.README.md)以同步真实 busy 检查与封门实现 if_idle；status 采样不授权稍后的关闭。已受理准备、owner 接管、后台 operation 和未完成 cleanup 参与同一边界，重复关闭共用完成 Promise。只收束本实例真实拥有的工作，不因保存 command ID 就取消另一 Service 已接管的命令。普通 GET 不算执行 busy，但最终 Store 关闭等待原读取资源排空；Service 的窄 beforeResourceClose 回调先封最后业务资源入口再排空。未确认停止或清理失败保留原资源、profile 锁及诊断 HTTP，状态为 drain_failed，不伪造 completed。
 
+长期运行与改动规范：累计已完成的会话、执行、消息和已关闭资源不能成为正常 Loop 的准入配额；同时活跃资源、单页、单批和实际未知结果可以有明确界限。正常竞争通过可取消的背压、分页或流式读取恢复进展，不能把部分扫描当全集，不能盲目重放已提交或未知效果。新功能、重构与升级必须核获取→等待→释放顺序，不新增全局锁来掩盖拥塞；短SQL事务和内部互斥不得跨 await 等待模型、用户或子资源，不持父许可等待获取子许可，清理不能互相等待。Session/Profile的OS所有权和执行permit按原实际寿命持有，不能以避免等待为由提前归还；确需同步时用运行证据核顺序、取消、关闭、异常释放和无循环等待。确认结束的热对象、许可和原生句柄及时回收，未知仍保准确 owner/generation 和证明。验收覆盖累计千次 child/reviewer、超过连接旧配额的完整关闭/重连、产物饱和恢复、精确取消、崩溃恢复和任务完成后的零新派发；加速回归不能代数天数周 soak。当前负责实现与证据归[Agent](../../packages/agent/README.md)、[Store](../../packages/agent/src/storage/README.md)、[MCP](../../packages/agent/src/mcp/README.md)和[Artifact](../../packages/agent/src/artifacts/README.md)。
+
 独立 Native `/v1/lifecycle` 与 `/v1/lifecycle/shutdown` 用 lifecycleVersion 和原 profile/instance 核对目标，业务 API 不兼容或 Store 不可用不阻断有限诊断。无 Origin 的 bearer 请求才可进入，Browser gateway 不暴露；202 仅为受理，成功资源关闭及所属进程退出另行确认。公共 Lifecycle Client 丢回复后只查询原实例，不自动重发或改绑。成功 HTTP 关闭明确结束 runner 自己的父管道读取；普通网络退出仍不等于父死亡。理由见[原子关闭决定](../../.agents/notes/implemented/architecture/2026-10-02-atomic-service-shutdown.md)；正式 daemon 目标发现与 CLI 切换尚未由此完成。
 
 [`client`](../../packages/client/README.md)只依赖生成 schema 和网络能力；[`ui`](../../packages/ui/README.md)消费公开投影、React 与便携展示控件，不知道参考扩展业务。SSE 的 ready/heartbeat 不推进 cursor；变化应用成功后确认，过滤范围的 checkpoint 只来自一致页。快照页不代表全局事件应用成功，切换 scope 需要相应水位。reset 后先冻结原 Store 的全局集合基线，再完整重读所需事实；SDK `startAfter` 仅设置重开 scan 起点，保留原 ACK，不将单对象 snapshotCursor 冒充全局应用。validated `onReady` 可确认流准入并等待应用准备，仍不 ACK；正常 EOF 且 ACK 尚未到达重读基线时沿原起点重开。原 Store 改变、读取失败或未完成时不解除对应写门禁，也不重发业务意图。
@@ -108,7 +110,7 @@ Native Skills 目录只经 [Main 的有限 reader](../../apps/desktop/electron/s
 
 Native在已验证Model正文发布前，可由静态Worker运行UI公开固定Markdown纯计算；不读取业务数据或获得网络、文件、执行权限。准确原文／任务身份、有限队列及当前display owner隔离计算，HTTP／IPC EOF资源在计算前释放；新formatted批完成前保留旧已验证正文。主线程继续原HTML／图片／链接安全处理，prepared树不能授正文读取或写入资格。超全局语法缓存预算的树只归活动展示批，inactive snapshot缓存不成为其长期owner；参数及实际窗口资格归[Native owner](../../apps/desktop/README.md#native-当前会话环境信息与子详情)。
 
-正文取消信号从Runtime的中立Artifact端口传递到原Artifact reader，排队取消不查询Store；它不成为业务取消。Artifact保留8个活动操作并限制读取占用，额外接纳受票据数和已知排队载荷预算约束；close排空此前接受的工作，超载只返回可重试错误，不取得Model重放权。引用授权、EOF／hash／size和不可变文件核实保持，参数、惰性source计量限制与真实压力证据分别归[Artifact](../../packages/agent/src/artifacts/README.md)及[Service](../../apps/service/README.md#多主子会话流与读取压力)。
+正文取消信号从Runtime的中立Artifact端口传递到原reader/publisher，排队取消不查询Store；它不成为业务取消。Artifact保留8个活动操作并限制读取占用，正式票据数和已知排队载荷预算保持有界；额外调用等待共享容量，字节便利发布按原调用时语义私有封存，不持writer/目录句柄等待。close拒绝未入正式队列者并等待临时snapshot清理，排空此前已接纳工作；正常拥塞不取得Model或发布重放权。未知原生关闭保Profile authority并明确失败。引用授权、EOF／hash／size和不可变文件核实保持，参数、惰性source计量限制与真实压力证据分别归[Artifact](../../packages/agent/src/artifacts/README.md)及[Service](../../apps/service/README.md#多主子会话流与读取压力)。
 
 Task carrier成功继续要求原child的attached效果域结算，child Model／Run已结束不代表排队或运行中的Shell已结束。Runtime在该边界用可信Store的准确owner／carrier快照与同事务cursor等待原变更，detached保持独立，最终成功／unknown仍由原SQLite事务复核。准确持久取消与本地读取／计算中断分别处理，不以信号本身伪造已停止，不重新执行Model或Shell；负责合同及修复验证归[Task](../../packages/agent/src/extensions/task/README.md)与[child Store](../../packages/agent/src/storage/sqlite/child/README.md)。
 
@@ -142,6 +144,8 @@ Native 的[单次 Plan 入口与审核](../../apps/desktop/README.md#native-计�
 
 共享 TUI 的[恢复面板](../../packages/ui/src/tui/README.md)区分原生 Ctrl+C/Ctrl+L 批次与 literal bracketed paste；前者只取消所属读取并查原申请，后者不能触发恢复或查询。原 GET 取消后的迟到结果不发布；原 POST 结果仍按原身份保存，取消读取不撤销业务效果。不新增 HTTP、执行权限或 journal 结构，输入边界与有限 macOS 资格见[恢复输入决定](../../.agents/notes/implemented/bug-fix/2026-10-06-recovery-native-controls-and-literal-paste.md)。
 
+Model 的来源请求集与完整来源在同一检查点冻结；单个 Tool 复核该原请求集加本次准确输入，整批累计请求只供后续 Model 和持久恢复。可信文件工厂可声明 `contextDiscovery=read_only`，仅允许原模型依据完全未变时接纳宿主新发现的低权限项目指令；扩展来源、自报 kind、未知工具及副作用不获得此例外。原 Model 仍保原来源，下一 Model 记录新指令及工具真实结果。Core-only 条件读集冲突只重新评估纯条件；有序输入取代及完成治理刷新按真实未派发证明继续同 Run，拒绝、已派发失败与 unknown 不被转成成功。实现与回归归[Agent owner](../../packages/agent/README.md)。
+
 来源新鲜度由宿主采集真实决策输入。模型路径刷新后重新决定；Action 保留旧 attempt 后重新准备与重新授权。批准、资源许可与来源检查都不能代替最终具名事务中的取消、owner、版本和业务条件复核；FS 与 SQLite 的非原子边界不被描述为全局原子保证。
 
 默认宿主的模式与工作区信任来自原 Store、用户主体及准确根 Session/Workspace 的持久控制事实。Native 管理接口只保存用户明确选择，按已观察 revision 执行 CAS；工作区目录与额外读取范围的身份由宿主重新计算，不能由 JSONC、Git 元数据或客户端路径替代。Session 当前模式和用户默认值分别保存；恢复后旧 Store 的控制行不获得当前派发权。原 `getSession` 只读取有限 Session 元数据，权限读取不拉取历史正文。默认每次授权携准确 mode/default/trust revision，派发事务用原 Command 主体复核；人类审批仍保留该读集，父子 AND 合并相同 kind/scope/revision，冲突读集拒绝派发，已提交的撤销不能在授权与 SQL 派发之间被忽略。在途效果按实际取消能力处理，撤销不改写此前成功事实。便携 Desktop/UI 与 CLI 控制回执保留用户原选择，未知只查原命令、不重发；组件释放不停止 Service。same_command 授权保存真实来源 Session/subject/Store/Workspace、definition/version、原 Interaction/决定版本与完整 input 或可信 command digest；当前 policy 必须继续提供该范围，最终 markDispatching 复核 grant epoch 与 mode/trust/必要条件读集。清除仅作用准确 Session，并保存原 mutation 回执；新授权也推进 epoch。默认 Shell digest 来自实际宿主环境/资产与命令，不由 Model/JSONC 提供。正式入口和平台资格仍按进度单独登记。
@@ -170,6 +174,8 @@ Session rename/delete 为原 root creator 的 Decimal64 控制 CAS。原命令�
 [原始 Session 导出](../../packages/agent/src/storage/sqlite/export/README.md)通过 begin/page/text/final verify 冻结同 Worker 的 root/主体/Store、全局 cursor、data_version 与 11 个 section 完整高水位/计数。每个短只读事务复核原 manifest；可观察提交、换 Worker、缺行、范围错误或取消均不发布完成标记，不持跨请求生产事务。未知内容与 provenance 保原文本；仅实际文本列 descriptor 提供准确 byte-range，不扫描 payload 推授权。SDK 核每页完整性与全文 EOF/hash，最后 Core proof 成功才发布 records/text completion；Artifact 仅保原 scope 引用，媒体核验、数据库备份和文件原子发布另由各自 owner 负责。
 
 Context 压缩为单选可信算法 slot，通过同一 Loop 的记录 Model Execution 保存完整输入、覆盖范围与摘要出处；提交前原上下文仍有效。后续输入使用带原 source ID 的低权限摘要，原历史、Model/Artifact 引用和 contextSelectionId 不因压缩改标。人工完成与摘要 publication 同一最终事务；自动失败保留旧选择，未变化的输入不立即无限重试。重置须由原 slot 对完整展开输入明确预检，缺少或拒绝预检保留活动点并且零 Provider。slot 的实际摘要校验、目录 fingerprint、来源新鲜度、取消与必要条件仍在发布前核对，不把结构完整当作已知模型窗口安全。HTTP/Client 只保存原受理意图，真实终态查原 Run；未知回执不重发。默认 pure 算法和实际 SDK 子场景见[Service owner](../../apps/service/README.md)。
+
+公共 Message 可带只读 `compression` 显示身份，仅由同 Session/Run 的准确 Model 与 snapshot 推导；已发布、失败、取消和未发布分开。压缩 Model 的完整正文不具最终回复资格，普通模型正文也不能先于实际 Run completed 取得最终回复资格。默认已知窗口使用总窗口 75% 水位，不能缩小或无继续空间的摘要以明确原 Run 失败收束；未知窗口维护点不成为 Provider 容量上限。
 
 Native 原压缩／重置查询沿原 Command receipt 使用公共精确 Run reader；当前 View 只承担实际 scope 准入，有限近期 Run 目录的缺项不抹除原执行。调用者核原 Run／Store／Session／Command，原受理与执行状态分开，GET 失败不替换已核事实或触发新的执行；具体入口与验证归[Native owner](../../apps/desktop/README.md)。公共 API、Store 格式和原维护写入门禁保持。
 
@@ -304,11 +310,11 @@ runless 后代只沿有限真实 Execution/Command 链继承原 provenance；准
 
 MCP adapter 同步 frozen metadata getter与原可执行 catalogue共享同一代次。真实connect/refresh Tool或Action保存准确原SDK Tool到自身publisher scope immutable chunks/manifest/pages/root，Worker只保有限pointer；Query封存原record/generation/indexDigest，不连接、发现、读vault或派发。publisher已保存结果与source value全等，原connection command/parent/inputDigest和新source key分别绑定，Artifact再核原scope/hash/size。不是以sourceRecordKey单独证明writer，也不重构私有bootstrap Job正文。
 
-公共Client闭合32KiB Query并一次manifest后逐块核完整EOF/size/SHA、fatal UTF-8/JSON/schema，完整SDK字段及省略保留；currentStore负责admission，旧originStore负责Artifactmetadata，恢复不重标来源或恢复grant。TUI/CLI只接该公共Query/reader，以原Session/Workspace/read generation+ownAbort隔离迟到，页面/长字段不裁成complete前缀，metadata查看零业务POST/cancel。当前两Query使用现有整组安全观察器作主体准入，其8192记录上限保留；不承诺任意长执行组均可读取。owner与有限实际证据见[MCP](../../packages/agent/src/mcp/README.md)、[Client](../../packages/client/README.md)、[TUI](../../packages/ui/src/tui/README.md)和[CLI](../../apps/cli/README.md#tui-mcp-目录与配置选择)。
+公共Client闭合32KiB Query并一次manifest后逐块核完整EOF/size/SHA、fatal UTF-8/JSON/schema，完整SDK字段及省略保留；currentStore负责admission，旧originStore负责Artifactmetadata，恢复不重标来源或恢复grant。TUI/CLI只接该公共Query/reader，以原Session/Workspace/read generation+ownAbort隔离迟到，页面/长字段不裁成complete前缀，metadata查看零业务POST/cancel。当前两Query使用现有整组安全观察器作主体准入；累计已完成Session/Message/Part完整流式核实，实际活跃或未确认安全域仍有界，不以截断历史授予读取。owner与有限实际证据见[MCP](../../packages/agent/src/mcp/README.md)、[Client](../../packages/client/README.md)、[TUI](../../packages/ui/src/tui/README.md)和[CLI](../../apps/cli/README.md#tui-mcp-目录与配置选择)。
 
 ## MCP 原连接申请与当前 live
 
-显式连接仍是普通 `builtin.mcp/mcp.connect@1` 与实际独立connection Job，不因配置available、Command accepted或历史ready获得执行许可。有限 `mcp.connection@1` 沿当前Store/Session/subject的整组安全准入，只核准确原Action、operation Job与parent；原8192 records和Worker/result上限保持。Action kind=job、namespaced definition与实际bare Job definition分别核版本、inputDigest、origin/ref/root-work。16KiB Display只投有限身份、phase、原ready和当前live/currentGeneration/created，warm复用保原Job，holder unavailable投null generation而保原ready，detached失败不宣称零效果。
+显式连接仍是普通 `builtin.mcp/mcp.connect@1` 与实际独立connection Job，不因配置available、Command accepted或历史ready获得执行许可。有限 `mcp.connection@1` 沿当前Store/Session/subject的整组安全准入，只核准确原Action、operation Job与parent；原活跃/未确认安全域及Worker/result上限保持，累计完成历史不承担8192门槛。Action kind=job、namespaced definition与实际bare Job definition分别核版本、inputDigest、origin/ref/root-work。16KiB Display只投有限身份、phase、原ready和当前live/currentGeneration/created，warm复用保原Job，holder unavailable投null generation而保原ready，detached失败不宣称零效果。
 
 UI只持可选connection port和原读取代次；Host用公开完整Workspace目录、实际canonical identity和原完整observed核新申请。独立 `ui/mcp-connection-intents.json@1` 只在durable prepare成功的热调用允许首次POST；冷或既有intent只原GET，Store+Session+Server未知冲突不借新key绕过。subject/Store不等在HTTP前拒绝，关闭/切scope只abort所属reader，晚到结果归原intent但不覆盖后来选择。maintenance v9保原资产bytes/身份/phase，旧v8闭合格式不扩，不恢复热权限。实际Query、Host、A→B原GET前拒绝、普通审批与源码外TUI范围见[Agent](../../packages/agent/src/mcp/README.md#原连接申请的有限事实)、[CLI](../../apps/cli/README.md#tui-mcp-显式连接与原申请)、[UI](../../packages/ui/src/tui/README.md#mcp-显式连接与原申请)和[maintenance](../../packages/agent/src/maintenance/README.md#mcp-连接申请的独立离线资产)。
 

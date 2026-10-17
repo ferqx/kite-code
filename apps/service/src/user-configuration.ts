@@ -118,6 +118,10 @@ export function createUserConfiguration(path = userConfigurationPath(homedir()))
         names.add(name);
         const id = routeId(alias, name);
         const metadata = typeof entry === 'string' ? {} : object(entry);
+        const contextWindowTokens =
+          metadata.contextWindowTokens === undefined
+            ? metadata.contextWindow
+            : metadata.contextWindowTokens;
         const enabled = !disabled.some((item) => {
           const selected = route(item);
           return selected?.provider === alias && selected.name === name;
@@ -140,13 +144,10 @@ export function createUserConfiguration(path = userConfigurationPath(homedir()))
           ...metadataConnection,
           model: name,
           enabled,
-          ...(typeof metadata.contextWindowTokens === 'number' ||
-          typeof metadata.maxOutputTokens === 'number'
+          ...(contextWindowTokens !== undefined || typeof metadata.maxOutputTokens === 'number'
             ? {
                 modelCapabilities: {
-                  ...(typeof metadata.contextWindowTokens === 'number'
-                    ? { contextWindowTokens: metadata.contextWindowTokens }
-                    : {}),
+                  ...(contextWindowTokens === undefined ? {} : { contextWindowTokens }),
                   ...(typeof metadata.maxOutputTokens === 'number'
                     ? { maxOutputTokens: metadata.maxOutputTokens }
                     : {}),

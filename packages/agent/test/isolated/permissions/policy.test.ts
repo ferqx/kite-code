@@ -445,6 +445,28 @@ test('record_write stays outside Accept Edits; Request Approval and unqualified 
   }
 }, 15000);
 
+test('absolute file reads retain their read classification at both known versions', () => {
+  for (const version of ['1', '2'])
+    expect(
+      builtinCapability(
+        'builtin.files.path',
+        'files.read_path',
+        'tool',
+        'builtin.planning',
+        version,
+      ),
+    ).toEqual({ effects: ['read'], safeRead: true });
+  for (const [id, version] of [
+    ['files.read_path', '3'],
+    ['files.read_path', undefined],
+    ['files.write_path', '1'],
+    ['files.edit_path', '1'],
+  ])
+    expect(
+      builtinCapability('builtin.files.path', id!, 'tool', 'builtin.planning', version),
+    ).toEqual({ effects: ['external'], safeRead: false });
+});
+
 test('Web network effects require the exact registered builtin Tool identity and version', () => {
   expect(builtinCapability('builtin.web', 'web_fetch', 'tool', 'builtin.planning', '1')).toEqual({
     effects: ['network', 'unknown'],

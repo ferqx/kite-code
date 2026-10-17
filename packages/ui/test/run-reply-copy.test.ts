@@ -133,3 +133,15 @@ test('earlier incomplete or future format assistant body prevents whole reply co
   ).toBe('first\n\nfinal');
   expect(replies([message('empty', '1', '')]).get('empty')?.text).toBeUndefined();
 });
+
+test('compression summaries in every phase never become final or copied assistant prose', () => {
+  for (const status of ['running', 'completed', 'failed', 'cancelled', 'unpublished'] as const) {
+    const summary = message('summary', '2', 'PRIVATE COMPRESSION SUMMARY', {
+      compression: { id: 'compression', trigger: 'automatic', status },
+    });
+    expect([...replies([summary])]).toEqual([]);
+    expect([...replies([summary, message('answer', '3', 'actual answer')])]).toEqual([
+      ['answer', { runId: 'run', text: 'actual answer' }],
+    ]);
+  }
+});

@@ -289,6 +289,7 @@ export function createMcpLifecycle(options: McpLifecycleOptions) {
     ref?: OperationRef;
     stopping?: Promise<StopConfirmation>;
     stopRequested?: boolean;
+    disposed?: boolean;
     confirmPublication?: () => Promise<void>;
   };
   type Ticket = {
@@ -383,8 +384,7 @@ export function createMcpLifecycle(options: McpLifecycleOptions) {
       if (!entry.confirmPublication || ticket.newEntry !== entry || !ticket.completed)
         throw new McpAdapterError('mcp_scope_transition_unconfirmed');
       assertTicket(ticket);
-      tickets.delete(scope);
-      if (ticket.bootstrapId) admitted.delete(ticket.bootstrapId);
+      releaseTicket(ticket);
     }
   }
   async function confirmScopePublication(storeId: string, sessionId: string, serverId: string) {
@@ -410,6 +410,49 @@ export function createMcpLifecycle(options: McpLifecycleOptions) {
   const live = new Map<string, Entry>();
   const starting = new Map<string, ReturnType<typeof deferred<Entry>>>();
   let closed = false;
+  function retire(entry: Entry | undefined) {
+    if (!entry?.disposed || entry.terminal !== 'ended') return;
+    const scope = scopeKey(entry.storeId, entry.sessionId, entry.serverId);
+    const ticket = tickets.get(scope);
+    // A transition still needs the exact old/new holder to verify its durable stop/publication proof.
+    if (ticket && (ticket.holder === entry || ticket.newEntry === entry)) return;
+    if (entries.get(entry.executionId) === entry) entries.delete(entry.executionId);
+    if (live.get(scope) === entry) live.delete(scope);
+    const pending = starting.get(entry.executionId);
+    if (pending) {
+      pending.reject(new McpAdapterError('mcp_connection_unavailable'));
+      starting.delete(entry.executionId);
+    }
+    entry.adapter = undefined;
+    entry.scope = undefined;
+    entry.source = undefined;
+    entry.transport = undefined;
+    entry.confirmPublication = undefined;
+  }
+  function releaseTicket(ticket: Ticket) {
+    if (tickets.get(ticket.scope) !== ticket) return;
+    tickets.delete(ticket.scope);
+    if (ticket.bootstrapId && admitted.get(ticket.bootstrapId)?.ticket === ticket)
+      admitted.delete(ticket.bootstrapId);
+    const executionId = ticket.bootstrapExecutionId ?? ticket.ref?.executionId;
+    if (executionId && !entries.has(executionId)) {
+      const pending = starting.get(executionId);
+      if (pending) {
+        pending.reject(new McpAdapterError('mcp_connection_unavailable'));
+        starting.delete(executionId);
+      }
+    }
+    const holder = ticket.holder,
+      replacement = ticket.newEntry;
+    // The live adapter can retain its original admission closure. Do not leave a linked history
+    // of completed transition holders inside that otherwise current connection.
+    ticket.holder = undefined;
+    ticket.newEntry = undefined;
+    ticket.onRef = undefined;
+    ticket.verifyUnopened = undefined;
+    retire(holder);
+    retire(replacement);
+  }
   function processEvidence(entry: Entry): Record<string, Json> {
     if (!entry.transport?.readProcessEvidence) return {};
     try {
@@ -539,9 +582,8 @@ export function createMcpLifecycle(options: McpLifecycleOptions) {
           : {}),
       },
     },
-    ...(!staticServer || staticServer.transport.type === 'stdio'
-      ? { resources: { slot: 'process' as const } }
-      : {}),
+    // This Job owns a connection until transport stop, rather than a bounded process task.
+    // Scope admission and the live connection map retain its lifetime ownership independently.
     async start(input, context) {
       const value = input as {
         serverId: string;
@@ -834,7 +876,11 @@ export function createMcpLifecycle(options: McpLifecycleOptions) {
         return;
       }
       const entry = entries.get((handle.reference as { executionId: string }).executionId);
-      if (entry?.terminal === 'ended') await entry.scope?.release();
+      if (entry?.terminal === 'ended') {
+        if (!entry.disposed) await entry.scope?.release();
+        entry.disposed = true;
+        retire(entry);
+      }
     },
   });
   const jobs: JobDefinition[] = [...servers.values()].map(createConnectionJob);
@@ -941,9 +987,7 @@ export function createMcpLifecycle(options: McpLifecycleOptions) {
       !entryStopped()
     )
       return;
-    tickets.delete(scope);
-    if (ticket.bootstrapId && admitted.get(ticket.bootstrapId)?.ticket === ticket)
-      admitted.delete(ticket.bootstrapId);
+    releaseTicket(ticket);
   }
   async function connect(input: Json, context: ActionContext): Promise<ToolResult> {
     const request = input as { serverId: string; key: string };
@@ -992,8 +1036,7 @@ export function createMcpLifecycle(options: McpLifecycleOptions) {
           ticket.mode = 'quarantined';
           ticket.releaseAfterStoppedOpening = true;
         } else {
-          tickets.delete(ticket.scope);
-          if (ticket.bootstrapId) admitted.delete(ticket.bootstrapId);
+          releaseTicket(ticket);
         }
         if (!ticket.completed)
           ticket.openAllowed.reject(new McpAdapterError('mcp_connection_unavailable'));
@@ -1579,8 +1622,7 @@ export function createMcpLifecycle(options: McpLifecycleOptions) {
         )
           ticket.mode = 'quarantined';
         else if (ticket.mode !== 'publishing') {
-          tickets.delete(ticket.scope);
-          if (ticket.bootstrapId) admitted.delete(ticket.bootstrapId);
+          releaseTicket(ticket);
         }
         if (!ticket.completed)
           ticket.openAllowed.reject(new McpAdapterError('mcp_reconnection_unconfirmed'));

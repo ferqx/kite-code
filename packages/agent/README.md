@@ -85,6 +85,8 @@ child 在实际激活时持久保存 `deadlineAt=startedAt+1_800_000`，根 Run 
 
 [输入事务](src/storage/sqlite/inputs/README.md)区分准确活动 Run 的 `input.steer` 与独立 `input.follow_up`。Core 在安全检查点按持久顺序应用 steer，尚未派发的旧模型、工具和审批保存 `superseded_by_user_input` 与准确的工具响应配对；已派发调用保留原参数、来源和真实结果。最终派发与 Run 完成事务复查 pending 输入，完成附近到达的 steer 仍继续同一个 Run。follow-up 保留自己的命令和原 afterRun 关系，不因后来工作或原 Run 取消而换目标；单独取消未应用输入不会生成消息。公开 child 输入目前仍限制在宿主受控路径，完整业务追加消息继续按方案实施。
 
+有序工具派发接收 Core 独立的真实 dispatched 事实；未派发且被新输入取代的取消正常释放顺序，不将同 Run 误终止，也不把扩展自报的取消当成资格。完成治理工具在真实未派发的上下文／能力／输入变化后重新走 Model 与条件边界，重新准备 directive，不复用旧输入。治理准备前冻结输入／能力／来源，准备后和最终派发仍核同一依据；完成评估期间到达的 steer 先进入新模型，不拿旧 unsatisfied 结束 Run。条件评估仅对 Core 实际观察到的读集版本冲突让出调度后重读；最终完成证明失效时仅核本 Run 实际观察的义务／记录／执行安全版本是否推进，不以全局事件当作进展；[无关会话回归](test/isolated/execution/completion-unrelated-progress.test.ts)防止静态失效义务反复重评。扩展抛出的同名错误、真实拒绝、已派发故障及未知效果仍如实处理。[有序派发](test/isolated/execution/tool-dispatch-admission.test.ts)与[完成检查](test/isolated/execution/completion-refresh.test.ts)分别覆盖这些边界。
+
 模型请求使用当前选择的完整消息与结果来源，按两个独立游标穷尽固定上界，不从屏幕历史或通知推断输入。每次准备模型请求前，原 owner 按真实完成游标分页消费合法 pending Job；消费引用、delivery 与内部回执同事务保存。完成游标保存在执行事实中，裁剪通知后仍可查；已派发模型不被后来结果改写，idle 结果不触发模型。child 同 Loop 消费自己的内部结果，根上下文只消费 carrier 的公开终态。结果以低信任 `user` 数据和准确、唯一的 source ID 呈现，保留原 execution/revision/Store。
 
 空闲根 Session 的 Rewind 核实整个执行组及完整消息/工具配对，保留原历史并原子抑制旧 pending；当前选择只保留所选旧前缀及后续新消息，重复回退不会恢复已排除分支。已消费且保留在选择范围内的结果继续使用原 source ID。显式 include 保存新的选入意图及原结果出处，不重跑工具、不恢复 suppressed delivery、不启动模型；活动 Run 的新 include 当前返回 `input_busy`。完整 Fork、压缩、自动续轮及活动输入整合继续按进度表推进。
@@ -98,6 +100,8 @@ child 在实际激活时持久保存 `deadlineAt=startedAt+1_800_000`，根 Run 
 唯一 Loop 的主 Run 无总期限或累计额度，子 Run 激活后固定 30 分钟，包含等待后代的时间。暂时性 Model 失败不设尝试次数上限，按原失败 Execution 血缘退避且响应取消；公开重试 `maxAttempts=null`。长度截断的纯文本作为真实响应段保留并继续，截断工具批次零派发，摘要长度截断不发布。来源／能力变化可反复重新准备。完成治理不以重复诊断 key 代替当前必要条件核验。Shell 只有明确 `timeoutMs` 才有单次总期限。
 
 模型顺序中的同 Tool／相同 JSON 参数连续五次 `failed` 触发 `repeated_tool_failure`，经原 `run.cancel` 域停止当前 Run 与 attached 后代。Core 确认未派发的 `context_refresh_required/capability_refresh_required` 是中性准备失效，不增加也不清空计数；其他调用换工具、参数或返回非失败结果时重置。唯一 Loop 从 [UnifiedExecution](src/execution/index.ts) 的内部 `ToolExecutionResult` 接收真实 dispatch 标记，和扩展可自报的 `ToolResult.details` 分开；原 `tool()` 调用者仍取得同一业务结果，不增加逐 Tool SQL 查询。并行批次先保存所有已启动结果，再按原调用顺序计算。计数跨完成检查保存，显式原 Run 接续从原 Model/Tool ledger 重建；历史扫描和最后 checkpoint 都将 Store 的 `authorization.dispatched` 交给同一分类函数，缺少证据时保守计数，不能通过压缩、重启或伪造扩展详情重置。[长任务回归](test/isolated/execution/long-running.test.ts)核5／128个新目录指令退回、前四次真实失败保留和伪造详情；[重试](test/isolated/execution/model-attempt.test.ts)和[真实强杀接续](test/isolated/recovery/run-resume-runtime.test.ts)分别核模型和两种 Tool 恢复边界。定向通过不代表实际连续数周或完整平台资格。
+
+普通来源发现与旧依据变化分别处理。[文件工具工厂](src/tools/files-tools.ts)仅为 read/list/glob/search 提供可信 `ToolDefinition.contextDiscovery=read_only`；Core 冻结原 Model 的 source requests，各 Tool 用原请求集加本次准确输入复核，不混入同批兄弟刚引入的目标。只有宿主捕获的低权限项目指令新增、原模型全部来源仍不变时，合格只读调用可以继续；下一 Model 同时取得新指令与真实结果，不追溯改写旧 Model。未知工具、扩展自报同 kind 和不透明来源没有该资格。[混合批次回归](test/isolated/context/tool-batch-freshness.test.ts)验证正常四项各一次及旧来源改写／删除保守拒绝；[真实 SIGKILL 恢复](test/isolated/recovery/source-discovery-resume.test.ts)核原 response 和下一 Model planned 两个边界，四个读取不重放。
 
 [模型上下文组装](src/model-context.ts)统一普通请求、压缩请求和展开校验的来源位置。默认宿主显式装配纯 `agentContractSource`，静态规则及可缓存工作区事实不混入动态计划状态。[项目来源](src/platform/project-sources.ts)将完整 AGENTS／CLAUDE 正文标为带出处的低权限 user 数据，放在真实历史之后。`ContextSource.placement` 仅允许 user 的 `after_history` 或 `runtime`；最多一个 runtime 来源组成唯一尾部观察块，非法或冲突明确拒绝。无 placement 的既有来源保原前缀行为；原 source IDs、完整工具配对、摘要及派发前 freshness 不变。
 
@@ -113,6 +117,8 @@ Core 只依赖中立 `ArtifactContentStore` 端口；Tool/Action 以当前 execu
 
 累计已完成历史不以4096条拒绝接续。Store 在正常业务事务内维护增量审计证明；健康证明的首次冷读按索引核当前前沿和未认证变更，不扫描累计已认证历史。旧库一次性升级和失效证明仍完整审计回退。未变化的实际 SQLite 快照可跨准备阶段复用，任何写入使其失效。新 Model 在原来源封存版本化 continuation，用于恢复当前来源请求和五次失败 streak；大 checkpoint 沿原 sourceBody Artifact 完整核验。旧记录仍完整分页重建，不把有限 View 当全集；实际成本和未知边界见[冷恢复协议](src/storage/sqlite/run-resume.README.md)。
 
+有 Artifact 宿主时，continuation v3 以[来源请求增量链](src/source-request-journal.ts)引用每批首次出现的完整输入；后续 Model、摘要和重试只封存链头及准确失败 streak，不重复写入整个累计请求集。恢复完整核原 Artifact/hash、Store/Session/subject/Run、顺序和无环关系；v1/v2仍按原格式读取，无 Artifact 的小型 Core 保v2。热 Model 只共享 Core 已冻结请求，宿主每次捕获拿独立输入副本；压缩不丢弃早期新鲜性依据。[真实128轮回归](test/isolated/context/source-request-journal.test.ts)核增量保存量、全部原输入、宿主修改隔离及非法引用，原SIGKILL恢复回归继续核不重放。完整 `captureBatch` 现行合同仍要求保留一个准确输入集合；这里消除重复副本和累计重复封存，不承诺常量RSS。
+
 Run 的初始化三态与原 selection 保持。明确 root 接续可在同一 OS 锁/generation 下原子接管所选 Run 的活动 child 树，沿原配置、权限交集、carrier 与截止时间继续；queued、激活前、已结束子结果、原审批和前台 task.execute 共用普通监督与唯一 Loop。纯 Model 中断结束旧尝试并创建新请求；自动压缩 pending/未发布摘要重新尝试，已发布点保持。普通工具和外部 Job 的未知效果、半完成任意 initializer、无法重建的绑定继续拒绝；受限 continuation 合同不按工具名称放行。资源和证明边界归[协议 owner](src/storage/sqlite/run-resume.README.md)。
 
 显式 `recoverSession(decision='interrupt')` 取得原 Session OS 锁并 fencing，原子中断遗留 Run、保留 partial 和原执行来源。可证明未派发的同 Store 计划取消；可能产生效果的工具/Job 保持 `outcome_unknown`，不会重做启动。该入口不返回普通执行 owner，未知仍限制该 Session；其他 Session 可继续。已有持久根报告的显式冷恢复由 `resumeJobReport` 和专门 `resolveRecoveryRunConfiguration` 负责，详细资格与生命周期见 [Task owner](src/extensions/task/README.md#task-的-after_turn)。外部 adapter 的显式核实见下方“显式 Job 外部核实”；原适配器必须提供可靠查询能力。离线备份恢复由 maintenance owner 单独负责。
@@ -120,6 +126,10 @@ Run 的初始化三态与原 selection 保持。明确 root 接续可在同一 O
 Job 输出与终态分开保存：单 chunk 32 KiB，内容的 JSON 编码与固定行开销共用 1 MiB 保留预算；每 stream 至多一个合并丢失区间。生产方主动丢弃只关闭该 stream 的保留尾部，其他 stream 仍可使用剩余总预算；任何丢失与总预算耗尽分别记录。独立 64 位高水位不依赖输出行是否保留。每页先确定最多 200 条正常行的上界，再合入与该页相交的至多三条 gap；裁剪区间返回准确 `throughSeq` 和无法精确归属时的 null 字节量。跨 stream 的 gap 可以重叠并包含别的 stream 正常行，消费方保留各条事实并以本页最大 `throughSeq` 推进。纯读取不写回截断结果，终态不受输出预算限制。
 
 当前资源支持 Runtime/Session 单串行键与单类别槽位。显式 Workspace 后端用稳定 profile 协调区覆盖同 profile、同 Workspace 身份、同 key 的多个 Service；未注入后端时 Workspace 请求仍明确拒绝，不宣称不同 profile 对同一磁盘目录全局互斥。后端等待数与字节有界，取消移除候补；close 拒绝新申请、取消候补并等待活动许可正常释放，期间保留 profile 使用锁，不提前释放执行许可。持有资源的 Action 不能再嵌套获取子操作许可，明确返回不支持。Shell、child、Interaction、输入与结果选择已通过所列本机切片；完整权限/计划/Context、默认 MCP、备份维护、全量客户端与三平台发行资格继续按进度表推进。
+
+MCP 连接 Job 的生命周期可能覆盖整个会话，不占普通 Shell 的短任务 process slot；连接身份、scope admission 和真实停止证明仍归[MCP owner](src/mcp/README.md)。Workspace permit 仅在实际解锁成功后归还；失败保原 permit 的准确重试权并使等待中的 close 明确失败，不能标记成功或无限等待。Profile 解锁也先确认再标 closed；关闭失败后封住新 acquire，准确剩余清理可以重试。[原生故障回归](test/isolated/resources/workspace-release-fault.test.ts)验证 workspace/profile 两级锁真实仍 busy、无候补越过及重试后的维护准入。
+
+长期使用按历史累计与当前活动分别处理。Run 执行安全观察完整流式核历史及递归成员并增量计算原 revision，成功历史不再有4096条总量门槛；实际未确认的工具／Job 集合仍保有限安全诊断，不能以截断列表授予安全。Session/Run/Execution取消在原单事务中分页解析完整域，子树去重并核 root/Workspace，取消不再因256个历史子会话或4096项历史而被拒绝。child 创建不再按 root 的累计 Session 数拒绝，实际并发、父子资源顺序、权限、generation 和每 Run 30 分钟截止保持。[成功历史](test/isolated/storage/run-execution-safety-history.test.ts)、[完整取消](test/isolated/storage/cancellation-history.test.ts)和[真实子任务累计](test/isolated/child/history-runtime.test.ts)分别核这些边界，短时加速回归不代表已经运行数天或数周。
 
 Runtime/Session 的 [串行资源 owner](src/execution/resources.ts)只保留仍有 holder 或 waiter 的原 Semaphore。最后许可归还或没有取得许可的取消结束后，核空闲和 Map 中的原对象身份再删除键；handoff 继续保留预留许可，迟到重复 release 不能删除同 key 的新 owner。serial→slot 获取和逆序释放保持，未确认 Job 仍保留其原 permit。
 

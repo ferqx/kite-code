@@ -14,6 +14,8 @@ export type NativeToolMessageFact = Pick<
 > & {
   messageId: string;
   executionId: string;
+  /** Core-confirmed pre-dispatch freshness rejection; the original Execution remains failed. */
+  decisionRefresh?: 'context_refresh_required' | 'capability_refresh_required';
   /** Display only: unique original Model call fields, or its known version's directory default. */
   target?: string;
   /** Read-only original Execution authorization; never a grant or answer capability. */

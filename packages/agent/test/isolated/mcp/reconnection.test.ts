@@ -200,7 +200,7 @@ async function fixture(
   let lifecycle = createMcpLifecycle(options);
   expect(
     lifecycle.extension.jobs?.find((job) => job.id === 'mcp.source.connection')?.resources?.slot,
-  ).toBe('process');
+  ).toBeUndefined();
   const makeRuntime = () =>
     createRuntime({
       get store() {
@@ -482,7 +482,7 @@ async function fixture(
   };
 }
 
-test('last process slot: warm B targets A, stop barrier precedes new open, new R parent supports warm C and repeated R; cold Query has no effects', async () => {
+test('independent connection lifetime: warm B targets A, stop barrier precedes new open, new R parent supports warm C and repeated R; cold Query has no effects', async () => {
   const f = await fixture();
   try {
     const a = await f.invoke('a', 'mcp.connect', { serverId: 'local', key: 'a' });
@@ -562,8 +562,8 @@ test('last process slot: warm B targets A, stop barrier precedes new open, new R
 }, 30000);
 
 test('unknown owned stop quarantines same scope; no new ensure/open and another Session is independent', async () => {
-  // The unconfirmed original transport retains its permit; the independent Session needs its own slot.
-  const f = await fixture(2);
+  // Unknown supervision retains original ownership without consuming another Session's process permit.
+  const f = await fixture(1);
   try {
     const a = await f.invoke('a', 'mcp.connect', { serverId: 'local', key: 'a' });
     const b = await f.invoke('b', 'mcp.connect', { serverId: 'local', key: 'b' });

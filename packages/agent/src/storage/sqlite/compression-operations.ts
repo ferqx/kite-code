@@ -302,8 +302,7 @@ export function getCompressionOrigin(
     db.db.run('COMMIT');
     return origin;
   } catch (error) {
-    db.db.run('ROLLBACK');
-    throw error;
+    return db.rollback(error);
   }
 }
 

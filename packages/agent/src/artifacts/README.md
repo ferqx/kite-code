@@ -12,9 +12,11 @@ POSIX [文件读取](../artifacts-files.ts)为三类消费者保持同一完整�
 
 `readReference({expectedStoreId, reference})` 在同一个在途读取中实时查询准确 scope 的登记引用，逐项保持完整原 metadata（含出处、MIME、hash 和 size）的 canonical 相等，再沿同一完整文件验证返回 bytes；不缓存引用或授权。`expectedStoreId` 是当前连接准入，`reference.storeId` 是原引用出处，恢复后不能互换。中立 `ArtifactContentStore` 将这个入口设为可选：Runtime 使用它避免先查询、再由默认 `read` 重复查询同一引用；未提供该入口的自定义端口保留原 Runtime metadata 校验与 `read` 路径。包装读取的端口需要明确包装所提供的两个入口，不能把一个入口的阻塞或取消钩子当作另一个入口也已执行。Runtime 在读取前后仍核取消并复核完整 bytes 的 size/hash，发布、owner 守卫和每段持久检查点保持。
 
-每个 Artifact Store 最多接纳8个活动操作，其中读取最多6个，为真实输出发布保留进展空间。其余操作进入可取消的有界队列：最多64项、读取最多32项，排队 metadata 与已知字节数组合计预算16MiB。这是排队保留量，不是单个或累计 Artifact 的大小限制；空闲时的大文件仍可完整发布。预算不足返回可重试的 `artifact_busy`。每批最多连续交接4个发布后给等待读取机会，避免读取洪峰误伤模型发布，也避免发布持续饿死读取。惰性 source 闭包的任意外部保留量不能据此计量，只受票据数约束。
+每个 Artifact Store 最多接纳8个活动操作，其中读取最多6个，为真实输出发布保留进展空间。其余操作进入可取消的有界队列：最多64项、读取最多32项，排队 metadata 与已知字节数组合计预算16MiB。这是内部正式票据保留量，不是单个或累计 Artifact 的大小限制；空闲时的大文件仍可完整发布。超出预算的调用等待共享容量通知，不因正常拥塞返回 `artifact_busy`，也不重试已经发生的发布或登记。每批最多连续交接4个发布后给等待读取机会，避免读取洪峰误伤模型发布，也避免发布持续饿死读取。惰性 source 闭包和调用方保留的 Promise／载荷不由这个队列预算计量，不能据此承诺任意无限并发的常量内存。
 
-`read`、`readReference` 和 `readStream` 均接受 `AbortSignal`；Runtime 的正文取消沿中立端口传递。排队期间取消立即移除票据，不再查询 Store；已接纳的读取仍遵守原完整文件校验与取消边界。scope 和 metadata 在调用时封存，signal 不传入 Worker；`publish(Uint8Array)` 先取得接纳资格再复制调用时 bytes，拒绝时不先复制大载荷。close 拒绝新操作，等待此前接受的活动及排队操作全部结算后才释放 Profile 使用权。取舍及真实并发故障见[有界接纳决定](../../../../.agents/notes/implemented/architecture/2026-10-15-artifact-admission-backpressure.md)。
+`read`、`readReference` 和 `readStream` 均接受 `AbortSignal`；Runtime 的正文读取与发布取消沿中立端口传递。排队期间取消立即移除票据，溢出等待也立即结束，不再查询 Store；已接纳的读取仍遵守原完整文件校验与取消边界。scope 和 metadata 在调用时封存，signal 不传入 Worker。`publish(Uint8Array)` 保持调用时bytes：排队预算足够时立即复制，超预算时同步按64KiB块写入未发布的私有snapshot，再等待容量；封存成功后关闭writer和目录句柄，等待期间只保原路径与identity/size/change。活动槽内重开并完整复核，最后清理snapshot，不持文件句柄或permit等待其他许可，也不提前发布Blob或登记引用。
+
+close 拒绝新操作，唤醒尚未取得正式票据的调用为 `artifact_closed`，等待这些调用清理snapshot，并排空已接纳活动及队列后才释放Profile使用权。原生snapshot关闭未确认时保原错误和资源，不重复关闭旧数字fd/HANDLE；停止新准入，close明确 `artifact_snapshot_cleanup_unconfirmed`并保Profile锁，不能误报成功。原8/6并发、公平交接和完整EOF/hash/scope均保持。保留参数与公平性的理由见[原有界接纳决定](../../../../.agents/notes/implemented/architecture/2026-10-15-artifact-admission-backpressure.md)，正常拥塞继续等待的取舍见[正常Loop决定](../../../../.agents/notes/implemented/bug-fix/2026-10-17-normal-loop-checkpoints.md)。[真实背压回归](../../test/isolated/artifacts/backpressure.test.ts)核104个并发发布、bytes/scope封存、排队取消、关闭排空、单次真实Model输出完成和未确认关闭。
 
 Store 登记使用 `verifyPublishedArtifact` 固定工作内存复核全文，不把整 Blob 分配到 Worker 事务中。Windows x64 使用下面的固定原生实现；其他 Windows architecture 仍明确 unsupported。本机 macOS 证据不代表 Windows/Linux、独立安装或跨平台发行资格。
 

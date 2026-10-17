@@ -167,7 +167,7 @@ function toolTarget(message: Message): string | undefined {
 }
 
 function resultPreview(message: Message, showReadFailure = false): string | undefined {
-  if (message.status === 'cancelled') return undefined;
+  if (message.status === 'cancelled' || message.status === 'not_executed') return undefined;
   if (message.approval?.reason && ['rejected', 'awaiting_user'].includes(message.approval.state))
     return message.approval.reason;
   if (message.toolName === 'read_file' && !(showReadFailure && message.status === 'failed'))
@@ -229,15 +229,18 @@ function toolIcon(message: Message) {
 
 function activitySummary(messages: readonly Message[]) {
   if (messages.length === 1) return toolTitle(messages[0]!);
-  const reads = messages.filter((message) => message.toolName === 'read_file').length;
-  const searches = messages.filter(
+  const executed = messages.filter((message) => message.status !== 'not_executed');
+  const refreshed = messages.length - executed.length;
+  const reads = executed.filter((message) => message.toolName === 'read_file').length;
+  const searches = executed.filter(
     (message) => message.toolName === 'search_content' || message.toolName === 'search_files',
   ).length;
-  const other = messages.length - reads - searches;
+  const other = executed.length - reads - searches;
   const parts = [
     reads && `读取 ${reads} 次`,
     searches && `搜索 ${searches} 次`,
     other && `执行 ${other} 项`,
+    refreshed && `重新评估 ${refreshed} 项`,
   ].filter(Boolean);
   return parts.join(' · ') || `${messages.length} 项工具操作`;
 }
@@ -312,6 +315,12 @@ function createdChildTask(message: Message): boolean {
 }
 
 function executionLabel(message: Message) {
+  if (message.status === 'not_executed')
+    return message.decisionRefresh === 'context_refresh_required'
+      ? '上下文已更新，此次未执行'
+      : message.decisionRefresh === 'capability_refresh_required'
+        ? '工具信息已更新，此次未执行'
+        : '未执行';
   if (createdChildTask(message)) return '已创建';
   if (stoppedDuringAutoReview(message)) return '未执行';
   if (message.approval?.state === 'reviewing' && !message.settled) return '';
@@ -533,6 +542,7 @@ export function ToolActivity({
   const pendingReview = !message.settled && message.approval?.state === 'reviewing';
   const hasDiff = edit && message.changeConfirmed && !!message.toolResult;
   const canExpand =
+    (grouped || message.status !== 'not_executed') &&
     (!read || childIssue) &&
     (!edit || hasDiff || childIssue) &&
     !pendingReview &&

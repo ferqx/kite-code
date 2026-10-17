@@ -8,9 +8,11 @@ The original complete default regression failed in the real two-Worker continuou
 
 ## Decision
 
+普通已打开 Worker 的请求竞争等待已由[正常 Loop 检查点决定](2026-10-17-normal-loop-checkpoints.md)部分取代：首个事务尚未开始时在同一队列继续等待，不再因累计等待超过1秒失败。本记录继续保留启动/初始化原生等待、真实原红和禁止重放已开始或提交未知事务的理由；当前实现与验证以[Store owner](../../../../packages/agent/src/storage/README.md#写锁竞争的正常等待)为准。
+
 The existing SQLite connection owner sets native `busy_timeout=1000` for writable connections. Readonly connections and startup format preflight retain 100ms. SQLite's native handler waits within the current statement; no Worker request, transaction callback, Command or external effect is resubmitted. The existing immediate transaction, rollback, original-ID receipt and unknown-commit query boundaries remain.
 
-This value is an accumulated SQLite busy-handler sleep budget, not a one-second HTTP wall-time guarantee. Exhaustion still returns the original `SQLITE_BUSY`. Current implementation and validation belong to the [Store owner](../../../../packages/agent/src/storage/README.md#写锁的有界等待); the formal load and recovery boundaries belong to the [resilience owner](../../../../docs/active/runtime-resilience-qualification.md).
+This value is an accumulated SQLite busy-handler sleep budget, not a one-second HTTP wall-time guarantee. The bounded startup path still returns the original `SQLITE_BUSY` on exhaustion. Current implementation and validation belong to the [Store owner](../../../../packages/agent/src/storage/README.md#写锁竞争的正常等待); the formal load and recovery boundaries belong to the [resilience owner](../../../../docs/active/runtime-resilience-qualification.md).
 
 ## Alternatives considered
 

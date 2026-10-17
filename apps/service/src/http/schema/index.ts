@@ -1003,6 +1003,13 @@ export const schemas = {
     role: z.enum(['system', 'user', 'assistant', 'tool']),
     content: z.string(),
     firstOutput: z.enum(['content', 'reasoning', 'tool_calls']).optional(),
+    compression: z
+      .object({
+        id,
+        trigger: z.enum(['manual', 'automatic']),
+        status: z.enum(['running', 'completed', 'failed', 'cancelled', 'unpublished']),
+      })
+      .optional(),
     originMessage: z
       .object({
         storeId: id,
@@ -1307,6 +1314,7 @@ export const SessionViewSchema = z.object({
       runId: id,
       originStoreId: id,
       phase: z.enum(['preparing', 'summarizing', 'validating']),
+      executionId: id.optional(),
     })
     .optional(),
 });

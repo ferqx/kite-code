@@ -80396,6 +80396,19 @@ var schema71 = {
           role: { type: 'string', enum: ['system', 'user', 'assistant', 'tool'] },
           content: { type: 'string' },
           firstOutput: { type: 'string', enum: ['content', 'reasoning', 'tool_calls'] },
+          compression: {
+            type: 'object',
+            properties: {
+              id: { type: 'string', minLength: 1, maxLength: 128, pattern: '^[A-Za-z0-9_-]+$' },
+              trigger: { type: 'string', enum: ['manual', 'automatic'] },
+              status: {
+                type: 'string',
+                enum: ['running', 'completed', 'failed', 'cancelled', 'unpublished'],
+              },
+            },
+            required: ['id', 'trigger', 'status'],
+            additionalProperties: true,
+          },
           originMessage: {
             type: 'object',
             properties: {
@@ -82121,8 +82134,8 @@ function validate68(
                                           var valid7 = true;
                                         }
                                         if (valid7) {
-                                          if (data13.originMessage !== undefined) {
-                                            let data22 = data13.originMessage;
+                                          if (data13.compression !== undefined) {
+                                            let data22 = data13.compression;
                                             const _errs61 = errors;
                                             if (errors === _errs61) {
                                               if (
@@ -82132,14 +82145,11 @@ function validate68(
                                               ) {
                                                 let missing4;
                                                 if (
-                                                  (data22.storeId === undefined &&
-                                                    (missing4 = 'storeId')) ||
-                                                  (data22.sessionId === undefined &&
-                                                    (missing4 = 'sessionId')) ||
-                                                  (data22.messageId === undefined &&
-                                                    (missing4 = 'messageId')) ||
-                                                  (data22.runId === undefined &&
-                                                    (missing4 = 'runId'))
+                                                  (data22.id === undefined && (missing4 = 'id')) ||
+                                                  (data22.trigger === undefined &&
+                                                    (missing4 = 'trigger')) ||
+                                                  (data22.status === undefined &&
+                                                    (missing4 = 'status'))
                                                 ) {
                                                   validate68.errors = [
                                                     {
@@ -82147,9 +82157,9 @@ function validate68(
                                                         instancePath +
                                                         '/messages/' +
                                                         i1 +
-                                                        '/originMessage',
+                                                        '/compression',
                                                       schemaPath:
-                                                        '#/properties/messages/items/properties/originMessage/required',
+                                                        '#/properties/messages/items/properties/compression/required',
                                                       keyword: 'required',
                                                       params: { missingProperty: missing4 },
                                                       message:
@@ -82160,8 +82170,8 @@ function validate68(
                                                   ];
                                                   return false;
                                                 } else {
-                                                  if (data22.storeId !== undefined) {
-                                                    let data23 = data22.storeId;
+                                                  if (data22.id !== undefined) {
+                                                    let data23 = data22.id;
                                                     const _errs64 = errors;
                                                     if (errors === _errs64) {
                                                       if (typeof data23 === 'string') {
@@ -82172,9 +82182,9 @@ function validate68(
                                                                 instancePath +
                                                                 '/messages/' +
                                                                 i1 +
-                                                                '/originMessage/storeId',
+                                                                '/compression/id',
                                                               schemaPath:
-                                                                '#/properties/messages/items/properties/originMessage/properties/storeId/maxLength',
+                                                                '#/properties/messages/items/properties/compression/properties/id/maxLength',
                                                               keyword: 'maxLength',
                                                               params: { limit: 128 },
                                                               message:
@@ -82190,9 +82200,9 @@ function validate68(
                                                                   instancePath +
                                                                   '/messages/' +
                                                                   i1 +
-                                                                  '/originMessage/storeId',
+                                                                  '/compression/id',
                                                                 schemaPath:
-                                                                  '#/properties/messages/items/properties/originMessage/properties/storeId/minLength',
+                                                                  '#/properties/messages/items/properties/compression/properties/id/minLength',
                                                                 keyword: 'minLength',
                                                                 params: { limit: 1 },
                                                                 message:
@@ -82208,9 +82218,9 @@ function validate68(
                                                                     instancePath +
                                                                     '/messages/' +
                                                                     i1 +
-                                                                    '/originMessage/storeId',
+                                                                    '/compression/id',
                                                                   schemaPath:
-                                                                    '#/properties/messages/items/properties/originMessage/properties/storeId/pattern',
+                                                                    '#/properties/messages/items/properties/compression/properties/id/pattern',
                                                                   keyword: 'pattern',
                                                                   params: {
                                                                     pattern: '^[A-Za-z0-9_-]+$',
@@ -82232,9 +82242,9 @@ function validate68(
                                                               instancePath +
                                                               '/messages/' +
                                                               i1 +
-                                                              '/originMessage/storeId',
+                                                              '/compression/id',
                                                             schemaPath:
-                                                              '#/properties/messages/items/properties/originMessage/properties/storeId/type',
+                                                              '#/properties/messages/items/properties/compression/properties/id/type',
                                                             keyword: 'type',
                                                             params: { type: 'string' },
                                                             message: 'must be string',
@@ -82248,21 +82258,194 @@ function validate68(
                                                     var valid9 = true;
                                                   }
                                                   if (valid9) {
-                                                    if (data22.sessionId !== undefined) {
-                                                      let data24 = data22.sessionId;
+                                                    if (data22.trigger !== undefined) {
+                                                      let data24 = data22.trigger;
                                                       const _errs66 = errors;
-                                                      if (errors === _errs66) {
-                                                        if (typeof data24 === 'string') {
-                                                          if (func1(data24) > 128) {
+                                                      if (typeof data24 !== 'string') {
+                                                        validate68.errors = [
+                                                          {
+                                                            instancePath:
+                                                              instancePath +
+                                                              '/messages/' +
+                                                              i1 +
+                                                              '/compression/trigger',
+                                                            schemaPath:
+                                                              '#/properties/messages/items/properties/compression/properties/trigger/type',
+                                                            keyword: 'type',
+                                                            params: { type: 'string' },
+                                                            message: 'must be string',
+                                                          },
+                                                        ];
+                                                        return false;
+                                                      }
+                                                      if (
+                                                        !(
+                                                          data24 === 'manual' ||
+                                                          data24 === 'automatic'
+                                                        )
+                                                      ) {
+                                                        validate68.errors = [
+                                                          {
+                                                            instancePath:
+                                                              instancePath +
+                                                              '/messages/' +
+                                                              i1 +
+                                                              '/compression/trigger',
+                                                            schemaPath:
+                                                              '#/properties/messages/items/properties/compression/properties/trigger/enum',
+                                                            keyword: 'enum',
+                                                            params: {
+                                                              allowedValues:
+                                                                schema71.properties.messages.items
+                                                                  .properties.compression.properties
+                                                                  .trigger.enum,
+                                                            },
+                                                            message:
+                                                              'must be equal to one of the allowed values',
+                                                          },
+                                                        ];
+                                                        return false;
+                                                      }
+                                                      var valid9 = _errs66 === errors;
+                                                    } else {
+                                                      var valid9 = true;
+                                                    }
+                                                    if (valid9) {
+                                                      if (data22.status !== undefined) {
+                                                        let data25 = data22.status;
+                                                        const _errs68 = errors;
+                                                        if (typeof data25 !== 'string') {
+                                                          validate68.errors = [
+                                                            {
+                                                              instancePath:
+                                                                instancePath +
+                                                                '/messages/' +
+                                                                i1 +
+                                                                '/compression/status',
+                                                              schemaPath:
+                                                                '#/properties/messages/items/properties/compression/properties/status/type',
+                                                              keyword: 'type',
+                                                              params: { type: 'string' },
+                                                              message: 'must be string',
+                                                            },
+                                                          ];
+                                                          return false;
+                                                        }
+                                                        if (
+                                                          !(
+                                                            data25 === 'running' ||
+                                                            data25 === 'completed' ||
+                                                            data25 === 'failed' ||
+                                                            data25 === 'cancelled' ||
+                                                            data25 === 'unpublished'
+                                                          )
+                                                        ) {
+                                                          validate68.errors = [
+                                                            {
+                                                              instancePath:
+                                                                instancePath +
+                                                                '/messages/' +
+                                                                i1 +
+                                                                '/compression/status',
+                                                              schemaPath:
+                                                                '#/properties/messages/items/properties/compression/properties/status/enum',
+                                                              keyword: 'enum',
+                                                              params: {
+                                                                allowedValues:
+                                                                  schema71.properties.messages.items
+                                                                    .properties.compression
+                                                                    .properties.status.enum,
+                                                              },
+                                                              message:
+                                                                'must be equal to one of the allowed values',
+                                                            },
+                                                          ];
+                                                          return false;
+                                                        }
+                                                        var valid9 = _errs68 === errors;
+                                                      } else {
+                                                        var valid9 = true;
+                                                      }
+                                                    }
+                                                  }
+                                                }
+                                              } else {
+                                                validate68.errors = [
+                                                  {
+                                                    instancePath:
+                                                      instancePath +
+                                                      '/messages/' +
+                                                      i1 +
+                                                      '/compression',
+                                                    schemaPath:
+                                                      '#/properties/messages/items/properties/compression/type',
+                                                    keyword: 'type',
+                                                    params: { type: 'object' },
+                                                    message: 'must be object',
+                                                  },
+                                                ];
+                                                return false;
+                                              }
+                                            }
+                                            var valid7 = _errs61 === errors;
+                                          } else {
+                                            var valid7 = true;
+                                          }
+                                          if (valid7) {
+                                            if (data13.originMessage !== undefined) {
+                                              let data26 = data13.originMessage;
+                                              const _errs70 = errors;
+                                              if (errors === _errs70) {
+                                                if (
+                                                  data26 &&
+                                                  typeof data26 == 'object' &&
+                                                  !Array.isArray(data26)
+                                                ) {
+                                                  let missing5;
+                                                  if (
+                                                    (data26.storeId === undefined &&
+                                                      (missing5 = 'storeId')) ||
+                                                    (data26.sessionId === undefined &&
+                                                      (missing5 = 'sessionId')) ||
+                                                    (data26.messageId === undefined &&
+                                                      (missing5 = 'messageId')) ||
+                                                    (data26.runId === undefined &&
+                                                      (missing5 = 'runId'))
+                                                  ) {
+                                                    validate68.errors = [
+                                                      {
+                                                        instancePath:
+                                                          instancePath +
+                                                          '/messages/' +
+                                                          i1 +
+                                                          '/originMessage',
+                                                        schemaPath:
+                                                          '#/properties/messages/items/properties/originMessage/required',
+                                                        keyword: 'required',
+                                                        params: { missingProperty: missing5 },
+                                                        message:
+                                                          "must have required property '" +
+                                                          missing5 +
+                                                          "'",
+                                                      },
+                                                    ];
+                                                    return false;
+                                                  } else {
+                                                    if (data26.storeId !== undefined) {
+                                                      let data27 = data26.storeId;
+                                                      const _errs73 = errors;
+                                                      if (errors === _errs73) {
+                                                        if (typeof data27 === 'string') {
+                                                          if (func1(data27) > 128) {
                                                             validate68.errors = [
                                                               {
                                                                 instancePath:
                                                                   instancePath +
                                                                   '/messages/' +
                                                                   i1 +
-                                                                  '/originMessage/sessionId',
+                                                                  '/originMessage/storeId',
                                                                 schemaPath:
-                                                                  '#/properties/messages/items/properties/originMessage/properties/sessionId/maxLength',
+                                                                  '#/properties/messages/items/properties/originMessage/properties/storeId/maxLength',
                                                                 keyword: 'maxLength',
                                                                 params: { limit: 128 },
                                                                 message:
@@ -82271,16 +82454,16 @@ function validate68(
                                                             ];
                                                             return false;
                                                           } else {
-                                                            if (func1(data24) < 1) {
+                                                            if (func1(data27) < 1) {
                                                               validate68.errors = [
                                                                 {
                                                                   instancePath:
                                                                     instancePath +
                                                                     '/messages/' +
                                                                     i1 +
-                                                                    '/originMessage/sessionId',
+                                                                    '/originMessage/storeId',
                                                                   schemaPath:
-                                                                    '#/properties/messages/items/properties/originMessage/properties/sessionId/minLength',
+                                                                    '#/properties/messages/items/properties/originMessage/properties/storeId/minLength',
                                                                   keyword: 'minLength',
                                                                   params: { limit: 1 },
                                                                   message:
@@ -82289,16 +82472,16 @@ function validate68(
                                                               ];
                                                               return false;
                                                             } else {
-                                                              if (!pattern4.test(data24)) {
+                                                              if (!pattern4.test(data27)) {
                                                                 validate68.errors = [
                                                                   {
                                                                     instancePath:
                                                                       instancePath +
                                                                       '/messages/' +
                                                                       i1 +
-                                                                      '/originMessage/sessionId',
+                                                                      '/originMessage/storeId',
                                                                     schemaPath:
-                                                                      '#/properties/messages/items/properties/originMessage/properties/sessionId/pattern',
+                                                                      '#/properties/messages/items/properties/originMessage/properties/storeId/pattern',
                                                                     keyword: 'pattern',
                                                                     params: {
                                                                       pattern: '^[A-Za-z0-9_-]+$',
@@ -82320,9 +82503,9 @@ function validate68(
                                                                 instancePath +
                                                                 '/messages/' +
                                                                 i1 +
-                                                                '/originMessage/sessionId',
+                                                                '/originMessage/storeId',
                                                               schemaPath:
-                                                                '#/properties/messages/items/properties/originMessage/properties/sessionId/type',
+                                                                '#/properties/messages/items/properties/originMessage/properties/storeId/type',
                                                               keyword: 'type',
                                                               params: { type: 'string' },
                                                               message: 'must be string',
@@ -82331,26 +82514,26 @@ function validate68(
                                                           return false;
                                                         }
                                                       }
-                                                      var valid9 = _errs66 === errors;
+                                                      var valid10 = _errs73 === errors;
                                                     } else {
-                                                      var valid9 = true;
+                                                      var valid10 = true;
                                                     }
-                                                    if (valid9) {
-                                                      if (data22.messageId !== undefined) {
-                                                        let data25 = data22.messageId;
-                                                        const _errs68 = errors;
-                                                        if (errors === _errs68) {
-                                                          if (typeof data25 === 'string') {
-                                                            if (func1(data25) > 128) {
+                                                    if (valid10) {
+                                                      if (data26.sessionId !== undefined) {
+                                                        let data28 = data26.sessionId;
+                                                        const _errs75 = errors;
+                                                        if (errors === _errs75) {
+                                                          if (typeof data28 === 'string') {
+                                                            if (func1(data28) > 128) {
                                                               validate68.errors = [
                                                                 {
                                                                   instancePath:
                                                                     instancePath +
                                                                     '/messages/' +
                                                                     i1 +
-                                                                    '/originMessage/messageId',
+                                                                    '/originMessage/sessionId',
                                                                   schemaPath:
-                                                                    '#/properties/messages/items/properties/originMessage/properties/messageId/maxLength',
+                                                                    '#/properties/messages/items/properties/originMessage/properties/sessionId/maxLength',
                                                                   keyword: 'maxLength',
                                                                   params: { limit: 128 },
                                                                   message:
@@ -82359,16 +82542,16 @@ function validate68(
                                                               ];
                                                               return false;
                                                             } else {
-                                                              if (func1(data25) < 1) {
+                                                              if (func1(data28) < 1) {
                                                                 validate68.errors = [
                                                                   {
                                                                     instancePath:
                                                                       instancePath +
                                                                       '/messages/' +
                                                                       i1 +
-                                                                      '/originMessage/messageId',
+                                                                      '/originMessage/sessionId',
                                                                     schemaPath:
-                                                                      '#/properties/messages/items/properties/originMessage/properties/messageId/minLength',
+                                                                      '#/properties/messages/items/properties/originMessage/properties/sessionId/minLength',
                                                                     keyword: 'minLength',
                                                                     params: { limit: 1 },
                                                                     message:
@@ -82377,16 +82560,16 @@ function validate68(
                                                                 ];
                                                                 return false;
                                                               } else {
-                                                                if (!pattern4.test(data25)) {
+                                                                if (!pattern4.test(data28)) {
                                                                   validate68.errors = [
                                                                     {
                                                                       instancePath:
                                                                         instancePath +
                                                                         '/messages/' +
                                                                         i1 +
-                                                                        '/originMessage/messageId',
+                                                                        '/originMessage/sessionId',
                                                                       schemaPath:
-                                                                        '#/properties/messages/items/properties/originMessage/properties/messageId/pattern',
+                                                                        '#/properties/messages/items/properties/originMessage/properties/sessionId/pattern',
                                                                       keyword: 'pattern',
                                                                       params: {
                                                                         pattern: '^[A-Za-z0-9_-]+$',
@@ -82408,9 +82591,9 @@ function validate68(
                                                                   instancePath +
                                                                   '/messages/' +
                                                                   i1 +
-                                                                  '/originMessage/messageId',
+                                                                  '/originMessage/sessionId',
                                                                 schemaPath:
-                                                                  '#/properties/messages/items/properties/originMessage/properties/messageId/type',
+                                                                  '#/properties/messages/items/properties/originMessage/properties/sessionId/type',
                                                                 keyword: 'type',
                                                                 params: { type: 'string' },
                                                                 message: 'must be string',
@@ -82419,341 +82602,26 @@ function validate68(
                                                             return false;
                                                           }
                                                         }
-                                                        var valid9 = _errs68 === errors;
+                                                        var valid10 = _errs75 === errors;
                                                       } else {
-                                                        var valid9 = true;
+                                                        var valid10 = true;
                                                       }
-                                                      if (valid9) {
-                                                        if (data22.runId !== undefined) {
-                                                          let data26 = data22.runId;
-                                                          const _errs70 = errors;
-                                                          const _errs71 = errors;
-                                                          let valid10 = false;
-                                                          const _errs72 = errors;
-                                                          if (errors === _errs72) {
-                                                            if (typeof data26 === 'string') {
-                                                              if (func1(data26) > 128) {
-                                                                const err18 = {
-                                                                  instancePath:
-                                                                    instancePath +
-                                                                    '/messages/' +
-                                                                    i1 +
-                                                                    '/originMessage/runId',
-                                                                  schemaPath:
-                                                                    '#/properties/messages/items/properties/originMessage/properties/runId/anyOf/0/maxLength',
-                                                                  keyword: 'maxLength',
-                                                                  params: { limit: 128 },
-                                                                  message:
-                                                                    'must NOT have more than 128 characters',
-                                                                };
-                                                                if (vErrors === null) {
-                                                                  vErrors = [err18];
-                                                                } else {
-                                                                  vErrors.push(err18);
-                                                                }
-                                                                errors++;
-                                                              } else {
-                                                                if (func1(data26) < 1) {
-                                                                  const err19 = {
-                                                                    instancePath:
-                                                                      instancePath +
-                                                                      '/messages/' +
-                                                                      i1 +
-                                                                      '/originMessage/runId',
-                                                                    schemaPath:
-                                                                      '#/properties/messages/items/properties/originMessage/properties/runId/anyOf/0/minLength',
-                                                                    keyword: 'minLength',
-                                                                    params: { limit: 1 },
-                                                                    message:
-                                                                      'must NOT have fewer than 1 characters',
-                                                                  };
-                                                                  if (vErrors === null) {
-                                                                    vErrors = [err19];
-                                                                  } else {
-                                                                    vErrors.push(err19);
-                                                                  }
-                                                                  errors++;
-                                                                } else {
-                                                                  if (!pattern4.test(data26)) {
-                                                                    const err20 = {
-                                                                      instancePath:
-                                                                        instancePath +
-                                                                        '/messages/' +
-                                                                        i1 +
-                                                                        '/originMessage/runId',
-                                                                      schemaPath:
-                                                                        '#/properties/messages/items/properties/originMessage/properties/runId/anyOf/0/pattern',
-                                                                      keyword: 'pattern',
-                                                                      params: {
-                                                                        pattern: '^[A-Za-z0-9_-]+$',
-                                                                      },
-                                                                      message:
-                                                                        'must match pattern "' +
-                                                                        '^[A-Za-z0-9_-]+$' +
-                                                                        '"',
-                                                                    };
-                                                                    if (vErrors === null) {
-                                                                      vErrors = [err20];
-                                                                    } else {
-                                                                      vErrors.push(err20);
-                                                                    }
-                                                                    errors++;
-                                                                  }
-                                                                }
-                                                              }
-                                                            } else {
-                                                              const err21 = {
-                                                                instancePath:
-                                                                  instancePath +
-                                                                  '/messages/' +
-                                                                  i1 +
-                                                                  '/originMessage/runId',
-                                                                schemaPath:
-                                                                  '#/properties/messages/items/properties/originMessage/properties/runId/anyOf/0/type',
-                                                                keyword: 'type',
-                                                                params: { type: 'string' },
-                                                                message: 'must be string',
-                                                              };
-                                                              if (vErrors === null) {
-                                                                vErrors = [err21];
-                                                              } else {
-                                                                vErrors.push(err21);
-                                                              }
-                                                              errors++;
-                                                            }
-                                                          }
-                                                          var _valid3 = _errs72 === errors;
-                                                          valid10 = valid10 || _valid3;
-                                                          const _errs74 = errors;
-                                                          if (data26 !== null) {
-                                                            const err22 = {
-                                                              instancePath:
-                                                                instancePath +
-                                                                '/messages/' +
-                                                                i1 +
-                                                                '/originMessage/runId',
-                                                              schemaPath:
-                                                                '#/properties/messages/items/properties/originMessage/properties/runId/anyOf/1/type',
-                                                              keyword: 'type',
-                                                              params: { type: 'null' },
-                                                              message: 'must be null',
-                                                            };
-                                                            if (vErrors === null) {
-                                                              vErrors = [err22];
-                                                            } else {
-                                                              vErrors.push(err22);
-                                                            }
-                                                            errors++;
-                                                          }
-                                                          var _valid3 = _errs74 === errors;
-                                                          valid10 = valid10 || _valid3;
-                                                          if (!valid10) {
-                                                            const err23 = {
-                                                              instancePath:
-                                                                instancePath +
-                                                                '/messages/' +
-                                                                i1 +
-                                                                '/originMessage/runId',
-                                                              schemaPath:
-                                                                '#/properties/messages/items/properties/originMessage/properties/runId/anyOf',
-                                                              keyword: 'anyOf',
-                                                              params: {},
-                                                              message:
-                                                                'must match a schema in anyOf',
-                                                            };
-                                                            if (vErrors === null) {
-                                                              vErrors = [err23];
-                                                            } else {
-                                                              vErrors.push(err23);
-                                                            }
-                                                            errors++;
-                                                            validate68.errors = vErrors;
-                                                            return false;
-                                                          } else {
-                                                            errors = _errs71;
-                                                            if (vErrors !== null) {
-                                                              if (_errs71) {
-                                                                vErrors.length = _errs71;
-                                                              } else {
-                                                                vErrors = null;
-                                                              }
-                                                            }
-                                                          }
-                                                          var valid9 = _errs70 === errors;
-                                                        } else {
-                                                          var valid9 = true;
-                                                        }
-                                                      }
-                                                    }
-                                                  }
-                                                }
-                                              } else {
-                                                validate68.errors = [
-                                                  {
-                                                    instancePath:
-                                                      instancePath +
-                                                      '/messages/' +
-                                                      i1 +
-                                                      '/originMessage',
-                                                    schemaPath:
-                                                      '#/properties/messages/items/properties/originMessage/type',
-                                                    keyword: 'type',
-                                                    params: { type: 'object' },
-                                                    message: 'must be object',
-                                                  },
-                                                ];
-                                                return false;
-                                              }
-                                            }
-                                            var valid7 = _errs61 === errors;
-                                          } else {
-                                            var valid7 = true;
-                                          }
-                                          if (valid7) {
-                                            if (data13.contentFormat !== undefined) {
-                                              let data27 = data13.contentFormat;
-                                              const _errs76 = errors;
-                                              if (typeof data27 !== 'string') {
-                                                validate68.errors = [
-                                                  {
-                                                    instancePath:
-                                                      instancePath +
-                                                      '/messages/' +
-                                                      i1 +
-                                                      '/contentFormat',
-                                                    schemaPath:
-                                                      '#/properties/messages/items/properties/contentFormat/type',
-                                                    keyword: 'type',
-                                                    params: { type: 'string' },
-                                                    message: 'must be string',
-                                                  },
-                                                ];
-                                                return false;
-                                              }
-                                              if (data27 !== 'unsupported') {
-                                                validate68.errors = [
-                                                  {
-                                                    instancePath:
-                                                      instancePath +
-                                                      '/messages/' +
-                                                      i1 +
-                                                      '/contentFormat',
-                                                    schemaPath:
-                                                      '#/properties/messages/items/properties/contentFormat/const',
-                                                    keyword: 'const',
-                                                    params: { allowedValue: 'unsupported' },
-                                                    message: 'must be equal to constant',
-                                                  },
-                                                ];
-                                                return false;
-                                              }
-                                              var valid7 = _errs76 === errors;
-                                            } else {
-                                              var valid7 = true;
-                                            }
-                                            if (valid7) {
-                                              if (data13.outputBody !== undefined) {
-                                                let data28 = data13.outputBody;
-                                                const _errs78 = errors;
-                                                if (errors === _errs78) {
-                                                  if (
-                                                    data28 &&
-                                                    typeof data28 == 'object' &&
-                                                    !Array.isArray(data28)
-                                                  ) {
-                                                    let missing5;
-                                                    if (
-                                                      (data28.kind === undefined &&
-                                                        (missing5 = 'kind')) ||
-                                                      (data28.executionId === undefined &&
-                                                        (missing5 = 'executionId')) ||
-                                                      (data28.complete === undefined &&
-                                                        (missing5 = 'complete')) ||
-                                                      (data28.contentBytes === undefined &&
-                                                        (missing5 = 'contentBytes')) ||
-                                                      (data28.reasoningBytes === undefined &&
-                                                        (missing5 = 'reasoningBytes')) ||
-                                                      (data28.toolCallCount === undefined &&
-                                                        (missing5 = 'toolCallCount'))
-                                                    ) {
-                                                      validate68.errors = [
-                                                        {
-                                                          instancePath:
-                                                            instancePath +
-                                                            '/messages/' +
-                                                            i1 +
-                                                            '/outputBody',
-                                                          schemaPath:
-                                                            '#/properties/messages/items/properties/outputBody/required',
-                                                          keyword: 'required',
-                                                          params: { missingProperty: missing5 },
-                                                          message:
-                                                            "must have required property '" +
-                                                            missing5 +
-                                                            "'",
-                                                        },
-                                                      ];
-                                                      return false;
-                                                    } else {
-                                                      if (data28.kind !== undefined) {
-                                                        let data29 = data28.kind;
-                                                        const _errs81 = errors;
-                                                        if (typeof data29 !== 'string') {
-                                                          validate68.errors = [
-                                                            {
-                                                              instancePath:
-                                                                instancePath +
-                                                                '/messages/' +
-                                                                i1 +
-                                                                '/outputBody/kind',
-                                                              schemaPath:
-                                                                '#/properties/messages/items/properties/outputBody/properties/kind/type',
-                                                              keyword: 'type',
-                                                              params: { type: 'string' },
-                                                              message: 'must be string',
-                                                            },
-                                                          ];
-                                                          return false;
-                                                        }
-                                                        if (data29 !== 'model_output') {
-                                                          validate68.errors = [
-                                                            {
-                                                              instancePath:
-                                                                instancePath +
-                                                                '/messages/' +
-                                                                i1 +
-                                                                '/outputBody/kind',
-                                                              schemaPath:
-                                                                '#/properties/messages/items/properties/outputBody/properties/kind/const',
-                                                              keyword: 'const',
-                                                              params: {
-                                                                allowedValue: 'model_output',
-                                                              },
-                                                              message: 'must be equal to constant',
-                                                            },
-                                                          ];
-                                                          return false;
-                                                        }
-                                                        var valid11 = _errs81 === errors;
-                                                      } else {
-                                                        var valid11 = true;
-                                                      }
-                                                      if (valid11) {
-                                                        if (data28.executionId !== undefined) {
-                                                          let data30 = data28.executionId;
-                                                          const _errs83 = errors;
-                                                          if (errors === _errs83) {
-                                                            if (typeof data30 === 'string') {
-                                                              if (func1(data30) > 128) {
+                                                      if (valid10) {
+                                                        if (data26.messageId !== undefined) {
+                                                          let data29 = data26.messageId;
+                                                          const _errs77 = errors;
+                                                          if (errors === _errs77) {
+                                                            if (typeof data29 === 'string') {
+                                                              if (func1(data29) > 128) {
                                                                 validate68.errors = [
                                                                   {
                                                                     instancePath:
                                                                       instancePath +
                                                                       '/messages/' +
                                                                       i1 +
-                                                                      '/outputBody/executionId',
+                                                                      '/originMessage/messageId',
                                                                     schemaPath:
-                                                                      '#/properties/messages/items/properties/outputBody/properties/executionId/maxLength',
+                                                                      '#/properties/messages/items/properties/originMessage/properties/messageId/maxLength',
                                                                     keyword: 'maxLength',
                                                                     params: { limit: 128 },
                                                                     message:
@@ -82762,16 +82630,16 @@ function validate68(
                                                                 ];
                                                                 return false;
                                                               } else {
-                                                                if (func1(data30) < 1) {
+                                                                if (func1(data29) < 1) {
                                                                   validate68.errors = [
                                                                     {
                                                                       instancePath:
                                                                         instancePath +
                                                                         '/messages/' +
                                                                         i1 +
-                                                                        '/outputBody/executionId',
+                                                                        '/originMessage/messageId',
                                                                       schemaPath:
-                                                                        '#/properties/messages/items/properties/outputBody/properties/executionId/minLength',
+                                                                        '#/properties/messages/items/properties/originMessage/properties/messageId/minLength',
                                                                       keyword: 'minLength',
                                                                       params: { limit: 1 },
                                                                       message:
@@ -82780,16 +82648,16 @@ function validate68(
                                                                   ];
                                                                   return false;
                                                                 } else {
-                                                                  if (!pattern4.test(data30)) {
+                                                                  if (!pattern4.test(data29)) {
                                                                     validate68.errors = [
                                                                       {
                                                                         instancePath:
                                                                           instancePath +
                                                                           '/messages/' +
                                                                           i1 +
-                                                                          '/outputBody/executionId',
+                                                                          '/originMessage/messageId',
                                                                         schemaPath:
-                                                                          '#/properties/messages/items/properties/outputBody/properties/executionId/pattern',
+                                                                          '#/properties/messages/items/properties/originMessage/properties/messageId/pattern',
                                                                         keyword: 'pattern',
                                                                         params: {
                                                                           pattern:
@@ -82812,9 +82680,9 @@ function validate68(
                                                                     instancePath +
                                                                     '/messages/' +
                                                                     i1 +
-                                                                    '/outputBody/executionId',
+                                                                    '/originMessage/messageId',
                                                                   schemaPath:
-                                                                    '#/properties/messages/items/properties/outputBody/properties/executionId/type',
+                                                                    '#/properties/messages/items/properties/originMessage/properties/messageId/type',
                                                                   keyword: 'type',
                                                                   params: { type: 'string' },
                                                                   message: 'must be string',
@@ -82823,105 +82691,460 @@ function validate68(
                                                               return false;
                                                             }
                                                           }
-                                                          var valid11 = _errs83 === errors;
+                                                          var valid10 = _errs77 === errors;
                                                         } else {
-                                                          var valid11 = true;
+                                                          var valid10 = true;
                                                         }
-                                                        if (valid11) {
-                                                          if (data28.complete !== undefined) {
-                                                            const _errs85 = errors;
-                                                            if (
-                                                              typeof data28.complete !== 'boolean'
-                                                            ) {
-                                                              validate68.errors = [
-                                                                {
-                                                                  instancePath:
-                                                                    instancePath +
-                                                                    '/messages/' +
-                                                                    i1 +
-                                                                    '/outputBody/complete',
-                                                                  schemaPath:
-                                                                    '#/properties/messages/items/properties/outputBody/properties/complete/type',
-                                                                  keyword: 'type',
-                                                                  params: { type: 'boolean' },
-                                                                  message: 'must be boolean',
-                                                                },
-                                                              ];
-                                                              return false;
-                                                            }
-                                                            var valid11 = _errs85 === errors;
-                                                          } else {
-                                                            var valid11 = true;
-                                                          }
-                                                          if (valid11) {
-                                                            if (data28.contentBytes !== undefined) {
-                                                              let data32 = data28.contentBytes;
-                                                              const _errs87 = errors;
-                                                              if (errors === _errs87) {
-                                                                if (typeof data32 === 'string') {
-                                                                  if (!pattern9.test(data32)) {
-                                                                    validate68.errors = [
-                                                                      {
+                                                        if (valid10) {
+                                                          if (data26.runId !== undefined) {
+                                                            let data30 = data26.runId;
+                                                            const _errs79 = errors;
+                                                            const _errs80 = errors;
+                                                            let valid11 = false;
+                                                            const _errs81 = errors;
+                                                            if (errors === _errs81) {
+                                                              if (typeof data30 === 'string') {
+                                                                if (func1(data30) > 128) {
+                                                                  const err18 = {
+                                                                    instancePath:
+                                                                      instancePath +
+                                                                      '/messages/' +
+                                                                      i1 +
+                                                                      '/originMessage/runId',
+                                                                    schemaPath:
+                                                                      '#/properties/messages/items/properties/originMessage/properties/runId/anyOf/0/maxLength',
+                                                                    keyword: 'maxLength',
+                                                                    params: { limit: 128 },
+                                                                    message:
+                                                                      'must NOT have more than 128 characters',
+                                                                  };
+                                                                  if (vErrors === null) {
+                                                                    vErrors = [err18];
+                                                                  } else {
+                                                                    vErrors.push(err18);
+                                                                  }
+                                                                  errors++;
+                                                                } else {
+                                                                  if (func1(data30) < 1) {
+                                                                    const err19 = {
+                                                                      instancePath:
+                                                                        instancePath +
+                                                                        '/messages/' +
+                                                                        i1 +
+                                                                        '/originMessage/runId',
+                                                                      schemaPath:
+                                                                        '#/properties/messages/items/properties/originMessage/properties/runId/anyOf/0/minLength',
+                                                                      keyword: 'minLength',
+                                                                      params: { limit: 1 },
+                                                                      message:
+                                                                        'must NOT have fewer than 1 characters',
+                                                                    };
+                                                                    if (vErrors === null) {
+                                                                      vErrors = [err19];
+                                                                    } else {
+                                                                      vErrors.push(err19);
+                                                                    }
+                                                                    errors++;
+                                                                  } else {
+                                                                    if (!pattern4.test(data30)) {
+                                                                      const err20 = {
                                                                         instancePath:
                                                                           instancePath +
                                                                           '/messages/' +
                                                                           i1 +
-                                                                          '/outputBody/contentBytes',
+                                                                          '/originMessage/runId',
                                                                         schemaPath:
-                                                                          '#/properties/messages/items/properties/outputBody/properties/contentBytes/pattern',
+                                                                          '#/properties/messages/items/properties/originMessage/properties/runId/anyOf/0/pattern',
                                                                         keyword: 'pattern',
                                                                         params: {
                                                                           pattern:
-                                                                            '^(0|[1-9][0-9]*)$',
+                                                                            '^[A-Za-z0-9_-]+$',
                                                                         },
                                                                         message:
                                                                           'must match pattern "' +
-                                                                          '^(0|[1-9][0-9]*)$' +
+                                                                          '^[A-Za-z0-9_-]+$' +
                                                                           '"',
-                                                                      },
-                                                                    ];
-                                                                    return false;
+                                                                      };
+                                                                      if (vErrors === null) {
+                                                                        vErrors = [err20];
+                                                                      } else {
+                                                                        vErrors.push(err20);
+                                                                      }
+                                                                      errors++;
+                                                                    }
                                                                   }
+                                                                }
+                                                              } else {
+                                                                const err21 = {
+                                                                  instancePath:
+                                                                    instancePath +
+                                                                    '/messages/' +
+                                                                    i1 +
+                                                                    '/originMessage/runId',
+                                                                  schemaPath:
+                                                                    '#/properties/messages/items/properties/originMessage/properties/runId/anyOf/0/type',
+                                                                  keyword: 'type',
+                                                                  params: { type: 'string' },
+                                                                  message: 'must be string',
+                                                                };
+                                                                if (vErrors === null) {
+                                                                  vErrors = [err21];
                                                                 } else {
+                                                                  vErrors.push(err21);
+                                                                }
+                                                                errors++;
+                                                              }
+                                                            }
+                                                            var _valid3 = _errs81 === errors;
+                                                            valid11 = valid11 || _valid3;
+                                                            const _errs83 = errors;
+                                                            if (data30 !== null) {
+                                                              const err22 = {
+                                                                instancePath:
+                                                                  instancePath +
+                                                                  '/messages/' +
+                                                                  i1 +
+                                                                  '/originMessage/runId',
+                                                                schemaPath:
+                                                                  '#/properties/messages/items/properties/originMessage/properties/runId/anyOf/1/type',
+                                                                keyword: 'type',
+                                                                params: { type: 'null' },
+                                                                message: 'must be null',
+                                                              };
+                                                              if (vErrors === null) {
+                                                                vErrors = [err22];
+                                                              } else {
+                                                                vErrors.push(err22);
+                                                              }
+                                                              errors++;
+                                                            }
+                                                            var _valid3 = _errs83 === errors;
+                                                            valid11 = valid11 || _valid3;
+                                                            if (!valid11) {
+                                                              const err23 = {
+                                                                instancePath:
+                                                                  instancePath +
+                                                                  '/messages/' +
+                                                                  i1 +
+                                                                  '/originMessage/runId',
+                                                                schemaPath:
+                                                                  '#/properties/messages/items/properties/originMessage/properties/runId/anyOf',
+                                                                keyword: 'anyOf',
+                                                                params: {},
+                                                                message:
+                                                                  'must match a schema in anyOf',
+                                                              };
+                                                              if (vErrors === null) {
+                                                                vErrors = [err23];
+                                                              } else {
+                                                                vErrors.push(err23);
+                                                              }
+                                                              errors++;
+                                                              validate68.errors = vErrors;
+                                                              return false;
+                                                            } else {
+                                                              errors = _errs80;
+                                                              if (vErrors !== null) {
+                                                                if (_errs80) {
+                                                                  vErrors.length = _errs80;
+                                                                } else {
+                                                                  vErrors = null;
+                                                                }
+                                                              }
+                                                            }
+                                                            var valid10 = _errs79 === errors;
+                                                          } else {
+                                                            var valid10 = true;
+                                                          }
+                                                        }
+                                                      }
+                                                    }
+                                                  }
+                                                } else {
+                                                  validate68.errors = [
+                                                    {
+                                                      instancePath:
+                                                        instancePath +
+                                                        '/messages/' +
+                                                        i1 +
+                                                        '/originMessage',
+                                                      schemaPath:
+                                                        '#/properties/messages/items/properties/originMessage/type',
+                                                      keyword: 'type',
+                                                      params: { type: 'object' },
+                                                      message: 'must be object',
+                                                    },
+                                                  ];
+                                                  return false;
+                                                }
+                                              }
+                                              var valid7 = _errs70 === errors;
+                                            } else {
+                                              var valid7 = true;
+                                            }
+                                            if (valid7) {
+                                              if (data13.contentFormat !== undefined) {
+                                                let data31 = data13.contentFormat;
+                                                const _errs85 = errors;
+                                                if (typeof data31 !== 'string') {
+                                                  validate68.errors = [
+                                                    {
+                                                      instancePath:
+                                                        instancePath +
+                                                        '/messages/' +
+                                                        i1 +
+                                                        '/contentFormat',
+                                                      schemaPath:
+                                                        '#/properties/messages/items/properties/contentFormat/type',
+                                                      keyword: 'type',
+                                                      params: { type: 'string' },
+                                                      message: 'must be string',
+                                                    },
+                                                  ];
+                                                  return false;
+                                                }
+                                                if (data31 !== 'unsupported') {
+                                                  validate68.errors = [
+                                                    {
+                                                      instancePath:
+                                                        instancePath +
+                                                        '/messages/' +
+                                                        i1 +
+                                                        '/contentFormat',
+                                                      schemaPath:
+                                                        '#/properties/messages/items/properties/contentFormat/const',
+                                                      keyword: 'const',
+                                                      params: { allowedValue: 'unsupported' },
+                                                      message: 'must be equal to constant',
+                                                    },
+                                                  ];
+                                                  return false;
+                                                }
+                                                var valid7 = _errs85 === errors;
+                                              } else {
+                                                var valid7 = true;
+                                              }
+                                              if (valid7) {
+                                                if (data13.outputBody !== undefined) {
+                                                  let data32 = data13.outputBody;
+                                                  const _errs87 = errors;
+                                                  if (errors === _errs87) {
+                                                    if (
+                                                      data32 &&
+                                                      typeof data32 == 'object' &&
+                                                      !Array.isArray(data32)
+                                                    ) {
+                                                      let missing6;
+                                                      if (
+                                                        (data32.kind === undefined &&
+                                                          (missing6 = 'kind')) ||
+                                                        (data32.executionId === undefined &&
+                                                          (missing6 = 'executionId')) ||
+                                                        (data32.complete === undefined &&
+                                                          (missing6 = 'complete')) ||
+                                                        (data32.contentBytes === undefined &&
+                                                          (missing6 = 'contentBytes')) ||
+                                                        (data32.reasoningBytes === undefined &&
+                                                          (missing6 = 'reasoningBytes')) ||
+                                                        (data32.toolCallCount === undefined &&
+                                                          (missing6 = 'toolCallCount'))
+                                                      ) {
+                                                        validate68.errors = [
+                                                          {
+                                                            instancePath:
+                                                              instancePath +
+                                                              '/messages/' +
+                                                              i1 +
+                                                              '/outputBody',
+                                                            schemaPath:
+                                                              '#/properties/messages/items/properties/outputBody/required',
+                                                            keyword: 'required',
+                                                            params: { missingProperty: missing6 },
+                                                            message:
+                                                              "must have required property '" +
+                                                              missing6 +
+                                                              "'",
+                                                          },
+                                                        ];
+                                                        return false;
+                                                      } else {
+                                                        if (data32.kind !== undefined) {
+                                                          let data33 = data32.kind;
+                                                          const _errs90 = errors;
+                                                          if (typeof data33 !== 'string') {
+                                                            validate68.errors = [
+                                                              {
+                                                                instancePath:
+                                                                  instancePath +
+                                                                  '/messages/' +
+                                                                  i1 +
+                                                                  '/outputBody/kind',
+                                                                schemaPath:
+                                                                  '#/properties/messages/items/properties/outputBody/properties/kind/type',
+                                                                keyword: 'type',
+                                                                params: { type: 'string' },
+                                                                message: 'must be string',
+                                                              },
+                                                            ];
+                                                            return false;
+                                                          }
+                                                          if (data33 !== 'model_output') {
+                                                            validate68.errors = [
+                                                              {
+                                                                instancePath:
+                                                                  instancePath +
+                                                                  '/messages/' +
+                                                                  i1 +
+                                                                  '/outputBody/kind',
+                                                                schemaPath:
+                                                                  '#/properties/messages/items/properties/outputBody/properties/kind/const',
+                                                                keyword: 'const',
+                                                                params: {
+                                                                  allowedValue: 'model_output',
+                                                                },
+                                                                message:
+                                                                  'must be equal to constant',
+                                                              },
+                                                            ];
+                                                            return false;
+                                                          }
+                                                          var valid12 = _errs90 === errors;
+                                                        } else {
+                                                          var valid12 = true;
+                                                        }
+                                                        if (valid12) {
+                                                          if (data32.executionId !== undefined) {
+                                                            let data34 = data32.executionId;
+                                                            const _errs92 = errors;
+                                                            if (errors === _errs92) {
+                                                              if (typeof data34 === 'string') {
+                                                                if (func1(data34) > 128) {
                                                                   validate68.errors = [
                                                                     {
                                                                       instancePath:
                                                                         instancePath +
                                                                         '/messages/' +
                                                                         i1 +
-                                                                        '/outputBody/contentBytes',
+                                                                        '/outputBody/executionId',
                                                                       schemaPath:
-                                                                        '#/properties/messages/items/properties/outputBody/properties/contentBytes/type',
-                                                                      keyword: 'type',
-                                                                      params: { type: 'string' },
-                                                                      message: 'must be string',
+                                                                        '#/properties/messages/items/properties/outputBody/properties/executionId/maxLength',
+                                                                      keyword: 'maxLength',
+                                                                      params: { limit: 128 },
+                                                                      message:
+                                                                        'must NOT have more than 128 characters',
                                                                     },
                                                                   ];
                                                                   return false;
-                                                                }
-                                                              }
-                                                              var valid11 = _errs87 === errors;
-                                                            } else {
-                                                              var valid11 = true;
-                                                            }
-                                                            if (valid11) {
-                                                              if (
-                                                                data28.reasoningBytes !== undefined
-                                                              ) {
-                                                                let data33 = data28.reasoningBytes;
-                                                                const _errs89 = errors;
-                                                                if (errors === _errs89) {
-                                                                  if (typeof data33 === 'string') {
-                                                                    if (!pattern9.test(data33)) {
+                                                                } else {
+                                                                  if (func1(data34) < 1) {
+                                                                    validate68.errors = [
+                                                                      {
+                                                                        instancePath:
+                                                                          instancePath +
+                                                                          '/messages/' +
+                                                                          i1 +
+                                                                          '/outputBody/executionId',
+                                                                        schemaPath:
+                                                                          '#/properties/messages/items/properties/outputBody/properties/executionId/minLength',
+                                                                        keyword: 'minLength',
+                                                                        params: { limit: 1 },
+                                                                        message:
+                                                                          'must NOT have fewer than 1 characters',
+                                                                      },
+                                                                    ];
+                                                                    return false;
+                                                                  } else {
+                                                                    if (!pattern4.test(data34)) {
                                                                       validate68.errors = [
                                                                         {
                                                                           instancePath:
                                                                             instancePath +
                                                                             '/messages/' +
                                                                             i1 +
-                                                                            '/outputBody/reasoningBytes',
+                                                                            '/outputBody/executionId',
                                                                           schemaPath:
-                                                                            '#/properties/messages/items/properties/outputBody/properties/reasoningBytes/pattern',
+                                                                            '#/properties/messages/items/properties/outputBody/properties/executionId/pattern',
+                                                                          keyword: 'pattern',
+                                                                          params: {
+                                                                            pattern:
+                                                                              '^[A-Za-z0-9_-]+$',
+                                                                          },
+                                                                          message:
+                                                                            'must match pattern "' +
+                                                                            '^[A-Za-z0-9_-]+$' +
+                                                                            '"',
+                                                                        },
+                                                                      ];
+                                                                      return false;
+                                                                    }
+                                                                  }
+                                                                }
+                                                              } else {
+                                                                validate68.errors = [
+                                                                  {
+                                                                    instancePath:
+                                                                      instancePath +
+                                                                      '/messages/' +
+                                                                      i1 +
+                                                                      '/outputBody/executionId',
+                                                                    schemaPath:
+                                                                      '#/properties/messages/items/properties/outputBody/properties/executionId/type',
+                                                                    keyword: 'type',
+                                                                    params: { type: 'string' },
+                                                                    message: 'must be string',
+                                                                  },
+                                                                ];
+                                                                return false;
+                                                              }
+                                                            }
+                                                            var valid12 = _errs92 === errors;
+                                                          } else {
+                                                            var valid12 = true;
+                                                          }
+                                                          if (valid12) {
+                                                            if (data32.complete !== undefined) {
+                                                              const _errs94 = errors;
+                                                              if (
+                                                                typeof data32.complete !== 'boolean'
+                                                              ) {
+                                                                validate68.errors = [
+                                                                  {
+                                                                    instancePath:
+                                                                      instancePath +
+                                                                      '/messages/' +
+                                                                      i1 +
+                                                                      '/outputBody/complete',
+                                                                    schemaPath:
+                                                                      '#/properties/messages/items/properties/outputBody/properties/complete/type',
+                                                                    keyword: 'type',
+                                                                    params: { type: 'boolean' },
+                                                                    message: 'must be boolean',
+                                                                  },
+                                                                ];
+                                                                return false;
+                                                              }
+                                                              var valid12 = _errs94 === errors;
+                                                            } else {
+                                                              var valid12 = true;
+                                                            }
+                                                            if (valid12) {
+                                                              if (
+                                                                data32.contentBytes !== undefined
+                                                              ) {
+                                                                let data36 = data32.contentBytes;
+                                                                const _errs96 = errors;
+                                                                if (errors === _errs96) {
+                                                                  if (typeof data36 === 'string') {
+                                                                    if (!pattern9.test(data36)) {
+                                                                      validate68.errors = [
+                                                                        {
+                                                                          instancePath:
+                                                                            instancePath +
+                                                                            '/messages/' +
+                                                                            i1 +
+                                                                            '/outputBody/contentBytes',
+                                                                          schemaPath:
+                                                                            '#/properties/messages/items/properties/outputBody/properties/contentBytes/pattern',
                                                                           keyword: 'pattern',
                                                                           params: {
                                                                             pattern:
@@ -82942,9 +83165,9 @@ function validate68(
                                                                           instancePath +
                                                                           '/messages/' +
                                                                           i1 +
-                                                                          '/outputBody/reasoningBytes',
+                                                                          '/outputBody/contentBytes',
                                                                         schemaPath:
-                                                                          '#/properties/messages/items/properties/outputBody/properties/reasoningBytes/type',
+                                                                          '#/properties/messages/items/properties/outputBody/properties/contentBytes/type',
                                                                         keyword: 'type',
                                                                         params: { type: 'string' },
                                                                         message: 'must be string',
@@ -82953,120 +83176,55 @@ function validate68(
                                                                     return false;
                                                                   }
                                                                 }
-                                                                var valid11 = _errs89 === errors;
+                                                                var valid12 = _errs96 === errors;
                                                               } else {
-                                                                var valid11 = true;
+                                                                var valid12 = true;
                                                               }
-                                                              if (valid11) {
+                                                              if (valid12) {
                                                                 if (
-                                                                  data28.toolCallCount !== undefined
+                                                                  data32.reasoningBytes !==
+                                                                  undefined
                                                                 ) {
-                                                                  let data34 = data28.toolCallCount;
-                                                                  const _errs91 = errors;
-                                                                  if (
-                                                                    !(
-                                                                      typeof data34 == 'number' &&
-                                                                      !(data34 % 1) &&
-                                                                      !isNaN(data34) &&
-                                                                      isFinite(data34)
-                                                                    )
-                                                                  ) {
-                                                                    validate68.errors = [
-                                                                      {
-                                                                        instancePath:
-                                                                          instancePath +
-                                                                          '/messages/' +
-                                                                          i1 +
-                                                                          '/outputBody/toolCallCount',
-                                                                        schemaPath:
-                                                                          '#/properties/messages/items/properties/outputBody/properties/toolCallCount/type',
-                                                                        keyword: 'type',
-                                                                        params: { type: 'integer' },
-                                                                        message: 'must be integer',
-                                                                      },
-                                                                    ];
-                                                                    return false;
-                                                                  }
-                                                                  if (errors === _errs91) {
+                                                                  let data37 =
+                                                                    data32.reasoningBytes;
+                                                                  const _errs98 = errors;
+                                                                  if (errors === _errs98) {
                                                                     if (
-                                                                      typeof data34 == 'number' &&
-                                                                      isFinite(data34)
+                                                                      typeof data37 === 'string'
                                                                     ) {
-                                                                      if (
-                                                                        data34 > 9007199254740991 ||
-                                                                        isNaN(data34)
-                                                                      ) {
+                                                                      if (!pattern9.test(data37)) {
                                                                         validate68.errors = [
                                                                           {
                                                                             instancePath:
                                                                               instancePath +
                                                                               '/messages/' +
                                                                               i1 +
-                                                                              '/outputBody/toolCallCount',
+                                                                              '/outputBody/reasoningBytes',
                                                                             schemaPath:
-                                                                              '#/properties/messages/items/properties/outputBody/properties/toolCallCount/maximum',
-                                                                            keyword: 'maximum',
+                                                                              '#/properties/messages/items/properties/outputBody/properties/reasoningBytes/pattern',
+                                                                            keyword: 'pattern',
                                                                             params: {
-                                                                              comparison: '<=',
-                                                                              limit: 9007199254740991,
+                                                                              pattern:
+                                                                                '^(0|[1-9][0-9]*)$',
                                                                             },
                                                                             message:
-                                                                              'must be <= 9007199254740991',
+                                                                              'must match pattern "' +
+                                                                              '^(0|[1-9][0-9]*)$' +
+                                                                              '"',
                                                                           },
                                                                         ];
                                                                         return false;
-                                                                      } else {
-                                                                        if (
-                                                                          data34 < 0 ||
-                                                                          isNaN(data34)
-                                                                        ) {
-                                                                          validate68.errors = [
-                                                                            {
-                                                                              instancePath:
-                                                                                instancePath +
-                                                                                '/messages/' +
-                                                                                i1 +
-                                                                                '/outputBody/toolCallCount',
-                                                                              schemaPath:
-                                                                                '#/properties/messages/items/properties/outputBody/properties/toolCallCount/minimum',
-                                                                              keyword: 'minimum',
-                                                                              params: {
-                                                                                comparison: '>=',
-                                                                                limit: 0,
-                                                                              },
-                                                                              message:
-                                                                                'must be >= 0',
-                                                                            },
-                                                                          ];
-                                                                          return false;
-                                                                        }
                                                                       }
-                                                                    }
-                                                                  }
-                                                                  var valid11 = _errs91 === errors;
-                                                                } else {
-                                                                  var valid11 = true;
-                                                                }
-                                                                if (valid11) {
-                                                                  if (
-                                                                    data28.readAvailability !==
-                                                                    undefined
-                                                                  ) {
-                                                                    let data35 =
-                                                                      data28.readAvailability;
-                                                                    const _errs93 = errors;
-                                                                    if (
-                                                                      typeof data35 !== 'string'
-                                                                    ) {
+                                                                    } else {
                                                                       validate68.errors = [
                                                                         {
                                                                           instancePath:
                                                                             instancePath +
                                                                             '/messages/' +
                                                                             i1 +
-                                                                            '/outputBody/readAvailability',
+                                                                            '/outputBody/reasoningBytes',
                                                                           schemaPath:
-                                                                            '#/properties/messages/items/properties/outputBody/properties/readAvailability/type',
+                                                                            '#/properties/messages/items/properties/outputBody/properties/reasoningBytes/type',
                                                                           keyword: 'type',
                                                                           params: {
                                                                             type: 'string',
@@ -83076,31 +83234,166 @@ function validate68(
                                                                       ];
                                                                       return false;
                                                                     }
-                                                                    if (data35 !== 'unsupported') {
+                                                                  }
+                                                                  var valid12 = _errs98 === errors;
+                                                                } else {
+                                                                  var valid12 = true;
+                                                                }
+                                                                if (valid12) {
+                                                                  if (
+                                                                    data32.toolCallCount !==
+                                                                    undefined
+                                                                  ) {
+                                                                    let data38 =
+                                                                      data32.toolCallCount;
+                                                                    const _errs100 = errors;
+                                                                    if (
+                                                                      !(
+                                                                        typeof data38 == 'number' &&
+                                                                        !(data38 % 1) &&
+                                                                        !isNaN(data38) &&
+                                                                        isFinite(data38)
+                                                                      )
+                                                                    ) {
                                                                       validate68.errors = [
                                                                         {
                                                                           instancePath:
                                                                             instancePath +
                                                                             '/messages/' +
                                                                             i1 +
-                                                                            '/outputBody/readAvailability',
+                                                                            '/outputBody/toolCallCount',
                                                                           schemaPath:
-                                                                            '#/properties/messages/items/properties/outputBody/properties/readAvailability/const',
-                                                                          keyword: 'const',
+                                                                            '#/properties/messages/items/properties/outputBody/properties/toolCallCount/type',
+                                                                          keyword: 'type',
                                                                           params: {
-                                                                            allowedValue:
-                                                                              'unsupported',
+                                                                            type: 'integer',
                                                                           },
                                                                           message:
-                                                                            'must be equal to constant',
+                                                                            'must be integer',
                                                                         },
                                                                       ];
                                                                       return false;
                                                                     }
-                                                                    var valid11 =
-                                                                      _errs93 === errors;
+                                                                    if (errors === _errs100) {
+                                                                      if (
+                                                                        typeof data38 == 'number' &&
+                                                                        isFinite(data38)
+                                                                      ) {
+                                                                        if (
+                                                                          data38 >
+                                                                            9007199254740991 ||
+                                                                          isNaN(data38)
+                                                                        ) {
+                                                                          validate68.errors = [
+                                                                            {
+                                                                              instancePath:
+                                                                                instancePath +
+                                                                                '/messages/' +
+                                                                                i1 +
+                                                                                '/outputBody/toolCallCount',
+                                                                              schemaPath:
+                                                                                '#/properties/messages/items/properties/outputBody/properties/toolCallCount/maximum',
+                                                                              keyword: 'maximum',
+                                                                              params: {
+                                                                                comparison: '<=',
+                                                                                limit: 9007199254740991,
+                                                                              },
+                                                                              message:
+                                                                                'must be <= 9007199254740991',
+                                                                            },
+                                                                          ];
+                                                                          return false;
+                                                                        } else {
+                                                                          if (
+                                                                            data38 < 0 ||
+                                                                            isNaN(data38)
+                                                                          ) {
+                                                                            validate68.errors = [
+                                                                              {
+                                                                                instancePath:
+                                                                                  instancePath +
+                                                                                  '/messages/' +
+                                                                                  i1 +
+                                                                                  '/outputBody/toolCallCount',
+                                                                                schemaPath:
+                                                                                  '#/properties/messages/items/properties/outputBody/properties/toolCallCount/minimum',
+                                                                                keyword: 'minimum',
+                                                                                params: {
+                                                                                  comparison: '>=',
+                                                                                  limit: 0,
+                                                                                },
+                                                                                message:
+                                                                                  'must be >= 0',
+                                                                              },
+                                                                            ];
+                                                                            return false;
+                                                                          }
+                                                                        }
+                                                                      }
+                                                                    }
+                                                                    var valid12 =
+                                                                      _errs100 === errors;
                                                                   } else {
-                                                                    var valid11 = true;
+                                                                    var valid12 = true;
+                                                                  }
+                                                                  if (valid12) {
+                                                                    if (
+                                                                      data32.readAvailability !==
+                                                                      undefined
+                                                                    ) {
+                                                                      let data39 =
+                                                                        data32.readAvailability;
+                                                                      const _errs102 = errors;
+                                                                      if (
+                                                                        typeof data39 !== 'string'
+                                                                      ) {
+                                                                        validate68.errors = [
+                                                                          {
+                                                                            instancePath:
+                                                                              instancePath +
+                                                                              '/messages/' +
+                                                                              i1 +
+                                                                              '/outputBody/readAvailability',
+                                                                            schemaPath:
+                                                                              '#/properties/messages/items/properties/outputBody/properties/readAvailability/type',
+                                                                            keyword: 'type',
+                                                                            params: {
+                                                                              type: 'string',
+                                                                            },
+                                                                            message:
+                                                                              'must be string',
+                                                                          },
+                                                                        ];
+                                                                        return false;
+                                                                      }
+                                                                      if (
+                                                                        data39 !== 'unsupported'
+                                                                      ) {
+                                                                        validate68.errors = [
+                                                                          {
+                                                                            instancePath:
+                                                                              instancePath +
+                                                                              '/messages/' +
+                                                                              i1 +
+                                                                              '/outputBody/readAvailability',
+                                                                            schemaPath:
+                                                                              '#/properties/messages/items/properties/outputBody/properties/readAvailability/const',
+                                                                            keyword: 'const',
+                                                                            params: {
+                                                                              allowedValue:
+                                                                                'unsupported',
+                                                                            },
+                                                                            message:
+                                                                              'must be equal to constant',
+                                                                          },
+                                                                        ];
+                                                                        return false;
+                                                                      }
+                                                                      var valid12 =
+                                                                        _errs102 === errors;
+                                                                    } else {
+                                                                      var valid12 = true;
+                                                                    }
                                                                   }
                                                                 }
                                                               }
@@ -83108,103 +83401,84 @@ function validate68(
                                                           }
                                                         }
                                                       }
+                                                    } else {
+                                                      validate68.errors = [
+                                                        {
+                                                          instancePath:
+                                                            instancePath +
+                                                            '/messages/' +
+                                                            i1 +
+                                                            '/outputBody',
+                                                          schemaPath:
+                                                            '#/properties/messages/items/properties/outputBody/type',
+                                                          keyword: 'type',
+                                                          params: { type: 'object' },
+                                                          message: 'must be object',
+                                                        },
+                                                      ];
+                                                      return false;
                                                     }
-                                                  } else {
-                                                    validate68.errors = [
-                                                      {
-                                                        instancePath:
-                                                          instancePath +
-                                                          '/messages/' +
-                                                          i1 +
-                                                          '/outputBody',
-                                                        schemaPath:
-                                                          '#/properties/messages/items/properties/outputBody/type',
-                                                        keyword: 'type',
-                                                        params: { type: 'object' },
-                                                        message: 'must be object',
-                                                      },
-                                                    ];
-                                                    return false;
                                                   }
+                                                  var valid7 = _errs87 === errors;
+                                                } else {
+                                                  var valid7 = true;
                                                 }
-                                                var valid7 = _errs78 === errors;
-                                              } else {
-                                                var valid7 = true;
-                                              }
-                                              if (valid7) {
-                                                if (data13.toolCalls !== undefined) {
-                                                  let data36 = data13.toolCalls;
-                                                  const _errs95 = errors;
-                                                  if (errors === _errs95) {
-                                                    if (Array.isArray(data36)) {
-                                                      var valid12 = true;
-                                                      const len2 = data36.length;
-                                                      for (let i2 = 0; i2 < len2; i2++) {
-                                                        let data37 = data36[i2];
-                                                        const _errs97 = errors;
-                                                        if (errors === _errs97) {
-                                                          if (
-                                                            data37 &&
-                                                            typeof data37 == 'object' &&
-                                                            !Array.isArray(data37)
-                                                          ) {
-                                                            let missing6;
+                                                if (valid7) {
+                                                  if (data13.toolCalls !== undefined) {
+                                                    let data40 = data13.toolCalls;
+                                                    const _errs104 = errors;
+                                                    if (errors === _errs104) {
+                                                      if (Array.isArray(data40)) {
+                                                        var valid13 = true;
+                                                        const len2 = data40.length;
+                                                        for (let i2 = 0; i2 < len2; i2++) {
+                                                          let data41 = data40[i2];
+                                                          const _errs106 = errors;
+                                                          if (errors === _errs106) {
                                                             if (
-                                                              (data37.id === undefined &&
-                                                                (missing6 = 'id')) ||
-                                                              (data37.name === undefined &&
-                                                                (missing6 = 'name')) ||
-                                                              (data37.arguments === undefined &&
-                                                                (missing6 = 'arguments'))
+                                                              data41 &&
+                                                              typeof data41 == 'object' &&
+                                                              !Array.isArray(data41)
                                                             ) {
-                                                              validate68.errors = [
-                                                                {
-                                                                  instancePath:
-                                                                    instancePath +
-                                                                    '/messages/' +
-                                                                    i1 +
-                                                                    '/toolCalls/' +
-                                                                    i2,
-                                                                  schemaPath:
-                                                                    '#/properties/messages/items/properties/toolCalls/items/required',
-                                                                  keyword: 'required',
-                                                                  params: {
-                                                                    missingProperty: missing6,
+                                                              let missing7;
+                                                              if (
+                                                                (data41.id === undefined &&
+                                                                  (missing7 = 'id')) ||
+                                                                (data41.name === undefined &&
+                                                                  (missing7 = 'name')) ||
+                                                                (data41.arguments === undefined &&
+                                                                  (missing7 = 'arguments'))
+                                                              ) {
+                                                                validate68.errors = [
+                                                                  {
+                                                                    instancePath:
+                                                                      instancePath +
+                                                                      '/messages/' +
+                                                                      i1 +
+                                                                      '/toolCalls/' +
+                                                                      i2,
+                                                                    schemaPath:
+                                                                      '#/properties/messages/items/properties/toolCalls/items/required',
+                                                                    keyword: 'required',
+                                                                    params: {
+                                                                      missingProperty: missing7,
+                                                                    },
+                                                                    message:
+                                                                      "must have required property '" +
+                                                                      missing7 +
+                                                                      "'",
                                                                   },
-                                                                  message:
-                                                                    "must have required property '" +
-                                                                    missing6 +
-                                                                    "'",
-                                                                },
-                                                              ];
-                                                              return false;
-                                                            } else {
-                                                              if (data37.id !== undefined) {
-                                                                let data38 = data37.id;
-                                                                const _errs100 = errors;
-                                                                if (errors === _errs100) {
-                                                                  if (typeof data38 === 'string') {
-                                                                    if (func1(data38) > 128) {
-                                                                      validate68.errors = [
-                                                                        {
-                                                                          instancePath:
-                                                                            instancePath +
-                                                                            '/messages/' +
-                                                                            i1 +
-                                                                            '/toolCalls/' +
-                                                                            i2 +
-                                                                            '/id',
-                                                                          schemaPath:
-                                                                            '#/properties/messages/items/properties/toolCalls/items/properties/id/maxLength',
-                                                                          keyword: 'maxLength',
-                                                                          params: { limit: 128 },
-                                                                          message:
-                                                                            'must NOT have more than 128 characters',
-                                                                        },
-                                                                      ];
-                                                                      return false;
-                                                                    } else {
-                                                                      if (func1(data38) < 1) {
+                                                                ];
+                                                                return false;
+                                                              } else {
+                                                                if (data41.id !== undefined) {
+                                                                  let data42 = data41.id;
+                                                                  const _errs109 = errors;
+                                                                  if (errors === _errs109) {
+                                                                    if (
+                                                                      typeof data42 === 'string'
+                                                                    ) {
+                                                                      if (func1(data42) > 128) {
                                                                         validate68.errors = [
                                                                           {
                                                                             instancePath:
@@ -83215,18 +83489,16 @@ function validate68(
                                                                               i2 +
                                                                               '/id',
                                                                             schemaPath:
-                                                                              '#/properties/messages/items/properties/toolCalls/items/properties/id/minLength',
-                                                                            keyword: 'minLength',
-                                                                            params: { limit: 1 },
+                                                                              '#/properties/messages/items/properties/toolCalls/items/properties/id/maxLength',
+                                                                            keyword: 'maxLength',
+                                                                            params: { limit: 128 },
                                                                             message:
-                                                                              'must NOT have fewer than 1 characters',
+                                                                              'must NOT have more than 128 characters',
                                                                           },
                                                                         ];
                                                                         return false;
                                                                       } else {
-                                                                        if (
-                                                                          !pattern4.test(data38)
-                                                                        ) {
+                                                                        if (func1(data42) < 1) {
                                                                           validate68.errors = [
                                                                             {
                                                                               instancePath:
@@ -83237,81 +83509,75 @@ function validate68(
                                                                                 i2 +
                                                                                 '/id',
                                                                               schemaPath:
-                                                                                '#/properties/messages/items/properties/toolCalls/items/properties/id/pattern',
-                                                                              keyword: 'pattern',
-                                                                              params: {
-                                                                                pattern:
-                                                                                  '^[A-Za-z0-9_-]+$',
-                                                                              },
+                                                                                '#/properties/messages/items/properties/toolCalls/items/properties/id/minLength',
+                                                                              keyword: 'minLength',
+                                                                              params: { limit: 1 },
                                                                               message:
-                                                                                'must match pattern "' +
-                                                                                '^[A-Za-z0-9_-]+$' +
-                                                                                '"',
+                                                                                'must NOT have fewer than 1 characters',
                                                                             },
                                                                           ];
                                                                           return false;
+                                                                        } else {
+                                                                          if (
+                                                                            !pattern4.test(data42)
+                                                                          ) {
+                                                                            validate68.errors = [
+                                                                              {
+                                                                                instancePath:
+                                                                                  instancePath +
+                                                                                  '/messages/' +
+                                                                                  i1 +
+                                                                                  '/toolCalls/' +
+                                                                                  i2 +
+                                                                                  '/id',
+                                                                                schemaPath:
+                                                                                  '#/properties/messages/items/properties/toolCalls/items/properties/id/pattern',
+                                                                                keyword: 'pattern',
+                                                                                params: {
+                                                                                  pattern:
+                                                                                    '^[A-Za-z0-9_-]+$',
+                                                                                },
+                                                                                message:
+                                                                                  'must match pattern "' +
+                                                                                  '^[A-Za-z0-9_-]+$' +
+                                                                                  '"',
+                                                                              },
+                                                                            ];
+                                                                            return false;
+                                                                          }
                                                                         }
                                                                       }
+                                                                    } else {
+                                                                      validate68.errors = [
+                                                                        {
+                                                                          instancePath:
+                                                                            instancePath +
+                                                                            '/messages/' +
+                                                                            i1 +
+                                                                            '/toolCalls/' +
+                                                                            i2 +
+                                                                            '/id',
+                                                                          schemaPath:
+                                                                            '#/properties/messages/items/properties/toolCalls/items/properties/id/type',
+                                                                          keyword: 'type',
+                                                                          params: {
+                                                                            type: 'string',
+                                                                          },
+                                                                          message: 'must be string',
+                                                                        },
+                                                                      ];
+                                                                      return false;
                                                                     }
-                                                                  } else {
-                                                                    validate68.errors = [
-                                                                      {
-                                                                        instancePath:
-                                                                          instancePath +
-                                                                          '/messages/' +
-                                                                          i1 +
-                                                                          '/toolCalls/' +
-                                                                          i2 +
-                                                                          '/id',
-                                                                        schemaPath:
-                                                                          '#/properties/messages/items/properties/toolCalls/items/properties/id/type',
-                                                                        keyword: 'type',
-                                                                        params: { type: 'string' },
-                                                                        message: 'must be string',
-                                                                      },
-                                                                    ];
-                                                                    return false;
                                                                   }
-                                                                }
-                                                                var valid13 = _errs100 === errors;
-                                                              } else {
-                                                                var valid13 = true;
-                                                              }
-                                                              if (valid13) {
-                                                                if (data37.name !== undefined) {
-                                                                  const _errs102 = errors;
-                                                                  if (
-                                                                    typeof data37.name !== 'string'
-                                                                  ) {
-                                                                    validate68.errors = [
-                                                                      {
-                                                                        instancePath:
-                                                                          instancePath +
-                                                                          '/messages/' +
-                                                                          i1 +
-                                                                          '/toolCalls/' +
-                                                                          i2 +
-                                                                          '/name',
-                                                                        schemaPath:
-                                                                          '#/properties/messages/items/properties/toolCalls/items/properties/name/type',
-                                                                        keyword: 'type',
-                                                                        params: { type: 'string' },
-                                                                        message: 'must be string',
-                                                                      },
-                                                                    ];
-                                                                    return false;
-                                                                  }
-                                                                  var valid13 = _errs102 === errors;
+                                                                  var valid14 = _errs109 === errors;
                                                                 } else {
-                                                                  var valid13 = true;
+                                                                  var valid14 = true;
                                                                 }
-                                                                if (valid13) {
-                                                                  if (
-                                                                    data37.arguments !== undefined
-                                                                  ) {
-                                                                    const _errs104 = errors;
+                                                                if (valid14) {
+                                                                  if (data41.name !== undefined) {
+                                                                    const _errs111 = errors;
                                                                     if (
-                                                                      typeof data37.arguments !==
+                                                                      typeof data41.name !==
                                                                       'string'
                                                                     ) {
                                                                       validate68.errors = [
@@ -83322,9 +83588,9 @@ function validate68(
                                                                             i1 +
                                                                             '/toolCalls/' +
                                                                             i2 +
-                                                                            '/arguments',
+                                                                            '/name',
                                                                           schemaPath:
-                                                                            '#/properties/messages/items/properties/toolCalls/items/properties/arguments/type',
+                                                                            '#/properties/messages/items/properties/toolCalls/items/properties/name/type',
                                                                           keyword: 'type',
                                                                           params: {
                                                                             type: 'string',
@@ -83334,12 +83600,150 @@ function validate68(
                                                                       ];
                                                                       return false;
                                                                     }
-                                                                    var valid13 =
-                                                                      _errs104 === errors;
+                                                                    var valid14 =
+                                                                      _errs111 === errors;
                                                                   } else {
-                                                                    var valid13 = true;
+                                                                    var valid14 = true;
+                                                                  }
+                                                                  if (valid14) {
+                                                                    if (
+                                                                      data41.arguments !== undefined
+                                                                    ) {
+                                                                      const _errs113 = errors;
+                                                                      if (
+                                                                        typeof data41.arguments !==
+                                                                        'string'
+                                                                      ) {
+                                                                        validate68.errors = [
+                                                                          {
+                                                                            instancePath:
+                                                                              instancePath +
+                                                                              '/messages/' +
+                                                                              i1 +
+                                                                              '/toolCalls/' +
+                                                                              i2 +
+                                                                              '/arguments',
+                                                                            schemaPath:
+                                                                              '#/properties/messages/items/properties/toolCalls/items/properties/arguments/type',
+                                                                            keyword: 'type',
+                                                                            params: {
+                                                                              type: 'string',
+                                                                            },
+                                                                            message:
+                                                                              'must be string',
+                                                                          },
+                                                                        ];
+                                                                        return false;
+                                                                      }
+                                                                      var valid14 =
+                                                                        _errs113 === errors;
+                                                                    } else {
+                                                                      var valid14 = true;
+                                                                    }
                                                                   }
                                                                 }
+                                                              }
+                                                            } else {
+                                                              validate68.errors = [
+                                                                {
+                                                                  instancePath:
+                                                                    instancePath +
+                                                                    '/messages/' +
+                                                                    i1 +
+                                                                    '/toolCalls/' +
+                                                                    i2,
+                                                                  schemaPath:
+                                                                    '#/properties/messages/items/properties/toolCalls/items/type',
+                                                                  keyword: 'type',
+                                                                  params: { type: 'object' },
+                                                                  message: 'must be object',
+                                                                },
+                                                              ];
+                                                              return false;
+                                                            }
+                                                          }
+                                                          var valid13 = _errs106 === errors;
+                                                          if (!valid13) {
+                                                            break;
+                                                          }
+                                                        }
+                                                      } else {
+                                                        validate68.errors = [
+                                                          {
+                                                            instancePath:
+                                                              instancePath +
+                                                              '/messages/' +
+                                                              i1 +
+                                                              '/toolCalls',
+                                                            schemaPath:
+                                                              '#/properties/messages/items/properties/toolCalls/type',
+                                                            keyword: 'type',
+                                                            params: { type: 'array' },
+                                                            message: 'must be array',
+                                                          },
+                                                        ];
+                                                        return false;
+                                                      }
+                                                    }
+                                                    var valid7 = _errs104 === errors;
+                                                  } else {
+                                                    var valid7 = true;
+                                                  }
+                                                  if (valid7) {
+                                                    if (data13.toolCallId !== undefined) {
+                                                      const _errs115 = errors;
+                                                      if (typeof data13.toolCallId !== 'string') {
+                                                        validate68.errors = [
+                                                          {
+                                                            instancePath:
+                                                              instancePath +
+                                                              '/messages/' +
+                                                              i1 +
+                                                              '/toolCallId',
+                                                            schemaPath:
+                                                              '#/properties/messages/items/properties/toolCallId/type',
+                                                            keyword: 'type',
+                                                            params: { type: 'string' },
+                                                            message: 'must be string',
+                                                          },
+                                                        ];
+                                                        return false;
+                                                      }
+                                                      var valid7 = _errs115 === errors;
+                                                    } else {
+                                                      var valid7 = true;
+                                                    }
+                                                    if (valid7) {
+                                                      if (data13.sourceIds !== undefined) {
+                                                        let data46 = data13.sourceIds;
+                                                        const _errs117 = errors;
+                                                        if (errors === _errs117) {
+                                                          if (Array.isArray(data46)) {
+                                                            var valid15 = true;
+                                                            const len3 = data46.length;
+                                                            for (let i3 = 0; i3 < len3; i3++) {
+                                                              const _errs119 = errors;
+                                                              if (typeof data46[i3] !== 'string') {
+                                                                validate68.errors = [
+                                                                  {
+                                                                    instancePath:
+                                                                      instancePath +
+                                                                      '/messages/' +
+                                                                      i1 +
+                                                                      '/sourceIds/' +
+                                                                      i3,
+                                                                    schemaPath:
+                                                                      '#/properties/messages/items/properties/sourceIds/items/type',
+                                                                    keyword: 'type',
+                                                                    params: { type: 'string' },
+                                                                    message: 'must be string',
+                                                                  },
+                                                                ];
+                                                                return false;
+                                                              }
+                                                              var valid15 = _errs119 === errors;
+                                                              if (!valid15) {
+                                                                break;
                                                               }
                                                             }
                                                           } else {
@@ -83349,149 +83753,28 @@ function validate68(
                                                                   instancePath +
                                                                   '/messages/' +
                                                                   i1 +
-                                                                  '/toolCalls/' +
-                                                                  i2,
+                                                                  '/sourceIds',
                                                                 schemaPath:
-                                                                  '#/properties/messages/items/properties/toolCalls/items/type',
+                                                                  '#/properties/messages/items/properties/sourceIds/type',
                                                                 keyword: 'type',
-                                                                params: { type: 'object' },
-                                                                message: 'must be object',
+                                                                params: { type: 'array' },
+                                                                message: 'must be array',
                                                               },
                                                             ];
                                                             return false;
                                                           }
                                                         }
-                                                        var valid12 = _errs97 === errors;
-                                                        if (!valid12) {
-                                                          break;
-                                                        }
+                                                        var valid7 = _errs117 === errors;
+                                                      } else {
+                                                        var valid7 = true;
                                                       }
-                                                    } else {
-                                                      validate68.errors = [
-                                                        {
-                                                          instancePath:
-                                                            instancePath +
-                                                            '/messages/' +
-                                                            i1 +
-                                                            '/toolCalls',
-                                                          schemaPath:
-                                                            '#/properties/messages/items/properties/toolCalls/type',
-                                                          keyword: 'type',
-                                                          params: { type: 'array' },
-                                                          message: 'must be array',
-                                                        },
-                                                      ];
-                                                      return false;
-                                                    }
-                                                  }
-                                                  var valid7 = _errs95 === errors;
-                                                } else {
-                                                  var valid7 = true;
-                                                }
-                                                if (valid7) {
-                                                  if (data13.toolCallId !== undefined) {
-                                                    const _errs106 = errors;
-                                                    if (typeof data13.toolCallId !== 'string') {
-                                                      validate68.errors = [
-                                                        {
-                                                          instancePath:
-                                                            instancePath +
-                                                            '/messages/' +
-                                                            i1 +
-                                                            '/toolCallId',
-                                                          schemaPath:
-                                                            '#/properties/messages/items/properties/toolCallId/type',
-                                                          keyword: 'type',
-                                                          params: { type: 'string' },
-                                                          message: 'must be string',
-                                                        },
-                                                      ];
-                                                      return false;
-                                                    }
-                                                    var valid7 = _errs106 === errors;
-                                                  } else {
-                                                    var valid7 = true;
-                                                  }
-                                                  if (valid7) {
-                                                    if (data13.sourceIds !== undefined) {
-                                                      let data42 = data13.sourceIds;
-                                                      const _errs108 = errors;
-                                                      if (errors === _errs108) {
-                                                        if (Array.isArray(data42)) {
-                                                          var valid14 = true;
-                                                          const len3 = data42.length;
-                                                          for (let i3 = 0; i3 < len3; i3++) {
-                                                            const _errs110 = errors;
-                                                            if (typeof data42[i3] !== 'string') {
-                                                              validate68.errors = [
-                                                                {
-                                                                  instancePath:
-                                                                    instancePath +
-                                                                    '/messages/' +
-                                                                    i1 +
-                                                                    '/sourceIds/' +
-                                                                    i3,
-                                                                  schemaPath:
-                                                                    '#/properties/messages/items/properties/sourceIds/items/type',
-                                                                  keyword: 'type',
-                                                                  params: { type: 'string' },
-                                                                  message: 'must be string',
-                                                                },
-                                                              ];
-                                                              return false;
-                                                            }
-                                                            var valid14 = _errs110 === errors;
-                                                            if (!valid14) {
-                                                              break;
-                                                            }
-                                                          }
-                                                        } else {
-                                                          validate68.errors = [
-                                                            {
-                                                              instancePath:
-                                                                instancePath +
-                                                                '/messages/' +
-                                                                i1 +
-                                                                '/sourceIds',
-                                                              schemaPath:
-                                                                '#/properties/messages/items/properties/sourceIds/type',
-                                                              keyword: 'type',
-                                                              params: { type: 'array' },
-                                                              message: 'must be array',
-                                                            },
-                                                          ];
-                                                          return false;
-                                                        }
-                                                      }
-                                                      var valid7 = _errs108 === errors;
-                                                    } else {
-                                                      var valid7 = true;
-                                                    }
-                                                    if (valid7) {
-                                                      if (data13.originCommandId !== undefined) {
-                                                        let data44 = data13.originCommandId;
-                                                        const _errs112 = errors;
-                                                        if (errors === _errs112) {
-                                                          if (typeof data44 === 'string') {
-                                                            if (func1(data44) > 128) {
-                                                              validate68.errors = [
-                                                                {
-                                                                  instancePath:
-                                                                    instancePath +
-                                                                    '/messages/' +
-                                                                    i1 +
-                                                                    '/originCommandId',
-                                                                  schemaPath:
-                                                                    '#/properties/messages/items/properties/originCommandId/maxLength',
-                                                                  keyword: 'maxLength',
-                                                                  params: { limit: 128 },
-                                                                  message:
-                                                                    'must NOT have more than 128 characters',
-                                                                },
-                                                              ];
-                                                              return false;
-                                                            } else {
-                                                              if (func1(data44) < 1) {
+                                                      if (valid7) {
+                                                        if (data13.originCommandId !== undefined) {
+                                                          let data48 = data13.originCommandId;
+                                                          const _errs121 = errors;
+                                                          if (errors === _errs121) {
+                                                            if (typeof data48 === 'string') {
+                                                              if (func1(data48) > 128) {
                                                                 validate68.errors = [
                                                                   {
                                                                     instancePath:
@@ -83500,79 +83783,7 @@ function validate68(
                                                                       i1 +
                                                                       '/originCommandId',
                                                                     schemaPath:
-                                                                      '#/properties/messages/items/properties/originCommandId/minLength',
-                                                                    keyword: 'minLength',
-                                                                    params: { limit: 1 },
-                                                                    message:
-                                                                      'must NOT have fewer than 1 characters',
-                                                                  },
-                                                                ];
-                                                                return false;
-                                                              } else {
-                                                                if (!pattern4.test(data44)) {
-                                                                  validate68.errors = [
-                                                                    {
-                                                                      instancePath:
-                                                                        instancePath +
-                                                                        '/messages/' +
-                                                                        i1 +
-                                                                        '/originCommandId',
-                                                                      schemaPath:
-                                                                        '#/properties/messages/items/properties/originCommandId/pattern',
-                                                                      keyword: 'pattern',
-                                                                      params: {
-                                                                        pattern: '^[A-Za-z0-9_-]+$',
-                                                                      },
-                                                                      message:
-                                                                        'must match pattern "' +
-                                                                        '^[A-Za-z0-9_-]+$' +
-                                                                        '"',
-                                                                    },
-                                                                  ];
-                                                                  return false;
-                                                                }
-                                                              }
-                                                            }
-                                                          } else {
-                                                            validate68.errors = [
-                                                              {
-                                                                instancePath:
-                                                                  instancePath +
-                                                                  '/messages/' +
-                                                                  i1 +
-                                                                  '/originCommandId',
-                                                                schemaPath:
-                                                                  '#/properties/messages/items/properties/originCommandId/type',
-                                                                keyword: 'type',
-                                                                params: { type: 'string' },
-                                                                message: 'must be string',
-                                                              },
-                                                            ];
-                                                            return false;
-                                                          }
-                                                        }
-                                                        var valid7 = _errs112 === errors;
-                                                      } else {
-                                                        var valid7 = true;
-                                                      }
-                                                      if (valid7) {
-                                                        if (
-                                                          data13.contextSelectionId !== undefined
-                                                        ) {
-                                                          let data45 = data13.contextSelectionId;
-                                                          const _errs114 = errors;
-                                                          if (errors === _errs114) {
-                                                            if (typeof data45 === 'string') {
-                                                              if (func1(data45) > 128) {
-                                                                validate68.errors = [
-                                                                  {
-                                                                    instancePath:
-                                                                      instancePath +
-                                                                      '/messages/' +
-                                                                      i1 +
-                                                                      '/contextSelectionId',
-                                                                    schemaPath:
-                                                                      '#/properties/messages/items/properties/contextSelectionId/maxLength',
+                                                                      '#/properties/messages/items/properties/originCommandId/maxLength',
                                                                     keyword: 'maxLength',
                                                                     params: { limit: 128 },
                                                                     message:
@@ -83581,16 +83792,16 @@ function validate68(
                                                                 ];
                                                                 return false;
                                                               } else {
-                                                                if (func1(data45) < 1) {
+                                                                if (func1(data48) < 1) {
                                                                   validate68.errors = [
                                                                     {
                                                                       instancePath:
                                                                         instancePath +
                                                                         '/messages/' +
                                                                         i1 +
-                                                                        '/contextSelectionId',
+                                                                        '/originCommandId',
                                                                       schemaPath:
-                                                                        '#/properties/messages/items/properties/contextSelectionId/minLength',
+                                                                        '#/properties/messages/items/properties/originCommandId/minLength',
                                                                       keyword: 'minLength',
                                                                       params: { limit: 1 },
                                                                       message:
@@ -83599,16 +83810,16 @@ function validate68(
                                                                   ];
                                                                   return false;
                                                                 } else {
-                                                                  if (!pattern4.test(data45)) {
+                                                                  if (!pattern4.test(data48)) {
                                                                     validate68.errors = [
                                                                       {
                                                                         instancePath:
                                                                           instancePath +
                                                                           '/messages/' +
                                                                           i1 +
-                                                                          '/contextSelectionId',
+                                                                          '/originCommandId',
                                                                         schemaPath:
-                                                                          '#/properties/messages/items/properties/contextSelectionId/pattern',
+                                                                          '#/properties/messages/items/properties/originCommandId/pattern',
                                                                         keyword: 'pattern',
                                                                         params: {
                                                                           pattern:
@@ -83631,9 +83842,9 @@ function validate68(
                                                                     instancePath +
                                                                     '/messages/' +
                                                                     i1 +
-                                                                    '/contextSelectionId',
+                                                                    '/originCommandId',
                                                                   schemaPath:
-                                                                    '#/properties/messages/items/properties/contextSelectionId/type',
+                                                                    '#/properties/messages/items/properties/originCommandId/type',
                                                                   keyword: 'type',
                                                                   params: { type: 'string' },
                                                                   message: 'must be string',
@@ -83642,63 +83853,155 @@ function validate68(
                                                               return false;
                                                             }
                                                           }
-                                                          var valid7 = _errs114 === errors;
+                                                          var valid7 = _errs121 === errors;
                                                         } else {
                                                           var valid7 = true;
                                                         }
                                                         if (valid7) {
-                                                          if (data13.inputKind !== undefined) {
-                                                            let data46 = data13.inputKind;
-                                                            const _errs116 = errors;
-                                                            if (typeof data46 !== 'string') {
-                                                              validate68.errors = [
-                                                                {
-                                                                  instancePath:
-                                                                    instancePath +
-                                                                    '/messages/' +
-                                                                    i1 +
-                                                                    '/inputKind',
-                                                                  schemaPath:
-                                                                    '#/properties/messages/items/properties/inputKind/type',
-                                                                  keyword: 'type',
-                                                                  params: { type: 'string' },
-                                                                  message: 'must be string',
-                                                                },
-                                                              ];
-                                                              return false;
-                                                            }
-                                                            if (
-                                                              !(
-                                                                data46 === 'input.steer' ||
-                                                                data46 === 'input.follow_up' ||
-                                                                data46 === 'result.include'
-                                                              )
-                                                            ) {
-                                                              validate68.errors = [
-                                                                {
-                                                                  instancePath:
-                                                                    instancePath +
-                                                                    '/messages/' +
-                                                                    i1 +
-                                                                    '/inputKind',
-                                                                  schemaPath:
-                                                                    '#/properties/messages/items/properties/inputKind/enum',
-                                                                  keyword: 'enum',
-                                                                  params: {
-                                                                    allowedValues:
-                                                                      schema71.properties.messages
-                                                                        .items.properties.inputKind
-                                                                        .enum,
+                                                          if (
+                                                            data13.contextSelectionId !== undefined
+                                                          ) {
+                                                            let data49 = data13.contextSelectionId;
+                                                            const _errs123 = errors;
+                                                            if (errors === _errs123) {
+                                                              if (typeof data49 === 'string') {
+                                                                if (func1(data49) > 128) {
+                                                                  validate68.errors = [
+                                                                    {
+                                                                      instancePath:
+                                                                        instancePath +
+                                                                        '/messages/' +
+                                                                        i1 +
+                                                                        '/contextSelectionId',
+                                                                      schemaPath:
+                                                                        '#/properties/messages/items/properties/contextSelectionId/maxLength',
+                                                                      keyword: 'maxLength',
+                                                                      params: { limit: 128 },
+                                                                      message:
+                                                                        'must NOT have more than 128 characters',
+                                                                    },
+                                                                  ];
+                                                                  return false;
+                                                                } else {
+                                                                  if (func1(data49) < 1) {
+                                                                    validate68.errors = [
+                                                                      {
+                                                                        instancePath:
+                                                                          instancePath +
+                                                                          '/messages/' +
+                                                                          i1 +
+                                                                          '/contextSelectionId',
+                                                                        schemaPath:
+                                                                          '#/properties/messages/items/properties/contextSelectionId/minLength',
+                                                                        keyword: 'minLength',
+                                                                        params: { limit: 1 },
+                                                                        message:
+                                                                          'must NOT have fewer than 1 characters',
+                                                                      },
+                                                                    ];
+                                                                    return false;
+                                                                  } else {
+                                                                    if (!pattern4.test(data49)) {
+                                                                      validate68.errors = [
+                                                                        {
+                                                                          instancePath:
+                                                                            instancePath +
+                                                                            '/messages/' +
+                                                                            i1 +
+                                                                            '/contextSelectionId',
+                                                                          schemaPath:
+                                                                            '#/properties/messages/items/properties/contextSelectionId/pattern',
+                                                                          keyword: 'pattern',
+                                                                          params: {
+                                                                            pattern:
+                                                                              '^[A-Za-z0-9_-]+$',
+                                                                          },
+                                                                          message:
+                                                                            'must match pattern "' +
+                                                                            '^[A-Za-z0-9_-]+$' +
+                                                                            '"',
+                                                                        },
+                                                                      ];
+                                                                      return false;
+                                                                    }
+                                                                  }
+                                                                }
+                                                              } else {
+                                                                validate68.errors = [
+                                                                  {
+                                                                    instancePath:
+                                                                      instancePath +
+                                                                      '/messages/' +
+                                                                      i1 +
+                                                                      '/contextSelectionId',
+                                                                    schemaPath:
+                                                                      '#/properties/messages/items/properties/contextSelectionId/type',
+                                                                    keyword: 'type',
+                                                                    params: { type: 'string' },
+                                                                    message: 'must be string',
                                                                   },
-                                                                  message:
-                                                                    'must be equal to one of the allowed values',
-                                                                },
-                                                              ];
-                                                              return false;
+                                                                ];
+                                                                return false;
+                                                              }
                                                             }
-                                                            var valid7 = _errs116 === errors;
+                                                            var valid7 = _errs123 === errors;
                                                           } else {
                                                             var valid7 = true;
+                                                          }
+                                                          if (valid7) {
+                                                            if (data13.inputKind !== undefined) {
+                                                              let data50 = data13.inputKind;
+                                                              const _errs125 = errors;
+                                                              if (typeof data50 !== 'string') {
+                                                                validate68.errors = [
+                                                                  {
+                                                                    instancePath:
+                                                                      instancePath +
+                                                                      '/messages/' +
+                                                                      i1 +
+                                                                      '/inputKind',
+                                                                    schemaPath:
+                                                                      '#/properties/messages/items/properties/inputKind/type',
+                                                                    keyword: 'type',
+                                                                    params: { type: 'string' },
+                                                                    message: 'must be string',
+                                                                  },
+                                                                ];
+                                                                return false;
+                                                              }
+                                                              if (
+                                                                !(
+                                                                  data50 === 'input.steer' ||
+                                                                  data50 === 'input.follow_up' ||
+                                                                  data50 === 'result.include'
+                                                                )
+                                                              ) {
+                                                                validate68.errors = [
+                                                                  {
+                                                                    instancePath:
+                                                                      instancePath +
+                                                                      '/messages/' +
+                                                                      i1 +
+                                                                      '/inputKind',
+                                                                    schemaPath:
+                                                                      '#/properties/messages/items/properties/inputKind/enum',
+                                                                    keyword: 'enum',
+                                                                    params: {
+                                                                      allowedValues:
+                                                                        schema71.properties.messages
+                                                                          .items.properties
+                                                                          .inputKind.enum,
+                                                                    },
+                                                                    message:
+                                                                      'must be equal to one of the allowed values',
+                                                                  },
+                                                                ];
+                                                                return false;
+                                                              }
+                                                              var valid7 = _errs125 === errors;
+                                                            } else {
+                                                              var valid7 = true;
+                                                            }
                                                           }
                                                         }
                                                       }
@@ -83754,48 +84057,48 @@ function validate68(
             }
             if (valid0) {
               if (data.resultSources !== undefined) {
-                let data47 = data.resultSources;
-                const _errs118 = errors;
-                if (errors === _errs118) {
-                  if (Array.isArray(data47)) {
-                    var valid15 = true;
-                    const len4 = data47.length;
+                let data51 = data.resultSources;
+                const _errs127 = errors;
+                if (errors === _errs127) {
+                  if (Array.isArray(data51)) {
+                    var valid16 = true;
+                    const len4 = data51.length;
                     for (let i4 = 0; i4 < len4; i4++) {
-                      let data48 = data47[i4];
-                      const _errs120 = errors;
-                      if (errors === _errs120) {
-                        if (data48 && typeof data48 == 'object' && !Array.isArray(data48)) {
-                          let missing7;
+                      let data52 = data51[i4];
+                      const _errs129 = errors;
+                      if (errors === _errs129) {
+                        if (data52 && typeof data52 == 'object' && !Array.isArray(data52)) {
+                          let missing8;
                           if (
-                            (data48.id === undefined && (missing7 = 'id')) ||
-                            (data48.seq === undefined && (missing7 = 'seq')) ||
-                            (data48.sessionId === undefined && (missing7 = 'sessionId')) ||
-                            (data48.createdSelectionId === undefined &&
-                              (missing7 = 'createdSelectionId')) ||
-                            (data48.executionId === undefined && (missing7 = 'executionId')) ||
-                            (data48.resultRevision === undefined &&
-                              (missing7 = 'resultRevision')) ||
-                            (data48.originStoreId === undefined && (missing7 = 'originStoreId')) ||
-                            (data48.inclusion === undefined && (missing7 = 'inclusion')) ||
-                            (data48.result === undefined && (missing7 = 'result'))
+                            (data52.id === undefined && (missing8 = 'id')) ||
+                            (data52.seq === undefined && (missing8 = 'seq')) ||
+                            (data52.sessionId === undefined && (missing8 = 'sessionId')) ||
+                            (data52.createdSelectionId === undefined &&
+                              (missing8 = 'createdSelectionId')) ||
+                            (data52.executionId === undefined && (missing8 = 'executionId')) ||
+                            (data52.resultRevision === undefined &&
+                              (missing8 = 'resultRevision')) ||
+                            (data52.originStoreId === undefined && (missing8 = 'originStoreId')) ||
+                            (data52.inclusion === undefined && (missing8 = 'inclusion')) ||
+                            (data52.result === undefined && (missing8 = 'result'))
                           ) {
                             validate68.errors = [
                               {
                                 instancePath: instancePath + '/resultSources/' + i4,
                                 schemaPath: '#/properties/resultSources/items/required',
                                 keyword: 'required',
-                                params: { missingProperty: missing7 },
-                                message: "must have required property '" + missing7 + "'",
+                                params: { missingProperty: missing8 },
+                                message: "must have required property '" + missing8 + "'",
                               },
                             ];
                             return false;
                           } else {
-                            if (data48.id !== undefined) {
-                              let data49 = data48.id;
-                              const _errs123 = errors;
-                              if (errors === _errs123) {
-                                if (typeof data49 === 'string') {
-                                  if (func1(data49) > 128) {
+                            if (data52.id !== undefined) {
+                              let data53 = data52.id;
+                              const _errs132 = errors;
+                              if (errors === _errs132) {
+                                if (typeof data53 === 'string') {
+                                  if (func1(data53) > 128) {
                                     validate68.errors = [
                                       {
                                         instancePath: instancePath + '/resultSources/' + i4 + '/id',
@@ -83808,7 +84111,7 @@ function validate68(
                                     ];
                                     return false;
                                   } else {
-                                    if (func1(data49) < 1) {
+                                    if (func1(data53) < 1) {
                                       validate68.errors = [
                                         {
                                           instancePath:
@@ -83822,7 +84125,7 @@ function validate68(
                                       ];
                                       return false;
                                     } else {
-                                      if (!pattern4.test(data49)) {
+                                      if (!pattern4.test(data53)) {
                                         validate68.errors = [
                                           {
                                             instancePath:
@@ -83853,17 +84156,17 @@ function validate68(
                                   return false;
                                 }
                               }
-                              var valid16 = _errs123 === errors;
+                              var valid17 = _errs132 === errors;
                             } else {
-                              var valid16 = true;
+                              var valid17 = true;
                             }
-                            if (valid16) {
-                              if (data48.seq !== undefined) {
-                                let data50 = data48.seq;
-                                const _errs125 = errors;
-                                if (errors === _errs125) {
-                                  if (typeof data50 === 'string') {
-                                    if (!pattern9.test(data50)) {
+                            if (valid17) {
+                              if (data52.seq !== undefined) {
+                                let data54 = data52.seq;
+                                const _errs134 = errors;
+                                if (errors === _errs134) {
+                                  if (typeof data54 === 'string') {
+                                    if (!pattern9.test(data54)) {
                                       validate68.errors = [
                                         {
                                           instancePath:
@@ -83893,17 +84196,17 @@ function validate68(
                                     return false;
                                   }
                                 }
-                                var valid16 = _errs125 === errors;
+                                var valid17 = _errs134 === errors;
                               } else {
-                                var valid16 = true;
+                                var valid17 = true;
                               }
-                              if (valid16) {
-                                if (data48.sessionId !== undefined) {
-                                  let data51 = data48.sessionId;
-                                  const _errs127 = errors;
-                                  if (errors === _errs127) {
-                                    if (typeof data51 === 'string') {
-                                      if (func1(data51) > 128) {
+                              if (valid17) {
+                                if (data52.sessionId !== undefined) {
+                                  let data55 = data52.sessionId;
+                                  const _errs136 = errors;
+                                  if (errors === _errs136) {
+                                    if (typeof data55 === 'string') {
+                                      if (func1(data55) > 128) {
                                         validate68.errors = [
                                           {
                                             instancePath:
@@ -83917,7 +84220,7 @@ function validate68(
                                         ];
                                         return false;
                                       } else {
-                                        if (func1(data51) < 1) {
+                                        if (func1(data55) < 1) {
                                           validate68.errors = [
                                             {
                                               instancePath:
@@ -83934,7 +84237,7 @@ function validate68(
                                           ];
                                           return false;
                                         } else {
-                                          if (!pattern4.test(data51)) {
+                                          if (!pattern4.test(data55)) {
                                             validate68.errors = [
                                               {
                                                 instancePath:
@@ -83969,17 +84272,17 @@ function validate68(
                                       return false;
                                     }
                                   }
-                                  var valid16 = _errs127 === errors;
+                                  var valid17 = _errs136 === errors;
                                 } else {
-                                  var valid16 = true;
+                                  var valid17 = true;
                                 }
-                                if (valid16) {
-                                  if (data48.createdSelectionId !== undefined) {
-                                    let data52 = data48.createdSelectionId;
-                                    const _errs129 = errors;
-                                    if (errors === _errs129) {
-                                      if (typeof data52 === 'string') {
-                                        if (func1(data52) > 128) {
+                                if (valid17) {
+                                  if (data52.createdSelectionId !== undefined) {
+                                    let data56 = data52.createdSelectionId;
+                                    const _errs138 = errors;
+                                    if (errors === _errs138) {
+                                      if (typeof data56 === 'string') {
+                                        if (func1(data56) > 128) {
                                           validate68.errors = [
                                             {
                                               instancePath:
@@ -83996,7 +84299,7 @@ function validate68(
                                           ];
                                           return false;
                                         } else {
-                                          if (func1(data52) < 1) {
+                                          if (func1(data56) < 1) {
                                             validate68.errors = [
                                               {
                                                 instancePath:
@@ -84013,7 +84316,7 @@ function validate68(
                                             ];
                                             return false;
                                           } else {
-                                            if (!pattern4.test(data52)) {
+                                            if (!pattern4.test(data56)) {
                                               validate68.errors = [
                                                 {
                                                   instancePath:
@@ -84053,17 +84356,17 @@ function validate68(
                                         return false;
                                       }
                                     }
-                                    var valid16 = _errs129 === errors;
+                                    var valid17 = _errs138 === errors;
                                   } else {
-                                    var valid16 = true;
+                                    var valid17 = true;
                                   }
-                                  if (valid16) {
-                                    if (data48.executionId !== undefined) {
-                                      let data53 = data48.executionId;
-                                      const _errs131 = errors;
-                                      if (errors === _errs131) {
-                                        if (typeof data53 === 'string') {
-                                          if (func1(data53) > 128) {
+                                  if (valid17) {
+                                    if (data52.executionId !== undefined) {
+                                      let data57 = data52.executionId;
+                                      const _errs140 = errors;
+                                      if (errors === _errs140) {
+                                        if (typeof data57 === 'string') {
+                                          if (func1(data57) > 128) {
                                             validate68.errors = [
                                               {
                                                 instancePath:
@@ -84080,7 +84383,7 @@ function validate68(
                                             ];
                                             return false;
                                           } else {
-                                            if (func1(data53) < 1) {
+                                            if (func1(data57) < 1) {
                                               validate68.errors = [
                                                 {
                                                   instancePath:
@@ -84097,7 +84400,7 @@ function validate68(
                                               ];
                                               return false;
                                             } else {
-                                              if (!pattern4.test(data53)) {
+                                              if (!pattern4.test(data57)) {
                                                 validate68.errors = [
                                                   {
                                                     instancePath:
@@ -84137,17 +84440,17 @@ function validate68(
                                           return false;
                                         }
                                       }
-                                      var valid16 = _errs131 === errors;
+                                      var valid17 = _errs140 === errors;
                                     } else {
-                                      var valid16 = true;
+                                      var valid17 = true;
                                     }
-                                    if (valid16) {
-                                      if (data48.resultRevision !== undefined) {
-                                        let data54 = data48.resultRevision;
-                                        const _errs133 = errors;
-                                        if (errors === _errs133) {
-                                          if (typeof data54 === 'string') {
-                                            if (!pattern9.test(data54)) {
+                                    if (valid17) {
+                                      if (data52.resultRevision !== undefined) {
+                                        let data58 = data52.resultRevision;
+                                        const _errs142 = errors;
+                                        if (errors === _errs142) {
+                                          if (typeof data58 === 'string') {
+                                            if (!pattern9.test(data58)) {
                                               validate68.errors = [
                                                 {
                                                   instancePath:
@@ -84185,17 +84488,17 @@ function validate68(
                                             return false;
                                           }
                                         }
-                                        var valid16 = _errs133 === errors;
+                                        var valid17 = _errs142 === errors;
                                       } else {
-                                        var valid16 = true;
+                                        var valid17 = true;
                                       }
-                                      if (valid16) {
-                                        if (data48.originStoreId !== undefined) {
-                                          let data55 = data48.originStoreId;
-                                          const _errs135 = errors;
-                                          if (errors === _errs135) {
-                                            if (typeof data55 === 'string') {
-                                              if (func1(data55) > 128) {
+                                      if (valid17) {
+                                        if (data52.originStoreId !== undefined) {
+                                          let data59 = data52.originStoreId;
+                                          const _errs144 = errors;
+                                          if (errors === _errs144) {
+                                            if (typeof data59 === 'string') {
+                                              if (func1(data59) > 128) {
                                                 validate68.errors = [
                                                   {
                                                     instancePath:
@@ -84213,7 +84516,7 @@ function validate68(
                                                 ];
                                                 return false;
                                               } else {
-                                                if (func1(data55) < 1) {
+                                                if (func1(data59) < 1) {
                                                   validate68.errors = [
                                                     {
                                                       instancePath:
@@ -84231,7 +84534,7 @@ function validate68(
                                                   ];
                                                   return false;
                                                 } else {
-                                                  if (!pattern4.test(data55)) {
+                                                  if (!pattern4.test(data59)) {
                                                     validate68.errors = [
                                                       {
                                                         instancePath:
@@ -84271,15 +84574,15 @@ function validate68(
                                               return false;
                                             }
                                           }
-                                          var valid16 = _errs135 === errors;
+                                          var valid17 = _errs144 === errors;
                                         } else {
-                                          var valid16 = true;
+                                          var valid17 = true;
                                         }
-                                        if (valid16) {
-                                          if (data48.inclusion !== undefined) {
-                                            let data56 = data48.inclusion;
-                                            const _errs137 = errors;
-                                            if (typeof data56 !== 'string') {
+                                        if (valid17) {
+                                          if (data52.inclusion !== undefined) {
+                                            let data60 = data52.inclusion;
+                                            const _errs146 = errors;
+                                            if (typeof data60 !== 'string') {
                                               validate68.errors = [
                                                 {
                                                   instancePath:
@@ -84297,7 +84600,7 @@ function validate68(
                                               return false;
                                             }
                                             if (
-                                              !(data56 === 'automatic' || data56 === 'explicit')
+                                              !(data60 === 'automatic' || data60 === 'explicit')
                                             ) {
                                               validate68.errors = [
                                                 {
@@ -84320,21 +84623,21 @@ function validate68(
                                               ];
                                               return false;
                                             }
-                                            var valid16 = _errs137 === errors;
+                                            var valid17 = _errs146 === errors;
                                           } else {
-                                            var valid16 = true;
+                                            var valid17 = true;
                                           }
-                                          if (valid16) {
-                                            if (data48.result !== undefined) {
-                                              const _errs139 = errors;
+                                          if (valid17) {
+                                            if (data52.result !== undefined) {
+                                              const _errs148 = errors;
                                               if (
-                                                !validate69(data48.result, {
+                                                !validate69(data52.result, {
                                                   instancePath:
                                                     instancePath +
                                                     '/resultSources/' +
                                                     i4 +
                                                     '/result',
-                                                  parentData: data48,
+                                                  parentData: data52,
                                                   parentDataProperty: 'result',
                                                   rootData,
                                                   dynamicAnchors,
@@ -84346,9 +84649,9 @@ function validate68(
                                                     : vErrors.concat(validate69.errors);
                                                 errors = vErrors.length;
                                               }
-                                              var valid16 = _errs139 === errors;
+                                              var valid17 = _errs148 === errors;
                                             } else {
-                                              var valid16 = true;
+                                              var valid17 = true;
                                             }
                                           }
                                         }
@@ -84372,8 +84675,8 @@ function validate68(
                           return false;
                         }
                       }
-                      var valid15 = _errs120 === errors;
-                      if (!valid15) {
+                      var valid16 = _errs129 === errors;
+                      if (!valid16) {
                         break;
                       }
                     }
@@ -84390,20 +84693,20 @@ function validate68(
                     return false;
                   }
                 }
-                var valid0 = _errs118 === errors;
+                var valid0 = _errs127 === errors;
               } else {
                 var valid0 = true;
               }
               if (valid0) {
                 if (data.nextAfterSeq !== undefined) {
-                  let data58 = data.nextAfterSeq;
-                  const _errs140 = errors;
-                  const _errs141 = errors;
-                  let valid17 = false;
-                  const _errs142 = errors;
-                  if (errors === _errs142) {
-                    if (typeof data58 === 'string') {
-                      if (!pattern9.test(data58)) {
+                  let data62 = data.nextAfterSeq;
+                  const _errs149 = errors;
+                  const _errs150 = errors;
+                  let valid18 = false;
+                  const _errs151 = errors;
+                  if (errors === _errs151) {
+                    if (typeof data62 === 'string') {
+                      if (!pattern9.test(data62)) {
                         const err24 = {
                           instancePath: instancePath + '/nextAfterSeq',
                           schemaPath: '#/properties/nextAfterSeq/anyOf/0/pattern',
@@ -84434,10 +84737,10 @@ function validate68(
                       errors++;
                     }
                   }
-                  var _valid4 = _errs142 === errors;
-                  valid17 = valid17 || _valid4;
-                  const _errs144 = errors;
-                  if (data58 !== null) {
+                  var _valid4 = _errs151 === errors;
+                  valid18 = valid18 || _valid4;
+                  const _errs153 = errors;
+                  if (data62 !== null) {
                     const err26 = {
                       instancePath: instancePath + '/nextAfterSeq',
                       schemaPath: '#/properties/nextAfterSeq/anyOf/1/type',
@@ -84452,9 +84755,9 @@ function validate68(
                     }
                     errors++;
                   }
-                  var _valid4 = _errs144 === errors;
-                  valid17 = valid17 || _valid4;
-                  if (!valid17) {
+                  var _valid4 = _errs153 === errors;
+                  valid18 = valid18 || _valid4;
+                  if (!valid18) {
                     const err27 = {
                       instancePath: instancePath + '/nextAfterSeq',
                       schemaPath: '#/properties/nextAfterSeq/anyOf',
@@ -84471,29 +84774,29 @@ function validate68(
                     validate68.errors = vErrors;
                     return false;
                   } else {
-                    errors = _errs141;
+                    errors = _errs150;
                     if (vErrors !== null) {
-                      if (_errs141) {
-                        vErrors.length = _errs141;
+                      if (_errs150) {
+                        vErrors.length = _errs150;
                       } else {
                         vErrors = null;
                       }
                     }
                   }
-                  var valid0 = _errs140 === errors;
+                  var valid0 = _errs149 === errors;
                 } else {
                   var valid0 = true;
                 }
                 if (valid0) {
                   if (data.nextAfterSourceId !== undefined) {
-                    let data59 = data.nextAfterSourceId;
-                    const _errs146 = errors;
-                    const _errs147 = errors;
-                    let valid18 = false;
-                    const _errs148 = errors;
-                    if (errors === _errs148) {
-                      if (typeof data59 === 'string') {
-                        if (func1(data59) > 128) {
+                    let data63 = data.nextAfterSourceId;
+                    const _errs155 = errors;
+                    const _errs156 = errors;
+                    let valid19 = false;
+                    const _errs157 = errors;
+                    if (errors === _errs157) {
+                      if (typeof data63 === 'string') {
+                        if (func1(data63) > 128) {
                           const err28 = {
                             instancePath: instancePath + '/nextAfterSourceId',
                             schemaPath: '#/properties/nextAfterSourceId/anyOf/0/maxLength',
@@ -84508,7 +84811,7 @@ function validate68(
                           }
                           errors++;
                         } else {
-                          if (func1(data59) < 1) {
+                          if (func1(data63) < 1) {
                             const err29 = {
                               instancePath: instancePath + '/nextAfterSourceId',
                               schemaPath: '#/properties/nextAfterSourceId/anyOf/0/minLength',
@@ -84523,7 +84826,7 @@ function validate68(
                             }
                             errors++;
                           } else {
-                            if (!pattern4.test(data59)) {
+                            if (!pattern4.test(data63)) {
                               const err30 = {
                                 instancePath: instancePath + '/nextAfterSourceId',
                                 schemaPath: '#/properties/nextAfterSourceId/anyOf/0/pattern',
@@ -84556,10 +84859,10 @@ function validate68(
                         errors++;
                       }
                     }
-                    var _valid5 = _errs148 === errors;
-                    valid18 = valid18 || _valid5;
-                    const _errs150 = errors;
-                    if (data59 !== null) {
+                    var _valid5 = _errs157 === errors;
+                    valid19 = valid19 || _valid5;
+                    const _errs159 = errors;
+                    if (data63 !== null) {
                       const err32 = {
                         instancePath: instancePath + '/nextAfterSourceId',
                         schemaPath: '#/properties/nextAfterSourceId/anyOf/1/type',
@@ -84574,9 +84877,9 @@ function validate68(
                       }
                       errors++;
                     }
-                    var _valid5 = _errs150 === errors;
-                    valid18 = valid18 || _valid5;
-                    if (!valid18) {
+                    var _valid5 = _errs159 === errors;
+                    valid19 = valid19 || _valid5;
+                    if (!valid19) {
                       const err33 = {
                         instancePath: instancePath + '/nextAfterSourceId',
                         schemaPath: '#/properties/nextAfterSourceId/anyOf',
@@ -84593,26 +84896,26 @@ function validate68(
                       validate68.errors = vErrors;
                       return false;
                     } else {
-                      errors = _errs147;
+                      errors = _errs156;
                       if (vErrors !== null) {
-                        if (_errs147) {
-                          vErrors.length = _errs147;
+                        if (_errs156) {
+                          vErrors.length = _errs156;
                         } else {
                           vErrors = null;
                         }
                       }
                     }
-                    var valid0 = _errs146 === errors;
+                    var valid0 = _errs155 === errors;
                   } else {
                     var valid0 = true;
                   }
                   if (valid0) {
                     if (data.snapshotCursor !== undefined) {
-                      let data60 = data.snapshotCursor;
-                      const _errs152 = errors;
-                      if (errors === _errs152) {
-                        if (typeof data60 === 'string') {
-                          if (!pattern9.test(data60)) {
+                      let data64 = data.snapshotCursor;
+                      const _errs161 = errors;
+                      if (errors === _errs161) {
+                        if (typeof data64 === 'string') {
+                          if (!pattern9.test(data64)) {
                             validate68.errors = [
                               {
                                 instancePath: instancePath + '/snapshotCursor',
@@ -84637,56 +84940,56 @@ function validate68(
                           return false;
                         }
                       }
-                      var valid0 = _errs152 === errors;
+                      var valid0 = _errs161 === errors;
                     } else {
                       var valid0 = true;
                     }
                     if (valid0) {
                       if (data.compression !== undefined) {
-                        let data61 = data.compression;
-                        const _errs154 = errors;
-                        if (errors === _errs154) {
-                          if (data61 && typeof data61 == 'object' && !Array.isArray(data61)) {
-                            let missing8;
+                        let data65 = data.compression;
+                        const _errs163 = errors;
+                        if (errors === _errs163) {
+                          if (data65 && typeof data65 == 'object' && !Array.isArray(data65)) {
+                            let missing9;
                             if (
-                              (data61.id === undefined && (missing8 = 'id')) ||
-                              (data61.originSessionId === undefined &&
-                                (missing8 = 'originSessionId')) ||
-                              (data61.originCompressionId === undefined &&
-                                (missing8 = 'originCompressionId')) ||
-                              (data61.sessionId === undefined && (missing8 = 'sessionId')) ||
-                              (data61.contextSelectionId === undefined &&
-                                (missing8 = 'contextSelectionId')) ||
-                              (data61.originStoreId === undefined &&
-                                (missing8 = 'originStoreId')) ||
-                              (data61.modelExecutionId === undefined &&
-                                (missing8 = 'modelExecutionId')) ||
-                              (data61.runId === undefined && (missing8 = 'runId')) ||
-                              (data61.coveredThroughSeq === undefined &&
-                                (missing8 = 'coveredThroughSeq')) ||
-                              (data61.publishedSeq === undefined && (missing8 = 'publishedSeq')) ||
-                              (data61.previousCompressionId === undefined &&
-                                (missing8 = 'previousCompressionId')) ||
-                              (data61.compressor === undefined && (missing8 = 'compressor')) ||
-                              (data61.trigger === undefined && (missing8 = 'trigger'))
+                              (data65.id === undefined && (missing9 = 'id')) ||
+                              (data65.originSessionId === undefined &&
+                                (missing9 = 'originSessionId')) ||
+                              (data65.originCompressionId === undefined &&
+                                (missing9 = 'originCompressionId')) ||
+                              (data65.sessionId === undefined && (missing9 = 'sessionId')) ||
+                              (data65.contextSelectionId === undefined &&
+                                (missing9 = 'contextSelectionId')) ||
+                              (data65.originStoreId === undefined &&
+                                (missing9 = 'originStoreId')) ||
+                              (data65.modelExecutionId === undefined &&
+                                (missing9 = 'modelExecutionId')) ||
+                              (data65.runId === undefined && (missing9 = 'runId')) ||
+                              (data65.coveredThroughSeq === undefined &&
+                                (missing9 = 'coveredThroughSeq')) ||
+                              (data65.publishedSeq === undefined && (missing9 = 'publishedSeq')) ||
+                              (data65.previousCompressionId === undefined &&
+                                (missing9 = 'previousCompressionId')) ||
+                              (data65.compressor === undefined && (missing9 = 'compressor')) ||
+                              (data65.trigger === undefined && (missing9 = 'trigger'))
                             ) {
                               validate68.errors = [
                                 {
                                   instancePath: instancePath + '/compression',
                                   schemaPath: '#/properties/compression/required',
                                   keyword: 'required',
-                                  params: { missingProperty: missing8 },
-                                  message: "must have required property '" + missing8 + "'",
+                                  params: { missingProperty: missing9 },
+                                  message: "must have required property '" + missing9 + "'",
                                 },
                               ];
                               return false;
                             } else {
-                              if (data61.id !== undefined) {
-                                let data62 = data61.id;
-                                const _errs157 = errors;
-                                if (errors === _errs157) {
-                                  if (typeof data62 === 'string') {
-                                    if (func1(data62) > 128) {
+                              if (data65.id !== undefined) {
+                                let data66 = data65.id;
+                                const _errs166 = errors;
+                                if (errors === _errs166) {
+                                  if (typeof data66 === 'string') {
+                                    if (func1(data66) > 128) {
                                       validate68.errors = [
                                         {
                                           instancePath: instancePath + '/compression/id',
@@ -84699,7 +85002,7 @@ function validate68(
                                       ];
                                       return false;
                                     } else {
-                                      if (func1(data62) < 1) {
+                                      if (func1(data66) < 1) {
                                         validate68.errors = [
                                           {
                                             instancePath: instancePath + '/compression/id',
@@ -84712,7 +85015,7 @@ function validate68(
                                         ];
                                         return false;
                                       } else {
-                                        if (!pattern4.test(data62)) {
+                                        if (!pattern4.test(data66)) {
                                           validate68.errors = [
                                             {
                                               instancePath: instancePath + '/compression/id',
@@ -84741,17 +85044,17 @@ function validate68(
                                     return false;
                                   }
                                 }
-                                var valid19 = _errs157 === errors;
+                                var valid20 = _errs166 === errors;
                               } else {
-                                var valid19 = true;
+                                var valid20 = true;
                               }
-                              if (valid19) {
-                                if (data61.originSessionId !== undefined) {
-                                  let data63 = data61.originSessionId;
-                                  const _errs159 = errors;
-                                  if (errors === _errs159) {
-                                    if (typeof data63 === 'string') {
-                                      if (func1(data63) > 128) {
+                              if (valid20) {
+                                if (data65.originSessionId !== undefined) {
+                                  let data67 = data65.originSessionId;
+                                  const _errs168 = errors;
+                                  if (errors === _errs168) {
+                                    if (typeof data67 === 'string') {
+                                      if (func1(data67) > 128) {
                                         validate68.errors = [
                                           {
                                             instancePath:
@@ -84765,7 +85068,7 @@ function validate68(
                                         ];
                                         return false;
                                       } else {
-                                        if (func1(data63) < 1) {
+                                        if (func1(data67) < 1) {
                                           validate68.errors = [
                                             {
                                               instancePath:
@@ -84779,7 +85082,7 @@ function validate68(
                                           ];
                                           return false;
                                         } else {
-                                          if (!pattern4.test(data63)) {
+                                          if (!pattern4.test(data67)) {
                                             validate68.errors = [
                                               {
                                                 instancePath:
@@ -84811,17 +85114,17 @@ function validate68(
                                       return false;
                                     }
                                   }
-                                  var valid19 = _errs159 === errors;
+                                  var valid20 = _errs168 === errors;
                                 } else {
-                                  var valid19 = true;
+                                  var valid20 = true;
                                 }
-                                if (valid19) {
-                                  if (data61.originCompressionId !== undefined) {
-                                    let data64 = data61.originCompressionId;
-                                    const _errs161 = errors;
-                                    if (errors === _errs161) {
-                                      if (typeof data64 === 'string') {
-                                        if (func1(data64) > 128) {
+                                if (valid20) {
+                                  if (data65.originCompressionId !== undefined) {
+                                    let data68 = data65.originCompressionId;
+                                    const _errs170 = errors;
+                                    if (errors === _errs170) {
+                                      if (typeof data68 === 'string') {
+                                        if (func1(data68) > 128) {
                                           validate68.errors = [
                                             {
                                               instancePath:
@@ -84835,7 +85138,7 @@ function validate68(
                                           ];
                                           return false;
                                         } else {
-                                          if (func1(data64) < 1) {
+                                          if (func1(data68) < 1) {
                                             validate68.errors = [
                                               {
                                                 instancePath:
@@ -84849,7 +85152,7 @@ function validate68(
                                             ];
                                             return false;
                                           } else {
-                                            if (!pattern4.test(data64)) {
+                                            if (!pattern4.test(data68)) {
                                               validate68.errors = [
                                                 {
                                                   instancePath:
@@ -84884,17 +85187,17 @@ function validate68(
                                         return false;
                                       }
                                     }
-                                    var valid19 = _errs161 === errors;
+                                    var valid20 = _errs170 === errors;
                                   } else {
-                                    var valid19 = true;
+                                    var valid20 = true;
                                   }
-                                  if (valid19) {
-                                    if (data61.sessionId !== undefined) {
-                                      let data65 = data61.sessionId;
-                                      const _errs163 = errors;
-                                      if (errors === _errs163) {
-                                        if (typeof data65 === 'string') {
-                                          if (func1(data65) > 128) {
+                                  if (valid20) {
+                                    if (data65.sessionId !== undefined) {
+                                      let data69 = data65.sessionId;
+                                      const _errs172 = errors;
+                                      if (errors === _errs172) {
+                                        if (typeof data69 === 'string') {
+                                          if (func1(data69) > 128) {
                                             validate68.errors = [
                                               {
                                                 instancePath:
@@ -84908,7 +85211,7 @@ function validate68(
                                             ];
                                             return false;
                                           } else {
-                                            if (func1(data65) < 1) {
+                                            if (func1(data69) < 1) {
                                               validate68.errors = [
                                                 {
                                                   instancePath:
@@ -84922,7 +85225,7 @@ function validate68(
                                               ];
                                               return false;
                                             } else {
-                                              if (!pattern4.test(data65)) {
+                                              if (!pattern4.test(data69)) {
                                                 validate68.errors = [
                                                   {
                                                     instancePath:
@@ -84955,17 +85258,17 @@ function validate68(
                                           return false;
                                         }
                                       }
-                                      var valid19 = _errs163 === errors;
+                                      var valid20 = _errs172 === errors;
                                     } else {
-                                      var valid19 = true;
+                                      var valid20 = true;
                                     }
-                                    if (valid19) {
-                                      if (data61.contextSelectionId !== undefined) {
-                                        let data66 = data61.contextSelectionId;
-                                        const _errs165 = errors;
-                                        if (errors === _errs165) {
-                                          if (typeof data66 === 'string') {
-                                            if (func1(data66) > 128) {
+                                    if (valid20) {
+                                      if (data65.contextSelectionId !== undefined) {
+                                        let data70 = data65.contextSelectionId;
+                                        const _errs174 = errors;
+                                        if (errors === _errs174) {
+                                          if (typeof data70 === 'string') {
+                                            if (func1(data70) > 128) {
                                               validate68.errors = [
                                                 {
                                                   instancePath:
@@ -84980,7 +85283,7 @@ function validate68(
                                               ];
                                               return false;
                                             } else {
-                                              if (func1(data66) < 1) {
+                                              if (func1(data70) < 1) {
                                                 validate68.errors = [
                                                   {
                                                     instancePath:
@@ -84996,7 +85299,7 @@ function validate68(
                                                 ];
                                                 return false;
                                               } else {
-                                                if (!pattern4.test(data66)) {
+                                                if (!pattern4.test(data70)) {
                                                   validate68.errors = [
                                                     {
                                                       instancePath:
@@ -85031,17 +85334,17 @@ function validate68(
                                             return false;
                                           }
                                         }
-                                        var valid19 = _errs165 === errors;
+                                        var valid20 = _errs174 === errors;
                                       } else {
-                                        var valid19 = true;
+                                        var valid20 = true;
                                       }
-                                      if (valid19) {
-                                        if (data61.originStoreId !== undefined) {
-                                          let data67 = data61.originStoreId;
-                                          const _errs167 = errors;
-                                          if (errors === _errs167) {
-                                            if (typeof data67 === 'string') {
-                                              if (func1(data67) > 128) {
+                                      if (valid20) {
+                                        if (data65.originStoreId !== undefined) {
+                                          let data71 = data65.originStoreId;
+                                          const _errs176 = errors;
+                                          if (errors === _errs176) {
+                                            if (typeof data71 === 'string') {
+                                              if (func1(data71) > 128) {
                                                 validate68.errors = [
                                                   {
                                                     instancePath:
@@ -85056,7 +85359,7 @@ function validate68(
                                                 ];
                                                 return false;
                                               } else {
-                                                if (func1(data67) < 1) {
+                                                if (func1(data71) < 1) {
                                                   validate68.errors = [
                                                     {
                                                       instancePath:
@@ -85071,7 +85374,7 @@ function validate68(
                                                   ];
                                                   return false;
                                                 } else {
-                                                  if (!pattern4.test(data67)) {
+                                                  if (!pattern4.test(data71)) {
                                                     validate68.errors = [
                                                       {
                                                         instancePath:
@@ -85106,17 +85409,17 @@ function validate68(
                                               return false;
                                             }
                                           }
-                                          var valid19 = _errs167 === errors;
+                                          var valid20 = _errs176 === errors;
                                         } else {
-                                          var valid19 = true;
+                                          var valid20 = true;
                                         }
-                                        if (valid19) {
-                                          if (data61.modelExecutionId !== undefined) {
-                                            let data68 = data61.modelExecutionId;
-                                            const _errs169 = errors;
-                                            if (errors === _errs169) {
-                                              if (typeof data68 === 'string') {
-                                                if (func1(data68) > 128) {
+                                        if (valid20) {
+                                          if (data65.modelExecutionId !== undefined) {
+                                            let data72 = data65.modelExecutionId;
+                                            const _errs178 = errors;
+                                            if (errors === _errs178) {
+                                              if (typeof data72 === 'string') {
+                                                if (func1(data72) > 128) {
                                                   validate68.errors = [
                                                     {
                                                       instancePath:
@@ -85132,7 +85435,7 @@ function validate68(
                                                   ];
                                                   return false;
                                                 } else {
-                                                  if (func1(data68) < 1) {
+                                                  if (func1(data72) < 1) {
                                                     validate68.errors = [
                                                       {
                                                         instancePath:
@@ -85148,7 +85451,7 @@ function validate68(
                                                     ];
                                                     return false;
                                                   } else {
-                                                    if (!pattern4.test(data68)) {
+                                                    if (!pattern4.test(data72)) {
                                                       validate68.errors = [
                                                         {
                                                           instancePath:
@@ -85184,17 +85487,17 @@ function validate68(
                                                 return false;
                                               }
                                             }
-                                            var valid19 = _errs169 === errors;
+                                            var valid20 = _errs178 === errors;
                                           } else {
-                                            var valid19 = true;
+                                            var valid20 = true;
                                           }
-                                          if (valid19) {
-                                            if (data61.runId !== undefined) {
-                                              let data69 = data61.runId;
-                                              const _errs171 = errors;
-                                              if (errors === _errs171) {
-                                                if (typeof data69 === 'string') {
-                                                  if (func1(data69) > 128) {
+                                          if (valid20) {
+                                            if (data65.runId !== undefined) {
+                                              let data73 = data65.runId;
+                                              const _errs180 = errors;
+                                              if (errors === _errs180) {
+                                                if (typeof data73 === 'string') {
+                                                  if (func1(data73) > 128) {
                                                     validate68.errors = [
                                                       {
                                                         instancePath:
@@ -85209,7 +85512,7 @@ function validate68(
                                                     ];
                                                     return false;
                                                   } else {
-                                                    if (func1(data69) < 1) {
+                                                    if (func1(data73) < 1) {
                                                       validate68.errors = [
                                                         {
                                                           instancePath:
@@ -85224,7 +85527,7 @@ function validate68(
                                                       ];
                                                       return false;
                                                     } else {
-                                                      if (!pattern4.test(data69)) {
+                                                      if (!pattern4.test(data73)) {
                                                         validate68.errors = [
                                                           {
                                                             instancePath:
@@ -85258,17 +85561,17 @@ function validate68(
                                                   return false;
                                                 }
                                               }
-                                              var valid19 = _errs171 === errors;
+                                              var valid20 = _errs180 === errors;
                                             } else {
-                                              var valid19 = true;
+                                              var valid20 = true;
                                             }
-                                            if (valid19) {
-                                              if (data61.coveredThroughSeq !== undefined) {
-                                                let data70 = data61.coveredThroughSeq;
-                                                const _errs173 = errors;
-                                                if (errors === _errs173) {
-                                                  if (typeof data70 === 'string') {
-                                                    if (!pattern9.test(data70)) {
+                                            if (valid20) {
+                                              if (data65.coveredThroughSeq !== undefined) {
+                                                let data74 = data65.coveredThroughSeq;
+                                                const _errs182 = errors;
+                                                if (errors === _errs182) {
+                                                  if (typeof data74 === 'string') {
+                                                    if (!pattern9.test(data74)) {
                                                       validate68.errors = [
                                                         {
                                                           instancePath:
@@ -85302,17 +85605,17 @@ function validate68(
                                                     return false;
                                                   }
                                                 }
-                                                var valid19 = _errs173 === errors;
+                                                var valid20 = _errs182 === errors;
                                               } else {
-                                                var valid19 = true;
+                                                var valid20 = true;
                                               }
-                                              if (valid19) {
-                                                if (data61.publishedSeq !== undefined) {
-                                                  let data71 = data61.publishedSeq;
-                                                  const _errs175 = errors;
-                                                  if (errors === _errs175) {
-                                                    if (typeof data71 === 'string') {
-                                                      if (!pattern9.test(data71)) {
+                                              if (valid20) {
+                                                if (data65.publishedSeq !== undefined) {
+                                                  let data75 = data65.publishedSeq;
+                                                  const _errs184 = errors;
+                                                  if (errors === _errs184) {
+                                                    if (typeof data75 === 'string') {
+                                                      if (!pattern9.test(data75)) {
                                                         validate68.errors = [
                                                           {
                                                             instancePath:
@@ -85348,20 +85651,20 @@ function validate68(
                                                       return false;
                                                     }
                                                   }
-                                                  var valid19 = _errs175 === errors;
+                                                  var valid20 = _errs184 === errors;
                                                 } else {
-                                                  var valid19 = true;
+                                                  var valid20 = true;
                                                 }
-                                                if (valid19) {
-                                                  if (data61.previousCompressionId !== undefined) {
-                                                    let data72 = data61.previousCompressionId;
-                                                    const _errs177 = errors;
-                                                    const _errs178 = errors;
-                                                    let valid20 = false;
-                                                    const _errs179 = errors;
-                                                    if (errors === _errs179) {
-                                                      if (typeof data72 === 'string') {
-                                                        if (func1(data72) > 128) {
+                                                if (valid20) {
+                                                  if (data65.previousCompressionId !== undefined) {
+                                                    let data76 = data65.previousCompressionId;
+                                                    const _errs186 = errors;
+                                                    const _errs187 = errors;
+                                                    let valid21 = false;
+                                                    const _errs188 = errors;
+                                                    if (errors === _errs188) {
+                                                      if (typeof data76 === 'string') {
+                                                        if (func1(data76) > 128) {
                                                           const err34 = {
                                                             instancePath:
                                                               instancePath +
@@ -85380,7 +85683,7 @@ function validate68(
                                                           }
                                                           errors++;
                                                         } else {
-                                                          if (func1(data72) < 1) {
+                                                          if (func1(data76) < 1) {
                                                             const err35 = {
                                                               instancePath:
                                                                 instancePath +
@@ -85399,7 +85702,7 @@ function validate68(
                                                             }
                                                             errors++;
                                                           } else {
-                                                            if (!pattern4.test(data72)) {
+                                                            if (!pattern4.test(data76)) {
                                                               const err36 = {
                                                                 instancePath:
                                                                   instancePath +
@@ -85443,10 +85746,10 @@ function validate68(
                                                         errors++;
                                                       }
                                                     }
-                                                    var _valid6 = _errs179 === errors;
-                                                    valid20 = valid20 || _valid6;
-                                                    const _errs181 = errors;
-                                                    if (data72 !== null) {
+                                                    var _valid6 = _errs188 === errors;
+                                                    valid21 = valid21 || _valid6;
+                                                    const _errs190 = errors;
+                                                    if (data76 !== null) {
                                                       const err38 = {
                                                         instancePath:
                                                           instancePath +
@@ -85464,9 +85767,9 @@ function validate68(
                                                       }
                                                       errors++;
                                                     }
-                                                    var _valid6 = _errs181 === errors;
-                                                    valid20 = valid20 || _valid6;
-                                                    if (!valid20) {
+                                                    var _valid6 = _errs190 === errors;
+                                                    valid21 = valid21 || _valid6;
+                                                    if (!valid21) {
                                                       const err39 = {
                                                         instancePath:
                                                           instancePath +
@@ -85486,37 +85789,37 @@ function validate68(
                                                       validate68.errors = vErrors;
                                                       return false;
                                                     } else {
-                                                      errors = _errs178;
+                                                      errors = _errs187;
                                                       if (vErrors !== null) {
-                                                        if (_errs178) {
-                                                          vErrors.length = _errs178;
+                                                        if (_errs187) {
+                                                          vErrors.length = _errs187;
                                                         } else {
                                                           vErrors = null;
                                                         }
                                                       }
                                                     }
-                                                    var valid19 = _errs177 === errors;
+                                                    var valid20 = _errs186 === errors;
                                                   } else {
-                                                    var valid19 = true;
+                                                    var valid20 = true;
                                                   }
-                                                  if (valid19) {
-                                                    if (data61.compressor !== undefined) {
-                                                      let data73 = data61.compressor;
-                                                      const _errs183 = errors;
-                                                      if (errors === _errs183) {
+                                                  if (valid20) {
+                                                    if (data65.compressor !== undefined) {
+                                                      let data77 = data65.compressor;
+                                                      const _errs192 = errors;
+                                                      if (errors === _errs192) {
                                                         if (
-                                                          data73 &&
-                                                          typeof data73 == 'object' &&
-                                                          !Array.isArray(data73)
+                                                          data77 &&
+                                                          typeof data77 == 'object' &&
+                                                          !Array.isArray(data77)
                                                         ) {
-                                                          let missing9;
+                                                          let missing10;
                                                           if (
-                                                            (data73.id === undefined &&
-                                                              (missing9 = 'id')) ||
-                                                            (data73.version === undefined &&
-                                                              (missing9 = 'version')) ||
-                                                            (data73.snapshot === undefined &&
-                                                              (missing9 = 'snapshot'))
+                                                            (data77.id === undefined &&
+                                                              (missing10 = 'id')) ||
+                                                            (data77.version === undefined &&
+                                                              (missing10 = 'version')) ||
+                                                            (data77.snapshot === undefined &&
+                                                              (missing10 = 'snapshot'))
                                                           ) {
                                                             validate68.errors = [
                                                               {
@@ -85527,22 +85830,22 @@ function validate68(
                                                                   '#/properties/compression/properties/compressor/required',
                                                                 keyword: 'required',
                                                                 params: {
-                                                                  missingProperty: missing9,
+                                                                  missingProperty: missing10,
                                                                 },
                                                                 message:
                                                                   "must have required property '" +
-                                                                  missing9 +
+                                                                  missing10 +
                                                                   "'",
                                                               },
                                                             ];
                                                             return false;
                                                           } else {
-                                                            if (data73.id !== undefined) {
-                                                              let data74 = data73.id;
-                                                              const _errs186 = errors;
-                                                              if (errors === _errs186) {
-                                                                if (typeof data74 === 'string') {
-                                                                  if (func1(data74) > 128) {
+                                                            if (data77.id !== undefined) {
+                                                              let data78 = data77.id;
+                                                              const _errs195 = errors;
+                                                              if (errors === _errs195) {
+                                                                if (typeof data78 === 'string') {
+                                                                  if (func1(data78) > 128) {
                                                                     validate68.errors = [
                                                                       {
                                                                         instancePath:
@@ -85558,7 +85861,7 @@ function validate68(
                                                                     ];
                                                                     return false;
                                                                   } else {
-                                                                    if (func1(data74) < 1) {
+                                                                    if (func1(data78) < 1) {
                                                                       validate68.errors = [
                                                                         {
                                                                           instancePath:
@@ -85591,17 +85894,17 @@ function validate68(
                                                                   return false;
                                                                 }
                                                               }
-                                                              var valid21 = _errs186 === errors;
+                                                              var valid22 = _errs195 === errors;
                                                             } else {
-                                                              var valid21 = true;
+                                                              var valid22 = true;
                                                             }
-                                                            if (valid21) {
-                                                              if (data73.version !== undefined) {
-                                                                let data75 = data73.version;
-                                                                const _errs188 = errors;
-                                                                if (errors === _errs188) {
-                                                                  if (typeof data75 === 'string') {
-                                                                    if (func1(data75) > 128) {
+                                                            if (valid22) {
+                                                              if (data77.version !== undefined) {
+                                                                let data79 = data77.version;
+                                                                const _errs197 = errors;
+                                                                if (errors === _errs197) {
+                                                                  if (typeof data79 === 'string') {
+                                                                    if (func1(data79) > 128) {
                                                                       validate68.errors = [
                                                                         {
                                                                           instancePath:
@@ -85617,7 +85920,7 @@ function validate68(
                                                                       ];
                                                                       return false;
                                                                     } else {
-                                                                      if (func1(data75) < 1) {
+                                                                      if (func1(data79) < 1) {
                                                                         validate68.errors = [
                                                                           {
                                                                             instancePath:
@@ -85650,19 +85953,19 @@ function validate68(
                                                                     return false;
                                                                   }
                                                                 }
-                                                                var valid21 = _errs188 === errors;
+                                                                var valid22 = _errs197 === errors;
                                                               } else {
-                                                                var valid21 = true;
+                                                                var valid22 = true;
                                                               }
-                                                              if (valid21) {
-                                                                if (data73.snapshot !== undefined) {
-                                                                  const _errs190 = errors;
+                                                              if (valid22) {
+                                                                if (data77.snapshot !== undefined) {
+                                                                  const _errs199 = errors;
                                                                   if (
-                                                                    !validate69(data73.snapshot, {
+                                                                    !validate69(data77.snapshot, {
                                                                       instancePath:
                                                                         instancePath +
                                                                         '/compression/compressor/snapshot',
-                                                                      parentData: data73,
+                                                                      parentData: data77,
                                                                       parentDataProperty:
                                                                         'snapshot',
                                                                       rootData,
@@ -85677,9 +85980,9 @@ function validate68(
                                                                           );
                                                                     errors = vErrors.length;
                                                                   }
-                                                                  var valid21 = _errs190 === errors;
+                                                                  var valid22 = _errs199 === errors;
                                                                 } else {
-                                                                  var valid21 = true;
+                                                                  var valid22 = true;
                                                                 }
                                                               }
                                                             }
@@ -85700,15 +86003,15 @@ function validate68(
                                                           return false;
                                                         }
                                                       }
-                                                      var valid19 = _errs183 === errors;
+                                                      var valid20 = _errs192 === errors;
                                                     } else {
-                                                      var valid19 = true;
+                                                      var valid20 = true;
                                                     }
-                                                    if (valid19) {
-                                                      if (data61.trigger !== undefined) {
-                                                        let data77 = data61.trigger;
-                                                        const _errs191 = errors;
-                                                        if (typeof data77 !== 'string') {
+                                                    if (valid20) {
+                                                      if (data65.trigger !== undefined) {
+                                                        let data81 = data65.trigger;
+                                                        const _errs200 = errors;
+                                                        if (typeof data81 !== 'string') {
                                                           validate68.errors = [
                                                             {
                                                               instancePath:
@@ -85725,8 +86028,8 @@ function validate68(
                                                         }
                                                         if (
                                                           !(
-                                                            data77 === 'manual' ||
-                                                            data77 === 'automatic'
+                                                            data81 === 'manual' ||
+                                                            data81 === 'automatic'
                                                           )
                                                         ) {
                                                           validate68.errors = [
@@ -85748,9 +86051,9 @@ function validate68(
                                                           ];
                                                           return false;
                                                         }
-                                                        var valid19 = _errs191 === errors;
+                                                        var valid20 = _errs200 === errors;
                                                       } else {
-                                                        var valid19 = true;
+                                                        var valid20 = true;
                                                       }
                                                     }
                                                   }
@@ -85778,7 +86081,7 @@ function validate68(
                             return false;
                           }
                         }
-                        var valid0 = _errs154 === errors;
+                        var valid0 = _errs163 === errors;
                       } else {
                         var valid0 = true;
                       }
@@ -106851,6 +107154,19 @@ var schema91 = {
           role: { type: 'string', enum: ['system', 'user', 'assistant', 'tool'] },
           content: { type: 'string' },
           firstOutput: { type: 'string', enum: ['content', 'reasoning', 'tool_calls'] },
+          compression: {
+            type: 'object',
+            properties: {
+              id: { type: 'string', minLength: 1, maxLength: 128, pattern: '^[A-Za-z0-9_-]+$' },
+              trigger: { type: 'string', enum: ['manual', 'automatic'] },
+              status: {
+                type: 'string',
+                enum: ['running', 'completed', 'failed', 'cancelled', 'unpublished'],
+              },
+            },
+            required: ['id', 'trigger', 'status'],
+            additionalProperties: true,
+          },
           originMessage: {
             type: 'object',
             properties: {
@@ -106955,6 +107271,7 @@ var schema91 = {
           pattern: '^[A-Za-z0-9_-]+$',
         },
         phase: { type: 'string', enum: ['preparing', 'summarizing', 'validating'] },
+        executionId: { type: 'string', minLength: 1, maxLength: 128, pattern: '^[A-Za-z0-9_-]+$' },
       },
       required: ['runId', 'originStoreId', 'phase'],
       additionalProperties: true,
@@ -112365,8 +112682,8 @@ function validate101(
                                             var valid26 = true;
                                           }
                                           if (valid26) {
-                                            if (data71.originMessage !== undefined) {
-                                              let data80 = data71.originMessage;
+                                            if (data71.compression !== undefined) {
+                                              let data80 = data71.compression;
                                               const _errs227 = errors;
                                               if (errors === _errs227) {
                                                 if (
@@ -112376,14 +112693,12 @@ function validate101(
                                                 ) {
                                                   let missing9;
                                                   if (
-                                                    (data80.storeId === undefined &&
-                                                      (missing9 = 'storeId')) ||
-                                                    (data80.sessionId === undefined &&
-                                                      (missing9 = 'sessionId')) ||
-                                                    (data80.messageId === undefined &&
-                                                      (missing9 = 'messageId')) ||
-                                                    (data80.runId === undefined &&
-                                                      (missing9 = 'runId'))
+                                                    (data80.id === undefined &&
+                                                      (missing9 = 'id')) ||
+                                                    (data80.trigger === undefined &&
+                                                      (missing9 = 'trigger')) ||
+                                                    (data80.status === undefined &&
+                                                      (missing9 = 'status'))
                                                   ) {
                                                     validate101.errors = [
                                                       {
@@ -112391,9 +112706,9 @@ function validate101(
                                                           instancePath +
                                                           '/messages/' +
                                                           i3 +
-                                                          '/originMessage',
+                                                          '/compression',
                                                         schemaPath:
-                                                          '#/properties/messages/items/properties/originMessage/required',
+                                                          '#/properties/messages/items/properties/compression/required',
                                                         keyword: 'required',
                                                         params: { missingProperty: missing9 },
                                                         message:
@@ -112404,8 +112719,8 @@ function validate101(
                                                     ];
                                                     return false;
                                                   } else {
-                                                    if (data80.storeId !== undefined) {
-                                                      let data81 = data80.storeId;
+                                                    if (data80.id !== undefined) {
+                                                      let data81 = data80.id;
                                                       const _errs230 = errors;
                                                       if (errors === _errs230) {
                                                         if (typeof data81 === 'string') {
@@ -112416,9 +112731,9 @@ function validate101(
                                                                   instancePath +
                                                                   '/messages/' +
                                                                   i3 +
-                                                                  '/originMessage/storeId',
+                                                                  '/compression/id',
                                                                 schemaPath:
-                                                                  '#/properties/messages/items/properties/originMessage/properties/storeId/maxLength',
+                                                                  '#/properties/messages/items/properties/compression/properties/id/maxLength',
                                                                 keyword: 'maxLength',
                                                                 params: { limit: 128 },
                                                                 message:
@@ -112434,9 +112749,9 @@ function validate101(
                                                                     instancePath +
                                                                     '/messages/' +
                                                                     i3 +
-                                                                    '/originMessage/storeId',
+                                                                    '/compression/id',
                                                                   schemaPath:
-                                                                    '#/properties/messages/items/properties/originMessage/properties/storeId/minLength',
+                                                                    '#/properties/messages/items/properties/compression/properties/id/minLength',
                                                                   keyword: 'minLength',
                                                                   params: { limit: 1 },
                                                                   message:
@@ -112452,9 +112767,9 @@ function validate101(
                                                                       instancePath +
                                                                       '/messages/' +
                                                                       i3 +
-                                                                      '/originMessage/storeId',
+                                                                      '/compression/id',
                                                                     schemaPath:
-                                                                      '#/properties/messages/items/properties/originMessage/properties/storeId/pattern',
+                                                                      '#/properties/messages/items/properties/compression/properties/id/pattern',
                                                                     keyword: 'pattern',
                                                                     params: {
                                                                       pattern: '^[A-Za-z0-9_-]+$',
@@ -112476,9 +112791,9 @@ function validate101(
                                                                 instancePath +
                                                                 '/messages/' +
                                                                 i3 +
-                                                                '/originMessage/storeId',
+                                                                '/compression/id',
                                                               schemaPath:
-                                                                '#/properties/messages/items/properties/originMessage/properties/storeId/type',
+                                                                '#/properties/messages/items/properties/compression/properties/id/type',
                                                               keyword: 'type',
                                                               params: { type: 'string' },
                                                               message: 'must be string',
@@ -112492,21 +112807,194 @@ function validate101(
                                                       var valid28 = true;
                                                     }
                                                     if (valid28) {
-                                                      if (data80.sessionId !== undefined) {
-                                                        let data82 = data80.sessionId;
+                                                      if (data80.trigger !== undefined) {
+                                                        let data82 = data80.trigger;
                                                         const _errs232 = errors;
-                                                        if (errors === _errs232) {
-                                                          if (typeof data82 === 'string') {
-                                                            if (func1(data82) > 128) {
+                                                        if (typeof data82 !== 'string') {
+                                                          validate101.errors = [
+                                                            {
+                                                              instancePath:
+                                                                instancePath +
+                                                                '/messages/' +
+                                                                i3 +
+                                                                '/compression/trigger',
+                                                              schemaPath:
+                                                                '#/properties/messages/items/properties/compression/properties/trigger/type',
+                                                              keyword: 'type',
+                                                              params: { type: 'string' },
+                                                              message: 'must be string',
+                                                            },
+                                                          ];
+                                                          return false;
+                                                        }
+                                                        if (
+                                                          !(
+                                                            data82 === 'manual' ||
+                                                            data82 === 'automatic'
+                                                          )
+                                                        ) {
+                                                          validate101.errors = [
+                                                            {
+                                                              instancePath:
+                                                                instancePath +
+                                                                '/messages/' +
+                                                                i3 +
+                                                                '/compression/trigger',
+                                                              schemaPath:
+                                                                '#/properties/messages/items/properties/compression/properties/trigger/enum',
+                                                              keyword: 'enum',
+                                                              params: {
+                                                                allowedValues:
+                                                                  schema91.properties.messages.items
+                                                                    .properties.compression
+                                                                    .properties.trigger.enum,
+                                                              },
+                                                              message:
+                                                                'must be equal to one of the allowed values',
+                                                            },
+                                                          ];
+                                                          return false;
+                                                        }
+                                                        var valid28 = _errs232 === errors;
+                                                      } else {
+                                                        var valid28 = true;
+                                                      }
+                                                      if (valid28) {
+                                                        if (data80.status !== undefined) {
+                                                          let data83 = data80.status;
+                                                          const _errs234 = errors;
+                                                          if (typeof data83 !== 'string') {
+                                                            validate101.errors = [
+                                                              {
+                                                                instancePath:
+                                                                  instancePath +
+                                                                  '/messages/' +
+                                                                  i3 +
+                                                                  '/compression/status',
+                                                                schemaPath:
+                                                                  '#/properties/messages/items/properties/compression/properties/status/type',
+                                                                keyword: 'type',
+                                                                params: { type: 'string' },
+                                                                message: 'must be string',
+                                                              },
+                                                            ];
+                                                            return false;
+                                                          }
+                                                          if (
+                                                            !(
+                                                              data83 === 'running' ||
+                                                              data83 === 'completed' ||
+                                                              data83 === 'failed' ||
+                                                              data83 === 'cancelled' ||
+                                                              data83 === 'unpublished'
+                                                            )
+                                                          ) {
+                                                            validate101.errors = [
+                                                              {
+                                                                instancePath:
+                                                                  instancePath +
+                                                                  '/messages/' +
+                                                                  i3 +
+                                                                  '/compression/status',
+                                                                schemaPath:
+                                                                  '#/properties/messages/items/properties/compression/properties/status/enum',
+                                                                keyword: 'enum',
+                                                                params: {
+                                                                  allowedValues:
+                                                                    schema91.properties.messages
+                                                                      .items.properties.compression
+                                                                      .properties.status.enum,
+                                                                },
+                                                                message:
+                                                                  'must be equal to one of the allowed values',
+                                                              },
+                                                            ];
+                                                            return false;
+                                                          }
+                                                          var valid28 = _errs234 === errors;
+                                                        } else {
+                                                          var valid28 = true;
+                                                        }
+                                                      }
+                                                    }
+                                                  }
+                                                } else {
+                                                  validate101.errors = [
+                                                    {
+                                                      instancePath:
+                                                        instancePath +
+                                                        '/messages/' +
+                                                        i3 +
+                                                        '/compression',
+                                                      schemaPath:
+                                                        '#/properties/messages/items/properties/compression/type',
+                                                      keyword: 'type',
+                                                      params: { type: 'object' },
+                                                      message: 'must be object',
+                                                    },
+                                                  ];
+                                                  return false;
+                                                }
+                                              }
+                                              var valid26 = _errs227 === errors;
+                                            } else {
+                                              var valid26 = true;
+                                            }
+                                            if (valid26) {
+                                              if (data71.originMessage !== undefined) {
+                                                let data84 = data71.originMessage;
+                                                const _errs236 = errors;
+                                                if (errors === _errs236) {
+                                                  if (
+                                                    data84 &&
+                                                    typeof data84 == 'object' &&
+                                                    !Array.isArray(data84)
+                                                  ) {
+                                                    let missing10;
+                                                    if (
+                                                      (data84.storeId === undefined &&
+                                                        (missing10 = 'storeId')) ||
+                                                      (data84.sessionId === undefined &&
+                                                        (missing10 = 'sessionId')) ||
+                                                      (data84.messageId === undefined &&
+                                                        (missing10 = 'messageId')) ||
+                                                      (data84.runId === undefined &&
+                                                        (missing10 = 'runId'))
+                                                    ) {
+                                                      validate101.errors = [
+                                                        {
+                                                          instancePath:
+                                                            instancePath +
+                                                            '/messages/' +
+                                                            i3 +
+                                                            '/originMessage',
+                                                          schemaPath:
+                                                            '#/properties/messages/items/properties/originMessage/required',
+                                                          keyword: 'required',
+                                                          params: { missingProperty: missing10 },
+                                                          message:
+                                                            "must have required property '" +
+                                                            missing10 +
+                                                            "'",
+                                                        },
+                                                      ];
+                                                      return false;
+                                                    } else {
+                                                      if (data84.storeId !== undefined) {
+                                                        let data85 = data84.storeId;
+                                                        const _errs239 = errors;
+                                                        if (errors === _errs239) {
+                                                          if (typeof data85 === 'string') {
+                                                            if (func1(data85) > 128) {
                                                               validate101.errors = [
                                                                 {
                                                                   instancePath:
                                                                     instancePath +
                                                                     '/messages/' +
                                                                     i3 +
-                                                                    '/originMessage/sessionId',
+                                                                    '/originMessage/storeId',
                                                                   schemaPath:
-                                                                    '#/properties/messages/items/properties/originMessage/properties/sessionId/maxLength',
+                                                                    '#/properties/messages/items/properties/originMessage/properties/storeId/maxLength',
                                                                   keyword: 'maxLength',
                                                                   params: { limit: 128 },
                                                                   message:
@@ -112515,16 +113003,16 @@ function validate101(
                                                               ];
                                                               return false;
                                                             } else {
-                                                              if (func1(data82) < 1) {
+                                                              if (func1(data85) < 1) {
                                                                 validate101.errors = [
                                                                   {
                                                                     instancePath:
                                                                       instancePath +
                                                                       '/messages/' +
                                                                       i3 +
-                                                                      '/originMessage/sessionId',
+                                                                      '/originMessage/storeId',
                                                                     schemaPath:
-                                                                      '#/properties/messages/items/properties/originMessage/properties/sessionId/minLength',
+                                                                      '#/properties/messages/items/properties/originMessage/properties/storeId/minLength',
                                                                     keyword: 'minLength',
                                                                     params: { limit: 1 },
                                                                     message:
@@ -112533,16 +113021,16 @@ function validate101(
                                                                 ];
                                                                 return false;
                                                               } else {
-                                                                if (!pattern4.test(data82)) {
+                                                                if (!pattern4.test(data85)) {
                                                                   validate101.errors = [
                                                                     {
                                                                       instancePath:
                                                                         instancePath +
                                                                         '/messages/' +
                                                                         i3 +
-                                                                        '/originMessage/sessionId',
+                                                                        '/originMessage/storeId',
                                                                       schemaPath:
-                                                                        '#/properties/messages/items/properties/originMessage/properties/sessionId/pattern',
+                                                                        '#/properties/messages/items/properties/originMessage/properties/storeId/pattern',
                                                                       keyword: 'pattern',
                                                                       params: {
                                                                         pattern: '^[A-Za-z0-9_-]+$',
@@ -112564,9 +113052,9 @@ function validate101(
                                                                   instancePath +
                                                                   '/messages/' +
                                                                   i3 +
-                                                                  '/originMessage/sessionId',
+                                                                  '/originMessage/storeId',
                                                                 schemaPath:
-                                                                  '#/properties/messages/items/properties/originMessage/properties/sessionId/type',
+                                                                  '#/properties/messages/items/properties/originMessage/properties/storeId/type',
                                                                 keyword: 'type',
                                                                 params: { type: 'string' },
                                                                 message: 'must be string',
@@ -112575,26 +113063,26 @@ function validate101(
                                                             return false;
                                                           }
                                                         }
-                                                        var valid28 = _errs232 === errors;
+                                                        var valid29 = _errs239 === errors;
                                                       } else {
-                                                        var valid28 = true;
+                                                        var valid29 = true;
                                                       }
-                                                      if (valid28) {
-                                                        if (data80.messageId !== undefined) {
-                                                          let data83 = data80.messageId;
-                                                          const _errs234 = errors;
-                                                          if (errors === _errs234) {
-                                                            if (typeof data83 === 'string') {
-                                                              if (func1(data83) > 128) {
+                                                      if (valid29) {
+                                                        if (data84.sessionId !== undefined) {
+                                                          let data86 = data84.sessionId;
+                                                          const _errs241 = errors;
+                                                          if (errors === _errs241) {
+                                                            if (typeof data86 === 'string') {
+                                                              if (func1(data86) > 128) {
                                                                 validate101.errors = [
                                                                   {
                                                                     instancePath:
                                                                       instancePath +
                                                                       '/messages/' +
                                                                       i3 +
-                                                                      '/originMessage/messageId',
+                                                                      '/originMessage/sessionId',
                                                                     schemaPath:
-                                                                      '#/properties/messages/items/properties/originMessage/properties/messageId/maxLength',
+                                                                      '#/properties/messages/items/properties/originMessage/properties/sessionId/maxLength',
                                                                     keyword: 'maxLength',
                                                                     params: { limit: 128 },
                                                                     message:
@@ -112603,16 +113091,16 @@ function validate101(
                                                                 ];
                                                                 return false;
                                                               } else {
-                                                                if (func1(data83) < 1) {
+                                                                if (func1(data86) < 1) {
                                                                   validate101.errors = [
                                                                     {
                                                                       instancePath:
                                                                         instancePath +
                                                                         '/messages/' +
                                                                         i3 +
-                                                                        '/originMessage/messageId',
+                                                                        '/originMessage/sessionId',
                                                                       schemaPath:
-                                                                        '#/properties/messages/items/properties/originMessage/properties/messageId/minLength',
+                                                                        '#/properties/messages/items/properties/originMessage/properties/sessionId/minLength',
                                                                       keyword: 'minLength',
                                                                       params: { limit: 1 },
                                                                       message:
@@ -112621,16 +113109,16 @@ function validate101(
                                                                   ];
                                                                   return false;
                                                                 } else {
-                                                                  if (!pattern4.test(data83)) {
+                                                                  if (!pattern4.test(data86)) {
                                                                     validate101.errors = [
                                                                       {
                                                                         instancePath:
                                                                           instancePath +
                                                                           '/messages/' +
                                                                           i3 +
-                                                                          '/originMessage/messageId',
+                                                                          '/originMessage/sessionId',
                                                                         schemaPath:
-                                                                          '#/properties/messages/items/properties/originMessage/properties/messageId/pattern',
+                                                                          '#/properties/messages/items/properties/originMessage/properties/sessionId/pattern',
                                                                         keyword: 'pattern',
                                                                         params: {
                                                                           pattern:
@@ -112653,9 +113141,9 @@ function validate101(
                                                                     instancePath +
                                                                     '/messages/' +
                                                                     i3 +
-                                                                    '/originMessage/messageId',
+                                                                    '/originMessage/sessionId',
                                                                   schemaPath:
-                                                                    '#/properties/messages/items/properties/originMessage/properties/messageId/type',
+                                                                    '#/properties/messages/items/properties/originMessage/properties/sessionId/type',
                                                                   keyword: 'type',
                                                                   params: { type: 'string' },
                                                                   message: 'must be string',
@@ -112664,343 +113152,26 @@ function validate101(
                                                               return false;
                                                             }
                                                           }
-                                                          var valid28 = _errs234 === errors;
+                                                          var valid29 = _errs241 === errors;
                                                         } else {
-                                                          var valid28 = true;
+                                                          var valid29 = true;
                                                         }
-                                                        if (valid28) {
-                                                          if (data80.runId !== undefined) {
-                                                            let data84 = data80.runId;
-                                                            const _errs236 = errors;
-                                                            const _errs237 = errors;
-                                                            let valid29 = false;
-                                                            const _errs238 = errors;
-                                                            if (errors === _errs238) {
-                                                              if (typeof data84 === 'string') {
-                                                                if (func1(data84) > 128) {
-                                                                  const err68 = {
-                                                                    instancePath:
-                                                                      instancePath +
-                                                                      '/messages/' +
-                                                                      i3 +
-                                                                      '/originMessage/runId',
-                                                                    schemaPath:
-                                                                      '#/properties/messages/items/properties/originMessage/properties/runId/anyOf/0/maxLength',
-                                                                    keyword: 'maxLength',
-                                                                    params: { limit: 128 },
-                                                                    message:
-                                                                      'must NOT have more than 128 characters',
-                                                                  };
-                                                                  if (vErrors === null) {
-                                                                    vErrors = [err68];
-                                                                  } else {
-                                                                    vErrors.push(err68);
-                                                                  }
-                                                                  errors++;
-                                                                } else {
-                                                                  if (func1(data84) < 1) {
-                                                                    const err69 = {
-                                                                      instancePath:
-                                                                        instancePath +
-                                                                        '/messages/' +
-                                                                        i3 +
-                                                                        '/originMessage/runId',
-                                                                      schemaPath:
-                                                                        '#/properties/messages/items/properties/originMessage/properties/runId/anyOf/0/minLength',
-                                                                      keyword: 'minLength',
-                                                                      params: { limit: 1 },
-                                                                      message:
-                                                                        'must NOT have fewer than 1 characters',
-                                                                    };
-                                                                    if (vErrors === null) {
-                                                                      vErrors = [err69];
-                                                                    } else {
-                                                                      vErrors.push(err69);
-                                                                    }
-                                                                    errors++;
-                                                                  } else {
-                                                                    if (!pattern4.test(data84)) {
-                                                                      const err70 = {
-                                                                        instancePath:
-                                                                          instancePath +
-                                                                          '/messages/' +
-                                                                          i3 +
-                                                                          '/originMessage/runId',
-                                                                        schemaPath:
-                                                                          '#/properties/messages/items/properties/originMessage/properties/runId/anyOf/0/pattern',
-                                                                        keyword: 'pattern',
-                                                                        params: {
-                                                                          pattern:
-                                                                            '^[A-Za-z0-9_-]+$',
-                                                                        },
-                                                                        message:
-                                                                          'must match pattern "' +
-                                                                          '^[A-Za-z0-9_-]+$' +
-                                                                          '"',
-                                                                      };
-                                                                      if (vErrors === null) {
-                                                                        vErrors = [err70];
-                                                                      } else {
-                                                                        vErrors.push(err70);
-                                                                      }
-                                                                      errors++;
-                                                                    }
-                                                                  }
-                                                                }
-                                                              } else {
-                                                                const err71 = {
-                                                                  instancePath:
-                                                                    instancePath +
-                                                                    '/messages/' +
-                                                                    i3 +
-                                                                    '/originMessage/runId',
-                                                                  schemaPath:
-                                                                    '#/properties/messages/items/properties/originMessage/properties/runId/anyOf/0/type',
-                                                                  keyword: 'type',
-                                                                  params: { type: 'string' },
-                                                                  message: 'must be string',
-                                                                };
-                                                                if (vErrors === null) {
-                                                                  vErrors = [err71];
-                                                                } else {
-                                                                  vErrors.push(err71);
-                                                                }
-                                                                errors++;
-                                                              }
-                                                            }
-                                                            var _valid15 = _errs238 === errors;
-                                                            valid29 = valid29 || _valid15;
-                                                            const _errs240 = errors;
-                                                            if (data84 !== null) {
-                                                              const err72 = {
-                                                                instancePath:
-                                                                  instancePath +
-                                                                  '/messages/' +
-                                                                  i3 +
-                                                                  '/originMessage/runId',
-                                                                schemaPath:
-                                                                  '#/properties/messages/items/properties/originMessage/properties/runId/anyOf/1/type',
-                                                                keyword: 'type',
-                                                                params: { type: 'null' },
-                                                                message: 'must be null',
-                                                              };
-                                                              if (vErrors === null) {
-                                                                vErrors = [err72];
-                                                              } else {
-                                                                vErrors.push(err72);
-                                                              }
-                                                              errors++;
-                                                            }
-                                                            var _valid15 = _errs240 === errors;
-                                                            valid29 = valid29 || _valid15;
-                                                            if (!valid29) {
-                                                              const err73 = {
-                                                                instancePath:
-                                                                  instancePath +
-                                                                  '/messages/' +
-                                                                  i3 +
-                                                                  '/originMessage/runId',
-                                                                schemaPath:
-                                                                  '#/properties/messages/items/properties/originMessage/properties/runId/anyOf',
-                                                                keyword: 'anyOf',
-                                                                params: {},
-                                                                message:
-                                                                  'must match a schema in anyOf',
-                                                              };
-                                                              if (vErrors === null) {
-                                                                vErrors = [err73];
-                                                              } else {
-                                                                vErrors.push(err73);
-                                                              }
-                                                              errors++;
-                                                              validate101.errors = vErrors;
-                                                              return false;
-                                                            } else {
-                                                              errors = _errs237;
-                                                              if (vErrors !== null) {
-                                                                if (_errs237) {
-                                                                  vErrors.length = _errs237;
-                                                                } else {
-                                                                  vErrors = null;
-                                                                }
-                                                              }
-                                                            }
-                                                            var valid28 = _errs236 === errors;
-                                                          } else {
-                                                            var valid28 = true;
-                                                          }
-                                                        }
-                                                      }
-                                                    }
-                                                  }
-                                                } else {
-                                                  validate101.errors = [
-                                                    {
-                                                      instancePath:
-                                                        instancePath +
-                                                        '/messages/' +
-                                                        i3 +
-                                                        '/originMessage',
-                                                      schemaPath:
-                                                        '#/properties/messages/items/properties/originMessage/type',
-                                                      keyword: 'type',
-                                                      params: { type: 'object' },
-                                                      message: 'must be object',
-                                                    },
-                                                  ];
-                                                  return false;
-                                                }
-                                              }
-                                              var valid26 = _errs227 === errors;
-                                            } else {
-                                              var valid26 = true;
-                                            }
-                                            if (valid26) {
-                                              if (data71.contentFormat !== undefined) {
-                                                let data85 = data71.contentFormat;
-                                                const _errs242 = errors;
-                                                if (typeof data85 !== 'string') {
-                                                  validate101.errors = [
-                                                    {
-                                                      instancePath:
-                                                        instancePath +
-                                                        '/messages/' +
-                                                        i3 +
-                                                        '/contentFormat',
-                                                      schemaPath:
-                                                        '#/properties/messages/items/properties/contentFormat/type',
-                                                      keyword: 'type',
-                                                      params: { type: 'string' },
-                                                      message: 'must be string',
-                                                    },
-                                                  ];
-                                                  return false;
-                                                }
-                                                if (data85 !== 'unsupported') {
-                                                  validate101.errors = [
-                                                    {
-                                                      instancePath:
-                                                        instancePath +
-                                                        '/messages/' +
-                                                        i3 +
-                                                        '/contentFormat',
-                                                      schemaPath:
-                                                        '#/properties/messages/items/properties/contentFormat/const',
-                                                      keyword: 'const',
-                                                      params: { allowedValue: 'unsupported' },
-                                                      message: 'must be equal to constant',
-                                                    },
-                                                  ];
-                                                  return false;
-                                                }
-                                                var valid26 = _errs242 === errors;
-                                              } else {
-                                                var valid26 = true;
-                                              }
-                                              if (valid26) {
-                                                if (data71.outputBody !== undefined) {
-                                                  let data86 = data71.outputBody;
-                                                  const _errs244 = errors;
-                                                  if (errors === _errs244) {
-                                                    if (
-                                                      data86 &&
-                                                      typeof data86 == 'object' &&
-                                                      !Array.isArray(data86)
-                                                    ) {
-                                                      let missing10;
-                                                      if (
-                                                        (data86.kind === undefined &&
-                                                          (missing10 = 'kind')) ||
-                                                        (data86.executionId === undefined &&
-                                                          (missing10 = 'executionId')) ||
-                                                        (data86.complete === undefined &&
-                                                          (missing10 = 'complete')) ||
-                                                        (data86.contentBytes === undefined &&
-                                                          (missing10 = 'contentBytes')) ||
-                                                        (data86.reasoningBytes === undefined &&
-                                                          (missing10 = 'reasoningBytes')) ||
-                                                        (data86.toolCallCount === undefined &&
-                                                          (missing10 = 'toolCallCount'))
-                                                      ) {
-                                                        validate101.errors = [
-                                                          {
-                                                            instancePath:
-                                                              instancePath +
-                                                              '/messages/' +
-                                                              i3 +
-                                                              '/outputBody',
-                                                            schemaPath:
-                                                              '#/properties/messages/items/properties/outputBody/required',
-                                                            keyword: 'required',
-                                                            params: { missingProperty: missing10 },
-                                                            message:
-                                                              "must have required property '" +
-                                                              missing10 +
-                                                              "'",
-                                                          },
-                                                        ];
-                                                        return false;
-                                                      } else {
-                                                        if (data86.kind !== undefined) {
-                                                          let data87 = data86.kind;
-                                                          const _errs247 = errors;
-                                                          if (typeof data87 !== 'string') {
-                                                            validate101.errors = [
-                                                              {
-                                                                instancePath:
-                                                                  instancePath +
-                                                                  '/messages/' +
-                                                                  i3 +
-                                                                  '/outputBody/kind',
-                                                                schemaPath:
-                                                                  '#/properties/messages/items/properties/outputBody/properties/kind/type',
-                                                                keyword: 'type',
-                                                                params: { type: 'string' },
-                                                                message: 'must be string',
-                                                              },
-                                                            ];
-                                                            return false;
-                                                          }
-                                                          if (data87 !== 'model_output') {
-                                                            validate101.errors = [
-                                                              {
-                                                                instancePath:
-                                                                  instancePath +
-                                                                  '/messages/' +
-                                                                  i3 +
-                                                                  '/outputBody/kind',
-                                                                schemaPath:
-                                                                  '#/properties/messages/items/properties/outputBody/properties/kind/const',
-                                                                keyword: 'const',
-                                                                params: {
-                                                                  allowedValue: 'model_output',
-                                                                },
-                                                                message:
-                                                                  'must be equal to constant',
-                                                              },
-                                                            ];
-                                                            return false;
-                                                          }
-                                                          var valid30 = _errs247 === errors;
-                                                        } else {
-                                                          var valid30 = true;
-                                                        }
-                                                        if (valid30) {
-                                                          if (data86.executionId !== undefined) {
-                                                            let data88 = data86.executionId;
-                                                            const _errs249 = errors;
-                                                            if (errors === _errs249) {
-                                                              if (typeof data88 === 'string') {
-                                                                if (func1(data88) > 128) {
+                                                        if (valid29) {
+                                                          if (data84.messageId !== undefined) {
+                                                            let data87 = data84.messageId;
+                                                            const _errs243 = errors;
+                                                            if (errors === _errs243) {
+                                                              if (typeof data87 === 'string') {
+                                                                if (func1(data87) > 128) {
                                                                   validate101.errors = [
                                                                     {
                                                                       instancePath:
                                                                         instancePath +
                                                                         '/messages/' +
                                                                         i3 +
-                                                                        '/outputBody/executionId',
+                                                                        '/originMessage/messageId',
                                                                       schemaPath:
-                                                                        '#/properties/messages/items/properties/outputBody/properties/executionId/maxLength',
+                                                                        '#/properties/messages/items/properties/originMessage/properties/messageId/maxLength',
                                                                       keyword: 'maxLength',
                                                                       params: { limit: 128 },
                                                                       message:
@@ -113009,16 +113180,16 @@ function validate101(
                                                                   ];
                                                                   return false;
                                                                 } else {
-                                                                  if (func1(data88) < 1) {
+                                                                  if (func1(data87) < 1) {
                                                                     validate101.errors = [
                                                                       {
                                                                         instancePath:
                                                                           instancePath +
                                                                           '/messages/' +
                                                                           i3 +
-                                                                          '/outputBody/executionId',
+                                                                          '/originMessage/messageId',
                                                                         schemaPath:
-                                                                          '#/properties/messages/items/properties/outputBody/properties/executionId/minLength',
+                                                                          '#/properties/messages/items/properties/originMessage/properties/messageId/minLength',
                                                                         keyword: 'minLength',
                                                                         params: { limit: 1 },
                                                                         message:
@@ -113027,16 +113198,16 @@ function validate101(
                                                                     ];
                                                                     return false;
                                                                   } else {
-                                                                    if (!pattern4.test(data88)) {
+                                                                    if (!pattern4.test(data87)) {
                                                                       validate101.errors = [
                                                                         {
                                                                           instancePath:
                                                                             instancePath +
                                                                             '/messages/' +
                                                                             i3 +
-                                                                            '/outputBody/executionId',
+                                                                            '/originMessage/messageId',
                                                                           schemaPath:
-                                                                            '#/properties/messages/items/properties/outputBody/properties/executionId/pattern',
+                                                                            '#/properties/messages/items/properties/originMessage/properties/messageId/pattern',
                                                                           keyword: 'pattern',
                                                                           params: {
                                                                             pattern:
@@ -113059,9 +113230,9 @@ function validate101(
                                                                       instancePath +
                                                                       '/messages/' +
                                                                       i3 +
-                                                                      '/outputBody/executionId',
+                                                                      '/originMessage/messageId',
                                                                     schemaPath:
-                                                                      '#/properties/messages/items/properties/outputBody/properties/executionId/type',
+                                                                      '#/properties/messages/items/properties/originMessage/properties/messageId/type',
                                                                     keyword: 'type',
                                                                     params: { type: 'string' },
                                                                     message: 'must be string',
@@ -113070,111 +113241,465 @@ function validate101(
                                                                 return false;
                                                               }
                                                             }
-                                                            var valid30 = _errs249 === errors;
+                                                            var valid29 = _errs243 === errors;
                                                           } else {
-                                                            var valid30 = true;
+                                                            var valid29 = true;
                                                           }
-                                                          if (valid30) {
-                                                            if (data86.complete !== undefined) {
-                                                              const _errs251 = errors;
-                                                              if (
-                                                                typeof data86.complete !== 'boolean'
-                                                              ) {
-                                                                validate101.errors = [
-                                                                  {
-                                                                    instancePath:
-                                                                      instancePath +
-                                                                      '/messages/' +
-                                                                      i3 +
-                                                                      '/outputBody/complete',
-                                                                    schemaPath:
-                                                                      '#/properties/messages/items/properties/outputBody/properties/complete/type',
-                                                                    keyword: 'type',
-                                                                    params: { type: 'boolean' },
-                                                                    message: 'must be boolean',
-                                                                  },
-                                                                ];
-                                                                return false;
-                                                              }
-                                                              var valid30 = _errs251 === errors;
-                                                            } else {
-                                                              var valid30 = true;
-                                                            }
-                                                            if (valid30) {
-                                                              if (
-                                                                data86.contentBytes !== undefined
-                                                              ) {
-                                                                let data90 = data86.contentBytes;
-                                                                const _errs253 = errors;
-                                                                if (errors === _errs253) {
-                                                                  if (typeof data90 === 'string') {
-                                                                    if (!pattern9.test(data90)) {
-                                                                      validate101.errors = [
-                                                                        {
+                                                          if (valid29) {
+                                                            if (data84.runId !== undefined) {
+                                                              let data88 = data84.runId;
+                                                              const _errs245 = errors;
+                                                              const _errs246 = errors;
+                                                              let valid30 = false;
+                                                              const _errs247 = errors;
+                                                              if (errors === _errs247) {
+                                                                if (typeof data88 === 'string') {
+                                                                  if (func1(data88) > 128) {
+                                                                    const err68 = {
+                                                                      instancePath:
+                                                                        instancePath +
+                                                                        '/messages/' +
+                                                                        i3 +
+                                                                        '/originMessage/runId',
+                                                                      schemaPath:
+                                                                        '#/properties/messages/items/properties/originMessage/properties/runId/anyOf/0/maxLength',
+                                                                      keyword: 'maxLength',
+                                                                      params: { limit: 128 },
+                                                                      message:
+                                                                        'must NOT have more than 128 characters',
+                                                                    };
+                                                                    if (vErrors === null) {
+                                                                      vErrors = [err68];
+                                                                    } else {
+                                                                      vErrors.push(err68);
+                                                                    }
+                                                                    errors++;
+                                                                  } else {
+                                                                    if (func1(data88) < 1) {
+                                                                      const err69 = {
+                                                                        instancePath:
+                                                                          instancePath +
+                                                                          '/messages/' +
+                                                                          i3 +
+                                                                          '/originMessage/runId',
+                                                                        schemaPath:
+                                                                          '#/properties/messages/items/properties/originMessage/properties/runId/anyOf/0/minLength',
+                                                                        keyword: 'minLength',
+                                                                        params: { limit: 1 },
+                                                                        message:
+                                                                          'must NOT have fewer than 1 characters',
+                                                                      };
+                                                                      if (vErrors === null) {
+                                                                        vErrors = [err69];
+                                                                      } else {
+                                                                        vErrors.push(err69);
+                                                                      }
+                                                                      errors++;
+                                                                    } else {
+                                                                      if (!pattern4.test(data88)) {
+                                                                        const err70 = {
                                                                           instancePath:
                                                                             instancePath +
                                                                             '/messages/' +
                                                                             i3 +
-                                                                            '/outputBody/contentBytes',
+                                                                            '/originMessage/runId',
                                                                           schemaPath:
-                                                                            '#/properties/messages/items/properties/outputBody/properties/contentBytes/pattern',
+                                                                            '#/properties/messages/items/properties/originMessage/properties/runId/anyOf/0/pattern',
                                                                           keyword: 'pattern',
                                                                           params: {
                                                                             pattern:
-                                                                              '^(0|[1-9][0-9]*)$',
+                                                                              '^[A-Za-z0-9_-]+$',
                                                                           },
                                                                           message:
                                                                             'must match pattern "' +
-                                                                            '^(0|[1-9][0-9]*)$' +
+                                                                            '^[A-Za-z0-9_-]+$' +
                                                                             '"',
-                                                                        },
-                                                                      ];
-                                                                      return false;
+                                                                        };
+                                                                        if (vErrors === null) {
+                                                                          vErrors = [err70];
+                                                                        } else {
+                                                                          vErrors.push(err70);
+                                                                        }
+                                                                        errors++;
+                                                                      }
                                                                     }
+                                                                  }
+                                                                } else {
+                                                                  const err71 = {
+                                                                    instancePath:
+                                                                      instancePath +
+                                                                      '/messages/' +
+                                                                      i3 +
+                                                                      '/originMessage/runId',
+                                                                    schemaPath:
+                                                                      '#/properties/messages/items/properties/originMessage/properties/runId/anyOf/0/type',
+                                                                    keyword: 'type',
+                                                                    params: { type: 'string' },
+                                                                    message: 'must be string',
+                                                                  };
+                                                                  if (vErrors === null) {
+                                                                    vErrors = [err71];
                                                                   } else {
+                                                                    vErrors.push(err71);
+                                                                  }
+                                                                  errors++;
+                                                                }
+                                                              }
+                                                              var _valid15 = _errs247 === errors;
+                                                              valid30 = valid30 || _valid15;
+                                                              const _errs249 = errors;
+                                                              if (data88 !== null) {
+                                                                const err72 = {
+                                                                  instancePath:
+                                                                    instancePath +
+                                                                    '/messages/' +
+                                                                    i3 +
+                                                                    '/originMessage/runId',
+                                                                  schemaPath:
+                                                                    '#/properties/messages/items/properties/originMessage/properties/runId/anyOf/1/type',
+                                                                  keyword: 'type',
+                                                                  params: { type: 'null' },
+                                                                  message: 'must be null',
+                                                                };
+                                                                if (vErrors === null) {
+                                                                  vErrors = [err72];
+                                                                } else {
+                                                                  vErrors.push(err72);
+                                                                }
+                                                                errors++;
+                                                              }
+                                                              var _valid15 = _errs249 === errors;
+                                                              valid30 = valid30 || _valid15;
+                                                              if (!valid30) {
+                                                                const err73 = {
+                                                                  instancePath:
+                                                                    instancePath +
+                                                                    '/messages/' +
+                                                                    i3 +
+                                                                    '/originMessage/runId',
+                                                                  schemaPath:
+                                                                    '#/properties/messages/items/properties/originMessage/properties/runId/anyOf',
+                                                                  keyword: 'anyOf',
+                                                                  params: {},
+                                                                  message:
+                                                                    'must match a schema in anyOf',
+                                                                };
+                                                                if (vErrors === null) {
+                                                                  vErrors = [err73];
+                                                                } else {
+                                                                  vErrors.push(err73);
+                                                                }
+                                                                errors++;
+                                                                validate101.errors = vErrors;
+                                                                return false;
+                                                              } else {
+                                                                errors = _errs246;
+                                                                if (vErrors !== null) {
+                                                                  if (_errs246) {
+                                                                    vErrors.length = _errs246;
+                                                                  } else {
+                                                                    vErrors = null;
+                                                                  }
+                                                                }
+                                                              }
+                                                              var valid29 = _errs245 === errors;
+                                                            } else {
+                                                              var valid29 = true;
+                                                            }
+                                                          }
+                                                        }
+                                                      }
+                                                    }
+                                                  } else {
+                                                    validate101.errors = [
+                                                      {
+                                                        instancePath:
+                                                          instancePath +
+                                                          '/messages/' +
+                                                          i3 +
+                                                          '/originMessage',
+                                                        schemaPath:
+                                                          '#/properties/messages/items/properties/originMessage/type',
+                                                        keyword: 'type',
+                                                        params: { type: 'object' },
+                                                        message: 'must be object',
+                                                      },
+                                                    ];
+                                                    return false;
+                                                  }
+                                                }
+                                                var valid26 = _errs236 === errors;
+                                              } else {
+                                                var valid26 = true;
+                                              }
+                                              if (valid26) {
+                                                if (data71.contentFormat !== undefined) {
+                                                  let data89 = data71.contentFormat;
+                                                  const _errs251 = errors;
+                                                  if (typeof data89 !== 'string') {
+                                                    validate101.errors = [
+                                                      {
+                                                        instancePath:
+                                                          instancePath +
+                                                          '/messages/' +
+                                                          i3 +
+                                                          '/contentFormat',
+                                                        schemaPath:
+                                                          '#/properties/messages/items/properties/contentFormat/type',
+                                                        keyword: 'type',
+                                                        params: { type: 'string' },
+                                                        message: 'must be string',
+                                                      },
+                                                    ];
+                                                    return false;
+                                                  }
+                                                  if (data89 !== 'unsupported') {
+                                                    validate101.errors = [
+                                                      {
+                                                        instancePath:
+                                                          instancePath +
+                                                          '/messages/' +
+                                                          i3 +
+                                                          '/contentFormat',
+                                                        schemaPath:
+                                                          '#/properties/messages/items/properties/contentFormat/const',
+                                                        keyword: 'const',
+                                                        params: { allowedValue: 'unsupported' },
+                                                        message: 'must be equal to constant',
+                                                      },
+                                                    ];
+                                                    return false;
+                                                  }
+                                                  var valid26 = _errs251 === errors;
+                                                } else {
+                                                  var valid26 = true;
+                                                }
+                                                if (valid26) {
+                                                  if (data71.outputBody !== undefined) {
+                                                    let data90 = data71.outputBody;
+                                                    const _errs253 = errors;
+                                                    if (errors === _errs253) {
+                                                      if (
+                                                        data90 &&
+                                                        typeof data90 == 'object' &&
+                                                        !Array.isArray(data90)
+                                                      ) {
+                                                        let missing11;
+                                                        if (
+                                                          (data90.kind === undefined &&
+                                                            (missing11 = 'kind')) ||
+                                                          (data90.executionId === undefined &&
+                                                            (missing11 = 'executionId')) ||
+                                                          (data90.complete === undefined &&
+                                                            (missing11 = 'complete')) ||
+                                                          (data90.contentBytes === undefined &&
+                                                            (missing11 = 'contentBytes')) ||
+                                                          (data90.reasoningBytes === undefined &&
+                                                            (missing11 = 'reasoningBytes')) ||
+                                                          (data90.toolCallCount === undefined &&
+                                                            (missing11 = 'toolCallCount'))
+                                                        ) {
+                                                          validate101.errors = [
+                                                            {
+                                                              instancePath:
+                                                                instancePath +
+                                                                '/messages/' +
+                                                                i3 +
+                                                                '/outputBody',
+                                                              schemaPath:
+                                                                '#/properties/messages/items/properties/outputBody/required',
+                                                              keyword: 'required',
+                                                              params: {
+                                                                missingProperty: missing11,
+                                                              },
+                                                              message:
+                                                                "must have required property '" +
+                                                                missing11 +
+                                                                "'",
+                                                            },
+                                                          ];
+                                                          return false;
+                                                        } else {
+                                                          if (data90.kind !== undefined) {
+                                                            let data91 = data90.kind;
+                                                            const _errs256 = errors;
+                                                            if (typeof data91 !== 'string') {
+                                                              validate101.errors = [
+                                                                {
+                                                                  instancePath:
+                                                                    instancePath +
+                                                                    '/messages/' +
+                                                                    i3 +
+                                                                    '/outputBody/kind',
+                                                                  schemaPath:
+                                                                    '#/properties/messages/items/properties/outputBody/properties/kind/type',
+                                                                  keyword: 'type',
+                                                                  params: { type: 'string' },
+                                                                  message: 'must be string',
+                                                                },
+                                                              ];
+                                                              return false;
+                                                            }
+                                                            if (data91 !== 'model_output') {
+                                                              validate101.errors = [
+                                                                {
+                                                                  instancePath:
+                                                                    instancePath +
+                                                                    '/messages/' +
+                                                                    i3 +
+                                                                    '/outputBody/kind',
+                                                                  schemaPath:
+                                                                    '#/properties/messages/items/properties/outputBody/properties/kind/const',
+                                                                  keyword: 'const',
+                                                                  params: {
+                                                                    allowedValue: 'model_output',
+                                                                  },
+                                                                  message:
+                                                                    'must be equal to constant',
+                                                                },
+                                                              ];
+                                                              return false;
+                                                            }
+                                                            var valid31 = _errs256 === errors;
+                                                          } else {
+                                                            var valid31 = true;
+                                                          }
+                                                          if (valid31) {
+                                                            if (data90.executionId !== undefined) {
+                                                              let data92 = data90.executionId;
+                                                              const _errs258 = errors;
+                                                              if (errors === _errs258) {
+                                                                if (typeof data92 === 'string') {
+                                                                  if (func1(data92) > 128) {
                                                                     validate101.errors = [
                                                                       {
                                                                         instancePath:
                                                                           instancePath +
                                                                           '/messages/' +
                                                                           i3 +
-                                                                          '/outputBody/contentBytes',
+                                                                          '/outputBody/executionId',
                                                                         schemaPath:
-                                                                          '#/properties/messages/items/properties/outputBody/properties/contentBytes/type',
-                                                                        keyword: 'type',
-                                                                        params: { type: 'string' },
-                                                                        message: 'must be string',
+                                                                          '#/properties/messages/items/properties/outputBody/properties/executionId/maxLength',
+                                                                        keyword: 'maxLength',
+                                                                        params: { limit: 128 },
+                                                                        message:
+                                                                          'must NOT have more than 128 characters',
                                                                       },
                                                                     ];
                                                                     return false;
-                                                                  }
-                                                                }
-                                                                var valid30 = _errs253 === errors;
-                                                              } else {
-                                                                var valid30 = true;
-                                                              }
-                                                              if (valid30) {
-                                                                if (
-                                                                  data86.reasoningBytes !==
-                                                                  undefined
-                                                                ) {
-                                                                  let data91 =
-                                                                    data86.reasoningBytes;
-                                                                  const _errs255 = errors;
-                                                                  if (errors === _errs255) {
-                                                                    if (
-                                                                      typeof data91 === 'string'
-                                                                    ) {
-                                                                      if (!pattern9.test(data91)) {
+                                                                  } else {
+                                                                    if (func1(data92) < 1) {
+                                                                      validate101.errors = [
+                                                                        {
+                                                                          instancePath:
+                                                                            instancePath +
+                                                                            '/messages/' +
+                                                                            i3 +
+                                                                            '/outputBody/executionId',
+                                                                          schemaPath:
+                                                                            '#/properties/messages/items/properties/outputBody/properties/executionId/minLength',
+                                                                          keyword: 'minLength',
+                                                                          params: { limit: 1 },
+                                                                          message:
+                                                                            'must NOT have fewer than 1 characters',
+                                                                        },
+                                                                      ];
+                                                                      return false;
+                                                                    } else {
+                                                                      if (!pattern4.test(data92)) {
                                                                         validate101.errors = [
                                                                           {
                                                                             instancePath:
                                                                               instancePath +
                                                                               '/messages/' +
                                                                               i3 +
-                                                                              '/outputBody/reasoningBytes',
+                                                                              '/outputBody/executionId',
                                                                             schemaPath:
-                                                                              '#/properties/messages/items/properties/outputBody/properties/reasoningBytes/pattern',
+                                                                              '#/properties/messages/items/properties/outputBody/properties/executionId/pattern',
+                                                                            keyword: 'pattern',
+                                                                            params: {
+                                                                              pattern:
+                                                                                '^[A-Za-z0-9_-]+$',
+                                                                            },
+                                                                            message:
+                                                                              'must match pattern "' +
+                                                                              '^[A-Za-z0-9_-]+$' +
+                                                                              '"',
+                                                                          },
+                                                                        ];
+                                                                        return false;
+                                                                      }
+                                                                    }
+                                                                  }
+                                                                } else {
+                                                                  validate101.errors = [
+                                                                    {
+                                                                      instancePath:
+                                                                        instancePath +
+                                                                        '/messages/' +
+                                                                        i3 +
+                                                                        '/outputBody/executionId',
+                                                                      schemaPath:
+                                                                        '#/properties/messages/items/properties/outputBody/properties/executionId/type',
+                                                                      keyword: 'type',
+                                                                      params: { type: 'string' },
+                                                                      message: 'must be string',
+                                                                    },
+                                                                  ];
+                                                                  return false;
+                                                                }
+                                                              }
+                                                              var valid31 = _errs258 === errors;
+                                                            } else {
+                                                              var valid31 = true;
+                                                            }
+                                                            if (valid31) {
+                                                              if (data90.complete !== undefined) {
+                                                                const _errs260 = errors;
+                                                                if (
+                                                                  typeof data90.complete !==
+                                                                  'boolean'
+                                                                ) {
+                                                                  validate101.errors = [
+                                                                    {
+                                                                      instancePath:
+                                                                        instancePath +
+                                                                        '/messages/' +
+                                                                        i3 +
+                                                                        '/outputBody/complete',
+                                                                      schemaPath:
+                                                                        '#/properties/messages/items/properties/outputBody/properties/complete/type',
+                                                                      keyword: 'type',
+                                                                      params: { type: 'boolean' },
+                                                                      message: 'must be boolean',
+                                                                    },
+                                                                  ];
+                                                                  return false;
+                                                                }
+                                                                var valid31 = _errs260 === errors;
+                                                              } else {
+                                                                var valid31 = true;
+                                                              }
+                                                              if (valid31) {
+                                                                if (
+                                                                  data90.contentBytes !== undefined
+                                                                ) {
+                                                                  let data94 = data90.contentBytes;
+                                                                  const _errs262 = errors;
+                                                                  if (errors === _errs262) {
+                                                                    if (
+                                                                      typeof data94 === 'string'
+                                                                    ) {
+                                                                      if (!pattern9.test(data94)) {
+                                                                        validate101.errors = [
+                                                                          {
+                                                                            instancePath:
+                                                                              instancePath +
+                                                                              '/messages/' +
+                                                                              i3 +
+                                                                              '/outputBody/contentBytes',
+                                                                            schemaPath:
+                                                                              '#/properties/messages/items/properties/outputBody/properties/contentBytes/pattern',
                                                                             keyword: 'pattern',
                                                                             params: {
                                                                               pattern:
@@ -113195,9 +113720,9 @@ function validate101(
                                                                             instancePath +
                                                                             '/messages/' +
                                                                             i3 +
-                                                                            '/outputBody/reasoningBytes',
+                                                                            '/outputBody/contentBytes',
                                                                           schemaPath:
-                                                                            '#/properties/messages/items/properties/outputBody/properties/reasoningBytes/type',
+                                                                            '#/properties/messages/items/properties/outputBody/properties/contentBytes/type',
                                                                           keyword: 'type',
                                                                           params: {
                                                                             type: 'string',
@@ -113208,54 +113733,24 @@ function validate101(
                                                                       return false;
                                                                     }
                                                                   }
-                                                                  var valid30 = _errs255 === errors;
+                                                                  var valid31 = _errs262 === errors;
                                                                 } else {
-                                                                  var valid30 = true;
+                                                                  var valid31 = true;
                                                                 }
-                                                                if (valid30) {
+                                                                if (valid31) {
                                                                   if (
-                                                                    data86.toolCallCount !==
+                                                                    data90.reasoningBytes !==
                                                                     undefined
                                                                   ) {
-                                                                    let data92 =
-                                                                      data86.toolCallCount;
-                                                                    const _errs257 = errors;
-                                                                    if (
-                                                                      !(
-                                                                        typeof data92 == 'number' &&
-                                                                        !(data92 % 1) &&
-                                                                        !isNaN(data92) &&
-                                                                        isFinite(data92)
-                                                                      )
-                                                                    ) {
-                                                                      validate101.errors = [
-                                                                        {
-                                                                          instancePath:
-                                                                            instancePath +
-                                                                            '/messages/' +
-                                                                            i3 +
-                                                                            '/outputBody/toolCallCount',
-                                                                          schemaPath:
-                                                                            '#/properties/messages/items/properties/outputBody/properties/toolCallCount/type',
-                                                                          keyword: 'type',
-                                                                          params: {
-                                                                            type: 'integer',
-                                                                          },
-                                                                          message:
-                                                                            'must be integer',
-                                                                        },
-                                                                      ];
-                                                                      return false;
-                                                                    }
-                                                                    if (errors === _errs257) {
+                                                                    let data95 =
+                                                                      data90.reasoningBytes;
+                                                                    const _errs264 = errors;
+                                                                    if (errors === _errs264) {
                                                                       if (
-                                                                        typeof data92 == 'number' &&
-                                                                        isFinite(data92)
+                                                                        typeof data95 === 'string'
                                                                       ) {
                                                                         if (
-                                                                          data92 >
-                                                                            9007199254740991 ||
-                                                                          isNaN(data92)
+                                                                          !pattern9.test(data95)
                                                                         ) {
                                                                           validate101.errors = [
                                                                             {
@@ -113263,72 +113758,32 @@ function validate101(
                                                                                 instancePath +
                                                                                 '/messages/' +
                                                                                 i3 +
-                                                                                '/outputBody/toolCallCount',
+                                                                                '/outputBody/reasoningBytes',
                                                                               schemaPath:
-                                                                                '#/properties/messages/items/properties/outputBody/properties/toolCallCount/maximum',
-                                                                              keyword: 'maximum',
+                                                                                '#/properties/messages/items/properties/outputBody/properties/reasoningBytes/pattern',
+                                                                              keyword: 'pattern',
                                                                               params: {
-                                                                                comparison: '<=',
-                                                                                limit: 9007199254740991,
+                                                                                pattern:
+                                                                                  '^(0|[1-9][0-9]*)$',
                                                                               },
                                                                               message:
-                                                                                'must be <= 9007199254740991',
+                                                                                'must match pattern "' +
+                                                                                '^(0|[1-9][0-9]*)$' +
+                                                                                '"',
                                                                             },
                                                                           ];
                                                                           return false;
-                                                                        } else {
-                                                                          if (
-                                                                            data92 < 0 ||
-                                                                            isNaN(data92)
-                                                                          ) {
-                                                                            validate101.errors = [
-                                                                              {
-                                                                                instancePath:
-                                                                                  instancePath +
-                                                                                  '/messages/' +
-                                                                                  i3 +
-                                                                                  '/outputBody/toolCallCount',
-                                                                                schemaPath:
-                                                                                  '#/properties/messages/items/properties/outputBody/properties/toolCallCount/minimum',
-                                                                                keyword: 'minimum',
-                                                                                params: {
-                                                                                  comparison: '>=',
-                                                                                  limit: 0,
-                                                                                },
-                                                                                message:
-                                                                                  'must be >= 0',
-                                                                              },
-                                                                            ];
-                                                                            return false;
-                                                                          }
                                                                         }
-                                                                      }
-                                                                    }
-                                                                    var valid30 =
-                                                                      _errs257 === errors;
-                                                                  } else {
-                                                                    var valid30 = true;
-                                                                  }
-                                                                  if (valid30) {
-                                                                    if (
-                                                                      data86.readAvailability !==
-                                                                      undefined
-                                                                    ) {
-                                                                      let data93 =
-                                                                        data86.readAvailability;
-                                                                      const _errs259 = errors;
-                                                                      if (
-                                                                        typeof data93 !== 'string'
-                                                                      ) {
+                                                                      } else {
                                                                         validate101.errors = [
                                                                           {
                                                                             instancePath:
                                                                               instancePath +
                                                                               '/messages/' +
                                                                               i3 +
-                                                                              '/outputBody/readAvailability',
+                                                                              '/outputBody/reasoningBytes',
                                                                             schemaPath:
-                                                                              '#/properties/messages/items/properties/outputBody/properties/readAvailability/type',
+                                                                              '#/properties/messages/items/properties/outputBody/properties/reasoningBytes/type',
                                                                             keyword: 'type',
                                                                             params: {
                                                                               type: 'string',
@@ -113339,8 +113794,28 @@ function validate101(
                                                                         ];
                                                                         return false;
                                                                       }
+                                                                    }
+                                                                    var valid31 =
+                                                                      _errs264 === errors;
+                                                                  } else {
+                                                                    var valid31 = true;
+                                                                  }
+                                                                  if (valid31) {
+                                                                    if (
+                                                                      data90.toolCallCount !==
+                                                                      undefined
+                                                                    ) {
+                                                                      let data96 =
+                                                                        data90.toolCallCount;
+                                                                      const _errs266 = errors;
                                                                       if (
-                                                                        data93 !== 'unsupported'
+                                                                        !(
+                                                                          typeof data96 ==
+                                                                            'number' &&
+                                                                          !(data96 % 1) &&
+                                                                          !isNaN(data96) &&
+                                                                          isFinite(data96)
+                                                                        )
                                                                       ) {
                                                                         validate101.errors = [
                                                                           {
@@ -113348,24 +113823,142 @@ function validate101(
                                                                               instancePath +
                                                                               '/messages/' +
                                                                               i3 +
-                                                                              '/outputBody/readAvailability',
+                                                                              '/outputBody/toolCallCount',
                                                                             schemaPath:
-                                                                              '#/properties/messages/items/properties/outputBody/properties/readAvailability/const',
-                                                                            keyword: 'const',
+                                                                              '#/properties/messages/items/properties/outputBody/properties/toolCallCount/type',
+                                                                            keyword: 'type',
                                                                             params: {
-                                                                              allowedValue:
-                                                                                'unsupported',
+                                                                              type: 'integer',
                                                                             },
                                                                             message:
-                                                                              'must be equal to constant',
+                                                                              'must be integer',
                                                                           },
                                                                         ];
                                                                         return false;
                                                                       }
-                                                                      var valid30 =
-                                                                        _errs259 === errors;
+                                                                      if (errors === _errs266) {
+                                                                        if (
+                                                                          typeof data96 ==
+                                                                            'number' &&
+                                                                          isFinite(data96)
+                                                                        ) {
+                                                                          if (
+                                                                            data96 >
+                                                                              9007199254740991 ||
+                                                                            isNaN(data96)
+                                                                          ) {
+                                                                            validate101.errors = [
+                                                                              {
+                                                                                instancePath:
+                                                                                  instancePath +
+                                                                                  '/messages/' +
+                                                                                  i3 +
+                                                                                  '/outputBody/toolCallCount',
+                                                                                schemaPath:
+                                                                                  '#/properties/messages/items/properties/outputBody/properties/toolCallCount/maximum',
+                                                                                keyword: 'maximum',
+                                                                                params: {
+                                                                                  comparison: '<=',
+                                                                                  limit: 9007199254740991,
+                                                                                },
+                                                                                message:
+                                                                                  'must be <= 9007199254740991',
+                                                                              },
+                                                                            ];
+                                                                            return false;
+                                                                          } else {
+                                                                            if (
+                                                                              data96 < 0 ||
+                                                                              isNaN(data96)
+                                                                            ) {
+                                                                              validate101.errors = [
+                                                                                {
+                                                                                  instancePath:
+                                                                                    instancePath +
+                                                                                    '/messages/' +
+                                                                                    i3 +
+                                                                                    '/outputBody/toolCallCount',
+                                                                                  schemaPath:
+                                                                                    '#/properties/messages/items/properties/outputBody/properties/toolCallCount/minimum',
+                                                                                  keyword:
+                                                                                    'minimum',
+                                                                                  params: {
+                                                                                    comparison:
+                                                                                      '>=',
+                                                                                    limit: 0,
+                                                                                  },
+                                                                                  message:
+                                                                                    'must be >= 0',
+                                                                                },
+                                                                              ];
+                                                                              return false;
+                                                                            }
+                                                                          }
+                                                                        }
+                                                                      }
+                                                                      var valid31 =
+                                                                        _errs266 === errors;
                                                                     } else {
-                                                                      var valid30 = true;
+                                                                      var valid31 = true;
+                                                                    }
+                                                                    if (valid31) {
+                                                                      if (
+                                                                        data90.readAvailability !==
+                                                                        undefined
+                                                                      ) {
+                                                                        let data97 =
+                                                                          data90.readAvailability;
+                                                                        const _errs268 = errors;
+                                                                        if (
+                                                                          typeof data97 !== 'string'
+                                                                        ) {
+                                                                          validate101.errors = [
+                                                                            {
+                                                                              instancePath:
+                                                                                instancePath +
+                                                                                '/messages/' +
+                                                                                i3 +
+                                                                                '/outputBody/readAvailability',
+                                                                              schemaPath:
+                                                                                '#/properties/messages/items/properties/outputBody/properties/readAvailability/type',
+                                                                              keyword: 'type',
+                                                                              params: {
+                                                                                type: 'string',
+                                                                              },
+                                                                              message:
+                                                                                'must be string',
+                                                                            },
+                                                                          ];
+                                                                          return false;
+                                                                        }
+                                                                        if (
+                                                                          data97 !== 'unsupported'
+                                                                        ) {
+                                                                          validate101.errors = [
+                                                                            {
+                                                                              instancePath:
+                                                                                instancePath +
+                                                                                '/messages/' +
+                                                                                i3 +
+                                                                                '/outputBody/readAvailability',
+                                                                              schemaPath:
+                                                                                '#/properties/messages/items/properties/outputBody/properties/readAvailability/const',
+                                                                              keyword: 'const',
+                                                                              params: {
+                                                                                allowedValue:
+                                                                                  'unsupported',
+                                                                              },
+                                                                              message:
+                                                                                'must be equal to constant',
+                                                                            },
+                                                                          ];
+                                                                          return false;
+                                                                        }
+                                                                        var valid31 =
+                                                                          _errs268 === errors;
+                                                                      } else {
+                                                                        var valid31 = true;
+                                                                      }
                                                                     }
                                                                   }
                                                                 }
@@ -113373,105 +113966,84 @@ function validate101(
                                                             }
                                                           }
                                                         }
+                                                      } else {
+                                                        validate101.errors = [
+                                                          {
+                                                            instancePath:
+                                                              instancePath +
+                                                              '/messages/' +
+                                                              i3 +
+                                                              '/outputBody',
+                                                            schemaPath:
+                                                              '#/properties/messages/items/properties/outputBody/type',
+                                                            keyword: 'type',
+                                                            params: { type: 'object' },
+                                                            message: 'must be object',
+                                                          },
+                                                        ];
+                                                        return false;
                                                       }
-                                                    } else {
-                                                      validate101.errors = [
-                                                        {
-                                                          instancePath:
-                                                            instancePath +
-                                                            '/messages/' +
-                                                            i3 +
-                                                            '/outputBody',
-                                                          schemaPath:
-                                                            '#/properties/messages/items/properties/outputBody/type',
-                                                          keyword: 'type',
-                                                          params: { type: 'object' },
-                                                          message: 'must be object',
-                                                        },
-                                                      ];
-                                                      return false;
                                                     }
+                                                    var valid26 = _errs253 === errors;
+                                                  } else {
+                                                    var valid26 = true;
                                                   }
-                                                  var valid26 = _errs244 === errors;
-                                                } else {
-                                                  var valid26 = true;
-                                                }
-                                                if (valid26) {
-                                                  if (data71.toolCalls !== undefined) {
-                                                    let data94 = data71.toolCalls;
-                                                    const _errs261 = errors;
-                                                    if (errors === _errs261) {
-                                                      if (Array.isArray(data94)) {
-                                                        var valid31 = true;
-                                                        const len4 = data94.length;
-                                                        for (let i4 = 0; i4 < len4; i4++) {
-                                                          let data95 = data94[i4];
-                                                          const _errs263 = errors;
-                                                          if (errors === _errs263) {
-                                                            if (
-                                                              data95 &&
-                                                              typeof data95 == 'object' &&
-                                                              !Array.isArray(data95)
-                                                            ) {
-                                                              let missing11;
+                                                  if (valid26) {
+                                                    if (data71.toolCalls !== undefined) {
+                                                      let data98 = data71.toolCalls;
+                                                      const _errs270 = errors;
+                                                      if (errors === _errs270) {
+                                                        if (Array.isArray(data98)) {
+                                                          var valid32 = true;
+                                                          const len4 = data98.length;
+                                                          for (let i4 = 0; i4 < len4; i4++) {
+                                                            let data99 = data98[i4];
+                                                            const _errs272 = errors;
+                                                            if (errors === _errs272) {
                                                               if (
-                                                                (data95.id === undefined &&
-                                                                  (missing11 = 'id')) ||
-                                                                (data95.name === undefined &&
-                                                                  (missing11 = 'name')) ||
-                                                                (data95.arguments === undefined &&
-                                                                  (missing11 = 'arguments'))
+                                                                data99 &&
+                                                                typeof data99 == 'object' &&
+                                                                !Array.isArray(data99)
                                                               ) {
-                                                                validate101.errors = [
-                                                                  {
-                                                                    instancePath:
-                                                                      instancePath +
-                                                                      '/messages/' +
-                                                                      i3 +
-                                                                      '/toolCalls/' +
-                                                                      i4,
-                                                                    schemaPath:
-                                                                      '#/properties/messages/items/properties/toolCalls/items/required',
-                                                                    keyword: 'required',
-                                                                    params: {
-                                                                      missingProperty: missing11,
+                                                                let missing12;
+                                                                if (
+                                                                  (data99.id === undefined &&
+                                                                    (missing12 = 'id')) ||
+                                                                  (data99.name === undefined &&
+                                                                    (missing12 = 'name')) ||
+                                                                  (data99.arguments === undefined &&
+                                                                    (missing12 = 'arguments'))
+                                                                ) {
+                                                                  validate101.errors = [
+                                                                    {
+                                                                      instancePath:
+                                                                        instancePath +
+                                                                        '/messages/' +
+                                                                        i3 +
+                                                                        '/toolCalls/' +
+                                                                        i4,
+                                                                      schemaPath:
+                                                                        '#/properties/messages/items/properties/toolCalls/items/required',
+                                                                      keyword: 'required',
+                                                                      params: {
+                                                                        missingProperty: missing12,
+                                                                      },
+                                                                      message:
+                                                                        "must have required property '" +
+                                                                        missing12 +
+                                                                        "'",
                                                                     },
-                                                                    message:
-                                                                      "must have required property '" +
-                                                                      missing11 +
-                                                                      "'",
-                                                                  },
-                                                                ];
-                                                                return false;
-                                                              } else {
-                                                                if (data95.id !== undefined) {
-                                                                  let data96 = data95.id;
-                                                                  const _errs266 = errors;
-                                                                  if (errors === _errs266) {
-                                                                    if (
-                                                                      typeof data96 === 'string'
-                                                                    ) {
-                                                                      if (func1(data96) > 128) {
-                                                                        validate101.errors = [
-                                                                          {
-                                                                            instancePath:
-                                                                              instancePath +
-                                                                              '/messages/' +
-                                                                              i3 +
-                                                                              '/toolCalls/' +
-                                                                              i4 +
-                                                                              '/id',
-                                                                            schemaPath:
-                                                                              '#/properties/messages/items/properties/toolCalls/items/properties/id/maxLength',
-                                                                            keyword: 'maxLength',
-                                                                            params: { limit: 128 },
-                                                                            message:
-                                                                              'must NOT have more than 128 characters',
-                                                                          },
-                                                                        ];
-                                                                        return false;
-                                                                      } else {
-                                                                        if (func1(data96) < 1) {
+                                                                  ];
+                                                                  return false;
+                                                                } else {
+                                                                  if (data99.id !== undefined) {
+                                                                    let data100 = data99.id;
+                                                                    const _errs275 = errors;
+                                                                    if (errors === _errs275) {
+                                                                      if (
+                                                                        typeof data100 === 'string'
+                                                                      ) {
+                                                                        if (func1(data100) > 128) {
                                                                           validate101.errors = [
                                                                             {
                                                                               instancePath:
@@ -113482,18 +114054,18 @@ function validate101(
                                                                                 i4 +
                                                                                 '/id',
                                                                               schemaPath:
-                                                                                '#/properties/messages/items/properties/toolCalls/items/properties/id/minLength',
-                                                                              keyword: 'minLength',
-                                                                              params: { limit: 1 },
+                                                                                '#/properties/messages/items/properties/toolCalls/items/properties/id/maxLength',
+                                                                              keyword: 'maxLength',
+                                                                              params: {
+                                                                                limit: 128,
+                                                                              },
                                                                               message:
-                                                                                'must NOT have fewer than 1 characters',
+                                                                                'must NOT have more than 128 characters',
                                                                             },
                                                                           ];
                                                                           return false;
                                                                         } else {
-                                                                          if (
-                                                                            !pattern4.test(data96)
-                                                                          ) {
+                                                                          if (func1(data100) < 1) {
                                                                             validate101.errors = [
                                                                               {
                                                                                 instancePath:
@@ -113504,89 +114076,51 @@ function validate101(
                                                                                   i4 +
                                                                                   '/id',
                                                                                 schemaPath:
-                                                                                  '#/properties/messages/items/properties/toolCalls/items/properties/id/pattern',
-                                                                                keyword: 'pattern',
+                                                                                  '#/properties/messages/items/properties/toolCalls/items/properties/id/minLength',
+                                                                                keyword:
+                                                                                  'minLength',
                                                                                 params: {
-                                                                                  pattern:
-                                                                                    '^[A-Za-z0-9_-]+$',
+                                                                                  limit: 1,
                                                                                 },
                                                                                 message:
-                                                                                  'must match pattern "' +
-                                                                                  '^[A-Za-z0-9_-]+$' +
-                                                                                  '"',
+                                                                                  'must NOT have fewer than 1 characters',
                                                                               },
                                                                             ];
                                                                             return false;
+                                                                          } else {
+                                                                            if (
+                                                                              !pattern4.test(
+                                                                                data100,
+                                                                              )
+                                                                            ) {
+                                                                              validate101.errors = [
+                                                                                {
+                                                                                  instancePath:
+                                                                                    instancePath +
+                                                                                    '/messages/' +
+                                                                                    i3 +
+                                                                                    '/toolCalls/' +
+                                                                                    i4 +
+                                                                                    '/id',
+                                                                                  schemaPath:
+                                                                                    '#/properties/messages/items/properties/toolCalls/items/properties/id/pattern',
+                                                                                  keyword:
+                                                                                    'pattern',
+                                                                                  params: {
+                                                                                    pattern:
+                                                                                      '^[A-Za-z0-9_-]+$',
+                                                                                  },
+                                                                                  message:
+                                                                                    'must match pattern "' +
+                                                                                    '^[A-Za-z0-9_-]+$' +
+                                                                                    '"',
+                                                                                },
+                                                                              ];
+                                                                              return false;
+                                                                            }
                                                                           }
                                                                         }
-                                                                      }
-                                                                    } else {
-                                                                      validate101.errors = [
-                                                                        {
-                                                                          instancePath:
-                                                                            instancePath +
-                                                                            '/messages/' +
-                                                                            i3 +
-                                                                            '/toolCalls/' +
-                                                                            i4 +
-                                                                            '/id',
-                                                                          schemaPath:
-                                                                            '#/properties/messages/items/properties/toolCalls/items/properties/id/type',
-                                                                          keyword: 'type',
-                                                                          params: {
-                                                                            type: 'string',
-                                                                          },
-                                                                          message: 'must be string',
-                                                                        },
-                                                                      ];
-                                                                      return false;
-                                                                    }
-                                                                  }
-                                                                  var valid32 = _errs266 === errors;
-                                                                } else {
-                                                                  var valid32 = true;
-                                                                }
-                                                                if (valid32) {
-                                                                  if (data95.name !== undefined) {
-                                                                    const _errs268 = errors;
-                                                                    if (
-                                                                      typeof data95.name !==
-                                                                      'string'
-                                                                    ) {
-                                                                      validate101.errors = [
-                                                                        {
-                                                                          instancePath:
-                                                                            instancePath +
-                                                                            '/messages/' +
-                                                                            i3 +
-                                                                            '/toolCalls/' +
-                                                                            i4 +
-                                                                            '/name',
-                                                                          schemaPath:
-                                                                            '#/properties/messages/items/properties/toolCalls/items/properties/name/type',
-                                                                          keyword: 'type',
-                                                                          params: {
-                                                                            type: 'string',
-                                                                          },
-                                                                          message: 'must be string',
-                                                                        },
-                                                                      ];
-                                                                      return false;
-                                                                    }
-                                                                    var valid32 =
-                                                                      _errs268 === errors;
-                                                                  } else {
-                                                                    var valid32 = true;
-                                                                  }
-                                                                  if (valid32) {
-                                                                    if (
-                                                                      data95.arguments !== undefined
-                                                                    ) {
-                                                                      const _errs270 = errors;
-                                                                      if (
-                                                                        typeof data95.arguments !==
-                                                                        'string'
-                                                                      ) {
+                                                                      } else {
                                                                         validate101.errors = [
                                                                           {
                                                                             instancePath:
@@ -113595,9 +114129,9 @@ function validate101(
                                                                               i3 +
                                                                               '/toolCalls/' +
                                                                               i4 +
-                                                                              '/arguments',
+                                                                              '/id',
                                                                             schemaPath:
-                                                                              '#/properties/messages/items/properties/toolCalls/items/properties/arguments/type',
+                                                                              '#/properties/messages/items/properties/toolCalls/items/properties/id/type',
                                                                             keyword: 'type',
                                                                             params: {
                                                                               type: 'string',
@@ -113608,12 +114142,187 @@ function validate101(
                                                                         ];
                                                                         return false;
                                                                       }
-                                                                      var valid32 =
-                                                                        _errs270 === errors;
+                                                                    }
+                                                                    var valid33 =
+                                                                      _errs275 === errors;
+                                                                  } else {
+                                                                    var valid33 = true;
+                                                                  }
+                                                                  if (valid33) {
+                                                                    if (data99.name !== undefined) {
+                                                                      const _errs277 = errors;
+                                                                      if (
+                                                                        typeof data99.name !==
+                                                                        'string'
+                                                                      ) {
+                                                                        validate101.errors = [
+                                                                          {
+                                                                            instancePath:
+                                                                              instancePath +
+                                                                              '/messages/' +
+                                                                              i3 +
+                                                                              '/toolCalls/' +
+                                                                              i4 +
+                                                                              '/name',
+                                                                            schemaPath:
+                                                                              '#/properties/messages/items/properties/toolCalls/items/properties/name/type',
+                                                                            keyword: 'type',
+                                                                            params: {
+                                                                              type: 'string',
+                                                                            },
+                                                                            message:
+                                                                              'must be string',
+                                                                          },
+                                                                        ];
+                                                                        return false;
+                                                                      }
+                                                                      var valid33 =
+                                                                        _errs277 === errors;
                                                                     } else {
-                                                                      var valid32 = true;
+                                                                      var valid33 = true;
+                                                                    }
+                                                                    if (valid33) {
+                                                                      if (
+                                                                        data99.arguments !==
+                                                                        undefined
+                                                                      ) {
+                                                                        const _errs279 = errors;
+                                                                        if (
+                                                                          typeof data99.arguments !==
+                                                                          'string'
+                                                                        ) {
+                                                                          validate101.errors = [
+                                                                            {
+                                                                              instancePath:
+                                                                                instancePath +
+                                                                                '/messages/' +
+                                                                                i3 +
+                                                                                '/toolCalls/' +
+                                                                                i4 +
+                                                                                '/arguments',
+                                                                              schemaPath:
+                                                                                '#/properties/messages/items/properties/toolCalls/items/properties/arguments/type',
+                                                                              keyword: 'type',
+                                                                              params: {
+                                                                                type: 'string',
+                                                                              },
+                                                                              message:
+                                                                                'must be string',
+                                                                            },
+                                                                          ];
+                                                                          return false;
+                                                                        }
+                                                                        var valid33 =
+                                                                          _errs279 === errors;
+                                                                      } else {
+                                                                        var valid33 = true;
+                                                                      }
                                                                     }
                                                                   }
+                                                                }
+                                                              } else {
+                                                                validate101.errors = [
+                                                                  {
+                                                                    instancePath:
+                                                                      instancePath +
+                                                                      '/messages/' +
+                                                                      i3 +
+                                                                      '/toolCalls/' +
+                                                                      i4,
+                                                                    schemaPath:
+                                                                      '#/properties/messages/items/properties/toolCalls/items/type',
+                                                                    keyword: 'type',
+                                                                    params: { type: 'object' },
+                                                                    message: 'must be object',
+                                                                  },
+                                                                ];
+                                                                return false;
+                                                              }
+                                                            }
+                                                            var valid32 = _errs272 === errors;
+                                                            if (!valid32) {
+                                                              break;
+                                                            }
+                                                          }
+                                                        } else {
+                                                          validate101.errors = [
+                                                            {
+                                                              instancePath:
+                                                                instancePath +
+                                                                '/messages/' +
+                                                                i3 +
+                                                                '/toolCalls',
+                                                              schemaPath:
+                                                                '#/properties/messages/items/properties/toolCalls/type',
+                                                              keyword: 'type',
+                                                              params: { type: 'array' },
+                                                              message: 'must be array',
+                                                            },
+                                                          ];
+                                                          return false;
+                                                        }
+                                                      }
+                                                      var valid26 = _errs270 === errors;
+                                                    } else {
+                                                      var valid26 = true;
+                                                    }
+                                                    if (valid26) {
+                                                      if (data71.toolCallId !== undefined) {
+                                                        const _errs281 = errors;
+                                                        if (typeof data71.toolCallId !== 'string') {
+                                                          validate101.errors = [
+                                                            {
+                                                              instancePath:
+                                                                instancePath +
+                                                                '/messages/' +
+                                                                i3 +
+                                                                '/toolCallId',
+                                                              schemaPath:
+                                                                '#/properties/messages/items/properties/toolCallId/type',
+                                                              keyword: 'type',
+                                                              params: { type: 'string' },
+                                                              message: 'must be string',
+                                                            },
+                                                          ];
+                                                          return false;
+                                                        }
+                                                        var valid26 = _errs281 === errors;
+                                                      } else {
+                                                        var valid26 = true;
+                                                      }
+                                                      if (valid26) {
+                                                        if (data71.sourceIds !== undefined) {
+                                                          let data104 = data71.sourceIds;
+                                                          const _errs283 = errors;
+                                                          if (errors === _errs283) {
+                                                            if (Array.isArray(data104)) {
+                                                              var valid34 = true;
+                                                              const len5 = data104.length;
+                                                              for (let i5 = 0; i5 < len5; i5++) {
+                                                                const _errs285 = errors;
+                                                                if (
+                                                                  typeof data104[i5] !== 'string'
+                                                                ) {
+                                                                  validate101.errors = [
+                                                                    {
+                                                                      instancePath:
+                                                                        instancePath +
+                                                                        '/messages/' +
+                                                                        i3 +
+                                                                        '/sourceIds/' +
+                                                                        i5,
+                                                                      schemaPath:
+                                                                        '#/properties/messages/items/properties/sourceIds/items/type',
+                                                                      keyword: 'type',
+                                                                      params: { type: 'string' },
+                                                                      message: 'must be string',
+                                                                    },
+                                                                  ];
+                                                                  return false;
+                                                                }
+                                                                var valid34 = _errs285 === errors;
+                                                                if (!valid34) {
+                                                                  break;
                                                                 }
                                                               }
                                                             } else {
@@ -113623,149 +114332,30 @@ function validate101(
                                                                     instancePath +
                                                                     '/messages/' +
                                                                     i3 +
-                                                                    '/toolCalls/' +
-                                                                    i4,
+                                                                    '/sourceIds',
                                                                   schemaPath:
-                                                                    '#/properties/messages/items/properties/toolCalls/items/type',
+                                                                    '#/properties/messages/items/properties/sourceIds/type',
                                                                   keyword: 'type',
-                                                                  params: { type: 'object' },
-                                                                  message: 'must be object',
+                                                                  params: { type: 'array' },
+                                                                  message: 'must be array',
                                                                 },
                                                               ];
                                                               return false;
                                                             }
                                                           }
-                                                          var valid31 = _errs263 === errors;
-                                                          if (!valid31) {
-                                                            break;
-                                                          }
+                                                          var valid26 = _errs283 === errors;
+                                                        } else {
+                                                          var valid26 = true;
                                                         }
-                                                      } else {
-                                                        validate101.errors = [
-                                                          {
-                                                            instancePath:
-                                                              instancePath +
-                                                              '/messages/' +
-                                                              i3 +
-                                                              '/toolCalls',
-                                                            schemaPath:
-                                                              '#/properties/messages/items/properties/toolCalls/type',
-                                                            keyword: 'type',
-                                                            params: { type: 'array' },
-                                                            message: 'must be array',
-                                                          },
-                                                        ];
-                                                        return false;
-                                                      }
-                                                    }
-                                                    var valid26 = _errs261 === errors;
-                                                  } else {
-                                                    var valid26 = true;
-                                                  }
-                                                  if (valid26) {
-                                                    if (data71.toolCallId !== undefined) {
-                                                      const _errs272 = errors;
-                                                      if (typeof data71.toolCallId !== 'string') {
-                                                        validate101.errors = [
-                                                          {
-                                                            instancePath:
-                                                              instancePath +
-                                                              '/messages/' +
-                                                              i3 +
-                                                              '/toolCallId',
-                                                            schemaPath:
-                                                              '#/properties/messages/items/properties/toolCallId/type',
-                                                            keyword: 'type',
-                                                            params: { type: 'string' },
-                                                            message: 'must be string',
-                                                          },
-                                                        ];
-                                                        return false;
-                                                      }
-                                                      var valid26 = _errs272 === errors;
-                                                    } else {
-                                                      var valid26 = true;
-                                                    }
-                                                    if (valid26) {
-                                                      if (data71.sourceIds !== undefined) {
-                                                        let data100 = data71.sourceIds;
-                                                        const _errs274 = errors;
-                                                        if (errors === _errs274) {
-                                                          if (Array.isArray(data100)) {
-                                                            var valid33 = true;
-                                                            const len5 = data100.length;
-                                                            for (let i5 = 0; i5 < len5; i5++) {
-                                                              const _errs276 = errors;
-                                                              if (typeof data100[i5] !== 'string') {
-                                                                validate101.errors = [
-                                                                  {
-                                                                    instancePath:
-                                                                      instancePath +
-                                                                      '/messages/' +
-                                                                      i3 +
-                                                                      '/sourceIds/' +
-                                                                      i5,
-                                                                    schemaPath:
-                                                                      '#/properties/messages/items/properties/sourceIds/items/type',
-                                                                    keyword: 'type',
-                                                                    params: { type: 'string' },
-                                                                    message: 'must be string',
-                                                                  },
-                                                                ];
-                                                                return false;
-                                                              }
-                                                              var valid33 = _errs276 === errors;
-                                                              if (!valid33) {
-                                                                break;
-                                                              }
-                                                            }
-                                                          } else {
-                                                            validate101.errors = [
-                                                              {
-                                                                instancePath:
-                                                                  instancePath +
-                                                                  '/messages/' +
-                                                                  i3 +
-                                                                  '/sourceIds',
-                                                                schemaPath:
-                                                                  '#/properties/messages/items/properties/sourceIds/type',
-                                                                keyword: 'type',
-                                                                params: { type: 'array' },
-                                                                message: 'must be array',
-                                                              },
-                                                            ];
-                                                            return false;
-                                                          }
-                                                        }
-                                                        var valid26 = _errs274 === errors;
-                                                      } else {
-                                                        var valid26 = true;
-                                                      }
-                                                      if (valid26) {
-                                                        if (data71.originCommandId !== undefined) {
-                                                          let data102 = data71.originCommandId;
-                                                          const _errs278 = errors;
-                                                          if (errors === _errs278) {
-                                                            if (typeof data102 === 'string') {
-                                                              if (func1(data102) > 128) {
-                                                                validate101.errors = [
-                                                                  {
-                                                                    instancePath:
-                                                                      instancePath +
-                                                                      '/messages/' +
-                                                                      i3 +
-                                                                      '/originCommandId',
-                                                                    schemaPath:
-                                                                      '#/properties/messages/items/properties/originCommandId/maxLength',
-                                                                    keyword: 'maxLength',
-                                                                    params: { limit: 128 },
-                                                                    message:
-                                                                      'must NOT have more than 128 characters',
-                                                                  },
-                                                                ];
-                                                                return false;
-                                                              } else {
-                                                                if (func1(data102) < 1) {
+                                                        if (valid26) {
+                                                          if (
+                                                            data71.originCommandId !== undefined
+                                                          ) {
+                                                            let data106 = data71.originCommandId;
+                                                            const _errs287 = errors;
+                                                            if (errors === _errs287) {
+                                                              if (typeof data106 === 'string') {
+                                                                if (func1(data106) > 128) {
                                                                   validate101.errors = [
                                                                     {
                                                                       instancePath:
@@ -113774,80 +114364,7 @@ function validate101(
                                                                         i3 +
                                                                         '/originCommandId',
                                                                       schemaPath:
-                                                                        '#/properties/messages/items/properties/originCommandId/minLength',
-                                                                      keyword: 'minLength',
-                                                                      params: { limit: 1 },
-                                                                      message:
-                                                                        'must NOT have fewer than 1 characters',
-                                                                    },
-                                                                  ];
-                                                                  return false;
-                                                                } else {
-                                                                  if (!pattern4.test(data102)) {
-                                                                    validate101.errors = [
-                                                                      {
-                                                                        instancePath:
-                                                                          instancePath +
-                                                                          '/messages/' +
-                                                                          i3 +
-                                                                          '/originCommandId',
-                                                                        schemaPath:
-                                                                          '#/properties/messages/items/properties/originCommandId/pattern',
-                                                                        keyword: 'pattern',
-                                                                        params: {
-                                                                          pattern:
-                                                                            '^[A-Za-z0-9_-]+$',
-                                                                        },
-                                                                        message:
-                                                                          'must match pattern "' +
-                                                                          '^[A-Za-z0-9_-]+$' +
-                                                                          '"',
-                                                                      },
-                                                                    ];
-                                                                    return false;
-                                                                  }
-                                                                }
-                                                              }
-                                                            } else {
-                                                              validate101.errors = [
-                                                                {
-                                                                  instancePath:
-                                                                    instancePath +
-                                                                    '/messages/' +
-                                                                    i3 +
-                                                                    '/originCommandId',
-                                                                  schemaPath:
-                                                                    '#/properties/messages/items/properties/originCommandId/type',
-                                                                  keyword: 'type',
-                                                                  params: { type: 'string' },
-                                                                  message: 'must be string',
-                                                                },
-                                                              ];
-                                                              return false;
-                                                            }
-                                                          }
-                                                          var valid26 = _errs278 === errors;
-                                                        } else {
-                                                          var valid26 = true;
-                                                        }
-                                                        if (valid26) {
-                                                          if (
-                                                            data71.contextSelectionId !== undefined
-                                                          ) {
-                                                            let data103 = data71.contextSelectionId;
-                                                            const _errs280 = errors;
-                                                            if (errors === _errs280) {
-                                                              if (typeof data103 === 'string') {
-                                                                if (func1(data103) > 128) {
-                                                                  validate101.errors = [
-                                                                    {
-                                                                      instancePath:
-                                                                        instancePath +
-                                                                        '/messages/' +
-                                                                        i3 +
-                                                                        '/contextSelectionId',
-                                                                      schemaPath:
-                                                                        '#/properties/messages/items/properties/contextSelectionId/maxLength',
+                                                                        '#/properties/messages/items/properties/originCommandId/maxLength',
                                                                       keyword: 'maxLength',
                                                                       params: { limit: 128 },
                                                                       message:
@@ -113856,16 +114373,16 @@ function validate101(
                                                                   ];
                                                                   return false;
                                                                 } else {
-                                                                  if (func1(data103) < 1) {
+                                                                  if (func1(data106) < 1) {
                                                                     validate101.errors = [
                                                                       {
                                                                         instancePath:
                                                                           instancePath +
                                                                           '/messages/' +
                                                                           i3 +
-                                                                          '/contextSelectionId',
+                                                                          '/originCommandId',
                                                                         schemaPath:
-                                                                          '#/properties/messages/items/properties/contextSelectionId/minLength',
+                                                                          '#/properties/messages/items/properties/originCommandId/minLength',
                                                                         keyword: 'minLength',
                                                                         params: { limit: 1 },
                                                                         message:
@@ -113874,16 +114391,16 @@ function validate101(
                                                                     ];
                                                                     return false;
                                                                   } else {
-                                                                    if (!pattern4.test(data103)) {
+                                                                    if (!pattern4.test(data106)) {
                                                                       validate101.errors = [
                                                                         {
                                                                           instancePath:
                                                                             instancePath +
                                                                             '/messages/' +
                                                                             i3 +
-                                                                            '/contextSelectionId',
+                                                                            '/originCommandId',
                                                                           schemaPath:
-                                                                            '#/properties/messages/items/properties/contextSelectionId/pattern',
+                                                                            '#/properties/messages/items/properties/originCommandId/pattern',
                                                                           keyword: 'pattern',
                                                                           params: {
                                                                             pattern:
@@ -113906,9 +114423,9 @@ function validate101(
                                                                       instancePath +
                                                                       '/messages/' +
                                                                       i3 +
-                                                                      '/contextSelectionId',
+                                                                      '/originCommandId',
                                                                     schemaPath:
-                                                                      '#/properties/messages/items/properties/contextSelectionId/type',
+                                                                      '#/properties/messages/items/properties/originCommandId/type',
                                                                     keyword: 'type',
                                                                     params: { type: 'string' },
                                                                     message: 'must be string',
@@ -113917,63 +114434,158 @@ function validate101(
                                                                 return false;
                                                               }
                                                             }
-                                                            var valid26 = _errs280 === errors;
+                                                            var valid26 = _errs287 === errors;
                                                           } else {
                                                             var valid26 = true;
                                                           }
                                                           if (valid26) {
-                                                            if (data71.inputKind !== undefined) {
-                                                              let data104 = data71.inputKind;
-                                                              const _errs282 = errors;
-                                                              if (typeof data104 !== 'string') {
-                                                                validate101.errors = [
-                                                                  {
-                                                                    instancePath:
-                                                                      instancePath +
-                                                                      '/messages/' +
-                                                                      i3 +
-                                                                      '/inputKind',
-                                                                    schemaPath:
-                                                                      '#/properties/messages/items/properties/inputKind/type',
-                                                                    keyword: 'type',
-                                                                    params: { type: 'string' },
-                                                                    message: 'must be string',
-                                                                  },
-                                                                ];
-                                                                return false;
-                                                              }
-                                                              if (
-                                                                !(
-                                                                  data104 === 'input.steer' ||
-                                                                  data104 === 'input.follow_up' ||
-                                                                  data104 === 'result.include'
-                                                                )
-                                                              ) {
-                                                                validate101.errors = [
-                                                                  {
-                                                                    instancePath:
-                                                                      instancePath +
-                                                                      '/messages/' +
-                                                                      i3 +
-                                                                      '/inputKind',
-                                                                    schemaPath:
-                                                                      '#/properties/messages/items/properties/inputKind/enum',
-                                                                    keyword: 'enum',
-                                                                    params: {
-                                                                      allowedValues:
-                                                                        schema91.properties.messages
-                                                                          .items.properties
-                                                                          .inputKind.enum,
+                                                            if (
+                                                              data71.contextSelectionId !==
+                                                              undefined
+                                                            ) {
+                                                              let data107 =
+                                                                data71.contextSelectionId;
+                                                              const _errs289 = errors;
+                                                              if (errors === _errs289) {
+                                                                if (typeof data107 === 'string') {
+                                                                  if (func1(data107) > 128) {
+                                                                    validate101.errors = [
+                                                                      {
+                                                                        instancePath:
+                                                                          instancePath +
+                                                                          '/messages/' +
+                                                                          i3 +
+                                                                          '/contextSelectionId',
+                                                                        schemaPath:
+                                                                          '#/properties/messages/items/properties/contextSelectionId/maxLength',
+                                                                        keyword: 'maxLength',
+                                                                        params: { limit: 128 },
+                                                                        message:
+                                                                          'must NOT have more than 128 characters',
+                                                                      },
+                                                                    ];
+                                                                    return false;
+                                                                  } else {
+                                                                    if (func1(data107) < 1) {
+                                                                      validate101.errors = [
+                                                                        {
+                                                                          instancePath:
+                                                                            instancePath +
+                                                                            '/messages/' +
+                                                                            i3 +
+                                                                            '/contextSelectionId',
+                                                                          schemaPath:
+                                                                            '#/properties/messages/items/properties/contextSelectionId/minLength',
+                                                                          keyword: 'minLength',
+                                                                          params: { limit: 1 },
+                                                                          message:
+                                                                            'must NOT have fewer than 1 characters',
+                                                                        },
+                                                                      ];
+                                                                      return false;
+                                                                    } else {
+                                                                      if (!pattern4.test(data107)) {
+                                                                        validate101.errors = [
+                                                                          {
+                                                                            instancePath:
+                                                                              instancePath +
+                                                                              '/messages/' +
+                                                                              i3 +
+                                                                              '/contextSelectionId',
+                                                                            schemaPath:
+                                                                              '#/properties/messages/items/properties/contextSelectionId/pattern',
+                                                                            keyword: 'pattern',
+                                                                            params: {
+                                                                              pattern:
+                                                                                '^[A-Za-z0-9_-]+$',
+                                                                            },
+                                                                            message:
+                                                                              'must match pattern "' +
+                                                                              '^[A-Za-z0-9_-]+$' +
+                                                                              '"',
+                                                                          },
+                                                                        ];
+                                                                        return false;
+                                                                      }
+                                                                    }
+                                                                  }
+                                                                } else {
+                                                                  validate101.errors = [
+                                                                    {
+                                                                      instancePath:
+                                                                        instancePath +
+                                                                        '/messages/' +
+                                                                        i3 +
+                                                                        '/contextSelectionId',
+                                                                      schemaPath:
+                                                                        '#/properties/messages/items/properties/contextSelectionId/type',
+                                                                      keyword: 'type',
+                                                                      params: { type: 'string' },
+                                                                      message: 'must be string',
                                                                     },
-                                                                    message:
-                                                                      'must be equal to one of the allowed values',
-                                                                  },
-                                                                ];
-                                                                return false;
+                                                                  ];
+                                                                  return false;
+                                                                }
                                                               }
-                                                              var valid26 = _errs282 === errors;
+                                                              var valid26 = _errs289 === errors;
                                                             } else {
                                                               var valid26 = true;
+                                                            }
+                                                            if (valid26) {
+                                                              if (data71.inputKind !== undefined) {
+                                                                let data108 = data71.inputKind;
+                                                                const _errs291 = errors;
+                                                                if (typeof data108 !== 'string') {
+                                                                  validate101.errors = [
+                                                                    {
+                                                                      instancePath:
+                                                                        instancePath +
+                                                                        '/messages/' +
+                                                                        i3 +
+                                                                        '/inputKind',
+                                                                      schemaPath:
+                                                                        '#/properties/messages/items/properties/inputKind/type',
+                                                                      keyword: 'type',
+                                                                      params: { type: 'string' },
+                                                                      message: 'must be string',
+                                                                    },
+                                                                  ];
+                                                                  return false;
+                                                                }
+                                                                if (
+                                                                  !(
+                                                                    data108 === 'input.steer' ||
+                                                                    data108 === 'input.follow_up' ||
+                                                                    data108 === 'result.include'
+                                                                  )
+                                                                ) {
+                                                                  validate101.errors = [
+                                                                    {
+                                                                      instancePath:
+                                                                        instancePath +
+                                                                        '/messages/' +
+                                                                        i3 +
+                                                                        '/inputKind',
+                                                                      schemaPath:
+                                                                        '#/properties/messages/items/properties/inputKind/enum',
+                                                                      keyword: 'enum',
+                                                                      params: {
+                                                                        allowedValues:
+                                                                          schema91.properties
+                                                                            .messages.items
+                                                                            .properties.inputKind
+                                                                            .enum,
+                                                                      },
+                                                                      message:
+                                                                        'must be equal to one of the allowed values',
+                                                                    },
+                                                                  ];
+                                                                  return false;
+                                                                }
+                                                                var valid26 = _errs291 === errors;
+                                                              } else {
+                                                                var valid26 = true;
+                                                              }
                                                             }
                                                           }
                                                         }
@@ -114029,11 +114641,11 @@ function validate101(
               }
               if (valid0) {
                 if (data.snapshotCursor !== undefined) {
-                  let data105 = data.snapshotCursor;
-                  const _errs284 = errors;
-                  if (errors === _errs284) {
-                    if (typeof data105 === 'string') {
-                      if (!pattern9.test(data105)) {
+                  let data109 = data.snapshotCursor;
+                  const _errs293 = errors;
+                  if (errors === _errs293) {
+                    if (typeof data109 === 'string') {
+                      if (!pattern9.test(data109)) {
                         validate101.errors = [
                           {
                             instancePath: instancePath + '/snapshotCursor',
@@ -114058,17 +114670,17 @@ function validate101(
                       return false;
                     }
                   }
-                  var valid0 = _errs284 === errors;
+                  var valid0 = _errs293 === errors;
                 } else {
                   var valid0 = true;
                 }
                 if (valid0) {
                   if (data.storeId !== undefined) {
-                    let data106 = data.storeId;
-                    const _errs286 = errors;
-                    if (errors === _errs286) {
-                      if (typeof data106 === 'string') {
-                        if (func1(data106) > 128) {
+                    let data110 = data.storeId;
+                    const _errs295 = errors;
+                    if (errors === _errs295) {
+                      if (typeof data110 === 'string') {
+                        if (func1(data110) > 128) {
                           validate101.errors = [
                             {
                               instancePath: instancePath + '/storeId',
@@ -114080,7 +114692,7 @@ function validate101(
                           ];
                           return false;
                         } else {
-                          if (func1(data106) < 1) {
+                          if (func1(data110) < 1) {
                             validate101.errors = [
                               {
                                 instancePath: instancePath + '/storeId',
@@ -114092,7 +114704,7 @@ function validate101(
                             ];
                             return false;
                           } else {
-                            if (!pattern4.test(data106)) {
+                            if (!pattern4.test(data110)) {
                               validate101.errors = [
                                 {
                                   instancePath: instancePath + '/storeId',
@@ -114119,40 +114731,40 @@ function validate101(
                         return false;
                       }
                     }
-                    var valid0 = _errs286 === errors;
+                    var valid0 = _errs295 === errors;
                   } else {
                     var valid0 = true;
                   }
                   if (valid0) {
                     if (data.compressionProgress !== undefined) {
-                      let data107 = data.compressionProgress;
-                      const _errs288 = errors;
-                      if (errors === _errs288) {
-                        if (data107 && typeof data107 == 'object' && !Array.isArray(data107)) {
-                          let missing12;
+                      let data111 = data.compressionProgress;
+                      const _errs297 = errors;
+                      if (errors === _errs297) {
+                        if (data111 && typeof data111 == 'object' && !Array.isArray(data111)) {
+                          let missing13;
                           if (
-                            (data107.runId === undefined && (missing12 = 'runId')) ||
-                            (data107.originStoreId === undefined &&
-                              (missing12 = 'originStoreId')) ||
-                            (data107.phase === undefined && (missing12 = 'phase'))
+                            (data111.runId === undefined && (missing13 = 'runId')) ||
+                            (data111.originStoreId === undefined &&
+                              (missing13 = 'originStoreId')) ||
+                            (data111.phase === undefined && (missing13 = 'phase'))
                           ) {
                             validate101.errors = [
                               {
                                 instancePath: instancePath + '/compressionProgress',
                                 schemaPath: '#/properties/compressionProgress/required',
                                 keyword: 'required',
-                                params: { missingProperty: missing12 },
-                                message: "must have required property '" + missing12 + "'",
+                                params: { missingProperty: missing13 },
+                                message: "must have required property '" + missing13 + "'",
                               },
                             ];
                             return false;
                           } else {
-                            if (data107.runId !== undefined) {
-                              let data108 = data107.runId;
-                              const _errs291 = errors;
-                              if (errors === _errs291) {
-                                if (typeof data108 === 'string') {
-                                  if (func1(data108) > 128) {
+                            if (data111.runId !== undefined) {
+                              let data112 = data111.runId;
+                              const _errs300 = errors;
+                              if (errors === _errs300) {
+                                if (typeof data112 === 'string') {
+                                  if (func1(data112) > 128) {
                                     validate101.errors = [
                                       {
                                         instancePath: instancePath + '/compressionProgress/runId',
@@ -114165,7 +114777,7 @@ function validate101(
                                     ];
                                     return false;
                                   } else {
-                                    if (func1(data108) < 1) {
+                                    if (func1(data112) < 1) {
                                       validate101.errors = [
                                         {
                                           instancePath: instancePath + '/compressionProgress/runId',
@@ -114178,7 +114790,7 @@ function validate101(
                                       ];
                                       return false;
                                     } else {
-                                      if (!pattern4.test(data108)) {
+                                      if (!pattern4.test(data112)) {
                                         validate101.errors = [
                                           {
                                             instancePath:
@@ -114209,17 +114821,17 @@ function validate101(
                                   return false;
                                 }
                               }
-                              var valid34 = _errs291 === errors;
+                              var valid35 = _errs300 === errors;
                             } else {
-                              var valid34 = true;
+                              var valid35 = true;
                             }
-                            if (valid34) {
-                              if (data107.originStoreId !== undefined) {
-                                let data109 = data107.originStoreId;
-                                const _errs293 = errors;
-                                if (errors === _errs293) {
-                                  if (typeof data109 === 'string') {
-                                    if (func1(data109) > 128) {
+                            if (valid35) {
+                              if (data111.originStoreId !== undefined) {
+                                let data113 = data111.originStoreId;
+                                const _errs302 = errors;
+                                if (errors === _errs302) {
+                                  if (typeof data113 === 'string') {
+                                    if (func1(data113) > 128) {
                                       validate101.errors = [
                                         {
                                           instancePath:
@@ -114233,7 +114845,7 @@ function validate101(
                                       ];
                                       return false;
                                     } else {
-                                      if (func1(data109) < 1) {
+                                      if (func1(data113) < 1) {
                                         validate101.errors = [
                                           {
                                             instancePath:
@@ -114247,7 +114859,7 @@ function validate101(
                                         ];
                                         return false;
                                       } else {
-                                        if (!pattern4.test(data109)) {
+                                        if (!pattern4.test(data113)) {
                                           validate101.errors = [
                                             {
                                               instancePath:
@@ -114279,15 +114891,15 @@ function validate101(
                                     return false;
                                   }
                                 }
-                                var valid34 = _errs293 === errors;
+                                var valid35 = _errs302 === errors;
                               } else {
-                                var valid34 = true;
+                                var valid35 = true;
                               }
-                              if (valid34) {
-                                if (data107.phase !== undefined) {
-                                  let data110 = data107.phase;
-                                  const _errs295 = errors;
-                                  if (typeof data110 !== 'string') {
+                              if (valid35) {
+                                if (data111.phase !== undefined) {
+                                  let data114 = data111.phase;
+                                  const _errs304 = errors;
+                                  if (typeof data114 !== 'string') {
                                     validate101.errors = [
                                       {
                                         instancePath: instancePath + '/compressionProgress/phase',
@@ -114302,9 +114914,9 @@ function validate101(
                                   }
                                   if (
                                     !(
-                                      data110 === 'preparing' ||
-                                      data110 === 'summarizing' ||
-                                      data110 === 'validating'
+                                      data114 === 'preparing' ||
+                                      data114 === 'summarizing' ||
+                                      data114 === 'validating'
                                     )
                                   ) {
                                     validate101.errors = [
@@ -114323,9 +114935,83 @@ function validate101(
                                     ];
                                     return false;
                                   }
-                                  var valid34 = _errs295 === errors;
+                                  var valid35 = _errs304 === errors;
                                 } else {
-                                  var valid34 = true;
+                                  var valid35 = true;
+                                }
+                                if (valid35) {
+                                  if (data111.executionId !== undefined) {
+                                    let data115 = data111.executionId;
+                                    const _errs306 = errors;
+                                    if (errors === _errs306) {
+                                      if (typeof data115 === 'string') {
+                                        if (func1(data115) > 128) {
+                                          validate101.errors = [
+                                            {
+                                              instancePath:
+                                                instancePath + '/compressionProgress/executionId',
+                                              schemaPath:
+                                                '#/properties/compressionProgress/properties/executionId/maxLength',
+                                              keyword: 'maxLength',
+                                              params: { limit: 128 },
+                                              message: 'must NOT have more than 128 characters',
+                                            },
+                                          ];
+                                          return false;
+                                        } else {
+                                          if (func1(data115) < 1) {
+                                            validate101.errors = [
+                                              {
+                                                instancePath:
+                                                  instancePath + '/compressionProgress/executionId',
+                                                schemaPath:
+                                                  '#/properties/compressionProgress/properties/executionId/minLength',
+                                                keyword: 'minLength',
+                                                params: { limit: 1 },
+                                                message: 'must NOT have fewer than 1 characters',
+                                              },
+                                            ];
+                                            return false;
+                                          } else {
+                                            if (!pattern4.test(data115)) {
+                                              validate101.errors = [
+                                                {
+                                                  instancePath:
+                                                    instancePath +
+                                                    '/compressionProgress/executionId',
+                                                  schemaPath:
+                                                    '#/properties/compressionProgress/properties/executionId/pattern',
+                                                  keyword: 'pattern',
+                                                  params: { pattern: '^[A-Za-z0-9_-]+$' },
+                                                  message:
+                                                    'must match pattern "' +
+                                                    '^[A-Za-z0-9_-]+$' +
+                                                    '"',
+                                                },
+                                              ];
+                                              return false;
+                                            }
+                                          }
+                                        }
+                                      } else {
+                                        validate101.errors = [
+                                          {
+                                            instancePath:
+                                              instancePath + '/compressionProgress/executionId',
+                                            schemaPath:
+                                              '#/properties/compressionProgress/properties/executionId/type',
+                                            keyword: 'type',
+                                            params: { type: 'string' },
+                                            message: 'must be string',
+                                          },
+                                        ];
+                                        return false;
+                                      }
+                                    }
+                                    var valid35 = _errs306 === errors;
+                                  } else {
+                                    var valid35 = true;
+                                  }
                                 }
                               }
                             }
@@ -114343,7 +115029,7 @@ function validate101(
                           return false;
                         }
                       }
-                      var valid0 = _errs288 === errors;
+                      var valid0 = _errs297 === errors;
                     } else {
                       var valid0 = true;
                     }
@@ -115318,7 +116004,7 @@ function validate106(
 }
 validate106.evaluated = { props: true, dynamicProps: false, dynamicItems: false };
 var response_ResumeJobReportResponse = validate109;
-var pattern680 = new RegExp('^[a-z0-9_]+$', 'u');
+var pattern683 = new RegExp('^[a-z0-9_]+$', 'u');
 function validate109(
   data,
   { instancePath = '', parentData, parentDataProperty, rootData = data, dynamicAnchors = {} } = {},
@@ -115986,7 +116672,7 @@ function validate109(
                                         }
                                         errors++;
                                       } else {
-                                        if (!pattern680.test(data11)) {
+                                        if (!pattern683.test(data11)) {
                                           const err22 = {
                                             instancePath: instancePath + '/receipt/reason',
                                             schemaPath:
@@ -129222,6 +129908,19 @@ var schema105 = {
     role: { type: 'string', enum: ['system', 'user', 'assistant', 'tool'] },
     content: { type: 'string' },
     firstOutput: { type: 'string', enum: ['content', 'reasoning', 'tool_calls'] },
+    compression: {
+      type: 'object',
+      properties: {
+        id: { type: 'string', minLength: 1, maxLength: 128, pattern: '^[A-Za-z0-9_-]+$' },
+        trigger: { type: 'string', enum: ['manual', 'automatic'] },
+        status: {
+          type: 'string',
+          enum: ['running', 'completed', 'failed', 'cancelled', 'unpublished'],
+        },
+      },
+      required: ['id', 'trigger', 'status'],
+      additionalProperties: true,
+    },
     originMessage: {
       type: 'object',
       properties: {
@@ -129726,22 +130425,21 @@ function validate126(
                         var valid0 = true;
                       }
                       if (valid0) {
-                        if (data.originMessage !== undefined) {
-                          let data8 = data.originMessage;
+                        if (data.compression !== undefined) {
+                          let data8 = data.compression;
                           const _errs22 = errors;
                           if (errors === _errs22) {
                             if (data8 && typeof data8 == 'object' && !Array.isArray(data8)) {
                               let missing1;
                               if (
-                                (data8.storeId === undefined && (missing1 = 'storeId')) ||
-                                (data8.sessionId === undefined && (missing1 = 'sessionId')) ||
-                                (data8.messageId === undefined && (missing1 = 'messageId')) ||
-                                (data8.runId === undefined && (missing1 = 'runId'))
+                                (data8.id === undefined && (missing1 = 'id')) ||
+                                (data8.trigger === undefined && (missing1 = 'trigger')) ||
+                                (data8.status === undefined && (missing1 = 'status'))
                               ) {
                                 validate126.errors = [
                                   {
-                                    instancePath: instancePath + '/originMessage',
-                                    schemaPath: '#/properties/originMessage/required',
+                                    instancePath: instancePath + '/compression',
+                                    schemaPath: '#/properties/compression/required',
                                     keyword: 'required',
                                     params: { missingProperty: missing1 },
                                     message: "must have required property '" + missing1 + "'",
@@ -129749,17 +130447,17 @@ function validate126(
                                 ];
                                 return false;
                               } else {
-                                if (data8.storeId !== undefined) {
-                                  let data9 = data8.storeId;
+                                if (data8.id !== undefined) {
+                                  let data9 = data8.id;
                                   const _errs25 = errors;
                                   if (errors === _errs25) {
                                     if (typeof data9 === 'string') {
                                       if (func1(data9) > 128) {
                                         validate126.errors = [
                                           {
-                                            instancePath: instancePath + '/originMessage/storeId',
+                                            instancePath: instancePath + '/compression/id',
                                             schemaPath:
-                                              '#/properties/originMessage/properties/storeId/maxLength',
+                                              '#/properties/compression/properties/id/maxLength',
                                             keyword: 'maxLength',
                                             params: { limit: 128 },
                                             message: 'must NOT have more than 128 characters',
@@ -129770,9 +130468,9 @@ function validate126(
                                         if (func1(data9) < 1) {
                                           validate126.errors = [
                                             {
-                                              instancePath: instancePath + '/originMessage/storeId',
+                                              instancePath: instancePath + '/compression/id',
                                               schemaPath:
-                                                '#/properties/originMessage/properties/storeId/minLength',
+                                                '#/properties/compression/properties/id/minLength',
                                               keyword: 'minLength',
                                               params: { limit: 1 },
                                               message: 'must NOT have fewer than 1 characters',
@@ -129783,10 +130481,9 @@ function validate126(
                                           if (!pattern4.test(data9)) {
                                             validate126.errors = [
                                               {
-                                                instancePath:
-                                                  instancePath + '/originMessage/storeId',
+                                                instancePath: instancePath + '/compression/id',
                                                 schemaPath:
-                                                  '#/properties/originMessage/properties/storeId/pattern',
+                                                  '#/properties/compression/properties/id/pattern',
                                                 keyword: 'pattern',
                                                 params: { pattern: '^[A-Za-z0-9_-]+$' },
                                                 message:
@@ -129800,9 +130497,8 @@ function validate126(
                                     } else {
                                       validate126.errors = [
                                         {
-                                          instancePath: instancePath + '/originMessage/storeId',
-                                          schemaPath:
-                                            '#/properties/originMessage/properties/storeId/type',
+                                          instancePath: instancePath + '/compression/id',
+                                          schemaPath: '#/properties/compression/properties/id/type',
                                           keyword: 'type',
                                           params: { type: 'string' },
                                           message: 'must be string',
@@ -129816,18 +130512,144 @@ function validate126(
                                   var valid2 = true;
                                 }
                                 if (valid2) {
-                                  if (data8.sessionId !== undefined) {
-                                    let data10 = data8.sessionId;
+                                  if (data8.trigger !== undefined) {
+                                    let data10 = data8.trigger;
                                     const _errs27 = errors;
-                                    if (errors === _errs27) {
-                                      if (typeof data10 === 'string') {
-                                        if (func1(data10) > 128) {
+                                    if (typeof data10 !== 'string') {
+                                      validate126.errors = [
+                                        {
+                                          instancePath: instancePath + '/compression/trigger',
+                                          schemaPath:
+                                            '#/properties/compression/properties/trigger/type',
+                                          keyword: 'type',
+                                          params: { type: 'string' },
+                                          message: 'must be string',
+                                        },
+                                      ];
+                                      return false;
+                                    }
+                                    if (!(data10 === 'manual' || data10 === 'automatic')) {
+                                      validate126.errors = [
+                                        {
+                                          instancePath: instancePath + '/compression/trigger',
+                                          schemaPath:
+                                            '#/properties/compression/properties/trigger/enum',
+                                          keyword: 'enum',
+                                          params: {
+                                            allowedValues:
+                                              schema105.properties.compression.properties.trigger
+                                                .enum,
+                                          },
+                                          message: 'must be equal to one of the allowed values',
+                                        },
+                                      ];
+                                      return false;
+                                    }
+                                    var valid2 = _errs27 === errors;
+                                  } else {
+                                    var valid2 = true;
+                                  }
+                                  if (valid2) {
+                                    if (data8.status !== undefined) {
+                                      let data11 = data8.status;
+                                      const _errs29 = errors;
+                                      if (typeof data11 !== 'string') {
+                                        validate126.errors = [
+                                          {
+                                            instancePath: instancePath + '/compression/status',
+                                            schemaPath:
+                                              '#/properties/compression/properties/status/type',
+                                            keyword: 'type',
+                                            params: { type: 'string' },
+                                            message: 'must be string',
+                                          },
+                                        ];
+                                        return false;
+                                      }
+                                      if (
+                                        !(
+                                          data11 === 'running' ||
+                                          data11 === 'completed' ||
+                                          data11 === 'failed' ||
+                                          data11 === 'cancelled' ||
+                                          data11 === 'unpublished'
+                                        )
+                                      ) {
+                                        validate126.errors = [
+                                          {
+                                            instancePath: instancePath + '/compression/status',
+                                            schemaPath:
+                                              '#/properties/compression/properties/status/enum',
+                                            keyword: 'enum',
+                                            params: {
+                                              allowedValues:
+                                                schema105.properties.compression.properties.status
+                                                  .enum,
+                                            },
+                                            message: 'must be equal to one of the allowed values',
+                                          },
+                                        ];
+                                        return false;
+                                      }
+                                      var valid2 = _errs29 === errors;
+                                    } else {
+                                      var valid2 = true;
+                                    }
+                                  }
+                                }
+                              }
+                            } else {
+                              validate126.errors = [
+                                {
+                                  instancePath: instancePath + '/compression',
+                                  schemaPath: '#/properties/compression/type',
+                                  keyword: 'type',
+                                  params: { type: 'object' },
+                                  message: 'must be object',
+                                },
+                              ];
+                              return false;
+                            }
+                          }
+                          var valid0 = _errs22 === errors;
+                        } else {
+                          var valid0 = true;
+                        }
+                        if (valid0) {
+                          if (data.originMessage !== undefined) {
+                            let data12 = data.originMessage;
+                            const _errs31 = errors;
+                            if (errors === _errs31) {
+                              if (data12 && typeof data12 == 'object' && !Array.isArray(data12)) {
+                                let missing2;
+                                if (
+                                  (data12.storeId === undefined && (missing2 = 'storeId')) ||
+                                  (data12.sessionId === undefined && (missing2 = 'sessionId')) ||
+                                  (data12.messageId === undefined && (missing2 = 'messageId')) ||
+                                  (data12.runId === undefined && (missing2 = 'runId'))
+                                ) {
+                                  validate126.errors = [
+                                    {
+                                      instancePath: instancePath + '/originMessage',
+                                      schemaPath: '#/properties/originMessage/required',
+                                      keyword: 'required',
+                                      params: { missingProperty: missing2 },
+                                      message: "must have required property '" + missing2 + "'",
+                                    },
+                                  ];
+                                  return false;
+                                } else {
+                                  if (data12.storeId !== undefined) {
+                                    let data13 = data12.storeId;
+                                    const _errs34 = errors;
+                                    if (errors === _errs34) {
+                                      if (typeof data13 === 'string') {
+                                        if (func1(data13) > 128) {
                                           validate126.errors = [
                                             {
-                                              instancePath:
-                                                instancePath + '/originMessage/sessionId',
+                                              instancePath: instancePath + '/originMessage/storeId',
                                               schemaPath:
-                                                '#/properties/originMessage/properties/sessionId/maxLength',
+                                                '#/properties/originMessage/properties/storeId/maxLength',
                                               keyword: 'maxLength',
                                               params: { limit: 128 },
                                               message: 'must NOT have more than 128 characters',
@@ -129835,13 +130657,13 @@ function validate126(
                                           ];
                                           return false;
                                         } else {
-                                          if (func1(data10) < 1) {
+                                          if (func1(data13) < 1) {
                                             validate126.errors = [
                                               {
                                                 instancePath:
-                                                  instancePath + '/originMessage/sessionId',
+                                                  instancePath + '/originMessage/storeId',
                                                 schemaPath:
-                                                  '#/properties/originMessage/properties/sessionId/minLength',
+                                                  '#/properties/originMessage/properties/storeId/minLength',
                                                 keyword: 'minLength',
                                                 params: { limit: 1 },
                                                 message: 'must NOT have fewer than 1 characters',
@@ -129849,13 +130671,13 @@ function validate126(
                                             ];
                                             return false;
                                           } else {
-                                            if (!pattern4.test(data10)) {
+                                            if (!pattern4.test(data13)) {
                                               validate126.errors = [
                                                 {
                                                   instancePath:
-                                                    instancePath + '/originMessage/sessionId',
+                                                    instancePath + '/originMessage/storeId',
                                                   schemaPath:
-                                                    '#/properties/originMessage/properties/sessionId/pattern',
+                                                    '#/properties/originMessage/properties/storeId/pattern',
                                                   keyword: 'pattern',
                                                   params: { pattern: '^[A-Za-z0-9_-]+$' },
                                                   message:
@@ -129871,9 +130693,9 @@ function validate126(
                                       } else {
                                         validate126.errors = [
                                           {
-                                            instancePath: instancePath + '/originMessage/sessionId',
+                                            instancePath: instancePath + '/originMessage/storeId',
                                             schemaPath:
-                                              '#/properties/originMessage/properties/sessionId/type',
+                                              '#/properties/originMessage/properties/storeId/type',
                                             keyword: 'type',
                                             params: { type: 'string' },
                                             message: 'must be string',
@@ -129882,23 +130704,23 @@ function validate126(
                                         return false;
                                       }
                                     }
-                                    var valid2 = _errs27 === errors;
+                                    var valid3 = _errs34 === errors;
                                   } else {
-                                    var valid2 = true;
+                                    var valid3 = true;
                                   }
-                                  if (valid2) {
-                                    if (data8.messageId !== undefined) {
-                                      let data11 = data8.messageId;
-                                      const _errs29 = errors;
-                                      if (errors === _errs29) {
-                                        if (typeof data11 === 'string') {
-                                          if (func1(data11) > 128) {
+                                  if (valid3) {
+                                    if (data12.sessionId !== undefined) {
+                                      let data14 = data12.sessionId;
+                                      const _errs36 = errors;
+                                      if (errors === _errs36) {
+                                        if (typeof data14 === 'string') {
+                                          if (func1(data14) > 128) {
                                             validate126.errors = [
                                               {
                                                 instancePath:
-                                                  instancePath + '/originMessage/messageId',
+                                                  instancePath + '/originMessage/sessionId',
                                                 schemaPath:
-                                                  '#/properties/originMessage/properties/messageId/maxLength',
+                                                  '#/properties/originMessage/properties/sessionId/maxLength',
                                                 keyword: 'maxLength',
                                                 params: { limit: 128 },
                                                 message: 'must NOT have more than 128 characters',
@@ -129906,13 +130728,13 @@ function validate126(
                                             ];
                                             return false;
                                           } else {
-                                            if (func1(data11) < 1) {
+                                            if (func1(data14) < 1) {
                                               validate126.errors = [
                                                 {
                                                   instancePath:
-                                                    instancePath + '/originMessage/messageId',
+                                                    instancePath + '/originMessage/sessionId',
                                                   schemaPath:
-                                                    '#/properties/originMessage/properties/messageId/minLength',
+                                                    '#/properties/originMessage/properties/sessionId/minLength',
                                                   keyword: 'minLength',
                                                   params: { limit: 1 },
                                                   message: 'must NOT have fewer than 1 characters',
@@ -129920,13 +130742,13 @@ function validate126(
                                               ];
                                               return false;
                                             } else {
-                                              if (!pattern4.test(data11)) {
+                                              if (!pattern4.test(data14)) {
                                                 validate126.errors = [
                                                   {
                                                     instancePath:
-                                                      instancePath + '/originMessage/messageId',
+                                                      instancePath + '/originMessage/sessionId',
                                                     schemaPath:
-                                                      '#/properties/originMessage/properties/messageId/pattern',
+                                                      '#/properties/originMessage/properties/sessionId/pattern',
                                                     keyword: 'pattern',
                                                     params: { pattern: '^[A-Za-z0-9_-]+$' },
                                                     message:
@@ -129943,9 +130765,9 @@ function validate126(
                                           validate126.errors = [
                                             {
                                               instancePath:
-                                                instancePath + '/originMessage/messageId',
+                                                instancePath + '/originMessage/sessionId',
                                               schemaPath:
-                                                '#/properties/originMessage/properties/messageId/type',
+                                                '#/properties/originMessage/properties/sessionId/type',
                                               keyword: 'type',
                                               params: { type: 'string' },
                                               message: 'must be string',
@@ -129954,272 +130776,23 @@ function validate126(
                                           return false;
                                         }
                                       }
-                                      var valid2 = _errs29 === errors;
+                                      var valid3 = _errs36 === errors;
                                     } else {
-                                      var valid2 = true;
+                                      var valid3 = true;
                                     }
-                                    if (valid2) {
-                                      if (data8.runId !== undefined) {
-                                        let data12 = data8.runId;
-                                        const _errs31 = errors;
-                                        const _errs32 = errors;
-                                        let valid3 = false;
-                                        const _errs33 = errors;
-                                        if (errors === _errs33) {
-                                          if (typeof data12 === 'string') {
-                                            if (func1(data12) > 128) {
-                                              const err6 = {
-                                                instancePath: instancePath + '/originMessage/runId',
-                                                schemaPath:
-                                                  '#/properties/originMessage/properties/runId/anyOf/0/maxLength',
-                                                keyword: 'maxLength',
-                                                params: { limit: 128 },
-                                                message: 'must NOT have more than 128 characters',
-                                              };
-                                              if (vErrors === null) {
-                                                vErrors = [err6];
-                                              } else {
-                                                vErrors.push(err6);
-                                              }
-                                              errors++;
-                                            } else {
-                                              if (func1(data12) < 1) {
-                                                const err7 = {
-                                                  instancePath:
-                                                    instancePath + '/originMessage/runId',
-                                                  schemaPath:
-                                                    '#/properties/originMessage/properties/runId/anyOf/0/minLength',
-                                                  keyword: 'minLength',
-                                                  params: { limit: 1 },
-                                                  message: 'must NOT have fewer than 1 characters',
-                                                };
-                                                if (vErrors === null) {
-                                                  vErrors = [err7];
-                                                } else {
-                                                  vErrors.push(err7);
-                                                }
-                                                errors++;
-                                              } else {
-                                                if (!pattern4.test(data12)) {
-                                                  const err8 = {
-                                                    instancePath:
-                                                      instancePath + '/originMessage/runId',
-                                                    schemaPath:
-                                                      '#/properties/originMessage/properties/runId/anyOf/0/pattern',
-                                                    keyword: 'pattern',
-                                                    params: { pattern: '^[A-Za-z0-9_-]+$' },
-                                                    message:
-                                                      'must match pattern "' +
-                                                      '^[A-Za-z0-9_-]+$' +
-                                                      '"',
-                                                  };
-                                                  if (vErrors === null) {
-                                                    vErrors = [err8];
-                                                  } else {
-                                                    vErrors.push(err8);
-                                                  }
-                                                  errors++;
-                                                }
-                                              }
-                                            }
-                                          } else {
-                                            const err9 = {
-                                              instancePath: instancePath + '/originMessage/runId',
-                                              schemaPath:
-                                                '#/properties/originMessage/properties/runId/anyOf/0/type',
-                                              keyword: 'type',
-                                              params: { type: 'string' },
-                                              message: 'must be string',
-                                            };
-                                            if (vErrors === null) {
-                                              vErrors = [err9];
-                                            } else {
-                                              vErrors.push(err9);
-                                            }
-                                            errors++;
-                                          }
-                                        }
-                                        var _valid1 = _errs33 === errors;
-                                        valid3 = valid3 || _valid1;
-                                        const _errs35 = errors;
-                                        if (data12 !== null) {
-                                          const err10 = {
-                                            instancePath: instancePath + '/originMessage/runId',
-                                            schemaPath:
-                                              '#/properties/originMessage/properties/runId/anyOf/1/type',
-                                            keyword: 'type',
-                                            params: { type: 'null' },
-                                            message: 'must be null',
-                                          };
-                                          if (vErrors === null) {
-                                            vErrors = [err10];
-                                          } else {
-                                            vErrors.push(err10);
-                                          }
-                                          errors++;
-                                        }
-                                        var _valid1 = _errs35 === errors;
-                                        valid3 = valid3 || _valid1;
-                                        if (!valid3) {
-                                          const err11 = {
-                                            instancePath: instancePath + '/originMessage/runId',
-                                            schemaPath:
-                                              '#/properties/originMessage/properties/runId/anyOf',
-                                            keyword: 'anyOf',
-                                            params: {},
-                                            message: 'must match a schema in anyOf',
-                                          };
-                                          if (vErrors === null) {
-                                            vErrors = [err11];
-                                          } else {
-                                            vErrors.push(err11);
-                                          }
-                                          errors++;
-                                          validate126.errors = vErrors;
-                                          return false;
-                                        } else {
-                                          errors = _errs32;
-                                          if (vErrors !== null) {
-                                            if (_errs32) {
-                                              vErrors.length = _errs32;
-                                            } else {
-                                              vErrors = null;
-                                            }
-                                          }
-                                        }
-                                        var valid2 = _errs31 === errors;
-                                      } else {
-                                        var valid2 = true;
-                                      }
-                                    }
-                                  }
-                                }
-                              }
-                            } else {
-                              validate126.errors = [
-                                {
-                                  instancePath: instancePath + '/originMessage',
-                                  schemaPath: '#/properties/originMessage/type',
-                                  keyword: 'type',
-                                  params: { type: 'object' },
-                                  message: 'must be object',
-                                },
-                              ];
-                              return false;
-                            }
-                          }
-                          var valid0 = _errs22 === errors;
-                        } else {
-                          var valid0 = true;
-                        }
-                        if (valid0) {
-                          if (data.contentFormat !== undefined) {
-                            let data13 = data.contentFormat;
-                            const _errs37 = errors;
-                            if (typeof data13 !== 'string') {
-                              validate126.errors = [
-                                {
-                                  instancePath: instancePath + '/contentFormat',
-                                  schemaPath: '#/properties/contentFormat/type',
-                                  keyword: 'type',
-                                  params: { type: 'string' },
-                                  message: 'must be string',
-                                },
-                              ];
-                              return false;
-                            }
-                            if (data13 !== 'unsupported') {
-                              validate126.errors = [
-                                {
-                                  instancePath: instancePath + '/contentFormat',
-                                  schemaPath: '#/properties/contentFormat/const',
-                                  keyword: 'const',
-                                  params: { allowedValue: 'unsupported' },
-                                  message: 'must be equal to constant',
-                                },
-                              ];
-                              return false;
-                            }
-                            var valid0 = _errs37 === errors;
-                          } else {
-                            var valid0 = true;
-                          }
-                          if (valid0) {
-                            if (data.outputBody !== undefined) {
-                              let data14 = data.outputBody;
-                              const _errs39 = errors;
-                              if (errors === _errs39) {
-                                if (data14 && typeof data14 == 'object' && !Array.isArray(data14)) {
-                                  let missing2;
-                                  if (
-                                    (data14.kind === undefined && (missing2 = 'kind')) ||
-                                    (data14.executionId === undefined &&
-                                      (missing2 = 'executionId')) ||
-                                    (data14.complete === undefined && (missing2 = 'complete')) ||
-                                    (data14.contentBytes === undefined &&
-                                      (missing2 = 'contentBytes')) ||
-                                    (data14.reasoningBytes === undefined &&
-                                      (missing2 = 'reasoningBytes')) ||
-                                    (data14.toolCallCount === undefined &&
-                                      (missing2 = 'toolCallCount'))
-                                  ) {
-                                    validate126.errors = [
-                                      {
-                                        instancePath: instancePath + '/outputBody',
-                                        schemaPath: '#/properties/outputBody/required',
-                                        keyword: 'required',
-                                        params: { missingProperty: missing2 },
-                                        message: "must have required property '" + missing2 + "'",
-                                      },
-                                    ];
-                                    return false;
-                                  } else {
-                                    if (data14.kind !== undefined) {
-                                      let data15 = data14.kind;
-                                      const _errs42 = errors;
-                                      if (typeof data15 !== 'string') {
-                                        validate126.errors = [
-                                          {
-                                            instancePath: instancePath + '/outputBody/kind',
-                                            schemaPath:
-                                              '#/properties/outputBody/properties/kind/type',
-                                            keyword: 'type',
-                                            params: { type: 'string' },
-                                            message: 'must be string',
-                                          },
-                                        ];
-                                        return false;
-                                      }
-                                      if (data15 !== 'model_output') {
-                                        validate126.errors = [
-                                          {
-                                            instancePath: instancePath + '/outputBody/kind',
-                                            schemaPath:
-                                              '#/properties/outputBody/properties/kind/const',
-                                            keyword: 'const',
-                                            params: { allowedValue: 'model_output' },
-                                            message: 'must be equal to constant',
-                                          },
-                                        ];
-                                        return false;
-                                      }
-                                      var valid4 = _errs42 === errors;
-                                    } else {
-                                      var valid4 = true;
-                                    }
-                                    if (valid4) {
-                                      if (data14.executionId !== undefined) {
-                                        let data16 = data14.executionId;
-                                        const _errs44 = errors;
-                                        if (errors === _errs44) {
-                                          if (typeof data16 === 'string') {
-                                            if (func1(data16) > 128) {
+                                    if (valid3) {
+                                      if (data12.messageId !== undefined) {
+                                        let data15 = data12.messageId;
+                                        const _errs38 = errors;
+                                        if (errors === _errs38) {
+                                          if (typeof data15 === 'string') {
+                                            if (func1(data15) > 128) {
                                               validate126.errors = [
                                                 {
                                                   instancePath:
-                                                    instancePath + '/outputBody/executionId',
+                                                    instancePath + '/originMessage/messageId',
                                                   schemaPath:
-                                                    '#/properties/outputBody/properties/executionId/maxLength',
+                                                    '#/properties/originMessage/properties/messageId/maxLength',
                                                   keyword: 'maxLength',
                                                   params: { limit: 128 },
                                                   message: 'must NOT have more than 128 characters',
@@ -130227,13 +130800,13 @@ function validate126(
                                               ];
                                               return false;
                                             } else {
-                                              if (func1(data16) < 1) {
+                                              if (func1(data15) < 1) {
                                                 validate126.errors = [
                                                   {
                                                     instancePath:
-                                                      instancePath + '/outputBody/executionId',
+                                                      instancePath + '/originMessage/messageId',
                                                     schemaPath:
-                                                      '#/properties/outputBody/properties/executionId/minLength',
+                                                      '#/properties/originMessage/properties/messageId/minLength',
                                                     keyword: 'minLength',
                                                     params: { limit: 1 },
                                                     message:
@@ -130242,13 +130815,13 @@ function validate126(
                                                 ];
                                                 return false;
                                               } else {
-                                                if (!pattern4.test(data16)) {
+                                                if (!pattern4.test(data15)) {
                                                   validate126.errors = [
                                                     {
                                                       instancePath:
-                                                        instancePath + '/outputBody/executionId',
+                                                        instancePath + '/originMessage/messageId',
                                                       schemaPath:
-                                                        '#/properties/outputBody/properties/executionId/pattern',
+                                                        '#/properties/originMessage/properties/messageId/pattern',
                                                       keyword: 'pattern',
                                                       params: { pattern: '^[A-Za-z0-9_-]+$' },
                                                       message:
@@ -130265,9 +130838,9 @@ function validate126(
                                             validate126.errors = [
                                               {
                                                 instancePath:
-                                                  instancePath + '/outputBody/executionId',
+                                                  instancePath + '/originMessage/messageId',
                                                 schemaPath:
-                                                  '#/properties/outputBody/properties/executionId/type',
+                                                  '#/properties/originMessage/properties/messageId/type',
                                                 keyword: 'type',
                                                 params: { type: 'string' },
                                                 message: 'must be string',
@@ -130276,86 +130849,373 @@ function validate126(
                                             return false;
                                           }
                                         }
-                                        var valid4 = _errs44 === errors;
+                                        var valid3 = _errs38 === errors;
                                       } else {
-                                        var valid4 = true;
+                                        var valid3 = true;
                                       }
-                                      if (valid4) {
-                                        if (data14.complete !== undefined) {
-                                          const _errs46 = errors;
-                                          if (typeof data14.complete !== 'boolean') {
-                                            validate126.errors = [
-                                              {
-                                                instancePath: instancePath + '/outputBody/complete',
-                                                schemaPath:
-                                                  '#/properties/outputBody/properties/complete/type',
-                                                keyword: 'type',
-                                                params: { type: 'boolean' },
-                                                message: 'must be boolean',
-                                              },
-                                            ];
-                                            return false;
-                                          }
-                                          var valid4 = _errs46 === errors;
-                                        } else {
-                                          var valid4 = true;
-                                        }
-                                        if (valid4) {
-                                          if (data14.contentBytes !== undefined) {
-                                            let data18 = data14.contentBytes;
-                                            const _errs48 = errors;
-                                            if (errors === _errs48) {
-                                              if (typeof data18 === 'string') {
-                                                if (!pattern9.test(data18)) {
-                                                  validate126.errors = [
-                                                    {
+                                      if (valid3) {
+                                        if (data12.runId !== undefined) {
+                                          let data16 = data12.runId;
+                                          const _errs40 = errors;
+                                          const _errs41 = errors;
+                                          let valid4 = false;
+                                          const _errs42 = errors;
+                                          if (errors === _errs42) {
+                                            if (typeof data16 === 'string') {
+                                              if (func1(data16) > 128) {
+                                                const err6 = {
+                                                  instancePath:
+                                                    instancePath + '/originMessage/runId',
+                                                  schemaPath:
+                                                    '#/properties/originMessage/properties/runId/anyOf/0/maxLength',
+                                                  keyword: 'maxLength',
+                                                  params: { limit: 128 },
+                                                  message: 'must NOT have more than 128 characters',
+                                                };
+                                                if (vErrors === null) {
+                                                  vErrors = [err6];
+                                                } else {
+                                                  vErrors.push(err6);
+                                                }
+                                                errors++;
+                                              } else {
+                                                if (func1(data16) < 1) {
+                                                  const err7 = {
+                                                    instancePath:
+                                                      instancePath + '/originMessage/runId',
+                                                    schemaPath:
+                                                      '#/properties/originMessage/properties/runId/anyOf/0/minLength',
+                                                    keyword: 'minLength',
+                                                    params: { limit: 1 },
+                                                    message:
+                                                      'must NOT have fewer than 1 characters',
+                                                  };
+                                                  if (vErrors === null) {
+                                                    vErrors = [err7];
+                                                  } else {
+                                                    vErrors.push(err7);
+                                                  }
+                                                  errors++;
+                                                } else {
+                                                  if (!pattern4.test(data16)) {
+                                                    const err8 = {
                                                       instancePath:
-                                                        instancePath + '/outputBody/contentBytes',
+                                                        instancePath + '/originMessage/runId',
                                                       schemaPath:
-                                                        '#/properties/outputBody/properties/contentBytes/pattern',
+                                                        '#/properties/originMessage/properties/runId/anyOf/0/pattern',
                                                       keyword: 'pattern',
-                                                      params: { pattern: '^(0|[1-9][0-9]*)$' },
+                                                      params: { pattern: '^[A-Za-z0-9_-]+$' },
                                                       message:
                                                         'must match pattern "' +
-                                                        '^(0|[1-9][0-9]*)$' +
+                                                        '^[A-Za-z0-9_-]+$' +
                                                         '"',
-                                                    },
-                                                  ];
-                                                  return false;
+                                                    };
+                                                    if (vErrors === null) {
+                                                      vErrors = [err8];
+                                                    } else {
+                                                      vErrors.push(err8);
+                                                    }
+                                                    errors++;
+                                                  }
                                                 }
+                                              }
+                                            } else {
+                                              const err9 = {
+                                                instancePath: instancePath + '/originMessage/runId',
+                                                schemaPath:
+                                                  '#/properties/originMessage/properties/runId/anyOf/0/type',
+                                                keyword: 'type',
+                                                params: { type: 'string' },
+                                                message: 'must be string',
+                                              };
+                                              if (vErrors === null) {
+                                                vErrors = [err9];
                                               } else {
+                                                vErrors.push(err9);
+                                              }
+                                              errors++;
+                                            }
+                                          }
+                                          var _valid1 = _errs42 === errors;
+                                          valid4 = valid4 || _valid1;
+                                          const _errs44 = errors;
+                                          if (data16 !== null) {
+                                            const err10 = {
+                                              instancePath: instancePath + '/originMessage/runId',
+                                              schemaPath:
+                                                '#/properties/originMessage/properties/runId/anyOf/1/type',
+                                              keyword: 'type',
+                                              params: { type: 'null' },
+                                              message: 'must be null',
+                                            };
+                                            if (vErrors === null) {
+                                              vErrors = [err10];
+                                            } else {
+                                              vErrors.push(err10);
+                                            }
+                                            errors++;
+                                          }
+                                          var _valid1 = _errs44 === errors;
+                                          valid4 = valid4 || _valid1;
+                                          if (!valid4) {
+                                            const err11 = {
+                                              instancePath: instancePath + '/originMessage/runId',
+                                              schemaPath:
+                                                '#/properties/originMessage/properties/runId/anyOf',
+                                              keyword: 'anyOf',
+                                              params: {},
+                                              message: 'must match a schema in anyOf',
+                                            };
+                                            if (vErrors === null) {
+                                              vErrors = [err11];
+                                            } else {
+                                              vErrors.push(err11);
+                                            }
+                                            errors++;
+                                            validate126.errors = vErrors;
+                                            return false;
+                                          } else {
+                                            errors = _errs41;
+                                            if (vErrors !== null) {
+                                              if (_errs41) {
+                                                vErrors.length = _errs41;
+                                              } else {
+                                                vErrors = null;
+                                              }
+                                            }
+                                          }
+                                          var valid3 = _errs40 === errors;
+                                        } else {
+                                          var valid3 = true;
+                                        }
+                                      }
+                                    }
+                                  }
+                                }
+                              } else {
+                                validate126.errors = [
+                                  {
+                                    instancePath: instancePath + '/originMessage',
+                                    schemaPath: '#/properties/originMessage/type',
+                                    keyword: 'type',
+                                    params: { type: 'object' },
+                                    message: 'must be object',
+                                  },
+                                ];
+                                return false;
+                              }
+                            }
+                            var valid0 = _errs31 === errors;
+                          } else {
+                            var valid0 = true;
+                          }
+                          if (valid0) {
+                            if (data.contentFormat !== undefined) {
+                              let data17 = data.contentFormat;
+                              const _errs46 = errors;
+                              if (typeof data17 !== 'string') {
+                                validate126.errors = [
+                                  {
+                                    instancePath: instancePath + '/contentFormat',
+                                    schemaPath: '#/properties/contentFormat/type',
+                                    keyword: 'type',
+                                    params: { type: 'string' },
+                                    message: 'must be string',
+                                  },
+                                ];
+                                return false;
+                              }
+                              if (data17 !== 'unsupported') {
+                                validate126.errors = [
+                                  {
+                                    instancePath: instancePath + '/contentFormat',
+                                    schemaPath: '#/properties/contentFormat/const',
+                                    keyword: 'const',
+                                    params: { allowedValue: 'unsupported' },
+                                    message: 'must be equal to constant',
+                                  },
+                                ];
+                                return false;
+                              }
+                              var valid0 = _errs46 === errors;
+                            } else {
+                              var valid0 = true;
+                            }
+                            if (valid0) {
+                              if (data.outputBody !== undefined) {
+                                let data18 = data.outputBody;
+                                const _errs48 = errors;
+                                if (errors === _errs48) {
+                                  if (
+                                    data18 &&
+                                    typeof data18 == 'object' &&
+                                    !Array.isArray(data18)
+                                  ) {
+                                    let missing3;
+                                    if (
+                                      (data18.kind === undefined && (missing3 = 'kind')) ||
+                                      (data18.executionId === undefined &&
+                                        (missing3 = 'executionId')) ||
+                                      (data18.complete === undefined && (missing3 = 'complete')) ||
+                                      (data18.contentBytes === undefined &&
+                                        (missing3 = 'contentBytes')) ||
+                                      (data18.reasoningBytes === undefined &&
+                                        (missing3 = 'reasoningBytes')) ||
+                                      (data18.toolCallCount === undefined &&
+                                        (missing3 = 'toolCallCount'))
+                                    ) {
+                                      validate126.errors = [
+                                        {
+                                          instancePath: instancePath + '/outputBody',
+                                          schemaPath: '#/properties/outputBody/required',
+                                          keyword: 'required',
+                                          params: { missingProperty: missing3 },
+                                          message: "must have required property '" + missing3 + "'",
+                                        },
+                                      ];
+                                      return false;
+                                    } else {
+                                      if (data18.kind !== undefined) {
+                                        let data19 = data18.kind;
+                                        const _errs51 = errors;
+                                        if (typeof data19 !== 'string') {
+                                          validate126.errors = [
+                                            {
+                                              instancePath: instancePath + '/outputBody/kind',
+                                              schemaPath:
+                                                '#/properties/outputBody/properties/kind/type',
+                                              keyword: 'type',
+                                              params: { type: 'string' },
+                                              message: 'must be string',
+                                            },
+                                          ];
+                                          return false;
+                                        }
+                                        if (data19 !== 'model_output') {
+                                          validate126.errors = [
+                                            {
+                                              instancePath: instancePath + '/outputBody/kind',
+                                              schemaPath:
+                                                '#/properties/outputBody/properties/kind/const',
+                                              keyword: 'const',
+                                              params: { allowedValue: 'model_output' },
+                                              message: 'must be equal to constant',
+                                            },
+                                          ];
+                                          return false;
+                                        }
+                                        var valid5 = _errs51 === errors;
+                                      } else {
+                                        var valid5 = true;
+                                      }
+                                      if (valid5) {
+                                        if (data18.executionId !== undefined) {
+                                          let data20 = data18.executionId;
+                                          const _errs53 = errors;
+                                          if (errors === _errs53) {
+                                            if (typeof data20 === 'string') {
+                                              if (func1(data20) > 128) {
                                                 validate126.errors = [
                                                   {
                                                     instancePath:
-                                                      instancePath + '/outputBody/contentBytes',
+                                                      instancePath + '/outputBody/executionId',
                                                     schemaPath:
-                                                      '#/properties/outputBody/properties/contentBytes/type',
-                                                    keyword: 'type',
-                                                    params: { type: 'string' },
-                                                    message: 'must be string',
+                                                      '#/properties/outputBody/properties/executionId/maxLength',
+                                                    keyword: 'maxLength',
+                                                    params: { limit: 128 },
+                                                    message:
+                                                      'must NOT have more than 128 characters',
                                                   },
                                                 ];
                                                 return false;
-                                              }
-                                            }
-                                            var valid4 = _errs48 === errors;
-                                          } else {
-                                            var valid4 = true;
-                                          }
-                                          if (valid4) {
-                                            if (data14.reasoningBytes !== undefined) {
-                                              let data19 = data14.reasoningBytes;
-                                              const _errs50 = errors;
-                                              if (errors === _errs50) {
-                                                if (typeof data19 === 'string') {
-                                                  if (!pattern9.test(data19)) {
+                                              } else {
+                                                if (func1(data20) < 1) {
+                                                  validate126.errors = [
+                                                    {
+                                                      instancePath:
+                                                        instancePath + '/outputBody/executionId',
+                                                      schemaPath:
+                                                        '#/properties/outputBody/properties/executionId/minLength',
+                                                      keyword: 'minLength',
+                                                      params: { limit: 1 },
+                                                      message:
+                                                        'must NOT have fewer than 1 characters',
+                                                    },
+                                                  ];
+                                                  return false;
+                                                } else {
+                                                  if (!pattern4.test(data20)) {
                                                     validate126.errors = [
                                                       {
                                                         instancePath:
-                                                          instancePath +
-                                                          '/outputBody/reasoningBytes',
+                                                          instancePath + '/outputBody/executionId',
                                                         schemaPath:
-                                                          '#/properties/outputBody/properties/reasoningBytes/pattern',
+                                                          '#/properties/outputBody/properties/executionId/pattern',
+                                                        keyword: 'pattern',
+                                                        params: { pattern: '^[A-Za-z0-9_-]+$' },
+                                                        message:
+                                                          'must match pattern "' +
+                                                          '^[A-Za-z0-9_-]+$' +
+                                                          '"',
+                                                      },
+                                                    ];
+                                                    return false;
+                                                  }
+                                                }
+                                              }
+                                            } else {
+                                              validate126.errors = [
+                                                {
+                                                  instancePath:
+                                                    instancePath + '/outputBody/executionId',
+                                                  schemaPath:
+                                                    '#/properties/outputBody/properties/executionId/type',
+                                                  keyword: 'type',
+                                                  params: { type: 'string' },
+                                                  message: 'must be string',
+                                                },
+                                              ];
+                                              return false;
+                                            }
+                                          }
+                                          var valid5 = _errs53 === errors;
+                                        } else {
+                                          var valid5 = true;
+                                        }
+                                        if (valid5) {
+                                          if (data18.complete !== undefined) {
+                                            const _errs55 = errors;
+                                            if (typeof data18.complete !== 'boolean') {
+                                              validate126.errors = [
+                                                {
+                                                  instancePath:
+                                                    instancePath + '/outputBody/complete',
+                                                  schemaPath:
+                                                    '#/properties/outputBody/properties/complete/type',
+                                                  keyword: 'type',
+                                                  params: { type: 'boolean' },
+                                                  message: 'must be boolean',
+                                                },
+                                              ];
+                                              return false;
+                                            }
+                                            var valid5 = _errs55 === errors;
+                                          } else {
+                                            var valid5 = true;
+                                          }
+                                          if (valid5) {
+                                            if (data18.contentBytes !== undefined) {
+                                              let data22 = data18.contentBytes;
+                                              const _errs57 = errors;
+                                              if (errors === _errs57) {
+                                                if (typeof data22 === 'string') {
+                                                  if (!pattern9.test(data22)) {
+                                                    validate126.errors = [
+                                                      {
+                                                        instancePath:
+                                                          instancePath + '/outputBody/contentBytes',
+                                                        schemaPath:
+                                                          '#/properties/outputBody/properties/contentBytes/pattern',
                                                         keyword: 'pattern',
                                                         params: { pattern: '^(0|[1-9][0-9]*)$' },
                                                         message:
@@ -130370,9 +131230,9 @@ function validate126(
                                                   validate126.errors = [
                                                     {
                                                       instancePath:
-                                                        instancePath + '/outputBody/reasoningBytes',
+                                                        instancePath + '/outputBody/contentBytes',
                                                       schemaPath:
-                                                        '#/properties/outputBody/properties/reasoningBytes/type',
+                                                        '#/properties/outputBody/properties/contentBytes/type',
                                                       keyword: 'type',
                                                       params: { type: 'string' },
                                                       message: 'must be string',
@@ -130381,95 +131241,42 @@ function validate126(
                                                   return false;
                                                 }
                                               }
-                                              var valid4 = _errs50 === errors;
+                                              var valid5 = _errs57 === errors;
                                             } else {
-                                              var valid4 = true;
+                                              var valid5 = true;
                                             }
-                                            if (valid4) {
-                                              if (data14.toolCallCount !== undefined) {
-                                                let data20 = data14.toolCallCount;
-                                                const _errs52 = errors;
-                                                if (
-                                                  !(
-                                                    typeof data20 == 'number' &&
-                                                    !(data20 % 1) &&
-                                                    !isNaN(data20) &&
-                                                    isFinite(data20)
-                                                  )
-                                                ) {
-                                                  validate126.errors = [
-                                                    {
-                                                      instancePath:
-                                                        instancePath + '/outputBody/toolCallCount',
-                                                      schemaPath:
-                                                        '#/properties/outputBody/properties/toolCallCount/type',
-                                                      keyword: 'type',
-                                                      params: { type: 'integer' },
-                                                      message: 'must be integer',
-                                                    },
-                                                  ];
-                                                  return false;
-                                                }
-                                                if (errors === _errs52) {
-                                                  if (
-                                                    typeof data20 == 'number' &&
-                                                    isFinite(data20)
-                                                  ) {
-                                                    if (
-                                                      data20 > 9007199254740991 ||
-                                                      isNaN(data20)
-                                                    ) {
+                                            if (valid5) {
+                                              if (data18.reasoningBytes !== undefined) {
+                                                let data23 = data18.reasoningBytes;
+                                                const _errs59 = errors;
+                                                if (errors === _errs59) {
+                                                  if (typeof data23 === 'string') {
+                                                    if (!pattern9.test(data23)) {
                                                       validate126.errors = [
                                                         {
                                                           instancePath:
                                                             instancePath +
-                                                            '/outputBody/toolCallCount',
+                                                            '/outputBody/reasoningBytes',
                                                           schemaPath:
-                                                            '#/properties/outputBody/properties/toolCallCount/maximum',
-                                                          keyword: 'maximum',
-                                                          params: {
-                                                            comparison: '<=',
-                                                            limit: 9007199254740991,
-                                                          },
-                                                          message: 'must be <= 9007199254740991',
+                                                            '#/properties/outputBody/properties/reasoningBytes/pattern',
+                                                          keyword: 'pattern',
+                                                          params: { pattern: '^(0|[1-9][0-9]*)$' },
+                                                          message:
+                                                            'must match pattern "' +
+                                                            '^(0|[1-9][0-9]*)$' +
+                                                            '"',
                                                         },
                                                       ];
                                                       return false;
-                                                    } else {
-                                                      if (data20 < 0 || isNaN(data20)) {
-                                                        validate126.errors = [
-                                                          {
-                                                            instancePath:
-                                                              instancePath +
-                                                              '/outputBody/toolCallCount',
-                                                            schemaPath:
-                                                              '#/properties/outputBody/properties/toolCallCount/minimum',
-                                                            keyword: 'minimum',
-                                                            params: { comparison: '>=', limit: 0 },
-                                                            message: 'must be >= 0',
-                                                          },
-                                                        ];
-                                                        return false;
-                                                      }
                                                     }
-                                                  }
-                                                }
-                                                var valid4 = _errs52 === errors;
-                                              } else {
-                                                var valid4 = true;
-                                              }
-                                              if (valid4) {
-                                                if (data14.readAvailability !== undefined) {
-                                                  let data21 = data14.readAvailability;
-                                                  const _errs54 = errors;
-                                                  if (typeof data21 !== 'string') {
+                                                  } else {
                                                     validate126.errors = [
                                                       {
                                                         instancePath:
                                                           instancePath +
-                                                          '/outputBody/readAvailability',
+                                                          '/outputBody/reasoningBytes',
                                                         schemaPath:
-                                                          '#/properties/outputBody/properties/readAvailability/type',
+                                                          '#/properties/outputBody/properties/reasoningBytes/type',
                                                         keyword: 'type',
                                                         params: { type: 'string' },
                                                         message: 'must be string',
@@ -130477,24 +131284,126 @@ function validate126(
                                                     ];
                                                     return false;
                                                   }
-                                                  if (data21 !== 'unsupported') {
+                                                }
+                                                var valid5 = _errs59 === errors;
+                                              } else {
+                                                var valid5 = true;
+                                              }
+                                              if (valid5) {
+                                                if (data18.toolCallCount !== undefined) {
+                                                  let data24 = data18.toolCallCount;
+                                                  const _errs61 = errors;
+                                                  if (
+                                                    !(
+                                                      typeof data24 == 'number' &&
+                                                      !(data24 % 1) &&
+                                                      !isNaN(data24) &&
+                                                      isFinite(data24)
+                                                    )
+                                                  ) {
                                                     validate126.errors = [
                                                       {
                                                         instancePath:
                                                           instancePath +
-                                                          '/outputBody/readAvailability',
+                                                          '/outputBody/toolCallCount',
                                                         schemaPath:
-                                                          '#/properties/outputBody/properties/readAvailability/const',
-                                                        keyword: 'const',
-                                                        params: { allowedValue: 'unsupported' },
-                                                        message: 'must be equal to constant',
+                                                          '#/properties/outputBody/properties/toolCallCount/type',
+                                                        keyword: 'type',
+                                                        params: { type: 'integer' },
+                                                        message: 'must be integer',
                                                       },
                                                     ];
                                                     return false;
                                                   }
-                                                  var valid4 = _errs54 === errors;
+                                                  if (errors === _errs61) {
+                                                    if (
+                                                      typeof data24 == 'number' &&
+                                                      isFinite(data24)
+                                                    ) {
+                                                      if (
+                                                        data24 > 9007199254740991 ||
+                                                        isNaN(data24)
+                                                      ) {
+                                                        validate126.errors = [
+                                                          {
+                                                            instancePath:
+                                                              instancePath +
+                                                              '/outputBody/toolCallCount',
+                                                            schemaPath:
+                                                              '#/properties/outputBody/properties/toolCallCount/maximum',
+                                                            keyword: 'maximum',
+                                                            params: {
+                                                              comparison: '<=',
+                                                              limit: 9007199254740991,
+                                                            },
+                                                            message: 'must be <= 9007199254740991',
+                                                          },
+                                                        ];
+                                                        return false;
+                                                      } else {
+                                                        if (data24 < 0 || isNaN(data24)) {
+                                                          validate126.errors = [
+                                                            {
+                                                              instancePath:
+                                                                instancePath +
+                                                                '/outputBody/toolCallCount',
+                                                              schemaPath:
+                                                                '#/properties/outputBody/properties/toolCallCount/minimum',
+                                                              keyword: 'minimum',
+                                                              params: {
+                                                                comparison: '>=',
+                                                                limit: 0,
+                                                              },
+                                                              message: 'must be >= 0',
+                                                            },
+                                                          ];
+                                                          return false;
+                                                        }
+                                                      }
+                                                    }
+                                                  }
+                                                  var valid5 = _errs61 === errors;
                                                 } else {
-                                                  var valid4 = true;
+                                                  var valid5 = true;
+                                                }
+                                                if (valid5) {
+                                                  if (data18.readAvailability !== undefined) {
+                                                    let data25 = data18.readAvailability;
+                                                    const _errs63 = errors;
+                                                    if (typeof data25 !== 'string') {
+                                                      validate126.errors = [
+                                                        {
+                                                          instancePath:
+                                                            instancePath +
+                                                            '/outputBody/readAvailability',
+                                                          schemaPath:
+                                                            '#/properties/outputBody/properties/readAvailability/type',
+                                                          keyword: 'type',
+                                                          params: { type: 'string' },
+                                                          message: 'must be string',
+                                                        },
+                                                      ];
+                                                      return false;
+                                                    }
+                                                    if (data25 !== 'unsupported') {
+                                                      validate126.errors = [
+                                                        {
+                                                          instancePath:
+                                                            instancePath +
+                                                            '/outputBody/readAvailability',
+                                                          schemaPath:
+                                                            '#/properties/outputBody/properties/readAvailability/const',
+                                                          keyword: 'const',
+                                                          params: { allowedValue: 'unsupported' },
+                                                          message: 'must be equal to constant',
+                                                        },
+                                                      ];
+                                                      return false;
+                                                    }
+                                                    var valid5 = _errs63 === errors;
+                                                  } else {
+                                                    var valid5 = true;
+                                                  }
                                                 }
                                               }
                                             }
@@ -130502,81 +131411,68 @@ function validate126(
                                         }
                                       }
                                     }
+                                  } else {
+                                    validate126.errors = [
+                                      {
+                                        instancePath: instancePath + '/outputBody',
+                                        schemaPath: '#/properties/outputBody/type',
+                                        keyword: 'type',
+                                        params: { type: 'object' },
+                                        message: 'must be object',
+                                      },
+                                    ];
+                                    return false;
                                   }
-                                } else {
-                                  validate126.errors = [
-                                    {
-                                      instancePath: instancePath + '/outputBody',
-                                      schemaPath: '#/properties/outputBody/type',
-                                      keyword: 'type',
-                                      params: { type: 'object' },
-                                      message: 'must be object',
-                                    },
-                                  ];
-                                  return false;
                                 }
+                                var valid0 = _errs48 === errors;
+                              } else {
+                                var valid0 = true;
                               }
-                              var valid0 = _errs39 === errors;
-                            } else {
-                              var valid0 = true;
-                            }
-                            if (valid0) {
-                              if (data.toolCalls !== undefined) {
-                                let data22 = data.toolCalls;
-                                const _errs56 = errors;
-                                if (errors === _errs56) {
-                                  if (Array.isArray(data22)) {
-                                    var valid5 = true;
-                                    const len0 = data22.length;
-                                    for (let i0 = 0; i0 < len0; i0++) {
-                                      let data23 = data22[i0];
-                                      const _errs58 = errors;
-                                      if (errors === _errs58) {
-                                        if (
-                                          data23 &&
-                                          typeof data23 == 'object' &&
-                                          !Array.isArray(data23)
-                                        ) {
-                                          let missing3;
+                              if (valid0) {
+                                if (data.toolCalls !== undefined) {
+                                  let data26 = data.toolCalls;
+                                  const _errs65 = errors;
+                                  if (errors === _errs65) {
+                                    if (Array.isArray(data26)) {
+                                      var valid6 = true;
+                                      const len0 = data26.length;
+                                      for (let i0 = 0; i0 < len0; i0++) {
+                                        let data27 = data26[i0];
+                                        const _errs67 = errors;
+                                        if (errors === _errs67) {
                                           if (
-                                            (data23.id === undefined && (missing3 = 'id')) ||
-                                            (data23.name === undefined && (missing3 = 'name')) ||
-                                            (data23.arguments === undefined &&
-                                              (missing3 = 'arguments'))
+                                            data27 &&
+                                            typeof data27 == 'object' &&
+                                            !Array.isArray(data27)
                                           ) {
-                                            validate126.errors = [
-                                              {
-                                                instancePath: instancePath + '/toolCalls/' + i0,
-                                                schemaPath: '#/properties/toolCalls/items/required',
-                                                keyword: 'required',
-                                                params: { missingProperty: missing3 },
-                                                message:
-                                                  "must have required property '" + missing3 + "'",
-                                              },
-                                            ];
-                                            return false;
-                                          } else {
-                                            if (data23.id !== undefined) {
-                                              let data24 = data23.id;
-                                              const _errs61 = errors;
-                                              if (errors === _errs61) {
-                                                if (typeof data24 === 'string') {
-                                                  if (func1(data24) > 128) {
-                                                    validate126.errors = [
-                                                      {
-                                                        instancePath:
-                                                          instancePath + '/toolCalls/' + i0 + '/id',
-                                                        schemaPath:
-                                                          '#/properties/toolCalls/items/properties/id/maxLength',
-                                                        keyword: 'maxLength',
-                                                        params: { limit: 128 },
-                                                        message:
-                                                          'must NOT have more than 128 characters',
-                                                      },
-                                                    ];
-                                                    return false;
-                                                  } else {
-                                                    if (func1(data24) < 1) {
+                                            let missing4;
+                                            if (
+                                              (data27.id === undefined && (missing4 = 'id')) ||
+                                              (data27.name === undefined && (missing4 = 'name')) ||
+                                              (data27.arguments === undefined &&
+                                                (missing4 = 'arguments'))
+                                            ) {
+                                              validate126.errors = [
+                                                {
+                                                  instancePath: instancePath + '/toolCalls/' + i0,
+                                                  schemaPath:
+                                                    '#/properties/toolCalls/items/required',
+                                                  keyword: 'required',
+                                                  params: { missingProperty: missing4 },
+                                                  message:
+                                                    "must have required property '" +
+                                                    missing4 +
+                                                    "'",
+                                                },
+                                              ];
+                                              return false;
+                                            } else {
+                                              if (data27.id !== undefined) {
+                                                let data28 = data27.id;
+                                                const _errs70 = errors;
+                                                if (errors === _errs70) {
+                                                  if (typeof data28 === 'string') {
+                                                    if (func1(data28) > 128) {
                                                       validate126.errors = [
                                                         {
                                                           instancePath:
@@ -130585,16 +131481,16 @@ function validate126(
                                                             i0 +
                                                             '/id',
                                                           schemaPath:
-                                                            '#/properties/toolCalls/items/properties/id/minLength',
-                                                          keyword: 'minLength',
-                                                          params: { limit: 1 },
+                                                            '#/properties/toolCalls/items/properties/id/maxLength',
+                                                          keyword: 'maxLength',
+                                                          params: { limit: 128 },
                                                           message:
-                                                            'must NOT have fewer than 1 characters',
+                                                            'must NOT have more than 128 characters',
                                                         },
                                                       ];
                                                       return false;
                                                     } else {
-                                                      if (!pattern4.test(data24)) {
+                                                      if (func1(data28) < 1) {
                                                         validate126.errors = [
                                                           {
                                                             instancePath:
@@ -130603,72 +131499,46 @@ function validate126(
                                                               i0 +
                                                               '/id',
                                                             schemaPath:
-                                                              '#/properties/toolCalls/items/properties/id/pattern',
-                                                            keyword: 'pattern',
-                                                            params: { pattern: '^[A-Za-z0-9_-]+$' },
+                                                              '#/properties/toolCalls/items/properties/id/minLength',
+                                                            keyword: 'minLength',
+                                                            params: { limit: 1 },
                                                             message:
-                                                              'must match pattern "' +
-                                                              '^[A-Za-z0-9_-]+$' +
-                                                              '"',
+                                                              'must NOT have fewer than 1 characters',
                                                           },
                                                         ];
                                                         return false;
+                                                      } else {
+                                                        if (!pattern4.test(data28)) {
+                                                          validate126.errors = [
+                                                            {
+                                                              instancePath:
+                                                                instancePath +
+                                                                '/toolCalls/' +
+                                                                i0 +
+                                                                '/id',
+                                                              schemaPath:
+                                                                '#/properties/toolCalls/items/properties/id/pattern',
+                                                              keyword: 'pattern',
+                                                              params: {
+                                                                pattern: '^[A-Za-z0-9_-]+$',
+                                                              },
+                                                              message:
+                                                                'must match pattern "' +
+                                                                '^[A-Za-z0-9_-]+$' +
+                                                                '"',
+                                                            },
+                                                          ];
+                                                          return false;
+                                                        }
                                                       }
                                                     }
-                                                  }
-                                                } else {
-                                                  validate126.errors = [
-                                                    {
-                                                      instancePath:
-                                                        instancePath + '/toolCalls/' + i0 + '/id',
-                                                      schemaPath:
-                                                        '#/properties/toolCalls/items/properties/id/type',
-                                                      keyword: 'type',
-                                                      params: { type: 'string' },
-                                                      message: 'must be string',
-                                                    },
-                                                  ];
-                                                  return false;
-                                                }
-                                              }
-                                              var valid6 = _errs61 === errors;
-                                            } else {
-                                              var valid6 = true;
-                                            }
-                                            if (valid6) {
-                                              if (data23.name !== undefined) {
-                                                const _errs63 = errors;
-                                                if (typeof data23.name !== 'string') {
-                                                  validate126.errors = [
-                                                    {
-                                                      instancePath:
-                                                        instancePath + '/toolCalls/' + i0 + '/name',
-                                                      schemaPath:
-                                                        '#/properties/toolCalls/items/properties/name/type',
-                                                      keyword: 'type',
-                                                      params: { type: 'string' },
-                                                      message: 'must be string',
-                                                    },
-                                                  ];
-                                                  return false;
-                                                }
-                                                var valid6 = _errs63 === errors;
-                                              } else {
-                                                var valid6 = true;
-                                              }
-                                              if (valid6) {
-                                                if (data23.arguments !== undefined) {
-                                                  const _errs65 = errors;
-                                                  if (typeof data23.arguments !== 'string') {
+                                                  } else {
                                                     validate126.errors = [
                                                       {
                                                         instancePath:
-                                                          instancePath +
-                                                          '/toolCalls/' +
-                                                          i0 +
-                                                          '/arguments',
+                                                          instancePath + '/toolCalls/' + i0 + '/id',
                                                         schemaPath:
-                                                          '#/properties/toolCalls/items/properties/arguments/type',
+                                                          '#/properties/toolCalls/items/properties/id/type',
                                                         keyword: 'type',
                                                         params: { type: 'string' },
                                                         message: 'must be string',
@@ -130676,191 +131546,172 @@ function validate126(
                                                     ];
                                                     return false;
                                                   }
-                                                  var valid6 = _errs65 === errors;
+                                                }
+                                                var valid7 = _errs70 === errors;
+                                              } else {
+                                                var valid7 = true;
+                                              }
+                                              if (valid7) {
+                                                if (data27.name !== undefined) {
+                                                  const _errs72 = errors;
+                                                  if (typeof data27.name !== 'string') {
+                                                    validate126.errors = [
+                                                      {
+                                                        instancePath:
+                                                          instancePath +
+                                                          '/toolCalls/' +
+                                                          i0 +
+                                                          '/name',
+                                                        schemaPath:
+                                                          '#/properties/toolCalls/items/properties/name/type',
+                                                        keyword: 'type',
+                                                        params: { type: 'string' },
+                                                        message: 'must be string',
+                                                      },
+                                                    ];
+                                                    return false;
+                                                  }
+                                                  var valid7 = _errs72 === errors;
                                                 } else {
-                                                  var valid6 = true;
+                                                  var valid7 = true;
+                                                }
+                                                if (valid7) {
+                                                  if (data27.arguments !== undefined) {
+                                                    const _errs74 = errors;
+                                                    if (typeof data27.arguments !== 'string') {
+                                                      validate126.errors = [
+                                                        {
+                                                          instancePath:
+                                                            instancePath +
+                                                            '/toolCalls/' +
+                                                            i0 +
+                                                            '/arguments',
+                                                          schemaPath:
+                                                            '#/properties/toolCalls/items/properties/arguments/type',
+                                                          keyword: 'type',
+                                                          params: { type: 'string' },
+                                                          message: 'must be string',
+                                                        },
+                                                      ];
+                                                      return false;
+                                                    }
+                                                    var valid7 = _errs74 === errors;
+                                                  } else {
+                                                    var valid7 = true;
+                                                  }
                                                 }
                                               }
                                             }
+                                          } else {
+                                            validate126.errors = [
+                                              {
+                                                instancePath: instancePath + '/toolCalls/' + i0,
+                                                schemaPath: '#/properties/toolCalls/items/type',
+                                                keyword: 'type',
+                                                params: { type: 'object' },
+                                                message: 'must be object',
+                                              },
+                                            ];
+                                            return false;
                                           }
-                                        } else {
-                                          validate126.errors = [
-                                            {
-                                              instancePath: instancePath + '/toolCalls/' + i0,
-                                              schemaPath: '#/properties/toolCalls/items/type',
-                                              keyword: 'type',
-                                              params: { type: 'object' },
-                                              message: 'must be object',
-                                            },
-                                          ];
-                                          return false;
+                                        }
+                                        var valid6 = _errs67 === errors;
+                                        if (!valid6) {
+                                          break;
                                         }
                                       }
-                                      var valid5 = _errs58 === errors;
-                                      if (!valid5) {
-                                        break;
-                                      }
+                                    } else {
+                                      validate126.errors = [
+                                        {
+                                          instancePath: instancePath + '/toolCalls',
+                                          schemaPath: '#/properties/toolCalls/type',
+                                          keyword: 'type',
+                                          params: { type: 'array' },
+                                          message: 'must be array',
+                                        },
+                                      ];
+                                      return false;
                                     }
-                                  } else {
-                                    validate126.errors = [
-                                      {
-                                        instancePath: instancePath + '/toolCalls',
-                                        schemaPath: '#/properties/toolCalls/type',
-                                        keyword: 'type',
-                                        params: { type: 'array' },
-                                        message: 'must be array',
-                                      },
-                                    ];
-                                    return false;
                                   }
-                                }
-                                var valid0 = _errs56 === errors;
-                              } else {
-                                var valid0 = true;
-                              }
-                              if (valid0) {
-                                if (data.toolCallId !== undefined) {
-                                  const _errs67 = errors;
-                                  if (typeof data.toolCallId !== 'string') {
-                                    validate126.errors = [
-                                      {
-                                        instancePath: instancePath + '/toolCallId',
-                                        schemaPath: '#/properties/toolCallId/type',
-                                        keyword: 'type',
-                                        params: { type: 'string' },
-                                        message: 'must be string',
-                                      },
-                                    ];
-                                    return false;
-                                  }
-                                  var valid0 = _errs67 === errors;
+                                  var valid0 = _errs65 === errors;
                                 } else {
                                   var valid0 = true;
                                 }
                                 if (valid0) {
-                                  if (data.sourceIds !== undefined) {
-                                    let data28 = data.sourceIds;
-                                    const _errs69 = errors;
-                                    if (errors === _errs69) {
-                                      if (Array.isArray(data28)) {
-                                        var valid7 = true;
-                                        const len1 = data28.length;
-                                        for (let i1 = 0; i1 < len1; i1++) {
-                                          const _errs71 = errors;
-                                          if (typeof data28[i1] !== 'string') {
-                                            validate126.errors = [
-                                              {
-                                                instancePath: instancePath + '/sourceIds/' + i1,
-                                                schemaPath: '#/properties/sourceIds/items/type',
-                                                keyword: 'type',
-                                                params: { type: 'string' },
-                                                message: 'must be string',
-                                              },
-                                            ];
-                                            return false;
-                                          }
-                                          var valid7 = _errs71 === errors;
-                                          if (!valid7) {
-                                            break;
-                                          }
-                                        }
-                                      } else {
-                                        validate126.errors = [
-                                          {
-                                            instancePath: instancePath + '/sourceIds',
-                                            schemaPath: '#/properties/sourceIds/type',
-                                            keyword: 'type',
-                                            params: { type: 'array' },
-                                            message: 'must be array',
-                                          },
-                                        ];
-                                        return false;
-                                      }
+                                  if (data.toolCallId !== undefined) {
+                                    const _errs76 = errors;
+                                    if (typeof data.toolCallId !== 'string') {
+                                      validate126.errors = [
+                                        {
+                                          instancePath: instancePath + '/toolCallId',
+                                          schemaPath: '#/properties/toolCallId/type',
+                                          keyword: 'type',
+                                          params: { type: 'string' },
+                                          message: 'must be string',
+                                        },
+                                      ];
+                                      return false;
                                     }
-                                    var valid0 = _errs69 === errors;
+                                    var valid0 = _errs76 === errors;
                                   } else {
                                     var valid0 = true;
                                   }
                                   if (valid0) {
-                                    if (data.originCommandId !== undefined) {
-                                      let data30 = data.originCommandId;
-                                      const _errs73 = errors;
-                                      if (errors === _errs73) {
-                                        if (typeof data30 === 'string') {
-                                          if (func1(data30) > 128) {
-                                            validate126.errors = [
-                                              {
-                                                instancePath: instancePath + '/originCommandId',
-                                                schemaPath:
-                                                  '#/properties/originCommandId/maxLength',
-                                                keyword: 'maxLength',
-                                                params: { limit: 128 },
-                                                message: 'must NOT have more than 128 characters',
-                                              },
-                                            ];
-                                            return false;
-                                          } else {
-                                            if (func1(data30) < 1) {
+                                    if (data.sourceIds !== undefined) {
+                                      let data32 = data.sourceIds;
+                                      const _errs78 = errors;
+                                      if (errors === _errs78) {
+                                        if (Array.isArray(data32)) {
+                                          var valid8 = true;
+                                          const len1 = data32.length;
+                                          for (let i1 = 0; i1 < len1; i1++) {
+                                            const _errs80 = errors;
+                                            if (typeof data32[i1] !== 'string') {
                                               validate126.errors = [
                                                 {
-                                                  instancePath: instancePath + '/originCommandId',
-                                                  schemaPath:
-                                                    '#/properties/originCommandId/minLength',
-                                                  keyword: 'minLength',
-                                                  params: { limit: 1 },
-                                                  message: 'must NOT have fewer than 1 characters',
+                                                  instancePath: instancePath + '/sourceIds/' + i1,
+                                                  schemaPath: '#/properties/sourceIds/items/type',
+                                                  keyword: 'type',
+                                                  params: { type: 'string' },
+                                                  message: 'must be string',
                                                 },
                                               ];
                                               return false;
-                                            } else {
-                                              if (!pattern4.test(data30)) {
-                                                validate126.errors = [
-                                                  {
-                                                    instancePath: instancePath + '/originCommandId',
-                                                    schemaPath:
-                                                      '#/properties/originCommandId/pattern',
-                                                    keyword: 'pattern',
-                                                    params: { pattern: '^[A-Za-z0-9_-]+$' },
-                                                    message:
-                                                      'must match pattern "' +
-                                                      '^[A-Za-z0-9_-]+$' +
-                                                      '"',
-                                                  },
-                                                ];
-                                                return false;
-                                              }
+                                            }
+                                            var valid8 = _errs80 === errors;
+                                            if (!valid8) {
+                                              break;
                                             }
                                           }
                                         } else {
                                           validate126.errors = [
                                             {
-                                              instancePath: instancePath + '/originCommandId',
-                                              schemaPath: '#/properties/originCommandId/type',
+                                              instancePath: instancePath + '/sourceIds',
+                                              schemaPath: '#/properties/sourceIds/type',
                                               keyword: 'type',
-                                              params: { type: 'string' },
-                                              message: 'must be string',
+                                              params: { type: 'array' },
+                                              message: 'must be array',
                                             },
                                           ];
                                           return false;
                                         }
                                       }
-                                      var valid0 = _errs73 === errors;
+                                      var valid0 = _errs78 === errors;
                                     } else {
                                       var valid0 = true;
                                     }
                                     if (valid0) {
-                                      if (data.contextSelectionId !== undefined) {
-                                        let data31 = data.contextSelectionId;
-                                        const _errs75 = errors;
-                                        if (errors === _errs75) {
-                                          if (typeof data31 === 'string') {
-                                            if (func1(data31) > 128) {
+                                      if (data.originCommandId !== undefined) {
+                                        let data34 = data.originCommandId;
+                                        const _errs82 = errors;
+                                        if (errors === _errs82) {
+                                          if (typeof data34 === 'string') {
+                                            if (func1(data34) > 128) {
                                               validate126.errors = [
                                                 {
-                                                  instancePath:
-                                                    instancePath + '/contextSelectionId',
+                                                  instancePath: instancePath + '/originCommandId',
                                                   schemaPath:
-                                                    '#/properties/contextSelectionId/maxLength',
+                                                    '#/properties/originCommandId/maxLength',
                                                   keyword: 'maxLength',
                                                   params: { limit: 128 },
                                                   message: 'must NOT have more than 128 characters',
@@ -130868,13 +131719,12 @@ function validate126(
                                               ];
                                               return false;
                                             } else {
-                                              if (func1(data31) < 1) {
+                                              if (func1(data34) < 1) {
                                                 validate126.errors = [
                                                   {
-                                                    instancePath:
-                                                      instancePath + '/contextSelectionId',
+                                                    instancePath: instancePath + '/originCommandId',
                                                     schemaPath:
-                                                      '#/properties/contextSelectionId/minLength',
+                                                      '#/properties/originCommandId/minLength',
                                                     keyword: 'minLength',
                                                     params: { limit: 1 },
                                                     message:
@@ -130883,13 +131733,13 @@ function validate126(
                                                 ];
                                                 return false;
                                               } else {
-                                                if (!pattern4.test(data31)) {
+                                                if (!pattern4.test(data34)) {
                                                   validate126.errors = [
                                                     {
                                                       instancePath:
-                                                        instancePath + '/contextSelectionId',
+                                                        instancePath + '/originCommandId',
                                                       schemaPath:
-                                                        '#/properties/contextSelectionId/pattern',
+                                                        '#/properties/originCommandId/pattern',
                                                       keyword: 'pattern',
                                                       params: { pattern: '^[A-Za-z0-9_-]+$' },
                                                       message:
@@ -130905,8 +131755,8 @@ function validate126(
                                           } else {
                                             validate126.errors = [
                                               {
-                                                instancePath: instancePath + '/contextSelectionId',
-                                                schemaPath: '#/properties/contextSelectionId/type',
+                                                instancePath: instancePath + '/originCommandId',
+                                                schemaPath: '#/properties/originCommandId/type',
                                                 keyword: 'type',
                                                 params: { type: 'string' },
                                                 message: 'must be string',
@@ -130915,51 +131765,126 @@ function validate126(
                                             return false;
                                           }
                                         }
-                                        var valid0 = _errs75 === errors;
+                                        var valid0 = _errs82 === errors;
                                       } else {
                                         var valid0 = true;
                                       }
                                       if (valid0) {
-                                        if (data.inputKind !== undefined) {
-                                          let data32 = data.inputKind;
-                                          const _errs77 = errors;
-                                          if (typeof data32 !== 'string') {
-                                            validate126.errors = [
-                                              {
-                                                instancePath: instancePath + '/inputKind',
-                                                schemaPath: '#/properties/inputKind/type',
-                                                keyword: 'type',
-                                                params: { type: 'string' },
-                                                message: 'must be string',
-                                              },
-                                            ];
-                                            return false;
-                                          }
-                                          if (
-                                            !(
-                                              data32 === 'input.steer' ||
-                                              data32 === 'input.follow_up' ||
-                                              data32 === 'result.include'
-                                            )
-                                          ) {
-                                            validate126.errors = [
-                                              {
-                                                instancePath: instancePath + '/inputKind',
-                                                schemaPath: '#/properties/inputKind/enum',
-                                                keyword: 'enum',
-                                                params: {
-                                                  allowedValues:
-                                                    schema105.properties.inputKind.enum,
+                                        if (data.contextSelectionId !== undefined) {
+                                          let data35 = data.contextSelectionId;
+                                          const _errs84 = errors;
+                                          if (errors === _errs84) {
+                                            if (typeof data35 === 'string') {
+                                              if (func1(data35) > 128) {
+                                                validate126.errors = [
+                                                  {
+                                                    instancePath:
+                                                      instancePath + '/contextSelectionId',
+                                                    schemaPath:
+                                                      '#/properties/contextSelectionId/maxLength',
+                                                    keyword: 'maxLength',
+                                                    params: { limit: 128 },
+                                                    message:
+                                                      'must NOT have more than 128 characters',
+                                                  },
+                                                ];
+                                                return false;
+                                              } else {
+                                                if (func1(data35) < 1) {
+                                                  validate126.errors = [
+                                                    {
+                                                      instancePath:
+                                                        instancePath + '/contextSelectionId',
+                                                      schemaPath:
+                                                        '#/properties/contextSelectionId/minLength',
+                                                      keyword: 'minLength',
+                                                      params: { limit: 1 },
+                                                      message:
+                                                        'must NOT have fewer than 1 characters',
+                                                    },
+                                                  ];
+                                                  return false;
+                                                } else {
+                                                  if (!pattern4.test(data35)) {
+                                                    validate126.errors = [
+                                                      {
+                                                        instancePath:
+                                                          instancePath + '/contextSelectionId',
+                                                        schemaPath:
+                                                          '#/properties/contextSelectionId/pattern',
+                                                        keyword: 'pattern',
+                                                        params: { pattern: '^[A-Za-z0-9_-]+$' },
+                                                        message:
+                                                          'must match pattern "' +
+                                                          '^[A-Za-z0-9_-]+$' +
+                                                          '"',
+                                                      },
+                                                    ];
+                                                    return false;
+                                                  }
+                                                }
+                                              }
+                                            } else {
+                                              validate126.errors = [
+                                                {
+                                                  instancePath:
+                                                    instancePath + '/contextSelectionId',
+                                                  schemaPath:
+                                                    '#/properties/contextSelectionId/type',
+                                                  keyword: 'type',
+                                                  params: { type: 'string' },
+                                                  message: 'must be string',
                                                 },
-                                                message:
-                                                  'must be equal to one of the allowed values',
-                                              },
-                                            ];
-                                            return false;
+                                              ];
+                                              return false;
+                                            }
                                           }
-                                          var valid0 = _errs77 === errors;
+                                          var valid0 = _errs84 === errors;
                                         } else {
                                           var valid0 = true;
+                                        }
+                                        if (valid0) {
+                                          if (data.inputKind !== undefined) {
+                                            let data36 = data.inputKind;
+                                            const _errs86 = errors;
+                                            if (typeof data36 !== 'string') {
+                                              validate126.errors = [
+                                                {
+                                                  instancePath: instancePath + '/inputKind',
+                                                  schemaPath: '#/properties/inputKind/type',
+                                                  keyword: 'type',
+                                                  params: { type: 'string' },
+                                                  message: 'must be string',
+                                                },
+                                              ];
+                                              return false;
+                                            }
+                                            if (
+                                              !(
+                                                data36 === 'input.steer' ||
+                                                data36 === 'input.follow_up' ||
+                                                data36 === 'result.include'
+                                              )
+                                            ) {
+                                              validate126.errors = [
+                                                {
+                                                  instancePath: instancePath + '/inputKind',
+                                                  schemaPath: '#/properties/inputKind/enum',
+                                                  keyword: 'enum',
+                                                  params: {
+                                                    allowedValues:
+                                                      schema105.properties.inputKind.enum,
+                                                  },
+                                                  message:
+                                                    'must be equal to one of the allowed values',
+                                                },
+                                              ];
+                                              return false;
+                                            }
+                                            var valid0 = _errs86 === errors;
+                                          } else {
+                                            var valid0 = true;
+                                          }
                                         }
                                       }
                                     }
@@ -132461,6 +133386,19 @@ var schema110 = {
       role: { type: 'string', enum: ['system', 'user', 'assistant', 'tool'] },
       content: { type: 'string' },
       firstOutput: { type: 'string', enum: ['content', 'reasoning', 'tool_calls'] },
+      compression: {
+        type: 'object',
+        properties: {
+          id: { type: 'string', minLength: 1, maxLength: 128, pattern: '^[A-Za-z0-9_-]+$' },
+          trigger: { type: 'string', enum: ['manual', 'automatic'] },
+          status: {
+            type: 'string',
+            enum: ['running', 'completed', 'failed', 'cancelled', 'unpublished'],
+          },
+        },
+        required: ['id', 'trigger', 'status'],
+        additionalProperties: true,
+      },
       originMessage: {
         type: 'object',
         properties: {
@@ -132989,22 +133927,21 @@ function validate132(
                               var valid1 = true;
                             }
                             if (valid1) {
-                              if (data0.originMessage !== undefined) {
-                                let data9 = data0.originMessage;
+                              if (data0.compression !== undefined) {
+                                let data9 = data0.compression;
                                 const _errs24 = errors;
                                 if (errors === _errs24) {
                                   if (data9 && typeof data9 == 'object' && !Array.isArray(data9)) {
                                     let missing1;
                                     if (
-                                      (data9.storeId === undefined && (missing1 = 'storeId')) ||
-                                      (data9.sessionId === undefined && (missing1 = 'sessionId')) ||
-                                      (data9.messageId === undefined && (missing1 = 'messageId')) ||
-                                      (data9.runId === undefined && (missing1 = 'runId'))
+                                      (data9.id === undefined && (missing1 = 'id')) ||
+                                      (data9.trigger === undefined && (missing1 = 'trigger')) ||
+                                      (data9.status === undefined && (missing1 = 'status'))
                                     ) {
                                       validate132.errors = [
                                         {
-                                          instancePath: instancePath + '/' + i0 + '/originMessage',
-                                          schemaPath: '#/items/properties/originMessage/required',
+                                          instancePath: instancePath + '/' + i0 + '/compression',
+                                          schemaPath: '#/items/properties/compression/required',
                                           keyword: 'required',
                                           params: { missingProperty: missing1 },
                                           message: "must have required property '" + missing1 + "'",
@@ -133012,8 +133949,8 @@ function validate132(
                                       ];
                                       return false;
                                     } else {
-                                      if (data9.storeId !== undefined) {
-                                        let data10 = data9.storeId;
+                                      if (data9.id !== undefined) {
+                                        let data10 = data9.id;
                                         const _errs27 = errors;
                                         if (errors === _errs27) {
                                           if (typeof data10 === 'string') {
@@ -133021,12 +133958,9 @@ function validate132(
                                               validate132.errors = [
                                                 {
                                                   instancePath:
-                                                    instancePath +
-                                                    '/' +
-                                                    i0 +
-                                                    '/originMessage/storeId',
+                                                    instancePath + '/' + i0 + '/compression/id',
                                                   schemaPath:
-                                                    '#/items/properties/originMessage/properties/storeId/maxLength',
+                                                    '#/items/properties/compression/properties/id/maxLength',
                                                   keyword: 'maxLength',
                                                   params: { limit: 128 },
                                                   message: 'must NOT have more than 128 characters',
@@ -133038,12 +133972,9 @@ function validate132(
                                                 validate132.errors = [
                                                   {
                                                     instancePath:
-                                                      instancePath +
-                                                      '/' +
-                                                      i0 +
-                                                      '/originMessage/storeId',
+                                                      instancePath + '/' + i0 + '/compression/id',
                                                     schemaPath:
-                                                      '#/items/properties/originMessage/properties/storeId/minLength',
+                                                      '#/items/properties/compression/properties/id/minLength',
                                                     keyword: 'minLength',
                                                     params: { limit: 1 },
                                                     message:
@@ -133056,12 +133987,9 @@ function validate132(
                                                   validate132.errors = [
                                                     {
                                                       instancePath:
-                                                        instancePath +
-                                                        '/' +
-                                                        i0 +
-                                                        '/originMessage/storeId',
+                                                        instancePath + '/' + i0 + '/compression/id',
                                                       schemaPath:
-                                                        '#/items/properties/originMessage/properties/storeId/pattern',
+                                                        '#/items/properties/compression/properties/id/pattern',
                                                       keyword: 'pattern',
                                                       params: { pattern: '^[A-Za-z0-9_-]+$' },
                                                       message:
@@ -133078,12 +134006,9 @@ function validate132(
                                             validate132.errors = [
                                               {
                                                 instancePath:
-                                                  instancePath +
-                                                  '/' +
-                                                  i0 +
-                                                  '/originMessage/storeId',
+                                                  instancePath + '/' + i0 + '/compression/id',
                                                 schemaPath:
-                                                  '#/items/properties/originMessage/properties/storeId/type',
+                                                  '#/items/properties/compression/properties/id/type',
                                                 keyword: 'type',
                                                 params: { type: 'string' },
                                                 message: 'must be string',
@@ -133097,21 +134022,162 @@ function validate132(
                                         var valid3 = true;
                                       }
                                       if (valid3) {
-                                        if (data9.sessionId !== undefined) {
-                                          let data11 = data9.sessionId;
+                                        if (data9.trigger !== undefined) {
+                                          let data11 = data9.trigger;
                                           const _errs29 = errors;
-                                          if (errors === _errs29) {
-                                            if (typeof data11 === 'string') {
-                                              if (func1(data11) > 128) {
+                                          if (typeof data11 !== 'string') {
+                                            validate132.errors = [
+                                              {
+                                                instancePath:
+                                                  instancePath + '/' + i0 + '/compression/trigger',
+                                                schemaPath:
+                                                  '#/items/properties/compression/properties/trigger/type',
+                                                keyword: 'type',
+                                                params: { type: 'string' },
+                                                message: 'must be string',
+                                              },
+                                            ];
+                                            return false;
+                                          }
+                                          if (!(data11 === 'manual' || data11 === 'automatic')) {
+                                            validate132.errors = [
+                                              {
+                                                instancePath:
+                                                  instancePath + '/' + i0 + '/compression/trigger',
+                                                schemaPath:
+                                                  '#/items/properties/compression/properties/trigger/enum',
+                                                keyword: 'enum',
+                                                params: {
+                                                  allowedValues:
+                                                    schema110.items.properties.compression
+                                                      .properties.trigger.enum,
+                                                },
+                                                message:
+                                                  'must be equal to one of the allowed values',
+                                              },
+                                            ];
+                                            return false;
+                                          }
+                                          var valid3 = _errs29 === errors;
+                                        } else {
+                                          var valid3 = true;
+                                        }
+                                        if (valid3) {
+                                          if (data9.status !== undefined) {
+                                            let data12 = data9.status;
+                                            const _errs31 = errors;
+                                            if (typeof data12 !== 'string') {
+                                              validate132.errors = [
+                                                {
+                                                  instancePath:
+                                                    instancePath + '/' + i0 + '/compression/status',
+                                                  schemaPath:
+                                                    '#/items/properties/compression/properties/status/type',
+                                                  keyword: 'type',
+                                                  params: { type: 'string' },
+                                                  message: 'must be string',
+                                                },
+                                              ];
+                                              return false;
+                                            }
+                                            if (
+                                              !(
+                                                data12 === 'running' ||
+                                                data12 === 'completed' ||
+                                                data12 === 'failed' ||
+                                                data12 === 'cancelled' ||
+                                                data12 === 'unpublished'
+                                              )
+                                            ) {
+                                              validate132.errors = [
+                                                {
+                                                  instancePath:
+                                                    instancePath + '/' + i0 + '/compression/status',
+                                                  schemaPath:
+                                                    '#/items/properties/compression/properties/status/enum',
+                                                  keyword: 'enum',
+                                                  params: {
+                                                    allowedValues:
+                                                      schema110.items.properties.compression
+                                                        .properties.status.enum,
+                                                  },
+                                                  message:
+                                                    'must be equal to one of the allowed values',
+                                                },
+                                              ];
+                                              return false;
+                                            }
+                                            var valid3 = _errs31 === errors;
+                                          } else {
+                                            var valid3 = true;
+                                          }
+                                        }
+                                      }
+                                    }
+                                  } else {
+                                    validate132.errors = [
+                                      {
+                                        instancePath: instancePath + '/' + i0 + '/compression',
+                                        schemaPath: '#/items/properties/compression/type',
+                                        keyword: 'type',
+                                        params: { type: 'object' },
+                                        message: 'must be object',
+                                      },
+                                    ];
+                                    return false;
+                                  }
+                                }
+                                var valid1 = _errs24 === errors;
+                              } else {
+                                var valid1 = true;
+                              }
+                              if (valid1) {
+                                if (data0.originMessage !== undefined) {
+                                  let data13 = data0.originMessage;
+                                  const _errs33 = errors;
+                                  if (errors === _errs33) {
+                                    if (
+                                      data13 &&
+                                      typeof data13 == 'object' &&
+                                      !Array.isArray(data13)
+                                    ) {
+                                      let missing2;
+                                      if (
+                                        (data13.storeId === undefined && (missing2 = 'storeId')) ||
+                                        (data13.sessionId === undefined &&
+                                          (missing2 = 'sessionId')) ||
+                                        (data13.messageId === undefined &&
+                                          (missing2 = 'messageId')) ||
+                                        (data13.runId === undefined && (missing2 = 'runId'))
+                                      ) {
+                                        validate132.errors = [
+                                          {
+                                            instancePath:
+                                              instancePath + '/' + i0 + '/originMessage',
+                                            schemaPath: '#/items/properties/originMessage/required',
+                                            keyword: 'required',
+                                            params: { missingProperty: missing2 },
+                                            message:
+                                              "must have required property '" + missing2 + "'",
+                                          },
+                                        ];
+                                        return false;
+                                      } else {
+                                        if (data13.storeId !== undefined) {
+                                          let data14 = data13.storeId;
+                                          const _errs36 = errors;
+                                          if (errors === _errs36) {
+                                            if (typeof data14 === 'string') {
+                                              if (func1(data14) > 128) {
                                                 validate132.errors = [
                                                   {
                                                     instancePath:
                                                       instancePath +
                                                       '/' +
                                                       i0 +
-                                                      '/originMessage/sessionId',
+                                                      '/originMessage/storeId',
                                                     schemaPath:
-                                                      '#/items/properties/originMessage/properties/sessionId/maxLength',
+                                                      '#/items/properties/originMessage/properties/storeId/maxLength',
                                                     keyword: 'maxLength',
                                                     params: { limit: 128 },
                                                     message:
@@ -133120,16 +134186,16 @@ function validate132(
                                                 ];
                                                 return false;
                                               } else {
-                                                if (func1(data11) < 1) {
+                                                if (func1(data14) < 1) {
                                                   validate132.errors = [
                                                     {
                                                       instancePath:
                                                         instancePath +
                                                         '/' +
                                                         i0 +
-                                                        '/originMessage/sessionId',
+                                                        '/originMessage/storeId',
                                                       schemaPath:
-                                                        '#/items/properties/originMessage/properties/sessionId/minLength',
+                                                        '#/items/properties/originMessage/properties/storeId/minLength',
                                                       keyword: 'minLength',
                                                       params: { limit: 1 },
                                                       message:
@@ -133138,16 +134204,16 @@ function validate132(
                                                   ];
                                                   return false;
                                                 } else {
-                                                  if (!pattern4.test(data11)) {
+                                                  if (!pattern4.test(data14)) {
                                                     validate132.errors = [
                                                       {
                                                         instancePath:
                                                           instancePath +
                                                           '/' +
                                                           i0 +
-                                                          '/originMessage/sessionId',
+                                                          '/originMessage/storeId',
                                                         schemaPath:
-                                                          '#/items/properties/originMessage/properties/sessionId/pattern',
+                                                          '#/items/properties/originMessage/properties/storeId/pattern',
                                                         keyword: 'pattern',
                                                         params: { pattern: '^[A-Za-z0-9_-]+$' },
                                                         message:
@@ -133167,9 +134233,9 @@ function validate132(
                                                     instancePath +
                                                     '/' +
                                                     i0 +
-                                                    '/originMessage/sessionId',
+                                                    '/originMessage/storeId',
                                                   schemaPath:
-                                                    '#/items/properties/originMessage/properties/sessionId/type',
+                                                    '#/items/properties/originMessage/properties/storeId/type',
                                                   keyword: 'type',
                                                   params: { type: 'string' },
                                                   message: 'must be string',
@@ -133178,26 +134244,26 @@ function validate132(
                                               return false;
                                             }
                                           }
-                                          var valid3 = _errs29 === errors;
+                                          var valid4 = _errs36 === errors;
                                         } else {
-                                          var valid3 = true;
+                                          var valid4 = true;
                                         }
-                                        if (valid3) {
-                                          if (data9.messageId !== undefined) {
-                                            let data12 = data9.messageId;
-                                            const _errs31 = errors;
-                                            if (errors === _errs31) {
-                                              if (typeof data12 === 'string') {
-                                                if (func1(data12) > 128) {
+                                        if (valid4) {
+                                          if (data13.sessionId !== undefined) {
+                                            let data15 = data13.sessionId;
+                                            const _errs38 = errors;
+                                            if (errors === _errs38) {
+                                              if (typeof data15 === 'string') {
+                                                if (func1(data15) > 128) {
                                                   validate132.errors = [
                                                     {
                                                       instancePath:
                                                         instancePath +
                                                         '/' +
                                                         i0 +
-                                                        '/originMessage/messageId',
+                                                        '/originMessage/sessionId',
                                                       schemaPath:
-                                                        '#/items/properties/originMessage/properties/messageId/maxLength',
+                                                        '#/items/properties/originMessage/properties/sessionId/maxLength',
                                                       keyword: 'maxLength',
                                                       params: { limit: 128 },
                                                       message:
@@ -133206,16 +134272,16 @@ function validate132(
                                                   ];
                                                   return false;
                                                 } else {
-                                                  if (func1(data12) < 1) {
+                                                  if (func1(data15) < 1) {
                                                     validate132.errors = [
                                                       {
                                                         instancePath:
                                                           instancePath +
                                                           '/' +
                                                           i0 +
-                                                          '/originMessage/messageId',
+                                                          '/originMessage/sessionId',
                                                         schemaPath:
-                                                          '#/items/properties/originMessage/properties/messageId/minLength',
+                                                          '#/items/properties/originMessage/properties/sessionId/minLength',
                                                         keyword: 'minLength',
                                                         params: { limit: 1 },
                                                         message:
@@ -133224,16 +134290,16 @@ function validate132(
                                                     ];
                                                     return false;
                                                   } else {
-                                                    if (!pattern4.test(data12)) {
+                                                    if (!pattern4.test(data15)) {
                                                       validate132.errors = [
                                                         {
                                                           instancePath:
                                                             instancePath +
                                                             '/' +
                                                             i0 +
-                                                            '/originMessage/messageId',
+                                                            '/originMessage/sessionId',
                                                           schemaPath:
-                                                            '#/items/properties/originMessage/properties/messageId/pattern',
+                                                            '#/items/properties/originMessage/properties/sessionId/pattern',
                                                           keyword: 'pattern',
                                                           params: { pattern: '^[A-Za-z0-9_-]+$' },
                                                           message:
@@ -133253,9 +134319,9 @@ function validate132(
                                                       instancePath +
                                                       '/' +
                                                       i0 +
-                                                      '/originMessage/messageId',
+                                                      '/originMessage/sessionId',
                                                     schemaPath:
-                                                      '#/items/properties/originMessage/properties/messageId/type',
+                                                      '#/items/properties/originMessage/properties/sessionId/type',
                                                     keyword: 'type',
                                                     params: { type: 'string' },
                                                     message: 'must be string',
@@ -133264,307 +134330,26 @@ function validate132(
                                                 return false;
                                               }
                                             }
-                                            var valid3 = _errs31 === errors;
+                                            var valid4 = _errs38 === errors;
                                           } else {
-                                            var valid3 = true;
+                                            var valid4 = true;
                                           }
-                                          if (valid3) {
-                                            if (data9.runId !== undefined) {
-                                              let data13 = data9.runId;
-                                              const _errs33 = errors;
-                                              const _errs34 = errors;
-                                              let valid4 = false;
-                                              const _errs35 = errors;
-                                              if (errors === _errs35) {
-                                                if (typeof data13 === 'string') {
-                                                  if (func1(data13) > 128) {
-                                                    const err6 = {
-                                                      instancePath:
-                                                        instancePath +
-                                                        '/' +
-                                                        i0 +
-                                                        '/originMessage/runId',
-                                                      schemaPath:
-                                                        '#/items/properties/originMessage/properties/runId/anyOf/0/maxLength',
-                                                      keyword: 'maxLength',
-                                                      params: { limit: 128 },
-                                                      message:
-                                                        'must NOT have more than 128 characters',
-                                                    };
-                                                    if (vErrors === null) {
-                                                      vErrors = [err6];
-                                                    } else {
-                                                      vErrors.push(err6);
-                                                    }
-                                                    errors++;
-                                                  } else {
-                                                    if (func1(data13) < 1) {
-                                                      const err7 = {
-                                                        instancePath:
-                                                          instancePath +
-                                                          '/' +
-                                                          i0 +
-                                                          '/originMessage/runId',
-                                                        schemaPath:
-                                                          '#/items/properties/originMessage/properties/runId/anyOf/0/minLength',
-                                                        keyword: 'minLength',
-                                                        params: { limit: 1 },
-                                                        message:
-                                                          'must NOT have fewer than 1 characters',
-                                                      };
-                                                      if (vErrors === null) {
-                                                        vErrors = [err7];
-                                                      } else {
-                                                        vErrors.push(err7);
-                                                      }
-                                                      errors++;
-                                                    } else {
-                                                      if (!pattern4.test(data13)) {
-                                                        const err8 = {
-                                                          instancePath:
-                                                            instancePath +
-                                                            '/' +
-                                                            i0 +
-                                                            '/originMessage/runId',
-                                                          schemaPath:
-                                                            '#/items/properties/originMessage/properties/runId/anyOf/0/pattern',
-                                                          keyword: 'pattern',
-                                                          params: { pattern: '^[A-Za-z0-9_-]+$' },
-                                                          message:
-                                                            'must match pattern "' +
-                                                            '^[A-Za-z0-9_-]+$' +
-                                                            '"',
-                                                        };
-                                                        if (vErrors === null) {
-                                                          vErrors = [err8];
-                                                        } else {
-                                                          vErrors.push(err8);
-                                                        }
-                                                        errors++;
-                                                      }
-                                                    }
-                                                  }
-                                                } else {
-                                                  const err9 = {
-                                                    instancePath:
-                                                      instancePath +
-                                                      '/' +
-                                                      i0 +
-                                                      '/originMessage/runId',
-                                                    schemaPath:
-                                                      '#/items/properties/originMessage/properties/runId/anyOf/0/type',
-                                                    keyword: 'type',
-                                                    params: { type: 'string' },
-                                                    message: 'must be string',
-                                                  };
-                                                  if (vErrors === null) {
-                                                    vErrors = [err9];
-                                                  } else {
-                                                    vErrors.push(err9);
-                                                  }
-                                                  errors++;
-                                                }
-                                              }
-                                              var _valid1 = _errs35 === errors;
-                                              valid4 = valid4 || _valid1;
-                                              const _errs37 = errors;
-                                              if (data13 !== null) {
-                                                const err10 = {
-                                                  instancePath:
-                                                    instancePath +
-                                                    '/' +
-                                                    i0 +
-                                                    '/originMessage/runId',
-                                                  schemaPath:
-                                                    '#/items/properties/originMessage/properties/runId/anyOf/1/type',
-                                                  keyword: 'type',
-                                                  params: { type: 'null' },
-                                                  message: 'must be null',
-                                                };
-                                                if (vErrors === null) {
-                                                  vErrors = [err10];
-                                                } else {
-                                                  vErrors.push(err10);
-                                                }
-                                                errors++;
-                                              }
-                                              var _valid1 = _errs37 === errors;
-                                              valid4 = valid4 || _valid1;
-                                              if (!valid4) {
-                                                const err11 = {
-                                                  instancePath:
-                                                    instancePath +
-                                                    '/' +
-                                                    i0 +
-                                                    '/originMessage/runId',
-                                                  schemaPath:
-                                                    '#/items/properties/originMessage/properties/runId/anyOf',
-                                                  keyword: 'anyOf',
-                                                  params: {},
-                                                  message: 'must match a schema in anyOf',
-                                                };
-                                                if (vErrors === null) {
-                                                  vErrors = [err11];
-                                                } else {
-                                                  vErrors.push(err11);
-                                                }
-                                                errors++;
-                                                validate132.errors = vErrors;
-                                                return false;
-                                              } else {
-                                                errors = _errs34;
-                                                if (vErrors !== null) {
-                                                  if (_errs34) {
-                                                    vErrors.length = _errs34;
-                                                  } else {
-                                                    vErrors = null;
-                                                  }
-                                                }
-                                              }
-                                              var valid3 = _errs33 === errors;
-                                            } else {
-                                              var valid3 = true;
-                                            }
-                                          }
-                                        }
-                                      }
-                                    }
-                                  } else {
-                                    validate132.errors = [
-                                      {
-                                        instancePath: instancePath + '/' + i0 + '/originMessage',
-                                        schemaPath: '#/items/properties/originMessage/type',
-                                        keyword: 'type',
-                                        params: { type: 'object' },
-                                        message: 'must be object',
-                                      },
-                                    ];
-                                    return false;
-                                  }
-                                }
-                                var valid1 = _errs24 === errors;
-                              } else {
-                                var valid1 = true;
-                              }
-                              if (valid1) {
-                                if (data0.contentFormat !== undefined) {
-                                  let data14 = data0.contentFormat;
-                                  const _errs39 = errors;
-                                  if (typeof data14 !== 'string') {
-                                    validate132.errors = [
-                                      {
-                                        instancePath: instancePath + '/' + i0 + '/contentFormat',
-                                        schemaPath: '#/items/properties/contentFormat/type',
-                                        keyword: 'type',
-                                        params: { type: 'string' },
-                                        message: 'must be string',
-                                      },
-                                    ];
-                                    return false;
-                                  }
-                                  if (data14 !== 'unsupported') {
-                                    validate132.errors = [
-                                      {
-                                        instancePath: instancePath + '/' + i0 + '/contentFormat',
-                                        schemaPath: '#/items/properties/contentFormat/const',
-                                        keyword: 'const',
-                                        params: { allowedValue: 'unsupported' },
-                                        message: 'must be equal to constant',
-                                      },
-                                    ];
-                                    return false;
-                                  }
-                                  var valid1 = _errs39 === errors;
-                                } else {
-                                  var valid1 = true;
-                                }
-                                if (valid1) {
-                                  if (data0.outputBody !== undefined) {
-                                    let data15 = data0.outputBody;
-                                    const _errs41 = errors;
-                                    if (errors === _errs41) {
-                                      if (
-                                        data15 &&
-                                        typeof data15 == 'object' &&
-                                        !Array.isArray(data15)
-                                      ) {
-                                        let missing2;
-                                        if (
-                                          (data15.kind === undefined && (missing2 = 'kind')) ||
-                                          (data15.executionId === undefined &&
-                                            (missing2 = 'executionId')) ||
-                                          (data15.complete === undefined &&
-                                            (missing2 = 'complete')) ||
-                                          (data15.contentBytes === undefined &&
-                                            (missing2 = 'contentBytes')) ||
-                                          (data15.reasoningBytes === undefined &&
-                                            (missing2 = 'reasoningBytes')) ||
-                                          (data15.toolCallCount === undefined &&
-                                            (missing2 = 'toolCallCount'))
-                                        ) {
-                                          validate132.errors = [
-                                            {
-                                              instancePath: instancePath + '/' + i0 + '/outputBody',
-                                              schemaPath: '#/items/properties/outputBody/required',
-                                              keyword: 'required',
-                                              params: { missingProperty: missing2 },
-                                              message:
-                                                "must have required property '" + missing2 + "'",
-                                            },
-                                          ];
-                                          return false;
-                                        } else {
-                                          if (data15.kind !== undefined) {
-                                            let data16 = data15.kind;
-                                            const _errs44 = errors;
-                                            if (typeof data16 !== 'string') {
-                                              validate132.errors = [
-                                                {
-                                                  instancePath:
-                                                    instancePath + '/' + i0 + '/outputBody/kind',
-                                                  schemaPath:
-                                                    '#/items/properties/outputBody/properties/kind/type',
-                                                  keyword: 'type',
-                                                  params: { type: 'string' },
-                                                  message: 'must be string',
-                                                },
-                                              ];
-                                              return false;
-                                            }
-                                            if (data16 !== 'model_output') {
-                                              validate132.errors = [
-                                                {
-                                                  instancePath:
-                                                    instancePath + '/' + i0 + '/outputBody/kind',
-                                                  schemaPath:
-                                                    '#/items/properties/outputBody/properties/kind/const',
-                                                  keyword: 'const',
-                                                  params: { allowedValue: 'model_output' },
-                                                  message: 'must be equal to constant',
-                                                },
-                                              ];
-                                              return false;
-                                            }
-                                            var valid5 = _errs44 === errors;
-                                          } else {
-                                            var valid5 = true;
-                                          }
-                                          if (valid5) {
-                                            if (data15.executionId !== undefined) {
-                                              let data17 = data15.executionId;
-                                              const _errs46 = errors;
-                                              if (errors === _errs46) {
-                                                if (typeof data17 === 'string') {
-                                                  if (func1(data17) > 128) {
+                                          if (valid4) {
+                                            if (data13.messageId !== undefined) {
+                                              let data16 = data13.messageId;
+                                              const _errs40 = errors;
+                                              if (errors === _errs40) {
+                                                if (typeof data16 === 'string') {
+                                                  if (func1(data16) > 128) {
                                                     validate132.errors = [
                                                       {
                                                         instancePath:
                                                           instancePath +
                                                           '/' +
                                                           i0 +
-                                                          '/outputBody/executionId',
+                                                          '/originMessage/messageId',
                                                         schemaPath:
-                                                          '#/items/properties/outputBody/properties/executionId/maxLength',
+                                                          '#/items/properties/originMessage/properties/messageId/maxLength',
                                                         keyword: 'maxLength',
                                                         params: { limit: 128 },
                                                         message:
@@ -133573,16 +134358,16 @@ function validate132(
                                                     ];
                                                     return false;
                                                   } else {
-                                                    if (func1(data17) < 1) {
+                                                    if (func1(data16) < 1) {
                                                       validate132.errors = [
                                                         {
                                                           instancePath:
                                                             instancePath +
                                                             '/' +
                                                             i0 +
-                                                            '/outputBody/executionId',
+                                                            '/originMessage/messageId',
                                                           schemaPath:
-                                                            '#/items/properties/outputBody/properties/executionId/minLength',
+                                                            '#/items/properties/originMessage/properties/messageId/minLength',
                                                           keyword: 'minLength',
                                                           params: { limit: 1 },
                                                           message:
@@ -133591,16 +134376,16 @@ function validate132(
                                                       ];
                                                       return false;
                                                     } else {
-                                                      if (!pattern4.test(data17)) {
+                                                      if (!pattern4.test(data16)) {
                                                         validate132.errors = [
                                                           {
                                                             instancePath:
                                                               instancePath +
                                                               '/' +
                                                               i0 +
-                                                              '/outputBody/executionId',
+                                                              '/originMessage/messageId',
                                                             schemaPath:
-                                                              '#/items/properties/outputBody/properties/executionId/pattern',
+                                                              '#/items/properties/originMessage/properties/messageId/pattern',
                                                             keyword: 'pattern',
                                                             params: { pattern: '^[A-Za-z0-9_-]+$' },
                                                             message:
@@ -133620,9 +134405,9 @@ function validate132(
                                                         instancePath +
                                                         '/' +
                                                         i0 +
-                                                        '/outputBody/executionId',
+                                                        '/originMessage/messageId',
                                                       schemaPath:
-                                                        '#/items/properties/outputBody/properties/executionId/type',
+                                                        '#/items/properties/originMessage/properties/messageId/type',
                                                       keyword: 'type',
                                                       params: { type: 'string' },
                                                       message: 'must be string',
@@ -133631,100 +134416,421 @@ function validate132(
                                                   return false;
                                                 }
                                               }
-                                              var valid5 = _errs46 === errors;
+                                              var valid4 = _errs40 === errors;
                                             } else {
-                                              var valid5 = true;
+                                              var valid4 = true;
                                             }
-                                            if (valid5) {
-                                              if (data15.complete !== undefined) {
-                                                const _errs48 = errors;
-                                                if (typeof data15.complete !== 'boolean') {
-                                                  validate132.errors = [
-                                                    {
-                                                      instancePath:
-                                                        instancePath +
-                                                        '/' +
-                                                        i0 +
-                                                        '/outputBody/complete',
-                                                      schemaPath:
-                                                        '#/items/properties/outputBody/properties/complete/type',
-                                                      keyword: 'type',
-                                                      params: { type: 'boolean' },
-                                                      message: 'must be boolean',
-                                                    },
-                                                  ];
-                                                  return false;
-                                                }
-                                                var valid5 = _errs48 === errors;
-                                              } else {
-                                                var valid5 = true;
-                                              }
-                                              if (valid5) {
-                                                if (data15.contentBytes !== undefined) {
-                                                  let data19 = data15.contentBytes;
-                                                  const _errs50 = errors;
-                                                  if (errors === _errs50) {
-                                                    if (typeof data19 === 'string') {
-                                                      if (!pattern9.test(data19)) {
-                                                        validate132.errors = [
-                                                          {
+                                            if (valid4) {
+                                              if (data13.runId !== undefined) {
+                                                let data17 = data13.runId;
+                                                const _errs42 = errors;
+                                                const _errs43 = errors;
+                                                let valid5 = false;
+                                                const _errs44 = errors;
+                                                if (errors === _errs44) {
+                                                  if (typeof data17 === 'string') {
+                                                    if (func1(data17) > 128) {
+                                                      const err6 = {
+                                                        instancePath:
+                                                          instancePath +
+                                                          '/' +
+                                                          i0 +
+                                                          '/originMessage/runId',
+                                                        schemaPath:
+                                                          '#/items/properties/originMessage/properties/runId/anyOf/0/maxLength',
+                                                        keyword: 'maxLength',
+                                                        params: { limit: 128 },
+                                                        message:
+                                                          'must NOT have more than 128 characters',
+                                                      };
+                                                      if (vErrors === null) {
+                                                        vErrors = [err6];
+                                                      } else {
+                                                        vErrors.push(err6);
+                                                      }
+                                                      errors++;
+                                                    } else {
+                                                      if (func1(data17) < 1) {
+                                                        const err7 = {
+                                                          instancePath:
+                                                            instancePath +
+                                                            '/' +
+                                                            i0 +
+                                                            '/originMessage/runId',
+                                                          schemaPath:
+                                                            '#/items/properties/originMessage/properties/runId/anyOf/0/minLength',
+                                                          keyword: 'minLength',
+                                                          params: { limit: 1 },
+                                                          message:
+                                                            'must NOT have fewer than 1 characters',
+                                                        };
+                                                        if (vErrors === null) {
+                                                          vErrors = [err7];
+                                                        } else {
+                                                          vErrors.push(err7);
+                                                        }
+                                                        errors++;
+                                                      } else {
+                                                        if (!pattern4.test(data17)) {
+                                                          const err8 = {
                                                             instancePath:
                                                               instancePath +
                                                               '/' +
                                                               i0 +
-                                                              '/outputBody/contentBytes',
+                                                              '/originMessage/runId',
                                                             schemaPath:
-                                                              '#/items/properties/outputBody/properties/contentBytes/pattern',
+                                                              '#/items/properties/originMessage/properties/runId/anyOf/0/pattern',
                                                             keyword: 'pattern',
-                                                            params: {
-                                                              pattern: '^(0|[1-9][0-9]*)$',
-                                                            },
+                                                            params: { pattern: '^[A-Za-z0-9_-]+$' },
                                                             message:
                                                               'must match pattern "' +
-                                                              '^(0|[1-9][0-9]*)$' +
+                                                              '^[A-Za-z0-9_-]+$' +
                                                               '"',
-                                                          },
-                                                        ];
-                                                        return false;
+                                                          };
+                                                          if (vErrors === null) {
+                                                            vErrors = [err8];
+                                                          } else {
+                                                            vErrors.push(err8);
+                                                          }
+                                                          errors++;
+                                                        }
                                                       }
+                                                    }
+                                                  } else {
+                                                    const err9 = {
+                                                      instancePath:
+                                                        instancePath +
+                                                        '/' +
+                                                        i0 +
+                                                        '/originMessage/runId',
+                                                      schemaPath:
+                                                        '#/items/properties/originMessage/properties/runId/anyOf/0/type',
+                                                      keyword: 'type',
+                                                      params: { type: 'string' },
+                                                      message: 'must be string',
+                                                    };
+                                                    if (vErrors === null) {
+                                                      vErrors = [err9];
                                                     } else {
+                                                      vErrors.push(err9);
+                                                    }
+                                                    errors++;
+                                                  }
+                                                }
+                                                var _valid1 = _errs44 === errors;
+                                                valid5 = valid5 || _valid1;
+                                                const _errs46 = errors;
+                                                if (data17 !== null) {
+                                                  const err10 = {
+                                                    instancePath:
+                                                      instancePath +
+                                                      '/' +
+                                                      i0 +
+                                                      '/originMessage/runId',
+                                                    schemaPath:
+                                                      '#/items/properties/originMessage/properties/runId/anyOf/1/type',
+                                                    keyword: 'type',
+                                                    params: { type: 'null' },
+                                                    message: 'must be null',
+                                                  };
+                                                  if (vErrors === null) {
+                                                    vErrors = [err10];
+                                                  } else {
+                                                    vErrors.push(err10);
+                                                  }
+                                                  errors++;
+                                                }
+                                                var _valid1 = _errs46 === errors;
+                                                valid5 = valid5 || _valid1;
+                                                if (!valid5) {
+                                                  const err11 = {
+                                                    instancePath:
+                                                      instancePath +
+                                                      '/' +
+                                                      i0 +
+                                                      '/originMessage/runId',
+                                                    schemaPath:
+                                                      '#/items/properties/originMessage/properties/runId/anyOf',
+                                                    keyword: 'anyOf',
+                                                    params: {},
+                                                    message: 'must match a schema in anyOf',
+                                                  };
+                                                  if (vErrors === null) {
+                                                    vErrors = [err11];
+                                                  } else {
+                                                    vErrors.push(err11);
+                                                  }
+                                                  errors++;
+                                                  validate132.errors = vErrors;
+                                                  return false;
+                                                } else {
+                                                  errors = _errs43;
+                                                  if (vErrors !== null) {
+                                                    if (_errs43) {
+                                                      vErrors.length = _errs43;
+                                                    } else {
+                                                      vErrors = null;
+                                                    }
+                                                  }
+                                                }
+                                                var valid4 = _errs42 === errors;
+                                              } else {
+                                                var valid4 = true;
+                                              }
+                                            }
+                                          }
+                                        }
+                                      }
+                                    } else {
+                                      validate132.errors = [
+                                        {
+                                          instancePath: instancePath + '/' + i0 + '/originMessage',
+                                          schemaPath: '#/items/properties/originMessage/type',
+                                          keyword: 'type',
+                                          params: { type: 'object' },
+                                          message: 'must be object',
+                                        },
+                                      ];
+                                      return false;
+                                    }
+                                  }
+                                  var valid1 = _errs33 === errors;
+                                } else {
+                                  var valid1 = true;
+                                }
+                                if (valid1) {
+                                  if (data0.contentFormat !== undefined) {
+                                    let data18 = data0.contentFormat;
+                                    const _errs48 = errors;
+                                    if (typeof data18 !== 'string') {
+                                      validate132.errors = [
+                                        {
+                                          instancePath: instancePath + '/' + i0 + '/contentFormat',
+                                          schemaPath: '#/items/properties/contentFormat/type',
+                                          keyword: 'type',
+                                          params: { type: 'string' },
+                                          message: 'must be string',
+                                        },
+                                      ];
+                                      return false;
+                                    }
+                                    if (data18 !== 'unsupported') {
+                                      validate132.errors = [
+                                        {
+                                          instancePath: instancePath + '/' + i0 + '/contentFormat',
+                                          schemaPath: '#/items/properties/contentFormat/const',
+                                          keyword: 'const',
+                                          params: { allowedValue: 'unsupported' },
+                                          message: 'must be equal to constant',
+                                        },
+                                      ];
+                                      return false;
+                                    }
+                                    var valid1 = _errs48 === errors;
+                                  } else {
+                                    var valid1 = true;
+                                  }
+                                  if (valid1) {
+                                    if (data0.outputBody !== undefined) {
+                                      let data19 = data0.outputBody;
+                                      const _errs50 = errors;
+                                      if (errors === _errs50) {
+                                        if (
+                                          data19 &&
+                                          typeof data19 == 'object' &&
+                                          !Array.isArray(data19)
+                                        ) {
+                                          let missing3;
+                                          if (
+                                            (data19.kind === undefined && (missing3 = 'kind')) ||
+                                            (data19.executionId === undefined &&
+                                              (missing3 = 'executionId')) ||
+                                            (data19.complete === undefined &&
+                                              (missing3 = 'complete')) ||
+                                            (data19.contentBytes === undefined &&
+                                              (missing3 = 'contentBytes')) ||
+                                            (data19.reasoningBytes === undefined &&
+                                              (missing3 = 'reasoningBytes')) ||
+                                            (data19.toolCallCount === undefined &&
+                                              (missing3 = 'toolCallCount'))
+                                          ) {
+                                            validate132.errors = [
+                                              {
+                                                instancePath:
+                                                  instancePath + '/' + i0 + '/outputBody',
+                                                schemaPath:
+                                                  '#/items/properties/outputBody/required',
+                                                keyword: 'required',
+                                                params: { missingProperty: missing3 },
+                                                message:
+                                                  "must have required property '" + missing3 + "'",
+                                              },
+                                            ];
+                                            return false;
+                                          } else {
+                                            if (data19.kind !== undefined) {
+                                              let data20 = data19.kind;
+                                              const _errs53 = errors;
+                                              if (typeof data20 !== 'string') {
+                                                validate132.errors = [
+                                                  {
+                                                    instancePath:
+                                                      instancePath + '/' + i0 + '/outputBody/kind',
+                                                    schemaPath:
+                                                      '#/items/properties/outputBody/properties/kind/type',
+                                                    keyword: 'type',
+                                                    params: { type: 'string' },
+                                                    message: 'must be string',
+                                                  },
+                                                ];
+                                                return false;
+                                              }
+                                              if (data20 !== 'model_output') {
+                                                validate132.errors = [
+                                                  {
+                                                    instancePath:
+                                                      instancePath + '/' + i0 + '/outputBody/kind',
+                                                    schemaPath:
+                                                      '#/items/properties/outputBody/properties/kind/const',
+                                                    keyword: 'const',
+                                                    params: { allowedValue: 'model_output' },
+                                                    message: 'must be equal to constant',
+                                                  },
+                                                ];
+                                                return false;
+                                              }
+                                              var valid6 = _errs53 === errors;
+                                            } else {
+                                              var valid6 = true;
+                                            }
+                                            if (valid6) {
+                                              if (data19.executionId !== undefined) {
+                                                let data21 = data19.executionId;
+                                                const _errs55 = errors;
+                                                if (errors === _errs55) {
+                                                  if (typeof data21 === 'string') {
+                                                    if (func1(data21) > 128) {
                                                       validate132.errors = [
                                                         {
                                                           instancePath:
                                                             instancePath +
                                                             '/' +
                                                             i0 +
-                                                            '/outputBody/contentBytes',
+                                                            '/outputBody/executionId',
                                                           schemaPath:
-                                                            '#/items/properties/outputBody/properties/contentBytes/type',
-                                                          keyword: 'type',
-                                                          params: { type: 'string' },
-                                                          message: 'must be string',
+                                                            '#/items/properties/outputBody/properties/executionId/maxLength',
+                                                          keyword: 'maxLength',
+                                                          params: { limit: 128 },
+                                                          message:
+                                                            'must NOT have more than 128 characters',
                                                         },
                                                       ];
                                                       return false;
-                                                    }
-                                                  }
-                                                  var valid5 = _errs50 === errors;
-                                                } else {
-                                                  var valid5 = true;
-                                                }
-                                                if (valid5) {
-                                                  if (data15.reasoningBytes !== undefined) {
-                                                    let data20 = data15.reasoningBytes;
-                                                    const _errs52 = errors;
-                                                    if (errors === _errs52) {
-                                                      if (typeof data20 === 'string') {
-                                                        if (!pattern9.test(data20)) {
+                                                    } else {
+                                                      if (func1(data21) < 1) {
+                                                        validate132.errors = [
+                                                          {
+                                                            instancePath:
+                                                              instancePath +
+                                                              '/' +
+                                                              i0 +
+                                                              '/outputBody/executionId',
+                                                            schemaPath:
+                                                              '#/items/properties/outputBody/properties/executionId/minLength',
+                                                            keyword: 'minLength',
+                                                            params: { limit: 1 },
+                                                            message:
+                                                              'must NOT have fewer than 1 characters',
+                                                          },
+                                                        ];
+                                                        return false;
+                                                      } else {
+                                                        if (!pattern4.test(data21)) {
                                                           validate132.errors = [
                                                             {
                                                               instancePath:
                                                                 instancePath +
                                                                 '/' +
                                                                 i0 +
-                                                                '/outputBody/reasoningBytes',
+                                                                '/outputBody/executionId',
                                                               schemaPath:
-                                                                '#/items/properties/outputBody/properties/reasoningBytes/pattern',
+                                                                '#/items/properties/outputBody/properties/executionId/pattern',
+                                                              keyword: 'pattern',
+                                                              params: {
+                                                                pattern: '^[A-Za-z0-9_-]+$',
+                                                              },
+                                                              message:
+                                                                'must match pattern "' +
+                                                                '^[A-Za-z0-9_-]+$' +
+                                                                '"',
+                                                            },
+                                                          ];
+                                                          return false;
+                                                        }
+                                                      }
+                                                    }
+                                                  } else {
+                                                    validate132.errors = [
+                                                      {
+                                                        instancePath:
+                                                          instancePath +
+                                                          '/' +
+                                                          i0 +
+                                                          '/outputBody/executionId',
+                                                        schemaPath:
+                                                          '#/items/properties/outputBody/properties/executionId/type',
+                                                        keyword: 'type',
+                                                        params: { type: 'string' },
+                                                        message: 'must be string',
+                                                      },
+                                                    ];
+                                                    return false;
+                                                  }
+                                                }
+                                                var valid6 = _errs55 === errors;
+                                              } else {
+                                                var valid6 = true;
+                                              }
+                                              if (valid6) {
+                                                if (data19.complete !== undefined) {
+                                                  const _errs57 = errors;
+                                                  if (typeof data19.complete !== 'boolean') {
+                                                    validate132.errors = [
+                                                      {
+                                                        instancePath:
+                                                          instancePath +
+                                                          '/' +
+                                                          i0 +
+                                                          '/outputBody/complete',
+                                                        schemaPath:
+                                                          '#/items/properties/outputBody/properties/complete/type',
+                                                        keyword: 'type',
+                                                        params: { type: 'boolean' },
+                                                        message: 'must be boolean',
+                                                      },
+                                                    ];
+                                                    return false;
+                                                  }
+                                                  var valid6 = _errs57 === errors;
+                                                } else {
+                                                  var valid6 = true;
+                                                }
+                                                if (valid6) {
+                                                  if (data19.contentBytes !== undefined) {
+                                                    let data23 = data19.contentBytes;
+                                                    const _errs59 = errors;
+                                                    if (errors === _errs59) {
+                                                      if (typeof data23 === 'string') {
+                                                        if (!pattern9.test(data23)) {
+                                                          validate132.errors = [
+                                                            {
+                                                              instancePath:
+                                                                instancePath +
+                                                                '/' +
+                                                                i0 +
+                                                                '/outputBody/contentBytes',
+                                                              schemaPath:
+                                                                '#/items/properties/outputBody/properties/contentBytes/pattern',
                                                               keyword: 'pattern',
                                                               params: {
                                                                 pattern: '^(0|[1-9][0-9]*)$',
@@ -133744,9 +134850,9 @@ function validate132(
                                                               instancePath +
                                                               '/' +
                                                               i0 +
-                                                              '/outputBody/reasoningBytes',
+                                                              '/outputBody/contentBytes',
                                                             schemaPath:
-                                                              '#/items/properties/outputBody/properties/reasoningBytes/type',
+                                                              '#/items/properties/outputBody/properties/contentBytes/type',
                                                             keyword: 'type',
                                                             params: { type: 'string' },
                                                             message: 'must be string',
@@ -133755,68 +134861,97 @@ function validate132(
                                                         return false;
                                                       }
                                                     }
-                                                    var valid5 = _errs52 === errors;
+                                                    var valid6 = _errs59 === errors;
                                                   } else {
-                                                    var valid5 = true;
+                                                    var valid6 = true;
                                                   }
-                                                  if (valid5) {
-                                                    if (data15.toolCallCount !== undefined) {
-                                                      let data21 = data15.toolCallCount;
-                                                      const _errs54 = errors;
-                                                      if (
-                                                        !(
-                                                          typeof data21 == 'number' &&
-                                                          !(data21 % 1) &&
-                                                          !isNaN(data21) &&
-                                                          isFinite(data21)
-                                                        )
-                                                      ) {
-                                                        validate132.errors = [
-                                                          {
-                                                            instancePath:
-                                                              instancePath +
-                                                              '/' +
-                                                              i0 +
-                                                              '/outputBody/toolCallCount',
-                                                            schemaPath:
-                                                              '#/items/properties/outputBody/properties/toolCallCount/type',
-                                                            keyword: 'type',
-                                                            params: { type: 'integer' },
-                                                            message: 'must be integer',
-                                                          },
-                                                        ];
-                                                        return false;
-                                                      }
-                                                      if (errors === _errs54) {
-                                                        if (
-                                                          typeof data21 == 'number' &&
-                                                          isFinite(data21)
-                                                        ) {
-                                                          if (
-                                                            data21 > 9007199254740991 ||
-                                                            isNaN(data21)
-                                                          ) {
+                                                  if (valid6) {
+                                                    if (data19.reasoningBytes !== undefined) {
+                                                      let data24 = data19.reasoningBytes;
+                                                      const _errs61 = errors;
+                                                      if (errors === _errs61) {
+                                                        if (typeof data24 === 'string') {
+                                                          if (!pattern9.test(data24)) {
                                                             validate132.errors = [
                                                               {
                                                                 instancePath:
                                                                   instancePath +
                                                                   '/' +
                                                                   i0 +
-                                                                  '/outputBody/toolCallCount',
+                                                                  '/outputBody/reasoningBytes',
                                                                 schemaPath:
-                                                                  '#/items/properties/outputBody/properties/toolCallCount/maximum',
-                                                                keyword: 'maximum',
+                                                                  '#/items/properties/outputBody/properties/reasoningBytes/pattern',
+                                                                keyword: 'pattern',
                                                                 params: {
-                                                                  comparison: '<=',
-                                                                  limit: 9007199254740991,
+                                                                  pattern: '^(0|[1-9][0-9]*)$',
                                                                 },
                                                                 message:
-                                                                  'must be <= 9007199254740991',
+                                                                  'must match pattern "' +
+                                                                  '^(0|[1-9][0-9]*)$' +
+                                                                  '"',
                                                               },
                                                             ];
                                                             return false;
-                                                          } else {
-                                                            if (data21 < 0 || isNaN(data21)) {
+                                                          }
+                                                        } else {
+                                                          validate132.errors = [
+                                                            {
+                                                              instancePath:
+                                                                instancePath +
+                                                                '/' +
+                                                                i0 +
+                                                                '/outputBody/reasoningBytes',
+                                                              schemaPath:
+                                                                '#/items/properties/outputBody/properties/reasoningBytes/type',
+                                                              keyword: 'type',
+                                                              params: { type: 'string' },
+                                                              message: 'must be string',
+                                                            },
+                                                          ];
+                                                          return false;
+                                                        }
+                                                      }
+                                                      var valid6 = _errs61 === errors;
+                                                    } else {
+                                                      var valid6 = true;
+                                                    }
+                                                    if (valid6) {
+                                                      if (data19.toolCallCount !== undefined) {
+                                                        let data25 = data19.toolCallCount;
+                                                        const _errs63 = errors;
+                                                        if (
+                                                          !(
+                                                            typeof data25 == 'number' &&
+                                                            !(data25 % 1) &&
+                                                            !isNaN(data25) &&
+                                                            isFinite(data25)
+                                                          )
+                                                        ) {
+                                                          validate132.errors = [
+                                                            {
+                                                              instancePath:
+                                                                instancePath +
+                                                                '/' +
+                                                                i0 +
+                                                                '/outputBody/toolCallCount',
+                                                              schemaPath:
+                                                                '#/items/properties/outputBody/properties/toolCallCount/type',
+                                                              keyword: 'type',
+                                                              params: { type: 'integer' },
+                                                              message: 'must be integer',
+                                                            },
+                                                          ];
+                                                          return false;
+                                                        }
+                                                        if (errors === _errs63) {
+                                                          if (
+                                                            typeof data25 == 'number' &&
+                                                            isFinite(data25)
+                                                          ) {
+                                                            if (
+                                                              data25 > 9007199254740991 ||
+                                                              isNaN(data25)
+                                                            ) {
                                                               validate132.errors = [
                                                                 {
                                                                   instancePath:
@@ -133825,67 +134960,90 @@ function validate132(
                                                                     i0 +
                                                                     '/outputBody/toolCallCount',
                                                                   schemaPath:
-                                                                    '#/items/properties/outputBody/properties/toolCallCount/minimum',
-                                                                  keyword: 'minimum',
+                                                                    '#/items/properties/outputBody/properties/toolCallCount/maximum',
+                                                                  keyword: 'maximum',
                                                                   params: {
-                                                                    comparison: '>=',
-                                                                    limit: 0,
+                                                                    comparison: '<=',
+                                                                    limit: 9007199254740991,
                                                                   },
-                                                                  message: 'must be >= 0',
+                                                                  message:
+                                                                    'must be <= 9007199254740991',
                                                                 },
                                                               ];
                                                               return false;
+                                                            } else {
+                                                              if (data25 < 0 || isNaN(data25)) {
+                                                                validate132.errors = [
+                                                                  {
+                                                                    instancePath:
+                                                                      instancePath +
+                                                                      '/' +
+                                                                      i0 +
+                                                                      '/outputBody/toolCallCount',
+                                                                    schemaPath:
+                                                                      '#/items/properties/outputBody/properties/toolCallCount/minimum',
+                                                                    keyword: 'minimum',
+                                                                    params: {
+                                                                      comparison: '>=',
+                                                                      limit: 0,
+                                                                    },
+                                                                    message: 'must be >= 0',
+                                                                  },
+                                                                ];
+                                                                return false;
+                                                              }
                                                             }
                                                           }
                                                         }
-                                                      }
-                                                      var valid5 = _errs54 === errors;
-                                                    } else {
-                                                      var valid5 = true;
-                                                    }
-                                                    if (valid5) {
-                                                      if (data15.readAvailability !== undefined) {
-                                                        let data22 = data15.readAvailability;
-                                                        const _errs56 = errors;
-                                                        if (typeof data22 !== 'string') {
-                                                          validate132.errors = [
-                                                            {
-                                                              instancePath:
-                                                                instancePath +
-                                                                '/' +
-                                                                i0 +
-                                                                '/outputBody/readAvailability',
-                                                              schemaPath:
-                                                                '#/items/properties/outputBody/properties/readAvailability/type',
-                                                              keyword: 'type',
-                                                              params: { type: 'string' },
-                                                              message: 'must be string',
-                                                            },
-                                                          ];
-                                                          return false;
-                                                        }
-                                                        if (data22 !== 'unsupported') {
-                                                          validate132.errors = [
-                                                            {
-                                                              instancePath:
-                                                                instancePath +
-                                                                '/' +
-                                                                i0 +
-                                                                '/outputBody/readAvailability',
-                                                              schemaPath:
-                                                                '#/items/properties/outputBody/properties/readAvailability/const',
-                                                              keyword: 'const',
-                                                              params: {
-                                                                allowedValue: 'unsupported',
-                                                              },
-                                                              message: 'must be equal to constant',
-                                                            },
-                                                          ];
-                                                          return false;
-                                                        }
-                                                        var valid5 = _errs56 === errors;
+                                                        var valid6 = _errs63 === errors;
                                                       } else {
-                                                        var valid5 = true;
+                                                        var valid6 = true;
+                                                      }
+                                                      if (valid6) {
+                                                        if (data19.readAvailability !== undefined) {
+                                                          let data26 = data19.readAvailability;
+                                                          const _errs65 = errors;
+                                                          if (typeof data26 !== 'string') {
+                                                            validate132.errors = [
+                                                              {
+                                                                instancePath:
+                                                                  instancePath +
+                                                                  '/' +
+                                                                  i0 +
+                                                                  '/outputBody/readAvailability',
+                                                                schemaPath:
+                                                                  '#/items/properties/outputBody/properties/readAvailability/type',
+                                                                keyword: 'type',
+                                                                params: { type: 'string' },
+                                                                message: 'must be string',
+                                                              },
+                                                            ];
+                                                            return false;
+                                                          }
+                                                          if (data26 !== 'unsupported') {
+                                                            validate132.errors = [
+                                                              {
+                                                                instancePath:
+                                                                  instancePath +
+                                                                  '/' +
+                                                                  i0 +
+                                                                  '/outputBody/readAvailability',
+                                                                schemaPath:
+                                                                  '#/items/properties/outputBody/properties/readAvailability/const',
+                                                                keyword: 'const',
+                                                                params: {
+                                                                  allowedValue: 'unsupported',
+                                                                },
+                                                                message:
+                                                                  'must be equal to constant',
+                                                              },
+                                                            ];
+                                                            return false;
+                                                          }
+                                                          var valid6 = _errs65 === errors;
+                                                        } else {
+                                                          var valid6 = true;
+                                                        }
                                                       }
                                                     }
                                                   }
@@ -133893,95 +135051,75 @@ function validate132(
                                               }
                                             }
                                           }
+                                        } else {
+                                          validate132.errors = [
+                                            {
+                                              instancePath: instancePath + '/' + i0 + '/outputBody',
+                                              schemaPath: '#/items/properties/outputBody/type',
+                                              keyword: 'type',
+                                              params: { type: 'object' },
+                                              message: 'must be object',
+                                            },
+                                          ];
+                                          return false;
                                         }
-                                      } else {
-                                        validate132.errors = [
-                                          {
-                                            instancePath: instancePath + '/' + i0 + '/outputBody',
-                                            schemaPath: '#/items/properties/outputBody/type',
-                                            keyword: 'type',
-                                            params: { type: 'object' },
-                                            message: 'must be object',
-                                          },
-                                        ];
-                                        return false;
                                       }
+                                      var valid1 = _errs50 === errors;
+                                    } else {
+                                      var valid1 = true;
                                     }
-                                    var valid1 = _errs41 === errors;
-                                  } else {
-                                    var valid1 = true;
-                                  }
-                                  if (valid1) {
-                                    if (data0.toolCalls !== undefined) {
-                                      let data23 = data0.toolCalls;
-                                      const _errs58 = errors;
-                                      if (errors === _errs58) {
-                                        if (Array.isArray(data23)) {
-                                          var valid6 = true;
-                                          const len1 = data23.length;
-                                          for (let i1 = 0; i1 < len1; i1++) {
-                                            let data24 = data23[i1];
-                                            const _errs60 = errors;
-                                            if (errors === _errs60) {
-                                              if (
-                                                data24 &&
-                                                typeof data24 == 'object' &&
-                                                !Array.isArray(data24)
-                                              ) {
-                                                let missing3;
+                                    if (valid1) {
+                                      if (data0.toolCalls !== undefined) {
+                                        let data27 = data0.toolCalls;
+                                        const _errs67 = errors;
+                                        if (errors === _errs67) {
+                                          if (Array.isArray(data27)) {
+                                            var valid7 = true;
+                                            const len1 = data27.length;
+                                            for (let i1 = 0; i1 < len1; i1++) {
+                                              let data28 = data27[i1];
+                                              const _errs69 = errors;
+                                              if (errors === _errs69) {
                                                 if (
-                                                  (data24.id === undefined && (missing3 = 'id')) ||
-                                                  (data24.name === undefined &&
-                                                    (missing3 = 'name')) ||
-                                                  (data24.arguments === undefined &&
-                                                    (missing3 = 'arguments'))
+                                                  data28 &&
+                                                  typeof data28 == 'object' &&
+                                                  !Array.isArray(data28)
                                                 ) {
-                                                  validate132.errors = [
-                                                    {
-                                                      instancePath:
-                                                        instancePath +
-                                                        '/' +
-                                                        i0 +
-                                                        '/toolCalls/' +
-                                                        i1,
-                                                      schemaPath:
-                                                        '#/items/properties/toolCalls/items/required',
-                                                      keyword: 'required',
-                                                      params: { missingProperty: missing3 },
-                                                      message:
-                                                        "must have required property '" +
-                                                        missing3 +
-                                                        "'",
-                                                    },
-                                                  ];
-                                                  return false;
-                                                } else {
-                                                  if (data24.id !== undefined) {
-                                                    let data25 = data24.id;
-                                                    const _errs63 = errors;
-                                                    if (errors === _errs63) {
-                                                      if (typeof data25 === 'string') {
-                                                        if (func1(data25) > 128) {
-                                                          validate132.errors = [
-                                                            {
-                                                              instancePath:
-                                                                instancePath +
-                                                                '/' +
-                                                                i0 +
-                                                                '/toolCalls/' +
-                                                                i1 +
-                                                                '/id',
-                                                              schemaPath:
-                                                                '#/items/properties/toolCalls/items/properties/id/maxLength',
-                                                              keyword: 'maxLength',
-                                                              params: { limit: 128 },
-                                                              message:
-                                                                'must NOT have more than 128 characters',
-                                                            },
-                                                          ];
-                                                          return false;
-                                                        } else {
-                                                          if (func1(data25) < 1) {
+                                                  let missing4;
+                                                  if (
+                                                    (data28.id === undefined &&
+                                                      (missing4 = 'id')) ||
+                                                    (data28.name === undefined &&
+                                                      (missing4 = 'name')) ||
+                                                    (data28.arguments === undefined &&
+                                                      (missing4 = 'arguments'))
+                                                  ) {
+                                                    validate132.errors = [
+                                                      {
+                                                        instancePath:
+                                                          instancePath +
+                                                          '/' +
+                                                          i0 +
+                                                          '/toolCalls/' +
+                                                          i1,
+                                                        schemaPath:
+                                                          '#/items/properties/toolCalls/items/required',
+                                                        keyword: 'required',
+                                                        params: { missingProperty: missing4 },
+                                                        message:
+                                                          "must have required property '" +
+                                                          missing4 +
+                                                          "'",
+                                                      },
+                                                    ];
+                                                    return false;
+                                                  } else {
+                                                    if (data28.id !== undefined) {
+                                                      let data29 = data28.id;
+                                                      const _errs72 = errors;
+                                                      if (errors === _errs72) {
+                                                        if (typeof data29 === 'string') {
+                                                          if (func1(data29) > 128) {
                                                             validate132.errors = [
                                                               {
                                                                 instancePath:
@@ -133992,16 +135130,16 @@ function validate132(
                                                                   i1 +
                                                                   '/id',
                                                                 schemaPath:
-                                                                  '#/items/properties/toolCalls/items/properties/id/minLength',
-                                                                keyword: 'minLength',
-                                                                params: { limit: 1 },
+                                                                  '#/items/properties/toolCalls/items/properties/id/maxLength',
+                                                                keyword: 'maxLength',
+                                                                params: { limit: 128 },
                                                                 message:
-                                                                  'must NOT have fewer than 1 characters',
+                                                                  'must NOT have more than 128 characters',
                                                               },
                                                             ];
                                                             return false;
                                                           } else {
-                                                            if (!pattern4.test(data25)) {
+                                                            if (func1(data29) < 1) {
                                                               validate132.errors = [
                                                                 {
                                                                   instancePath:
@@ -134012,75 +135150,42 @@ function validate132(
                                                                     i1 +
                                                                     '/id',
                                                                   schemaPath:
-                                                                    '#/items/properties/toolCalls/items/properties/id/pattern',
-                                                                  keyword: 'pattern',
-                                                                  params: {
-                                                                    pattern: '^[A-Za-z0-9_-]+$',
-                                                                  },
+                                                                    '#/items/properties/toolCalls/items/properties/id/minLength',
+                                                                  keyword: 'minLength',
+                                                                  params: { limit: 1 },
                                                                   message:
-                                                                    'must match pattern "' +
-                                                                    '^[A-Za-z0-9_-]+$' +
-                                                                    '"',
+                                                                    'must NOT have fewer than 1 characters',
                                                                 },
                                                               ];
                                                               return false;
+                                                            } else {
+                                                              if (!pattern4.test(data29)) {
+                                                                validate132.errors = [
+                                                                  {
+                                                                    instancePath:
+                                                                      instancePath +
+                                                                      '/' +
+                                                                      i0 +
+                                                                      '/toolCalls/' +
+                                                                      i1 +
+                                                                      '/id',
+                                                                    schemaPath:
+                                                                      '#/items/properties/toolCalls/items/properties/id/pattern',
+                                                                    keyword: 'pattern',
+                                                                    params: {
+                                                                      pattern: '^[A-Za-z0-9_-]+$',
+                                                                    },
+                                                                    message:
+                                                                      'must match pattern "' +
+                                                                      '^[A-Za-z0-9_-]+$' +
+                                                                      '"',
+                                                                  },
+                                                                ];
+                                                                return false;
+                                                              }
                                                             }
                                                           }
-                                                        }
-                                                      } else {
-                                                        validate132.errors = [
-                                                          {
-                                                            instancePath:
-                                                              instancePath +
-                                                              '/' +
-                                                              i0 +
-                                                              '/toolCalls/' +
-                                                              i1 +
-                                                              '/id',
-                                                            schemaPath:
-                                                              '#/items/properties/toolCalls/items/properties/id/type',
-                                                            keyword: 'type',
-                                                            params: { type: 'string' },
-                                                            message: 'must be string',
-                                                          },
-                                                        ];
-                                                        return false;
-                                                      }
-                                                    }
-                                                    var valid7 = _errs63 === errors;
-                                                  } else {
-                                                    var valid7 = true;
-                                                  }
-                                                  if (valid7) {
-                                                    if (data24.name !== undefined) {
-                                                      const _errs65 = errors;
-                                                      if (typeof data24.name !== 'string') {
-                                                        validate132.errors = [
-                                                          {
-                                                            instancePath:
-                                                              instancePath +
-                                                              '/' +
-                                                              i0 +
-                                                              '/toolCalls/' +
-                                                              i1 +
-                                                              '/name',
-                                                            schemaPath:
-                                                              '#/items/properties/toolCalls/items/properties/name/type',
-                                                            keyword: 'type',
-                                                            params: { type: 'string' },
-                                                            message: 'must be string',
-                                                          },
-                                                        ];
-                                                        return false;
-                                                      }
-                                                      var valid7 = _errs65 === errors;
-                                                    } else {
-                                                      var valid7 = true;
-                                                    }
-                                                    if (valid7) {
-                                                      if (data24.arguments !== undefined) {
-                                                        const _errs67 = errors;
-                                                        if (typeof data24.arguments !== 'string') {
+                                                        } else {
                                                           validate132.errors = [
                                                             {
                                                               instancePath:
@@ -134089,9 +135194,9 @@ function validate132(
                                                                 i0 +
                                                                 '/toolCalls/' +
                                                                 i1 +
-                                                                '/arguments',
+                                                                '/id',
                                                               schemaPath:
-                                                                '#/items/properties/toolCalls/items/properties/arguments/type',
+                                                                '#/items/properties/toolCalls/items/properties/id/type',
                                                               keyword: 'type',
                                                               params: { type: 'string' },
                                                               message: 'must be string',
@@ -134099,145 +135204,188 @@ function validate132(
                                                           ];
                                                           return false;
                                                         }
-                                                        var valid7 = _errs67 === errors;
+                                                      }
+                                                      var valid8 = _errs72 === errors;
+                                                    } else {
+                                                      var valid8 = true;
+                                                    }
+                                                    if (valid8) {
+                                                      if (data28.name !== undefined) {
+                                                        const _errs74 = errors;
+                                                        if (typeof data28.name !== 'string') {
+                                                          validate132.errors = [
+                                                            {
+                                                              instancePath:
+                                                                instancePath +
+                                                                '/' +
+                                                                i0 +
+                                                                '/toolCalls/' +
+                                                                i1 +
+                                                                '/name',
+                                                              schemaPath:
+                                                                '#/items/properties/toolCalls/items/properties/name/type',
+                                                              keyword: 'type',
+                                                              params: { type: 'string' },
+                                                              message: 'must be string',
+                                                            },
+                                                          ];
+                                                          return false;
+                                                        }
+                                                        var valid8 = _errs74 === errors;
                                                       } else {
-                                                        var valid7 = true;
+                                                        var valid8 = true;
+                                                      }
+                                                      if (valid8) {
+                                                        if (data28.arguments !== undefined) {
+                                                          const _errs76 = errors;
+                                                          if (
+                                                            typeof data28.arguments !== 'string'
+                                                          ) {
+                                                            validate132.errors = [
+                                                              {
+                                                                instancePath:
+                                                                  instancePath +
+                                                                  '/' +
+                                                                  i0 +
+                                                                  '/toolCalls/' +
+                                                                  i1 +
+                                                                  '/arguments',
+                                                                schemaPath:
+                                                                  '#/items/properties/toolCalls/items/properties/arguments/type',
+                                                                keyword: 'type',
+                                                                params: { type: 'string' },
+                                                                message: 'must be string',
+                                                              },
+                                                            ];
+                                                            return false;
+                                                          }
+                                                          var valid8 = _errs76 === errors;
+                                                        } else {
+                                                          var valid8 = true;
+                                                        }
                                                       }
                                                     }
+                                                  }
+                                                } else {
+                                                  validate132.errors = [
+                                                    {
+                                                      instancePath:
+                                                        instancePath +
+                                                        '/' +
+                                                        i0 +
+                                                        '/toolCalls/' +
+                                                        i1,
+                                                      schemaPath:
+                                                        '#/items/properties/toolCalls/items/type',
+                                                      keyword: 'type',
+                                                      params: { type: 'object' },
+                                                      message: 'must be object',
+                                                    },
+                                                  ];
+                                                  return false;
+                                                }
+                                              }
+                                              var valid7 = _errs69 === errors;
+                                              if (!valid7) {
+                                                break;
+                                              }
+                                            }
+                                          } else {
+                                            validate132.errors = [
+                                              {
+                                                instancePath:
+                                                  instancePath + '/' + i0 + '/toolCalls',
+                                                schemaPath: '#/items/properties/toolCalls/type',
+                                                keyword: 'type',
+                                                params: { type: 'array' },
+                                                message: 'must be array',
+                                              },
+                                            ];
+                                            return false;
+                                          }
+                                        }
+                                        var valid1 = _errs67 === errors;
+                                      } else {
+                                        var valid1 = true;
+                                      }
+                                      if (valid1) {
+                                        if (data0.toolCallId !== undefined) {
+                                          const _errs78 = errors;
+                                          if (typeof data0.toolCallId !== 'string') {
+                                            validate132.errors = [
+                                              {
+                                                instancePath:
+                                                  instancePath + '/' + i0 + '/toolCallId',
+                                                schemaPath: '#/items/properties/toolCallId/type',
+                                                keyword: 'type',
+                                                params: { type: 'string' },
+                                                message: 'must be string',
+                                              },
+                                            ];
+                                            return false;
+                                          }
+                                          var valid1 = _errs78 === errors;
+                                        } else {
+                                          var valid1 = true;
+                                        }
+                                        if (valid1) {
+                                          if (data0.sourceIds !== undefined) {
+                                            let data33 = data0.sourceIds;
+                                            const _errs80 = errors;
+                                            if (errors === _errs80) {
+                                              if (Array.isArray(data33)) {
+                                                var valid9 = true;
+                                                const len2 = data33.length;
+                                                for (let i2 = 0; i2 < len2; i2++) {
+                                                  const _errs82 = errors;
+                                                  if (typeof data33[i2] !== 'string') {
+                                                    validate132.errors = [
+                                                      {
+                                                        instancePath:
+                                                          instancePath +
+                                                          '/' +
+                                                          i0 +
+                                                          '/sourceIds/' +
+                                                          i2,
+                                                        schemaPath:
+                                                          '#/items/properties/sourceIds/items/type',
+                                                        keyword: 'type',
+                                                        params: { type: 'string' },
+                                                        message: 'must be string',
+                                                      },
+                                                    ];
+                                                    return false;
+                                                  }
+                                                  var valid9 = _errs82 === errors;
+                                                  if (!valid9) {
+                                                    break;
                                                   }
                                                 }
                                               } else {
                                                 validate132.errors = [
                                                   {
                                                     instancePath:
-                                                      instancePath + '/' + i0 + '/toolCalls/' + i1,
-                                                    schemaPath:
-                                                      '#/items/properties/toolCalls/items/type',
+                                                      instancePath + '/' + i0 + '/sourceIds',
+                                                    schemaPath: '#/items/properties/sourceIds/type',
                                                     keyword: 'type',
-                                                    params: { type: 'object' },
-                                                    message: 'must be object',
+                                                    params: { type: 'array' },
+                                                    message: 'must be array',
                                                   },
                                                 ];
                                                 return false;
                                               }
                                             }
-                                            var valid6 = _errs60 === errors;
-                                            if (!valid6) {
-                                              break;
-                                            }
+                                            var valid1 = _errs80 === errors;
+                                          } else {
+                                            var valid1 = true;
                                           }
-                                        } else {
-                                          validate132.errors = [
-                                            {
-                                              instancePath: instancePath + '/' + i0 + '/toolCalls',
-                                              schemaPath: '#/items/properties/toolCalls/type',
-                                              keyword: 'type',
-                                              params: { type: 'array' },
-                                              message: 'must be array',
-                                            },
-                                          ];
-                                          return false;
-                                        }
-                                      }
-                                      var valid1 = _errs58 === errors;
-                                    } else {
-                                      var valid1 = true;
-                                    }
-                                    if (valid1) {
-                                      if (data0.toolCallId !== undefined) {
-                                        const _errs69 = errors;
-                                        if (typeof data0.toolCallId !== 'string') {
-                                          validate132.errors = [
-                                            {
-                                              instancePath: instancePath + '/' + i0 + '/toolCallId',
-                                              schemaPath: '#/items/properties/toolCallId/type',
-                                              keyword: 'type',
-                                              params: { type: 'string' },
-                                              message: 'must be string',
-                                            },
-                                          ];
-                                          return false;
-                                        }
-                                        var valid1 = _errs69 === errors;
-                                      } else {
-                                        var valid1 = true;
-                                      }
-                                      if (valid1) {
-                                        if (data0.sourceIds !== undefined) {
-                                          let data29 = data0.sourceIds;
-                                          const _errs71 = errors;
-                                          if (errors === _errs71) {
-                                            if (Array.isArray(data29)) {
-                                              var valid8 = true;
-                                              const len2 = data29.length;
-                                              for (let i2 = 0; i2 < len2; i2++) {
-                                                const _errs73 = errors;
-                                                if (typeof data29[i2] !== 'string') {
-                                                  validate132.errors = [
-                                                    {
-                                                      instancePath:
-                                                        instancePath +
-                                                        '/' +
-                                                        i0 +
-                                                        '/sourceIds/' +
-                                                        i2,
-                                                      schemaPath:
-                                                        '#/items/properties/sourceIds/items/type',
-                                                      keyword: 'type',
-                                                      params: { type: 'string' },
-                                                      message: 'must be string',
-                                                    },
-                                                  ];
-                                                  return false;
-                                                }
-                                                var valid8 = _errs73 === errors;
-                                                if (!valid8) {
-                                                  break;
-                                                }
-                                              }
-                                            } else {
-                                              validate132.errors = [
-                                                {
-                                                  instancePath:
-                                                    instancePath + '/' + i0 + '/sourceIds',
-                                                  schemaPath: '#/items/properties/sourceIds/type',
-                                                  keyword: 'type',
-                                                  params: { type: 'array' },
-                                                  message: 'must be array',
-                                                },
-                                              ];
-                                              return false;
-                                            }
-                                          }
-                                          var valid1 = _errs71 === errors;
-                                        } else {
-                                          var valid1 = true;
-                                        }
-                                        if (valid1) {
-                                          if (data0.originCommandId !== undefined) {
-                                            let data31 = data0.originCommandId;
-                                            const _errs75 = errors;
-                                            if (errors === _errs75) {
-                                              if (typeof data31 === 'string') {
-                                                if (func1(data31) > 128) {
-                                                  validate132.errors = [
-                                                    {
-                                                      instancePath:
-                                                        instancePath +
-                                                        '/' +
-                                                        i0 +
-                                                        '/originCommandId',
-                                                      schemaPath:
-                                                        '#/items/properties/originCommandId/maxLength',
-                                                      keyword: 'maxLength',
-                                                      params: { limit: 128 },
-                                                      message:
-                                                        'must NOT have more than 128 characters',
-                                                    },
-                                                  ];
-                                                  return false;
-                                                } else {
-                                                  if (func1(data31) < 1) {
+                                          if (valid1) {
+                                            if (data0.originCommandId !== undefined) {
+                                              let data35 = data0.originCommandId;
+                                              const _errs84 = errors;
+                                              if (errors === _errs84) {
+                                                if (typeof data35 === 'string') {
+                                                  if (func1(data35) > 128) {
                                                     validate132.errors = [
                                                       {
                                                         instancePath:
@@ -134246,72 +135394,7 @@ function validate132(
                                                           i0 +
                                                           '/originCommandId',
                                                         schemaPath:
-                                                          '#/items/properties/originCommandId/minLength',
-                                                        keyword: 'minLength',
-                                                        params: { limit: 1 },
-                                                        message:
-                                                          'must NOT have fewer than 1 characters',
-                                                      },
-                                                    ];
-                                                    return false;
-                                                  } else {
-                                                    if (!pattern4.test(data31)) {
-                                                      validate132.errors = [
-                                                        {
-                                                          instancePath:
-                                                            instancePath +
-                                                            '/' +
-                                                            i0 +
-                                                            '/originCommandId',
-                                                          schemaPath:
-                                                            '#/items/properties/originCommandId/pattern',
-                                                          keyword: 'pattern',
-                                                          params: { pattern: '^[A-Za-z0-9_-]+$' },
-                                                          message:
-                                                            'must match pattern "' +
-                                                            '^[A-Za-z0-9_-]+$' +
-                                                            '"',
-                                                        },
-                                                      ];
-                                                      return false;
-                                                    }
-                                                  }
-                                                }
-                                              } else {
-                                                validate132.errors = [
-                                                  {
-                                                    instancePath:
-                                                      instancePath + '/' + i0 + '/originCommandId',
-                                                    schemaPath:
-                                                      '#/items/properties/originCommandId/type',
-                                                    keyword: 'type',
-                                                    params: { type: 'string' },
-                                                    message: 'must be string',
-                                                  },
-                                                ];
-                                                return false;
-                                              }
-                                            }
-                                            var valid1 = _errs75 === errors;
-                                          } else {
-                                            var valid1 = true;
-                                          }
-                                          if (valid1) {
-                                            if (data0.contextSelectionId !== undefined) {
-                                              let data32 = data0.contextSelectionId;
-                                              const _errs77 = errors;
-                                              if (errors === _errs77) {
-                                                if (typeof data32 === 'string') {
-                                                  if (func1(data32) > 128) {
-                                                    validate132.errors = [
-                                                      {
-                                                        instancePath:
-                                                          instancePath +
-                                                          '/' +
-                                                          i0 +
-                                                          '/contextSelectionId',
-                                                        schemaPath:
-                                                          '#/items/properties/contextSelectionId/maxLength',
+                                                          '#/items/properties/originCommandId/maxLength',
                                                         keyword: 'maxLength',
                                                         params: { limit: 128 },
                                                         message:
@@ -134320,16 +135403,16 @@ function validate132(
                                                     ];
                                                     return false;
                                                   } else {
-                                                    if (func1(data32) < 1) {
+                                                    if (func1(data35) < 1) {
                                                       validate132.errors = [
                                                         {
                                                           instancePath:
                                                             instancePath +
                                                             '/' +
                                                             i0 +
-                                                            '/contextSelectionId',
+                                                            '/originCommandId',
                                                           schemaPath:
-                                                            '#/items/properties/contextSelectionId/minLength',
+                                                            '#/items/properties/originCommandId/minLength',
                                                           keyword: 'minLength',
                                                           params: { limit: 1 },
                                                           message:
@@ -134338,16 +135421,16 @@ function validate132(
                                                       ];
                                                       return false;
                                                     } else {
-                                                      if (!pattern4.test(data32)) {
+                                                      if (!pattern4.test(data35)) {
                                                         validate132.errors = [
                                                           {
                                                             instancePath:
                                                               instancePath +
                                                               '/' +
                                                               i0 +
-                                                              '/contextSelectionId',
+                                                              '/originCommandId',
                                                             schemaPath:
-                                                              '#/items/properties/contextSelectionId/pattern',
+                                                              '#/items/properties/originCommandId/pattern',
                                                             keyword: 'pattern',
                                                             params: { pattern: '^[A-Za-z0-9_-]+$' },
                                                             message:
@@ -134367,9 +135450,9 @@ function validate132(
                                                         instancePath +
                                                         '/' +
                                                         i0 +
-                                                        '/contextSelectionId',
+                                                        '/originCommandId',
                                                       schemaPath:
-                                                        '#/items/properties/contextSelectionId/type',
+                                                        '#/items/properties/originCommandId/type',
                                                       keyword: 'type',
                                                       params: { type: 'string' },
                                                       message: 'must be string',
@@ -134378,55 +135461,145 @@ function validate132(
                                                   return false;
                                                 }
                                               }
-                                              var valid1 = _errs77 === errors;
+                                              var valid1 = _errs84 === errors;
                                             } else {
                                               var valid1 = true;
                                             }
                                             if (valid1) {
-                                              if (data0.inputKind !== undefined) {
-                                                let data33 = data0.inputKind;
-                                                const _errs79 = errors;
-                                                if (typeof data33 !== 'string') {
-                                                  validate132.errors = [
-                                                    {
-                                                      instancePath:
-                                                        instancePath + '/' + i0 + '/inputKind',
-                                                      schemaPath:
-                                                        '#/items/properties/inputKind/type',
-                                                      keyword: 'type',
-                                                      params: { type: 'string' },
-                                                      message: 'must be string',
-                                                    },
-                                                  ];
-                                                  return false;
-                                                }
-                                                if (
-                                                  !(
-                                                    data33 === 'input.steer' ||
-                                                    data33 === 'input.follow_up' ||
-                                                    data33 === 'result.include'
-                                                  )
-                                                ) {
-                                                  validate132.errors = [
-                                                    {
-                                                      instancePath:
-                                                        instancePath + '/' + i0 + '/inputKind',
-                                                      schemaPath:
-                                                        '#/items/properties/inputKind/enum',
-                                                      keyword: 'enum',
-                                                      params: {
-                                                        allowedValues:
-                                                          schema110.items.properties.inputKind.enum,
+                                              if (data0.contextSelectionId !== undefined) {
+                                                let data36 = data0.contextSelectionId;
+                                                const _errs86 = errors;
+                                                if (errors === _errs86) {
+                                                  if (typeof data36 === 'string') {
+                                                    if (func1(data36) > 128) {
+                                                      validate132.errors = [
+                                                        {
+                                                          instancePath:
+                                                            instancePath +
+                                                            '/' +
+                                                            i0 +
+                                                            '/contextSelectionId',
+                                                          schemaPath:
+                                                            '#/items/properties/contextSelectionId/maxLength',
+                                                          keyword: 'maxLength',
+                                                          params: { limit: 128 },
+                                                          message:
+                                                            'must NOT have more than 128 characters',
+                                                        },
+                                                      ];
+                                                      return false;
+                                                    } else {
+                                                      if (func1(data36) < 1) {
+                                                        validate132.errors = [
+                                                          {
+                                                            instancePath:
+                                                              instancePath +
+                                                              '/' +
+                                                              i0 +
+                                                              '/contextSelectionId',
+                                                            schemaPath:
+                                                              '#/items/properties/contextSelectionId/minLength',
+                                                            keyword: 'minLength',
+                                                            params: { limit: 1 },
+                                                            message:
+                                                              'must NOT have fewer than 1 characters',
+                                                          },
+                                                        ];
+                                                        return false;
+                                                      } else {
+                                                        if (!pattern4.test(data36)) {
+                                                          validate132.errors = [
+                                                            {
+                                                              instancePath:
+                                                                instancePath +
+                                                                '/' +
+                                                                i0 +
+                                                                '/contextSelectionId',
+                                                              schemaPath:
+                                                                '#/items/properties/contextSelectionId/pattern',
+                                                              keyword: 'pattern',
+                                                              params: {
+                                                                pattern: '^[A-Za-z0-9_-]+$',
+                                                              },
+                                                              message:
+                                                                'must match pattern "' +
+                                                                '^[A-Za-z0-9_-]+$' +
+                                                                '"',
+                                                            },
+                                                          ];
+                                                          return false;
+                                                        }
+                                                      }
+                                                    }
+                                                  } else {
+                                                    validate132.errors = [
+                                                      {
+                                                        instancePath:
+                                                          instancePath +
+                                                          '/' +
+                                                          i0 +
+                                                          '/contextSelectionId',
+                                                        schemaPath:
+                                                          '#/items/properties/contextSelectionId/type',
+                                                        keyword: 'type',
+                                                        params: { type: 'string' },
+                                                        message: 'must be string',
                                                       },
-                                                      message:
-                                                        'must be equal to one of the allowed values',
-                                                    },
-                                                  ];
-                                                  return false;
+                                                    ];
+                                                    return false;
+                                                  }
                                                 }
-                                                var valid1 = _errs79 === errors;
+                                                var valid1 = _errs86 === errors;
                                               } else {
                                                 var valid1 = true;
+                                              }
+                                              if (valid1) {
+                                                if (data0.inputKind !== undefined) {
+                                                  let data37 = data0.inputKind;
+                                                  const _errs88 = errors;
+                                                  if (typeof data37 !== 'string') {
+                                                    validate132.errors = [
+                                                      {
+                                                        instancePath:
+                                                          instancePath + '/' + i0 + '/inputKind',
+                                                        schemaPath:
+                                                          '#/items/properties/inputKind/type',
+                                                        keyword: 'type',
+                                                        params: { type: 'string' },
+                                                        message: 'must be string',
+                                                      },
+                                                    ];
+                                                    return false;
+                                                  }
+                                                  if (
+                                                    !(
+                                                      data37 === 'input.steer' ||
+                                                      data37 === 'input.follow_up' ||
+                                                      data37 === 'result.include'
+                                                    )
+                                                  ) {
+                                                    validate132.errors = [
+                                                      {
+                                                        instancePath:
+                                                          instancePath + '/' + i0 + '/inputKind',
+                                                        schemaPath:
+                                                          '#/items/properties/inputKind/enum',
+                                                        keyword: 'enum',
+                                                        params: {
+                                                          allowedValues:
+                                                            schema110.items.properties.inputKind
+                                                              .enum,
+                                                        },
+                                                        message:
+                                                          'must be equal to one of the allowed values',
+                                                      },
+                                                    ];
+                                                    return false;
+                                                  }
+                                                  var valid1 = _errs88 === errors;
+                                                } else {
+                                                  var valid1 = true;
+                                                }
                                               }
                                             }
                                           }
@@ -144302,7 +145475,7 @@ function validate162(
 }
 validate162.evaluated = { props: true, dynamicProps: false, dynamicItems: false };
 var request_ConfigurationPatchRequest = validate163;
-var pattern874 = new RegExp(
+var pattern879 = new RegExp(
   '^(?!(?:__proto__|constructor|prototype)$)[^\\u0000-\\u001f\\u007f]+$',
   'u',
 );
@@ -145052,7 +146225,7 @@ function validate163(
                                                             }
                                                             errors++;
                                                           } else {
-                                                            if (!pattern874.test(data8)) {
+                                                            if (!pattern879.test(data8)) {
                                                               const err8 = {
                                                                 instancePath:
                                                                   instancePath +
@@ -145478,7 +146651,7 @@ function validate163(
                                                             }
                                                             errors++;
                                                           } else {
-                                                            if (!pattern874.test(data12)) {
+                                                            if (!pattern879.test(data12)) {
                                                               const err24 = {
                                                                 instancePath:
                                                                   instancePath +

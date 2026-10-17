@@ -54,6 +54,7 @@ import { bodyReference, jsonBody, persistedModelRequest, utf8Body } from './mode
 import { assembleModelContext, modelHistory } from './model-context';
 import { modelOutputReference, readModelOutput } from './model-output';
 import { type ModelInputMetadata, modelInputMetadata } from './model-snapshot';
+import { readSourceRequestJournal, sourceRequestJournalNode } from './source-request-journal';
 import type {
   AcceptCommandInput,
   AuthorizationReviewIdentity,
@@ -63,6 +64,7 @@ import type {
   ReadAuthorizationReviewInput,
   Store,
 } from './storage/port';
+import { isStorageTransactionUnconfirmed } from './storage/transaction-state';
 import {
   AgentError,
   type ChildConfiguration,
@@ -314,6 +316,7 @@ type RunExecutionCheckpoint = {
   modelRequest?: ModelRequest;
   modelSource?: Record<string, Json>;
   sourceRequests: readonly SourceRequest[];
+  sourceRequestJournal?: import('./model-body').ModelBodyReference | null;
   initializationState: 'unstarted' | 'completed';
 };
 
@@ -423,6 +426,7 @@ export class AgentRuntime {
     {
       runId: string;
       originStoreId: string;
+      executionId?: string;
       phase: 'preparing' | 'summarizing' | 'validating';
     }
   >();
@@ -488,6 +492,7 @@ export class AgentRuntime {
   private readonly wakeups = new Set<string>();
   private readonly pendingSessions = new Set<string>();
   private readonly dispatchFailures = new Map<string, { code: string; instanceId: string }>();
+  private readonly ownerReleaseFailures = new Map<string, { owner: OwnerRef; error: unknown }>();
   private readonly nextDispatchPoll = new Map<string, number>();
   private readonly changeWaits: ChangeWaits;
   private controlTimer?: ReturnType<typeof setTimeout>;
@@ -836,6 +841,7 @@ export class AgentRuntime {
       this.jobReconcileCleanupFailed ||
       this.runResumeCleanupFailed ||
       this.preparationCleanupFailed ||
+      this.ownerReleaseFailures.size ||
       (this.closing && this.lifecycleState !== 'closed')
     )
       reasons.push('cleanup');
@@ -2389,8 +2395,11 @@ export class AgentRuntime {
     };
   }
   private frozenTokenModel(run: RunRecord, modelId: string): Record<string, Json> | undefined {
-    const config = (run.configuration as { configuration?: { models?: Record<string, Json>[] } })
-      ?.configuration;
+    const frozen = run.configuration as {
+      configuration?: { models?: Record<string, Json>[] };
+      snapshot?: { configuration?: { models?: Record<string, Json>[] } };
+    } | null;
+    const config = frozen?.snapshot?.configuration ?? frozen?.configuration;
     const matches = config?.models?.filter((model) => model.id === modelId);
     return matches?.length === 1 ? matches[0] : undefined;
   }
@@ -2653,6 +2662,7 @@ export class AgentRuntime {
       compressionProgress?: {
         runId: string;
         originStoreId: string;
+        executionId?: string;
         phase: 'preparing' | 'summarizing' | 'validating';
       };
     }
@@ -2846,14 +2856,16 @@ export class AgentRuntime {
     const requests = new Map<string, SourceRequest>();
     const streak: ToolFailureStreak = { signature: null, count: 0 };
     const continuation = source.continuation as Record<string, Json> | undefined;
-    const currentContinuation = continuation?.version === 2;
+    const currentContinuation = continuation?.version === 2 || continuation?.version === 3;
     if (continuation) {
       const saved = continuation.toolFailureStreak as Record<string, Json> | null;
       if (
-        (continuation.version !== 1 && continuation.version !== 2) ||
+        (continuation.version !== 1 && continuation.version !== 2 && continuation.version !== 3) ||
         continuation.runId !== state.run.id ||
         continuation.contextSelectionId !== state.run.contextSelectionId ||
-        !Array.isArray(continuation.sourceRequests) ||
+        (continuation.version === 3
+          ? continuation.sourceRequestJournal === undefined
+          : !Array.isArray(continuation.sourceRequests)) ||
         !saved ||
         !Number.isInteger(saved.count) ||
         Number(saved.count) < 0 ||
@@ -2865,7 +2877,28 @@ export class AgentRuntime {
         streak.count = Number(saved.count);
         streak.signature = saved.signature as string | null;
       }
-      for (const value of continuation.sourceRequests) {
+      const savedRequests =
+        continuation.version === 3
+          ? await readSourceRequestJournal(
+              continuation.sourceRequestJournal!,
+              {
+                storeId: state.run.originStoreId,
+                sessionId: state.run.sessionId,
+                subjectId,
+                workspaceId: state.session.workspaceId,
+                runId: state.run.id,
+              },
+              async (reference) =>
+                jsonBody(await this.readBody(reference, signal, state.run.originStoreId)),
+              signal,
+            )
+          : (continuation.sourceRequests as Json[]);
+      if (continuation.version === 3)
+        result.sourceRequestJournal =
+          continuation.sourceRequestJournal === null
+            ? null
+            : bodyReference(continuation.sourceRequestJournal)!;
+      for (const value of savedRequests) {
         if (
           !value ||
           typeof value !== 'object' ||
@@ -3402,7 +3435,6 @@ export class AgentRuntime {
         }
         if (owner && !this.runResumeCleanupFailed && !this.preparationCleanupFailed)
           await this.releaseOwner(owner).catch((error) => {
-            this.runResumeCleanupFailed = true;
             this.stopDispatchPolling(input.sessionId, error);
           });
       }
@@ -3944,7 +3976,10 @@ export class AgentRuntime {
             this.preparationCleanupError(preparationError, error, preparationResources!),
           );
         } finally {
-          if (owner && !cleanupFailed) await this.releaseOwner(owner).catch(() => false);
+          if (owner && !cleanupFailed)
+            await this.releaseOwner(owner).catch((error) =>
+              this.stopDispatchPolling(input.sessionId, error),
+            );
         }
       }
     })().finally(() => {
@@ -4208,7 +4243,21 @@ export class AgentRuntime {
     // Host retains this owner until its operations and their disposers have settled.
     if (this.hasUnconfirmedCleanup() || this.extensionHost.hasActiveOperations(owner.sessionId))
       return false;
-    return this.options.store.releaseSessionOwner(owner);
+    const key = this.ownerReleaseKey(owner);
+    try {
+      const released = await this.options.store.releaseSessionOwner(owner);
+      if (released) this.ownerReleaseFailures.delete(key);
+      return released;
+    } catch (error) {
+      // Keep the exact original authority until its physical unlock is confirmed.
+      // This cleanup fact does not rewrite an already completed Run or replay its work.
+      this.ownerReleaseFailures.set(key, { owner: { ...owner }, error });
+      this.stopDispatchPolling(owner.sessionId, error);
+      throw error;
+    }
+  }
+  private ownerReleaseKey(owner: OwnerRef): string {
+    return JSON.stringify([owner.sessionId, owner.instanceId, owner.generation]);
   }
   private async pump(sessionId: string): Promise<void> {
     const session = await this.options.store.getSession(sessionId);
@@ -4221,7 +4270,10 @@ export class AgentRuntime {
     try {
       await this.pumpOwned(sessionId, owner);
     } finally {
-      await this.releaseOwner(owner).catch(() => false);
+      // An earlier failed release is retained for the explicit drain boundary. Do not
+      // silently retry it in finally and then report the original pump as disposed.
+      if (!this.ownerReleaseFailures.has(this.ownerReleaseKey(owner)))
+        await this.releaseOwner(owner).catch((error) => this.stopDispatchPolling(sessionId, error));
     }
   }
   private async pumpOwned(sessionId: string, owner: OwnerRef): Promise<void> {
@@ -4972,37 +5024,78 @@ export class AgentRuntime {
       const configuredSources = binding.sources ?? this.options.sources;
       const sourceRequests = new Map<string, SourceRequest>();
       const failureStreak = resumed?.toolFailureStreak ?? { signature: null, count: 0 };
-      for (const request of resumed?.sourceRequests ?? [])
+      let sourceRequestJournal = resumed?.sourceRequestJournal ?? null;
+      const pendingSourceRequests: SourceRequest[] = [];
+      for (const request of resumed?.sourceRequests ?? []) {
+        freeze(request);
         sourceRequests.set(
           `${request.definitionId}:${await semanticDigest(request.input)}`,
           request,
         );
+        if (this.options.artifacts && resumed?.sourceRequestJournal === undefined)
+          pendingSourceRequests.push(request);
+      }
       sourceRequests.set('model', {
         sessionId: session.id,
         workspaceId: session.workspaceId,
         definitionId: modelId,
         input: { kind: 'model_request' },
       });
-      const continuationState = (): Json => ({
-        version: 2,
-        runId: run.id,
-        contextSelectionId: run.contextSelectionId,
-        sourceRequests: [...sourceRequests.entries()]
-          .filter(([key]) => key !== 'model')
-          .map(([, request]) => request as unknown as Json),
-        toolFailureStreak: { ...failureStreak },
-      });
+      const continuationState = async (): Promise<Json> => {
+        if (this.options.artifacts) {
+          if (pendingSourceRequests.length) {
+            sourceRequestJournal = await this.publishBody(
+              scope,
+              sourceRequestJournalNode(
+                {
+                  storeId: run.originStoreId,
+                  sessionId: run.sessionId,
+                  subjectId: command.subjectId,
+                  workspaceId: session.workspaceId,
+                  runId: run.id,
+                },
+                sourceRequestJournal,
+                pendingSourceRequests,
+              ),
+            );
+            pendingSourceRequests.length = 0;
+          }
+          return {
+            version: 3,
+            runId: run.id,
+            contextSelectionId: run.contextSelectionId,
+            sourceRequestJournal: sourceRequestJournal as unknown as Json,
+            toolFailureStreak: { ...failureStreak },
+          };
+        }
+        return {
+          version: 2,
+          runId: run.id,
+          contextSelectionId: run.contextSelectionId,
+          sourceRequests: [...sourceRequests.entries()]
+            .filter(([key]) => key !== 'model')
+            .map(([, request]) => request as unknown as Json),
+          toolFailureStreak: { ...failureStreak },
+        };
+      };
       let captured: ContextSource[] = [];
+      let capturedRequests = new Map<string, SourceRequest>();
       let continuationSource: ContextSource | null = null;
       const capture = async (
         requests: Iterable<SourceRequest> = sourceRequests.values(),
         bindings = scope.bindings,
+        hostSources?: Map<string, ContextSource>,
       ) => {
         const sources = new Map<string, ContextSource>();
-        const requestList = [...requests].map((request) => ({ ...request, runId: run.id }));
-        const addHostSources = (hostSources: ContextSource[]) => {
-          if (!Array.isArray(hostSources)) throw new AgentError('context_source_invalid');
-          addSources(hostSources);
+        const requestList = [...requests].map((request) => ({
+          ...request,
+          input: structuredClone(request.input),
+          runId: run.id,
+        }));
+        const addHostSources = (values: ContextSource[]) => {
+          if (!Array.isArray(values)) throw new AgentError('context_source_invalid');
+          addSources(values);
+          for (const source of values) hostSources?.set(source.id, source);
         };
         const addSources = (values: ContextSource[]) => {
           for (const source of values) {
@@ -5032,6 +5125,12 @@ export class AgentRuntime {
         }
         const result = [...sources.values()].sort((a, b) => a.id.localeCompare(b.id));
         return result;
+      };
+      const captureModelSources = async () => {
+        // A Model decision depends on its own request set. Later sibling targets are
+        // retained for the next Model, but cannot widen an unrelated Tool's check.
+        capturedRequests = new Map(sourceRequests);
+        return capture(capturedRequests.values());
       };
       let lastAutomaticFailure: string | undefined;
       const compress = async (
@@ -5085,6 +5184,7 @@ export class AgentRuntime {
         const progress: {
           runId: string;
           originStoreId: string;
+          executionId?: string;
           phase: 'preparing' | 'summarizing' | 'validating';
         } = { runId: run.id, originStoreId: run.originStoreId, phase: 'preparing' };
         try {
@@ -5122,6 +5222,7 @@ export class AgentRuntime {
             trigger,
           });
           attemptedExecutionId = requestId;
+          progress.executionId = requestId;
           stage = 'model';
           const originalModel = model!;
           const compressionModel: ModelAdapter = {
@@ -5161,7 +5262,7 @@ export class AgentRuntime {
                   compressionId: pending.id,
                   decisionSources: captured,
                   checkFreshness,
-                  continuation: continuationState(),
+                  continuation: await continuationState(),
                 },
                 compressionModel,
                 { ...request, requestId },
@@ -5249,7 +5350,7 @@ export class AgentRuntime {
         await this.consumeJobResults(run, owner, controller.signal);
         await selectCapabilities();
         capturedInputVersion = inputVersion;
-        captured = await capture();
+        captured = await captureModelSources();
         const assembled = assembleModelContext(
           captured,
           await this.modelMessages(
@@ -5278,8 +5379,9 @@ export class AgentRuntime {
         if (inputVersion !== capturedInputVersion) throw new AgentError('superseded_by_user_input');
         await checkCapabilities(capabilityFingerprint);
         if (
-          (await semanticDigest(JSON.parse(JSON.stringify(await capture())) as Json)) !==
-          (await semanticDigest(JSON.parse(JSON.stringify(captured)) as Json))
+          (await semanticDigest(
+            JSON.parse(JSON.stringify(await capture(capturedRequests.values()))) as Json,
+          )) !== (await semanticDigest(JSON.parse(JSON.stringify(captured)) as Json))
         )
           throw new AgentError('context_refresh_required');
       };
@@ -5292,22 +5394,31 @@ export class AgentRuntime {
             description: tool.description,
             inputSchema: tool.inputSchema,
           }));
+      const toolSourceRequest = (call: import('./storage/types').ToolCall): SourceRequest => {
+        let input: Json = null;
+        try {
+          input = JSON.parse(call.arguments) as Json;
+        } catch {
+          /* UnifiedExecution records invalid parameters. */
+        }
+        return {
+          sessionId: session.id,
+          workspaceId: session.workspaceId,
+          definitionId: call.name,
+          input,
+        };
+      };
       const registerToolRequests = async (calls: readonly import('./storage/types').ToolCall[]) => {
         if (!configuredSources && !scope.bindings.extensions.some((extension) => extension.context))
           return;
         for (const call of calls) {
-          let input: Json = null;
-          try {
-            input = JSON.parse(call.arguments) as Json;
-          } catch {
-            /* UnifiedExecution records invalid parameters. */
+          const request = toolSourceRequest(call);
+          const key = `${call.name}:${await semanticDigest(request.input)}`;
+          if (!sourceRequests.has(key)) {
+            freeze(request);
+            sourceRequests.set(key, request);
+            if (this.options.artifacts) pendingSourceRequests.push(request);
           }
-          sourceRequests.set(`${call.name}:${await semanticDigest(input)}`, {
-            sessionId: session.id,
-            workspaceId: session.workspaceId,
-            definitionId: call.name,
-            input,
-          });
         }
       };
       let toolAdmission: ReturnType<typeof createToolDispatchBatch> | undefined;
@@ -5350,7 +5461,7 @@ export class AgentRuntime {
                   decisionSources: captured,
                   checkFreshness,
                   ...(modelRetry ? { modelRetry } : {}),
-                  continuation: continuationState(),
+                  continuation: await continuationState(),
                 },
                 model!,
                 current,
@@ -5422,22 +5533,46 @@ export class AgentRuntime {
         },
         executeTool: async (call, stepId, source, signal) => {
           const decisionSources = structuredClone(captured);
-          const decisionRequests = structuredClone([...sourceRequests.values()]);
+          const modelRequests = new Map(structuredClone([...capturedRequests.entries()]));
+          const decisionRequests = new Map(modelRequests);
+          const request = toolSourceRequest(call);
+          decisionRequests.set(`${call.name}:${await semanticDigest(request.input)}`, request);
           const decisionInputVersion = capturedInputVersion;
           const decisionCapabilities = capabilityFingerprint;
           const decisionBindings = scope.bindings;
+          const definition = decisionBindings.tools.get(call.name);
+          const digestSources = (sources: ContextSource[]) =>
+            semanticDigest(JSON.parse(JSON.stringify(sources)) as Json);
+          const decisionDigest = await digestSources(decisionSources);
           const checkToolDecision = async () => {
             if (inputVersion !== decisionInputVersion)
               throw new AgentError('superseded_by_user_input');
             await checkCapabilities(decisionCapabilities);
+            const hostSources = new Map<string, ContextSource>();
+            const current = await capture(decisionRequests.values(), decisionBindings, hostSources);
+            if ((await digestSources(current)) === decisionDigest) return;
+            const known = new Set(decisionSources.map((source) => source.id));
+            const additions = current.filter((source) => !known.has(source.id));
             if (
-              (await semanticDigest(
-                JSON.parse(
-                  JSON.stringify(await capture(decisionRequests, decisionBindings)),
-                ) as Json,
-              )) !== (await semanticDigest(JSON.parse(JSON.stringify(decisionSources)) as Json))
+              definition?.contextDiscovery === 'read_only' &&
+              additions.length > 0 &&
+              additions.every(
+                (source) =>
+                  source.kind === 'project_instruction' &&
+                  source.role === 'user' &&
+                  source.placement === 'after_history' &&
+                  canonicalJson(source as unknown as Json) ===
+                    canonicalJson((hostSources.get(source.id) ?? null) as unknown as Json),
+              ) &&
+              (await digestSources(current.filter((source) => known.has(source.id)))) ===
+                decisionDigest &&
+              (await digestSources(await capture(modelRequests.values(), decisionBindings))) ===
+                decisionDigest
             )
-              throw new AgentError('context_refresh_required');
+              // A scoped read observes new instructions without pretending the old Model
+              // already used them. The next Model captures them with the actual results.
+              return;
+            throw new AgentError('context_refresh_required');
           };
           return this.execution.toolExecution(
             {
@@ -5448,7 +5583,7 @@ export class AgentRuntime {
               checkFreshness: checkToolDecision,
               toolAdmission: toolAdmission?.forCall(call.id),
             },
-            decisionBindings.tools.get(call.name),
+            definition,
             call,
             stepId,
             source,
@@ -5472,7 +5607,7 @@ export class AgentRuntime {
             canonicalJson(resumed.modelSource.capabilitySnapshot ?? null)
         )
           throw new AgentError('capability_refresh_required');
-        captured = await capture();
+        captured = await captureModelSources();
         if (
           canonicalJson(captured as unknown as Json) !==
           canonicalJson(resumed.modelSource.sources ?? [])
@@ -5552,7 +5687,7 @@ export class AgentRuntime {
         if (request.expectedCompressionId !== null) {
           await selectCapabilities();
           capturedInputVersion = inputVersion;
-          captured = await capture();
+          captured = await captureModelSources();
           expectedHighWaterSeq = (
             await this.options.store.getExpandedContext({
               expectedStoreId: run.originStoreId,
@@ -5616,7 +5751,7 @@ export class AgentRuntime {
           controller.signal.throwIfAborted();
           const cursor = (await this.options.store.getMetadata()).lastChangeCursor;
           resultChanged = (await requiredResults()) > 0 || resultChanged;
-          const evaluations = await this.execution.requirements(
+          const { evaluations, observation } = await this.execution.requirementEvaluation(
             scope,
             'completion',
             undefined,
@@ -5628,6 +5763,7 @@ export class AgentRuntime {
             resultChanged = true;
             continue;
           }
+          if ((await applySteer()) > 0 || inputVersion !== capturedInputVersion) continue complete;
           const blocked = evaluations.filter((evaluation) => evaluation.outcome === 'unsatisfied');
           if (!blocked.length) {
             if (resultChanged) continue complete;
@@ -5641,6 +5777,14 @@ export class AgentRuntime {
               });
               break complete;
             } catch (error) {
+              if (
+                error instanceof AgentError &&
+                error.code === 'requirement_not_satisfied' &&
+                (await this.execution.requirementsChanged(scope, observation))
+              )
+                // A related fact changed after evaluation. Re-read conditions at
+                // this settle boundary; the rejected transaction performed no effect.
+                continue;
               if (!(error instanceof AgentError) || error.code !== 'input_pending') throw error;
               if ((await applySteer()) > 0) continue complete;
               continue;
@@ -5651,6 +5795,14 @@ export class AgentRuntime {
           const latest = await this.options.store.getRun(run.id);
           for (const extension of scope.bindings.extensions) {
             if (!extension.completionGovernance) continue;
+            if ((await applySteer()) > 0 || inputVersion !== capturedInputVersion)
+              continue complete;
+            const preparationInputVersion = inputVersion;
+            const preparationCapabilities = capabilityFingerprint;
+            const preparationBindings = scope.bindings;
+            const preparationRequests = structuredClone([...capturedRequests.values()]);
+            const preparationSources = await capture(preparationRequests, preparationBindings);
+            const preparationDigest = await semanticDigest(preparationSources as unknown as Json);
             const references = latest?.requirements ?? [];
             const directive = await extension.completionGovernance.prepare({
               runId: run.id,
@@ -5680,6 +5832,17 @@ export class AgentRuntime {
                 },
               },
             });
+            if ((await applySteer()) > 0 || inputVersion !== preparationInputVersion)
+              continue complete;
+            const preparedCapabilities = await readCapabilities();
+            if (
+              (preparedCapabilities &&
+                preparedCapabilities.fingerprint !== preparationCapabilities) ||
+              (await semanticDigest(
+                (await capture(preparationRequests, preparationBindings)) as unknown as Json,
+              )) !== preparationDigest
+            )
+              continue complete;
             if (!directive) continue;
             if (typeof directive.key !== 'string' || !directive.key || directive.key.length > 512)
               throw new AgentError('completion_directive_invalid');
@@ -5732,19 +5895,22 @@ export class AgentRuntime {
                 input: directive.input,
               },
             ];
-            const decisionBindings = scope.bindings;
-            const decisionInputVersion = inputVersion;
-            const decisionCapabilities = capabilityFingerprint;
+            const decisionBindings = preparationBindings;
+            const decisionInputVersion = preparationInputVersion;
+            const decisionCapabilities = preparationCapabilities;
             const checkSources = await capture(requests, decisionBindings);
             const checkCompletionFreshness = async () => {
               if (inputVersion !== decisionInputVersion)
                 throw new AgentError('superseded_by_user_input');
               await checkCapabilities(decisionCapabilities);
               if (
-                (await semanticDigest(checkSources as unknown as Json)) !==
                 (await semanticDigest(
-                  (await capture(requests, decisionBindings)) as unknown as Json,
-                ))
+                  (await capture(preparationRequests, decisionBindings)) as unknown as Json,
+                )) !== preparationDigest ||
+                (await semanticDigest(checkSources as unknown as Json)) !==
+                  (await semanticDigest(
+                    (await capture(requests, decisionBindings)) as unknown as Json,
+                  ))
               )
                 throw new AgentError('context_refresh_required');
             };
@@ -5754,7 +5920,7 @@ export class AgentRuntime {
                 ref.requirementId === extension.mutationGovernance?.requirementId,
             );
             if (!reference) throw new AgentError('mutation_policy_missing');
-            const result = await this.execution.tool(
+            const { result, dispatched } = await this.execution.toolExecution(
               {
                 ...scope,
                 bindings: decisionBindings,
@@ -5778,6 +5944,25 @@ export class AgentRuntime {
             );
             if (result.outcome === 'outcome_unknown')
               throw new AgentError('operation_unverifiable');
+            if (
+              dispatched === false &&
+              ((result.outcome === 'failed' &&
+                [
+                  'context_refresh_required',
+                  'capability_refresh_required',
+                  'input_pending',
+                ].includes(result.content)) ||
+                (result.outcome === 'cancelled' &&
+                  ['superseded_by_user_input', 'cancelled_before_dispatch'].includes(
+                    result.content,
+                  )))
+            ) {
+              controller.signal.throwIfAborted();
+              await applySteer();
+              // The completion directive was never executed. A fresh Model/condition
+              // boundary must prepare a new directive instead of reusing its old input.
+              continue complete;
+            }
             directiveApplied = true;
             if (result.outcome !== 'succeeded') throw new AgentError(result.content);
             break;
@@ -5903,7 +6088,93 @@ export class AgentRuntime {
       });
     }
   }
+  private async stopOwnedBeforeCancellationWrite(input: CancelCommandInput | CancelWorkInput) {
+    // A replayed cancellation receipt cannot stop work that began after its original
+    // boundary. Observation failure also grants no additional local stop authority.
+    try {
+      if (await this.options.store.getCommand(input.commandId)) return;
+    } catch {
+      return;
+    }
+    const owned = (live: { originStoreId: string; subjectId: string }) =>
+      live.originStoreId === input.expectedStoreId && live.subjectId === input.subjectId;
+    const stop = (live: { controller: AbortController }) =>
+      // This is only the exact local shrinking action. The API still awaits the
+      // original durable cancellation write and reports persistence errors honestly.
+      live.controller.abort(new AgentError('cancel_requested'));
+    if ('targetCommandId' in input) {
+      const live = this.active.get(input.targetCommandId);
+      if (live && owned(live) && live.sessionId === input.sessionId) stop(live);
+      const preparation =
+        this.jobReconcileControllers.get(input.targetCommandId) ??
+        this.runResumeControllers.get(input.targetCommandId);
+      if (preparation) {
+        try {
+          const command = await this.options.store.getCommand(input.targetCommandId);
+          if (
+            command &&
+            command.originStoreId === input.expectedStoreId &&
+            command.sessionId === input.sessionId &&
+            command.subjectId === input.subjectId
+          )
+            preparation.abort(new AgentError('cancel_requested'));
+        } catch {
+          // Without the exact original identity, only durable cancellation may stop it.
+        }
+      }
+      return;
+    }
+    if (input.kind === 'execution.cancel') {
+      const live = this.activeExecutions.get(input.executionId);
+      if (live && owned(live) && live.sessionId === input.sessionId)
+        live.controller.abort(new AgentError('execution_cancel_requested'));
+      return;
+    }
+    if (input.kind === 'run.cancel') {
+      for (const live of this.active.values())
+        if (owned(live) && live.sessionId === input.sessionId && live.runId === input.runId)
+          stop(live);
+      return;
+    }
+    const withinSession = async (sessionId: string) => {
+      if (sessionId === input.sessionId) return true;
+      if (!input.includeBackground) return false;
+      try {
+        const target = await this.options.store.getSession(input.sessionId);
+        if (!target) return false;
+        let node = await this.options.store.getSession(sessionId);
+        const seen = new Set<string>();
+        while (node && !seen.has(node.id)) {
+          if (
+            node.rootSessionId !== target.rootSessionId ||
+            node.workspaceId !== target.workspaceId
+          )
+            return false;
+          if (node.id === target.id) return true;
+          seen.add(node.id);
+          node = node.parentSessionId
+            ? await this.options.store.getSession(node.parentSessionId)
+            : null;
+        }
+      } catch {
+        // Failed ancestry observation cannot grant a broader local stop, and cannot
+        // prevent the original durable cancellation from validating its own scope.
+      }
+      return false;
+    };
+    for (const live of this.active.values())
+      if (
+        owned(live) &&
+        (input.includeBackground || live.runId !== undefined) &&
+        (await withinSession(live.sessionId))
+      )
+        stop(live);
+    if (input.includeBackground)
+      for (const live of this.activeExecutions.values())
+        if (owned(live) && (await withinSession(live.sessionId))) stop(live);
+  }
   async cancelCommand(input: CancelCommandInput): Promise<CommandRecord> {
+    await this.stopOwnedBeforeCancellationWrite(input);
     let receipt: CommandRecord;
     try {
       receipt = await this.options.store.cancelCommand(input);
@@ -5950,6 +6221,7 @@ export class AgentRuntime {
     return this.cancelWork({ ...input, kind: 'session.cancel' });
   }
   private async cancelWork(input: CancelWorkInput): Promise<CommandRecord> {
+    await this.stopOwnedBeforeCancellationWrite(input);
     let receipt: CommandRecord;
     try {
       receipt = await this.options.store.cancelWork(input);
@@ -6056,6 +6328,12 @@ export class AgentRuntime {
     this.pendingSessions.clear();
     this.nextDispatchPoll.clear();
     this.dispatchFailures.clear();
+    // Stop only this instance's actual handles before waiting on contended durable
+    // writes. Their cancellation receipts, results and cleanup still drain below.
+    for (const live of this.active.values())
+      live.controller.abort(new AgentError('service_shutdown'));
+    for (const live of this.activeExecutions.values())
+      live.controller.abort(new AgentError('service_shutdown'));
     await this.controlTask?.catch(() => {});
     if (this.admissions) await new Promise<void>((resolve) => this.admissionWaiters.add(resolve));
     for (const [commandId, active] of this.active) {
@@ -6085,11 +6363,25 @@ export class AgentRuntime {
     )
       throw new AgentError('shutdown_cleanup_unconfirmed');
     await Promise.all(this.configurationReleases.map((release) => release()));
+    // Only the exact trusted lock release is retryable here. Host disposers and
+    // business executions have already settled and are never replayed by this retry.
+    for (const { owner } of this.ownerReleaseFailures.values())
+      await this.releaseOwner(owner).catch(() => false);
+    if (
+      [...this.ownerReleaseFailures.values()].some(
+        ({ error }) => !isStorageTransactionUnconfirmed(error),
+      )
+    )
+      throw new AgentError('shutdown_cleanup_unconfirmed');
     await options.beforeResourceClose?.();
     this.resourceAdmissionClosed = true;
     if (this.resourceUsers) await new Promise<void>((resolve) => this.resourceWaiters.add(resolve));
     await this.options.artifacts?.close();
     await this.options.store.close();
+    // A poisoned transaction cannot commit an owner-release write. Only the exact
+    // strict Store/Worker close above may finish its lock cleanup; the original
+    // unfinished ledger stays fenced for explicit recovery and is never replayed.
+    this.ownerReleaseFailures.clear();
   }
   private async consumeJobResults(
     run: RunRecord,
@@ -6259,6 +6551,7 @@ export class AgentRuntime {
       refId: `approval-body-${(await semanticDigest(executionId)).slice(0, 32)}-${hash}`,
       mediaType: 'application/json',
       content,
+      signal: scope.signal,
     });
     scope.signal.throwIfAborted();
     const original = request as { [key: string]: Json };
@@ -6375,6 +6668,7 @@ export class AgentRuntime {
       refId: `${purpose}-${hash}`,
       mediaType: 'application/json',
       content,
+      signal: scope.signal,
     });
     scope.signal.throwIfAborted();
     return { kind: 'model_body', version: 1, reference };
@@ -6410,6 +6704,7 @@ export class AgentRuntime {
       refId: `model-output-${executionId}-${hash}`,
       mediaType: 'application/vnd.kite.model-output+json',
       content,
+      signal: scope.signal,
     });
   }
   private async sealModelMetadata(

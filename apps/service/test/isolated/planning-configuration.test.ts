@@ -108,7 +108,7 @@ async function fixture(
     ],
     tools: toolIds.map((id) => ({
       id,
-      definitionVersion: id === 'files.read' ? '3' : id === 'files.write' ? '2' : '1',
+      definitionVersion: id === 'files.read' ? '4' : id === 'files.write' ? '2' : '1',
     })),
     planning: { requirePlan: true },
   };
@@ -131,7 +131,7 @@ async function fixture(
                   .map((id) => ({
                     kind: 'tool' as const,
                     definitionId: id,
-                    definitionVersion: id === 'files.read' ? '3' : id === 'files.write' ? '2' : '1',
+                    definitionVersion: id === 'files.read' ? '4' : id === 'files.write' ? '2' : '1',
                   })),
                 ...['planning.write', 'planning.review', 'planning.update'].map((id) => ({
                   kind: 'job' as const,
@@ -593,7 +593,7 @@ test('global exact Planning Action uses trusted Request Approval/unqualified Aut
 
 test('actual host checker identities are frozen in Run snapshot; parent record authorization cannot grant its nested file read', async () => {
   const host = {
-    fileHashChecker: { definitionId: 'files.read', definitionVersion: '3' },
+    fileHashChecker: { definitionId: 'files.read', definitionVersion: '4' },
     commandChecker: { definitionId: 'shell.command', definitionVersion: '1' },
     mcpCheckers: [
       {
@@ -642,7 +642,7 @@ test('actual host checker identities are frozen in Run snapshot; parent record a
     expect(done.run!.configuration).toMatchObject({
       snapshot: {
         planning: {
-          fileHashChecker: { definitionId: 'files.read', definitionVersion: '3' },
+          fileHashChecker: { definitionId: 'files.read', definitionVersion: '4' },
           commandChecker: { definitionId: 'shell.command', definitionVersion: '1' },
           mcpCheckers: [
             {

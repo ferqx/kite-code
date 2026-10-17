@@ -25,7 +25,7 @@ test('HTTP Run automatically verifies nested ordinary file Tools with persistent
         { definitionId: 'files.write', definitionVersion: '2', effects: ['workspace_write'] },
         { definitionId: 'files.edit', definitionVersion: '2', effects: ['workspace_write'] },
       ],
-      fileHashChecker: { definitionId: 'files.read', definitionVersion: '3' },
+      fileHashChecker: { definitionId: 'files.read', definitionVersion: '4' },
     },
   });
   const counts = { models: 0, wrappers: 0, writes: 0, edits: 0, reads: 0 };

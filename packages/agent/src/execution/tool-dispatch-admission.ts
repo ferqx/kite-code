@@ -11,7 +11,7 @@ export class ToolDispatchCancelledError extends Error {
 export interface ToolDispatchAdmission {
   wait(): Promise<void>;
   dispatched(): void;
-  settled(result?: ToolResult, error?: unknown): void;
+  settled(result?: ToolResult, error?: unknown, dispatched?: boolean): void;
 }
 export function createToolDispatchBatch(
   callIds: readonly string[],
@@ -52,16 +52,19 @@ export function createToolDispatchBatch(
         if (signal.aborted) throw new ToolDispatchCancelledError(signal.reason);
       },
       dispatched: advance,
-      settled(result, error) {
+      settled(result, error, dispatched) {
         if (released) return;
+        const retired =
+          dispatched === false &&
+          result?.outcome === 'cancelled' &&
+          ['superseded_by_user_input', 'cancelled_before_dispatch'].includes(result.content);
         if (
           !error &&
           !signal.aborted &&
-          result?.outcome === 'failed' &&
-          result.content !== 'approval_denied'
+          (retired || (result?.outcome === 'failed' && result.content !== 'approval_denied'))
         ) {
-          // A schema rejection can settle before an earlier interactive Tool. It
-          // cannot let the next call jump that still-unresolved admission.
+          // A rejection or retired decision can settle before an earlier interactive
+          // Tool. It cannot let the next call jump that unresolved admission.
           void predecessor.then(() => {
             if (!signal.aborted) advance();
           });
@@ -76,7 +79,7 @@ export function createToolDispatchBatch(
     forCall: (id: string) => admissions.get(id),
     settled: (id: string, result: ToolResult, dispatched?: boolean) => {
       if (dispatched === true) admissions.get(id)?.dispatched();
-      else if (dispatched === false) admissions.get(id)?.settled(result);
+      else if (dispatched === false) admissions.get(id)?.settled(result, undefined, dispatched);
       else cancel(new AgentError('tool_dispatch_not_admitted'));
     },
     finish() {

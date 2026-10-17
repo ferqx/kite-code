@@ -1,9 +1,10 @@
 import { expect, test } from 'bun:test';
-import type { Execution, Message } from '@kite-ai/client';
-import { SessionPage } from '@kite-ai/ui/desktop';
+import type { AgentClient, Execution, Message } from '@kite-ai/client';
+import { SessionPage, ToolActivity } from '@kite-ai/ui/desktop';
 import { JSDOM } from 'jsdom';
 import { act } from 'react';
 import { createRoot } from 'react-dom/client';
+import { NativeToolMessages } from '../../electron/tool-messages';
 import type { NativeBridge, NativeRequest, NativeSelection } from '../../src/native-bridge';
 import {
   desktopToolMessage,
@@ -12,6 +13,7 @@ import {
   NativeToolMessage,
   useNativeToolMessages,
 } from '../../src/native-tool-messages';
+import { desktopTranscript } from '../../src/native-transcript';
 import type { NativeToolMessagePage } from '../../src/tool-messages-bridge';
 import { prepareDesktopDom } from '../native-page-dom.fixture';
 
@@ -353,6 +355,118 @@ test('live tool rows come only from current-Store active Run executions and rema
       ),
     ).toEqual([]);
   } finally {
+    await f.close();
+  }
+});
+
+test('verified freshness rejections stay neutral in the real Native grouped transcript while one dispatched failure remains visible', async () => {
+  const f = fixture();
+  const messages = new Map<string, Message>(),
+    executions = new Map<string, Execution>();
+  for (let index = 0; index < 5; index++) {
+    const id = `read-${index}`,
+      code =
+        index < 2
+          ? 'context_refresh_required'
+          : index < 4
+            ? 'capability_refresh_required'
+            : 'file_not_found';
+    messages.set(id, { ...message(id, code), runId: 'r', seq: String(index + 1) });
+    executions.set(`e-${id}`, {
+      id: `e-${id}`,
+      originStoreId: 'store',
+      sessionId: 's',
+      runId: 'r',
+      kind: 'tool',
+      definitionId: 'files.read',
+      definitionVersion: '4',
+      status: 'failed',
+      resultRevision: '1',
+      cancelRequestedAt: null,
+      authorization: { dispatched: index === 4 },
+      result: {
+        outcome: 'failed',
+        content: code,
+        details: { code, adapterAttempted: index === 4, dispatchCommitted: index === 4 },
+      },
+    });
+  }
+  const manager = new NativeToolMessages(
+    {
+      verifyConnection: async () => {},
+      getExecution: async (id: string) => executions.get(id)!,
+    } as unknown as AgentClient,
+    () => ({
+      generation: 1,
+      viewSelection: 2,
+      historyEpoch: 0,
+      storeId: 'store',
+      sessionId: 's',
+      workspaceId: 'w',
+    }),
+    () => messages,
+  );
+  try {
+    const facts = await manager.list({
+      method: 'toolMessages.list',
+      generation: 1,
+      viewSelection: 2,
+      historyEpoch: 0,
+      readId: 'confirmed',
+      messageIds: [...messages.keys()],
+    });
+    const transcript = desktopTranscript({
+      messages: [...messages.values()],
+      tools: facts.entries,
+      storeId: 'store',
+      sessionId: 's',
+      runs: [
+        {
+          id: 'r',
+          originStoreId: 'store',
+          sessionId: 's',
+          status: 'completed',
+          isActive: false,
+          createdAt: 1,
+          finishedAt: 2,
+          reason: null,
+        },
+      ],
+    });
+    expect(facts.entries.every((entry) => entry.status === 'failed')).toBe(true);
+    expect(transcript.messages.filter((entry) => entry.status === 'not_executed')).toHaveLength(4);
+    await act(async () =>
+      f.root.render(
+        <SessionPage
+          workspaces={[]}
+          sessionLabel="refresh"
+          readingKey="s"
+          loading={false}
+          connected
+          connectionLabel="local"
+          actions={{}}
+          messages={transcript.messages}
+          renderToolActivity={(group, state) => (
+            <ToolActivity {...state} messages={group} renderChildren={() => null} />
+          )}
+        />,
+      ),
+    );
+    await act(async () => f.host.querySelector<HTMLButtonElement>('.agent-turn-summary')!.click());
+    const group = f.host.querySelector<HTMLButtonElement>('.tool-activity-summary')!;
+    expect(group.textContent).toContain('读取 1 次');
+    expect(group.textContent).toContain('重新评估 4 项');
+    expect(group.textContent).toContain('失败 1 项');
+    expect(group.textContent).not.toContain('失败 5 项');
+    await act(async () => group.click());
+    expect(f.host.querySelectorAll('.tool-activity-step.not_executed')).toHaveLength(4);
+    expect(f.host.querySelectorAll('.tool-activity-step.failed')).toHaveLength(1);
+    expect(f.host.textContent?.match(/上下文已更新，此次未执行/g)).toHaveLength(2);
+    expect(f.host.textContent?.match(/工具信息已更新，此次未执行/g)).toHaveLength(2);
+    expect(f.host.textContent).not.toContain('context_refresh_required');
+    expect([...executions.values()].every((entry) => entry.status === 'failed')).toBe(true);
+  } finally {
+    manager.release();
     await f.close();
   }
 });

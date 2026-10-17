@@ -8,6 +8,8 @@ Status: implemented
 
 ## Decision
 
+整组主体准入的累计Session/Message/Part门槛由[正常Loop决定](../bug-fix/2026-10-17-normal-loop-checkpoints.md)部分替代；当前完整流式观察归[Store owner](../../../../packages/agent/src/storage/README.md#累计执行组观察)。本文原连接意图、准确publisher/Job proof、未知结果和冷读取理由继续适用。
+
 可见Request connection先选择再独立Enter确认准确Server/source/transport/Session，只提交普通 `builtin.mcp/mcp.connect@1`；实际connection Job沿原独立许可和最后source/wire核验。Host新提交读完整公共Workspace目录、实际canonical identity及与原observed全等的安全目录，只接admitted/selected/available来源。read-set仅用于本次观察复核，不加入connect input伪装CAS，不建立第二执行器。
 
 独立 `ui/mcp-connection-intents.json@1` 闭合完整原request、subject、Store/Session/Workspace/identity、body/request SHA和有限phase；key是1–64字符ASCII安全ID。沿Profile-use lease、短data lock、private/no-follow/单硬链/实体、16MiB/128、etag CAS、temp/fsync/rename/目录同步与重读。只有本进程成功prepare=true允许准确首次POST；热权利不写文件，冷或既有ID只核原GET。Store+Session+Server的pending/unknown不借新Workspace或key绕过，unknown不淘汰，journal ready/failed不降级。

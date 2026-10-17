@@ -131,7 +131,7 @@ test('actual candidate default paired and daemon children protect closure and re
     const configBytes = JSON.stringify({
       modelId: 'fixed',
       tools: [
-        { id: 'files.read', definitionVersion: '3' },
+        { id: 'files.read', definitionVersion: '4' },
         { id: 'files.write', definitionVersion: '2' },
       ],
       models: [

@@ -36,7 +36,7 @@ for (const mode of ['high', 'zero', 'missing', 'many'] as const)
           ? 3
           : normal === 1
             ? mode === 'high'
-              ? 50000
+              ? 250000
               : mode === 'zero'
                 ? 0
                 : mode === 'many'
@@ -133,7 +133,7 @@ for (const mode of ['high', 'zero', 'missing', 'many'] as const)
       expect(
         observations.some(
           (value) =>
-            value.baseline === (mode === 'high' ? 50000 : mode === 'zero' ? 0 : undefined) &&
+            value.baseline === (mode === 'high' ? 250000 : mode === 'zero' ? 0 : undefined) &&
             value.compress === (mode === 'high'),
         ),
       ).toBe(true);
@@ -165,7 +165,7 @@ for (const mode of ['high', 'zero', 'missing', 'many'] as const)
         missingInputCount: mode === 'missing' ? 1 : 0,
       });
       expect(projected.cumulativeUsage.inputTokens).toBe(
-        mode === 'high' ? 50008 : mode === 'many' ? 1025 : 5,
+        mode === 'high' ? 250008 : mode === 'many' ? 1025 : 5,
       );
       if (mode === 'many')
         expect(projected.cumulativeUsage.executionCount).toBeGreaterThan(

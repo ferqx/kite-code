@@ -31,6 +31,8 @@ export type EffectiveConfiguration = JsonObject & {
   tools?: NamedConfiguration[];
   skills?: NamedConfiguration[];
   mcp?: NamedConfiguration[];
+  /** Explicit maintenance policy; no callbacks or execution authority. */
+  compression?: { thresholdTokens?: number };
 };
 export interface ConfigurationSnapshot {
   readonly version: 1;

@@ -261,7 +261,7 @@ test.skipIf(!['darwin', 'linux'].includes(process.platform))(
       writeFileSync(
         configPath,
         config([
-          { id: 'files.read', definitionVersion: '3' },
+          { id: 'files.read', definitionVersion: '4' },
           { id: 'files.write', definitionVersion: '2' },
         ]),
         { mode: 0o600 },

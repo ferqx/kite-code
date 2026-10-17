@@ -12,7 +12,7 @@
 
 ## 基线与只读观察
 
-Runtime 在普通 Loop 安全边界由最近已完成的 assistant 原 Execution 读取完整原输入，核 Store、Session、模型及原结果；跨 Run 还要求冻结模型配置一致。Core 向可信 `CompressionInput` 传 `modelId/tools/tokenBaseline`，默认 Service 直接使用此时实际工具声明，保持原约 80% 阈值与未知窗口 32768 维护触发点。压缩后旧历史不再匹配时重新估算，新请求返回统计后形成新基线。摘要快照记录 `tokenAccounting/tokenProjection`，仅保存计数和出处，不复制基线正文。
+Runtime 在普通 Loop 安全边界由最近已完成的 assistant 原 Execution 读取完整原输入，核 Store、Session、模型及原结果；跨 Run 还要求冻结模型配置一致。Core 向可信 `CompressionInput` 传 `modelId/tools/tokenBaseline`，默认 Service 直接使用此时实际工具声明。窗口缺省为 256K（262144 token），模型明确声明优先；默认阈值为总窗口 75%，配置 `compression.thresholdTokens` 时采用该准确 token 数覆盖比例。默认值由 Service 在实际选中模型的 Run 配置中冻结，Core 统计叶子仍不猜 Provider 容量。压缩后旧历史不再匹配时重新估算，新请求返回统计后形成新基线。摘要快照记录 `tokenAccounting/tokenProjection` 和 `automaticPolicy`，仅保存计数、阈值和出处，不复制基线正文。
 
 `AgentRuntime.readContextEstimate` 是有资源生命周期的只读观察：按原 Model 输入权限展开完整所选历史，保留固定 selection/upper，复核压缩点和选择未变化；不捕获新项目指令、不解析现在配置、不初始化 Provider、不写 Store。来源布局沿最近已保存请求，因此只是基于已保存来源和历史的预测，随后配置、工具、来源或尚未提交输入仍可能使实际请求不同。冷恢复可重建，不保存估算为消费事实。
 

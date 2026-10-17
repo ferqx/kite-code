@@ -225,7 +225,7 @@ test.skipIf(process.platform !== 'darwin')(
           ],
           tools: [
             { id: 'files.write', definitionVersion: '2' },
-            { id: 'files.read', definitionVersion: '3' },
+            { id: 'files.read', definitionVersion: '4' },
           ],
         }),
       );

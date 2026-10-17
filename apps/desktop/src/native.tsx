@@ -1318,6 +1318,10 @@ function NativeDesktopContent({
           ? desktopTranscript({
               messages,
               runs: runMessages.runs,
+              compressionProgress:
+                !selection.viewLoading && !selection.permissionUnavailable
+                  ? selection.compressionProgress
+                  : undefined,
               tools: toolMessages.entries,
               storeId: selection.storeId,
               sessionId: selection.session.id,

@@ -81,7 +81,7 @@ for (const scenario of ['fork', 'combined', 'selector'] as const) {
         modelId: 'fixed',
         models: [model],
         tools: [
-          { id: 'files.read', definitionVersion: '3' },
+          { id: 'files.read', definitionVersion: '4' },
           { id: 'files.write', definitionVersion: '2' },
         ],
       }),

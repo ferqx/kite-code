@@ -11,7 +11,12 @@ const model = {
 function input(role: string, tools: string[]) {
   const actualTools = tools.map((id) => ({
     id,
-    version: id === 'files.read' ? '3' : ['files.glob', 'files.search'].includes(id) ? '2' : '1',
+    version:
+      id === 'files.read'
+        ? '4'
+        : ['files.read_path', 'files.glob', 'files.search'].includes(id)
+          ? '2'
+          : '1',
     extensionId: id.endsWith('_path')
       ? 'builtin.files.path'
       : id.startsWith('files.')
@@ -67,6 +72,7 @@ test('default Task roles preserve worker and bind implementation plus three read
   });
   const parent = [
     'files.read',
+    'files.read_path',
     'files.write',
     'shell.launch',
     'shell.stop',
@@ -81,7 +87,7 @@ test('default Task roles preserve worker and bind implementation plus three read
   }
   for (const role of ['explore', 'plan', 'review']) {
     const readonly = await configured.resolveChildRunConfiguration!(input(role, parent));
-    expect(readonly.toolIds).toEqual(['files.read', 'shell.read']);
+    expect(readonly.toolIds).toEqual(['files.read', 'files.read_path', 'shell.read']);
     expect(readonly.modelId).toBe('actual-parent');
   }
   expect(configured.childConfigurations![2]!.inputSchema).toMatchObject({

@@ -433,6 +433,12 @@ export interface MessageContent {
   sourceIds?: string[];
 }
 export interface MessageRecord extends MessageContent {
+  /** Read-only SQL proof of a compression Model response; never trusted from message content. */
+  compression?: {
+    id: string;
+    trigger: 'manual' | 'automatic';
+    status: 'running' | 'completed' | 'failed' | 'cancelled' | 'unpublished';
+  };
   id: string;
   sessionId: string;
   runId: string | null;

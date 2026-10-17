@@ -49,7 +49,7 @@ async function fixture(
               { definitionId: 'files.write', definitionVersion: '2', effects: ['workspace_write'] },
               { definitionId: 'files.edit', definitionVersion: '2', effects: ['workspace_write'] },
             ],
-            fileHashChecker: { definitionId: 'files.read', definitionVersion: '3' },
+            fileHashChecker: { definitionId: 'files.read', definitionVersion: '4' },
           },
         }),
   });

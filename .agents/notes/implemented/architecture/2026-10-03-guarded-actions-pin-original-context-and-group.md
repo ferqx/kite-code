@@ -8,6 +8,8 @@ Status: implemented
 
 ## Decision
 
+仅累计已完成Session/Message/Part按8192条拒绝完整观察的边界，由[正常Loop决定](../bug-fix/2026-10-17-normal-loop-checkpoints.md)部分取代；实际active/pending/unfinished安全域、原contextRevision/record读集及最终dispatch guard继续按本决定核实，当前流式实现归[Store owner](../../../../packages/agent/src/storage/README.md#累计执行组观察)。
+
 可信 Host 在普通 Action prepare 注册 `requireExecutionGroupQuiescent`，实际 Store 查询绑定 root 创建主体与完整父子树。静止事实包含原组全部 active Run、pending Command 与planned/dispatching/running/unknown Execution，仅排除准确原intake/carrier。records.get/list完整投影、revision、missing与分页absence和原contextRevision一并封存；每类最多8192事实，无法闭合就拒绝。
 
 Ask后仅刷新当前静止谓词，原records与contextRevision不替换。最终OwnedWrite派发事务先核全组静止，再核原contextRevision与records，零event/adapter失败封闭。contextRevision绑定全组实际Session/selection、完整Messages/Part revisions，排除自己的Command/Ask分配水位。guarded carrier成为持久root fence，阻挡后继Run/Execution/child/compression/resume；cancel请求或crash/unknown/cold query不解除，只有实际已知终态释放，另root继续。

@@ -129,3 +129,34 @@ test('restored sealed Model history projects the original private output Store w
   expect(original.modelOutput!.head.storeId).toBe('original-store');
   expect(copied.modelOutput!.head.storeId).toBe('original-store');
 });
+
+test('sealed original compression facts survive the public message response with exact source provenance', async () => {
+  const original: MessageRecord = {
+    id: 'summary-original',
+    sessionId: 'source',
+    runId: 'source-run',
+    seq: '4',
+    role: 'assistant',
+    status: 'complete',
+    content: 'summary',
+    compression: { id: 'actual-compression', trigger: 'automatic', status: 'completed' },
+  };
+  const { compression: _compression, ...withoutCompression } = original;
+  const copy = { ...withoutCompression, id: 'copy-summary', sessionId: 'fork', runId: null };
+  const runtime = {
+    getMessageOrigin: async () => ({
+      message: original,
+      subjectId: 'owner',
+      originStoreId: 'original-store',
+    }),
+  } as unknown as AgentRuntime;
+  expect((await messageResponses(runtime, [copy], 'current-store', 'owner'))[0]).toMatchObject({
+    compression: original.compression,
+    originMessage: {
+      storeId: 'original-store',
+      sessionId: 'source',
+      messageId: original.id,
+      runId: original.runId,
+    },
+  });
+});

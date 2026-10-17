@@ -917,6 +917,7 @@ export class NativeCaller {
             storeId: snapshot.view.storeId,
             session: snapshot.view.session,
             runs: snapshot.view.runs,
+            compressionProgress: unavailable ? undefined : snapshot.view.compressionProgress,
             activeCommand: snapshot.activeCommand,
             executions: snapshot.view.executions,
             interactions: snapshot.interactions,

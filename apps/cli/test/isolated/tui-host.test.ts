@@ -113,7 +113,7 @@ for (const mode of ['complete', 'cancel', 'eof'] as const) {
           modelId: 'local',
           tools: [
             { id: 'files.write', definitionVersion: '2' },
-            { id: 'files.read', definitionVersion: '3' },
+            { id: 'files.read', definitionVersion: '4' },
           ],
           models: [
             {

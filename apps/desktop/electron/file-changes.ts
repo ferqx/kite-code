@@ -60,7 +60,8 @@ function resultFacts(execution: Execution) {
   }
   const path =
     (execution.definitionVersion === '2' ||
-      (execution.definitionId === 'files.read' && execution.definitionVersion === '3')) &&
+      (execution.definitionId === 'files.read' &&
+        ['3', '4'].includes(execution.definitionVersion))) &&
     baseline(content?.baseline) &&
     typeof content?.path === 'string'
       ? content.path

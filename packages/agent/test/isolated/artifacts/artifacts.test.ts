@@ -421,9 +421,13 @@ test('Artifact host admission is bounded and close drains accepted publications 
   const queued = Array.from({ length: 64 }, (_, i) =>
     f.artifact.publish({ ...common, refId: `queued-${i}` }),
   );
-  await code(f.artifact.publish({ ...common, refId: 'refused' }), 'artifact_busy');
+  const overflow = f.artifact.publish({ ...common, refId: 'refused' }).then(
+    () => null,
+    (error: unknown) => error,
+  );
   expect(entered).toBe(8);
   const closing = f.artifact.close();
+  expect(await overflow).toMatchObject({ code: 'artifact_closed' });
   await code(f.artifact.publish({ ...common, refId: 'after-close' }), 'artifact_closed');
   release();
   await Promise.all([...inFlight, ...queued]);
@@ -433,7 +437,7 @@ test('Artifact host admission is bounded and close drains accepted publications 
   expect(await f.store.getArtifactReference({ ...common, refId: 'queued-63' })).not.toBeNull();
 });
 
-test('Artifact queued byte budget rejects before another copy, and queued reads abort without a Store lookup', async () => {
+test('Artifact queued byte budget spills before another copy, and queued reads abort without a Store lookup', async () => {
   const f = await fixture();
   const common = {
     expectedStoreId: f.expectedStoreId,
@@ -464,17 +468,11 @@ test('Artifact queued byte budget rejects before another copy, and queued reads 
   const bytes = new Uint8Array(10 * 1024 * 1024).fill(65);
   const accepted = f.artifact.publish({ ...common, refId: 'queued-large', content: bytes });
   bytes.fill(66);
-  let error: unknown;
-  try {
-    await f.artifact.publish({
-      ...common,
-      refId: 'over-budget',
-      content: new Uint8Array(7 * 1024 * 1024),
-    });
-  } catch (cause) {
-    error = cause;
-  }
-  expect(error).toMatchObject({ code: 'artifact_busy', retryable: true });
+  const overBudget = f.artifact.publish({
+    ...common,
+    refId: 'over-budget',
+    content: new Uint8Array(7 * 1024 * 1024),
+  });
   let lookups = 0;
   const original = f.store.getArtifactReference.bind(f.store);
   f.store.getArtifactReference = async (input) => {
@@ -503,7 +501,7 @@ test('Artifact queued byte budget rejects before another copy, and queued reads 
   expect(await next).toBe(reason);
   expect(lookups).toBe(0);
   release();
-  await Promise.all([...active, accepted]);
+  await Promise.all([...active, accepted, overBudget]);
   const content = await f.artifact.read({ ...common, refId: 'queued-large' });
   expect(content.length).toBe(bytes.length);
   expect(content[0]).toBe(65);
@@ -531,7 +529,12 @@ test('Artifact read streams reserve publication capacity and queued-reader satur
       (error: unknown) => error,
     ),
   );
-  await code(f.artifact.read({ ...common, refId: 'original' }), 'artifact_busy');
+  const overflow = f.artifact
+    .read({ ...common, refId: 'original', signal: controller.signal })
+    .then(
+      () => null,
+      (error: unknown) => error,
+    );
   await f.artifact.publish({
     ...common,
     refId: 'not-starved',
@@ -539,7 +542,9 @@ test('Artifact read streams reserve publication capacity and queued-reader satur
   });
   const abortReason = Error('release_queued_reads');
   controller.abort(abortReason);
-  expect((await Promise.all(queued)).every((error) => error === abortReason)).toBe(true);
+  expect((await Promise.all([...queued, overflow])).every((error) => error === abortReason)).toBe(
+    true,
+  );
   await Promise.all(readers.map((reader) => reader.return!()));
   expect(Buffer.from(await f.artifact.read({ ...common, refId: 'not-starved' })).toString()).toBe(
     'producer continues',
