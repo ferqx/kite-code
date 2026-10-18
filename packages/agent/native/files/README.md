@@ -2,6 +2,8 @@
 
 本 crate 由 Agent 的 [构建 companion](../../scripts/build-native-files.ts)编译；[唯一加载器](../../src/files-native-binding.ts)接回原 `WorkspaceFileIo`，不增加 Model Tool、权限来源或恢复状态。正式构建只携带原生资产，不携带或调用编译器。源码开发先运行根 `bun run build:files-native`；根安装脚本也构建该资产。
 
+构建向 stderr 依次报告原生编译、资产准备和依赖许可证收集三个阶段，实时转发 Cargo 诊断，全部完成后输出资产路径；失败仍保留 Cargo 诊断及非零退出。`cargo metadata` 的 JSON 留给脚本解析，不混入进度输出。
+
 Rust 固定1.97.1，cap-std／cap-fs-ext 固定4.0.3，napi-rs 和官方 windows-sys 的准确依赖由 [Cargo.lock](Cargo.lock)封存。Windows 固定 x64 MSVC 和静态 CRT；Linux 目标为 GNU libc，macOS 按实际 CPU 构建。构建显式选定目标，清除常见 Rust compiler／target／flags 环境覆盖，并记录 crate 配置及来源摘要。其他平台的编译检查不替代本机运行资格。
 
 Windows DLL 在 [build.rs](build.rs)固定 `/DEPENDENTLOADFLAG:0x800`，将其静态导入的解析限制到 System32；不依赖每个 DLL 名都在 KnownDLLs 中，也不修改进程全局搜索状态。[Microsoft 合同](https://learn.microsoft.com/en-us/cpp/build/reference/dependentloadflag?view=msvc-170)适用于 Windows10 RS1及以上。搬迁测试直接读取实际 PE 的 x64／PE32+、无 delay import 与 DependentLoadFlags，再在 Bun／Node 实际加载；`dumpbin /LOADCONFIG`另核编译输出。

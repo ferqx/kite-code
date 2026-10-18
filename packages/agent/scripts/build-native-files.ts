@@ -47,10 +47,19 @@ export async function buildNativeFiles(outdir: string) {
     });
     const timer = setTimeout(() => child.kill(), 180000);
     try {
+      const readStderr = async () => {
+        const decoder = new TextDecoder();
+        let output = '';
+        for await (const chunk of child.stderr) {
+          process.stderr.write(chunk);
+          output += decoder.decode(chunk, { stream: true });
+        }
+        return output + decoder.decode();
+      };
       const [exit, stdout, stderr] = await Promise.all([
         child.exited,
         new Response(child.stdout).text(),
-        new Response(child.stderr).text(),
+        readStderr(),
       ]);
       if (exit !== 0) throw Error(`files_native_build_failed:${exit}\n${stderr}`);
       return stdout;
@@ -58,7 +67,9 @@ export async function buildNativeFiles(outdir: string) {
       clearTimeout(timer);
     }
   };
+  console.error(`[files-native] [1/3] Building native module (${target})...`);
   await run(['build', '--release', '--locked', '--target', target]);
+  console.error('[files-native] [2/3] Preparing native assets...');
   const binary = join(
     crate,
     'target',
@@ -98,6 +109,7 @@ export async function buildNativeFiles(outdir: string) {
     }),
   );
   copyFileSync(join(crate, 'Cargo.lock'), join(destination, 'Cargo.lock'));
+  console.error('[files-native] [3/3] Collecting dependency licenses...');
   const metadata = JSON.parse(await run(['metadata', '--locked', '--format-version=1']));
   const notices: string[] = [];
   for (const item of metadata.packages) {
@@ -109,5 +121,6 @@ export async function buildNativeFiles(outdir: string) {
     for (const name of names) notices.push(readFileSync(join(root, name), 'utf8'));
   }
   writeFileSync(join(destination, 'THIRD_PARTY_NOTICES.txt'), notices.join('\n\n'));
+  console.error(`[files-native] Done: ${asset}`);
 }
 if (import.meta.main) await buildNativeFiles(resolve(process.argv[2] ?? 'dist'));
