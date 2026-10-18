@@ -178,7 +178,7 @@ async function fixture(
                       index: 0,
                       id: 'source-directory',
                       type: 'function',
-                      function: { name: 'mcp.sources.list', arguments: '{}' },
+                      function: { name: 'list_mcp_sources', arguments: '{}' },
                     },
                   ],
                 }
@@ -778,7 +778,7 @@ test('fixed SDK first Model sees only frozen selected safe metadata; actual dire
     expect(f.modelBodies).toHaveLength(2);
     const first = JSON.stringify(f.modelBodies[0]);
     expect(first).toContain('local_mcp_metadata');
-    expect(first).toContain('mcp.sources.list');
+    expect(first).toContain('list_mcp_sources');
     expect(first).not.toContain(f.raw.url);
     expect(first).not.toContain('RAW_PRIVATE_VALUE');
     const tool = (await f.store.listExecutions('a')).find(

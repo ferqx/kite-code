@@ -342,13 +342,13 @@ async function fixture(
           ? await planningCall(parentIndex)
           : call
             ? {
-                name: 'task',
+                name: 'spawn_agent',
                 input: {
                   key: report ? 'recursive' : 'original',
                   role: 'worker',
                   input: { content: 'ORIGINAL_CHILD_INPUT' },
                   cancellation: 'detached',
-                  resultDisposition: report ? 'after_turn' : disposition,
+                  result_disposition: report ? 'after_turn' : disposition,
                 },
               }
             : null;
@@ -447,10 +447,10 @@ async function fixture(
   planningCall = async (index): Promise<{ name: string; input: Json } | null> => {
     if (index === 0)
       return {
-        name: 'planning.write',
+        name: 'write_plan',
         input: {
-          planId: 'report-plan',
-          expectedVersion: null,
+          plan_id: 'report-plan',
+          expected_version: null,
           title: 'Delegate then report',
           body: 'One original child and one report',
           steps: [{ id: 'delegate', title: 'Accept original child delegation' }],
@@ -463,18 +463,18 @@ async function fixture(
     }))!.value as Record<string, Json>;
     if (index === 1)
       return {
-        name: 'planning.review',
-        input: { planId: current.planId!, version: current.version!, digest: current.digest! },
+        name: 'request_plan_review',
+        input: { plan_id: current.planId!, version: current.version!, digest: current.digest! },
       };
     if (index === 2)
       return {
-        name: 'task',
+        name: 'spawn_agent',
         input: {
           key: 'original',
           role: 'worker',
           input: { content: 'ORIGINAL_CHILD_INPUT' },
           cancellation: 'detached',
-          resultDisposition: 'after_turn',
+          result_disposition: 'after_turn',
         },
       };
     if (index === 3) {
@@ -483,17 +483,17 @@ async function fixture(
         (e) => e.definitionId === 'task' && e.status === 'succeeded',
       )!;
       return {
-        name: 'planning.update',
+        name: 'update_plan_progress',
         input: {
-          runId: run.id,
-          planId: current.planId!,
+          run_id: run.id,
+          plan_id: current.planId!,
           version: current.version!,
           digest: current.digest!,
-          expectedProgressRevision: null,
-          stepId: 'delegate',
+          expected_progress_revision: null,
+          step_id: 'delegate',
           status: 'completed',
-          executionId: task.id,
-          completePlan: true,
+          execution_id: task.id,
+          complete_plan: true,
         },
       };
     }

@@ -57,13 +57,13 @@ test('precise cancellation while the real scoped Artifact reader is awaited prev
       {
         type: 'tool_call',
         id: 'call',
-        name: 'files.write',
+        name: 'write_file',
         arguments: JSON.stringify({
           path: 'never',
           base: null,
-          contentArtifact: {
+          content_artifact: {
             id: ref.id,
-            mediaType: ref.mediaType,
+            media_type: ref.mediaType,
             size: ref.size,
             scope: ref.scope,
           },

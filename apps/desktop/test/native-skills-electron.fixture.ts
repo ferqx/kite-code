@@ -177,6 +177,7 @@ try {
       .locator('.settings-editor-panel')
       .getByRole('complementary', { name: `${name} 详情`, exact: true });
     await entry.waitFor();
+    await entry.locator('details').locator('summary').click();
     const text = await entry.innerText();
     for (const value of expected)
       assert.ok(text.includes(value), JSON.stringify({ summary, value, text }));

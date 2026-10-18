@@ -215,6 +215,11 @@ export async function createWorkspaceAssembly(options: {
     const tools: ToolDefinition[] = skillIds.map((id) => ({
       id,
       version: '1',
+      model: {
+        name: id === 'skills.load' ? 'load_skill' : 'read_skill_resource',
+        snakeCase: true,
+        parameterNames: { id: 'skill_id' },
+      },
       description:
         id === 'skills.load'
           ? 'Load selected Skill knowledge on demand; never execute its resources'

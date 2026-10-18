@@ -67,7 +67,7 @@ const provider = Bun.serve({
     const call = shell
       ? shellCalls === 1
         ? {
-            name: 'shell.launch',
+            name: 'shell_launch',
             input: {
               key: 'platform-shell',
               command: 'printf default-shell; printf default-stderr >&2',
@@ -76,14 +76,14 @@ const provider = Bun.serve({
           }
         : null
       : fileCalls === 1
-        ? { name: 'files.write', input: { path: 'ordinary.txt', base: null, content: body } }
+        ? { name: 'write_file', input: { path: 'ordinary.txt', base: null, content: body } }
         : fileCalls === 2
-          ? { name: 'files.read', input: { path: 'ordinary.txt' } }
+          ? { name: 'read_file', input: { path: 'ordinary.txt' } }
           : fileCalls === 3
-            ? { name: 'files.read', input: { path: asset } }
+            ? { name: 'read_file', input: { path: asset } }
             : fileCalls === 4
               ? {
-                  name: 'files.write',
+                  name: 'write_file',
                   input: { path: asset, base: assetBaseline, content: 'MUST_NOT_PUBLISH' },
                 }
               : null;

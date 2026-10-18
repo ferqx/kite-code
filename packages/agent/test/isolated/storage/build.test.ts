@@ -11,7 +11,7 @@ import {
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { buildNativeFiles } from '../../../scripts/build-native-files';
+import { buildNativeFilesFixture } from '../../../../../tests/fixtures/build-tool-environment';
 import { privateDirectory } from '../../../src/platform/windows-path-security';
 import { buildStorageAssets } from '../../../src/storage/worker/build-assets';
 
@@ -58,7 +58,7 @@ test('built sqlite entry opens with its bundled Worker and SQL asset', async () 
       packages: 'external',
     });
     expect(result.success).toBe(true);
-    await buildNativeFiles(output);
+    await buildNativeFilesFixture(output);
     const profile = (await import(
       pathToFileURL(join(output, 'profile.js')).href
     )) as typeof import('../../../src/profile');

@@ -87,13 +87,13 @@ test('actual packaged default SDK three scopes seal durable raw digests, indepen
         round = key.includes('SECOND') ? 'second' : 'first';
       let call: { name: string; input: unknown } | null = null;
       if (step === 0)
-        call = { name: 'files.read', input: { path: `${session}/original.txt`, limit: 10000 } };
+        call = { name: 'read_file', input: { path: `${session}/original.txt`, max_lines: 10000 } };
       if (step === 1) {
         const read = JSON.parse(body.messages.filter((m) => m.role === 'tool').at(-1)!.content) as {
           baseline: unknown;
         };
         call = {
-          name: 'files.write',
+          name: 'write_file',
           input: {
             path: `${session}/original.txt`,
             base: read.baseline,
@@ -103,7 +103,7 @@ test('actual packaged default SDK three scopes seal durable raw digests, indepen
       }
       if (step === 2)
         call = {
-          name: 'files.write',
+          name: 'write_file',
           input: { path: `${session}/${round}-created.txt`, base: null, content: 'new file\r\n' },
         };
       const frame = (delta: unknown, finish_reason: string | null) =>

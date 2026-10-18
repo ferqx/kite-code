@@ -54,6 +54,7 @@ import { bodyReference, jsonBody, persistedModelRequest, utf8Body } from './mode
 import { assembleModelContext, modelHistory } from './model-context';
 import { modelOutputReference, readModelOutput } from './model-output';
 import { type ModelInputMetadata, modelInputMetadata } from './model-snapshot';
+import { createModelToolSurface, modelToolMessages } from './model-tools';
 import { readSourceRequestJournal, sourceRequestJournalNode } from './source-request-journal';
 import type {
   AcceptCommandInput,
@@ -150,6 +151,9 @@ function sealExtension(extension: Extension): Extension {
         Object.freeze({
           ...definition,
           inputSchema: freeze(structuredClone(definition.inputSchema)),
+          ...('model' in definition && definition.model !== undefined
+            ? { model: freeze(structuredClone(definition.model)) }
+            : {}),
           ...(definition.resources === undefined
             ? {}
             : { resources: freeze(structuredClone(definition.resources)) }),
@@ -1513,6 +1517,7 @@ export class AgentRuntime {
       version: tool.version,
       description: tool.description,
       inputSchema: tool.inputSchema,
+      model: (tool.model ?? null) as unknown as Json,
       resources: (tool.resources ?? null) as Json,
       recovery: (tool.recovery ?? null) as Json,
       extensionId:
@@ -2098,7 +2103,10 @@ export class AgentRuntime {
     let changed = false;
     const request = {
       ...snapshot.request,
-      messages: snapshot.request.messages.map(({ continuation, ...message }) => {
+      ...('toolSurface' in (snapshot.metadata.context ?? {})
+        ? { tools: snapshot.metadata.context!.toolSurface! }
+        : {}),
+      messages: modelToolMessages(snapshot.request.messages).map(({ continuation, ...message }) => {
         changed ||= continuation !== undefined;
         // Older reviewer snapshots may contain private history serialized as user text.
         // Only the exact persisted review child can identify this envelope, never its text alone.
@@ -2115,12 +2123,21 @@ export class AgentRuntime {
       }),
     };
     input.signal?.throwIfAborted();
+    changed ||=
+      request.tools !== snapshot.request.tools ||
+      canonicalJson(request.messages as unknown as Json) !==
+        canonicalJson(snapshot.request.messages as unknown as Json);
     if (!changed) return snapshot;
+    let metadata = snapshot.metadata;
+    if (metadata.context && 'toolSurface' in metadata.context) {
+      const { toolSurface: _privateSurface, ...context } = metadata.context;
+      metadata = { ...metadata, context };
+    }
     // Public digest describes the public body; original receipt verification stays private above.
     const bytes = Buffer.from(canonicalJson(request as unknown as Json));
     const bodyHash = await semanticDigestBytes(bytes);
     input.signal?.throwIfAborted();
-    return { ...snapshot, request, bodyHash, bodyBytes: String(bytes.byteLength) };
+    return { ...snapshot, request, metadata, bodyHash, bodyBytes: String(bytes.byteLength) };
   }
   /** Internal replay retains opaque transport state; the public Inspector omits it. */
   private async readOriginalModelInput(
@@ -2353,7 +2370,7 @@ export class AgentRuntime {
       ...saved.request,
       messages: [
         ...saved.request.messages.slice(0, split).filter(isSource),
-        ...history,
+        ...modelToolMessages(history),
         ...saved.request.messages.slice(split).filter(isSource),
       ],
     };
@@ -2790,7 +2807,7 @@ export class AgentRuntime {
     )
       throw new AgentError('child_parent_binding_unavailable');
     const source = await this.readResumeModelSource(model, subjectId, signal);
-    const original = await this.readModelInput({
+    const original = await this.readOriginalModelInput({
       expectedStoreId: run.originStoreId,
       sessionId: run.sessionId,
       subjectId,
@@ -4769,6 +4786,7 @@ export class AgentRuntime {
           extensionId: selected.extensionIds.get(tool.id)!,
           description: tool.description,
           inputSchema: tool.inputSchema,
+          model: (tool.model ?? null) as unknown as Json,
           resources: (tool.resources ?? null) as Json,
         })),
       jobs: [...selected.jobs.values()]
@@ -5200,13 +5218,22 @@ export class AgentRuntime {
           command.kind === 'context.compress'
             ? ((command.request as { focus?: string }).focus ?? null)
             : null;
+        const presented = createModelToolSurface(
+          {
+            modelId,
+            requestId: 'context-estimate',
+            messages: originalMessages,
+            tools: modelTools(),
+          },
+          scope.bindings.tools,
+        ).request;
         const input = {
           command: freeze(structuredClone(command)),
           run: freeze(structuredClone(run)),
           session: freeze(structuredClone(session)),
-          messages: freeze(structuredClone(originalMessages)),
+          messages: freeze(structuredClone(presented.messages)),
           modelId,
-          tools: freeze(structuredClone(modelTools())),
+          tools: freeze(structuredClone(presented.tools)),
           tokenBaseline: freeze(
             await this.readTokenBaseline(
               run,

@@ -79,11 +79,11 @@ for (const mode of [
           yield {
             type: 'tool_call',
             id: 'task-call',
-            name: 'task',
+            name: 'spawn_agent',
             arguments: JSON.stringify({
               key: 'report-task',
               role: 'reader',
-              resultDisposition: 'after_turn',
+              result_disposition: 'after_turn',
               cancellation: 'detached',
               input: { content: 'exact original child' },
             }),
@@ -92,11 +92,11 @@ for (const mode of [
             yield {
               type: 'tool_call',
               id: 'second-task-call',
-              name: 'task',
+              name: 'spawn_agent',
               arguments: JSON.stringify({
                 key: 'second-task',
                 role: 'reader',
-                resultDisposition: 'after_turn',
+                result_disposition: 'after_turn',
                 cancellation: 'detached',
                 input: { content: 'second exact child' },
               }),

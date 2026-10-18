@@ -262,7 +262,7 @@ test.skipIf(process.platform !== 'darwin')(
                       id: `${original}-shell`,
                       type: 'function',
                       function: {
-                        name: 'shell.launch',
+                        name: 'shell_launch',
                         arguments: JSON.stringify({
                           key: `shell-${original}`,
                           command: shell.shellCommand(original),
@@ -277,13 +277,13 @@ test.skipIf(process.platform !== 'darwin')(
                 id: `root-${rootIndex}-task-${index}`,
                 type: 'function',
                 function: {
-                  name: 'task',
+                  name: 'spawn_agent',
                   arguments: JSON.stringify({
                     key: `child-${index}`,
                     role: 'worker',
                     input: { content: `MULTI_CHILD_${rootIndex}_${index}` },
                     cancellation: 'attached',
-                    resultDisposition: 'required',
+                    result_disposition: 'required',
                   }),
                 },
               })),

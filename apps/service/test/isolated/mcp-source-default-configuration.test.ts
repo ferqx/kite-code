@@ -143,19 +143,22 @@ process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:rpc.id,result})+'\\n');}})
       let call: ToolCall = null;
       if (useExisting) {
         if (actualStep === 0) {
-          const tool = tools.find((tool) => tool.function.name.startsWith('mcp.mcp-'));
+          const tool = tools.find((tool) => tool.function.name.startsWith('mcp_mcp_'));
           expect(tool).toBeDefined();
           call = { name: tool!.function.name, input: { value: 'exact' } };
         }
       } else if (options.broken || options.disabled) {
-        if (actualStep === 0) call = { name: 'files.read', input: { path: 'owned.txt' } };
-      } else if (actualStep === 0) call = { name: 'mcp.sources.list', input: {} };
+        if (actualStep === 0) call = { name: 'read_file', input: { path: 'owned.txt' } };
+      } else if (actualStep === 0) call = { name: 'list_mcp_sources', input: {} };
       else if (actualStep === 1) {
         const safeId = JSON.stringify(body.messages).match(/mcp-[a-f0-9]{64}/)?.[0];
         expect(safeId).toBeDefined();
-        call = { name: 'mcp.connect', input: { serverId: safeId!, key: `owned-${workId}` } };
+        call = {
+          name: 'connect_mcp_server',
+          input: { server_id: safeId!, key: `owned-${workId}` },
+        };
       } else if (actualStep === 2) {
-        const tool = tools.find((tool) => tool.function.name.startsWith('mcp.mcp-'));
+        const tool = tools.find((tool) => tool.function.name.startsWith('mcp_mcp_'));
         expect(tool).toBeDefined();
         call = { name: tool!.function.name, input: { value: 'exact' } };
       }
@@ -498,7 +501,9 @@ test('bad optional raw source and explicit resolved empty MCP selection preserve
       expect(f.bodies).toHaveLength(2);
       expect(f.bodies[0]!.tools).not.toEqual(
         expect.arrayContaining([
-          expect.objectContaining({ function: expect.objectContaining({ name: 'mcp.connect' }) }),
+          expect.objectContaining({
+            function: expect.objectContaining({ name: 'connect_mcp_server' }),
+          }),
         ]),
       );
       expect(

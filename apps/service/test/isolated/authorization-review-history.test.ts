@@ -4,6 +4,7 @@ import { createHash } from 'node:crypto';
 import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { createRuntime } from '@kite-ai/agent';
 import { createArtifactStore } from '@kite-ai/agent/artifacts';
 import { selectProfile } from '@kite-ai/agent/profile';
@@ -125,7 +126,7 @@ for (const shape of ['inline', 'artifact', 'artifact-ask', 'artifact-ask-legacy'
         expectedStoreId,
         id: 'w',
         name: 'owned',
-        rootUri: `file://${root}`,
+        rootUri: pathToFileURL(root).href,
       });
       await runtime.createSession({
         ...scope,

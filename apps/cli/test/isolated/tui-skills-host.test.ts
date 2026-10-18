@@ -10,6 +10,7 @@ import { launchPairedService } from '@kite-ai/service/paired';
 import { privateDirectory, temporaryDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { ownedUserConfiguration } from '../../../service/test/fixtures/user-configuration-fixture';
 import type { CLIServiceArtifact } from '../../host';
+import { buildOwnedDaemon } from '../fixtures/daemon-host-build';
 
 const repo = resolve(import.meta.dir, '../../../..');
 const sha = (bytes: string | Uint8Array) => createHash('sha256').update(bytes).digest('hex');
@@ -100,7 +101,8 @@ for (const mode of ['paired', 'shared'] as const)
       }),
       { mode: 0o600 },
     );
-    const entrypoint = join(repo, 'apps/service/dist/main.js');
+    await buildOwnedDaemon(join(root, 'service-artifact'));
+    const entrypoint = join(root, 'service-artifact/node_modules/@kite-ai/service/main.js');
     const artifact: CLIServiceArtifact = {
       entrypoint,
       entrypointSha256: sha(readFileSync(entrypoint)),
@@ -169,12 +171,18 @@ for (const mode of ['paired', 'shared'] as const)
         const manifest = JSON.stringify(assets);
         writeFileSync(join(web, 'manifest.json'), manifest);
         const instanceId = randomUUID();
-        daemon = Bun.spawn([process.execPath, join(repo, 'apps/service/dist/daemon-main.js')], {
-          env: { ...process.env, ...userConfiguration.homeEnvironment },
-          stdin: 'pipe',
-          stdout: 'pipe',
-          stderr: 'pipe',
-        });
+        daemon = Bun.spawn(
+          [
+            process.execPath,
+            join(root, 'service-artifact/node_modules/@kite-ai/service/daemon-main.js'),
+          ],
+          {
+            env: { ...process.env, ...userConfiguration.homeEnvironment },
+            stdin: 'pipe',
+            stdout: 'pipe',
+            stderr: 'pipe',
+          },
+        );
         daemon.stdin.write(
           `${JSON.stringify({
             operation: 'start',

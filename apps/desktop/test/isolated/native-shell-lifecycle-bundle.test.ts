@@ -252,7 +252,7 @@ test.skipIf(process.platform !== 'darwin')(
                   id: `${marker}-${label}`,
                   type: 'function',
                   function: {
-                    name: 'shell.launch',
+                    name: 'shell_launch',
                     arguments: JSON.stringify({
                       key: label,
                       command: `${quote(executable)} ${quote(join(workspace, `${label}.pids`))} ${quote(effects)} ${quote(label)} ${quote(provider.url.port)}`,

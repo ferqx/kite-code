@@ -75,7 +75,7 @@ test.skipIf(process.platform !== 'darwin')(
                   id: `read-only-call-${calls}-${index}`,
                   type: 'function',
                   function: {
-                    name: 'files.read',
+                    name: 'read_file',
                     arguments: JSON.stringify({ path: 'read-only.txt' }),
                   },
                 })),

@@ -72,15 +72,15 @@ for (const entrance of ['slash-task', 'draft-mode', 'active-queued', 'scope-draf
         const call =
           step === 0
             ? {
-                name: 'files.write',
+                name: 'write_file',
                 input: { path: 'before.txt', content: 'must stay denied', base: null },
               }
             : step === 1
               ? {
-                  name: 'planning.write',
+                  name: 'write_plan',
                   input: {
-                    planId: 'original-plan',
-                    expectedVersion: null,
+                    plan_id: 'original-plan',
+                    expected_version: null,
                     title: 'Original human plan',
                     body,
                     steps: [{ id: 'write-once', title: 'Write exactly once' }],
@@ -88,16 +88,16 @@ for (const entrance of ['slash-task', 'draft-mode', 'active-queued', 'scope-draf
                 }
               : step === 2
                 ? {
-                    name: 'planning.review',
+                    name: 'request_plan_review',
                     input: {
-                      planId: current?.planId,
+                      plan_id: current?.planId,
                       version: current?.version,
                       digest: current?.digest,
                     },
                   }
                 : step === 3
                   ? {
-                      name: 'files.write',
+                      name: 'write_file',
                       input: {
                         path: 'after.txt',
                         content: 'ORIGINAL_PLAN_ACTUAL_EFFECT',
@@ -106,17 +106,17 @@ for (const entrance of ['slash-task', 'draft-mode', 'active-queued', 'scope-draf
                     }
                   : step === 4
                     ? {
-                        name: 'planning.update',
+                        name: 'update_plan_progress',
                         input: {
-                          runId,
-                          planId: current?.planId,
+                          run_id: runId,
+                          plan_id: current?.planId,
                           version: current?.version,
                           digest: current?.digest,
-                          expectedProgressRevision: null,
-                          stepId: 'write-once',
+                          expected_progress_revision: null,
+                          step_id: 'write-once',
                           status: 'completed',
-                          executionId: writeId,
-                          completePlan: true,
+                          execution_id: writeId,
+                          complete_plan: true,
                         },
                       }
                     : null;
@@ -318,6 +318,7 @@ for (const entrance of ['slash-task', 'draft-mode', 'active-queued', 'scope-draf
         readFileSync(join(f.root, 'plan-attachment.bin')),
       );
       expect(f.requests).toHaveLength(0);
+      expect(f.titleRequests).toHaveLength(0);
       const db = new Database(f.profile.databasePath, { readonly: true });
       try {
         const original = db

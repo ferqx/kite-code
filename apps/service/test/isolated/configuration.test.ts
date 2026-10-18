@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -134,7 +134,7 @@ test('ordinary host defaults select Shell only with a supplied backend and prese
   ]);
 });
 
-test('ordinary paired host exposes everyday tools without tool configuration, reads a real workspace file, and respects explicit disable', async () => {
+test('ordinary paired host exposes public file schemas, edits with an exact baseline, preserves internal execution inputs, and respects explicit disable', async () => {
   const f = fixture();
   const marker = 'owned fresh-profile project source';
   writeFileSync(join(f.workspace, 'source.txt'), marker);
@@ -144,6 +144,14 @@ test('ordinary paired host exposes everyday tools without tool configuration, re
     port: 0,
     async fetch(request) {
       const body = (await request.json()) as Record<string, unknown>;
+      if (!Array.isArray(body.tools)) {
+        const chunk = (delta: unknown, finish: string | null) =>
+          `data: ${JSON.stringify({ id: 'title', object: 'chat.completion.chunk', model: 'local', choices: [{ index: 0, delta, finish_reason: finish }] })}\n\n`;
+        return new Response(
+          `${chunk({ content: 'Project read' }, null)}${chunk({}, 'stop')}data: [DONE]\n\n`,
+          { headers: { 'content-type': 'text/event-stream' } },
+        );
+      }
       requests.push(body);
       const tools = body.tools as {
         function: { name: string; parameters: { properties: Record<string, unknown> } };
@@ -157,8 +165,18 @@ test('ordinary paired host exposes everyday tools without tool configuration, re
       ];
       if (names.some((name) => !/^[a-zA-Z0-9_-]{1,64}$/.test(name)))
         return Response.json({ error: { message: 'invalid function name' } }, { status: 400 });
-      const readTool = tools.find((tool) => tool.function.parameters.properties.offset);
-      const call = requests.length === 1;
+      const readTool = tools.find((tool) => tool.function.parameters.properties.start_line);
+      const call = requests.length <= 2;
+      const edit = requests.length === 2;
+      const priorResult = edit
+        ? (JSON.parse(
+            String(
+              (body.messages as { role: string; content: unknown }[]).find(
+                (message) => message.role === 'tool',
+              )!.content,
+            ),
+          ) as { baseline: unknown })
+        : undefined;
       const chunk = (delta: unknown, finish: string | null) =>
         `data: ${JSON.stringify({ id: 'fresh-host', object: 'chat.completion.chunk', model: 'local', choices: [{ index: 0, delta, finish_reason: finish }] })}\n\n`;
       return new Response(
@@ -171,8 +189,18 @@ test('ordinary paired host exposes everyday tools without tool configuration, re
                     id: 'read-source',
                     type: 'function',
                     function: {
-                      name: readTool!.function.name,
-                      arguments: JSON.stringify({ path: 'source.txt' }),
+                      name: edit ? 'edit_file' : readTool!.function.name,
+                      arguments: JSON.stringify(
+                        edit
+                          ? {
+                              path: 'source.txt',
+                              base: priorResult!.baseline,
+                              old_text: 'owned',
+                              new_text: 'verified',
+                              expected_matches: 1,
+                            }
+                          : { path: 'source.txt', start_line: 1, max_lines: 200 },
+                      ),
                     },
                   },
                 ],
@@ -187,6 +215,7 @@ test('ordinary paired host exposes everyday tools without tool configuration, re
     },
   });
   let child: Awaited<ReturnType<typeof launch>> | undefined;
+  let reader: Awaited<ReturnType<typeof openSqliteStore>> | undefined;
   try {
     const config = { modelId: 'local', models: [model('local', provider.url.href)] };
     writeFileSync(f.file, JSON.stringify(config));
@@ -203,11 +232,70 @@ test('ordinary paired host exposes everyday tools without tool configuration, re
       ifRevision: trust.revision,
     });
     expect(await child.run('read-project')).toMatchObject({ status: 'applied' });
+    const pending = await until(
+      () =>
+        child!.handle.client.listInteractions('session', {
+          storeId: child!.storeId,
+          state: 'pending',
+        }),
+      (page) => page.interactions.some((card) => card.definitionId === 'files.edit'),
+    );
+    const approval = pending.interactions.find((card) => card.definitionId === 'files.edit')!;
+    expect(approval.request).toMatchObject({
+      definitionId: 'files.edit',
+      definitionVersion: '2',
+      input: { path: 'source.txt', find: 'owned', replace: 'verified', occurrences: 1 },
+    });
+    await child.handle.client.answerInteraction('session', approval.id, {
+      expectedStoreId: child.storeId,
+      commandId: 'approve-file-edit',
+      expectedRevision: approval.revision,
+      answer: { kind: 'approval', decision: 'approve' },
+    });
     const view = await child.finished('read-project');
     expect(view.runs.find((run) => run.originCommandId === 'read-project')?.status).toBe(
       'completed',
     );
-    expect(requests).toHaveLength(2);
+    expect(requests).toHaveLength(3);
+    reader = await openSqliteStore({
+      dataRoot: f.profile.dataRoot,
+      profile: f.profile.profile,
+      mode: 'readonly',
+    });
+    const executions = await reader.listExecutions('session');
+    const read = executions.find((row) => row.definitionId === 'files.read')!;
+    const edit = executions.find((row) => row.definitionId === 'files.edit')!;
+    expect(read.input).toEqual({ path: 'source.txt', offset: 1, limit: 200 });
+    expect(edit.status).toBe('succeeded');
+    expect(readFileSync(join(f.workspace, 'source.txt'), 'utf8')).toBe(
+      marker.replace('owned', 'verified'),
+    );
+    expect(edit.input).toMatchObject({
+      path: 'source.txt',
+      find: 'owned',
+      replace: 'verified',
+      occurrences: 1,
+    });
+    expect((edit.input as Record<string, unknown>).base).toEqual(
+      JSON.parse(
+        String(
+          (requests[1]!.messages as { role: string; content: unknown }[]).find(
+            (message) => message.role === 'tool',
+          )!.content,
+        ),
+      ).baseline,
+    );
+    const history = requests[2]!.messages as {
+      role: string;
+      tool_calls?: { function: { name: string; arguments: string } }[];
+    }[];
+    const calls = history.flatMap((message) => message.tool_calls ?? []);
+    expect(calls.map((call) => call.function.name)).toEqual(['read_file', 'edit_file']);
+    expect(JSON.parse(calls[1]!.function.arguments)).toMatchObject({
+      old_text: 'owned',
+      new_text: 'verified',
+      expected_matches: 1,
+    });
     const names = (requests[0]!.tools as { function: { name: string } }[]).map(
       (tool) => tool.function.name,
     );
@@ -217,8 +305,12 @@ test('ordinary paired host exposes everyday tools without tool configuration, re
     expect(new Set(names).size).toBe(8);
     expect(JSON.stringify(requests[1]!.messages)).toContain(marker);
     expect(
-      (await child.handle.client.listInteractions('session', { storeId: child.storeId }))
-        .interactions,
+      (
+        await child.handle.client.listInteractions('session', {
+          storeId: child.storeId,
+          state: 'pending',
+        })
+      ).interactions,
     ).toHaveLength(0);
     expect(existsSync(f.projectFile)).toBe(false);
 
@@ -240,10 +332,11 @@ test('ordinary paired host exposes everyday tools without tool configuration, re
     const nextTools = requests.at(-1)!.tools as {
       function: { parameters: { properties: Record<string, unknown> } };
     }[];
-    expect(nextTools.some((tool) => tool.function.parameters.properties.offset)).toBe(false);
+    expect(nextTools.some((tool) => tool.function.parameters.properties.start_line)).toBe(false);
     expect(nextNames).not.toContain('web_fetch');
     expect(nextTools.some((tool) => tool.function.parameters.properties.text)).toBe(true);
   } finally {
+    await reader?.close();
     await child?.handle.close();
     provider.stop(true);
     f.close();
@@ -788,7 +881,7 @@ test('user provider Responses protocol reaches the real runtime endpoint and nev
           type: 'function_call',
           id: 'fc_service',
           call_id: 'call_service',
-          name: 'files_read',
+          name: 'read_file',
           arguments: JSON.stringify({ path: 'responses-source.txt' }),
           status: 'completed',
         };
@@ -886,7 +979,7 @@ test('user provider Responses protocol reaches the real runtime endpoint and nev
         expect.objectContaining({
           type: 'function_call',
           call_id: 'call_service',
-          name: 'files_read',
+          name: 'read_file',
         }),
         expect.objectContaining({
           type: 'function_call_output',

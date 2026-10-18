@@ -67,11 +67,11 @@ test('built Service and actual PTY permission controls create exact Shell grants
       const call =
         results.length === 0
           ? {
-              name: 'shell.launch',
+              name: 'shell_launch',
               input: { key, command: "printf 'owned\\n' >> effects", cancellation: 'attached' },
             }
           : results.length === 1
-            ? { name: 'shell.wait', input: { shellId: key, timeoutMs: 4000 } }
+            ? { name: 'shell_wait', input: { shell_id: key, wait_timeout_ms: 4000 } }
             : undefined;
       const delta = call
         ? {

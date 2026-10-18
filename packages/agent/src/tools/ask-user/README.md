@@ -1,5 +1,7 @@
 # 普通 ask_user Tool
 
+模型工具名保持 `ask_user`，可信 model 元信息启用声明属性的 snake_case 投影；题目、选项和答案正文不改写。内部工具身份、问题 schema 和回答协议保持不变。
+
 整份请求的原 schema 是 `oneOf`：闭合题目 object 或明确的 `const:null` 取消选项。客户端可在未填完问题时提交这个原 null 值；Core 仍保存普通 question answer，公开 `answer_saved.cancelled:false`，不取消 Run。leaf 将 null 解释为成功取得的取消信息 `{cancelled:true}`，交给同一 Run 的后续 Model 请求，不自动重问。该信息取消与原工作 signal 取消分别保留，不增加专用 DTO、Interaction kind 或恢复入口。
 
 公开 `@kite-ai/agent/ask-user` 的 `createAskUserExtension()` 纯工厂登记 `builtin.ask-user@1` 与 `ask_user@1`，import 和工厂不打开资源。执行只调用当前普通 `ToolContext.requestInput`，没有旧 Runtime 依赖、专用 Loop、数据库迁移或回答端口。

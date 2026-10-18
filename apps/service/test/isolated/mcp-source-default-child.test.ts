@@ -106,32 +106,32 @@ async function fixture(scenario: Scenario) {
       const safeId = JSON.stringify(messages).match(/mcp-[a-f0-9]{64}/)?.[0];
       let call: { name: string; input: unknown } | null = null;
       if (!child && scenario !== 'cold' && index === 0)
-        call = { name: 'mcp.connect', input: { serverId: safeId, key: 'parent' } };
+        call = { name: 'connect_mcp_server', input: { server_id: safeId, key: 'parent' } };
       else if (!child && index === (scenario === 'cold' ? 0 : 1))
         call = {
-          name: 'task',
+          name: 'spawn_agent',
           input: {
             key: 'owned-child',
             role: 'worker',
             input: { content: 'CHILD_OWNED_REQUEST' },
             cancellation: 'attached',
-            resultDisposition: 'required',
+            result_disposition: 'required',
           },
         };
       else if (child && index === 0)
         call = {
-          name: 'mcp.connect',
-          input: { serverId: safeId, key: grandchild ? 'grandchild' : 'child' },
+          name: 'connect_mcp_server',
+          input: { server_id: safeId, key: grandchild ? 'grandchild' : 'child' },
         };
       else if (child && !grandchild && index === 1 && scenario === 'nested')
         call = {
-          name: 'task',
+          name: 'spawn_agent',
           input: {
             key: 'owned-grandchild',
             role: 'worker',
             input: { content: 'GRANDCHILD_OWNED_REQUEST' },
             cancellation: 'attached',
-            resultDisposition: 'required',
+            result_disposition: 'required',
           },
         };
       else if (child && index === 1 && scenario !== 'deny') {

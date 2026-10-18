@@ -20,6 +20,8 @@
 
 SDK 的 `kite.sdk.messages` 转换版本在 Chat Completions 为2、Responses 为3：内部 `files.read` 等 Tool ID 在发送前转为最多64字符的 ASCII 函数名，只含字母、数字、下划线与连字符。合法原名保持；其他名称替换非法字符并在截短后分配不碰撞的后缀，先保留当前声明及完整历史中的合法名称。声明、assistant 历史调用与配对结果使用同一请求内映射，完成的 Provider 调用还原原 ID 后才交给 Core；不改写原请求、ModelInput 或持久历史。转换由 [sdk.ts](src/sdk.ts)负责，不依赖模型名称推测能力。范围及不重命名 Core ID 的取舍见[工具名决定](../../.agents/notes/implemented/bug-fix/2026-10-16-compatible-tool-names.md)。
 
+上述为任意中立调用者的协议编码规则；当前 Agent 内置工具在交给任意 Adapter 前，已由 [Agent 工具表面](../agent/src/model-tools.README.md)转换为 `read_file` 等公开名称和参数。Agent 的公开 ModelInput/历史重建归该 owner；AI 不重复维护内置工具的语义命名表。
+
 [SDK 严格端点测试](test/sdk.test.ts)拒绝非法声明及历史函数名，核带点、中文、超长、名称碰撞、原 ID 回传与输入不变；[普通 paired 宿主测试](../../apps/service/test/isolated/configuration.test.ts)使用真实八个默认工具，严格校验请求名称、执行真实文件读取，再带原工具历史完成第二次请求。修复前两项均实际复现失败；原先宽松模拟端点允许带点名称，不能证明真实 Provider 请求合同成立。
 
 2026-10-16 在 Windows x64／Bun 1.4.2 的本次修复工作树，经用户明确授权向 DeepSeek 官方 deepseek-v4-flash 发送两次对照，均仅“你好”及原失败请求中的八个工具定义，不含原系统／项目上下文或 reasoning_effort。两份实际请求只有函数名不同：六个旧名称不合语法时返回400／invalid_request_error，转换后返回200且完整流结束；不执行工具，不改用户配置。该有限实测确认工具名缺陷和修复效果，不证明真实文件工具执行、其他模型或全部 Provider 兼容性；详细计数和证据限制见上述决定。

@@ -547,10 +547,12 @@ test('checkpoint batches preserve distinct Tool inputs and refreshed business fa
     expect(effects).toBe(0);
     for (const batches of [hostBatches, extensionBatches]) {
       const complete = batches.find((requests) =>
-        requests.some(
-          (request) =>
-            request.definitionId === 'fixture.work' &&
-            (request.input as { ordinal?: number }).ordinal === 2,
+        [1, 2].every((ordinal) =>
+          requests.some(
+            (request) =>
+              request.definitionId === 'fixture.work' &&
+              (request.input as { ordinal?: number }).ordinal === ordinal,
+          ),
         ),
       );
       expect(complete).toEqual([

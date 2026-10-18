@@ -181,7 +181,7 @@ async function fixture(
       yield {
         type: 'tool_call',
         id: `call-${step}`,
-        name: 'files.write',
+        name: 'write_file',
         // The first absolute and later relative paths must share one original checkpoint target.
         arguments: JSON.stringify(
           step === 0 ? { ...input, path: join(workspace, input.path) } : input,

@@ -206,7 +206,7 @@ async function fixture() {
           async *stream(request: ModelRequest) {
             models.push(structuredClone(request));
             if (step++ === 0) {
-              const tool = request.tools.find((t) => t.id.startsWith('mcp.local.'))!;
+              const tool = request.tools.find((t) => t.id.startsWith('mcp_local_'))!;
               expect(tool.inputSchema).toEqual({ type: 'object', additionalProperties: false });
               yield { type: 'tool_call' as const, id: 'task-call', name: tool.id, arguments: '{}' };
               yield {

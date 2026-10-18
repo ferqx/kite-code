@@ -214,8 +214,9 @@ export function createTaskExtension(options: TaskOptions): Extension {
     tools: [
       {
         id: 'task',
+        model: { name: 'spawn_agent', snakeCase: true },
         version: '1',
-        description: `Create a child Agent using a trusted role. Creation is not completion. ${delegationGuidance}`,
+        description: `Spawn a background child Agent using a trusted role and return its accepted task reference. Defaults to attached cancellation and required result delivery; acceptance is not completion. key identifies the exact operation, and input is the trusted role input JSON. ${delegationGuidance}`,
         inputSchema: object(
           {
             key: idSchema,
@@ -292,8 +293,10 @@ export function createTaskExtension(options: TaskOptions): Extension {
       },
       {
         id: 'task_read',
+        model: { name: 'read_agent', snakeCase: true },
         version: '1',
-        description: 'Read the exact child carrier; no new Model or child execution is started.',
+        description:
+          'Read the exact child task status and available result using task_id; does not start a new Model or child execution.',
         inputSchema: object({ taskId: idSchema }, ['taskId']),
         async execute(input, context) {
           const ref = await reference(context, text(value(input), 'taskId'));
@@ -303,6 +306,7 @@ export function createTaskExtension(options: TaskOptions): Extension {
       },
       {
         id: 'task_wait',
+        model: { name: 'task_wait', snakeCase: true, hidden: true },
         version: '1',
         description:
           'Wait for any of an exact current-owner child set; timeout/new input do not cancel children.',
@@ -348,6 +352,7 @@ export function createTaskExtension(options: TaskOptions): Extension {
       },
       {
         id: 'send_message',
+        model: { name: 'send_agent_message', snakeCase: true },
         version: '1',
         description:
           'Queue an Agent message to an exact direct child or parent. Idle recipients remain idle; acceptance does not prove Model input.',
@@ -399,6 +404,7 @@ export function createTaskExtension(options: TaskOptions): Extension {
       },
       {
         id: 'followup_task',
+        model: { name: 'followup_agent', snakeCase: true },
         version: '1',
         description:
           'Create new child work after one exact predecessor ends, retaining its Session history. This is not resuming the old execution.',
@@ -468,6 +474,7 @@ export function createTaskExtension(options: TaskOptions): Extension {
       },
       {
         id: 'task_cancel',
+        model: { name: 'cancel_agent_task', snakeCase: true },
         version: '1',
         description:
           'Request cancellation of one exact child; this does not claim stopped confirmation.',
@@ -504,9 +511,10 @@ export function createTaskExtension(options: TaskOptions): Extension {
       {
         ...create,
         id: 'task.execute',
+        model: { name: 'run_agent', snakeCase: true },
         recovery: { version: '1' },
         resume: foreground,
-        description: `Run an attached child using a trusted role; return its actual complete terminal summary before the next parent Model turn. ${delegationGuidance}`,
+        description: `Run a foreground attached child using a trusted role; wait and return its complete actual terminal summary before the next parent Model turn. key identifies the exact operation; input is the trusted role input JSON. Parent cancellation propagates to this child. ${delegationGuidance}`,
         inputSchema: object(
           {
             key: idSchema,
@@ -521,14 +529,21 @@ export function createTaskExtension(options: TaskOptions): Extension {
       {
         ...wait,
         id: 'wait_agents',
+        model: {
+          name: 'wait_agents',
+          snakeCase: true,
+          omitParameters: ['taskId'],
+          requiredParameters: ['taskIds'],
+        },
         description:
-          'Event-driven wait-any for exact child task IDs; does not consume messages or cancel targets.',
+          'Wait for any of 1–64 unique exact child task_ids; use a one-item array for one child. timeout_ms is 0–30000 milliseconds, default 30000. New input or interaction may wake early; waiting does not consume messages or cancel targets.',
       },
       {
         ...wait,
         id: 'wait_agent',
+        model: { name: 'wait_agent_event', snakeCase: true, omitParameters: ['taskId', 'taskIds'] },
         description:
-          'Wait for own mailbox updates, input or interaction without consuming messages; optional exact task targets retain wait-any behavior.',
+          'Wait for own mailbox updates, input or interaction without consuming messages. after_seq selects the mailbox sequence. timeout_ms is 0–30000 milliseconds, default 30000. Use wait_agents to wait for specific child tasks; timeout never cancels work.',
         inputSchema: object(
           {
             taskId: idSchema,
@@ -561,6 +576,7 @@ export function createTaskExtension(options: TaskOptions): Extension {
       },
       {
         id: 'list_agents',
+        model: { name: 'list_agents', snakeCase: true },
         version: '1',
         description:
           'Read a bounded identity/status page of own child carriers, preserving a fixed sequence upper bound. No Model, activation, or result body read.',
@@ -585,6 +601,7 @@ export function createTaskExtension(options: TaskOptions): Extension {
       },
       {
         id: 'interrupt_agent',
+        model: { name: 'interrupt_agent', snakeCase: true },
         version: '1',
         description:
           'Request interruption of one exact current child Run. This is not carrier/session cancellation or stopped confirmation.',

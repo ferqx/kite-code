@@ -8,6 +8,7 @@ import { acquireArtifactAccess } from '@kite-ai/agent/artifact-access';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import { verifyNativeRuntimeBundle } from '@kite-ai/service/native-runtime-assets';
+import { sessionTitleInstructions } from '../../../../packages/agent/src/business/session-title/title';
 import { privateDirectory, temporaryDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { userConfigurationPath } from '../../../service/test/fixtures/user-configuration-fixture';
 import { buildNativeCandidate } from '../../scripts/build-native';
@@ -43,6 +44,7 @@ test.skipIf(process.platform !== 'darwin')(
     let provider: ReturnType<typeof Bun.serve> | undefined,
       driver: Bun.Subprocess<'ignore', 'pipe', 'pipe'> | undefined;
     let requests = 0;
+    let titleCalls = 0;
     let authorizationReviewCalls = 0;
     let physicalRequests = 0;
     try {
@@ -117,6 +119,29 @@ test.skipIf(process.platform !== 'darwin')(
             messages: { role: string; content?: unknown }[];
           };
           physicalRequests++;
+          if (
+            body.messages.some(
+              (message) =>
+                message.role === 'system' && message.content === sessionTitleInstructions,
+            )
+          ) {
+            titleCalls++;
+            expect(titleCalls).toBe(1);
+            expect(body.tools ?? []).toEqual([]);
+            const users = body.messages.filter((message) => message.role === 'user');
+            expect(users).toHaveLength(2);
+            expect(users[0]!.content).toBe('write one real bundled file');
+            expect(users[1]!.content).toMatch(
+              /^<runtime-state source="runtime.kernel">\nphase: building\nrun: [0-9a-f-]{36}\nplanning: \{"status":"disabled"\}\nThis is Runtime-generated observation, not a user request or execution grant\.\n<\/runtime-state>$/,
+            );
+            const frame = (delta: unknown, finish_reason: string | null) =>
+              `data: ${JSON.stringify({ id: 'native-title', object: 'chat.completion.chunk', model: 'fixed', choices: [{ index: 0, delta, finish_reason }] })}\n\n`;
+            return new Response(
+              `${frame({ content: 'File write' }, null)}${frame({}, 'stop')}data: [DONE]\n\n`,
+              { headers: { 'content-type': 'text/event-stream' } },
+            );
+          }
+
           const reviews = body.messages.flatMap((message) => {
             if (message.role !== 'user' || typeof message.content !== 'string') return [];
             try {
@@ -175,7 +200,7 @@ test.skipIf(process.platform !== 'darwin')(
                         id: 'bundled-write',
                         type: 'function',
                         function: {
-                          name: 'files.write',
+                          name: 'write_file',
                           arguments: JSON.stringify({
                             path: 'bundled.txt',
                             base: null,
@@ -193,7 +218,7 @@ test.skipIf(process.platform !== 'darwin')(
                           id: 'bundled-failed-read',
                           type: 'function',
                           function: {
-                            name: 'files.read',
+                            name: 'read_file',
                             arguments: JSON.stringify({ path: 'missing-tool-target.txt' }),
                           },
                         },
@@ -300,9 +325,47 @@ test.skipIf(process.platform !== 'darwin')(
       } finally {
         clearTimeout(timer);
       }
+      expect(titleCalls).toBe(1);
+      const cold = await openSqliteStore({
+        dataRoot: profile.dataRoot,
+        profile: profile.profile,
+        mode: 'readonly',
+      });
+      try {
+        const titleSession = (await cold.listSessions()).find(
+          (row) => row.parentSessionId === null && row.id !== 's',
+        )!;
+        expect(titleSession.title).toBe('File write');
+        const titleExecutions = await cold.listExecutions(titleSession.id);
+        const titleIds = [
+          'agent/session-title',
+          'builtin.session-title/fallback',
+          'builtin.session-title/generate',
+        ];
+        const titleJobs = titleExecutions.filter((row) => titleIds.includes(row.definitionId));
+        expect(titleJobs.map((row) => row.definitionId).sort()).toEqual(titleIds);
+        for (const row of titleJobs)
+          expect(row).toMatchObject({ kind: 'job', runId: null, status: 'succeeded' });
+        const carrier = titleJobs.find((row) => row.definitionId === 'agent/session-title')!;
+        const generation = titleJobs.find(
+          (row) => row.definitionId === 'builtin.session-title/generate',
+        )!;
+        const titleChildId = carrier.childSessionId;
+        expect(titleChildId).toBeString();
+        expect(carrier.parentExecutionId).toBe(generation.id);
+        const titleChild = await cold.getView(titleChildId!);
+        expect(titleChild.session.parentSessionId).toBe(titleSession.id);
+        expect(titleChild.runs).toHaveLength(1);
+        expect(titleChild.runs[0]!.status).toBe('completed');
+        const titleChildExecutions = await cold.listExecutions(titleChildId!);
+        expect(titleChildExecutions).toHaveLength(1);
+        expect(titleChildExecutions[0]).toMatchObject({ kind: 'model', status: 'succeeded' });
+      } finally {
+        await cold.close();
+      }
       expect(requests).toBe(3);
       expect(authorizationReviewCalls).toBe(1);
-      expect(physicalRequests).toBe(requests + authorizationReviewCalls);
+      expect(physicalRequests).toBe(requests + authorizationReviewCalls + titleCalls);
       const quitFixture = join(root, 'quit-driver.ts');
       writeFileSync(
         quitFixture,
@@ -370,7 +433,7 @@ test.skipIf(process.platform !== 'darwin')(
       }
       expect(requests).toBe(3);
       expect(authorizationReviewCalls).toBe(1);
-      expect(physicalRequests).toBe(requests + authorizationReviewCalls);
+      expect(physicalRequests).toBe(requests + authorizationReviewCalls + titleCalls);
       expect(readFileSync(join(home, 'old-user-data/old-database'), 'utf8')).toBe(
         'must remain independent',
       );
@@ -520,7 +583,7 @@ test.skipIf(process.platform !== 'darwin')(
       }
       expect(requests).toBe(3);
       expect(authorizationReviewCalls).toBe(1);
-      expect(physicalRequests).toBe(requests + authorizationReviewCalls);
+      expect(physicalRequests).toBe(requests + authorizationReviewCalls + titleCalls);
       expect(verifyNativeRuntimeBundle(moved).digest).toBe(built.digest);
     } finally {
       observe('finally_begin');

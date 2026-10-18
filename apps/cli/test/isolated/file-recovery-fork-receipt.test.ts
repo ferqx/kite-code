@@ -38,10 +38,10 @@ test('actual default Files rebuild Fork false receipt is applied and cold origin
       const read = body.messages.filter((m) => m.role === 'tool').at(-1);
       const call =
         n === 0
-          ? { name: 'files.read', input: { path: 'original.txt', limit: 1000 } }
+          ? { name: 'read_file', input: { path: 'original.txt', max_lines: 1000 } }
           : n === 1
             ? {
-                name: 'files.write',
+                name: 'write_file',
                 input: {
                   path: 'original.txt',
                   content: 'actual changed bytes\r\n',

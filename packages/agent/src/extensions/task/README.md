@@ -1,5 +1,7 @@
 # Task 子协作叶子
 
+模型接口以 `spawn_agent/run_agent/read_agent/cancel_agent_task/send_agent_message/followup_agent` 表达创建、前台运行、查询、carrier取消、邮件和后继工作，其他协作接口为 `list_agents/interrupt_agent/wait_agents/wait_agent_event`。声明属性使用 snake_case，任意 `input` JSON 保持原值；key、准确 Run/selection 绑定和内部 `task*` 身份不变。`task_wait` 保留注册与原执行合同，但隐藏于模型目录，以 `wait_agents` 为等待子任务的规范入口。模型的 `wait_agent_event` 只接受 `after_seq/timeout_ms`，等待自身邮件、输入或交互；准确任务目标的 wait-any 仍由原内部 `wait_agent` 合同保留。毫秒超时默认30000，不取消目标。
+
 `createTaskExtension({roles})` 显式装配 `task/task.execute/task_read/task_wait/task_cancel/send_message/followup_task/list_agents/interrupt_agent/wait_agents/wait_agent` ordinary Tools。可信宿主选择 role→已注册 child configuration，模型不能提交新配置、权限或 Provider；构造/import 不执行 I/O。定义继续经过统一 Tool 权限与执行路径，child 使用既有 `operations.ensure(kind:agent)` 和唯一 Loop。
 
 [默认角色](roles.ts)保留 worker／code，并提供完整 explore／plan／review 只读分析能力。Task 与前台 Task 的实际 role schema 和说明包含五个角色、实施任务适用条件以及独立兄弟任务并行语义；描述不是权限。三个只读角色只取父调用当前步骤的冻结工具身份与可信角色范围的交集，再由 Agent 纯 `isReadOnlyTaskTool` 核冻结定义的 extension owner、ID 与版本；同名自定义工具、未来版本、文件写入、进程／联网派发及未知 MCP 不能借角色名称进入 child。新增角色不增加默认三个槽位，也不替代父子权限、计划、取消和真实记录核验。[真实默认角色测试](../../../../../apps/service/test/isolated/default-task-roles.test.ts)覆盖 plan／review 的实际 child、读取、Scope、记录与完整结果。

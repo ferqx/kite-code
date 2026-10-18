@@ -465,16 +465,16 @@ test('default paired main exposes actual Model logs and complete original >64KiB
     const tools = requests[0]!.tools as { function: { name: string } }[];
     const expectedTools = [
       { id: 'ask_user', definitionVersion: '1' },
-      { id: 'files.edit', definitionVersion: '2' },
-      { id: 'files.glob', definitionVersion: '2' },
-      { id: 'files.list', definitionVersion: '1' },
-      { id: 'files.read', definitionVersion: '4' },
-      { id: 'files.search', definitionVersion: '2' },
-      { id: 'files.write', definitionVersion: '2' },
+      { id: 'edit_file', definitionVersion: '2' },
+      { id: 'glob_files', definitionVersion: '2' },
+      { id: 'list_directory', definitionVersion: '1' },
+      { id: 'read_file', definitionVersion: '4' },
+      { id: 'search_content', definitionVersion: '2' },
+      { id: 'write_file', definitionVersion: '2' },
       { id: 'web_fetch', definitionVersion: '1' },
     ];
     expect(tools.map((tool) => tool.function.name).sort()).toEqual(
-      expectedTools.map((tool) => tool.id),
+      expectedTools.map((tool) => tool.id).sort(),
     );
     expect(tools.find((tool) => tool.function.name === 'ask_user')).toMatchObject({
       type: 'function',

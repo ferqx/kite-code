@@ -54,6 +54,38 @@ const wait = async (text: string) => {
   }
   throw Error(`expected ${text} tail=${pty.text().slice(-5000)}`);
 };
+// The onboarding redraw can exceed the 24-row viewport. Observe only the
+// newest complete synchronized redraw after the navigation key, never an old
+// selected line retained in scrollback or a partially written ANSI frame.
+const waitSelectedWorkspaceTrust = async () => {
+  const end = Date.now() + 10000;
+  const begin = '\x1b[?2026h',
+    finish = '\x1b[?2026l';
+  while (Date.now() < end) {
+    abort.signal.throwIfAborted();
+    const material = pty.sinceAction();
+    const opening = material.lastIndexOf(begin);
+    const closing = opening < 0 ? -1 : material.indexOf(finish, opening + begin.length);
+    if (closing >= 0) {
+      const lines = material
+        .slice(opening + begin.length, closing)
+        .replace(new RegExp(`${String.fromCharCode(27)}\\[[0-?]*[ -/]*[@-~]`, 'g'), '')
+        .split(/\r?\n/)
+        .map((line) => line.trim());
+      if (
+        lines.includes('Open this workspace?') &&
+        lines.includes('› Trust this workspace and continue') &&
+        lines.includes('Exit Kite Code')
+      )
+        return;
+    }
+    if (pty.ended) throw Error('models host ended before selected workspace trust frame');
+    await Bun.sleep(50);
+  }
+  throw Error(
+    `expected complete selected workspace trust frame tail=${pty.sinceAction().slice(-5000)}`,
+  );
+};
 const key = async (value: string) => {
   await pty.key(value);
   await Bun.sleep(150);
@@ -84,7 +116,7 @@ const cleanup = async () => {
 try {
   await wait('› Exit Kite Code');
   await key('\x1b[B');
-  await wait('› Trust this workspace and continue');
+  await waitSelectedWorkspaceTrust();
   await key('\r');
   await wait('New Run');
   const trustDb = new Database(input.databasePath, { readonly: true });

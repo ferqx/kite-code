@@ -295,6 +295,13 @@ test('per-parent limit queues the second child before dispatch; durable root sto
       async () => (await f.store.getExecution(refs[1]!.executionId!))?.status === 'cancelled',
       'queued child cancelled',
     );
+    const cancelled = (await f.store.getExecution(refs[1]!.executionId!))!;
+    expect(cancelled.reference).toBeNull();
+    expect(cancelled.result).toMatchObject({
+      outcome: 'cancelled',
+      details: { adapterAttempted: false },
+    });
+    expect((await f.store.getCommand(`child-start-${cancelled.id}`))?.status).toBe('rejected');
     expect(second.requests).toHaveLength(0);
     expect((await f.store.getView(refs[1]!.childSessionId!)).runs).toHaveLength(0);
     expect(first.cancelled).toBe(true);
@@ -467,6 +474,13 @@ test('denied child Job and unknown configuration never call a child Model', asyn
         expect(ref?.childSessionId).toBeString();
         expect((await f.store.getExecution(ref!.executionId!))?.status).toBe('failed');
         expect((await f.store.getView(ref!.childSessionId!)).runs).toHaveLength(0);
+        const start = (await f.store.getCommand(`child-start-${ref!.executionId!}`))!;
+        expect(start.status).toBe('rejected');
+        expect(start.receipt).toEqual({
+          outcome: 'not_activated',
+          executionId: ref!.executionId!,
+          reason: 'child_carrier_ended',
+        });
       }
     } finally {
       await f.close();

@@ -8,6 +8,8 @@
 
 `ensureOperation` 原子建立 operation Command、planned Job、新 child Session、已应用创建命令及 accepted `child.start` 命令。全部继承原主体、rootWorkCommandId/seq 和父 Job 决策来源，交付目标仍为原创建 Session/contextSelection。父工具响应丢失查回同一个 childSessionId/executionId，不重建。root group 不设累计历史 Session 配额；关系深度最多 64，实际并发与每 Run 固定期限仍独立核实，不扫描整个库。
 
+未激活的 carrier 失败或取消时，`finishExecution` 在同一事务将仍 accepted 的原 `child.start` 命令结算为 `rejected`，保留 `not_activated` 回执；carrier 未知时命令为 `needs_review`。Command 不使用 Execution 的 `cancelled` 状态。实际[排队取消与拒权回归](../../../../test/isolated/child/runtime.test.ts)核取消 carrier、零 child Model／Run，以及启动命令的合法终态。
+
 [真实累计回归](../../../../test/isolated/child/history-runtime.test.ts)在同一 root Run、一个模型槽与一个普通 child 槽下创建1003个普通 child和1001个真实自动审核 child，包含实际模型失败、准确 interrupt 取消和历史 key复用。父 Run completed、全部 child终态、Runtime closed；这项加速本机回归不代替数天或数周 soak，不放宽 unknown、owner、deadline 或跨 root取消边界。
 
 `activateChildRun` 是唯一受控 child.start 激活入口，输入 rootOwner、executionId、configuration、可增加的 requirements、required requirementEvaluations 与 freshness。Job 必须已真实 dispatched 且仍 dispatching/running；configuration 必须等于原 snapshot，freshness.checked 必须是宿主当前重新读取并比较来源后的 true，source 精确等于父 Job 原 decisionSource。Store 不读取磁盘、不调用模型，只复核已封存来源和当前必要记录 revision/evaluation。继承父必要 refs 不可省略；同事务创建原 child Run/用户输入消息/命令回执，重复返回同一 Run，绝不另启模型。

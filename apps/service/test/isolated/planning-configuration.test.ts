@@ -332,10 +332,10 @@ test('requirePlan initializes before first real Provider call; user review and a
         expect(run?.requirements[0]?.originStoreId).toBe(f.base.expectedStoreId);
         expect(await f.record(`run/${runId}/plan.required`)).not.toBeNull();
         return {
-          name: 'planning.write',
+          name: 'write_plan',
           input: {
-            planId: 'p',
-            expectedVersion: null,
+            plan_id: 'p',
+            expected_version: null,
             title: 'Private plan',
             body: 'Write one harmless ledger',
             steps: [{ id: 'a', title: 'write' }],
@@ -345,12 +345,12 @@ test('requirePlan initializes before first real Provider call; user review and a
       const current = (await f.record('plan.current'))!.value as Record<string, Json>;
       if (step === 1)
         return {
-          name: 'planning.review',
-          input: { planId: current.planId!, version: current.version!, digest: current.digest! },
+          name: 'request_plan_review',
+          input: { plan_id: current.planId!, version: current.version!, digest: current.digest! },
         };
       if (step === 2)
         return {
-          name: 'files.write',
+          name: 'write_file',
           input: { path: 'ledger.txt', content: 'one actual effect', base: null },
         };
       if (step === 3) {
@@ -358,17 +358,17 @@ test('requirePlan initializes before first real Provider call; user review and a
           (x) => x.runId === runId && x.definitionId === 'files.write',
         )!;
         return {
-          name: 'planning.update',
+          name: 'update_plan_progress',
           input: {
-            runId,
-            planId: current.planId!,
+            run_id: runId,
+            plan_id: current.planId!,
             version: current.version!,
             digest: current.digest!,
-            expectedProgressRevision: null,
-            stepId: 'a',
+            expected_progress_revision: null,
+            step_id: 'a',
             status: 'completed',
-            executionId: actual.id,
-            completePlan: true,
+            execution_id: actual.id,
+            complete_plan: true,
           },
         };
       }
@@ -447,34 +447,34 @@ test('required validation saves an exact user waiver; a later Run cannot reuse i
       if (f.commandId === 'work')
         return step === 0
           ? {
-              name: 'validation.request_waiver',
+              name: 'request_validation_waiver',
               input: {
-                recordKey: `run/${runId}/validation.required`,
+                record_key: `run/${runId}/validation.required`,
                 reason: 'Explicit local waiver',
               },
             }
           : null;
       if (step === 0)
         return {
-          name: 'validation.define',
+          name: 'define_validation_checks',
           input: {
-            runId,
+            run_id: runId,
             checks: [
               {
                 kind: 'receipt',
                 target: {
-                  executionId: 'nonexistent-target',
+                  execution_id: 'nonexistent-target',
                   attempt: 1,
-                  definitionId: 'files.write',
-                  definitionVersion: '2',
-                  inputDigest: 'missing',
-                  resultRevision: '1',
+                  definition_id: 'files.write',
+                  definition_version: '2',
+                  input_digest: 'missing',
+                  result_revision: '1',
                 },
               },
             ],
           },
         };
-      if (step === 1) return { name: 'validation.check', input: { runId } };
+      if (step === 1) return { name: 'run_validation_checks', input: { run_id: runId } };
       return null;
     },
   );
@@ -611,13 +611,13 @@ test('actual host checker identities are frozen in Run snapshot; parent record a
     async (step, f): Promise<Call> => {
       if (step === 0)
         return {
-          name: 'validation.define',
+          name: 'define_validation_checks',
           input: {
-            runId: await f.runId(),
+            run_id: await f.runId(),
             checks: [{ kind: 'file_hash', path: 'private.txt', sha256: '0'.repeat(64) }],
           },
         };
-      if (step === 1) return { name: 'validation.check', input: { runId: await f.runId() } };
+      if (step === 1) return { name: 'run_validation_checks', input: { run_id: await f.runId() } };
       return null;
     },
     { mode: 'full', exclude: ['files.read'] },
@@ -679,9 +679,9 @@ test('record-write permission approval does not answer the separate exact valida
     async (step, f) =>
       step === 0
         ? {
-            name: 'validation.request_waiver',
+            name: 'request_validation_waiver',
             input: {
-              recordKey: `run/${await f.runId()}/validation.required`,
+              record_key: `run/${await f.runId()}/validation.required`,
               reason: 'Explicit exception',
             },
           }

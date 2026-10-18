@@ -47,8 +47,17 @@ export function createPathFileTools(boundaryInput: PathFileBoundary) {
   const tools: ToolDefinition[] = templates.map((template) => ({
     ...template,
     id: `${template.id}_path`,
+    model: {
+      ...template.model!,
+      name:
+        template.id === 'files.read'
+          ? 'read_user_file'
+          : template.id === 'files.write'
+            ? 'write_user_file'
+            : 'edit_user_file',
+    },
     version: template.id === 'files.read' ? '2' : '1',
-    description: `Absolute user-file ${template.id.slice(6)}; exact target permission, UTF-8 and complete bodies/Artifacts; modifications require exact baseline. External files are outside workspace checkpoints.${template.id === 'files.read' ? ' Read up to 200 lines by default; continue at selection.nextOffset or specify offset/limit. The baseline describes the complete file.' : ''}`,
+    description: `${template.description.split(' Paths are ')[0]} Use a canonical absolute user-file path with exact target permission. External file modifications are outside workspace checkpoints.`,
     inputSchema: {
       ...template.inputSchema,
       properties: {

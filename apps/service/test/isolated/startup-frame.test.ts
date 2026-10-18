@@ -14,6 +14,7 @@ import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { selectProfile } from '@kite-ai/agent/profile';
+import { hostBuildEnvironment } from '../../../../tests/fixtures/build-tool-environment';
 import { privateDirectory } from '../../../../tests/fixtures/test-filesystem';
 
 const repository = resolve(import.meta.dir, '../../../..');
@@ -34,7 +35,12 @@ async function bounded<T>(work: Promise<T>, ms = 5000): Promise<T> {
   }
 }
 async function build(args: string[], cwd: string) {
-  const child = Bun.spawn([process.execPath, ...args], { cwd, stdout: 'pipe', stderr: 'pipe' });
+  const child = Bun.spawn([process.execPath, ...args], {
+    cwd,
+    env: hostBuildEnvironment(),
+    stdout: 'pipe',
+    stderr: 'pipe',
+  });
   try {
     const [code, stdout, stderr] = await bounded(
       Promise.all([

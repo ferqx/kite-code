@@ -142,11 +142,11 @@ for (const mode of ['paired', 'shared'] as const)
         }),
         { mode: 0o600 },
       );
-      let pairedEntry = join(repo, 'apps/service/dist/main.js'),
-        daemonEntry = join(repo, 'apps/service/dist/daemon-main.js');
+      const base = join(root, 'artifact');
+      await buildOwnedDaemon(base);
+      let pairedEntry = join(base, 'node_modules/@kite-ai/service/main.js'),
+        daemonEntry = join(base, 'node_modules/@kite-ai/service/daemon-main.js');
       if (contextMode === 'fork') {
-        const base = join(root, 'artifact');
-        await buildOwnedDaemon(base);
         for (const entry of ['paired', 'daemon'] as const) {
           const source = join(base, `${entry}-workflow.ts`);
           writeFileSync(

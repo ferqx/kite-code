@@ -49,7 +49,7 @@ export async function nativeCallerJobsProfile() {
             if (
               call.length !== 1 ||
               result.length !== 1 ||
-              call[0]!.function.name !== 'shell.launch'
+              call[0]!.function.name !== 'shell_launch'
             )
               return false;
             const input = JSON.parse(call[0]!.function.arguments) as { key?: string };
@@ -70,7 +70,7 @@ export async function nativeCallerJobsProfile() {
               id: `native-launch-${key}`,
               type: 'function',
               function: {
-                name: 'shell.launch',
+                name: 'shell_launch',
                 arguments: JSON.stringify({
                   key,
                   command: `printf 'NATIVE_JOB_${key}_中🙂\\n'; while :; do /bin/sleep 1; done`,

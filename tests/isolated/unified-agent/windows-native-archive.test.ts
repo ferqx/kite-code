@@ -52,13 +52,14 @@ mock.module('node:fs',()=>({...fs,
 const security={
   writePrivateFile(){throw Error('8MiB private writer cannot hold Native artifacts');},
   writePrivateArtifactFile(p,bytes){assert.equal(files.has(p),false);files.set(p,Buffer.from(bytes));events.push('write:'+p);if(scenario==='unknown')throw primary;},
+  writePrivateArtifactFiles(root,entries){assert.equal(root,dest);for(const [relative,bytes] of entries){assert.equal(path.posix.isAbsolute(relative),false);assert.equal(relative.split('/').includes('..'),false);const filename=path.posix.join(root,relative);let parent=path.posix.dirname(filename);while(!directories.has(parent)){directories.add(parent);parent=path.posix.dirname(parent);}security.writePrivateArtifactFile(filename,bytes);}},
   syncPrivateFile(p){assert.ok(files.has(p));events.push('flush:'+p);},
 };
 mock.module(${JSON.stringify(modulePath('packages/agent/src/platform/windows-path-security.ts'))},()=>({
   defaultWindowsPathSecurity:()=>security,
   privateDirectory(p){let current=p;while(!directories.has(current)){directories.add(current);current=path.posix.dirname(current);}events.push('directory:'+p);},
 }));
-const retain=name=>{assert.equal(retained.has(name),false);retained.add(name);return{verify(){assert.ok(retained.has(name));},release(){assert.ok(retained.delete(name));events.push('close:'+name);}}};
+const retain=name=>{assert.equal(retained.has(name),false);retained.add(name);return{name,verify(){assert.ok(retained.has(name));},release(){assert.ok(retained.delete(name));events.push('close:'+name);}}};
 mock.module('@kite-ai/agent/artifact-access',()=>({acquireArtifactAccess:({root})=>retain('lease:'+root)}));
 const verified=p=>({root:p,digest:hash(nativeBytes),manifest,terminal:{digest:hash(terminalBytes),manifest:terminal}});
 mock.module('@kite-ai/service/native-runtime-assets',()=>({
@@ -66,7 +67,7 @@ mock.module('@kite-ai/service/native-runtime-assets',()=>({
   retainWindowsNativeRuntimeFiles:p=>retain('files:'+p),
   verifyNativeRuntimeBundle:p=>{if(p===dest){assert.equal(files.get(dest+'/app/payload').length,payload.length);assert.ok(files.get(dest+'/app/payload').equals(payload));assert.ok(directories.has(dest+'/electron/empty'));}return verified(p);},
 }));
-mock.module('@kite-ai/service/runtime-assets',()=>({parseTerminalBundleManifest:value=>value,retainWindowsTerminalRuntimeFiles:p=>retain('files:'+p)}));
+mock.module('@kite-ai/service/runtime-assets',()=>({parseTerminalBundleManifest:value=>value,retainWindowsTerminalRuntimeFiles:p=>retain('files:'+p),readWindowsTerminalRuntimeFile(owner,path){assert.ok(retained.has(owner.name));assert.ok(owner.name.startsWith('files:'));const bytes=files.get(owner.name.slice('files:'.length)+'/'+path);assert.ok(bytes);return Buffer.from(bytes);}}));
 mock.module(${JSON.stringify(modulePath('scripts/release/terminal-archive.ts'))},()=>({readCandidateArchiveFiles:()=>archiveFiles}));
 mock.module(${JSON.stringify(modulePath('scripts/release/terminal-paths.ts'))},()=>({rejectBundleOutput(){}}));
 mock.module(${JSON.stringify(modulePath('packages/agent/src/platform/windows-installation-removal.ts'))},()=>({retainWindowsInstallationRemoval({root,inventory}){return{

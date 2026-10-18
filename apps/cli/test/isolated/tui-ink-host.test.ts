@@ -7,6 +7,7 @@ import { join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { privateDirectory } from '@kite-ai/agent/windows-path-security';
+import { sessionTitleInstructions } from '../../../../packages/agent/src/business/session-title/title';
 import { ownedUserConfiguration } from '../../../service/test/fixtures/user-configuration-fixture';
 import { buildOwnedDaemon } from '../fixtures/daemon-host-build';
 import { compileFileRecoveryTUI } from '../fixtures/file-recovery-profile';
@@ -30,12 +31,27 @@ test('ordinary Ink TUI opens the untrusted gate, renders original Markdown and m
   const alignmentParagraph =
     'ALIGN_BEGIN 如果是明确的实施类任务，我会直接交付实现、必要验证和受影响文档的同步说明，不额外建计划；只有会实质改变产品行为、范围或授权边界且现有证据无法裁决的问题，我才会请你决定。 ALIGN_END';
   const response = `**Original assistant heading**\n\n| Column | Value |\n| --- | --- |\n| Original table cell | Exact value |\n\n\`\`\`ts\nconsole.log("original assistant");\n\`\`\`\n\n${alignmentParagraph}\n\nEND_ORIGINAL_ASSISTANT_COMPLETE`;
-  const requests: { messages: { role: string; content: unknown }[] }[] = [];
+  const requests: { messages: { role: string; content: unknown }[]; tools?: unknown[] }[] = [];
+  const titleRequests: (typeof requests)[number][] = [];
   const provider = Bun.serve({
     hostname: '127.0.0.1',
     port: 0,
     async fetch(request) {
       const body = (await request.json()) as (typeof requests)[number];
+      if (
+        body.messages.some(
+          (message) => message.role === 'system' && message.content === sessionTitleInstructions,
+        )
+      ) {
+        titleRequests.push(body);
+        expect(body.tools ?? []).toEqual([]);
+        const frame = (delta: unknown, finish_reason: string | null) =>
+          `data: ${JSON.stringify({ id: 'title', object: 'chat.completion.chunk', model: 'fixed', choices: [{ index: 0, delta, finish_reason }] })}\n\n`;
+        return new Response(
+          `${frame({ content: 'Ink task' }, null)}${frame({}, 'stop')}data: [DONE]\n\n`,
+          { headers: { 'content-type': 'text/event-stream' } },
+        );
+      }
       requests.push(body);
       const frame = (delta: unknown, reason: string | null) =>
         `data: ${JSON.stringify({ id: 'original', object: 'chat.completion.chunk', model: 'fixed', choices: [{ index: 0, delta, finish_reason: reason }] })}\n\n`;
@@ -122,6 +138,7 @@ test('ordinary Ink TUI opens the untrusted gate, renders original Markdown and m
     expect(code).toBe(0);
     expect(stdout).toContain('ORDINARY_INK_PARITY_RUN_EXIT');
     expect(requests).toHaveLength(1);
+    expect(titleRequests).toHaveLength(1);
     expect(
       requests[0]!.messages.some(
         (message) => message.role === 'user' && message.content === original,
@@ -129,14 +146,50 @@ test('ordinary Ink TUI opens the untrusted gate, renders original Markdown and m
     ).toBe(true);
     const db = new Database(profile.databasePath, { readonly: true });
     try {
-      expect(db.query('SELECT status,is_active FROM run').all()).toEqual([
-        { status: 'completed', is_active: 0 },
+      const roots = db.query('SELECT id,title FROM session WHERE parent_id IS NULL').all() as {
+        id: string;
+        title: string;
+      }[];
+      expect(roots).toHaveLength(1);
+      const rootSession = roots[0]!;
+      expect(rootSession.title).toBe('Ink task');
+      expect(db.query('SELECT parent_id FROM session WHERE parent_id IS NOT NULL').all()).toEqual([
+        { parent_id: rootSession.id },
       ]);
+      expect(
+        db
+          .query(
+            "SELECT adapter_id,kind,state,run_id FROM execution WHERE session_id=? AND kind!='model' ORDER BY adapter_id",
+          )
+          .all(rootSession.id),
+      ).toEqual([
+        { adapter_id: 'agent/session-title', kind: 'job', state: 'succeeded', run_id: null },
+        {
+          adapter_id: 'builtin.session-title/fallback',
+          kind: 'job',
+          state: 'succeeded',
+          run_id: null,
+        },
+        {
+          adapter_id: 'builtin.session-title/generate',
+          kind: 'job',
+          state: 'succeeded',
+          run_id: null,
+        },
+      ]);
+      expect(
+        db
+          .query("SELECT state FROM execution WHERE session_id=? AND kind='model'")
+          .all(rootSession.id),
+      ).toEqual([{ state: 'succeeded' }]);
+      expect(
+        db.query('SELECT status,is_active FROM run WHERE session_id=?').all(rootSession.id),
+      ).toEqual([{ status: 'completed', is_active: 0 }]);
       const messages = db
         .query(
-          "SELECT m.role,p.json FROM message m JOIN message_part p ON p.message_id=m.id WHERE p.kind='text' ORDER BY m.seq,p.ordinal",
+          "SELECT m.role,p.json FROM message m JOIN message_part p ON p.message_id=m.id WHERE p.kind='text' AND m.session_id=? ORDER BY m.seq,p.ordinal",
         )
-        .all() as { role: string; json: string }[];
+        .all(rootSession.id) as { role: string; json: string }[];
       expect(
         messages.filter((row) => row.role === 'user').map((row) => JSON.parse(row.json).content),
       ).toEqual([original]);

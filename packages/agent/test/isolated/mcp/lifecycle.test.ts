@@ -146,7 +146,7 @@ async function fixture(
         .name;
       const tool =
         step === 0 && route !== 'use-b'
-          ? { name: 'mcp.connect', input: { serverId: 'local', key: 'first' } }
+          ? { name: 'connect_mcp_server', input: { server_id: 'local', key: 'first' } }
           : (step === 1 && route !== 'use-b') || (step === 0 && route === 'use-b')
             ? remote
               ? { name: remote, input: {} }
@@ -501,8 +501,8 @@ test('readonly Runtime reopen exposes saved catalogue without live restoration; 
           {
             type: 'tool_call',
             id: 'retry',
-            name: 'mcp.connect',
-            arguments: '{"serverId":"local","key":"first"}',
+            name: 'connect_mcp_server',
+            arguments: '{"server_id":"local","key":"first"}',
           },
           { type: 'finish', reason: 'tool_calls', usage: { inputTokens: 1, outputTokens: 1 } },
         ],

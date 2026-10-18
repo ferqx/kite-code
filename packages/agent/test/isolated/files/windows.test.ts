@@ -138,13 +138,13 @@ nativeTest(
           {
             type: 'tool_call',
             id: 'list',
-            name: 'files.list',
+            name: 'list_directory',
             arguments: JSON.stringify({ path: workspace, limit: 50 }),
           },
           {
             type: 'tool_call',
             id: 'read',
-            name: 'files.read',
+            name: 'read_file',
             arguments: JSON.stringify({ path: join(workspace, 'large.txt') }),
           },
           { ...finish, reason: 'tool_calls' },

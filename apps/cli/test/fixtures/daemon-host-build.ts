@@ -8,6 +8,7 @@ import {
 } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { hostBuildEnvironment } from '../../../../tests/fixtures/build-tool-environment';
 
 const repository = resolve(import.meta.dir, '../../../..');
 async function deadline<T>(work: Promise<T>, ms: number): Promise<T> {
@@ -24,7 +25,12 @@ async function deadline<T>(work: Promise<T>, ms: number): Promise<T> {
   }
 }
 async function runBuild(args: string[], cwd: string) {
-  const child = Bun.spawn([process.execPath, ...args], { cwd, stdout: 'pipe', stderr: 'pipe' });
+  const child = Bun.spawn([process.execPath, ...args], {
+    cwd,
+    env: hostBuildEnvironment(),
+    stdout: 'pipe',
+    stderr: 'pipe',
+  });
   try {
     const [code, stdout, stderr] = await deadline(
       Promise.all([

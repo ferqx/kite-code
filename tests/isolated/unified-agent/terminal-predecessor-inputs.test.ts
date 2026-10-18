@@ -16,14 +16,22 @@ import {
   withoutReviewedTuiLockDeclarations,
 } from '../../fixtures/unified-agent/terminal-predecessor';
 
-const repository = resolve(import.meta.dir, '../../..'),
-  path = 'packages/agent/package.json',
+const repository = resolve(import.meta.dir, '../../..');
+function historicalInput(path: string) {
+  const result = Bun.spawnSync(
+    ['git', 'show', `${COMPATIBLE_TERMINAL_PREDECESSOR_COMMIT}:${path}`],
+    { cwd: repository },
+  );
+  if (result.exitCode !== 0) throw Error(`historical_predecessor_input_missing:${path}`);
+  return result.stdout;
+}
+const path = 'packages/agent/package.json',
   original = Bun.spawnSync(['git', 'show', `${TERMINAL_PREDECESSOR_COMMIT}:${path}`], {
     cwd: repository,
   });
 if (original.exitCode !== 0) throw Error('terminal_predecessor_original_manifest_missing');
 const previous = original.stdout,
-  current = readFileSync(resolve(repository, path)),
+  current = historicalInput(path),
   bytes = (text: string) => Buffer.from(text);
 
 test('predecessor accepts identical inputs and the exact owned-process and permissions increments', () => {
@@ -60,7 +68,7 @@ test('predecessor accepts only the exact Windows Native bootstrap source entry i
     );
   expect(originalService.exitCode).toBe(0);
   const previousService = originalService.stdout,
-    currentService = readFileSync(resolve(repository, servicePath)),
+    currentService = historicalInput(servicePath),
     text = currentService.toString('utf8');
   expect(matchTerminalPredecessorInput(servicePath, previousService, previousService)).toBe(
     'identical',
@@ -93,7 +101,7 @@ test('the root input permits only the exact reviewed stdio and Desktop developme
     });
   expect(original.exitCode).toBe(0);
   const previous = original.stdout,
-    current = readFileSync(resolve(repository, path)),
+    current = historicalInput(path),
     text = current.toString('utf8');
   expect(matchTerminalPredecessorInput(path, previous, previous)).toBe('identical');
   expect(matchTerminalPredecessorInput(path, previous, current)).toBe(
@@ -126,7 +134,7 @@ test('predecessor permits only the exact parser declarations and pinned complete
       cwd: repository,
     });
     expect(prior.exitCode).toBe(0);
-    const current = readFileSync(resolve(repository, path));
+    const current = historicalInput(path);
     expect(
       createHash('sha256')
         .update(
@@ -189,7 +197,7 @@ test('UI declarations refine only the exact reviewed workspace manifest; arbitra
     cwd: repository,
   });
   expect(prior.exitCode).toBe(0);
-  const current = readFileSync(resolve(repository, path)),
+  const current = historicalInput(path),
     text = current.toString();
   expect(matchTerminalPredecessorInput(path, prior.stdout, current)).toBe(
     'tui_workspace_dependency_increment',
@@ -206,7 +214,7 @@ test('UI declarations refine only the exact reviewed workspace manifest; arbitra
   }
 });
 
-test('current workspace refinements preserve pinned bytes and reject incomplete or misplaced declarations', () => {
+test('historical workspace refinements preserve pinned bytes and reject incomplete or misplaced declarations', () => {
   const hashes: Record<string, string> = {
     'bun.lock': 'cc1b2b43f874bca59043e4c2090675c2b0c4c4033d9d1cd19da95b5ffc67d6d1',
     'packages/agent/package.json':
@@ -214,7 +222,7 @@ test('current workspace refinements preserve pinned bytes and reject incomplete 
     'packages/ui/package.json': 'f2ef2bdb1eca663e29c5f05b1fd595bab911287136a2a698956e3d2aa90b2411',
   };
   for (const [path, sha256] of Object.entries(hashes)) {
-    const current = readFileSync(resolve(repository, path)),
+    const current = historicalInput(path),
       text = current.toString('utf8'),
       original = Bun.spawnSync(['git', 'show', `${TERMINAL_PREDECESSOR_COMMIT}:${path}`], {
         cwd: repository,
@@ -286,7 +294,7 @@ test('current workspace refinements preserve pinned bytes and reject incomplete 
   }
 });
 
-test('compatible real predecessor pins all eleven raw inputs and both exact migration assets without refinements', () => {
+test('compatible real predecessor retains eleven original identity checks and both exact migration assets', () => {
   expect(COMPATIBLE_TERMINAL_PREDECESSOR_COMMIT).toBe('4a4c0e440b2098e5b4ec58c5831452773b39228f');
   expect(COMPATIBLE_PREDECESSOR_INPUT_PATHS).toHaveLength(11);
   expect(() =>
@@ -310,7 +318,7 @@ test('compatible real predecessor pins all eleven raw inputs and both exact migr
       { cwd: repository },
     );
     expect(original.exitCode).toBe(0);
-    const current = readFileSync(resolve(repository, path));
+    const current = original.stdout;
     const sha256 = createHash('sha256').update(current).digest('hex');
     expect(assertCompatiblePredecessorLockedInput(path, original.stdout, current)).toEqual({
       path,
@@ -360,4 +368,46 @@ test('unmerged recovery and UI commits cannot replace the complete compatible pr
       assertCompatiblePredecessorLockedInput(migration.path, malformed, malformed),
     ).toThrow(`compatible_predecessor_input_changed:${migration.path}`);
   }
+});
+
+test('actual Terminal inputs keep eleven raw proofs and label only approved complete pairs as reviewed', () => {
+  const reviewedPaths = new Set([
+    'bun.lock',
+    'package.json',
+    'packages/ai/package.json',
+    'packages/agent/package.json',
+    'packages/ui/package.json',
+    'apps/service/package.json',
+  ]);
+  for (const path of COMPATIBLE_PREDECESSOR_INPUT_PATHS) {
+    const actual = readFileSync(resolve(repository, path));
+    const old = Bun.spawnSync(
+      ['git', 'show', `${COMPATIBLE_TERMINAL_PREDECESSOR_COMMIT}:${path}`],
+      { cwd: repository },
+    );
+    expect(old.exitCode).toBe(0);
+    const expectedMatch = reviewedPaths.has(path) ? 'reviewed_locked_input_increment' : 'identical';
+    expect(assertCompatiblePredecessorLockedInput(path, old.stdout, actual)).toEqual({
+      path,
+      sha256: createHash('sha256').update(old.stdout).digest('hex'),
+      currentSha256: createHash('sha256').update(actual).digest('hex'),
+      match: expectedMatch,
+    });
+    const legacy = Bun.spawnSync(['git', 'show', `${TERMINAL_PREDECESSOR_COMMIT}:${path}`], {
+      cwd: repository,
+    });
+    expect(legacy.exitCode).toBe(0);
+    expect(matchTerminalPredecessorInput(path, legacy.stdout, actual)).toBe(expectedMatch);
+    expect(
+      matchTerminalPredecessorInput(path, legacy.stdout, Buffer.concat([actual, Buffer.from('x')])),
+    ).toBeUndefined();
+    expect(() =>
+      assertCompatiblePredecessorLockedInput(
+        path,
+        old.stdout,
+        Buffer.concat([actual, Buffer.from('x')]),
+      ),
+    ).toThrow(`compatible_predecessor_input_changed:${path}`);
+  }
+  expect(matchTerminalPredecessorInput('unreviewed', previous, previous)).toBeUndefined();
 });

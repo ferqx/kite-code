@@ -15,7 +15,7 @@ import {
 import { selectProfile } from '@kite-ai/agent/profile';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import type { InteractionRecord } from '@kite-ai/agent/storage';
-import { createFixedModel } from '@kite-ai/ai';
+import { createFixedModel, type ModelAdapter } from '@kite-ai/ai';
 import { createMcpHttpTransportPort } from '../../src/mcp-http-port';
 
 function gate() {
@@ -197,18 +197,33 @@ async function fixture(injectAfterUnknown = false) {
             }
           : { allowed: allow, revision: 'explicit-connection-permission-1' },
     },
-    resolveRunConfiguration: async (input) => {
-      const cached = await lifecycle.readStepCapabilities(input),
-        tool = cached.toolIds[0]!;
+    resolveRunConfiguration: async () => {
+      let fixed: ReturnType<typeof createFixedModel> | undefined;
+      const model: ModelAdapter = {
+        async *stream(request, options) {
+          if (!fixed) {
+            const tools = request.tools.filter((tool) =>
+              /^mcp_local_effect_[a-f0-9]{8}$/.test(tool.id),
+            );
+            if (tools.length !== 1) throw Error('credential_fixture_remote_tool_unavailable');
+            fixed = createFixedModel([
+              [
+                { type: 'tool_call', id: 'remote-call', name: tools[0]!.id, arguments: '{}' },
+                {
+                  type: 'finish',
+                  reason: 'tool_calls',
+                  usage: { inputTokens: 0, outputTokens: 0 },
+                },
+              ],
+              [{ type: 'finish', reason: 'stop', usage: { inputTokens: 0, outputTokens: 0 } }],
+            ]);
+          }
+          yield* fixed.stream(request, options);
+        },
+      };
       return {
         modelId: 'fixed',
-        model: createFixedModel([
-          [
-            { type: 'tool_call', id: 'remote-call', name: tool, arguments: '{}' },
-            { type: 'finish', reason: 'tool_calls', usage: { inputTokens: 0, outputTokens: 0 } },
-          ],
-          [{ type: 'finish', reason: 'stop', usage: { inputTokens: 0, outputTokens: 0 } }],
-        ]),
+        model,
         toolIds: ['mcp.connect'],
         snapshot: {},
         readStepCapabilities: (context) => lifecycle.readStepCapabilities(context),

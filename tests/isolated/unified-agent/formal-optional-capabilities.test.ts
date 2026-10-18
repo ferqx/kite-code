@@ -68,7 +68,7 @@ test.skipIf(!['darwin', 'linux'].includes(process.platform))(
         const call = shell
           ? shellCalls === 1
             ? {
-                name: 'shell.launch',
+                name: 'shell_launch',
                 input: {
                   key: 'default-shell',
                   command: 'printf default-shell; printf default-stderr >&2',
@@ -78,11 +78,11 @@ test.skipIf(!['darwin', 'linux'].includes(process.platform))(
             : null
           : fileCalls === 1
             ? {
-                name: 'files.write',
+                name: 'write_file',
                 input: { path: 'neighbor.txt', base: null, content: 'ordinary 😀\r\n' },
               }
             : fileCalls === 2
-              ? { name: 'files.read', input: { path: 'neighbor.txt' } }
+              ? { name: 'read_file', input: { path: 'neighbor.txt' } }
               : null;
         const delta = call
           ? {

@@ -92,11 +92,11 @@ test('actual candidate default paired and daemon children protect closure and re
     ];
     expect([normalPath, ...protectedPaths].every((path) => !path.startsWith('../'))).toBe(true);
     const calls = [
-      { name: 'files.write', input: { path: normalPath, content: '邻近 UTF8 😀\r\n', base: null } },
-      { name: 'files.read', input: { path: normalPath } },
+      { name: 'write_file', input: { path: normalPath, content: '邻近 UTF8 😀\r\n', base: null } },
+      { name: 'read_file', input: { path: normalPath } },
       ...protectedPaths.flatMap((path) => [
-        { name: 'files.read', input: { path } },
-        { name: 'files.write', input: { path, content: 'MUST NEVER WRITE', base: null } },
+        { name: 'read_file', input: { path } },
+        { name: 'write_file', input: { path, content: 'MUST NEVER WRITE', base: null } },
       ]),
     ];
     const messages: unknown[][] = [];

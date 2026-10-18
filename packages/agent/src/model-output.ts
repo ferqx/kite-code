@@ -1,5 +1,6 @@
 import { canonicalJson } from './json';
 import { bodyReference } from './model-body';
+import { isToolCallModel } from './model-tools';
 import { AgentError, type ArtifactReference, type Json, type ToolCall } from './storage/types';
 
 export interface ModelOutputReference {
@@ -291,10 +292,11 @@ export async function readModelOutput(
         }
         if (
           !obj(call) ||
-          !keys(call, ['id', 'name', 'arguments']) ||
+          !keys(call, ['id', 'name', 'arguments', 'model']) ||
           typeof call.id !== 'string' ||
           typeof call.name !== 'string' ||
-          typeof call.arguments !== 'string'
+          typeof call.arguments !== 'string' ||
+          (call.model !== undefined && !isToolCallModel(call.model))
         )
           throw new AgentError('model_output_invalid');
         calls.push(call as unknown as ToolCall);

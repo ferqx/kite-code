@@ -44,7 +44,7 @@ async function fixture(options: {
       const call = options.script
         ? await options.script(requests.length - 1, f)
         : requests.length === 1
-          ? { name: 'files.write', input: { path: 'result.txt', content: 'first', base: null } }
+          ? { name: 'write_file', input: { path: 'result.txt', content: 'first', base: null } }
           : null;
       if (options.pauseAtModelStep === requests.length - 1) {
         pausedRequest = requests.at(-1)!;
@@ -252,7 +252,7 @@ test('trusted automatic validation initializes without plan flags, runs the real
             key: `run/${run!.id}/mutation.required`,
           }),
         ).not.toBeNull();
-        return { name: 'files.write', input: { path: 'result.txt', content: 'first', base: null } };
+        return { name: 'write_file', input: { path: 'result.txt', content: 'first', base: null } };
       }
       return null;
     },
@@ -348,7 +348,7 @@ test('missing selected checker stays inconclusive and unloading the factory cann
     pauseAtModelStep: 2,
     script: async (step, current): Promise<Call> => {
       if (step === 0)
-        return { name: 'files.write', input: { path: 'result.txt', content: 'first', base: null } };
+        return { name: 'write_file', input: { path: 'result.txt', content: 'first', base: null } };
       if (step === 2) current.unload();
       return null;
     },
@@ -389,17 +389,17 @@ test('a second mutation invalidates the first passed head and requires another o
   const f = await fixture({
     script: async (step, current): Promise<Call> => {
       if (step === 0)
-        return { name: 'files.write', input: { path: 'result.txt', content: 'first', base: null } };
+        return { name: 'write_file', input: { path: 'result.txt', content: 'first', base: null } };
       if (step === 1) {
         const executions = await current.store.listExecutions('s');
         const runId = (await current.runId())!;
         const head = (await current.head())!;
         return {
-          name: 'validation.auto_check',
+          name: 'check_file_changes',
           input: {
-            runId,
-            mutationExecutionId: executions.find((x) => x.definitionId === 'files.write')!.id,
-            headRevision: head.revision,
+            run_id: runId,
+            mutation_execution_id: executions.find((x) => x.definitionId === 'files.write')!.id,
+            head_revision: head.revision,
             seq: '1',
           },
         };
@@ -420,7 +420,7 @@ test('a second mutation invalidates the first passed head and requires another o
           ),
         ) as Record<string, Json>;
         return {
-          name: 'files.write',
+          name: 'write_file',
           input: { path: 'result.txt', content: 'second', base: body.baseline! },
         };
       }
@@ -456,7 +456,7 @@ test('revoking persistent trust after the actual mutation denies the checker and
   const f = await fixture({
     script: async (step, current): Promise<Call> => {
       if (step === 0)
-        return { name: 'files.write', input: { path: 'result.txt', content: 'first', base: null } };
+        return { name: 'write_file', input: { path: 'result.txt', content: 'first', base: null } };
       if (step === 1) await current.revoke();
       return null;
     },

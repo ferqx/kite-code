@@ -115,6 +115,7 @@ await runTUIHost({testDiagnostics:true,dataRoot:${JSON.stringify(f.profile.dataR
       ]);
       if (exit !== 0) console.error(err);
       expect(exit).toBe(0);
+      expect(f.titleRequests).toHaveLength(0);
       expect(out).toContain(
         scenario === 'cancel'
           ? 'WORKFLOW_QUESTION_ORIGINAL_CANCELLED'
@@ -141,6 +142,7 @@ await runTUIHost({testDiagnostics:true,dataRoot:${JSON.stringify(f.profile.dataR
           row.path.endsWith('/answer') &&
           row.body?.answer?.kind === 'question',
       );
+      expect(f.titleRequests).toHaveLength(0);
       if (scenario === 'cancel') {
         expect(answers).toHaveLength(0);
         const starts = network.filter(

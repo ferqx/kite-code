@@ -159,10 +159,10 @@ test('actual ExtensionHost reads a real accepted plan proof and current document
           yield {
             type: 'tool_call',
             id: 'write',
-            name: 'planning.write',
+            name: 'write_plan',
             arguments: JSON.stringify({
-              expectedVersion: null,
-              planId: 'actual',
+              expected_version: null,
+              plan_id: 'actual',
               title: 'Approved actual plan',
               body: 'Actual original content',
               steps: [{ id: 'one', title: 'Actual step' }],
@@ -183,9 +183,9 @@ test('actual ExtensionHost reads a real accepted plan proof and current document
           yield {
             type: 'tool_call',
             id: 'review',
-            name: 'planning.review',
+            name: 'request_plan_review',
             arguments: JSON.stringify({
-              planId: current.planId,
+              plan_id: current.planId,
               version: current.version,
               digest: current.digest,
             }),

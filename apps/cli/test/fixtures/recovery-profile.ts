@@ -36,7 +36,9 @@ export async function untilRecovery(check: () => Promise<boolean>) {
 }
 
 /** Default compatible SDK, actual original Auto ask_user card, real SIGKILL and owned SQLite. */
-export async function recoveryProfile(options: { holdModelSessionId?: string } = {}) {
+export async function recoveryProfile(
+  options: { holdModelSessionId?: string; completeModelSessionId?: string } = {},
+) {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-client-recovery-'))),
     workspace = join(root, 'workspace'),
     profile = selectProfile({ dataRoot: join(root, 'data'), profile: 'owned' });
@@ -81,6 +83,16 @@ export async function recoveryProfile(options: { holdModelSessionId?: string } =
                 .get() as { request_json: string; session_id: string } | null;
               const human = row && JSON.parse(row.request_json).content;
               if (typeof human !== 'string') throw Error('original_recovery_work_missing');
+              if (row?.session_id === options.completeModelSessionId) {
+                // Caller transport cases own a plain completed Model, independently
+                // of this fixture's original Session's real recovery Files approval.
+                const frame = (delta: unknown, finish_reason: string | null) =>
+                  `data: ${JSON.stringify({ id: 'completed-caller', object: 'chat.completion.chunk', model: 'fixed', choices: [{ index: 0, delta, finish_reason }] })}\n\n`;
+                return new Response(
+                  `${frame({ content: 'ORIGINAL_CALLER_DONE' }, null)}${frame({}, 'stop')}data: [DONE]\n\n`,
+                  { headers: { 'content-type': 'text/event-stream' } },
+                );
+              }
               if (row?.session_id === options.holdModelSessionId) {
                 // A caller-journal fixture can hold its own real Model request active.
                 // The original recovery work still follows the strict Files identity below.
@@ -99,7 +111,7 @@ export async function recoveryProfile(options: { holdModelSessionId?: string } =
                 );
               }
               complete = originalToolResults(messages, human, [
-                { id: 'original-file', name: 'files.write' },
+                { id: 'original-file', name: 'write_file' },
               ]);
             } finally {
               db.close();
@@ -122,7 +134,7 @@ export async function recoveryProfile(options: { holdModelSessionId?: string } =
                       id: 'original-file',
                       type: 'function',
                       function: {
-                        name: 'files.write',
+                        name: 'write_file',
                         arguments: JSON.stringify({
                           path: 'effect',
                           content: 'ORIGINAL_EFFECT_ONCE',

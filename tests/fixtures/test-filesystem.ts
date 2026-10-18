@@ -21,6 +21,12 @@ export function temporaryDirectory(prefix: string): string {
   return root;
 }
 
+/** macOS's per-user temp path can exceed the Unix socket address limit with owned IDs. */
+export function temporarySocketDirectory(prefix: string): string {
+  if (process.platform !== 'darwin') return temporaryDirectory(prefix);
+  return mkdtempSync(join(realpathSync.native('/tmp'), prefix));
+}
+
 /** Real directory traversal aliases without requiring Windows symlink privileges. */
 export function directoryLink(target: string, path: string): void {
   symlinkSync(

@@ -79,7 +79,7 @@ async function fixture(decision: ReviewResponse = 'approve_once') {
           normalRequests.push({ route, body });
           if (step++ === 0)
             call = {
-              name: 'files.write',
+              name: 'write_file',
               arguments: JSON.stringify({
                 path: `${workId}.txt`,
                 content: `actual ${workId}`,

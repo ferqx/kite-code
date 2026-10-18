@@ -108,11 +108,11 @@ Native 回退在双 prefix EX 内固定仍由原 nonce 持有的既存 Terminal�
 
 正式 CLI／Native 离线维护使用同一调用内资源 owner；SQLite strict-close 或原句柄关闭未确认时保留原资源、Profile EX 与相关临时目录至实际宿主退出。正常关闭才允许清理和交出维护权，错误返回不充当关闭证明。恢复 journal、新 Store及来源 fencing保持；维护owner和平台验收边界见[维护合同](../../packages/agent/src/maintenance/README.md)。
 
-当前Terminal／Native跨代码兼容链固定真实提交 `4a4c0e440b2098e5b4ec58c5831452773b39228f`：11项锁输入全部原字节相同，0001／0002 SQL分别核原字节与固定checksum。双方均支持同一闭合schema后，经原installed A→B→A→B核同Store、原任务身份、B完整正文和后续真实工作；原source／builder／实际代码差异、期限、普通退出／EX和卸载保数据守卫保持。不以format major相同推导旧代码可读新增迁移，也不删除审计／恢复旧库制造兼容。新组合的实际结果按[Terminal](../../apps/cli/docs/terminal-release.md#验证边界)／[Native](../../apps/desktop/docs/native-release.md#真实代码升级与冷回退) owner核对，历史通过不自动授予新组合、已发布样本或其他平台资格。
+当前Terminal／Native跨代码兼容链固定真实提交 `4a4c0e440b2098e5b4ec58c5831452773b39228f`：11项原始锁输入逐一核对，除原字节相同外，仅接受[Terminal owner](../../apps/cli/docs/terminal-release.md#验证边界)登记的固定前驱／当前输入完整 raw SHA 配对；0001／0002 SQL 仍分别核原字节与固定 checksum。双方均支持同一闭合schema后，经原installed A→B→A→B核同Store、原任务身份、B完整正文和后续真实工作；原source／builder／实际代码差异、期限、普通退出／EX和卸载保数据守卫保持。不以format major相同推导旧代码可读新增迁移，也不删除审计／恢复旧库制造兼容。新组合的实际结果按[Terminal](../../apps/cli/docs/terminal-release.md#验证边界)／[Native](../../apps/desktop/docs/native-release.md#真实代码升级与冷回退) owner核对，历史通过不自动授予新组合、已发布样本或其他平台资格。
 
 原a2b／837前驱、历史SHA和精确workspace投影继续保留legacy输入守卫；a2b实际Terminal／Native拒绝反例分别核Core0002与privateDB9的安全拒绝、Provider零增量、普通退出、准确身份及原bytes／inode不变。Core先拒绝的窗口不冒充private路径已核，两类Native反例使用独立Profile，不复制／恢复／降级数据。原完整冷回退中的正文、身份、零重放和数据保护移入同schema兼容链，原Mac Main／renderer实际字节差异要求保持。
 
-用户2026-10-16确认保留事务内恢复审计并明确版本兼容边界；完整取舍归[兼容前驱决定](../../.agents/notes/implemented/testing/2026-10-16-schema-compatible-predecessors.md)。原legacy投影仅供其准确历史输入，不扩大当前兼容准入；兼容入口11项raw identical及两SQL固定checksum，Windows调用者沿同准入且保原1140000ms期限，源码接线不授原生资格。
+用户2026-10-16确认保留事务内恢复审计并明确版本兼容边界；完整取舍归[兼容前驱决定](../../.agents/notes/implemented/testing/2026-10-16-schema-compatible-predecessors.md)。原 legacy 投影仍只供其准确历史输入。2026-10-18用户确认另为三个已提交的构建／实际依赖增量及本轮 live 脚本增加有限 raw 配对准入；它不把不同输入标为 identical，不改旧源码或固定前驱，也不容许未知依赖变化。Windows 调用者沿同一独立守卫，11项原始 hash、两 SQL 原字节及固定 checksum、原1140000ms期限保持，源码接线不授原生资格。
 
 ## SQLite 与可选能力
 
@@ -126,7 +126,7 @@ WAL qualification 以官方已知修复/确证 backport、实际 sourceId 与多
 
 默认 macOS Shell 已接入宿主 Seatbelt/launchd coalition，真实默认 candidate 保存原 Job 输出/全树停止并可 cold 读取零重放。它不授予跨平台生产 sandbox 或完整资源/release 资格；Files runtimeAssets 保护、原权限/read-set 与不盲重放仍强制。Win/Linux 原生验证按用户最新安排后置，Windows 由用户后续独立验证；现有 Actions 接线保留，当前不从 macOS 扩大支持集合。通用 OS keyring smoke 保 CI 双 gate/实际随机 namespace；Native 本机资格只使用本任务临时 Profile 的准确独立 account，保存后准确 revoke/remove，再由 fresh backend 核 absence。MCP 外联网只在明确 live gate 开启时执行；自有 loopback 范围归 [Native owner](../../apps/desktop/README.md#native-mcp-完整设置)。
 
-Windows release job另接[完整真实代码调用者](../../tests/fixtures/unified-agent/windows-cross-version.qualification.ts)，复用该job准确Terminal／Native和固定4a4c兼容前驱的两份原builder；11项锁输入逐字相同，两份Core迁移核准确原字节与固定checksum，实际Agent字节／candidate与clean来源独立核，不以版本标签推导兼容。原同代码、Native维护和TUI caller均保留，新步骤位于其后；整个release job现为60分钟／always formal与完整准入保持，所有原fixture期限保持，统一1140000ms绝对期限包括物化、Terminal三任务／冷读、Native四基础窗口／三任务和installed新Store恢复后第五窗口／单次卸载。前驱已支持DB9，不计DB9拒旧／已发布样本／T029；本机源码和读取证据不授Windows或Linux原生资格。实际入口、预算和来源归[Terminal owner](../../apps/cli/docs/terminal-release.md#windows-真实代码升级与冷回退调用者)，平台验收按用户最新安排后置，Windows 由用户后续独立验证；现有Actions接线保留，当前未dispatch。
+Windows release job另接[完整真实代码调用者](../../tests/fixtures/unified-agent/windows-cross-version.qualification.ts)，复用该job准确Terminal／Native和固定4a4c兼容前驱的两份原builder；11项锁输入沿同一原字节／精确 raw 配对守卫，两份 Core 迁移仍核准确原字节与固定 checksum，实际Agent字节／candidate与clean来源独立核，不以版本标签推导兼容。原同代码、Native维护和TUI caller均保留，新步骤位于其后；整个release job现为60分钟／always formal与完整准入保持，所有原fixture期限保持，统一1140000ms绝对期限包括物化、Terminal三任务／冷读、Native四基础窗口／三任务和installed新Store恢复后第五窗口／单次卸载。前驱已支持DB9，不计DB9拒旧／已发布样本／T029；本机源码和读取证据不授Windows或Linux原生资格。实际入口、预算和来源归[Terminal owner](../../apps/cli/docs/terminal-release.md#windows-真实代码升级与冷回退调用者)，平台验收按用户最新安排后置，Windows 由用户后续独立验证；现有Actions接线保留，当前未dispatch。
 
 ## 平台与完成约束
 

@@ -64,8 +64,10 @@ function save(complete = false) {
   writeFileSync(ledgerPath + '.pending', JSON.stringify(value));
   renameSync(ledgerPath + '.pending', ledgerPath);
 }
-process.on('SIGTERM', () => { reason = 'signal'; });
-process.on('SIGINT', () => { reason = 'signal'; });
+let wakeTick;
+const stop = () => { reason = 'signal'; wakeTick?.(); };
+process.on('SIGTERM', stop);
+process.on('SIGINT', stop);
 const hard = setTimeout(() => { reason = 'deadline'; save(false); descendant.kill('SIGTERM'); process.exit(124); }, settings.durationSeconds * 1000);
 function payload(stream, phase, bytes) {
   const prefix = label + '|' + phase + '|' + seq + '|' + stream + '|中文🙂|';
@@ -92,7 +94,13 @@ try {
     await emit('stdout', payload('stdout', 'tick', settings.payloadBytes * 3 / 4));
     await emit('stderr', payload('stderr', 'tick', settings.payloadBytes / 4));
     save();
-    await new Promise(resolve => setTimeout(resolve, Math.max(0, settings.tickMs - (performance.now() - tick))));
+    await new Promise(resolve => {
+      let timer;
+      const wake = () => { clearTimeout(timer); wakeTick = undefined; resolve(); };
+      wakeTick = wake;
+      timer = setTimeout(wake, Math.max(0, settings.tickMs - (performance.now() - tick)));
+      if (reason !== 'running') wake();
+    });
   }
   if (reason === 'running') reason = 'finish';
 } finally {

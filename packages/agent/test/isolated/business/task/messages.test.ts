@@ -15,8 +15,49 @@ const finish: Extract<ModelEvent, { type: 'finish' }> = {
   usage: { inputTokens: 1, outputTokens: 1 },
 };
 function call(name: string, input: unknown): ModelEvent[] {
+  // These are provider outputs; runtime selection and durable assertions retain internal IDs.
+  const publicNames: Record<string, string> = {
+    task: 'spawn_agent',
+    'task.execute': 'run_agent',
+    task_read: 'read_agent',
+    task_wait: 'wait_agents',
+    task_cancel: 'cancel_agent_task',
+    send_message: 'send_agent_message',
+    followup_task: 'followup_agent',
+    wait_agents: 'wait_agents',
+    wait_agent: 'wait_agent_event',
+    list_agents: 'list_agents',
+    interrupt_agent: 'interrupt_agent',
+  };
+  const publicKeys: Record<string, string> = {
+    taskId: 'task_id',
+    taskIds: 'task_ids',
+    timeoutMs: 'timeout_ms',
+    resultDisposition: 'result_disposition',
+    commandId: 'command_id',
+    targetRunId: 'target_run_id',
+    afterRunId: 'after_run_id',
+    contextSelectionId: 'context_selection_id',
+    afterSeq: 'after_seq',
+    upperSeq: 'upper_seq',
+  };
+  let arguments_ = input;
+  if (publicNames[name] && input && typeof input === 'object' && !Array.isArray(input)) {
+    arguments_ = Object.fromEntries(
+      Object.entries(input).map(([key, value]) =>
+        (name === 'task_wait' || name === 'wait_agents') && key === 'taskId'
+          ? ['task_ids', [value]]
+          : [publicKeys[key] ?? key, value],
+      ),
+    );
+  }
   return [
-    { type: 'tool_call', id: crypto.randomUUID(), name, arguments: JSON.stringify(input) },
+    {
+      type: 'tool_call',
+      id: crypto.randomUUID(),
+      name: publicNames[name] ?? name,
+      arguments: JSON.stringify(arguments_),
+    },
     { ...finish, reason: 'tool_calls' },
   ];
 }

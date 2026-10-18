@@ -1,5 +1,7 @@
 # MCP leaf
 
+模型入口使用 `search_mcp_tools`、`connect_mcp_server`、`refresh_mcp_catalogue`、`list_mcp_resources`、`read_mcp_resource`、`list_mcp_prompts` 与 `get_mcp_prompt`；Service 的只读来源目录使用 `list_mcp_sources`。内置声明字段投影为 snake_case，远端 prompt arguments 等开放参数保持原 key。动态远端工具的模型名称为 `mcp_<server>_<remote>_<hash8>`，server／remote 片段清理并限制长度、hash 绑定原 server ID 与远端工具名，完整公开名不超过 64 字符；内部 ID/version、原远端 schema 和 RPC arguments 不改写。搜索结果的 `modelName` 与该可调用模型名一致，原 definition 和 descriptor 事实仍保留；发现名称不授予执行权限。
+
 [tools-search](tools-search.ts)只搜索本 Run 实际选入的冻结目录，供 Model 取得准确远端定义；不连接或重新发现，也不把 annotations 当权限。实际选中连接的[资源来源](resource-model-source.ts)只投影有限原身份及 generation，标明不是 authority；Model 动态选入原 resources.list/read，实际读取仍核完整目录 Execution、descriptor digest 和目标 URI。TUI 依据同 Scope 的不可变资源收据展示 URI，资源正文留在正式 Model 结果，不进入普通目录卡片。
 
 [provider-action](provider-action.ts)给真实父 Tool 提供普通 nested Action 的有限端口。Store 原子核父执行、Actor、root work、所属 Run 与取消关系，热装配保相同权限；冷记录仅观察、不得重建默认执行。OAuth 执行仍在正式 Action／HTTP port，连接、来源批准和认证各自独立核实。

@@ -76,7 +76,7 @@ export function groupOptions(
         yield {
           type: 'tool_call',
           id: key,
-          name: mode === 'group_foreground' ? 'task.execute' : 'task',
+          name: mode === 'group_foreground' ? 'run_agent' : 'spawn_agent',
           arguments: JSON.stringify({ key, role: 'worker', input: { content: key } }),
         };
       yield { ...finish, reason: 'tool_calls' };
@@ -126,14 +126,14 @@ export function groupOptions(
           type: 'tool_call',
           id: 'grand',
           name: ['group_terminal_descendant', 'group_new_descendant'].includes(mode)
-            ? 'task'
-            : 'task.execute',
+            ? 'spawn_agent'
+            : 'run_agent',
           arguments: JSON.stringify({
             key: 'grand',
             role: 'worker',
             input: { content: 'grand' },
             ...(['group_terminal_descendant', 'group_new_descendant'].includes(mode)
-              ? { cancellation: 'detached', resultDisposition: 'background' }
+              ? { cancellation: 'detached', result_disposition: 'background' }
               : {}),
           }),
         };

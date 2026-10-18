@@ -155,13 +155,13 @@ test('real UnifiedExecution dispatches paged read/glob; denied requests have zer
     },
   };
   const model = createFixedModel([
-    call('files.read', { path: 'root.ts', offset: 2, limit: 1 }),
+    call('read_file', { path: 'root.ts', start_line: 2, max_lines: 1 }),
     [finish],
-    call('files.glob', { pattern: '**/*.ts' }),
+    call('glob_files', { pattern: '**/*.ts' }),
     [finish],
-    call('files.read', { path: 'root.ts' }),
+    call('read_file', { path: 'root.ts' }),
     [finish],
-    call('files.glob', { pattern: '**/*.ts' }),
+    call('glob_files', { pattern: '**/*.ts' }),
     [finish],
   ]);
   let deny = false;

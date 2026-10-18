@@ -3205,7 +3205,7 @@
               },
               "transformationVersion": {
                 "type": "string",
-                "const": "1"
+                "enum": ["1", "2"]
               },
               "messageOrder": {
                 "type": "string",
@@ -4939,7 +4939,7 @@
                   },
                   "transformationVersion": {
                     "type": "string",
-                    "const": "1"
+                    "enum": ["1", "2"]
                   },
                   "messageOrder": {
                     "type": "string",

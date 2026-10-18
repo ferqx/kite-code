@@ -1,9 +1,11 @@
 import { Database } from 'bun:sqlite';
+import { expect } from 'bun:test';
 import { createHash } from 'node:crypto';
 import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { selectProfile } from '@kite-ai/agent/profile';
+import { sessionTitleInstructions } from '../../../../packages/agent/src/business/session-title/title';
 import { privateDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { ownedUserConfiguration } from '../../../service/test/fixtures/user-configuration-fixture';
 import type { CLIServiceArtifact } from '../../host';
@@ -57,7 +59,8 @@ export async function workflowQuestionProfile(decision: 'replan' | 'waive') {
     }),
     { mode: 0o600 },
   );
-  const requests: { messages: { role: string; content: unknown }[] }[] = [];
+  const requests: { messages: { role: string; content: unknown }[]; tools?: unknown[] }[] = [];
+  const titleRequests: (typeof requests)[number][] = [];
   let provider: ReturnType<typeof Bun.serve>;
   try {
     provider = Bun.serve({
@@ -65,6 +68,20 @@ export async function workflowQuestionProfile(decision: 'replan' | 'waive') {
       port: 0,
       async fetch(request) {
         const input = (await request.json()) as (typeof requests)[number];
+        if (
+          input.messages.some(
+            (message) => message.role === 'system' && message.content === sessionTitleInstructions,
+          )
+        ) {
+          titleRequests.push(input);
+          expect(input.tools ?? []).toEqual([]);
+          const frame = (delta: unknown, finish_reason: string | null) =>
+            `data: ${JSON.stringify({ id: 'title', object: 'chat.completion.chunk', model: 'fixed', choices: [{ index: 0, delta, finish_reason }] })}\n\n`;
+          return new Response(
+            `${frame({ content: 'Skill task' }, null)}${frame({}, 'stop')}data: [DONE]\n\n`,
+            { headers: { 'content-type': 'text/event-stream' } },
+          );
+        }
         requests.push(input);
         const db = new Database(profile.databasePath, { readonly: true });
         let key: string;
@@ -168,6 +185,7 @@ export async function workflowQuestionProfile(decision: 'replan' | 'waive') {
       artifact,
       ledger,
       requests,
+      titleRequests,
       instructions,
       userConfiguration,
       close,

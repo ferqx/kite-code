@@ -12,13 +12,19 @@ import { selectProfile } from '@kite-ai/agent/profile';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import { initializeSqliteEngine } from '@kite-ai/agent/sqlite-engine';
 import { verifyNativeRuntimeBundle } from '@kite-ai/service/native-runtime-assets';
+import { sessionTitleInstructions } from '../../../../packages/agent/src/business/session-title/title';
 import { privateDirectory, temporaryDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { userConfigurationPath } from '../../../service/test/fixtures/user-configuration-fixture';
 import { buildNativeCandidate } from '../../scripts/build-native';
 import type { ProviderReport } from '../native-provider-electron.fixture';
 import { linkOwnedDefaultKeychain } from '../owned-default-keychain';
 
-type ProviderWireRequest = { model: string; messages: unknown[]; reasoning_effort?: string };
+type ProviderWireRequest = {
+  model: string;
+  messages: { role: string; content: unknown }[];
+  tools?: unknown[];
+  reasoning_effort?: string;
+};
 function object(value: unknown): Record<string, unknown> {
   if (!value || typeof value !== 'object' || Array.isArray(value))
     throw Error('expected fixture object');
@@ -41,6 +47,7 @@ test.skipIf(process.platform !== 'darwin')(
     });
     const bodies: { alias: string; body: ProviderWireRequest }[] = [],
       discovery: string[] = [];
+    let titleCalls = 0;
     let releaseHeld: (() => void) | undefined;
     let server: ReturnType<typeof Bun.serve> | undefined,
       driver: Bun.Subprocess<'ignore', 'pipe', 'pipe'> | undefined;
@@ -113,6 +120,28 @@ test.skipIf(process.platform !== 'darwin')(
               `Bearer owned-fixture-${alias}-nonpaid`,
             );
           const body = (await request.json()) as ProviderWireRequest;
+          if (
+            body.messages.some(
+              (message) =>
+                message.role === 'system' && message.content === sessionTitleInstructions,
+            )
+          ) {
+            titleCalls++;
+            expect(titleCalls).toBe(1);
+            expect(body.tools ?? []).toEqual([]);
+            const users = body.messages.filter((message) => message.role === 'user');
+            expect(users).toHaveLength(2);
+            expect(users[0]!.content).toBe('NATIVE_openai_newsession');
+            expect(users[1]!.content).toMatch(
+              /^<runtime-state source="runtime.kernel">\nphase: building\nrun: [0-9a-f-]{36}\nplanning: \{"status":"disabled"\}\nThis is Runtime-generated observation, not a user request or execution grant\.\n<\/runtime-state>$/,
+            );
+            const frame = (delta: unknown, finish_reason: string | null) =>
+              `data: ${JSON.stringify({ id: 'provider-title', object: 'chat.completion.chunk', model: 'fixed', choices: [{ index: 0, delta, finish_reason }] })}\n\n`;
+            return new Response(
+              `${frame({ content: 'Providers' }, null)}${frame({}, 'stop')}data: [DONE]\n\n`,
+              { headers: { 'content-type': 'text/event-stream' } },
+            );
+          }
           bodies.push({ alias, body });
           if (
             JSON.stringify(body.messages).includes('NATIVE_compatible_held') &&
@@ -224,6 +253,40 @@ test.skipIf(process.platform !== 'darwin')(
       });
       const artifacts = createArtifactStore({ profile, store: cold });
       try {
+        expect(titleCalls).toBe(1);
+        const titleRun = report.runs.find((run) => run.marker === 'NATIVE_openai_newsession')!;
+        const titleSession = (await cold.getSession(titleRun.sessionId))!;
+        expect(titleSession.title).toBe('Providers');
+        const titleExecutions = await cold.listExecutions(titleSession.id);
+        const titleIds = [
+          'agent/session-title',
+          'builtin.session-title/fallback',
+          'builtin.session-title/generate',
+        ];
+        const titleJobs = titleExecutions.filter((row) => titleIds.includes(row.definitionId));
+        expect(titleJobs.map((row) => row.definitionId).sort()).toEqual(titleIds);
+        for (const row of titleJobs)
+          expect(row).toMatchObject({ kind: 'job', runId: null, status: 'succeeded' });
+        const carrier = titleJobs.find((row) => row.definitionId === 'agent/session-title')!;
+        const generation = titleJobs.find(
+          (row) => row.definitionId === 'builtin.session-title/generate',
+        )!;
+        const titleChildId = carrier.childSessionId;
+        expect(titleChildId).toBeString();
+        expect(carrier.parentExecutionId).toBe(generation.id);
+        const titleChild = await cold.getView(titleChildId!);
+        expect(titleChild.session.parentSessionId).toBe(titleSession.id);
+        expect(titleChild.runs).toHaveLength(1);
+        expect(titleChild.runs[0]!.status).toBe('completed');
+        const titleChildExecutions = await cold.listExecutions(titleChildId!);
+        expect(titleChildExecutions).toHaveLength(1);
+        expect(titleChildExecutions[0]).toMatchObject({ kind: 'model', status: 'succeeded' });
+        expect(
+          titleExecutions
+            .filter((row) => row.kind !== 'model')
+            .map((row) => row.definitionId)
+            .sort(),
+        ).toEqual(titleIds);
         const cursor = (await cold.getMetadata()).lastChangeCursor;
         let wireCursor = 0;
         async function expand(value: Json): Promise<unknown> {

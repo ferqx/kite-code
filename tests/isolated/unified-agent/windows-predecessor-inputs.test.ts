@@ -22,6 +22,14 @@ import {
 } from '../../fixtures/unified-agent/windows-predecessor';
 
 const root = resolve(import.meta.dir, '../../..');
+function historicalInput(path: string) {
+  const result = Bun.spawnSync(
+    ['git', 'show', `${COMPATIBLE_WINDOWS_PREDECESSOR_COMMIT}:${path}`],
+    { cwd: root },
+  );
+  if (result.exitCode !== 0) throw Error(`historical_windows_input_missing:${path}`);
+  return result.stdout;
+}
 // Read-only audit of actual commit 837a2b8c; these are dependency inputs, not fabricated old source.
 const previousInputs = {
   'bun.lock': 'abad6bbc5cad8a0b2ac5e7c53edb15c5ae2e4d1b5167e75be24de028ba1a4d8f',
@@ -61,13 +69,13 @@ test('real Windows predecessor retains exactly its original eleven locked input 
   }
 });
 
-test('current Windows inputs retain all original bytes except the exact reviewed scripts, parser and UI declarations', () => {
+test('historical Windows inputs retain all original bytes except the exact reviewed scripts, parser and UI declarations', () => {
   for (const [path, expected] of Object.entries(previousInputs)) {
     const original = Bun.spawnSync(['git', 'show', `${WINDOWS_PREDECESSOR_COMMIT}:${path}`], {
       cwd: root,
     });
     expect(original.exitCode).toBe(0);
-    const current = readFileSync(resolve(root, path));
+    const current = historicalInput(path);
     const workspaceProjection =
       refinePredecessorWorkspaceDeclarations(path, current)?.bytes ?? current;
     const refined =
@@ -218,7 +226,7 @@ test.skipIf(process.platform === 'win32' && process.arch === 'x64')(
   },
 );
 
-test('Windows compatible predecessor permits only identical raw inputs and pinned schema bytes', () => {
+test('Windows compatible predecessor retains original identical raw inputs and pinned schema bytes', () => {
   expect(COMPATIBLE_WINDOWS_PREDECESSOR_COMMIT).toBe('4a4c0e440b2098e5b4ec58c5831452773b39228f');
   const paths = windowsPredecessorLockedInputPaths(
     JSON.parse(readFileSync(resolve(root, 'package.json'), 'utf8')),
@@ -230,7 +238,7 @@ test('Windows compatible predecessor permits only identical raw inputs and pinne
       { cwd: root },
     );
     expect(original.exitCode).toBe(0);
-    const current = readFileSync(resolve(root, path));
+    const current = original.stdout;
     expect(assertCompatiblePredecessorLockedInput(path, original.stdout, current)).toEqual({
       path,
       sha256: createHash('sha256').update(original.stdout).digest('hex'),
@@ -274,3 +282,47 @@ test.skipIf(process.platform === 'win32' && process.arch === 'x64')(
     ).rejects.toThrow('windows_predecessor_platform_required');
   },
 );
+
+test('actual Windows inputs preserve raw proofs and use context-bound reviewed pairs without POSIX source exceptions', () => {
+  const reviewedPaths = new Set([
+    'bun.lock',
+    'package.json',
+    'packages/ai/package.json',
+    'packages/agent/package.json',
+    'packages/ui/package.json',
+    'apps/service/package.json',
+  ]);
+  for (const path of COMPATIBLE_PREDECESSOR_INPUT_PATHS) {
+    const actual = readFileSync(resolve(root, path));
+    const expectedMatch = reviewedPaths.has(path) ? 'reviewed_locked_input_increment' : 'identical';
+    for (const [commit, guard] of [
+      [WINDOWS_PREDECESSOR_COMMIT, assertWindowsPredecessorLockedInput],
+      [COMPATIBLE_WINDOWS_PREDECESSOR_COMMIT, assertCompatiblePredecessorLockedInput],
+    ] as const) {
+      const old = Bun.spawnSync(['git', 'show', `${commit}:${path}`], { cwd: root });
+      expect(old.exitCode).toBe(0);
+      expect(guard(path, old.stdout, actual)).toEqual({
+        path,
+        sha256: createHash('sha256').update(old.stdout).digest('hex'),
+        currentSha256: createHash('sha256').update(actual).digest('hex'),
+        match: expectedMatch,
+      });
+      expect(() => guard(path, old.stdout, Buffer.concat([actual, Buffer.from('x')]))).toThrow();
+    }
+  }
+  expect(() =>
+    assertWindowsPredecessorLockedInput('unreviewed', Buffer.from('same'), Buffer.from('same')),
+  ).toThrow('windows_predecessor_dependency_input_changed:unreviewed');
+  const posixAgent = Bun.spawnSync(
+    ['git', 'show', `a2b6441fde28d9c0f895a26e6a9d2471d2b1b242:packages/agent/package.json`],
+    { cwd: root },
+  );
+  expect(posixAgent.exitCode).toBe(0);
+  expect(() =>
+    assertWindowsPredecessorLockedInput(
+      'packages/agent/package.json',
+      posixAgent.stdout,
+      historicalInput('packages/agent/package.json'),
+    ),
+  ).toThrow('windows_predecessor_dependency_input_changed:packages/agent/package.json');
+});

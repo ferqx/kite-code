@@ -106,10 +106,10 @@ async function fixture(ask = false, withPort = true, connectServer = 'local') {
       const step = steps.get(route) ?? 0;
       steps.set(route, step + 1);
       const tools = (body.tools ?? []) as { function: { name: string; parameters: unknown } }[];
-      const remote = tools.find((x) => x.function.name.startsWith('mcp.local.'));
+      const remote = tools.find((x) => x.function.name.startsWith('mcp_local_effect_'));
       const call =
         step === 0 && route !== 'remote-b'
-          ? { name: 'mcp.connect', input: { serverId: connectServer, key: 'first' } }
+          ? { name: 'connect_mcp_server', input: { server_id: connectServer, key: 'first' } }
           : (step === 1 && route !== 'remote-b') || (step === 0 && route === 'remote-b')
             ? remote
               ? { name: remote.function.name, input: { value: 'exact' } }
@@ -265,7 +265,7 @@ test('default MCP has no network before dispatched Job; next actual Model sees e
     await f.runtime.waitForCommand('connect-a', { timeoutMs: 5000 });
     expect(f.requests[0]!.tools).toMatchObject([
       { function: { name: 'ask_user' } },
-      { function: { name: 'mcp.connect' } },
+      { function: { name: 'connect_mcp_server' } },
     ]);
     const models = (await f.store.getView('a')).executions.filter(
       (execution) => execution.kind === 'model',
@@ -292,13 +292,25 @@ test('default MCP has no network before dispatched Job; next actual Model sees e
       { id: 'mcp.tools.search', definitionVersion: '1', extensionId: 'builtin.mcp.discovery' },
     ]);
     const wire = f.requests[1]!.tools as { function: { name: string; parameters: unknown } }[];
-    expect(wire.map((tool) => tool.function.name)).toEqual(bindings.map((tool) => tool.id));
-    expect(wire.find((tool) => tool.function.name === remote[0]!.id)!.function.parameters).toEqual({
+    const remoteWire = wire.find((tool) =>
+      /^mcp_local_effect_[a-f0-9]{8}$/.test(tool.function.name),
+    )!;
+    expect(wire.map((tool) => tool.function.name)).toEqual([
+      'ask_user',
+      'connect_mcp_server',
+      remoteWire.function.name,
+      'list_mcp_resources',
+      'read_mcp_resource',
+      'search_mcp_tools',
+    ]);
+    expect(remoteWire.function.parameters).toEqual({
       type: 'object',
       properties: { value: { type: 'string' } },
       required: ['value'],
     });
-    expect(second.request.tools!.map((tool) => tool.id)).toEqual(bindings.map((tool) => tool.id));
+    expect(second.request.tools!.map((tool) => tool.id)).toEqual(
+      wire.map((tool) => tool.function.name),
+    );
     const remoteExecution = (await f.store.listExecutions('a')).find(
       (execution) => execution.definitionId === remote[0]!.id,
     )!;

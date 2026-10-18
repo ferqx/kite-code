@@ -31,10 +31,53 @@ function childHoldKey(request: ModelRequest): string {
   );
   return content;
 }
-const call = (name: string, input: unknown): ModelEvent[] => [
-  { type: 'tool_call', id: crypto.randomUUID(), name, arguments: JSON.stringify(input) },
-  { ...finish, reason: 'tool_calls' },
-];
+function call(name: string, input: unknown): ModelEvent[] {
+  // These are provider outputs; runtime selection and durable assertions retain internal IDs.
+  const publicNames: Record<string, string> = {
+    task: 'spawn_agent',
+    'task.execute': 'run_agent',
+    task_read: 'read_agent',
+    task_wait: 'wait_agents',
+    task_cancel: 'cancel_agent_task',
+    send_message: 'send_agent_message',
+    followup_task: 'followup_agent',
+    wait_agents: 'wait_agents',
+    wait_agent: 'wait_agent_event',
+    list_agents: 'list_agents',
+    interrupt_agent: 'interrupt_agent',
+  };
+  const publicKeys: Record<string, string> = {
+    taskId: 'task_id',
+    taskIds: 'task_ids',
+    timeoutMs: 'timeout_ms',
+    resultDisposition: 'result_disposition',
+    commandId: 'command_id',
+    targetRunId: 'target_run_id',
+    afterRunId: 'after_run_id',
+    contextSelectionId: 'context_selection_id',
+    afterSeq: 'after_seq',
+    upperSeq: 'upper_seq',
+  };
+  let arguments_ = input;
+  if (publicNames[name] && input && typeof input === 'object' && !Array.isArray(input)) {
+    arguments_ = Object.fromEntries(
+      Object.entries(input).map(([key, value]) =>
+        (name === 'task_wait' || name === 'wait_agents') && key === 'taskId'
+          ? ['task_ids', [value]]
+          : [publicKeys[key] ?? key, value],
+      ),
+    );
+  }
+  return [
+    {
+      type: 'tool_call',
+      id: crypto.randomUUID(),
+      name: publicNames[name] ?? name,
+      arguments: JSON.stringify(arguments_),
+    },
+    { ...finish, reason: 'tool_calls' },
+  ];
+}
 test('followup_task creates a new required carrier in the same child Session and waits for its exact result', async () => {
   const directory = realpathSync(mkdtempSync(join(tmpdir(), 'kite-task-followup-required-')));
   const store = await openSqliteStore({ dataRoot: join(directory, 'data'), profile: 'test' });
@@ -226,7 +269,7 @@ test('65 required children queue, hold one parent Run and all settle without a c
           yield {
             type: 'tool_call',
             id: `child-${index}`,
-            name: 'task',
+            name: 'spawn_agent',
             arguments: JSON.stringify({
               key: `child-${index}`,
               role: 'reader',
@@ -721,7 +764,7 @@ for (const wake of ['terminal', 'input', 'include', 'timeout'] as const)
         (view) =>
           view.executions.some(
             (execution) =>
-              execution.definitionId === 'task_wait' &&
+              execution.definitionId === 'wait_agents' &&
               (execution.status === 'dispatching' ||
                 (wake === 'timeout' && execution.status === 'succeeded')),
           ) && releases.size === 2,
@@ -760,7 +803,7 @@ for (const wake of ['terminal', 'input', 'include', 'timeout'] as const)
       const view = await store.getView('root');
       expect(parentModels).toBe(4);
       expect(view.runs[0]?.status).toBe('completed');
-      const waited = view.executions.find((execution) => execution.definitionId === 'task_wait')!;
+      const waited = view.executions.find((execution) => execution.definitionId === 'wait_agents')!;
       expect(waited.status).toBe('succeeded');
       const details = (waited.result as Record<string, Json>).details as Record<string, Json>;
       expect(details.reason).toBe(wake === 'include' ? 'input' : wake);

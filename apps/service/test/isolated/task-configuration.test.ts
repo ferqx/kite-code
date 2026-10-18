@@ -52,10 +52,10 @@ function endpoint(role = 'worker') {
           (tool) => tool.function.name,
         ) ?? [];
       let call: { name: string; input: Json } | undefined;
-      if (parent && names.includes('task')) {
+      if (parent && names.includes('spawn_agent')) {
         const calls: { name: string; input: Json }[] = [
           {
-            name: 'task',
+            name: 'spawn_agent',
             input: {
               key,
               role,
@@ -63,12 +63,12 @@ function endpoint(role = 'worker') {
               cancellation: 'detached',
             },
           },
-          { name: 'task_wait', input: { taskId: key, timeoutMs: 4000 } },
-          { name: 'task_read', input: { taskId: key } },
+          { name: 'wait_agents', input: { task_ids: [key], timeout_ms: 4000 } },
+          { name: 'read_agent', input: { task_id: key } },
         ];
         call = calls[results.length];
       } else if (!parent && !results.length)
-        call = { name: 'files.read', input: { path: 'input.txt' } };
+        call = { name: 'read_file', input: { path: 'input.txt' } };
       const chunk = (delta: unknown, reason: string | null) =>
         `data: ${JSON.stringify({ id: 'local', object: 'chat.completion.chunk', created: 1, model: body.model, choices: [{ index: 0, delta, finish_reason: reason }] })}\n\n`;
       return new Response(
@@ -125,7 +125,7 @@ async function fixture(
     tools: [
       'task',
       'task_read',
-      'task_wait',
+      'wait_agents',
       'task_cancel',
       'files.read',
       ...(options.defaultRole ? ['files.write'] : []),
@@ -155,7 +155,7 @@ async function fixture(
             { kind: 'model' as const, definitionId: 'parent', definitionVersion: '1' },
             { kind: 'model' as const, definitionId: 'child', definitionVersion: '1' },
             { kind: 'tool' as const, definitionId: 'files.read', definitionVersion: '4' },
-            ...['task', 'task_read', 'task_wait', 'task_cancel']
+            ...['task', 'task_read', 'wait_agents', 'task_cancel']
               .filter((id) => id !== options.deny)
               .map((id) => ({ kind: 'tool' as const, definitionId: id, definitionVersion: '1' })),
             ...(options.deny === 'carrier'
@@ -287,10 +287,10 @@ test('default Task uses one global factory and the actual shared Loop/model slot
     ).toHaveLength(1);
     const operations = await f.store.listExecutions('s');
     expect(operations.filter((row) => row.definitionId === 'task')).toHaveLength(1);
-    expect(operations.find((row) => row.definitionId === 'task_wait')?.status).toBe('succeeded');
+    expect(operations.find((row) => row.definitionId === 'wait_agents')?.status).toBe('succeeded');
     expect(operations.find((row) => row.definitionId === 'task_read')?.status).toBe('succeeded');
     const first = f.a.requests[0]!.tools as { function: { name: string } }[];
-    expect(first.filter((tool) => tool.function.name === 'task')).toHaveLength(1);
+    expect(first.filter((tool) => tool.function.name === 'spawn_agent')).toHaveLength(1);
     const calls = f.a.requests.length;
     const cursor = (await f.store.getMetadata()).lastChangeCursor;
     await f.store.getView('s');
@@ -494,7 +494,12 @@ test('selected collaboration additions expose exact closed schemas to the real S
       f.configurationPath,
       JSON.stringify({
         ...f.configuration,
-        tools: [...f.configuration.tools, ...ids.map((id) => ({ id, definitionVersion: '1' }))],
+        tools: [
+          ...f.configuration.tools,
+          ...ids
+            .filter((id) => !f.configuration.tools.some((tool) => tool.id === id))
+            .map((id) => ({ id, definitionVersion: '1' })),
+        ],
       }),
     );
     await f.submit();
@@ -503,7 +508,9 @@ test('selected collaboration additions expose exact closed schemas to the real S
       function: { name: string; parameters: Record<string, unknown> };
     }[];
     for (const id of ids) {
-      const actual = tools.find((tool) => tool.function.name === id);
+      const actual = tools.find(
+        (tool) => tool.function.name === (id === 'wait_agent' ? 'wait_agent_event' : id),
+      );
       expect(actual).toBeDefined();
       expect(actual?.function.parameters).toMatchObject({
         type: 'object',
@@ -512,7 +519,7 @@ test('selected collaboration additions expose exact closed schemas to the real S
     }
     expect(
       tools.find((tool) => tool.function.name === 'interrupt_agent')?.function.parameters.required,
-    ).toEqual(['taskId', 'targetRunId', 'commandId']);
+    ).toEqual(['task_id', 'target_run_id', 'command_id']);
     expect(
       (await f.store.listExecutions('s')).filter((row) => row.childSessionId !== null),
     ).toHaveLength(1);
@@ -556,7 +563,7 @@ test('default plan and review run through the real Task carrier and expose only 
       for (const request of childRequests) {
         expect(
           (request.tools as { function: { name: string } }[]).map((tool) => tool.function.name),
-        ).toEqual(['files.read']);
+        ).toEqual(['read_file']);
       }
       const executions = await f.store.listExecutions(carrier.childSessionId!);
       expect(

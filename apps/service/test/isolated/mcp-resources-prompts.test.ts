@@ -261,6 +261,23 @@ async function fixture(
         : { name: object(descriptor).name, arguments: { subject: 'exact subject' } }),
     };
   }
+  async function modelBinding() {
+    const value = await binding();
+    return {
+      server_id: value.serverId,
+      connection_key: value.connectionKey,
+      config_digest: value.configDigest,
+      generation: value.generation,
+    };
+  }
+  async function modelTarget(family: 'resources' | 'prompts') {
+    const { catalogueExecutionId, descriptorDigest, ...payload } = await target(family);
+    return {
+      ...payload,
+      catalogue_execution_id: catalogueExecutionId,
+      descriptor_digest: descriptorDigest,
+    };
+  }
   const provider = Bun.serve({
     hostname: '127.0.0.1',
     port: 0,
@@ -288,31 +305,29 @@ async function fixture(
           connectionKey: 'first',
         });
         const selectedBinding = {
-          serverId: actual.serverId,
-          connectionKey: actual.connectionKey,
-          configDigest: actual.configDigest,
+          server_id: actual.serverId,
+          connection_key: actual.connectionKey,
+          config_digest: actual.configDigest,
           generation: actual.generation,
         };
         const selectedTools = body.tools as { function: { name: string } }[];
-        expect(selectedTools.some((tool) => tool.function.name === 'mcp.resources.list')).toBe(
+        expect(selectedTools.some((tool) => tool.function.name === 'list_mcp_resources')).toBe(
           true,
         );
-        expect(selectedTools.some((tool) => tool.function.name === 'mcp.resources.read')).toBe(
-          true,
-        );
-        if (step === 1) modelResourceCall = { name: 'mcp.resources.list', input: selectedBinding };
+        expect(selectedTools.some((tool) => tool.function.name === 'read_mcp_resource')).toBe(true);
+        if (step === 1) modelResourceCall = { name: 'list_mcp_resources', input: selectedBinding };
         else {
           const catalogue = JSON.parse(
             messages.filter((message) => message.role === 'tool').at(-1)!.content,
           );
           expect(catalogue.binding.runId).toBe(actual.runId);
           modelResourceCall = {
-            name: 'mcp.resources.read',
+            name: 'read_mcp_resource',
             input: {
               ...selectedBinding,
               uri: catalogue.descriptors[0].descriptor.uri,
-              catalogueExecutionId: catalogue.binding.executionId,
-              descriptorDigest: catalogue.descriptors[0].descriptorDigest,
+              catalogue_execution_id: catalogue.binding.executionId,
+              descriptor_digest: catalogue.descriptors[0].descriptorDigest,
             },
           };
         }
@@ -320,20 +335,20 @@ async function fixture(
       const call =
         modelResourceCall ??
         (step === 0
-          ? { name: 'mcp.connect', input: { serverId: 'local', key: 'first' } }
+          ? { name: 'connect_mcp_server', input: { server_id: 'local', key: 'first' } }
           : flow === 'all' && step === 1
-            ? { name: 'mcp.resources.list', input: await binding() }
+            ? { name: 'list_mcp_resources', input: await modelBinding() }
             : flow === 'all' && step === 2
               ? {
-                  name: 'mcp.resources.read',
-                  input: { ...(await binding()), ...(await target('resources')) },
+                  name: 'read_mcp_resource',
+                  input: { ...(await modelBinding()), ...(await modelTarget('resources')) },
                 }
               : flow === 'all' && step === 3
-                ? { name: 'mcp.prompts.list', input: await binding() }
+                ? { name: 'list_mcp_prompts', input: await modelBinding() }
                 : flow === 'all' && step === 4
                   ? {
-                      name: 'mcp.prompts.get',
-                      input: { ...(await binding()), ...(await target('prompts')) },
+                      name: 'get_mcp_prompt',
+                      input: { ...(await modelBinding()), ...(await modelTarget('prompts')) },
                     }
                   : null);
       const chunk = {

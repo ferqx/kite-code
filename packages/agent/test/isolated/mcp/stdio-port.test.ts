@@ -527,8 +527,8 @@ macTest(
         {
           type: 'tool_call',
           id: 'a',
-          name: 'mcp.connect',
-          arguments: '{"serverId":"local","key":"first"}',
+          name: 'connect_mcp_server',
+          arguments: '{"server_id":"local","key":"first"}',
         },
         { ...finish, reason: 'tool_calls' },
       ],
@@ -537,8 +537,8 @@ macTest(
         {
           type: 'tool_call',
           id: 'b',
-          name: 'mcp.connect',
-          arguments: '{"serverId":"local","key":"first"}',
+          name: 'connect_mcp_server',
+          arguments: '{"server_id":"local","key":"first"}',
         },
         { ...finish, reason: 'tool_calls' },
       ],
@@ -885,8 +885,8 @@ macTest(
           {
             type: 'tool_call',
             id: 'connect',
-            name: 'mcp.connect',
-            arguments: '{"serverId":"local","key":"original"}',
+            name: 'connect_mcp_server',
+            arguments: '{"server_id":"local","key":"original"}',
           },
           { ...finish, reason: 'tool_calls' },
         ],

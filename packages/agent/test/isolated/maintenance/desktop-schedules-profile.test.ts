@@ -4,6 +4,7 @@ import { createHash } from 'node:crypto';
 import { mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { prepareQualifiedSqliteFixture } from '../../../../../tests/fixtures/unified-agent/qualified-sqlite-fixture';
 import {
   createProfileBackup,
@@ -25,7 +26,7 @@ test('actual Node DB10 backup restores exact original bindings and foreign Store
     await store.createWorkspace({
       expectedStoreId: storeId,
       id: 'workspace',
-      rootUri: `file://${root}`,
+      rootUri: pathToFileURL(root).href,
       name: 'Original workspace',
     });
     await store.createSession({

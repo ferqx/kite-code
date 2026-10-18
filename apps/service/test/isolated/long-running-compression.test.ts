@@ -61,8 +61,8 @@ for (const window of [4096, undefined])
                 id: `read-${decisions}`,
                 type: 'function',
                 function: {
-                  name: 'files.read',
-                  arguments: JSON.stringify({ path: `input-${decisions}.txt`, limit: 10000 }),
+                  name: 'read_file',
+                  arguments: JSON.stringify({ path: `input-${decisions}.txt`, max_lines: 10000 }),
                 },
               },
             ],

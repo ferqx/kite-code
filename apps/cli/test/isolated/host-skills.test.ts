@@ -78,7 +78,7 @@ async function fixture(
                       name: 'complete_skill',
                       arguments: JSON.stringify({ activation_id: 'manual-1', output: {} }),
                     }
-                  : { name: 'skills.load', arguments: JSON.stringify({ id: chosen }) },
+                  : { name: 'load_skill', arguments: JSON.stringify({ skill_id: chosen }) },
               },
             ],
           }

@@ -2,7 +2,7 @@ import { expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
 import { mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { createProfileBackup, restoreProfileBackup } from '@kite-ai/agent/maintenance';
 import { selectProfile } from '@kite-ai/agent/profile';
@@ -11,9 +11,9 @@ import { launchPairedService } from '@kite-ai/service/paired';
 import { privateDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { ownedUserConfiguration } from '../../../service/test/fixtures/user-configuration-fixture';
 import { openTuiDraftFile } from '../../host/tui-drafts';
+import { buildOwnedDaemon } from '../fixtures/daemon-host-build';
 import { compileFileRecoveryTUI } from '../fixtures/file-recovery-profile';
 
-const repository = resolve(import.meta.dir, '../../../..');
 test('source-tree-external built PTY cold draft, Service SIGKILL holds host lease, final input flush and restored original remain read-only', async () => {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-tui-draft-pty-')));
   const workspace = join(root, 'workspace');
@@ -30,8 +30,9 @@ test('source-tree-external built PTY cold draft, Service SIGKILL holds host leas
       return new Response('', { status: 500 });
     },
   });
+  await buildOwnedDaemon(join(root, 'service-artifact'));
   const sha = (path: string) => createHash('sha256').update(readFileSync(path)).digest('hex');
-  const entrypoint = join(repository, 'apps/service/dist/main.js');
+  const entrypoint = join(root, 'service-artifact/node_modules/@kite-ai/service/main.js');
   const artifact = {
     entrypoint,
     entrypointSha256: sha(entrypoint),

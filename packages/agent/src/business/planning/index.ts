@@ -1414,11 +1414,47 @@ export function createPlanningValidation(inputOptions: PlanningOptions = {}) {
       },
     },
   };
+  const modelTools: Readonly<Record<string, { name: string; description: string }>> = {
+    'planning.read': {
+      name: 'read_plan',
+      description: 'Read the current plan, version and progress before changing or reviewing it.',
+    },
+    'planning.write': {
+      name: 'write_plan',
+      description:
+        'Save a new plan version with its goal and steps; saving does not approve execution.',
+    },
+    'planning.review': {
+      name: 'request_plan_review',
+      description: 'Present the exact current plan to the user for approval or revision.',
+    },
+    'planning.update': {
+      name: 'update_plan_progress',
+      description:
+        'Update progress for the current plan using actual execution receipts; cannot approve a plan.',
+    },
+    'validation.define': {
+      name: 'define_validation_checks',
+      description:
+        'Define checks and expected results for this Run; existing required checks remain mandatory.',
+    },
+    'validation.check': {
+      name: 'run_validation_checks',
+      description:
+        'Run the defined checks against their exact execution targets and save the observed results.',
+    },
+    'validation.rebind': {
+      name: 'rebind_validation_checks',
+      description:
+        'Bind existing checks to a new successful repair execution without changing their expectations.',
+    },
+  };
   for (const [id, fn] of Object.entries(functions))
     tools.push({
       id,
       version: '1',
-      description: `Explicit ${id} business operation`,
+      model: { name: modelTools[id]!.name, snakeCase: true },
+      description: modelTools[id]!.description,
       inputSchema: fn.input,
       execute: guarded(fn.execute),
     });
@@ -1514,6 +1550,7 @@ export function createPlanningValidation(inputOptions: PlanningOptions = {}) {
   tools.push({
     id: 'validation.request_waiver',
     version: '1',
+    model: { name: 'request_validation_waiver', snakeCase: true },
     description: 'Ask the user for an exact waiver; the Tool cannot approve it',
     inputSchema: waiverAction.inputSchema,
     execute: waiverAction.execute,
@@ -1864,7 +1901,8 @@ export function createPlanningValidation(inputOptions: PlanningOptions = {}) {
       );
     },
   };
-  if (automatic) tools.push(automatic.tool);
+  if (automatic)
+    tools.push({ ...automatic.tool, model: { name: 'check_file_changes', snakeCase: true } });
   const extension: Extension = {
     ...(automatic
       ? {

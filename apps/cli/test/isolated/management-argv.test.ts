@@ -1,21 +1,32 @@
 import { Database } from 'bun:sqlite';
 import { expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
-import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { launchPairedService } from '@kite-ai/service/paired';
 import type { CLIServiceArtifact } from '../../host';
+import { buildOwnedDaemon } from '../fixtures/daemon-host-build';
 
 const repo = resolve(import.meta.dir, '../../../..');
 test('actual development argv uses paired public management and exact supplied intent without Model or Tool', async () => {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-cli-management-argv-'))),
     dataRoot = join(root, 'data'),
     profile = selectProfile({ dataRoot, profile: 'development' });
+  await buildOwnedDaemon(join(root, 'service-artifact'));
   const sha = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('hex'),
-    entrypoint = join(repo, 'apps/service/dist/main.js'),
+    entrypoint = join(root, 'service-artifact/node_modules/@kite-ai/service/main.js'),
     entrypointSha256 = sha(readFileSync(entrypoint));
   const artifact: CLIServiceArtifact = {
     entrypoint,
@@ -25,11 +36,22 @@ test('actual development argv uses paired public management and exact supplied i
     buildId: `development-${entrypointSha256}`,
     apiMajor: 1,
   };
+  mkdirSync(join(root, 'apps/service'), { recursive: true });
+  symlinkSync(
+    join(root, 'service-artifact/node_modules/@kite-ai/service'),
+    join(root, 'apps/service/dist'),
+    process.platform === 'win32' ? 'junction' : 'dir',
+  );
+  const driver = join(root, 'management-argv.ts');
+  writeFileSync(
+    driver,
+    `import {runDevelopmentCLI} from ${JSON.stringify(join(repo, 'scripts/development/unified-cli.ts'))};process.exitCode=await runDevelopmentCLI({root:${JSON.stringify(root)}});`,
+  );
   async function argv(words: string[]) {
-    const child = Bun.spawn(
-      [process.execPath, join(repo, 'scripts/development/unified-cli.ts'), ...words],
-      { stdout: 'pipe', stderr: 'pipe' },
-    );
+    const child = Bun.spawn([process.execPath, driver, ...words], {
+      stdout: 'pipe',
+      stderr: 'pipe',
+    });
     return {
       exit: await child.exited,
       out: await new Response(child.stdout).text(),

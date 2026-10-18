@@ -29,10 +29,10 @@ mock.module('@kite-ai/agent/artifact-access',()=>({
  },
  acquireArtifactAccess({root}){calls.push(['lease',root]);return {release(){calls.push(['lease-close',root]);}};}
 }));
-const {nativeBundleEntries,retainWindowsNativeRuntimeFiles}=await import(${JSON.stringify(module)});
+const {nativeBundleEntries,retainWindowsNativeRuntimeFiles,windowsNativeElectronResources}=await import(${JSON.stringify(module)});
 const entries=nativeBundleEntries('win32');
 const manifest={version:1,apiMajor:1,target:{platform:'win32',arch:'x64'},electronVersion:'44.3.0',sqlite:fixtureNativeSqlite,terminalRoot:'terminal',terminalManifestSha256:'a'.repeat(64),entries,
-files:[...Object.values(entries),'electron/version','.use-terminal.lock','app/native-verifier.exe','app/kite.exe','app/kite-tui.exe','app/kite-desktop.exe'].map(path=>({path,size:0,sha256:'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855',mode:path==='.use-terminal.lock'?384:path===entries.electron?493:420})),links:[],directories:['electron/empty']};
+files:[...Object.values(entries),'electron/version','.use-terminal.lock','app/native-verifier.exe','app/kite.exe','app/kite-tui.exe','app/kite-desktop.exe',...windowsNativeElectronResources].map(path=>({path,size:windowsNativeElectronResources.includes(path)?1:0,sha256:windowsNativeElectronResources.includes(path)?'2d711642b726b04401627ca9fbac32f5c8530fb1903cc4db02258717921a4881':'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855',mode:path==='.use-terminal.lock'?384:path===entries.electron?493:420})),links:[],directories:['electron/empty']};
 mkdirSync(join(root,'electron/empty'),{recursive:true});mkdirSync(join(root,'terminal'));
 const save=()=>writeFileSync(join(root,'native-manifest.json'),JSON.stringify(manifest));save();
 Object.defineProperty(process,'platform',{value:'win32'});Object.defineProperty(process,'arch',{value:'x64'});
@@ -65,7 +65,11 @@ test('actual Node reads complete Windows outer and inner content without native 
   const sqlite = fileURLToPath(
     new URL('../../../../tests/fixtures/unified-agent/sqlite-engine-fixture.ts', import.meta.url),
   );
+  const security = fileURLToPath(
+    new URL('../../../../packages/agent/src/platform/windows-path-security.ts', import.meta.url),
+  );
   const code = `
+import {mock} from 'bun:test';
 import assert from 'node:assert/strict';
 import {mkdtempSync,mkdirSync,writeFileSync,rmSync,realpathSync} from 'node:fs';
 import {join,dirname} from 'node:path';
@@ -74,9 +78,12 @@ import {createHash} from 'node:crypto';
 import {spawnSync} from 'node:child_process';
 import {fixtureTerminalSqlite,fixtureNativeSqlite} from ${JSON.stringify(sqlite)};
 import {terminalBundleEntries} from ${JSON.stringify(terminal)};
-import {nativeBundleEntries} from ${JSON.stringify(native)};
+import {nativeBundleEntries,windowsNativeElectronResources} from ${JSON.stringify(native)};
 const parent=realpathSync(mkdtempSync(join(tmpdir(),'kite-node-native-content-'))),root=join(parent,'candidate');mkdirSync(root);mkdirSync(join(root,'terminal'));
 const sha=bytes=>createHash('sha256').update(bytes).digest('hex');
+const actualSecurity=await import(${JSON.stringify(security)});
+// Only these inert Windows fixture assets use host mkdir; no native ACL claim is made.
+mock.module(${JSON.stringify(security)},()=>({...actualSecurity,privateDirectory(path){assert.equal(process.platform,'win32');mkdirSync(path,{recursive:true,mode:0o700});}}));
 Object.defineProperty(process,'platform',{value:'win32'});Object.defineProperty(process,'arch',{value:'x64'});
 try {
  const innerRoot=join(root,'terminal'),innerFiles=[],innerEntries=terminalBundleEntries('win32');
@@ -84,7 +91,7 @@ try {
  const inner={version:1,apiMajor:1,target:{platform:'win32',arch:'x64'},bunVersion:'1.4.2',sqlite:fixtureTerminalSqlite(innerRoot,innerFiles),productVersion:'1.0.0',source:{commit:'a'.repeat(40),dirty:true},entries:innerEntries,files:innerFiles,links:[]};
  const innerBytes=Buffer.from(JSON.stringify(inner));writeFileSync(join(innerRoot,'terminal-manifest.json'),innerBytes);
  const outerEntries=nativeBundleEntries('win32'),files=[];
- for(const path of [...Object.values(outerEntries),'electron/version','.use-terminal.lock']){mkdirSync(dirname(join(root,path)),{recursive:true});const bytes=Buffer.from(path==='.use-terminal.lock'?'':path==='electron/version'?'44.3.0':path===outerEntries.package?JSON.stringify({name:'kite-native',version:'0.1.0',main:'main.cjs'}):path);writeFileSync(join(root,path),bytes);files.push({path,size:bytes.length,sha256:sha(bytes),mode:path==='.use-terminal.lock'?384:path===outerEntries.electron?493:420});}
+ for(const path of [...Object.values(outerEntries),'electron/version','.use-terminal.lock',...windowsNativeElectronResources]){mkdirSync(dirname(join(root,path)),{recursive:true});const bytes=Buffer.from(path==='.use-terminal.lock'?'':path==='electron/version'?'44.3.0':path===outerEntries.package?JSON.stringify({name:'kite-native',version:'0.1.0',main:'main.cjs'}):path);writeFileSync(join(root,path),bytes);files.push({path,size:bytes.length,sha256:sha(bytes),mode:path==='.use-terminal.lock'?384:path===outerEntries.electron?493:420});}
  mkdirSync(join(root,'electron/empty'));const outer={version:1,apiMajor:1,target:{platform:'win32',arch:'x64'},electronVersion:'44.3.0',sqlite:fixtureNativeSqlite,terminalRoot:'terminal',terminalManifestSha256:sha(innerBytes),entries:outerEntries,files,links:[],directories:['electron/empty']};writeFileSync(join(root,'native-manifest.json'),JSON.stringify(outer));
  const entry=join(parent,'reader.ts');writeFileSync(entry,'export {readNativeRuntimeBundleContent,verifyNativeRuntimeBundle} from '+JSON.stringify(${JSON.stringify(native)})+';export {readTerminalRuntimeBundleContent} from '+JSON.stringify(${JSON.stringify(terminal)})+';');
  const built=await Bun.build({entrypoints:[entry],outdir:parent,target:'node',format:'cjs',external:['bun:ffi']});assert.equal(built.success,true);

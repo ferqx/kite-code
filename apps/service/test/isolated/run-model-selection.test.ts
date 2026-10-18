@@ -78,7 +78,7 @@ async function fixture(
           | undefined
       )?.find((tool) =>
         readUserConfiguration
-          ? Object.hasOwn(tool.function.parameters.properties ?? {}, 'offset')
+          ? tool.function.name === 'read_file'
           : tool.function.description === 'Trusted fixture delegation',
       );
       const delta =
@@ -91,7 +91,10 @@ async function fixture(
                   type: 'function',
                   function: {
                     name: selectedTool!.function.name,
-                    arguments: JSON.stringify({ path: '.kite-code/kite-code.jsonc', limit: 10000 }),
+                    arguments: JSON.stringify({
+                      path: '.kite-code/kite-code.jsonc',
+                      max_lines: 10000,
+                    }),
                   },
                 },
               ],

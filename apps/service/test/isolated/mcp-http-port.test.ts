@@ -298,8 +298,8 @@ test('actual SQLite/Core dispatched connection Jobs admit exact origin and cance
       {
         type: 'tool_call',
         id: 'a',
-        name: 'mcp.connect',
-        arguments: '{"serverId":"local","key":"first"}',
+        name: 'connect_mcp_server',
+        arguments: '{"server_id":"local","key":"first"}',
       },
       toolFinish,
     ],
@@ -308,8 +308,8 @@ test('actual SQLite/Core dispatched connection Jobs admit exact origin and cance
       {
         type: 'tool_call',
         id: 'b',
-        name: 'mcp.connect',
-        arguments: '{"serverId":"local","key":"first"}',
+        name: 'connect_mcp_server',
+        arguments: '{"server_id":"local","key":"first"}',
       },
       toolFinish,
     ],

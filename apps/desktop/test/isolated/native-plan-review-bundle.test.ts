@@ -352,7 +352,7 @@ test.skipIf(process.platform !== 'darwin')(
               { headers: { 'content-type': 'text/event-stream' } },
             );
           }
-          if (previous === 'planning.write') {
+          if (previous === 'write_plan') {
             assert.ok(value);
             assert.ok(typeof value.planId === 'string');
             assert.ok(typeof value.digest === 'string');
@@ -378,7 +378,7 @@ test.skipIf(process.platform !== 'darwin')(
               }),
             );
           }
-          if (previous === 'planning.review') {
+          if (previous === 'request_plan_review') {
             assert.ok(value);
             assert.ok(typeof value.decision === 'string');
             assert.ok(value.feedback === undefined || typeof value.feedback === 'string');
@@ -395,51 +395,51 @@ test.skipIf(process.platform !== 'darwin')(
           let name: string | undefined, input: unknown;
           const pointer = pointers.get(sessionId);
           const planWrite = (version: number | null, text: string) => ({
-            planId: `p-${sessionId}`,
-            expectedVersion: version,
+            plan_id: `p-${sessionId}`,
+            expected_version: version,
             title: `Original ${sessionId} plan`,
             body: text,
             steps: [{ id: 'write', title: 'Write the approved file and verify its receipt' }],
           });
           if (stage === 0) {
-            name = 'files.write';
+            name = 'write_file';
             input = {
               path: `blocked-${sessionId}-0.txt`,
               base: null,
               content: 'must remain absent',
             };
           } else if (!pointer) {
-            name = 'planning.write';
+            name = 'write_plan';
             input = planWrite(null, sessionId === 'a' ? bodyText : `Original ${sessionId} body`);
-          } else if (previous === 'planning.write') {
-            name = 'files.write';
+          } else if (previous === 'write_plan') {
+            name = 'write_file';
             input = {
               path: `blocked-${sessionId}-${pointer!.version}.txt`,
               base: null,
               content: 'must remain absent',
             };
           } else if (
-            previous === 'files.write' &&
+            previous === 'write_file' &&
             value?.baseline === undefined &&
             value?.content === undefined &&
             !value?.path
           ) {
-            name = 'planning.review';
-            input = pointer;
-          } else if (previous === 'planning.review' && value?.decision === 'revise') {
+            name = 'request_plan_review';
+            input = { plan_id: pointer.planId, version: pointer.version, digest: pointer.digest };
+          } else if (previous === 'request_plan_review' && value?.decision === 'revise') {
             // The exact accepted review result, rather than a request counter, drives v2.
             expect(value).toEqual({ status: 'not_approved', decision: 'revise', feedback });
-            name = 'planning.write';
+            name = 'write_plan';
             input = planWrite(1, `# Revised original plan\n${value.feedback}\n新版正文尾部`);
-          } else if (previous === 'planning.review' && value?.decision === 'approve') {
+          } else if (previous === 'request_plan_review' && value?.decision === 'approve') {
             expect(value.mode).toBe(sessionId === 'a' ? 'auto' : 'accept_edits');
-            name = 'files.write';
+            name = 'write_file';
             input = {
               path: `effect-${sessionId}.txt`,
               base: null,
               content: `approved ${sessionId} exact effect\n雪🙂`,
             };
-          } else if (previous === 'files.write' && value?.path) {
+          } else if (previous === 'write_file' && value?.path) {
             const reader = await openSqliteStore({
               dataRoot: profile.dataRoot,
               profile: profile.profile,
@@ -450,31 +450,33 @@ test.skipIf(process.platform !== 'darwin')(
                 (e) => e.definitionId === 'files.write' && e.status === 'succeeded',
               )!;
               expect(execution).toBeDefined();
-              name = 'planning.update';
+              name = 'update_plan_progress';
               input = {
-                ...pointer,
-                runId: execution.runId,
-                expectedProgressRevision: null,
-                stepId: 'write',
+                plan_id: pointer.planId,
+                version: pointer.version,
+                digest: pointer.digest,
+                run_id: execution.runId,
+                expected_progress_revision: null,
+                step_id: 'write',
                 status: 'completed',
-                executionId: execution.id,
-                completePlan: true,
+                execution_id: execution.id,
+                complete_plan: true,
               };
             } finally {
               await reader.close();
             }
-          } else if (previous === 'planning.review' && value?.decision === 'deny') {
-            name = 'files.write';
+          } else if (previous === 'request_plan_review' && value?.decision === 'deny') {
+            name = 'write_file';
             input = { path: 'denied-effect.txt', base: null, content: 'must remain absent' };
           }
           // An unapproved necessary plan keeps the same Run active until explicit cancellation.
           if (sessionId === 'd' && stage >= 5) name = undefined;
           const id = `native-plan-call-${serial}`;
           if (name) callNames.set(id, name);
-          if (name === 'planning.review') {
+          if (name === 'request_plan_review') {
             const argumentsJson = JSON.stringify(input) ?? 'undefined';
             const schema = (
-              body.tools?.find((tool) => tool.function.name === 'planning.review')?.function as
+              body.tools?.find((tool) => tool.function.name === 'request_plan_review')?.function as
                 | { parameters?: unknown }
                 | undefined
             )?.parameters;
@@ -648,7 +650,7 @@ test.skipIf(process.platform !== 'darwin')(
           !JSON.stringify(body.messages).includes('NATIVE_PARENT_B') ||
           JSON.stringify(body.messages).includes('NATIVE_PLAN_B')
         )
-          expect(body.tools?.some((tool) => tool.function.name === 'planning.write')).toBe(true);
+          expect(body.tools?.some((tool) => tool.function.name === 'write_plan')).toBe(true);
       }
       expect(reviewRequests).toHaveLength(authorizationReviewCalls);
       expect(bodies).toHaveLength(businessBodies.length + authorizationReviewCalls);

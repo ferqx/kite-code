@@ -23,6 +23,7 @@ import {
   selectDaemonEndpoint,
 } from '../../../apps/service/src/daemon/endpoint';
 import { ownedUserConfiguration } from '../../../apps/service/test/fixtures/user-configuration-fixture';
+import { sessionTitleInstructions } from '../../../packages/agent/src/business/session-title/title';
 import { runDevelopmentCLI, selectDevelopmentCLI } from '../../../scripts/development/unified-cli';
 import { privateDirectory, temporaryDirectory } from '../../fixtures/test-filesystem';
 
@@ -226,12 +227,30 @@ test('actual CLI development argv runs one paired built Service with the selecte
   const workspace = join(root, 'workspace');
   mkdirSync(workspace);
   let requests = 0;
+  let titleRequests = 0;
   const complete = 'development answer α\u0000tail';
   const provider = Bun.serve({
     hostname: '127.0.0.1',
     port: 0,
     async fetch(request) {
-      const body = (await request.json()) as { messages: { content: unknown }[] };
+      const body = (await request.json()) as {
+        messages: { role: string; content: unknown }[];
+        tools?: unknown[];
+      };
+      if (
+        body.messages.some(
+          (message) => message.role === 'system' && message.content === sessionTitleInstructions,
+        )
+      ) {
+        titleRequests++;
+        expect(body.tools ?? []).toEqual([]);
+        const frame = (delta: unknown, finish_reason: string | null) =>
+          `data: ${JSON.stringify({ id: 'title', object: 'chat.completion.chunk', model: 'fixture', choices: [{ index: 0, delta, finish_reason }] })}\n\n`;
+        return new Response(
+          `${frame({ content: 'Dev task' }, null)}${frame({}, 'stop')}data: [DONE]\n\n`,
+          { headers: { 'content-type': 'text/event-stream' } },
+        );
+      }
       expect(JSON.stringify(body.messages)).toContain('original development task');
       requests++;
       return new Response(
@@ -330,6 +349,7 @@ test('actual CLI development argv runs one paired built Service with the selecte
     expect(code).toBe(0);
     expect(stderr).toBe('');
     expect(requests).toBe(1);
+    expect(titleRequests).toBe(1);
     const answer = stdout.split('\n').find((line) => line.startsWith('answer '));
     expect(answer).toBeDefined();
     expect(JSON.parse(answer!.slice(7))).toMatchObject({ complete: true, content: complete });
@@ -469,10 +489,10 @@ test('actual development wrapper new argv binds original Work, cold caller, File
       let call: { name: string; input: unknown } | undefined;
       if (user === 'seed actual checkpoint') {
         if (seedStep === 0)
-          call = { name: 'files.read', input: { path: 'original.txt', limit: 10000 } };
+          call = { name: 'read_file', input: { path: 'original.txt', max_lines: 10000 } };
         if (seedStep === 1)
           call = {
-            name: 'files.write',
+            name: 'write_file',
             input: {
               path: 'original.txt',
               base: JSON.parse(body.messages.filter((m) => m.role === 'tool').at(-1)!.content)

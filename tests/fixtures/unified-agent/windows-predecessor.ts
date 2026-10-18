@@ -12,8 +12,10 @@ import {
   assertCompatiblePredecessorInputPaths,
   assertCompatiblePredecessorLockedInput,
   COMPATIBLE_PREDECESSOR_COMMIT,
+  COMPATIBLE_PREDECESSOR_INPUT_PATHS,
   COMPATIBLE_PREDECESSOR_MIGRATIONS,
 } from './compatible-predecessor-input';
+import { matchReviewedPredecessorInput } from './predecessor-reviewed-input';
 import { matchPredecessorShellParserInput } from './predecessor-shell-parser-input';
 import { matchPredecessorStdioInput } from './predecessor-stdio-input';
 import { refinePredecessorWorkspaceDeclarations } from './predecessor-workspace-declarations';
@@ -53,7 +55,10 @@ export function assertWindowsPredecessorLockedInput(
   previous: Uint8Array,
   current: Uint8Array,
 ) {
+  if (!COMPATIBLE_PREDECESSOR_INPUT_PATHS.some((input) => input === path))
+    throw Error(`windows_predecessor_dependency_input_changed:${path}`);
   const match =
+    matchReviewedPredecessorInput('windows_legacy', path, previous, current)?.match ??
     matchPredecessorStdioInput(path, previous, current) ??
     matchPredecessorShellParserInput(path, previous, current) ??
     (['bun.lock', 'package.json', 'packages/ui/package.json'].includes(path)
@@ -278,6 +283,10 @@ async function materializeWindowsPredecessorVersion(
   };
   const lockedInputs = [];
   const reviewedDeclarations = [];
+  const reviewedInputIncrements: {
+    path: string;
+    evidence: NonNullable<ReturnType<typeof matchReviewedPredecessorInput>>;
+  }[] = [];
   const inputs = windowsPredecessorLockedInputPaths(currentManifest);
   if (compatible) assertCompatiblePredecessorInputPaths(inputs);
   for (const path of inputs) {
@@ -288,9 +297,17 @@ async function materializeWindowsPredecessorVersion(
         ? assertCompatiblePredecessorLockedInput(path, previous, current)
         : assertWindowsPredecessorLockedInput(path, previous, current),
     );
-    const refinement = compatible
-      ? undefined
-      : refinePredecessorWorkspaceDeclarations(path, current);
+    const reviewedInput = matchReviewedPredecessorInput(
+      compatible ? 'compatible' : 'windows_legacy',
+      path,
+      previous,
+      current,
+    );
+    if (reviewedInput) reviewedInputIncrements.push({ path, evidence: reviewedInput });
+    const refinement =
+      compatible || reviewedInput
+        ? undefined
+        : refinePredecessorWorkspaceDeclarations(path, current);
     if (refinement)
       reviewedDeclarations.push({
         path,
@@ -385,6 +402,7 @@ await buildNativeCandidate({terminalRoot:${JSON.stringify(terminal)},electronDis
     sourceCommit: predecessorCommit,
     lockedInputs,
     reviewedDeclarations,
+    reviewedInputIncrements,
     schemaCapability: compatible ? ('recovery-audit-v1' as const) : ('baseline-v1' as const),
     migrations,
   };

@@ -24,13 +24,13 @@ test('fixed model uses ordinary UnifiedExecution file tools; read returns the ex
   const files = createWorkspaceFiles({ root });
   const store = await openSqliteStore({ dataRoot: join(root, 'data'), profile: 'new' });
   const model = createFixedModel([
-    call('files.write', { path: 'actual', content: 'hello', base: null }),
+    call('write_file', { path: 'actual', content: 'hello', base: null }),
     [finish],
-    call('files.read', { path: 'actual' }),
+    call('read_file', { path: 'actual' }),
     [finish],
     call('files.unknown', { path: 'unknown', content: 'bad', base: null }),
     [finish],
-    call('files.write', { path: 'denied', content: 'bad', base: null }),
+    call('write_file', { path: 'denied', content: 'bad', base: null }),
     [finish],
   ]);
   let deny = false;

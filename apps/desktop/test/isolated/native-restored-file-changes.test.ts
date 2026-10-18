@@ -72,7 +72,7 @@ test('restored Native Files read original write/edit previews and read/write/edi
       requests.push(body);
       let call: { name: string; input: Json } | null = null;
       if ([0, 2, 4].includes(step))
-        call = { name: 'files.read', input: { path: relativePath, limit: 100 } };
+        call = { name: 'read_file', input: { path: relativePath, max_lines: 100 } };
       else if (step === 1 || step === 3) {
         const read = body.messages.filter((message) => message.role === 'tool').at(-1);
         if (!read) throw Error('original_restored_file_baseline_missing');
@@ -81,17 +81,17 @@ test('restored Native Files read original write/edit previews and read/write/edi
         call =
           step === 1
             ? {
-                name: 'files.write',
+                name: 'write_file',
                 input: { path: relativePath, base: facts.baseline, content: written },
               }
             : {
-                name: 'files.edit',
+                name: 'edit_file',
                 input: {
                   path: relativePath,
                   base: facts.baseline,
-                  find: 'written α🙂',
-                  replace: 'edited 原🌿',
-                  occurrences: 1,
+                  old_text: 'written α🙂',
+                  new_text: 'edited 原🌿',
+                  expected_matches: 1,
                 },
               };
       }

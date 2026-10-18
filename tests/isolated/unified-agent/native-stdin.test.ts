@@ -6,6 +6,7 @@ import { selectProfile } from '@kite-ai/agent/profile';
 import { connectSharedService } from '../../../apps/cli/host/shared-service';
 import { buildNativeCandidate } from '../../../apps/desktop/scripts/build-native';
 import { ownedUserConfiguration } from '../../../apps/service/test/fixtures/user-configuration-fixture';
+import { sessionTitleInstructions } from '../../../packages/agent/src/business/session-title/title';
 import {
   installNativeBundle,
   uninstallNativeBundle,
@@ -62,11 +63,33 @@ test.skipIf(process.platform !== 'darwin')(
       messages: { role: string; content: string }[];
       tools: { function: { name: string } }[];
     }[] = [];
+    let titleCalls = 0;
     const provider = Bun.serve({
       hostname: '127.0.0.1',
       port: 0,
       async fetch(request) {
         const body = (await request.json()) as (typeof requests)[number];
+        if (
+          body.messages.some(
+            (message) => message.role === 'system' && message.content === sessionTitleInstructions,
+          )
+        ) {
+          titleCalls++;
+          expect(titleCalls).toBe(1);
+          expect(body.tools ?? []).toEqual([]);
+          const titleUsers = body.messages.filter((message) => message.role === 'user');
+          expect(titleUsers).toHaveLength(2);
+          expect(titleUsers[0]!.content).toBe('完整 Native stdin 申请 中🪁');
+          expect(titleUsers[1]!.content).toMatch(
+            /^<runtime-state source="runtime.kernel">\nphase: building\nrun: [0-9a-f-]{36}\nplanning: \{"status":"disabled"\}\nThis is Runtime-generated observation, not a user request or execution grant\.\n<\/runtime-state>$/,
+          );
+          const frame = (delta: unknown, finish_reason: string | null) =>
+            `data: ${JSON.stringify({ id: 'stdin-title', object: 'chat.completion.chunk', model: body.model, choices: [{ index: 0, delta, finish_reason }] })}\n\n`;
+          return new Response(
+            `${frame({ content: '输入问答' }, null)}${frame({}, 'stop')}data: [DONE]\n\n`,
+            { headers: { 'content-type': 'text/event-stream' } },
+          );
+        }
         requests.push(body);
         const asking = requests.length === 1;
         const frame = (delta: unknown, finish_reason: string | null) =>
@@ -208,17 +231,17 @@ test.skipIf(process.platform !== 'darwin')(
       expect(requests).toHaveLength(1);
       expect(requests[0]!.tools.map((tool) => tool.function.name)).toEqual([
         'ask_user',
-        'files.edit',
-        'files.glob',
-        'files.list',
-        'files.read',
-        'files.search',
-        'files.write',
-        'shell.execute',
-        'shell.launch',
-        'shell.read',
-        'shell.stop',
-        'shell.wait',
+        'edit_file',
+        'glob_files',
+        'list_directory',
+        'read_file',
+        'search_content',
+        'write_file',
+        'shell_execute',
+        'shell_launch',
+        'shell_read',
+        'shell_stop',
+        'shell_wait',
         'web_fetch',
       ]);
       const originalUsers = requests[0]!.messages.filter(
@@ -350,6 +373,46 @@ test.skipIf(process.platform !== 'darwin')(
       ).toEqual(semantic);
       const view = await client.getView(original.sessionId);
       expect(view.runs).toHaveLength(1);
+      expect(titleCalls).toBe(1);
+      expect(view.session.title).toBe('输入问答');
+      const titleIds = [
+        'agent/session-title',
+        'builtin.session-title/fallback',
+        'builtin.session-title/generate',
+      ];
+      const titleExecutions = view.executions.filter((execution) =>
+        titleIds.includes(execution.definitionId),
+      );
+      expect(titleExecutions.map((execution) => execution.definitionId).sort()).toEqual(titleIds);
+      expect(
+        view.executions.filter(
+          (execution) =>
+            execution.kind !== 'model' &&
+            execution.definitionId !== 'ask_user' &&
+            !titleIds.includes(execution.definitionId),
+        ),
+      ).toEqual([]);
+      expect(view.executions.filter((execution) => execution.kind === 'model')).toHaveLength(2);
+      expect(
+        view.executions.filter((execution) => execution.definitionId === 'ask_user'),
+      ).toHaveLength(1);
+      for (const execution of titleExecutions)
+        expect(execution).toMatchObject({ kind: 'job', runId: null, status: 'succeeded' });
+      const generation = titleExecutions.find(
+        (execution) => execution.definitionId === 'builtin.session-title/generate',
+      )!;
+      const carrier = titleExecutions.find(
+        (execution) => execution.definitionId === 'agent/session-title',
+      )!;
+      const titleChildSessionId = carrier.childSessionId;
+      expect(titleChildSessionId).toBeString();
+      expect(carrier.parentExecutionId).toBe(generation.id);
+      const titleChild = await client.getView(titleChildSessionId!);
+      expect(titleChild.session.parentSessionId).toBe(original.sessionId);
+      expect(titleChild.runs).toHaveLength(1);
+      expect(titleChild.runs[0]!.status).toBe('completed');
+      expect(titleChild.executions).toHaveLength(1);
+      expect(titleChild.executions[0]).toMatchObject({ kind: 'model', status: 'succeeded' });
       const history = await client.listMessages(original.sessionId, {
         afterSeq: '0',
         upperSeq: view.session.nextSeq,
@@ -378,6 +441,7 @@ test.skipIf(process.platform !== 'darwin')(
       expect(await client.getInteraction(original.sessionId, card.id, { storeId })).toEqual(saved);
       expect((await client.getView(original.sessionId)).runs).toHaveLength(1);
       expect(requests).toHaveLength(2);
+      expect(titleCalls).toBe(1);
       expect(() => uninstallNativeBundle(prefix)).toThrow('Lock is busy');
     } catch (error) {
       console.error(`native_stdin_diagnostic:${diagnostic}`);

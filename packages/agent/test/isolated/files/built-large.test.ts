@@ -11,6 +11,7 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
+import { hostBuildEnvironment } from '../../../../../tests/fixtures/build-tool-environment';
 
 const repository = resolve(import.meta.dir, '../../../../..');
 type Manifest = {
@@ -20,9 +21,10 @@ type Manifest = {
   dependencies: Record<string, string>;
   scripts: { build: string };
 };
-async function run(args: string[], cwd: string): Promise<string> {
+async function run(args: string[], cwd: string, env = process.env): Promise<string> {
   const processHandle = Bun.spawn([process.execPath, ...args], {
     cwd,
+    env,
     stdout: 'pipe',
     stderr: 'pipe',
   });
@@ -64,7 +66,7 @@ test('fresh complete package outside source runs large file and streamed Artifac
         );
         const flag = args.indexOf('--outdir');
         if (flag >= 0) args[flag + 1] = destination;
-        await run(args, source);
+        await run(args, source, hostBuildEnvironment());
       }
       const exports = Object.fromEntries(
         Object.entries(manifest.exports).map(([key, path]) => [
@@ -124,7 +126,7 @@ const store=await openSqliteStore({dataRoot:join(base,'data'),profile:'new'});co
 await store.createWorkspace({expectedStoreId:storeId,id:'w',name:'w',rootUri:pathToFileURL(working).href});await store.createSession({expectedStoreId:storeId,sessionId:'s',commandId:'create',workspaceId:'w',title:'s',subjectId:'owner'});
 const artifacts=createArtifactStore({profile:{dataRoot:join(base,'data'),profile:'new'},store});
 const finish={type:'finish',reason:'stop',usage:{inputTokens:1,outputTokens:1}};
-const model=createFixedModel([[{type:'tool_call',id:'call',name:'files.read',arguments:'{"path":"large"}'},{...finish,reason:'tool_calls'}],[finish]]);
+const model=createFixedModel([[{type:'tool_call',id:'call',name:'read_file',arguments:'{"path":"large"}'},{...finish,reason:'tool_calls'}],[finish]]);
 const runtime=createRuntime({store,artifacts,model,modelId:'fixed',permissions:{async authorize(){return {allowed:true,revision:'p1'}}},extensions:[{id:'files',version:'2',apiMajor:1,tools:createFileTools(files)}]});
 try{
  await runtime.submitCommand({expectedStoreId:storeId,commandId:'read',sessionId:'s',subjectId:'owner',request:{kind:'run.start',content:'complete large read'}});await runtime.waitForCommand('read');

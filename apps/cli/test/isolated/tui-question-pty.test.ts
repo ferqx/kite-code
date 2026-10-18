@@ -13,6 +13,7 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { createClient, type Interaction } from '@kite-ai/client';
+import { sessionTitleInstructions } from '../../../../packages/agent/src/business/session-title/title';
 import { privateDirectory } from '../../../../tests/fixtures/test-filesystem';
 import type { CLIServiceArtifact } from '../../host';
 import { verifyTerminalBundle } from '../../host/terminal-artifact';
@@ -60,6 +61,7 @@ test('actual 80x24 default ask_user wizard preserves labeled original IDs, edite
       function: { name: string; description: string; parameters: Record<string, unknown> };
     }[];
   }[] = [];
+  const titleRequests: typeof modelRequests = [];
   const controlWork = new Set<Promise<Response>>();
   const facts: unknown[] = [];
   let original: Interaction | undefined,
@@ -160,9 +162,28 @@ test('actual 80x24 default ask_user wizard preserves labeled original IDs, edite
       port: 0,
       async fetch(request) {
         const body = (await request.json()) as (typeof modelRequests)[number];
-        modelRequests.push(body);
         const chunk = (delta: unknown, reason: string | null) =>
           `data: ${JSON.stringify({ id: 'owned-question', object: 'chat.completion.chunk', created: 1, model: 'local', choices: [{ index: 0, delta, finish_reason: reason }] })}\n\n`;
+        if (
+          body.messages.some(
+            (message) => message.role === 'system' && message.content === sessionTitleInstructions,
+          )
+        ) {
+          titleRequests.push(body);
+          expect(titleRequests).toHaveLength(1);
+          expect(body.tools ?? []).toEqual([]);
+          const users = body.messages.filter((message) => message.role === 'user');
+          expect(users).toHaveLength(2);
+          expect(users[0]!.content).toBe('Ask the production default question');
+          expect(users[1]!.content).toMatch(
+            /^<runtime-state source="runtime.kernel">\nphase: building\nrun: [0-9a-f-]{36}\nplanning: \{"status":"disabled"\}\nThis is Runtime-generated observation, not a user request or execution grant\.\n<\/runtime-state>$/,
+          );
+          return new Response(
+            `${chunk({ content: 'Questions' }, null)}${chunk({}, 'stop')}data: [DONE]\n\n`,
+            { headers: { 'content-type': 'text/event-stream' } },
+          );
+        }
+        modelRequests.push(body);
         const answered = body.messages.some((message) => message.role === 'tool');
         return new Response(
           chunk(
@@ -402,6 +423,41 @@ test('actual 80x24 default ask_user wizard preserves labeled original IDs, edite
           expect(saved.request).toEqual(original!.request);
           expect(saved.sessionId).toBe(original!.sessionId);
           expect(saved.originStoreId).toBe(original!.originStoreId);
+          expect(titleRequests).toHaveLength(1);
+          const titleView = await (await connected()).getView(sessionId);
+          expect(titleView.session.title).toBe('Questions');
+          const titleIds = [
+            'agent/session-title',
+            'builtin.session-title/fallback',
+            'builtin.session-title/generate',
+          ];
+          const titleJobs = titleView.executions.filter((row) =>
+            titleIds.includes(row.definitionId),
+          );
+          expect(titleJobs.map((row) => row.definitionId).sort()).toEqual(titleIds);
+          expect(
+            titleView.executions.filter(
+              (row) =>
+                row.kind !== 'model' &&
+                row.definitionId !== 'ask_user' &&
+                !titleIds.includes(row.definitionId),
+            ),
+          ).toEqual([]);
+          for (const row of titleJobs)
+            expect(row).toMatchObject({ kind: 'job', runId: null, status: 'succeeded' });
+          const carrier = titleJobs.find((row) => row.definitionId === 'agent/session-title')!;
+          const generation = titleJobs.find(
+            (row) => row.definitionId === 'builtin.session-title/generate',
+          )!;
+          const titleChildId = carrier.childSessionId;
+          expect(titleChildId).toBeString();
+          expect(carrier.parentExecutionId).toBe(generation.id);
+          const titleChild = await (await connected()).getView(titleChildId!);
+          expect(titleChild.session.parentSessionId).toBe(sessionId);
+          expect(titleChild.runs).toHaveLength(1);
+          expect(titleChild.runs[0]!.status).toBe('completed');
+          expect(titleChild.executions).toHaveLength(1);
+          expect(titleChild.executions[0]).toMatchObject({ kind: 'model', status: 'succeeded' });
           expect(modelRequests).toHaveLength(2);
           const result = modelRequests[1]!.messages.find((message) => message.role === 'tool');
           expect(result).toBeDefined();
@@ -510,6 +566,7 @@ test('actual 80x24 default ask_user wizard preserves labeled original IDs, edite
       ),
       facts,
       modelRequests,
+      titleRequests,
       observerReads,
       scope:
         'Default production ask_user via compatible loopback Provider and temporary credential backend; canonical three questions with explicit closed text Custom; source-free development candidate; shared three-platform 80x24 driver, actual macOS only; no native vault, paid Provider or installed/platform qualification',

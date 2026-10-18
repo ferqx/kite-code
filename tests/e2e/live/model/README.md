@@ -1,6 +1,20 @@
 # 真实模型 E2E 套件
 
-本目录包含显式 opt-in 的真实模型端到端套件。运行受维护的 context compaction 套件：
+当前维护的[工具模型 runner](model-tools.live.ts)使用 `@kite-ai/agent`、实际 SQLite 和 `@kite-ai/ai/sdk`，读取现有用户配置的默认模型与协议。凭据按 Service 相同规则在内存中解析，不修改用户配置。显式执行：
+
+```bash
+KITE_RUN_LIVE_MODEL_TOOLS=1 bun run test:model:tools:live --output=/absolute/owned-directory/report.json
+```
+
+未设置门禁时在读取配置和访问网络前拒绝执行；报告路径可省略，指定时必须为绝对路径且文件不能已存在。Runner 只发送独立临时 Workspace 内的合成任务和测试工具目录，不读取仓库正文、用户说明或真实会话。先核 Files 列表、glob、字面搜索、准确基线编辑与新建文件，再以新 Run 读取结果；第二场景使用同一真实模型作为 parent 和一个无工具 child，验证 `spawn_agent → wait_agents(task_ids) → read_agent`。实际磁盘、内部 Execution/授权输入、公开 ModelInput、下一轮历史与冷读取分别断言，不以模型确认文字代替实际效果。
+
+整个 runner 最多 20 次实际 HTTP 请求、总时限 240 秒，每次请求时限 60 秒；测试将 `maxOutputTokens` 上限收紧为 4096，其余已配置 preset（包括 reasoning effort）保持。Provider 失败立即使测试失败，不更换模型、协议、删除参数重发或自动重试。关闭 Runtime/文件能力并删除自有 Store 后，只保留模型/Provider/协议、日期、状态码、调用名称/字段名称、用量及脱敏计数，不保留请求、响应或凭据正文。
+
+这项真实模型测试只证明当次明确模型和工具路径；普通 Service/权限组合由 mock Provider + 真实本地 Service 测试另证，不代称其他模型、完整客户端、MCP 远端或全部平台通过。
+
+## 历史模型套件
+
+以下 compaction 与 background 文件仍依赖旧运行时，根脚本中的旧 aliases 已退出，不能用于验证当前实现。保留原命令和记录供对应历史版本追溯。原 context compaction 命令为：
 
 ```bash
 KITE_RUN_LIVE_MODEL_COMPACTION=1 \
@@ -51,6 +65,7 @@ Runner 在权限为 `0700` 的临时根目录内创建隔离的 Kite 配置和 W
 
 ## 验证记录
 
+- 2026-10-18，macOS arm64、Bun 1.4.2、HEAD `bcf70ce84` 上的工具表面工作树；使用现有默认 provider `deepseek`、model `deepseek-v4-flash`、`chat-completions`，配置的 `reasoningEffort:medium` 保持，测试输出上限为4096。直接网络实际11次HTTP均200；`files`（6次请求）和 `agents`（5次，包含真实child）通过，共11次工具调用、10份parent热/冷完整公开快照。准确终态、子结果 `323`、任务目标和磁盘效果均独立断言。命令为 `KITE_RUN_LIVE_MODEL_TOOLS=1 bun run test:model:tools:live --output=<自有绝对路径>`；最终runner耗时11.916秒，Provider实报输入34921/output1524 token。此前调试首次因测试使用字符串比较对象键顺序误报快照差异，修正后完整两场景通过；本轮三次runner实际合计29次请求，无换模型/协议或自动重试。只保留脱敏报告，不保留请求或响应正文。此证据不覆盖Native/Windows/Linux、其他模型、真实MCP远端或完整Service客户端。
 - 2026-07-22，provider `deepseek`，model `deepseek-v4-flash`，正常网络条件。
 - 命令：从本地 Kite Code 配置填充 opt-in 变量后运行 `bun run test:model:live`。
 - 结果：`manual-direct-summary` 和 `incremental-summary` 通过。本记录未保留 request 或 response 正文。

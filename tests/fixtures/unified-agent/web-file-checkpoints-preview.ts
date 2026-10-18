@@ -42,13 +42,13 @@ const provider = Bun.serve({
     const step = steps.get(key) ?? 0;
     steps.set(key, step + 1);
     let call: { name: string; input: unknown } | null = null;
-    if (step === 0) call = { name: 'files.read', input: { path: 'original.txt', limit: 10000 } };
+    if (step === 0) call = { name: 'read_file', input: { path: 'original.txt', max_lines: 10000 } };
     if (step === 1) {
       const result = JSON.parse(body.messages.filter((m) => m.role === 'tool').at(-1)!.content) as {
         baseline: unknown;
       };
       call = {
-        name: 'files.write',
+        name: 'write_file',
         input: {
           path: 'original.txt',
           base: result.baseline,
@@ -58,7 +58,7 @@ const provider = Bun.serve({
     }
     if (step === 2)
       call = {
-        name: 'files.write',
+        name: 'write_file',
         input: { path: `${key}-created.txt`, base: null, content: `${key} created\r\n` },
       };
     const frame = (delta: unknown, finish_reason: string | null) =>

@@ -1,5 +1,7 @@
 # Skill Workflow 业务扩展
 
+Workflow 的现有模型工具名称保持 `activate_skill`、`read_skill_reference`、`complete_skill`、`verify_skill`、`repair_skill`、`decide_skill_verification`，声明输入字段采用 snake_case 投影；业务 `input`／`output` 等开放 JSON 保留原字段。内部定义、激活身份、权限和核验判定不由公开名称改变。
+
 [`@kite-ai/agent/skill-workflow`](index.ts) 显式注册既有 Workflow 行为；[知识 leaf](../../skills/README.md) 继续只负责可加载知识。工厂不扫描目录、打开 Store 或执行脚本，Core/Loop 不解析 Skill 状态。默认宿主接线与可信配置由 [Service](../../../../../apps/service/README.md) 负责。
 
 ## 契约与激活

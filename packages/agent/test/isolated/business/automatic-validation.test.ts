@@ -203,7 +203,7 @@ function mutationRef(run: RunRecord) {
 }
 test('real mutation followed immediately by Model stop is checked without a second Model or explicit validation call', async () => {
   const f = await fixture(async (step) =>
-    step === 0 ? call('files.write', { path: 'out.txt', content: 'actual', base: null }) : [finish],
+    step === 0 ? call('write_file', { path: 'out.txt', content: 'actual', base: null }) : [finish],
   );
   try {
     await f.submit();
@@ -231,15 +231,14 @@ test('real mutation followed immediately by Model stop is checked without a seco
 }, 10000);
 test('a changed file causes a new same-Loop repair turn and a fresh exact check; immutable mutation facts remain', async () => {
   const f = await fixture(async (step, f) => {
-    if (step === 0)
-      return call('files.write', { path: 'out.txt', content: 'expected', base: null });
+    if (step === 0) return call('write_file', { path: 'out.txt', content: 'expected', base: null });
     if (step === 1) {
       writeFileSync(join(f.root, 'out.txt'), 'external change');
       return [finish];
     }
     if (step === 2) {
       const base = (await f.files.read('out.txt')).baseline;
-      return call('files.write', {
+      return call('write_file', {
         path: 'out.txt',
         content: 'expected',
         base: base as unknown as Json,
@@ -267,7 +266,7 @@ test('missing checker permission keeps the original requirement unsatisfied unti
   const f = await fixture(
     async (step) =>
       step === 0
-        ? call('files.write', { path: 'out.txt', content: 'actual', base: null })
+        ? call('write_file', { path: 'out.txt', content: 'actual', base: null })
         : [finish],
     { checkerAllowed: false, pauseAtModelStep: 2 },
   );
@@ -314,7 +313,7 @@ test('automatic governance remains off for ordinary mutation without an enabled 
   const f = await fixture(
     async (step) =>
       step === 0
-        ? call('files.write', { path: 'out.txt', content: 'actual', base: null })
+        ? call('write_file', { path: 'out.txt', content: 'actual', base: null })
         : [finish],
     { enabled: false },
   );
@@ -335,7 +334,7 @@ function gate() {
 }
 test('a new mutation after an explicit passed check invalidates completion until its own exact check', async () => {
   const f = await fixture(async (step, f) => {
-    if (step === 0) return call('files.write', { path: 'out.txt', content: 'first', base: null });
+    if (step === 0) return call('write_file', { path: 'out.txt', content: 'first', base: null });
     if (step === 1) {
       const command = await f.store.getCommand('work'),
         run = await f.store.getRun(String((command!.receipt as { runId: string }).runId));
@@ -343,16 +342,16 @@ test('a new mutation after an explicit passed check invalidates completion until
         expectedStoreId: f.metadata.storeId,
         requirement: mutationRef(run!),
       });
-      return call('validation.auto_check', {
-        runId: run!.id,
-        mutationExecutionId: page.facts[0]!.executionId,
-        headRevision: page.headRevision,
+      return call('check_file_changes', {
+        run_id: run!.id,
+        mutation_execution_id: page.facts[0]!.executionId,
+        head_revision: page.headRevision,
         seq: '1',
       });
     }
     if (step === 2) {
       const base = (await f.files.read('out.txt')).baseline;
-      return call('files.write', {
+      return call('write_file', {
         path: 'out.txt',
         content: 'second',
         base: base as unknown as Json,
@@ -384,7 +383,7 @@ test('settlement record failure rolls back the true terminal with its event; the
       database.run(
         "CREATE TRIGGER settlement_fault BEFORE INSERT ON extension_record WHEN NEW.key LIKE '%/mutation/settled/%' BEGIN SELECT RAISE(ABORT,'settlement fault'); END",
       );
-      return call('files.write', { path: 'out.txt', content: 'actual', base: null });
+      return call('write_file', { path: 'out.txt', content: 'actual', base: null });
     }
     return [finish];
   });
@@ -427,7 +426,7 @@ test('intent registration rollback denies dispatch with zero file publication', 
       database.run(
         "CREATE TRIGGER intent_fault BEFORE INSERT ON extension_record WHEN NEW.key LIKE '%/mutation/intent/%' BEGIN SELECT RAISE(ABORT,'intent fault'); END",
       );
-      return call('files.write', { path: 'out.txt', content: 'actual', base: null });
+      return call('write_file', { path: 'out.txt', content: 'actual', base: null });
     }
     return [finish];
   });
@@ -456,7 +455,7 @@ test('a checker paused after its actual read cannot overwrite a newly registered
   const f = await fixture(
     async (step) =>
       step === 0
-        ? call('files.write', { path: 'out.txt', content: 'actual', base: null })
+        ? call('write_file', { path: 'out.txt', content: 'actual', base: null })
         : [finish],
     {
       onRead: async () => {
@@ -526,7 +525,7 @@ test('cancellation during an actual checker does not dispatch repair or activate
   const f = await fixture(
     async (step) =>
       step === 0
-        ? call('files.write', { path: 'out.txt', content: 'actual', base: null })
+        ? call('write_file', { path: 'out.txt', content: 'actual', base: null })
         : [finish],
     {
       onRead: async () => {
@@ -587,7 +586,7 @@ test('automatic obligation never grants the original mutation permission; human 
   const f = await fixture(
     async (step) =>
       step === 0
-        ? call('files.write', { path: 'out.txt', content: 'actual', base: null })
+        ? call('write_file', { path: 'out.txt', content: 'actual', base: null })
         : [finish],
     { askWrites: true },
   );
@@ -633,7 +632,7 @@ test('automatic obligation never grants the original mutation permission; human 
 }, 10000);
 test('Rewind retains original verified history without replaying it into a fresh Run', async () => {
   const f = await fixture(async (step) =>
-    step === 0 ? call('files.write', { path: 'out.txt', content: 'actual', base: null }) : [finish],
+    step === 0 ? call('write_file', { path: 'out.txt', content: 'actual', base: null }) : [finish],
   );
   try {
     await f.submit();
@@ -683,7 +682,7 @@ test('more than 64 actual mutations use one immutable requirement and bounded se
       ...Array.from(
         { length: 65 },
         (_, index) =>
-          call('files.write', {
+          call('write_file', {
             path: `file-${index}.txt`,
             content: String(index),
             base: null,
@@ -734,7 +733,7 @@ test('an actually published but unconfirmed mutation remains unknown and never a
   const f = await fixture(
     async (step) =>
       step === 0
-        ? call('files.write', { path: 'out.txt', content: 'published', base: null })
+        ? call('write_file', { path: 'out.txt', content: 'published', base: null })
         : [finish],
     { ambiguousWrite: true },
   );
@@ -759,9 +758,9 @@ test('an actually published but unconfirmed mutation remains unknown and never a
 
 test('two actual same-path mutations preserve history and verify the latest committed baseline', async () => {
   const f = await fixture(async (step, f) => {
-    if (step === 0) return call('files.write', { path: 'out.txt', content: 'v1', base: null });
+    if (step === 0) return call('write_file', { path: 'out.txt', content: 'v1', base: null });
     if (step === 1)
-      return call('files.write', {
+      return call('write_file', {
         path: 'out.txt',
         content: 'v2',
         base: (await f.files.read('out.txt')).baseline as unknown as Json,
@@ -791,9 +790,9 @@ test('two actual same-path mutations preserve history and verify the latest comm
 test('same-path supersession does not hide a mismatching latest hash or invent an old passed check', async () => {
   const f = await fixture(
     async (step, f) => {
-      if (step === 0) return call('files.write', { path: 'out.txt', content: 'v1', base: null });
+      if (step === 0) return call('write_file', { path: 'out.txt', content: 'v1', base: null });
       if (step === 1)
-        return call('files.write', {
+        return call('write_file', {
           path: 'out.txt',
           content: 'v2',
           base: (await f.files.read('out.txt')).baseline as unknown as Json,

@@ -28,6 +28,10 @@ test('Model resource context publishes actual selected scope refs only, never re
   const body = JSON.parse(source!.content);
   expect(body.connections).toEqual([fact]);
   expect(body.trustedAsAuthority).toBe(false);
+  expect(body.tools.list.modelName).toBe('list_mcp_resources');
+  expect(body.tools.read.modelName).toBe('read_mcp_resource');
+  expect(body.tools.read.bindingInput).toContain('server_id');
+  expect(body.tools.read.targetInput).toContain('descriptor_digest');
   expect(source!.content).not.toContain('PRIVATE');
   expect(source!.content).not.toContain('readOnlyHint');
 });

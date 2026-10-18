@@ -15,6 +15,7 @@ import { basename, join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { verifyTerminalBundle } from '../../../apps/cli/host/terminal-artifact';
 import { userConfigurationPath } from '../../../apps/service/src/user-configuration-path';
+import { sessionTitleInstructions } from '../../../packages/agent/src/business/session-title/title';
 import { sourceServerArguments } from '../../../scripts/development/ensure-web';
 import { sourceTerminalRoot } from '../../../scripts/release/source-terminal';
 import { buildTerminalBundle } from '../../../scripts/release/terminal-bundle';
@@ -277,6 +278,7 @@ test('fresh full candidate formal wrappers run, reuse daemon Web and shared 80x2
     server = driver(root, 'Server'),
     socket = ownedSocket(root, 'owned.sock');
   let calls = 0,
+    titleCalls = 0,
     started = false,
     stopped = false,
     databasePath = '';
@@ -311,7 +313,24 @@ test('fresh full candidate formal wrappers run, reuse daemon Web and shared 80x2
           db.close(true);
         }
       }
-      const body = (await request.json()) as { messages: { role: string; content: string }[] };
+      const body = (await request.json()) as {
+        messages: { role: string; content: string }[];
+        tools?: unknown[];
+      };
+      if (
+        body.messages.some(
+          (message) => message.role === 'system' && message.content === sessionTitleInstructions,
+        )
+      ) {
+        titleCalls++;
+        expect(body.tools ?? []).toEqual([]);
+        const frame = (delta: unknown, finish_reason: string | null) =>
+          `data: ${JSON.stringify({ id: 'title', object: 'chat.completion.chunk', model: 'fixed', choices: [{ index: 0, delta, finish_reason }] })}\n\n`;
+        return new Response(
+          `${frame({ content: 'Formal run' }, null)}${frame({}, 'stop')}data: [DONE]\n\n`,
+          { headers: { 'content-type': 'text/event-stream' } },
+        );
+      }
       const user = [...body.messages]
         .reverse()
         .find(
@@ -434,10 +453,11 @@ test('fresh full candidate formal wrappers run, reuse daemon Web and shared 80x2
     expect(run.code).toBe(0);
     expect(run.stdout).toContain('FORMAL CLI COMPLETE');
     expect(calls).toBe(1);
+    expect(titleCalls).toBe(1);
     const read = join(root, 'read.mjs');
     writeFileSync(
       read,
-      `import {openSqliteStore} from ${JSON.stringify(pathToFileURL(join(candidate, 'node_modules/@kite-ai/agent/sqlite.js')).href)};const s=await openSqliteStore({dataRoot:${JSON.stringify(dataRoot)},profile:'default',mode:'readonly'});try{const executions=await s.listExecutions('formal-session');const runs=await Promise.all([...new Set(executions.map(e=>e.runId))].map(id=>s.getRun(id)));console.log(JSON.stringify({session:await s.getSession('formal-session'),runs,executions,messages:await s.listMessages('formal-session')}));}finally{await s.close();}`,
+      `import {openSqliteStore} from ${JSON.stringify(pathToFileURL(join(candidate, 'node_modules/@kite-ai/agent/sqlite.js')).href)};const s=await openSqliteStore({dataRoot:${JSON.stringify(dataRoot)},profile:'default',mode:'readonly'});try{const allExecutions=await s.listExecutions('formal-session');const titleIds=['builtin.session-title/fallback','builtin.session-title/generate','agent/session-title'];const executions=allExecutions.filter(e=>e.kind==='model');const titleExecutions=allExecutions.filter(e=>titleIds.includes(e.definitionId));const unexpectedExecutions=allExecutions.filter(e=>e.kind!=='model'&&!titleIds.includes(e.definitionId));const runs=await Promise.all([...new Set(executions.map(e=>e.runId))].map(id=>s.getRun(id)));console.log(JSON.stringify({session:await s.getSession('formal-session'),runs,executions,titleExecutions,unexpectedExecutions,messages:await s.listMessages('formal-session')}));}finally{await s.close();}`,
     );
     const before = await execute([runtime, read], workspace, home);
     expect(before.code).toBe(0);
@@ -446,6 +466,25 @@ test('fresh full candidate formal wrappers run, reuse daemon Web and shared 80x2
     expect(first.runs).toHaveLength(1);
     expect(first.runs[0].status).toBe('completed');
     expect(first.executions).toHaveLength(1);
+    expect(first.unexpectedExecutions).toEqual([]);
+    expect(first.session.title).toBe('Formal run');
+    expect(
+      first.titleExecutions.map((entry: { definitionId: string }) => entry.definitionId).sort(),
+    ).toEqual([
+      'agent/session-title',
+      'builtin.session-title/fallback',
+      'builtin.session-title/generate',
+    ]);
+    for (const entry of first.titleExecutions)
+      expect(entry).toMatchObject({ kind: 'job', runId: null, status: 'succeeded' });
+    const titleGeneration = first.titleExecutions.find(
+      (entry: { definitionId: string }) => entry.definitionId === 'builtin.session-title/generate',
+    );
+    const titleCarrier = first.titleExecutions.find(
+      (entry: { definitionId: string }) => entry.definitionId === 'agent/session-title',
+    );
+    expect(titleCarrier.parentExecutionId).toBe(titleGeneration.id);
+    expect(titleCarrier.childSessionId).toBeString();
     const launched = await execute(
       [process.execPath, server, '--server', socket, '--workspace', workspace, '--json'],
       workspace,
@@ -629,6 +668,8 @@ try{
     expect(facts.runs).toHaveLength(2);
     expect(facts.runs.every((r: { status: string }) => r.status === 'completed')).toBe(true);
     expect(facts.executions).toHaveLength(2);
+    expect(facts.unexpectedExecutions).toEqual([]);
+    expect(facts.titleExecutions).toEqual(first.titleExecutions);
     expect(calls).toBe(2);
     const publicRead = join(root, 'public-read.mjs');
     writeFileSync(
@@ -651,6 +692,7 @@ try{
         isActive: false,
       });
     expect(calls).toBe(2);
+    expect(titleCalls).toBe(1);
 
     expect(readFileSync(join(candidate, 'terminal-manifest.json'))).toEqual(manifest);
     const verifyOrigin = performance.now();

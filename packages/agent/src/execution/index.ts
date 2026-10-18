@@ -21,6 +21,7 @@ import { canonicalJson, semanticDigest } from '../json';
 import { bodyReference } from '../model-body';
 import { type ModelOutputReference, ModelOutputWriter } from '../model-output';
 import { captureModelRequestMetadata, modelMetadataJson } from '../model-snapshot';
+import { createModelToolSurface, modelToolMessages } from '../model-tools';
 import type { AuthorizationReviewBinding } from '../runtime';
 import type { ReadAuthorizationReviewInput, Store } from '../storage/port';
 import {
@@ -712,6 +713,7 @@ export class UnifiedExecution {
     stepId: string,
     planned?: ExecutionRecord,
   ): Promise<ModelResponse> {
+    const surface = createModelToolSurface(request, scope.bindings?.tools ?? new Map());
     const executionId = request.requestId;
     const input = planned
       ? structuredClone(planned.input)
@@ -746,7 +748,12 @@ export class UnifiedExecution {
     if (!planned && this.options.sealSource) source = await this.options.sealSource(scope, source);
     if (!planned) {
       const capturedMetadata = modelMetadataJson(
-        await captureModelRequestMetadata(scope, model, request),
+        await captureModelRequestMetadata(
+          scope,
+          model,
+          request,
+          surface.changed ? surface.request : undefined,
+        ),
       );
       const modelMetadata = this.options.sealModelMetadata
         ? await this.options.sealModelMetadata(scope, capturedMetadata)
@@ -820,7 +827,12 @@ export class UnifiedExecution {
       scope.signal.throwIfAborted();
       let savedLength = 0;
       let savedAt = Date.now();
-      for await (const event of model.stream(actualRequest, { signal: scope.signal })) {
+      const modelRequest = {
+        ...actualRequest,
+        tools: surface.tools,
+        messages: modelToolMessages(actualRequest.messages),
+      };
+      for await (const event of model.stream(modelRequest, { signal: scope.signal })) {
         if (finish) throw new AgentError('model_event_after_finish');
         if (event.type === 'usage') recordedUsage = structuredClone({ ...event.usage });
         scope.signal.throwIfAborted();
@@ -836,7 +848,7 @@ export class UnifiedExecution {
           if (output) await output.text('reasoning', event.text);
         } else if (event.type === 'tool_call') {
           firstOutput ??= 'tool_calls';
-          const call = { id: event.id, name: event.name, arguments: event.arguments };
+          const call = surface.decode(event);
           calls.push(call);
           if (output) await output.call(call);
         } else {
@@ -1062,6 +1074,20 @@ export class UnifiedExecution {
         dispatched: false,
       };
     }
+    if (call.model?.error)
+      return {
+        result: await this.recordRejectedTool(
+          scope,
+          executionId,
+          call,
+          stepId,
+          source,
+          input,
+          call.model.error,
+          definition?.version,
+        ),
+        dispatched: false,
+      };
     if (!definition)
       return {
         result: await this.recordRejectedTool(

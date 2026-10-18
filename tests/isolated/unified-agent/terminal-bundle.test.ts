@@ -16,6 +16,7 @@ import { tmpdir } from 'node:os';
 import { join, relative, resolve } from 'node:path';
 import type { ProfileBackup, ProfileRestoreResult } from '@kite-ai/agent/maintenance';
 import { ownedUserConfiguration } from '../../../apps/service/test/fixtures/user-configuration-fixture';
+import { sessionTitleInstructions } from '../../../packages/agent/src/business/session-title/title';
 import { privateDirectory } from '../../fixtures/test-filesystem';
 
 const repositoryRoot = resolve(import.meta.dir, '../../..');
@@ -145,12 +146,37 @@ test('sealed terminal bundle remains independent after archive relocation and te
     const setupResult = await execute([runtime, setup], workspace, home);
     expect(setupResult.code).toBe(0);
     const profile = JSON.parse(setupResult.stdout) as { profilePath: string; databasePath: string };
-    let providerCalls = 0;
+    let providerCalls = 0,
+      titleCalls = 0;
     const provider = Bun.serve({
       hostname: '127.0.0.1',
       port: 0,
       async fetch(request) {
-        const body = (await request.json()) as { messages: unknown[] };
+        const body = (await request.json()) as {
+          messages: { role: string; content: string }[];
+          tools?: unknown[];
+        };
+        if (
+          body.messages.some(
+            (message) => message.role === 'system' && message.content === sessionTitleInstructions,
+          )
+        ) {
+          titleCalls++;
+          expect(titleCalls).toBe(1);
+          expect(body.tools ?? []).toEqual([]);
+          const titleUsers = body.messages.filter((message) => message.role === 'user');
+          expect(titleUsers).toHaveLength(2);
+          expect(titleUsers[0]!.content).toBe('sealed terminal task');
+          expect(titleUsers[1]!.content).toMatch(
+            /^<runtime-state source="runtime.kernel">\nphase: building\nrun: [0-9a-f-]{36}\nplanning: \{"status":"disabled"\}\nThis is Runtime-generated observation, not a user request or execution grant\.\n<\/runtime-state>$/,
+          );
+          const frame = (delta: unknown, finish_reason: string | null) =>
+            `data: ${JSON.stringify({ id: 'bundle-title', object: 'chat.completion.chunk', model: 'fixed', choices: [{ index: 0, delta, finish_reason }] })}\n\n`;
+          return new Response(
+            `${frame({ content: 'Bundle run' }, null)}${frame({}, 'stop')}data: [DONE]\n\n`,
+            { headers: { 'content-type': 'text/event-stream' } },
+          );
+        }
         expect(JSON.stringify(body.messages)).toContain('sealed terminal task');
         providerCalls++;
         const frame = (delta: unknown, finish_reason: string | null) =>
@@ -201,22 +227,68 @@ test('sealed terminal bundle remains independent after archive relocation and te
       expect(task.code).toBe(0);
       expect(task.stdout).toContain('SEALED BUNDLE MODEL BODY');
       expect(providerCalls).toBe(1);
+      expect(titleCalls).toBe(1);
       const read = join(home, 'read.mjs');
       writeFileSync(
         read,
-        `import {openSqliteStore} from ${JSON.stringify(join(candidate, 'node_modules/@kite-ai/agent/sqlite.js'))};const s=await openSqliteStore({dataRoot:${JSON.stringify(dataRoot)},profile:'default',mode:'readonly'});try{const session=await s.getSession('bundle-session');const messages=await s.listMessages('bundle-session');const executions=await s.listExecutions('bundle-session');console.log(JSON.stringify({session,messages,executions}));}finally{await s.close();}`,
+        `import {openSqliteStore} from ${JSON.stringify(join(candidate, 'node_modules/@kite-ai/agent/sqlite.js'))};const s=await openSqliteStore({dataRoot:${JSON.stringify(dataRoot)},profile:'default',mode:'readonly'});try{const session=await s.getSession('bundle-session');const messages=await s.listMessages('bundle-session');const executions=await s.listExecutions('bundle-session');const carrier=executions.find(e=>e.definitionId==='agent/session-title');const titleChild=carrier?{session:await s.getSession(carrier.childSessionId),view:await s.getView(carrier.childSessionId),executions:await s.listExecutions(carrier.childSessionId)}:null;console.log(JSON.stringify({session,messages,executions,titleChild}));}finally{await s.close();}`,
       );
       const history = await execute([runtime, read], workspace, home);
       expect(history.code).toBe(0);
       expect(history.stdout).toContain('SEALED BUNDLE MODEL BODY');
       const saved = JSON.parse(history.stdout) as {
-        session: { id: string };
-        executions: { kind: string }[];
+        session: { id: string; title: string };
+        executions: {
+          id: string;
+          kind: string;
+          definitionId: string;
+          runId: string | null;
+          status: string;
+          parentExecutionId: string | null;
+          childSessionId: string | null;
+        }[];
+        titleChild: {
+          session: { id: string; parentSessionId: string };
+          view: { runs: { status: string }[] };
+          executions: { kind: string; status: string }[];
+        };
       };
       expect(saved.session.id).toBe('bundle-session');
-      expect(saved.executions).toHaveLength(1);
-      expect(saved.executions[0]?.kind).toBe('model');
+      expect(saved.session.title).toBe('Bundle run');
+      expect(saved.executions.filter((execution) => execution.kind === 'model')).toHaveLength(1);
+      const titleIds = [
+        'agent/session-title',
+        'builtin.session-title/fallback',
+        'builtin.session-title/generate',
+      ];
+      const titleExecutions = saved.executions.filter((execution) =>
+        titleIds.includes(execution.definitionId),
+      );
+      expect(titleExecutions.map((execution) => execution.definitionId).sort()).toEqual(titleIds);
+      expect(
+        saved.executions.filter(
+          (execution) => execution.kind !== 'model' && !titleIds.includes(execution.definitionId),
+        ),
+      ).toEqual([]);
+      for (const execution of titleExecutions)
+        expect(execution).toMatchObject({ kind: 'job', runId: null, status: 'succeeded' });
+      const generation = titleExecutions.find(
+        (execution) => execution.definitionId === 'builtin.session-title/generate',
+      )!;
+      const carrier = titleExecutions.find(
+        (execution) => execution.definitionId === 'agent/session-title',
+      )!;
+      const titleChildSessionId = carrier.childSessionId;
+      expect(titleChildSessionId).toBeString();
+      expect(carrier.parentExecutionId).toBe(generation.id);
+      expect(titleChildSessionId).toBe(saved.titleChild.session.id);
+      expect(saved.titleChild.session.parentSessionId).toBe('bundle-session');
+      expect(saved.titleChild.view.runs).toHaveLength(1);
+      expect(saved.titleChild.view.runs[0]!.status).toBe('completed');
+      expect(saved.titleChild.executions).toHaveLength(1);
+      expect(saved.titleChild.executions[0]).toMatchObject({ kind: 'model', status: 'succeeded' });
       expect(providerCalls).toBe(1);
+      expect(titleCalls).toBe(1);
       const started = await execute(
         [cli, 'server', 'start', '--server', socket, '--workspace', workspace],
         workspace,

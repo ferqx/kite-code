@@ -7,7 +7,7 @@ import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
-import { createClient } from '@kite-ai/client';
+import { ClientError, createClient } from '@kite-ai/client';
 import { launchPairedService } from '@kite-ai/service/paired';
 import { ownedUserConfiguration } from '../../../../apps/service/test/fixtures/user-configuration-fixture';
 
@@ -181,12 +181,12 @@ try {
     process.platform === 'darwin' || (process.platform === 'linux' && Bun.which('bwrap') !== null);
   const toolNames: [string, string][] = [
     ['ask_user', 'ask_user'],
-    ['files.edit', 'files_edit'],
-    ['files.glob', 'files_glob'],
-    ['files.list', 'files_list'],
-    ['files.read', 'files_read'],
-    ['files.search', 'files_search'],
-    ['files.write', 'files_write'],
+    ['files.edit', 'edit_file'],
+    ['files.glob', 'glob_files'],
+    ['files.list', 'list_directory'],
+    ['files.read', 'read_file'],
+    ['files.search', 'search_content'],
+    ['files.write', 'write_file'],
     ...(shellAvailable
       ? ([
           ['shell.execute', 'shell_execute'],
@@ -244,11 +244,10 @@ try {
   assert.equal(snapshot.executionId, model.id);
   assert.equal(snapshot.originCommandId, 'work');
   assert.equal(snapshot.confirmation, 'succeeded');
-  assert.equal(snapshot.bodyHash, ref.hash);
-  assert.equal(snapshot.bodyBytes, ref.size);
+  assert.notEqual(snapshot.bodyHash, ref.hash);
   assert.deepEqual(
     snapshot.request.tools.map((tool) => tool.id),
-    toolNames.map(([originalId]) => originalId),
+    toolNames.map(([, modelName]) => modelName),
   );
   const complete = Buffer.from(canonical(snapshot.request));
   assert.equal(hash(complete), snapshot.bodyHash);
@@ -274,20 +273,52 @@ try {
     snapshot.metadata.context?.sources.filter((entry) => entry.id === 'project:w:AGENTS.md'),
     [{ id: 'project:w:AGENTS.md', digest: hash(Buffer.from(source)) }],
   );
-  const media = await client.readArtifact(
-    's',
-    { expectedStoreId: storeId, refId: ref.id as string, scope: { kind: 'session', id: 's' } },
-    {
-      expectedReference: {
-        size: ref.size as string,
-        hash: ref.hash as string,
-        mediaType: 'application/json',
-        storeId,
-      },
-    },
+  // Public Inspector exposes the frozen model projection; private provider bodies
+  // are checked only through this fixture's owned raw bytes, never public downloads.
+  const denyPrivateBody = async (selectedClient: ReturnType<typeof createClient>) => {
+    await assert.rejects(
+      () =>
+        selectedClient.readArtifact(
+          's',
+          {
+            expectedStoreId: storeId,
+            refId: ref.id as string,
+            scope: { kind: 'session', id: 's' },
+          },
+          {
+            expectedReference: {
+              size: ref.size as string,
+              hash: ref.hash as string,
+              mediaType: 'application/json',
+              storeId,
+            },
+          },
+        ),
+      (error: unknown) =>
+        error instanceof ClientError &&
+        error.status === 403 &&
+        error.code === 'artifact_scope_denied',
+    );
+  };
+  await denyPrivateBody(client);
+  const modelBlob = join(
+    profile.profilePath,
+    'blobs',
+    (ref.hash as string).slice(0, 2),
+    ref.hash as string,
   );
+  const media = { content: Uint8Array.from(readFileSync(modelBlob)) };
   assert.equal(hash(media.content), ref.hash);
-  assert.deepEqual(media.content, Uint8Array.from(complete));
+  assert.equal(String(media.content.length), ref.size);
+  const originalRequest = JSON.parse(new TextDecoder().decode(media.content));
+  assert.deepEqual(
+    originalRequest.tools.map((tool: { id: string }) => tool.id),
+    toolNames.map(([originalId]) => originalId),
+  );
+  assert.deepEqual(originalRequest.messages, snapshot.request.messages);
+  assert.equal(originalRequest.requestId, snapshot.request.requestId);
+  assert.equal(originalRequest.modelId, snapshot.request.modelId);
+  assert.deepEqual(media.content, Uint8Array.from(Buffer.from(canonical(originalRequest))));
   let rejected = false;
   try {
     await client.getModelInput('other', model.id);
@@ -318,18 +349,8 @@ try {
   assert.deepEqual(cold.metadata, snapshot.metadata);
   assert.equal(cold.bodyHash, snapshot.bodyHash);
   assert.deepEqual(await service.client.getCommand('work'), command);
-  const coldMedia = await service.client.readArtifact(
-    's',
-    { expectedStoreId: storeId, refId: ref.id as string, scope: { kind: 'session', id: 's' } },
-    {
-      expectedReference: {
-        size: ref.size as string,
-        hash: ref.hash as string,
-        mediaType: 'application/json',
-        storeId,
-      },
-    },
-  );
+  await denyPrivateBody(service.client);
+  const coldMedia = { content: Uint8Array.from(readFileSync(modelBlob)) };
   assert.deepEqual(coldMedia.content, media.content);
   assert.deepEqual(counts(), before);
   assert.deepEqual(await store.getMetadata(), metadata);
@@ -362,6 +383,7 @@ try {
       originalCommand: command.status,
       completeClose: true,
       coldNoNewRecords: true,
+      privateBodyPublicDownloadDenied: true,
     }),
   );
 } finally {

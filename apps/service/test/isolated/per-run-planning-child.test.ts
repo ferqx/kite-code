@@ -173,7 +173,7 @@ async function fixture(
     tools: [
       { id: 'files.read', definitionVersion: '4' },
       { id: 'files.write', definitionVersion: '2' },
-      ...['task', 'task_wait', 'task_read'].map((id) => ({ id, definitionVersion: '1' })),
+      ...['task', 'wait_agents', 'task_read'].map((id) => ({ id, definitionVersion: '1' })),
       ...(scenario === 'pending_job'
         ? ['shell.launch', 'validation.define', 'validation.check'].map((id) => ({
             id,
@@ -225,7 +225,7 @@ async function fixture(
           })),
           ...[
             'task',
-            'task_wait',
+            'wait_agents',
             'task_read',
             'shell.launch',
             'validation.define',
@@ -263,7 +263,7 @@ async function fixture(
             input.originCommandId === workId &&
             modelSteps.get('parent') === 4
           ) {
-            // task_wait returns on an interaction, before the child is terminal.
+            // wait_agents returns on an interaction, before the child is terminal.
             // Keep the original approval live without holding the sole Model slot.
             const executions = await store.listExecutions('s');
             const task = executions.find(
@@ -518,12 +518,12 @@ type Fixture = Awaited<ReturnType<typeof fixture>>;
 
 async function script(model: string, step: number, f: Fixture): Promise<Call> {
   if (model === 'child') {
-    if (step === 0) return { name: 'files.read', input: { path: 'original.txt' } };
+    if (step === 0) return { name: 'read_file', input: { path: 'original.txt' } };
     if (step === 1) {
       if (['ask', 'head_drift', 'proof_drift'].includes(f.scenario)) f.policy('auto');
       if (f.scenario === 'untrusted') f.policy('full', false);
       return {
-        name: 'files.write',
+        name: 'write_file',
         input: { path: 'child.txt', content: 'original child effect', base: null },
       };
     }
@@ -532,7 +532,7 @@ async function script(model: string, step: number, f: Fixture): Promise<Call> {
   if (f.scenario === 'pending_task' || f.workId === 'next')
     return step === 0
       ? {
-          name: 'task',
+          name: 'spawn_agent',
           input: {
             key: f.workId,
             role: 'worker',
@@ -543,10 +543,10 @@ async function script(model: string, step: number, f: Fixture): Promise<Call> {
       : null;
   if (step === 0)
     return {
-      name: 'planning.write',
+      name: 'write_plan',
       input: {
-        planId: 'parent-plan',
-        expectedVersion: null,
+        plan_id: 'parent-plan',
+        expected_version: null,
         title: 'Delegate once',
         body: 'Actual child reads and writes once',
         steps: [{ id: 'delegate', title: 'Delegate and wait' }],
@@ -556,29 +556,29 @@ async function script(model: string, step: number, f: Fixture): Promise<Call> {
   if (f.scenario === 'pending_job') {
     if (step === 1)
       return {
-        name: 'validation.define',
+        name: 'define_validation_checks',
         input: {
-          runId: (await f.run()).id,
+          run_id: (await f.run()).id,
           checks: [
             {
               kind: 'command',
               input: { command: 'printf forbidden > forbidden.txt' },
-              expectedExitCode: 0,
+              expected_exit_code: 0,
             },
           ],
         },
       };
-    if (step === 2) return { name: 'validation.check', input: { runId: (await f.run()).id } };
+    if (step === 2) return { name: 'run_validation_checks', input: { run_id: (await f.run()).id } };
     return null;
   }
   if (step === 1)
     return {
-      name: 'planning.review',
-      input: { planId: current.planId!, version: current.version!, digest: current.digest! },
+      name: 'request_plan_review',
+      input: { plan_id: current.planId!, version: current.version!, digest: current.digest! },
     };
   if (step === 2)
     return {
-      name: 'task',
+      name: 'spawn_agent',
       input: {
         key: f.workId,
         role: 'worker',
@@ -586,23 +586,23 @@ async function script(model: string, step: number, f: Fixture): Promise<Call> {
         cancellation: 'attached',
       },
     };
-  if (step === 3) return { name: 'task_wait', input: { taskId: f.workId, timeoutMs: 4000 } };
+  if (step === 3) return { name: 'wait_agents', input: { task_ids: [f.workId], timeout_ms: 4000 } };
   if (step === 4 && ['approved', 'next'].includes(f.scenario)) {
     const target = (await f.store.listExecutions('s')).find(
       (e) => e.definitionId === 'task' && e.status === 'succeeded',
     )!;
     return {
-      name: 'planning.update',
+      name: 'update_plan_progress',
       input: {
-        runId: (await f.run()).id,
-        planId: current.planId!,
+        run_id: (await f.run()).id,
+        plan_id: current.planId!,
         version: current.version!,
         digest: current.digest!,
-        expectedProgressRevision: null,
-        stepId: 'delegate',
+        expected_progress_revision: null,
+        step_id: 'delegate',
         status: 'completed',
-        executionId: target.id,
-        completePlan: true,
+        execution_id: target.id,
+        complete_plan: true,
       },
     };
   }
@@ -657,6 +657,11 @@ test('approved accept_edits under current Full independently challenges Task/car
     await delegateApprovals(f);
     const parent = await f.done();
     expect(parent.status).toBe('completed');
+    const wait = (await f.store.listExecutions('s')).find(
+      (execution) => execution.definitionId === 'wait_agents',
+    )!;
+    expect(wait.status).toBe('succeeded');
+    expect(wait.input).toEqual({ taskIds: ['work'], timeoutMs: 4000 });
     expect(readFileSync(join(f.workspace, 'child.txt'), 'utf8')).toBe('original child effect');
     const carrier = (await f.store.listExecutions('s')).find(
       (e) => e.definitionId === 'agent/worker',

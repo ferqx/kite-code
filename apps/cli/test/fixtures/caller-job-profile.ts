@@ -51,7 +51,7 @@ export async function callerJobProfile() {
       const done = originalToolResults(
         body.messages,
         'two owned jobs',
-        ['a', 'b'].map((key) => ({ id: `launch-${key}`, name: 'shell.launch' })),
+        ['a', 'b'].map((key) => ({ id: `launch-${key}`, name: 'shell_launch' })),
       );
       const delta = done
         ? { content: 'PARENT_DONE_TWO_INDEPENDENT_JOBS' }
@@ -61,7 +61,7 @@ export async function callerJobProfile() {
               id: `launch-${key}`,
               type: 'function',
               function: {
-                name: 'shell.launch',
+                name: 'shell_launch',
                 arguments: JSON.stringify({
                   key,
                   command: `printf 'JOB_${key}_UTF8 中🙂é\\n'; while :; do /bin/sleep 1; done`,

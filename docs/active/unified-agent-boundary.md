@@ -2,6 +2,8 @@
 
 状态：active
 
+[模型工具投影](../../packages/agent/src/model-tools.README.md)在 Agent 的实际 `ModelAdapter` 边界完成：内部 ModelRequest／ToolCall 保留原定义 ID/version 和规范参数，leaf 的纯 `ToolDefinition.model` 仅描述公开名、声明字段映射与隐藏资格。完整模型调用先按本轮准确目录校验、转回内部参数，再进入原来源、权限、资源、计划、派发与终态链路；未知工具、坏参数和碰撞不得形成效果。声明字段可转 snake_case，任意业务 JSON 与动态 MCP 原 schema/arguments 不改写；baseline、操作 key 和去重身份保留。持久 `ToolCall.model` 只存原公开名称、精简字段路径及必要错误，后继模型历史不借当前定义重解释原调用；`metadata.context.toolSurface` 封存当时公开工具，公开 Inspector 使用该原快照并保持既有完整正文与 scope 核验。本次不提供旧会话工具消息兼容，不增加旧名 alias；原 Store/Runtime authority 不随命名变化。任务等待的模型入口统一为必填 `task_ids` 数组，事件等待 `wait_agent_event` 只接 `after_seq/timeout_ms`；隐藏的 `task_wait` 仍是内部注册定义，不获得新的模型入口。跨层实现归 [Execution](../../packages/agent/src/execution/index.ts)、[Model metadata](../../packages/agent/src/model-snapshot.ts)和上述 owner，具体验证以本轮实际测试范围为准。
+
 Run 扩展通过 `runLifecycle.prepare` 在启动前和完成前选择自身已注册的普通 Action，Core 复用原 Command、权限、namespace、取消和执行事实，不内置标题规则。默认会话命名扩展由 Service 装配，模型请求在无工具的内部子会话中正常执行；`resultDelivery:caller` 将子结果交由调用扩展消费，不自动进入主模型上下文。标题复用 Session rename CAS，消息写入不再隐式改名，客户端创建只提供空 title 标记；没有标题用途 DTO、专用 ModelOutput 格式或标题恢复分支。当前接口与验证归[Agent owner](../../packages/agent/README.md#入口与职责)、[Service owner](../../apps/service/README.md#默认装配与业务规则归属)和[生命周期取舍](../../.agents/notes/implemented/architecture/2026-10-18-run-lifecycle-extension-actions.md)。
 
 Windows daemon 的可信装配可借用本进程已经完成准入的原 live artifact owner，绑定 proof、entry、executable 与 build；借用未归还、关闭开始、复制或伪造均拒绝。新的实际进程仍独立取得锁/原文件 pin 并全量核验，不向 startup JSON、配置或 HTTP 增加借用能力。原 HANDLE 内容事实和批量私有复制不改变 Files 授权、维护 EX、精确取消或关闭未知保资源的合同。实现归 [Service owner](../../apps/service/README.md)和 [platform owner](../../packages/agent/src/platform/README.md)，取舍归[闭包成本决定](../../.agents/notes/implemented/bug-fix/2026-10-17-windows-bundle-admission-cost.md)。

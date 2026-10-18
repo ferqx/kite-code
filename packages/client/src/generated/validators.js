@@ -63668,7 +63668,7 @@ var schema62 = {
               type: 'object',
               properties: {
                 transformationId: { type: 'string', const: 'kite.model-request' },
-                transformationVersion: { type: 'string', const: '1' },
+                transformationVersion: { type: 'string', enum: ['1', '2'] },
                 messageOrder: { type: 'string', const: 'request.messages' },
                 sourceOrder: { type: 'string', const: 'request.messages[].sourceIds' },
                 sources: {
@@ -68572,17 +68572,28 @@ function validate55(
                                                                   }
                                                                   errors++;
                                                                 }
-                                                                if (data76 !== '1') {
+                                                                if (
+                                                                  !(
+                                                                    data76 === '1' || data76 === '2'
+                                                                  )
+                                                                ) {
                                                                   const err72 = {
                                                                     instancePath:
                                                                       instancePath +
                                                                       '/metadata/context/transformationVersion',
                                                                     schemaPath:
-                                                                      '#/properties/metadata/anyOf/0/properties/context/properties/transformationVersion/const',
-                                                                    keyword: 'const',
-                                                                    params: { allowedValue: '1' },
+                                                                      '#/properties/metadata/anyOf/0/properties/context/properties/transformationVersion/enum',
+                                                                    keyword: 'enum',
+                                                                    params: {
+                                                                      allowedValues:
+                                                                        schema62.properties.metadata
+                                                                          .anyOf[0].properties
+                                                                          .context.properties
+                                                                          .transformationVersion
+                                                                          .enum,
+                                                                    },
                                                                     message:
-                                                                      'must be equal to constant',
+                                                                      'must be equal to one of the allowed values',
                                                                   };
                                                                   if (vErrors === null) {
                                                                     vErrors = [err72];

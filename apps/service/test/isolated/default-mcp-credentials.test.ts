@@ -126,12 +126,12 @@ async function fixture() {
       const step = steps.get(marker) ?? 0;
       steps.set(marker, step + 1);
       const connecting = marker.includes('connect');
-      const remote = body.tools.find((tool) => tool.function.name.startsWith('mcp.local.'));
+      const remote = body.tools.find((tool) => tool.function.name.startsWith('mcp_local_'));
       const call =
         connecting && step === 0
           ? {
-              name: 'mcp.connect',
-              input: { serverId: 'local', key: marker.includes('-b') ? 'first-b' : 'first-a' },
+              name: 'connect_mcp_server',
+              input: { server_id: 'local', key: marker.includes('-b') ? 'first-b' : 'first-a' },
             }
           : (connecting ? step === 1 : step === 0) && remote
             ? { name: remote.function.name, input: {} }

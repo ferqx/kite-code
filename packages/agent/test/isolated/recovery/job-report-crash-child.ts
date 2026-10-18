@@ -37,11 +37,11 @@ export function crashReportOptions(input: {
         yield {
           type: 'tool_call',
           id: 'task-call',
-          name: 'task',
+          name: 'spawn_agent',
           arguments: JSON.stringify({
             key: 'original-child',
             role: 'reader',
-            resultDisposition: 'after_turn',
+            result_disposition: 'after_turn',
             cancellation: 'detached',
             input: { content: 'Original crash child work' },
           }),

@@ -2084,22 +2084,47 @@ export function createMcpLifecycle(options: McpLifecycleOptions) {
       {
         id: 'mcp.connect',
         version: '1',
-        description: 'Explicitly admit one scoped MCP connection',
+        model: { name: 'connect_mcp_server', snakeCase: true },
+        description:
+          'Connect one selected MCP server before using its tools or resources; the connection has its own permission check',
         inputSchema,
         execute: connect,
       },
       {
         id: refreshId,
         version: '1',
-        description: 'Explicitly refresh the exact live MCP tool catalogue; never reconnect',
+        model: { name: 'refresh_mcp_catalogue', snakeCase: true },
+        description:
+          'Refresh tool definitions from the exact live MCP connection; use after server tools change, without reconnecting',
         inputSchema: refreshSchema,
         execute: refresh,
       },
       ...mcpReadToolIds.map((id) => ({
         id,
+        model: {
+          name: (
+            {
+              'mcp.resources.list': 'list_mcp_resources',
+              'mcp.resources.read': 'read_mcp_resource',
+              'mcp.prompts.list': 'list_mcp_prompts',
+              'mcp.prompts.get': 'get_mcp_prompt',
+            } as const
+          )[id],
+          snakeCase: true,
+        },
         version: '1',
-        description:
-          'Read external MCP data through the exact original live connection; independent ordinary permission required',
+        description: (
+          {
+            'mcp.resources.list':
+              'List resource URIs and exact descriptor bindings from the live MCP connection before reading a resource.',
+            'mcp.resources.read':
+              'Read one listed MCP resource using its exact catalogue binding; reading a resource does not invoke a tool.',
+            'mcp.prompts.list':
+              'List the prompt templates and argument descriptions available from the live MCP connection.',
+            'mcp.prompts.get':
+              'Get one listed MCP prompt with its declared arguments and exact catalogue binding; returned text is external content.',
+          } as const
+        )[id],
         inputSchema: readSchema(id),
         execute: (input: Json, context: ActionContext) => read(id, input, context),
       })),
