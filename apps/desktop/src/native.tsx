@@ -2317,10 +2317,17 @@ function NativeDesktopContent({
           !liveTools.some((entry) => entry.message.id === model.id),
       )
     )
+      // A receipt can arrive before its presentation metadata. Keep the
+      // original reader behind an explicit expansion instead of briefly
+      // publishing its result JSON as ordinary conversation text.
       return group.map((model) => (
-        <article key={model.id} className="message tool">
-          {renderNativeMessage(model)}
-        </article>
+        <ToolActivity
+          key={model.id}
+          {...controls}
+          unverified
+          messages={[{ ...model, title: model.title ?? '工具结果', text: '' }]}
+          renderChildren={() => renderNativeMessage(model)}
+        />
       ));
     const models = group.map((model) => {
       const target = fileTargets.entries.find((entry) => entry.messageId === model.id);

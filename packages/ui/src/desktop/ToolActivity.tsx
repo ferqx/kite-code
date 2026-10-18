@@ -485,6 +485,7 @@ export function ToolActivity({
   activityId,
   restoredExpanded,
   childDetail,
+  unverified,
 }: {
   expandedItems?: Readonly<Record<string, boolean>>;
   onToggleItem?: (id: string, open: boolean) => void;
@@ -499,6 +500,8 @@ export function ToolActivity({
   activityId?: string;
   restoredExpanded?: ReadonlySet<string>;
   childDetail?: { readonly label: string; readonly onOpen: () => void };
+  /** The host has an original record but has not verified its execution status. */
+  unverified?: boolean;
 }) {
   const message = messages[0]!;
   const messageOpenFile = openFileForMessage ? openFileForMessage(message) : openFile;
@@ -583,7 +586,9 @@ export function ToolActivity({
           : '已取消'
       : grouped
         ? undefined
-        : executionLabel(message);
+        : unverified && message.status === undefined
+          ? '状态待核对'
+          : executionLabel(message);
   const heading = (
     <>
       <MarkerIcon className="tool-activity-marker-icon">

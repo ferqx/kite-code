@@ -23,6 +23,7 @@ test('reading state drops vanished message, tool step and turn expansion IDs', (
       follow: false,
       expanded: {
         'activity:tool:a': true,
+        'activity-group:tool:a': false,
         'tool:a': false,
         'turn:t:complete': true,
         'subagent-step:step': true,
@@ -45,6 +46,7 @@ test('reading state drops vanished message, tool step and turn expansion IDs', (
     follow: false,
     expanded: {
       'activity:tool:a': true,
+      'activity-group:tool:a': false,
       'tool:a': false,
       'turn:t:complete': true,
       'subagent-step:step': true,

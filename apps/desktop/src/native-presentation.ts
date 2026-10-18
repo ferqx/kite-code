@@ -86,30 +86,47 @@ export function desktopDirectory(
 }
 
 export function desktopMessages(messages: readonly Message[]): DesktopMessage[] {
-  return messages.map((message) => ({
-    id: message.id,
-    role: message.compression ? 'system' : message.role,
-    ...(message.compression
-      ? {
-          systemKind: 'compaction' as const,
-          title:
-            message.compression.status === 'completed'
-              ? '上下文压缩完成'
-              : message.compression.status === 'failed'
-                ? '上下文压缩失败'
-                : message.compression.status === 'cancelled'
-                  ? '上下文压缩已取消'
-                  : message.compression.status === 'running'
-                    ? '上下文压缩上次确认为进行中'
-                    : '上下文压缩未发布',
-          status:
-            message.compression.status === 'unpublished' || message.compression.status === 'running'
-              ? ('unknown' as const)
-              : message.compression.status,
-        }
-      : {}),
-    text: message.compression ? '' : message.content,
-    settled: message.compression ? true : message.status === 'complete',
-    // Public Message completion does not establish a final Run reply or legacy tool presentation.
-  }));
+  return messages.map((message) => {
+    // firstOutput identifies the first channel, not the current phase. A
+    // reasoning-first response starts rendering as soon as it has actual text.
+    const thinking =
+      message.role === 'assistant' &&
+      message.status === 'incomplete' &&
+      message.contentFormat !== 'unsupported' &&
+      message.outputBody?.readAvailability !== 'unsupported' &&
+      message.content.length === 0 &&
+      (!message.outputBody || message.outputBody.contentBytes === '0') &&
+      (message.firstOutput === 'reasoning' ||
+        (message.firstOutput === undefined &&
+          message.outputBody !== undefined &&
+          message.outputBody.reasoningBytes !== '0' &&
+          message.outputBody.toolCallCount === 0));
+    return {
+      id: message.id,
+      role: message.compression ? 'system' : thinking ? 'thinking' : message.role,
+      ...(message.compression
+        ? {
+            systemKind: 'compaction' as const,
+            title:
+              message.compression.status === 'completed'
+                ? '上下文压缩完成'
+                : message.compression.status === 'failed'
+                  ? '上下文压缩失败'
+                  : message.compression.status === 'cancelled'
+                    ? '上下文压缩已取消'
+                    : message.compression.status === 'running'
+                      ? '上下文压缩上次确认为进行中'
+                      : '上下文压缩未发布',
+            status:
+              message.compression.status === 'unpublished' ||
+              message.compression.status === 'running'
+                ? ('unknown' as const)
+                : message.compression.status,
+          }
+        : {}),
+      text: message.compression || thinking ? '' : message.content,
+      settled: message.compression ? true : message.status === 'complete',
+      // Public Message completion does not establish a final Run reply or legacy tool presentation.
+    };
+  });
 }

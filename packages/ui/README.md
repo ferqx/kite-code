@@ -40,7 +40,7 @@ SessionPage 的可选 `covered` 保留主panel树、尺寸和阅读实例，以o
 
 原工具组件允许宿主给 `Message.target` 传展示文本，不从文本取得文件或执行权限。Native 的已知工具行沿准确执行结果与当前视图适配；未来定义／版本不借旧同名分类解释，原文仍可展开。Shell 操作继续复用原工具图标，实际身份、目标、状态与限定证据归 [Desktop owner](../../apps/desktop/README.md#原工具过程与结果阅读)。
 
-SessionPage／Conversation 的 `renderMessageContent` 和 `renderToolActivity` 让宿主复用原消息外层、轮次折叠、最终回复复制和分组阅读状态，工具 slot 接完整分组与原展开控制；原 `renderMessage` 及未传新 slot 的缺省行为保持。`copyText=null` 表示当前正文仅可读预览，不能当全文复制；`TurnActivity.cancelling/unavailable` 只表达宿主确认的停止中／上次确认状态。ToolActivity 的 `openFileForMessage` 保每项独立回调，`ask.cancelled` 表达取消信息回答，与工具／Run 终态分开。准确公共 Run、原问答结果和完整正文资格归 [Desktop owner](../../apps/desktop/README.md#原轮次阅读聚合与问答回执)，纯 UI 不建立来源或业务 authority。
+SessionPage／Conversation 的 `renderMessageContent` 和 `renderToolActivity` 让宿主复用原消息外层、轮次折叠、最终回复复制和分组阅读状态，工具 slot 接完整分组与原展开控制；原 `renderMessage` 及未传新 slot 的缺省行为保持。`copyText=null` 表示当前正文仅可读预览，不能当全文复制；`TurnActivity.cancelling/unavailable` 只表达宿主确认的停止中／上次确认状态。ToolActivity 的 `unverified` 在未提供执行 status 时显示“状态待核对”，已提供的真实执行状态仍优先；该标记仅控制展示，不建立执行结果。`openFileForMessage` 保每项独立回调，`ask.cancelled` 表达取消信息回答，与工具／Run 终态分开。准确公共 Run、原问答结果和完整正文资格归 [Desktop owner](../../apps/desktop/README.md#原轮次阅读聚合与问答回执)，纯 UI 不建立来源或业务 authority。
 
 [ModelEffortSelector](src/desktop/ModelEffortSelector.tsx)复用原双栏浮层与 [GemSlider](src/desktop/GemSlider.tsx)。选中模型且宿主提供变更回调时即可调整思考程度，不接收模型支持能力开关。六档「轻度、中、高、极高、Max、Ultar」分别回调 `low/medium/high/xhigh/max/ultar`，不提供配置默认或关闭思考按钮及回调。模型按钮和浮层当前值只显示宿主明确提供的档位；未配置时不补“默认”或空的档位节点，打开滑块也不自动发送选择。宿主可传准确 `ModelOption.id` 与 `reasoningEffortChoices`；选择、列表键和当前标记按 ID 区分，同一提供商内同名模型补显示 ID。滑块映射宿主提供的六档子集；一档用按钮，零档不造滑块。旧 none/minimal 可作为已配置值显示，不生成额外选项。[浮层回归](test/isolated/model-effort.test.tsx)核无能力元数据的模型可调整与缺失路由；[Native DOM](../../apps/desktop/test/isolated/native-model-picker-dom.test.tsx)核 Ultar 回调、稀疏档位、两按钮缺席、旧 none 配置及切换模型后清除临时值。
 
@@ -53,6 +53,8 @@ SessionPage／Conversation 的 `renderMessageContent` 和 `renderToolActivity` �
 原 [BackgroundExecutions](src/desktop/BackgroundExecutions.tsx)环境信息卡已由 Native 的 SessionPage 消费，保留 Shell／子 Agent 分组、名称、当前任务和子详情回调。宿主可声明 queued／starting／unknown／restored 状态；当前环境模式 `currentOnly` 的 Shell 列表保运行／停止中，子列表保全部记录，逐项 `canStop=false` 或缺少停止回调时不提供停止入口，状态本身不证明进程清理。300px 卡及宽窄窗口停靠／浮层仍由原 SessionPage 管理。完整目录、准确停止、只读子详情和草稿往返归 [Desktop owner](../../apps/desktop/README.md#native-当前会话环境信息与子详情)，UI 不取得新执行或读取 authority。
 
 原 [Approval](src/desktop/Approval.tsx)可经 `InteractionCard.renderApproval` 接入宿主，保主按钮、拒绝和范围菜单。slot 只接原卡、disabled、原完整附件正文与已获准的回答回调；附件未验证时没有回答回调，换卡即失效。缺省普通／MCP／问题表单保持。ToolActivity 的 `submitted`／`unavailable`／`cancelled` 与 `dispatchCommitted` 只表达宿主确认的审批和派发事实，不把批准当工具成功；准确来源、accepted decision 和原提交链归 [Desktop owner](../../apps/desktop/README.md#原审批面板与授权观察)。
+
+Conversation 在调用宿主 `renderMessage` 之前统一排除 thinking、timing、terminal 内容。只有结构标记的准确 Turn 保留一个原顺序锚点和静态状态行，不产生空折叠控件；有可读正文或工具的 Turn 沿用原分组，隐藏思考不会打断相邻探索聚合。已确认终态的原 Turn 不因遗留 incomplete 前缀继续标记忙碌，其他活动 Turn 仍保持实际状态。过程 Collapsible 以原 Turn 的 process／complete 阅读 key 区分生命周期，终态重分组直接进入关闭状态，避免旧过程在退出动画中与最终回复同时重绘；手动展开与收起保留原动画，工具展开选择仍由 Conversation 阅读状态保存。单条工具详情与工具聚合使用独立的阅读 key，新形成的聚合默认收起，后续增加工具和状态更新保留用户对聚合的选择；[聚合 DOM 回归](test/isolated/desktop-tool-aggregation.test.tsx)核活动聚合、单项升级、手动选择与后续更新。[思考轮次回归](test/desktop-reasoning-turns.test.tsx)核宿主不接收原思考、无正文终态／耗时／原用户顺序、无空控件与工具聚合。
 
 ## 公共表单与观察
 

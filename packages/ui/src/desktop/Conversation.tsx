@@ -523,25 +523,82 @@ export function Conversation({
       .map((message) => message.ask?.toolCallId)
       .filter(Boolean),
   );
-  const shown = messages.filter((message) => {
-    if (renderMessage) return true;
-    if (message.role === 'thinking') return false;
-    if (message.systemKind === 'turn_timing' || message.systemKind === 'turn_terminal')
-      return false;
-    if (message.role === 'tool' && askToolIds.has(message.id.slice(5))) return false;
-    if (message.role === 'system')
-      return message.systemKind === 'ask' || message.settled || !!message.status;
-    if (message.role === 'tool') return isVisibleTool(message);
-    if (message.role === 'subagent')
-      return !message.parentToolCallId || !visibleToolIds.has(message.parentToolCallId);
-    return !message.settled || !!message.text;
-  });
+  const structural = (message: Message) =>
+    message.role === 'thinking' ||
+    message.systemKind === 'turn_timing' ||
+    message.systemKind === 'turn_terminal';
+  const visible = new Set(
+    messages.filter((message) => {
+      if (structural(message)) return false;
+      if (renderMessage) return true;
+      if (message.role === 'tool' && askToolIds.has(message.id.slice(5))) return false;
+      if (message.role === 'system')
+        return message.systemKind === 'ask' || message.settled || !!message.status;
+      if (message.role === 'tool') return isVisibleTool(message);
+      if (message.role === 'subagent')
+        return !message.parentToolCallId || !visibleToolIds.has(message.parentToolCallId);
+      return !message.settled || !!message.text;
+    }),
+  );
+  const visibleTurns = new Set(
+    [...visible].filter((message) => message.role !== 'user').map((message) => message.turnId),
+  );
+  const anchors = new Map<string, Message>();
+  for (const message of messages) {
+    if (structural(message) && message.turnId && !anchors.has(message.turnId))
+      anchors.set(message.turnId, message);
+  }
+  if (turnActivity && !anchors.has(turnActivity.turnId))
+    anchors.set(turnActivity.turnId, {
+      id: `activity-anchor:${turnActivity.turnId}`,
+      turnId: turnActivity.turnId,
+      role: 'system',
+      systemKind: 'turn_timing',
+      text: '',
+      settled: ['completed', 'failed', 'cancelled'].includes(turnActivity.status),
+    });
+  const anchoredTurns = new Set<string>();
+  // A hidden-only Turn still needs its status in chronological position. Keep
+  // one structural anchor only when no readable message already owns that Turn;
+  // hidden reasoning must not split otherwise contiguous exploration tools.
+  const shown: Message[] = [];
+  for (const message of messages) {
+    if (visible.has(message)) {
+      shown.push(message);
+      const anchor = message.turnId && anchors.get(message.turnId);
+      // Native seals timing/terminal markers after all history. The exact user
+      // identity keeps a no-output Turn before subsequent conversation rounds.
+      if (
+        message.role === 'user' &&
+        anchor &&
+        !visibleTurns.has(message.turnId) &&
+        !anchoredTurns.has(message.turnId)
+      ) {
+        anchoredTurns.add(message.turnId);
+        shown.push(anchor);
+      }
+    } else if (
+      structural(message) &&
+      message.turnId &&
+      !visibleTurns.has(message.turnId) &&
+      !anchoredTurns.has(message.turnId)
+    ) {
+      anchoredTurns.add(message.turnId);
+      shown.push(message);
+    }
+  }
   const runningToolTurns = new Set<string>();
   const thinkingTurns = new Set<string>();
   for (const message of messages) {
-    if (!message.turnId || message.settled) continue;
+    if (!message.turnId) continue;
+    // An earlier interrupted Model prefix does not own the current attempt's
+    // phase. Ordered model messages supersede that Turn's older thought marker.
+    if (message.role === 'assistant' || message.role === 'thinking') {
+      if (message.role === 'thinking' && !message.settled) thinkingTurns.add(message.turnId);
+      else thinkingTurns.delete(message.turnId);
+    }
+    if (message.settled) continue;
     if (message.role === 'tool') runningToolTurns.add(message.turnId);
-    if (message.role === 'thinking') thinkingTurns.add(message.turnId);
   }
   const finalReplyByTurn = new Map<string, Message>();
   const timingByTurn = new Map(
@@ -639,6 +696,7 @@ export function Conversation({
   }
   const renderGroup = (group: Message[]) => {
     const message = group[0]!;
+    if (structural(message)) return null;
     if (renderMessage)
       return (
         <div key={message.id} className="message-group">
@@ -647,7 +705,9 @@ export function Conversation({
           </article>
         </div>
       );
-    const activityKey = `activity:${message.id}`;
+    // A newly formed aggregate must not inherit a single receipt's open reader.
+    // Keep its identity stable as more tools join the same aggregate.
+    const activityKey = `${group.length > 1 ? 'activity-group' : 'activity'}:${message.id}`;
     if (message.role === 'tool' && renderToolActivity)
       return (
         <Fragment key={activityKey}>
@@ -735,7 +795,7 @@ export function Conversation({
     );
     const failureGroups = entry.groups.filter(([message]) => !!message && isTurnFailure(message));
     const processGroups = entry.groups.filter(
-      (group) => group !== finalGroup && !failureGroups.includes(group),
+      (group) => group !== finalGroup && !failureGroups.includes(group) && !structural(group[0]!),
     );
     const activity = turnActivity?.turnId === entry.turnId ? turnActivity : undefined;
     const timing = timingByTurn.get(entry.turnId);
@@ -746,8 +806,7 @@ export function Conversation({
         ? ['queued', 'running', 'waiting', 'cancelling', 'recovery_required'].includes(
             activity.status,
           )
-        : !turnActivity &&
-          processGroups.some((group) => group.some((message) => !message.settled)));
+        : !turnActivity && entry.groups.some((group) => group.some((message) => !message.settled)));
     const failed =
       activity?.status === 'failed' || terminalStatus === 'failed' || failureGroups.length > 0;
     const cancelled =
@@ -800,8 +859,7 @@ export function Conversation({
                             ? '已处理'
                             : '正在处理'
                           : '处理过程';
-    const showProcess =
-      processGroups.length > 0 || active || cancelled || aborted || activity?.unavailable;
+    const showProcess = processGroups.length > 0;
     // A settled Turn starts a new reading state even when no final reply was
     // confirmed. Its process closes once, then the reader's choice persists.
     const settled =
@@ -809,6 +867,8 @@ export function Conversation({
       !!finalGroup ||
       failureGroups.length > 0 ||
       ['completed', 'failed', 'cancelled'].includes(activity?.status ?? '');
+    // Settlement regroups the final reply outside the process. Start a new
+    // container so the old process cannot repaint during its exit animation.
     const turnKey = `turn:${entry.turnId}:${settled ? 'complete' : 'process'}`;
     const open = expanded[turnKey] ?? !settled;
     const elapsedPrefix =
@@ -843,7 +903,12 @@ export function Conversation({
         }
       >
         {showProcess && (
-          <Collapsible asChild open={open} onOpenChange={(next) => onToggle(turnKey, next)}>
+          <Collapsible
+            key={turnKey}
+            asChild
+            open={open}
+            onOpenChange={(next) => onToggle(turnKey, next)}
+          >
             <div className="agent-turn-process">
               <div className="agent-turn-summary-row">
                 <CollapsibleTrigger asChild>
@@ -870,7 +935,7 @@ export function Conversation({
             </div>
           </Collapsible>
         )}
-        {!showProcess && finalGroup && (
+        {!showProcess && (finalGroup || failureGroups.length === 0) && (
           <div className="agent-turn-summary agent-turn-summary-static" role="status">
             {statusContent}
           </div>
@@ -897,6 +962,7 @@ export function Conversation({
               messages.some(
                 (message) =>
                   message.systemKind !== 'turn_timing' &&
+                  (!message.turnId || !terminalByTurn.get(message.turnId)) &&
                   (message.delivery === 'sending' ||
                     ((message.role === 'assistant' ||
                       message.role === 'tool' ||
