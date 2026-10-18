@@ -1469,6 +1469,14 @@ export class ExtensionHost {
           scope.signal.throwIfAborted();
           const admission = (options as { admission?: unknown }).admission;
           if (
+            options.resultDelivery !== undefined &&
+            (options.resultDelivery !== 'caller' ||
+              options.request.kind !== 'agent' ||
+              options.resultRequirement !== undefined ||
+              options.continuation !== undefined)
+          )
+            throw new AgentError('invalid_operation_result_delivery');
+          if (
             admission !== undefined &&
             (admission !== 'fail_if_full' || options.request.kind !== 'agent')
           )
@@ -1495,6 +1503,7 @@ export class ExtensionHost {
                 request.configurationId !== options.request.configurationId ||
                 canonicalJson(request.input as Json) !== canonicalJson(options.request.input) ||
                 request.cancellation !== (options.cancellation ?? 'attached') ||
+                (request.resultDelivery ?? null) !== (options.resultDelivery ?? null) ||
                 canonicalJson((request.resultRequirement ?? null) as Json) !==
                   canonicalJson((options.resultRequirement ?? null) as unknown as Json)
               )
@@ -1578,6 +1587,7 @@ export class ExtensionHost {
                   }
                 : {}),
               cancellation: options.cancellation ?? 'attached',
+              ...(options.resultDelivery ? { resultDelivery: options.resultDelivery } : {}),
               ...(agent ? { childConfiguration: agent.configuration } : {}),
               ...(options.planRecordKey ? { planRecordKey: options.planRecordKey } : {}),
             });

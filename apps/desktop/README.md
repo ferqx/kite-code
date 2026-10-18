@@ -306,6 +306,8 @@ Main 对目录与所选会话分别保留一个在途读取和一个后继通知
 
 ## Native 新对话准备与首次发送
 
+首次发送保存空 title，标明需要[共享 AI 命名](../../docs/handbook/features/sessions.md#自动命名)；“新对话”只由 [native-presentation](src/native-presentation.ts)与页面标题作空名称占位，不作为明确名称阻止自动生成。命名完成继续沿原 SSE／目录／选择刷新显示。显式命名、定时任务名称和原创建意图的未知查回保持原输入；[准备页 DOM 回归](test/isolated/native-new-conversation-dom.test.tsx)核首次创建的未命名标记及原草稿／迟到选择，[目录回归](test/native-directory.test.tsx)核空名称占位。
+
 [NativeDesktop](src/native.tsx)直接消费原 SessionPage 的欢迎区、四项建议、项目／分支菜单与 Composer。全局及项目新对话入口只进入准备页，不创建空 Session；建议只追加草稿、聚焦并移动光标。准备草稿和已有 Session 未保存草稿分别保留，页面、项目及分支选择不清空原文。实际模型目录由 [NativeModelPicker](src/native-model-picker.tsx)经独立只读 `conversation.models.read` 读取全局配置。普通客户端读取期间只将原模型选择区标为 `aria-busy` 并禁用模型／发送操作，不在工具栏插入加载段落，避免会话切到准备页后先增高再收缩；输入与独立草稿保留，真实目录失败仍显示原错误。选择项目只读取其分支，不重挂目录或改变全局默认，首次发送仍核所选项目实际配置和支持档位。原 Full 风险确认保留；本次权限选择在创建原 Session 后、首条输入前应用，不写项目默认。
 
 [NativeConversation](electron/conversation.ts)负责有限编排，复用原 NativeCaller 创建意图、私有草稿、permission controller、caller journal 和 DesktopInput。发送前冻结创建五元身份、输入 Command、原文、模型／effort、Plan 与权限；先保存未来原 Session 的准确草稿，再执行原创建。准备的权限 controller 与正在阅读的选择分别持有观察，迟到结果不抢回后来页面。选择项目仅授权该根目录；实际权限包含额外宿主只读范围时，保留创建后的 Session 和原文，打开已有权限面板供明确确认。

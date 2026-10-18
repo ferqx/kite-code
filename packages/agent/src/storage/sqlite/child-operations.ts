@@ -116,12 +116,26 @@ export function assertConfigurationReads(
       throw new AgentError('context_refresh_required');
   }
 }
+export function assertOperationResultDelivery(input: EnsureOperationInput): void {
+  if (
+    input.resultDelivery !== undefined &&
+    (input.resultDelivery !== 'caller' ||
+      input.request.kind !== 'agent' ||
+      input.resultRequirement !== undefined ||
+      input.resultRequirementSchema !== undefined ||
+      input.afterTurnAuthorization !== undefined)
+  )
+    throw new AgentError('invalid_operation_result_delivery');
+}
 export function ensureAgent(
   db: SqliteOperations,
   input: EnsureOperationInput,
   authorizationReview = false,
   continuation?: EnsureAgentFollowUpInput,
 ): OperationRef {
+  assertOperationResultDelivery(input);
+  if (continuation && input.resultDelivery !== undefined)
+    throw new AgentError('invalid_operation_result_delivery');
   prepareResultRequirement(input);
   const work = (): OperationRef => {
     db.identity(input.expectedStoreId);
@@ -250,6 +264,7 @@ export function ensureAgent(
       extensionId: input.extensionId,
       operationKey: input.operationKey,
       cancellation: input.cancellation ?? 'attached',
+      ...(input.resultDelivery ? { resultDelivery: input.resultDelivery } : {}),
       resultRequirement: (input.resultRequirement ?? null) as unknown as Json,
       resultRequirementSchema: input.resultRequirementSchema ?? null,
       ...(continuation

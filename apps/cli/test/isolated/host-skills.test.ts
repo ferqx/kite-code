@@ -14,6 +14,7 @@ import {
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { selectProfile } from '@kite-ai/agent/profile';
+import { sessionTitleInstructions } from '../../../../packages/agent/src/business/session-title/title';
 import { privateDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { ownedUserConfiguration } from '../../../service/test/fixtures/user-configuration-fixture';
 import type { CLIServiceArtifact } from '../../host';
@@ -32,13 +33,31 @@ async function fixture(
   privateDirectory(elsewhere);
   const profile = selectProfile({ dataRoot: join(root, 'data'), profile: 'driver' });
   let calls = 0;
+  let titleCalls = 0;
   const observed: string[][] = [];
   const provider = Bun.serve({
     hostname: '127.0.0.1',
     port: 0,
     maxRequestBodySize: 64 * 1024 * 1024,
     async fetch(request) {
-      const input = (await request.json()) as { messages: { content: unknown }[] };
+      const input = (await request.json()) as {
+        messages: { role: string; content: unknown }[];
+        tools?: unknown[];
+      };
+      if (
+        input.messages.some(
+          (message) => message.role === 'system' && message.content === sessionTitleInstructions,
+        )
+      ) {
+        titleCalls++;
+        expect(input.tools ?? []).toEqual([]);
+        const chunk = (delta: unknown, finish_reason: string | null) =>
+          `data: ${JSON.stringify({ id: 'title', object: 'chat.completion.chunk', model: 'fixture', choices: [{ index: 0, delta, finish_reason }] })}\n\n`;
+        return new Response(
+          `${chunk({ content: 'Readable skills conversation' }, null)}${chunk({}, 'stop')}data: [DONE]\n\n`,
+          { headers: { 'content-type': 'text/event-stream' } },
+        );
+      }
       calls++;
       observed.push(
         input.messages.map((item) =>
@@ -196,6 +215,7 @@ async function fixture(
     workspace,
     run,
     calls: () => calls,
+    titleCalls: () => titleCalls,
     observed,
     counts() {
       const db = new Database(profile.databasePath, { readonly: true });
@@ -235,6 +255,7 @@ test('actual argv selects only discovered Skill names/IDs, loads full body throu
     expect(one.code).toBe(0);
     expect(one.stderr).toBe('');
     expect(f.calls()).toBe(2);
+    expect(f.titleCalls()).toBe(1);
     expect(f.observed[0]!.join('\n')).toContain('AlphaSkill');
     expect(f.observed[0]!.join('\n')).not.toContain('BetaSkill');
     expect(f.observed[0]!.join('\n')).not.toContain('ALPHA_FULL_BODY_');
@@ -252,7 +273,9 @@ test('actual argv selects only discovered Skill names/IDs, loads full body throu
       .query('SELECT id,config_json FROM run ORDER BY rowid LIMIT 1')
       .get() as { id: string; config_json: string };
     const modelSources = database
-      .query("SELECT decision_source_json FROM execution WHERE kind='model' ORDER BY rowid")
+      .query(
+        "SELECT decision_source_json FROM execution WHERE kind='model' AND session_id IN (SELECT id FROM session WHERE parent_id IS NULL) ORDER BY rowid",
+      )
       .all() as { decision_source_json: string }[];
     expect(modelSources[1]!.decision_source_json).toContain('skill.body:alpha');
     database.close();
@@ -282,6 +305,7 @@ test('actual argv selects only discovered Skill names/IDs, loads full body throu
     expect(two.code).toBe(0);
     expect(two.stderr).toBe('');
     expect(f.calls()).toBe(4);
+    expect(f.titleCalls()).toBe(1);
     expect(f.observed[2]!.join('\n')).toContain('BetaSkill');
     expect(f.observed[3]!.join('\n')).toContain('BETA_FULL_BODY_');
     expect(existsSync(join(f.root, 'script-effect'))).toBe(false);
@@ -294,7 +318,11 @@ test('actual argv selects only discovered Skill names/IDs, loads full body throu
           }
         ).config_json,
       ).toBe(original.config_json);
-      const configs = reopened.query('SELECT config_json FROM run ORDER BY rowid').all() as {
+      const configs = reopened
+        .query(
+          'SELECT config_json FROM run WHERE session_id IN (SELECT id FROM session WHERE parent_id IS NULL) ORDER BY rowid',
+        )
+        .all() as {
         config_json: string;
       }[];
       expect(configs).toHaveLength(2);
@@ -330,6 +358,7 @@ test('unknown Skill selector fails explicitly before Provider and cannot create 
     expect(result.code).toBe(1);
     expect(result.stdout + result.stderr).toContain('skill_not_discovered');
     expect(f.calls()).toBe(0);
+    expect(f.titleCalls()).toBe(0);
     expect(existsSync(join(f.root, 'script-effect'))).toBe(false);
   } finally {
     f.close();
@@ -350,6 +379,7 @@ test('selecting a known Skill alone does not grant workspace trust or Tool execu
     ]);
     expect(result.code).toBe(0);
     expect(f.calls()).toBe(2);
+    expect(f.titleCalls()).toBe(1);
     expect(f.observed[0]!.join('\n')).toContain('AlphaSkill');
     expect(f.observed[1]!.join('\n')).not.toContain('ALPHA_FULL_BODY_');
     const db = new Database(f.profile.databasePath, { readonly: true });
@@ -386,6 +416,7 @@ test('ambiguous discovered names persist original rejection and perform no Model
     expect(result.stderr).toBe('');
     expect(result.stdout).toContain('skill_selection_ambiguous');
     expect(f.calls()).toBe(0);
+    expect(f.titleCalls()).toBe(0);
     const intent = JSON.parse(
       result.stdout
         .split('\n')
@@ -399,7 +430,13 @@ test('ambiguous discovered names persist original rejection and perform no Model
         .get(intent.commandId) as { status: string; receipt_json: string };
       expect(command.status).toBe('rejected');
       expect(JSON.parse(command.receipt_json).reason).toBe('skill_selection_ambiguous');
-      expect((db.query('SELECT COUNT(*) AS n FROM execution').get() as { n: number }).n).toBe(0);
+      expect(
+        (
+          db.query("SELECT COUNT(*) AS n FROM execution WHERE kind IN ('model','tool')").get() as {
+            n: number;
+          }
+        ).n,
+      ).toBe(0);
       expect((db.query('SELECT COUNT(*) AS n FROM run').get() as { n: number }).n).toBe(0);
     } finally {
       db.close();
@@ -446,7 +483,15 @@ test('actual paired argv explicitly initializes Workflow while preserving indepe
       expect(request.extensionInputs[0].input.activations).toEqual([
         { key: 'manual-1', skillId: 'skill:alpha-skill', input: {} },
       ]);
-      expect((db.query('SELECT count(*) AS n FROM run').get() as { n: number }).n).toBe(1);
+      expect(
+        (
+          db
+            .query(
+              'SELECT count(*) AS n FROM run WHERE session_id IN (SELECT id FROM session WHERE parent_id IS NULL)',
+            )
+            .get() as { n: number }
+        ).n,
+      ).toBe(1);
     } finally {
       db.close();
     }
@@ -473,6 +518,7 @@ test('actual paired argv refuses default-off and structured-input Workflows befo
         mode === 'disabled' ? 'workflow_disabled' : 'workflow_input_required',
       );
       expect(f.calls()).toBe(0);
+      expect(f.titleCalls()).toBe(0);
       expect(f.counts().runs).toBe(0);
     } finally {
       f.close();
@@ -495,6 +541,7 @@ test('actual paired host lacking extension-input capability rejects explicit act
     expect(reply.code).toBe(1);
     expect(reply.stderr).toContain('capability');
     expect(f.calls()).toBe(0);
+    expect(f.titleCalls()).toBe(0);
     expect(f.counts().runs).toBe(0);
   } finally {
     f.close();

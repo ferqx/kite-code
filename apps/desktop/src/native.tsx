@@ -1174,7 +1174,7 @@ function NativeDesktopContent({
         workspaceId: newWorkspace,
         commandId: crypto.randomUUID(),
         sessionId: crypto.randomUUID(),
-        title: '新对话',
+        title: '',
       },
       commandId: crypto.randomUUID(),
       text: newDraft,
@@ -2562,7 +2562,9 @@ function NativeDesktopContent({
           ? (childFacts?.session.title ?? childDetail.sessionId)
           : preparing
             ? '新对话'
-            : (selection?.session.title ?? 'kite')
+            : selection
+              ? selection.session.title || '新对话'
+              : 'kite'
       }
       readingKey={
         firstVisible && !firstSaved && !childDetail

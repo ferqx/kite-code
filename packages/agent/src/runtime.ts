@@ -174,6 +174,9 @@ function sealExtension(extension: Extension): Extension {
       : {}),
     ...(extension.conditions ? { conditions: Object.freeze({ ...extension.conditions }) } : {}),
     ...(extension.context ? { context: Object.freeze({ ...extension.context }) } : {}),
+    ...(extension.runLifecycle
+      ? { runLifecycle: Object.freeze({ ...extension.runLifecycle }) }
+      : {}),
     tools: Object.freeze(definitions(extension.tools) ?? []),
     jobs: Object.freeze(definitions(extension.jobs) ?? []),
     actions: Object.freeze(definitions(extension.actions) ?? []),
@@ -4358,20 +4361,6 @@ export class AgentRuntime {
           }
           continue;
         }
-        if (
-          !this.options.model &&
-          !this.options.resolveRunConfiguration &&
-          !Object.hasOwn(command.request as object, 'selectedSkills') &&
-          !Object.hasOwn(command.request as object, 'extensionInputs')
-        ) {
-          await this.options.store.rejectCommand({
-            expectedStoreId: command.originStoreId,
-            owner,
-            commandId: command.id,
-            reason: 'model_unavailable',
-          });
-          continue;
-        }
         await this.run(command, owner);
       }
       if (await this.releaseOwner(owner)) return;
@@ -4550,6 +4539,72 @@ export class AgentRuntime {
       if (!deferred && this.reportBindings.delete(command.id)) await retained.release();
     }
   }
+  private async runLifecycle(
+    phase: 'before_start' | 'before_complete',
+    origin: CommandRecord,
+    owner: OwnerRef,
+    run: RunRecord | null,
+    controller = new AbortController(),
+  ): Promise<void> {
+    for (const extension of this.extensions) {
+      if (!extension.runLifecycle) continue;
+      const commandId = `lifecycle-${await semanticDigest({ phase, commandId: origin.id, extensionId: extension.id })}`;
+      let command = await this.options.store.getCommand(commandId);
+      if (command && command.status !== 'accepted') continue;
+      // Before admission, cancellation still belongs to the original input.
+      const releaseOrigin = !this.active.has(origin.id)
+        ? this.trackLive(origin, owner, controller)
+        : undefined;
+      let release: (() => void) | undefined;
+      try {
+        if (!command) {
+          const session = await this.options.store.getSession(origin.sessionId);
+          if (!session) throw new AgentError('session_not_found');
+          const selected = await extension.runLifecycle.prepare(
+            freeze({
+              phase,
+              command: structuredClone(origin),
+              session: structuredClone(session),
+              run: run ? structuredClone(run) : null,
+            }),
+          );
+          if (!selected) continue;
+          controller.signal.throwIfAborted();
+          const request = {
+            kind: 'extension.invoke' as const,
+            extensionId: extension.id,
+            actionId: selected.actionId,
+            definitionVersion: selected.definitionVersion,
+            input: structuredClone(selected.input),
+          };
+          this.extensionHost.validateAction(request);
+          command = await this.options.store.acceptCommand({
+            expectedStoreId: origin.originStoreId,
+            sessionId: origin.sessionId,
+            subjectId: origin.subjectId,
+            commandId,
+            request,
+          });
+        }
+        release = this.trackLive(command, owner, controller);
+        await this.extensionHost.run(command, owner, controller);
+      } catch (error) {
+        if (command) {
+          const current = await this.options.store.getCommand(command.id);
+          if (current?.status === 'accepted' && current.cancelRequestedAt === null)
+            await this.options.store.rejectCommand({
+              expectedStoreId: origin.originStoreId,
+              owner,
+              commandId: command.id,
+              reason: error instanceof AgentError ? error.code : 'action_preparation_failed',
+            });
+        }
+      } finally {
+        release?.();
+        releaseOrigin?.();
+      }
+    }
+  }
   private async run(command: CommandRecord, owner: OwnerRef): Promise<void> {
     let modelId =
       (command.request as { modelId?: string }).modelId ?? this.options.modelId ?? 'fixed';
@@ -4569,6 +4624,7 @@ export class AgentRuntime {
     let run: RunRecord;
     let preparationResources: RunConfiguration | undefined;
     try {
+      await this.runLifecycle('before_start', command, owner, null);
       let snapshot: Json = null;
       if (
         (command.kind === 'run.start' || command.kind === 'input.follow_up') &&
@@ -4798,6 +4854,7 @@ export class AgentRuntime {
       run.configuration.toolDispatchOrder === 'model';
     const { release: releaseBinding } = this.retainRunBinding(run.id, binding);
     const release = this.trackLive(command, owner, controller, run.id);
+    let completionLifecycleDispatched = false;
     let deadlineTimer: ReturnType<typeof setTimeout> | undefined;
     let expiry: Promise<void> | undefined;
     const expire = () =>
@@ -5767,6 +5824,11 @@ export class AgentRuntime {
           const blocked = evaluations.filter((evaluation) => evaluation.outcome === 'unsatisfied');
           if (!blocked.length) {
             if (resultChanged) continue complete;
+            if (!completionLifecycleDispatched) {
+              completionLifecycleDispatched = true;
+              await this.runLifecycle('before_complete', command, owner, run, controller);
+              controller.signal.throwIfAborted();
+            }
             try {
               await this.options.store.finishRun({
                 expectedStoreId: command.originStoreId,

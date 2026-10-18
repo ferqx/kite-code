@@ -143,6 +143,7 @@ export interface RecordScope {
   sessionId: string;
 }
 export interface EnsureOperationInput extends OwnedWrite, RecordScope {
+  resultDelivery?: 'caller';
   originCommandId: string;
   parentExecutionId: string;
   operationKey: string;

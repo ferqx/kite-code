@@ -14,7 +14,7 @@ export function desktopDirectory(
       const waiting = run?.isActive && run.status === 'waiting_execution' && run.waitingForResults;
       return {
         sessionId: session.id,
-        displayName: session.title,
+        displayName: session.title || '新对话',
         status: directory.unavailable
           ? '上次确认状态'
           : run?.isActive
@@ -40,7 +40,7 @@ export function desktopDirectory(
     const active = observed ? selection.runs.find((run) => run.isActive) : undefined;
     return {
       sessionId: session.id,
-      displayName: session.title,
+      displayName: session.title || '新对话',
       status: !observed
         ? '状态待读取'
         : directory.unavailable || selection.viewLoading || selection.permissionUnavailable

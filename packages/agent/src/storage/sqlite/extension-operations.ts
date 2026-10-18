@@ -8,7 +8,7 @@ import {
   type Json,
   type OperationRef,
 } from '../types';
-import { ensureAgent } from './child-operations';
+import { assertOperationResultDelivery, ensureAgent } from './child-operations';
 import { actualRoot, assertNoExecutionGroupFence, executionGuard } from './execution-group-safety';
 import type { SqliteOperations } from './operations';
 
@@ -347,6 +347,7 @@ export function callExtension(db: SqliteOperations, method: Method, args: unknow
     }
     case 'ensureOperation': {
       const input = args[0] as Parameters<Store['ensureOperation']>[0];
+      assertOperationResultDelivery(input);
       if (input.request.kind === 'agent') return ensureAgent(db, input);
       return db.tx(() => {
         db.identity(input.expectedStoreId);

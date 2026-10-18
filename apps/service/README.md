@@ -6,6 +6,8 @@ Windows daemon 在本进程首次完整准入后，把原 live artifact owner �
 
 ## 默认装配与业务规则归属
 
+默认装配注册 [Agent 会话命名扩展](../../packages/agent/src/business/session-title/index.ts)，通过通用 Run 生命周期 Action 和已有内部子 Agent 生成标题。Service 只提供当前 Runtime 读取／rename 端口与按原轮选定模型 ID 的当前配置创建的无工具绑定；模型调用继续由 Agent 统一执行。标题规则与 CAS 归扩展，公共 HTTP schema 与客户端执行 DTO 保持。[本机 HTTP 回归](test/isolated/session-title.test.ts)核所选模型、参数、目录名称／消息隔离和读取零额外调用，不代表真实付费 Provider 或安装制品资格。
+
 原完整 TUI 旅程补齐的默认配置包括可信 explore／plan／code／review 子任务角色、前台 Task 的真实结果交付、内建计划完成指导、MCP 发现／资源工具和 Provider 配置向导。业务行为由 Agent 对应模块实现；Service 仅选择当前身份、配置、公共响应和装配。Model 失败／重试响应只公开实际失败前驱的有限字段，不公开完整 decisionSource 或凭据。
 
 已取得准入的 MCP 连接可把准确 Store／Session／Run／connection generation 作为只读 Model 来源；资源列表／读取仍使用原 Tool 和目录收据的严格绑定。Run 内认证通过普通 nested Action 与真实父 Tool 绑定，沿原 Actor、root work、权限及取消收束；没有直接绕过 Core 的 OAuth 执行入口。默认压缩可在同一用户任务的已结算 Tool 边界发生，不要求额外用户轮次；user-role 来源附件仍不冒充用户输入。

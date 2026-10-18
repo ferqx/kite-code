@@ -209,7 +209,10 @@ export function finishJobDelivery(
   execution: Record<string, string | number | bigint | null>,
 ): void {
   if (execution.kind !== 'job') return;
-  const command = db.row('SELECT kind FROM command WHERE id=?', execution.origin_command_id!);
+  const command = db.row(
+    'SELECT kind,request_json FROM command WHERE id=?',
+    execution.origin_command_id!,
+  );
   if (!['operation.job', 'operation.agent'].includes(String(command?.kind))) return;
   const target = db.row('SELECT * FROM session WHERE id=?', execution.delivery_target_session_id!);
   const reason =
@@ -223,7 +226,10 @@ export function finishJobDelivery(
             ? 'execution_cancel'
             : execution.origin_store_id !== db.metadata().storeId
               ? 'origin_unverifiable'
-              : null;
+              : command?.kind === 'operation.agent' &&
+                  JSON.parse(String(command.request_json)).resultDelivery === 'caller'
+                ? 'caller_owned'
+                : null;
   db.run(
     'UPDATE execution SET delivery=?,delivery_reason=? WHERE id=?',
     reason ? 'suppressed' : 'pending',

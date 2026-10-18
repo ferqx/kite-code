@@ -8,6 +8,10 @@
 
 ## 入口与职责
 
+[扩展契约](src/extensions/index.ts)的 `runLifecycle.prepare` 在 `before_start` 与 `before_complete` 选择本 namespace 的已注册 Action。Core 在模型配置解析前、最终完成 CAS 前分别调度普通真实 Action；稳定 Command ID 去重，完成重试和冷读不重复执行，失败保留 Action 自身结果，不替代主 Run 的业务结果。Action 继续通过原受控 operations 请求子执行；`resultDelivery:caller` 仅将普通 child 的自动交付标为调用扩展所有，实际状态、结果与取消证据保持。省略时保留原会话投递；它不能与必要结果义务或 after-turn 自动报告组合。[生命周期测试](test/isolated/execution/run-lifecycle.test.ts)与[结果交付测试](test/isolated/child/result-delivery.test.ts)验证这些通用合同，并核实未安装命名扩展时空标题及控制修订保持不变。
+
+[会话命名扩展](src/business/session-title/index.ts)用启动前 Action 先保存首条原文规整空白后的前10个Unicode码点及自有 CAS marker，在首次主任务完成前通过按本轮选定模型装配的无工具内部 child 尝试一次可读标题。标题专用副本去掉首尾空白，将连续空白合并为一个空格，再分别截取兜底的10码点或命名输入的8192码点；按需读取原文，只构造有界副本，原消息及主模型输入保持不变。全为空白时保存“新会话”且不发起命名模型请求。扩展持有10秒取消、32KiB输出限制、[标题校验](src/business/session-title/title.ts)与原 Session rename CAS；AI 输出裁至10码点后再次校验可读性，拒绝只剩表情、数字或符号的标题。模型不可用、重试等待、失败和迟到手动改名仍保原文兜底或手动名称。独立子会话及 caller 交付隔离正文，无 Core 标题开关、公共用途字段或专用恢复格式；后续输入和冷读不补发命名。[命名集成](test/isolated/execution/session-title-generation.test.ts)核真实 SQLite、连续空白与原文隔离、取消、手动竞争、已有空标题历史不补命名、父上下文隔离及普通主恢复点；[Store](src/storage/README.md#session-标题写入)只保存消息和执行显式 rename，不再从用户正文推导标题。设计理由与限制见[生命周期取舍](../../.agents/notes/implemented/architecture/2026-10-18-run-lifecycle-extension-actions.md)。
+
 - [根入口](src/index.ts)：`createRuntime`，import 不打开资源。Runtime 的短命令受理与异步运行分开；模型和工具等待不占控制入口。
 - [扩展入口](src/extensions/index.ts)：具版本 Tool/Action/Query、JSON schema、公开内容 envelope 与有限操作。扩展只获得当前 Session、自有 namespace 的记录 CAS、公开 Run/Execution 和受控子工具；不取得 SQL、owner 或完整运行状态。
 - [权限策略与 Shell 授权](src/permissions/README.md)：独立 `@kite-ai/agent/permissions` 与 `/permissions/shell`，统一三策略、权限约束、Shell AST/危险拒绝、摘要和最终 scope；Service 只注入宿主事实，Loop 保持通用授权接口。

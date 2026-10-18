@@ -109,6 +109,12 @@ test('PC directory groups original IDs, keeps navigation available during creati
     );
     expect(created).toEqual(['b']);
     expect(selected).toEqual(['second']);
+    const unnamed = session('unnamed', 'a');
+    unnamed.title = '';
+    expect(
+      desktopDirectory({ storeId: 'store', workspaces, sessions: [unnamed] })[0]!.sessions[0]!
+        .displayName,
+    ).toBe('新对话');
   } finally {
     await act(async () => root.unmount());
     restoreLayoutGlobals();

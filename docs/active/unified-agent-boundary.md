@@ -2,6 +2,8 @@
 
 状态：active
 
+Run 扩展通过 `runLifecycle.prepare` 在启动前和完成前选择自身已注册的普通 Action，Core 复用原 Command、权限、namespace、取消和执行事实，不内置标题规则。默认会话命名扩展由 Service 装配，模型请求在无工具的内部子会话中正常执行；`resultDelivery:caller` 将子结果交由调用扩展消费，不自动进入主模型上下文。标题复用 Session rename CAS，消息写入不再隐式改名，客户端创建只提供空 title 标记；没有标题用途 DTO、专用 ModelOutput 格式或标题恢复分支。当前接口与验证归[Agent owner](../../packages/agent/README.md#入口与职责)、[Service owner](../../apps/service/README.md#默认装配与业务规则归属)和[生命周期取舍](../../.agents/notes/implemented/architecture/2026-10-18-run-lifecycle-extension-actions.md)。
+
 Windows daemon 的可信装配可借用本进程已经完成准入的原 live artifact owner，绑定 proof、entry、executable 与 build；借用未归还、关闭开始、复制或伪造均拒绝。新的实际进程仍独立取得锁/原文件 pin 并全量核验，不向 startup JSON、配置或 HTTP 增加借用能力。原 HANDLE 内容事实和批量私有复制不改变 Files 授权、维护 EX、精确取消或关闭未知保资源的合同。实现归 [Service owner](../../apps/service/README.md)和 [platform owner](../../packages/agent/src/platform/README.md)，取舍归[闭包成本决定](../../.agents/notes/implemented/bug-fix/2026-10-17-windows-bundle-admission-cost.md)。
 
 Model 用量通过 [AI 中立事件](../../packages/ai/src/index.ts)的独立 `usage` 快照交接，完整 finish 与工具派发仍分别核实。[Agent Execution](../../packages/agent/src/execution/index.ts)在成功、失败、取消结果中保留已收输入／输出、缓存、推理、原服务端总数及 `usage.raw`；只保存响应中的用量叶子，不复制 headers、凭据或其他原响应。未收到、无效或旧记录未保存的测量保持未知，原始明细不生成授权或执行成功。TUI 同原请求优先显示实测输入，缺失才用本地估算；完整 Model 输入身份与冻结容量仍独立核实，累计统计不代替当前上下文。既有 JSON result 承载新增可选字段，SQL baseline 与公开 HTTP schema 保持。当前接口、限制和实测范围归 [AI](../../packages/ai/README.md)、[Agent](../../packages/agent/README.md)和 [CLI Host](../../apps/cli/README.md)。

@@ -893,6 +893,7 @@ test('first send clears and renders original text; late failure cannot steal ano
     expect(f.input('当前会话私有草稿')?.value).toBe('first raw\n雪🙂');
     expect(f.calls.filter((call) => call.method === 'createSession')).toHaveLength(0);
     expect(send.creation.workspaceId).toBe('w');
+    expect(send.creation.title).toBe('');
     expect(send.intent.modelId).toBe('model');
     await f.click('发送明确的新轮次');
     const retry = [...f.calls]

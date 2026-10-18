@@ -113,7 +113,6 @@ import { storageMeta } from './schema';
 import { callSessionExport } from './session-export';
 import { getSessionLogs, sessionLogEnvelope, unwrapChangePayload } from './session-logs';
 import { manageSession } from './session-management-operations';
-import { applyFirstUserSessionTitle } from './session-titles';
 import {
   readWorkspaceRemoval,
   removeWorkspace,
@@ -785,7 +784,6 @@ export class SqliteOperations {
       sessionId,
     );
     this.run('INSERT INTO message_part VALUES(?,0,?,1,0,?)', id, 'text', canonicalJson(content));
-    if (role === 'user') applyFirstUserSessionTitle(this, sessionId, id);
     this.event(sessionId, id, 'message.updated');
     return id;
   }

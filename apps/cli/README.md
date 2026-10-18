@@ -1,5 +1,7 @@
 # CLI 与 TUI
 
+新建普通会话由 [ensureSession](host/index.ts)保存空 title 的未命名标记，再按[共享自动命名](../../docs/handbook/features/sessions.md#自动命名)由默认 Service 装配的 Agent 扩展保存可读名称。命名使用独立内部子会话，CLI／TUI 的原正文读取和模型展示接口保持；[真实 argv 回归](test/isolated/host.test.ts)核17MiB完整原回复、命名一次及继续／只读零额外命名。
+
 原 TUI 的真实终端用例现在经[统一入口](../../scripts/run-unified-tui-system-tests.ts)完整运行在新 UI／Host／Client／Service／Agent 上。配套模式保每个 TUI 独立 Service 实例；显式 `--server` 才连接正式 Daemon，多个客户端可读取同一新 Store／Session，退出只断开共享连接。`/status` 的 stdio／unix／pipe 来自实际可信连接选择，成功配对提示还需核实原实例；不从平台名称猜连接，也不显示凭据、PID 或私有地址。
 
 原 `readSession` 在 Store／Session／Workspace 核验后，只把公开视图 owner 与当前已认证 ServerInfo 实例传给 UI 作活动观察。冷重开读到其他 owner 的持久运行态时保未核实提示，不自动提交恢复、中断或重放，也不声称另一个 Service 已死亡；配套与共享执行生命周期不由显示动画决定。

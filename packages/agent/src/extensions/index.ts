@@ -2,6 +2,7 @@ import type { ContextSource, SourceRequest } from '../context';
 import type { PermissionControlRead } from '../storage/port';
 import type {
   ArtifactScope,
+  CommandRecord,
   ExecutionOutputPage,
   ExecutionStatus,
   ExtensionRecord,
@@ -14,7 +15,9 @@ import type {
   OperationRequest,
   RequirementEvaluation,
   RequirementRef,
+  RunRecord,
   RunStatus,
+  SessionRecord,
 } from '../storage/types';
 import type { AgentOperationView } from './task/port';
 
@@ -141,6 +144,15 @@ export interface JobDefinition {
 }
 export type { CompletionDirective, CompletionGovernance, MutationGovernance } from './governance';
 export interface Extension {
+  /** Pure selection of an ordinary, globally registered Action for a Run boundary. */
+  readonly runLifecycle?: {
+    prepare(event: {
+      readonly phase: 'before_start' | 'before_complete';
+      readonly command: Readonly<CommandRecord>;
+      readonly session: Readonly<SessionRecord>;
+      readonly run: Readonly<RunRecord> | null;
+    }): Promise<{ actionId: string; definitionVersion: string; input: Json } | null>;
+  };
   readonly compression?: import('../context').ContextCompressor;
   readonly mutationGovernance?: import('./governance').MutationGovernance;
   readonly completionGovernance?: import('./governance').CompletionGovernance;
@@ -271,6 +283,8 @@ export interface ReadContext {
   };
 }
 export interface OperationOptions {
+  /** Agent result is consumed by this caller instead of automatically entering Session context. */
+  resultDelivery?: 'caller';
   /** Request only; the trusted Run policy must independently authorize this. */
   continuation?: { kind: 'after_turn' };
   resultRequirement?: import('../storage/types').ResultRequirementDeclaration;

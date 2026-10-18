@@ -36,17 +36,17 @@ async function fixture(title = '') {
   };
 }
 
-test('the first real user Message names an unnamed Session once from its original first 120 characters', async () => {
+test('persisting user Messages does not infer a Session title or emit an implicit rename', async () => {
   const f = await fixture();
   try {
     expect((await f.store.getSession('s'))!.title).toBe('');
-    const original = `First line\n${'完整用户正文 '.repeat(25)}`;
+    const original = `🪁{"task":"请保留第一条原文"}\n${'完整用户正文 🪁 '.repeat(25)}`;
     await f.admit('first', original);
     expect((await f.store.getSession('s'))!.title).toBe('');
     const run = await f.start('first');
     expect(await f.store.getSession('s')).toMatchObject({
-      title: original.slice(0, 120),
-      controlRevision: '1',
+      title: '',
+      controlRevision: '0',
     });
     await f.store.finishRun({
       expectedStoreId: f.base.expectedStoreId,
@@ -58,11 +58,11 @@ test('the first real user Message names an unnamed Session once from its origina
     await f.admit('second', 'A later message must not rename the Session');
     await f.start('second');
     expect(await f.store.getSession('s')).toMatchObject({
-      title: original.slice(0, 120),
-      controlRevision: '1',
+      title: '',
+      controlRevision: '0',
     });
     const { events } = await f.store.getChanges({ after: '0', limit: 100 });
-    expect(events.filter((event) => event.type === 'session.renamed')).toHaveLength(1);
+    expect(events.filter((event) => event.type === 'session.renamed')).toHaveLength(0);
   } finally {
     await f.close();
   }
@@ -90,7 +90,7 @@ test('explicit creation and a rename before a delayed Run preserve the chosen ti
   }
 });
 
-test('an unnamed Session rename before message materialization fences automatic naming across Workers', async () => {
+test('an explicit rename before message materialization remains unchanged across Workers', async () => {
   const f = await fixture();
   const peer = await openSqliteStore(f.profile);
   try {

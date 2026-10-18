@@ -14,6 +14,7 @@ import {
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { selectProfile } from '@kite-ai/agent/profile';
+import { sessionTitleInstructions } from '../../../../packages/agent/src/business/session-title/title';
 import { privateDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { ownedUserConfiguration } from '../../../service/test/fixtures/user-configuration-fixture';
 import type { CLIServiceArtifact } from '../../host';
@@ -28,20 +29,36 @@ async function fixture(body: string) {
   privateDirectory(elsewhere);
   const profile = selectProfile({ dataRoot: join(root, 'data'), profile: 'driver' });
   let calls = 0;
+  let titleCalls = 0;
   const observed: string[][] = [];
   const provider = Bun.serve({
     hostname: '127.0.0.1',
     port: 0,
     maxRequestBodySize: 64 * 1024 * 1024,
     async fetch(request) {
-      const input = (await request.json()) as { messages: { content: unknown }[] };
-      calls++;
-      observed.push(
-        input.messages.map((item) =>
-          typeof item.content === 'string' ? item.content : JSON.stringify(item.content),
-        ),
+      const input = (await request.json()) as {
+        messages: { role: string; content: unknown }[];
+        tools?: unknown[];
+      };
+      const title = input.messages.some(
+        (message) => message.role === 'system' && message.content === sessionTitleInstructions,
       );
-      const text = calls === 1 ? body : 'second complete answer';
+      if (title) {
+        titleCalls++;
+        expect(input.tools ?? []).toEqual([]);
+      } else {
+        calls++;
+        observed.push(
+          input.messages.map((item) =>
+            typeof item.content === 'string' ? item.content : JSON.stringify(item.content),
+          ),
+        );
+      }
+      const text = title
+        ? 'Readable CLI conversation'
+        : calls === 1
+          ? body
+          : 'second complete answer';
       const encoder = new TextEncoder();
       const stream = new ReadableStream<Uint8Array>({
         start(controller) {
@@ -139,6 +156,7 @@ async function fixture(body: string) {
     artifact,
     run,
     calls: () => calls,
+    titleCalls: () => titleCalls,
     observed,
     counts() {
       const db = new Database(profile.databasePath, { readonly: true });
@@ -197,9 +215,10 @@ test('actual argv CLI runs and resumes its exact persisted Session through built
     expect(answer.storeId).toBe(intent.storeId);
     expect(answer.sessionId).toBe('original');
     expect(f.calls()).toBe(1);
+    expect(f.titleCalls()).toBe(1);
     expect(first.stdout.includes('Bearer')).toBe(false);
     const counts = f.counts();
-    expect(counts).toMatchObject({ sessions: 1, runs: 1 });
+    expect(counts).toMatchObject({ sessions: 2, runs: 2 });
     const status = await f.run(['run', '--execution-status']);
     expect(status.code).toBe(0);
     expect(JSON.parse(status.stdout)).toMatchObject({
@@ -214,11 +233,13 @@ test('actual argv CLI runs and resumes its exact persisted Session through built
     expect(status.stderr).toContain('Paired host exit stops only this Service instance');
     expect(f.counts()).toEqual(counts);
     expect(f.calls()).toBe(1);
+    expect(f.titleCalls()).toBe(1);
     const missing = await f.run(['resume', '--thread', 'missing', '--task', 'do not create']);
     expect(missing.code).toBe(1);
     expect(missing.stderr).toBe('session_not_found\n');
     expect(f.counts()).toEqual(counts);
     expect(f.calls()).toBe(1);
+    expect(f.titleCalls()).toBe(1);
     const resumed = await f.run(['resume', '--thread', 'original', '--task', 'again']);
     expect(resumed.code).toBe(0);
     expect(resumed.stderr).toBe('');
@@ -232,9 +253,10 @@ test('actual argv CLI runs and resumes its exact persisted Session through built
     expect(second.sessionId).toBe('original');
     expect(second.commandId).not.toBe(intent.commandId);
     expect(f.calls()).toBe(2);
+    expect(f.titleCalls()).toBe(1);
     expect(f.observed[1]!.some((text) => text.endsWith('\u0000original α tail'))).toBe(true);
-    expect(f.counts().sessions).toBe(1);
-    expect(f.counts().runs).toBe(2);
+    expect(f.counts().sessions).toBe(2);
+    expect(f.counts().runs).toBe(3);
   } finally {
     f.close();
   }

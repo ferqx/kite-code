@@ -20,6 +20,7 @@ import {
   createOsCredentialBackend,
   type JsonObject,
   type McpRegistry,
+  type ModelConfiguration,
   type NamedConfiguration,
   readConfigurationFile,
   resolveConfiguration,
@@ -53,6 +54,7 @@ import {
 } from '@kite-ai/agent/permissions/shell';
 import { createPlanningValidation, type PlanningOptions } from '@kite-ai/agent/planning';
 import type { ProfileSelection } from '@kite-ai/agent/profile';
+import { createSessionTitleExtension } from '@kite-ai/agent/session-title';
 import { KnowledgeReadCleanupError } from '@kite-ai/agent/sources';
 import { sqliteStorageAssets } from '@kite-ai/agent/sqlite';
 import { createDefaultTaskRequestClassifier } from '@kite-ai/agent/task';
@@ -636,11 +638,37 @@ export function createDefaultProcessConfiguration(options: {
       mcpSources.describe(request) ??
       mcpManagement.describe(request),
   });
+  const titles = createSessionTitleExtension({
+    runtime: () => {
+      if (!policyRuntime) throw new AgentError('execution_scope_unavailable');
+      return policyRuntime;
+    },
+    resolveModel: ({ modelId, ...input }) =>
+      resolveConfigurationBinding(input, { modelId, modelOnly: true }),
+  });
+  const resolveModel = async (selected: ModelConfiguration) => {
+    const apiKey =
+      selected.credentialRef === undefined
+        ? undefined
+        : await modelVault.resolve(selected.credentialRef);
+    const binding = createCompatibleModelBinding({
+      name: selected.provider,
+      protocol: modelProtocol(selected.provider, selected.protocol),
+      baseURL: selected.baseURL!,
+      modelId: selected.model,
+      apiKey,
+    });
+    return createSdkModelAdapter({
+      models: new Map([[selected.id, binding]]),
+      presets: new Map([[selected.id, parseModelPreset(selected.options)]]),
+    });
+  };
   type ResolveInput = Parameters<NonNullable<RuntimeOptions['resolveRunConfiguration']>>[0];
   const resolveConfigurationBinding = async (
     { command, session, workspace }: ResolveInput,
     selection?: {
       modelId: string;
+      modelOnly?: boolean;
       toolIds?: readonly string[];
       skillSelection?: SkillSelection;
       workflowFence?: Awaited<ReturnType<typeof workflowForkFence>>;
@@ -717,6 +745,27 @@ export function createDefaultProcessConfiguration(options: {
       // adapters. Skill rows are validated locally by discovery, then the exact
       // selected subset is included in the final immutable snapshot below.
       createConfigurationSnapshot({ ...effective, skills: [] });
+      if (selection?.modelOnly)
+        return {
+          model: await resolveModel(selected),
+          modelId: selected.id,
+          toolIds: [],
+          extensions: [],
+          permissions: options.permissions ?? {
+            authorize: async (request) => ({
+              allowed:
+                request.kind === 'model' &&
+                request.definitionId === selected.id &&
+                request.definitionVersion === '1',
+              revision: 'selected-model-only-1',
+            }),
+          },
+          snapshot: createConfigurationSnapshot({
+            ...effective,
+            tools: [],
+            skills: [],
+          }) as unknown as Json,
+        } satisfies RunConfiguration;
       // Freeze the host's declared default along with this Run's actual model.
       // Core's generic configuration leaf still preserves absent metadata verbatim.
       selected.modelCapabilities = {
@@ -997,21 +1046,7 @@ export function createDefaultProcessConfiguration(options: {
               planningSnapshotDigest(recovery.mcpSourceSnapshot))
         )
           throw new AgentError('recovery_configuration_changed');
-        const apiKey =
-          selected.credentialRef === undefined
-            ? undefined
-            : await modelVault.resolve(selected.credentialRef);
-        const binding = createCompatibleModelBinding({
-          name: selected.provider,
-          protocol: modelProtocol(selected.provider, selected.protocol),
-          baseURL: selected.baseURL,
-          modelId: selected.model,
-          apiKey,
-        });
-        const model = createSdkModelAdapter({
-          models: new Map([[selected.id, binding]]),
-          presets: new Map([[selected.id, actualOptions]]),
-        });
+        const model = await resolveModel(selected);
         const authorizationReview = options.authorizationReview ?? {
           id: 'builtin.auto',
           version: createHash('sha256')
@@ -1748,6 +1783,11 @@ export function createDefaultProcessConfiguration(options: {
   });
   return {
     ...child,
+    childConfigurations: [...(child.childConfigurations ?? []), titles.childConfiguration],
+    resolveChildRunConfiguration: (input) =>
+      titles.ownsChild(input.configurationId)
+        ? titles.resolveChild(input)
+        : child.resolveChildRunConfiguration!(input),
     skillCatalogue: createDefaultSkillCatalogueSource({
       defaults: configurationDefaults,
       userConfiguration,
@@ -1840,6 +1880,7 @@ export function createDefaultProcessConfiguration(options: {
     supportsExtensionInputs: true,
     extensions: [
       ...builtinExtensions,
+      titles.extension,
       ...(mcp.extension ? [mcp.extension] : []),
       mcpManagement.extension,
       mcpSources.extension,
@@ -1865,6 +1906,10 @@ export function createDefaultProcessConfiguration(options: {
     permissions: {
       toolDispatchOrder: (options.permissions ?? globalDefaultPolicy).toolDispatchOrder,
       async authorize(request) {
+        if (!options.permissions) {
+          const titleDecision = await titles.authorize(request);
+          if (titleDecision) return titleDecision;
+        }
         if (
           request.kind === 'job' &&
           (request.definitionId.startsWith('builtin.mcp/mcp.resources.') ||

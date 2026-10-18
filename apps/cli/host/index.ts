@@ -313,7 +313,7 @@ export async function ensureSession(
     commandId,
     sessionId,
     workspaceId: workspace.id,
-    title: args.task === '' ? '' : args.task.slice(0, 120),
+    title: '',
   });
   write(
     `session intent ${JSON.stringify({ storeId, commandId, sessionId, workspaceId: workspace.id })}`,

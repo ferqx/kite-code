@@ -1,5 +1,9 @@
 # Store 边界
 
+## Session 标题写入
+
+[消息写入](sqlite/operations.ts)只保存原消息，不从首条正文推导标题，也不隐式增加 Session control revision 或产生 rename 事件。自动命名和原文兜底统一由[命名扩展](../business/session-title/index.ts)通过显式 `renameSession` 完成，Store 保留原主体、删除状态与 revision CAS 核实；未安装该扩展的宿主不自动命名。[真实 Store 测试](../../test/isolated/storage/session-titles.test.ts)核空标题保持、消息写入零 rename，以及跨 Worker 的显式名称保存。
+
 ## 恢复后的只读 Interaction
 
 [Interaction owner](sqlite/interactions/README.md)区分当前原卡观察与明确 `origin:'all'` 的历史读取。当前 Store 仍是准入身份，实际保存的恢复记录保原 origin／来源与 presentation 关系，不隐式查 Fork／Include 祖先；默认查询、回答、决定接纳和派发继续要求当前出处。完整附件沿既有 Artifact 原引用校验，不建立回答 proof。SQL baseline 和维护格式不变；真实公共恢复与 Native 的分别验证范围见 [HTTP／Client 回归](../../../../tests/isolated/unified-agent/client-interactions.test.ts)和 [Native owner](../../../../apps/desktop/README.md#原交互记录只读历史)。
