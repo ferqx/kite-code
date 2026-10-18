@@ -3,6 +3,7 @@ import { readFileSync, realpathSync, rmSync } from 'node:fs';
 import { createServer } from 'node:http';
 import type { Socket } from 'node:net';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { createRuntime } from '@kite-ai/agent';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import {
@@ -49,8 +50,12 @@ for (const mode of ['tool', 'model'] as const)
     const child = Bun.spawn(
       [
         process.execPath,
-        new URL('../../../../packages/agent/test/isolated/recovery/crash-child.ts', import.meta.url)
-          .pathname,
+        fileURLToPath(
+          new URL(
+            '../../../../packages/agent/test/isolated/recovery/crash-child.ts',
+            import.meta.url,
+          ),
+        ),
       ],
       {
         env: {

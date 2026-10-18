@@ -64,7 +64,12 @@ describe('TUI PTY System — Input & Message', () => {
       try {
         await submitUserMessage(tui, server, 'Test message from PTY', { timeout: 15000 });
       } catch (error) {
-        console.error('Failed input viewport:', tui.viewport(), 'Requests:', server.getRequests());
+        console.error(
+          'Failed input viewport:',
+          tui.viewport(),
+          'Requests:',
+          server.getWorkRequests(),
+        );
         const db = new Database(workspace.databasePath, { readonly: true });
         try {
           console.error(
@@ -114,7 +119,7 @@ describe('TUI PTY System — Input & Message', () => {
         },
       );
 
-      expect(server.getRequestCount()).toBe(queuedDelivery.requestBaseline);
+      expect(server.getWorkRequestCount()).toBe(queuedDelivery.requestBaseline);
       const queuedViewport = stripAnsi(tui.viewport());
       expect(queuedViewport).toContain('Working');
       expect(queuedViewport).toContain('Second queued message');
@@ -137,7 +142,7 @@ describe('TUI PTY System — Input & Message', () => {
     'bracketed paste preserves a newline in the submitted message',
     async () => {
       server.setResponses([{ message: { content: 'I received your message!' }, delay: 50 }]);
-      const requestBaseline = server.getRequestCount();
+      const requestBaseline = server.getWorkRequestCount();
       await pasteText(tui, 'Line1\nLine2');
 
       await submitCurrentInput(tui);

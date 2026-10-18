@@ -1,7 +1,8 @@
 import { expect, test } from 'bun:test';
-import { realpathSync, symlinkSync, writeFileSync } from 'node:fs';
+import { realpathSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { join, resolve } from 'node:path';
+import { directoryLink } from '../../../../tests/fixtures/test-filesystem';
 import { buildNativeDesktop } from '../../scripts/build-native';
 
 const require = createRequire(import.meta.url);
@@ -112,10 +113,9 @@ for (const kind of [
           naming: 'caller-window-driver.js',
         });
         expect(built.success).toBe(true);
-        symlinkSync(
+        directoryLink(
           resolve(import.meta.dir, '../../../../node_modules'),
           join(f.root, 'node_modules'),
-          'dir',
         );
         const requestPath = join(f.root, 'caller-request.json');
         writeFileSync(requestPath, JSON.stringify(input), { mode: 0o600 });

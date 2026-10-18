@@ -1,7 +1,8 @@
 import { afterEach, beforeEach, expect, test } from 'bun:test';
-import { mkdirSync, mkdtempSync, renameSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { directoryLink, recordReparseEntry } from '../../../../tests/fixtures/test-filesystem';
 import { canonicalJson } from '../../src/json';
 import {
   compileSkillWorkflow,
@@ -297,7 +298,7 @@ test('root aliases bind their exact canonical identity and resource symlinks or 
   mkdirSync(join(dir, 'references'));
   writeFileSync(join(dir, 'references/read.md'), 'original');
   const alias = join(root, 'alias');
-  symlinkSync(dir, alias);
+  directoryLink(dir, alias);
   const entry = compile(alias);
   expect(entry.descriptor.availability).toBe('available');
   expect(readWorkflowReference(entry, 'references/read.md').content).toBe('original');
@@ -305,7 +306,7 @@ test('root aliases bind their exact canonical identity and resource symlinks or 
   mkdirSync(join(elsewhere, 'references'));
   writeFileSync(join(elsewhere, 'references/read.md'), 'external');
   rmSync(alias);
-  symlinkSync(elsewhere, alias);
+  directoryLink(elsewhere, alias);
   expect(() => readWorkflowReference(entry, 'references/read.md')).toThrow(
     'skill_workflow_changed',
   );
@@ -319,7 +320,7 @@ test('root aliases bind their exact canonical identity and resource symlinks or 
   );
   const fresh = compile(dir);
   rmSync(join(dir, 'references/read.md'));
-  symlinkSync(join(elsewhere, 'references/read.md'), join(dir, 'references/read.md'));
+  recordReparseEntry(join(elsewhere, 'references/read.md'), join(dir, 'references/read.md'));
   expect(compile(dir).diagnostics.some((d) => d.code === 'invalid_path')).toBe(true);
   expect(() => readWorkflowReference(fresh, 'references/read.md')).toThrow(
     'skill_workflow_changed',

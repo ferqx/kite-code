@@ -1,9 +1,8 @@
 import { expect, test } from 'bun:test';
-import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { rmSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
 import { createFixedModel, type ModelEvent } from '@kite-ai/ai';
+import { temporaryDirectory } from '../../../../../tests/fixtures/test-filesystem';
 import { createRuntime } from '../../../src';
 import { defineExtension, type Json } from '../../../src/extensions';
 import { openSqliteStore } from '../../../src/sqlite';
@@ -16,7 +15,7 @@ const finish: Extract<ModelEvent, { type: 'finish' }> = {
 };
 for (const scenario of ['pending', 'unknown', 'cancel', 'other_session'] as const) {
   test(`actual SQLite idle owner intake window preserves ${scenario} scope`, async () => {
-    const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-owner-handoff-')));
+    const root = temporaryDirectory('kite-owner-handoff-');
     const store = await openSqliteStore({ dataRoot: root, profile: 'new' });
     let effects = 0,
       injected = false,
@@ -267,7 +266,7 @@ for (const scenario of ['pending', 'unknown', 'cancel', 'other_session'] as cons
 }
 
 test('actual SQLite root owner keeps peer Action intake after an empty control poll while its detached Job is hot', async () => {
-  const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-hot-owner-intake-')));
+  const root = temporaryDirectory('kite-hot-owner-intake-');
   const storeA = await openSqliteStore({ dataRoot: root, profile: 'new' });
   const storeB = await openSqliteStore({ dataRoot: root, profile: 'new' });
   const starts: string[] = [];

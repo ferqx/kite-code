@@ -264,7 +264,7 @@ writeFileSync('late-side-effect.txt', 'unexpected completion');
     expect(final.task?.state).toBe('cancelled');
     expect(final.successor!.status).toBe('completed');
     expect(final.afterCancelDispatches).toEqual([]);
-    expect(server.getRequestCount()).toBe(3);
+    expect(server.getWorkRequestCount()).toBe(3);
     console.log(
       JSON.stringify({
         pid,

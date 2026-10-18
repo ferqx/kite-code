@@ -70,7 +70,7 @@ describe('TUI PTY System — model stream reconnect', () => {
       await waitForText(() => tui.outputSinceLastAction(), 'RECOVERED', 10_000);
       await waitForText(() => tui.outputSinceLastAction(), 'RECONNECT_DONE', 10_000);
 
-      expect(server.getRequestCount()).toBeGreaterThanOrEqual(3);
+      expect(server.getWorkRequestCount()).toBeGreaterThanOrEqual(3);
       const renderedLifecycle = tui.scrollback();
       expect(screenContains(renderedLifecycle, 'RECONNECT_PARTIAL')).toBe(true);
       expect(screenContains(renderedLifecycle, 'RECOVERED')).toBe(true);

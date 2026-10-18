@@ -14,6 +14,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import {
   privateDirectory,
   temporaryDirectory,
@@ -450,8 +451,8 @@ test('built maintenance leaf creates and inspects a backup from a consumer outsi
   try {
     const packaged = join(f.directory, 'package');
     const build = await Bun.build({
-      entrypoints: [new URL('../../../src/maintenance/index.ts', import.meta.url).pathname],
-      root: new URL('../../../src', import.meta.url).pathname,
+      entrypoints: [fileURLToPath(new URL('../../../src/maintenance/index.ts', import.meta.url))],
+      root: fileURLToPath(new URL('../../../src', import.meta.url)),
       outdir: packaged,
       target: 'bun',
       packages: 'external',

@@ -89,7 +89,7 @@ describe('TUI PTY System — parent-owned App Servers', () => {
       expect(secondInstance).toBeDefined();
       expect(secondInstance).not.toBe(firstInstance);
       expect(secondStore).toBe(firstStore);
-      expect(server.getRequestCount()).toBe(1);
+      expect(server.getWorkRequestCount()).toBe(1);
 
       first.write('\x1b');
       await waitForCondition(

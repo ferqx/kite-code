@@ -8,6 +8,7 @@
  * Uses Bun.serve() — zero additional dependencies.
  */
 
+import { sessionTitleInstructions } from '../../../packages/agent/src/business/session-title/title';
 import { startTestHttpServer } from '../../helpers/test-http-server';
 import {
   migrateOriginalToolCall,
@@ -128,8 +129,11 @@ export interface MockModelServer {
   getRequestCount(): number;
   /** Full request bodies received by /v1/chat/completions */
   getRequests(): MockChatRequest[];
+  /** Ordinary work requests; automatic title requests remain visible in getRequests(). */
+  getWorkRequestCount(): number;
+  getWorkRequests(): MockChatRequest[];
   /** Whether the first request after since contains this exact user message. */
-  hasRequestMessage(text: string, since: number): boolean;
+  hasRequestMessage(text: string, since: number, purpose?: 'work'): boolean;
   /** Configure the local /v1/models response used by first-run scenarios. */
   setModelsResponse(response: { status?: number; delay?: number; models?: string[] }): void;
   /** GET URLs received by the local model-discovery fixture. */
@@ -157,6 +161,7 @@ export function createMockModelServer(): MockModelServer {
   let responseCursor = 0;
   let callCount = 0;
   const requests: MockChatRequest[] = [];
+  const workRequests: MockChatRequest[] = [];
   const modelRequests: string[] = [];
   const unexpectedRequests: number[] = [];
   const contractViolations: string[] = [];
@@ -207,6 +212,23 @@ export function createMockModelServer(): MockModelServer {
           : [];
         requests.push({ body: bodyRecord, messages });
         const stream = body?.stream === true;
+        if (messages[0]?.role === 'system' && messages[0].content === sessionTitleInstructions) {
+          if (Array.isArray(bodyRecord.tools) && bodyRecord.tools.length > 0) {
+            contractViolations.push('automatic title request offered tools');
+            return new Response('automatic title request offered tools', { status: 422 });
+          }
+          const content = '测试会话';
+          if (!stream)
+            return Response.json({
+              choices: [{ message: { role: 'assistant', content }, finish_reason: 'stop' }],
+            });
+          return new Response(
+            `data: ${JSON.stringify({ choices: [{ index: 0, delta: { role: 'assistant', content }, finish_reason: null }] })}\n\n` +
+              `data: ${JSON.stringify({ choices: [{ index: 0, delta: {}, finish_reason: 'stop' }] })}\n\ndata: [DONE]\n\n`,
+            { headers: { 'content-type': 'text/event-stream' } },
+          );
+        }
+        workRequests.push({ body: bodyRecord, messages });
         const idx = callCount;
         callCount++;
 
@@ -614,10 +636,12 @@ export function createMockModelServer(): MockModelServer {
       responses = [...r];
       responseCursor = 0;
     },
-    getRequestCount: () => callCount,
+    getRequestCount: () => requests.length,
     getRequests: () => [...requests],
-    hasRequestMessage: (text: string, since: number) => {
-      const messages = requests[since]?.messages ?? [];
+    getWorkRequestCount: () => callCount,
+    getWorkRequests: () => [...workRequests],
+    hasRequestMessage: (text: string, since: number, purpose?: 'work') => {
+      const messages = (purpose === 'work' ? workRequests : requests)[since]?.messages ?? [];
       const expected = normalizeRequestedText(text);
       let matched = false;
       for (let index = 0; index < messages.length; index++) {

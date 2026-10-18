@@ -3,12 +3,13 @@ import { expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
 import { copyFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { inspectProfileBackup, type RestoreProfileBackupInput } from '@kite-ai/agent/maintenance';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import { temporaryDirectory } from '../../../../tests/fixtures/test-filesystem';
 
-const repository = new URL('../../../../', import.meta.url).pathname;
+const repository = fileURLToPath(new URL('../../../../', import.meta.url));
 // Internal seams belong only to source fixtures; consumer processes use built public entries.
 const { copyTerminalDependencies } = (await import(
   join(repository, 'scripts/release/terminal-dependencies.ts')

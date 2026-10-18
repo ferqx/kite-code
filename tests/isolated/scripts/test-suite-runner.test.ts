@@ -1,7 +1,10 @@
 import { afterEach, describe, expect, test } from 'bun:test';
+import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
+import { pathToFileURL } from 'node:url';
+import { testToolchainEnvironment } from '../../../scripts/test-environment';
 import { runTestPlan } from '../../../scripts/test-plan';
 import { runTestJob, runTestJobs } from '../../../scripts/test-suite';
 
@@ -19,8 +22,57 @@ afterEach(() => {
 });
 
 describe('layered test runner', () => {
+  test('uses a qualified same-byte Windows runtime and preserves entry arguments', async () => {
+    const root = fixture();
+    const entry = join(root, 'entry.ts');
+    const output = join(root, 'runtime.json');
+    const module = pathToFileURL(
+      resolve(import.meta.dir, '../../../scripts/test-environment.ts'),
+    ).href;
+    writeFileSync(
+      entry,
+      `import { createHash } from 'node:crypto';
+import { readFileSync, writeFileSync } from 'node:fs';
+import { withTestRuntime } from ${JSON.stringify(module)};
+process.exitCode = await withTestRuntime(import.meta.filename, process.argv.slice(2), async () => {
+  writeFileSync(process.argv[2], JSON.stringify({
+    args: process.argv.slice(3), runtime: process.execPath, home: process.env.HOME,
+    sha256: createHash('sha256').update(readFileSync(process.execPath)).digest('hex'),
+    cargo: process.env.CARGO_HOME, rustup: process.env.RUSTUP_HOME,
+  }));
+  return 0;
+});`,
+    );
+    const args = ['path with spaces', '中文参数', '--literal=value'];
+    const toolchain = testToolchainEnvironment();
+    const child = Bun.spawn([process.execPath, entry, output, ...args], {
+      env: { ...process.env, ...toolchain },
+      stdout: 'pipe',
+      stderr: 'pipe',
+    });
+    const [code, stdout, stderr] = await Promise.all([
+      child.exited,
+      new Response(child.stdout).text(),
+      new Response(child.stderr).text(),
+    ]);
+    expect({ code, stdout, stderr }).toEqual({ code: 0, stdout: '', stderr: '' });
+    const result = JSON.parse(readFileSync(output, 'utf8'));
+    expect(result.args).toEqual(args);
+    expect(result.home).toBe(process.env.HOME);
+    expect(result.cargo).toBe(toolchain.CARGO_HOME);
+    expect(result.rustup).toBe(toolchain.RUSTUP_HOME);
+    expect(result.sha256).toBe(
+      createHash('sha256').update(readFileSync(process.execPath)).digest('hex'),
+    );
+    if (result.runtime !== process.execPath) {
+      expect(process.platform).toBe('win32');
+      expect(existsSync(dirname(dirname(result.runtime)))).toBe(false);
+    }
+  }, 120_000);
+
   test('gives concurrent child processes unique disposable homes', async () => {
     const root = fixture();
+    const toolchain = testToolchainEnvironment();
     const firstOutput = join(root, 'first-home.txt');
     const secondOutput = join(root, 'second-home.txt');
     const first = join(root, 'tests', 'first.test.ts');
@@ -30,14 +82,26 @@ describe('layered test runner', () => {
       "import { expect, test } from 'bun:test'; import { writeFileSync } from 'node:fs'; import { join } from 'node:path';" +
         "test('home', () => { writeFileSync(" +
         JSON.stringify(firstOutput) +
-        ", process.env.HOME!); expect(process.env.KITE_CODE_HOME).toBe(join(process.env.HOME!, '.kite-code')); });",
+        ", process.env.HOME!); expect(process.env.KITE_CODE_HOME).toBe(join(process.env.HOME!, '.kite-code'));" +
+        'expect(process.env.CARGO_HOME).toBe(' +
+        JSON.stringify(toolchain.CARGO_HOME) +
+        ');' +
+        'expect(process.env.RUSTUP_HOME).toBe(' +
+        JSON.stringify(toolchain.RUSTUP_HOME) +
+        '); });',
     );
     writeFileSync(
       second,
       "import { expect, test } from 'bun:test'; import { writeFileSync } from 'node:fs'; import { join } from 'node:path';" +
         "test('home', () => { writeFileSync(" +
         JSON.stringify(secondOutput) +
-        ", process.env.HOME!); expect(process.env.KITE_CODE_HOME).toBe(join(process.env.HOME!, '.kite-code')); });",
+        ", process.env.HOME!); expect(process.env.KITE_CODE_HOME).toBe(join(process.env.HOME!, '.kite-code'));" +
+        'expect(process.env.CARGO_HOME).toBe(' +
+        JSON.stringify(toolchain.CARGO_HOME) +
+        ');' +
+        'expect(process.env.RUSTUP_HOME).toBe(' +
+        JSON.stringify(toolchain.RUSTUP_HOME) +
+        '); });',
     );
     expect(
       await runTestJobs(

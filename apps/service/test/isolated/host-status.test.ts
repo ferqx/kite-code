@@ -1,7 +1,7 @@
 import { expect, test } from 'bun:test';
 import { mkdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { pathToFileURL } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { createRuntime } from '@kite-ai/agent';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
@@ -300,10 +300,12 @@ test('diagnostic Store unavailable remains real authenticated HTTP; advertised h
         platform: 'darwin',
         configurationId: 'owned',
         env: {},
-        supervisorPath: new URL(
-          '../../../../packages/agent/src/platform/process/shell-supervisor.ts',
-          import.meta.url,
-        ).pathname,
+        supervisorPath: fileURLToPath(
+          new URL(
+            '../../../../packages/agent/src/platform/process/shell-supervisor.ts',
+            import.meta.url,
+          ),
+        ),
         bunExecutable: process.execPath,
         shellExecutable: '/bin/sh',
       },

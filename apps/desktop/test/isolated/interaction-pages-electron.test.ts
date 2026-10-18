@@ -1,18 +1,12 @@
 import { expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
-import {
-  mkdtempSync,
-  readFileSync,
-  realpathSync,
-  rmSync,
-  symlinkSync,
-  writeFileSync,
-} from 'node:fs';
+import { mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
+import { directoryLink } from '../../../../tests/fixtures/test-filesystem';
 import { buildNativeDesktop } from '../../scripts/build-native';
 
 const require = createRequire(import.meta.url);
@@ -42,10 +36,9 @@ test.skipIf(process.platform !== 'darwin')(
           title: id,
         });
       await store.close();
-      symlinkSync(
+      directoryLink(
         resolve(import.meta.dir, '../../../../node_modules'),
         join(root, 'node_modules'),
-        'dir',
       );
       const source = join(root, 'service.ts');
       writeFileSync(

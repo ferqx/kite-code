@@ -1,9 +1,9 @@
 import { Database } from 'bun:sqlite';
-import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { ownedUserConfiguration } from '../../../apps/service/test/fixtures/user-configuration-fixture';
+import { privateDirectory, temporaryDirectory } from '../../fixtures/test-filesystem';
 
 export interface TestWorkspace {
   home: string;
@@ -320,11 +320,9 @@ export function translateOriginalTestConfig(input: Record<string, unknown> = {})
       'files.list',
       'files.glob',
       'files.search',
-      'shell.launch',
-      'shell.execute',
-      'shell.read',
-      'shell.wait',
-      'shell.stop',
+      ...(process.platform === 'win32'
+        ? []
+        : ['shell.launch', 'shell.execute', 'shell.read', 'shell.wait', 'shell.stop']),
       'ask_user',
       'task',
       'task.execute',
@@ -371,11 +369,11 @@ export function createTestWorkspace(opts?: {
   projectMcpServers?: Record<string, unknown>;
   enforceWorkspaceTrust?: boolean;
 }): TestWorkspace {
-  const home = realpathSync(mkdtempSync(join(tmpdir(), 'kite-code-e2e-'))),
-    workspace = realpathSync(mkdtempSync(join(tmpdir(), 'kite-code-ws-')));
+  const home = temporaryDirectory('kite-code-e2e-'),
+    workspace = temporaryDirectory('kite-code-ws-');
   const profile = selectProfile({ dataRoot: join(home, '.kite-code'), profile: 'development' });
   const translated = translateOriginalTestConfig(opts?.configOverrides);
-  mkdirSync(join(profile.profilePath, 'ui'), { recursive: true, mode: 0o700 });
+  privateDirectory(join(profile.profilePath, 'ui'));
   const configPath = ownedUserConfiguration(home).path;
   writeFileSync(configPath, JSON.stringify(translated.configuration, null, 2), { mode: 0o600 });
   writeFileSync(

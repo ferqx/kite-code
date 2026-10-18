@@ -100,7 +100,7 @@ describe('TUI PTY System — model streaming', () => {
       expect(clean).not.toContain('STREAM_PRIVATE_TAIL');
       expect(clean.lastIndexOf('STREAM_FIRST')).toBeLessThan(clean.lastIndexOf('STREAM_MIDDLE'));
       expect(clean.lastIndexOf('STREAM_MIDDLE')).toBeLessThan(clean.lastIndexOf('STREAM_FINAL'));
-      expect(server.getRequests()[0]?.body.stream).toBe(true);
+      expect(server.getWorkRequests()[0]?.body.stream).toBe(true);
 
       // The same runnable journey now switches to a content-only response and
       // proves that the first committed frame is genuinely incremental.
@@ -221,7 +221,7 @@ describe('TUI PTY System — model delivery races', () => {
         .filter((frame) => screenContains(frame, 'GREETING_ANSWER_ONCE'))
         .join('\n');
       expect(screenContains(postAnswerFrames, 'Thinking ')).toBe(false);
-      expect(server.getRequests()[0]?.body.stream).toBe(true);
+      expect(server.getWorkRequests()[0]?.body.stream).toBe(true);
     },
     TIMEOUT,
   );
@@ -334,7 +334,7 @@ describe('TUI PTY System — late reasoning after visible content', () => {
         thinkingHeader + 2,
       );
       expect(compactLines[thinkingHeader + 1]).toBe('');
-      expect(server.getRequests()[0]?.body.stream).toBe(true);
+      expect(server.getWorkRequests()[0]?.body.stream).toBe(true);
 
       // Persist the settled live projection, then load it through the normal
       // PTY resume flow. A replay must not resurrect the transient spinner,

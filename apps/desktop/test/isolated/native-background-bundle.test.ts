@@ -8,7 +8,6 @@ import {
   realpathSync,
   renameSync,
   rmSync,
-  symlinkSync,
   writeFileSync,
 } from 'node:fs';
 import { createRequire } from 'node:module';
@@ -25,7 +24,11 @@ import { selectProfile } from '@kite-ai/agent/profile';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import { initializeSqliteEngine } from '@kite-ai/agent/sqlite-engine';
 import { verifyNativeRuntimeBundle } from '@kite-ai/service/native-runtime-assets';
-import { privateDirectory, temporaryDirectory } from '../../../../tests/fixtures/test-filesystem';
+import {
+  directoryLink,
+  privateDirectory,
+  temporaryDirectory,
+} from '../../../../tests/fixtures/test-filesystem';
 import { userConfigurationPath } from '../../../service/test/fixtures/user-configuration-fixture';
 import { buildNativeCandidate } from '../../scripts/build-native';
 
@@ -505,10 +508,9 @@ test.skipIf(process.platform !== 'darwin')(
         );
       const probeDirectory = join(root, 'maintenance-probe');
       privateDirectory(probeDirectory);
-      symlinkSync(
+      directoryLink(
         join(nativeInstallation.releaseRoot, 'terminal/node_modules'),
         join(probeDirectory, 'node_modules'),
-        'dir',
       );
       writeFileSync(
         join(probeDirectory, 'grace.js'),

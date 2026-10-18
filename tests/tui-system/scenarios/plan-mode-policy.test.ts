@@ -257,11 +257,11 @@ describe('TUI PTY System — Plan Mode Policy Boundary', () => {
       expect(actual!.state).toBe('succeeded');
       expect(actual!.dispatched).toBe(1);
       expect(actual!.result_json).toContain('planning-baseline.txt');
-      const modelRequestsAtResult = server.getRequestCount();
+      const modelRequestsAtResult = server.getWorkRequestCount();
       tui.write('\x03');
       await observedRun(readonlyTask, 'cancelled');
       await waitForText(() => tui.viewport(), 'Cancelled', 5000);
-      expect(server.getRequestCount()).toBe(modelRequestsAtResult);
+      expect(server.getWorkRequestCount()).toBe(modelRequestsAtResult);
       const output = tui.screenFramesSince(frames).join('\n');
       expect(screenContains(output, 'Deferred until execution')).toBe(false);
       expect(screenContains(output, '工具授权')).toBe(false);

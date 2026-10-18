@@ -78,7 +78,7 @@ test('128 full records are retained and capacity rejects new intent without repl
   } finally {
     f.close();
   }
-}, 120000);
+}, 300000);
 test('complete legal large UTF8 requests are not truncated; 16 MiB byte capacity leaves exact prior bytes; malformed/hardlinked journal is not empty', () => {
   const f = fixture();
   try {

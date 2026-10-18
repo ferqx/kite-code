@@ -2,20 +2,16 @@ import { Database } from 'bun:sqlite';
 import { afterAll, beforeAll, expect, test } from 'bun:test';
 import { spawn as spawnChildProcess } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
-import {
-  existsSync,
-  mkdirSync,
-  readFileSync,
-  realpathSync,
-  rmSync,
-  symlinkSync,
-  writeFileSync,
-} from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
-import { pathToFileURL } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { createClient } from '@kite-ai/client';
-import { privateDirectory, temporaryDirectory } from '../../../../tests/fixtures/test-filesystem';
+import {
+  directoryLink,
+  privateDirectory,
+  temporaryDirectory,
+} from '../../../../tests/fixtures/test-filesystem';
 import specification from '../../generated/openapi.json';
 import {
   type DaemonBootstrap,
@@ -116,10 +112,10 @@ beforeAll(async () => {
     if (!installed) throw Error(`daemon_fixture_dependency_missing:${dependency}`);
     const target = join(modules, dependency);
     mkdirSync(dirname(target), { recursive: true });
-    symlinkSync(realpathSync(installed), target, 'dir');
+    directoryLink(realpathSync(installed), target);
   }
   const fixtureBuild = await Bun.build({
-    entrypoints: [new URL('../fixtures/daemon-process-child.ts', import.meta.url).pathname],
+    entrypoints: [fileURLToPath(new URL('../fixtures/daemon-process-child.ts', import.meta.url))],
     target: 'bun',
     packages: 'external',
     outdir: artifact,

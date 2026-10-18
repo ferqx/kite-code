@@ -69,7 +69,7 @@ test(
       });
       await submitUserMessage(tui, server, 'answer without shell', { timeout: 15_000 });
       await waitForText(() => tui!.viewport(), 'model turn completed', 15_000);
-      expect(server.getRequestCount()).toBe(1);
+      expect(server.getWorkRequestCount()).toBe(1);
     } finally {
       await cleanupTuiSystemFixtures({
         tuis: [tui],
@@ -110,7 +110,7 @@ test(
       tui = await spawnReadyTui({ cols: 120, rows: 40, mockServer: server, workspace });
       await submitUserMessage(tui, server, 'answer without Git', { timeout: 15_000 });
       await waitForText(() => tui!.viewport(), 'ordinary turn completed', 15_000);
-      expect(server.getRequestCount()).toBe(1);
+      expect(server.getWorkRequestCount()).toBe(1);
       expect(server.hasRequestMessage('answer without Git', 0)).toBe(true);
       expect(getTrustedWorkspaceExternalReadRoots(workspace.workspace, trustStore)).toEqual([]);
     } finally {

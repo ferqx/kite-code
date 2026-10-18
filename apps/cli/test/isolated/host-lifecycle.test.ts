@@ -6,7 +6,6 @@ import {
   readFileSync,
   realpathSync,
   rmSync,
-  symlinkSync,
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -14,7 +13,7 @@ import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { launchPairedService } from '@kite-ai/service/paired';
-import { privateDirectory } from '../../../../tests/fixtures/test-filesystem';
+import { directoryLink, privateDirectory } from '../../../../tests/fixtures/test-filesystem';
 import type { CLIServiceArtifact } from '../../host';
 
 async function until<T>(read: () => T | Promise<T | undefined> | undefined): Promise<T> {
@@ -30,7 +29,7 @@ async function lifecycle(interleaveCancellation = false, loseCancelResponse = fa
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-cli-lifecycle-')));
   const workspace = join(root, 'workspace');
   privateDirectory(workspace);
-  symlinkSync(join(import.meta.dir, '../../../../node_modules'), join(root, 'node_modules'), 'dir');
+  directoryLink(join(import.meta.dir, '../../../../node_modules'), join(root, 'node_modules'));
   const profile = selectProfile({ dataRoot: join(root, 'data'), profile: 'new' });
   const service = join(root, 'service.js');
   const built = await Bun.build({

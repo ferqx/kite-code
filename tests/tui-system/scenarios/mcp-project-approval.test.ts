@@ -172,7 +172,7 @@ describe('TUI PTY System — project MCP approval', () => {
         state: 'succeeded',
       },
     ]);
-    expect(server.getRequestCount()).toBe(0);
+    expect(server.getWorkRequestCount()).toBe(0);
     tui.write('\x03');
     await submitCommand(tui, '/mcp', 20);
     // The Source result already contains this name. Wait for the refreshed

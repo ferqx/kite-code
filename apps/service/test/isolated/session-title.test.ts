@@ -1,12 +1,12 @@
 import { expect, test } from 'bun:test';
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { createRuntime } from '@kite-ai/agent';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import { createClient } from '@kite-ai/client';
+import { privateDirectory, temporaryDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { createDefaultProcessConfiguration } from '../../src/configuration';
 import { startService } from '../../src/index';
 
@@ -14,7 +14,7 @@ test.each([
   'default',
   'custom',
 ] as const)('a new Session receives a readable AI title through the selected model and public directory: %s permissions', async (policy) => {
-  const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-service-title-')));
+  const root = temporaryDirectory('kite-service-title-');
   const profile = selectProfile({ dataRoot: join(root, 'data'), profile: 'test' });
   const requests: Record<string, unknown>[] = [];
   const title = '修复新会话名称可读性';
@@ -53,7 +53,7 @@ test.each([
       })),
     }),
   );
-  mkdirSync(profile.profilePath, { recursive: true, mode: 0o700 });
+  privateDirectory(profile.profilePath);
   const host = createDefaultProcessConfiguration({
     profile,
     userConfigurationPath: config,

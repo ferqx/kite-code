@@ -1,19 +1,15 @@
 import { Database } from 'bun:sqlite';
 import { afterAll, beforeAll, expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
-import {
-  existsSync,
-  mkdirSync,
-  readFileSync,
-  realpathSync,
-  rmSync,
-  symlinkSync,
-  writeFileSync,
-} from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { createProfileBackup } from '@kite-ai/agent/maintenance';
 import { selectProfile } from '@kite-ai/agent/profile';
-import { privateDirectory, temporaryDirectory } from '../../../../tests/fixtures/test-filesystem';
+import {
+  directoryLink,
+  privateDirectory,
+  temporaryDirectory,
+} from '../../../../tests/fixtures/test-filesystem';
 import {
   readDaemonReservation,
   requestDaemonBootstrap,
@@ -21,7 +17,8 @@ import {
 } from '../../src/daemon';
 
 const repository = resolve(import.meta.dir, '../../../..');
-const nativeTest = ['darwin', 'linux'].includes(process.platform) ? test : test.skip;
+const nativePlatform = ['darwin', 'linux'].includes(process.platform);
+const nativeTest = nativePlatform ? test : test.skip;
 const hash = (value: string) => createHash('sha256').update(value).digest('hex');
 let root: string, artifact: string, entry: string;
 async function bounded<T>(work: Promise<T>, ms = 5000): Promise<T> {
@@ -57,6 +54,7 @@ async function build(args: string[], cwd: string) {
   }
 }
 beforeAll(async () => {
+  if (!nativePlatform) return;
   root = temporaryDirectory('kite-process-retention-');
   artifact = join(root, 'artifact');
   const modules = join(artifact, 'node_modules');
@@ -111,7 +109,7 @@ beforeAll(async () => {
     if (!installed) throw Error(`retention_dependency_missing:${dependency}`);
     const target = join(modules, dependency);
     mkdirSync(dirname(target), { recursive: true });
-    symlinkSync(realpathSync(installed), target, 'dir');
+    directoryLink(realpathSync(installed), target);
   }
   const result = await Bun.build({
     entrypoints: [join(import.meta.dir, '../fixtures/process-cleanup-retention-child.ts')],

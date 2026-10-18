@@ -3,6 +3,7 @@ import { expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
 import { readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { temporaryDirectory } from '../../../../../tests/fixtures/test-filesystem';
 import { canonicalJson } from '../../../src/json';
 import {
@@ -264,7 +265,7 @@ test('actual Node DB7 backup v15 inspect and restore preserve all original reque
     const original = actions.map((_, i) => record(i, storeId));
     const node = Bun.which('node');
     if (!node) throw Error('owned_node_unavailable');
-    const repository = new URL('../../../../../', import.meta.url).pathname;
+    const repository = fileURLToPath(new URL('../../../../../', import.meta.url));
     const source = join(root, 'mcp-driver.ts');
     const helper = join(root, 'node-ui-fixture/profile-access-helper.js');
     writeFileSync(

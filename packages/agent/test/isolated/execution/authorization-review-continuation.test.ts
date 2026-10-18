@@ -3,6 +3,7 @@ import { expect, test } from 'bun:test';
 import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { createFixedModel, type ModelEvent } from '@kite-ai/ai';
 import { createRuntime, type ModelInputSnapshot } from '../../../src';
 import { createArtifactStore } from '../../../src/artifacts';
@@ -110,7 +111,7 @@ for (const shape of ['inline', 'artifact-private', 'artifact-semantic'] as const
         expectedStoreId,
         id: 'w',
         name: 'owned',
-        rootUri: `file://${root}`,
+        rootUri: pathToFileURL(root).href,
       });
       await runtime.createSession({
         ...scope,
@@ -551,7 +552,7 @@ test('ordinary user JSON resembling a review envelope stays verbatim in the Insp
       expectedStoreId,
       id: 'w',
       name: 'owned',
-      rootUri: `file://${root}`,
+      rootUri: pathToFileURL(root).href,
     });
     await runtime.createSession({
       ...scope,

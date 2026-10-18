@@ -197,7 +197,7 @@ describe('TUI PTY System — MCP authentication recovery', () => {
     const message = 'continue without required provider';
     await submitUserMessage(tui, modelServer, message, { timeout: 15_000 });
     await waitForText(() => tui!.viewport(), 'completed without provider', 15_000);
-    expect(modelServer.getRequestCount()).toBe(1);
+    expect(modelServer.getWorkRequestCount()).toBe(1);
     expect(modelServer.hasRequestMessage(message, 0)).toBe(true);
     expect(screenContains(tui.viewport(), 'Session Waive')).toBe(false);
     await waitForCondition(
@@ -388,7 +388,7 @@ describe('TUI PTY System — MCP authentication recovery', () => {
         15_000,
       );
       expect(toolCalls).toBe(1);
-      expect(modelServer.getRequestCount()).toBe(2);
+      expect(modelServer.getWorkRequestCount()).toBe(2);
       await waitForText(() => tui!.viewport(), '❯ 1. Run login', 5_000);
       if (choice === 'later') {
         tui.write('\x1b[B');
@@ -407,7 +407,7 @@ describe('TUI PTY System — MCP authentication recovery', () => {
       await waitForText(() => tui!.viewport(), 'continued after deferring provider login', 15_000);
       if (choice === 'login') expect(metadataRequests).toBeGreaterThanOrEqual(2);
       expect(toolCalls).toBe(1);
-      expect(modelServer.getRequestCount()).toBe(3);
+      expect(modelServer.getWorkRequestCount()).toBe(3);
     },
     50_000,
   );

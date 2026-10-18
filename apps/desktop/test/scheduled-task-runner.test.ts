@@ -6,6 +6,7 @@ import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { DatabaseSync } from 'node:sqlite';
+import { pathToFileURL } from 'node:url';
 import { AgentError, createRuntime } from '@kite-ai/agent';
 import { createArtifactStore } from '@kite-ai/agent/artifacts';
 import { openSqliteStore, resolveProfile } from '@kite-ai/agent/sqlite';
@@ -410,7 +411,7 @@ for (const protocol of ['fixed-model', 'responses'] as const) {
       await client.createWorkspace({
         expectedStoreId: storeId,
         id: 'workspace',
-        rootUri: `file://${root}`,
+        rootUri: pathToFileURL(root).href,
         name: 'Disposable',
       });
       const { nextRunAt: _next, createdAt: _created, updatedAt: _updated, ...input } = f.task;
@@ -629,7 +630,7 @@ test('actual scheduled Service Run waits for ordinary approval and completes onl
     await client.createWorkspace({
       expectedStoreId: storeId,
       id: 'workspace',
-      rootUri: `file://${root}`,
+      rootUri: pathToFileURL(root).href,
       name: 'Disposable',
     });
     runner.start();
@@ -1019,7 +1020,7 @@ test('actual Runtime unknown tool outcome keeps the failed scheduled Run blocked
     await client.createWorkspace({
       expectedStoreId: storeId,
       id: 'workspace',
-      rootUri: `file://${root}`,
+      rootUri: pathToFileURL(root).href,
       name: 'Disposable',
     });
     runner.start();
@@ -1173,7 +1174,7 @@ test('actual detached child remains a scheduling gate after the original foregro
     await client.createWorkspace({
       expectedStoreId: storeId,
       id: 'workspace',
-      rootUri: `file://${root}`,
+      rootUri: pathToFileURL(root).href,
       name: 'Disposable',
     });
     runner.start();
@@ -1549,7 +1550,7 @@ test('actual after-turn report admission and its active Run block scheduling unt
     await client.createWorkspace({
       expectedStoreId: storeId,
       id: 'workspace',
-      rootUri: `file://${root}`,
+      rootUri: pathToFileURL(root).href,
       name: 'Disposable',
     });
 

@@ -112,8 +112,8 @@ describe('TUI PTY System — active Run model selection', () => {
     async () => {
       await submitUserMessage(tui, server, 'stream on the old model', { timeout: 15_000 });
       await waitForText(() => tui.viewport(), 'ACTIVE_OLD_MODEL_FIRST', 10_000);
-      expect(server.getRequestCount()).toBe(1);
-      expect(server.getRequests()[0]?.body.model).toBe('mock-model');
+      expect(server.getWorkRequestCount()).toBe(1);
+      expect(server.getWorkRequests()[0]?.body.model).toBe('mock-model');
       expect(screenContains(tui.viewport(), 'mock-model')).toBe(true);
 
       await submitCommand(tui, '/model');
@@ -138,7 +138,7 @@ describe('TUI PTY System — active Run model selection', () => {
 
       // Selecting a model is App Control state only; it must not submit a
       // second Runtime turn while the first stream remains in flight.
-      expect(server.getRequestCount()).toBe(1);
+      expect(server.getWorkRequestCount()).toBe(1);
       expect(screenContains(tui.viewport(), 'next-model')).toBe(false);
 
       await waitForText(() => tui.scrollback(), 'ACTIVE_OLD_MODEL_FINAL', TIMEOUT);
@@ -157,8 +157,8 @@ describe('TUI PTY System — active Run model selection', () => {
         10_000,
       );
 
-      expect(server.getRequestCount()).toBe(2);
-      expect(server.getRequests()[1]?.body.model).toBe('next-model');
+      expect(server.getWorkRequestCount()).toBe(2);
+      expect(server.getWorkRequests()[1]?.body.model).toBe('next-model');
       const settled = stripAnsi(tui.scrollback());
       expect(settled.split('ACTIVE_OLD_MODEL_FINAL')).toHaveLength(2);
       expect(settled.split('ACTIVE_NEXT_MODEL_FINAL')).toHaveLength(2);
@@ -214,7 +214,7 @@ describe('TUI PTY System — active Run theme and language changes', () => {
       });
       await waitForText(() => tui.viewport(), 'ACTIVE_VISUAL_EPOCH_FIRST', 10_000);
       await waitForText(() => tui.viewport(), 'ACTIVE_VISUAL_EPOCH_MIDDLE_01', 10_000);
-      const requestBaseline = server.getRequestCount();
+      const requestBaseline = server.getWorkRequestCount();
 
       await submitCommand(tui, '/theme');
       await waitForText(() => tui.viewport(), '选择色彩主题', 10_000);
@@ -226,7 +226,7 @@ describe('TUI PTY System — active Run theme and language changes', () => {
         'theme selection acknowledgement',
         10_000,
       );
-      expect(server.getRequestCount()).toBe(requestBaseline);
+      expect(server.getWorkRequestCount()).toBe(requestBaseline);
 
       await submitCommand(tui, '/language');
       await waitForText(() => tui.viewport(), '语言', 10_000);
@@ -234,7 +234,7 @@ describe('TUI PTY System — active Run theme and language changes', () => {
       await moveSelectorDownTo(tui, 'English');
       tui.write('\r');
       await waitForTextGone(() => tui.viewport(), '语言', 10_000);
-      expect(server.getRequestCount()).toBe(requestBaseline);
+      expect(server.getWorkRequestCount()).toBe(requestBaseline);
 
       // Opening a translated local overlay gives a semantic receipt for the
       // language epoch; it does not touch Runtime or the in-flight stream.
@@ -250,7 +250,7 @@ describe('TUI PTY System — active Run theme and language changes', () => {
         15_000,
       );
       const settled = stripAnsi(tui.scrollback());
-      expect(server.getRequestCount()).toBe(requestBaseline);
+      expect(server.getWorkRequestCount()).toBe(requestBaseline);
       expect(settled.split('ACTIVE_VISUAL_EPOCH_FINAL')).toHaveLength(2);
       expect(screenContains(tui.viewport(), '❯')).toBe(true);
     },

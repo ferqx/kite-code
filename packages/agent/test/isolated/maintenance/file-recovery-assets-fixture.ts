@@ -1,11 +1,12 @@
 import { createHash } from 'node:crypto';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { privateDirectory } from '../../../../../tests/fixtures/test-filesystem';
 import { selectProfile } from '../../../src/platform/profile';
 import { nodeAssets, retainLegacyDb5Fixture } from './assets-fixture';
 
-const repository = new URL('../../../../../', import.meta.url).pathname;
+const repository = fileURLToPath(new URL('../../../../../', import.meta.url));
 export async function nodeFileRecoveryAssets(
   root: string,
   profile: { dataRoot: string; profile: string },

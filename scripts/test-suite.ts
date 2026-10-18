@@ -2,6 +2,7 @@ import { mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync 
 import { availableParallelism, tmpdir } from 'node:os';
 import { join, relative, resolve, sep } from 'node:path';
 import ts from 'typescript';
+import { testToolchainEnvironment } from './test-environment';
 
 export const TEST_FILE_PATTERN = /\.(?:test|spec)\.[cm]?[jt]sx?$/u;
 
@@ -125,6 +126,7 @@ function testEnvironment(prefix: string): { env: Record<string, string>; dispose
   return {
     env: {
       ...process.env,
+      ...testToolchainEnvironment(),
       HOME: home,
       // KLSV1 Service contract: this is the exact code root, not an OS-home override.
       KITE_CODE_HOME: codeRoot,

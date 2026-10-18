@@ -618,8 +618,8 @@ describe('TUI input helpers', () => {
       baseURL: 'http://127.0.0.1/v1',
       port: 0,
       setResponses() {},
-      getRequestCount: () => requests.length,
-      getRequests: () => requests,
+      getWorkRequestCount: () => requests.length,
+      getWorkRequests: () => requests,
       hasRequestMessage: (text: string, since: number) =>
         requests
           .slice(since)
@@ -649,8 +649,8 @@ describe('TUI input helpers', () => {
       },
     ];
     const server = {
-      getRequestCount: () => requests.length,
-      getRequests: () => requests,
+      getWorkRequestCount: () => requests.length,
+      getWorkRequests: () => requests,
     } as unknown as MockModelServer;
     await expect(waitForRequestMessage(server, target, 10, { since: 0 })).rejects.toThrow(
       'Saw 1 new request(s)',
@@ -707,8 +707,8 @@ describe('TUI input helpers', () => {
       baseURL: 'http://127.0.0.1/v1',
       port: 0,
       setResponses() {},
-      getRequestCount: () => requests.length,
-      getRequests: () => requests,
+      getWorkRequestCount: () => requests.length,
+      getWorkRequests: () => requests,
       hasRequestMessage: (text: string, since: number) =>
         requests
           .slice(since)
@@ -750,8 +750,8 @@ describe('TUI input helpers', () => {
       baseURL: 'http://127.0.0.1/v1',
       port: 0,
       setResponses() {},
-      getRequestCount: () => requests.length,
-      getRequests: () => requests,
+      getWorkRequestCount: () => requests.length,
+      getWorkRequests: () => requests,
       hasRequestMessage: (text: string, since: number) =>
         requests
           .slice(since)

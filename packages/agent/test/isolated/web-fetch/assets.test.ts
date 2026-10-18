@@ -16,8 +16,10 @@ test('formal built public entry selects package Worker asset/hash; source path h
   const storage = sqliteStorageAssets();
   expect(storage.preload.pathname.endsWith('/storage/worker/observer-preload.ts')).toBe(true);
   expect(storage.observerModules.map((module) => module.pathname)).toEqual([
-    new URL('../../../src/platform/process/owned-worker.ts', import.meta.url).pathname,
-    new URL('../../../src/platform/process/worker-thread.darwin.ts', import.meta.url).pathname,
+    fileURLToPath(new URL('../../../src/platform/process/owned-worker.ts', import.meta.url)),
+    fileURLToPath(
+      new URL('../../../src/platform/process/worker-thread.darwin.ts', import.meta.url),
+    ),
   ]);
   const builtStorage = await import(resolve(import.meta.dir, '../../../dist/sqlite.js'));
   const actualBuiltAssets = builtStorage.sqliteStorageAssets();

@@ -1,5 +1,9 @@
 # Run binding verification owner
 
+[lifecycle-observers.test.ts](lifecycle-observers.test.ts) 使用真实 Core/SQLite 与固定模型，核 Run/Model 的 start/end 只反映实际准入或已提交原事实，覆盖成功/失败/取消/准入拒绝、独立模型重试、原命令重试与冷读零重放。显式 Store ACK 屏障区分激活、模型派发、Provider EOF 和终态保存；业务 Action 按注册顺序执行，内部 child 不重入前置业务钩子，但仍具有完整 Run/Model 观察。每 Run/Step 的回调冻结保持实际原版本。未完成开始或结束观察 Promise 不延迟执行、原 Run disposer 或 Runtime close，观察异常局部失效；事件只包含有限身份、状态和标准用量，不携带私有正文或 Provider raw。有限队列压力与关闭丢弃由[纯队列测试](../../lifecycle-observers.test.ts)覆盖，不以该通知机制承诺可靠后续业务。
+
+[lifecycle-recovery.test.ts](lifecycle-recovery.test.ts) 在真实子进程停于原 Model 计划或 Run 完成边界后终止进程，再由新 Runtime 恢复同一 Run。冷读零事件、原 Run start 与历史 Model 零重放，实际新 Model 的 start/end 与原 fixture ledger 逐项对应，重复恢复不重发通知；它不代表各平台正式安装资格。
+
 `run-bindings.test.ts` verifies host-resolved RunConfiguration extensions/sources/dispose through actual Core, default Loop and disposable SQLite profiles. It changes no production implementation and imports no legacy engine.
 
 The v1 Model request is held by an explicit gate while a separate Session admits v2. Tests compare each actual Model tool schema with the immutable Run manifest and executed handler/version. Mutating the caller's original schema, description, handler/version and Workspace serial resource key must preserve v1; resource acquisition delegates to real native Workspace locks and verifies the sealed original key. No elapsed-time assumption controls version changes.

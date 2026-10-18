@@ -1,5 +1,7 @@
 # Runtime 生命周期 owner
 
+Extension 的 `lifecycle.onRunStart/onRunEnd/onModelStart/onModelEnd` 是有限只读观察。Run start 从实际激活 ACK 发布，Model start 从派发准入 ACK 和取消复核之后、进入 adapter 前发布；end 只反映真实提交终态。start 回调不阻塞执行，恢复不重放原 Run start 或历史 Model。两个 `beforeRun/beforeRunComplete` 业务 Action 钩子只用于显式任务输入，不随内部 child 或自动 report 重入。顺序、命名与通知合同归[Agent 生命周期扩展](../README.md#生命周期扩展)。观察队列不持有运行绑定、执行许可或 Store 使用权，不计入 busy；Run 真实终态可先于其资源 disposer。关闭不等待观察 Promise，并在最终资源关闭前丢弃未交付项；观察错误不能令已经确认的任务或资源关闭变成失败。可靠业务工作仍走原 Action/Job，与普通资源清理门禁保持分离。
+
 `AgentRuntime.getLifecycleState()` 同步采样本实例已有的接纳、派发、执行、后台操作和绑定清理事实。`tryBeginShutdown('if_idle' | 'cancel', { beforeResourceClose? })` 在同一个同步代码段内检查并封住新工作接纳。空闲关闭被拒绝时，实例继续接纳工作；请求成功时，返回的完成 Promise 与后续所有 `close()` 或关闭调用相同。此 API 仅供可信宿主使用，不向 Extension 提供关闭操作，也不定义 daemon 发现协议。
 
 `runtime.ts` 中闭合的公开入口列表在首次 await 前登记已接纳的异步准备。写入和取消控制使实例处于 busy 状态。观察调用保护 Store/artifact 的寿命，不使空闲实例变为 busy；在 draining 期间，控制和观察仍可使用，直到最终资源接纳被封住。`waitForCommand` 以 `runtime_draining` 结束，不等待关闭流程已停止调度的工作。纯生命周期采样不读取 Store、不调用 Model、不选择 Provider，也不进行远端发现。

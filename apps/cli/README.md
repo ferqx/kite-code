@@ -1,5 +1,7 @@
 # CLI 与 TUI
 
+当前测试夹具在隔离应用HOME前固定Rust工具链缓存，并按实际Windows ACL／junction／file URL建立测试前提；128条journal、四workspace构建与大正文等待按[测试体系](../../tests/README.md)提供硬件余量。恢复夹具持有同一只读WAL观察连接，逐原调用核SDK wire身份；[三类调用者强杀](test/isolated/caller-kind-crash.test.ts)整例预算现为120秒，仍核实际原生退出、原申请和零重发。下文既有30秒等记录对应原提交的实际资格，不代表本轮全部Windows或安装验收通过。
+
 新建普通会话由 [ensureSession](host/index.ts)保存空 title 的未命名标记，再按[共享自动命名](../../docs/handbook/features/sessions.md#自动命名)由默认 Service 装配的 Agent 扩展保存可读名称。命名使用独立内部子会话，CLI／TUI 的原正文读取和模型展示接口保持；[真实 argv 回归](test/isolated/host.test.ts)核17MiB完整原回复、命名一次及继续／只读零额外命名。
 
 原 TUI 的真实终端用例现在经[统一入口](../../scripts/run-unified-tui-system-tests.ts)完整运行在新 UI／Host／Client／Service／Agent 上。配套模式保每个 TUI 独立 Service 实例；显式 `--server` 才连接正式 Daemon，多个客户端可读取同一新 Store／Session，退出只断开共享连接。`/status` 的 stdio／unix／pipe 来自实际可信连接选择，成功配对提示还需核实原实例；不从平台名称猜连接，也不显示凭据、PID 或私有地址。

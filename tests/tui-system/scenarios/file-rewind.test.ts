@@ -221,7 +221,7 @@ describe('TUI PTY System — File Rewind', () => {
     expect(requirePersistedRuntimeReady(observePersistedSessionIds(workspace))).toHaveLength(
       sessions,
     );
-    expect(server.getRequestCount()).toBe(6);
+    expect(server.getWorkRequestCount()).toBe(6);
     tui.write('c');
     let continuationObserved = false;
     await waitForCondition(

@@ -1,6 +1,7 @@
 import { expect, test } from 'bun:test';
 import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import type { ExecutionRecord } from '@kite-ai/agent/storage';
 import { createClient } from '@kite-ai/client';
@@ -60,7 +61,7 @@ test('public cold resume preserves over 4096 genuine original executions and dis
   const child = Bun.spawn(
     [
       process.execPath,
-      new URL('../fixtures/long-run-resume-child.ts', import.meta.url).pathname,
+      fileURLToPath(new URL('../fixtures/long-run-resume-child.ts', import.meta.url)),
       root,
     ],
     { stdin: 'ignore', stdout: 'pipe', stderr: 'pipe' },

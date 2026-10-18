@@ -1,20 +1,12 @@
 import { expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
-import {
-  existsSync,
-  mkdirSync,
-  readFileSync,
-  realpathSync,
-  rmSync,
-  symlinkSync,
-  writeFileSync,
-} from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
-import { temporaryDirectory } from '../../../../tests/fixtures/test-filesystem';
+import { directoryLink, temporaryDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { buildNativeDesktop } from '../../scripts/build-native';
 
 const require = createRequire(import.meta.url);
@@ -113,11 +105,7 @@ test.skipIf(process.platform !== 'darwin')(
         .replace("'CONTROL_URL'", JSON.stringify(`http://127.0.0.1:${control.port}`))
         .replace("'LEDGER_PATH'", JSON.stringify(ledger)),
     );
-    symlinkSync(
-      resolve(import.meta.dir, '../../../../node_modules'),
-      join(root, 'node_modules'),
-      'dir',
-    );
+    directoryLink(resolve(import.meta.dir, '../../../../node_modules'), join(root, 'node_modules'));
     const service = await Bun.build({
       entrypoints: [serviceSource],
       target: 'bun',

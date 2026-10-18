@@ -4,6 +4,7 @@ import { createHash } from 'node:crypto';
 import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { createRuntime } from '@kite-ai/agent';
 import { createArtifactStore } from '@kite-ai/agent/artifacts';
 import { selectProfile } from '@kite-ai/agent/profile';
@@ -125,7 +126,7 @@ for (const shape of ['inline', 'artifact', 'artifact-ask', 'artifact-ask-legacy'
         expectedStoreId,
         id: 'w',
         name: 'owned',
-        rootUri: `file://${root}`,
+        rootUri: pathToFileURL(root).href,
       });
       await runtime.createSession({
         ...scope,
@@ -402,7 +403,7 @@ test('Legacy pending Auto attachment survives SIGKILL and cold HTTP reads withou
   const child = Bun.spawn(
     [
       process.execPath,
-      new URL('./authorization-review-legacy-fixture.ts', import.meta.url).pathname,
+      fileURLToPath(new URL('./authorization-review-legacy-fixture.ts', import.meta.url)),
     ],
     {
       env: { ...process.env, KITE_REVIEW_FIXTURE_ROOT: root },

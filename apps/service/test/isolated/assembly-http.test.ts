@@ -446,7 +446,12 @@ test('a newly disabled file capability affects the next Run while an admitted wa
         function: expect.objectContaining({ name: 'ask_user' }),
       }),
     ]);
-    expect(JSON.stringify(provider.requests[0]!.tools)).toContain('files.write');
+    expect(provider.requests[0]!.tools).toContainEqual(
+      expect.objectContaining({
+        type: 'function',
+        function: expect.objectContaining({ name: 'files_write' }),
+      }),
+    );
   } finally {
     writeFileSync(join(f.profile.profilePath, 'permission-release'), 'release');
     await f.close();

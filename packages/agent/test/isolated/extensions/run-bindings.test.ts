@@ -81,6 +81,7 @@ async function fixture(options: Omit<RuntimeOptions, 'store'>) {
     done,
     close: async () => {
       await runtime.close();
+      await store.close();
       rmSync(dataRoot, { recursive: true, force: true });
     },
   };
@@ -258,8 +259,12 @@ test('actual model schemas and persisted manifest use per-Run clones: active v1 
     ]);
   } finally {
     release.release();
-    await f.close();
-    await locks?.close();
+    try {
+      await f.runtime.close();
+    } finally {
+      await locks?.close();
+      await f.close();
+    }
   }
   expect(disposals1).toBe(1);
   expect(disposals2).toBe(1);

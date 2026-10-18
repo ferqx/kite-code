@@ -534,7 +534,7 @@ export async function waitForRequestMessage(
   while (Date.now() - start < effectiveTimeout) {
     const expected = text.replaceAll('\r\n', '\n');
     const matched = server
-      .getRequests()
+      .getWorkRequests()
       .slice(since)
       .some((request) => {
         // The original submitted turn follows the settled assistant/Tool history.
@@ -566,9 +566,9 @@ export async function waitForRequestMessage(
     if (matched) return;
     await sleep(interval);
   }
-  const requestCount = server.getRequestCount();
+  const requestCount = server.getWorkRequestCount();
   const requestTail = server
-    .getRequests()
+    .getWorkRequests()
     .slice(since)
     .slice(-3)
     .map((request) =>
@@ -602,11 +602,11 @@ export async function submitUserMessage(
     testTiming?: { submitReceiptTimeoutMs?: number; semanticReceiptTimeoutMs?: number };
   },
 ): Promise<void> {
-  const since = server.getRequestCount();
+  const since = server.getWorkRequestCount();
   await typeText(tui, text, options?.delayMs);
   await submitCurrentInput(tui, {
     ...options?.testTiming,
-    acceptWhen: () => server.getRequestCount() > since,
+    acceptWhen: () => server.getWorkRequestCount() > since,
     requireAcceptWhen: true,
     semanticReceiptTimeoutMs:
       options?.testTiming?.semanticReceiptTimeoutMs ?? options?.timeout ?? 10_000,
@@ -639,7 +639,7 @@ export async function submitUserMessageForDeferredDelivery(
     readonly testTiming?: { submitReceiptTimeoutMs?: number; semanticReceiptTimeoutMs?: number };
   },
 ): Promise<DeferredUserMessageDelivery> {
-  const requestBaseline = server.getRequestCount();
+  const requestBaseline = server.getWorkRequestCount();
   await typeText(tui, text, options.delayMs);
   await submitCurrentInput(tui, {
     ...options.testTiming,
@@ -704,7 +704,7 @@ export async function submitCurrentInput(
         return;
       }
       throw new Error(
-        `PTY input left ${JSON.stringify(submitted.value)} but its required semantic receipt did not arrive`,
+        `PTY input left ${JSON.stringify(submitted.value)} but its required semantic receipt did not arrive; settled viewport: ${JSON.stringify(stripAnsi(tui.viewport()).slice(-4000))}`,
       );
     }
   }

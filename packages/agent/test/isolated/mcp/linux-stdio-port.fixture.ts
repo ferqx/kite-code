@@ -1,6 +1,7 @@
 import { mock } from 'bun:test';
 import assert from 'node:assert/strict';
 import { PassThrough } from 'node:stream';
+import { fileURLToPath } from 'node:url';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import type { McpStdioLinuxEvidence } from '../../../src/mcp/stdio-process-evidence';
 import type {
@@ -32,7 +33,7 @@ let current!: {
 const full = `完整原结果🙂${'x'.repeat(65536)}`;
 class LinuxOwnedProgramStartError extends Error {}
 mock.module(
-  new URL('../../../src/platform/process/linux-owned-program.ts', import.meta.url).pathname,
+  fileURLToPath(new URL('../../../src/platform/process/linux-owned-program.ts', import.meta.url)),
   () => ({
     LinuxOwnedProgramStartError,
     startLinuxOwnedProgram(options: {

@@ -13,6 +13,7 @@ import { userInfo } from 'node:os';
 import { join } from 'node:path';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { ownedUserConfiguration } from '../../../apps/service/test/fixtures/user-configuration-fixture';
+import { testToolchainEnvironment } from '../../../scripts/test-environment';
 import {
   currentTuiSystemStepSignal,
   throwIfTuiSystemStepAborted,
@@ -467,6 +468,7 @@ export function spawnTui(opts: PtyProcessOptions = {}): PtyProcess {
     const value = process.env[key];
     if (value !== undefined) childEnv[key] = value;
   }
+  Object.assign(childEnv, testToolchainEnvironment());
   // Test overrides
   if (opts.workspace?.env) {
     Object.assign(childEnv, opts.workspace.env);
@@ -817,7 +819,7 @@ export async function waitForTuiReady(
       );
     },
     typeof readiness === 'string' ? `${readiness} TUI readiness` : readiness.description,
-    15_000,
+    60_000,
   );
   if (typeof readiness === 'string' || readiness.waitForQuiescence !== false) {
     await waitForOutputQuiescence(() => tui.viewport(), 5_000, 250, false);

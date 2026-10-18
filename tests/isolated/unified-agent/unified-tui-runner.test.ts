@@ -9,7 +9,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, join, resolve } from 'node:path';
+import { basename, dirname, join, resolve } from 'node:path';
 import {
   parseUnifiedTuiShard,
   runUnifiedTuiSystemTests,
@@ -51,7 +51,7 @@ test('four exact deterministic shards cover every original terminal scenario, cu
     expect(job.command).toEqual([
       process.execPath,
       join(root, 'scripts/run-tui-system-tests.ts'),
-      job.files[0]!.split('/').at(-1)!,
+      basename(job.files[0]!),
     ]);
   }
   const shards = Array.from(

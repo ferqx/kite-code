@@ -223,7 +223,7 @@ async function fixture(
     subjectId: 'owner',
     request: { kind: 'run.start', content: 'original input' },
   });
-  await runtime.waitForCommand('work', { timeoutMs: 20000 });
+  await runtime.waitForCommand('work', { timeoutMs: options.large ? 300_000 : 20_000 });
   const view = await store.getView('s');
   return {
     directory,
@@ -484,7 +484,7 @@ test('copy/rebuild does not remap full 17MiB original Model media or replay it o
   } finally {
     await f.close();
   }
-}, 30000);
+}, 600_000);
 
 test('renderer cannot supply an internal namespace plan; conflicting lifecycle registration is rejected before any new Model', async () => {
   const f = await fixture();

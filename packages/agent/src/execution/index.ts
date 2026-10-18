@@ -132,6 +132,10 @@ function identity(scope: ToolScope) {
       };
 }
 export interface ExecutionOptions {
+  /** Internal observation after dispatch acknowledgement, before entering the adapter. */
+  onModelStart?: (scope: ExecutionScope, execution: ExecutionRecord) => void;
+  /** Internal post-commit observation; never a gate or an extension execution context. */
+  onModelSettled?: (scope: ExecutionScope, execution: ExecutionRecord) => void;
   reviewAuthorization?: (
     scope: ToolScope,
     request: AuthorizationRequest,
@@ -744,6 +748,7 @@ export class UnifiedExecution {
             : { capabilitySnapshot: scope.bindings.capabilitySnapshot }),
         };
     if (!planned && this.options.sealSource) source = await this.options.sealSource(scope, source);
+    let execution = planned;
     if (!planned) {
       const capturedMetadata = modelMetadataJson(
         await captureModelRequestMetadata(scope, model, request),
@@ -751,7 +756,7 @@ export class UnifiedExecution {
       const modelMetadata = this.options.sealModelMetadata
         ? await this.options.sealModelMetadata(scope, capturedMetadata)
         : capturedMetadata;
-      await this.prepare(scope, {
+      execution = await this.prepare(scope, {
         executionId,
         stepId,
         callId: executionId,
@@ -818,6 +823,11 @@ export class UnifiedExecution {
       });
       dispatched = true;
       scope.signal.throwIfAborted();
+      try {
+        this.options.onModelStart?.(scope, execution!);
+      } catch {
+        // Observation cannot change dispatch admission or the actual Model outcome.
+      }
       let savedLength = 0;
       let savedAt = Date.now();
       for await (const event of model.stream(actualRequest, { signal: scope.signal })) {
@@ -889,7 +899,7 @@ export class UnifiedExecution {
         if (!output) await activateOutput();
         await output!.continuation(finish.continuation);
       }
-      await this.options.store.finishExecution({
+      const settled = await this.options.store.finishExecution({
         expectedStoreId: scope.run.originStoreId,
         owner: scope.owner,
         executionId,
@@ -918,6 +928,7 @@ export class UnifiedExecution {
           ...(output ? { modelOutput: output.descriptor(true)! } : {}),
         },
       });
+      this.modelSettled(scope, settled);
       return {
         content,
         reasoning,
@@ -938,7 +949,7 @@ export class UnifiedExecution {
             ...(firstOutput ? { firstOutput } : {}),
           })
           .catch(() => {});
-      await this.options.store
+      const settled = await this.options.store
         .finishExecution({
           expectedStoreId: scope.run.originStoreId,
           owner: scope.owner,
@@ -962,9 +973,17 @@ export class UnifiedExecution {
           },
         })
         .catch(() => {});
+      if (settled) this.modelSettled(scope, settled);
       throw error;
     } finally {
       release?.();
+    }
+  }
+  private modelSettled(scope: ExecutionScope, execution: ExecutionRecord): void {
+    try {
+      this.options.onModelSettled?.(scope, execution);
+    } catch {
+      // A committed result cannot be downgraded by non-authoritative observation.
     }
   }
   async tool(

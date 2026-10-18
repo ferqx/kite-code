@@ -98,7 +98,7 @@ describe('TUI PTY System — Tool Approve', () => {
       expect(screenContains(beforeOutput, '允许一次')).toBe(true);
       expect(screenContains(beforeOutput, '拒绝')).toBe(true);
       expect(existsSync(approvalMarkerPath)).toBe(false);
-      expect(server.getRequestCount()).toBe(1);
+      expect(server.getWorkRequestCount()).toBe(1);
 
       // Approve the tool ("允许一次" is default selected at index 0, press Enter)
       const executionFrames = tui.markScreen();
@@ -125,7 +125,7 @@ describe('TUI PTY System — Tool Approve', () => {
       expect(clean.match(/APPROVAL_FLOW_COMPLETE/g) ?? []).toHaveLength(1);
       expect(clean.match(/External file changed\./g) ?? []).toHaveLength(1);
 
-      expect(server.getRequestCount()).toBe(2);
+      expect(server.getWorkRequestCount()).toBe(2);
       using database = new Database(workspace.databasePath, { readonly: true });
       expect(
         database

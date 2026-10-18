@@ -1,5 +1,6 @@
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { privateDirectory } from '../../../../../tests/fixtures/test-filesystem';
 import {
   acquireProfileAccess,
@@ -7,7 +8,7 @@ import {
   selectProfile,
 } from '../../../src/platform/profile';
 
-const repository = new URL('../../../../../', import.meta.url).pathname;
+const repository = fileURLToPath(new URL('../../../../../', import.meta.url));
 export type SelectionRecord = {
   intent: {
     sessionId: string;

@@ -2,7 +2,9 @@
 
 状态：active
 
-Run 扩展通过 `runLifecycle.prepare` 在启动前和完成前选择自身已注册的普通 Action，Core 复用原 Command、权限、namespace、取消和执行事实，不内置标题规则。默认会话命名扩展由 Service 装配，模型请求在无工具的内部子会话中正常执行；`resultDelivery:caller` 将子结果交由调用扩展消费，不自动进入主模型上下文。标题复用 Session rename CAS，消息写入不再隐式改名，客户端创建只提供空 title 标记；没有标题用途 DTO、专用 ModelOutput 格式或标题恢复分支。当前接口与验证归[Agent owner](../../packages/agent/README.md#入口与职责)、[Service owner](../../apps/service/README.md#默认装配与业务规则归属)和[生命周期取舍](../../.agents/notes/implemented/architecture/2026-10-18-run-lifecycle-extension-actions.md)。
+Extension 通过 `lifecycle.onRunStart/onRunEnd/onModelStart/onModelEnd` 观察原 Run/Model 事实；Model start 在派发准入 ACK 和取消复核后发布，Run start 在激活 ACK 后发布，end 以已提交终态为准。Model 使用实际冻结 Step 的注册，Run 使用原 Run 绑定。通知是有限冻结投影，不提供 SQL、owner、正文、Provider raw、operations 或资源句柄；权限、必要条件和完成 CAS 继续独立执行。有限观察队列可以丢通知，异常局部停用，不持 Run lease/permit、不参与执行成功或关闭判定。Run 终态与 Job 实际停止/资源释放保持分离；普通读取和重复原 Command 不重放，恢复只观察本次推进到的 Model 边界和新到达的 Run 终态，不补发原 Run start。需要可靠后续业务仍须登记原受控意图。当前接口、执行图、压力与真实 SQLite/恢复证据归[Agent 生命周期 owner](../../packages/agent/README.md#生命周期扩展)及[生命周期观察决定](../../.agents/notes/implemented/architecture/2026-10-18-settled-lifecycle-observers.md)。
+
+Run 扩展通过 `lifecycle.beforeRun/beforeRunComplete` 在显式任务输入的启动前和正常完成前按注册顺序选择自身已注册的普通 Action，Core 复用原 Command、权限、namespace、取消和执行事实；内部 child 和自动 Job report 不进入这两个钩子，避免业务递归。Core 不内置标题规则。默认会话命名扩展由 Service 装配，模型请求在无工具的内部子会话中正常执行；`resultDelivery:caller` 将子结果交由调用扩展消费，不自动进入主模型上下文。标题复用 Session rename CAS，消息写入不再隐式改名，客户端创建只提供空 title 标记；没有标题用途 DTO、专用 ModelOutput 格式或标题恢复分支。当前接口与验证归[Agent owner](../../packages/agent/README.md#入口与职责)、[Service owner](../../apps/service/README.md#默认装配与业务规则归属)和[生命周期取舍](../../.agents/notes/implemented/architecture/2026-10-18-run-lifecycle-extension-actions.md)。
 
 Windows daemon 的可信装配可借用本进程已经完成准入的原 live artifact owner，绑定 proof、entry、executable 与 build；借用未归还、关闭开始、复制或伪造均拒绝。新的实际进程仍独立取得锁/原文件 pin 并全量核验，不向 startup JSON、配置或 HTTP 增加借用能力。原 HANDLE 内容事实和批量私有复制不改变 Files 授权、维护 EX、精确取消或关闭未知保资源的合同。实现归 [Service owner](../../apps/service/README.md)和 [platform owner](../../packages/agent/src/platform/README.md)，取舍归[闭包成本决定](../../.agents/notes/implemented/bug-fix/2026-10-17-windows-bundle-admission-cost.md)。
 

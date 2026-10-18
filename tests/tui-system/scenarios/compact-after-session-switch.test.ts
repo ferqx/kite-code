@@ -234,6 +234,6 @@ describe('TUI PTY System — /compact after session switch', () => {
     });
     // The old retryable:false boolean is replaced by the actual refused Run
     // reason and an exact zero-new-Provider assertion, not a fabricated event.
-    expect(server.getRequestCount()).toBe(1);
+    expect(server.getWorkRequestCount()).toBe(1);
   }
 });

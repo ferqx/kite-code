@@ -16,7 +16,7 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { pathToFileURL } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { readConfigurationFile, updateConfigurationFile } from '../../../src/config/files';
 import { readMcpSources } from '../../../src/config/mcp-sources';
 import { closePrivate, fingerprint, openPrivate } from '../../../src/maintenance/files';
@@ -40,7 +40,7 @@ test.skipIf(process.platform === 'win32')(
     try {
       const result = await Bun.build({
         entrypoints: [
-          new URL('../../../src/platform/windows-path-security.ts', import.meta.url).pathname,
+          fileURLToPath(new URL('../../../src/platform/windows-path-security.ts', import.meta.url)),
         ],
         target: 'node',
         outdir: root,

@@ -2,13 +2,13 @@ import { Database } from 'bun:sqlite';
 import { expect, test } from 'bun:test';
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { mkdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
-import { temporaryDirectory } from '../../../../tests/fixtures/test-filesystem';
+import { directoryLink, temporaryDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { buildNativeDesktop } from '../../scripts/build-native';
 
 const require = createRequire(import.meta.url);
@@ -229,10 +229,9 @@ test.skipIf(process.platform !== 'darwin')(
       outdir = join(root, 'app');
     const serviceOutdir = join(root, 'apps/service/dist');
     mkdirSync(serviceOutdir, { recursive: true });
-    symlinkSync(
+    directoryLink(
       resolve(import.meta.dir, '../../../service/node_modules'),
       join(root, 'apps/service/node_modules'),
-      'dir',
     );
     const serviceBuild = await Bun.build({
       entrypoints: [resolve(import.meta.dir, '../../../service/src/main.ts')],
@@ -284,11 +283,7 @@ test.skipIf(process.platform !== 'darwin')(
         `import {createRequire} from 'node:module';const {_electron}=createRequire(${JSON.stringify(resolve(import.meta.dir, '../../package.json'))})('playwright');`,
       ),
     );
-    symlinkSync(
-      resolve(import.meta.dir, '../../../../node_modules'),
-      join(root, 'node_modules'),
-      'dir',
-    );
+    directoryLink(resolve(import.meta.dir, '../../../../node_modules'), join(root, 'node_modules'));
     const built = await Bun.build({
       entrypoints: [fixture],
       target: 'node',

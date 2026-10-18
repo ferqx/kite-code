@@ -546,36 +546,22 @@ test('checkpoint batches preserve distinct Tool inputs and refreshed business fa
     expect(completedRun.status).toBe('completed');
     expect(effects).toBe(0);
     for (const batches of [hostBatches, extensionBatches]) {
-      const complete = batches.find((requests) =>
-        requests.some(
-          (request) =>
-            request.definitionId === 'fixture.work' &&
-            (request.input as { ordinal?: number }).ordinal === 2,
-        ),
-      );
-      expect(complete).toEqual([
-        {
-          sessionId: 's',
-          runId: completedRun.id,
-          workspaceId: 'w',
-          definitionId: 'fixed',
-          input: { kind: 'model_request' },
-        },
-        {
-          sessionId: 's',
-          runId: completedRun.id,
-          workspaceId: 'w',
-          definitionId: 'fixture.work',
-          input: { ordinal: 1 },
-        },
-        {
-          sessionId: 's',
-          runId: completedRun.id,
-          workspaceId: 'w',
-          definitionId: 'fixture.work',
-          input: { ordinal: 2 },
-        },
-      ]);
+      const model = {
+        sessionId: 's',
+        runId: completedRun.id,
+        workspaceId: 'w',
+        definitionId: 'fixed',
+        input: { kind: 'model_request' },
+      };
+      const tool = (ordinal: number) => ({
+        ...model,
+        definitionId: 'fixture.work',
+        input: { ordinal },
+      });
+      // Each Tool checks its original Model plus its own target. Sibling
+      // targets are retained for the next Model, not added to this authority.
+      for (const ordinal of [1, 2]) expect(batches).toContainEqual([model, tool(ordinal)]);
+      expect(batches).toContainEqual([model, tool(1), tool(2)]);
     }
     expect(f.model.requests).toHaveLength(2);
     for (const [index, request] of f.model.requests.entries()) {

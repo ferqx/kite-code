@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
-import { type FileHandle, open, realpath } from 'node:fs/promises';
+import { realpath } from 'node:fs/promises';
 import { dirname, isAbsolute, relative, resolve } from 'node:path';
+import { createWorkspaceFiles } from '@kite-ai/agent/files';
 
 export interface OriginalToolCall {
   id: string;
@@ -101,11 +102,9 @@ function mcpConnectionFacts(request: Parameters<typeof migrateOriginalToolCall>[
 }
 /** Capture the current test-owned file; this prepares input, never performs a Tool mutation. */
 async function currentBaseline(path: string, scope: OriginalToolWorkspace) {
-  let file: FileHandle;
   const absolute = ownedPath(path, scope);
   try {
     ownedPath(await realpath(absolute), scope);
-    file = await open(absolute, 'r');
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
       ownedPath(await realpath(dirname(absolute)), scope);
@@ -113,28 +112,25 @@ async function currentBaseline(path: string, scope: OriginalToolWorkspace) {
     }
     throw error;
   }
+  const remainder = relative(resolve(scope.workspace), absolute);
+  const root =
+    !isAbsolute(remainder) &&
+    remainder !== '..' &&
+    !remainder.startsWith('../') &&
+    !remainder.startsWith('..\\')
+      ? scope.workspace
+      : scope.home;
+  const files = createWorkspaceFiles({ root });
   try {
-    const before = await file.stat({ bigint: true });
-    if (!before.isFile()) throw Error('original_tool_baseline_not_file');
-    const bytes = await file.readFile();
-    const after = await file.stat({ bigint: true });
-    if (
-      before.dev !== after.dev ||
-      before.ino !== after.ino ||
-      before.size !== after.size ||
-      before.mtimeNs !== after.mtimeNs ||
-      before.ctimeNs !== after.ctimeNs ||
-      after.size !== BigInt(bytes.length)
-    )
-      throw Error('original_tool_baseline_changed');
-    return {
-      hash: createHash('sha256').update(bytes).digest('hex'),
-      size: bytes.length,
-      device: String(after.dev),
-      inode: String(after.ino),
-    };
+    // Use the same native identity and full EOF/hash validation as the real
+    // consumer, including the complete Windows volume and file ID.
+    return (
+      await files.readBytes(relative(resolve(root), absolute).replaceAll('\\', '/'), {
+        maxBytes: Number.MAX_SAFE_INTEGER,
+      })
+    ).baseline;
   } finally {
-    await file.close();
+    await files.close();
   }
 }
 /** Explicit fixture-language migration. Unsupported semantics fail before emitting a response. */
@@ -350,20 +346,31 @@ export async function migrateOriginalToolCall(
         }
       }
       const declared = Array.isArray(request.body.tools) ? request.body.tools : [];
+      const isDeclared = (id: string) => {
+        const names = declared.flatMap((tool) =>
+          tool && typeof tool === 'object' && typeof tool.function?.name === 'string'
+            ? [tool.function.name as string]
+            : [],
+        );
+        if (names.includes(id)) return true;
+        const wire = id.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 64);
+        // The SDK encodes long internal IDs. Only accept an unambiguous
+        // declared wire candidate; Core and the remote fixture still check
+        // the complete original definition and exact call arguments.
+        const sameWireBase = (name: string) => {
+          if (name === wire) return true;
+          const suffix = /_[1-9][0-9]*$/.exec(name)?.[0];
+          return !!suffix && name === `${wire.slice(0, 64 - suffix.length)}${suffix}`;
+        };
+        return names.includes(wire) && names.filter(sameWireBase).length === 1;
+      };
       for (const source of mcpConnectionFacts(request).filter(
         (row) => row.serverName === match[1],
       )) {
         const exact = `mcp.${source.serverId}.${createHash('sha256').update(JSON.stringify(match[2])).digest('hex').slice(0, 32)}`;
-        if (
-          declared.some((tool) => tool && typeof tool === 'object' && tool.function?.name === exact)
-        )
-          rows.push({ definitionId: exact });
+        if (isDeclared(exact)) rows.push({ definitionId: exact });
       }
-      const matches = rows.filter((row) =>
-        declared.some(
-          (tool) => tool && typeof tool === 'object' && tool.function?.name === row.definitionId,
-        ),
-      );
+      const matches = rows.filter((row) => isDeclared(String(row.definitionId)));
       const ids = [...new Set(matches.map((row) => String(row.definitionId)))];
       if (ids.length !== 1) throw Error('original_mcp_tool_source_unavailable');
       name = ids[0]!;

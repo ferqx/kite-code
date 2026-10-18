@@ -214,7 +214,7 @@ describe('TUI PTY System — Interrupt Resume', () => {
         timeout: 15_000,
       });
       await waitForText(() => tui2.viewport(), 'Interrupted model turn before restart', 10_000);
-      expect(server.getRequestCount()).toBeGreaterThan(1);
+      expect(server.getWorkRequestCount()).toBeGreaterThan(1);
       expect(
         screenContains(tui2.viewport(), 'This response must not survive the terminated owner.'),
       ).toBe(false);

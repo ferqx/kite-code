@@ -133,7 +133,7 @@ describe('TUI PTY System — explicit App Server daemon', () => {
     await waitForText(() => second!.viewport(), original.instanceId, 5_000);
     expect(screenContains(second.viewport(), sessionId!)).toBe(true);
     expect(screenContains(second.viewport(), `传输: ${daemon.endpoint.kind}`)).toBe(true);
-    expect(server.getRequestCount()).toBe(1);
+    expect(server.getWorkRequestCount()).toBe(1);
     second.write('\x1b');
     await waitForCondition(
       () => second!.focusedMainInputReady(),
@@ -170,7 +170,7 @@ describe('TUI PTY System — explicit App Server daemon', () => {
     });
     await submitUserMessage(tui, server, 'Keep the daemon busy', { timeout: 15_000 });
     await waitForCondition(
-      () => server.getRequestCount() === 1,
+      () => server.getWorkRequestCount() === 1,
       'the daemon-owned model request to start',
       10_000,
     );

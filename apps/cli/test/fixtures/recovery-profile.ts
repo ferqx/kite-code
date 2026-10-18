@@ -3,19 +3,17 @@ import { createHash } from 'node:crypto';
 import {
   appendFileSync,
   existsSync,
-  mkdtempSync,
   readFileSync,
   realpathSync,
   rmSync,
   writeFileSync,
 } from 'node:fs';
-import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Readable } from 'node:stream';
 import { pathToFileURL } from 'node:url';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { launchPairedService } from '@kite-ai/service/paired';
-import { privateDirectory } from '../../../../tests/fixtures/test-filesystem';
+import { privateDirectory, temporaryDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { ordinaryHostConfigurationDefaults } from '../../../service/src/configuration-defaults';
 import { ownedUserConfiguration } from '../../../service/test/fixtures/user-configuration-fixture';
 import type { CLIServiceArtifact } from '../../host';
@@ -37,7 +35,7 @@ export async function untilRecovery(check: () => Promise<boolean>) {
 
 /** Default compatible SDK, actual original Auto ask_user card, real SIGKILL and owned SQLite. */
 export async function recoveryProfile(options: { holdModelSessionId?: string } = {}) {
-  const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-client-recovery-'))),
+  const root = temporaryDirectory('kite-client-recovery-'),
     workspace = join(root, 'workspace'),
     profile = selectProfile({ dataRoot: join(root, 'data'), profile: 'owned' });
   const userConfiguration = ownedUserConfiguration(join(root, 'home'));
@@ -49,12 +47,22 @@ export async function recoveryProfile(options: { holdModelSessionId?: string } =
   const ledger = join(root, 'model-ledger');
   let calls = 0,
     heldModelRequests = 0;
+  let observer: Database | undefined;
+  const database = () => {
+    if (!observer) {
+      observer = new Database(profile.databasePath, { readonly: true });
+      observer.run('PRAGMA query_only=ON');
+      observer.run('PRAGMA busy_timeout=100');
+    }
+    return observer;
+  };
   const reviews: { body: Record<string, unknown>; input: Record<string, unknown> }[] = [];
   const provider = (() => {
     try {
       return Bun.serve({
         hostname: '127.0.0.1',
         port: 0,
+        idleTimeout: 0,
         async fetch(request) {
           const body = (await request.json()) as Record<string, unknown>;
           const messages = body.messages as OriginalMessage[];
@@ -72,38 +80,33 @@ export async function recoveryProfile(options: { holdModelSessionId?: string } =
           else calls++;
           let complete = false;
           if (!input) {
-            const db = new Database(profile.databasePath, { readonly: true });
-            try {
-              const row = db
-                .query(
-                  'SELECT command.request_json,run.session_id FROM run JOIN command ON command.id=run.origin_command_id WHERE run.is_active=1 ORDER BY command.seq DESC LIMIT 1',
-                )
-                .get() as { request_json: string; session_id: string } | null;
-              const human = row && JSON.parse(row.request_json).content;
-              if (typeof human !== 'string') throw Error('original_recovery_work_missing');
-              if (row?.session_id === options.holdModelSessionId) {
-                // A caller-journal fixture can hold its own real Model request active.
-                // The original recovery work still follows the strict Files identity below.
-                heldModelRequests++;
-                return new Response(
-                  new ReadableStream<Uint8Array>({
-                    start(controller) {
-                      controller.enqueue(
-                        new TextEncoder().encode(
-                          `data: ${JSON.stringify({ id: 'held-caller', object: 'chat.completion.chunk', choices: [{ index: 0, delta: { role: 'assistant' }, finish_reason: null }] })}\n\n`,
-                        ),
-                      );
-                    },
-                  }),
-                  { headers: { 'content-type': 'text/event-stream' } },
-                );
-              }
-              complete = originalToolResults(messages, human, [
-                { id: 'original-file', name: 'files.write' },
-              ]);
-            } finally {
-              db.close();
+            const row = database()
+              .query(
+                'SELECT command.request_json,run.session_id FROM run JOIN command ON command.id=run.origin_command_id WHERE run.is_active=1 ORDER BY command.seq DESC LIMIT 1',
+              )
+              .get() as { request_json: string; session_id: string } | null;
+            const human = row && JSON.parse(row.request_json).content;
+            if (typeof human !== 'string') throw Error('original_recovery_work_missing');
+            if (row?.session_id === options.holdModelSessionId) {
+              // A caller-journal fixture can hold its own real Model request active.
+              // The original recovery work still follows the strict Files identity below.
+              heldModelRequests++;
+              return new Response(
+                new ReadableStream<Uint8Array>({
+                  start(controller) {
+                    controller.enqueue(
+                      new TextEncoder().encode(
+                        `data: ${JSON.stringify({ id: 'held-caller', object: 'chat.completion.chunk', choices: [{ index: 0, delta: { role: 'assistant' }, finish_reason: null }] })}\n\n`,
+                      ),
+                    );
+                  },
+                }),
+                { headers: { 'content-type': 'text/event-stream' } },
+              );
             }
+            complete = originalToolResults(messages, human, [
+              { id: 'original-file', name: 'files_write' },
+            ]);
           }
           if (!input) appendFileSync(ledger, complete ? 'completion\n' : 'decision\n');
           const delta = input
@@ -222,6 +225,13 @@ export async function recoveryProfile(options: { holdModelSessionId?: string } =
         reader.dispose();
       }
     }
+    // Retain one read-only WAL observer before dispatch. Reopening and closing
+    // the shared-memory mapping inside every Provider callback races the writer.
+    if (
+      (database().query('SELECT store_id FROM storage_meta').get() as { store_id: string })
+        .store_id !== storeId
+    )
+      throw Error('recovery_observer_store_changed');
     await client.startRun('s', {
       kind: 'run.start',
       expectedStoreId: storeId,
@@ -237,14 +247,7 @@ export async function recoveryProfile(options: { holdModelSessionId?: string } =
     if (card.definitionId !== 'files.write' || calls !== 1)
       throw Error('original_tool_card_not_ready');
     const run = (await client.getView('s')).runs.find((run) => run.isActive)!;
-    const rows = (sql: string) => {
-      const db = new Database(profile.databasePath, { readonly: true });
-      try {
-        return db.query(sql).all();
-      } finally {
-        db.close();
-      }
-    };
+    const rows = (sql: string) => database().query(sql).all();
     const reviewProof = () =>
       rows(
         "SELECT e.state,json_extract(e.result_json,'$.outcome') AS outcome,json_extract(json_extract(e.result_json,'$.content'),'$.decision') AS decision,e.parent_execution_id AS target FROM execution e JOIN command c ON c.id=e.origin_command_id WHERE c.kind='authorization.review'",
@@ -302,6 +305,7 @@ export async function recoveryProfile(options: { holdModelSessionId?: string } =
         if (closed) return;
         closed = true;
         provider.stop(true);
+        observer?.close();
         rmSync(root, { recursive: true, force: true });
       },
     };
@@ -311,6 +315,7 @@ export async function recoveryProfile(options: { holdModelSessionId?: string } =
       await warm.close().catch(() => {});
     }
     provider.stop(true);
+    observer?.close();
     rmSync(root, { recursive: true, force: true });
     throw error;
   }

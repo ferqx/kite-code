@@ -7,7 +7,6 @@ import {
   readFileSync,
   realpathSync,
   rmSync,
-  symlinkSync,
   unlinkSync,
   writeFileSync,
 } from 'node:fs';
@@ -17,7 +16,7 @@ import { pathToFileURL } from 'node:url';
 import { createProfileBackup } from '@kite-ai/agent/maintenance';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
-import { temporaryDirectory } from '../../../../tests/fixtures/test-filesystem';
+import { directoryLink, temporaryDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { buildNativeDesktop } from '../../scripts/build-native';
 
 const require = createRequire(import.meta.url);
@@ -103,10 +102,9 @@ test.skipIf(process.platform !== 'darwin')(
       serviceEntrypoint = join(root, 'apps/service/dist/service.js');
     const serviceOutdir = join(root, 'apps/service/dist');
     mkdirSync(serviceOutdir, { recursive: true });
-    symlinkSync(
+    directoryLink(
       resolve(import.meta.dir, '../../../service/node_modules'),
       join(root, 'apps/service/node_modules'),
-      'dir',
     );
     const serviceBuild = await Bun.build({
       entrypoints: [resolve(import.meta.dir, '../../../service/src/main.ts')],
@@ -148,11 +146,7 @@ test.skipIf(process.platform !== 'darwin')(
       `import {createRequire} from 'node:module';const {_electron}=createRequire(${JSON.stringify(resolve(import.meta.dir, '../../package.json'))})('playwright');`,
     );
     writeFileSync(join(root, 'driver.ts'), source);
-    symlinkSync(
-      resolve(import.meta.dir, '../../../../node_modules'),
-      join(root, 'node_modules'),
-      'dir',
-    );
+    directoryLink(resolve(import.meta.dir, '../../../../node_modules'), join(root, 'node_modules'));
     const built = await Bun.build({
       entrypoints: [join(root, 'driver.ts')],
       target: 'node',

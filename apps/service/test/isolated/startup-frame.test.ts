@@ -7,14 +7,13 @@ import {
   readFileSync,
   realpathSync,
   rmSync,
-  symlinkSync,
   writeFileSync,
 } from 'node:fs';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { selectProfile } from '@kite-ai/agent/profile';
-import { privateDirectory } from '../../../../tests/fixtures/test-filesystem';
+import { directoryLink, privateDirectory } from '../../../../tests/fixtures/test-filesystem';
 
 const repository = resolve(import.meta.dir, '../../../..');
 const hash = (value: string) => createHash('sha256').update(value).digest('hex');
@@ -107,7 +106,7 @@ beforeAll(async () => {
     if (!installed) throw Error(`startup_frame_dependency_missing:${dependency}`);
     const target = join(modules, dependency);
     mkdirSync(dirname(target), { recursive: true });
-    symlinkSync(realpathSync(installed), target, 'dir');
+    directoryLink(realpathSync(installed), target);
   }
   const require = createRequire(join(artifact, 'selected-public-entry.cjs'));
   entries = {

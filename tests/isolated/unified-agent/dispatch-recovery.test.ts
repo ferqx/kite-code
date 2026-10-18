@@ -1,16 +1,15 @@
 import { expect, test } from 'bun:test';
-import { mkdtempSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { rmSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
 import { createRuntime } from '@kite-ai/agent';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import type { Store } from '@kite-ai/agent/storage';
 import { createFixedModel } from '@kite-ai/ai';
 import { startService } from '@kite-ai/service';
+import { temporaryDirectory } from '../../fixtures/test-filesystem';
 
 test('an orphaned Run produces a local dispatch failure without repeated owner acquisition or implicit recovery', async () => {
-  const dataRoot = mkdtempSync(join(tmpdir(), 'kite-dispatch-recovery-'));
+  const dataRoot = temporaryDirectory('kite-dispatch-recovery-');
   let store = await openSqliteStore({ dataRoot, profile: 'test' });
   const expectedStoreId = (await store.getMetadata()).storeId;
   await store.createWorkspace({

@@ -1,6 +1,7 @@
 import { expect, test } from 'bun:test';
 import { chmodSync, readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { temporaryDirectory } from '../../../../../tests/fixtures/test-filesystem';
 import { createArtifactStore } from '../../../src/artifacts';
 import { canonicalJson } from '../../../src/json';
@@ -23,7 +24,7 @@ for (const mode of ['tool', 'model'])
     chmodSync(dataRoot, 0o700);
     const ledger = join(dataRoot, 'external-ledger');
     const child = Bun.spawn(
-      [process.execPath, new URL('./crash-child.ts', import.meta.url).pathname],
+      [process.execPath, fileURLToPath(new URL('./crash-child.ts', import.meta.url))],
       {
         env: {
           ...process.env,
@@ -57,7 +58,8 @@ for (const mode of ['tool', 'model'])
       expect(ready.phase).toBe(
         mode === 'tool' ? 'effect_before_result_commit' : 'partial_committed',
       );
-      child.kill('SIGSTOP');
+      // Windows has no SIGSTOP; the live owner must be rejected there as well.
+      if (process.platform !== 'win32') child.kill('SIGSTOP');
       writer = await openSqliteStore({ dataRoot, profile: 'test' });
       // A live or frozen OS owner is not taken over based on a stale heartbeat.
       expect(await writer.acquireSessionOwner('crashed', 'contender')).toBeNull();

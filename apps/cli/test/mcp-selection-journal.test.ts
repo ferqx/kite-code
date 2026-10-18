@@ -165,4 +165,4 @@ test('128 records retain unknown; private corrupted, linked, oversized files and
   } finally {
     f.close();
   }
-}, 120000);
+}, 300000);

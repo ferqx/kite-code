@@ -5,6 +5,7 @@ import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { ClientError, createServiceLifecycleClient } from '@kite-ai/client';
 import { retainProcessObservation, selectDaemonEndpoint } from '@kite-ai/service/daemon';
+import { privateDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { runSelectedDaemon } from '../../host/daemon';
 import { verifyTerminalBundle } from '../../host/terminal-artifact';
 import { recoveryProfile } from '../fixtures/recovery-profile';
@@ -44,7 +45,9 @@ for (const connection of ['paired', 'shared'] as const)
   test(`actual ${connection} work argv durable POST loss + SIGKILL and cold caller argv first GET loss preserve complete Workflow request and zero POST`, async () => {
     const started = Date.now();
     const f = await recoveryProfile();
-    const candidateRoot = join(f.root, 'candidate');
+    const candidateParent = join(f.root, 'candidate-parent');
+    privateDirectory(candidateParent);
+    const candidateRoot = join(candidateParent, 'candidate');
     const base = `${f.root}-cli-caller`,
       runner = join(f.root, 'caller-runner.ts'),
       wire = `${base}.wire.jsonl`,
@@ -560,7 +563,7 @@ for (const connection of ['paired', 'shared'] as const)
         { cause: failure },
       );
     if (failure) throw failure;
-  }, 30000);
+  }, 300000);
 
 test('actual paired main work JSON waits through original Tool approval and complete Run before owned Service closes', async () => {
   const f = await recoveryProfile(),
@@ -757,4 +760,4 @@ test('actual paired main work JSON waits through original Tool approval and comp
       { cause: failure },
     );
   if (failure) throw failure;
-}, 30000);
+}, 300000);

@@ -8,7 +8,7 @@
 
 ## 入口与职责
 
-[扩展契约](src/extensions/index.ts)的 `runLifecycle.prepare` 在 `before_start` 与 `before_complete` 选择本 namespace 的已注册 Action。Core 在模型配置解析前、最终完成 CAS 前分别调度普通真实 Action；稳定 Command ID 去重，完成重试和冷读不重复执行，失败保留 Action 自身结果，不替代主 Run 的业务结果。Action 继续通过原受控 operations 请求子执行；`resultDelivery:caller` 仅将普通 child 的自动交付标为调用扩展所有，实际状态、结果与取消证据保持。省略时保留原会话投递；它不能与必要结果义务或 after-turn 自动报告组合。[生命周期测试](test/isolated/execution/run-lifecycle.test.ts)与[结果交付测试](test/isolated/child/result-delivery.test.ts)验证这些通用合同，并核实未安装命名扩展时空标题及控制修订保持不变。
+[扩展契约](src/extensions/index.ts)的 `lifecycle.beforeRun/beforeRunComplete` 分别在显式任务输入的启动前与正常完成前选择本 namespace 的已注册 Action。Core 在模型配置解析前、最终完成 CAS 前按注册顺序调度普通真实 Action；内部 child 激活和自动 Job report 不进入这两个业务钩子。稳定 Command ID 去重，完成重试和冷读不重复执行，失败保留 Action 自身结果，不替代主 Run 的业务结果。Action 继续通过原受控 operations 请求子执行；`resultDelivery:caller` 仅将普通 child 的自动交付标为调用扩展所有，实际状态、结果与取消证据保持。省略时保留原会话投递；它不能与必要结果义务或 after-turn 自动报告组合。[生命周期测试](test/isolated/execution/run-lifecycle.test.ts)与[结果交付测试](test/isolated/child/result-delivery.test.ts)验证这些通用合同，并核实未安装命名扩展时空标题及控制修订保持不变。
 
 [会话命名扩展](src/business/session-title/index.ts)用启动前 Action 先保存首条原文规整空白后的前10个Unicode码点及自有 CAS marker，在首次主任务完成前通过按本轮选定模型装配的无工具内部 child 尝试一次可读标题。标题专用副本去掉首尾空白，将连续空白合并为一个空格，再分别截取兜底的10码点或命名输入的8192码点；按需读取原文，只构造有界副本，原消息及主模型输入保持不变。全为空白时保存“新会话”且不发起命名模型请求。扩展持有10秒取消、32KiB输出限制、[标题校验](src/business/session-title/title.ts)与原 Session rename CAS；AI 输出裁至10码点后再次校验可读性，拒绝只剩表情、数字或符号的标题。模型不可用、重试等待、失败和迟到手动改名仍保原文兜底或手动名称。独立子会话及 caller 交付隔离正文，无 Core 标题开关、公共用途字段或专用恢复格式；后续输入和冷读不补发命名。[命名集成](test/isolated/execution/session-title-generation.test.ts)核真实 SQLite、连续空白与原文隔离、取消、手动竞争、已有空标题历史不补命名、父上下文隔离及普通主恢复点；[Store](src/storage/README.md#session-标题写入)只保存消息和执行显式 rename，不再从用户正文推导标题。设计理由与限制见[生命周期取舍](../../.agents/notes/implemented/architecture/2026-10-18-run-lifecycle-extension-actions.md)。
 
@@ -46,6 +46,54 @@
 未提交普通Action的结果不以Command.applied视为完成；同Session后续普通派发须继续核原receipt主Execution。准确Store/owner观察、合法detached Job与未提交Action的区分，以及真实最终提交故障测试归[Store owner](src/storage/README.md#未提交普通-action-的串行边界)。
 
 MCP强制重连的建立失败收尾由[MCP leaf](src/mcp/README.md#强制重连持久发布与原事实)沿原operation有界等待真实Job终态，再核完整停止证明。运行中新holder的发布失败继续隔离；超时或迟到结算不追改原unknown，通用Execution与Query合同保持。
+
+## 生命周期扩展
+
+生命周期入口只有一层 `Extension.lifecycle: LifecycleHooks`。`Run` 指一次持久任务执行，`Model` 指其中一次模型尝试；Agent 实例可以经历多次 Run，每个 Run 可以调用多次 Model。命名区分两种合同：`before*` 选择由 Runtime 等待的普通业务 Action，`on*Start/on*End` 订阅只读事件。用词参考 [OpenAI RunHooks](https://openai.github.io/openai-agents-python/ref/lifecycle/) 的 start/end 事件与 [LangChain middleware](https://docs.langchain.com/oss/javascript/langchain/middleware/custom) 的执行阶段；两者并非统一行业协议，不把异步通知冒充可修改状态的 before/after middleware。
+
+| 时点 | Extension 入口 | 能力与执行边界 |
+| --- | --- | --- |
+| 显式任务输入准备前 | `lifecycle.beforeRun` | `run.start/input.follow_up` 配置解析前，纯选择自身全局注册的 Action；实际业务经过原权限、取消与 operation key |
+| 新 Run 激活后 | `lifecycle.onRunStart` | Run 保存成功后发布；内部 child 和自动 report 的新 Run 同样可观察，原 Run 恢复不重发 start |
+| 模型输入准备与派发前复核 | `context.capture/captureBatch` | 从自有 namespace 的只读投影贡献带来源的 `user` 数据；可能因刷新、重试多次读取 |
+| Model 派发准入后 | `lifecycle.onModelStart` | 原派发已确认且取消已复核，在进入 adapter 前发布；权限拒绝或派发前取消不发 start |
+| Model 结果提交后 | `lifecycle.onModelEnd` | 只读观察实际成功、失败、取消或未知结果；每个重试 Execution 保留自己的身份与结果 revision |
+| 显式输入的 Run 正常完成前 | `lifecycle.beforeRunComplete` | 必要条件已满足后、最终成功 CAS 前选择普通 Action；不是完成事实，也不替代必要条件 |
+| Run 终态提交后 | `lifecycle.onRunEnd` | 只读观察实际完成、失败、取消或中断；不等同于后台工作结束或资源 disposer 完成 |
+
+所有回调均可省略。两个前置回调接收冻结的 `RunBoundaryEvent`，返回 `LifecycleAction` 或 null；启动前的 `run` 为 null，完成前为原活动 Run。只从全局注册扩展选 Action，按注册顺序逐个选择并等待执行，不提供 `next()`、可包裹的 Loop 或重试控制。内部 `child.start` 和自动 `job.report` 不执行这两个钩子，避免 Action 创建的 child 再从完成钩子递归创建 child；子任务的正常 Tool/Action/Job 能力继续通过原 operations 工作。恢复不重跑启动前 Action，完成前仍按原命令身份去重。
+
+四个观察回调接收 [ModelStartedEvent/ModelSettledEvent/RunStartedEvent/RunSettledEvent](src/extensions/lifecycle.ts) 的冻结有限事实，包括来源 Store/Session/Run/Command、稳定 `eventId`；Model 另含原 Execution、定义与 attempt，Model 结束事件另含结果 revision 和标准用量；结束事件均含实际状态。缺失用量为 null，不推算 total；不提供请求、响应、reasoning、凭据、Provider raw 或内部 owner。详细结果继续通过宿主原 scope 的读取契约取得，事件身份本身不授予读取或执行权。
+
+正常路径由 Runtime 平铺推进，虚线表示发布通知，不等待回调完成：
+
+```mermaid
+flowchart TD
+    Input[显式任务输入] --> Before[beforeRun：顺序执行普通 Action]
+    Before --> Activate[解析配置并保存新 Run]
+    Activate -.-> RunStart[onRunStart]
+    Activate --> Context[准备上下文与当前 Step]
+    Context --> Admit[权限、必要条件和派发复核]
+    Admit -.-> ModelStart[onModelStart]
+    Admit --> Model[调用 Model adapter]
+    Model --> Commit[提交 Model 结果]
+    Commit -.-> ModelEnd[onModelEnd]
+    Commit --> Decision{工具或继续模型？}
+    Decision -->|需要| Tools[普通 Tool / Job]
+    Tools --> Context
+    Decision -->|完成候选| Conditions[核实必要完成条件]
+    Conditions --> Complete[beforeRunComplete：顺序执行普通 Action]
+    Complete --> Finish[最终完成 CAS]
+    Finish -.-> RunEnd[onRunEnd]
+```
+
+失败或取消直接保存实际终态后发布结束事件；Model 准入失败可以只有 end，没有 start。最终完成 CAS 若发现新输入或义务变化，会回到原 Loop 或完成核对，前置业务 Action 不因此重发。内部 child 复用相同 Run/Model 主链，省略图中的两个业务钩子；自动 report 从创建新 Run 开始。context 是可重复的来源捕获，不另叠一条修改同一模型输入的 beforeModel 转换链。
+
+Model 的 start/end 均绑定该次实际冻结 Step；Run 的 start/end 均绑定初始 Run 配置，不随后来 Step 或其他 Session 的目录替换。通知仅在原事实或准入 ACK 可确认时发布；配置拒绝无 Run 时不制造事件，完成 CAS 重试不重复发布。冷读和重复原 Command 不重放；恢复只发布本次推进到的 Model 边界和新到达的 Run 终态。已有必要条件与 completion governance 继续负责成功终态，观察回调不能更改已提交结果或创建受控工作。
+
+[观察队列](src/extensions/lifecycle.ts)按同一 callback 的发布顺序交付，最多保留128个在途/排队通知，每个 callback 最多16个排队项；超出丢弃新通知，异常只停用对应 callback。不同 callback 独立推进，不承诺彼此完成顺序，也不采用 middleware 的反向退栈顺序。start 表示事件发布边界，回调可能稍后才执行。执行和 Runtime 关闭不等待观察 Promise，不为其保留 Run lease、permit 或 Store；关闭丢弃待交付通知。进程内同步阻塞不能由此抢占，也不构成恶意代码隔离。需要保证发生的后续业务仍通过原 Action/Job/必要条件登记，不依赖通知必达或 exactly-once。
+
+[真实 SQLite 回归](test/isolated/extensions/lifecycle-observers.test.ts)覆盖开始/结束 ACK 屏障、注册顺序、child 无业务钩子重入、成功/失败/取消/拒绝、模型重试、原 Run/Step 版本绑定、冻结与脱敏、慢/异常观察和冷读零重放；[真实进程退出后的恢复](test/isolated/extensions/lifecycle-recovery.test.ts)核原 Run start 与已结算 Model 不重发；[队列测试](test/lifecycle-observers.test.ts)核有限压力、交付顺序和关闭丢弃。旧 `runLifecycle.prepare` 迁移至两个 before 回调；曾使用的 `afterModel/afterRun` 统一为 `onModelEnd/onRunEnd`，不保留双入口。原 `before_start/before_complete` 持久 Command key 及 `model.settled/run.settled` 事实身份保持稳定。设计边界见[生命周期观察决定](../../.agents/notes/implemented/architecture/2026-10-18-settled-lifecycle-observers.md)。
 
 ## 当前执行与恢复边界
 

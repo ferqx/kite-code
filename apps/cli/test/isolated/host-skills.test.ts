@@ -8,14 +8,13 @@ import {
   readFileSync,
   realpathSync,
   rmSync,
-  symlinkSync,
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { sessionTitleInstructions } from '../../../../packages/agent/src/business/session-title/title';
-import { privateDirectory } from '../../../../tests/fixtures/test-filesystem';
+import { directoryLink, privateDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { ownedUserConfiguration } from '../../../service/test/fixtures/user-configuration-fixture';
 import type { CLIServiceArtifact } from '../../host';
 import { workflowManifest } from '../fixtures/workflow-manifest';
@@ -153,12 +152,11 @@ async function fixture(
   const outdir = join(root, 'apps/service/dist');
   mkdirSync(outdir, { recursive: true });
   const service = join(outdir, 'service.js');
-  symlinkSync(
+  directoryLink(
     join(import.meta.dir, '../../../service/node_modules'),
     join(root, 'apps/service/node_modules'),
-    'dir',
   );
-  symlinkSync(join(import.meta.dir, '../../../../node_modules'), join(root, 'node_modules'), 'dir');
+  directoryLink(join(import.meta.dir, '../../../../node_modules'), join(root, 'node_modules'));
   const result = await Bun.build({
     entrypoints: [
       workflow === 'unsupported'

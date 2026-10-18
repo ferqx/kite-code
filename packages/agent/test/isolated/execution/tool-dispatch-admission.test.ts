@@ -1,9 +1,8 @@
 import { expect, test } from 'bun:test';
-import { mkdtempSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { rmSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
 import { createFixedModel, type ModelEvent } from '@kite-ai/ai';
+import { temporaryDirectory } from '../../../../../tests/fixtures/test-filesystem';
 import { createRuntime } from '../../../src';
 import { createToolDispatchBatch } from '../../../src/execution/tool-dispatch-admission';
 import type { ToolDefinition } from '../../../src/extensions';
@@ -25,7 +24,7 @@ async function eventually<T>(read: () => Promise<T | undefined>): Promise<T> {
   }
 }
 async function fixture(tools: ToolDefinition[], ask: boolean, planReadOnly = false) {
-  const root = mkdtempSync(join(tmpdir(), 'kite-tool-admission-'));
+  const root = temporaryDirectory('kite-tool-admission-');
   const store = await openSqliteStore({ dataRoot: root, profile: 'admission' });
   const model = createFixedModel([
     [

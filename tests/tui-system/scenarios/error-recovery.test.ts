@@ -92,7 +92,7 @@ describe('TUI PTY System — Error Recovery', () => {
       expect(screenContains(output, 'MODEL_ATTEMPT_RETRYABLE_FAILURE:provider_unavailable')).toBe(
         true,
       );
-      expect(server.getRequestCount()).toBe(5);
+      expect(server.getWorkRequestCount()).toBe(5);
     },
     TIMEOUT,
   );

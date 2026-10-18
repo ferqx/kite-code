@@ -2,7 +2,6 @@ import type { ContextSource, SourceRequest } from '../context';
 import type { PermissionControlRead } from '../storage/port';
 import type {
   ArtifactScope,
-  CommandRecord,
   ExecutionOutputPage,
   ExecutionStatus,
   ExtensionRecord,
@@ -15,9 +14,7 @@ import type {
   OperationRequest,
   RequirementEvaluation,
   RequirementRef,
-  RunRecord,
   RunStatus,
-  SessionRecord,
 } from '../storage/types';
 import type { AgentOperationView } from './task/port';
 
@@ -143,16 +140,18 @@ export interface JobDefinition {
   reconcile?(reference: Json, context: JobReconcileContext): Promise<JobReconcileResult>;
 }
 export type { CompletionDirective, CompletionGovernance, MutationGovernance } from './governance';
+export type {
+  LifecycleAction,
+  LifecycleHooks,
+  LifecycleObserver,
+  ModelSettledEvent,
+  ModelStartedEvent,
+  RunBoundaryEvent,
+  RunSettledEvent,
+  RunStartedEvent,
+} from './lifecycle';
 export interface Extension {
-  /** Pure selection of an ordinary, globally registered Action for a Run boundary. */
-  readonly runLifecycle?: {
-    prepare(event: {
-      readonly phase: 'before_start' | 'before_complete';
-      readonly command: Readonly<CommandRecord>;
-      readonly session: Readonly<SessionRecord>;
-      readonly run: Readonly<RunRecord> | null;
-    }): Promise<{ actionId: string; definitionVersion: string; input: Json } | null>;
-  };
+  readonly lifecycle?: import('./lifecycle').LifecycleHooks;
   readonly compression?: import('../context').ContextCompressor;
   readonly mutationGovernance?: import('./governance').MutationGovernance;
   readonly completionGovernance?: import('./governance').CompletionGovernance;

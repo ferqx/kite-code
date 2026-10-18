@@ -47,6 +47,13 @@ import type {
 import { sealForkRule } from './extensions/fork';
 import { type PublicForkInput, prepareNamespaceFork } from './extensions/fork-preparation';
 import { ExtensionHost } from './extensions/host';
+import {
+  LifecycleObservers,
+  modelSettledEvent,
+  modelStartedEvent,
+  runSettledEvent,
+  runStartedEvent,
+} from './extensions/lifecycle';
 import { canonicalJson, semanticDigest } from './json';
 import { defaultLoop, type LoopContext, recordToolOutcome, type ToolFailureStreak } from './loop';
 import { type ModelRetrySource, modelRetryReason, waitForModelRetry } from './model-attempt';
@@ -174,9 +181,7 @@ function sealExtension(extension: Extension): Extension {
       : {}),
     ...(extension.conditions ? { conditions: Object.freeze({ ...extension.conditions }) } : {}),
     ...(extension.context ? { context: Object.freeze({ ...extension.context }) } : {}),
-    ...(extension.runLifecycle
-      ? { runLifecycle: Object.freeze({ ...extension.runLifecycle }) }
-      : {}),
+    ...(extension.lifecycle ? { lifecycle: Object.freeze({ ...extension.lifecycle }) } : {}),
     tools: Object.freeze(definitions(extension.tools) ?? []),
     jobs: Object.freeze(definitions(extension.jobs) ?? []),
     actions: Object.freeze(definitions(extension.actions) ?? []),
@@ -419,6 +424,7 @@ export type RuntimeShutdownResult =
     };
 
 export class AgentRuntime {
+  private readonly lifecycleObservers = new LifecycleObservers();
   readonly supportsSelectedSkills: boolean;
   readonly supportsExtensionInputs: boolean;
   private readonly instanceId: string;
@@ -629,6 +635,25 @@ export class AgentRuntime {
       toolContext: (scope, definition, executionId, source) =>
         this.extensionHost.toolContext(scope, definition, executionId, source),
       onLiveExecution: (id, scope, controller) => this.trackExecution(id, scope, controller),
+      onModelStart: (scope, execution) => {
+        const extensions = scope.bindings?.extensions ?? this.extensions;
+        if (!extensions.some((extension) => extension.lifecycle?.onModelStart)) return;
+        const event = modelStartedEvent(execution);
+        for (const extension of extensions) {
+          const observer = extension.lifecycle?.onModelStart;
+          if (observer) this.lifecycleObservers.publish(observer, event);
+        }
+      },
+      onModelSettled: (scope, execution) => {
+        const extensions = scope.bindings?.extensions ?? this.extensions;
+        if (!extensions.some((extension) => extension.lifecycle?.onModelEnd)) return;
+        const event = modelSettledEvent(execution);
+        if (!event) return;
+        for (const extension of extensions) {
+          const observer = extension.lifecycle?.onModelEnd;
+          if (observer) this.lifecycleObservers.publish(observer, event);
+        }
+      },
       admitJob: (definition, scope) =>
         this.childAdmissions.get(definition)?.(scope) ?? Promise.resolve(undefined),
       validateArtifacts: async (scope, references) => {
@@ -4539,15 +4564,22 @@ export class AgentRuntime {
       if (!deferred && this.reportBindings.delete(command.id)) await retained.release();
     }
   }
-  private async runLifecycle(
-    phase: 'before_start' | 'before_complete',
+  private async runLifecycleActions(
+    hook: 'beforeRun' | 'beforeRunComplete',
     origin: CommandRecord,
     owner: OwnerRef,
     run: RunRecord | null,
     controller = new AbortController(),
   ): Promise<void> {
+    // Pair both business hooks on explicit input. Internal child.start/job.report
+    // Runs have observations, but cannot recursively dispatch lifecycle Actions.
+    if (origin.kind !== 'run.start' && origin.kind !== 'input.follow_up') return;
+    // These persisted keys predate the public callback names. Keep their original
+    // values so a rename cannot create a second Command for already accepted work.
+    const phase = hook === 'beforeRun' ? 'before_start' : 'before_complete';
     for (const extension of this.extensions) {
-      if (!extension.runLifecycle) continue;
+      const prepare = extension.lifecycle?.[hook];
+      if (!prepare) continue;
       const commandId = `lifecycle-${await semanticDigest({ phase, commandId: origin.id, extensionId: extension.id })}`;
       let command = await this.options.store.getCommand(commandId);
       if (command && command.status !== 'accepted') continue;
@@ -4560,9 +4592,8 @@ export class AgentRuntime {
         if (!command) {
           const session = await this.options.store.getSession(origin.sessionId);
           if (!session) throw new AgentError('session_not_found');
-          const selected = await extension.runLifecycle.prepare(
+          const selected = await prepare(
             freeze({
-              phase,
               command: structuredClone(origin),
               session: structuredClone(session),
               run: run ? structuredClone(run) : null,
@@ -4624,7 +4655,7 @@ export class AgentRuntime {
     let run: RunRecord;
     let preparationResources: RunConfiguration | undefined;
     try {
-      await this.runLifecycle('before_start', command, owner, null);
+      await this.runLifecycleActions('beforeRun', command, owner, null);
       let snapshot: Json = null;
       if (
         (command.kind === 'run.start' || command.kind === 'input.follow_up') &&
@@ -4891,6 +4922,16 @@ export class AgentRuntime {
     };
     armDeadline();
     try {
+      if (!resumed) {
+        const extensions = binding.extensions ?? this.extensions;
+        if (extensions.some((extension) => extension.lifecycle?.onRunStart)) {
+          const event = runStartedEvent(run);
+          for (const extension of extensions) {
+            const observer = extension.lifecycle?.onRunStart;
+            if (observer) this.lifecycleObservers.publish(observer, event);
+          }
+        }
+      }
       if (run.deadlineAt !== null && run.deadlineAt <= Date.now()) await expire();
       if ((await this.options.store.getRun(run.id))?.status === 'cancelling')
         controller.abort(new AgentError('cancel_requested'));
@@ -5826,7 +5867,7 @@ export class AgentRuntime {
             if (resultChanged) continue complete;
             if (!completionLifecycleDispatched) {
               completionLifecycleDispatched = true;
-              await this.runLifecycle('before_complete', command, owner, run, controller);
+              await this.runLifecycleActions('beforeRunComplete', command, owner, run, controller);
               controller.signal.throwIfAborted();
             }
             try {
@@ -6143,6 +6184,23 @@ export class AgentRuntime {
     } finally {
       if (deadlineTimer) clearTimeout(deadlineTimer);
       await expiry?.catch(() => {});
+      const extensions = binding.extensions ?? this.extensions;
+      if (extensions.some((extension) => extension.lifecycle?.onRunEnd)) {
+        // Observe the original durable outcome, including early compression returns.
+        // Unconfirmed terminal writes must never invent a successful notification.
+        try {
+          const settled = await this.options.store.getRun(run.id);
+          const event = settled ? runSettledEvent(settled) : null;
+          if (event) {
+            for (const extension of extensions) {
+              const observer = extension.lifecycle?.onRunEnd;
+              if (observer) this.lifecycleObservers.publish(observer, event);
+            }
+          }
+        } catch {
+          // Observation cannot replace the original execution failure.
+        }
+      }
       release();
       await releaseBinding().catch((error) => {
         if (resumed) this.runResumeCleanupFailed = true;
@@ -6438,6 +6496,7 @@ export class AgentRuntime {
     await options.beforeResourceClose?.();
     this.resourceAdmissionClosed = true;
     if (this.resourceUsers) await new Promise<void>((resolve) => this.resourceWaiters.add(resolve));
+    this.lifecycleObservers.close();
     await this.options.artifacts?.close();
     await this.options.store.close();
     // A poisoned transaction cannot commit an owner-release write. Only the exact

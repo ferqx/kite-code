@@ -518,9 +518,11 @@ describe('TUI PTY System — MCP Select management', () => {
 
     expect(toolCalls).toBe(1);
     expect(screenContains(tui.viewport(), '❯')).toBe(true);
-    const requests = server.getRequests();
+    const requests = server.getWorkRequests();
     expect(requests).toHaveLength(3);
-    expect(JSON.stringify(requests[0]?.body)).toContain('mcp.tools.search');
+    expect(requests[0]?.body.tools).toContainEqual(
+      expect.objectContaining({ function: expect.objectContaining({ name: 'mcp_tools_search' }) }),
+    );
     // Small catalogs (≤ 20 tools) bind directly alongside tool_search, so the
     // MCP tool name may appear in the first request's tool list in 'all' mode.
     const discovered = requests[1]?.messages
@@ -563,7 +565,7 @@ describe('TUI PTY System — MCP Select management', () => {
     );
 
     expect(toolCalls).toBeGreaterThanOrEqual(2);
-    const continuedRequests = server.getRequests();
+    const continuedRequests = server.getWorkRequests();
     expect(continuedRequests).toHaveLength(5);
     expect(JSON.stringify(continuedRequests[4]?.messages)).toContain('provider_unavailable');
 
@@ -583,7 +585,7 @@ describe('TUI PTY System — MCP Select management', () => {
     expect(resourceConversation).not.toContain(
       'LangGraph resource content from MCP resources/read.',
     );
-    const resourceRequests = server.getRequests();
+    const resourceRequests = server.getWorkRequests();
     expect(resourceRequests).toHaveLength(8);
     expect(JSON.stringify(resourceRequests[7]?.messages)).toContain(
       'LangGraph resource content from MCP resources/read.',
@@ -599,7 +601,7 @@ describe('TUI PTY System — MCP Select management', () => {
       'RESOURCE_FAILURE_RECOVERED: the conversation continued after the read error.',
       20_000,
     );
-    const failureRequests = server.getRequests();
+    const failureRequests = server.getWorkRequests();
     expect(failureRequests).toHaveLength(10);
     expect(JSON.stringify(failureRequests[9]?.messages)).toContain('mcp_descriptor_stale');
     expect(resourceReads).toBe(1);
@@ -645,12 +647,12 @@ describe('TUI PTY System — MCP Select management', () => {
     expect(JSON.parse(actual[0]!.result_json)).toMatchObject({ outcome: 'outcome_unknown' });
     expect(failedTransportCalls).toBe(1);
     expect(toolCalls).toBe(beforeFailure + 1);
-    expect(server.getRequestCount()).toBe(11);
+    expect(server.getWorkRequestCount()).toBe(11);
     await waitForText(() => tui!.viewport(), '未知 — 核实原任务', 5_000);
     expect(
       screenContains(tui.viewport(), 'Outcome unknown; original work remains unverified.'),
     ).toBe(true);
-    expect(server.getRequestCount()).toBe(11);
+    expect(server.getWorkRequestCount()).toBe(11);
     expect(failedTransportCalls).toBe(1);
   }, 40_000);
 });

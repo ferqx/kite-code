@@ -367,7 +367,7 @@ describe('TUI PTY System — Sub-agent Approval Cancellation', () => {
       expect(screenContains(approvalFrame, '工具授权')).toBe(true);
       expect(screenContains(approvalFrame, 'Working')).toBe(false);
       expect(screenContains(approvalFrame, 'cancelled-subagent-write')).toBe(true);
-      const requestCountBeforeAction = server.getRequestCount();
+      const requestCountBeforeAction = server.getWorkRequestCount();
 
       if (action === 'reject') {
         tui.write('\x1b[B');
@@ -400,10 +400,10 @@ describe('TUI PTY System — Sub-agent Approval Cancellation', () => {
       expect(existsSync(externalFile)).toBe(false);
       // Cancellation/rejection is terminal for this fixture; a parent model
       // continuation would consume a third response and fail cleanup.
-      if (server.getRequestCount() !== requestCountBeforeAction) {
+      if (server.getWorkRequestCount() !== requestCountBeforeAction) {
         console.log(
           'unexpected child cancellation continuation',
-          server.getRequests().map((request) => request.messages.at(-1)),
+          server.getWorkRequests().map((request) => request.messages.at(-1)),
         );
         const observation = new Database(workspace.databasePath, { readonly: true });
         try {
@@ -415,7 +415,7 @@ describe('TUI PTY System — Sub-agent Approval Cancellation', () => {
           observation.close();
         }
       }
-      expect(server.getRequestCount()).toBe(requestCountBeforeAction);
+      expect(server.getWorkRequestCount()).toBe(requestCountBeforeAction);
 
       const persisted = requirePersistedRuntimeReady(observePersistedTurnEvents(workspace, prompt));
       expect(persisted).toBeDefined();
@@ -712,7 +712,7 @@ describe('TUI PTY System — Sub-agent Read File Flow', () => {
         console.log('  output after read timeout:', stripAnsi(tui.viewport()).slice(-4000));
         console.log(
           '  model requests after read timeout:',
-          server.getRequests().map((request) => request.messages.at(-1)),
+          server.getWorkRequests().map((request) => request.messages.at(-1)),
         );
         throw error;
       }
@@ -830,7 +830,7 @@ describe('TUI PTY System — Sub-agent Multi-round Natural Summary', () => {
 
       const output = stripAnsi(tui.scrollback());
       expect(summaryRetainedReadCapability).toBe(true);
-      expect(server.getRequestCount()).toBe(EXPLORATION_FIXTURE_READS + 3);
+      expect(server.getWorkRequestCount()).toBe(EXPLORATION_FIXTURE_READS + 3);
       expect(output).toContain('BOUNDED_PARENT_FINAL');
       expect(output).not.toContain('Working');
       expect(output).not.toContain('Cancellation was not accepted');
@@ -1018,7 +1018,7 @@ describe('TUI PTY System — Concurrent Sub-agent Cancellation Queue', () => {
       });
       await waitForText(() => tui.outputSinceLastAction(), 'Delegating · 4 agents', TIMEOUT);
       await waitForCondition(
-        () => server.getRequestCount() === 6,
+        () => server.getWorkRequestCount() === 6,
         'an empty child search result to reach the next model request',
         TIMEOUT,
       );
@@ -1074,7 +1074,7 @@ describe('TUI PTY System — Concurrent Sub-agent Cancellation Queue', () => {
       await waitForCondition(
         () =>
           server
-            .getRequests()
+            .getWorkRequests()
             .slice(queued.requestBaseline)
             .some((request) =>
               request.messages.some(

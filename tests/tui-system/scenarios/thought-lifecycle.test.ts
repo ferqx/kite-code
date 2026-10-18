@@ -967,7 +967,7 @@ describe('TUI PTY System — Thought Lifecycle', () => {
       await submitUserMessage(tui, server, '了解当前项目', { timeout: 15_000 });
 
       await waitForCondition(
-        () => server.getRequestCount() === 5,
+        () => server.getWorkRequestCount() === 5,
         'real-session final model request',
         20_000,
       );

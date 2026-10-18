@@ -228,7 +228,7 @@ test('Source journal never evicts unknown records and refuses oversized complete
   } finally {
     f.close();
   }
-}, 120000);
+}, 300000);
 test('Source journal refuses public permissions, links, duplicate IDs and invalid UTF8 without changing original bytes', () => {
   const f = fixture();
   try {

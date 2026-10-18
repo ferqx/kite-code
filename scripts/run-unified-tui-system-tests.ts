@@ -1,4 +1,5 @@
 import { basename, relative, resolve } from 'node:path';
+import { withTestRuntime } from './test-environment';
 import { planTestSuites, runTestPlan } from './test-plan';
 import { collectTestFiles, testParallelism } from './test-suite';
 
@@ -89,9 +90,14 @@ export async function runUnifiedTuiSystemTests(
   return await runTestPlan(root, plan, concurrency);
 }
 
-if (import.meta.main)
-  process.exitCode = await runUnifiedTuiSystemTests(
-    resolve(import.meta.dir, '..'),
-    process.argv.slice(2),
-    process.env[UNIFIED_TUI_SHARD_ENV],
-  );
+if (import.meta.main) {
+  const args = process.argv.slice(2);
+  const run = () =>
+    runUnifiedTuiSystemTests(
+      resolve(import.meta.dir, '..'),
+      args,
+      process.env[UNIFIED_TUI_SHARD_ENV],
+    );
+  process.exitCode =
+    args.length === 0 ? await withTestRuntime(import.meta.filename, args, run) : await run();
+}

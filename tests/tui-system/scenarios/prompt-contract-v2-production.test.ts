@@ -140,8 +140,8 @@ describe('TUI PTY System — production Prompt Contract V2', () => {
       expect(actual!.events.filter((event) => event.type === 'run.finished')).toEqual([
         expect.objectContaining({ type: 'run.finished', status: 'completed' }),
       ]);
-      expect(server.getRequestCount()).toBe(6);
-      const request = server.getRequests()[0];
+      expect(server.getWorkRequestCount()).toBe(6);
+      const request = server.getWorkRequests()[0];
       expect(request).toBeDefined();
       const messages = request!.messages.map((message) => ({
         role: message.role,
@@ -170,7 +170,7 @@ describe('TUI PTY System — production Prompt Contract V2', () => {
       expect(runtimeMessages[0]!.role).toBe('user');
       expect(runtimeMessages[0]!.content).toContain('phase: planning');
       expect(messages.at(-1)?.content).toBe(runtimeMessages[0]!.content);
-      const approved = server.getRequests()[2]!;
+      const approved = server.getWorkRequests()[2]!;
       expect(approved.body.tools).toEqual(request!.body.tools);
       expect(approved.messages.filter((message) => message.role === 'system')).toEqual(
         request!.messages.filter((message) => message.role === 'system'),
@@ -178,7 +178,7 @@ describe('TUI PTY System — production Prompt Contract V2', () => {
       expect(String(approved.messages.at(-1)?.content)).toContain('phase: building');
       expect(
         server
-          .getRequests()
+          .getWorkRequests()
           .flatMap((item) => item.messages)
           .some(
             (message) =>

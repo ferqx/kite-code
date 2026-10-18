@@ -4,7 +4,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { createFixedModel } from '@kite-ai/ai';
-import type { Extension } from '../../../src/extensions';
+import type { Extension, RunBoundaryEvent } from '../../../src/extensions';
+import { semanticDigest } from '../../../src/json';
 import { createRuntime } from '../../../src/runtime';
 import { openSqliteStore } from '../../../src/sqlite';
 import type { Store } from '../../../src/storage/port';
@@ -32,24 +33,30 @@ test.each([
   const profile = { dataRoot: join(root, 'data'), profile: 'test' };
   const store = await openSqliteStore(profile);
   const observed: string[] = [];
+  const prepare = async (phase: 'before_start' | 'before_complete', event: RunBoundaryEvent) => {
+    expect(Object.isFrozen(event)).toBe(true);
+    expect(Object.isFrozen(event.command)).toBe(true);
+    expect(event.command.id).toBe('work');
+    expect(event.command.request).toMatchObject({ content: 'Original input' });
+    if (phase === 'before_start') expect(event.run).toBeNull();
+    else expect(event.run?.isActive).toBe(true);
+    observed.push(phase);
+    return {
+      actionId: 'record',
+      definitionVersion: '1',
+      input: { phase, commandId: event.command.id },
+    };
+  };
   const extension: Extension = {
     id: 'lifecycle.fixture',
     version: '1',
     apiMajor: 1,
-    runLifecycle: {
-      async prepare(event) {
-        expect(Object.isFrozen(event)).toBe(true);
-        expect(Object.isFrozen(event.command)).toBe(true);
-        expect(event.command.id).toBe('work');
-        expect(event.command.request).toMatchObject({ content: 'Original input' });
-        if (event.phase === 'before_start') expect(event.run).toBeNull();
-        else expect(event.run?.isActive).toBe(true);
-        observed.push(event.phase);
-        return {
-          actionId: 'record',
-          definitionVersion: '1',
-          input: { phase: event.phase, commandId: event.command.id },
-        };
+    lifecycle: {
+      beforeRun(event) {
+        return prepare('before_start', event);
+      },
+      beforeRunComplete(event) {
+        return prepare('before_complete', event);
       },
     },
     records: [{ contentType: 'fixture.lifecycle', contentVersion: 1, schema: { type: 'object' } }],
@@ -154,6 +161,12 @@ test.each([
     });
     expect(observed).toEqual(expectedPhases);
     for (const phase of expectedPhases) {
+      // Public callback names must not change the original durable operation identity.
+      const commandId = `lifecycle-${await semanticDigest({ phase, commandId: 'work', extensionId: extension.id })}`;
+      expect(await store.getCommand(commandId)).toMatchObject({
+        id: commandId,
+        request: { kind: 'extension.invoke', extensionId: extension.id, actionId: 'record' },
+      });
       const record = await store.getExtensionRecord({
         extensionId: extension.id,
         sessionId: 's',

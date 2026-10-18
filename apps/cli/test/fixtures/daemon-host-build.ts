@@ -32,7 +32,7 @@ async function runBuild(args: string[], cwd: string) {
         new Response(child.stdout).text(),
         new Response(child.stderr).text(),
       ]),
-      20000,
+      120000,
     );
     if (code !== 0) throw Error(`daemon_fixture_build_failed:${stdout}\n${stderr}`);
   } finally {

@@ -103,7 +103,7 @@ describe('TUI PTY System — Tool Parse Error', () => {
       // TUI must still be alive with prompt
       expect(screenContains(output, '❯')).toBe(true);
       expect(screenContains(output, 'Kernel recovered after the invalid tool input.')).toBe(true);
-      const recovered = server.getRequests()[1]!;
+      const recovered = server.getWorkRequests()[1]!;
       expect(
         recovered.messages.filter(
           (message) => message.role === 'tool' && message.tool_call_id === 'call_1',
@@ -142,7 +142,7 @@ describe('TUI PTY System — Tool Parse Error', () => {
           .query("SELECT id FROM execution WHERE session_id=? AND run_id=? AND kind='job'")
           .all(original!.threadId, original!.turnId),
       ).toHaveLength(0);
-      expect(server.getRequestCount()).toBe(2);
+      expect(server.getWorkRequestCount()).toBe(2);
     },
     TIMEOUT,
   );
@@ -164,7 +164,7 @@ describe('TUI PTY System — Tool Parse Error', () => {
 
       const output = tui.viewport();
       expect(screenContains(output, 'Recovery message after parse error!')).toBe(true);
-      expect(server.getRequestCount()).toBe(3);
+      expect(server.getWorkRequestCount()).toBe(3);
       expect(screenContains(output, '❯')).toBe(true);
     },
     TIMEOUT,

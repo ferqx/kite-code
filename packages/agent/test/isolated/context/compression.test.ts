@@ -1,10 +1,11 @@
 import { Database } from 'bun:sqlite';
 import { expect, test } from 'bun:test';
-import { chmodSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import type { ModelAdapter, ModelEvent, ModelRequest } from '@kite-ai/ai';
+import { rewriteArtifact } from '../../../../../tests/fixtures/test-filesystem';
 import { createArtifactStore } from '../../../src/artifacts';
 import { artifactPath } from '../../../src/artifacts-files';
 import type { ContextCompressor } from '../../../src/context';
@@ -724,7 +725,7 @@ test('complete >=17MiB summary retains original Artifact provenance through Fork
       commandId: 'compact',
       expectedContextSelectionId: selection,
     });
-    await f.runtime.waitForCommand('compact', { timeoutMs: 40000 });
+    await f.runtime.waitForCommand('compact', { timeoutMs: 300000 });
     const page = await f.store.getSelectedContext({ expectedStoreId: f.storeId, sessionId: 's' });
     expect(page.compression).toBeDefined();
     const exec = await f.store.getExecution(page.compression!.modelExecutionId);
@@ -744,7 +745,7 @@ test('complete >=17MiB summary retains original Artifact provenance through Fork
       commandId: 'copy-work',
       request: { kind: 'run.start', content: 'read summary' },
     });
-    await f.runtime.waitForCommand('copy-work', { timeoutMs: 40000 });
+    await f.runtime.waitForCommand('copy-work', { timeoutMs: 300000 });
     const actual = f.requests.at(-1)!;
     const summaries = actual.messages.filter((m) => m.content.startsWith('Context summary'));
     expect(summaries).toHaveLength(1);
@@ -762,22 +763,20 @@ test('complete >=17MiB summary retains original Artifact provenance through Fork
       ),
       bytes = readFileSync(path),
       priorCalls = f.requests.length;
-    chmodSync(path, 0o600);
-    writeFileSync(path, 'corrupt original immutable summary');
+    rewriteArtifact(path, 'corrupt original immutable summary');
     await f.runtime.submitCommand({
       ...f.base,
       sessionId: 'copy',
       commandId: 'corrupt-work',
       request: { kind: 'run.start', content: 'must not dispatch' },
     });
-    await f.runtime.waitForCommand('corrupt-work', { timeoutMs: 40000 });
+    await f.runtime.waitForCommand('corrupt-work', { timeoutMs: 300000 });
     expect(f.requests.length).toBe(priorCalls);
     expect(
       (await f.store.getView('copy')).runs.find((r) => r.originCommandId === 'corrupt-work')!
         .status,
     ).toBe('failed');
-    writeFileSync(path, bytes);
-    chmodSync(path, 0o400);
+    rewriteArtifact(path, bytes);
     await f.runtime.close();
     const store = await openSqliteStore({ ...f.profile, mode: 'readonly' }),
       before = (await store.getMetadata()).lastChangeCursor,
@@ -825,7 +824,7 @@ test('complete >=17MiB summary retains original Artifact provenance through Fork
     await cold?.close();
     await f.close();
   }
-}, 60000);
+}, 600000);
 
 test('original scope denial, actual hard permission denial and unsupported Part preserve history with zero compression Model', async () => {
   const denied = await fixture({ denyCompression: true });

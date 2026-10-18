@@ -1,14 +1,6 @@
 import { expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
-import {
-  mkdirSync,
-  mkdtempSync,
-  readFileSync,
-  realpathSync,
-  rmSync,
-  symlinkSync,
-  writeFileSync,
-} from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -18,7 +10,7 @@ import { selectProfile } from '@kite-ai/agent/profile';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import type { Store } from '@kite-ai/agent/storage';
 import { launchPairedService } from '@kite-ai/service/paired';
-import { privateDirectory } from '../../../../tests/fixtures/test-filesystem';
+import { directoryLink, privateDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { ownedUserConfiguration } from '../../../service/test/fixtures/user-configuration-fixture';
 import { buildNativeDesktop } from '../../scripts/build-native';
 
@@ -254,17 +246,15 @@ test.skipIf(process.platform !== 'darwin')(
       child = undefined;
       await reader.close();
       reader = undefined;
-      symlinkSync(
+      directoryLink(
         resolve(import.meta.dir, '../../../../node_modules'),
         join(root, 'node_modules'),
-        'dir',
       );
       const serviceOutdir = join(root, 'apps/service/dist');
       mkdirSync(serviceOutdir, { recursive: true });
-      symlinkSync(
+      directoryLink(
         resolve(import.meta.dir, '../../../service/node_modules'),
         join(root, 'apps/service/node_modules'),
-        'dir',
       );
       const built = await Bun.build({
         entrypoints: [resolve(import.meta.dir, '../../../service/src/main.ts')],

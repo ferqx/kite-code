@@ -222,7 +222,7 @@ describe('TUI PTY System — cancel shell then render successor', () => {
         25,
       );
 
-      const successorRequestBaseline = server.getRequestCount();
+      const successorRequestBaseline = server.getWorkRequestCount();
       // Workspace-baseline Shell executes directly in Auto. The cancelled run
       // therefore made exactly one primary-model request and no reviewer call.
       expect(successorRequestBaseline).toBe(1);
@@ -238,7 +238,7 @@ describe('TUI PTY System — cancel shell then render successor', () => {
       // the terminal projection. Its durable receipt is the absence of a
       // second model request during this cleanup window.
       await tuiSystemDelay(250);
-      expect(server.getRequestCount()).toBe(successorRequestBaseline);
+      expect(server.getWorkRequestCount()).toBe(successorRequestBaseline);
 
       await waitForRequestMessage(server, 'continue with successor', 15_000, {
         since: successorRequestBaseline,

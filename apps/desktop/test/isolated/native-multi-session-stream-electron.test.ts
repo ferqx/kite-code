@@ -1,12 +1,12 @@
 import { expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
-import { mkdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
-import { temporaryDirectory } from '../../../../tests/fixtures/test-filesystem';
+import { directoryLink, temporaryDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { ownedUserConfiguration } from '../../../service/test/fixtures/user-configuration-fixture';
 import {
   buildMixedShellSupervisor,
@@ -340,10 +340,9 @@ test.skipIf(process.platform !== 'darwin')(
       );
       const serviceOutdir = join(root, 'apps/service/dist');
       mkdirSync(serviceOutdir, { recursive: true });
-      symlinkSync(
+      directoryLink(
         resolve(import.meta.dir, '../../../service/node_modules'),
         join(root, 'apps/service/node_modules'),
-        'dir',
       );
       const serviceEntrypoint = join(serviceOutdir, 'service.js'),
         bunExecutable = realpathSync(process.execPath);
@@ -425,10 +424,9 @@ await runServiceProcess({ configure: (startup, host) => ({ ...createDefaultProce
           })
         ).success,
       ).toBe(true);
-      symlinkSync(
+      directoryLink(
         resolve(import.meta.dir, '../../../../node_modules'),
         join(root, 'node_modules'),
-        'dir',
       );
       driver = Bun.spawn(
         [

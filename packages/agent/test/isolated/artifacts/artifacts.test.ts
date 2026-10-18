@@ -16,6 +16,7 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { type ArtifactStore, createArtifactStore } from '../../../src/artifacts';
 import { artifactPath } from '../../../src/artifacts-files';
 import { openSqliteStore } from '../../../src/sqlite';
@@ -288,7 +289,7 @@ test('original session/subject and exact execution/message scope are verified, r
 
 test('two real processes publish one immutable hash and original ref without temp leaks', async () => {
   const f = await fixture();
-  const child = new URL('./publish-child.ts', import.meta.url).pathname;
+  const child = fileURLToPath(new URL('./publish-child.ts', import.meta.url));
   const children = [0, 1].map(() =>
     Bun.spawn([process.execPath, child, f.profile.dataRoot], { stdout: 'pipe', stderr: 'pipe' }),
   );

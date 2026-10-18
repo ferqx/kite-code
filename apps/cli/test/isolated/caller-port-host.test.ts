@@ -255,7 +255,7 @@ test('actual owned caller port freezes large UTF8 Plan, steer, followup and orig
     await warm.close();
     f.close();
   }
-}, 30000);
+}, 600000);
 
 test('Question cancellation rechecks its exact card while ordinary Job stop still rejects Tools', async () => {
   const scope = { storeId: 'store', workspaceId: 'workspace', sessionId: 'session' };

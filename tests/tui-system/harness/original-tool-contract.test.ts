@@ -1,9 +1,11 @@
 import { expect, test } from 'bun:test';
+import { createHash } from 'node:crypto';
 import { mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { Json, ToolContext } from '@kite-ai/agent/extensions';
 import { createFileTools, createWorkspaceFiles } from '@kite-ai/agent/files';
+import { sessionTitleInstructions } from '../../../packages/agent/src/business/session-title/title';
 import { createMockModelServer, parseDraftSavedPlan } from './fixtures';
 import { migrateOriginalToolCall } from './original-tool-contract';
 
@@ -154,4 +156,82 @@ test('new planning identity is decoded without inventing legacy outcome text', (
     parseDraftSavedPlan(JSON.stringify({ planId: 'original', version: 3, digest: 'a'.repeat(64) })),
   ).toEqual({ plan_id: 'original', version: 3, structural_digest: 'a'.repeat(64) });
   expect(() => parseDraftSavedPlan(JSON.stringify({ accepted: true }))).toThrow();
+});
+
+test('automatic title requests remain visible without consuming ordinary work responses', async () => {
+  const server = createMockModelServer();
+  server.setResponses([{ message: { content: 'ORIGINAL_WORK_RESULT' } }]);
+  const invoke = (messages: Array<{ role: string; content: string }>) =>
+    fetch(`${server.baseURL}/chat/completions`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ messages, tools: [], stream: false }),
+    });
+  try {
+    const title = await invoke([
+      { role: 'system', content: sessionTitleInstructions },
+      { role: 'user', content: 'Original topic' },
+    ]);
+    expect(title.status).toBe(200);
+    expect((await title.json()).choices[0].message.content).toBe('测试会话');
+    expect(server.getRequestCount()).toBe(1);
+    expect(server.getWorkRequestCount()).toBe(0);
+    const work = await invoke([{ role: 'user', content: 'Original work' }]);
+    expect((await work.json()).choices[0].message.content).toBe('ORIGINAL_WORK_RESULT');
+    expect(server.getRequestCount()).toBe(2);
+    expect(server.getRequests()).toHaveLength(2);
+    expect(server.getWorkRequests()).toHaveLength(1);
+    expect(server.hasRequestMessage('Original work', 0, 'work')).toBe(true);
+    expect(() => server.assertComplete()).not.toThrow();
+  } finally {
+    server.stop();
+  }
+});
+
+test('MCP fixture keeps the full original definition across an unambiguous SDK wire name and rejects ambiguous aliases', async () => {
+  const { root, scope } = await ownedFixture();
+  const serverId = 'a'.repeat(64),
+    remoteName = 'remote echo';
+  const definition = `mcp.${serverId}.${createHash('sha256').update(JSON.stringify(remoteName)).digest('hex').slice(0, 32)}`;
+  const wire = definition.replace(/\./g, '_').slice(0, 64);
+  const call = {
+    id: 'original-call',
+    name: `mcp__closed__${remoteName}`,
+    args: { text: 'original' },
+  };
+  const request = {
+    body: { tools: [{ type: 'function', function: { name: wire } }] },
+    messages: [
+      {
+        role: 'user',
+        content: JSON.stringify({
+          source: 'mcp_selected_connection_refs',
+          connections: [
+            {
+              serverId,
+              serverName: 'closed',
+              connectionKey: 'original-connection',
+              configDigest: 'original-digest',
+              generation: 1,
+            },
+          ],
+        }),
+      },
+    ],
+  };
+  try {
+    expect(await migrateOriginalToolCall(call, scope, request)).toEqual({
+      ...call,
+      name: definition,
+    });
+    await expect(
+      migrateOriginalToolCall(call, scope, { ...request, messages: [] }),
+    ).rejects.toThrow('original_mcp_tool_source_unavailable');
+    request.body.tools.push({ type: 'function', function: { name: `${wire.slice(0, 62)}_1` } });
+    await expect(migrateOriginalToolCall(call, scope, request)).rejects.toThrow(
+      'original_mcp_tool_source_unavailable',
+    );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
 });

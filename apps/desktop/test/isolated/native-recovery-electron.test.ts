@@ -1,7 +1,8 @@
 import { expect, test } from 'bun:test';
-import { realpathSync, symlinkSync } from 'node:fs';
+import { realpathSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { join, resolve } from 'node:path';
+import { directoryLink } from '../../../../tests/fixtures/test-filesystem';
 import { buildNativeDesktop } from '../../scripts/build-native';
 
 const require = createRequire(import.meta.url);
@@ -46,10 +47,9 @@ for (const kind of ['run', 'interrupt', 'report'])
           naming: 'driver.js',
         });
         if (!built.success) throw new AggregateError(built.logs, 'native_driver_build');
-        symlinkSync(
+        directoryLink(
           resolve(import.meta.dir, '../../../../node_modules'),
           join(f.root, 'node_modules'),
-          'dir',
         );
         const processDriver = Bun.spawn(
           [

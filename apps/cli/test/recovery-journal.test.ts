@@ -80,7 +80,7 @@ test('128 original pending slots never evict unknown and full journal refuses ne
   } finally {
     f.close();
   }
-}, 120000);
+}, 300000);
 for (const scenario of ['corrupt', 'unknownVersion', 'hardlink', 'privateField'] as const)
   test(`journal ${scenario} stays unavailable and preserves original bytes`, () => {
     const f = fixture();

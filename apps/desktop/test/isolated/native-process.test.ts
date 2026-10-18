@@ -1,9 +1,9 @@
 import { expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
-import { readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { selectProfile } from '@kite-ai/agent/profile';
-import { temporaryDirectory } from '../../../../tests/fixtures/test-filesystem';
+import { directoryLink, temporaryDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { parseNativeAssets } from '../../electron/native-assets';
 import { decodeNativeRequest } from '../../electron/native-ipc';
 import { buildNativeDesktop } from '../../scripts/build-native';
@@ -26,11 +26,7 @@ test('actual Node paired spawn uses the one public launcher with private bootstr
   const serviceEntry = realpathSync(resolve(import.meta.dir, '../../../service/dist/main.js'));
   const bunExecutable = realpathSync(process.execPath);
   const profile = selectProfile({ dataRoot: join(root, 'data'), profile: 'native' });
-  symlinkSync(
-    resolve(import.meta.dir, '../../../../node_modules'),
-    join(root, 'node_modules'),
-    'dir',
-  );
+  directoryLink(resolve(import.meta.dir, '../../../../node_modules'), join(root, 'node_modules'));
   const entry = join(root, 'entry.ts'),
     output = join(root, 'node-main.js');
   writeFileSync(

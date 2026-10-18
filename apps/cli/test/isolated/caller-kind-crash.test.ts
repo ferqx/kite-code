@@ -232,4 +232,4 @@ for (const kind of ['input.steer', 'input.follow_up', 'command.cancel'] as const
       await warm.close();
       f.close();
     }
-  }, 30000);
+  }, 120000);

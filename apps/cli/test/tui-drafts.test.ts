@@ -1,24 +1,19 @@
 import { expect, test } from 'bun:test';
-import {
-  chmodSync,
-  linkSync,
-  mkdtempSync,
-  readFileSync,
-  realpathSync,
-  rmSync,
-  symlinkSync,
-  writeFileSync,
-} from 'node:fs';
-import { tmpdir } from 'node:os';
+import { linkSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { createProfileBackup } from '@kite-ai/agent/maintenance';
 import { acquireProfileAccess, acquireProfileDataLock } from '@kite-ai/agent/profile-access';
-import { privateDirectory } from '../../../tests/fixtures/test-filesystem';
+import {
+  fixturePermissions,
+  privateDirectory,
+  recordReparseEntry,
+  temporaryDirectory,
+} from '../../../tests/fixtures/test-filesystem';
 import { createTuiDraftPort } from '../host/tui-draft-port';
 import { openTuiDraftFile, TuiDraftError } from '../host/tui-drafts';
 
 function fixture() {
-  const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-tui-draft-')));
+  const root = temporaryDirectory('kite-tui-draft-');
   const profile = { dataRoot: join(root, 'data'), profile: 'draft' };
   const access = acquireProfileAccess(profile);
   privateDirectory(access.profilePath);
@@ -119,7 +114,7 @@ test('malformed, links, permissions and capacity fail without recreating or trun
       expect(readFileSync(f.path, 'utf8')).toBe(bytes);
     }
     rmSync(f.path);
-    symlinkSync(join(f.root, 'missing'), f.path);
+    recordReparseEntry(join(f.root, 'missing'), f.path);
     expect(() => f.open().save(scope, '0', 'new')).toThrow('tui_draft_storage_unavailable');
     expect(() => readFileSync(f.path)).toThrow();
     rmSync(f.path);
@@ -129,9 +124,9 @@ test('malformed, links, permissions and capacity fail without recreating or trun
     linkSync(f.path, join(f.root, 'hard'));
     expect(() => file.load(scope)).toThrow('tui_draft_storage_unavailable');
     rmSync(join(f.root, 'hard'));
-    chmodSync(f.path, 0o644);
+    fixturePermissions(f.path, 0o644);
     expect(() => file.load(scope)).toThrow('tui_draft_storage_unavailable');
-    chmodSync(f.path, 0o600);
+    fixturePermissions(f.path, 0o600);
     expect(() => file.save(scope, '1', 'x'.repeat(17 * 1024 * 1024))).toThrow(
       'tui_draft_capacity_exceeded',
     );

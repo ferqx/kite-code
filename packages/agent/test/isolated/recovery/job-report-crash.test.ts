@@ -2,6 +2,7 @@ import { expect, test } from 'bun:test';
 import { mkdtempSync, readFileSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { createRuntime } from '../../../src/runtime';
 import { openSqliteStore } from '../../../src/sqlite';
 import { crashReportOptions } from './job-report-crash-child';
@@ -42,7 +43,7 @@ test('owned SIGKILL after accepted report preserves cold reads and explicit repo
   const child = Bun.spawn(
     [
       process.execPath,
-      new URL('./job-report-crash-child.ts', import.meta.url).pathname,
+      fileURLToPath(new URL('./job-report-crash-child.ts', import.meta.url)),
       root,
       ledger,
     ],

@@ -1,6 +1,7 @@
 import { expect, test } from 'bun:test';
 import { rmSync } from 'node:fs';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { createRuntime, type ModelOutputSnapshot } from '@kite-ai/agent';
 import { createProfileBackup } from '@kite-ai/agent/maintenance';
 import { selectProfile } from '@kite-ai/agent/profile';
@@ -48,7 +49,7 @@ test('unconfirmed Service Store close retains original ownership until its proce
     child = Bun.spawn(
       [
         process.execPath,
-        new URL('../fixtures/store-close-ownership-child.ts', import.meta.url).pathname,
+        fileURLToPath(new URL('../fixtures/store-close-ownership-child.ts', import.meta.url)),
         root,
       ],
       { stdin: 'pipe', stdout: 'pipe', stderr: 'pipe' },

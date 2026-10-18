@@ -1,6 +1,11 @@
 import { createHash } from 'node:crypto';
 import { type ModelAdapter, ModelAttemptError } from '@kite-ai/ai';
-import { type AuthorizationRequest, defineExtension, type Json } from '../../extensions';
+import {
+  type AuthorizationRequest,
+  defineExtension,
+  type Json,
+  type RunBoundaryEvent,
+} from '../../extensions';
 import type {
   AgentRuntime,
   ChildAgentConfiguration,
@@ -64,25 +69,30 @@ export function createSessionTitleExtension(options: {
       return null;
     return { command, session, content: fields(command.request).content as string };
   };
+  const lifecycleAction = (actionId: 'fallback' | 'generate', event: RunBoundaryEvent) => {
+    if (event.command.kind !== 'run.start' || event.session.parentSessionId !== null) return null;
+    if (
+      actionId === 'fallback' &&
+      (event.session.title !== '' || event.session.controlRevision !== '0')
+    )
+      return null;
+    if (actionId === 'generate' && event.session.controlRevision !== '1') return null;
+    return {
+      actionId,
+      definitionVersion: '1',
+      input: { commandId: event.command.id, ...(event.run ? { runId: event.run.id } : {}) },
+    };
+  };
   const extension = defineExtension({
     id: extensionId,
     version: '1',
     apiMajor: 1,
-    runLifecycle: {
-      async prepare(event) {
-        if (event.command.kind !== 'run.start' || event.session.parentSessionId !== null)
-          return null;
-        if (
-          event.phase === 'before_start' &&
-          (event.session.title !== '' || event.session.controlRevision !== '0')
-        )
-          return null;
-        if (event.phase === 'before_complete' && event.session.controlRevision !== '1') return null;
-        return {
-          actionId: event.phase === 'before_start' ? 'fallback' : 'generate',
-          definitionVersion: '1',
-          input: { commandId: event.command.id, ...(event.run ? { runId: event.run.id } : {}) },
-        };
+    lifecycle: {
+      async beforeRun(event) {
+        return lifecycleAction('fallback', event);
+      },
+      async beforeRunComplete(event) {
+        return lifecycleAction('generate', event);
       },
     },
     records: [

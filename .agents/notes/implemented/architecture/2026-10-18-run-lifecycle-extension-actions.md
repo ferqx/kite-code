@@ -12,7 +12,7 @@ Status: implemented
 
 ## Decision
 
-全局注册的 Extension 通过纯 `runLifecycle.prepare` 在 `before_start` 或 `before_complete` 选择自身已注册 Action。Core 只提供冻结的真实事件、稳定 Command ID 去重，并通过原受管 Action carrier 执行；没有命名开关或模型用途分支。启动前 Action 在模型解析前完成，因此配置缺失也可保存兜底；完成前 Action 在原 Run 最后 CAS 前等待，CLI 读取终态后退出不会抢先取消命名。最终 CAS 的输入／义务核对继续独立执行。
+全局注册的 Extension 通过纯 `lifecycle.beforeRun/beforeRunComplete` 分别在显式 run.start/input.follow_up 的启动前和正常完成前按注册顺序选择自身已注册 Action。内部 child.start 激活与自动 job.report 不进入这两个业务阶段，防止 Action 创建的 child 从完成钩子递归调度自身；这些 Run 的通用 start/end 观察仍存在。Core 只提供冻结的真实事件、稳定 Command ID 去重，并通过原受管 Action carrier 执行；没有命名开关或模型用途分支。启动前 Action 在模型解析前完成，因此配置缺失也可保存兜底；完成前 Action 在原 Run 最后 CAS 前等待，CLI 读取终态后退出不会抢先取消命名。最终 CAS 的输入／义务核对继续独立执行。
 
 SQLite 消息写入不再推导标题或隐式增加控制修订；首条消息自动改名的旧 helper 已删除。未装配命名扩展时，普通 Store 写入保持原标题，只有显式 rename 命令能改名。
 
@@ -21,6 +21,8 @@ SQLite 消息写入不再推导标题或隐式增加控制修订；首条消息�
 普通扩展子 Agent 增加显式 `resultDelivery:caller`：真实结果交由调用扩展消费，不自动投递下一主模型；成功、失败和取消状态保持，复用原 delivery suppressed／caller_owned。该选项封存于原命令并参与幂等冲突，Host 和 Store 都拒绝非 Agent、必要结果义务和 after-turn 报告等矛盾组合。省略字段保持原自动投递。
 
 标题输出保存在内部子会话，扩展验证单行、可读且不超过10码点后，复用原主体和 Session revision CAS 改名。可重试模型错误在这个业务 adapter 中终止一次命名请求，不改 Core 的普通重试合同；10秒发起准确取消，收尾核实原 child 状态，未知保持 unknown。主业务结果独立于普通生命周期 Action 的失败；历史读取和后续输入不会补发标题请求。
+
+公开回调已按用户后续要求统一为 Extension.lifecycle 的 beforeRun/beforeRunComplete，不再依赖传入 phase 分支；原 before_start/before_complete 仍只作为持久命令 key，保证旧操作的 Command ID 与幂等关系不变。通用 onRunStart/onRunEnd、onModelStart/onModelEnd 只读事件与平铺执行规则见[生命周期观察决定](2026-10-18-settled-lifecycle-observers.md)。
 
 ## Alternatives considered
 
