@@ -52,10 +52,10 @@ export async function fileRecoveryProfile(input: { secondMutation?: boolean } = 
       const read = body.messages.filter((m) => m.role === 'tool').at(-1);
       const call =
         n === 0 || (input.secondMutation && n === 3)
-          ? { name: 'files.read', input: { path: 'original.txt', limit: 1000 } }
+          ? { name: 'read_file', input: { path: 'original.txt', max_lines: 1000 } }
           : n === 1 || (input.secondMutation && n === 4)
             ? {
-                name: 'files.write',
+                name: 'write_file',
                 input: {
                   path: 'original.txt',
                   content: n === 1 ? 'actual changed bytes\r\n' : 'later actual Run bytes\r\n',
@@ -214,6 +214,11 @@ export async function compileFileRecoveryTUI(root: string, runner: string) {
       {
         name: 'fixture-file-url',
         setup(build) {
+          // Avoid Bun's external export-star namespace bug while retaining one installed Ink context.
+          build.onResolve({ filter: /^@kite-ai\/ui\/tui\/ink$/ }, () => ({
+            path: 'ink',
+            external: true,
+          }));
           build.onResolve({ filter: /^file:/ }, ({ path }) => ({ path: fileURLToPath(path) }));
         },
       },

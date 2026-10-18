@@ -107,13 +107,13 @@ test.skipIf(process.platform !== 'darwin')(
                 id: `task-${index}`,
                 type: 'function',
                 function: {
-                  name: 'task',
+                  name: 'spawn_agent',
                   arguments: JSON.stringify({
                     key: `child-${index}`,
                     role: 'worker',
                     input: { content },
                     cancellation: 'detached',
-                    resultDisposition: 'required',
+                    result_disposition: 'required',
                   }),
                 },
               })),

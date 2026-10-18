@@ -74,13 +74,13 @@ test.skipIf(process.platform !== 'darwin')(
       expect(paths.every((path) => !path.startsWith('../'))).toBe(true);
       const calls = [
         {
-          name: 'files.write',
+          name: 'write_file',
           input: { path: 'neighbor.txt', base: null, content: '实际邻居 UTF8 😀\r\n' },
         },
-        { name: 'files.read', input: { path: 'neighbor.txt' } },
+        { name: 'read_file', input: { path: 'neighbor.txt' } },
         ...paths.flatMap((path) => [
-          { name: 'files.read', input: { path } },
-          { name: 'files.write', input: { path, base: null, content: 'MUST NEVER REPLACE ASSET' } },
+          { name: 'read_file', input: { path } },
+          { name: 'write_file', input: { path, base: null, content: 'MUST NEVER REPLACE ASSET' } },
         ]),
       ];
       provider = Bun.serve({

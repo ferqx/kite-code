@@ -14,7 +14,11 @@ import {
   requestDaemonBootstrap,
   selectDaemonEndpoint,
 } from '@kite-ai/service/daemon';
-import { privateDirectory, temporaryDirectory } from '../../../../tests/fixtures/test-filesystem';
+import { sessionTitleInstructions } from '../../../../packages/agent/src/business/session-title/title';
+import {
+  privateDirectory,
+  temporarySocketDirectory,
+} from '../../../../tests/fixtures/test-filesystem';
 import { runSelectedCLI } from '../../host';
 import { runSelectedDaemon } from '../../host/daemon';
 import { selectWorkflowActivations } from '../../host/workflow-activations';
@@ -35,7 +39,8 @@ let root: string, entry: string;
 const cleanups = new Set<() => Promise<void>>();
 beforeAll(async () => {
   if (!supportsDaemonFixture) return;
-  root = realpathSync(temporaryDirectory('kite-shared-skills-'));
+  // The UUID-scoped socket must fit macOS's original 103-byte Unix address budget.
+  root = temporarySocketDirectory('kite-shared-skills-');
   const built = await buildOwnedDaemon(join(root, 'artifact'));
   const result = await Bun.build({
     entrypoints: [
@@ -79,13 +84,28 @@ async function fixture(workflow?: 'enabled' | 'disabled' | 'structured') {
   let stopDaemon: (() => Promise<unknown>) | undefined;
   const entered = gate(),
     release = gate();
-  const requests: { messages: OriginalMessage[] }[] = [];
+  const requests: { messages: OriginalMessage[]; tools?: unknown[] }[] = [];
+  let titleCalls = 0;
   const issuedCalls = new Map<string, string>();
   const provider = Bun.serve({
     hostname: '127.0.0.1',
     port: 0,
     async fetch(request) {
       const body = (await request.json()) as (typeof requests)[number];
+      if (
+        body.messages.some(
+          (message) => message.role === 'system' && message.content === sessionTitleInstructions,
+        )
+      ) {
+        titleCalls++;
+        expect(body.tools ?? []).toEqual([]);
+        const chunk = (delta: unknown, finish_reason: string | null) =>
+          `data: ${JSON.stringify({ id: 'title', object: 'chat.completion.chunk', model: 'fixture', choices: [{ index: 0, delta, finish_reason }] })}\n\n`;
+        return new Response(
+          `${chunk({ content: 'Shared run' }, null)}${chunk({}, 'stop')}data: [DONE]\n\n`,
+          { headers: { 'content-type': 'text/event-stream' } },
+        );
+      }
       requests.push(body);
       const text = JSON.stringify(body.messages);
       const db = new Database(profile.databasePath, { readonly: true });
@@ -144,7 +164,7 @@ async function fixture(workflow?: 'enabled' | 'disabled' | 'structured') {
                         name: 'complete_skill',
                         arguments: JSON.stringify({ activation_id: 'manual-1', output: {} }),
                       }
-                    : { name: 'skills.load', arguments: JSON.stringify({ id: chosen }) },
+                    : { name: 'load_skill', arguments: JSON.stringify({ skill_id: chosen }) },
               },
             ],
           };
@@ -153,7 +173,7 @@ async function fixture(workflow?: 'enabled' | 'disabled' | 'structured') {
           `load-${requests.length}`,
           workflow && text.includes('SHARED_WORKFLOW_INLINE_ORIGINAL_BODY')
             ? 'complete_skill'
-            : 'skills.load',
+            : 'load_skill',
         );
       const held = !toolReply && text.includes('HOLD_ALPHA');
       return new Response(
@@ -427,6 +447,7 @@ async function fixture(workflow?: 'enabled' | 'disabled' | 'structured') {
       client,
       storeId,
       requests,
+      titleCalls: () => titleCalls,
       entered,
       release,
       session,
@@ -694,6 +715,7 @@ nativeTest(
       });
       expect(reply.stderr).toBe('');
       expect(f.requests.length).toBe(2);
+      expect(f.titleCalls()).toBe(1);
       expect(JSON.stringify(f.requests[0]!.messages)).toContain(
         'SHARED_WORKFLOW_INLINE_ORIGINAL_BODY',
       );

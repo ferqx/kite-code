@@ -82,7 +82,7 @@ test('80x24 source-free MCP selection and clear preserve original pending work a
                   id: 'original-write',
                   type: 'function',
                   function: {
-                    name: 'files.write',
+                    name: 'write_file',
                     arguments: JSON.stringify({
                       path: calls === 2 ? 'effect.txt' : 'effect-next.txt',
                       base: null,

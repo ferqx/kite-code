@@ -11,7 +11,6 @@ import {
   symlinkSync,
   writeFileSync,
 } from 'node:fs';
-import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -21,10 +20,12 @@ import { getLoadedSqliteEngine, initializeSqliteEngine } from '@kite-ai/agent/sq
 import { ClientError, createClient } from '@kite-ai/client';
 import { launchPairedService } from '@kite-ai/service/paired';
 import { privateDirectory } from '../../../../tests/fixtures/test-filesystem';
+import { serviceBundledDependencies } from '../../../service/bundled-dependencies';
 import type { CLIServiceArtifact } from '../../host';
 import { verifyTerminalBundle } from '../../host/terminal-artifact';
 import { decodeMcpAuthFact } from '../../host/tui-mcp-auth';
 import { decodeMcpSourcePage } from '../../host/tui-mcp-source-approval';
+import { installedDependency, verifyBuiltDependency } from '../fixtures/built-dependency-proof';
 
 const repo = resolve(import.meta.dir, '../../../..');
 const sha = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('hex');
@@ -60,15 +61,6 @@ type Wire = {
     decision?: string;
   };
 };
-function installed(name: string, owner: string) {
-  for (const search of createRequire(join(owner, 'package.json')).resolve.paths(
-    `${name}/package.json`,
-  ) ?? []) {
-    const path = join(search, name, 'package.json');
-    if (existsSync(path)) return JSON.parse(readFileSync(path, 'utf8')) as { version: string };
-  }
-  throw Error('owned_declared_dependency_missing');
-}
 
 test('80x24 real OAuth Auth Actions preserve original IDs and cold removed source history is explicit GET-only', async () => {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-tui-mcp-auth-')));
@@ -269,9 +261,16 @@ test('80x24 real OAuth Auth Actions preserve original IDs and cold removed sourc
     const dependencyVersions: Record<string, string> = {};
     for (const [name, range] of Object.entries(declared.dependencies ?? {})) {
       if (range.startsWith('workspace:')) continue;
-      const expected = installed(name, serviceOwner).version;
-      expect(installed(name, serviceBuilt).version).toBe(expected);
-      dependencyVersions[name] = expected;
+      const expected = installedDependency(name, serviceOwner);
+      expect(
+        verifyBuiltDependency(
+          name,
+          serviceBuilt,
+          expected,
+          serviceBundledDependencies.includes(name),
+        ),
+      ).toEqual(expected);
+      dependencyVersions[name] = expected.version;
     }
     privateFile(join(evidence, 'service-dependencies.json'), dependencyVersions);
     symlinkSync(

@@ -322,18 +322,18 @@ async function fixture(script: (step: number, f: Fixture) => Promise<Call>) {
 type Fixture = Awaited<ReturnType<typeof fixture>>;
 
 async function planScript(step: number, f: Fixture): Promise<Call> {
-  if (step === 0) return { name: 'files.read', input: { path: 'original.txt' } };
+  if (step === 0) return { name: 'read_file', input: { path: 'original.txt' } };
   if (step === 1)
     return {
-      name: 'files.write',
+      name: 'write_file',
       input: { path: 'before.txt', content: 'must be refused', base: null },
     };
   if (step === 2)
     return {
-      name: 'planning.write',
+      name: 'write_plan',
       input: {
-        planId: 'plan',
-        expectedVersion: null,
+        plan_id: 'plan',
+        expected_version: null,
         title: 'Owned plan',
         body: 'One precise write 中文',
         steps: [{ id: 'a', title: 'Write once' }],
@@ -342,12 +342,12 @@ async function planScript(step: number, f: Fixture): Promise<Call> {
   const current = (await f.record('plan.current'))?.value as Record<string, Json>;
   if (step === 3)
     return {
-      name: 'planning.review',
-      input: { planId: current.planId!, version: current.version!, digest: current.digest! },
+      name: 'request_plan_review',
+      input: { plan_id: current.planId!, version: current.version!, digest: current.digest! },
     };
   if (step === 4)
     return {
-      name: 'files.write',
+      name: 'write_file',
       input: { path: 'after.txt', content: 'approved actual effect', base: null },
     };
   if (step === 5) {
@@ -360,17 +360,17 @@ async function planScript(step: number, f: Fixture): Promise<Call> {
     );
     if (!write) return null;
     return {
-      name: 'planning.update',
+      name: 'update_plan_progress',
       input: {
-        runId: run.id,
-        planId: current.planId!,
+        run_id: run.id,
+        plan_id: current.planId!,
         version: current.version!,
         digest: current.digest!,
-        expectedProgressRevision: null,
-        stepId: 'a',
+        expected_progress_revision: null,
+        step_id: 'a',
         status: 'completed',
-        executionId: write.id,
-        completePlan: true,
+        execution_id: write.id,
+        complete_plan: true,
       },
     };
   }
@@ -382,7 +382,7 @@ test('actual Service per-Run planning blocks Full writes before approval, permit
     f.workId === 'work'
       ? planScript(step, f)
       : step === 0
-        ? { name: 'files.write', input: { path: `${f.workId}.txt`, content: f.workId, base: null } }
+        ? { name: 'write_file', input: { path: `${f.workId}.txt`, content: f.workId, base: null } }
         : null,
   );
   try {

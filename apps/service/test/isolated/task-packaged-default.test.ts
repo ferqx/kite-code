@@ -117,7 +117,7 @@ test('source-free default Task preserves full child result and emits exactly one
             role: 'worker',
             input: { content: 'PACKAGED_CHILD_INPUT' },
             cancellation: 'detached',
-            resultDisposition: disposition,
+            result_disposition: disposition,
           };
         content = 'PACKAGED_PARENT_DONE';
       }
@@ -128,7 +128,7 @@ test('source-free default Task preserves full child result and emits exactly one
                 index: 0,
                 id: `task-${disposition}`,
                 type: 'function',
-                function: { name: 'task', arguments: JSON.stringify(selected) },
+                function: { name: 'spawn_agent', arguments: JSON.stringify(selected) },
               },
             ],
           }
@@ -409,7 +409,7 @@ test('source-free default Task preserves full child result and emits exactly one
       });
       expect(childInput.runId).toBe(childView.runs[0]!.id);
       expect(childInput.request.modelId).toBe('fixed');
-      expect(childInput.request.tools.map((tool) => tool.id)).toContain('task');
+      expect(childInput.request.tools.map((tool) => tool.id)).toContain('spawn_agent');
       if (scenario === 'after_turn') {
         const reportRun = view.runs.find((run) => run.originCommandId !== work)!;
         const reportCommand = await client.getCommand(reportRun.originCommandId);

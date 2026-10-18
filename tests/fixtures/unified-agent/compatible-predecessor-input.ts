@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { matchReviewedPredecessorInput } from './predecessor-reviewed-input';
 
 /** First merged real code with both reviewed workspace declarations and recovery-audit schema. */
 export const COMPATIBLE_PREDECESSOR_COMMIT = '4a4c0e440b2098e5b4ec58c5831452773b39228f';
@@ -27,16 +28,22 @@ export const COMPATIBLE_PREDECESSOR_MIGRATIONS = [
 ] as const;
 const sha256 = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('hex');
 
-/** No legacy refinement or platform source-entry exception applies to this predecessor. */
+/** Raw identity or one closed, explicitly reviewed raw pair; SQL never receives an exception. */
 export function assertCompatiblePredecessorLockedInput(
   path: string,
   previous: Uint8Array,
   current: Uint8Array,
 ) {
   const migration = COMPATIBLE_PREDECESSOR_MIGRATIONS.find((item) => item.path === path);
+  const allowed = COMPATIBLE_PREDECESSOR_INPUT_PATHS.some((input) => input === path);
+  const identical = Buffer.from(previous).equals(Buffer.from(current));
+  const reviewed =
+    allowed && !identical
+      ? matchReviewedPredecessorInput('compatible', path, previous, current)
+      : undefined;
   if (
-    (!COMPATIBLE_PREDECESSOR_INPUT_PATHS.some((input) => input === path) && !migration) ||
-    !Buffer.from(previous).equals(Buffer.from(current)) ||
+    (!allowed && !migration) ||
+    (!identical && !reviewed) ||
     (migration && sha256(previous) !== migration.sha256)
   )
     throw Error(`compatible_predecessor_input_changed:${path}`);
@@ -44,7 +51,7 @@ export function assertCompatiblePredecessorLockedInput(
     path,
     sha256: sha256(previous),
     currentSha256: sha256(current),
-    match: 'identical' as const,
+    match: reviewed?.match ?? ('identical' as const),
   };
 }
 export function assertCompatiblePredecessorInputPaths(paths: readonly string[]) {

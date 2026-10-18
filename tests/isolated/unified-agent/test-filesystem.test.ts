@@ -1,5 +1,7 @@
 import { expect, test } from 'bun:test';
+import { randomUUID } from 'node:crypto';
 import { lstatSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -10,6 +12,7 @@ import {
   expectPrivateMode,
   fixturePermissions,
   temporaryDirectory,
+  temporarySocketDirectory,
 } from '../../fixtures/test-filesystem';
 
 test('scratch roots use the actual OS temp directory and preserve private ownership and file URL bytes', () => {
@@ -35,6 +38,32 @@ test('scratch roots use the actual OS temp directory and preserve private owners
   } finally {
     rmSync(first, { recursive: true, force: true });
     rmSync(second, { recursive: true, force: true });
+  }
+});
+
+test('owned socket roots preserve private canonical paths and bind UUID-scoped Unix addresses', async () => {
+  const root = temporarySocketDirectory('kite-socket-');
+  const server = createServer();
+  try {
+    expect(realpathSync.native(root)).toBe(root);
+    expectPrivateMode(root, 0o700);
+    if (process.platform === 'win32') {
+      expect(dirname(root)).toBe(realpathSync.native(tmpdir()));
+    } else {
+      const socket = join(root, `${randomUUID()}-status.sock`);
+      if (process.platform === 'darwin') expect(Buffer.byteLength(socket)).toBeLessThanOrEqual(103);
+      await new Promise<void>((resolve, reject) => {
+        server.once('error', reject);
+        server.listen(socket, resolve);
+      });
+      expect(server.listening).toBe(true);
+    }
+  } finally {
+    if (server.listening)
+      await new Promise<void>((resolve, reject) =>
+        server.close((error) => (error ? reject(error) : resolve())),
+      );
+    rmSync(root, { recursive: true, force: true });
   }
 });
 

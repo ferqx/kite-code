@@ -84,11 +84,11 @@ export async function recoveryReportProfile() {
                   id: 'original-task',
                   type: 'function',
                   function: {
-                    name: 'task',
+                    name: 'spawn_agent',
                     arguments: JSON.stringify({
                       key: 'original-child',
                       role: 'reader',
-                      resultDisposition: 'after_turn',
+                      result_disposition: 'after_turn',
                       cancellation: 'detached',
                       input: { content: 'Original child effect' },
                     }),

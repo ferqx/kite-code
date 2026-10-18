@@ -10,8 +10,10 @@ import {
   assertCompatiblePredecessorInputPaths,
   assertCompatiblePredecessorLockedInput,
   COMPATIBLE_PREDECESSOR_COMMIT,
+  COMPATIBLE_PREDECESSOR_INPUT_PATHS,
   COMPATIBLE_PREDECESSOR_MIGRATIONS,
 } from './compatible-predecessor-input';
+import { matchReviewedPredecessorInput } from './predecessor-reviewed-input';
 import { matchPredecessorShellParserInput } from './predecessor-shell-parser-input';
 import { matchPredecessorStdioInput } from './predecessor-stdio-input';
 import { refinePredecessorWorkspaceDeclarations } from './predecessor-workspace-declarations';
@@ -84,10 +86,14 @@ export function matchTerminalPredecessorInput(
   | 'shell_parser_and_tui_workspace_dependency_increment'
   | 'tui_workspace_dependency_increment'
   | 'runtime_stdio_and_desktop_development_script_increment'
+  | 'reviewed_locked_input_increment'
   | undefined {
+  if (!COMPATIBLE_PREDECESSOR_INPUT_PATHS.some((input) => input === path)) return undefined;
   const oldBytes = Buffer.from(previous),
     actualBytes = Buffer.from(current);
   if (oldBytes.equals(actualBytes)) return 'identical';
+  const reviewed = matchReviewedPredecessorInput('terminal_legacy', path, previous, current);
+  if (reviewed) return reviewed.match;
   const currentBytes = Buffer.from(
     refinePredecessorWorkspaceDeclarations(path, current)?.bytes ?? current,
   );
@@ -288,6 +294,10 @@ async function materializeTerminalPredecessorVersion(
     commits: string[];
     projectedSha256: string;
   }[] = [];
+  const reviewedInputIncrements: {
+    path: string;
+    evidence: NonNullable<ReturnType<typeof matchReviewedPredecessorInput>>;
+  }[] = [];
   for (const path of inputs) {
     if (!inside(repository, resolve(repository, path)))
       throw Error('terminal_predecessor_input_escape');
@@ -298,9 +308,17 @@ async function materializeTerminalPredecessorVersion(
         : matchTerminalPredecessorInput(path, old, current);
     if (!match) throw Error(`terminal_predecessor_dependency_input_changed:${path}`);
     lockedInputs.push({ path, sha256: sha256(old), currentSha256: sha256(current), match });
-    const refinement = compatible
-      ? undefined
-      : refinePredecessorWorkspaceDeclarations(path, current);
+    const reviewedInput = matchReviewedPredecessorInput(
+      compatible ? 'compatible' : 'terminal_legacy',
+      path,
+      old,
+      current,
+    );
+    if (reviewedInput) reviewedInputIncrements.push({ path, evidence: reviewedInput });
+    const refinement =
+      compatible || reviewedInput
+        ? undefined
+        : refinePredecessorWorkspaceDeclarations(path, current);
     if (refinement)
       reviewedDeclarations.push({
         path,
@@ -477,6 +495,7 @@ for (const path of JSON.parse(workspaceJSON)) {
       productVersion: oldProductVersion as string,
       lockedInputs,
       reviewedDeclarations,
+      reviewedInputIncrements,
       baseline: { path: baseline, sha256: baselineSha256, format: 1 as const },
       schemaCapability: compatible ? ('recovery-audit-v1' as const) : ('baseline-v1' as const),
       migrations,

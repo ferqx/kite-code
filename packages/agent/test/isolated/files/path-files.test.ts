@@ -332,7 +332,7 @@ for (const decision of ['full', 'approve', 'deny'] as const) {
         {
           type: 'tool_call',
           id: 'write',
-          name: 'files.write_path',
+          name: 'write_user_file',
           arguments: JSON.stringify({ path, content: 'actual-runtime', base: null }),
         },
         { ...finish, reason: 'tool_calls' },
@@ -342,14 +342,14 @@ for (const decision of ['full', 'approve', 'deny'] as const) {
         {
           type: 'tool_call',
           id: 'read',
-          name: 'files.read_path',
+          name: 'read_user_file',
           arguments: JSON.stringify({ path }),
         },
         {
           type: 'tool_call',
           id: 'large',
-          name: 'files.read_path',
-          arguments: JSON.stringify({ path: largePath, limit: 120002 }),
+          name: 'read_user_file',
+          arguments: JSON.stringify({ path: largePath, max_lines: 120002 }),
         },
         { ...finish, reason: 'tool_calls' },
       ],

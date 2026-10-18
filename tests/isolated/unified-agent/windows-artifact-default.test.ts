@@ -46,6 +46,7 @@ test('source-free default paired Service seals >64KiB actual Model media and col
         originalCommand: 'applied',
         completeClose: true,
         coldNoNewRecords: true,
+        privateBodyPublicDownloadDenied: true,
       });
       expect(BigInt(result.bodyBytes)).toBeGreaterThan(65536n);
       expect(result.bodyHash).toMatch(/^[a-f0-9]{64}$/);

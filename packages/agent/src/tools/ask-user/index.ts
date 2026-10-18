@@ -88,6 +88,7 @@ function questions(input: Json) {
 export function createAskUserExtension(): Extension {
   const tool: ToolDefinition = {
     id: 'ask_user',
+    model: { name: 'ask_user', snakeCase: true },
     version: '1',
     description:
       'Ask only when a material choice blocks progress. Submit all one to three focused questions in one call using the canonical questions array, each with two to three label/description options. Put the preferred option first; at most one option per question may be recommended=true. Every question also permits free input. Cancelling the answers returns cancelled information and leaves the task running; do not automatically repeat these questions.',

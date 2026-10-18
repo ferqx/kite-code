@@ -20,8 +20,9 @@ export function createMcpToolsSearchTool(
   return {
     id: mcpToolsSearchId,
     version: '1',
+    model: { name: 'search_mcp_tools', snakeCase: true },
     description:
-      'Search this step’s actual selected MCP tool catalogue. Returns exact registered IDs, versions and schemas without connecting or invoking tools.',
+      'Search this step’s actual selected MCP tool catalogue. Returns callable model names, exact registered IDs, versions and schemas without connecting or invoking tools.',
     inputSchema: {
       type: 'object',
       additionalProperties: false,
@@ -66,6 +67,7 @@ export function createMcpToolsSearchTool(
           const row = {
             serverId: source.serverId,
             serverName: source.label,
+            modelName: tool.model?.name ?? tool.id,
             definitionId: tool.id,
             definitionVersion: tool.version,
             ...(source.names?.has(tool.id) ? { remoteName: source.names.get(tool.id)! } : {}),

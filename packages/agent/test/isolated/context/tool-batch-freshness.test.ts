@@ -30,8 +30,8 @@ function calls(...values: { id: string; name: string; path: string }[]): ModelEv
     { ...finish, type: 'finish', reason: 'tool_calls' },
   ];
 }
-const read = (id: string, path: string) => ({ id, name: 'files.read', path });
-const list = (id: string, path: string) => ({ id, name: 'files.list', path });
+const read = (id: string, path: string) => ({ id, name: 'read_file', path });
+const list = (id: string, path: string) => ({ id, name: 'list_directory', path });
 const inputPath = (request: SourceRequest) => {
   const input = request.input;
   return input &&

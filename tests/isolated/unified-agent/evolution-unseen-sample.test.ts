@@ -13,6 +13,7 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
+import { hostBuildEnvironment } from '../../fixtures/build-tool-environment';
 
 const repository = resolve(import.meta.dir, '../../..');
 type Manifest = {
@@ -23,10 +24,15 @@ type Manifest = {
   dependencies?: Record<string, string>;
 };
 const sha = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('hex');
-async function child(command: string[], cwd: string, deadlineMs = 20000) {
+async function child(
+  command: string[],
+  cwd: string,
+  deadlineMs = 20000,
+  env: NodeJS.ProcessEnv = { PATH: globalThis.process.env.PATH ?? '' },
+) {
   const process = Bun.spawn(command, {
     cwd,
-    env: { PATH: globalThis.process.env.PATH ?? '' },
+    env,
     stdout: 'pipe',
     stderr: 'pipe',
   });
@@ -63,7 +69,7 @@ async function build(source: string, destination: string) {
     );
     const index = args.indexOf('--outdir');
     if (index >= 0) args[index + 1] = args[index + 1]!.replace(/^\.\/dist(?=\/|$)/, destination);
-    await child([process.execPath, ...args], source);
+    await child([process.execPath, ...args], source, 20000, hostBuildEnvironment());
   }
   const exports = Object.fromEntries(
     Object.entries(manifest.exports).map(([name, path]) => [

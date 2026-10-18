@@ -4,7 +4,7 @@ import { drizzle } from 'drizzle-orm/bun-sqlite';
 import { verifyPublishedArtifact } from '../../artifacts-files';
 import type { Store } from '../port';
 import { AgentError, type ArtifactReference, type ArtifactScope } from '../types';
-import { isLegacyPublicReviewRequest } from './authorization-review';
+import { isHumanBoundReviewRequest } from './authorization-review';
 import type { SqliteOperations } from './operations';
 import { blobReferences, blobs } from './schema';
 
@@ -134,7 +134,7 @@ export function callArtifact(ops: SqliteOperations, method: string, args: unknow
       const reference = get(ops, input);
       const result =
         method === 'getLegacyReviewArtifactReference' && reference
-          ? isLegacyPublicReviewRequest(ops, reference)
+          ? isHumanBoundReviewRequest(ops, reference)
             ? reference
             : null
           : reference;

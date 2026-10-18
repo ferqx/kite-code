@@ -200,10 +200,13 @@ async function fixture() {
       const step = steps.get(marker) ?? 0;
       steps.set(marker, step + 1);
       const connect = marker.includes('connect'),
-        remote = body.tools?.find((t) => t.function.name.startsWith('mcp.local.'));
+        remote = body.tools?.find((t) => t.function.name.startsWith('mcp_local_'));
       const call =
         connect && step === 0
-          ? { name: 'mcp.connect', arguments: JSON.stringify({ serverId: 'local', key: marker }) }
+          ? {
+              name: 'connect_mcp_server',
+              arguments: JSON.stringify({ server_id: 'local', key: marker }),
+            }
           : step === (connect ? 1 : 0) && remote
             ? { name: remote.function.name, arguments: '{}' }
             : undefined;
@@ -361,7 +364,7 @@ test('default compatible Model learns captured Task tools after connection, ordi
     expect(f.calls).toBe(1);
     expect(f.models.length).toBe(3);
     const second = f.models[1] as { tools: { function: { name: string; parameters: unknown } }[] };
-    expect(second.tools.some((t) => t.function.name.startsWith('mcp.local.'))).toBe(true);
+    expect(second.tools.some((t) => t.function.name.startsWith('mcp_local_'))).toBe(true);
     const job = await f.taskExecution('a');
     const live = await until(
       () => f.store.getExecution(job.id),

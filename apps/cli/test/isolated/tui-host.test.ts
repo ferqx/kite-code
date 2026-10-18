@@ -3,10 +3,12 @@ import { expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
 import {
   existsSync,
+  mkdirSync,
   mkdtempSync,
   readFileSync,
   realpathSync,
   rmSync,
+  symlinkSync,
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -17,6 +19,7 @@ import { launchPairedService } from '@kite-ai/service/paired';
 import { privateDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { ownedUserConfiguration } from '../../../service/test/fixtures/user-configuration-fixture';
 import type { CLIServiceArtifact } from '../../host';
+import { buildOwnedDaemon } from '../fixtures/daemon-host-build';
 
 const repository = resolve(import.meta.dir, '../../../..');
 for (const mode of ['complete', 'cancel', 'eof'] as const) {
@@ -26,7 +29,19 @@ for (const mode of ['complete', 'cancel', 'eof'] as const) {
     privateDirectory(workspace);
     const profile = selectProfile({ dataRoot: join(root, 'data'), profile: 'development' });
     const userConfiguration = ownedUserConfiguration(join(root, 'home'));
-    const entrypoint = join(repository, 'apps/service/dist/main.js');
+    await buildOwnedDaemon(join(root, 'service-artifact'));
+    mkdirSync(join(root, 'apps/service'), { recursive: true });
+    symlinkSync(
+      join(root, 'service-artifact/node_modules/@kite-ai/service'),
+      join(root, 'apps/service/dist'),
+      process.platform === 'win32' ? 'junction' : 'dir',
+    );
+    const developmentEntry = join(root, 'development-tui.ts');
+    writeFileSync(
+      developmentEntry,
+      `import {runDevelopmentTUI as run} from ${JSON.stringify(join(repository, 'scripts/development/unified-tui.ts'))};export function runDevelopmentTUI(input){return run({...input,root:${JSON.stringify(root)}});}`,
+    );
+    const entrypoint = join(root, 'apps/service/dist/main.js');
     const sha = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('hex');
     const entrypointSha256 = sha(readFileSync(entrypoint));
     const artifact: CLIServiceArtifact = {
@@ -82,7 +97,7 @@ for (const mode of ['complete', 'cancel', 'eof'] as const) {
                     id: 'write-original',
                     type: 'function',
                     function: {
-                      name: mode === 'complete' ? 'files.read' : 'files.write',
+                      name: mode === 'complete' ? 'read_file' : 'write_file',
                       arguments: JSON.stringify(
                         mode === 'complete'
                           ? { path: 'source.txt' }
@@ -174,7 +189,7 @@ for (const mode of ['complete', 'cancel', 'eof'] as const) {
       }
       const program = `import os,pty,subprocess,select,time,signal,re,json,sqlite3
 master,slave=pty.openpty()
-p=subprocess.Popen([${JSON.stringify(process.execPath)},${JSON.stringify(join(repository, 'apps/cli/test/fixtures/tui-diagnostics-entry.ts'))},${JSON.stringify(join(repository, 'scripts/development/unified-tui.ts'))},'--workspace',${JSON.stringify(workspace)},'--thread','a','--data-root',${JSON.stringify(join(root, 'data'))}],stdin=slave,stdout=slave,stderr=slave,start_new_session=True)
+p=subprocess.Popen([${JSON.stringify(process.execPath)},${JSON.stringify(join(repository, 'apps/cli/test/fixtures/tui-diagnostics-entry.ts'))},${JSON.stringify(developmentEntry)},'--workspace',${JSON.stringify(workspace)},'--thread','a','--data-root',${JSON.stringify(join(root, 'data'))}],stdin=slave,stdout=slave,stderr=slave,start_new_session=True)
 os.close(slave);buffer=b''
 def wait(text):
  global buffer

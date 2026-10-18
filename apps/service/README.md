@@ -653,7 +653,7 @@ Service 在任何 vault 效果前核完整原 readSet，发现后和 JSONC 短 C
 
 复合发布和原命令选择的取舍见[已实施决定](../../.agents/notes/implemented/architecture/2026-10-06-native-provider-intents-and-next-run-selection.md)。
 
-普通工具的内部 namespace ID 保持不变，实际 compatible 请求中的函数名由 [AI adapter](../../packages/ai/README.md)转换并在返回时还原。`files.read` 不再直接作为远端函数名发送；Core 的定义、权限、ModelInput 和历史仍使用原 ID。[普通 paired 宿主回归](test/isolated/configuration.test.ts)对默认八工具及后续历史请求实施严格 ASCII 函数名校验，核完整 Run、真实项目文件读取与显式禁用；不以单条无工具的真实 Provider 成功代替该路径。
+普通工具的内部 namespace ID、权限和持久执行输入保持不变；[Agent 模型工具表面](../../packages/agent/src/model-tools.README.md)在所有 ModelAdapter 边界统一提供 `read_file` 等公开名称与 snake_case 参数，再将完整调用还原到内部工具。公开 ModelInput 按当时封存的表面重建名称、schema 与历史，内部 assembly/执行仍绑定原 ID/version；[AI adapter](../../packages/ai/README.md)只继续负责通用协议编码。[普通 paired 宿主回归](test/isolated/configuration.test.ts)核真实公开 wire、准确基线编辑、原内部授权与后续历史；[显式真实模型测试](../../tests/e2e/live/model/README.md)另核单一默认模型，不将两类证据混作全部 Provider 资格。
 
 
 [Native MCP 测试装配](test/native-mcp-process.fixture.ts)仅由 Terminal builder 的固定 `native-mcp-loopback` 选项在构建前写入，网络选项和可选公开测试证书均进入 inventory/digest；普通 main/daemon 不选择它。该候选保默认权限、默认 OS vault 和系统 opener，但 loopback/证书网络不是生产默认资格。实际窗口及人工浏览器资格的入口和限制归 [Desktop owner](../desktop/README.md#native-mcp-完整设置)。

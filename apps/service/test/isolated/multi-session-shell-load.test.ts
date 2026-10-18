@@ -77,18 +77,18 @@ function provider(shellCommand: (label: string) => string, slots: number) {
       if (!body.messages.some((message) => message.role === 'tool')) {
         const calls = [
           {
-            name: 'shell.launch',
+            name: 'shell_launch',
             args: { key: `shell-${label}`, command: shellCommand(label), cancellation: 'attached' },
           },
           ...(!isChild
             ? Array.from({ length: 3 }, (_, i) => ({
-                name: 'task',
+                name: 'spawn_agent',
                 args: {
                   key: `task-${root}-${i}`,
                   role: 'worker',
                   input: { content: `MIXED_ROOT_${root} MIXED_CHILD_${root}_${i}` },
                   cancellation: 'attached',
-                  resultDisposition: 'required',
+                  result_disposition: 'required',
                 },
               }))
             : []),
@@ -533,11 +533,49 @@ for (const slots of [4, 16])
         }, 'attached-root-shell-tree-stopped');
         for (const row of ledgers().filter((row) => stopped.has(row.label)))
           expect(!alive(row.pid) && !alive(row.descendantPid)).toBe(true);
-        const target = childItems.find(
-          (item) => labelsBySession.get(item.execution.childSessionId!) === 'child-1-0',
-        )!;
+        const childStopDeadline = Date.now() + 20000;
+        let selectedChild:
+          | {
+              target: BackgroundExecutionItem;
+              label: string;
+              childSessionId: string;
+              parentSessionId: string;
+              shellExecutionId: string;
+            }
+          | undefined;
+        await until(
+          async () => {
+            for (const target of childItems) {
+              const childSessionId = target.execution.childSessionId!;
+              const label = labelsBySession.get(childSessionId)!;
+              if (stopped.has(label)) continue;
+              const ledger = ledgers().find((row) => row.label === label);
+              if (!ledger || ledger.complete) continue;
+              if (!alive(ledger.pid) || !alive(ledger.descendantPid)) continue;
+              const shellExecutionId = jobsByLabel.get(label)!;
+              const shell = await client.getExecution(shellExecutionId);
+              const carrier = await client.getExecution(target.execution.id);
+              if (shell.status !== 'running' || carrier.status !== 'running') continue;
+              ownPids.add(ledger.pid);
+              ownPids.add(ledger.descendantPid);
+              selectedChild = {
+                target,
+                label,
+                childSessionId,
+                parentSessionId: target.execution.sessionId,
+                shellExecutionId,
+              };
+              return true;
+            }
+            return false;
+          },
+          'one-child-shell-tree-ready',
+          Math.max(0, childStopDeadline - Date.now()),
+        );
+        if (!selectedChild) throw Error('mixed_running_child_missing');
+        const { target, label, childSessionId, parentSessionId, shellExecutionId } = selectedChild;
         const childView = async () => {
-          const view = await client.getView(target.execution.childSessionId!);
+          const view = await client.getView(childSessionId);
           return {
             session: view.session,
             runs: view.runs.map(({ id, status, isActive, reason, waitingForResults }) => ({
@@ -552,28 +590,36 @@ for (const slots of [4, 16])
         };
         cancelTrace.push({
           phase: 'before-child-stop',
+          label,
+          childSessionId,
+          parentSessionId,
+          shellExecutionId,
           target: await client.getExecution(target.execution.id),
-          shell: await client.getExecution(jobsByLabel.get('child-1-0')!),
+          shell: await client.getExecution(shellExecutionId),
           view: await childView(),
         });
-        const stopReceipt = await client.cancelExecution('root-1', {
+        const stopReceipt = await client.cancelExecution(parentSessionId, {
           expectedStoreId: storeId,
           commandId: 'stop-one-child-tree',
           kind: 'execution.cancel',
           executionId: target.execution.id,
         });
         cancelTrace.push({ phase: 'child-stop-receipt', receipt: stopReceipt });
-        stopped.add('child-1-0');
-        await until(async () => {
-          const shell = await client.getExecution(jobsByLabel.get('child-1-0')!);
-          cancelTrace.push({
-            phase: 'child-stop-poll',
-            shell,
-            target: await client.getExecution(target.execution.id),
-            view: await childView(),
-          });
-          return shell.status === 'cancelled';
-        }, 'one-child-shell-tree-stopped');
+        stopped.add(label);
+        await until(
+          async () => {
+            const shell = await client.getExecution(shellExecutionId);
+            cancelTrace.push({
+              phase: 'child-stop-poll',
+              shell,
+              target: await client.getExecution(target.execution.id),
+              view: await childView(),
+            });
+            return shell.status === 'cancelled';
+          },
+          'one-child-shell-tree-stopped',
+          Math.max(0, childStopDeadline - Date.now()),
+        );
         const before = new Map(
           ledgers()
             .filter((row) => !stopped.has(row.label))

@@ -7,7 +7,7 @@ import { openSqliteStore, resolveProfile } from '@kite-ai/agent/sqlite';
 import { createFixedModel } from '@kite-ai/ai';
 import { createClient } from '@kite-ai/client';
 import { startService } from '@kite-ai/service';
-import { type PublicAction, PublicViewCard } from '@kite-ai/ui';
+import type { PublicAction } from '@kite-ai/ui';
 import { JSDOM } from 'jsdom';
 import React from 'react';
 import { flushSync } from 'react-dom';
@@ -83,6 +83,7 @@ Object.assign(globalThis, {
   document: dom.window.document,
   HTMLElement: dom.window.HTMLElement,
 });
+const { PublicViewCard } = await import('@kite-ai/ui');
 const element = dom.window.document.getElementById('app')!;
 const ui = createRoot(element);
 let serial = 0;

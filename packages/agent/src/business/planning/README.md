@@ -1,5 +1,7 @@
 # Plan 与确定性验证业务叶子
 
+模型工具使用 `read_plan`、`write_plan`、`request_plan_review`、`update_plan_progress` 与 `define_validation_checks`、`run_validation_checks`、`rebind_validation_checks`、`request_validation_waiver`；自动文件检查公开为 `check_file_changes`。声明过的输入字段通过模型投影使用 snake_case，内部 definition ID/version、计划批准、receipt、权限与最终 CAS 保持原合同。开放 JSON 检查输入与业务 payload 不按字段名猜测改写。
+
 `createPlanningValidation` 显式装配 ordinary Tools、用户 Actions、只读 Query、必要条件 evaluator 与 Run initializer。import 不读文件、不启动 Model/进程。默认未启用计划或 required 验证，普通对话可以直接完成；默认 Service 装配由 Service owner 接入，本叶子的存在不代表正式 UI/默认入口已迁移。
 
 实现使用[公共扩展端口](../../extensions/index.ts)，没有 SQL、Provider、旧 Runtime 或第二 Loop。`requirePlan` 登记 dispatch/completion 义务；`requiredValidation` 登记 completion 义务。`initializeRequirements(input, policy?)` 由可信宿主调用：`policy.requirePlan=true` 仅对原 Run 单调加强，false 不削弱工厂已有要求；`readOnlyDefinitions` 仅接受宿主实际装配并确认只读的 `{kind:'tool',definitionId,definitionVersion}`，封存为准确 Run 的不可变集合，模型输入/JSONC/远端 annotation 不取得此接口。未批准时只允许 Model、原管理 Tools 与准确封存的只读 Tool 派发；只读父 Tool 的普通 Job/child 仍独立受计划门禁，Full 不能绕过。initializer 在首次执行前创建 `run/<actualRunId>/...` 不可变 executable 记录，再由 Core 封存准确 Session/Run/原 Store。关闭后续配置或缺少 evaluator 不能删除已登记要求。

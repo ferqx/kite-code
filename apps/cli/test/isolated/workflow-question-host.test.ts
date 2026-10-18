@@ -442,6 +442,7 @@ for (const decision of ['replan', 'waive'] as const)
       const output = lines.find((line) => line.startsWith('answer {'));
       expect(JSON.parse(output!.slice(7)).content).toBe('WORKFLOW_DECISION_DONE');
       expect(f.requests.length).toBe(decision === 'waive' ? 3 : 4);
+      expect(f.titleRequests).toHaveLength(1);
       expect(JSON.stringify(f.requests[0]!.messages)).toContain(f.instructions);
       expect(readFileSync(f.ledger, 'utf8').trim().split('\n')).toHaveLength(
         decision === 'waive' ? 1 : 2,

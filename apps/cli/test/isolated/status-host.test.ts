@@ -11,7 +11,10 @@ import {
   requestDaemonBootstrap,
   selectDaemonEndpoint,
 } from '@kite-ai/service/daemon';
-import { privateDirectory, temporaryDirectory } from '../../../../tests/fixtures/test-filesystem';
+import {
+  privateDirectory,
+  temporarySocketDirectory,
+} from '../../../../tests/fixtures/test-filesystem';
 import { runSelectedDaemon } from '../../host/daemon';
 import { buildOwnedDaemon } from '../fixtures/daemon-host-build';
 
@@ -21,7 +24,7 @@ const supportsDaemonFixture = ['darwin', 'linux'].includes(process.platform);
 const nativeTest = supportsDaemonFixture ? test : test.skip;
 beforeAll(async () => {
   if (!supportsDaemonFixture) return;
-  root = realpathSync(temporaryDirectory('kite-status-host-'));
+  root = realpathSync(temporarySocketDirectory('kite-status-host-'));
   const old = await buildOwnedDaemon(join(root, 'artifact'));
   const result = await Bun.build({
     entrypoints: [

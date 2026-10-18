@@ -1,6 +1,8 @@
 # Ordinary Shell Tools
 
-`createShellExtension({job})` is a pure factory containing four ordinary Tools and one trusted `shell.command` Job. `shell.launch` calls ordinary `operations.ensure`, then saves an immutable own-record OperationRef. Only the registered Job's `start` may start a process. Import/factory/read/wait never create another manager or restart a cold reference. JSON input contains no cwd, environment, executable or guardian authority.
+模型侧名称为 `shell_execute/shell_launch/shell_read/shell_wait/shell_stop`，仅声明属性投影为 snake_case。前台执行的毫秒期限为 `execution_timeout_ms`，等待的毫秒上限为 `wait_timeout_ms`；后者默认30000，超时不停止 Job。原 `shell.*` 身份、key、权限、Job 和取消证据合同不变。
+
+`createShellExtension({job})` is a pure factory containing five ordinary Tools and one trusted `shell.command` Job. `shell.launch` calls ordinary `operations.ensure`, then saves an immutable own-record OperationRef. Only the registered Job's `start` may start a process. Import/factory/read/wait never create another manager or restart a cold reference. JSON input contains no cwd, environment, executable or guardian authority.
 
 `shell.read` reads the exact own-record ref through generic scoped `operations.readOutput`; pages have fixed 64-bit output cursors/high water and preserve explicit gaps. `shell.wait` timeout leaves the original Job alive. `shell.stop` saves only a cancel-request receipt and the current durable execution fact; it cannot synthesize stopped from acceptance, leader exit or EOF. Actual supervisor `ended`/`unknown` qualification remains in the Job leaf. Original Command retry is an original operation; a new parent execution cannot rebind the same operation key.
 

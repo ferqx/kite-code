@@ -45,7 +45,7 @@ async function fixture(
   const requests: Record<string, unknown>[] = [];
   const authReviews: Record<string, unknown>[] = [];
   const calls: ({ name: string; input: unknown } | undefined)[] = [
-    { name: 'files.write', input: { path: 'output.txt', content: 'exact first', base: null } },
+    { name: 'write_file', input: { path: 'output.txt', content: 'exact first', base: null } },
     undefined,
   ];
   const provider = Bun.serve({

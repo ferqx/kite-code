@@ -219,8 +219,8 @@ async function finished(f: Awaited<ReturnType<typeof setup>>, observation?: Asse
 test('paired default assembly binds real files/source freshness and never dispatches old arguments after permission wait', async () => {
   const started = performance.now();
   const provider = endpoint([
-    { name: 'files.write', input: { path: 'nested/output.txt', content: 'old', base: null } },
-    { name: 'files.write', input: { path: 'nested/output.txt', content: 'new', base: null } },
+    { name: 'write_file', input: { path: 'nested/output.txt', content: 'old', base: null } },
+    { name: 'write_file', input: { path: 'nested/output.txt', content: 'new', base: null } },
   ]);
   const observation = assemblyObservation(() => provider.requests.length, started);
   observation.stage('test.begin');
@@ -267,8 +267,8 @@ test('paired default assembly binds real files/source freshness and never dispat
 
 test('paired Skills load/resource are ordinary Tools and knowledge/source IDs never execute linked scripts', async () => {
   const provider = endpoint([
-    { name: 'skills.load', input: { id: 'guide' } },
-    { name: 'skills.resource', input: { id: 'guide', path: 'scripts/helper.sh' } },
+    { name: 'load_skill', input: { skill_id: 'guide' } },
+    { name: 'read_skill_resource', input: { skill_id: 'guide', path: 'scripts/helper.sh' } },
   ]);
   const f = await setup(provider, ['skills.load', 'skills.resource'], []);
   try {
@@ -311,7 +311,7 @@ test('paired Skills load/resource are ordinary Tools and knowledge/source IDs ne
 });
 
 test('Skill dependency claims do not grant a host capability and unknown selected Tool refuses only its Run', async () => {
-  const provider = endpoint([{ name: 'skills.load', input: { id: 'guide' } }]);
+  const provider = endpoint([{ name: 'load_skill', input: { skill_id: 'guide' } }]);
   const f = await setup(provider, ['skills.load'], []);
   try {
     const skill = join(f.workspace, 'skill');
@@ -355,9 +355,10 @@ test('Skill dependency claims do not grant a host capability and unknown selecte
 
 test('a newly disabled file capability affects the next Run while an admitted waiting Run retains its original binding', async () => {
   const provider = endpoint([
-    { name: 'files.write', input: { path: 'old.txt', content: 'old binding', base: null } },
+    { name: 'write_file', input: { path: 'old.txt', content: 'old binding', base: null } },
     undefined,
     {
+      // Deliberately unavailable identity: rejection preserves its raw name without an alias.
       name: 'files.write',
       input: { path: 'future.txt', content: 'must not dispatch', base: null },
     },
@@ -449,7 +450,7 @@ test('a newly disabled file capability affects the next Run while an admitted wa
     expect(provider.requests[0]!.tools).toContainEqual(
       expect.objectContaining({
         type: 'function',
-        function: expect.objectContaining({ name: 'files_write' }),
+        function: expect.objectContaining({ name: 'write_file' }),
       }),
     );
   } finally {

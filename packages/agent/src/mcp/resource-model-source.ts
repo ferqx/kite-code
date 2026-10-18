@@ -52,15 +52,17 @@ export function createMcpResourceModelSource(input: {
     connections,
     tools: {
       list: {
+        modelName: 'list_mcp_resources',
         definitionId: 'mcp.resources.list',
         definitionVersion: '1',
-        bindingInput: ['serverId', 'connectionKey', 'configDigest', 'generation'],
+        bindingInput: ['server_id', 'connection_key', 'config_digest', 'generation'],
       },
       read: {
+        modelName: 'read_mcp_resource',
         definitionId: 'mcp.resources.read',
         definitionVersion: '1',
-        bindingInput: ['serverId', 'connectionKey', 'configDigest', 'generation'],
-        targetInput: ['uri', 'catalogueExecutionId', 'descriptorDigest'],
+        bindingInput: ['server_id', 'connection_key', 'config_digest', 'generation'],
+        targetInput: ['uri', 'catalogue_execution_id', 'descriptor_digest'],
         catalogueExecutionIdSource: 'list result binding.executionId',
         descriptorDigestSource: 'list result descriptors[].descriptorDigest',
       },

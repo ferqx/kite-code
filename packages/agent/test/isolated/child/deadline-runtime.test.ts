@@ -199,6 +199,13 @@ test('actual macOS timer commits exact Run cancellation and aborts an in-flight 
       ),
     ).toBe(true);
     expect((await f.store.getView('s')).runs[0]!.status).toBe('completed');
+    // The child Run finishes before its parent carrier's separate terminal transaction.
+    // Establish that exact settlement boundary before checking that views stay read-only.
+    const carrier = await fact(async () => {
+      const value = await f.store.getExecution(ref.executionId!);
+      return value?.status === 'cancelled' ? value : undefined;
+    });
+    expect(carrier.status).toBe('cancelled');
     const cursor = (await f.store.getMetadata()).lastChangeCursor;
     await f.runtime.getView(ref.childSessionId!);
     await f.runtime.getView(ref.childSessionId!);

@@ -28,6 +28,7 @@
 - [SQLite 入口](src/sqlite.ts)：显式打开新 profile、一个专用 Worker；macOS 的解析／Store 原 Worker 收尾通过[平台 owner](src/platform/README.md)等待原 Mach 权终态和准确释放，再交接原锁。具体字段和事务由[基线迁移](src/storage/migrations/0001-baseline.sql)、[具名操作](src/storage/sqlite/operations.ts)维护；三端与完整资源门禁仍按进度保留。
 - [Store 目录](src/storage/README.md)：原 Store 与实际 root 创建主体的有限 keyset 分页；Workspace 保持认证 profile 范围，空 Workspace 不依赖 Session 才可见。
 - [唯一 Loop](src/loop.ts)：只使用模型/输入/执行契约；工具参数只有在完整模型响应保存后才能派发。
+- [模型工具表面](src/model-tools.README.md)：leaf 用纯 `ToolDefinition.model` 声明公开名称与字段，UnifiedExecution 在任意 ModelAdapter 边界统一投影、校验并转回原内部输入；内部定义、权限和 baseline/key 保持。历史只记录原公开名称及精简字段映射，Inspector 使用封存的实际工具表面，不从今天目录重建；具体名称表、opaque JSON 与隐藏工具边界归该 owner。
 - [来源入口](src/sources.ts)：宿主显式配置的项目指令适配器，根 import 不读取文件。按可信目标链读取 AGENTS.md/CLAUDE.md 的实际内容摘要，相关新增、修改、删除进入派发前复核。具体 factory 的 disposer 与知识读取作用域保原文件资源到关闭确认；纯 `ContextSources` 及来源身份保持。
 - [文件入口](src/files.ts)与[普通文件 Tools](src/tools/files/README.md)：显式 Workspace 的目录 FD、完整内容基线与精确修改；行读取、glob、查询分页保留明确范围。大正文使用完整 Artifact，显式分页继续保留选择范围。
 - [Files 原生模块](native/files/README.md)：固定 cap-std／napi-rs 的 Node-API 能力 owner，官方 SDK 补齐 Windows 完整身份、句柄发布及关闭未知；build 携带固定原生资产，运行期无编译或旧 FFI 回退。

@@ -115,21 +115,21 @@ export async function openDefaultShellContinuousFixture(root: string, candidateR
         const results = body.messages.slice(last + 1).filter((row) => row.role === 'tool');
         const calls = [
           {
-            name: 'files.write',
+            name: 'write_file',
             input: { path: `effects/${nonce}.txt`, base: null, content: nonce },
           },
           {
-            name: 'task',
+            name: 'spawn_agent',
             input: {
               key: `child-${nonce}`,
               role: 'worker',
               input: { content: `load-child:${nonce}` },
               cancellation: 'attached',
-              resultDisposition: 'required',
+              result_disposition: 'required',
             },
           },
           {
-            name: 'shell.launch',
+            name: 'shell_launch',
             input: {
               key: `shell-${nonce}`,
               command: `${quote(join(candidate.root, candidate.manifest.entries.runtime))} -e ${quote(CONTINUOUS_SHELL_SOURCE)} ${quote(nonce)}`,
@@ -137,8 +137,8 @@ export async function openDefaultShellContinuousFixture(root: string, candidateR
             },
           },
           {
-            name: 'shell.wait',
-            input: { shellId: `shell-${nonce}`, timeoutMs: 4000 },
+            name: 'shell_wait',
+            input: { shell_id: `shell-${nonce}`, wait_timeout_ms: 4000 },
           },
         ];
         const call = child ? undefined : calls[Math.min(results.length, 3)];

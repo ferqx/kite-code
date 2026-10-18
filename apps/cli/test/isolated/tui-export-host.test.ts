@@ -78,7 +78,7 @@ for (const mode of ['complete'] as readonly string[]) {
                     id: 'write-original',
                     type: 'function',
                     function: {
-                      name: mode === 'complete' ? 'files.read' : 'files.write',
+                      name: mode === 'complete' ? 'read_file' : 'write_file',
                       arguments: JSON.stringify(
                         mode === 'complete'
                           ? { path: 'source.txt' }

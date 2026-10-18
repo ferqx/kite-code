@@ -160,7 +160,7 @@ test.skipIf(process.platform !== 'darwin')(
             expect(id).toBeDefined();
             expect(body.tools?.map((tool) => tool.function.name).sort()).toEqual([
               'ask_user',
-              'files.write',
+              'write_file',
             ]);
             if (!body.messages.some((message) => message.role === 'tool')) {
               finish = 'tool_calls';
@@ -171,7 +171,7 @@ test.skipIf(process.platform !== 'darwin')(
                     id: `write-${id}`,
                     type: 'function',
                     function: {
-                      name: 'files.write',
+                      name: 'write_file',
                       arguments: JSON.stringify({
                         path: `auto-${id}.txt`,
                         base: null,

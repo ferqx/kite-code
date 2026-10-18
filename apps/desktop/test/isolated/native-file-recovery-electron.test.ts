@@ -66,14 +66,14 @@ test.skipIf(process.platform !== 'darwin')(
         steps.set(key, step + 1);
         let call: { name: string; input: Json } | null = null;
         if (step === 0)
-          call = { name: 'files.read', input: { path: 'original.txt', limit: 10000 } };
+          call = { name: 'read_file', input: { path: 'original.txt', max_lines: 10000 } };
         else if (step === 1) {
           const read = body.messages.filter((message) => message.role === 'tool').at(-1);
           if (!read) throw Error('actual_file_read_baseline_missing');
           const actual = JSON.parse(read.content) as { path: string; baseline: Json };
           expect(actual.path).toBe('original.txt');
           call = {
-            name: 'files.write',
+            name: 'write_file',
             input: {
               path: 'original.txt',
               base: actual.baseline,
@@ -82,7 +82,7 @@ test.skipIf(process.platform !== 'darwin')(
           };
         } else if (step === 2)
           call = {
-            name: 'files.write',
+            name: 'write_file',
             input: {
               path: `${key}-created.txt`,
               base: null,

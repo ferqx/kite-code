@@ -137,6 +137,9 @@ mock.module(${JSON.stringify(modulePath('packages/agent/src/platform/locks.ts'))
 mock.module(${JSON.stringify(modulePath('packages/agent/src/platform/windows-artifact-scope.ts'))}, () => ({
   retainWindowsArtifactScope() { return { verify() { throw original; }, release() { events.push('scope-close'); if (failScope) throw cleanup; } }; },
   retainWindowsArtifactObjects() { throw Error('unexpected-full-file-pin'); },
+  readWindowsArtifactObject() { throw Error('unexpected-pinned-object-read'); },
+  hashWindowsArtifactFile() { throw Error('unexpected-pinned-file-hash'); },
+  readWindowsArtifactFile() { throw Error('unexpected-pinned-file-read'); },
 }));
 const { deriveNativeWindowsUseKeys } = await import(${JSON.stringify(modulePath('packages/agent/src/platform/windows-installation-coordination.ts'))});
 mock.module(${JSON.stringify(modulePath('packages/agent/src/platform/windows-installation-coordination.ts'))}, () => ({

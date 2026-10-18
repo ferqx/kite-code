@@ -142,7 +142,7 @@ test('real Core saves the preview in original Execution receipts; repeated call 
       {
         type: 'tool_call',
         id: 'repeated-call',
-        name: 'files.write',
+        name: 'write_file',
         arguments: JSON.stringify({ path, base: null, content: `actual ${path} bytes` }),
       } as ModelEvent,
       { ...finish, reason: 'tool_calls' } as ModelEvent,

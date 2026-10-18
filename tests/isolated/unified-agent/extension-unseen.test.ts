@@ -11,6 +11,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
+import { hostBuildEnvironment } from '../../fixtures/build-tool-environment';
 import { privateDirectory, temporaryDirectory } from '../../fixtures/test-filesystem';
 
 const repository = resolve(import.meta.dir, '../../..');
@@ -64,8 +65,13 @@ function present<T>(value: T | null | undefined): T {
   if (value === null || value === undefined) throw Error('actual_fixture_evidence_missing');
   return value;
 }
-async function child(command: string[], cwd: string, deadlineMs = 20000) {
-  const process = Bun.spawn(command, { cwd, env: {}, stdout: 'pipe', stderr: 'pipe' });
+async function child(
+  command: string[],
+  cwd: string,
+  deadlineMs = 20000,
+  env: NodeJS.ProcessEnv = {},
+) {
+  const process = Bun.spawn(command, { cwd, env, stdout: 'pipe', stderr: 'pipe' });
   const timer = setTimeout(() => process.kill('SIGKILL'), deadlineMs);
   try {
     const [code, stdout, stderr] = await Promise.all([
@@ -99,7 +105,7 @@ async function build(source: string, destination: string) {
     );
     const index = args.indexOf('--outdir');
     if (index >= 0) args[index + 1] = args[index + 1]!.replace(/^\.\/dist(?=\/|$)/, destination);
-    await child([process.execPath, ...args], source);
+    await child([process.execPath, ...args], source, 20000, hostBuildEnvironment());
   }
   const exports = Object.fromEntries(
     Object.entries(manifest.exports).map(([name, path]) => [

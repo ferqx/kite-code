@@ -95,11 +95,11 @@ export async function runOwnedMcpStdio(root: string, e: CaseEvidence, assets: Mc
       const body = (await request.json()) as Record<string, unknown>;
       const step = providerCalls++;
       let call: { name: string; input: unknown } | undefined;
-      if (step === 0) call = { name: 'mcp.sources.list', input: {} };
+      if (step === 0) call = { name: 'list_mcp_sources', input: {} };
       else if (step === 1) {
         const serverId = JSON.stringify(body.messages).match(/mcp-[a-f0-9]{64}/)?.[0];
         if (!serverId) throw Error('mcp_stdio_source_missing');
-        call = { name: 'mcp.connect', input: { serverId, key: 'owned-stdio' } };
+        call = { name: 'connect_mcp_server', input: { server_id: serverId, key: 'owned-stdio' } };
       } else if (step === 2) {
         await callGate;
         const tools = body.tools as { function: { name: string; description?: string } }[];

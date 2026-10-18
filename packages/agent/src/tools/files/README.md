@@ -1,5 +1,7 @@
 # Workspace 文件 leaf
 
+模型接口由可信 `ToolDefinition.model` 投影：`read_file/write_file/edit_file/list_directory/glob_files/search_content`，绝对用户文件为 `read_user_file/write_user_file/edit_user_file`。读取使用 `start_line/max_lines`，编辑使用 `old_text/new_text/expected_matches` 及对应 Artifact 字段，其余声明属性使用 snake_case；任意正文和 Artifact 身份保持原值。内部 `files.*` ID、定义版本、完整 baseline、权限与检查点合同保持原样。`search_content` 仍是字面量搜索，不新增正则能力。
+
 公开入口 `@kite-ai/agent/files` 的 import 不打开资源。宿主显式调用 `createWorkspaceFiles({root,maxFileBytes?})` 选定一个物理 Workspace 根，再用 `createFileTools(files)` 将六个普通 ToolDefinition 装配进扩展；工具仍走 UnifiedExecution 的权限、来源复查、计划、派发和终态。没有 CodingAgent、Git 或旧 filesystem authority 依赖。
 
 ## Node-API 文件后端

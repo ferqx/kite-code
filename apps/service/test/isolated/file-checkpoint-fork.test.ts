@@ -236,13 +236,13 @@ for (const scenario of ['fork', 'combined', 'selector'] as const) {
       for (const request of requests)
         expect(request.tools.map((tool) => tool.function.name).sort()).toEqual([
           'ask_user',
-          'files.edit',
-          'files.glob',
-          'files.list',
-          'files.read',
-          'files.search',
-          'files.write',
+          'edit_file',
+          'glob_files',
+          'list_directory',
+          'read_file',
+          'search_content',
           'web_fetch',
+          'write_file',
         ]);
       expect(readFileSync(originalPath, 'utf8')).toBe('second actual modified UTF8\r\n');
       expect(existsSync(join(workspace, 'first-created.txt'))).toBe(true);

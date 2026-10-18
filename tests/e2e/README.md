@@ -4,7 +4,7 @@ E2E 套件按跨越的外部边界分类：
 
 - `local/`：使用隔离本地 fixture 的确定性跨进程测试，属于 `test:e2e`。
 - `live/mcp/`：访问公开或外部管理 MCP 服务的显式 opt-in 测试，不使用 Bun 默认测试命名。
-- `live/model/`：消耗真实模型 Provider 配额的显式 opt-in 测试。当前维护 context compaction direct/incremental summary runner。
+- `live/model/`：消耗真实模型 Provider 配额的显式 opt-in 测试。当前工具表面 runner 使用新 Agent/SDK 验证文件操作、公开历史、冷读取和任务等待；旧 compaction/background 文件保留历史，不由当前脚本调用，见[模型套件](live/model/README.md)。
 
 TUI PTY 场景保留在 `tests/tui-system/scenarios/`，因为它们有独立的串行 harness 和测试标准。
 

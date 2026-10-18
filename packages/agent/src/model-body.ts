@@ -1,4 +1,5 @@
 import type { ModelRequest } from '@kite-ai/ai';
+import { isToolCallModel } from './model-tools';
 import type { ArtifactReference, Json } from './storage/types';
 import { AgentError } from './storage/types';
 
@@ -75,10 +76,11 @@ export function persistedModelRequest(value: Json): ModelRequest {
           !message.toolCalls.every(
             (call) =>
               object(call) &&
-              keys(call, ['id', 'name', 'arguments']) &&
+              keys(call, ['id', 'name', 'arguments', 'model']) &&
               text(call.id) &&
               text(call.name) &&
-              text(call.arguments),
+              text(call.arguments) &&
+              (call.model === undefined || isToolCallModel(call.model)),
           )))
     )
       throw new AgentError('model_body_invalid');

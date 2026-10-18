@@ -69,7 +69,7 @@ rollback 在发布前完整预检仍由原 nonce 持有的 Terminal；正常 Ter
 
 Windows 注册 CLI/TUI 另由 [完整 installed TUI caller](../../../tests/fixtures/unified-agent/windows-installed-tui.qualification.ts)消费准确 Terminal／Native 候选：同一个独立稳定 `kite-tui.exe` 先用 Terminal，再用登记后的 Native 双层闭包；实际键盘任务、全文／思考、导出、准确取消、草稿及冷读零重放，正常退出须原 Job 未 Terminate／完整 EOF／Job0／双 EX，撤登记和最终卸载保原数据。此调用者已接 release job，但 Windows 实际运行尚未取得，按用户安排交后续 Actions；它不把窗口、真正跨代码切换、Shell／RSS 或阶段资格记为通过。完整合同及预算归 [Terminal owner](../../cli/docs/terminal-release.md#windows-installed-tui-正式调用者)。
 
-同一安装调用者支持显式 `--predecessor=<absolute-original-native>` 真代码分支，由[统一入口](../../../tests/fixtures/unified-agent/windows-cross-version.qualification.ts)调用固定 `4a4c0e440b2098e5b4ec58c5831452773b39228f` 原源码自己的两类 builder。11项锁输入和两份迁移 SQL 均逐字相同，迁移另核固定 checksum；原两版 `0.1.0`、clean source、不同 commit／candidate／实际 Agent SHA 均独立核对。该前驱支持0002和DB9，属于同 schema 跨代码兼容。原837输入与历史SHA仍保独立legacy守卫，不计DB9旧writer拒绝或已发布predecessor资格。
+同一安装调用者支持显式 `--predecessor=<absolute-original-native>` 真代码分支，由[统一入口](../../../tests/fixtures/unified-agent/windows-cross-version.qualification.ts)调用固定 `4a4c0e440b2098e5b4ec58c5831452773b39228f` 原源码自己的两类 builder。11项锁输入沿[Terminal 输入守卫](../../cli/docs/terminal-release.md#验证边界)核原字节相同或已审查的完整 raw 配对；两份迁移 SQL 仍逐字相同，另核固定 checksum；原两版 `0.1.0`、clean source、不同 commit／candidate／实际 Agent SHA 均独立核对。该前驱支持0002和DB9，属于同 schema 跨代码兼容。原837输入与历史SHA仍保独立legacy守卫，不计DB9旧writer拒绝或已发布predecessor资格。
 
 真分支从零参数稳定 `kite-desktop.exe` 完成 A任务／A原Main与Service alive、双SH时选B／B冷读并明确新任务／回退A冷读B并明确第三任务／最终B冷读全部原历史四窗口，后继真实Provider请求必须含此前完整正文，冷读游标／Provider保持。普通完整短结果与sealed描述符按实际存储分别核原身份／正文／bytes／hash，不要求短正文必须有sealed引用；三任务为完整固定短正文，不授350KiB或17MiB窗口展示资格。四窗原owner自然退出／未Terminate和双EX后，B installed CLI按原backup／inspect／restore新Store／status链执行，再从B第五冷窗口核全部原Command／Run／Execution及结果／出处，Provider恰3；最终只卸载一次并保Core／Native DB／config原字节。显式基础420秒、各独立UIA driver45秒／launch与页面及退出10秒、维护180秒／CLI30秒，取统一绝对期限的更小值，默认120秒／180秒及原95条断言保持。原生Windows整链尚未执行，资格保留；与Terminal共享物化、mandatory CI及真实输入边界归[Terminal owner](../../cli/docs/terminal-release.md#windows-真实代码升级与冷回退调用者)，准确本机修正与证据归[当前进度](../../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-11windows-真实代码升级与冷回退正式调用者)。
 
@@ -107,9 +107,9 @@ Native 自带 `bin/kite maintenance` 和登记后的独立 Terminal 前门均先
 
 ## 真实代码升级与冷回退
 
-[跨代码窗口验收](../../../tests/isolated/unified-agent/native-cross-version.test.ts)补充原同源码版本标记的指针测试。当前固定真实兼容提交 `4a4c0e440b2098e5b4ec58c5831452773b39228f`，由其自己的 Terminal／Native builder 构建。11项锁输入全部原字节相同，Core format 1 的0001／0002两份迁移另核原字节和固定 checksum；不把仅同 format major 当成反向读写兼容。原源码前后干净、闭包、实际Agent／候选不同、Mac Main／renderer字节差异、源码删除、归档搬迁和原输出删除守卫保持。原a2b的DB7及旧Core schema不被修改，另供安全拒绝反例；3140／Linux1b796只保历史证据。取舍归[兼容前驱决定](../../../.agents/notes/implemented/testing/2026-10-16-schema-compatible-predecessors.md)。
+[跨代码窗口验收](../../../tests/isolated/unified-agent/native-cross-version.test.ts)补充原同源码版本标记的指针测试。当前固定真实兼容提交 `4a4c0e440b2098e5b4ec58c5831452773b39228f`，由其自己的 Terminal／Native builder 构建。11项锁输入核原字节相同或已审查的完整 raw 配对，Core format 1 的0001／0002两份迁移仍另核原字节和固定 checksum；不把仅同 format major 当成反向读写兼容。原源码前后干净、闭包、实际Agent／候选不同、Mac Main／renderer字节差异、源码删除、归档搬迁和原输出删除守卫保持。原a2b的DB7及旧Core schema不被修改，另供安全拒绝反例；3140／Linux1b796只保历史证据。取舍归[兼容前驱决定](../../../.agents/notes/implemented/testing/2026-10-16-schema-compatible-predecessors.md)。
 
-原a2b／837的legacy workspace投影、SHA和路径隔离按[Terminal owner](../../cli/docs/terminal-release.md#验证边界)保留；当前兼容入口只接受11项完整同字节及两SQL固定checksum。模型配置在所属Profile与user文件保存同值输入和原字节保护，不改变生产来源选择。
+原a2b／837的legacy workspace投影、SHA和路径隔离按[Terminal owner](../../cli/docs/terminal-release.md#验证边界)保留；当前兼容入口不借用 legacy 投影；只接受原字节相同或同一固定前驱 context 下的准确 raw 配对，两 SQL 仍核原字节及固定 checksum。模型配置在所属Profile与user文件保存同值输入和原字节保护，不改变生产来源选择。
 
 实际 installed `bin/kite-desktop` 启动正式 Main 和配对 Service，经原四窗口完成 A 原任务、升级 B 的新完整正文、冷回退 A 读取 B 全文并继续原会话，再切回 B 冷读三条原任务。当前 B 构建明确选择 `processHostFixture: native-extension-reference`，mini-review只属测试装配；未注册到默认产品。升级时运行中的 A 仍持原 outer／inner且卸载 busy；四次普通退出后全部候选可独占。指针切换与卸载保 Core／Native私有库 inode／完整字节及配置，回退不恢复备份。原正文由真实窗口按钮和 Main／HTTP 完整读取，冷读保原 Command／Run／Model、正文／hash／ref和Store游标；B的352041B全文实际进入回退后新模型。原持久caller不恢复成hot输入，Provider总计3。
 

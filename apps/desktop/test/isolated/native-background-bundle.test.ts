@@ -183,13 +183,13 @@ test.skipIf(process.platform !== 'darwin')(
               id: `${isOriginal ? 'original' : 'newer'}-${index}`,
               type: 'function',
               function: {
-                name: 'task',
+                name: 'spawn_agent',
                 arguments: JSON.stringify({
                   key: `child-${index}`,
                   role: 'worker',
                   input: { content },
                   cancellation: 'detached',
-                  resultDisposition:
+                  result_disposition:
                     content === 'UNICODE_CHILD' || content === 'STOP_CHILD'
                       ? 'required'
                       : 'background',

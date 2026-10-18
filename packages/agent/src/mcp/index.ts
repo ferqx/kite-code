@@ -336,6 +336,14 @@ export function createMcpAdapter(options: McpAdapterOptions) {
       let boundJobs: readonly JobDefinition[] = Object.freeze([]);
       let boundCache: Cache | undefined;
       let boundTools: readonly ToolDefinition[] = Object.freeze([]);
+      function modelToolName(remoteName: string): string {
+        const segment = (value: string) =>
+          value
+            .replace(/[^A-Za-z0-9_]+/g, '_')
+            .replace(/^_+|_+$/g, '')
+            .toLowerCase() || 'tool';
+        return `mcp_${segment(serverId).slice(0, 20)}_${segment(remoteName).slice(0, 29)}_${digest({ serverId, remoteName }).slice(0, 8)}`;
+      }
       function bindTools(captured: Cache): readonly ToolDefinition[] {
         const names = new Set<string>();
         const jobs: JobDefinition[] = [];
@@ -430,9 +438,10 @@ export function createMcpAdapter(options: McpAdapterOptions) {
                 },
               });
               jobs.push(task.job);
-              return freeze(task.tool);
+              return freeze({ ...task.tool, model: { name: modelToolName(descriptor.name) } });
             }
             const definition: ToolDefinition = {
+              model: { name: modelToolName(descriptor.name) },
               id: `mcp.${serverId}.${digest(descriptor.name).slice(0, 32)}`,
               version,
               description: `External MCP tool: ${[...(descriptor.description ?? descriptor.name)]

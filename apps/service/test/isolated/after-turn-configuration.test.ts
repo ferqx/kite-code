@@ -63,13 +63,13 @@ async function fixture(mode: 'allow' | 'deny' | 'json_only') {
                 id: 'actual-task',
                 type: 'function',
                 function: {
-                  name: 'task',
+                  name: 'spawn_agent',
                   arguments: JSON.stringify({
                     key: 'original-child',
                     role: 'worker',
                     input: { content: 'read' },
                     cancellation: 'detached',
-                    resultDisposition: 'after_turn',
+                    result_disposition: 'after_turn',
                   }),
                 },
               },

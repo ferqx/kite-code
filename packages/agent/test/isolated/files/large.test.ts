@@ -89,7 +89,7 @@ test('real UnifiedExecution writes from a scoped large Artifact, reads complete 
   });
   const publicSource = {
     id: source.id,
-    mediaType: source.mediaType,
+    media_type: source.mediaType,
     size: source.size,
     scope: source.scope,
   };
@@ -111,11 +111,11 @@ test('real UnifiedExecution writes from a scoped large Artifact, reads complete 
     },
   };
   const responses = [
-    call('files.write', { path: 'large', base: null, contentArtifact: publicSource }),
+    call('write_file', { path: 'large', base: null, content_artifact: publicSource }),
     [finish],
-    call('files.read', { path: 'large' }),
+    call('read_file', { path: 'large' }),
     [finish],
-    call('files.write', { path: 'denied', base: null, contentArtifact: publicSource }),
+    call('write_file', { path: 'denied', base: null, content_artifact: publicSource }),
     [finish],
   ];
   const model = createFixedModel(responses);
@@ -180,15 +180,15 @@ test('real UnifiedExecution writes from a scoped large Artifact, reads complete 
     responses.splice(
       4,
       0,
-      call('files.edit', {
+      call('edit_file', {
         path: 'large',
         base: summary.baseline,
-        find: 'end\n',
-        replace: 'REPAIRED\n',
-        occurrences: 1,
+        old_text: 'end\n',
+        new_text: 'REPAIRED\n',
+        expected_matches: 1,
       }),
       [finish],
-      call('files.search', { text: 'x' }),
+      call('search_content', { text: 'x' }),
       [finish],
     );
     await run('edit');

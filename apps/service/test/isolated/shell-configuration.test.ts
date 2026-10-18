@@ -85,19 +85,19 @@ function endpoint(
         child && !isChild
           ? [
               {
-                name: 'task',
+                name: 'spawn_agent',
                 input: {
                   key,
                   role: 'worker',
                   input: { content: 'child-shell-task' },
                   cancellation: 'attached',
-                  resultDisposition: 'required',
+                  result_disposition: 'required',
                 },
               },
             ]
           : [
               {
-                name: 'shell.launch',
+                name: 'shell_launch',
                 input: {
                   key,
                   command: actualCommand,
@@ -106,17 +106,17 @@ function endpoint(
                 },
               },
               {
-                name: stop ? 'shell.stop' : 'shell.wait',
+                name: stop ? 'shell_stop' : 'shell_wait',
                 input: stop
-                  ? { shellId: key, commandId: `stop-${key}` }
-                  : { shellId: key, timeoutMs: 4000 },
+                  ? { shell_id: key, command_id: `stop-${key}` }
+                  : { shell_id: key, wait_timeout_ms: 4000 },
               },
-              { name: 'shell.wait', input: { shellId: key, timeoutMs: 4000 } },
-              { name: 'shell.read', input: { shellId: key, afterSeq: '0', limit: 200 } },
+              { name: 'shell_wait', input: { shell_id: key, wait_timeout_ms: 4000 } },
+              { name: 'shell_read', input: { shell_id: key, after_seq: '0', limit: 200 } },
             ];
       const call =
         reviewPayload || (background && results.length > 0) ? undefined : calls[results.length];
-      if (call?.name === 'shell.stop') await beforeStop?.();
+      if (call?.name === 'shell_stop') await beforeStop?.();
       const chunk = (delta: unknown, reason: string | null) =>
         `data: ${JSON.stringify({ id: 'local', object: 'chat.completion.chunk', created: 1, model: body.model, choices: [{ index: 0, delta, finish_reason: reason }] })}\n\n`;
       return new Response(

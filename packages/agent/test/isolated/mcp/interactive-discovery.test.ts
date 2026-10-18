@@ -29,6 +29,7 @@ test('search returns exact frozen definitions and complete schemas without invok
     fresh = 0;
   const remote: ToolDefinition = {
     id: 'actual.remote.id',
+    model: { name: 'mcp_actual_echo_01234567' },
     version: 'actual-fingerprint',
     description: 'Echo a message.',
     inputSchema: {
@@ -59,6 +60,7 @@ test('search returns exact frozen definitions and complete schemas without invok
       serverId: 'actual-server',
       serverName: 'recoverable',
       remoteName: 'actual remote name',
+      modelName: remote.model!.name,
       definitionId: remote.id,
       definitionVersion: remote.version,
       description: remote.description,

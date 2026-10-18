@@ -683,7 +683,11 @@ async function mcpChurn(root: string, e: CaseEvidence, stdioAssets?: McpSoakStdi
     model: {
       async *stream(request) {
         if (request.messages.at(-1)?.role === 'user') {
-          yield { type: 'tool_call', id: randomUUID(), name: tools[0]!.id, arguments: '{}' };
+          const advertised = request.tools.find(
+            (tool) => tool.description === 'External MCP tool: owned local read',
+          );
+          if (!advertised) throw Error('mcp_churn_public_tool_missing');
+          yield { type: 'tool_call', id: randomUUID(), name: advertised.id, arguments: '{}' };
           yield { ...finish, reason: 'tool_calls' };
         } else {
           yield { type: 'text_delta', text: 'done' };

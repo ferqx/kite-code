@@ -7,10 +7,11 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { createClient } from '@kite-ai/client';
+import { hostBuildEnvironment } from '../../../../tests/fixtures/build-tool-environment';
 import {
   directoryLink,
   privateDirectory,
-  temporaryDirectory,
+  temporarySocketDirectory,
 } from '../../../../tests/fixtures/test-filesystem';
 import specification from '../../generated/openapi.json';
 import {
@@ -40,7 +41,12 @@ async function deadline<T>(work: Promise<T>, ms = 10000): Promise<T> {
   }
 }
 async function runBuild(args: string[], cwd: string) {
-  const child = Bun.spawn([process.execPath, ...args], { cwd, stdout: 'pipe', stderr: 'pipe' });
+  const child = Bun.spawn([process.execPath, ...args], {
+    cwd,
+    env: hostBuildEnvironment(),
+    stdout: 'pipe',
+    stderr: 'pipe',
+  });
   try {
     const [code, stdout, stderr] = await deadline(
       Promise.all([
@@ -59,7 +65,7 @@ async function runBuild(args: string[], cwd: string) {
   }
 }
 beforeAll(async () => {
-  root = temporaryDirectory('kite-daemon-process-');
+  root = temporarySocketDirectory('kite-daemon-process-');
   artifact = join(root, 'artifact');
   const modules = join(artifact, 'node_modules');
   const dependencies = new Map<string, Set<string>>();

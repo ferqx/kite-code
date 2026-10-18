@@ -14,9 +14,24 @@ Windows x64 的同一来源、连接与工具入口已接入独立 stdio 后端�
 
 Linux 的同一声明、来源批准、连接申请和工具入口现已接入独立 stdio 后端源码：直接执行原绝对 command、完整 args／cwd 和明确环境，以原 PID namespace 收束所属后代，保完整工具输出。准确取消与 Service 关闭须等原根回收、原树结束和全部管道／FD 关闭；不能确认时保 unknown 和原资源。冷查历史保原身份与结果，不重新连接或重做工具。它保持原 MCP 程序权限和网络，具体实现归[MCP owner](../../../packages/agent/src/mcp/README.md#linux-stdio-所属-namespace)；Linux 实机、正式安装恢复与全部客户端资格仍待重构后验证。
 
-已知模型上下文窗口能够容纳能力目录时，MCP 工具可直接披露，不受固定 20 个工具的数量限制；目录超过已知窗口时可由 `tool_search` 按需发现。窗口未知时不会套用旧的较小目录预算。搜索查询不按 512 字符截断，也不按固定 12 条候选或 4 条 Provider 结果截断；显式结果数量需是正安全整数。外部工具描述仍按信任来源清理，未获信任的远端正文不会直接进入模型请求；有效 schema、Skill 文件和指令不因旧本地大小额度静默丢弃。发现和披露仍不授予执行权限。
+## 当前模型入口与目录范围
 
-`list_mcp_tools` 默认列出完整匹配清单；指定正安全整数 `limit` 时可按 cursor 分页，不再受旧 100 条上限约束。清理后的 Provider／工具名称保持完整。MCP Resource、动态工具的有效结果和已激活 Skill 的引用文件不再因旧 128 KiB 本地阈值被截断或拒绝；读取仍需通过原有路径、身份、格式和权限校验，较大的内容仍可能超过模型实际上下文窗口。
+| 能力 | 模型工具名称 | 用途 |
+| --- | --- | --- |
+| MCP 来源 | `list_mcp_sources`、`connect_mcp_server`、`refresh_mcp_catalogue` | 查看已选择来源，显式连接，以及刷新准确原连接的工具目录 |
+| MCP 工具搜索 | `search_mcp_tools` | 查找本轮实际已选择、已发布的 MCP 工具，返回其可调用模型名称和原定义信息 |
+| MCP 资源 | `list_mcp_resources`、`read_mcp_resource` | 先列出资源及绑定，再读取准确原资源；资源目录与工具目录分开 |
+| MCP 提示 | `list_mcp_prompts`、`get_mcp_prompt` | 查看提示模板，再按原参数取得外部提示内容 |
+| Skill 知识 | `load_skill`、`read_skill_resource` | 用 `skill_id` 读取已选择知识及声明资源，不执行资源代码 |
+| Skill Workflow | `activate_skill`、`read_skill_reference`、`complete_skill`、`verify_skill`、`repair_skill`、`decide_skill_verification` | 既有激活、输出、核验、修复与用户决定流程，仍受原配置开关和权限限制 |
+
+动态 MCP 工具使用包含来源、远端工具名与稳定摘要的公开名称；搜索结果的 `modelName` 对应本轮实际可调用名称。内置参数使用 snake_case，远端工具的原参数、prompt arguments 及其他任意 JSON 字段保持原样，不能按名称自行转换。
+
+当前通用 Service 的 `search_mcp_tools` 只搜索本轮选择的 MCP 工具目录：`query` 最多 256 字符，候选默认 10 项、显式 `limit` 最多 20 项；`list_mcp_sources` 是来源目录，不是工具全量目录。以下保留的完整工具目录与无固定搜索额度是既有产品承诺，当前上述入口尚不能完整满足，CLI、TUI 和 Desktop 的同一通用宿主均受影响。本轮只调整名称与参数投影，不改变搜索能力或把这一差异视为已解决；实现范围见 [MCP owner](../../../packages/agent/src/mcp/README.md) 的工具搜索及来源目录说明。
+
+已知模型上下文窗口能够容纳能力目录时，MCP 工具可直接披露，不受固定 20 个工具的数量限制；目录超过已知窗口时可由 `search_mcp_tools` 按需发现。窗口未知时不会套用旧的较小目录预算。搜索查询不按 512 字符截断，也不按固定 12 条候选或 4 条 Provider 结果截断；显式结果数量需是正安全整数。外部工具描述仍按信任来源清理，未获信任的远端正文不会直接进入模型请求；有效 schema、Skill 文件和指令不因旧本地大小额度静默丢弃。发现和披露仍不授予执行权限。
+
+原工具全量目录的产品承诺是默认列出完整匹配清单；指定正安全整数 `limit` 时可按 cursor 分页，不再受旧 100 条上限约束。清理后的 Provider／工具名称保持完整。MCP Resource、动态工具的有效结果和已激活 Skill 的引用文件不再因旧 128 KiB 本地阈值被截断或拒绝；读取仍需通过原有路径、身份、格式和权限校验，较大的内容仍可能超过模型实际上下文窗口。
 
 Skill Activation 和 Skill Workflow 默认受开关限制。手册不承诺默认安装即可使用所有 Skill 工作流。某个模型不支持工具调用时，扩展的使用方式也受限制。
 

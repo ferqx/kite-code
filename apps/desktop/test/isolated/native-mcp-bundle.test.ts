@@ -178,7 +178,7 @@ else throw Error('owned_credential_operation_invalid');
                   parameters: { properties?: { value?: { type?: string } } };
                 };
               }) =>
-                value.function.name.startsWith('mcp.mcp-') &&
+                /^mcp_mcp_[a-f0-9]{16}_owned_effect_[a-f0-9]{8}$/.test(value.function.name) &&
                 value.function.parameters?.properties?.value?.type === 'string',
             );
             if (!remote?.function.parameters?.required?.includes('value'))
@@ -358,7 +358,7 @@ else throw Error('owned_credential_operation_invalid');
         expect(
           model.body.tools.find(
             (value) =>
-              value.function.name.startsWith('mcp.mcp-') &&
+              /^mcp_mcp_[a-f0-9]{16}_owned_effect_[a-f0-9]{8}$/.test(value.function.name) &&
               value.function.parameters.properties?.value?.type === 'string',
           )?.function.parameters.required,
         ).toEqual(['value']);

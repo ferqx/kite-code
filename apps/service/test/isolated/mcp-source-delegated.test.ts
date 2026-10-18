@@ -1,5 +1,4 @@
 import { expect, test } from 'bun:test';
-import { createHash } from 'node:crypto';
 import { mkdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -10,7 +9,7 @@ import { createMcpLifecycle } from '@kite-ai/agent/mcp';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import type { InteractionRecord } from '@kite-ai/agent/storage';
-import { createFixedModel, type ModelEvent } from '@kite-ai/ai';
+import { createFixedModel, type ModelAdapter, type ModelEvent } from '@kite-ai/ai';
 import { privateDirectory, temporaryDirectory } from '../../../../tests/fixtures/test-filesystem';
 import {
   createMcpSourceConfiguration,
@@ -103,7 +102,7 @@ async function fixture(
     original: McpSelectedSourceSnapshot | undefined;
   let childTemplate: RunConfiguration | undefined;
   const sourceFailures: string[] = [];
-  let child = createFixedModel([]),
+  let child: ModelAdapter = createFixedModel([]),
     parent = createFixedModel([]);
   const delegate: Extension = {
     id: 'owned.delegate',
@@ -186,21 +185,27 @@ async function fixture(
       });
       original = selected.snapshot;
       id = selected.servers[0]!.id;
-      const remote = `mcp.${id}.${createHash('sha256').update(JSON.stringify('effect')).digest('hex').slice(0, 32)}`;
       parent = createFixedModel([
-        ...(cold ? [] : [call('mcp.connect', { serverId: id, key: 'parent' })]),
+        ...(cold ? [] : [call('connect_mcp_server', { server_id: id, key: 'parent' })]),
         call('owned.delegate', {}),
         [finish],
       ]);
-      child = createFixedModel(
-        zero
-          ? [[finish]]
-          : [
-              call('mcp.connect', { serverId: id, key: 'child' }),
-              call(remote, { value: 'exact' }),
-              [finish],
-            ],
-      );
+      let childStep = 0;
+      child = {
+        async *stream(request, { signal }) {
+          signal.throwIfAborted();
+          const step = childStep++;
+          if (zero || step > 1) yield finish;
+          else if (step === 0) yield* call('connect_mcp_server', { server_id: id, key: 'child' });
+          else {
+            const remote = request.tools.find(
+              (tool) => tool.description === 'External MCP tool: effect',
+            );
+            if (!remote) throw Error('delegated_public_effect_tool_missing');
+            yield* call(remote.id, { value: 'exact' });
+          }
+        },
+      };
       return {
         model: parent,
         modelId: 'parent',

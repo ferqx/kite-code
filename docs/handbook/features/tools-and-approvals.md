@@ -4,7 +4,24 @@
 
 普通 CLI、TUI 和 Desktop 的 Agent 宿主默认提供工作区文件读取、列目录、搜索和编辑，以及 `ask_user`、`web_fetch`；宿主具备合格 Shell 后端时也提供命令执行与管理工具。配置好模型后即可使用这些日常能力，无需先手工添加工具列表。显式禁用或移除的工具仍不提供给后续运行；实际调用继续遵守工作区信任、三种权限策略与当前平台能力限制。
 
-文件读取工具省略 `limit` 时默认返回 200 行；可按 `selection.nextOffset` 继续分页，或显式指定 `offset/limit`。每页保留完整文件的 hash、字节大小和对象基线，不能把页正文当成全文。显式读取范围仍可能很大，行数也不能限制单行字节数；大正文保留完整 Artifact，并继续接受上下文压缩与容量检查。
+## 模型工具名称
+
+模型使用以下名称调用能力；实际提供的集合仍由宿主、当前 Run 配置与平台资格决定。公开名称和参数不扩大原授权范围。
+
+| 能力 | 模型工具名称 | 主要参数或含义 |
+| --- | --- | --- |
+| 工作区文件 | `read_file`、`list_directory`、`glob_files`、`search_content` | `path` 以工作区根目录为基准；读取用 `start_line`、`max_lines` |
+| 文件修改 | `write_file`、`edit_file` | 保留 `base` 原完整文件基线；新建使用 `base:null`；精确编辑用 `old_text`、`new_text`、`expected_matches` |
+| 工作区外用户文件 | `read_user_file`、`write_user_file`、`edit_user_file` | 独立绝对路径与准确目标权限；不进入工作区检查点 |
+| Shell | `shell_execute`、`shell_launch`、`shell_read`、`shell_wait`、`shell_stop` | 前台执行、后台启动、读取、等待和停止分别处理；保留原操作 `key` |
+| 问题与网页 | `ask_user`、`web_fetch` | 普通问题只收集信息；网页时限用 `timeout_ms` |
+| 子 Agent | `run_agent`、`spawn_agent`、`read_agent`、`followup_agent`、`send_agent_message`、`cancel_agent_task` | 前台返回完整子结果，后台启动只返回受理；后续操作绑定原任务 |
+| 子 Agent 等待与目录 | `wait_agents`、`wait_agent_event`、`list_agents`、`interrupt_agent` | `wait_agents` 必须传 `task_ids` 数组，单目标也是数组；`wait_agent_event` 只等自身事件，不指定任务目标 |
+| 计划与验证 | `read_plan`、`write_plan`、`request_plan_review`、`update_plan_progress`、`define_validation_checks`、`run_validation_checks`、`rebind_validation_checks`、`request_validation_waiver`、`check_file_changes` | 计划保存、批准、进度及真实验证仍分别核实 |
+
+`shell_execute.execution_timeout_ms` 是执行截止时限；到期申请取消，并继续核实真实停止。`shell_wait.wait_timeout_ms` 和 Agent 等待的 `timeout_ms` 只限制本次等待，不停止目标。等待与取消回执不能冒充执行成功或停止确认。
+
+`read_file` 和 `read_user_file` 省略 `max_lines` 时默认返回 200 行；`start_line` 从 1 开始，可将结果的 `selection.nextOffset` 作为下一次 `start_line` 继续分页。每页保留完整文件的 hash、字节大小和对象基线，不能把页正文当成全文。显式读取范围仍可能很大，行数也不能限制单行字节数；大正文保留完整 Artifact，并继续接受上下文压缩与容量检查。
 
 同一完整模型回复中的工具可以并行执行；需要同一串行资源的调用仍依次取得资源，每项调用分别核实完整参数、当前权限和执行来源。历史按实际结果保存顺序记录，下一次模型调用按原工具声明顺序接收完整配对结果。拒绝审批会终止本轮，已开始的工具须完成取消与清理；结果不确定或保存失败会保留真实失败，不能提前继续调用模型或显示任务完成。
 
@@ -48,7 +65,7 @@ Auto 下需要审查的调用按当前任务、准确参数和授权进入审批
 
 通用 Agent 的大人工审批请求使用完整附件，有限卡保留原调用与可选授权范围；读取附件后再决定。正文大小不使后端截断参数或扩张授权。普通问题的回答只提供信息；即使问题用于 Workflow replan/waiver，也不等于批准后续工具。等待期间现行权限变化时，旧答案不能授予执行。
 
-文件工具不再因过去的整文件、搜索匹配数、修改原文或模型结果长度上限拒绝操作或隐去结果。读取工具按显式 `offset`、`limit` 或默认 200 行选择内容，并给出续读位置。文件路径权限、二进制检查、目标身份、原文摘要和原子发布检查仍生效。数据能被读取不代表任意模型均能在一个请求中接收它；Provider 的真实请求容量仍生效。
+文件工具不再因过去的整文件、搜索匹配数、修改原文或模型结果长度上限拒绝操作或隐去结果。读取工具按显式 `start_line`、`max_lines` 或默认 200 行选择内容，并给出续读位置。文件路径权限、二进制检查、目标身份、原文摘要和原子发布检查仍生效。数据能被读取不代表任意模型均能在一个请求中接收它；Provider 的真实请求容量仍生效。
 
 Windows x64 本地 Workspace 的六文件工具及检查点原字节恢复已接入源码后端，完整 Windows 运行与安装版资格仍待验证。操作绑定原 Workspace 对象，不修改已有文件或目录的 ACL。Windows 的备用数据流、设备名、尾点／空格、重解析路径及短名别名会明确拒绝；受保护目录不能借大小写变体绕过。实际能力和验证边界见[Files owner](../../../packages/agent/src/tools/files/README.md#windows-workspace-文件源码)。
 
@@ -56,7 +73,7 @@ Windows x64 本地 Workspace 的六文件工具及检查点原字节恢复已接
 
 访问工作区外的用户文件使用独立绝对路径工具；外部写入遵守当前权限模式，获准后仍检查准确目标和原文件基线。Windows 的普通路径大小写变体可使用，受保护路径不能借此绕过限制。外部文件修改不进入工作区检查点，工作区恢复不会撤销它们；实际平台验证范围见上述 Files owner。
 
-`search_files` 和 `search_content` 的文件 glob 中，完整目录段 `**/` 匹配零层或多层目录，因此 `**/*.ts` 包含搜索根目录的 `.ts` 文件。`tool_search` 中带具体用途的查询继续搜索匹配能力；只有纯工具／服务目录查询才提示使用 `list_mcp_tools`。
+`glob_files` 的文件 glob 中，完整目录段 `**/` 匹配零层或多层目录，因此 `**/*.ts` 包含搜索根目录的 `.ts` 文件。`search_content` 按字面文本搜索文件内容，不把输入解释为正则表达式。MCP 工具使用 `search_mcp_tools` 查找本轮已选择的工具；`list_mcp_sources` 查看来源目录，来源目录不代表全量工具清单。
 
 `web_fetch` 默认返回完整提取正文，不再使用旧的 8K 默认长度或 16K 参数上限；显式 `max_chars` 是该次调用选择的内容长度。有效跳转链不再受默认 3 次限制，真实循环仍会被拒绝，每次跳转继续检查网络权限与 SSRF。请求时限和取消仍生效。外网响应体在读取过程中按实际字节检查 5 MB 解析安全上限，防止远端无界响应耗尽内存；这不计入 Run 累计产物用量。
 

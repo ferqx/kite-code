@@ -371,13 +371,13 @@ if (mode === 'seed-run') {
           {
             type: 'tool_call',
             id: 'original-launch',
-            name: mode === 'report' ? 'task' : 'ledger.launch',
+            name: mode === 'report' ? 'spawn_agent' : 'ledger.launch',
             arguments:
               mode === 'report'
                 ? JSON.stringify({
                     key: 'child',
                     role: 'reader',
-                    resultDisposition: 'after_turn',
+                    result_disposition: 'after_turn',
                     cancellation: 'detached',
                     input: { content: '原实际子结果 中🙂\r\n' },
                   })

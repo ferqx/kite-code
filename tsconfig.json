@@ -69,6 +69,7 @@
     "scripts/release/entrypoints/native-tui.ts",
     "scripts/release/entrypoints/windows-terminal-verifier.ts",
     "tests/fixtures/unified-agent/**/*.ts",
+    "tests/e2e/live/model/model-tools.live.ts",
     "tests/fixtures/extensions/mini-review/**/*.ts",
     "tests/fixtures/extensions/upgrade/**/*.ts",
     "tests/isolated/unified-agent/**/*.ts",

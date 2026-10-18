@@ -367,6 +367,12 @@ export interface ToolCall {
   id: string;
   name: string;
   arguments: string;
+  /** Exact Model presentation, never execution authority. Retained for current history replay. */
+  model?: {
+    name: string;
+    parameters?: { path: string[]; name: string }[];
+    error?: 'invalid_tool_arguments' | 'tool_not_available';
+  };
 }
 
 export interface ModelInputIdentity {

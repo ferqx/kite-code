@@ -2,10 +2,12 @@ import {
   type ModelAdapter,
   type ModelAdapterSnapshot,
   type ModelRequest,
+  type ModelTool,
   reasoningEfforts,
 } from '@kite-ai/ai';
 import type { ExecutionScope } from './execution';
 import { semanticDigest } from './json';
+import { persistedModelRequest } from './model-body';
 import { AgentError, type Json } from './storage/types';
 
 /** Actual per-Execution facts. Request content/order/schema remain in its complete immutable input. */
@@ -21,7 +23,9 @@ export interface ModelRequestMetadata {
   };
   readonly context: {
     readonly transformationId: 'kite.model-request';
-    readonly transformationVersion: '1';
+    readonly transformationVersion: '1' | '2';
+    /** Frozen public catalogue; internal request/tools remain the execution authority. */
+    readonly toolSurface?: readonly ModelTool[];
     readonly messageOrder: 'request.messages';
     readonly sourceOrder: 'request.messages[].sourceIds';
     readonly sources: readonly { id: string; digest: string }[];
@@ -91,8 +95,9 @@ export async function captureModelRequestMetadata(
   scope: ExecutionScope,
   model: ModelAdapter,
   request: ModelRequest,
+  presented?: ModelRequest,
 ): Promise<ModelRequestMetadata> {
-  const described = model.describeRequest?.(request);
+  const described = model.describeRequest?.(presented ?? request);
   return {
     version: 1,
     adapter: described
@@ -121,7 +126,8 @@ export async function captureModelRequestMetadata(
     },
     context: {
       transformationId: 'kite.model-request',
-      transformationVersion: '1',
+      transformationVersion: presented ? '2' : '1',
+      ...(presented ? { toolSurface: structuredClone(presented.tools) } : {}),
       messageOrder: 'request.messages',
       sourceOrder: 'request.messages[].sourceIds',
       sources: (scope.decisionSources ?? []).map(({ id, digest }) => ({ id, digest })),
@@ -209,9 +215,11 @@ export function persistedModelRequestMetadata(value: Json): ModelRequestMetadata
       'messageOrder',
       'sourceOrder',
       'sources',
+      'toolSurface',
     ]) ||
     context.transformationId !== 'kite.model-request' ||
-    context.transformationVersion !== '1' ||
+    !['1', '2'].includes(String(context.transformationVersion)) ||
+    (context.transformationVersion === '2' && !Array.isArray(context.toolSurface)) ||
     context.messageOrder !== 'request.messages' ||
     context.sourceOrder !== 'request.messages[].sourceIds' ||
     !Array.isArray(context.sources) ||
@@ -224,6 +232,13 @@ export function persistedModelRequestMetadata(value: Json): ModelRequestMetadata
     )
   )
     throw new AgentError('model_snapshot_invalid');
+  if (context.toolSurface !== undefined)
+    persistedModelRequest({
+      modelId: 'snapshot',
+      requestId: 'snapshot',
+      messages: [],
+      tools: context.toolSurface,
+    });
   return structuredClone(value) as unknown as ModelRequestMetadata;
 }
 export function modelDispatchMetadata(value: Json | null): ModelInputMetadata['authorization'] {

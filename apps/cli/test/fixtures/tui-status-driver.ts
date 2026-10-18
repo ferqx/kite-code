@@ -115,12 +115,24 @@ try {
   await wait('Build: owned-status');
   await wait('Workspace: w');
   await wait('Session: a');
-  await wait('Shell: unavailable');
+  await wait(
+    process.platform === 'darwin'
+      ? 'Shell: available / macos_coalition / darwin_host_boundary'
+      : 'Shell: unavailable',
+  );
   await wait('Telemetry: disabled');
   const original = rows();
   assert.equal(original.length, 1);
   assert.deepEqual(original[0].scope, { workspaceId: 'w', sessionId: 'a' });
   assert.equal(original[0].identity.storeId, input.storeId);
+  if (process.platform === 'darwin')
+    assert.deepEqual(original[0].execution.shell, {
+      configured: true,
+      available: true,
+      supervision: 'macos_coalition',
+      qualification: 'darwin_host_boundary',
+      reason: null,
+    });
   await key('r');
   await wait('Connection: unknown');
   await wait('Last confirmed host facts');

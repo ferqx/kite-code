@@ -70,6 +70,17 @@ export interface ToolDefinition {
   readonly version: string;
   readonly description: string;
   readonly inputSchema: JsonSchema;
+  /** Pure Model presentation. Internal identity, input and permission contracts stay unchanged. */
+  readonly model?: {
+    readonly name: string;
+    readonly snakeCase?: boolean;
+    /** Internal property paths to public names; array items use `*`. Opaque JSON is untouched. */
+    readonly parameterNames?: Readonly<Record<string, string>>;
+    readonly hidden?: boolean;
+    /** Restrict a public entry without removing the original internal control contract. */
+    readonly omitParameters?: readonly string[];
+    readonly requiredParameters?: readonly string[];
+  };
   readonly resources?: ResourceRequest;
   /** Trusted I/O factory opt-in: an observation may discover new host project instructions.
    * Existing decision sources and all permissions still require fresh verification. */

@@ -2115,8 +2115,9 @@ export function createMcpSourceConfiguration(options: McpSourceConfigurationOpti
       {
         id: mcpSourcesDirectoryToolId,
         version: '1',
+        model: { name: 'list_mcp_sources', snakeCase: true },
         description:
-          'Read selected safe MCP IDs and names without connecting; metadata grants no permission',
+          'List the selected MCP servers and their safe IDs before connecting; reading the directory does not connect or authorize tools',
         inputSchema: pageSchema,
         execute: directory,
       },

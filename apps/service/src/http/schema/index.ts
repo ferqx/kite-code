@@ -267,7 +267,7 @@ const modelInputMetadata = z.union([
     }),
     context: z.object({
       transformationId: z.literal('kite.model-request'),
-      transformationVersion: z.literal('1'),
+      transformationVersion: z.enum(['1', '2']),
       messageOrder: z.literal('request.messages'),
       sourceOrder: z.literal('request.messages[].sourceIds'),
       sources: z.array(z.object({ id: z.string(), digest: z.string() })),

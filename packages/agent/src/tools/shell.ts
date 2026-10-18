@@ -57,8 +57,21 @@ export function createShellExtension(options: ShellToolsOptions): Extension {
       {
         key: idSchema,
         command: { type: 'string', minLength: 1, maxLength: 262144 },
-        cancellation: { enum: ['attached', 'detached'] },
-        ...(foreground ? { timeoutMs: { type: 'integer', minimum: 1 } } : {}),
+        cancellation: {
+          enum: ['attached', 'detached'],
+          description:
+            'Defaults to attached: parent cancellation also cancels this Job. Detached Jobs keep an independent lifecycle within the root work.',
+        },
+        ...(foreground
+          ? {
+              timeoutMs: {
+                type: 'integer',
+                minimum: 1,
+                description:
+                  'Execution deadline in milliseconds. Expiry requests cancellation and waits for original stop evidence.',
+              },
+            }
+          : {}),
         ...(options.permissionsSchema ? { permissions: options.permissionsSchema } : {}),
       },
       ['key', 'command'],
@@ -109,9 +122,14 @@ export function createShellExtension(options: ShellToolsOptions): Extension {
     tools: [
       {
         id: 'shell.execute',
+        model: {
+          name: 'shell_execute',
+          snakeCase: true,
+          parameterNames: { timeoutMs: 'execution_timeout_ms' },
+        },
         version: '1',
         description:
-          'Execute one supervised Shell Job, wait for its actual terminal state and read its durable output. A deadline requests cancellation and still waits for the original stop evidence; large output is an explicit preview with the original Job reference.',
+          'Execute one supervised Shell Job in the foreground and return its actual terminal state and durable output. execution_timeout_ms is an optional deadline in milliseconds: expiry requests cancellation and still waits for original stop evidence. Large output is an explicit preview with the original Job reference. key identifies this exact operation; a retry must retain its original intent.',
         inputSchema: schema(true),
         async execute(input, context) {
           const launched = await launch(input, context);
@@ -125,6 +143,7 @@ export function createShellExtension(options: ShellToolsOptions): Extension {
       },
       {
         id: 'shell.launch',
+        model: { name: 'shell_launch', snakeCase: true },
         version: '1',
         description: `Start one exact supervised Shell Job. Acceptance is not completion.${options.permissionsSchema ? ' Default: workspace writes, no network. Request permissions explicitly for outside writes or Internet; the request still requires policy authorization. A failed command is never automatically rerun with wider permissions.' : ''}`,
         inputSchema: schema(false),
@@ -134,6 +153,7 @@ export function createShellExtension(options: ShellToolsOptions): Extension {
       },
       {
         id: 'shell.read',
+        model: { name: 'shell_read', snakeCase: true },
         version: '1',
         description: 'Read exact durable Shell status and keyset output; never restart it.',
         inputSchema: object(
@@ -164,8 +184,14 @@ export function createShellExtension(options: ShellToolsOptions): Extension {
       },
       {
         id: 'shell.wait',
+        model: {
+          name: 'shell_wait',
+          snakeCase: true,
+          parameterNames: { timeoutMs: 'wait_timeout_ms' },
+        },
         version: '1',
-        description: 'Wait for this exact Shell Job; timeout does not stop it.',
+        description:
+          'Wait for this exact Shell Job for up to wait_timeout_ms milliseconds (0–30000; default 30000). Timeout returns its current durable state and does not stop the Job.',
         inputSchema: object(
           { shellId: idSchema, timeoutMs: { type: 'integer', minimum: 0, maximum: 30000 } },
           ['shellId'],
@@ -193,6 +219,7 @@ export function createShellExtension(options: ShellToolsOptions): Extension {
       },
       {
         id: 'shell.stop',
+        model: { name: 'shell_stop', snakeCase: true },
         version: '1',
         description:
           'Request cancellation of one exact Shell Job. Receipt does not prove group stop.',

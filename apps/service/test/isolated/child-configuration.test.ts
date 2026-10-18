@@ -59,7 +59,7 @@ function provider() {
           ? toolResults.length
             ? null
             : {
-                name: 'files.write',
+                name: 'write_file',
                 input: { path: 'forbidden.txt', base: null, content: 'must not write' },
               }
           : body.model === 'background'
@@ -68,7 +68,7 @@ function provider() {
               : { name: 'fixture.launch', input: {} }
             : toolResults.some((message) => message.content.includes('baseline'))
               ? null
-              : { name: 'files.read', input: { path: 'input.txt' } };
+              : { name: 'read_file', input: { path: 'input.txt' } };
       const chunk = (delta: unknown, reason: string | null) =>
         `data: ${JSON.stringify({ id: 'local', object: 'chat.completion.chunk', created: 1, model: body.model, choices: [{ index: 0, delta, finish_reason: reason }] })}\n\n`;
       return new Response(

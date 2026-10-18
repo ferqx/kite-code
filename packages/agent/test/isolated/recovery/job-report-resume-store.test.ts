@@ -67,11 +67,11 @@ async function fixture(withRequirements = false) {
       {
         type: 'tool_call',
         id: 'delegate',
-        name: 'task',
+        name: 'spawn_agent',
         arguments: JSON.stringify({
           key: 'child',
           role: 'reader',
-          resultDisposition: 'after_turn',
+          result_disposition: 'after_turn',
           cancellation: 'detached',
           input: { content: 'original child' },
         }),

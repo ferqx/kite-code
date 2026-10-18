@@ -33,6 +33,9 @@ const symbols = {
  GetTokenInformation(_token, _kind, bytes, _length, size) { size[0] = 16; if (bytes) new DataView(bytes.buffer).setBigUint64(0, 1000n, true); return true; },
  ConvertSidToStringSidA(_sid, output) { output[0] = 5000n; return true; },
  GetSecurityInfo(handle, _kind, _flags, owner, _group, dacl, _sacl, sd) { role = handles.get(handle); owner[0] = 1000n; dacl[0] = 3000n; sd[0] = 4000n; return 0; },
+ GetKernelObjectSecurity(handle, flags, _descriptor, length, needed) { assert.equal(flags, 5); assert.equal(length, 131072); role = handles.get(handle); assert.ok(role); needed[0] = 20; return true; },
+ GetSecurityDescriptorOwner(_descriptor, owner, defaulted) { owner[0] = 1000n; defaulted[0] = 0; return true; },
+ GetSecurityDescriptorDacl(_descriptor, present, dacl, defaulted) { present[0] = 1; dacl[0] = 3000n; defaulted[0] = 0; return true; },
  GetSecurityDescriptorControl(_sd, control, revision) { control[0] = 0x1004; revision[0] = 1; return true; },
  GetAce(_acl, _index, output) {
   const view = new DataView(ace); view.setUint8(0, 0); view.setUint8(1, role.directory ? 3 : 0); view.setUint16(2, 12, true);

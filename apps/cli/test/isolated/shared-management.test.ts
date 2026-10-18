@@ -13,7 +13,10 @@ import {
   requestDaemonBootstrap,
   selectDaemonEndpoint,
 } from '@kite-ai/service/daemon';
-import { privateDirectory, temporaryDirectory } from '../../../../tests/fixtures/test-filesystem';
+import {
+  privateDirectory,
+  temporarySocketDirectory,
+} from '../../../../tests/fixtures/test-filesystem';
 import { runSelectedDaemon } from '../../host/daemon';
 import { runSelectedManagement } from '../../host/management';
 import type { ManagementCLIArguments } from '../../src/arguments';
@@ -25,7 +28,8 @@ const nativeTest = supportsDaemonFixture ? test : test.skip;
 const hash = (value: Uint8Array | string) => createHash('sha256').update(value).digest('hex');
 beforeAll(async () => {
   if (!supportsDaemonFixture) return;
-  root = temporaryDirectory('kite-shared-management-');
+  // Keep UUID-scoped sockets inside macOS's original Unix address budget.
+  root = temporarySocketDirectory('kite-shared-management-');
   const old = await buildOwnedDaemon(join(root, 'artifact'));
   const result = await Bun.build({
     entrypoints: [

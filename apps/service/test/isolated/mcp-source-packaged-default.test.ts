@@ -97,11 +97,11 @@ test('sealed default process discovers and executes owned stdio sources using pe
       let call: { name: string; input: unknown } | null = null;
       const n = step++;
       if (!ordinary) {
-        if (n === 0) call = { name: 'mcp.sources.list', input: {} };
+        if (n === 0) call = { name: 'list_mcp_sources', input: {} };
         else if (n === 1) {
           const id = JSON.stringify(body.messages).match(/mcp-[a-f0-9]{64}/)?.[0];
           expect(id).toBeDefined();
-          call = { name: 'mcp.connect', input: { serverId: id, key: 'packaged-owned' } };
+          call = { name: 'connect_mcp_server', input: { server_id: id, key: 'packaged-owned' } };
         } else if (n === 2) {
           const tools = body.tools as { function: { name: string; parameters: unknown } }[];
           const remote = tools.find((tool) =>

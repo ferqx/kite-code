@@ -277,6 +277,13 @@ const plan = (version: number | null) => ({
   body: 'Harmless precise task',
   steps: [{ id: 'a', title: 'effect' }],
 });
+const modelPlan = (version: number | null) => ({
+  plan_id: 'p',
+  expected_version: version,
+  title: 'Plan',
+  body: 'Harmless precise task',
+  steps: [{ id: 'a', title: 'effect' }],
+});
 
 test('an ordinary Job receipt reaches its actual Run through its parent Tool rather than a guessed Run ID', async () => {
   const f = await fixture({ requiredValidation: true }, async (step, f) => {
@@ -284,29 +291,29 @@ test('an ordinary Job receipt reaches its actual Run through its parent Tool rat
     const job = (await f.store.listExecutions('s')).find((e) => e.definitionId === 'fixture.job')!;
     const parent = (await f.store.getExecution(job.parentExecutionId!))!;
     if (step === 1)
-      return call('validation.define', {
-        runId: parent.runId!,
+      return call('define_validation_checks', {
+        run_id: parent.runId!,
         checks: [
           {
             kind: 'receipt',
             target: {
-              executionId: job.id,
+              execution_id: job.id,
               attempt: job.attempt,
-              definitionId: job.definitionId,
-              definitionVersion: job.definitionVersion,
-              inputDigest: Array.from(
+              definition_id: job.definitionId,
+              definition_version: job.definitionVersion,
+              input_digest: Array.from(
                 new Uint8Array(
                   await crypto.subtle.digest('SHA-256', new TextEncoder().encode('{}')),
                 ),
               )
                 .map((b) => b.toString(16).padStart(2, '0'))
                 .join(''),
-              resultRevision: job.resultRevision,
+              result_revision: job.resultRevision,
             },
           },
         ],
       });
-    if (step === 2) return call('validation.check', { runId: parent.runId! });
+    if (step === 2) return call('run_validation_checks', { run_id: parent.runId! });
     return [finish];
   });
   try {
@@ -326,7 +333,7 @@ test('an ordinary Job receipt reaches its actual Run through its parent Tool rat
 test('actual successful Model text and planning-management receipts cannot count as work verification', async () => {
   for (const kind of ['model', 'planning'] as const) {
     const f = await fixture({ requiredValidation: true }, async (step, f) => {
-      if (step === 0) return call('planning.read');
+      if (step === 0) return call('read_plan');
       const target = (await f.store.listExecutions('s')).find(
         (e) =>
           e.status === 'succeeded' &&
@@ -352,24 +359,24 @@ test('actual successful Model text and planning-management receipts cannot count
         )
           .map((b) => b.toString(16).padStart(2, '0'))
           .join('');
-        return call('validation.define', {
-          runId: target.runId!,
+        return call('define_validation_checks', {
+          run_id: target.runId!,
           checks: [
             {
               kind: 'receipt',
               target: {
-                executionId: target.id,
+                execution_id: target.id,
                 attempt: target.attempt,
-                definitionId: target.definitionId,
-                definitionVersion: target.definitionVersion,
-                inputDigest: hash,
-                resultRevision: target.resultRevision,
+                definition_id: target.definitionId,
+                definition_version: target.definitionVersion,
+                input_digest: hash,
+                result_revision: target.resultRevision,
               },
             },
           ],
         });
       }
-      if (step === 2) return call('validation.check', { runId: target.runId! });
+      if (step === 2) return call('run_validation_checks', { run_id: target.runId! });
       return [finish];
     });
     try {
@@ -394,11 +401,11 @@ test('a newly disabled factory cannot omit an already persisted validation requi
   const f = await fixture(
     { requirePlan: true, requiredValidation: true },
     async (step, f) => {
-      if (step === 0) return call('planning.write', plan(null));
+      if (step === 0) return call('write_plan', modelPlan(null));
       const current = (await f.record('plan.current'))!.value as Record<string, Json>;
       if (step === 1)
-        return call('planning.review', {
-          planId: current.planId!,
+        return call('request_plan_review', {
+          plan_id: current.planId!,
           version: current.version!,
           digest: current.digest!,
         });
@@ -407,16 +414,16 @@ test('a newly disabled factory cannot omit an already persisted validation requi
         const execution = (await f.store.listExecutions('s')).find(
           (e) => e.definitionId === 'fixture.effect',
         )!;
-        return call('planning.update', {
-          runId: execution.runId!,
-          planId: current.planId!,
+        return call('update_plan_progress', {
+          run_id: execution.runId!,
+          plan_id: current.planId!,
           version: current.version!,
           digest: current.digest!,
-          expectedProgressRevision: null,
-          stepId: 'a',
+          expected_progress_revision: null,
+          step_id: 'a',
           status: 'completed',
-          executionId: execution.id,
-          completePlan: true,
+          execution_id: execution.id,
+          complete_plan: true,
         });
       }
       return [finish];
@@ -515,33 +522,33 @@ test('actual plan review feedback reaches the next Model input and revised v2 ne
   const feedback = '  请调整方案 🪁\n保留组合字符 e\u0301 与原换行\n  ';
   const approvalFeedback = '批准新版 ✅\n请按这个方案执行 e\u0301';
   const f = await fixture({ requirePlan: true }, async (step, f) => {
-    if (step === 0) return call('planning.write', plan(null));
+    if (step === 0) return call('write_plan', modelPlan(null));
     if (step === 1 || step === 5) {
       const current = (await f.record('plan.current'))!.value as Record<string, Json>;
-      return call('planning.review', {
-        planId: current.planId!,
+      return call('request_plan_review', {
+        plan_id: current.planId!,
         version: current.version!,
         digest: current.digest!,
       });
     }
     if (step === 2 || step === 4 || step === 6) return call('fixture.effect');
-    if (step === 3) return call('planning.write', { ...plan(1), body: feedback });
+    if (step === 3) return call('write_plan', { ...modelPlan(1), body: feedback });
     if (step === 7) {
       const current = (await f.record('plan.current'))!.value as Record<string, Json>;
       const effect = (await f.store.listExecutions('s')).find(
         (execution) =>
           execution.definitionId === 'fixture.effect' && execution.status === 'succeeded',
       )!;
-      return call('planning.update', {
-        runId: await f.runId(),
-        planId: current.planId!,
+      return call('update_plan_progress', {
+        run_id: await f.runId(),
+        plan_id: current.planId!,
         version: current.version!,
         digest: current.digest!,
-        expectedProgressRevision: null,
-        stepId: 'a',
+        expected_progress_revision: null,
+        step_id: 'a',
         status: 'completed',
-        executionId: effect.id,
-        completePlan: true,
+        execution_id: effect.id,
+        complete_plan: true,
       });
     }
     return [finish];
@@ -598,11 +605,11 @@ test('actual plan review denial and empty revision preserve feedback without app
     { kind: 'plan_review', decision: 'approve', mode: 'unknown', feedback: '不能授权' },
   ] as const) {
     const f = await fixture({ requirePlan: true }, async (step, f) => {
-      if (step === 0) return call('planning.write', plan(null));
+      if (step === 0) return call('write_plan', modelPlan(null));
       if (step === 1) {
         const current = (await f.record('plan.current'))!.value as Record<string, Json>;
-        return call('planning.review', {
-          planId: current.planId!,
+        return call('request_plan_review', {
+          plan_id: current.planId!,
           version: current.version!,
           digest: current.digest!,
         });
@@ -650,38 +657,38 @@ test('actual plan review binds mode/current digest; v2 invalidates v1 and only f
   for (const scenario of ['no-review', 'new-receipt', 'old-receipt'] as const) {
     const reviewV2 = scenario !== 'no-review';
     const f = await fixture({ requirePlan: true }, async (step, f) => {
-      if (step === 0) return call('planning.write', plan(null));
+      if (step === 0) return call('write_plan', modelPlan(null));
       if (step === 1 || (reviewV2 && step === 4)) {
         const current = (await f.record('plan.current'))!.value as Record<string, Json>;
-        return call('planning.review', {
-          planId: current.planId!,
+        return call('request_plan_review', {
+          plan_id: current.planId!,
           version: current.version!,
           digest: current.digest!,
         });
       }
       if (step === 2 || step === (reviewV2 ? 5 : 4)) return call('fixture.effect');
-      if (step === 3) return call('planning.write', plan(1));
+      if (step === 3) return call('write_plan', modelPlan(1));
       if (reviewV2 && step === 6) {
         const current = (await f.record('plan.current'))!.value as Record<string, Json>;
         const effects = (await f.store.listExecutions('s')).filter(
           (e) => e.definitionId === 'fixture.effect' && e.status === 'succeeded',
         );
-        return call('planning.update', {
-          runId: await f.runId(),
-          planId: current.planId!,
+        return call('update_plan_progress', {
+          run_id: await f.runId(),
+          plan_id: current.planId!,
           version: current.version!,
           digest: current.digest!,
-          expectedProgressRevision: null,
-          stepId: 'a',
+          expected_progress_revision: null,
+          step_id: 'a',
           status: 'completed',
-          executionId: effects.find((e) =>
+          execution_id: effects.find((e) =>
             (e.decisionSource as { sources: { id: string }[] }).sources.some(
               (source) =>
                 source.id ===
                 (scenario === 'old-receipt' ? 'builtin.planning:s:p:1' : 'builtin.planning:s:p:2'),
             ),
           )!.id,
-          completePlan: true,
+          complete_plan: true,
         });
       }
       return [finish];
@@ -733,11 +740,11 @@ test('actual plan review binds mode/current digest; v2 invalidates v1 and only f
 test('compensation requires prior completion and a distinct real receipt, preserves original facts, and cannot finish the plan', async () => {
   for (const scenario of ['distinct', 'no-prior', 'same-receipt'] as const) {
     const f = await fixture({ requirePlan: true }, async (step, f) => {
-      if (step === 0) return call('planning.write', plan(null));
+      if (step === 0) return call('write_plan', modelPlan(null));
       const current = (await f.record('plan.current'))!.value as Record<string, Json>;
       if (step === 1)
-        return call('planning.review', {
-          planId: current.planId!,
+        return call('request_plan_review', {
+          plan_id: current.planId!,
           version: current.version!,
           digest: current.digest!,
         });
@@ -755,19 +762,19 @@ test('compensation requires prior completion and a distinct real receipt, preser
           ? (progress.value as { steps: { a: { receipt: { executionId: string } } } }).steps.a
               .receipt.executionId
           : null;
-        return call('planning.update', {
-          runId: await f.runId(),
-          planId: current.planId!,
+        return call('update_plan_progress', {
+          run_id: await f.runId(),
+          plan_id: current.planId!,
           version: current.version!,
           digest: current.digest!,
-          expectedProgressRevision: progress?.revision ?? null,
-          stepId: 'a',
+          expected_progress_revision: progress?.revision ?? null,
+          step_id: 'a',
           status: step === 3 && scenario !== 'no-prior' ? 'completed' : 'compensated',
-          executionId:
+          execution_id:
             scenario === 'distinct' && step === 5
               ? effects.find((e) => e.id !== originalId)!.id
               : effects[0]!.id,
-          completePlan: false,
+          complete_plan: false,
         });
       }
       return [finish];
@@ -818,18 +825,18 @@ test('caller mutation cannot remove the original host verification policy before
         const actual = (await f.store.listExecutions('s')).find(
           (e) => e.definitionId === 'fixture.effect',
         )!;
-        return call('validation.define', {
-          runId: actual.runId!,
+        return call('define_validation_checks', {
+          run_id: actual.runId!,
           checks: [
             {
               kind: 'receipt',
               target: {
-                executionId: actual.id,
+                execution_id: actual.id,
                 attempt: actual.attempt,
-                definitionId: actual.definitionId,
-                definitionVersion: actual.definitionVersion,
-                inputDigest: 'irrelevant',
-                resultRevision: actual.resultRevision,
+                definition_id: actual.definitionId,
+                definition_version: actual.definitionVersion,
+                input_digest: 'irrelevant',
+                result_revision: actual.resultRevision,
               },
             },
           ],
@@ -868,24 +875,24 @@ test('a real successful receipt in an older Run cannot satisfy a later Run requi
       const inputDigest = Array.from(new Uint8Array(bytes))
         .map((b) => b.toString(16).padStart(2, '0'))
         .join('');
-      return call('validation.define', {
-        runId: currentRun,
+      return call('define_validation_checks', {
+        run_id: currentRun,
         checks: [
           {
             kind: 'receipt',
             target: {
-              executionId: old.id,
+              execution_id: old.id,
               attempt: old.attempt,
-              definitionId: old.definitionId,
-              definitionVersion: old.definitionVersion,
-              inputDigest,
-              resultRevision: old.resultRevision,
+              definition_id: old.definitionId,
+              definition_version: old.definitionVersion,
+              input_digest: inputDigest,
+              result_revision: old.resultRevision,
             },
           },
         ],
       });
     }
-    if (step === 3) return call('validation.check', { runId: currentRun });
+    if (step === 3) return call('run_validation_checks', { run_id: currentRun });
     return [finish];
   });
   try {
@@ -948,24 +955,24 @@ test('actual deterministic receipt validation rejects missing/failed/unknown and
           .map((b) => b.toString(16).padStart(2, '0'))
           .join('');
         const target = {
-          executionId: variant === 'missing' ? 'missing' : actual.id,
+          execution_id: variant === 'missing' ? 'missing' : actual.id,
           attempt: variant === 'attempt' ? actual.attempt + 1 : actual.attempt,
-          definitionId: variant === 'definition' ? 'other' : actual.definitionId,
-          definitionVersion:
+          definition_id: variant === 'definition' ? 'other' : actual.definitionId,
+          definition_version:
             variant === 'definitionVersion' ? 'old-version' : actual.definitionVersion,
-          inputDigest: variant === 'input' ? 'wrong' : inputDigest,
-          resultRevision: variant === 'result' ? '999' : actual.resultRevision,
+          input_digest: variant === 'input' ? 'wrong' : inputDigest,
+          result_revision: variant === 'result' ? '999' : actual.resultRevision,
         };
         if (step === 1)
-          return call('validation.define', {
-            runId: variant === 'wrongRun' ? 'other-run' : actual.runId!,
+          return call('define_validation_checks', {
+            run_id: variant === 'wrongRun' ? 'other-run' : actual.runId!,
             checks: [
               variant === 'inconclusive'
                 ? { kind: 'command', description: 'unavailable runner' }
                 : { kind: 'receipt', target },
             ],
           });
-        if (step === 2) return call('validation.check', { runId: actual.runId! });
+        if (step === 2) return call('run_validation_checks', { run_id: actual.runId! });
         return [finish];
       },
     );
@@ -995,8 +1002,8 @@ test('an exact real user waiver remains waived without inventing passed evidence
   const f = await fixture({ requiredValidation: true, allowWaiver: true }, async (step, f) => {
     if (step === 0) {
       const runId = await f.runId();
-      return call('validation.request_waiver', {
-        recordKey: `run/${runId}/validation.required`,
+      return call('request_validation_waiver', {
+        record_key: `run/${runId}/validation.required`,
         reason: 'User accepts missing harmless receipt',
       });
     }
@@ -1056,14 +1063,14 @@ test('immutable file expectation survives repeated same-Run repair and actual fu
         runId = await f.runId();
         writeFileSync(join(f.root, 'work.txt'), 'bad\nsecond line\n');
         originalRequired = (await f.record(`run/${runId}/validation.required`))!.revision;
-        return call('validation.define', {
-          runId,
+        return call('define_validation_checks', {
+          run_id: runId,
           checks: [{ kind: 'file_hash', path: 'work.txt', sha256: hash }],
         });
       }
       if (step === 1) {
         specRevision = (await f.record(`run/${runId}/validation.spec`))!.revision;
-        return call('validation.check', { runId });
+        return call('run_validation_checks', { run_id: runId });
       }
       if (step === 2) {
         const pointer = (await f.record(`run/${runId}/validation.current`))!.value as {
@@ -1078,23 +1085,23 @@ test('immutable file expectation survives repeated same-Run repair and actual fu
       if (step >= 2 && step <= 27) {
         if (step % 2 === 0) {
           const base = (await f.files.read('work.txt')).baseline;
-          return call('files.write', {
+          return call('write_file', {
             path: 'work.txt',
             content: `bad-${step}\nsecond line\n`,
             base: base as unknown as Json,
           });
         }
-        return call('validation.check', { runId });
+        return call('run_validation_checks', { run_id: runId });
       }
       if (step === 28) {
         const base = (await f.files.read('work.txt')).baseline;
-        return call('files.write', {
+        return call('write_file', {
           path: 'work.txt',
           content: 'good\nsecond line\n',
           base: base as unknown as Json,
         });
       }
-      if (step === 29) return call('validation.check', { runId });
+      if (step === 29) return call('run_validation_checks', { run_id: runId });
       return [finish];
     },
   );
@@ -1137,14 +1144,14 @@ function receiptTarget(execution: {
   resultRevision: string;
 }): Json {
   return {
-    executionId: execution.id,
+    execution_id: execution.id,
     attempt: execution.attempt,
-    definitionId: execution.definitionId!,
-    definitionVersion: execution.definitionVersion!,
-    inputDigest: new Bun.CryptoHasher('sha256')
+    definition_id: execution.definitionId!,
+    definition_version: execution.definitionVersion!,
+    input_digest: new Bun.CryptoHasher('sha256')
       .update(JSON.stringify(execution.input))
       .digest('hex'),
-    resultRevision: execution.resultRevision,
+    result_revision: execution.resultRevision,
   };
 }
 
@@ -1162,13 +1169,13 @@ test('Artifact schema failure repairs via a new exact execution binding without 
         (e) => e.definitionId === 'fixture.publish',
       )!;
       const ref = (execution.result as { artifactRefs: Json[] }).artifactRefs[0]!;
-      return call('validation.define', {
-        runId,
+      return call('define_validation_checks', {
+        run_id: runId,
         checks: [
           {
             kind: 'artifact_schema',
             target: receiptTarget(execution),
-            artifactRef: ref,
+            artifact_ref: ref,
             schema: { type: 'object', required: ['ok'], properties: { ok: { const: true } } },
           },
         ],
@@ -1176,7 +1183,7 @@ test('Artifact schema failure repairs via a new exact execution binding without 
     }
     if (step === 2) {
       specRevision = (await f.record(`run/${runId}/validation.spec`))!.revision;
-      return call('validation.check', { runId });
+      return call('run_validation_checks', { run_id: runId });
     }
     if (step === 3) {
       oldAttempt = ((await f.record(`run/${runId}/validation.current`))!.value as { key: string })
@@ -1192,13 +1199,13 @@ test('Artifact schema failure repairs via a new exact execution binding without 
         .filter((e) => e.definitionId === 'fixture.publish')
         .at(-1)!;
       const ref = (execution.result as { artifactRefs: Json[] }).artifactRefs[0]!;
-      return call('validation.rebind', {
-        runId,
-        expectedRevision: null,
-        bindings: [{ index: 0, target: receiptTarget(execution), artifactRef: ref }],
+      return call('rebind_validation_checks', {
+        run_id: runId,
+        expected_revision: null,
+        bindings: [{ index: 0, target: receiptTarget(execution), artifact_ref: ref }],
       });
     }
-    if (step === 5) return call('validation.check', { runId });
+    if (step === 5) return call('run_validation_checks', { run_id: runId });
     return [finish];
   });
   try {
@@ -1238,8 +1245,8 @@ test('missing checker, wrong Artifact scope and unsupported schema stay inconclu
         }
         if (step === 1) {
           if (scenario === 'no_checker' || scenario === 'missing_checker')
-            return call('validation.define', {
-              runId,
+            return call('define_validation_checks', {
+              run_id: runId,
               checks: [{ kind: 'file_hash', path: 'unused.txt', sha256: '0'.repeat(64) }],
             });
           const execution = (await f.store.listExecutions('s')).find(
@@ -1253,13 +1260,13 @@ test('missing checker, wrong Artifact scope and unsupported schema stay inconclu
               : scenario === 'literal_ref'
                 ? { ...published, id: 'literal-success' }
                 : published;
-          return call('validation.define', {
-            runId,
+          return call('define_validation_checks', {
+            run_id: runId,
             checks: [
               {
                 kind: 'artifact_schema',
                 target: receiptTarget(execution),
-                artifactRef: ref,
+                artifact_ref: ref,
                 schema:
                   scenario === 'unsupported_schema'
                     ? { type: 'object', $ref: 'https://unavailable.invalid/schema' }
@@ -1268,7 +1275,7 @@ test('missing checker, wrong Artifact scope and unsupported schema stay inconclu
             ],
           });
         }
-        if (step === 2) return call('validation.check', { runId });
+        if (step === 2) return call('run_validation_checks', { run_id: runId });
         return [finish];
       },
     );
@@ -1302,21 +1309,21 @@ test('repair bindings cannot swap definition, overwrite immutable expectations, 
     const executions = await f.store.listExecutions('s');
     const effect = executions.find((e) => e.definitionId === 'fixture.effect')!;
     if (step === 1)
-      return call('validation.define', {
-        runId,
+      return call('define_validation_checks', {
+        run_id: runId,
         checks: [{ kind: 'receipt', target: receiptTarget(effect) }],
       });
     if (step === 2) {
       spec = (await f.record(`run/${runId}/validation.spec`))!.revision;
-      return call('validation.rebind', {
-        runId,
-        expectedRevision: null,
+      return call('rebind_validation_checks', {
+        run_id: runId,
+        expected_revision: null,
         bindings: [
           {
             index: 0,
             target: {
               ...(receiptTarget(effect) as Record<string, Json>),
-              definitionId: 'planning.read',
+              definition_id: 'planning.read',
             },
           },
         ],
@@ -1327,17 +1334,17 @@ test('repair bindings cannot swap definition, overwrite immutable expectations, 
         'failed',
       );
       expect(await f.record(`run/${runId}/validation.binding.current`)).toBeNull();
-      return call('validation.rebind', {
-        runId,
-        expectedRevision: null,
+      return call('rebind_validation_checks', {
+        run_id: runId,
+        expected_revision: null,
         bindings: [{ index: 0, target: receiptTarget(effect) }],
       });
     }
     if (step === 4) {
       bindingRevision = (await f.record(`run/${runId}/validation.binding.current`))!.revision;
-      return call('validation.rebind', {
-        runId,
-        expectedRevision: null,
+      return call('rebind_validation_checks', {
+        run_id: runId,
+        expected_revision: null,
         bindings: [{ index: 0, target: receiptTarget(effect) }],
       });
     }
@@ -1345,8 +1352,8 @@ test('repair bindings cannot swap definition, overwrite immutable expectations, 
       expect(executions.filter((e) => e.definitionId === 'validation.rebind').at(-1)!.status).toBe(
         'failed',
       );
-      return call('validation.define', {
-        runId,
+      return call('define_validation_checks', {
+        run_id: runId,
         checks: [{ kind: 'command', description: 'replace failure' }],
       });
     }
@@ -1354,7 +1361,7 @@ test('repair bindings cannot swap definition, overwrite immutable expectations, 
       expect(executions.filter((e) => e.definitionId === 'validation.define').at(-1)!.status).toBe(
         'failed',
       );
-      return call('validation.check', { runId });
+      return call('run_validation_checks', { run_id: runId });
     }
     return [finish];
   });
@@ -1386,12 +1393,12 @@ test('a late checker callback cannot cover a newer verification head; its known 
       if (step === 0) {
         runId = await f.runId();
         writeFileSync(join(f.root, 'work.txt'), 'actual');
-        return call('validation.define', {
-          runId,
+        return call('define_validation_checks', {
+          run_id: runId,
           checks: [{ kind: 'file_hash', path: 'work.txt', sha256: hash }],
         });
       }
-      if (step === 1 || step === 2) return call('validation.check', { runId });
+      if (step === 1 || step === 2) return call('run_validation_checks', { run_id: runId });
       if (step === 3) {
         const pointer = (await f.record(`run/${runId}/validation.current`))!;
         expect(pointer.revision).toBe(newerRevision);
@@ -1401,7 +1408,7 @@ test('a late checker callback cannot cover a newer verification head; its known 
             .filter((e) => e.definitionId === 'validation.check')
             .at(-1)!.status,
         ).toBe('failed');
-        return call('validation.check', { runId });
+        return call('run_validation_checks', { run_id: runId });
       }
       return [finish];
     },
@@ -1456,7 +1463,7 @@ test('planning.write retains its original pointer CAS when a real nested writer 
   const f = await fixture(
     {},
     async (step) =>
-      step === 0 ? call('planning.write', { ...plan(null), planId: 'old' }) : [finish],
+      step === 0 ? call('write_plan', { ...modelPlan(null), plan_id: 'old' }) : [finish],
     true,
     (extension) => ({
       ...extension,
@@ -1522,8 +1529,8 @@ test('planning.update preserves a concurrent same-namespace progress update inst
     async (step, f) => {
       if (step === 0) {
         runId = await f.runId();
-        return call('planning.write', {
-          ...plan(null),
+        return call('write_plan', {
+          ...modelPlan(null),
           steps: [
             { id: 'a', title: 'A' },
             { id: 'b', title: 'B' },
@@ -1532,13 +1539,13 @@ test('planning.update preserves a concurrent same-namespace progress update inst
       }
       if (step === 1) {
         const current = (await f.record('plan.current'))!.value as Record<string, Json>;
-        return call('planning.update', {
-          runId,
-          planId: 'p',
+        return call('update_plan_progress', {
+          run_id: runId,
+          plan_id: 'p',
           version: 1,
           digest: current.digest!,
-          expectedProgressRevision: null,
-          stepId: 'a',
+          expected_progress_revision: null,
+          step_id: 'a',
           status: 'running',
         });
       }
@@ -1644,21 +1651,21 @@ test('two real accepted waiver decisions survive rebind in one Run with immutabl
       .filter((e) => e.definitionId === 'fixture.publish')
       .at(-1)!;
     if (step === 1)
-      return call('validation.define', {
-        runId,
+      return call('define_validation_checks', {
+        run_id: runId,
         checks: [
           {
             kind: 'artifact_schema',
             target: receiptTarget(execution),
-            artifactRef: (execution.result as { artifactRefs: Json[] }).artifactRefs[0]!,
+            artifact_ref: (execution.result as { artifactRefs: Json[] }).artifactRefs[0]!,
             schema: { type: 'object', required: ['ok'], properties: { ok: { const: true } } },
           },
         ],
       });
-    if (step === 2 || step === 6) return call('validation.check', { runId });
+    if (step === 2 || step === 6) return call('run_validation_checks', { run_id: runId });
     if (step === 3 || step === 7)
-      return call('validation.request_waiver', {
-        recordKey: `run/${runId}/validation.required`,
+      return call('request_validation_waiver', {
+        record_key: `run/${runId}/validation.required`,
         reason:
           step === 3 ? 'First precise user decision' : 'User accepts the changed repair binding',
       });
@@ -1671,14 +1678,14 @@ test('two real accepted waiver decisions survive rebind in one Run with immutabl
       return call('fixture.publish', { ok: false, repair: 1 });
     }
     if (step === 5)
-      return call('validation.rebind', {
-        runId,
-        expectedRevision: null,
+      return call('rebind_validation_checks', {
+        run_id: runId,
+        expected_revision: null,
         bindings: [
           {
             index: 0,
             target: receiptTarget(execution),
-            artifactRef: (execution.result as { artifactRefs: Json[] }).artifactRefs[0]!,
+            artifact_ref: (execution.result as { artifactRefs: Json[] }).artifactRefs[0]!,
           },
         ],
       });
@@ -1733,8 +1740,8 @@ test('two real accepted waiver decisions survive rebind in one Run with immutabl
 test('request_waiver known denial has no Interaction or unknown execution while an actual checker failure remains unknown', async () => {
   const denied = await fixture({}, async (step, f) =>
     step === 0
-      ? call('validation.request_waiver', {
-          recordKey: `run/${await f.runId()}/validation.required`,
+      ? call('request_validation_waiver', {
+          record_key: `run/${await f.runId()}/validation.required`,
           reason: 'not allowed',
         })
       : [finish],
@@ -1767,12 +1774,12 @@ test('request_waiver known denial has no Interaction or unknown execution while 
     async (step, f) => {
       if (step === 0) {
         runId = await f.runId();
-        return call('validation.define', {
-          runId,
+        return call('define_validation_checks', {
+          run_id: runId,
           checks: [{ kind: 'file_hash', path: 'unused', sha256: '0'.repeat(64) }],
         });
       }
-      if (step === 1) return call('validation.check', { runId });
+      if (step === 1) return call('run_validation_checks', { run_id: runId });
       return [finish];
     },
     true,
@@ -1880,11 +1887,11 @@ test('host-qualified readonly parent Tool cannot authorize its ordinary Job befo
 
 test('actual accepted plan approval is exclusive to its original Run and old completed approval contributes no authority', async () => {
   const f = await fixture({ requirePlan: true }, async (step, f) => {
-    if (step === 0) return call('planning.write', plan(null));
+    if (step === 0) return call('write_plan', modelPlan(null));
     if (step === 1) {
       const current = (await f.record('plan.current'))!.value as Record<string, Json>;
-      return call('planning.review', {
-        planId: current.planId!,
+      return call('request_plan_review', {
+        plan_id: current.planId!,
         version: current.version!,
         digest: current.digest!,
       });
@@ -1983,11 +1990,11 @@ test('an accepted original plan cannot dispatch effects after its actual conditi
   const f = await fixture(
     { requirePlan: true },
     async (step, f) => {
-      if (step === 0) return call('planning.write', plan(null));
+      if (step === 0) return call('write_plan', modelPlan(null));
       if (step === 1) {
         const current = (await f.record('plan.current'))!.value as Record<string, Json>;
-        return call('planning.review', {
-          planId: current.planId!,
+        return call('request_plan_review', {
+          plan_id: current.planId!,
           version: current.version!,
           digest: current.digest!,
         });
@@ -2033,11 +2040,11 @@ test('an accepted original plan cannot dispatch effects after its actual conditi
 test('a complete UTF8 and escaped plan above 300KiB is reviewed through its original full Artifact and completes with real receipt', async () => {
   const body = ('原始完整计划正文' + '"\\\r\n' + 'e\u0301').repeat(15000);
   const f = await fixture({ requirePlan: true }, async (step, f) => {
-    if (step === 0) return call('planning.write', { ...plan(null), body });
+    if (step === 0) return call('write_plan', { ...modelPlan(null), body });
     if (step === 1) {
       const current = (await f.record('plan.current'))!.value as Record<string, Json>;
-      return call('planning.review', {
-        planId: current.planId!,
+      return call('request_plan_review', {
+        plan_id: current.planId!,
         version: current.version!,
         digest: current.digest!,
       });
@@ -2048,16 +2055,16 @@ test('a complete UTF8 and escaped plan above 300KiB is reviewed through its orig
       const effect = (await f.store.listExecutions('s')).find(
         (execution) => execution.definitionId === 'fixture.effect',
       )!;
-      return call('planning.update', {
-        runId: await f.runId(),
-        planId: current.planId!,
+      return call('update_plan_progress', {
+        run_id: await f.runId(),
+        plan_id: current.planId!,
         version: current.version!,
         digest: current.digest!,
-        expectedProgressRevision: null,
-        stepId: 'a',
+        expected_progress_revision: null,
+        step_id: 'a',
         status: 'completed',
-        executionId: effect.id,
-        completePlan: true,
+        execution_id: effect.id,
+        complete_plan: true,
       });
     }
     return [finish];
@@ -2177,11 +2184,11 @@ test('sealed readonly identities survive caller mutation and their final revisio
 
 const attachmentPlanBody = '精确原计划\r\n"完整正文'.repeat(5000);
 const attachmentPlanScript: Script = async (step, f) => {
-  if (step === 0) return call('planning.write', { ...plan(null), body: attachmentPlanBody });
+  if (step === 0) return call('write_plan', { ...modelPlan(null), body: attachmentPlanBody });
   if (step === 1) {
     const current = (await f.record('plan.current'))!.value as Record<string, Json>;
-    return call('planning.review', {
-      planId: current.planId!,
+    return call('request_plan_review', {
+      plan_id: current.planId!,
       version: current.version!,
       digest: current.digest!,
     });
@@ -2361,28 +2368,28 @@ test('after actual accepted full-plan proof read, concurrent seal revision commi
 
 test('historical completed plan receipt retains original approval source while current contribution and next Run have none', async () => {
   const f = await fixture({ requirePlan: true }, async (step, f) => {
-    if (step === 0) return call('planning.write', plan(null));
+    if (step === 0) return call('write_plan', modelPlan(null));
     const pointer = (await f.record('plan.current'))!.value as Record<string, Json>;
     if (step === 1)
-      return call('planning.review', {
-        planId: pointer.planId!,
+      return call('request_plan_review', {
+        plan_id: pointer.planId!,
         version: pointer.version!,
         digest: pointer.digest!,
       });
     if (step === 2) return call('fixture.effect');
     if (step === 3)
-      return call('planning.update', {
-        runId: await f.runId(),
-        planId: pointer.planId!,
+      return call('update_plan_progress', {
+        run_id: await f.runId(),
+        plan_id: pointer.planId!,
         version: pointer.version!,
         digest: pointer.digest!,
-        expectedProgressRevision: null,
-        stepId: 'a',
+        expected_progress_revision: null,
+        step_id: 'a',
         status: 'completed',
-        executionId: (await f.store.listExecutions('s')).find(
+        execution_id: (await f.store.listExecutions('s')).find(
           (e) => e.definitionId === 'fixture.effect',
         )!.id,
-        completePlan: true,
+        complete_plan: true,
       });
     return [finish];
   });

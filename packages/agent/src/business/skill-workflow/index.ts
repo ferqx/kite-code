@@ -1343,6 +1343,7 @@ export function createSkillWorkflow(supplied: SkillWorkflowOptions) {
     tools: [
       {
         id: 'activate_skill',
+        model: { name: 'activate_skill', snakeCase: true },
         version: '1',
         description: 'Activate an explicitly available Skill Workflow; never grants capabilities',
         inputSchema: schema({
@@ -1405,6 +1406,7 @@ export function createSkillWorkflow(supplied: SkillWorkflowOptions) {
       },
       {
         id: 'read_skill_reference',
+        model: { name: 'read_skill_reference', snakeCase: true },
         version: '1',
         description: 'Read an active Workflow declared resource without execution',
         inputSchema: schema(
@@ -1433,6 +1435,7 @@ export function createSkillWorkflow(supplied: SkillWorkflowOptions) {
       },
       {
         id: 'complete_skill',
+        model: { name: 'complete_skill', snakeCase: true },
         version: '1',
         description:
           'Validate exact structured Workflow output and record its verification independently',
@@ -1452,6 +1455,7 @@ export function createSkillWorkflow(supplied: SkillWorkflowOptions) {
       },
       {
         id: 'verify_skill',
+        model: { name: 'verify_skill', snakeCase: true },
         version: '1',
         description: 'Read or perform the original Workflow verification through its admitted Job',
         inputSchema: schema({ activation_id: keySchema, attempt: attemptSchema }, [
@@ -1464,6 +1468,7 @@ export function createSkillWorkflow(supplied: SkillWorkflowOptions) {
       },
       {
         id: 'repair_skill',
+        model: { name: 'repair_skill', snakeCase: true },
         version: '1',
         description:
           'Create an explicit repair attempt preserving original failed evidence and capabilities',
@@ -1484,6 +1489,7 @@ export function createSkillWorkflow(supplied: SkillWorkflowOptions) {
       },
       {
         id: 'decide_skill_verification',
+        model: { name: 'decide_skill_verification', snakeCase: true },
         version: '1',
         description:
           'Ask the actual user to replan or waive the exact failed verification; never grants permissions',

@@ -380,11 +380,11 @@ async function seedJob({
       const call =
         results === 0
           ? {
-              name: 'shell.launch',
+              name: 'shell_launch',
               input: { key: 'original', command: `/bin/sh '${script}'`, cancellation: 'detached' },
             }
           : results === 1
-            ? { name: 'shell.wait', input: { shellId: 'original', timeoutMs: 10000 } }
+            ? { name: 'shell_wait', input: { shell_id: 'original', wait_timeout_ms: 10000 } }
             : undefined;
       const frame = (delta: unknown, reason: string | null) =>
         `data: ${JSON.stringify({ id: 'fixed', object: 'chat.completion.chunk', model: 'fixed', choices: [{ index: 0, delta, finish_reason: reason }] })}\n\n`;

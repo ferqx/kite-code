@@ -80,7 +80,7 @@ async function fixture(
         call =
           input.child && body.model === 'parent'
             ? {
-                name: 'task',
+                name: 'spawn_agent',
                 input: {
                   key: 'child',
                   role: 'worker',

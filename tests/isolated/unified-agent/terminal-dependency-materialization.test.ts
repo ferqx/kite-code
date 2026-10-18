@@ -293,7 +293,7 @@ test('an unrepresentable same-name version-shadowing cycle fails instead of chan
 test(
   'the complete installed materialized graph keeps every resolution edge and original asset while sharing real common ancestors',
   () => {
-    const root = mkdtempSync(join(tmpdir(), 'kite-terminal-actual-materialized-'));
+    const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-terminal-actual-materialized-')));
     try {
       const repositoryRoot = realpathSync(join(import.meta.dir, '../../..'));
       const destination = join(root, 'node_modules');

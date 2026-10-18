@@ -177,7 +177,9 @@ try {
     ['deepseek', 'DeepSeek', 'model-deepseek'],
   ] as const;
   for (const [alias, label, name] of aliases) {
-    await page.getByRole('button', { name: `配置 ${label}`, exact: true }).click();
+    await page.getByRole('button', { name: '新增提供商', exact: true }).click();
+    await page.getByRole('combobox', { name: '服务商预设', exact: true }).selectOption(alias);
+    await page.getByRole('textbox', { name: '提供商名称', exact: true }).fill(label);
     await page
       .getByRole('textbox', { name: '服务地址', exact: true })
       .fill(`${control}/${alias}/v1`);
@@ -215,7 +217,8 @@ try {
       row.credentialState,
       alias === 'openai' || alias === 'deepseek' ? 'stored' : 'unchanged',
     );
-    await page.getByRole('button', { name: '关闭提供商配置', exact: true }).click();
+    await page.getByRole('button', { name: '新增提供商', exact: true }).waitFor();
+    assert.equal(await page.getByRole('textbox', { name: '服务地址', exact: true }).count(), 0);
   }
   const config = readConfiguration();
   const models = config.models!;
@@ -265,7 +268,7 @@ try {
     await popup.getByRole('button', { name: /^选择模型，当前/ }).click();
     await popup
       .getByRole('tablist', { name: '模型提供商', exact: true })
-      .getByRole('tab', { name: alias, exact: true })
+      .getByRole('tab', { name: aliases.find(([id]) => id === alias)![1], exact: true })
       .click();
     await popup.getByRole('option', { name: `选择模型 ${id(alias)}`, exact: true }).click();
   }
@@ -273,7 +276,7 @@ try {
     const picker = page.getByRole('region', { name: '下一轮模型选择', exact: true });
     const popup = page.getByRole('dialog', { name: '模型与思考程度', exact: true });
     if (!(await popup.count())) await picker.getByRole('button', { name: /^模型：/ }).click();
-    const label = ({ low: '低', high: '高' } as Record<string, string>)[value];
+    const label = ({ low: '轻度', high: '高' } as Record<string, string>)[value];
     assert.ok(label, 'fixture requests an explicit supported effort');
     const slider = popup.getByRole('slider', { name: '思考程度', exact: true });
     await slider.press('Home');
@@ -490,12 +493,12 @@ try {
   await closeSettings(page);
   await page
     .getByRole('region', { name: '下一轮模型选择' })
-    .getByRole('button', { name: '模型：model-openai，思考程度：默认', exact: true })
+    .getByRole('button', { name: '模型：model-openai', exact: true })
     .waitFor();
   assert.equal(
     await page
       .getByRole('region', { name: '下一轮模型选择' })
-      .getByRole('button', { name: '模型：model-openai，思考程度：默认', exact: true })
+      .getByRole('button', { name: '模型：model-openai', exact: true })
       .count(),
     1,
   );

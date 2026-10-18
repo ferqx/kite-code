@@ -92,11 +92,11 @@ test('one ordinary Run retains complete project sources across 257 distinct File
                     id: `read-${start + index + 1}`,
                     type: 'function',
                     function: {
-                      name: 'files.read',
+                      name: 'read_file',
                       arguments: JSON.stringify({
                         path: 'AGENTS.md',
-                        offset: start + index + 1,
-                        limit: 1,
+                        start_line: start + index + 1,
+                        max_lines: 1,
                       }),
                     },
                   })),
@@ -289,12 +289,12 @@ test('one ordinary Run retains complete project sources across 257 distinct File
         },
       ]);
       expect(request.tools.map((tool) => tool.function.name)).toEqual([
-        'files.edit',
-        'files.glob',
-        'files.list',
-        'files.read',
-        'files.search',
-        'files.write',
+        'edit_file',
+        'glob_files',
+        'list_directory',
+        'read_file',
+        'search_content',
+        'write_file',
         'web_fetch',
       ]);
     }

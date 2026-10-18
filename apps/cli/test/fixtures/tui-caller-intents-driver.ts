@@ -1,9 +1,12 @@
+import { Database } from 'bun:sqlite';
 import assert from 'node:assert/strict';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { ptyDeadline, spawnTuiPTY, terminateTuiTree } from './tui-pty';
 
 const input = JSON.parse(process.argv[2]!) as {
   runner: string;
+  databasePath: string;
+  journal: string;
   root: string;
   request: string;
   cold: boolean;
@@ -88,6 +91,25 @@ const serviceGone = async () => {
   }
 };
 try {
+  // A committed caller has exactly its original completed Model; a prepared-only
+  // caller has no Run. Neither cold caller may dispatch the original work again.
+  const completedCaller = input.cold && input.crash === 'post-lost';
+  if (completedCaller) {
+    const records = JSON.parse(readFileSync(input.journal, 'utf8')).records;
+    assert.equal(records.length, 1);
+    const original = records[0].intent;
+    assert.equal(original.scope.sessionId, 'caller');
+    assert.equal(original.request.content, input.request);
+    const database = new Database(input.databasePath, { readonly: true });
+    try {
+      const runs = database
+        .query('SELECT origin_command_id,is_active FROM run WHERE session_id=?')
+        .all('caller');
+      assert.deepEqual(runs, [{ origin_command_id: original.request.commandId, is_active: 0 }]);
+    } finally {
+      database.close();
+    }
+  }
   await wait(input.cold ? 'Session caller' : 'New Run');
   servicePid = Number(readFileSync(input.servicePidPath, 'utf8'));
   assert.ok(Number.isSafeInteger(servicePid) && servicePid > 0);

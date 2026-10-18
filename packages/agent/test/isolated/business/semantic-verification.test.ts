@@ -62,12 +62,18 @@ async function commandFixture(
         .runId!;
       const response =
         steps++ === 0
-          ? call('validation.define', {
-              runId,
-              checks: [{ kind: 'command', input: { command: command(ledger) }, expectedExitCode }],
+          ? call('define_validation_checks', {
+              run_id: runId,
+              checks: [
+                {
+                  kind: 'command',
+                  input: { command: command(ledger) },
+                  expected_exit_code: expectedExitCode,
+                },
+              ],
             })
           : steps === 2
-            ? call('validation.check', { runId })
+            ? call('run_validation_checks', { run_id: runId })
             : [finish];
       yield* response;
     },
@@ -262,11 +268,11 @@ async function mcpScenario(mode: 'repair' | 'bad_shape' | 'wrong_version' | 'wro
       const target = async () => {
         const entry = executions.filter((entry) => entry.definitionId === 'fixture.write').at(-1)!;
         return {
-          executionId: entry.id,
+          execution_id: entry.id,
           attempt: entry.attempt,
-          definitionId: entry.definitionId,
-          definitionVersion: entry.definitionVersion,
-          inputDigest: Array.from(
+          definition_id: entry.definitionId,
+          definition_version: entry.definitionVersion,
+          input_digest: Array.from(
             new Uint8Array(
               await crypto.subtle.digest(
                 'SHA-256',
@@ -275,7 +281,7 @@ async function mcpScenario(mode: 'repair' | 'bad_shape' | 'wrong_version' | 'wro
             ),
             (byte) => byte.toString(16).padStart(2, '0'),
           ).join(''),
-          resultRevision: entry.resultRevision,
+          result_revision: entry.resultRevision,
         };
       };
       const step = steps++;
@@ -286,12 +292,12 @@ async function mcpScenario(mode: 'repair' | 'bad_shape' | 'wrong_version' | 'wro
       yield* step === 0
         ? call('fixture.write', { value: 1 })
         : step === 1
-          ? call('validation.define', {
-              runId,
+          ? call('define_validation_checks', {
+              run_id: runId,
               checks: [
                 {
                   kind: 'mcp',
-                  checkerId: 'read',
+                  checker_id: 'read',
                   input: {},
                   target: await target(),
                   schema: {
@@ -304,13 +310,13 @@ async function mcpScenario(mode: 'repair' | 'bad_shape' | 'wrong_version' | 'wro
               ],
             })
           : step === 2 || step === 5
-            ? call('validation.check', { runId })
+            ? call('run_validation_checks', { run_id: runId })
             : step === 3
               ? call('fixture.write', { value: 2 })
               : step === 4
-                ? call('validation.rebind', {
-                    runId,
-                    expectedRevision: null,
+                ? call('rebind_validation_checks', {
+                    run_id: runId,
+                    expected_revision: null,
                     bindings: [{ index: 0, target: await target() }],
                   })
                 : [finish];

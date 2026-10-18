@@ -1659,11 +1659,7 @@ export class SqliteOperations {
             if (pending) {
               this.run(
                 'UPDATE command SET status=?,receipt_json=? WHERE id=?',
-                status === 'outcome_unknown'
-                  ? 'needs_review'
-                  : status === 'cancelled'
-                    ? 'cancelled'
-                    : 'rejected',
+                status === 'outcome_unknown' ? 'needs_review' : 'rejected',
                 canonicalJson({
                   outcome: 'not_activated',
                   executionId: input.executionId,

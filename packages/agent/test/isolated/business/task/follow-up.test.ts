@@ -15,8 +15,49 @@ const finish: Extract<ModelEvent, { type: 'finish' }> = {
   usage: { inputTokens: 1, outputTokens: 1 },
 };
 function call(name: string, input: unknown): ModelEvent[] {
+  // These are provider outputs; runtime selection and durable assertions retain internal IDs.
+  const publicNames: Record<string, string> = {
+    task: 'spawn_agent',
+    'task.execute': 'run_agent',
+    task_read: 'read_agent',
+    task_wait: 'wait_agents',
+    task_cancel: 'cancel_agent_task',
+    send_message: 'send_agent_message',
+    followup_task: 'followup_agent',
+    wait_agents: 'wait_agents',
+    wait_agent: 'wait_agent_event',
+    list_agents: 'list_agents',
+    interrupt_agent: 'interrupt_agent',
+  };
+  const publicKeys: Record<string, string> = {
+    taskId: 'task_id',
+    taskIds: 'task_ids',
+    timeoutMs: 'timeout_ms',
+    resultDisposition: 'result_disposition',
+    commandId: 'command_id',
+    targetRunId: 'target_run_id',
+    afterRunId: 'after_run_id',
+    contextSelectionId: 'context_selection_id',
+    afterSeq: 'after_seq',
+    upperSeq: 'upper_seq',
+  };
+  let arguments_ = input;
+  if (publicNames[name] && input && typeof input === 'object' && !Array.isArray(input)) {
+    arguments_ = Object.fromEntries(
+      Object.entries(input).map(([key, value]) =>
+        (name === 'task_wait' || name === 'wait_agents') && key === 'taskId'
+          ? ['task_ids', [value]]
+          : [publicKeys[key] ?? key, value],
+      ),
+    );
+  }
   return [
-    { type: 'tool_call', id: crypto.randomUUID(), name, arguments: JSON.stringify(input) },
+    {
+      type: 'tool_call',
+      id: crypto.randomUUID(),
+      name: publicNames[name] ?? name,
+      arguments: JSON.stringify(arguments_),
+    },
     { ...finish, reason: 'tool_calls' },
   ];
 }
@@ -35,6 +76,14 @@ test.each([
   const profile = { dataRoot: join(directory, 'data'), profile: 'test' };
   const store = await openSqliteStore(profile);
   const originalStoreClose = store.close.bind(store);
+  const originalCancelWork = store.cancelWork.bind(store);
+  let cancellationBoundary: Awaited<ReturnType<typeof store.listExecutions>> = [];
+  let cancellationCursor = '0';
+  store.cancelWork = async (input) => {
+    if (input.commandId === 'stop-before-activation')
+      cancellationBoundary = (await store.listExecutions('root')).filter((e) => e.childSessionId);
+    return originalCancelWork(input);
+  };
   let storeCloses = 0,
     childBindingCloses = 0,
     childStreams = 0;
@@ -143,7 +192,8 @@ test.each([
         events = call('task_wait', { taskId: 'third', timeoutMs: 4000 });
       else if (calls === 5) {
         if (active) expect(requests).toHaveLength(1);
-        if (mode === 'root-stop')
+        if (mode === 'root-stop') {
+          cancellationCursor = (await store.getMetadata()).lastChangeCursor;
           await runtime.cancelSession({
             expectedStoreId: (await store.getMetadata()).storeId,
             sessionId: 'root',
@@ -151,6 +201,7 @@ test.each([
             commandId: 'stop-before-activation',
             includeBackground: true,
           });
+        }
         if (mode === 'root-delete') {
           const Database = (await import('bun:sqlite')).Database;
           const db = new Database(join(directory, 'data', 'test', 'core.db'));
@@ -312,7 +363,33 @@ test.each([
       expect(stopped?.receipt).toMatchObject({ outcome: 'cancel_requested' });
       const carriers = root.executions.filter((e) => e.childSessionId);
       expect(carriers).toHaveLength(2);
-      expect(carriers.every((e) => e.cancelRequestedAt !== null)).toBe(true);
+      expect(carriers.every((e) => e.status === 'cancelled')).toBe(true);
+      expect((await store.getView(old.childSessionId)).runs[0]!.status).toBe('cancelled');
+      expect(carriers.at(-1)!.result).toMatchObject({
+        outcome: 'cancelled',
+        details: { adapterAttempted: false },
+      });
+      // Local shrinking can settle the queued successor before the durable stop write.
+      // Preserve that terminal history instead of fabricating a later cancellation fact.
+      for (const before of cancellationBoundary.filter((e) =>
+        ['succeeded', 'failed', 'cancelled'].includes(e.status),
+      )) {
+        const after = carriers.find((e) => e.id === before.id)!;
+        expect({
+          status: after.status,
+          result: after.result,
+          cancelRequestedAt: after.cancelRequestedAt,
+        }).toEqual({
+          status: before.status,
+          result: before.result,
+          cancelRequestedAt: before.cancelRequestedAt,
+        });
+      }
+      const changes = await store.getChanges({ after: cancellationCursor });
+      for (const event of changes.events.filter((e) => e.type === 'execution.cancel_requested')) {
+        const carrier = carriers.find((e) => e.id === event.objectId);
+        if (carrier) expect(carrier.cancelRequestedAt).not.toBeNull();
+      }
       return;
     }
     if (mode === 'dual') {

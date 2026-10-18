@@ -67,6 +67,39 @@ async function until(read: () => boolean) {
   }
 }
 
+test('CamelCase MCP names project to lowercase while remote names and argument keys remain exact', async () => {
+  const f = setup();
+  const remote = {
+    ...descriptor,
+    name: 'ReadProjectStatus',
+    inputSchema: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['projectId'],
+      properties: { projectId: { type: 'string' } },
+    },
+  };
+  writeFileSync(f.catalogue, JSON.stringify([remote]));
+  try {
+    const scope = f.adapter.scope('camel-case');
+    const tool = (await scope.snapshotTools())[0]!;
+    expect(tool.model?.name).toMatch(/^mcp_fixture_readprojectstatus_[a-f0-9]{8}$/);
+    expect(tool.inputSchema).toEqual(remote.inputSchema);
+    expect((await tool.execute({ projectId: 'original' }, context())).outcome).toBe('succeeded');
+    const effects = readFileSync(f.ledger, 'utf8')
+      .split('\n')
+      .filter((line) => line.startsWith('effect:'));
+    expect(effects).toHaveLength(1);
+    expect(JSON.parse(effects[0]!.slice('effect:'.length))).toEqual({
+      name: remote.name,
+      arguments: { projectId: 'original' },
+    });
+    await scope.release();
+  } finally {
+    await f.close();
+  }
+});
+
 test('MCP lazy stdio scopes share a connection; immutable snapshots retain old schemas and output validation', async () => {
   const f = setup();
   try {
@@ -76,6 +109,9 @@ test('MCP lazy stdio scopes share a connection; immutable snapshots retain old s
     expect(existsSync(f.ledger)).toBe(false);
     const old = (await a.snapshotTools())[0]!;
     expect(Object.isFrozen(old)).toBe(true);
+    expect(old.model?.name).toMatch(/^mcp_fixture_external_tool_[a-f0-9]{8}$/);
+    expect(old.model!.name.length).toBeLessThanOrEqual(64);
+    expect(old.inputSchema).toEqual(descriptor.inputSchema);
     expect(Object.isFrozen(old.inputSchema)).toBe(true);
     const resources = await b.listResources();
     expect(resources[0]?.uri).toBe('fixture://resource');
@@ -237,7 +273,7 @@ test('MCP ToolDefinition is executed by actual UnifiedExecution with durable pro
     const store = await openSqliteStore({ dataRoot: join(f.root, 'data'), profile: 'local' });
     const model = createFixedModel([
       [
-        { type: 'tool_call', id: 'call', name: tool.id, arguments: '{"value":"local"}' },
+        { type: 'tool_call', id: 'call', name: tool.model!.name, arguments: '{"value":"local"}' },
         { type: 'finish', reason: 'tool_calls', usage: { inputTokens: 0, outputTokens: 0 } },
       ],
       [{ type: 'finish', reason: 'stop', usage: { inputTokens: 0, outputTokens: 0 } }],

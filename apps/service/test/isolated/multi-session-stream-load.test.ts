@@ -46,13 +46,13 @@ function provider() {
           id: `task-${root}-${index}`,
           type: 'function',
           function: {
-            name: 'task',
+            name: 'spawn_agent',
             arguments: JSON.stringify({
               key: `child-${index}`,
               role: 'worker',
               input: { content: `load-root-${root} child-index-${index}` },
               cancellation: root === '1' ? 'detached' : 'attached',
-              resultDisposition: 'required',
+              result_disposition: 'required',
             }),
           },
         }));

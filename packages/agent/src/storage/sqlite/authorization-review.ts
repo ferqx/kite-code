@@ -443,7 +443,7 @@ export function ensureAuthorizationReview(
  * Only an exact, durably bound human card authorizes those bytes for public reading.
  * This runs inside the caller's artifact read snapshot; it grants no execution authority.
  */
-export function isLegacyPublicReviewRequest(
+export function isHumanBoundReviewRequest(
   db: SqliteOperations,
   reference: ArtifactReference,
 ): boolean {

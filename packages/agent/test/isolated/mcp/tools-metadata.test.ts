@@ -150,7 +150,7 @@ async function fixture(
   const refreshCall = {
     type: 'tool_call' as const,
     id: 'actual-refresh',
-    name: 'mcp.catalogue.refresh',
+    name: 'refresh_mcp_catalogue',
     arguments: '{}',
   };
   const fixedModel = createFixedModel([
@@ -158,8 +158,8 @@ async function fixture(
       {
         type: 'tool_call',
         id: 'actual-call',
-        name: 'mcp.connect',
-        arguments: '{"serverId":"local","key":"original"}',
+        name: 'connect_mcp_server',
+        arguments: '{"server_id":"local","key":"original"}',
       },
       { type: 'finish', reason: 'tool_calls', usage: { inputTokens: 1, outputTokens: 1 } },
     ],
@@ -968,10 +968,10 @@ test('actual ordinary Model Tool refresh seals its own scope and both original g
     };
     f.tools = [second];
     f.refreshInput = {
-      serverId: 'local',
-      connectionKey: 'original',
-      connectionExecutionId: first.origin.connectionExecutionId,
-      configDigest: first.origin.configDigest,
+      server_id: 'local',
+      connection_key: 'original',
+      connection_execution_id: first.origin.connectionExecutionId,
+      config_digest: first.origin.configDigest,
       generation: 1,
     };
     await f.runtime.submitCommand({

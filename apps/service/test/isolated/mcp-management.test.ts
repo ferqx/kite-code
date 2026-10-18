@@ -118,7 +118,19 @@ async function fixture(transport: 'http' | 'stdio' = 'http', defaultMode?: 'regi
       providerBodies.push((await req.json()) as Record<string, unknown>);
       const requested = modelRefresh;
       modelRefresh = false;
-      const call = requested ? { name: 'mcp.catalogue.refresh', input: await binding() } : null;
+      const original = requested ? await binding() : null;
+      const call = original
+        ? {
+            name: 'refresh_mcp_catalogue',
+            input: {
+              server_id: original.serverId,
+              connection_key: original.connectionKey,
+              connection_execution_id: original.connectionExecutionId,
+              config_digest: original.configDigest,
+              generation: original.generation,
+            },
+          }
+        : null;
       const chunk = {
         id: 'fixed',
         object: 'chat.completion.chunk',

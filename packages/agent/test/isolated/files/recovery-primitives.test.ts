@@ -15,7 +15,7 @@ import {
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { buildNativeFiles } from '../../../scripts/build-native-files';
+import { buildNativeFilesFixture } from '../../../../../tests/fixtures/build-tool-environment';
 import { createFileTools, createWorkspaceFiles } from '../../../src/files';
 
 const budget = { maxBytes: 1024 * 1024 };
@@ -327,7 +327,7 @@ test('built public byte leaf executes outside the source tree with exact restore
       { stdout: 'pipe', stderr: 'pipe' },
     );
     expect(build.exitCode, build.stderr.toString()).toBe(0);
-    await buildNativeFiles(root);
+    await buildNativeFilesFixture(root);
     const child = Bun.spawnSync(
       [
         process.execPath,

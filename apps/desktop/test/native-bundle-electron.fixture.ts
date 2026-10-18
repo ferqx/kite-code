@@ -648,7 +648,7 @@ try {
         assert.ok((await write.textContent())!.includes('等待人工审批'));
         if (approvals.length === 0) {
           const pendingRow = page
-            .getByRole('button', { name: '新对话', exact: true })
+            .getByRole('button', { name: 'write one', exact: true })
             .and(page.locator('button.session-row'));
           await pendingRow.getByText('待用户输入', { exact: true }).waitFor();
           const actualSession = state.selection!.session.id;
@@ -674,7 +674,7 @@ try {
           assert.equal(activity.updatedAt! > 0, true);
           assert.equal(
             await page.locator('button.session-row[aria-label]').first().getAttribute('aria-label'),
-            '新对话',
+            'write one',
           );
           assert.equal(await (await fetch(`${control}/count`)).text(), '1');
           await pendingRow.click();
@@ -738,7 +738,7 @@ try {
   assert.equal(afterFirst.creationSubmissions.length, 1);
   assert.equal(afterFirst.creationSubmissions[0]!.phase, 'created');
   conversationId = afterFirst.creationSubmissions[0]!.input.sessionId;
-  conversationTitle = '新对话';
+  conversationTitle = 'File write';
   await page.waitForFunction(async (sessionId) => {
     const state = (await window.kiteNative!.request({
       method: 'state',

@@ -57,32 +57,32 @@ async function fixture(mode: 'nested' | 'followup') {
       let name = '',
         input: unknown;
       if (body.model === 'parent' && count === 1) {
-        name = 'task';
+        name = 'spawn_agent';
         input = {
           key: 'first',
           role: 'worker',
           input: { content: 'initial' },
           cancellation: 'detached',
-          resultDisposition: 'background',
+          result_disposition: 'background',
         };
       } else if (mode === 'nested' && body.model === 'child' && count === 1) {
-        name = 'task';
+        name = 'spawn_agent';
         input = {
           key: 'nested',
           role: 'grandworker',
           input: { content: 'nested' },
           cancellation: 'detached',
-          resultDisposition: 'after_turn',
+          result_disposition: 'after_turn',
         };
       } else if (mode === 'followup' && body.model === 'parent' && count === 3) {
-        name = 'followup_task';
+        name = 'followup_agent';
         input = {
-          taskId: 'first',
+          task_id: 'first',
           key: 'second',
-          afterRunId,
-          contextSelectionId,
+          after_run_id: afterRunId,
+          context_selection_id: contextSelectionId,
           content: 'new explicitly requested work',
-          resultDisposition: 'after_turn',
+          result_disposition: 'after_turn',
         };
       }
       if (

@@ -1449,11 +1449,11 @@ test('actual after-turn report admission and its active Run block scheduling unt
         yield {
           type: 'tool_call' as const,
           id: 'delegate',
-          name: 'task',
+          name: 'spawn_agent',
           arguments: JSON.stringify({
             key: 'child',
             role: 'reader',
-            resultDisposition: 'after_turn',
+            result_disposition: 'after_turn',
             cancellation: 'detached',
             input: { content: 'Harmless child' },
           }),

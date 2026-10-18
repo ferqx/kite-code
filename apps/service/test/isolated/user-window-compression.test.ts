@@ -50,8 +50,8 @@ for (const mode of ['legacy-1m', 'default-256k', 'explicit-threshold'] as const)
                     id: 'read-evidence',
                     type: 'function',
                     function: {
-                      name: 'files.read',
-                      arguments: JSON.stringify({ path: 'evidence.txt', limit: 5000 }),
+                      name: 'read_file',
+                      arguments: JSON.stringify({ path: 'evidence.txt', max_lines: 5000 }),
                     },
                   },
                 ],

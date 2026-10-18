@@ -103,6 +103,12 @@ test('actual single-file default Service protects loader companions without prot
       privateDirectory(join(root, path.substring(0, path.lastIndexOf('/'))));
       cpSync(join(agent, path), join(root, path));
     }
+    privateDirectory(join(root, 'native/files'));
+    cpSync(join(agent, 'native/files'), join(root, 'native/files'), { recursive: true });
+    const filesNativeBytes = ['files.node', 'manifest.json'].map((name) => ({
+      name,
+      bytes: readFileSync(join(agent, 'native/files', name)),
+    }));
     const preload = join(root, 'storage/worker/observer-preload.js');
     const preloadBytes = readFileSync(join(agent, 'storage/worker/observer-preload.js'));
     for (const [from, to] of [
@@ -133,16 +139,18 @@ test('actual single-file default Service protects loader companions without prot
       'extractor-worker.js',
       'extractor-worker.sha256',
       'stdio-guardian.js',
+      'native/files/files.node',
+      'native/files/manifest.json',
       relative(workspace, runtime),
       relative(workspace, join(profile.profilePath, 'config.jsonc')),
     ];
     expect([normalPath, ...protectedPaths].every((path) => !path.startsWith('../'))).toBe(true);
     const calls = [
-      { name: 'files.write', input: { path: normalPath, content: '邻近 UTF8 😀\r\n', base: null } },
-      { name: 'files.read', input: { path: normalPath } },
+      { name: 'write_file', input: { path: normalPath, content: '邻近 UTF8 😀\r\n', base: null } },
+      { name: 'read_file', input: { path: normalPath } },
       ...protectedPaths.flatMap((path) => [
-        { name: 'files.read', input: { path } },
-        { name: 'files.write', input: { path, content: 'MUST NEVER WRITE', base: null } },
+        { name: 'read_file', input: { path } },
+        { name: 'write_file', input: { path, content: 'MUST NEVER WRITE', base: null } },
       ]),
     ];
     const messages: unknown[][] = [];
@@ -253,6 +261,8 @@ try {
     expect(readFileSync(configPath, 'utf8')).toBe(configBytes);
     expect(readFileSync(manifestPath)).toEqual(manifestBytes);
     expect(readFileSync(preload)).toEqual(preloadBytes);
+    for (const asset of filesNativeBytes)
+      expect(readFileSync(join(root, 'native/files', asset.name))).toEqual(asset.bytes);
     verifyTerminalBundle(built.root);
     // A trusted custom extractor owns its exact real parser/checksum inventory; the default
     // sibling parser is absent and must not be invented as loaded authority.
@@ -307,13 +317,13 @@ await runServiceProcess({async configure(startup){const extractor=createPassiveW
       0,
       calls.length,
       {
-        name: 'files.write',
+        name: 'write_file',
         input: { path: 'neighbor-custom.txt', content: '邻近 UTF8 😀\r\n', base: null },
       },
-      { name: 'files.read', input: { path: 'neighbor-custom.txt' } },
+      { name: 'read_file', input: { path: 'neighbor-custom.txt' } },
       ...customProtected.flatMap((path) => [
-        { name: 'files.read', input: { path } },
-        { name: 'files.write', input: { path, content: 'MUST NEVER WRITE', base: null } },
+        { name: 'read_file', input: { path } },
+        { name: 'write_file', input: { path, content: 'MUST NEVER WRITE', base: null } },
       ]),
     );
     messages.length = 0;
@@ -355,6 +365,8 @@ await runServiceProcess({async configure(startup){const extractor=createPassiveW
     );
     expect(parserProof.extracted.content).toContain('Original custom parser content.');
     expect(readFileSync(preload)).toEqual(preloadBytes);
+    for (const asset of filesNativeBytes)
+      expect(readFileSync(join(root, 'native/files', asset.name))).toEqual(asset.bytes);
     verifyTerminalBundle(built.root);
     // Explicit trusted-host fault injection: actual HTTP/Runtime shutdown with a real shared artifact lock.
     // This proves failure retention, not an arbitrary default-bundle filesystem failure.

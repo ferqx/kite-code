@@ -778,8 +778,9 @@ test.each([
       const call =
         child && malicious && childCalls++ === 0
           ? scenario === 'drift'
-            ? { name: 'files.read', input: { path: 'skill/SKILL.md' } }
-            : { name: 'files.write', input: { path: 'forbidden.txt', content: 'must not execute' } }
+            ? { name: 'read_file', input: { path: 'skill/SKILL.md' } }
+            : // This unavailable identity must be rejected, never resolved through an old-name alias.
+              { name: 'files.write', input: { path: 'forbidden.txt', content: 'must not execute' } }
           : requests.length === 1
             ? {
                 name: 'activate_skill',
@@ -971,7 +972,7 @@ test.each([
     expect(manifest.tools).toContainEqual({
       extensionId: 'builtin.files',
       id: 'files.read',
-      version: '3',
+      version: '4',
     });
     expect(manifest.tools.some((tool) => tool.id === 'files.write')).toBe(false);
     const childRequests = requests.filter((request) =>
@@ -1000,7 +1001,7 @@ test.each([
       (childRequests[0]?.tools as { function: { name: string } }[]).map(
         (tool) => tool.function.name,
       ),
-    ).not.toContain('files.write');
+    ).not.toContain('write_file');
     expect(
       childView.executions
         .filter(

@@ -153,14 +153,19 @@ export function createFileTools(
       required: ['path'],
       properties: {
         path,
-        offset: { type: 'integer', minimum: 1, maximum: Number.MAX_SAFE_INTEGER },
+        offset: {
+          type: 'integer',
+          minimum: 1,
+          maximum: Number.MAX_SAFE_INTEGER,
+          description: 'First line to return, numbered from 1; defaults to 1.',
+        },
         limit: {
           type: 'integer',
           minimum: 1,
           maximum: Number.MAX_SAFE_INTEGER,
           default: 200,
           description:
-            'Maximum lines to return; defaults to 200. Continue at selection.nextOffset to read the next page, or request an explicit limit.',
+            'Maximum lines to return; defaults to 200. Continue at selection.nextOffset to read the next page, or request explicit max_lines.',
         },
       },
       call: (i) =>
@@ -271,14 +276,47 @@ export function createFileTools(
         }),
     },
   ];
+  const modelNames: Record<string, string> = {
+    read: 'read_file',
+    write: 'write_file',
+    edit: 'edit_file',
+    list: 'list_directory',
+    glob: 'glob_files',
+    search: 'search_content',
+  };
+  const modelParameters: Record<string, Record<string, string>> = {
+    read: { offset: 'start_line', limit: 'max_lines' },
+    edit: {
+      find: 'old_text',
+      replace: 'new_text',
+      occurrences: 'expected_matches',
+      findArtifact: 'old_text_artifact',
+      replaceArtifact: 'new_text_artifact',
+    },
+  };
+  const descriptions: Record<string, string> = {
+    read: 'Read UTF-8 file lines. Line numbers start at 1; return at most 200 lines by default. Continue at selection.nextOffset. The returned baseline describes the complete file and is required for later modifications.',
+    write:
+      'Create or replace a complete UTF-8 file. Pass base=null only to create a new file; replacing a file requires its exact complete-file baseline. Supply exactly one of content or content_artifact.',
+    edit: 'Replace exact, non-overlapping literal text in a UTF-8 file using its complete-file baseline. expected_matches must equal the actual number of matches. Supply old_text and new_text, or the corresponding immutable Artifact references.',
+    list: 'List immediate directory entries, with name-based pagination. Defaults to the workspace root and 100 entries; limit is 1–200. Continue using the returned name cursor.',
+    glob: 'Find file paths matching a glob, including **/ for zero or more directory levels. Defaults to the workspace root and 100 paths; limit is 1–200. Continue using the returned path cursor.',
+    search:
+      'Search file contents for literal text, not a regular expression. Defaults to the workspace root and all matches; an explicit limit selects 1–200 matches with a continuation cursor.',
+  };
   return definitions.map((d) => ({
     id: `files.${d.name}`,
+    model: {
+      name: modelNames[d.name]!,
+      snakeCase: true,
+      ...(modelParameters[d.name] ? { parameterNames: modelParameters[d.name] } : {}),
+    },
     ...(capture && (d.name === 'write' || d.name === 'edit')
       ? { resources: { serial: { scope: 'workspace' as const, key: 'files.mutation' } } }
       : {}),
     version:
       d.name === 'read' ? '4' : ['write', 'edit', 'search', 'glob'].includes(d.name) ? '2' : '1',
-    description: `Workspace ${d.name}; paths are relative to the fixed workspace root or absolute within it, never relative to Shell cwd. UTF-8, exact baseline for modifications, complete bodies or explicit immutable Artifact references.${d.name === 'read' ? ' Read up to 200 lines by default; continue at selection.nextOffset or specify offset/limit. The baseline describes the complete file.' : ''}`,
+    description: `${descriptions[d.name]} Paths are relative to the fixed workspace root or absolute inside it, never relative to Shell cwd.`,
     inputSchema: {
       type: 'object',
       additionalProperties: false,

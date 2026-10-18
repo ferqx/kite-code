@@ -54,11 +54,11 @@ for (const mode of ['report', 'apply_fault', 'early_result', 'followup_before'] 
           yield {
             type: 'tool_call',
             id: 'root-task',
-            name: 'task',
+            name: 'spawn_agent',
             arguments: JSON.stringify({
               key: 'child',
               role: 'child',
-              resultDisposition: 'background',
+              result_disposition: 'background',
               cancellation: 'detached',
               input: { content: 'create nested report' },
             }),
@@ -68,14 +68,14 @@ for (const mode of ['report', 'apply_fault', 'early_result', 'followup_before'] 
           yield {
             type: 'tool_call',
             id: 'human-followup',
-            name: 'followup_task',
+            name: 'followup_agent',
             arguments: JSON.stringify({
-              taskId: 'child',
+              task_id: 'child',
               key: 'next-child',
-              afterRunId: followupRun,
-              contextSelectionId: followupSelection,
+              after_run_id: followupRun,
+              context_selection_id: followupSelection,
               content: 'explicit preferred child work',
-              resultDisposition: 'background',
+              result_disposition: 'background',
             }),
           };
           yield { ...finish, reason: 'tool_calls' };
@@ -96,11 +96,11 @@ for (const mode of ['report', 'apply_fault', 'early_result', 'followup_before'] 
           yield {
             type: 'tool_call',
             id: 'nested-task',
-            name: 'task',
+            name: 'spawn_agent',
             arguments: JSON.stringify({
               key: 'grandchild',
               role: 'grandchild',
-              resultDisposition: 'after_turn',
+              result_disposition: 'after_turn',
               cancellation: 'detached',
               input: { content: 'exact nested result' },
             }),
@@ -327,11 +327,11 @@ test('explicit followup_task after_turn binds the new carrier and sender Run, re
         yield {
           type: 'tool_call',
           id: 'first',
-          name: 'task',
+          name: 'spawn_agent',
           arguments: JSON.stringify({
             key: 'first',
             role: 'reader',
-            resultDisposition: 'background',
+            result_disposition: 'background',
             cancellation: 'detached',
             input: { content: 'initial child' },
           }),
@@ -341,14 +341,14 @@ test('explicit followup_task after_turn binds the new carrier and sender Run, re
         yield {
           type: 'tool_call',
           id: 'followup',
-          name: 'followup_task',
+          name: 'followup_agent',
           arguments: JSON.stringify({
-            taskId: 'first',
+            task_id: 'first',
             key: 'second',
-            afterRunId,
-            contextSelectionId: selectionId,
+            after_run_id: afterRunId,
+            context_selection_id: selectionId,
             content: 'explicit new child work',
-            resultDisposition: 'after_turn',
+            result_disposition: 'after_turn',
           }),
         };
         yield { ...finish, reason: 'tool_calls' };

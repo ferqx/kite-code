@@ -41,9 +41,7 @@ test('actual default Service keeps native loader/assets protected in Full while 
         tools: { function: { name: string; description: string } }[];
       };
       const find = (operation: string) =>
-        input.tools.find((tool) =>
-          tool.function.description.startsWith(`Absolute user-file ${operation};`),
-        )!.function.name;
+        input.tools.find((tool) => tool.function.name === `${operation}_user_file`)!.function.name;
       const calls = [
         [find('read'), { path: ordinary }],
         [find('read'), { path: metadata }],

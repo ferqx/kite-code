@@ -607,7 +607,7 @@ export type ModelInputMetadata =
       };
       context: {
         transformationId: 'kite.model-request';
-        transformationVersion: '1';
+        transformationVersion: '1' | '2';
         messageOrder: 'request.messages';
         sourceOrder: 'request.messages[].sourceIds';
         sources: Array<{ id: string; digest: string }>;
@@ -942,7 +942,7 @@ export type ModelInputSnapshot = {
         };
         context: {
           transformationId: 'kite.model-request';
-          transformationVersion: '1';
+          transformationVersion: '1' | '2';
           messageOrder: 'request.messages';
           sourceOrder: 'request.messages[].sourceIds';
           sources: Array<{ id: string; digest: string }>;

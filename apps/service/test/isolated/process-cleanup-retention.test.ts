@@ -5,6 +5,7 @@ import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSyn
 import { dirname, join, resolve } from 'node:path';
 import { createProfileBackup } from '@kite-ai/agent/maintenance';
 import { selectProfile } from '@kite-ai/agent/profile';
+import { hostBuildEnvironment } from '../../../../tests/fixtures/build-tool-environment';
 import {
   directoryLink,
   privateDirectory,
@@ -35,7 +36,12 @@ async function bounded<T>(work: Promise<T>, ms = 5000): Promise<T> {
   }
 }
 async function build(args: string[], cwd: string) {
-  const child = Bun.spawn([process.execPath, ...args], { cwd, stdout: 'pipe', stderr: 'pipe' });
+  const child = Bun.spawn([process.execPath, ...args], {
+    cwd,
+    env: hostBuildEnvironment(),
+    stdout: 'pipe',
+    stderr: 'pipe',
+  });
   try {
     const [code, stdout, stderr] = await bounded(
       Promise.all([
