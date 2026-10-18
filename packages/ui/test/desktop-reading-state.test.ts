@@ -24,6 +24,7 @@ test('reading state drops vanished message, tool step and turn expansion IDs', (
       expanded: {
         'activity:tool:a': true,
         'activity-group:tool:a': false,
+        'activity-group:exploration-block': true,
         'tool:a': false,
         'turn:t:complete': true,
         'subagent-step:step': true,
@@ -37,6 +38,7 @@ test('reading state drops vanished message, tool step and turn expansion IDs', (
         settled: true,
         text: '',
         turnId: 't',
+        presentationGroupId: 'exploration-block',
         steps: [{ id: 'step', text: '', toolName: 'read', status: 'completed' }],
       },
     ],
@@ -47,6 +49,7 @@ test('reading state drops vanished message, tool step and turn expansion IDs', (
     expanded: {
       'activity:tool:a': true,
       'activity-group:tool:a': false,
+      'activity-group:exploration-block': true,
       'tool:a': false,
       'turn:t:complete': true,
       'subagent-step:step': true,

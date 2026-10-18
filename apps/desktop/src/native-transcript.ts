@@ -1,10 +1,10 @@
-import type { Message } from '@kite-ai/client';
+import type { Execution, Message } from '@kite-ai/client';
 import { completeRunReplies } from '@kite-ai/ui';
 import type { Message as DesktopMessage, TurnActivity } from '@kite-ai/ui/desktop';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { NativeBridge, NativeSelection } from './native-bridge';
 import { desktopMessages } from './native-presentation';
-import { desktopToolMessage } from './native-tool-messages';
+import { desktopToolMessage, desktopToolPresentation } from './native-tool-messages';
 import {
   type NativeRunFact,
   type NativeToolMessageFact,
@@ -274,6 +274,7 @@ export function desktopTranscript({
   messages,
   runs,
   tools,
+  executions = [],
   storeId,
   sessionId,
   fullReply,
@@ -282,6 +283,7 @@ export function desktopTranscript({
   messages: readonly Message[];
   runs: readonly NativeRunFact[];
   tools: readonly NativeToolMessageFact[];
+  executions?: readonly Execution[];
   storeId: string;
   sessionId: string;
   fullReply?: (message: Message) => string | undefined;
@@ -310,8 +312,22 @@ export function desktopTranscript({
         message.sourceIds?.length === 1 &&
         entry.executionId === message.sourceIds[0],
     );
+    // The current View can establish a tool's display classification before
+    // the receipt metadata GET returns. It does not establish its result.
+    const execution =
+      !fact && run && message.role === 'tool' && message.sourceIds?.length === 1
+        ? executions.find(
+            (entry) =>
+              entry.id === message.sourceIds![0] &&
+              entry.kind === 'tool' &&
+              entry.originStoreId === storeId &&
+              entry.sessionId === sessionId &&
+              entry.runId === run.id,
+          )
+        : undefined;
     const result: DesktopMessage = {
       ...(fact ? desktopToolMessage(fact, message.id, message.content) : model),
+      ...(execution ? desktopToolPresentation(execution) : {}),
       ...(run ? { turnId: identity(run.id) } : {}),
       ...(replies.has(message.id)
         ? {
@@ -320,15 +336,7 @@ export function desktopTranscript({
           }
         : {}),
     };
-    if (
-      fact &&
-      run &&
-      ((fact.definitionId === 'files.read' && ['2', '3', '4'].includes(fact.definitionVersion)) ||
-        (fact.definitionId === 'files.read_path' && ['1', '2'].includes(fact.definitionVersion)) ||
-        (['files.glob', 'files.search'].includes(fact.definitionId) &&
-          fact.definitionVersion === '2') ||
-        (fact.definitionId === 'files.list' && fact.definitionVersion === '1'))
-    )
+    if (run && result.presentation === 'exploration')
       return {
         ...result,
         presentation: 'exploration' as const,

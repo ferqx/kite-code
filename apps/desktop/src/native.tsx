@@ -79,7 +79,11 @@ import { NativeSessionPanel } from './native-sessions';
 import { NativeSkillsSettings } from './native-skills-settings';
 import { NativeStartup } from './native-startup';
 import { useNativeTheme } from './native-theme';
-import { liveToolMessages, useNativeToolMessages } from './native-tool-messages';
+import {
+  groupNativeToolMessages,
+  liveToolMessages,
+  useNativeToolMessages,
+} from './native-tool-messages';
 import { desktopTranscript, nativeReplyKey, useNativeRuns } from './native-transcript';
 import { NativeTrustConfirmation } from './native-trust';
 import { NativeWindowFrame } from './native-window-frame';
@@ -1358,6 +1362,7 @@ function NativeDesktopContent({
                   ? selection.compressionProgress
                   : undefined,
               tools: toolMessages.entries,
+              executions: selection.executions,
               storeId: selection.storeId,
               sessionId: selection.session.id,
               fullReply: (message) => {
@@ -1442,7 +1447,7 @@ function NativeDesktopContent({
                 ? 'unknown'
                 : 'sending',
       });
-    return models;
+    return groupNativeToolMessages(models);
   }, [
     preparing,
     transcript.messages,
@@ -2343,27 +2348,87 @@ function NativeDesktopContent({
     group,
     controls,
   ) => {
-    if (
-      childDetail ||
-      group.some(
-        (model) =>
-          !toolMessages.entries.some((entry) => entry.messageId === model.id) &&
-          !fileTargets.entries.some((entry) => entry.messageId === model.id) &&
-          !liveTools.some((entry) => entry.message.id === model.id),
-      )
-    )
+    const unverified = new Set(
+      group
+        .filter(
+          (model) =>
+            childDetail ||
+            (!toolMessages.entries.some((entry) => entry.messageId === model.id) &&
+              !fileTargets.entries.some((entry) => entry.messageId === model.id) &&
+              !liveTools.some((entry) => entry.message.id === model.id)),
+        )
+        .map((model) => model.id),
+    );
+    const liveNotices = group.map((model) => {
+      const live = liveTools.find((entry) => entry.message.id === model.id);
+      const status = !live
+        ? undefined
+        : selection?.viewLoading || selection?.permissionUnavailable
+          ? '上次确认状态'
+          : live.execution.cancelRequestedAt !== null
+            ? '已请求停止，等待执行结果。'
+            : undefined;
+      return status ? (
+        <p key={model.id} role="status">
+          {status}
+        </p>
+      ) : null;
+    });
+    if (unverified.size) {
       // A receipt can arrive before its presentation metadata. Keep the
       // original reader behind an explicit expansion instead of briefly
       // publishing its result JSON as ordinary conversation text.
-      return group.map((model) => (
+      const originalTool = (
+        model: (typeof group)[number],
+        expanded: boolean | undefined,
+        onToggle: (open: boolean) => void,
+      ) => (
         <ToolActivity
-          key={model.id}
-          {...controls}
           unverified
-          messages={[{ ...model, title: model.title ?? '工具结果', text: '' }]}
+          messages={[{ ...model, toolName: undefined, title: model.title ?? '工具结果', text: '' }]}
+          expanded={expanded}
+          onToggle={onToggle}
+          activityId={group.length === 1 ? controls.activityId : model.id}
+          restoredExpanded={controls.restoredExpanded}
           renderChildren={() => renderNativeMessage(model)}
         />
-      ));
+      );
+      if (group.length === 1)
+        return (
+          <>
+            {originalTool(group[0]!, controls.expanded, controls.onToggle)}
+            {liveNotices}
+          </>
+        );
+      return (
+        <>
+          <ToolActivity
+            {...controls}
+            unverified
+            messages={group.map((model) =>
+              unverified.has(model.id)
+                ? {
+                    ...model,
+                    title: model.title ?? '工具结果',
+                    text: '',
+                  }
+                : model,
+            )}
+            renderItem={(model) =>
+              unverified.has(model.id)
+                ? originalTool(
+                    group.find((original) => original.id === model.id)!,
+                    controls.expandedItems[model.id],
+                    (open) => controls.onToggleItem(model.id, open),
+                  )
+                : undefined
+            }
+            renderChildren={() => null}
+          />
+          {liveNotices}
+        </>
+      );
+    }
     const models = group.map((model) => {
       const target = fileTargets.entries.find((entry) => entry.messageId === model.id);
       return target?.path && target.operation
@@ -2410,18 +2475,7 @@ function NativeDesktopContent({
             };
           }}
         />
-        {group.map((model) => {
-          const live = liveTools.find((entry) => entry.message.id === model.id);
-          return live ? (
-            <p key={model.id} role="status">
-              {selection?.viewLoading || selection?.permissionUnavailable
-                ? '上次确认状态'
-                : live.execution.cancelRequestedAt !== null
-                  ? '已请求停止，等待执行结果。'
-                  : undefined}
-            </p>
-          ) : null;
-        })}
+        {liveNotices}
       </>
     );
   };
@@ -2671,15 +2725,17 @@ function NativeDesktopContent({
           : undefined,
       }}
       onOpen={(sessionId) => {
-        const returning =
-          (scheduledTasksView || preparing) &&
-          selection?.storeId === directory?.storeId &&
-          selection?.session.id === sessionId &&
-          selected.current === sessionId;
+        const sameTarget =
+          selected.current === sessionId &&
+          (!!selectionRead.current ||
+            (selection?.storeId === directory?.storeId && selection?.session.id === sessionId));
+        if (sameTarget && readingParent) return;
         pageIntent.current++;
         setScheduledTasksView(false);
         setPreparing(false);
-        if (!returning) void report(() => select(sessionId));
+        if (sameTarget) {
+          if (childDetail) environment.closeChild();
+        } else void report(() => select(sessionId));
       }}
       newConversation={
         preparing && !scheduledTasksView

@@ -707,7 +707,10 @@ export function Conversation({
       );
     // A newly formed aggregate must not inherit a single receipt's open reader.
     // Keep its identity stable as more tools join the same aggregate.
-    const activityKey = `${group.length > 1 ? 'activity-group' : 'activity'}:${message.id}`;
+    const activityKey =
+      group.length > 1
+        ? `activity-group:${message.presentationGroupId ?? message.id}`
+        : `activity:${message.id}`;
     if (message.role === 'tool' && renderToolActivity)
       return (
         <Fragment key={activityKey}>

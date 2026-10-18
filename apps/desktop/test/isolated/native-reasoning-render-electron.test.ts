@@ -70,17 +70,15 @@ test.skipIf(process.platform !== 'darwin')(
           else if (stage === 'tool' || stage === 'pure-tool') {
             send(
               {
-                tool_calls: [
-                  {
-                    index: 0,
-                    id: `read-only-call-${calls}`,
-                    type: 'function',
-                    function: {
-                      name: 'files.read',
-                      arguments: JSON.stringify({ path: 'read-only.txt' }),
-                    },
+                tool_calls: Array.from({ length: stage === 'tool' ? 2 : 1 }, (_, index) => ({
+                  index,
+                  id: `read-only-call-${calls}-${index}`,
+                  type: 'function',
+                  function: {
+                    name: 'files.read',
+                    arguments: JSON.stringify({ path: 'read-only.txt' }),
                   },
-                ],
+                })),
               },
               'tool_calls',
             );

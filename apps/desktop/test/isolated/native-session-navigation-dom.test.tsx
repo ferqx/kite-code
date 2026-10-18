@@ -405,6 +405,26 @@ test('live child navigation pauses parent history, updates the active child and 
   }
 });
 
+test('opening the selected parent from child details returns without selecting again', async () => {
+  const f = fixture();
+  try {
+    await f.render();
+    await f.click('Original');
+    await f.open();
+    await f.waitForText('Child prefix');
+    expect(f.host.textContent).toContain('Child prefix');
+    const selections = f.requests.filter((request) => request.method === 'select').length;
+    await f.click('Original');
+    await f.waitForText('Parent transcript');
+    expect(f.host.textContent).toContain('Parent transcript');
+    expect(f.host.textContent).not.toContain('Child prefix');
+    expect(f.host.querySelector('textarea')!.value).toBe('Original private draft');
+    expect(f.requests.filter((request) => request.method === 'select')).toHaveLength(selections);
+  } finally {
+    await f.close();
+  }
+});
+
 test('repeated reply calibrations retain the footer controls and transcript DOM while real history failures remain visible', async () => {
   const f = fixture(true);
   try {

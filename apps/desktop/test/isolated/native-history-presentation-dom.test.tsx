@@ -52,7 +52,9 @@ function fixture(failTools = false, failRuns = false) {
   const session = { ...backgroundItem().rootSession, nextSeq: '6' };
   let selected = 'root',
     revision = 1,
-    historyEpoch = 0;
+    historyEpoch = 0,
+    holdSelection = false;
+  let releaseSelection: (() => void) | undefined;
   const requests: NativeRequest[] = [];
   const pending: Record<Reader, (() => void)[]> = { runs: [], tools: [] };
   const listeners = new Set<(event: NativeEvent) => void>();
@@ -118,10 +120,18 @@ function fixture(failTools = false, failRuns = false) {
         case 'attach':
         case 'state':
           return state();
-        case 'select':
+        case 'select': {
           selected = request.sessionId;
           revision++;
+          if (holdSelection) {
+            holdSelection = false;
+            const value = state();
+            return new Promise((resolve) => {
+              releaseSelection = () => resolve(value);
+            });
+          }
           return state();
+        }
         case 'directory':
           return {
             storeId: 'store',
@@ -286,6 +296,10 @@ function fixture(failTools = false, failRuns = false) {
       });
     },
     pending: (reader: Reader) => pending[reader].length,
+    holdNextSelection() {
+      holdSelection = true;
+    },
+    releaseSelection: () => act(async () => releaseSelection?.()),
     async recalibrateHistory() {
       await act(async () => {
         historyEpoch++;
@@ -304,6 +318,7 @@ function fixture(failTools = false, failRuns = false) {
     },
     async close() {
       await act(async () => root.unmount());
+      releaseSelection?.();
       for (const reader of ['runs', 'tools'] as const)
         for (const resolve of pending[reader].splice(0)) resolve();
       await new Promise((resolve) => setTimeout(resolve, 0));
@@ -486,6 +501,90 @@ test('same-session history epoch recalibration keeps admitted readable content v
     expect(f.host.textContent).toContain(final);
     expect(f.host.querySelector('.agent-turn-summary')?.getAttribute('aria-expanded')).toBe(
       'false',
+    );
+  } finally {
+    await f.close();
+  }
+});
+
+test('repeatedly opening the current conversation preserves its nodes and reading state without selecting or reading again', async () => {
+  const f = fixture();
+  try {
+    await f.render();
+    await f.release('runs');
+    await f.release('tools');
+    await f.until(() => !!f.host.querySelector('.agent-turn-summary'));
+    await act(async () => f.host.querySelector<HTMLButtonElement>('.agent-turn-summary')!.click());
+    await act(async () =>
+      f.host.querySelector<HTMLButtonElement>('.tool-activity-summary')!.click(),
+    );
+    const viewport = f.host.querySelector<HTMLElement>('.conversation-viewport')!,
+      reply = f.host.querySelector('.message.assistant[data-final-reply="true"]'),
+      compression = f.host.querySelector('.context-compacted'),
+      input = f.host.querySelector('textarea');
+    viewport.scrollTop = 23;
+    const requests = f.requests.length;
+    for (let index = 0; index < 3; index++) await f.select('Original');
+    await act(async () =>
+      f.host.querySelector<HTMLButtonElement>('.session-row[aria-current="page"]')!.dispatchEvent(
+        new f.host.ownerDocument.defaultView!.KeyboardEvent('keydown', {
+          key: 'Enter',
+          bubbles: true,
+        }),
+      ),
+    );
+    expect(f.requests.slice(requests)).toEqual([]);
+    expect(f.host.querySelector('.conversation-loading')).toBeNull();
+    expect(f.host.querySelector('.conversation-viewport')).toBe(viewport);
+    expect(f.host.querySelector('.message.assistant[data-final-reply="true"]')).toBe(reply);
+    expect(f.host.querySelector('.context-compacted')).toBe(compression);
+    expect(f.host.querySelector('textarea')).toBe(input);
+    expect(viewport.scrollTop).toBe(23);
+    expect(f.host.querySelector('.agent-turn-summary')?.getAttribute('aria-expanded')).toBe('true');
+    expect(f.host.querySelector('.tool-activity-summary')?.getAttribute('aria-expanded')).toBe(
+      'true',
+    );
+  } finally {
+    await f.close();
+  }
+});
+
+test('reopening the same history while metadata loads does not restart its pending readers', async () => {
+  const f = fixture();
+  try {
+    await f.render();
+    const requests = f.requests.length;
+    await f.select('Original');
+    await f.select('Original');
+    expect(f.requests.slice(requests)).toEqual([]);
+    expect(f.pending('runs')).toBe(1);
+    expect(f.pending('tools')).toBe(1);
+    expectLoading(f.host);
+    await f.release('runs');
+    await f.release('tools');
+    await f.until(() => !!f.host.querySelector('.agent-turn-summary'));
+    expect(f.host.textContent).toContain(final);
+  } finally {
+    await f.close();
+  }
+});
+
+test('repeatedly selecting an in-flight target reuses the original selection request', async () => {
+  const f = fixture();
+  try {
+    await f.render();
+    await f.release('runs');
+    await f.release('tools');
+    await f.until(() => !!f.host.querySelector('.agent-turn-summary'));
+    f.holdNextSelection();
+    await f.select('Other session');
+    const requests = f.requests.filter((request) => request.method === 'select').length;
+    await f.select('Other session');
+    await f.select('Other session');
+    expect(f.requests.filter((request) => request.method === 'select')).toHaveLength(requests);
+    await f.releaseSelection();
+    await f.until(
+      () => !!f.host.querySelector('.conversation-viewport')?.textContent?.includes('Other ready'),
     );
   } finally {
     await f.close();

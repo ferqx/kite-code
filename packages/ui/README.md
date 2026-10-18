@@ -54,7 +54,7 @@ SessionPage／Conversation 的 `renderMessageContent` 和 `renderToolActivity` �
 
 原 [Approval](src/desktop/Approval.tsx)可经 `InteractionCard.renderApproval` 接入宿主，保主按钮、拒绝和范围菜单。slot 只接原卡、disabled、原完整附件正文与已获准的回答回调；附件未验证时没有回答回调，换卡即失效。缺省普通／MCP／问题表单保持。ToolActivity 的 `submitted`／`unavailable`／`cancelled` 与 `dispatchCommitted` 只表达宿主确认的审批和派发事实，不把批准当工具成功；准确来源、accepted decision 和原提交链归 [Desktop owner](../../apps/desktop/README.md#原审批面板与授权观察)。
 
-Conversation 在调用宿主 `renderMessage` 之前统一排除 thinking、timing、terminal 内容。只有结构标记的准确 Turn 保留一个原顺序锚点和静态状态行，不产生空折叠控件；有可读正文或工具的 Turn 沿用原分组，隐藏思考不会打断相邻探索聚合。已确认终态的原 Turn 不因遗留 incomplete 前缀继续标记忙碌，其他活动 Turn 仍保持实际状态。过程 Collapsible 以原 Turn 的 process／complete 阅读 key 区分生命周期，终态重分组直接进入关闭状态，避免旧过程在退出动画中与最终回复同时重绘；手动展开与收起保留原动画，工具展开选择仍由 Conversation 阅读状态保存。单条工具详情与工具聚合使用独立的阅读 key，新形成的聚合默认收起，后续增加工具和状态更新保留用户对聚合的选择；[聚合 DOM 回归](test/isolated/desktop-tool-aggregation.test.tsx)核活动聚合、单项升级、手动选择与后续更新。[思考轮次回归](test/desktop-reasoning-turns.test.tsx)核宿主不接收原思考、无正文终态／耗时／原用户顺序、无空控件与工具聚合。
+Conversation 在调用宿主 `renderMessage` 之前统一排除 thinking、timing、terminal 内容。只有结构标记的准确 Turn 保留一个原顺序锚点和静态状态行，不产生空折叠控件；有可读正文或工具的 Turn 沿用原分组，隐藏思考不会打断相邻探索聚合。已确认终态的原 Turn 不因遗留 incomplete 前缀继续标记忙碌，其他活动 Turn 仍保持实际状态。过程 Collapsible 以原 Turn 的 process／complete 阅读 key 区分生命周期，终态重分组直接进入关闭状态，避免旧过程在退出动画中与最终回复同时重绘；手动展开与收起保留原动画，工具展开选择仍由 Conversation 阅读状态保存。单条工具详情与工具聚合使用独立的阅读 key，聚合使用宿主的 `presentationGroupId`（缺省回退首项 ID），不随首个回执替换而重置；阅读缓存按仍存在的分组身份裁剪。新形成的聚合默认收起，后续增加工具和状态更新保留用户对聚合的选择。ToolActivity 的 `renderItem` 只替换组内单项，原组壳和开关仍由组件管理，让宿主把未核实原记录保留在独立的逐项展开内；缺已识别 toolName 时不把原始 text 作为收起的错误预览，实际状态仍显示。[聚合 DOM 回归](test/isolated/desktop-tool-aggregation.test.tsx)核活动聚合、单项升级、手动选择与后续更新。[思考轮次回归](test/desktop-reasoning-turns.test.tsx)核宿主不接收原思考、无正文终态／耗时／原用户顺序、无空控件与工具聚合。
 
 ## 公共表单与观察
 

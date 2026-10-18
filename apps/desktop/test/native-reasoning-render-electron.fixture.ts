@@ -150,6 +150,12 @@ try {
         probe.violations.push(`${kind}:${probe.phase}:raw_tool_json`);
       if (text.includes('PRIVATE_REASONING_SENTINEL'))
         probe.violations.push(`${kind}:${probe.phase}:private_reasoning`);
+      if (!['manual-open', 'manual-close', 'history'].includes(probe.phase)) {
+        if (conversation.querySelector('.tool-activity-summary[aria-expanded="true"]'))
+          probe.violations.push(`${kind}:${probe.phase}:tool_opened_without_user`);
+        if (conversation.querySelector('.tool-activity-steps'))
+          probe.violations.push(`${kind}:${probe.phase}:tool_items_mounted_without_user`);
+      }
       const assistants = conversation.querySelectorAll('.message.assistant').length;
       const final = conversation.querySelectorAll('.agent-turn-final').length;
       if (probe.phase === 'first-reasoning' && assistants)
@@ -375,7 +381,7 @@ try {
   await until(content, (value) => value.includes('正在思考'), 'third Model thinking indicator');
   await page.waitForTimeout(300);
   await checkReasoning('second-reasoning', 1);
-  await until(content, (value) => value.includes('读取 2 次'), 'actual reads aggregated');
+  await until(content, (value) => value.includes('读取 3 次'), 'actual reads aggregated');
   assert.equal(
     await page.locator('.conversation .tool-activity-summary').getAttribute('aria-expanded'),
     'false',
@@ -435,12 +441,10 @@ try {
   console.log('warm_render_probe', JSON.stringify(warm));
   assert.deepEqual(warm.violations, []);
   assert.equal(finished.selection!.runs.length, 1);
-  assert.equal(
-    finished.selection!.executions.filter(
-      (execution) => execution.definitionId === 'files.read' && execution.status === 'succeeded',
-    ).length,
-    2,
-  );
+  const actualReadTools = finished.selection!.executions.filter(
+    (execution) => execution.definitionId === 'files.read' && execution.status === 'succeeded',
+  ).length;
+  assert.equal(actualReadTools, 3);
   assert.equal((await counts()).calls, 3);
   assert.ok((await counts()).toolObserved);
   assert.deepEqual(
@@ -452,7 +456,7 @@ try {
   await page.locator('.agent-turn-summary[aria-expanded="false"]').click();
   await until(
     content,
-    (value) => value.includes('PUBLIC_STAGE_PROSE') && value.includes('读取 2 次'),
+    (value) => value.includes('PUBLIC_STAGE_PROSE') && value.includes('读取 3 次'),
     'user opens original phase prose and read group',
   );
   await page.locator('.tool-activity-summary[aria-expanded="false"]').click();
@@ -508,7 +512,7 @@ try {
     reasoningArtifactBytes,
     actualModels: 3,
     actualReadTool: true,
-    actualReadTools: 2,
+    actualReadTools,
     heldToolFacts,
     diagnosticsAbsent: true,
   };

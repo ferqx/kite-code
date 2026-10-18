@@ -375,6 +375,12 @@ test('actual NativeDesktop preserves a verified future tool outcome_unknown inst
     expect(f.host.textContent).toContain('future.tool · 99');
     expect(f.host.textContent).toContain('结果未知');
     expect(f.host.textContent).not.toContain('状态待核对');
+    expect(f.host.textContent).not.toContain(sentinel);
+    await f.toggle();
+    expect(f.host.textContent).toContain(original);
+    await f.toggle();
+    expect(f.host.textContent).not.toContain(sentinel);
+    expect(f.host.textContent).toContain('结果未知');
   } finally {
     await f.close();
   }

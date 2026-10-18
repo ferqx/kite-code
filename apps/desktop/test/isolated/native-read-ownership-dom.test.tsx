@@ -464,8 +464,12 @@ for (const method of ['select', 'draft.read'] as const)
     try {
       await f.render();
       await f.click('Original A');
+      await f.click('Other B');
       hold = true;
       await f.click('Original A');
+      expect(
+        f.calls.filter((request) => request.method === method && request.sessionId === 'a'),
+      ).toHaveLength(2);
       await f.notify({ kind: 'lifecycle', phase: 'quitting' });
       await act(async () => held.reject(Error('native_draining')));
       expect(f.dom.window.document.querySelector('[role="alertdialog"]')).toBeNull();

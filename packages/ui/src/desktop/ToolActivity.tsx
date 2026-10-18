@@ -13,7 +13,7 @@ import {
   Wrench01Icon,
 } from '@hugeicons/core-free-icons';
 import { HugeiconsIcon } from '@hugeicons/react';
-import { type ReactNode, useLayoutEffect, useRef, useState } from 'react';
+import { Fragment, type ReactNode, useLayoutEffect, useRef, useState } from 'react';
 import {
   AnimatedCollapsibleContent,
   Collapsible,
@@ -478,6 +478,7 @@ export function ToolActivity({
   openFile,
   openFileForMessage,
   renderChildren,
+  renderItem,
   suppressGenericFailure,
   expandedItems,
   onToggleItem,
@@ -495,6 +496,8 @@ export function ToolActivity({
   openFile?: (path: string) => void;
   openFileForMessage?: (message: Message) => ((path: string) => void) | undefined;
   renderChildren: (toolCallId: string, expanded: boolean) => ReactNode;
+  /** Keep a host's original per-item reader inside the aggregate's disclosure. */
+  renderItem?: (message: Message) => ReactNode | undefined;
   suppressGenericFailure?: boolean;
   childProcess?: boolean;
   activityId?: string;
@@ -640,6 +643,7 @@ export function ToolActivity({
       {!childProcess &&
         !open &&
         !grouped &&
+        !!message.toolName &&
         !shell &&
         !read &&
         !edit &&
@@ -735,27 +739,30 @@ export function ToolActivity({
         <AnimatedCollapsibleContent className="tool-activity-content">
           {grouped && (
             <div className="tool-activity-steps">
-              {messages.map((item) =>
-                item.toolName === 'shell_execute' ? (
-                  <ToolActivity
-                    key={item.id}
-                    messages={[item]}
-                    expanded={expandedItems?.[item.id]}
-                    onToggle={(next) => onToggleItem?.(item.id, next)}
-                    activityId={item.id}
-                    restoredExpanded={restoredExpanded}
-                    openFile={openFile}
-                    openFileForMessage={openFileForMessage}
-                    renderChildren={renderChildren}
-                  />
-                ) : (
-                  <ToolRow
-                    key={item.id}
-                    message={item}
-                    openFile={openFileForMessage ? openFileForMessage(item) : openFile}
-                  />
-                ),
-              )}
+              {messages.map((item) => (
+                <Fragment key={item.id}>
+                  {renderItem?.(item) ??
+                    (item.toolName === 'shell_execute' ? (
+                      <ToolActivity
+                        key={item.id}
+                        messages={[item]}
+                        expanded={expandedItems?.[item.id]}
+                        onToggle={(next) => onToggleItem?.(item.id, next)}
+                        activityId={item.id}
+                        restoredExpanded={restoredExpanded}
+                        openFile={openFile}
+                        openFileForMessage={openFileForMessage}
+                        renderChildren={renderChildren}
+                      />
+                    ) : (
+                      <ToolRow
+                        key={item.id}
+                        message={item}
+                        openFile={openFileForMessage ? openFileForMessage(item) : openFile}
+                      />
+                    ))}
+                </Fragment>
+              ))}
             </div>
           )}
           {shell && <ShellOutput message={message} />}

@@ -18,6 +18,58 @@ const labels: Record<string, readonly [readonly string[], string]> = {
   'shell.stop': [['1'], '请求停止后台 Shell'],
   ask_user: [['1'], '询问用户'],
 };
+const exploration = new Set([
+  'files.read',
+  'files.read_path',
+  'files.glob',
+  'files.search',
+  'files.list',
+]);
+
+/** Classification is display-only and requires an exact supported definition version. */
+export function desktopToolPresentation(
+  fact: Pick<NativeToolMessageFact, 'definitionId' | 'definitionVersion'>,
+): Pick<DesktopMessage, 'toolName' | 'title' | 'presentation'> {
+  const label = labels[fact.definitionId];
+  const known = label?.[0].includes(fact.definitionVersion);
+  return {
+    toolName: known
+      ? ((
+          {
+            'files.read': 'read_file',
+            'files.read_path': 'read_file',
+            'files.write': 'write_file',
+            'files.edit': 'edit_file',
+          } as Record<string, string>
+        )[fact.definitionId] ?? fact.definitionId)
+      : undefined,
+    title: known ? label![1] : `${fact.definitionId} · ${fact.definitionVersion}`,
+    ...(known && exploration.has(fact.definitionId)
+      ? { presentation: 'exploration' as const }
+      : {}),
+  };
+}
+
+/** A readable boundary, rather than the first arriving receipt, owns an exploration block. */
+export function groupNativeToolMessages(messages: readonly DesktopMessage[]): DesktopMessage[] {
+  let boundary: string | undefined;
+  return messages.map((message) => {
+    if (message.role === 'tool' && message.presentation === 'exploration' && message.turnId)
+      return {
+        ...message,
+        presentationGroupId: JSON.stringify(['native-exploration', message.turnId, boundary]),
+      };
+    if (
+      message.role !== 'thinking' &&
+      message.systemKind !== 'turn_timing' &&
+      message.systemKind !== 'turn_terminal' &&
+      message.presentation !== 'hidden' &&
+      !(message.role === 'assistant' && message.settled && !message.text)
+    )
+      boundary = message.id;
+    return message;
+  });
+}
 const sameReceipt = (left: Message, right: Message) =>
   left.sessionId === right.sessionId &&
   left.seq === right.seq &&
@@ -80,24 +132,12 @@ export function desktopToolMessage(
   id: string,
   text: string,
 ): DesktopMessage {
-  const label = labels[fact.definitionId];
-  const known = label?.[0].includes(fact.definitionVersion);
   return {
     id,
     role: 'tool',
     text,
     settled: !['planned', 'dispatching', 'running'].includes(fact.status),
-    toolName: known
-      ? ((
-          {
-            'files.read': 'read_file',
-            'files.read_path': 'read_file',
-            'files.write': 'write_file',
-            'files.edit': 'edit_file',
-          } as Record<string, string>
-        )[fact.definitionId] ?? fact.definitionId)
-      : undefined,
-    title: known ? label![1] : `${fact.definitionId} · ${fact.definitionVersion}`,
+    ...desktopToolPresentation(fact),
     target: fact.target,
     ...(fact.ask ? { ask: fact.ask } : {}),
     ...(fact.status === 'failed' && fact.decisionRefresh
@@ -163,7 +203,6 @@ export function liveToolMessages(
         execution.sessionId === selection.session.id &&
         !!execution.runId &&
         runIds.has(execution.runId) &&
-        ['planned', 'dispatching', 'running'].includes(execution.status) &&
         !results.has(JSON.stringify([execution.id, execution.runId])),
     )
     .map((execution) => ({
