@@ -217,6 +217,17 @@ export function useNativeToolMessages({
   const scope = JSON.stringify([generation, storeId, sessionId, viewSelection, historyEpoch]);
   const unavailable =
     suspended || !selection || selection.viewLoading || selection.permissionUnavailable;
+  const eligible = useMemo(
+    () =>
+      messages.filter(
+        (message) =>
+          message.role === 'tool' &&
+          message.status === 'complete' &&
+          message.sourceIds?.length === 1 &&
+          message.contentFormat !== 'unsupported',
+      ),
+    [messages],
+  );
   const [retryRevision, setRetryRevision] = useState(0);
   const cache = useRef({
     scope,
@@ -252,13 +263,6 @@ export function useNativeToolMessages({
       unavailable
     )
       return;
-    const eligible = messages.filter(
-      (message) =>
-        message.role === 'tool' &&
-        message.status === 'complete' &&
-        message.sourceIds?.length === 1 &&
-        message.contentFormat !== 'unsupported',
-    );
     // A terminal receipt is immutable. An unknown result is rechecked on a new observation.
     const pending = eligible.filter((message) => {
       const previous = current.read.get(message.id);
@@ -328,11 +332,12 @@ export function useNativeToolMessages({
     workspaceId,
     viewSelection,
     historyEpoch,
-    messages,
     retryRevision,
     unavailable,
     observationRevision,
+    eligible,
   ]);
+  const error = state.scope === scope ? state.error : undefined;
   return {
     entries: useMemo(() => {
       if (state.scope !== scope) return [];
@@ -343,7 +348,15 @@ export function useNativeToolMessages({
         return original && current && sameReceipt(original, current);
       });
     }, [state, scope, messages]),
-    error: state.scope === scope ? state.error : undefined,
+    loading:
+      !error &&
+      eligible.some((message) => {
+        if (cache.current.scope !== scope || cache.current.retryRevision !== retryRevision)
+          return true;
+        const previous = cache.current.read.get(message.id);
+        return !previous || !sameReceipt(previous.message, message);
+      }),
+    error,
     retry: () => setRetryRevision((value) => value + 1),
   };
 }

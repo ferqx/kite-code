@@ -204,6 +204,8 @@ Main 仅在原 Message／Execution 身份和结果完全匹配、原状态 faile
 
 [native-transcript](src/native-transcript.ts)把已核实的公共 Run 接入原 [Conversation](../../packages/ui/src/desktop/Conversation.tsx)，保原过程折叠、最终回复、失败行、工具聚合与会话阅读状态。SessionPage 的 `renderMessageContent` 只替换正文、`renderToolActivity` 接完整分组与原展开控制；外层布局和复制按钮仍归原组件。正文继续使用原 ModelOutputMessage，子详情沿原只读 reader，不以子日志重建轮次。
 
+进入会话时，Native 在历史轮次、工具及文件目标信息核对结束后才首次展示消息，等待期间使用原聊天加载状态；避免先显示压缩完成行和工具核对占位，再因轮次归属或工具聚合改变而移位。查询成功但没有对应事实和真实查询失败都会结束等待；失败保留原记录、错误及显式重试。首次展示后，同一展示身份的流式更新和 history epoch 校准不重新遮住正文；读取与动作仍按当前完整 scope 核验。切走再回会话重新等待本次信息，保留原阅读展开选择。[首次呈现回归](test/isolated/native-history-presentation-dom.test.tsx)覆盖两种返回顺序、轮次和工具核对失败、缓存返回及 epoch 校准；[活动回执回归](test/isolated/native-tool-receipt-render-dom.test.tsx)继续验证运行中延迟工具信息的折叠原文保护。
+
 当前 View 的真实 Run 可直接用于展示；完整历史超出近200项时，[Main](electron/tool-messages.ts)只接受当前已经观察、未带 `originMessage` 的 Message ID，每批32项，经当前生成 Client GET 核准确 Run ID／Session 和前后 Store 连接。结果仅含原出处、状态与时间，按原 generation／viewSelection／history epoch 绑定；关闭和切换只释放所属 GET。当前 Store 已保存的旧 Store 终态 Run 可作为历史事实展示，保原 `originStoreId`；foreign active 不进入活动轮次或控制。Fork／Include 的封存 Message 不查询来源 Run 后来的状态，也不据此标最终回复。
 
 同一 bridge／generation／Store／Session／Workspace／viewSelection 内，history epoch 刷新会重新核历史 Run；此前已核的 inactive completed／failed／cancelled 仅保留轮次展示，使等待新 metadata 和分批返回时不会暂时拆掉原 Conversation 节点或用户展开的过程。此展示层不填入新 epoch 的读取缓存，也不减少原 GET；已核的新 View 和新 metadata 替换旧事实，明确缺失删除旧展示。当前 View 同时更新该 scope 的 metadata，避免 Run 离开有限页后被较早结果覆盖。active／interrupted 不跨 epoch 保留，换任何展示身份即撤销；大正文复制和所有动作仍沿当前原身份与 authority 核验。原 DOM 文件5pass／80断言核节点、展开保持和新事实／缺失覆盖；原完整历史窗口的75秒资格与完整默认回归仍以[当前进度](../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-09普通制品图标依赖收束)为准。

@@ -55,7 +55,8 @@ function fixture(mode: Mode) {
   });
   const session = { ...backgroundItem().rootSession, nextSeq: '3' };
   let selected = 'root',
-    revision = 1;
+    revision = 1,
+    published = false;
   const listeners = new Set<(event: NativeEvent) => void>();
   const requests: NativeRequest[] = [];
   const pending: (() => void)[] = [];
@@ -68,9 +69,14 @@ function fixture(mode: Mode) {
     selection: {
       storeId: 'store',
       viewGeneration: revision,
-      viewSelection: revision,
+      viewSelection: 1,
       canReadModelOutput: false,
-      session: { ...session, id: selected, rootSessionId: selected },
+      session: {
+        ...session,
+        id: selected,
+        rootSessionId: selected,
+        nextSeq: selected === 'root' && !published ? '1' : session.nextSeq,
+      },
       runs: [],
       executions: [],
       interactions: [],
@@ -147,7 +153,11 @@ function fixture(mode: Mode) {
           };
         case 'messages':
           if (!request.upperSeq) throw Error('fixture_requires_history_upper_bound');
-          return { messages: messages(), nextAfterSeq: null, highWaterSeq: request.upperSeq };
+          return {
+            messages: selected === 'root' && !published ? [] : messages(),
+            nextAfterSeq: null,
+            highWaterSeq: request.upperSeq,
+          };
         case 'draft.read':
           return {
             id: selected,
@@ -251,6 +261,20 @@ function fixture(mode: Mode) {
         [...host.querySelectorAll<HTMLButtonElement>('button')]
           .find((button) => button.textContent === 'Original')
           ?.click();
+      });
+      // Establish the empty selected conversation before publishing an active
+      // receipt. Initial historical recovery has its own presentation barrier;
+      // this fixture exercises later receipts that must retain their reader.
+      await until(
+        () =>
+          requests.some((request) => request.method === 'messages') &&
+          !!host.querySelector('.conversation-viewport') &&
+          !host.querySelector('.conversation-loading'),
+      );
+      await act(async () => {
+        published = true;
+        revision++;
+        for (const listener of listeners) listener({ kind: 'changed', generation: 1 });
       });
       await until(() =>
         mode === 'unsupported'

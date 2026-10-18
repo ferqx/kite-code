@@ -240,7 +240,7 @@ const MessageItem = memo(function MessageItem({
   if (message.systemKind === 'compaction')
     return (
       <article className={`message context-compacted ${message.status ?? ''}`}>
-        <Marker variant="separator" role="status">
+        <Marker role="status">
           <MarkerContent className="tool-label">{message.title}</MarkerContent>
         </Marker>
         {message.status === 'failed' && message.text && <p>{message.text}</p>}

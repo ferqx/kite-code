@@ -232,14 +232,24 @@ export function useNativeRuns({
     for (const run of JSON.parse(view) as NativeRunFact[]) values.set(run.id, run);
     return [...values.values()];
   }, [state, scope, presentationIdentity, bridge, representatives, view]);
+  const error =
+    state.scope === scope &&
+    state.presentationIdentity === presentationIdentity &&
+    state.bridge === bridge
+      ? state.error
+      : undefined;
   return {
     runs,
-    error:
-      state.scope === scope &&
-      state.presentationIdentity === presentationIdentity &&
-      state.bridge === bridge
-        ? state.error
-        : undefined,
+    loading:
+      !error &&
+      [...representatives.keys()].some(
+        (id) =>
+          !runs.some((run) => run.id === id) &&
+          (cache.current.scope !== scope ||
+            cache.current.retryRevision !== retryRevision ||
+            !cache.current.read.has(id)),
+      ),
+    error,
     retry: () => setRetryRevision((value) => value + 1),
   };
 }

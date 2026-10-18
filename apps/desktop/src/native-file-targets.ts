@@ -143,7 +143,7 @@ export function useNativeFileTargets({
   ]);
   return {
     entries: state.scope === scope ? state.entries : [],
-    loading: state.loading,
+    loading: state.scope !== scope || state.loading,
     error: state.scope === scope ? state.error : undefined,
     retry: () => setRevision((value) => value + 1),
   };

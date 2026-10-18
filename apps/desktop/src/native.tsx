@@ -836,6 +836,41 @@ function NativeDesktopContent({
     historyComplete: historyState.phase === 'complete',
     observationRevision: selection?.viewGeneration ?? 0,
   });
+  const historyPresentationScope = JSON.stringify([
+    state?.generation,
+    selection?.storeId,
+    selection?.session.id,
+    selection?.viewSelection ?? selection?.viewGeneration,
+  ]);
+  const admittedHistoryPresentation = useRef<string | undefined>(undefined);
+  const historyMetadataLoading = runMessages.loading || toolMessages.loading || fileTargets.loading;
+  const historyMetadataUnavailable =
+    historyState.phase === 'unavailable' ||
+    !!(state?.selection?.permissionUnavailable && !state.selection.viewLoading);
+  // On entry, publish the history with its verified Turn ownership and tool
+  // grouping together. A partially restored layout would move compression
+  // rows and briefly expose tool-verification placeholders. Once admitted,
+  // normal live updates keep rendering while their metadata catches up.
+  const historyPresentationLoading =
+    admittedHistoryPresentation.current !== historyPresentationScope &&
+    !historyMetadataUnavailable &&
+    historyMetadataLoading;
+  useLayoutEffect(() => {
+    if (
+      readingParent &&
+      selection &&
+      selected.current === selection.session.id &&
+      ((historyState.phase === 'complete' && !historyMetadataLoading) || historyMetadataUnavailable)
+    )
+      admittedHistoryPresentation.current = historyPresentationScope;
+  }, [
+    readingParent,
+    selection,
+    historyState.phase,
+    historyMetadataLoading,
+    historyMetadataUnavailable,
+    historyPresentationScope,
+  ]);
   const replyScope = JSON.stringify([
     state?.generation ?? generation.current,
     selection?.storeId,
@@ -2566,8 +2601,9 @@ function NativeDesktopContent({
           : !preparing &&
             !(firstVisible && !firstSaved) &&
             !!selection &&
-            historyState.phase === 'loading' &&
-            (!messages.length || selected.current !== selection.session.id)
+            (historyPresentationLoading ||
+              (historyState.phase === 'loading' &&
+                (!messages.length || selected.current !== selection.session.id)))
       }
       fileChangesContent={
         !childDetail && !preparing && !scheduledTasksView && selection ? (

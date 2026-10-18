@@ -2236,18 +2236,20 @@ body {
 }
 .kite-client .context-compacted {
   margin: 8px 0;
-  font-size: 12px;
-  line-height: 18px;
+  font-size: var(--conversation-text-size);
+  font-family: var(--font-geist, inherit);
+  line-height: 24px;
   color: var(--muted-foreground);
 }
 .kite-client .context-compacted > [data-slot="marker"] {
-  gap: 12px;
+  min-height: 32px;
+  padding: 4px 0;
   font-size: inherit;
+  line-height: inherit;
   color: inherit;
 }
 .kite-client .context-compacted p {
   margin: 8px 0 0;
-  text-align: center;
 }
 .kite-client .context-compacted.failed {
   border: 0;
