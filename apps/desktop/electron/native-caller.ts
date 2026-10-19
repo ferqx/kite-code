@@ -38,6 +38,8 @@ import { openEditor } from './editor';
 import { NativeExtensions } from './extensions';
 import { NativeFileChanges } from './file-changes';
 import { NativeFileRecovery } from './file-recovery';
+import { NativeInputImageReads } from './input-image-reads';
+import { NativeInputImages } from './input-images';
 import { NativeInteractionAttachmentReads } from './interaction-attachment-reads';
 import { NativeInteractionHistoryReads } from './interaction-history-reads';
 import { NativeJobOutputReads } from './job-output-reads';
@@ -98,6 +100,8 @@ export class NativeCaller {
     promise: Promise<NativeDirectory>;
   };
   private readonly providers: NativeProviderSettings;
+  private readonly images = new NativeInputImages();
+  private readonly imageReads: NativeInputImageReads;
   private readonly mcp: NativeMcpSettings;
   private readonly skills: NativeSkillCatalogueReads;
   private readonly extensions: NativeExtensions;
@@ -300,6 +304,8 @@ export class NativeCaller {
       () => this.changed(),
       protectedRoots,
       this.processes,
+      (sessionId, ids) =>
+        this.images.publish(this.client, this.client.serverInfo!.storeId!, sessionId, ids),
     );
     const current = () =>
       !this.closed && this.selected
@@ -339,6 +345,7 @@ export class NativeCaller {
         : undefined;
     };
     this.toolMessages = new NativeToolMessages(client, messageScope, () => this.observedMessages);
+    this.imageReads = new NativeInputImageReads(client, messageScope, () => this.observedMessages);
     this.interactionHistory = new NativeInteractionHistoryReads(client, messageScope);
     this.extensions = new NativeExtensions(
       client,
@@ -582,6 +589,7 @@ export class NativeCaller {
     this.jobOutput.release();
     this.fileChanges.release();
     this.toolMessages.release();
+    this.imageReads.release();
     this.interactionHistory.release();
     this.resetHistory?.resolve();
     this.resetHistory = undefined;
@@ -1079,6 +1087,7 @@ export class NativeCaller {
   async invoke(request: NativeRequest): Promise<NativeResult> {
     if (request.method === 'attach') {
       if (this.closed) throw new ClientError('native_closed');
+      this.images.reset();
       this.releaseReads();
       this.background.release();
       this.invalidateDirectory(true);
@@ -1118,6 +1127,13 @@ export class NativeCaller {
         'toolMessages.runs',
         'toolMessages.usage',
         'toolMessages.close',
+        'input.image.open',
+        'input.image.read',
+        'input.image.close',
+        'input.images.begin',
+        'input.images.append',
+        'input.images.finish',
+        'input.images.release',
         'fileChanges.detail',
         'fileChanges.close',
       ].includes(request.method)
@@ -1131,6 +1147,32 @@ export class NativeCaller {
         : this.background;
     let result: NativeResult;
     switch (request.method) {
+      case 'input.images.begin':
+        this.images.begin(request);
+        result = null;
+        break;
+      case 'input.images.append':
+        this.images.append(request.id, request.offset, request.data);
+        result = null;
+        break;
+      case 'input.images.finish':
+        this.images.finish(request.id);
+        result = null;
+        break;
+      case 'input.images.release':
+        this.images.release(request.id);
+        result = null;
+        break;
+      case 'input.image.open':
+        result = await this.imageReads.open(request);
+        break;
+      case 'input.image.read':
+        result = this.imageReads.read(request.readId, request.offset);
+        break;
+      case 'input.image.close':
+        this.imageReads.close(request.readId);
+        result = null;
+        break;
       case 'scheduled.list':
       case 'scheduled.save':
       case 'scheduled.toggle':
@@ -1874,6 +1916,19 @@ export class NativeCaller {
         const snapshot = this.writableScope(request.sessionId);
         if (request.intent.expectedStoreId !== snapshot.view.storeId)
           throw new ClientError('store_identity_mismatch');
+        let intent = request.intent;
+        if (request.imageIds?.length) {
+          const images = await this.images.publish(
+            this.client,
+            snapshot.view.storeId,
+            request.sessionId,
+            request.imageIds,
+          );
+          this.check(generation);
+          if (originalSelection !== this.selection || this.selected !== request.sessionId)
+            throw new ClientError('native_selection_changed');
+          intent = { ...request.intent, images };
+        }
         let draftProof = request.draft;
         if (!draftProof) {
           const saved = this.requirePrivateData().read({
@@ -1888,26 +1943,22 @@ export class NativeCaller {
               textDigest: callerTextDigest(saved.content),
             };
         }
-        const prepared = await this.requireCaller().prepare(
-          request.sessionId,
-          request.intent,
-          draftProof,
-        );
-        if (request.intent.kind !== 'input.steer' && request.intent.modelId)
+        const prepared = await this.requireCaller().prepare(request.sessionId, intent, draftProof);
+        if (intent.kind !== 'input.steer' && intent.modelId)
           this.requirePrivateData().rememberModelRoute(
-            request.intent.expectedStoreId,
+            intent.expectedStoreId,
             request.sessionId,
-            request.intent.modelId,
+            intent.modelId,
           );
         this.check(generation);
         if (originalSelection !== this.selection || this.selected !== request.sessionId)
           throw new ClientError('native_selection_changed');
         result = inputMetadata(
-          request.intent.kind === 'run.start'
-            ? await this.input.start(request.sessionId, request.intent)
-            : request.intent.kind === 'input.steer'
-              ? await this.input.steer(request.sessionId, request.intent)
-              : await this.input.followUp(request.sessionId, request.intent),
+          intent.kind === 'run.start'
+            ? await this.input.start(request.sessionId, intent)
+            : intent.kind === 'input.steer'
+              ? await this.input.steer(request.sessionId, intent)
+              : await this.input.followUp(request.sessionId, intent),
         );
         if (prepared.intent.draft && result) result = { ...result, draft: prepared.intent.draft };
         break;
@@ -2100,6 +2151,7 @@ export class NativeCaller {
     this.workspaceObservation = undefined;
     this.selection++;
     this.generation++;
+    this.images.reset();
     this.selected = undefined;
   }
   async disposeNetwork() {
@@ -2121,6 +2173,8 @@ export class NativeCaller {
     this.detach();
     const stopped = this.processes.close();
     try {
+      await this.images.close();
+      await this.imageReads.closeAll();
       await this.disposeNetwork();
       await this.settingsMutationTail;
       await Promise.allSettled(this.creating.values());

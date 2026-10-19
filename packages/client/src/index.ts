@@ -1359,6 +1359,20 @@ export class AgentClient {
       );
     return result;
   }
+  uploadInputImage(
+    sessionId: string,
+    input: import('./generated/api').InputImageUploadRequest,
+    options: { signal?: AbortSignal } = {},
+  ): Promise<import('./generated/api').InputImage> {
+    this.requireCapability('input_images');
+    return this.mutate(
+      `/v1/sessions/${encodeURIComponent(sessionId)}/input-images`,
+      'InputImageUploadRequest',
+      'InputImage',
+      input,
+      options.signal,
+    );
+  }
   startRun(
     sessionId: string,
     input: StartCommandRequest,

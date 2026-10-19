@@ -2,6 +2,8 @@
 
 Status: implemented
 
+2026-10-19：[有界 DOM KeepAlive](2026-10-19-native-conversation-dom-cache.md)部分替代本篇的单消息树限制。原固定水位校准、取消、来源隔离、解析预算和无界保活的拒绝理由继续适用；当前产品和实现回到该记录所链的 owner。
+
 ## Problem
 
 用户要求新客户端主／子 Agent 阅读能够持续显示消息，反复切换时及时释放读取，利用缓存降低延迟和资源消耗。原 Native 子详情只读一次完整快照，重新进入又下载全历史和全部 Model 正文；父历史仍在隐藏期间反复校准。主历史缓存只有条数上限，共享阅读状态无界；旧客户端的数据缓存可参考，但保留其全量重读和长 DOM 重建成本不能保证切换响应。
@@ -12,7 +14,7 @@ Status: implemented
 - 主历史缓存只持有非活动数据，采用 take 转移、12项／64MiB保守估算／16MiB单项预算。子详情独立采用相同预算，仅缓存已验证数据；每次打开先由当前父范围核准子成员，再展示缓存并完整校准。新generation清旧数据，history epoch清非活动缓存并撤销读取资格；主历史同身份的已发布活动正文按[后续 reset 阅读修正](../bug-fix/2026-10-16-native-history-reset-reading.md)仅保留只读展示，不把这段文字解释为清空当前阅读页的产品要求。其余缓存预算、全量核对和权限隔离理由继续适用。
 - 活动子页复用现有全局 change 观察。环境目录与子读取分别单飞，变化合并为尾随读取，避免高频 partial 写入反复取消慢 GET。子读取仅在同一 context selection 下复用完整稳定前缀，未完成消息和 Model 正文重读；重进、显式刷新和 context 变化全量校准。原完整后台总览保持原固定快照语义。
 - 增量依据是 Store 的 `persistModelPartial` 只更新尚未完成的原消息，最终执行结算将其完成；完整消息不再由该路径更新。私有游标不改变公共 API，也不成为新的读取权限。每次 Main 仍核当前父子、来源和固定上界，Renderer 仍核完整 wire EOF／SHA／UTF-8。
-- 主子切换只保留一个活动消息树。隐藏父页暂停历史和辅助读取，返回重新校准；关闭、替换、失效与卸载只取消相应 GET／IPC lease，不提交任务取消。scope、nonce和Abort共同阻止迟到结果进入后来的页面。
+- 主子切换只保留一个接入可见文档的活动消息树；近期停用树现按上述后续决定有界保留并清理 effect。隐藏父页暂停历史和辅助读取，返回重新校准；关闭、替换、失效与卸载只取消相应 GET／IPC lease，不提交任务取消。scope、nonce和Abort共同阻止迟到结果进入后来的页面。
 - Main的父元数据刷新在途不撤销同selection已验证根的读取范围，避免controller暂时清空snapshot误伤child lease及Job固定H输出；Job新open仍核fresh Execution，原页不因最新输出增长扩大H。真实换根、reset或失败立即abort／撤销，迟到结果不能发布。自动元数据或显式权限刷新失败由Main主动释放environment目录、子正文和输出读取及观察，不依赖Renderer关闭；权限失效时不能用controller保留的快照重新准入。恢复须新建目录观察并全量校准当前子页，旧readId、正文缓冲和observation不复活。返回父页在layout阶段撤销旧complete资格并重开校准，正文／草稿可读而动作等待新EOF。
 - 多根change仍共用原全局SSE／ACK；全局目录修订与选中根修订分离，只由本根、已知后代或保守的新Session创建通知校准当前环境。目录索引仅路由失效，不取得读取或操作权。Controller替换选择时取消整条旧GET链，state刷新至多一个在途和一个最新后继；共享目录的child等待可独立取消，避免退役任务继续占用读取与闭包。
 - 显式返回同步撤销child导航意图，再abort当前读取；自动恢复不从旧render的child推导用户仍要查看。真实窗口曾在目录提交与返回交错后重新打开子页，精确layout／passive回归在旧代码稳定复现并于修复后通过；临时权限丢失仍可保留当前未撤销意图。
@@ -33,6 +35,6 @@ Status: implemented
 
 ## Consequences
 
-缓存预算约束可保留的展示载荷，不是进程 heap／RSS 上限；活动超长历史仍可完整读取，Model 完整快照与 IPC wire 在传输期间仍会产生整块内存。只保留当前消息树意味着极长历史仍有挂载成本，不能仅凭单元测试承诺任意长度会话零阻塞或绝对无泄漏。
+缓存预算约束可保留的展示载荷，不是进程 heap／RSS 上限；活动超长历史仍可完整读取，Model 完整快照与 IPC wire 在传输期间仍会产生整块内存。原单树的反复挂载成本现由后续 KeepAlive 决定在预算内缓解；极长超预算或已淘汰历史仍有挂载成本，不能仅凭单元测试承诺任意长度会话零阻塞或绝对无泄漏。
 
 现行产品行为与验证入口由 [Native owner](../../../../apps/desktop/README.md#native-当前会话环境信息与子详情)和[桌面手册](../../../../docs/handbook/clients/desktop/README.md)维护。旧客户端[主子历史缓存决定](../feature/2026-09-29-desktop-child-session-history-cache.md)的数据与权限分离理由仍适用于其自身路径；本决定限定新 Native 的读取实现，不将旧客户端资格迁移为新客户端证据。

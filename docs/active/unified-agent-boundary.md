@@ -1,5 +1,7 @@
 # 通用 Agent 新执行边界
 
+用户直接图片沿 [Native](../../apps/desktop/README.md#markdown-与附件输入) → [Service](../../apps/service/README.md#图片输入协议) → [Agent](../../packages/agent/README.md#用户图片输入) → [AI](../../packages/ai/README.md#图片消息)交接。Native 的单一“添加文件”入口以实际 File 自动分流；沙箱 preload 仅从磁盘 File 解析路径，不接受字符串路径读取或隐式获取正文。Native 只暂存用户交付的受限字节；每次新输入最多 10 张图片，由窗口、Native 提交、HTTP 与 Agent 受理独立核实，旧历史不裁剪；普通文件选择以独立 `files` 名称／URI 元数据进入原 Command 和 Message，不改写正文，Runtime 只在模型历史组装时追加低权限路径文本，不把路径授给新 I/O 接口。HTTP 上传先核真实身份／作用域，原 Artifact 发布后才返回稳定引用；输入事务核全部元数据，模型历史完整读回原图，SQL 基线保持。图片只映射为 Chat Completions／Responses 的内联 Base64，不隐式获取远程 URL、不上传到公网存储或引入 Anthropic Messages；读取不取得执行权限。已发布正文沿既有备份／Fork／保留边界，未知 Command 只查原结果。公开能力 `input_images`、可选引用字段和生成协议由 Service owner 维护，Web 不增加写入入口。
+
 状态：active
 
 [模型工具投影](../../packages/agent/src/model-tools.README.md)在 Agent 的实际 `ModelAdapter` 边界完成：内部 ModelRequest／ToolCall 保留原定义 ID/version 和规范参数，leaf 的纯 `ToolDefinition.model` 仅描述公开名、声明字段映射与隐藏资格。完整模型调用先按本轮准确目录校验、转回内部参数，再进入原来源、权限、资源、计划、派发与终态链路；未知工具、坏参数和碰撞不得形成效果。声明字段可转 snake_case，任意业务 JSON 与动态 MCP 原 schema/arguments 不改写；baseline、操作 key 和去重身份保留。持久 `ToolCall.model` 只存原公开名称、精简字段路径及必要错误，后继模型历史不借当前定义重解释原调用；`metadata.context.toolSurface` 封存当时公开工具，公开 Inspector 使用该原快照并保持既有完整正文与 scope 核验。本次不提供旧会话工具消息兼容，不增加旧名 alias；原 Store/Runtime authority 不随命名变化。任务等待的模型入口统一为必填 `task_ids` 数组，事件等待 `wait_agent_event` 只接 `after_seq/timeout_ms`；隐藏的 `task_wait` 仍是内部注册定义，不获得新的模型入口。跨层实现归 [Execution](../../packages/agent/src/execution/index.ts)、[Model metadata](../../packages/agent/src/model-snapshot.ts)和上述 owner，具体验证以本轮实际测试范围为准。
@@ -15,6 +17,8 @@ Model 用量通过 [AI 中立事件](../../packages/ai/src/index.ts)的独立 `u
 Workspace Files 模型工具在 [Files owner](../../packages/agent/src/tools/files/README.md#模型工具路径)按可信固定根把项目内绝对路径转换为相对路径，转换发生在原 IO／检查点 capture 前；原调用及审批保存完整原参数。底层相对路径和原目录对象约束、独立外部文件授权保持。Native 仅对唯一原 `files.list@1` 调用的省略／空路径显示已知默认 `.`；缺来源／歧义／未来版本不补目标，显示文本不授予文件动作。
 
 外部文件授权摘要、派发复查和读取 baseline 共用 [Files 原生身份](../../packages/agent/src/tools/files/README.md#绝对用户文件)；Windows 的 volume／128-bit FileID 不与 Node stat 身份混比。派发在实际已锚定的父目录对象上重核，目标或父对象替换继续拒绝；严格 owner／单链接、受保护路径、准确原参数和外部文件排除 Workspace 检查点的合同保持。
+
+普通宿主默认选择外部只读 `files.read_path`，供文件引用和准确绝对路径任务使用；没有默认增加外部写入或编辑工具。此项只补齐 Model 工具目录，仍由原权限和原生对象边界决定准确目标能否读取，不扩工作区工具根或读取外部项目说明。最小嵌入配置与显式禁用保持，当前装配与验证归 [Service owner](../../apps/service/README.md#默认装配与业务规则归属)。
 
 Files 的原生 I/O 沿 [Node-API owner](../../packages/agent/native/files/README.md)统一；cap-std 提供能力对象和读写，官方 SDK 补齐 Windows 原 HANDLE／完整 FileID／DACL／发布与关闭未知。Tool、Loop、检查点格式和授权接口不变；固定资产先核平台、CPU、ABI、hash 和无 symlink／单链接，缺失不回退。正式 Service 将 `filesNativeAssets()` 的加载器和整个 companion 加入普通／外部 Files 与恢复保护，包含 Full；位置不来自 Model／HTTP／JSONC。其他原生 owner 不随此切换。
 
@@ -110,7 +114,7 @@ Native Skills 目录只经 [Main 的有限 reader](../../apps/desktop/electron/s
 
 原 PC 环境信息卡与只读 child 详情复用已有后台 reader／durable caller。全局总览与当前根环境各持独立 Main 观察；环境范围来自实际 controller snapshot，renderer 的有限 surface 不提供根／Session／路径。选中根变化释放环境 GET 和旧停止资格，全局观察保持；目录刷新不扩大已固定 child 日志读取范围。展示缓存不持 observation 或原提交意图，子详情不改变 Main 阅读根、不恢复写权，准确 stop 与完整正文核验仍沿[Native owner](../../apps/desktop/README.md#native-当前会话环境信息与子详情)。observer reset 取消旧全局目录 GET 时，所有共同等待者得到明确观察失效，页面等待新状态；真实 GET 失败不被吞掉。
 
-活动 Native child 阅读复用全局 change 失效信号，不建立第二条执行流。有限私有游标只描述同 context selection 中已验证的完整消息前缀；Main 重核当前父范围和子绑定，变化时全量回退，每次尾部仍有固定上界和完整 EOF／hash 核验。重进与显式刷新完整校准，缓存不能替代当前父目录对子成员的确认。主子切换只取消所属 GET／IPC lease并拒迟到发布，暂停隐藏父阅读，不提交取消任务；有界缓存只持展示数据，不保留活跃订阅、隐藏DOM或操作资格。公开 Service／Core API 与持久格式保持。
+活动 Native child 阅读复用全局 change 失效信号，不建立第二条执行流。有限私有游标只描述同 context selection 中已验证的完整消息前缀；Main 重核当前父范围和子绑定，变化时全量回退，每次尾部仍有固定上界和完整 EOF／hash 核验。重进与显式刷新完整校准，缓存不能替代当前父目录对子成员的确认。主子切换只取消所属 GET／IPC lease并拒迟到发布，暂停隐藏父阅读，不提交取消任务；有界缓存只持展示数据、有限的已停用 DOM 和计入预算的已核验图片，不保留活跃订阅或操作资格；Native 的 [KeepAlive owner](../../apps/desktop/README.md)在重新准入前只读显示原树，公共 reader 由 Native adapter 显式控制当前读取与正文通知，不依赖独立 UI bundle 共享私有 Context。公开 Service／Core API 与持久格式保持。
 
 多个根并发时，全局SSE和ACK保持完整，当前根失效路由与全局目录修订分开。Main已验证目录的后代Session索引仅选择需要重读的事实，不授读取或停止权；新Session创建保守重核当前环境，换根／reset清除。Controller替换选择时取消旧GET链，Renderer state仅有一个在途和一个最新后继，共享目录的child等待可独立取消。同选择metadata刷新不撤销既有只读范围，原metadata／EOF写门禁仍独立；完整后台目录持续变更最多3次扫描后明确失败，不无限保留读取。
 
@@ -247,6 +251,8 @@ Native 明确退出的活动检查只读完整公共目录与 View；两秒超�
 Main 通过原固定 channel 的闭合生命周期通知撤销 renderer 旧读取的展示归属；它不增加业务请求或执行权。退出期间暂停自动刷新，取消后沿同一 generation 恢复状态／目录／选择和原草稿读取，不重新 attach 或提交业务。该展示撤销不提前 close／detach caller，也不消除真实当前错误、已提交 mutation 的未知回执或异常收尾提示；原 frame 身份与退出资源门禁保持。
 
 Native 启动诊断只来自本次所属 Service 的闭合私有 stderr 帧，经 paired launcher 重建后由 Main 持有；通用错误不变造有效报告。保存沿两个无 payload 的固定 host IPC，renderer 不提供报告或路径，Main 只写系统对话框选定的新文件，等待后复核当前 frame／窗口／报告。重试清除前次资格，保存不打开业务 caller、不修改 Store、不获得执行或恢复 authority；当前实现与范围见[Native owner](../../apps/desktop/README.md#原启动诊断保存)和[Service owner](../../apps/service/README.md)。
+
+默认 Service 的项目来源目标选择只接受原 Workspace 内路径；越界 Files 输入不触发外部项目说明读取，仍由 Files 原边界以普通 Tool 失败返回，原 Run 可以继续解释。根说明不可读或内部目标来源不安全仍失败关闭，不能把来源错误普遍降级为可忽略。实现与验证归 [Service owner](../../apps/service/README.md)及其 [拒绝回归](../../apps/service/test/isolated/assembly-file-denial.test.ts)，未扩大文件授权。
 
 ## 授权观察与执行资格
 

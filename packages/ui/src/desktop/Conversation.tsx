@@ -4,11 +4,13 @@ import {
   Fragment,
   memo,
   type ReactNode,
+  useCallback,
   useEffect,
   useLayoutEffect,
   useRef,
   useState,
 } from 'react';
+import { useConversationActivity } from '../conversation-activity';
 import {
   AnimatedCollapsibleContent,
   Collapsible,
@@ -94,13 +96,14 @@ function TurnElapsed({
   running: boolean;
   prefix: string;
 }) {
+  const { readActive } = useConversationActivity();
   const [now, setNow] = useState(Date.now);
   useEffect(() => {
-    if (!running || startedAtMs === undefined || finishedAtMs !== undefined) return;
+    if (!readActive || !running || startedAtMs === undefined || finishedAtMs !== undefined) return;
     setNow(Date.now());
     const timer = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(timer);
-  }, [running, startedAtMs, finishedAtMs]);
+  }, [readActive, running, startedAtMs, finishedAtMs]);
   const end = finishedAtMs ?? (running ? now : undefined);
   const elapsed = turnElapsedMilliseconds(startedAtMs, end);
   if (elapsed === undefined) return null;
@@ -366,9 +369,20 @@ export function Conversation({
   /** Host-adapted tool facts within the original grouping and reading state. */
   renderToolActivity?: (messages: readonly Message[], state: ToolActivityState) => ReactNode;
 }) {
+  const readingActivity = useConversationActivity();
+  const previousResume = useRef(readingActivity.resume);
+  const resumed = useRef(false);
   const viewport = useRef<HTMLDivElement>(null);
   const content = useRef<HTMLDivElement>(null);
   const reading = useRef<ReadingState>(initialReading ?? { top: 0, follow: true, expanded: {} });
+  const writtenScrollTop = useRef<number | undefined>(undefined);
+  const writeScroll = useCallback((element: HTMLDivElement, top: number) => {
+    element.scrollTop = top;
+    // Use the browser's clamped value, not scrollHeight. The scroll event may
+    // arrive after another chunk has changed that height.
+    writtenScrollTop.current = element.scrollTop;
+    reading.current.top = element.scrollTop;
+  }, []);
   const restoredExpanded = useRef(
     new Set(
       Object.entries(initialReading?.expanded ?? {})
@@ -379,6 +393,12 @@ export function Conversation({
   const restore = useRef(true);
   const [following, setFollowing] = useState(reading.current.follow);
   const [expanded, setExpanded] = useState(reading.current.expanded);
+  if (previousResume.current !== readingActivity.resume) {
+    previousResume.current = readingActivity.resume;
+    resumed.current = true;
+    restore.current = true;
+    for (const [id, open] of Object.entries(expanded)) if (open) restoredExpanded.current.add(id);
+  }
   useEffect(() => {
     const element = viewport.current;
     if (!element) return;
@@ -433,12 +453,14 @@ export function Conversation({
   const currentTurn = useRef(turnActivity?.turnId);
   currentTurn.current = turnActivity?.turnId;
   useLayoutEffect(
-    () => () =>
+    () => () => {
+      restore.current = true;
       save.current(
         currentMessages.current
           ? pruneReadingState(reading.current, currentMessages.current, currentTurn.current)
           : reading.current,
-      ),
+      );
+    },
     [],
   );
   useLayoutEffect(() => {
@@ -447,12 +469,12 @@ export function Conversation({
     const observer = new ResizeObserver(() => {
       // Child-local body reads and collapse animations do not commit Conversation.
       // ResizeObserver runs before paint; delaying this write exposes the old tail for a frame.
-      if (reading.current.follow) element.scrollTop = element.scrollHeight;
+      if (reading.current.follow) writeScroll(element, element.scrollHeight);
     });
     observer.observe(element);
     if (content.current) observer.observe(content.current);
     return () => observer.disconnect();
-  }, [loading]);
+  }, [loading, writeScroll]);
   // After each content/layout commit, follow only while the reader is at the bottom.
   useLayoutEffect(() => {
     const element = viewport.current;
@@ -461,7 +483,7 @@ export function Conversation({
       return;
     }
     if (restore.current || reading.current.follow) {
-      element.scrollTop = reading.current.follow ? element.scrollHeight : reading.current.top;
+      writeScroll(element, reading.current.follow ? element.scrollHeight : reading.current.top);
       restore.current = false;
     }
   });
@@ -874,6 +896,10 @@ export function Conversation({
     // container so the old process cannot repaint during its exit animation.
     const turnKey = `turn:${entry.turnId}:${settled ? 'complete' : 'process'}`;
     const open = expanded[turnKey] ?? !settled;
+    // Restoring a reading also restores the default-open active process.
+    // A later user toggle removes this marker and keeps the normal animation.
+    if (restore.current && (initialReading || resumed.current) && open)
+      restoredExpanded.current.add(turnKey);
     const elapsedPrefix =
       finishedDuration !== undefined || (runningTimer && label === '已处理')
         ? ' '
@@ -912,7 +938,10 @@ export function Conversation({
             open={open}
             onOpenChange={(next) => onToggle(turnKey, next)}
           >
-            <div className="agent-turn-process">
+            <div
+              className="agent-turn-process"
+              data-restored-expanded={restoredExpanded.current.has(turnKey) || undefined}
+            >
               <div className="agent-turn-summary-row">
                 <CollapsibleTrigger asChild>
                   <Button
@@ -977,6 +1006,12 @@ export function Conversation({
             onScroll: () => {
               const element = viewport.current;
               if (!element || loading || restore.current) return;
+              if (
+                writtenScrollTop.current !== undefined &&
+                Math.abs(element.scrollTop - writtenScrollTop.current) < 1
+              )
+                return;
+              writtenScrollTop.current = undefined;
               const follow = element.scrollHeight - element.clientHeight - element.scrollTop < 48;
               reading.current = {
                 top: element.scrollTop,
@@ -1023,7 +1058,7 @@ export function Conversation({
           onClick={() => {
             const element = viewport.current;
             if (!element) return;
-            element.scrollTop = element.scrollHeight;
+            writeScroll(element, element.scrollHeight);
             reading.current = { ...reading.current, follow: true, top: element.scrollTop };
             setFollowing(true);
           }}

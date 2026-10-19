@@ -1,12 +1,38 @@
 # Desktop 与 Native 制品
 
+产品展示名称统一为 **Kite**：共享侧栏、启动页、页面与窗口标题、关于菜单和原生提示使用相同大小写。原 `kite-native` 运行标识、workspace 包名、IPC 与本机偏好键保持，已有用户数据路径保持。
+
+## Markdown 与附件输入
+
+产品操作见[桌面手册](../../docs/handbook/clients/desktop/README.md#提示词与附件)。[共享 Composer](../../packages/ui/src/desktop/Composer.tsx)承载实时 Markdown 和 12px 横向附件卡片；`+` 只有“添加文件”，同一次系统多选允许混选图片与普通文件，按 MIME／已知图片扩展名自动分流。图片选择、粘贴与拖入共用用户 File 字节流程；普通文件由[沙箱 preload](electron/preload.ts)经 [Electron webUtils](https://www.electronjs.org/docs/latest/api/web-utils)从真实磁盘 File 取得路径，[URI 编码](src/input-file-reference.ts)保留中文、空格、百分号、查询／片段字符及 UNC，不读取普通文件正文；内存 File 没有路径时明确失败。旧 Main `input.files.pick` 已退出。两者由[窗口附件草稿](src/native-input-images.ts)按 Store/Session 独立保留、移除和冻结，受理后只清本次 ID；文件 URI 不改写草稿，随正式输入 `files` 元数据保存，历史与待发送卡片均独立于正文。选择器不读取普通文件正文，renderer 不能给 Main 任意读取路径。
+
+开发热更新后的旧 preload 可能缺少 `fileReferences`，旧 Main 也可能拒绝图片暂存方法。[窗口适配器](src/native-input-images.ts)把原 `invalid_native_request/native_host_operation_unavailable` 识别为附件接口尚未加载；缺少文件路径解析 port 时以有限 `file_picker_restart_required` 错误交给共享 Composer，图片暂存直接保留明确的完全退出／重新启动提示。普通选择失败仍可重试，不展示原错误细节、不清草稿或重发。取消选择返回空列表。[窗口回归](test/isolated/native-input-images-dom.test.tsx)与[编辑器回归](../../packages/ui/test/isolated/prompt-editor.test.tsx)分别核旧协议、普通失败、取消和原草稿保持；主进程仍按原开发边界显式重新启动。
+
+直接图片经[封闭 IPC](electron/native-ipc.ts)分块进入 [NativeInputImages](electron/input-images.ts)：每条输入最多 10 张，每张 16 MiB，窗口保留总量最多 128 张／64 MiB，核连续 offset、完整大小与 SHA-256。UI 在读取前拦截超量；[草稿 owner](src/native-input-images.ts)再次核已有与新增，IPC／Main 发布独立核每次输入的数量。Renderer 在任何读取前预留全部已选图片的窗口预算，跨添加批次串行准备；[原生异步编码](src/input-image-encoding.ts)以可取消 FileReader 完成摘要读取及 32KiB Base64 分块，避免逐字节字符串数组和整图 Data URL，摘要 buffer 不跨后续编码保留。移除或退出取消所属 reader，排队任务不再读取。Main 在原输入 journal 准备前，按准确 Store/Session 发布图片 Artifact，只把稳定引用放入正式命令；Provider 请求由 AI 转为内联 Base64，不使用外部托管或 Provider file ID。原 Command 与未知回执继续按原查询处理，不在窗口重开时重放上传或发送。未发送附件为窗口内草稿，不属于私有文本草稿的冷保存；成功受理才清理此次冻结的附件 ID。
+
+历史图片由 [Main reader](electron/input-image-reads.ts)从已观察的准确用户 Message 取得引用，不接受 renderer 自报 Artifact；每次核 generation/viewSelection/historyEpoch，完整 Client Artifact 校验后分块交付。[Renderer](src/native-user-images.tsx)再次核大小／EOF／SHA，在可见区域前后 160px 内自动创建 blob 缩略图，按窗口 bridge 串行读取，等待 close 回执后才开始下一项。图片加载、错误与重试共用固定预览区域；同一观察范围内的普通历史同步只暂停新的读取，不卸载原卡片或已验证预览。远离区域或隐藏窗口取消所属排队／读取并释放 URL，回到可见区域时重新按当前观察校验。切换会话仍取消未完成读取，但图片 key 只含 generation、原消息及图片引用身份，不使用 viewSelection／historyEpoch；已核验 URL 由有界缓存 owner 持有，返回时复用原 img，淘汰或真正移除时释放，编码载荷计入 UI 预算。CSP 仍只允许本地 blob 图片，不开放远程图片源。
+
+2026-10-18 Windows x64／Bun 1.4.3，本任务工作树的[图片暂存](test/input-images.test.ts)、[窗口草稿](test/isolated/native-input-images-dom.test.tsx)、[IPC](test/input-images-ipc.test.ts)、[历史读取](test/input-image-reads.test.ts)及受影响的原草稿／首次发送／导航 DOM 测试已运行；隔离 Chrome 实测 Markdown 快捷输入、撤销、路径引用、图片粘贴、Enter 与 scope 隔离。实际 HTTP／Provider 映射证据归 [Service](../service/README.md#图片输入协议)与 [AI](../../packages/ai/README.md#图片消息)。未调用真实付费图片模型，不据此宣布安装或跨平台资格。
+
+2026-10-19 Windows x64／Bun 1.4.3／Electron 44.3.0，在独立 Profile 与合成 Workspace 的普通 Native 开发窗口中，用系统文件选择器经 `+` 选文件并点击发送；真实用户配置的 `deepseek-v4-flash`／chat-completions、自动审核模式完成两场景。工作区内含中文／空格／方括号的 ini 文件实际 `files.read` 成功，最终回复准确合成标记；工作区外 ini 的同一工具返回 `file_path_invalid`，同 Run 的下一次真实 Model 正常解释拒绝。两个 Run 的持久记录均为 `completed`，各两次成功 Model、一次 Files；完整封存 Model 输入核实工具结果进入下一轮、外部文件及说明正文未进入模型，均无 `context_source_unavailable`。[越界装配回归](../service/test/isolated/assembly-file-denial.test.ts)另1项／13断言通过。当前范围为手工原生窗口路径引用资格，不代表直接图片、PDF 正文解析、其他模型、完整安装或跨平台资格；不增加普通客户端诊断入口，用户 Profile 与配置保持。
+
+普通宿主的外部只读工具曾遗漏于默认清单，上述强制工作区工具的拒绝测试不代表已选外部附件可用。默认补齐 `read_user_file` 后，同日同一平台／模型／自动审核模式重新在独立普通 Native 窗口经系统选择器选工作区外 ini，以普通“这是什么文件，读取实际内容”提问：模型实际使用 `files.read_path` 成功读取准确路径，回复实际字段值；原 Run `completed`、两次成功 Model、一次成功只读 Tool，完整下一 Model 输入包含准确文件内容，不包含同目录未选中的 `AGENTS.md`，无 `context_source_unavailable`。主输入和 `+` 仍只发送路径，不修改权限模式／配置、不复制文件或开放外部写入。当前默认装配归 [Service](../service/README.md#默认装配与业务规则归属)，取舍归[Note](../../.agents/notes/implemented/bug-fix/2026-10-19-default-external-file-read.md)。此证据限普通用户文本文件，不补齐二进制内容解析或其他模型／平台资格。
+
+2026-10-19 同一平台／模型／协议的独立普通 Native 窗口补齐混合附件：经两个系统选择器选工作区外 INI 和直接 PNG，原正文保持，消息独立保存一个 `files` 和一个 `images`；两次 Model 成功、一次 `files.read_path` 成功、Run `completed`。最终准确回复 INI 两个合成字段、图片文字与两个红色方块，封存 Model 输入中的图片 Base64 与原文件字节完全相同，未包含同目录未选的 `AGENTS.md`，无 `context_source_unavailable`。本段补齐前述直接图片未知，仅覆盖真实 DeepSeek Chat Completions；其他提供商及 Responses 仍为受控 HTTP 映射测试，未扩为真实端点或安装资格。
+
+同日 [Composer／草稿回归](test/isolated/native-input-images-dom.test.tsx)核编码中切换 scope、继续编辑、移除准确图片后停止后继分块及 finish、所属 URL／暂存释放、另一会话附件与正文保持；[编辑器回归](../../packages/ui/test/isolated/prompt-editor.test.tsx)核取消／迟到选择不进入其他会话。手工浏览器入口为 `bun run apps/desktop/test/input-attachments-browser-runner.fixture.ts`，只构建[独立测试入口](test/input-attachments-browser.fixture.tsx)，不改普通客户端、用户 Profile 或权限。实际 Electron 44.3.0 窗口验证 12 个文件在 720px／380px 容器中保持单行、横向滚至末尾、准确移除及会话隔离。四张各 16 MiB 的小 PNG 补齐文件分别在 1ms／8ms 模拟分块回执延迟下完成编码，Data URL 读取上限 32768 字节、各四次摘要读取／2048 个分块；两次观测均无超过 50ms 的主线程长任务，最大帧间隔约 37.7／49.9ms。时间包含夹具回执延迟，不代表实际 IPC 吞吐、超大像素图片解码或其他机器性能保证；dev／prod 无该观测入口。
+
+2026-10-19，Windows x64／Electron 44.3.0，统一入口在[独立浏览器夹具](test/input-attachments-browser-runner.fixture.ts)中使用真实沙箱 preload 和系统多选，一次选择工作区外 INI 与 PNG：真实磁盘 File 路径解析成功、普通文件卡片与完成编码的图片缩略图并排显示、正文保持空白，只有图片触发一次摘要读取。夹具的图像 IPC 为模拟回执，此项不冒充新的真实模型发送或完整安装资格；原 Provider 映射未改。10／11 张边界、混选超限零附件 port、粘贴／拖入累计、分批预留、移除释放名额、Main 窗口计数，以及 HTTP 超限零模型请求分别由上述 owner 测试核对。
+
+2026-10-19，本次 Windows x64／Bun 1.4.3／Electron 44.3.0 工作树针对流式抖动补齐验证：[Native 页面回归](test/isolated/native-history-presentation-dom.test.tsx)核活动 Run 的连续历史扫描期间，图片自动加载且卡片、img 与 URL 不被重复重建；[预览生命周期](test/isolated/native-user-images-dom.test.tsx)核六张可见图片只有一个活跃读取、视区／隐藏释放、切换后的排队取消与坏元数据零预览及显式重试。独立沙箱 Electron 窗口中，共享 Conversation 与真实 Native 图片组件使用合成 PNG 和受控 IPC 回执，24 次流式更新零向后跳，距底部最大偏差约 0.67 CSS px；12 次手动阅读更新中锚点和卡片高度偏移均为 0，切换后释放原 URL，返回后自动重新显示。此项验证实际浏览器布局与滚动，不代表新的真实模型或安装资格。
+
 ## 普通客户端与测试诊断
 
 [统一展示 context](src/native-diagnostics.tsx)只允许显式测试诊断。`NativeDesktop({testDiagnostics:true})` 供直接 DOM fixture；可信 `buildNativeDesktop` 第三参数中的 `testDiagnostics:true`、`buildNativeCandidate` 输入的同名选项供单独测试制品写入 renderer 构建常量，纳入实际制品字节指纹。普通正式制品和 `desktop:dev` 将常量固定为 false，Provider 同时核对该常量与组件参数，传入 true 不能绕过构建关闭值。dev／prod 不得出现测试专用调试功能，不依据 NODE_ENV、development 身份或 fixture 内容推断资格，也不改变 Main／IPC／Service 权限和恢复资格。顶部“会话工具／设置”、左栏连接标签与重读目录、两处 Composer 的“先审核计划”、当前会话的“保留草稿”及缺默认模型辅助提示均只在此显式测试模式展示；普通界面的设置仍从“个人工作区”用户菜单进入，Windows 另有[顶栏菜单](#windows-顶栏菜单)。[Main](electron/main.ts)移除 Linux 窗口菜单栏，Windows 隐藏独立系统菜单行并保留原生快捷键。
 
-普通界面隐藏机器身份、泛化 Model result dump、已确认的创建／答案／交互账本，以及正常完成的历史校准、零后台计数和缓存诊断。所保留的面板在未开启测试诊断时使用“执行记录”标签，未知、当前错误、未完成申请和取消未确认保持原查询合同；“查看提交记录”仍可读原申请全文并清理已核实记录，不清除 unknown。原全文继续核 EOF、完整字节、SHA 和准确命令，关闭／切 scope 只结束所属读取。非 Model [结果组件](src/native-result.tsx)逐字段保留全部业务正文；下文涉及“会话工具”的 Job／子日志、Model input、Context、恢复与管理面板由自动测试显式进入，配置另保普通用户菜单入口。
+普通界面隐藏机器身份、泛化 Model result dump、已确认的创建／答案／交互账本，以及正常完成的历史校准、后台状态汇总计数、子日志的固定序号／原子轮次 ID 和缓存诊断。后台计数非零、出现未知任务或观察不可用都不能绕过测试诊断开关；实际任务状态继续由原轮次和环境信息展示。所保留的面板在未开启测试诊断时使用“执行记录”标签，未知、当前错误、未完成申请和取消未确认保持原查询合同；“查看提交记录”仍可读原申请全文并清理已核实记录，不清除 unknown。原全文继续核 EOF、完整字节、SHA 和准确命令，关闭／切 scope 只结束所属读取。非 Model [结果组件](src/native-result.tsx)逐字段保留全部业务正文；下文涉及“会话工具”的 Job／子日志、Model input、Context、恢复与管理面板由自动测试显式进入，配置另保普通用户菜单入口。
 
-旧 Electron 身份断言在测试构建显式开启诊断；普通模式验证见[diagnostics DOM](test/isolated/native-diagnostics-dom.test.tsx)、[启动 DOM](test/isolated/native-startup-dom.test.tsx)及[新对话 DOM](test/isolated/native-new-conversation-dom.test.tsx)。启动与当前会话覆盖默认隐藏、显式开启辅助入口及零新增请求，缺模型仍禁发送；需要侧栏或目录重读的原问答／计划／草稿／恢复 DOM 明确开启诊断，其他用例保普通模式。DOM 文件沿测试体系各自隔离运行，避免多个 JSDOM 共享 React DOM 的全局捕获。此展示调整不建立完整 Windows／Linux 实测或新的发布资格。
+旧 Electron 身份断言在测试构建显式开启诊断；普通模式验证见[diagnostics DOM](test/isolated/native-diagnostics-dom.test.tsx)、[启动 DOM](test/isolated/native-startup-dom.test.tsx)、[新对话 DOM](test/isolated/native-new-conversation-dom.test.tsx)及[会话导航 DOM](test/isolated/native-session-navigation-dom.test.tsx)。启动与当前会话覆盖默认隐藏、显式开启辅助入口及零新增请求，缺模型仍禁发送；导航回归另核非零／未知计数、观察失败、子日志身份在普通模式隐藏，构建关闭时组件 opt-in 无法开启，显式测试诊断仍保留原计数与身份。需要侧栏或目录重读的原问答／计划／草稿／恢复 DOM 明确开启诊断，其他用例保普通模式。DOM 文件沿测试体系各自隔离运行，避免多个 JSDOM 共享 React DOM 的全局捕获。此展示调整不建立完整 Windows／Linux 实测或新的发布资格。
 
 [构建隔离回归](test/isolated/native-diagnostics-build.test.tsx)另经真实dev Vite服务加载原Provider，以及真实Vite／React构建原Provider和共享context的私有生产IIFE，验证编译关闭后即使组件传true、运行时伪造全局常量、dev／prod／test环境名、诊断环境变量或URL参数，仍保持普通模式；显式测试构建的true正向对照继续生效。实际2项／14断言通过，临时服务和目录均释放。生产部分验证原组件的实际编译行为，完整普通生产窗口另由下述混合压力回归覆盖，不将小入口当作完整发布打包资格。
 
@@ -15,6 +41,8 @@
 本地开发先安装当前 workspace 依赖，使用根 `npm run build` 后 `npm run desktop:dev`。该[显式开发宿主](../../scripts/development/unified-desktop.ts)复用已构建的 workspace 运行资产、实际 Bun SHA、已有 Native development assets 与构建器，从当前 Service 源码构建独立开发版本，使用 checkout 的 `unified-development/development` profile。Windows x64 的[开发环境准备](../../scripts/development/windows-desktop-environment.ts)复用已初始化环境或通过已安装 vswhere／VsDevCmd 自动初始化，只导入本次进程的构建白名单；普通 PowerShell 无须手动配置 MSVC。每次构建到独立 `.cache/unified-desktop-*`，Windows 目录由原生权限接口创建并通过私有 ACL 校验，实际 Electron 退出后清理自己的应用目录；开发数据保留，活动应用目录不覆盖。纯帮助与严格参数拒绝先于资产读取／工具探测／构建／Profile 写入，缺 built Service 明确要求 `npm run build`；SIGINT／SIGTERM通过本次父连接请求所属进程收尾，菜单退出沿Native原收尾流程。操作步骤及 Windows C++ 工具安装要求归[本地开发](../../docs/development/local-development.md)。[开发入口测试](../../tests/isolated/unified-agent/development-desktop.test.ts)核对自动初始化、已有环境复用、缺工具／SDK／无效环境拒绝、帮助、缺资产、严格参数、独立私有应用目录及已有缓存保留。
 
 当前桌面构建与启动使用仓库根 `bun run release:build --product native` 和 `bun run desktop`，定向验证为 `bun run test:desktop:native`，安装／归档／版本选择见 `bun run release:native --help`。旧 `apps/kite-desktop` 的普通开发、服务准备和打包命令已给出明确退役诊断／退出码2；不再从当前checkout构建或启动旧writer。原Vite开发热更新只属历史实现，当前Native候选启动的具体行为仍按本页及[发布owner](docs/native-release.md)核对。此项调用者退役不表示全部旧源码或阶段已退出。
+
+Windows 开发启动还会先运行 [Electron 权限预检](../../scripts/development/windows-electron-permissions.ts)及其固定 [PowerShell 实现](../../scripts/development/windows-electron-permissions.ps1)，按已安装包／实际 EXE／版本限定物理 `dist`。在固定原对象并完整扫描后，仅向缺权限的现有对象追加受限应用包 RX；无递归继承授权、ACL 重置或提权。链接、硬链接及适用的拒绝 ACE 在写入前失败；已有 ACL、所有者、继承和运行字节保留，已满足时不写入。每次启动重新解析当前安装，覆盖重装／版本切换；项目、私有应用目录、Profile 和正式 Native 权限策略不变。范围与取舍归 [Note](../../.agents/notes/implemented/bug-fix/2026-10-19-development-electron-sandbox-acl.md)，操作与错误码归[本地开发](../../docs/development/local-development.md)。[权限回归](../../tests/isolated/unified-agent/development-electron-permissions.test.ts)覆盖真实 ACL 增量、原权限／数据保全、重装、幂等、目录联接／硬链接和拒绝规则。2026-10-19 Windows x64／Bun 1.4.3／Electron 44.3.0 的独立官方 ZIP 新解压夹具复现 GPU `0x80000003`，自动修复后 renderer 加载且实际 preload 报告 sandboxed／contextIsolated 为 true，再次检查零写入；此证据只覆盖本机开发启动。
 
 ## 开发热更新与服务重载
 
@@ -28,7 +56,15 @@ Windows GUI stdin 的实际过早 EOF 已否定其控制通道方案。当前父
 
 ## 复用原桌面展示层
 
+[Native样式](src/native-tailwind.css)的窗口留白、会话标题和设置右栏与[共享面板](../../packages/ui/src/desktop/SessionPage.tsx)统一消费UI的侧栏动画参数，默认180ms／ease-out。设置布局始终保留可插值的第三列，在0与420px之间开合；空编辑宿主不再直接 `display:none`，透明度与可见性随退出完成。窄窗改用相同曲线的右侧位移动画。提供商、MCP与Skills的原portal内容仍在关闭时立即卸载，原读取取消、秘密清理和焦点语义不等待动画。
+
+2026-10-19 Windows x64／Bun1.4.3、`f734245a` 加本轮动画改动：[Native页面](test/isolated/native-new-conversation-dom.test.tsx)、[提供商](test/native-provider-settings-dom.test.tsx)、[MCP](test/native-mcp-settings.test.tsx)与[Skills](test/native-skills-settings.test.tsx)四个完整文件111项／1713断言及Desktop类型检查通过；连同共享三文件共142项／2007断言。设置宽窄栏的逐帧布局证据见[UI owner](../../packages/ui/README.md#原桌面展示层)，该夹具使用实际RightSidebar与Native CSS，不代证完整安装窗口、真实服务或其他平台资格。
+
 正式 [NativeDesktop](src/native.tsx) 已使用原 kite-desktop 的共享 [SessionPage](../../packages/ui/src/desktop/SessionPage.tsx)、Sidebar、Conversation、Composer 与 RightSidebar。[renderer 入口](src/native-main.tsx)载入原主题、字体、Tailwind/typeset 和共享 CSS；[构建器](scripts/build-native.ts)复用原 Vite/React/Tailwind 管线，仅替换 renderer 构建，Main/preload、Service 闭包、递归制品清单与使用锁保持。macOS 沿原 hiddenInset 与 trafficLightPosition 布局；正式 workspace 仍为原八个。
+
+[输入方式监听](src/native-input-modality.ts)由 renderer 入口在挂载前安装，在 document 捕获鼠标／触摸和键盘事件，通过根元素 `data-input-modality` 统一控制原生控件、共享组件与 Portal 的焦点外观。[Native CSS](src/native-tailwind.css)在 pointer 状态关闭 outline，并约束 Tailwind `focus-visible` ring／边色及调宽把手光环；共享 Composer 的聚焦边色／阴影沿同一状态。实际 focus、输入、菜单／弹窗归焦和键盘导航保持，未增加 blur 或阻止默认事件。键盘仍可恢复焦点提示，Web 未安装此 Native 监听。
+
+2026-10-18 Windows x64／Bun 1.4.3，基于 `f734245a` 的本次焦点样式变更：隔离 Vite 编译的实际共享组件在 Electron 44.3.0 中通过21项点击／键盘检查；包含原工作区既有样式调整的 Chrome 155 无头夹具通过23项，另核亮暗主题添加／编辑按钮的透明悬停和按下背景、相同图标颜色。控件实际保持 focus，菜单／Dialog／Sheet 关闭归焦无残留外框，Tab、键盘菜单退出及按钮／滑块光环恢复，草稿保留，零页面异常。上述[共享页面](../../packages/ui/test/desktop-page.test.tsx)与[Native 新对话](test/isolated/native-new-conversation-dom.test.tsx)两个完整文件31项／567断言、Desktop／UI typecheck、定向 Biome 和文档检查通过。隔离编译保留原嵌套 `@keyframes` 提示；未运行全量默认测试、正式安装窗口或其他平台。
 
 [适配器](src/native-presentation.ts)只将生成 Client 的真实 Workspace/Session/Message 转为原 UI view model。目录状态与时间消费同快照只读 activity，缺能力或未记录的事实保持待读取／未知；完成消息不推断 final reply、Turn、Tool grouping 或执行成功。正文 slot 继续使用现有 ModelOutputMessage 与完整原身份 reader；未知格式、预览与不完整内容继续保留。原 Composer 的发送、草稿、model choice 和 planMode 回调沿现有 Native controller，不建立第二条提交链。
 
@@ -116,11 +152,29 @@ Windows 导航的 [Native CSS](src/native-tailwind.css) 将宽侧栏和窄窗口
 
 设置是同级视图切换：[Native页面](src/native.tsx)将settingsOpen交给SessionPage.covered，主panel树保持挂载和原几何，以opacity0退出绘制，inert／aria-hidden退出交互，避免玻璃侧栏叠出下层正文、边缘或导航文字。保持挂载用于保留未发送草稿、阅读位置和panel状态，不执行会话重选、任务取消或新业务申请。窄侧栏原模态在covered期间关闭，返回后按原开关恢复；原返回自动聚焦在切换期间被抑制，设置自身仍有Radix焦点范围与Escape关闭。设置内容位于panel同级的overlays，明确showOverlay=false，不渲染会压暗材质或透出旧页面的遮罩；设置reader随原内容打开／关闭，Core／Service的authority与运行状态保持。
 
-Windows Mica 的实色 `.client-main-panel` 默认保留四周6px外边距；仅在 `.shell.sidebar-visible` 且同级 `#navigation-resize` 的实时 `aria-valuenow` 存在且非0时，将左侧外边距设为0、宽度扣除一份 `--native-panel-inset`，与导航之间只保留1px调宽分隔条，右侧仍为6px。拖到0时，CSS立即恢复主面板左右6px，并将分隔条宽度归零、关闭其过渡；同一次按住拖拽仍可反向展开。样式消费原分隔条已有的实时ARIA，不等待鼠标释放后的 `onLayoutChanged`，不新增JS状态或改动宽度保存逻辑。收起侧栏和窄窗口回到默认四周6px；窄窗口即使打开浮层侧栏，也不匹配这条宽窗口规则。面板沿共享 `var(--radius)` 圆角及6% foreground的1px淡边缘衔接材质，内部背景随圆角裁切。设置内容仍为四周6px留白。macOS 将这份留白设为0，主内容和设置内容直接铺满各自区域，使用直角并移除面板阴影描边。留白由面板本身承担，不覆盖 resizable Panel 固定的内联padding和尺寸计算。`#navigation-resize` 不常驻竖线，原事件及ARIA保持；悬浮保原短把手，键盘聚焦将可见环放到把手，移除整条分隔线的outline／shadow。仅已确认的 Native Mica／Vibrancy 消费玻璃布局，共享Web与其他平台的原布局保持。
+Windows Mica 在右侧栏关闭时，实色 `.client-main-panel` 默认保留四周6px外边距；仅在 `.shell.sidebar-visible` 且同级 `#navigation-resize` 的实时 `aria-valuenow` 存在且非0时，将左侧外边距设为0、宽度扣除一份 `--native-panel-inset`，与导航之间只保留1px调宽分隔条，右侧仍为6px。拖到0时，CSS立即恢复主面板左右6px，并将分隔条宽度归零、关闭其过渡；同一次按住拖拽仍可反向展开。样式消费原分隔条已有的实时ARIA，不等待鼠标释放后的 `onLayoutChanged`，不新增JS状态或改动宽度保存逻辑。收起侧栏和窄窗口回到默认四周6px；窄窗口即使打开浮层侧栏，也不匹配这条宽窗口规则。面板沿共享 `var(--radius)` 圆角及6% foreground的1px淡边缘衔接材质，内部背景随圆角裁切。设置右侧栏关闭时，设置内容仍为四周6px留白；打开后，主内容与右侧栏只在组合外侧保留留白，接缝处为直角。macOS 将这份留白设为0，主内容和设置内容直接铺满各自区域，使用直角并移除面板阴影描边。留白由面板本身承担，不覆盖 resizable Panel 固定的内联padding和尺寸计算。`#navigation-resize` 不常驻竖线，原事件及ARIA保持；悬浮保原短把手，键盘聚焦将可见环放到把手，移除整条分隔线的outline／shadow。仅已确认的 Native Mica／Vibrancy 消费玻璃布局，共享Web与其他平台的原布局保持。
+
+Windows `.sidebar-header` 的左／右内边距分别为16／10px，使 Kite 标题与主要导航、空间图标的左边缘对齐。桌面共用收展按钮的展开位置消费同一 `--sidebar-header-end-padding`，收起位置消费标题起始内边距；Mica／Vibrancy 加上内容的顶部留白，Mica 收起位置另计6px左留白，macOS 收起位置避让原窗口按钮区。按钮位于共享面板边界的零宽轨道，不受导航200px最小内容宽度的裁切，窗口拖动排除仍由 `no-drag` 保持。
+
+玻璃导航的 `.sidebar-header` 以同一 `--native-panel-inset` 设置顶部外边距，品牌、侧栏按钮与内缩后的会话标题／右侧操作共用垂直中心；Windows Mica 为6px，macOS 为0px。2026-10-19 Windows x64／Electron 44.3.0 的隔离窗口加载实际 SessionPage、NativeWindowFrame 和编译样式，以平台／材质标记核深浅共8组几何：Windows Mica 的按钮及标题中心偏差由6px降为0（浮点误差小于0.001px），Windows／Linux实色与macOS Vibrancy原对齐保持。此项是浏览器几何证据，不补充其他平台的原生材质最终合成资格。
+
+Native 的面板左外边距／宽度及会话标题栏的左内边距仅在共享 Group 的 `data-animate-width=true` 时跟随180ms过渡，使 Mica 的6px留白和macOS窗口按钮安全间距与[共享标题占位](../../packages/ui/src/desktop/SessionPage.tsx)一起移动；手动调宽沿原事件关闭动画，减少动画偏好统一直接切换。2026-10-19 Windows x64／Electron44.3.0 的隔离实际组件与编译样式逐帧对照：原Windows Mica侧栏收起的标题反向跳动为50px，实色为44px，macOS样式标记为108px；修复后1086px可用宽度的反向偏移小于0.1px、垂直位移为0。786px紧凑布局另核深浅主题、有／无右侧按钮、实色及macOS样式，减少动画偏好另核五组，反向及垂直位移均为0。页面／侧栏／安排任务／Native新对话／后台五个整文件60项、1041断言和UI／Desktop类型检查通过；平台标记只验证样式，不代证其他平台原生窗口或安装资格。
+
+Mica 分隔条在实时 `aria-valuenow=0` 时立即归零、关闭过渡的规则，只用于 Group 未进行程序动画的直接调宽。按钮收展仍沿共享分隔条过渡，避免快速反向切换时提前撤掉1px占位；原指针／键盘调宽事件先结束程序动画，因此按住拖到0仍立即恢复6px左留白，同次按住反向展开继续可用。
+
+同日基于 `f734245a` 加当前未提交源码，`bun .cache/sidebar-rapid-20261019/run.ts wide-verified` 构建运行，再以 `compact-verified --width=800 --skip-build`、`reduced-verified --reduce --skip-build` 复用同一构建。隔离 Electron44.3.0 实窗加载实际 SessionPage、Conversation、Composer、NativeWindowFrame 与编译样式，独立用户目录、沙箱保持开启。1086／786px可用宽度及减少动画模式共36组，每组24次快速切换，共864次切换请求，另含同帧重复点击和最终状态校准；5795份位置采样包含逐帧跟踪与点击前后核对。修前 Mica 的面板与标题过渡相差约1px；修后标题、正文和输入框的非预期反向／垂直位移、点击瞬间突跳及滚动漂移均为0，节点、草稿、保存宽度与最终按钮／ARIA／inert 状态保持。键盘 Home 收起及 Chromium 输入事件保持按下拖到0后反向展开，18组均通过。420px上限经面板库按可用宽度换算，最终恢复宽度与初始值最多差0.532px，保存值仍为420；该边界核连续性、方向和最终状态，不假定归一化动画进度完全一致。上述五个完整测试文件本轮重跑60项／1041断言通过，定向CSS检查通过；这是本机组件布局与输入证据，未复验真实Service、完整安装包或其他平台原生材质。
 
 2026-10-14 设置组件层验证（统一圆角前）：Windows 11 x64 build26300／Electron 44.3.0／Bun 1.4.2，实际当时Main／preload、普通renderer与配套Service隔离窗口核Mica标记。原Main窗口资格已由 `DwmGetWindowAttribute`确认 `DWMSBT_MAINWINDOW=2`；该次未改宿主材质选择。亮／暗设置中，主panel树opacity0但仍保持750px布局高度；向该树注入仅供验证的洋红底色后，返回区、分类栏及其与原主内容重叠区域的实际PNG alpha均为0，右侧设置内容为原主题RGB／alpha255，圆角和顶栏仍透明，无旧页面或黑色遮罩。主textarea和panel对象、未发送草稿及非零scrollTop（120px）在返回与Escape后保持；覆盖期间旧输入不能取得焦点。500×720窗口设置侧栏180px，原侧栏模态暂停，连续Tab均在设置内，返回后恢复侧栏并保草稿。零页面异常、Main退出0通过。[新会话DOM](test/isolated/native-new-conversation-dom.test.tsx)另核原输入实例、未发送草稿、返回／Escape、零重复attach／select／messages／draft.read和零发送；它与启动、草稿、读取归属、模型／提供商／MCP／Skills设置和窗口动作共九个完整文件44项／526断言通过。Desktop／UI typecheck及定向Biome通过。未运行完整默认、旧Windows或新macOS／Linux窗口，透明PNG不代证桌面壁纸最终合成或正式安装视觉资格。
 
 同环境此前圆角与分界验证（统一圆角前）：亮／暗主题下四周留白均为6px，面板y=38、高738px（viewport782）；实际PNG的圆角切口、留白和未聚焦的调宽分隔均为alpha0，面板内部为255。实际Playwright键盘与鼠标调宽、聚焦把手的可见环、收展动画结束后的6px左留白均通过；500×720窄窗口面板为x=6、y=38、宽488、高676，无整页溢出。后续设置覆盖调整复用该次主面板与调宽证据；当前圆角值和本轮窗口验证见下文。此检查核renderer交互与绘制层，不提升未取得的安装或其他平台资格。
+
+所有共享 [RightSidebar](../../packages/ui/src/desktop/RightSidebar.tsx) 的几何外观统一由 [Native CSS](src/native-tailwind.css) 管理：会话工具、文件变更、安排任务编辑及提供商／MCP／Skills 设置沿同一组高度、上下留白、右侧外缘和圆角规则。打开右栏时，主内容的右侧外边距与接缝圆角归零；会话布局仅保留原调宽分隔条，并将分隔条上下边界对齐面板。设置布局沿原900px断点决定并排或覆盖，覆盖时仍与内容区等高；设置容器的分隔边由内部共享右栏绘制，避免边线延伸到外侧留白。仅调整布局样式，未新增面板状态或改动各用途的关闭、滚动、焦点及读取生命周期。
+
+2026-10-18 Windows x64、Bun 1.4.3，在 `f734245a` 加本次布局改动上，定向 `bun test --parallel=1 --max-concurrency=1` 的 Native 设置／新会话与共享页面／安排任务七个文件共136项、1823断言通过。隔离模拟桥夹具编译实际 Native 与共享 SessionPage，Chrome 155.0.8059.82 无界面检查72组几何状态：明暗主题、Windows／macOS／实色回退的 CSS 标记、设置400–1600px窗口及900px断点两侧、三类会话右栏和左侧导航收展均核等高与接缝；键盘调宽、分隔条上下边界及关闭后留白恢复通过，页面零异常。CSS Biome、文档结构／影响检查通过；未运行实际 Service、macOS／Linux 原生窗口或正式安装制品，不以 CSS 标记检查替代这些资格。
+
+主内容面板的1px淡边缘由 [Native CSS](src/native-tailwind.css) 在盒内以负偏移 outline 绘制，避免 Windows Mica 导航展开、主面板左侧贴边时，被 ResizablePanel 内部裁剪层遮住；不增加占位边框。macOS 继续移除描边并铺满原区域。右栏开合的同步动画与不占位分隔由[共享 UI](../../packages/ui/README.md#原桌面展示层)负责。
+
+2026-10-18 Windows x64／Bun 1.4.3／Chrome 155.0.8059.82，在 `f734245a` 加本次修复上，隔离夹具加载实际 SessionPage 及当前 Vite 编译样式：100%／150%缩放下三类右栏共60组开合逐帧检查，左栏的物理像素边界保持稳定，最大 CSS 量化差为1/64px；修复前同类场景曾短暂偏移约113px。真实鼠标将右栏调宽80px，左栏位移为0；键盘调宽、动画中切入调宽、快速反向开合、左栏收展恢复和减少动画设置通过。亮暗主题在标题及正文左边缘均读到描边像素，macOS CSS 标记仍为无描边。定向 `bun test --parallel=1 --max-concurrency=1` 的共享页面、安排任务和 Native 新会话三个文件46项／713断言、UI typecheck及定向Biome通过；未复验真实 Service、原生壁纸合成或其他平台实窗。
 
 ## macOS 原生玻璃
 
@@ -132,11 +186,27 @@ macOS 复用上述玻璃透明层、设置遮盖、导航对齐和调宽样式�
 
 2026-10-15 macOS 26.7.1／Electron 44.3.0／Bun 1.4.2，内容铺满调整前的隔离实际 Main／preload／普通 renderer 与配套 Service 的13种状态核对通过：原桥返回 `vibrancy`，亮暗主题经原用户菜单切换后透明承载层保持透明，NativeImage 中导航空白 alpha为0、正文为255；向原主面板注入洋红底色后，设置左栏与原主面板重叠区域仍为alpha0，右侧内容为255。侧栏收展、键盘调宽、550／400px窄侧栏和设置往返保留草稿，顶部 header仍从y=0开始，原生按钮位置和窗口可调宽保持，页面无异常。另核 Mica 与 `none` 的 CSS 适用边界；窗口 IPC、窗口动作 DOM、启动 DOM 三个完整文件9项／155断言、Desktop typecheck、定向 Biome 和文档检查通过。此证据覆盖宿主接线和 renderer 透明层，未核系统壁纸最终合成或切换系统辅助功能设置。
 
+## 交互状态与透明材质
+
+Native 的[普通设置样式](src/native-tailwind.css)与[提供商／MCP／Skills 列表](src/native-provider-settings.css)消费 [UI owner 的中性交互变量](../../packages/ui/README.md#原桌面展示层)，顶栏菜单与设置内容沿用默认的悬停／选中／按下分级；设置返回与 `.settings-sidebar` 将按下变量局部映射到悬停值，与共享侧栏保持一致。已选设置分类将按下变量映射到选中值，避免点击时加深；Tailwind 的 `--color-accent` 映射到 `--control-hover`，使移出页面树的菜单也遵循同一规则。原 `--accent` 继续服务静态内容，不随交互高亮调整。实色主操作保留原角色配色，禁用状态和键盘焦点沿原控件语义。
+
+2026-10-19 Windows x64／Bun 1.4.3／Chrome 155.0.8059.82，在 `f734245a` 加当前未提交源码上，用隔离夹具加载实际 SessionPage、Sidebar 与 Native 编译样式，Windows／macOS CSS 标记下亮暗、Mica／Vibrancy／实色、窄侧栏、选中导航与设置分类选择器共14组对照：悬停／按下底色不一致的采样由64处降为0。键盘按下空间标题只绘制一层背景，焦点提示、透明承载层、草稿和主区普通按钮的原按下反馈保持；页面无异常，定向 CSS Biome 与文档检查通过。设置页仅核选择器夹具，未复验真实 Service、Electron 实窗或系统材质最终合成。
+
+[Native 页面](src/native.tsx)向共享 SessionPage 传递选中ID时，有明确导航目标则同时核 `selected.current` 与已读取的 `selection.session.id`。切换中保留的旧会话事实只用于原正文及写入门禁，不重新涂成当前选中项；新事实确认后才显示目标行高亮。没有显式切换目标的初始已选会话、同会话刷新及原晚到响应守卫保持。回归归[新对话与导航 DOM 测试](test/isolated/native-new-conversation-dom.test.tsx)。
+
+2026-10-19 Windows x64／Bun 1.4.3，在 `f734245a` 加当前未提交源码上：选中高亮回归先复现延迟选择响应时旧行仍带 `aria-current="page"`，修后核初始已选会话、会话／全局及项目准备入口、缺选择的 Main 发布、目标确认与晚到响应。新对话、会话导航及共享页面三个整文件44项／981断言，Desktop typecheck、定向 Biome 和文档检查通过。Chrome 155.0.8059.82 隔离实际 Native renderer 沿既有模拟桥，亮暗下三种入口及键盘共8组逐帧核对，修前8组误选旧行，修后为0；两种准备入口的4组旧行背景 alpha 全程为0，同目标刷新保留高亮。未改共享 hover 配色、会话选择请求或写入门禁；未复验真实 Service 或 Electron 实窗。
+
+Mica／Vibrancy 的背景明度与壁纸合成继续由系统材质管理，承载层保持透明，不为每个按钮重复添加模糊或读取壁纸。半透明交互层只控制组件的叠色；完全透明且明暗不受约束的底图无法仅靠一种 hover 色保证对比度。此边界也符合[系统材质的可读性说明](https://learn.microsoft.com/en-us/windows/apps/design/style/acrylic#legibility-considerations)。
+
+2026-10-19，基于 `f734245a` 和当时未提交源码的中性交互调整：Windows／Chrome 155.0.8059.82 隔离夹具加载实际 SessionPage、共享控件与当前 Native 编译样式，Windows／macOS CSS 标记下亮暗主题各4种模拟材质底色，以及540px侧栏共18种状态通过。普通按钮、空间／会话／导航／用户行、移出页面树的菜单核同一 hover，选中悬停与按下强度分开；禁用背景、键盘焦点、透明承载层、正文及草稿保持。另8种模拟底色的截图像素符合黑5%／白7%叠色，样本导航文字对比度最低约6.08:1；实际 NativeWindowFrame 与设置选择器夹具的亮暗2种状态核顶栏开合、设置返回／分类、提供商与目录按钮、选中悬停、禁用和实色保存按钮。三份 CSS 的 Biome、文档结构与影响检查通过。本轮未运行真实 Service、Electron 壁纸最终合成或其他平台实窗，模拟材质结果不构成任意壁纸可读性保证。
+
 ## 统一桌面圆角
 
-Native 统一消费[共享 UI 的根圆角变量](../../packages/ui/README.md#原桌面展示层)，沿空间列表原值10px；[设置／Mica 样式](src/native-tailwind.css)和[正文排版](src/native-typeset.css)均引用 `--radius`，没有另立 Native 圆角值。macOS 主内容与设置内容另按上文采用直角，内部控件仍消费共享圆角。Tailwind 尺寸别名、圆形及拼接直角的范围归 UI owner。现有 Mica 透明层、6px留白、设置覆盖与业务交互保持。
+Native 统一消费[共享 UI 的根圆角变量](../../packages/ui/README.md#原桌面展示层)，采用统一的16px圆角；[设置／Mica 样式](src/native-tailwind.css)和[正文排版](src/native-typeset.css)均引用 `--radius`，没有另立 Native 圆角值。macOS 主内容与设置内容另按上文采用直角，内部控件仍消费共享圆角。Tailwind 尺寸别名、圆形及拼接直角的范围归 UI owner。现有 Mica 透明层、6px留白、设置覆盖与业务交互保持。
 
 2026-10-14 同环境、基于 `006b79d3` 的当前圆角 diff：隔离普通 Native 构建和真实 Service，由实际空间选择入口登记测试目录（仅控制系统选择框回调）。亮／暗实际 computed style 核空间列表、主面板、Composer、建议按钮、项目选择、用户菜单及菜单项、设置内容、卡片、选择框与导航按钮均为10px；临时将根变量改为14px后全部随之改变，随后恢复10px。顶栏、设置分类栏与返回区保透明；500px窄窗口仍为同一圆角，返回与Escape保原输入实例和未发送草稿，圆形发送按钮与全屏直角保持。截图核布局，零页面异常、Main退出0通过。Desktop／UI typecheck、三份 CSS 的 Biome 和 diff 检查通过（保留原三项 `!important` 提示）；构建保原 keyframes 优化与大chunk提示。仅核本轮桌面外观，未运行完整默认测试或其他平台／安装制品验证，不将先前完整状态矩阵作为本轮重跑结果。
+
+2026-10-19，基于 `f734245a` 和当时未提交源码的16px调整：Windows／Chrome 155.0.8059.82 隔离夹具用实际 `SessionPage`、共享控件及 Native 编译样式核对1600／1000／540px亮暗共6种状态。面板、空间与会话行、输入框、环境卡、正文代码／引用／表格、菜单及弹窗随根变量由10px变为16px；发送按钮保留圆形，右栏拼接边和 macOS 主内容保留直角。前后布局尺寸与草稿相同，页面无异常；定向 CSS 和文档检查通过。本轮未重跑 Electron 实窗或平台发行资格。
 
 ## 玻璃导航间距
 
@@ -240,13 +310,21 @@ Native 的侧栏打开入口对当前父会话及同一在途选择去重，重�
 
 ## 原会话输入区权限与停止
 
+普通 [Native 页面](src/native.tsx)不再将 `permission.mode` 的 `saved/submitting` 状态插入 `beforeConversation`；原 [Composer](../../packages/ui/src/desktop/Composer.tsx)通过触发器的切换中标签、`aria-busy` 和禁用状态表达正常提交，避免状态段插入／移除时挤动消息区。`unknown/failed` 的原结果与准确查询入口、项目读取信任申请的原进度、显式测试诊断账本均保留，底层 Command、权限写入及重复提交门禁未改。
+
+`writeInput` 仅为首条发送、已有会话输入和首条重试设置 `sending`，仍委托原 `write` 保持串行及历史准入，并在完成／失败时撤销发送提示。通用 `pending` 继续禁用相关操作，但权限切换、停止、查询和空间操作不会借此替换发送／停止图标。空间行内操作的临时禁用不改变原悬停／聚焦显隐，选择器修复归[共享 UI](../../packages/ui/README.md)。
+
+2026-10-18 Windows x64／Bun 1.4.3，基于 `f734245a` 加当前工作区改动：新增 Native DOM 延迟权限回归先在原实现复现发送按钮 `aria-busy=true`，修复后保原图标、草稿及空间操作节点，禁用点击零额外写入；实际输入、首条发送及重试仍显示发送忙碌。新对话整文件20项／549断言、会话导航10项／302断言、共享页面13项／95断言及 Desktop typecheck 通过。Chrome 155 隔离共享组件夹具在亮暗主题、1240／800／500px 和触屏下验证：原空间隐藏按钮禁用时透明度从0变0.45，修复后仍为0，悬停／聚焦为1，触屏始终为1，所有受测页面几何和滚动不变；500px 未挂载侧栏，不计作侧栏视觉证据。未运行完整安装窗口、其他平台及全量默认测试；原嵌套 `@keyframes` 优化提示保留。
+
+2026-10-18 Windows x64／Bun 1.4.3，基于 `f734245a` 加本轮工作区改动：[Native 新对话整文件](test/isolated/native-new-conversation-dom.test.tsx)19项／518断言通过，新增普通模式五阶段、原 unknown 查询／零重放、失败提示、Store／会话隔离及信任进度保留，并核菜单 mousedown 不再落入输入区空白聚焦。Desktop／UI typecheck 通过。Chrome 155 隔离共享 SessionPage／Composer 布局夹具复现原临时状态段使消息区下移47px；按 Native DOM 已核实的正常状态显隐修正后，1240／800／500px 三宽度的面板、阅读区、输入框几何及手动滚动位置均不变，多行草稿保持、零页面异常。该有限布局证据不代正式安装窗口、全量默认测试或其他平台；原嵌套 `@keyframes` 编译提示保留。
+
 普通 Native 当前根会话未信任项目或新增宿主只读范围时，主区的[项目读取授权](src/native-trust.tsx)提供独立确认入口，不依赖测试诊断侧栏。复用原 Dialog 与 Button，展示当前项目 URI 和完整 `readScopes` 描述，勾选后才沿当前准确 `permission.trust` observation 提交；不改变权限模式、不重新创建会话，也不自动重发保留的首次输入。关闭、暂不授权与会话切换只结束页面确认；已提交申请仍保留原结果，未知时普通主区可准确查询原权限选择。当前 Store／会话／信任范围变化重置确认，迟到结果不移动后来选择或草稿。原诊断 PermissionPanel 继续可用。
 
 [原新对话 DOM 整文件](test/isolated/native-new-conversation-dom.test.tsx)在普通模式覆盖带额外目录的首次创建失败后确认与明确继续、取消零申请、范围变化重置勾选、迟到授权保留另会话草稿，以及 unknown 原 ID 查询／零重放；原诊断模式与权限菜单断言保持。此处只修展示入口，不改变 Main／Service 的信任准入或底层范围证明；DOM 结果不代证安装版系统窗口或跨平台资格。
 
 [NativeDesktop](src/native.tsx)为已有根会话接入原 [Composer](../../packages/ui/src/desktop/Composer.tsx)的请求批准／自动审核／完全访问菜单和停止按钮。模式沿现有 permission observation 提交，只改当前会话，不改工作区默认；请求批准直接提交 `accept_edits`，不再映射为旧 `ask`。Full 仍须原风险确认，确认绑定当前 generation、Store、Session、阅读选择与 history epoch；取消或切会话后的旧确认没有写入资格。模式选择不启动任务，也不清理原草稿；未读完历史、工作区未信任、事实不可用或原权限申请未核实时等待；提交回调也拒绝未信任的模式写入。会话工具中的模式表单在工作区未信任时同样只读，核对并明确设置信任后才提供模式选择；信任控制保持独立，修改模式不自动设置信任或启动 Model。原计划窗口按真实信任→Auto 顺序运行，由真实审核返回 `ask_user` 后保独立工具审批；完整审核、Files 与冷读断言保持；准确回归范围见[PC 迁移主线](../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-09pc-迁移完整默认回归)。
 
-普通历史／View 后台刷新只暂停操作，原输入区保留同一 generation、Store、Session、Workspace、阅读选择和 history epoch 内上次确认的权限标签。标签仅用于展示，不恢复已撤销的权限事实；真实权限／观察失败或切换范围即失效。[页面 DOM 回归](test/isolated/native-session-navigation-dom.test.tsx)模拟 Main 在普通 View 刷新时暂撤 permissions，核标签、计时和输入节点保留，操作仍禁用，真实失败提示仍出现。
+普通历史／View 后台刷新只暂停操作，审核标签按 generation、Store、Session 和 Workspace 保留上次已确认模式，不以新的 viewSelection／history epoch 丢弃同会话标签。模式展示使用原有界 `NativeDisplayCache`，最多12项；generation／Store 替换清理，真实权限或后台观察失败撤销当前项。缓存不保存 permission observation、trust 或写资格，未命中时显示明确读取占位。目标选择尚未得到 Main 确认时保留当前草稿并只读，确认后才一次切换到目标缓存草稿，再独立核对持久草稿；原本空草稿的禁用发送、实际发送／停止中与真实失败仍按原事实展示。Native 将普通读取等待交给 Composer 的 `sessionLoading`，已知标签、图标、透明度及悬停保持，权限、模型和执行动作仍沿当前事实准入。[页面 DOM 回归](test/isolated/native-session-navigation-dom.test.tsx)模拟 Main 在普通 View 刷新时暂撤 permissions，核标签、计时和输入节点保留，操作仍禁用，真实失败提示仍出现。
 
 停止沿现有 [NativeCaller](electron/native-caller.ts)保存并提交 `command.cancel`，目标是已核实当前 Store／Session 活动 Run 的 `originCommandId`。它不新增停止端口，也不把申请当成终态；原保存／提交中／未知申请禁止重复，准确结果仍由原 Run 和持久申请核实。只读子详情没有这组控制，切换阅读不停止原工作。
 
@@ -262,12 +340,15 @@ Native 的侧栏打开入口对当前父会话及同一在途选择去重，重�
 
 ## 会话工具栏显示快照
 
-[NativeDisplayCache](src/native-display-cache.ts)仅保留进程内展示数据，每个模型／指标缓存至多 12 项、总计 16MiB，单项超过 4MiB 不保留；按访问顺序淘汰，没有隐藏的会话组件或持久存储。模型目录按当前 generation、Store 和配置 revision 隔离，分别保存每个 Session／Workspace 及新对话准备页的已读事实；返回时不先清空标签，后台 GET 完成前模型与发送仍不可用。缓存率按当前 generation、Store、Session、Workspace 和 history epoch 隔离，复用时逐条核当前已读消息的准确内容与来源，去重、真实零和缺样行为保持；读 lease 仍绑定新的 viewSelection，迟到读取不能替换其他会话。
+[NativeDisplayCache](src/native-display-cache.ts)仅保留进程内展示数据，每个模型／指标／审核标签缓存至多 12 项、总计 16MiB，单项超过 4MiB 不保留；按访问顺序淘汰，没有隐藏的会话组件或持久存储。模型目录按当前 generation、Store 和配置 revision 隔离，分别保存每个 Session／Workspace 及新对话准备页的已读事实；返回时不先清空标签，后台 GET 完成前模型与发送仍不可用。缓存率按当前 generation、Store、Session、Workspace 和 history epoch 隔离，复用时逐条核当前已读消息的准确内容与来源，去重、真实零和缺样行为保持；读 lease 仍绑定新的 viewSelection，迟到读取不能替换其他会话。
 
-[NativeDesktop](src/native.tsx)在选择交接时先暂停旧历史读取并门禁操作，目标选择确认后一次交接其缓存正文与元数据，避免旧选择配新正文造成工具栏短暂清空。Main 在本次选择期间暂未发布 selection 时，仅保留旧选择的只读展示，撤销 permissions 并标记 viewLoading／permissionUnavailable；它不能恢复发送、审批或停止资格。目标草稿直接从原独立草稿缓存恢复，不先置空再填回。模型控件在后台核对时保留原 DOM 与文字颜色，弹层随禁用关闭；真实失败保留原错误。
+[NativeDesktop](src/native.tsx)在选择交接时先暂停旧历史读取并门禁操作，目标选择确认后一次交接其缓存正文与元数据，避免旧选择配新正文造成工具栏短暂清空。未命中模型展示缓存时，先经原 `input.models.read` 准备该目标的完整目录与持久模型路由，再发布目标页；原模型名和档位直接更新到最终值，不经过“选择模型”占位。`NativeModelSnapshots` 将原有界展示缓存交由导航与 [NativeModelPicker](src/native-model-picker.tsx)共同使用，预算和身份隔离保持；命中目标缓存时不等待额外准备，原 Picker 继续后台核对。冷准备的结果沿 generation／Store／Session／阅读选择／配置 revision 交给原 Picker，消费后不重复 GET；同一路由也按新阅读身份重新发布 ready，不能沿用旧会话发送资格。Main 在本次选择期间暂未发布 selection 时，仅保留旧选择的只读展示，撤销 permissions 并标记 viewLoading／permissionUnavailable；它不能恢复发送、审批或停止资格。目标草稿直接从原独立草稿缓存恢复，不先置空再填回。模型控件在后台核对时保留原 DOM 与文字颜色，弹层随禁用关闭；真实失败保留原错误。准备期间只延后目标 selection 的可见交接，原目录和全局失败仍发布；后台 state 通知和 layout 驱动的历史读取遵循同一准备门禁，不提前启动目标历史。新目标、退出或 generation 变化使旧准备失去发布资格；等待期间观察被撤回时只保留已确认目标的只读身份，最新失效标记胜过旧回执，Store 替换放弃旧准备；模型读取错误由目标 Picker 明确展示，目标历史继续加载，缺失的原路由不静默落到全局默认。这里仅调整 Renderer 的读取／发布顺序，不增加 Main／IPC、Core 或持久协议。
+
+进入安排任务页时丢弃本次导航的模型预读交接，返回会话时重新核对模型目录；原历史校准与未发送草稿保持。[安排任务 DOM](test/isolated/native-scheduled-tasks-dom.test.tsx)核往返读取、原草稿和零额外创建／发送。
 
 [模型 DOM](test/isolated/native-model-picker-dom.test.tsx)、[缓存率 DOM](test/isolated/native-cache-metrics-dom.test.tsx)和[完整会话页 DOM](test/isolated/native-new-conversation-dom.test.tsx)分别核模型与比例不串会话、原节点保留、延迟响应、epoch 失效、容量限制、无选择交接时禁止写入及首条自动进入。
 
+2026-10-19 Windows x64／Bun 1.4.3／Chrome 155，基于 `f734245a` 加本轮工作区改动：原实现用新增冷会话断言复现模型尚未就绪就发布目标页；修复后 `bun test --parallel=1 --max-concurrency=1 ./apps/desktop/test/isolated/native-session-shell-dom.test.tsx ./apps/desktop/test/isolated/native-model-picker-dom.test.tsx` 的18项／238断言通过，覆盖同模型新范围 ready、无重复 GET、后台状态通知、迟到准备、真实错误与准备中的观察撤回。合并后的19个相关整文件共139项／3208断言通过，Desktop typecheck、定向 Biome、文档和边界检查通过。增强的 `bun apps/desktop/test/session-shell-browser-runner.fixture.ts` 在浅／深主题完成冷页长模型名首帧、192帧等待采样和200次暖切换，模型按钮保持原 DOM，模型名／档位与同帧标题一致，无占位带来的中间宽度，业务写入为0。该夹具使用实际 NativeDesktop／CSS 与模拟 Main，浏览器沙箱开启；完整 Electron 安装窗口与真实 IPC 未复验，原嵌套 `@keyframes` 及既有 ToolActivity key 测试提示保留。
 ## 原交互记录只读历史
 
 原“会话工具”侧栏的“交互记录”由 [NativeInteractionHistory](src/native-interaction-history.tsx)复用 `InteractionCard` 阅读问题、计划审核和普通／MCP 审批，保存答案、取消、当前 revision 与 accepted decision 分开表达。通用 question 保原 schema／JSON 答案，不借默认 `ask_user` 的 q1–q3 解释任意定义。计划的实际修改反馈按原字符串显示；原 PlanBody 提供格式化阅读，完整原附件可另行展开。没有回答回调，待回答记录也只读；当前真正待输入卡和原提交链继续独立。
@@ -310,6 +391,8 @@ Main 对目录与所选会话分别保留一个在途读取和一个后继通知
 
 [NativeDesktop](src/native.tsx)直接消费原 SessionPage 的欢迎区、四项建议、项目／分支菜单与 Composer。全局及项目新对话入口只进入准备页，不创建空 Session；建议只追加草稿、聚焦并移动光标。准备草稿和已有 Session 未保存草稿分别保留，页面、项目及分支选择不清空原文。实际模型目录由 [NativeModelPicker](src/native-model-picker.tsx)经独立只读 `conversation.models.read` 读取全局配置。普通客户端读取期间只将原模型选择区标为 `aria-busy` 并禁用模型／发送操作，不在工具栏插入加载段落，避免会话切到准备页后先增高再收缩；输入与独立草稿保留，真实目录失败仍显示原错误。选择项目只读取其分支，不重挂目录或改变全局默认，首次发送仍核所选项目实际配置和支持档位。原 Full 风险确认保留；本次权限选择在创建原 Session 后、首条输入前应用，不写项目默认。
 
+全局“新对话”按当前目录顺序默认选择第一个已登记空间，空间行内入口仍使用明确的空间ID；切入准备时清除上次分支选择，再沿原 `chooseWorkspace` 读取真实分支，读取期间不能发送。无当前会话的启动准备从本次完整目录的首项初始化，使用已读目录事实，避免闭包尚未更新导致默认选择遗漏；页面意图变化后不再应用旧的初始化选择。没有空间时保持未选与可编辑草稿，发送禁用。普通目录刷新不覆盖当前手动选择，重新从全局入口进入才按最新顺序重置。2026-10-19 Windows／Bun1.4.3、`f734245a`加当前改动：三项新增实际Native DOM回归在原实现均失败，修复后通过，核目录延迟、首项重排、空目录、显式入口、手动选择、迟到分支与首次发送的准确空间；连同新对话及启动两个整文件27项／700断言、Desktop类型检查和Biome通过。此为实际组件DOM证据，未复验完整安装窗口。
+
 [NativeConversation](electron/conversation.ts)负责有限编排，复用原 NativeCaller 创建意图、私有草稿、permission controller、caller journal 和 DesktopInput。发送前冻结创建五元身份、输入 Command、原文、模型／effort、Plan 与权限；先保存未来原 Session 的准确草稿，再执行原创建。准备的权限 controller 与正在阅读的选择分别持有观察，迟到结果不抢回后来页面。选择项目仅授权该根目录；实际权限包含额外宿主只读范围时，保留创建后的 Session 和原文，打开已有权限面板供明确确认。
 
 原 [Git leaf](electron/git.ts)从 kite-desktop 迁入，保原分支与工作区语义，并使用上文的所属 helper 退出收束。Main 从同代次／Store 完整目录中的已登记 Workspace 解出规范路径；renderer 只能传 ID，分支结果没有路径或控制句柄。普通目录、缺 Git 的读取均可准备；只有显式选择另一分支才在首次创建前切换。实际根、HEAD、本地分支、脏文件与全部活动 Run／Job 均重新核对；Profile 和 Native／Terminal 制品根及其交叠目录不可切换。目标已与当前分支相同不执行切换，未显式选分支时使用发送时的真实环境。Service 按新 Run 读取／冻结项目配置，不沿旧单项目拓扑关闭或重启 Service。
@@ -330,13 +413,17 @@ Main 对目录与所选会话分别保留一个在途读取和一个后继通知
 
 ## Native 当前会话环境信息与子详情
 
-正式 [页面](src/native.tsx)将现有后台目录接到原 [BackgroundExecutions](../../packages/ui/src/desktop/BackgroundExecutions.tsx)环境卡和 SessionPage 的 `environmentInformation` slot，保留原 300px 卡、宽窄窗口停靠／浮层与开关行为。[适配器](src/native-environment.tsx)只展示实际 `shell.command` 或有准确 child Session 的执行，名称取公开 child title；Shell 沿原 currentOnly 契约只列运行／停止中，子列表另保 queued／starting／unknown／restored 状态，不把终态或受理回执当作进程清理证明。
+[目录适配](src/native-presentation.ts)在没有全局 activity 而消费当前会话观察时，将 `viewLoading` 与实际读取失败区分：同 Store／同 Session 的正常校准保留原运行展示；目录不可用或 `permissionUnavailable` 且不在校准中仍显示上次确认状态，foreign Store 不消费该观察。仅保留展示，不改变操作准入。[环境适配](src/native-environment.tsx)同样把校准 `busy` 与真实 `stale` 分开，普通刷新沿原展示缓存保持文字、行数和停止按钮，按钮在新 facts 完成前禁用；首次读取与真实错误仍明确提示。Main 尚未确认目标选择时，环境 hook 的 `paused` 立即停止旧范围读取并隔离 child／stop，保留当前卡片的文字与按钮为 busy；这类已知切换等待不转换成真实 stale 错误，切换前已存在的真实错误仍保留。旧 observation 不恢复写资格，已受理停止等待最新完整目录及原 Main 准入，scope 替换和未知零重放保持。
+
+2026-10-18 Windows x64／Bun 1.4.3，基于 `f734245a` 加本轮工作区改动：[目录](test/native-directory.test.tsx)新增同会话校准保运行标记及真实失败／foreign Store 反例，[停止竞态](test/isolated/native-environment-stop-dom.test.tsx)新增普通刷新保节点、空列表不插加载段、禁用零写及真实失败。原实现分别复现运行标记被撤下、环境卡加“上次状态”并移除停止按钮，以及空列表插加载段；修复后相关整文件通过。Chrome 155 隔离夹具使用实际目录适配、共享 SessionPage／Composer 与环境 hook，亮暗主题、1240／800／500px、空／非空目录下原环境卡高度变化为4／48px，修复后文字、按钮数、可见侧栏运行标记和所有受测几何／滚动保持；每次选择一次、后台读取继续、零停止写入。500px 原侧栏未挂载，不将该场景计作侧栏视觉证据。完整安装窗口、其他平台及全量默认测试未运行；原嵌套 `@keyframes` 编译提示保留。
+
+正式 [页面](src/native.tsx)将现有后台目录接到原 [BackgroundExecutions](../../packages/ui/src/desktop/BackgroundExecutions.tsx)环境卡和 SessionPage 的 `environmentInformation` slot，保留原 300px 卡、宽窄窗口停靠／浮层与开关行为。[适配器](src/native-environment.tsx)只展示实际 `shell.command` 或有准确 child Session 的执行，名称取公开 child title；自动命名扩展的 `agent/session-title` 按公开 `definitionId` 从环境卡的行与 child 入口映射中排除，不按可变名称判断，同名普通委派任务仍显示。原后台目录、执行历史、取消和 unknown 事实保留；回归见[环境展示测试](test/native-background-panel.test.tsx)。Shell 沿原 currentOnly 契约只列运行／停止中，子列表另保 queued／starting／unknown／restored 状态，不把终态或受理回执当作进程清理证明。
 
 Main 从实际选中根的 controller snapshot 固定 Store／subject／generation／rootSessionId／viewSelection，复用 [NativeBackground](electron/background.ts)与原完整 reader。封闭 IPC 的 `surface: environment` 仅选择这份 Main 观察，不接收 renderer 根 ID 或路径；它与全局总览有独立读取生命周期，选中根变化只释放环境读取，旧停止资格失效。SSE 或显式刷新触发 GET，完整成功后才发布。页面仅缓存最多八个同代次／Store／根的展示快照，每份最多512KiB；没有 observation、完整输出或提交意图。失败保旧名称和状态，停用停止入口；准确停止继续走原 durable caller，未知／在途原取消不换 ID 重发。
 
 子详情复用原 SessionPage 与完整 child reader，每次读取固定消息上界并核 ModelOutput 的 EOF／SHA／UTF-8 后显示。宿主将已验证 snapshot 交给 `ModelOutputMessage.verifiedSnapshot`，组件再次核准确出处和字节数，直接呈现已读正文与活动前缀。全局观察修订驱动目录和子详情更新，各自只有一个在途读取，期间变化合并为一次尾随读取，避免持续输出反复中止 GET。活动子页沿同一 context selection 的完整稳定消息前缀重读尾部；Main 核当前父子绑定，context 变化回退全量。公开已完成消息不可由 partial 写路径更新，未完成消息及正文必须重读；后台总览不使用增量游标，保持原完整固定快照。
 
-子详情只缓存已验证展示数据，最多12项、64MiB估算载荷、单项16MiB；不保存 observation 或操作资格。重新进入先由当前父范围目录核准子成员，再展示命中的正文，同时完整校准；显式刷新也完整重读，不以相同序号跳过。generation、history epoch 或 bridge 替换清理旧缓存。打开、刷新或返回不改变 Main 阅读根、不取得 child 写权；详情隐藏父输入、审批和工具动作，返回恢复原草稿与父轮次提示。子页打开期间暂停父 History、工具／轮次／文件／用量的辅助读取，保留当前展示数据；返回后恢复校准。关闭、切换子页、换根、reset 或卸载会 abort 所属读取，迟到结果不能替换后来视图，读取取消不停止业务任务。消息与正文按 ID 建索引，避免逐行扫描全历史；阅读位置和展开状态由共享 UI 的有界数据缓存保存，不保活隐藏消息 DOM。取舍见[主子会话阅读决定](../../.agents/notes/implemented/architecture/2026-10-15-native-session-reading-lifecycle.md)。
+子详情只缓存已验证展示数据，最多12项、64MiB估算载荷、单项16MiB；不保存 observation 或操作资格。重新进入先由当前父范围目录核准子成员，再展示命中的正文，同时完整校准；显式刷新也完整重读，不以相同序号跳过。generation、history epoch 或 bridge 替换清理旧缓存。打开、刷新或返回不改变 Main 阅读根、不取得 child 写权；详情隐藏父输入、审批和工具动作，返回恢复原草稿与父轮次提示。子页打开期间暂停父 History、工具／轮次／文件／用量的辅助读取，保留当前展示数据；返回后恢复校准。关闭、切换子页、换根、reset 或卸载会 abort 所属读取，迟到结果不能替换后来视图，读取取消不停止业务任务。消息与正文按 ID 建索引，避免逐行扫描全历史；阅读位置和展开状态由共享 UI 的有界数据缓存保存，近期消息树还按下述 KeepAlive 边界停用保留。取舍见[主子会话阅读决定](../../.agents/notes/implemented/architecture/2026-10-15-native-session-reading-lifecycle.md)。
 
 Main 自动刷新父元数据会暂时清空 controller snapshot，但不会因此撤销同一已准入根的 child lease或固定H的Job输出读取。仅在刷新在途、同 selection／Session 且未有真实失败时，环境与Job reader沿 Main 上次已验证根保持范围，每次读取仍核后端绑定；真实换根、reset 或刷新失败立即失效并abort相应读取。自动元数据刷新或显式权限刷新失败时，Main 主动释放 environment 的目录、子正文及输出 lease，清除观察与正文缓冲，不依赖 Renderer close；权限不可用时即使 controller 仍有旧快照也不能重新准入。恢复后旧 readId 与 observation 不复活，必须重新取得完整目录；Renderer 保留上次正文并对当前子页全量校准。[Main 回归](test/native-caller.test.ts)用 held 父 GET 核 child chunk／目录可独立完成，并让失败前的目录和 child GET 忽略 abort、跨过恢复后才返回，核旧结果拒绝、新观察可读及零业务取消；[Job输出回归](test/native-caller-job-output.test.ts)让SDK最新H从2推进至4，确认父刷新未结束仍只读原H2且可同scope重开。两者均核三种真实撤销拒绝迟到结果、零业务取消。返回父页在 layout 阶段重开历史校准，首屏草稿可编辑但发送／停止／权限等待新 EOF，避免旧 complete 状态短暂恢复操作资格。
 
@@ -476,7 +563,7 @@ ANGLE Metal同期123.22→15.59MiB、Skia资源4.79MiB→4096字节，SharedImag
 
 ## Native 跨会话后台总览
 
-[当前会话](src/native.tsx)在原 Run 状态旁显示当前 Session/Store 的未结束 Job 与 outcome_unknown 数量；planned/dispatching/running 包含停止未结算的项，终态、其他 Session、旧 Store、非 Job 不计入。计数使用 getView 的全部非终态投影，不是跨会话完整目录；父 Run 完成不清除后台状态。已有后台项或真实观察／权限失败时保留上次事实并标明；普通 View 后台刷新不因临时不可用额外插入底部状态行，避免输入区外层反复增高。数量不授予停止权或证明实际进程存活。[installed 默认 Shell](test/isolated/native-shell-lifecycle-bundle.test.ts)沿实际页面核父已完成、2 项未结束及准确停止后 1 项未结束，原完整输出、Main/Service fault、冷读与保数据卸载断言保持；准确证据和未验范围见[进度](../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-08父轮次完成与后台状态分别显示)。
+[当前会话](src/native.tsx)的后台状态汇总仅在显式测试诊断中显示；普通 dev／prod 在计数非零、未知或观察不可用时也不显示该行。原轮次进度、环境信息中的实际任务、准确停止和真实读取／权限失败的恢复入口继续保留。测试计数限定当前 Session/Store 的未结束 Job 与 outcome_unknown；planned/dispatching/running 包含停止未结算的项，终态、其他 Session、旧 Store、非 Job 不计入。计数使用 getView 的全部非终态投影，不是跨会话完整目录；父 Run 完成不清除后台状态。观察／权限不可用时，测试汇总标为上次确认状态，数量不授予停止权或证明实际进程存活。[installed 默认 Shell](test/isolated/native-shell-lifecycle-bundle.test.ts)显式构建测试诊断，沿实际页面核父已完成、2 项未结束及准确停止后 1 项未结束；原完整输出、Main/Service fault、冷读与保数据卸载断言保持，准确证据和未验范围见[进度](../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-08父轮次完成与后台状态分别显示)。
 
 正式 renderer 的[后台总览](src/native-background-panel.tsx)是独立于选中会话的主动入口。它读取原主体根会话树内全部当前来源 Job，以及准确恢复根中的旧来源历史，包含 child/task carrier 与子会话中的 Job；超过200项仍穷尽全部页，不从有限 `selection.executions` 猜完整集合。每项分别显示原 Store、原父 Run、准确 `child-start-${executionId}` 子 Run、required 等待与 delivery；较新的子 Run 不替换原载体。公共来源与快照合同由[Store](../../packages/agent/src/storage/README.md#跨会话原-job-目录)、[Service](../service/README.md#完整后台执行目录)和[Client](../../packages/client/README.md#完整后台执行目录)维护。
 
@@ -513,6 +600,8 @@ ANGLE Metal同期123.22→15.59MiB、Skia资源4.79MiB→4096字节，SharedImag
 [Main/IPC 测试](test/native-skills-reads.test.ts)与[实际 DOM](test/native-skills-settings.test.tsx)验证完整分页、关闭、迟到响应、刷新失败和作用域隔离。[默认 Native 候选](test/isolated/native-skills-bundle.test.ts)与[Electron driver](test/native-skills-electron.fixture.ts)已在本机 macOS 核搬迁、删除构建源后的默认 Service／网络装配：306 项经 16 个真实同 revision 页完整展示，文件与配置刷新、两个 Workspace、分类关闭重开、冷启动与普通所属 Service 退出均完成；退出后独立公共冷 Store 无 Run/Execution 增长。切换会话先沿原“返回应用”回到侧栏，再打开所选工作区的Skills设置；关闭设置不停止执行。原目录资格归[早期进度](../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-07正式-native-只读-skills-目录与阶段收束)，当前原窗口复验、真实失败和完整默认范围归[PC主线](../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-09pc-迁移完整默认回归)，取舍见[目录决定](../../.agents/notes/implemented/architecture/2026-10-07-native-readonly-skill-catalogue.md)。这项资格只覆盖当前 Native 公开目录消费者，完整 Skills/Workflow 与其他平台仍按 [P5](../../docs/plans/unified-agent-refactor-v1.md#3021-当前-native-skills-消费者迁移)核对。
 
 ## Native 普通问题与页面草稿
+
+普通问卷使用共享卡片：问题与进度分层展示，整行选项可选择，推荐项显示中文标记，说明按钮保持紧凑；取消与翻页／提交位于同一操作栏。默认作答区不显示 `question · pending`、执行 ID 或原请求 JSON，失败和未知答复仍保留中文状态及原命令查询。普通页不在输入框上方重复显示 `轮次：failed`；历史上下文来源错误显示可读原因，原代码保留在失败记录中。
 
 根 `desktop` 选择的 [Native renderer](src/native.tsx)实际消费共享 Questionnaire；默认 ask_user 的多题选择、自由输入、先浏览后一次提交和显式取消问卷均沿公共原 `interaction.answer`。取消只提交原 schema 的 null，后续 Model 在同一 Run 收到取消信息；所选会话存在 pending question 时，隐藏主输入表单及原命令、原申请或 active Job 的任务停止按钮。主输入草稿仍由页面原状态保留，回答或取消后的交互终态恢复原文；跨会话的未发送文本按原 Store／Session 页面缓存保留，已有私有草稿沿原读取链恢复。普通界面移除“保留草稿”，不新增自动持久保存。未知／失败回答保留原意图，只查询原 Command，不再次 POST。
 
@@ -683,6 +772,20 @@ Native 的 [消息投影](src/native-presentation.ts)将准确 `firstOutput: rea
 [压缩范围测试](test/native-compression.test.ts)、[输入选择测试](test/native-input.test.ts)、[真实窗口](test/isolated/native-compression-electron.test.ts)与[实际活动 Model 刷新 barrier](test/isolated/native-refresh-active.test.ts)核对完整重点、真实摘要与经公开校验的下一持久 ModelInput、旧可见历史、物理回执丢失只查原命令、unsafe reset 保留原点、无点 reset 和冷启动只读零额外 Provider、维护输入原 follow-up 以及不受后继 GET 阻塞的准确 steer。窗口含 33 条 Node 断言并核实两次原 Service PID 已退出；Provider 仅为自有本机固定兼容 SDK，不涉及远端服务。
 
 压缩与通知刷新最终完整 Native/共享权限组合实测 28 文件、51 项、348 条 Bun 断言全通过（约 75 秒）；随后新增确定性授权目录 GET/dirty 后继 barrier 的刷新文件复验为 2 项、7 条断言。新压缩窗口另有 33 条实际 Node 断言、四次自有兼容 SDK 调用及两次所属 PID 清理；原管理窗口 18 条 Node 断言和其他已有窗口证据仍保留。Desktop 类型、portable build、15 个本切片归属代码文件 Biome、文档结构和测试归属检查通过；未运行共享 dist 或全 workspace 构建。这是 macOS 私有开发制品资格，不代表正式旧入口切换、完整安装、Linux/Windows 或付费 Provider 验收。
+
+切换会话时，[renderer](src/native.tsx)立即撤销旧操作资格，但在目标选择请求返回前保留当前正文 DOM 和阅读状态；目标确认后，命中的 KeepAlive 项直接显示原 DOM，未命中则沿原完整历史、轮次归属与工具加载边界显示。新数据未就绪时保留缓存显示并禁用旧动作；普通同会话校准仍保留本地展开。`conversationCache` 的 scope 固定 generation／Store，history epoch 与已确认目录移除使非当前项失效，新增会话保留其他近期项；容量、体积和节点预算由 [UI owner](../../packages/ui/README.md)维护。停用树脱离可见文档且 effect 释放，不增加后台订阅，不以缓存恢复写资格。[Native model adapter](src/native-model-output-message.tsx)显式传递当前读取 gate，模型正文按实际内容身份保留，不再把每次 viewSelection 当作 DOM 身份；原 lease 仍在停用时关闭。Native 的完整回复复制文案以 generation／Store／Session 与原正文身份保存为展示，adapter 将暂停产生的通知撤回与实际关闭区分，entry 回收时清理；复制按钮仍由当前读取 gate 和缓存事件门禁保护，保留文案不恢复读取或提交资格。文件链接保留原节点，由当前 gate 与原 messageFile.open 范围核验决定是否操作。[Native DOM 回归](test/isolated/native-history-presentation-dom.test.tsx)核 held selection 期间正文节点与展开状态保持、旧选中高亮退出、发送禁用，以及返回后的恢复标记和手动开合。
+
+2026-10-19 KeepAlive 验证：Windows x64／Bun 1.4.3，`f734245a` 加主工作区快照及本补丁，使用 `bun test --parallel=1 --max-concurrency=1` 与准确 `./` 文件路径运行相关14个完整文件，105项／2815断言通过；UI／Desktop typecheck、定向Biome、文档结构／本任务影响映射、统一边界和测试归属检查通过。新增[缓存测试](../../packages/ui/test/isolated/desktop-conversation-cache.test.tsx)含条数、DOM体积、节点预算与100轮 effect 清理，原[全文测试](../../packages/ui/test/model-output.test.tsx)包含旧 lease abort、late 隔离与原全文节点恢复。Chrome155 的隔离夹具以显式 production JSX 分别构建 Root UI 与 Desktop UI，沿实际 SessionPage、Native model adapter 和 Native CSS，在亮暗主题中各核100次往返、恢复后12帧：原正文／表格节点不变，正文内部 childList 新增／替换为0，只连接1棵消息树，纵向230px／宽表格横向110px保持；固定正文 port 只读取1次、旧 signal 取消1次，校准中不发布当前复制正文，页面错误0。该夹具只证明显示与 reader adapter，不代替完整 Service／IPC、Electron 安装版、多平台或全量默认测试。
+
+本轮组件闪动回归由[专用浏览器夹具](test/conversation-cache-browser-runner.fixture.ts)执行：在已安装 Chrome 的环境运行 `bun apps/desktop/test/conversation-cache-browser-runner.fixture.ts`，夹具独立构建实际 Native CSS、Conversation、图片与全文 adapter，固定模拟图片／正文 port，不加载真实会话或 Service。它逐帧核图片解码、用户与完整回复复制按钮／文件链接的原节点、未悬停复制透明度、悬停文字颜色、复制反馈、只读点击门禁，以及100次切换后单一连接树、一次图片读取与正常过渡恢复。该入口只在显式测试制品中存在，不由环境名、URL 或普通 dev／prod 参数开启。
+
+完整 Native 壳层另由[页面回归](test/isolated/native-session-shell-dom.test.tsx)和[全页浏览器夹具](test/session-shell-browser-runner.fixture.ts)覆盖：`bun apps/desktop/test/session-shell-browser-runner.fixture.ts` 使用实际 NativeDesktop、Composer、模型选择和环境 hook，固定模拟 Main 端口并关闭测试诊断，不接真实 Service 或用户数据。它在浅／深主题逐帧核首次冷会话的长模型名、准备期间的 Main state 通知、会话确认、历史及模型校准、同会话重读、空草稿的发送／停止、原控件 DOM／透明度／位置／悬停、菜单与 Full 确认失效、禁用零业务写入及连续切换。冷首帧与暖缓存分别建立身份基线：首次读取尚无用量样本时不伪造缓存率徽标；模型按钮则跨两种场景保持原节点，首帧模型文字和宽度必须与同帧页面标题对应。正文资源夹具与全页壳层夹具分别证明各自断言，不以其中一个代替完整安装窗口或真实 IPC。
+
+2026-10-19 Windows x64／Bun 1.4.3／Chrome 155，基于 `f734245a` 加本轮工作区改动，上述两个浏览器命令在合并后的实际样式上通过：完整页面浅／深主题共144帧等待采样、200次连续切换，另核五类控件的悬停颜色；正文夹具另核图片、复制和链接的原节点与单一连接树。正文缓存、编辑器、Native 导航、权限、图片、读取归属及环境停止的18个相关整文件共125项／3058断言通过，Desktop／UI typecheck、定向 Biome、文档、边界和测试归属检查通过。Chrome 保持沙箱开启；Windows 受限进程中的 crashpad 启动失败后，在允许启动浏览器的本机进程环境完成复验。原嵌套 `@keyframes` 编译提示及既有 ToolActivity 测试 key 提示保留；此证据仍不代完整 Electron 安装窗口、真实 Main IPC、其他平台或全量默认测试。
+
+2026-10-19 组件恢复修复验证：Windows x64／Bun 1.4.3，`f734245a` 加既有工作区快照和本轮合并改动，准确 `./` 路径运行15个完整回归文件，111项／2869断言通过；合回后的 UI／Desktop typecheck、17个本任务代码／测试文件的 Biome、文档结构／本任务影响映射、统一边界和测试归属检查通过。上面的专用浏览器命令在 Chrome155 的亮暗主题各采样缓存校准与完成后24帧，并各切换100次：图片24帧均为原已解码节点，用户／完整回复复制按钮、文件链接与轮次控件保持原节点；未悬停复制透明度一直为0，轮次透明度一直为1，悬停文字颜色保持，复制反馈不重置，校准点击零复制／文件操作。每种主题图片读取和URL创建各1次，期间未撤销，当前文件链接可正常操作，普通过渡在恢复后回到120ms，只连接1棵阅读树，页面错误为0。资源预算、真正移除、窗口隐藏、复制展示回收和迟到隔离由隔离DOM回归补充；仍未验证完整 Service／IPC、Electron安装包、其他平台或全量默认套件。
+
+此前闪动修复的局部证据：2026-10-19 Windows x64／Bun 1.4.3，基于 `f734245a` 加当前工作区快照及本轮改动，相关七个完整文件46项／1438断言与 UI／Desktop typecheck 通过；新增两处 Native 断言在修复前失败。Chrome 155 隔离页面沿真实 SessionPage 和 Native CSS，在亮暗主题中各采样恢复后12帧，手动阅读位置230px及展开内容高度保持，轮次与工具恢复动画均为none，默认展开活动轮次同样保持；后续手动轮次／嵌套工具仍使用原展开动画，页面错误为0。未运行完整 Electron 安装版、多平台或全量默认测试。
 
 原生历史由 [NativeHistory](src/native-history.ts) 分页读取全部公开记录，固定原 Store、Session、选择代次与 highWaterSeq。每页仍核原身份、严格序号与游标；完整扫描后以本次结果精确替换该高水位的阅读快照，后台校准期间保留上次已发布正文，已消失记录不会残留。离开会话缓存及同会话新范围复用也只取已发布快照，不把进行中的前缀提前展示；实际失败才合入已经合法读到的正文并撤除操作资格。完整会话时间线与当前 Model context 分开，rewind 不自动隐藏原消息。当前选定会话不设累计记录数或字节截断，首尾原文不会被截断替代。
 

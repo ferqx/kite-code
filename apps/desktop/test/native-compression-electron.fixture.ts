@@ -145,7 +145,9 @@ try {
       'submit',
       (event) => {
         if (
-          (event.target as HTMLFormElement).querySelector('textarea[aria-label="当前会话私有草稿"]')
+          (event.target as HTMLFormElement).querySelector(
+            '[role="textbox"][aria-label="当前会话私有草稿"]',
+          )
         )
           events.push(event.type);
       },
@@ -155,7 +157,7 @@ try {
   await page.getByRole('textbox', { name: '当前会话私有草稿' }).fill('Original actual user source');
   // One real click waits for current actionability; a prior trial does not reserve the read gate.
   eq(
-    await page.getByRole('textbox', { name: '当前会话私有草稿' }).inputValue(),
+    await page.getByRole('textbox', { name: '当前会话私有草稿' }).innerText(),
     'Original actual user source',
   );
   await page.getByRole('button', { name: '发送明确的新轮次' }).click();
@@ -367,7 +369,7 @@ try {
         offset,
         limit: 65536,
       });
-      if (!chunk || !('data' in chunk)) throw Error('missing_input_chunk');
+      if (!chunk || !('data' in chunk) || !('eof' in chunk)) throw Error('missing_input_chunk');
       const raw = atob(chunk.data);
       for (let i = 0; i < raw.length; i++) bytes[offset + i] = raw.charCodeAt(i);
       offset = chunk.nextOffset;

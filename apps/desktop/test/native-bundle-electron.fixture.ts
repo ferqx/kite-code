@@ -476,7 +476,7 @@ try {
   assert.equal(await page.locator('.scheduled-card').count(), 0);
   await page.getByRole('button', { name: '返回会话', exact: true }).click();
   assert.equal(
-    await page.getByRole('textbox', { name: '当前会话私有草稿', exact: true }).inputValue(),
+    await page.getByRole('textbox', { name: '当前会话私有草稿', exact: true }).innerText(),
     retainedDraft,
   );
   const afterSchedule = await page.evaluate(
@@ -572,7 +572,7 @@ try {
       (event) => {
         if (
           (event.target as HTMLFormElement).querySelector(
-            'textarea[aria-label="当前会话私有草稿"], textarea[aria-label="新对话草稿"]',
+            '[role="textbox"][aria-label="当前会话私有草稿"], [role="textbox"][aria-label="新对话草稿"]',
           )
         )
           events.push({ type: event.type, focused: document.hasFocus() });
@@ -588,12 +588,12 @@ try {
   await prepareButton.press('Enter');
   await page.getByRole('button', { name: '研究与理解资料', exact: true }).click();
   assert.equal(
-    await page.getByRole('textbox', { name: '新对话草稿' }).inputValue(),
+    await page.getByRole('textbox', { name: '新对话草稿' }).innerText(),
     '研究与理解资料：',
   );
   await page.getByRole('button', { name: '新对话', exact: true }).click();
   assert.equal(
-    await page.getByRole('textbox', { name: '新对话草稿' }).inputValue(),
+    await page.getByRole('textbox', { name: '新对话草稿' }).innerText(),
     '研究与理解资料：',
   );
   const beforeFirst = await page.evaluate(
@@ -604,7 +604,7 @@ try {
   assert.equal(beforeFirst.inputSubmissions.length, 0);
   await page.getByRole('textbox', { name: '新对话草稿' }).fill('write one real bundled file');
   assert.equal(
-    await page.getByRole('textbox', { name: '新对话草稿' }).inputValue(),
+    await page.getByRole('textbox', { name: '新对话草稿' }).innerText(),
     'write one real bundled file',
   );
   await page.getByRole('button', { name: '发送首条消息' }).click();

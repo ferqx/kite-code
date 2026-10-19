@@ -1,10 +1,18 @@
 # 本机 Agent Service
 
+## 图片输入协议
+
+具备 Artifact port 的 Runtime 宣告 `input_images`；认证写入口 `POST /v1/sessions/{id}/input-images` 接收 expectedStoreId、稳定发布 ID、名称、明确图片 MIME 与 base64，主体由可信宿主提供。闭合 schema 与最多 24 MiB 的请求体先准入，Runtime 再按单张 16 MiB 和真实字节校验，返回完整不可变引用。路径、URL 和 PDF 二进制不属于此协议；普通文件另以 `files` 路径引用发送，Native 的统一入口按类型自动分流。
+
+公共 start/steer/follow-up 以及 Message 的可选 `images` 保存图片引用，可选 `files` 保存最多 128 个名称与本地 URI，两类附件均可替代空文本。三个写入口的 `images` 数量最多 10，历史 Message 仍按原保存元数据读取；三个写入口完整转发各自元数据，不在 HTTP 层把文件名拼回正文。引用准入和完整历史组装归 [Agent](../../packages/agent/README.md#用户图片输入)。[HTTP/Client 测试](test/isolated/input-images.test.ts)通过真实认证连接上传纯图片、单独发送普通文件，核模型原图／路径与历史原文分离及非法 URL 拒绝；[生成器](../../scripts/generate-unified-api.ts)同步 OpenAPI、schema、声明和 validators。未扩 Web 写入权限或原业务命令恢复权限。
+
 Windows daemon 在本进程首次完整准入后，把原 live artifact owner 交给 Service 装配；[同进程借用](src/windows-paired-artifact.ts)只接受 WeakMap 登记的原对象及准确 proof/entry/executable/build，关闭开始、伪造、复制或错根均拒绝，未归还借用时原 owner 不能关闭。每个新进程仍独立取得 SH、原文件 pin、完整库存与全字节 SHA，startup JSON 不传借用权。Runtime verifier 和归档可复用同一原 pin，但每次仍核全部内容与对象，关闭未知保原资源。普通 JS 依赖按[构建声明](bundled-dependencies.ts)内联；原跨进程和恢复合同保持，理由归[闭包成本决定](../../.agents/notes/implemented/bug-fix/2026-10-17-windows-bundle-admission-cost.md)。
 
 `GET /v1/sessions/{id}/inputs` 的有限 response request 联合包括 steer、follow-up 和 Core 已接受的 `result.include`；只读投影保原 selection／execution／result revision／target Run。原 Store reader 同时供 Runtime checkpoint消费，不能过滤掉 result include 来迁就客户端显示；接口 schema 负责正确投影，TUI 只把文本输入显示为队列并正常推进所有 cursor。原写路由、权限与 Core 应用顺序不变，[真实混合页回归](test/isolated/pending-inputs.test.ts)核完整原申请与零重执行。
 
 ## 默认装配与业务规则归属
+
+普通 CLI／TUI／Desktop 的[默认工具选择](src/configuration-defaults.ts)包含 `files.read_path`（模型名称 `read_user_file`），使模型可以读取用户明确引用的普通工作区外文件；`files.write_path/edit_path` 不随此默认开启。显式禁用／移除仍生效，嵌入式最小默认保持仅 `ask_user`。工具可见不等于执行授权：外部读取继续经过准确目标、原生身份、当前权限和 protected/private 检查，既不扩大工作区文件工具的根，也不加载外部目录的项目说明。[默认装配回归](test/isolated/configuration.test.ts)以真实 paired Service／SDK／原生文件读取核默认选择、外部完整结果进入下一 Model，以及显式禁用；[工作区越界回归](test/isolated/assembly-file-denial.test.ts)仍核误用 `read_file` 的普通失败。缺选原因与只读范围归[Note](../../.agents/notes/implemented/bug-fix/2026-10-19-default-external-file-read.md)，原生真实模型附件资格归 [Desktop owner](../desktop/README.md#markdown-与附件输入)。
 
 默认装配注册 [Agent 会话命名扩展](../../packages/agent/src/business/session-title/index.ts)，通过通用 Run 生命周期 Action 和已有内部子 Agent 生成标题。Service 只提供当前 Runtime 读取／rename 端口与按原轮选定模型 ID 的当前配置创建的无工具绑定；模型调用继续由 Agent 统一执行。标题规则与 CAS 归扩展，公共 HTTP schema 与客户端执行 DTO 保持。[本机 HTTP 回归](test/isolated/session-title.test.ts)核所选模型、参数、目录名称／消息隔离和读取零额外调用，不代表真实付费 Provider 或安装制品资格。
 
@@ -206,6 +214,8 @@ W09 二进制内容使用 `GET /v1/sessions/{id}/artifacts/{refId}?storeId=&scop
 Skills 是明确 `{id,path,enabled?,digest?}` 位置：相对路径限于选中 Workspace，绝对路径必须位于该 Workspace 或选中 profile 已有的 `skills` root。不发现 home/旧树或遍历任意目录；symlink 越界和重复物理位置局部不可用。可选 digest 固定 Skill 字节。摘要/版本/依赖事实进入 `skills.catalogue`；成功按需 Skill Tool 后全文进入 Model sources，`skills.resource` 后声明的文本资源进入来源。准确 source ID 与实际正文/资源字节 hash 绑定每次真实 Model execution。capture 刷新实际文件，不能用原 mtime/size 隐藏后续相关变更。脚本加载只读文本，不执行脚本；缺 required capability 显示局部不可用，明确请求失败，不补造已安装能力。
 
 默认 Run 的完整来源请求接入 `captureBatch`：项目来源按全部原定义/输入核实际目标，Skill catalogue及已加载正文仅在该检查点复用；下一检查点重新捕获。所选 MCP 来源继续对每个原请求执行现有 scope/read-set 核验，Workflow fork fence仍在捕获前检查。总唯一 source和冲突摘要门禁保持，不能按 Tool 名丢弃不同文件输入。[默认长任务](test/isolated/long-run-sources.test.ts)经正式 paired 装配、公开 Client和 compatible SDK 完成同 Run 的 257 次不同 Files读取，完整原指令进入 18 次实际请求，两次冷历史读取零重放；[公开长历史接续](test/isolated/long-run-resume.test.ts)另核 4096 次原效果后恢复同一 Run。两项证据不替代 installed客户端、真实 Provider或平台资格。
+
+[Workspace 装配](src/assembly.ts)在向项目来源选择 Files 目标时先核路径是否位于原根目录；越界目标只保留根说明捕获，由原 Files 边界返回普通拒绝结果，让同一 Run 的模型继续解释。该筛选不授予外部文件权限，也不吞掉必需根说明或内部目录的读取失败。[回归](test/isolated/assembly-file-denial.test.ts)核实际拒绝、下一 Model、无外部正文／说明、跨盘路径和坏根说明仍失败关闭。
 
 公开 `run.start/input.follow_up.selectedSkills` 是最多 256 个非空名称或配置 ID，每项最多 128 字符。原数组随 Command 保存并进入请求摘要；省略使用该次配置目录，显式 `[]` 选择零项。同 ID 改选择或混用省略与空数组产生冲突。默认装配明确支持 `run_skill_selection`；固定模型或未声明支持的自定义 resolver 不能静默忽略选择。私有 startup 不再接受该字段。每 Run 只由 Service 读取配置，使用同一验证过的 canonical catalogue 唯一匹配，name/ID 命中同项去重，未知或歧义在 vault.resolve/Provider 前以原 Command 持久拒绝。它只缩小实际 Skill catalogue、按需 lookup、source 和保存的配置快照，不发现路径、不新增 Tool、trusted root 或 capability。后续公开 Run 可明确换选择，原配置/来源保持原事实。[assembly 反例](test/isolated/assembly.test.ts)与[实际 CLI argv](../cli/test/isolated/host-skills.test.ts)验证别名、歧义、完整正文、两个 Run 快照和无信任零效果。
 

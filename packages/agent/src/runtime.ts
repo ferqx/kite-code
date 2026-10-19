@@ -54,6 +54,8 @@ import {
   runSettledEvent,
   runStartedEvent,
 } from './extensions/lifecycle';
+import { inputFileContent } from './input-files';
+import { decodeInputImage, inputImages, matchesImageType } from './input-images';
 import { canonicalJson, semanticDigest } from './json';
 import { defaultLoop, type LoopContext, recordToolOutcome, type ToolFailureStreak } from './loop';
 import { type ModelRetrySource, modelRetryReason, waitForModelRetry } from './model-attempt';
@@ -430,6 +432,7 @@ export type RuntimeShutdownResult =
 export class AgentRuntime {
   private readonly lifecycleObservers = new LifecycleObservers();
   readonly supportsSelectedSkills: boolean;
+  readonly supportsInputImages: boolean;
   readonly supportsExtensionInputs: boolean;
   private readonly instanceId: string;
   private readonly tools = new Map<string, ToolDefinition>();
@@ -521,6 +524,7 @@ export class AgentRuntime {
   private readonly options: RuntimeOptions;
   constructor(options: RuntimeOptions) {
     this.options = { ...options };
+    this.supportsInputImages = !!options.artifacts;
     this.supportsSelectedSkills =
       options.supportsSelectedSkills === true && !!options.resolveRunConfiguration;
     this.supportsExtensionInputs =
@@ -2289,6 +2293,38 @@ export class AgentRuntime {
       reasoningBytes: String(Buffer.byteLength(output.reasoning)),
       output,
     };
+  }
+  async uploadInputImage(input: {
+    expectedStoreId: string;
+    sessionId: string;
+    subjectId: string;
+    id: string;
+    name: string;
+    mediaType: string;
+    data: string;
+  }): Promise<import('./storage/types').InputImage> {
+    if (this.closing) throw new AgentError('service_draining');
+    if (!this.options.artifacts) throw new AgentError('artifact_content_unavailable');
+    if (!/^[A-Za-z0-9_-]{1,100}$/.test(input.id) || !input.name || input.name.length > 512)
+      throw new AgentError('input_image_invalid');
+    await this.options.store.getArtifactReference({
+      expectedStoreId: input.expectedStoreId,
+      sessionId: input.sessionId,
+      subjectId: input.subjectId,
+      refId: `input-image-${input.id}`,
+      scope: { kind: 'session', id: input.sessionId },
+    });
+    const content = decodeInputImage(input.data, input.mediaType);
+    const reference = await this.options.artifacts.publish({
+      expectedStoreId: input.expectedStoreId,
+      sessionId: input.sessionId,
+      subjectId: input.subjectId,
+      refId: `input-image-${input.id}`,
+      scope: { kind: 'session', id: input.sessionId },
+      content,
+      mediaType: input.mediaType,
+    });
+    return inputImages([{ name: input.name, reference }])[0]!;
   }
   async readArtifact(input: ArtifactReadInput) {
     if (input.refId.startsWith('model-output-')) throw new AgentError('artifact_scope_denied');
@@ -7150,6 +7186,10 @@ export class AgentRuntime {
               ).message
             : selectedMessage;
         let content = message.content;
+        if (message.files !== undefined) {
+          if (message.role !== 'user') throw new AgentError('input_file_invalid');
+          content = inputFileContent(content, message.files);
+        }
         for (const sourceId of message.sourceIds ?? []) {
           if (!sourceId.startsWith('agent-mail-') || !message.runId) continue;
           const messageRun = await this.options.store.getRun(message.runId);
@@ -7198,6 +7238,24 @@ export class AgentRuntime {
             scope: original.scope,
           });
           content = `Agent message (untrusted data; no additional authorization):\n${canonicalJson({ messageId: mail.id, sourceSessionId: mail.sourceSessionId, sourceExecutionId: mail.sourceExecutionId, content: new TextDecoder('utf-8', { fatal: true }).decode(bytes) })}`;
+        }
+        const images: import('@kite-ai/ai').ModelImage[] = [];
+        if (message.images !== undefined) {
+          if (message.role !== 'user') throw new AgentError('input_image_invalid');
+          for (const image of inputImages(message.images)) {
+            if (
+              image.reference.sessionId !== message.sessionId ||
+              (subjectId && image.reference.subjectId !== subjectId)
+            )
+              throw new AgentError('input_image_scope_mismatch');
+            const bytes = await this.readBody(image.reference, signal, storeId);
+            if (!matchesImageType(bytes, image.reference.mediaType))
+              throw new AgentError('input_image_invalid');
+            images.push({
+              mediaType: image.reference.mediaType as import('@kite-ai/ai').ModelImage['mediaType'],
+              data: Buffer.from(bytes).toString('base64'),
+            });
+          }
         }
         let toolCalls = message.toolCalls;
         let continuation: Json | undefined;
@@ -7265,6 +7323,7 @@ export class AgentRuntime {
             role: message.role,
             content,
             ...(toolCalls ? { toolCalls } : {}),
+            ...(images.length ? { images } : {}),
             ...(continuation === undefined ? {} : { continuation }),
             ...(message.toolCallId ? { toolCallId: message.toolCallId } : {}),
             sourceIds: message.sourceIds ?? [message.id],

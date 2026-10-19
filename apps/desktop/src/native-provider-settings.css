@@ -521,7 +521,7 @@
   .desktop-settings
   :is(.provider-settings, .catalogue-settings)
   .provider-instance[data-selected] {
-  background: var(--accent);
+  background: var(--control-selected);
 }
 .kite-client
   .desktop-settings
@@ -574,8 +574,8 @@
   .desktop-settings
   :is(.provider-settings, .catalogue-settings)
   .provider-instance-actions
-  .provider-button:hover {
-  background: var(--accent);
+  .provider-button:hover:not(:disabled) {
+  background: var(--control-hover);
   border-color: var(--border);
 }
 .kite-client .desktop-settings :is(.provider-settings, .catalogue-settings) .provider-delete-link {
@@ -758,8 +758,8 @@
   border: 0;
   border-radius: 0;
 }
-.kite-client .desktop-settings .settings-catalogue-row:hover {
-  background: var(--accent);
+.kite-client .desktop-settings .settings-catalogue-row:hover:not(:disabled) {
+  background: var(--control-hover);
 }
 .kite-client .desktop-settings .settings-catalogue-summary {
   display: -webkit-box;
@@ -829,9 +829,15 @@
 .kite-client .desktop-settings .catalogue-settings .settings-catalogue-row {
   background: transparent;
 }
-.kite-client .desktop-settings .catalogue-settings .settings-catalogue-row:hover,
-.kite-client .desktop-settings .catalogue-settings .settings-catalogue-row[data-selected] {
-  background: var(--accent);
+.kite-client .desktop-settings .catalogue-settings .settings-catalogue-row:hover:not(:disabled) {
+  background: var(--control-hover);
+}
+.kite-client .desktop-settings .catalogue-settings .settings-catalogue-row[data-selected],
+.kite-client
+  .desktop-settings
+  .catalogue-settings
+  .settings-catalogue-row[data-selected]:hover:not(:disabled) {
+  background: var(--control-selected);
 }
 .kite-client .desktop-settings .catalogue-settings .settings-catalogue-row {
   justify-content: flex-start;

@@ -124,6 +124,12 @@ test('native Conversation scroll follows, restores manual reading and retires RA
     resize(column);
     expect(viewport.scrollTop).toBe(1500);
     expect(frames.size).toBe(0);
+    // A queued scroll notification from the previous bottom write can arrive
+    // after the next stream chunk grows the content, before its resize callback.
+    height = 1800;
+    await act(async () => viewport.dispatchEvent(new dom.window.Event('scroll')));
+    resize(column);
+    expect(viewport.scrollTop).toBe(1800);
     viewport.scrollTop = 200;
     await act(async () => viewport.dispatchEvent(new dom.window.Event('scroll')));
     height = 2000;

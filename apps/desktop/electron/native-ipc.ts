@@ -6,6 +6,7 @@ import {
 } from '@kite-ai/client';
 import type { BrowserWindow, IpcMain, IpcMainInvokeEvent } from 'electron';
 import type { DesktopEditor } from '../src/file-changes-bridge';
+import { inputImageCount } from '../src/input-images-bridge';
 import {
   type NativeReply,
   type NativeRequest,
@@ -30,6 +31,13 @@ import { saveStartupDiagnosticReport } from './startup-report';
 const requestBytes = 1048576,
   responseBytes = 4 * 1048576;
 const fields: Record<NativeRequest['method'], readonly string[]> = {
+  'input.images.begin': ['id', 'name', 'mediaType', 'size', 'hash'],
+  'input.images.append': ['id', 'offset', 'data'],
+  'input.images.finish': ['id'],
+  'input.images.release': ['id'],
+  'input.image.open': ['readId', 'messageId', 'index', 'viewSelection', 'historyEpoch'],
+  'input.image.read': ['readId', 'offset'],
+  'input.image.close': ['readId'],
   'scheduled.list': [],
   'scheduled.save': ['input', 'operation'],
   'scheduled.toggle': ['id', 'enabled'],
@@ -103,7 +111,7 @@ const fields: Record<NativeRequest['method'], readonly string[]> = {
   'input.models.read': [],
   'conversation.models.read': [],
   'conversation.branch': ['workspaceId'],
-  'conversation.send': ['creation', 'intent', 'permissionMode', 'targetBranch'],
+  'conversation.send': ['creation', 'intent', 'permissionMode', 'targetBranch', 'imageIds'],
   'conversation.lookup': ['commandId'],
   'settings.providers.read': [],
   'settings.providers.close': [],
@@ -165,7 +173,7 @@ const fields: Record<NativeRequest['method'], readonly string[]> = {
   createSession: ['workspaceId', 'commandId', 'sessionId', 'title', 'expectedStoreId'],
   messages: ['sessionId', 'expectedStoreId', 'readId', 'afterSeq', 'upperSeq', 'limit'],
   'messages.close': ['readId'],
-  submit: ['sessionId', 'intent', 'draft'],
+  submit: ['sessionId', 'intent', 'draft', 'imageIds'],
   'caller.prepare': ['sessionId', 'intent', 'draft'],
   'caller.submit': ['commandId'],
   'caller.lookup': ['commandId'],
@@ -216,6 +224,62 @@ export function decodeNativeRequest(value: unknown): NativeRequest {
     method = input.method;
   if (typeof method !== 'string' || !Object.hasOwn(fields, method))
     throw Error('invalid_native_request');
+  if (method.startsWith('input.images.')) {
+    if (typeof input.id !== 'string' || !/^[A-Za-z0-9_-]{1,64}$/.test(input.id))
+      throw Error('invalid_native_request');
+    if (
+      method === 'input.images.begin' &&
+      (typeof input.name !== 'string' ||
+        !input.name ||
+        input.name.length > 512 ||
+        !['image/png', 'image/jpeg', 'image/webp', 'image/gif'].includes(String(input.mediaType)) ||
+        !Number.isSafeInteger(input.size) ||
+        Number(input.size) <= 0 ||
+        Number(input.size) > 16 * 1024 * 1024 ||
+        typeof input.hash !== 'string' ||
+        !/^[a-f0-9]{64}$/.test(input.hash))
+    )
+      throw Error('invalid_native_request');
+    if (
+      method === 'input.images.append' &&
+      (!Number.isSafeInteger(input.offset) ||
+        Number(input.offset) < 0 ||
+        typeof input.data !== 'string' ||
+        input.data.length > 87384 ||
+        !/^[A-Za-z0-9+/]*={0,2}$/.test(input.data))
+    )
+      throw Error('invalid_native_request');
+  }
+  if (
+    input.imageIds !== undefined &&
+    (!['submit', 'conversation.send'].includes(method) ||
+      !Array.isArray(input.imageIds) ||
+      input.imageIds.length > inputImageCount ||
+      !input.imageIds.every((id) => typeof id === 'string' && /^[A-Za-z0-9_-]{1,64}$/.test(id)) ||
+      new Set(input.imageIds).size !== input.imageIds.length)
+  )
+    throw Error('invalid_native_request');
+  if (method.startsWith('input.image.')) {
+    if (typeof input.readId !== 'string' || !/^[A-Za-z0-9_-]{1,128}$/.test(input.readId))
+      throw Error('invalid_native_request');
+    if (
+      method === 'input.image.open' &&
+      (typeof input.messageId !== 'string' ||
+        !/^[A-Za-z0-9_-]{1,128}$/.test(input.messageId) ||
+        !Number.isSafeInteger(input.index) ||
+        Number(input.index) < 0 ||
+        !Number.isSafeInteger(input.viewSelection) ||
+        Number(input.viewSelection) < 0 ||
+        !Number.isSafeInteger(input.historyEpoch) ||
+        Number(input.historyEpoch) < 0)
+    )
+      throw Error('invalid_native_request');
+    if (
+      method === 'input.image.read' &&
+      (!Number.isSafeInteger(input.offset) || Number(input.offset) < 0)
+    )
+      throw Error('invalid_native_request');
+  }
   if (method === 'scheduled.save') {
     parseScheduledTaskInput(input.input);
     if (input.operation !== 'create' && input.operation !== 'update')
@@ -648,6 +712,15 @@ export function decodeNativeRequest(value: unknown): NativeRequest {
   if (method === 'submit' || method === 'caller.prepare' || method === 'conversation.send') {
     const intent = record(input.intent);
     if (
+      ['input.steer', 'input.follow_up'].includes(String(intent.kind)) &&
+      typeof intent.content === 'string' &&
+      !intent.content.trim() &&
+      !(intent.images as unknown[] | undefined)?.length &&
+      !(intent.files as unknown[] | undefined)?.length &&
+      !(input.imageIds as unknown[] | undefined)?.length
+    )
+      throw Error('invalid_native_request');
+    if (
       method === 'caller.prepare' &&
       ![
         'run.start',
@@ -659,7 +732,16 @@ export function decodeNativeRequest(value: unknown): NativeRequest {
     )
       throw Error('invalid_native_request');
     try {
-      canonicalCallerCommandRequest(intent as CallerCommandRequest);
+      // Staged bytes are resolved by Main before the real command is journaled.
+      // Validate the remaining closed intent here; image-only steer/follow-up
+      // cannot carry immutable image references until that publication finishes.
+      canonicalCallerCommandRequest(
+        (typeof intent.content === 'string' &&
+        !intent.content.trim() &&
+        (input.imageIds as unknown[] | undefined)?.length
+          ? { ...intent, content: 'image' }
+          : intent) as CallerCommandRequest,
+      );
     } catch {
       throw Error('invalid_native_request');
     }
@@ -670,7 +752,11 @@ export function decodeNativeRequest(value: unknown): NativeRequest {
       throw Error('invalid_native_request');
     if (
       method === 'conversation.send' &&
-      (intent.kind !== 'run.start' || typeof intent.content !== 'string' || !intent.content.trim())
+      (intent.kind !== 'run.start' ||
+        typeof intent.content !== 'string' ||
+        (!intent.content.trim() &&
+          !(intent.files as unknown[] | undefined)?.length &&
+          !(input.imageIds as unknown[] | undefined)?.length))
     )
       throw Error('invalid_native_request');
     if (input.draft !== undefined) {

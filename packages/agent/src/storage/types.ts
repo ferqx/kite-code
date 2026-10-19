@@ -96,15 +96,26 @@ export type CommandRequest =
   | {
       kind: 'run.start';
       content: string;
+      images?: readonly InputImage[];
+      files?: readonly InputFileReference[];
       modelId?: string;
       reasoningEffort?: ReasoningEffort;
       selectedSkills?: readonly string[];
       extensionInputs?: readonly ExtensionInput[];
     }
-  | { kind: 'input.steer'; content: string; targetRunId: string; contextSelectionId: string }
+  | {
+      kind: 'input.steer';
+      content: string;
+      images?: readonly InputImage[];
+      files?: readonly InputFileReference[];
+      targetRunId: string;
+      contextSelectionId: string;
+    }
   | {
       kind: 'input.follow_up';
       content: string;
+      images?: readonly InputImage[];
+      files?: readonly InputFileReference[];
       afterRunId: string | null;
       contextSelectionId: string;
       modelId?: string;
@@ -434,6 +445,8 @@ export interface MessageContent {
   inputKind?: 'input.steer' | 'input.follow_up';
   role: 'system' | 'user' | 'assistant' | 'tool';
   content: string;
+  images?: InputImage[];
+  files?: InputFileReference[];
   toolCalls?: ToolCall[];
   toolCallId?: string;
   sourceIds?: string[];
@@ -566,6 +579,20 @@ export interface ArtifactReference {
   hash: string;
   size: string;
   mediaType: string;
+}
+
+/** A selected image is data; its reference confers no tool or filesystem permission. */
+export interface InputImage {
+  name: string;
+  reference: ArtifactReference & {
+    scope: { kind: 'session'; id: string };
+    mediaType: 'image/png' | 'image/jpeg' | 'image/webp' | 'image/gif';
+  };
+}
+
+export interface InputFileReference {
+  name: string;
+  uri: string;
 }
 
 export interface HostControlState {

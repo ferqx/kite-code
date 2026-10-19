@@ -1,6 +1,7 @@
 import { Copy01Icon, CopyXIcon, Tick02Icon } from '@hugeicons/core-free-icons';
 import { HugeiconsIcon } from '@hugeicons/react';
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { useConversationReadActive } from '../conversation-activity';
 import { Button } from './ui';
 
 /** The host supplies exact text; this control never reconstructs a message or Turn. */
@@ -15,20 +16,41 @@ export function MessageCopyButton({
   writeClipboardText?: (text: string) => Promise<void>;
   disabled?: boolean;
 }) {
+  const readActive = useConversationReadActive();
   const [copyState, setCopyState] = useState<'idle' | 'copied' | 'failed'>('idle');
   const copyResetTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const copyAttempt = useRef(0);
   const current = useRef({ text, disabled });
-  current.current = { text, disabled };
-  // biome-ignore lint/correctness/useExhaustiveDependencies: Text and visibility changes retire prior clipboard attempts and timers.
+  current.current = { text, disabled: disabled || !readActive };
+  const installed = useRef({ text, disabled });
+  const resetAt = useRef(0);
+  const scheduleReset = useCallback(() => {
+    if (!resetAt.current) return;
+    const remaining = resetAt.current - Date.now();
+    if (remaining <= 0) {
+      resetAt.current = 0;
+      setCopyState('idle');
+      return;
+    }
+    copyResetTimer.current = setTimeout(() => {
+      copyResetTimer.current = undefined;
+      resetAt.current = 0;
+      setCopyState('idle');
+    }, remaining);
+  }, []);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: Read admission changes retire pending clipboard attempts without resetting their visible feedback.
   useEffect(() => {
-    setCopyState('idle');
+    if (installed.current.text !== text || installed.current.disabled !== disabled) {
+      installed.current = { text, disabled };
+      resetAt.current = 0;
+      setCopyState('idle');
+    } else scheduleReset();
     return () => {
       copyAttempt.current++;
       if (copyResetTimer.current !== undefined) clearTimeout(copyResetTimer.current);
       copyResetTimer.current = undefined;
     };
-  }, [text, disabled]);
+  }, [text, disabled, readActive, scheduleReset]);
   const copyLabel =
     copyState === 'copied'
       ? '已复制消息'
@@ -38,8 +60,9 @@ export function MessageCopyButton({
           ? '复制本轮用户消息'
           : '复制本轮Agent回复';
   async function copyMessage() {
-    if (!text || disabled) return;
+    if (!text || current.current.disabled) return;
     const attempt = ++copyAttempt.current;
+    resetAt.current = 0;
     if (copyResetTimer.current !== undefined) clearTimeout(copyResetTimer.current);
     copyResetTimer.current = undefined;
     const active = () =>
@@ -49,10 +72,8 @@ export function MessageCopyButton({
       else await navigator.clipboard.writeText(text);
       if (!active()) return;
       setCopyState('copied');
-      copyResetTimer.current = setTimeout(() => {
-        copyResetTimer.current = undefined;
-        setCopyState('idle');
-      }, 2000);
+      resetAt.current = Date.now() + 2000;
+      scheduleReset();
     } catch {
       if (active()) setCopyState('failed');
     }
@@ -65,6 +86,7 @@ export function MessageCopyButton({
       variant="ghost"
       size="icon-xs"
       disabled={disabled}
+      aria-disabled={!readActive || disabled || undefined}
       aria-label={copyLabel}
       title={copyLabel}
       onClick={() => void copyMessage()}

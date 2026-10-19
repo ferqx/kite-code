@@ -158,7 +158,7 @@ export function ScheduledTaskEditor({
           value={prompt}
           disabled={pending}
           onChange={(event) => setPrompt(event.target.value)}
-          placeholder="描述 kite 应该做什么"
+          placeholder="描述 Kite 应该做什么"
         />
         <section className="scheduled-editor-section" aria-labelledby="scheduled-details-title">
           <h3 id="scheduled-details-title">详情</h3>

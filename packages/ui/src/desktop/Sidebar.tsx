@@ -198,7 +198,6 @@ function Workspace({
                   sideOffset={8}
                 >
                   <strong>{session.displayName}</strong>
-                  {statusLabel && <span>{statusLabel}</span>}
                   {sessionTime(session.updatedAt) && <span>{sessionTime(session.updatedAt)}</span>}
                 </TooltipContent>
               </Tooltip>

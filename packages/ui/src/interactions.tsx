@@ -53,6 +53,8 @@ function PlainInteractionCard({
   if (interaction.kind === 'approval' && !isMcpSourceReview(interaction) && renderApproval)
     return renderApproval({ interaction, disabled, onAnswer, completeContent, submission });
   const request = interaction.request;
+  const structuredQuestion =
+    interaction.kind === 'question' && !!onAnswer && !!questionForm(request);
   const sameCommand =
     request !== null &&
     typeof request === 'object' &&
@@ -87,12 +89,16 @@ function PlainInteractionCard({
     </>
   );
   return (
-    <article aria-label={`${interaction.kind} ${interaction.id}`}>
-      <h3>
-        {interaction.kind} · {interaction.state}
-      </h3>
-      {(interaction.kind === 'question' && onAnswer && questionForm(request)) ||
-      interaction.kind === 'plan_review' ? (
+    <article
+      className={structuredQuestion ? 'question-interaction' : undefined}
+      aria-label={structuredQuestion ? '补充问题' : `${interaction.kind} ${interaction.id}`}
+    >
+      {!structuredQuestion && (
+        <h3>
+          {interaction.kind} · {interaction.state}
+        </h3>
+      )}
+      {structuredQuestion ? null : interaction.kind === 'plan_review' ? (
         <details>
           <summary>原请求与身份</summary>
           {materials}
@@ -100,7 +106,21 @@ function PlainInteractionCard({
       ) : (
         materials
       )}
-      {submission && (
+      {submission && structuredQuestion && (
+        <p className="question-submission" data-phase={submission.phase} role="status">
+          {
+            {
+              saved: '回答已保存，正在提交…',
+              submitting: '正在提交回答…',
+              accepted: '回答已提交，正在继续…',
+              unknown: '提交结果尚未确认，请查询本次提交。',
+              failed: '回答提交失败。',
+            }[submission.phase]
+          }
+          {submission.error && ` ${submission.error}`}
+        </p>
+      )}
+      {submission && !structuredQuestion && (
         <p role="status">
           Answer {submission.phase} · command {submission.commandId}
           {submission.error ? ` · ${submission.error}` : ''}. Acceptance does not prove execution.

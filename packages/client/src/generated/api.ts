@@ -560,6 +560,27 @@ export type HostStatus = {
     reason: 'exporter_not_configured' | 'diagnostic_source_unavailable';
   };
 };
+export type InputImage = {
+  name: string;
+  reference: {
+    id: string;
+    storeId: string;
+    sessionId: string;
+    subjectId: string;
+    scope: { kind: 'session'; id: string };
+    hash: string;
+    size: string;
+    mediaType: 'image/png' | 'image/jpeg' | 'image/webp' | 'image/gif';
+  };
+};
+export type InputFileReference = { name: string; uri: string };
+export type InputImageUploadRequest = {
+  expectedStoreId: string;
+  id: string;
+  name: string;
+  mediaType: 'image/png' | 'image/jpeg' | 'image/webp' | 'image/gif';
+  data: string;
+};
 type ModelInputMetadata___schema0 =
   | string
   | number
@@ -1131,6 +1152,20 @@ export type IncludeResultRequest = {
 export type SteerCommandRequest = {
   kind: 'input.steer';
   content: string;
+  images?: Array<{
+    name: string;
+    reference: {
+      id: string;
+      storeId: string;
+      sessionId: string;
+      subjectId: string;
+      scope: { kind: 'session'; id: string };
+      hash: string;
+      size: string;
+      mediaType: 'image/png' | 'image/jpeg' | 'image/webp' | 'image/gif';
+    };
+  }>;
+  files?: Array<{ name: string; uri: string }>;
   targetRunId: string;
   contextSelectionId: string;
   expectedStoreId: string;
@@ -1146,6 +1181,20 @@ type FollowUpCommandRequest___schema0 =
 export type FollowUpCommandRequest = {
   kind: 'input.follow_up';
   content: string;
+  images?: Array<{
+    name: string;
+    reference: {
+      id: string;
+      storeId: string;
+      sessionId: string;
+      subjectId: string;
+      scope: { kind: 'session'; id: string };
+      hash: string;
+      size: string;
+      mediaType: 'image/png' | 'image/jpeg' | 'image/webp' | 'image/gif';
+    };
+  }>;
+  files?: Array<{ name: string; uri: string }>;
   afterRunId: string | null;
   contextSelectionId: string;
   modelId?: string;
@@ -1799,6 +1848,20 @@ export type Message = {
   role: 'system' | 'user' | 'assistant' | 'tool';
   content: string;
   firstOutput?: 'content' | 'reasoning' | 'tool_calls';
+  images?: Array<{
+    name: string;
+    reference: {
+      id: string;
+      storeId: string;
+      sessionId: string;
+      subjectId: string;
+      scope: { kind: 'session'; id: string };
+      hash: string;
+      size: string;
+      mediaType: 'image/png' | 'image/jpeg' | 'image/webp' | 'image/gif';
+    };
+  }>;
+  files?: Array<{ name: string; uri: string }>;
   compression?: {
     id: string;
     trigger: 'manual' | 'automatic';
@@ -1909,6 +1972,20 @@ export type StartCommandRequest = {
   commandId: string;
   kind: 'run.start';
   content: string;
+  images?: Array<{
+    name: string;
+    reference: {
+      id: string;
+      storeId: string;
+      sessionId: string;
+      subjectId: string;
+      scope: { kind: 'session'; id: string };
+      hash: string;
+      size: string;
+      mediaType: 'image/png' | 'image/jpeg' | 'image/webp' | 'image/gif';
+    };
+  }>;
+  files?: Array<{ name: string; uri: string }>;
   modelId?: string;
   reasoningEffort?: 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max' | 'ultar';
   selectedSkills?: Array<string>;
@@ -2530,6 +2607,20 @@ export type SelectedContextPage = {
     role: 'system' | 'user' | 'assistant' | 'tool';
     content: string;
     firstOutput?: 'content' | 'reasoning' | 'tool_calls';
+    images?: Array<{
+      name: string;
+      reference: {
+        id: string;
+        storeId: string;
+        sessionId: string;
+        subjectId: string;
+        scope: { kind: 'session'; id: string };
+        hash: string;
+        size: string;
+        mediaType: 'image/png' | 'image/jpeg' | 'image/webp' | 'image/gif';
+      };
+    }>;
+    files?: Array<{ name: string; uri: string }>;
     compression?: {
       id: string;
       trigger: 'manual' | 'automatic';
@@ -2879,6 +2970,20 @@ export type MessageList = Array<{
   role: 'system' | 'user' | 'assistant' | 'tool';
   content: string;
   firstOutput?: 'content' | 'reasoning' | 'tool_calls';
+  images?: Array<{
+    name: string;
+    reference: {
+      id: string;
+      storeId: string;
+      sessionId: string;
+      subjectId: string;
+      scope: { kind: 'session'; id: string };
+      hash: string;
+      size: string;
+      mediaType: 'image/png' | 'image/jpeg' | 'image/webp' | 'image/gif';
+    };
+  }>;
+  files?: Array<{ name: string; uri: string }>;
   compression?: {
     id: string;
     trigger: 'manual' | 'automatic';
@@ -3015,6 +3120,20 @@ export type SessionView = {
     role: 'system' | 'user' | 'assistant' | 'tool';
     content: string;
     firstOutput?: 'content' | 'reasoning' | 'tool_calls';
+    images?: Array<{
+      name: string;
+      reference: {
+        id: string;
+        storeId: string;
+        sessionId: string;
+        subjectId: string;
+        scope: { kind: 'session'; id: string };
+        hash: string;
+        size: string;
+        mediaType: 'image/png' | 'image/jpeg' | 'image/webp' | 'image/gif';
+      };
+    }>;
+    files?: Array<{ name: string; uri: string }>;
     compression?: {
       id: string;
       trigger: 'manual' | 'automatic';
@@ -3058,6 +3177,20 @@ export type CommandRequest =
   | {
       kind: 'input.steer';
       content: string;
+      images?: Array<{
+        name: string;
+        reference: {
+          id: string;
+          storeId: string;
+          sessionId: string;
+          subjectId: string;
+          scope: { kind: 'session'; id: string };
+          hash: string;
+          size: string;
+          mediaType: 'image/png' | 'image/jpeg' | 'image/webp' | 'image/gif';
+        };
+      }>;
+      files?: Array<{ name: string; uri: string }>;
       targetRunId: string;
       contextSelectionId: string;
       expectedStoreId: string;
@@ -3066,6 +3199,20 @@ export type CommandRequest =
   | {
       kind: 'input.follow_up';
       content: string;
+      images?: Array<{
+        name: string;
+        reference: {
+          id: string;
+          storeId: string;
+          sessionId: string;
+          subjectId: string;
+          scope: { kind: 'session'; id: string };
+          hash: string;
+          size: string;
+          mediaType: 'image/png' | 'image/jpeg' | 'image/webp' | 'image/gif';
+        };
+      }>;
+      files?: Array<{ name: string; uri: string }>;
       afterRunId: string | null;
       contextSelectionId: string;
       modelId?: string;
@@ -3084,6 +3231,20 @@ export type CommandRequest =
       commandId: string;
       kind: 'run.start';
       content: string;
+      images?: Array<{
+        name: string;
+        reference: {
+          id: string;
+          storeId: string;
+          sessionId: string;
+          subjectId: string;
+          scope: { kind: 'session'; id: string };
+          hash: string;
+          size: string;
+          mediaType: 'image/png' | 'image/jpeg' | 'image/webp' | 'image/gif';
+        };
+      }>;
+      files?: Array<{ name: string; uri: string }>;
       modelId?: string;
       reasoningEffort?: 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max' | 'ultar';
       selectedSkills?: Array<string>;
@@ -3281,10 +3442,43 @@ export type PendingInputPage = {
     cancelRequestedAt: number | null;
     seq: string;
     request:
-      | { kind: 'input.steer'; content: string; targetRunId: string; contextSelectionId: string }
+      | {
+          kind: 'input.steer';
+          content: string;
+          images?: Array<{
+            name: string;
+            reference: {
+              id: string;
+              storeId: string;
+              sessionId: string;
+              subjectId: string;
+              scope: { kind: 'session'; id: string };
+              hash: string;
+              size: string;
+              mediaType: 'image/png' | 'image/jpeg' | 'image/webp' | 'image/gif';
+            };
+          }>;
+          files?: Array<{ name: string; uri: string }>;
+          targetRunId: string;
+          contextSelectionId: string;
+        }
       | {
           kind: 'input.follow_up';
           content: string;
+          images?: Array<{
+            name: string;
+            reference: {
+              id: string;
+              storeId: string;
+              sessionId: string;
+              subjectId: string;
+              scope: { kind: 'session'; id: string };
+              hash: string;
+              size: string;
+              mediaType: 'image/png' | 'image/jpeg' | 'image/webp' | 'image/gif';
+            };
+          }>;
+          files?: Array<{ name: string; uri: string }>;
           afterRunId: string | null;
           contextSelectionId: string;
           modelId?: string;

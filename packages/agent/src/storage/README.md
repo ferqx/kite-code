@@ -1,5 +1,11 @@
 # Store 边界
 
+## 用户图片引用
+
+普通文件的 `files` 名称／URI 同样在消息 source JSON 保存，start 与 steer/follow-up 共用原事务。它不是 Artifact 引用或来源读取收据，也不授予文件访问；`MessageRecord.content` 始终保留原文，模型端路径文本由 Runtime 单独组装。
+
+用户输入的 `images` 在原消息 source JSON 保存名称和完整、不可变的 session Artifact 引用；[输入受理](sqlite/input-operations.ts)在原事务调用[引用核验](sqlite/artifact-operations.ts)比对 Store、Session、subject、scope 和全部原元数据。图片正文由既有 Artifact owner 保存，不新增 SQL 表或迁移。Fork 保留原来源链，离线 GC 继续依据原消息／会话关系保留被存活分支依赖的源会话；Runtime 按原出处完整读回图片，不能借当前会话重新声明原发布权。测试与语义见 [Agent](../../README.md#用户图片输入)。
+
 ## Session 标题写入
 
 [消息写入](sqlite/operations.ts)只保存原消息，不从首条正文推导标题，也不隐式增加 Session control revision 或产生 rename 事件。自动命名和原文兜底统一由[命名扩展](../business/session-title/index.ts)通过显式 `renameSession` 完成，Store 保留原主体、删除状态与 revision CAS 核实；未安装该扩展的宿主不自动命名。[真实 Store 测试](../../test/isolated/storage/session-titles.test.ts)核空标题保持、消息写入零 rename，以及跨 Worker 的显式名称保存。

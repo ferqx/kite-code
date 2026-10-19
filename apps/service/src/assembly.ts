@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import { lstat, realpath } from 'node:fs/promises';
+import { isAbsolute, relative, resolve, sep } from 'node:path';
 import { AgentError, ConfigurationPreparationCleanupError } from '@kite-ai/agent';
 import type { JsonObject, NamedConfiguration } from '@kite-ai/agent/config';
 import {
@@ -300,7 +301,14 @@ export async function createWorkspaceAssembly(options: {
           Array.isArray(request.input)
         )
           return [];
-        return typeof request.input.path === 'string' ? [request.input.path] : [];
+        const path = request.input.path;
+        if (typeof path !== 'string' || path.includes('\0')) return [];
+        // A rejected file target contributes no project instructions. The Files
+        // boundary still rejects it as an ordinary Tool result, allowing the Run
+        // to explain the failure without reading beyond its Workspace.
+        const target = relative(root, resolve(root, path));
+        if (isAbsolute(target) || target === '..' || target.startsWith(`..${sep}`)) return [];
+        return [path];
       },
     });
     project = projectSource;

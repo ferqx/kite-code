@@ -7,6 +7,14 @@
 @import "@fontsource-variable/geist-mono";
 @source "../../../packages/ui/src/desktop";
 
+@custom-variant focus-visible (&:focus-visible:where(:root:not([data-input-modality="pointer"]) *));
+
+/* Covers native controls and portalled content without dropping their actual focus. */
+html[data-input-modality="pointer"] :focus {
+  /* biome-ignore lint/complexity/noImportantStyles: Pointer input suppresses outlines from every native and portalled component. */
+  outline: none !important;
+}
+
 :root {
   --font-geist: "Geist Variable", sans-serif;
   --font-geist-mono: "Geist Mono Variable", monospace;
@@ -48,7 +56,8 @@ html[data-platform="macos"][data-theme="dark"] .kite-client.shell {
   --color-muted-foreground: var(--muted-foreground);
   --color-primary: var(--primary);
   --color-primary-foreground: var(--primary-foreground);
-  --color-accent: var(--accent);
+  /* Menu focus and open states share the same surface-aware neutral layer. */
+  --color-accent: var(--control-hover);
   --color-accent-foreground: var(--foreground);
   --color-ring: var(--input);
   --color-destructive: var(--destructive);
@@ -69,7 +78,7 @@ html[data-platform="macos"][data-theme="dark"] .kite-client.shell {
   height: 26px;
   padding: 0 10px;
   border: 0;
-  border-radius: var(--radius, 10px);
+  border-radius: var(--radius, 16px);
   background: transparent;
   color: var(--muted-foreground);
   font: inherit;
@@ -79,10 +88,18 @@ html[data-platform="macos"][data-theme="dark"] .kite-client.shell {
   -webkit-app-region: no-drag;
 }
 
-.native-window-menubar button:hover,
-.native-window-menubar button[aria-expanded="true"] {
-  background: var(--sidebar-accent);
+.native-window-menubar button:hover:not(:disabled) {
+  background: var(--control-hover);
   color: var(--foreground);
+}
+.native-window-menubar button[aria-expanded="true"],
+.native-window-menubar button[aria-expanded="true"]:hover:not(:disabled) {
+  background: var(--control-selected);
+  color: var(--foreground);
+}
+.native-window-menubar button:active:not(:disabled),
+.native-window-menubar button[aria-expanded="true"]:active:not(:disabled) {
+  background: var(--control-pressed);
 }
 
 .native-window-menubar button:focus-visible {
@@ -121,6 +138,7 @@ html[data-platform="macos"][data-theme="dark"] .kite-client.shell {
   overflow: hidden;
 }
 .kite-client .desktop-settings-header {
+  --control-pressed: var(--control-hover);
   position: absolute;
   z-index: 1;
   left: 0;
@@ -153,7 +171,7 @@ html[data-platform="macos"][data-theme="dark"] .kite-client.shell {
   cursor: pointer;
 }
 .kite-client .desktop-settings-header button:hover:not(:disabled) {
-  background: var(--sidebar-accent);
+  background: var(--control-hover);
 }
 .kite-client .desktop-settings-header button svg {
   width: 16px;
@@ -161,21 +179,33 @@ html[data-platform="macos"][data-theme="dark"] .kite-client.shell {
 }
 .kite-client .desktop-settings.settings-layout {
   display: grid;
-  grid-template-columns: 236px minmax(0, 1fr);
+  grid-template-columns: 236px minmax(0, 1fr) 0px;
+  transition: grid-template-columns var(--sidebar-motion-duration) var(--sidebar-motion-easing);
   gap: 0;
   height: 100%;
 }
 .kite-client .desktop-settings.settings-layout:has(> .settings-editor-panel > .right-sidebar) {
-  grid-template-columns: 236px minmax(0, 1fr) minmax(340px, 420px);
+  grid-template-columns: 236px minmax(0, 1fr) 420px;
 }
 .kite-client .desktop-settings .settings-editor-panel:empty {
-  display: none;
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transition-delay: 0s, var(--sidebar-motion-duration);
 }
 .kite-client .desktop-settings .settings-editor-panel {
   min-width: 0;
   height: 100%;
-  border-left: 1px solid var(--border);
   overflow: hidden;
+  background: var(--page-background);
+  opacity: 1;
+  visibility: visible;
+  transition:
+    opacity var(--sidebar-motion-duration) var(--sidebar-motion-easing),
+    visibility 0s;
+}
+.kite-client .desktop-settings .settings-editor-panel > .right-sidebar {
+  border-left: 1px solid var(--border);
 }
 .kite-client .desktop-settings .settings-editor-panel .right-sidebar-content {
   flex: 1;
@@ -198,6 +228,7 @@ html[data-platform="macos"] .kite-client .desktop-settings-dialog .settings-edit
   -webkit-app-region: no-drag;
 }
 .kite-client .settings-sidebar {
+  --control-pressed: var(--control-hover);
   padding: 52px 10px 24px;
   background: var(--sidebar);
   overflow-y: auto;
@@ -230,11 +261,17 @@ html[data-platform="macos"] .kite-client .desktop-settings-dialog .settings-edit
   height: 16px;
   flex-shrink: 0;
 }
-.kite-client .settings-sidebar nav button[aria-pressed="true"] {
-  background: var(--sidebar-accent);
+.kite-client .settings-sidebar nav button:hover:not(:disabled) {
+  background: var(--control-hover);
 }
-.kite-client .settings-sidebar nav button:hover {
-  background: var(--accent);
+.kite-client .settings-sidebar nav button[aria-pressed="true"],
+.kite-client .settings-sidebar nav button[aria-pressed="true"]:hover:not(:disabled) {
+  --control-pressed: var(--control-selected);
+  background: var(--control-selected);
+}
+.kite-client .settings-sidebar nav button:active:not(:disabled),
+.kite-client .settings-sidebar nav button[aria-pressed="true"]:active:not(:disabled) {
+  background: var(--control-pressed);
 }
 .kite-client .desktop-settings .settings-content {
   height: 100%;
@@ -343,7 +380,10 @@ html[data-platform="macos"] .kite-client .desktop-settings-dialog .settings-edit
   color: var(--foreground);
 }
 .kite-client .desktop-settings .settings-content button:hover:not(:disabled) {
-  background: var(--accent);
+  background: var(--control-hover);
+}
+.kite-client .desktop-settings .settings-content button:active:not(:disabled) {
+  background: var(--control-pressed);
 }
 /* Model configuration uses compact horizontal rows, independent of form labels. */
 .kite-client .desktop-settings .settings-content:has(.settings-models) {
@@ -681,8 +721,9 @@ html[data-platform="macos"] .kite-client .desktop-settings-dialog .settings-edit
   color: var(--foreground);
 }
 @media (max-width: 900px) {
+  .kite-client .desktop-settings.settings-layout,
   .kite-client .desktop-settings.settings-layout:has(> .settings-editor-panel > .right-sidebar) {
-    grid-template-columns: 236px minmax(0, 1fr);
+    grid-template-columns: 236px minmax(0, 1fr) 0px;
   }
   .kite-client .desktop-settings .settings-editor-panel {
     position: absolute;
@@ -691,14 +732,23 @@ html[data-platform="macos"] .kite-client .desktop-settings-dialog .settings-edit
     right: 0;
     width: min(420px, calc(100vw - 236px));
     box-shadow: -8px 0 24px #20221e12;
+    transform: translateX(0);
+    transition:
+      opacity var(--sidebar-motion-duration) var(--sidebar-motion-easing),
+      transform var(--sidebar-motion-duration) var(--sidebar-motion-easing),
+      visibility 0s;
+  }
+  .kite-client .desktop-settings .settings-editor-panel:empty {
+    transform: translateX(100%);
+    transition-delay: 0s, 0s, var(--sidebar-motion-duration);
   }
 }
 @media (max-width: 600px) {
   .kite-client .desktop-settings.settings-layout {
-    grid-template-columns: 180px minmax(0, 1fr);
+    grid-template-columns: 180px minmax(0, 1fr) 0px;
   }
   .kite-client .desktop-settings.settings-layout:has(> .settings-editor-panel > .right-sidebar) {
-    grid-template-columns: 180px minmax(0, 1fr);
+    grid-template-columns: 180px minmax(0, 1fr) 0px;
   }
   .kite-client .desktop-settings .settings-editor-panel {
     width: min(420px, calc(100vw - 20px));
@@ -800,6 +850,31 @@ html[data-native-window][data-platform="macos"] .kite-client .sidebar-header .br
   display: none;
 }
 
+html[data-native-window]
+  .kite-client
+  :where(.client-panels[data-animate-width="true"])
+  .session-header {
+  transition: padding-left var(--sidebar-motion-duration) var(--sidebar-motion-easing);
+}
+
+html[data-native-window]
+  .kite-client
+  :where(.client-panels[data-animate-width="true"])
+  .client-main-panel {
+  transition:
+    margin-left var(--sidebar-motion-duration) var(--sidebar-motion-easing),
+    width var(--sidebar-motion-duration) var(--sidebar-motion-easing);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html[data-native-window]
+    .kite-client
+    :where(.client-panels[data-animate-width="true"])
+    :is(.session-header, .client-main-panel) {
+    transition: none;
+  }
+}
+
 html[data-native-window][data-platform="macos"]
   .kite-client.shell:not(.sidebar-visible)
   .session-header {
@@ -869,19 +944,91 @@ html[data-native-window][data-platform="windows"] .kite-client .sidebar {
   --sidebar-inline-padding: 6px;
 }
 
+html[data-native-window][data-platform="windows"] .kite-client.shell {
+  --sidebar-header-end-padding: 10px;
+}
+
 html[data-native-window][data-platform="windows"] .kite-client .sidebar-header {
-  padding-inline: 10px;
+  padding-inline: 16px var(--sidebar-header-end-padding);
+}
+
+html[data-native-window]:is([data-window-material="mica"], [data-window-material="vibrancy"])
+  .kite-client.shell {
+  --sidebar-toggle-closed-offset: calc(
+    var(--session-header-start-padding) +
+    var(--native-panel-inset)
+  );
+  --sidebar-toggle-top: calc(10px + var(--native-panel-inset));
+}
+
+html[data-native-window][data-platform="macos"] .kite-client.shell {
+  --sidebar-toggle-closed-offset: calc(var(--native-window-controls-width) + 8px);
+}
+
+/* Keep navigation controls level with the inset conversation header. */
+html[data-native-window]:is(
+    [data-window-material="mica"],
+    [data-window-material="vibrancy"]
+  ) .kite-client
+  .sidebar-header {
+  margin-top: var(--native-panel-inset);
+}
+
+html[data-native-window]:is([data-window-material="mica"], [data-window-material="vibrancy"])
+  .kite-client
+  :is(.client-main-panel, .settings-content, .right-sidebar) {
+  height: calc(100% - var(--native-panel-inset) * 2);
+  margin: var(--native-panel-inset);
+  margin-right: var(--native-content-end-inset, var(--native-panel-inset));
+  border-radius: var(--radius);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--foreground) 6%, transparent);
+}
+
+html[data-native-window]:is([data-window-material="mica"], [data-window-material="vibrancy"])
+  .kite-client
+  :is(.client-main-panel, .right-sidebar) {
+  overflow: hidden;
 }
 
 html[data-native-window]:is([data-window-material="mica"], [data-window-material="vibrancy"])
   .kite-client
   .client-main-panel {
-  width: calc(100% - var(--native-panel-inset) * 2);
+  width: calc(
+    100% -
+    var(--native-panel-inset) -
+    var(--native-content-end-inset, var(--native-panel-inset))
+  );
+  /* Draw inside the panel so its flush left edge survives the resize viewport's clipping. */
+  outline: 1px solid color-mix(in srgb, var(--foreground) 6%, transparent);
+  outline-offset: -1px;
+  box-shadow: none;
+}
+
+/* Every right rail shares the main surface's inset and joins it with square inner corners. */
+html[data-native-window]:is(
+    [data-window-material="mica"],
+    [data-window-material="vibrancy"]
+  ) .kite-client
+  .right-sidebar {
+  width: calc(100% - var(--native-panel-inset));
+  margin-left: 0;
+  border-radius: 0 var(--radius) var(--radius) 0;
+}
+
+html[data-native-window]:is([data-window-material="mica"], [data-window-material="vibrancy"])
+  .kite-client
+  .client-panels:has(> #details-resize[data-open="true"])
+  .client-main-panel {
+  --native-content-end-inset: 0px;
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+}
+
+html[data-native-window]:is([data-window-material="mica"], [data-window-material="vibrancy"])
+  .kite-client
+  #details-resize {
   height: calc(100% - var(--native-panel-inset) * 2);
-  margin: var(--native-panel-inset);
-  border-radius: var(--radius);
-  overflow: hidden;
-  box-shadow: 0 0 0 1px color-mix(in srgb, var(--foreground) 6%, transparent);
+  margin-block: var(--native-panel-inset);
 }
 
 html[data-native-window][data-platform="windows"][data-window-material="mica"]
@@ -889,12 +1036,13 @@ html[data-native-window][data-platform="windows"][data-window-material="mica"]
   #navigation-resize[aria-valuenow]:not([aria-valuenow="0"])
   ~ #content
   .client-main-panel {
-  width: calc(100% - var(--native-panel-inset));
+  width: calc(100% - var(--native-content-end-inset, var(--native-panel-inset)));
   margin-left: 0;
 }
 
-/* The separator's live value reaches zero before the drag is released. */
+/* Direct resizing reaches zero before release; button changes keep the shared transition. */
 html[data-native-window][data-platform="windows"][data-window-material="mica"] .kite-client
+  .client-panels:not([data-animate-width="true"])
   #navigation-resize[aria-valuenow="0"] {
   width: 0;
   transition: none;
@@ -910,7 +1058,7 @@ html[data-native-window]:is([data-window-material="mica"], [data-window-material
 
 html[data-native-window]:is([data-window-material="mica"], [data-window-material="vibrancy"])
   .kite-client
-  #navigation-resize:focus-visible
+  #navigation-resize:focus-visible:where(:root:not([data-input-modality="pointer"]) *)
   .resizable-grip {
   opacity: 1;
   box-shadow: 0 0 0 2px var(--input);
@@ -921,16 +1069,24 @@ html[data-native-window]:is([data-window-material="mica"], [data-window-material
   .desktop-settings
   .settings-content {
   background: var(--background);
-  height: calc(100% - var(--native-panel-inset) * 2);
-  margin: var(--native-panel-inset);
-  border-radius: var(--radius);
-  box-shadow: 0 0 0 1px color-mix(in srgb, var(--foreground) 6%, transparent);
+}
+
+@media (min-width: 901px) {
+  html[data-native-window]:is([data-window-material="mica"], [data-window-material="vibrancy"])
+    .kite-client
+    .desktop-settings:has(> .settings-editor-panel > .right-sidebar)
+    .settings-content {
+    --native-content-end-inset: 0px;
+    border-top-right-radius: 0;
+    border-bottom-right-radius: 0;
+  }
 }
 
 html[data-native-window][data-platform="macos"]
   .kite-client
-  :is(.client-main-panel, .desktop-settings .settings-content) {
+  :is(.client-main-panel, .desktop-settings .settings-content, .right-sidebar) {
   margin: 0;
   border-radius: 0;
   box-shadow: none;
+  outline: none;
 }

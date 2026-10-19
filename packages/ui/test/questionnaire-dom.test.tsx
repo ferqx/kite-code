@@ -247,9 +247,7 @@ test('the explicit original null alternative answers once without completing req
       ),
     );
     const cancel = () =>
-      [...host.querySelectorAll('button')].find(
-        (button) => button.textContent === 'Cancel answering',
-      )!;
+      [...host.querySelectorAll('button')].find((button) => button.textContent === '取消回答')!;
     await act(async () => {
       cancel().click();
       cancel().click();

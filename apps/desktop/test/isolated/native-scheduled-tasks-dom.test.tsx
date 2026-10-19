@@ -8,7 +8,7 @@ import type {
   NativeRequest,
   NativeState,
 } from '../../src/native-bridge';
-import { prepareDesktopDom } from '../native-page-dom.fixture';
+import { prepareDesktopDom, promptValue, setPromptText } from '../native-page-dom.fixture';
 
 const bootstrap = new JSDOM('<div></div>', { pretendToBeVisual: true });
 const priorBootstrap = {
@@ -185,11 +185,12 @@ function fixture(failedResult = false) {
         expect(target).toBeDefined();
         target!.click();
       }),
-    edit: async (
-      target: HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement,
-      value: string,
-    ) =>
+    edit: async (target: HTMLElement, value: string) =>
       act(async () => {
+        if (target.hasAttribute('contenteditable')) {
+          await setPromptText(target, value);
+          return;
+        }
         Object.getOwnPropertyDescriptor(Object.getPrototypeOf(target), 'value')!.set!.call(
           target,
           value,
@@ -222,7 +223,7 @@ function fixture(failedResult = false) {
 test('Native reuses the scheduled page and editor with real projects, model validation, and original conversation drafts', async () => {
   const f = fixture();
   const input = () =>
-    f.host.querySelector<HTMLTextAreaElement>('textarea[aria-label="当前会话私有草稿"]');
+    f.host.querySelector<HTMLElement>('[role="textbox"][aria-label="当前会话私有草稿"]');
   try {
     await act(async () => f.root.render(<NativeDesktop />));
     await f.click('Original A');
@@ -288,15 +289,15 @@ test('Native reuses the scheduled page and editor with real projects, model vali
       'conversation.models.read',
     ]);
     await f.click('返回会话');
-    expect(input()?.value).toBe('unsaved original\n雪🙂');
+    expect(promptValue(input())).toBe('unsaved original\n雪🙂');
     expectResumedReads(1);
     await f.click('安排任务');
     await f.click('Original A');
-    expect(input()?.value).toBe('unsaved original\n雪🙂');
+    expect(promptValue(input())).toBe('unsaved original\n雪🙂');
     expectResumedReads(2);
     await f.click('安排任务');
     await f.click('Other B');
-    expect(input()?.value).toBe('saved other');
+    expect(promptValue(input())).toBe('saved other');
     expect(f.selected()).toBe('b');
     expect(
       f.calls
@@ -328,7 +329,9 @@ test('a late creation receipt cannot replace the scheduled page or the original 
     expect(f.calls.filter((call) => call.method === 'select')).toHaveLength(1);
     await f.click('Original A');
     expect(
-      f.host.querySelector<HTMLTextAreaElement>('textarea[aria-label="当前会话私有草稿"]')?.value,
+      promptValue(
+        f.host.querySelector<HTMLElement>('[role="textbox"][aria-label="当前会话私有草稿"]'),
+      ),
     ).toBe('saved original');
     expect(f.calls.filter((call) => call.method === 'conversation.send')).toHaveLength(1);
     expect(f.calls.filter((call) => call.method === 'createSession')).toHaveLength(0);

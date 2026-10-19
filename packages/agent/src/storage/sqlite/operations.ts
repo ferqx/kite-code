@@ -746,6 +746,8 @@ export class SqliteOperations {
       status: row.status as MessageRecord['status'],
       role: row.role as MessageRecord['role'],
       content,
+      ...(source.images ? { images: source.images as unknown as MessageRecord['images'] } : {}),
+      ...(source.files ? { files: source.files as unknown as MessageRecord['files'] } : {}),
       ...(compression ? { compression } : {}),
       ...(['content', 'reasoning', 'tool_calls'].includes(String(source.firstOutput))
         ? { firstOutput: source.firstOutput as MessageRecord['firstOutput'] }
@@ -1208,7 +1210,12 @@ export class SqliteOperations {
             this.appendMessage(
               String(command.session_id),
               id,
-              { content: request.content ?? '', sourceIds: [input.commandId] },
+              {
+                content: request.content ?? '',
+                ...(request.images ? { images: request.images } : {}),
+                ...(request.files ? { files: request.files } : {}),
+                sourceIds: [input.commandId],
+              },
               'user',
             );
           this.event(String(command.session_id), id, 'run.started');

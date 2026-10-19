@@ -62,7 +62,7 @@ export function desktopContentSecurityPolicy(development: DesktopDevelopment | n
   const connect = development
     ? `'self' ${development.rendererUrl.replace('http:', 'ws:').replace(/\/$/, '')}`
     : "'none'";
-  return `default-src 'self'; script-src ${script}; connect-src ${connect}; style-src 'self' 'unsafe-inline'; img-src 'self' data:; frame-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'`;
+  return `default-src 'self'; script-src ${script}; connect-src ${connect}; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; frame-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'`;
 }
 
 export function parseDevelopmentServiceReload(value: unknown): DevelopmentServiceReload {

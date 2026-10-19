@@ -31,6 +31,7 @@ export interface BackgroundExecutionsProps {
   readonly id?: string;
   readonly executions: readonly BackgroundExecutionSummary[];
   readonly stale?: boolean;
+  readonly busy?: boolean;
   readonly currentOnly?: boolean;
   readonly stoppingExecutionId?: string;
   readonly onStop?: (execution: BackgroundExecutionSummary) => void;
@@ -47,6 +48,7 @@ export function BackgroundExecutions({
   id,
   executions,
   stale,
+  busy = false,
   currentOnly,
   stoppingExecutionId,
   onStop,
@@ -64,6 +66,7 @@ export function BackgroundExecutions({
         className="background-executions environment-information"
         id={id}
         aria-label="环境信息"
+        aria-busy={busy || subagentDetails?.loading || undefined}
       >
         <header>
           <span>环境信息</span>
@@ -76,6 +79,7 @@ export function BackgroundExecutions({
           executions={shells}
           stoppingExecutionId={stoppingExecutionId}
           onStop={stale ? undefined : onStop}
+          busy={busy}
         />
         <ExecutionGroup
           icon={BotIcon}
@@ -84,6 +88,7 @@ export function BackgroundExecutions({
           executions={subagents}
           stoppingExecutionId={stoppingExecutionId}
           onStop={stale ? undefined : onStop}
+          busy={busy}
           subagentDetails={subagentDetails}
         />
       </section>
@@ -91,7 +96,7 @@ export function BackgroundExecutions({
   }
   if (!executions.length && !stale) return null;
   return (
-    <section className="background-executions" aria-label="后台执行">
+    <section className="background-executions" aria-label="后台执行" aria-busy={busy || undefined}>
       <header>
         <strong>后台执行</strong>
         {stale && <span className="background-stale">上次已知状态 · 等待重连刷新</span>}
@@ -110,7 +115,7 @@ export function BackgroundExecutions({
               {onStop && !stale && execution.status === 'running' && (
                 <button
                   type="button"
-                  disabled={stoppingExecutionId === execution.executionId}
+                  disabled={busy || stoppingExecutionId === execution.executionId}
                   onClick={() => onStop(execution)}
                 >
                   {stoppingExecutionId === execution.executionId ? '停止请求已受理' : '停止'}
@@ -132,6 +137,7 @@ function ExecutionGroup({
   stoppingExecutionId,
   onStop,
   subagentDetails,
+  busy,
 }: {
   readonly icon: typeof TerminalIcon;
   readonly label: string;
@@ -140,6 +146,7 @@ function ExecutionGroup({
   readonly stoppingExecutionId?: string;
   readonly onStop?: (execution: BackgroundExecutionSummary) => void;
   readonly subagentDetails?: BackgroundExecutionsProps['subagentDetails'];
+  readonly busy: boolean;
 }) {
   return (
     <section className="background-execution-group" aria-label={label}>
@@ -151,7 +158,7 @@ function ExecutionGroup({
           <Button
             className="ghost background-execution-refresh"
             size="xs"
-            disabled={subagentDetails.loading}
+            disabled={busy || subagentDetails.loading}
             aria-label="刷新子 Agent"
             onClick={subagentDetails.onRefresh}
           >
@@ -192,7 +199,7 @@ function ExecutionGroup({
                   <Button
                     className="background-execution-stop"
                     size="xs"
-                    disabled={stoppingExecutionId === execution.executionId}
+                    disabled={busy || stoppingExecutionId === execution.executionId}
                     onClick={() => onStop(execution)}
                   >
                     {stoppingExecutionId === execution.executionId ? '停止中' : '停止'}

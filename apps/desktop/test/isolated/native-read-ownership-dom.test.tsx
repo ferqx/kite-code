@@ -10,7 +10,7 @@ import type {
   NativeResult,
   NativeState,
 } from '../../src/native-bridge';
-import { prepareDesktopDom } from '../native-page-dom.fixture';
+import { prepareDesktopDom, promptValue } from '../native-page-dom.fixture';
 
 const bootstrap = new JSDOM('<div></div>', { pretendToBeVisual: true });
 const initialGlobals = {
@@ -186,7 +186,9 @@ function fixture(
           (heading) => heading.textContent === 'Other B',
         ),
       ).toBe(true);
-      expect(dom.window.document.querySelector('textarea')!.value).toBe('other text');
+      expect(
+        promptValue(dom.window.document.querySelector('[role="textbox"][contenteditable]')),
+      ).toBe('other text');
       expect(dom.window.document.querySelector('[role="alertdialog"]') === null).toBe(true);
     },
     async close() {
@@ -332,7 +334,9 @@ test('a global directory failure remains visible after a same-generation session
     expect(f.dom.window.document.querySelector('[role="alertdialog"]')?.textContent).toContain(
       'session_directory_unavailable',
     );
-    expect(f.dom.window.document.querySelector('textarea')!.value).toBe('other text');
+    expect(
+      promptValue(f.dom.window.document.querySelector('[role="textbox"][contenteditable]')),
+    ).toBe('other text');
   } finally {
     await f.close();
   }
@@ -417,7 +421,9 @@ for (const method of ['state', 'directory'] as const)
       await f.notify({ kind: 'lifecycle', phase: 'quitting' });
       await act(async () => held.reject(Error('native_draining')));
       expect(f.dom.window.document.querySelector('[role="alertdialog"]')).toBeNull();
-      expect(f.dom.window.document.querySelector('textarea')!.value).toBe('original text');
+      expect(
+        promptValue(f.dom.window.document.querySelector('[role="textbox"][contenteditable]')),
+      ).toBe('original text');
       await f.notify();
       expect(f.calls.filter((request) => request.method === 'state')).toHaveLength(callsBeforeQuit);
       hold = false;
@@ -426,7 +432,9 @@ for (const method of ['state', 'directory'] as const)
         callsBeforeQuit,
       );
       expect(f.dom.window.document.querySelector('[role="alertdialog"]')).toBeNull();
-      expect(f.dom.window.document.querySelector('textarea')!.value).toBe('original text');
+      expect(
+        promptValue(f.dom.window.document.querySelector('[role="textbox"][contenteditable]')),
+      ).toBe('original text');
       expect(f.calls.filter((request) => request.method === 'attach')).toHaveLength(1);
       expect(f.calls.filter((request) => request.method === 'conversation.send')).toHaveLength(0);
       expect(f.calls.filter((request) => request.method === 'draft.write')).toHaveLength(0);
@@ -475,7 +483,9 @@ for (const method of ['select', 'draft.read'] as const)
       expect(f.dom.window.document.querySelector('[role="alertdialog"]')).toBeNull();
       hold = false;
       await f.notify({ kind: 'lifecycle', phase: 'active' });
-      expect(f.dom.window.document.querySelector('textarea')!.value).toBe('original text');
+      expect(
+        promptValue(f.dom.window.document.querySelector('[role="textbox"][contenteditable]')),
+      ).toBe('original text');
       expect(f.dom.window.document.querySelector('[role="alertdialog"]')).toBeNull();
       expect(f.calls.filter((request) => request.method === 'attach')).toHaveLength(1);
       expect(f.calls.filter((request) => request.method === 'conversation.send')).toHaveLength(0);
@@ -570,9 +580,9 @@ test('private draft save is test-only and retains its original scope and CAS whi
     expect(f.dom.window.document.body.textContent).not.toContain(
       '历史已完整读取至固定高水位；当前执行事实仍须核实。',
     );
-    expect(f.dom.window.document.querySelector('textarea')!.value).toBe(
-      raw.replaceAll('\r\n', '\n'),
-    );
+    expect(
+      promptValue(f.dom.window.document.querySelector('[role="textbox"][contenteditable]')),
+    ).toBe(raw.replaceAll('\r\n', '\n'));
     expect(
       [...f.dom.window.document.querySelectorAll('button')].some(
         (candidate) => candidate.textContent === '保留草稿',
@@ -589,7 +599,9 @@ test('private draft save is test-only and retains its original scope and CAS whi
       { method: 'draft.write', generation: 1, sessionId: 'a', revision: 7, content: raw },
     ]);
     await f.click('Other B');
-    expect(f.dom.window.document.querySelector('textarea')!.value).toBe('other text');
+    expect(
+      promptValue(f.dom.window.document.querySelector('[role="textbox"][contenteditable]')),
+    ).toBe('other text');
     await act(async () =>
       savedReply.resolve({
         id: 'a',

@@ -55,7 +55,11 @@ try {
         type,
         (event) => {
           const element = event.target as HTMLElement;
-          if (!element.closest('form')?.querySelector('textarea[aria-label="当前会话私有草稿"]'))
+          if (
+            !element
+              .closest('form')
+              ?.querySelector('[role="textbox"][aria-label="当前会话私有草稿"]')
+          )
             return;
           target.questionnaireEvents.push({
             type,
@@ -209,7 +213,7 @@ try {
     });
     const input = page.getByRole('textbox', { name: '当前会话私有草稿' });
     await input.fill(content);
-    assert.equal(await input.inputValue(), content);
+    assert.equal(await input.innerText(), content);
     await page.getByRole('button', { name: '发送明确的新轮次', exact: true }).click();
     assert.equal(
       await page.evaluate(
@@ -226,7 +230,7 @@ try {
       await page.waitForTimeout(20);
     }
     await input.fill(originalDraft);
-    assert.equal(await input.inputValue(), originalDraft);
+    assert.equal(await input.innerText(), originalDraft);
     // The existing explicit private draft save is the cross-session Main draft contract.
     await page
       .getByText('历史已完整读取至固定高水位；当前执行事实仍须核实。', { exact: true })
@@ -310,7 +314,7 @@ try {
   await completed(first.runId!);
   await page.getByRole('textbox', { name: '当前会话私有草稿' }).waitFor();
   assert.equal(
-    await page.getByRole('textbox', { name: '当前会话私有草稿' }).inputValue(),
+    await page.getByRole('textbox', { name: '当前会话私有草稿' }).innerText(),
     mainDraft,
   );
   assert.equal(await posts(), 1);
@@ -327,7 +331,7 @@ try {
   await completed(second.runId!);
   await page.getByRole('textbox', { name: '当前会话私有草稿' }).waitFor();
   assert.equal(
-    await page.getByRole('textbox', { name: '当前会话私有草稿' }).inputValue(),
+    await page.getByRole('textbox', { name: '当前会话私有草稿' }).innerText(),
     cancelDraft,
   );
   assert.equal(await posts(), 2);

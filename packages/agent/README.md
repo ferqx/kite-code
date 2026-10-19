@@ -1,5 +1,15 @@
 # 通用 Agent
 
+## 用户图片输入
+
+普通文件附件通过 start/steer/follow-up 的可选 `files` 保存最多 128 个名称与 `file:` URI，原消息正文保持用户原文。受理核闭合字段、URI 与长度，路径引用不赋予读取权限。[模型历史组装](src/runtime.ts)通过[文件引用编码](src/input-files.ts)在 user 内容中追加明确的低权限路径数据，仍由现有 Files 工具检查目标、保护范围和权限；不自动读取文件、不加载外部目录的项目说明。Fork 与冷历史沿消息 source JSON 保留引用，无 SQL 表或迁移；[真实 HTTP](../../apps/service/test/isolated/input-images.test.ts)核附件单独发送、模型得到路径与展示正文分离，[真实 Store](test/isolated/artifacts/input-images.test.ts)核混合图片／文件在后继、Fork 与冷重开时保留。
+
+[Runtime.uploadInputImage](src/runtime.ts)先按准确 Store/Session/subject 核作用域，再校验 PNG、JPEG、WebP、GIF 的 canonical base64、格式头和单张 16 MiB 限制，以既有 Artifact owner 发布不可变 session 引用；不接收路径或 URL。`run.start/input.steer/input.follow_up` 的可选 `images` 是名称与完整引用，同次新输入最多 10 张、总量最多 64 MiB；受理事务先核数量，再比对原登记元数据，不能跨会话借用、改写 hash 或凭空声明引用。
+
+用户消息 source JSON 保存元数据，不把 base64 填进文本／SQL 消息正文；SQL baseline 不变。[模型历史组装](src/runtime.ts)核原用户消息出处，完整读取并验证原 Artifact 后才构建中立 `ModelMessage.images`。后续轮次、Fork 和冷重开沿原引用读取；缺失或损坏失败，不静默遗漏图片。原 ModelInput 的私有快照包含真实图片数据。上下文本地估算仍只是文本近似，图片用量以 Provider 已返回的实际统计为准，不补造图像 token。
+
+[真实 SQLite/Artifact 测试](test/isolated/artifacts/input-images.test.ts)核纯图片输入、后继轮次、Fork、冷重开、错 scope／hash 与 URL 拒绝。持久取舍见[图片引用决定](../../.agents/notes/implemented/architecture/2026-10-18-user-image-input-references.md)，HTTP 与 Native 准入分别归各 owner。
+
 正式构建内联[声明的普通 JS 依赖](scripts/bundled-dependencies.ts)，包括独立 Web extraction Worker 的 Readability/Turndown；keyring、Files Node-API、tree-sitter WASM 与 jsdom 动态资源仍沿原外部资产闭包核验。生成物扫描、原许可全文及精确资源复制归 [Terminal owner](../../apps/cli/docs/terminal-release.md)，不改变权限或 Worker 生命周期。Windows 制品原 HANDLE 的类型/大小/身份、完整字节/SHA 和私有批量复制边界归 [platform owner](src/platform/README.md)。
 
 `@kite-ai/agent` 正在按 [V1.3](../../docs/plans/unified-agent-refactor-v1.md)实施。当前支持显式装配模型、外部工具、Action/Query、一个默认 Loop 与具名 Store；[Service](../../apps/service/README.md)、[Client](../client/README.md)和[通用 UI](../ui/README.md)已通过真实 HTTP/SSE 联验。正式 Terminal 已消费通用 TUI；完整客户端迁移和正式旧路径退役仍按门禁核对。已完成范围和未运行场景见[实施证据](../../docs/plans/unified-agent-refactor-v1-progress.md)。

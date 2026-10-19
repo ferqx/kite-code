@@ -116,7 +116,11 @@ test('configuration cannot invent Tool IDs or trusted Skill roots, and disabled 
         selectedSkills: ['outside'],
       }),
     ).rejects.toMatchObject({ code: 'skill_path_denied' });
-    symlinkSync(outside, join(f.workspace, 'escape'));
+    symlinkSync(
+      outside,
+      join(f.workspace, 'escape'),
+      process.platform === 'win32' ? 'junction' : 'dir',
+    );
     await expect(
       createWorkspaceAssembly({
         workspaceRoot: f.workspace,
@@ -259,7 +263,11 @@ test('selected canonical source identity cannot silently disappear when a truste
         `---\nname: ${id}\ndescription: summary\n---\nbody`,
       );
     }
-    symlinkSync(join(f.workspace, 'one'), join(f.workspace, 'alias'));
+    symlinkSync(
+      join(f.workspace, 'one'),
+      join(f.workspace, 'alias'),
+      process.platform === 'win32' ? 'junction' : 'dir',
+    );
     assembly = await createWorkspaceAssembly({
       workspaceRoot: f.workspace,
       profile: f.profile,
@@ -268,7 +276,11 @@ test('selected canonical source identity cannot silently disappear when a truste
       selectedSkills: ['selected'],
     });
     rmSync(join(f.workspace, 'alias'));
-    symlinkSync(join(f.workspace, 'two'), join(f.workspace, 'alias'));
+    symlinkSync(
+      join(f.workspace, 'two'),
+      join(f.workspace, 'alias'),
+      process.platform === 'win32' ? 'junction' : 'dir',
+    );
     await expect(assembly.sources.capture(request)).rejects.toMatchObject({
       code: 'skill_version_changed',
     });

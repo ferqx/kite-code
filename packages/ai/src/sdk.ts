@@ -15,6 +15,7 @@ import {
   wrapLanguageModel,
 } from 'ai';
 import type { Json, ModelAdapter, ModelRequest, ModelUsage } from './index';
+import { isModelImage } from './index';
 import { ModelAttemptError } from './model-attempt';
 import {
   type ModelAdapterSnapshot,
@@ -68,6 +69,13 @@ function messages(
 ): SdkMessage[] {
   const calls = new Map<string, string>();
   return request.messages.map((message): SdkMessage => {
+    if (
+      message.images !== undefined &&
+      (message.role !== 'user' ||
+        !Array.isArray(message.images) ||
+        !message.images.every(isModelImage))
+    )
+      throw new Error('invalid_image_history');
     if (message.role === 'assistant') {
       for (const call of message.toolCalls ?? []) calls.set(call.id, encodeTool(call.name));
       const continuation = message.continuation;
@@ -140,6 +148,20 @@ function messages(
         ],
       };
     }
+    if (message.images?.length) {
+      if (message.role !== 'user') throw new Error('invalid_image_history');
+      return {
+        role: 'user',
+        content: [
+          ...(message.content ? [{ type: 'text' as const, text: message.content }] : []),
+          ...message.images.map((image) => ({
+            type: 'file' as const,
+            data: image.data,
+            mediaType: image.mediaType,
+          })),
+        ],
+      };
+    }
     return { role: message.role, content: message.content };
   });
 }
@@ -208,7 +230,7 @@ export function createSdkModelAdapter(options: {
       },
       transformation: {
         id: 'kite.sdk.messages',
-        version: provider?.protocol === 'responses' ? '3' : '2',
+        version: provider?.protocol === 'responses' ? '5' : '4',
       },
     };
   };

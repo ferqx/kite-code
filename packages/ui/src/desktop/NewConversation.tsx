@@ -140,7 +140,6 @@ export function NewConversationContext(props: NewConversationProps) {
         options={props.projects.map((project) => ({
           value: project.path,
           label: project.label,
-          detail: project.path,
         }))}
         disabled={props.busy}
         onSelect={props.onProject}

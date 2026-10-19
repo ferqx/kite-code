@@ -23,7 +23,7 @@ Object.assign(globalThis, {
   navigator: bootstrap.window.navigator,
 });
 const { createRoot } = await import('react-dom/client');
-const { NativeModelPicker } = await import('../../src/native-model-picker');
+const { NativeModelPicker, nativeModelScope } = await import('../../src/native-model-picker');
 Object.assign(globalThis, priorBootstrap);
 bootstrap.window.close();
 
@@ -537,6 +537,90 @@ test('same-provider duplicate names retain exact route IDs; sparse effort change
     expect(resolved).toEqual({ modelId: 'second' });
     expect(f.element.querySelector('.effort-value')?.textContent).toBe('高');
     expect(calls).toEqual([{ method: 'input.models.read', generation: 1 }]);
+  } finally {
+    await f.close();
+  }
+});
+
+test('prepared scopes paint their final route immediately and publish readiness even when the route is unchanged, without duplicate reads', async () => {
+  const f = fixture(),
+    calls: NativeRequest[] = [],
+    ready: unknown[] = [];
+  const bridge: NativeBridge = {
+    watch: () => () => {},
+    request: async (request) => {
+      calls.push(request);
+      return null;
+    },
+  };
+  const render = (id: string, view: number) =>
+    act(async () => {
+      const selection = selected(id, view),
+        scope = nativeModelScope(1, selection, undefined, 'settings');
+      f.root.render(
+        <NativeModelPicker
+          bridge={bridge}
+          generation={1}
+          selection={selection}
+          revision="settings"
+          value={{}}
+          prepared={{ key: scope.readKey, facts, error: '' }}
+          onChange={() => {
+            throw Error('unexpected choice');
+          }}
+          onReady={(value, choice) => ready.push([id, value, choice?.modelId])}
+        />,
+      );
+    });
+  try {
+    await render('a', 1);
+    const button = f.element.querySelector('[data-model-trigger]');
+    await render('b', 2);
+    expect(f.element.querySelector('[data-model-trigger]')).toBe(button);
+    expect(button?.textContent).toBe('remote-a轻度');
+    expect(ready).toEqual([
+      ['a', true, 'a'],
+      ['b', true, 'a'],
+    ]);
+    expect(calls).toEqual([]);
+  } finally {
+    await f.close();
+  }
+});
+
+test('a prepared catalogue from another Store cannot qualify the current picker', async () => {
+  const f = fixture(),
+    calls: NativeRequest[] = [],
+    ready: boolean[] = [];
+  const selection = selected('current'),
+    scope = nativeModelScope(1, selection);
+  const bridge: NativeBridge = {
+    watch: () => () => {},
+    request: async (request) => {
+      calls.push(request);
+      return { ...facts, selectedModelId: 'b' };
+    },
+  };
+  try {
+    await act(async () =>
+      f.root.render(
+        <NativeModelPicker
+          bridge={bridge}
+          generation={1}
+          selection={selection}
+          value={{}}
+          prepared={{ key: scope.readKey, facts: { ...facts, storeId: 'foreign' }, error: '' }}
+          onChange={() => {
+            throw Error('unexpected choice');
+          }}
+          onReady={(value) => ready.push(value)}
+        />,
+      ),
+    );
+    expect(f.element.querySelector('[data-model-trigger]')?.textContent).toBe('remote-b');
+    expect(calls).toEqual([{ method: 'input.models.read', generation: 1 }]);
+    expect(ready[0]).toBe(false);
+    expect(ready.at(-1)).toBe(true);
   } finally {
     await f.close();
   }

@@ -11,7 +11,7 @@ import type {
   NativeState,
 } from '../../src/native-bridge';
 import type { NativeWindowMenuBridge, NativeWindowMenuRequest } from '../../src/native-menu-bridge';
-import { prepareDesktopDom } from '../native-page-dom.fixture';
+import { prepareDesktopDom, promptValue, setPromptText } from '../native-page-dom.fixture';
 
 const bootstrap = new JSDOM('<div></div>', { pretendToBeVisual: true });
 const originals = {
@@ -147,11 +147,11 @@ test('retained startup hides the entire product until admitted attach and the co
   f.dom.window.document.documentElement.dataset.platform = 'windows';
   try {
     await f.render(false, true);
-    expect(f.host.querySelector('main[aria-label="kite 启动页"]')?.getAttribute('aria-busy')).toBe(
+    expect(f.host.querySelector('main[aria-label="Kite 启动页"]')?.getAttribute('aria-busy')).toBe(
       'true',
     );
     expect(f.host.querySelector('.shell')).toBeNull();
-    expect(f.host.querySelector('textarea')).toBeNull();
+    expect(f.host.querySelector('[role="textbox"][contenteditable]')).toBeNull();
     expect(f.host.querySelector('.native-window-titlebar')).toBeNull();
     expect(f.host.querySelector('[role="menubar"]')).toBeNull();
     await act(async () => {
@@ -169,7 +169,7 @@ test('retained startup hides the entire product until admitted attach and the co
     await act(async () => directory(observed));
     expect(f.host.querySelector('.shell')).toBeNull();
     expect(f.host.querySelector('.native-window-titlebar')).toBeNull();
-    expect(f.host.querySelector('main[aria-label="kite 启动页"]')?.getAttribute('aria-busy')).toBe(
+    expect(f.host.querySelector('main[aria-label="Kite 启动页"]')?.getAttribute('aria-busy')).toBe(
       'false',
     );
     expect(f.host.querySelector('[role="alert"]')?.textContent).toContain(
@@ -181,7 +181,7 @@ test('retained startup hides the entire product until admitted attach and the co
     expect(f.calls.filter((request) => request.method === 'attach')).toHaveLength(1);
     observed = { ...empty, unavailable: false };
     await f.notify(1);
-    expect(f.host.querySelector('main[aria-label="kite 启动页"]')).toBeNull();
+    expect(f.host.querySelector('main[aria-label="Kite 启动页"]')).toBeNull();
     expect(f.host.querySelector('.kite-client.shell')).not.toBeNull();
     expect(f.host.querySelector('.native-window-titlebar')).not.toBeNull();
     expect(
@@ -189,7 +189,7 @@ test('retained startup hides the entire product until admitted attach and the co
         (item) => item.textContent,
       ),
     ).toEqual(['文件', '编辑', '视图', '帮助']);
-    expect(f.host.querySelector('textarea[aria-label="新对话草稿"]')).not.toBeNull();
+    expect(f.host.querySelector('[role="textbox"][aria-label="新对话草稿"]')).not.toBeNull();
     expect(f.host.querySelector('.connection')).toBeNull();
     expect(f.host.querySelector('input[aria-label="先审核计划"]')).toBeNull();
     expect(f.host.textContent).not.toContain('本地 Agent');
@@ -282,21 +282,17 @@ test('startup failures retry explicitly once; a late previous observation and po
       ),
     );
     expect(f.host.textContent).not.toContain('old scope');
-    expect(f.host.querySelector('main[aria-label="kite 启动页"]')).toBeNull();
-    const draft = f.host.querySelector<HTMLTextAreaElement>('textarea[aria-label="新对话草稿"]')!;
+    expect(f.host.querySelector('main[aria-label="Kite 启动页"]')).toBeNull();
+    const draft = f.host.querySelector<HTMLElement>('[role="textbox"][aria-label="新对话草稿"]')!;
     await act(async () => {
-      Object.getOwnPropertyDescriptor(
-        f.dom.window.HTMLTextAreaElement.prototype,
-        'value',
-      )!.set!.call(draft, '保留原草稿\n雪🙂');
-      draft.dispatchEvent(new f.dom.window.Event('input', { bubbles: true }));
+      await setPromptText(draft, '保留原草稿\n雪🙂');
     });
     mode = 'connection-fails';
     await f.notify(generation);
-    expect(f.host.querySelector('main[aria-label="kite 启动页"]')).toBeNull();
+    expect(f.host.querySelector('main[aria-label="Kite 启动页"]')).toBeNull();
     expect(f.host.querySelector('.kite-client.shell')).not.toBeNull();
     expect(f.host.querySelector('.native-window-titlebar')).not.toBeNull();
-    expect(draft.value).toBe('保留原草稿\n雪🙂');
+    expect(promptValue(draft)).toBe('保留原草稿\n雪🙂');
     expect(f.calls.filter((request) => request.method === 'attach').length).toBe(3);
     expect(
       f.calls.every((request) =>
@@ -349,7 +345,7 @@ test('retained save button requires the Service diagnostic; fixed save failure a
     expect(f.calls.map((call) => call.method)).toEqual(['attach']);
     failed = false;
     await f.retry();
-    expect(f.host.querySelector('main[aria-label="kite 启动页"]')).toBeNull();
+    expect(f.host.querySelector('main[aria-label="Kite 启动页"]')).toBeNull();
     expect(f.host.textContent).not.toContain('保存诊断');
     expect(f.calls.filter((call) => call.method === 'attach').length).toBe(2);
   } finally {

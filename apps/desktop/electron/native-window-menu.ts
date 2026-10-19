@@ -68,7 +68,7 @@ export function nativeWindowMenuTemplate(options: {
         { label: '切换全屏', role: 'togglefullscreen' },
       ],
     },
-    { id: 'help', label: '帮助', submenu: [{ label: '关于 kite', role: 'about' }] },
+    { id: 'help', label: '帮助', submenu: [{ label: '关于 Kite', role: 'about' }] },
   ];
 }
 

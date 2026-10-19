@@ -2,6 +2,8 @@ import { dirname } from 'node:path';
 import { and, eq, sql } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/bun-sqlite';
 import { verifyPublishedArtifact } from '../../artifacts-files';
+import { inputImages } from '../../input-images';
+import { canonicalJson } from '../../json';
 import type { Store } from '../port';
 import { AgentError, type ArtifactReference, type ArtifactScope } from '../types';
 import { isHumanBoundReviewRequest } from './authorization-review';
@@ -10,6 +12,31 @@ import { blobReferences, blobs } from './schema';
 
 type Register = Parameters<Store['registerArtifact']>[0];
 type Get = Parameters<Store['getArtifactReference']>[0];
+export function assertInputImages(
+  ops: SqliteOperations,
+  input: { expectedStoreId: string; sessionId: string; subjectId: string; images: unknown },
+): void {
+  if (!Array.isArray(input.images) || input.images.length > 10)
+    throw new AgentError('input_image_invalid');
+  for (const image of inputImages(input.images)) {
+    const ref = image.reference;
+    if (
+      ref.storeId !== input.expectedStoreId ||
+      ref.sessionId !== input.sessionId ||
+      ref.subjectId !== input.subjectId
+    )
+      throw new AgentError('input_image_scope_mismatch');
+    const lookup = { ...input, refId: ref.id, scope: ref.scope };
+    scope(ops, lookup, true);
+    const original = get(ops, lookup);
+    if (
+      !original ||
+      canonicalJson(original as unknown as import('../types').Json) !==
+        canonicalJson(ref as unknown as import('../types').Json)
+    )
+      throw new AgentError('input_image_scope_mismatch');
+  }
+}
 function validate(input: Get): void {
   if (
     !/^[A-Za-z0-9_-]{1,128}$/.test(input.refId) ||

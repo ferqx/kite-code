@@ -40,6 +40,7 @@ import type {
   NativeFileTargetPage,
 } from './file-changes-bridge';
 import type { InputMetadata, InputRequest } from './input';
+import type { NativeInputFileResult, NativeInputImageRequest } from './input-images-bridge';
 import type {
   NativeInteractionHistoryPage,
   NativeInteractionHistoryRequest,
@@ -491,6 +492,7 @@ export type NativeAttachmentChunk = {
 export type NativeModelInputOpen = NativeModelBodyOpen<'modelInput'>;
 export type NativeModelInputChunk = NativeModelBodyChunk<'modelInput'>;
 export type NativeRequest =
+  | NativeInputImageRequest
   | NativeScheduledRequest
   | NativeExtensionsRequest
   | NativeInteractionHistoryRequest
@@ -511,6 +513,7 @@ export type NativeRequest =
       creation: NativeCreation['input'];
       intent: StartCommandRequest;
       permissionMode?: 'accept_edits' | 'auto' | 'full';
+      imageIds?: readonly string[];
       targetBranch?: string;
     }
   | { method: 'conversation.lookup'; generation: number; commandId: string }
@@ -704,6 +707,7 @@ export type NativeRequest =
       sessionId: string;
       intent: InputRequest;
       draft?: NativeCallerIntent['draft'];
+      imageIds?: readonly string[];
     }
   | {
       method: 'caller.prepare';
@@ -760,6 +764,7 @@ export type NativeRequest =
       answer: import('@kite-ai/client').AnswerInteractionRequest['answer'];
     };
 export type NativeResult =
+  | NativeInputFileResult
   | NativeScheduledResult
   | NativeExtensionsResult
   | NativeInteractionHistoryPage
@@ -817,6 +822,7 @@ export type NativeResult =
   | null;
 export type NativeReply = { ok: true; value: NativeResult } | { ok: false; code: string };
 export interface NativeBridge {
+  fileReferences?(files: readonly File[]): readonly { name: string; uri: string }[];
   request(input: NativeRequest): Promise<NativeResult>;
   watch(listener: (event: NativeEvent) => void): () => void;
 }

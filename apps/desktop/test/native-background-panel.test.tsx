@@ -255,6 +255,42 @@ test('retained environment card separates Shell and named children, exact stop, 
   );
 });
 
+test('environment excludes internal title generation while retaining delegated children with the same display name', () => {
+  const title = backgroundItem(1, true),
+    delegated = backgroundItem(2, true),
+    shell = backgroundItem(3);
+  title.execution.definitionId = 'agent/session-title';
+  title.childSession!.title = 'Renamed internal child';
+  delegated.execution.definitionId = 'agent/research';
+  delegated.execution.childSessionId = 'delegated-child';
+  delegated.childSession!.id = 'delegated-child';
+  delegated.childSession!.title = 'Child session-title';
+  delegated.childRun!.sessionId = 'delegated-child';
+  const items = [title, delegated, shell];
+  for (const status of [
+    'planned',
+    'dispatching',
+    'running',
+    'succeeded',
+    'failed',
+    'cancelled',
+    'outcome_unknown',
+  ] as const) {
+    title.execution.status = status;
+    const original = JSON.stringify(items);
+    for (const storeId of ['store', 'restored-store']) {
+      const display = environmentDisplay(items, storeId);
+      expect(display.rows.map((row) => row.executionId)).toEqual(['job-2', 'job-3']);
+      expect(display.rows[0]?.displayName).toBe('Child session-title');
+      expect([...display.children]).toEqual([['job-2', 'delegated-child']]);
+      expect(JSON.stringify(items)).toBe(original);
+    }
+  }
+  const display = environmentDisplay([title], 'store');
+  expect(display.rows).toEqual([]);
+  expect(display.children.size).toBe(0);
+});
+
 test('environment adapter keeps unknown and restored child facts distinct and never infers cleanup', () => {
   const child = backgroundItem(1, true);
   child.execution.status = 'outcome_unknown';

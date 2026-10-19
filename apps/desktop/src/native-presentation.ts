@@ -43,7 +43,7 @@ export function desktopDirectory(
       displayName: session.title || '新对话',
       status: !observed
         ? '状态待读取'
-        : directory.unavailable || selection.viewLoading || selection.permissionUnavailable
+        : directory.unavailable || (selection.permissionUnavailable && !selection.viewLoading)
           ? '上次确认状态'
           : active?.status === 'waiting_interaction'
             ? 'waiting'

@@ -1,4 +1,5 @@
-import { contextBridge, ipcRenderer } from 'electron';
+import { contextBridge, ipcRenderer, webUtils } from 'electron';
+import { inputFileReference } from '../src/input-file-reference';
 import {
   decodeNativeEvent,
   type NativeBridge,
@@ -30,6 +31,10 @@ const bridge: NativeBridge &
   NativeWindowBridge &
   NativeWindowMenuBridge &
   NativeStartupBridge = {
+  fileReferences(files) {
+    if (!Array.isArray(files) || files.length > 128) throw Error('file_reference_unavailable');
+    return files.map((file) => inputFileReference(file.name, webUtils.getPathForFile(file)));
+  },
   async showWindowMenu(request) {
     const reply = (await ipcRenderer.invoke(nativeWindowMenuChannel, request)) as NativeReply;
     if (!reply.ok) throw Object.assign(Error(reply.code), { code: reply.code });

@@ -1,7 +1,32 @@
 import type { JSDOM } from 'jsdom';
 
+/** These tests assert Native ownership, not keyboard editing; use the actual editor state. */
+export async function setPromptText(element: Element, value: string) {
+  const { setEditorText } = await import('../../../packages/ui/test/prompt-editor.fixture');
+  setEditorText(element as HTMLElement, value);
+}
+export function promptValue(element: Element | null | undefined) {
+  const text = (node: Node): string =>
+    node.nodeName === 'BR'
+      ? '\n'
+      : node.nodeType === 3
+        ? (node.textContent ?? '')
+        : [...node.childNodes].map(text).join('');
+  return element
+    ? [...element.children]
+        .map((child) => (child.textContent ? text(child) : ''))
+        .join('\n')
+        .replace(/\r\n?/g, '\n')
+    : undefined;
+}
+
 /** Browser APIs used by the retained desktop layout; these do not simulate Native facts or writes. */
 export function prepareDesktopDom(dom: JSDOM) {
+  Object.assign(dom.window.Range.prototype, {
+    getBoundingClientRect: () => new dom.window.DOMRect(),
+    getClientRects: () => [],
+  });
+  dom.window.HTMLElement.prototype.scrollIntoView = () => {};
   class ResizeObserverStub {
     observe() {}
     unobserve() {}

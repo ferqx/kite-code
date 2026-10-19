@@ -52,7 +52,7 @@ try {
     await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]!.isVisible()),
     true,
   );
-  assert.equal(await draft.inputValue(), '关闭和退出仍保留原草稿\n雪🙂');
+  assert.equal(await draft.innerText(), '关闭和退出仍保留原草稿\n雪🙂');
 
   await app.evaluate(({ dialog }) => {
     Object.assign(globalThis, { ownedQuitPrompts: [] });
@@ -99,7 +99,7 @@ try {
     10000,
     'cancelled quit did not preserve the original caller',
   );
-  assert.equal(await draft.inputValue(), '关闭和退出仍保留原草稿\n雪🙂');
+  assert.equal(await draft.innerText(), '关闭和退出仍保留原草稿\n雪🙂');
   assert.deepEqual(await locks(), { outer: true, inner: true });
   console.log(
     'native_quit_stage: original close/activate, bounded unknown inspection, default retention and exact draft',

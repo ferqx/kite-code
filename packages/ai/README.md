@@ -1,5 +1,11 @@
 # 模型边界
 
+## 图片消息
+
+中立 `ModelMessage.images` 只为 user role 提供明确 MIME 的 base64 原图，不接受 URL，支持 PNG、JPEG、WebP、GIF。AI 不读取本地路径或远程图片；[SDK adapter](src/sdk.ts)映射为 SDK file parts，分别编码为 Chat Completions 的 `image_url.url` Data URL 和 Responses 的 `input_image.image_url` 字符串，不使用 Provider 文件上传引用。本轮不接 Anthropic Messages；所有兼容提供商复用选定协议，不能因字段名相似而混用结构。`kite.sdk.messages` 转换版本更新为 Chat 4／Responses 5，旧历史的内容与原适配器元数据保持原值。
+
+[受控请求测试](test/input-images.test.ts)实际捕获两种协议的图片字节和文字，并核 URL 拒绝；不根据模型名称猜图片能力，真实支持仍由所选 Provider 决定。Artifact 引用、来源校验和历史图片读回归 [Agent owner](../agent/README.md#用户图片输入)。
+
 构建使用 Bun splitting 内联[明确声明的 SDK 普通 JS 依赖](bundled-dependencies.ts)，中立入口与 SDK 入口仍独立导出。Terminal 打包扫描全部生成模块，拒绝声明已内联的残余 bare import，并保存安装声明图的原 package manifest 摘要与许可全文；不改变实际 Provider 尝试、取消或用量合同。跨包打包取舍归[Windows 闭包成本决定](../../.agents/notes/implemented/bug-fix/2026-10-17-windows-bundle-admission-cost.md)。
 
 `@kite-ai/ai` 负责可移植的模型请求、流事件、用量和取消类型，不负责 Session、Run、执行权限、持久化或 HTTP。导入这个包不打开资源。完整模型响应是否可以派发工具由 Agent Loop 决定；不完整响应不能作为执行授权。
@@ -18,7 +24,7 @@
 
 测试使用带测试凭据的本地模拟 HTTP endpoint，证明传输映射与每次流尝试只发一个网络请求；不建立生产 Provider 兼容性、可用性或付费模型行为资格。
 
-SDK 的 `kite.sdk.messages` 转换版本在 Chat Completions 为2、Responses 为3：内部 `files.read` 等 Tool ID 在发送前转为最多64字符的 ASCII 函数名，只含字母、数字、下划线与连字符。合法原名保持；其他名称替换非法字符并在截短后分配不碰撞的后缀，先保留当前声明及完整历史中的合法名称。声明、assistant 历史调用与配对结果使用同一请求内映射，完成的 Provider 调用还原原 ID 后才交给 Core；不改写原请求、ModelInput 或持久历史。转换由 [sdk.ts](src/sdk.ts)负责，不依赖模型名称推测能力。范围及不重命名 Core ID 的取舍见[工具名决定](../../.agents/notes/implemented/bug-fix/2026-10-16-compatible-tool-names.md)。
+SDK 的 `kite.sdk.messages` 转换版本在 Chat Completions 为4、Responses 为5：内部 `files.read` 等 Tool ID 在发送前转为最多64字符的 ASCII 函数名，只含字母、数字、下划线与连字符。合法原名保持；其他名称替换非法字符并在截短后分配不碰撞的后缀，先保留当前声明及完整历史中的合法名称。声明、assistant 历史调用与配对结果使用同一请求内映射，完成的 Provider 调用还原原 ID 后才交给 Core；不改写原请求、ModelInput 或持久历史。转换由 [sdk.ts](src/sdk.ts)负责，不依赖模型名称推测能力。范围及不重命名 Core ID 的取舍见[工具名决定](../../.agents/notes/implemented/bug-fix/2026-10-16-compatible-tool-names.md)。
 
 上述为任意中立调用者的协议编码规则；当前 Agent 内置工具在交给任意 Adapter 前，已由 [Agent 工具表面](../agent/src/model-tools.README.md)转换为 `read_file` 等公开名称和参数。Agent 的公开 ModelInput/历史重建归该 owner；AI 不重复维护内置工具的语义命名表。
 

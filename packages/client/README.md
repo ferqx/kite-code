@@ -1,5 +1,9 @@
 # Client
 
+## 图片输入
+
+`uploadInputImage(sessionId, input, {signal?})` 要求原连接和 `input_images` 能力，经闭合生成 validator 发送明确 MIME/base64 并解码完整 `InputImage` 引用；不读取路径、不跟随图片 URL、不隐式重试上传。start/steer/follow-up 与 Message 的可选 `images` 使用同一 Service schema，正式 Command 只传元数据，三个写入 validator 均限制每次最多 10 张，历史 Message 不因新上限而裁剪。完整历史图片读取仍复用 `readArtifact` 的准确原引用和 EOF／SHA 校验。实际协议与[真实 HTTP 测试](../../apps/service/test/isolated/input-images.test.ts)归 [Service](../../apps/service/README.md#图片输入协议)。
+
 ## 模型尝试与原工作身份
 
 公共 Execution 可保留原 `rootWorkCommandId`／`rootWorkSeq`，以及 Model 的 `modelRetry`：准确失败前驱、从 2 开始的实际 attempt、三类已定义原因和可空 `maxAttempts`。新执行的 null 表示没有本地次数上限，历史有限数字仍可读。字段沿同一 Service schema 生成并验证；缺字段不补重试事实，不公开私有 `decisionSource`、请求正文或凭据。TUI 在同 Store／Session／Run／原工作内关联前驱，null 时不显示虚构分母；Client 不执行模型重试，也不因观察到失败重发 Command。[真实 HTTP／生成 validator 回归](../../apps/service/test/isolated/long-running-compression.test.ts)核同一 Run 的第六次尝试与 null。实际尝试与资格归 [Agent](../agent/README.md)和[模型适配器](../ai/README.md)。

@@ -4,9 +4,55 @@ import { Sidebar } from '@kite-ai/ui/desktop';
 import { JSDOM } from 'jsdom';
 import { act } from 'react';
 import { createRoot } from 'react-dom/client';
-import type { NativeDirectory } from '../src/native-bridge';
+import { renderToStaticMarkup } from 'react-dom/server';
+import type { NativeDirectory, NativeSelection } from '../src/native-bridge';
 import { desktopDirectory } from '../src/native-presentation';
+import { backgroundItem } from './background-item.fixture';
 import { prepareDesktopDom } from './native-page-dom.fixture';
+
+test('same-session permission refresh retains the observed running marker until a real observation failure', () => {
+  const item = backgroundItem();
+  const directory: NativeDirectory = {
+    storeId: 'store',
+    workspaces: [{ id: 'w', name: 'Workspace', rootUri: 'file:///workspace' }],
+    sessions: [item.rootSession],
+  };
+  const selection: NativeSelection = {
+    storeId: 'store',
+    viewGeneration: 1,
+    viewSelection: 1,
+    session: item.rootSession,
+    runs: [{ ...item.run!, status: 'running' }],
+    executions: [],
+    interactions: [],
+    interactionsAfterId: null,
+    canReadModelOutput: false,
+  };
+  for (const refreshing of [false, true]) {
+    const workspaces = desktopDirectory(directory, {
+      ...selection,
+      viewLoading: refreshing,
+      permissionUnavailable: refreshing,
+    });
+    expect(workspaces[0]!.sessions[0]!.status).toBe('running');
+    expect(
+      renderToStaticMarkup(
+        <Sidebar workspaces={workspaces} actions={{}} connectionLabel="" onOpen={() => {}} />,
+      ),
+    ).toContain('aria-label="会话运行中"');
+  }
+  expect(
+    desktopDirectory(directory, { ...selection, permissionUnavailable: true })[0]!.sessions[0]!
+      .status,
+  ).toBe('上次确认状态');
+  expect(
+    desktopDirectory({ ...directory, unavailable: true }, { ...selection, viewLoading: true })[0]!
+      .sessions[0]!.status,
+  ).toBe('上次确认状态');
+  expect(
+    desktopDirectory(directory, { ...selection, storeId: 'other' })[0]!.sessions[0]!.status,
+  ).toBe('状态待读取');
+});
 
 test('PC directory groups original IDs, keeps navigation available during creation, and folds without a business call', async () => {
   const dom = new JSDOM('<div id="root"></div>', {

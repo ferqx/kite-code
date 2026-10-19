@@ -4,6 +4,13 @@ import { JSDOM } from 'jsdom';
 import { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import { ModelOutputMessage, type ModelOutputMessageProps } from '../src';
+import { useConversationReadActive } from '../src/conversation-activity';
+import { ConversationCache } from '../src/desktop/ConversationCache';
+
+function CachedOutput(props: ModelOutputMessageProps) {
+  const readActive = useConversationReadActive();
+  return <ModelOutputMessage {...props} readActive={readActive} />;
+}
 
 export function outputFixture(content = 'Full answer tail', complete = true) {
   const contentBytes = String(new TextEncoder().encode(content).length);
@@ -198,6 +205,24 @@ async function domFixture() {
     root = createRoot(host);
   return {
     host,
+    renderCached: (
+      props: ModelOutputMessageProps,
+      identity = 'a',
+      loading = false,
+      readActive = true,
+    ) =>
+      act(async () =>
+        root.render(
+          <ConversationCache
+            identity={identity}
+            loading={loading}
+            visible
+            cache={{ scope: 'store', revision: '1', readActive }}
+          >
+            <CachedOutput {...props} />
+          </ConversationCache>,
+        ),
+      ),
     render: (props: ModelOutputMessageProps) =>
       act(async () => root.render(<ModelOutputMessage {...props} />)),
     click: async (label: string) =>
@@ -320,6 +345,82 @@ test('ordinary conversation excludes raw reasoning; only explicit diagnostic hos
     await f.render({ ...props, showReasoning: true });
     expect(f.host.querySelector('details')!.open).toBe(false);
     expect(f.host.querySelector('details pre')!.textContent).toBe('PRIVATE THOUGHTS');
+  } finally {
+    await f.close();
+  }
+});
+
+test('KeepAlive retains the verified full body and exact Markdown DOM while retiring its old read lease and copy publication', async () => {
+  const f = await domFixture(),
+    data = outputFixture('Retained complete answer');
+  let reads = 0;
+  let signal: AbortSignal | undefined;
+  const content: (string | undefined)[] = [];
+  const props: ModelOutputMessageProps = {
+    message: data.message,
+    storeId: 'store',
+    onContent: (value) => content.push(value),
+    onRead: async (request) => {
+      reads++;
+      signal = request.signal;
+      return data.snapshot;
+    },
+  };
+  try {
+    await f.renderCached(props);
+    await f.click('Read complete recorded Model output');
+    const body = f.host.querySelector('.message-markdown')!;
+    const paragraph = body.querySelector('p')!;
+    expect(body.textContent).toBe(data.snapshot.output.content);
+    await f.renderCached(props, 'b');
+    expect(body.isConnected).toBe(false);
+    expect(signal?.aborted).toBe(true);
+    await f.renderCached(props, 'a', true, false);
+    expect(f.host.querySelector('.message-markdown') === body).toBe(true);
+    expect(body.querySelector('p') === paragraph).toBe(true);
+    expect(body.textContent).toBe(data.snapshot.output.content);
+    expect(content.at(-1)).toBeUndefined();
+    expect(reads).toBe(1);
+    await f.renderCached(props);
+    expect(f.host.querySelector('.message-markdown') === body).toBe(true);
+    expect(body.querySelector('p') === paragraph).toBe(true);
+    expect(content.at(-1)).toBe(data.snapshot.output.content);
+    expect(reads).toBe(1);
+    await f.renderCached({ ...props, message: { ...data.message, content: 'changed preview' } });
+    expect(f.host.querySelector('.message-markdown')?.textContent).toBe('changed preview');
+    expect(content.at(-1)).toBeUndefined();
+  } finally {
+    await f.close();
+  }
+});
+
+test('KeepAlive aborts a pending full read on deactivation and permits a fresh read after activation without accepting the late body', async () => {
+  const f = await domFixture(),
+    data = outputFixture('Fresh verified body');
+  let release: ((snapshot: ModelOutputSnapshot) => void) | undefined;
+  let signal: AbortSignal | undefined;
+  const props: ModelOutputMessageProps = {
+    message: data.message,
+    storeId: 'store',
+    onRead: (request) => {
+      signal = request.signal;
+      return new Promise((resolve) => {
+        release = resolve;
+      });
+    },
+  };
+  try {
+    await f.renderCached(props);
+    await f.click('Read complete recorded Model output');
+    await f.renderCached(props, 'b');
+    expect(signal?.aborted).toBe(true);
+    await f.renderCached({ ...props, onRead: async () => data.snapshot });
+    await act(async () => release?.(data.snapshot));
+    expect(f.host.querySelector('.message-markdown')?.textContent).toBe('PREVIEW');
+    await f.click('Read complete recorded Model output');
+    expect(f.host.querySelector('.message-markdown')?.textContent).toBe(
+      data.snapshot.output.content,
+    );
   } finally {
     await f.close();
   }

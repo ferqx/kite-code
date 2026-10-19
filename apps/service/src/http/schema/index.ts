@@ -38,15 +38,34 @@ const sequence = z
 const json = z.json();
 const additionalInputContent = z
   .string()
-  .min(1)
   .max(1048576)
-  .refine(
-    (content) =>
-      content.trim().length > 0 && new TextEncoder().encode(content).byteLength <= 1048576,
-  );
+  .refine((content) => new TextEncoder().encode(content).byteLength <= 1048576);
+const inputImage = z.strictObject({
+  name: z.string().min(1).max(512),
+  reference: z.strictObject({
+    id,
+    storeId: id,
+    sessionId: id,
+    subjectId: z.string().min(1).max(256),
+    scope: z.strictObject({ kind: z.literal('session'), id }),
+    hash: z.string().regex(/^[a-f0-9]{64}$/),
+    size: sequence
+      .max(8)
+      .refine((value) => BigInt(value) > 0 && BigInt(value) <= 16n * 1024n * 1024n),
+    mediaType: z.enum(['image/png', 'image/jpeg', 'image/webp', 'image/gif']),
+  }),
+});
+const inputFileReference = z.strictObject({
+  name: z.string().min(1).max(512),
+  uri: z.string().min(1).max(8192).startsWith('file://'),
+});
+const inputFiles = z.array(inputFileReference).max(128);
+const inputImages = z.array(inputImage).max(10);
 const steerInput = z.strictObject({
   kind: z.literal('input.steer'),
   content: additionalInputContent,
+  images: inputImages.optional(),
+  files: inputFiles.optional(),
   targetRunId: id,
   contextSelectionId: id,
 });
@@ -61,6 +80,8 @@ const selectedSkills = z.array(z.string().min(1).max(128)).max(256);
 const followUpInput = z.strictObject({
   kind: z.literal('input.follow_up'),
   content: additionalInputContent,
+  images: inputImages.optional(),
+  files: inputFiles.optional(),
   afterRunId: id.nullable(),
   contextSelectionId: id,
   modelId: z.string().min(1).max(256).optional(),
@@ -394,6 +415,19 @@ const providerSettingsMarker = z.strictObject({
   operation: providerSettingsOperation,
 });
 export const schemas = {
+  InputImage: inputImage,
+  InputFileReference: inputFileReference,
+  InputImageUploadRequest: z.strictObject({
+    expectedStoreId: id,
+    id: id.max(100),
+    name: z.string().min(1).max(512),
+    mediaType: z.enum(['image/png', 'image/jpeg', 'image/webp', 'image/gif']),
+    data: z
+      .string()
+      .min(4)
+      .max(24 * 1024 * 1024)
+      .regex(/^[A-Za-z0-9+/]*={0,2}$/),
+  }),
   ModelInputMetadata: modelInputMetadata,
   PermissionControlQuery: z.strictObject({ storeId: id }),
   PermissionModeState: z.object({
@@ -666,8 +700,16 @@ export const schemas = {
     resultRevision: sequence,
     targetRunId: id.optional(),
   }),
-  SteerCommandRequest: steerInput.extend({ expectedStoreId: id, commandId: id }),
-  FollowUpCommandRequest: followUpInput.extend({ expectedStoreId: id, commandId: id }),
+  SteerCommandRequest: steerInput
+    .extend({ expectedStoreId: id, commandId: id })
+    .refine(
+      (value) => value.content.trim().length > 0 || !!value.images?.length || !!value.files?.length,
+    ),
+  FollowUpCommandRequest: followUpInput
+    .extend({ expectedStoreId: id, commandId: id })
+    .refine(
+      (value) => value.content.trim().length > 0 || !!value.images?.length || !!value.files?.length,
+    ),
   InputListQuery: z.strictObject({
     storeId: id,
     kind: z.enum(['input.steer', 'input.follow_up']).optional(),
@@ -1003,6 +1045,8 @@ export const schemas = {
     role: z.enum(['system', 'user', 'assistant', 'tool']),
     content: z.string(),
     firstOutput: z.enum(['content', 'reasoning', 'tool_calls']).optional(),
+    images: z.array(inputImage).optional(),
+    files: inputFiles.optional(),
     compression: z
       .object({
         id,
@@ -1105,6 +1149,8 @@ export const schemas = {
     commandId: id,
     kind: z.literal('run.start'),
     content: z.string().max(262144),
+    images: inputImages.optional(),
+    files: inputFiles.optional(),
     modelId: z.string().max(256).optional(),
     reasoningEffort: z
       .enum(['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'ultar'])
@@ -1901,6 +1947,13 @@ export const apiRoutes = [
     path: '/v1/sessions/{id}/artifacts/{refId}',
     response: 'ArtifactContent',
     binary: true,
+  },
+  {
+    method: 'post',
+    path: '/v1/sessions/{id}/input-images',
+    request: 'InputImageUploadRequest',
+    response: 'InputImage',
+    statuses: [201],
   },
   {
     method: 'get',

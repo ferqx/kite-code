@@ -1,4 +1,5 @@
 import type { ModelRequest } from '@kite-ai/ai';
+import { isModelImage } from '@kite-ai/ai';
 import { isToolCallModel } from './model-tools';
 import type { ArtifactReference, Json } from './storage/types';
 import { AgentError } from './storage/types';
@@ -64,9 +65,21 @@ export function persistedModelRequest(value: Json): ModelRequest {
   for (const message of value.messages) {
     if (
       !object(message) ||
-      !keys(message, ['role', 'content', 'toolCalls', 'toolCallId', 'sourceIds', 'continuation']) ||
+      !keys(message, [
+        'role',
+        'content',
+        'images',
+        'toolCalls',
+        'toolCallId',
+        'sourceIds',
+        'continuation',
+      ]) ||
       !['system', 'user', 'assistant', 'tool'].includes(String(message.role)) ||
       !text(message.content) ||
+      (message.images !== undefined &&
+        (message.role !== 'user' ||
+          !Array.isArray(message.images) ||
+          !message.images.every(isModelImage))) ||
       (message.continuation !== undefined && message.role !== 'assistant') ||
       (message.toolCallId !== undefined && !text(message.toolCallId)) ||
       (message.sourceIds !== undefined &&

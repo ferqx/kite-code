@@ -359,7 +359,7 @@ void app
     const rendererPath = join(app.getAppPath(), 'index.html'),
       rendererUrl = development?.rendererUrl ?? pathToFileURL(rendererPath).href;
     window = new BrowserWindow({
-      title: 'kite',
+      title: 'Kite',
       width: 1100,
       height: 780,
       ...(process.platform === 'darwin'
@@ -392,7 +392,7 @@ void app
       },
     });
     if (process.platform === 'win32') {
-      app.setAboutPanelOptions({ applicationName: 'kite', applicationVersion: app.getVersion() });
+      app.setAboutPanelOptions({ applicationName: 'Kite', applicationVersion: app.getVersion() });
       const menuOptions = {
         applicationEnabled: true,
         dispatch(action: import('../src/native-menu-bridge').NativeWindowMenuAction) {
@@ -556,7 +556,7 @@ void app
     else await window.loadFile(rendererPath);
   })
   .catch(() => {
-    dialog.showErrorBox('kite 无法启动', '原生调用者初始化失败。请核对发行资源。');
+    dialog.showErrorBox('Kite 无法启动', '原生调用者初始化失败。请核对发行资源。');
     app.exit(1);
   });
 app.on('activate', () => {
@@ -615,8 +615,8 @@ async function showQuitWarning(stillWaiting: boolean): Promise<boolean> {
     type: 'warning' as const,
     title: stillWaiting ? '服务仍在收尾' : '服务收尾未正常完成',
     message: stillWaiting
-      ? '可以继续等待，或强制退出 kite。'
-      : 'kite 无法确认服务已安全收尾，仍可退出应用。',
+      ? '可以继续等待，或强制退出 Kite。'
+      : 'Kite 无法确认服务已安全收尾，仍可退出应用。',
     detail: '强制退出可能中断正在进行的任务。下次启动后请检查会话和文件结果。',
     buttons: stillWaiting ? ['强制退出', '继续等待'] : ['退出应用'],
     defaultId: stillWaiting ? 1 : 0,

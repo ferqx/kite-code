@@ -75,6 +75,7 @@ export function ModelEffortSelector(props: ModelEffortSelectorProps) {
     <Popover
       open={open}
       onOpenChange={(next) => {
+        if (next && props.disabled) return;
         setOpen(next);
         if (next) {
           setView('effort');

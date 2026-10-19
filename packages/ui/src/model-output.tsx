@@ -6,6 +6,8 @@ export interface ModelOutputMessageProps {
   readonly message: Message;
   readonly storeId: string;
   readonly suspended?: boolean;
+  /** Paused retained display cannot read or publish current copy content. */
+  readonly readActive?: boolean;
   /** Explicit diagnostic host opt-in; ordinary conversation reading excludes raw reasoning. */
   readonly showReasoning?: boolean;
   /** The host reader independently proves the original Model Store after profile restore. */
@@ -51,11 +53,12 @@ function validateSnapshot(
     throw new ClientError('model_output_identity_conflict');
 }
 
-/** Only current-view full-body state. The host reader verifies complete wire EOF/hash before resolving. */
+/** Verified display may survive deactivation; reads and content publication require current admission. */
 export function ModelOutputMessage({
   message,
   storeId,
   suspended = false,
+  readActive = true,
   showReasoning = false,
   canReadRestoredOrigin = false,
   verifiedSnapshot,
@@ -116,27 +119,36 @@ export function ModelOutputMessage({
         : undefined
     : undefined;
 
-  // biome-ignore lint/correctness/useExhaustiveDependencies: Replacing the host snapshot releases the previous body and any pending reader even when message metadata is unchanged.
+  const installed = useRef({ identity, suspended, verifiedSnapshot });
   useEffect(() => {
     current.current = identity;
-    if (suspended) callbacks.current.onContent?.(undefined);
+    if (suspended || !readActive) callbacks.current.onContent?.(undefined);
     generation.current++;
     request.current?.abort();
     request.current = undefined;
-    setLoaded(undefined);
-    setDismissed(undefined);
+    const previous = installed.current;
+    installed.current = { identity, suspended, verifiedSnapshot };
+    if (
+      previous.identity !== identity ||
+      previous.suspended !== suspended ||
+      previous.verifiedSnapshot !== verifiedSnapshot
+    ) {
+      setLoaded(undefined);
+      setDismissed(undefined);
+      setError(undefined);
+    }
     setLoading(false);
-    setError(undefined);
     return () => {
       generation.current++;
       request.current?.abort();
+      request.current = undefined;
       callbacks.current.onContent?.(undefined);
     };
-  }, [identity, suspended, verifiedSnapshot]);
+  }, [identity, suspended, verifiedSnapshot, readActive]);
   // biome-ignore lint/correctness/useExhaustiveDependencies: A new message scope must publish its content even if the host reuses the same verified snapshot object.
   useEffect(() => {
-    callbacks.current.onContent?.(full?.output.content);
-  }, [full, identity]);
+    callbacks.current.onContent?.(readActive ? full?.output.content : undefined);
+  }, [full, identity, readActive]);
   function close() {
     if (admittedSnapshot) setDismissed({ identity, snapshot: admittedSnapshot });
     callbacks.current.onContent?.(undefined);
@@ -153,6 +165,7 @@ export function ModelOutputMessage({
       body.readAvailability === 'unsupported' ||
       (!callbacks.current.onRead && !admittedSnapshot) ||
       suspended ||
+      !readActive ||
       request.current
     )
       return;
@@ -240,6 +253,7 @@ export function ModelOutputMessage({
             loading ||
             body.readAvailability === 'unsupported'
           }
+          aria-disabled={!readActive || undefined}
           onClick={() => void read()}
         >
           Read complete recorded Model output

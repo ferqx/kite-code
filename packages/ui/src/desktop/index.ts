@@ -1,9 +1,14 @@
+export {
+  useConversationReadActive,
+  useConversationResourceRetention,
+} from '../conversation-activity';
 export { Approval } from './Approval';
 export {
   AskQuestionnaire,
   type AskQuestionnaireOption,
   type AskQuestionnaireProps,
 } from './AskQuestionnaire';
+export { AttachmentFileCard } from './AttachmentFileCard';
 export {
   type BackgroundExecutionSummary,
   BackgroundExecutions,
@@ -76,6 +81,7 @@ export {
   parseDesktopMarkdown,
   rememberDesktopMarkdownParse,
 } from './markdown-parse-cache';
+export { PromptEditor, type PromptEditorHandle, type PromptEditorProps } from './PromptEditor';
 export { RightSidebar, type RightSidebarProps, type RightSidebarTab } from './RightSidebar';
 export {
   type ScheduledTaskDraft,

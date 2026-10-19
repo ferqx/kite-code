@@ -128,7 +128,7 @@ try {
         (event) => {
           const element = event.target as HTMLElement;
           const form = element.closest('form');
-          if (!form?.querySelector('textarea[aria-label="当前会话私有草稿"]')) return;
+          if (!form?.querySelector('[role="textbox"][aria-label="当前会话私有草稿"]')) return;
           target.planMainEvents.push({
             type: event.type,
             target: element.tagName,
@@ -391,7 +391,7 @@ try {
     );
     stage('initial_model_held', { sessionId: id, providerRequest: count + 1 });
     await input.fill(mainDraft);
-    assert.equal(await input.inputValue(), mainDraft);
+    assert.equal(await input.innerText(), mainDraft);
     await page
       .getByText('历史已完整读取至固定高水位；当前执行事实仍须核实。', { exact: true })
       .waitFor();
@@ -401,7 +401,7 @@ try {
       Boolean,
       'original Main save never became enabled',
     );
-    assert.equal(await input.inputValue(), mainDraft);
+    assert.equal(await input.innerText(), mainDraft);
     assert.equal((await state()).selection?.session.id, id);
     await page.evaluate(async () => {
       const target = window as DiagnosticWindow;
@@ -409,8 +409,8 @@ try {
         method: 'state',
         generation: 1,
       })) as NativeState;
-      const input = document.querySelector<HTMLTextAreaElement>(
-        'textarea[aria-label="当前会话私有草稿"]',
+      const input = document.querySelector<HTMLElement>(
+        '[role="textbox"][aria-label="当前会话私有草稿"]',
       )!;
       const button = Array.from(input.closest('form')!.querySelectorAll('button')).find(
         (value) => value.textContent === '保留草稿',
@@ -422,7 +422,7 @@ try {
             .map((value) => value.textContent ?? '')
             .find((value) => value.startsWith('历史')) ?? '',
         enabled: !button.disabled,
-        value: input.value,
+        value: input.innerText,
       };
     });
     await saveButton.click();
@@ -566,7 +566,7 @@ try {
     }
     await page.getByRole('textbox', { name: '当前会话私有草稿', exact: true }).waitFor();
     assert.equal(
-      await page.getByRole('textbox', { name: '当前会话私有草稿', exact: true }).inputValue(),
+      await page.getByRole('textbox', { name: '当前会话私有草稿', exact: true }).innerText(),
       mainDraft,
     );
     stage('done_complete', {

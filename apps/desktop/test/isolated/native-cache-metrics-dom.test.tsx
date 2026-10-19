@@ -255,13 +255,13 @@ test('confirmed cache text and input nodes survive repeated calibration and the 
   try {
     await render();
     const rate = f.host.querySelector('.composer-cache-rate')!,
-      input = f.host.querySelector('.composer textarea');
+      input = f.host.querySelector('.composer [role="textbox"][contenteditable]');
     expect(rate.textContent).toBe('缓存 40%');
     for (let revision = 1; revision <= 8; revision++) {
       await render([{ ...original }], false, revision);
       expect(f.host.querySelector('.composer-cache-rate')).toBe(rate);
       expect(rate.getAttribute('title')).toBe('缓存命中 40 / 100 tokens');
-      expect(f.host.querySelector('.composer textarea')).toBe(input);
+      expect(f.host.querySelector('.composer [role="textbox"][contenteditable]')).toBe(input);
       await render([{ ...original }], true, revision);
       expect(f.host.querySelector('.composer-cache-rate')).toBe(rate);
     }
@@ -281,7 +281,7 @@ test('confirmed cache text and input nodes survive repeated calibration and the 
     expect(f.host.querySelector('.composer-cache-rate')).toBe(rate);
     expect(rate.getAttribute('title')).toBe('缓存命中 200 / 300 tokens');
     expect(f.host.querySelector('[role="alert"]')?.textContent).toContain('缓存指标未更新');
-    expect(f.host.querySelector('.composer textarea')).toBe(input);
+    expect(f.host.querySelector('.composer [role="textbox"][contenteditable]')).toBe(input);
   } finally {
     await f.close();
   }

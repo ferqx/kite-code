@@ -32,7 +32,7 @@ const final = '项目包含 Core、Desktop 与共享 UI。';
 const summary = 'PRIVATE_COMPRESSION_SUMMARY';
 const raw = 'ORIGINAL_TOOL_RECEIPT';
 type Reader = 'runs' | 'tools';
-function fixture(failTools = false, failRuns = false) {
+function fixture(failTools = false, failRuns = false, withImage = false) {
   const dom = new JSDOM('<div id="root"></div>', {
     url: 'http://localhost',
     pretendToBeVisual: true,
@@ -52,9 +52,39 @@ function fixture(failTools = false, failRuns = false) {
   const session = { ...backgroundItem().rootSession, nextSeq: '6' };
   let selected = 'root',
     revision = 1,
+    viewSelection = 1,
     historyEpoch = 0,
     holdSelection = false;
   let releaseSelection: (() => void) | undefined;
+  let holdMessages = false,
+    releaseMessages: (() => void) | undefined;
+  const imageData =
+    'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wl6VQAAAABJRU5ErkJggg==';
+  const imageBytes = Buffer.from(imageData, 'base64');
+  const imageReference = {
+    id: 'image-artifact',
+    storeId: 'store',
+    sessionId: 'root',
+    subjectId: 'owner',
+    scope: { kind: 'session' as const, id: 'root' },
+    hash: new Bun.CryptoHasher('sha256').update(imageBytes).digest('hex'),
+    size: String(imageBytes.length),
+    mediaType: 'image/png' as const,
+  };
+  const urls: string[] = [],
+    revoked: string[] = [];
+  const createUrl = URL.createObjectURL,
+    revokeUrl = URL.revokeObjectURL;
+  if (withImage) {
+    URL.createObjectURL = () => {
+      const url = `blob:history-image-${urls.length}`;
+      urls.push(url);
+      return url;
+    };
+    URL.revokeObjectURL = (url) => {
+      revoked.push(url);
+    };
+  }
   const requests: NativeRequest[] = [];
   const pending: Record<Reader, (() => void)[]> = { runs: [], tools: [] };
   const listeners = new Set<(event: NativeEvent) => void>();
@@ -68,7 +98,7 @@ function fixture(failTools = false, failRuns = false) {
     selection: {
       storeId: 'store',
       viewGeneration: revision,
-      viewSelection: revision,
+      viewSelection,
       canReadModelOutput: false,
       session: {
         ...session,
@@ -109,6 +139,7 @@ function fixture(failTools = false, failRuns = false) {
     })),
     message('final', 'assistant', '5', final),
   ];
+  if (withImage) messages[0]!.images = [{ name: 'selected.png', reference: imageReference }];
   const bridge: NativeBridge = {
     watch(listener) {
       listeners.add(listener);
@@ -123,6 +154,7 @@ function fixture(failTools = false, failRuns = false) {
         case 'select': {
           selected = request.sessionId;
           revision++;
+          viewSelection++;
           if (holdSelection) {
             holdSelection = false;
             const value = state();
@@ -147,8 +179,8 @@ function fixture(failTools = false, failRuns = false) {
             ],
             workspaces: [{ id: 'w', name: 'Workspace', rootUri: 'file:///workspace' }],
           };
-        case 'messages':
-          return {
+        case 'messages': {
+          const page = {
             messages:
               selected === 'root'
                 ? messages
@@ -161,6 +193,31 @@ function fixture(failTools = false, failRuns = false) {
                   ],
             nextAfterSeq: null,
             highWaterSeq: request.upperSeq!,
+          };
+          if (holdMessages) {
+            holdMessages = false;
+            return new Promise((resolve) => {
+              releaseMessages = () => resolve(page);
+            });
+          }
+          return page;
+        }
+        case 'input.image.open':
+          return {
+            kind: 'input.image.open',
+            readId: request.readId,
+            hash: imageReference.hash,
+            size: imageBytes.length,
+            mediaType: 'image/png',
+          };
+        case 'input.image.read':
+          return {
+            kind: 'input.image.chunk',
+            readId: request.readId,
+            offset: 0,
+            nextOffset: imageBytes.length,
+            data: imageData,
+            done: true,
           };
         case 'draft.read':
           return {
@@ -236,10 +293,10 @@ function fixture(failTools = false, failRuns = false) {
                           id: 'old-run',
                           originStoreId: 'store',
                           sessionId: captured,
-                          status: 'completed',
-                          isActive: false,
+                          status: withImage ? 'running' : 'completed',
+                          isActive: withImage,
                           createdAt: 1000,
-                          finishedAt: 3000,
+                          finishedAt: withImage ? null : 3000,
                           reason: null,
                         },
                       ],
@@ -284,6 +341,8 @@ function fixture(failTools = false, failRuns = false) {
   return {
     host,
     requests,
+    urls,
+    revoked,
     until,
     release,
     async select(title: string) {
@@ -300,6 +359,17 @@ function fixture(failTools = false, failRuns = false) {
       holdSelection = true;
     },
     releaseSelection: () => act(async () => releaseSelection?.()),
+    async stream(text: string) {
+      releaseMessages = undefined;
+      await act(async () => {
+        messages[messages.length - 1] = { ...messages.at(-1)!, content: text };
+        revision++;
+        holdMessages = true;
+        for (const listener of listeners) listener({ kind: 'changed', generation: 1 });
+      });
+      await until(() => !!releaseMessages);
+    },
+    releaseMessages: () => act(async () => releaseMessages?.()),
     async recalibrateHistory() {
       await act(async () => {
         historyEpoch++;
@@ -319,12 +389,15 @@ function fixture(failTools = false, failRuns = false) {
     async close() {
       await act(async () => root.unmount());
       releaseSelection?.();
+      releaseMessages?.();
       for (const reader of ['runs', 'tools'] as const)
         for (const resolve of pending[reader].splice(0)) resolve();
       await new Promise((resolve) => setTimeout(resolve, 0));
       dom.window.close();
       restore();
       Object.assign(globalThis, prior);
+      URL.createObjectURL = createUrl;
+      URL.revokeObjectURL = revokeUrl;
     },
   };
 }
@@ -338,6 +411,54 @@ function expectLoading(host: HTMLElement) {
   expect(host.textContent).not.toContain(summary);
   expect(host.textContent).not.toContain(raw);
 }
+
+test('sent image thumbnails retain verified nodes and URLs through streaming and cached session switches', async () => {
+  const f = fixture(false, false, true);
+  try {
+    await f.render();
+    await f.release('runs');
+    await f.release('tools');
+    await f.until(() => !!f.host.querySelector('.native-user-image img'));
+    const card = f.host.querySelector('.native-user-image')!;
+    const image = card.querySelector('img')!;
+    const viewport = f.host.querySelector('.conversation-viewport')!;
+    expect(f.urls).toHaveLength(1);
+    for (let index = 1; index <= 3; index++) {
+      await f.stream(`streamed reply ${index}`);
+      expect(f.host.querySelector('.native-user-image')).toBe(card);
+      expect(card.querySelector('img')).toBe(image);
+      expect(f.host.querySelector('.conversation-viewport')).toBe(viewport);
+      expect(f.revoked).toHaveLength(0);
+      await f.releaseMessages();
+      await f.until(() => !!f.host.textContent?.includes(`streamed reply ${index}`));
+      expect(f.host.querySelector('.native-user-image')).toBe(card);
+      expect(card.querySelector('img')).toBe(image);
+      expect(f.urls).toHaveLength(1);
+    }
+    expect(f.requests.filter((request) => request.method === 'input.image.open')).toHaveLength(1);
+    await f.select('Other session');
+    await f.until(() => !!f.host.textContent?.includes('Other ready'));
+    expect(f.host.querySelector('.native-user-image')).toBeNull();
+    expect(f.revoked).toHaveLength(0);
+    await f.select('Original');
+    await f.until(() => f.pending('runs') > 0 && f.pending('tools') > 0);
+    expect(f.host.querySelector('.conversation-viewport') === viewport).toBe(true);
+    expect(f.urls).toHaveLength(1);
+    expect(f.host.querySelector('.native-user-image img') === image).toBe(true);
+    expect(image.getAttribute('src')).toBe(f.urls[0]!);
+    expect(f.requests.filter((request) => request.method === 'input.image.open')).toHaveLength(1);
+    await f.release('runs');
+    await f.release('tools');
+    await f.until(() => !!f.host.querySelector('.native-user-image img'));
+    expect(f.urls).toHaveLength(1);
+    expect(f.host.querySelector('.native-user-image img') === image).toBe(true);
+    expect(image.getAttribute('src')).toBe(f.urls[0]!);
+    expect(f.revoked).toHaveLength(0);
+    expect(f.requests.filter((request) => request.method === 'input.image.open')).toHaveLength(1);
+  } finally {
+    await f.close();
+  }
+});
 
 for (const first of ['runs', 'tools'] as const) {
   test(`historical Native transcript waits for both readers with ${first} facts arriving first, then mounts the completed collapsed Turn once`, async () => {
@@ -439,7 +560,7 @@ test('a failed historical Run check releases the initial loading boundary and re
   }
 });
 
-test('reentering cached history waits for fresh ownership and tool checks while preserving explicit process and aggregate reading state', async () => {
+test('reentering cached history restores the original DOM before fresh ownership and tool checks, with operations gated', async () => {
   const f = fixture();
   try {
     await f.render();
@@ -454,21 +575,45 @@ test('reentering cached history waits for fresh ownership and tool checks while 
     expect(f.host.querySelector('.tool-activity-summary')?.getAttribute('aria-expanded')).toBe(
       'true',
     );
+    const originalViewport = f.host.querySelector('.conversation-viewport')!,
+      originalReply = f.host.querySelector('.agent-turn-final')!;
     await f.select('Other session');
     await f.until(
       () => !!f.host.querySelector('.conversation-viewport')?.textContent?.includes('Other ready'),
     );
+    expect(originalViewport.isConnected).toBe(false);
     await f.select('Original');
     await f.until(() => f.pending('runs') > 0 && f.pending('tools') > 0);
-    expectLoading(f.host);
+    expect(f.host.querySelector('.conversation-loading') === null).toBe(true);
+    expect(f.host.querySelector('.conversation-viewport') === originalViewport).toBe(true);
+    expect(f.host.querySelector('.agent-turn-final') === originalReply).toBe(true);
+    expect(
+      f.host.querySelector('fieldset.conversation-cache-entry')?.getAttribute('aria-disabled') ===
+        'true',
+    ).toBe(true);
+    expect(f.host.textContent).toContain(final);
     await f.release('tools');
-    expectLoading(f.host);
+    expect(f.host.querySelector('.conversation-viewport') === originalViewport).toBe(true);
+    expect(f.host.querySelector('.agent-turn-final') === originalReply).toBe(true);
     await f.release('runs');
+    expect(f.host.querySelector('.conversation-viewport') === originalViewport).toBe(true);
+    expect(f.host.querySelector('.agent-turn-final') === originalReply).toBe(true);
     await f.until(() => !!f.host.querySelector('.agent-turn-summary'));
     expect(f.host.querySelector('.agent-turn-summary')?.getAttribute('aria-expanded')).toBe('true');
     expect(f.host.querySelector('.tool-activity-summary')?.getAttribute('aria-expanded')).toBe(
       'true',
     );
+    expect(
+      f.host.querySelector('.agent-turn-process')?.getAttribute('data-restored-expanded'),
+    ).toBe('true');
+    expect(f.host.querySelector('.tool-activity')?.getAttribute('data-restored-expanded')).toBe(
+      'true',
+    );
+    await act(async () => f.host.querySelector<HTMLButtonElement>('.agent-turn-summary')!.click());
+    await act(async () => f.host.querySelector<HTMLButtonElement>('.agent-turn-summary')!.click());
+    expect(
+      f.host.querySelector('.agent-turn-process')?.getAttribute('data-restored-expanded'),
+    ).toBeNull();
     expect(f.host.querySelector('.context-compacted')?.textContent).toBe('上下文压缩完成');
     expect(f.host.textContent).not.toContain('状态待核对');
     expect(f.host.textContent).not.toContain(summary);
@@ -521,7 +666,7 @@ test('repeatedly opening the current conversation preserves its nodes and readin
     const viewport = f.host.querySelector<HTMLElement>('.conversation-viewport')!,
       reply = f.host.querySelector('.message.assistant[data-final-reply="true"]'),
       compression = f.host.querySelector('.context-compacted'),
-      input = f.host.querySelector('textarea');
+      input = f.host.querySelector('[role="textbox"][contenteditable]');
     viewport.scrollTop = 23;
     const requests = f.requests.length;
     for (let index = 0; index < 3; index++) await f.select('Original');
@@ -538,7 +683,7 @@ test('repeatedly opening the current conversation preserves its nodes and readin
     expect(f.host.querySelector('.conversation-viewport')).toBe(viewport);
     expect(f.host.querySelector('.message.assistant[data-final-reply="true"]')).toBe(reply);
     expect(f.host.querySelector('.context-compacted')).toBe(compression);
-    expect(f.host.querySelector('textarea')).toBe(input);
+    expect(f.host.querySelector('[role="textbox"][contenteditable]')).toBe(input);
     expect(viewport.scrollTop).toBe(23);
     expect(f.host.querySelector('.agent-turn-summary')?.getAttribute('aria-expanded')).toBe('true');
     expect(f.host.querySelector('.tool-activity-summary')?.getAttribute('aria-expanded')).toBe(
@@ -576,8 +721,19 @@ test('repeatedly selecting an in-flight target reuses the original selection req
     await f.release('runs');
     await f.release('tools');
     await f.until(() => !!f.host.querySelector('.agent-turn-summary'));
+    await act(async () => f.host.querySelector<HTMLButtonElement>('.agent-turn-summary')!.click());
+    const reply = f.host.querySelector('.agent-turn-final')!,
+      process = f.host.querySelector('.agent-turn-process')!;
     f.holdNextSelection();
     await f.select('Other session');
+    expect(f.host.querySelector('.conversation-loading') === null).toBe(true);
+    expect(f.host.querySelector('.agent-turn-final') === reply).toBe(true);
+    expect(f.host.querySelector('.agent-turn-process') === process).toBe(true);
+    expect(f.host.querySelector('.agent-turn-summary')?.getAttribute('aria-expanded')).toBe('true');
+    expect(f.host.querySelector('.session-row[aria-current="page"]') === null).toBe(true);
+    expect(
+      f.host.querySelector<HTMLButtonElement>('.composer button[type="submit"]')?.disabled,
+    ).toBe(true);
     const requests = f.requests.filter((request) => request.method === 'select').length;
     await f.select('Other session');
     await f.select('Other session');

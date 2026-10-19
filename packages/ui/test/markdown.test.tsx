@@ -4,6 +4,7 @@ import { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { MessageContent } from '../src/desktop/MessageContent';
+import { parseDesktopMarkdown } from '../src/desktop/markdown-parser';
 import { SafeMessageMarkdown } from '../src/markdown';
 
 test('full Markdown structure with inert HTML, image alt and relative file text', () => {
@@ -113,6 +114,53 @@ test('desktop GFM preserves complete large text, original links and code, and or
   }
 });
 
+test('desktop tight and loose lists keep separate paragraph, code and nested-list edges without changing saved syntax', () => {
+  const tight = [
+    '1. Before **bold** [local](src/file.ts)',
+    '   ```text',
+    '   original command',
+    '   ```',
+    '   After the code.',
+    '2. Nested steps:',
+    '   - [x] Done',
+    '   - [ ] Pending',
+    '3. Ends with a code block:',
+    '   ```text',
+    '   last command',
+    '   ```',
+  ];
+  const loose = tight.map((line, index) => ([1, 4, 5, 8, 9].includes(index) ? `\n${line}` : line));
+  const outputs = [tight, loose].map((lines) => {
+    const text = lines.join('\n'),
+      tree = parseDesktopMarkdown(text),
+      saved = JSON.stringify(tree),
+      dom = new JSDOM(
+        renderToStaticMarkup(<MessageContent text={text} prepared={{ text, tree }} />),
+      );
+    try {
+      const list = dom.window.document.querySelector('.typeset-chat > ol')!,
+        [first, second, last] = [...list.children];
+      expect([...first!.children].map((element) => element.tagName)).toEqual(['P', 'PRE', 'P']);
+      expect(first!.querySelector('strong')!.textContent).toBe('bold');
+      expect(first!.querySelector('pre > code')!.textContent).toBe('original command\n');
+      expect(first!.lastElementChild!.textContent).toBe('After the code.');
+      expect([...second!.children].map((element) => element.tagName)).toEqual(['P', 'UL']);
+      const checks = second!.querySelectorAll('input[type="checkbox"]');
+      expect([...checks].map((input) => (input as HTMLInputElement).checked)).toEqual([
+        true,
+        false,
+      ]);
+      expect([...last!.children].map((element) => element.tagName)).toEqual(['P', 'PRE']);
+      expect(last!.querySelector('pre > code')!.textContent).toBe('last command\n');
+      expect(JSON.stringify(tree)).toBe(saved);
+      return list.textContent;
+    } finally {
+      dom.window.close();
+    }
+  });
+  expect(outputs[0]!.replace(/\s+/g, ' ')).toBe(outputs[1]!.replace(/\s+/g, ' '));
+});
+
 test('desktop Markdown file links use the current host callback, revoke and restore capability, and update the body', async () => {
   const dom = new JSDOM('<div id="root"></div>');
   const previous = {
@@ -158,6 +206,44 @@ test('desktop Markdown file links use the current host callback, revoke and rest
     expect(host.textContent).toBe('New file');
     await click();
     expect(calls.at(-1)).toBe('new-body:src/new.ts');
+  } finally {
+    await act(async () => root.unmount());
+    dom.window.close();
+    Object.assign(globalThis, previous);
+  }
+});
+
+test('desktop Markdown keeps table focus and horizontal reading position while rows stream in', async () => {
+  const dom = new JSDOM('<div id="root"></div>');
+  const previous = {
+    window: globalThis.window,
+    document: globalThis.document,
+    IS_REACT_ACT_ENVIRONMENT: (
+      globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }
+    ).IS_REACT_ACT_ENVIRONMENT,
+  };
+  Object.assign(globalThis, {
+    window: dom.window,
+    document: dom.window.document,
+    IS_REACT_ACT_ENVIRONMENT: true,
+  });
+  const host = dom.window.document.getElementById('root')!,
+    root = createRoot(host);
+  const text = '| Item | Status |\n| --- | :---: |\n| Original | Running |';
+  try {
+    await act(async () => root.render(<MessageContent text={text} />));
+    const region = host.querySelector<HTMLElement>('[aria-label="表格"]')!;
+    region.focus();
+    region.scrollLeft = 180;
+    await act(async () =>
+      root.render(<MessageContent text={`${text}\n| Arrived later | Complete |`} />),
+    );
+    const current = host.querySelector<HTMLElement>('[aria-label="表格"]')!;
+    expect(current.scrollLeft).toBe(180);
+    expect(dom.window.document.activeElement).toBe(current);
+    expect(current.querySelectorAll('tbody tr')).toHaveLength(2);
+    expect(current.querySelectorAll('th')[1]!.style.textAlign).toBe('center');
+    expect(current.textContent).toContain('Arrived later');
   } finally {
     await act(async () => root.unmount());
     dom.window.close();

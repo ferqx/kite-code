@@ -21,11 +21,31 @@ export interface ModelToolCall {
 export interface ModelMessage {
   readonly role: 'system' | 'user' | 'assistant' | 'tool';
   readonly content: string;
+  /** Inline immutable image bytes, encoded as base64; only user messages carry images. */
+  readonly images?: readonly ModelImage[];
   readonly toolCalls?: readonly ModelToolCall[];
   readonly toolCallId?: string;
   readonly sourceIds?: readonly string[];
   /** Opaque adapter continuation. Private model history, never display text or authority. */
   readonly continuation?: Json;
+}
+
+export const imageMediaTypes = ['image/png', 'image/jpeg', 'image/webp', 'image/gif'] as const;
+export interface ModelImage {
+  readonly mediaType: (typeof imageMediaTypes)[number];
+  readonly data: string;
+}
+export function isModelImage(value: unknown): value is ModelImage {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const image = value as Record<string, unknown>;
+  return (
+    Object.keys(image).sort().join(',') === 'data,mediaType' &&
+    imageMediaTypes.includes(image.mediaType as ModelImage['mediaType']) &&
+    typeof image.data === 'string' &&
+    image.data.length > 0 &&
+    image.data.length % 4 === 0 &&
+    /^[A-Za-z0-9+/]*={0,2}$/.test(image.data)
+  );
 }
 
 export interface ModelTool {
