@@ -47,10 +47,12 @@ import type {
 } from './interaction-history-bridge';
 import type { NativeJobOutputPage, NativeJobOutputRequest } from './job-output-bridge';
 import type { NativeMcpRequest, NativeMcpResult, NativeMcpSubmission } from './mcp-bridge';
+import type { NativeBrowserBridge } from './native-browser-bridge';
 import type { NativeWindowMenuBridge } from './native-menu-bridge';
 import type { NativeScheduledRequest, NativeScheduledResult } from './scheduled-bridge';
 import type { NativeSkillsPage, NativeSkillsRequest } from './skills-bridge';
 import type {
+  NativeContextUsagePage,
   NativeModelUsagePage,
   NativeToolMessagePage,
   NativeToolMessageRequest,
@@ -771,6 +773,7 @@ export type NativeResult =
   | NativeToolMessagePage
   | NativeToolRunPage
   | NativeModelUsagePage
+  | NativeContextUsagePage
   | NativeFileTargetPage
   | NativeFileChangePage
   | NativeFileChangeDetail
@@ -831,7 +834,11 @@ declare global {
     readonly kiteNative?: Readonly<
       NativeBridge &
         Partial<
-          NativeThemeBridge & NativeWindowBridge & NativeWindowMenuBridge & NativeStartupBridge
+          NativeThemeBridge &
+            NativeWindowBridge &
+            NativeWindowMenuBridge &
+            NativeStartupBridge &
+            NativeBrowserBridge
         >
     >;
   }

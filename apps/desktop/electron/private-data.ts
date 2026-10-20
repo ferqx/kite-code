@@ -19,7 +19,7 @@ import {
   type NativeAnswerRecord,
   validateAnswerRecord,
 } from './answer-journal';
-import { callerCanonical, validateCallerRecord } from './caller-journal';
+import { callerCanonical, callerTextDigest, validateCallerRecord } from './caller-journal';
 import {
   type NativeConfigurationData,
   type NativeConfigurationRecord,
@@ -510,10 +510,51 @@ export function openPrivateData(profilePath: string, access: DesktopProfileAcces
       ...(row.code ? { code: String(row.code) } : {}),
     };
   };
-  const read = (scope: DraftScope): NativeDraft => {
+  const readDraft = (scope: DraftScope): NativeDraft => {
     const id = identity(scope),
       row = database().prepare('SELECT * FROM drafts WHERE id=?').get(id);
     return row ? draft(row) : { id, ...scope, revision: 0, content: '' };
+  };
+  function submittedDraft(record: NativeCallerRecord, saved: NativeDraft): boolean {
+    const { intent, phase } = record,
+      proof = intent.draft;
+    return (
+      (phase === 'accepted' || phase === 'applied') &&
+      !!proof &&
+      proof.id === saved.id &&
+      proof.revision === String(saved.revision) &&
+      intent.scope.storeId === saved.storeId &&
+      intent.scope.workspaceId === saved.workspaceId &&
+      intent.scope.sessionId === saved.rootSessionId &&
+      'content' in intent.request &&
+      intent.request.content === saved.content &&
+      callerTextDigest(saved.content) === proof.textDigest
+    );
+  }
+  // Caller receipt and consumption share one transaction. A later edit owns a new revision.
+  function consumeDraft(record: NativeCallerRecord) {
+    const proof = record.intent.draft;
+    if (!proof || !['accepted', 'applied'].includes(record.phase)) return;
+    const row = database().prepare('SELECT * FROM drafts WHERE id=?').get(proof.id);
+    if (!row) return;
+    const saved = draft(row);
+    if (!saved.content || !submittedDraft(record, saved)) return;
+    if (!Number.isSafeInteger(saved.revision + 1)) throw Error('draft_revision_conflict');
+    database()
+      .prepare('UPDATE drafts SET revision=?,content=? WHERE id=? AND revision=?')
+      .run(saved.revision + 1, JSON.stringify(''), saved.id, saved.revision);
+  }
+  const read = (scope: DraftScope): NativeDraft => {
+    const saved = readDraft(scope);
+    if (!saved.content) return saved;
+    // Older clients kept accepted input as a saved draft. Reconcile only its exact proof;
+    // opening history performs no command lookup, retry or new submission.
+    const accepted = callerRows().find((record) => submittedDraft(record, saved));
+    if (!accepted) return saved;
+    return transaction(() => {
+      consumeDraft(accepted);
+      return readDraft(scope);
+    });
   };
   const port: PrivateData = {
     ...createScheduledTaskData(database),
@@ -634,7 +675,7 @@ export function openPrivateData(profilePath: string, access: DesktopProfileAcces
     save(scope, revision, content) {
       if (Buffer.byteLength(content) > 1048576) throw Error('draft_capacity_exceeded');
       return transaction(() => {
-        const previous = read(scope);
+        const previous = readDraft(scope);
         if (previous.revision !== revision) throw Error('draft_revision_conflict');
         if (!Number.isSafeInteger(revision + 1)) throw Error('draft_revision_conflict');
         database()
@@ -943,7 +984,10 @@ export function openPrivateData(profilePath: string, access: DesktopProfileAcces
         const rows = callerRows(),
           old = rows.find((r) => r.intent.request.commandId === commandId);
         if (!old) throw Error('caller_intent_missing');
-        if (['applied', 'rejected'].includes(old.phase)) return old;
+        if (['applied', 'rejected'].includes(old.phase)) {
+          consumeDraft(old);
+          return old;
+        }
         const value = validateCallerRecord({ ...old, phase });
         if (
           callerBytes() -
@@ -961,6 +1005,7 @@ export function openPrivateData(profilePath: string, access: DesktopProfileAcces
         database()
           .prepare('UPDATE caller_intents SET state=? WHERE command_id=?')
           .run(JSON.stringify(value), commandId);
+        consumeDraft(value);
         return value;
       });
     },

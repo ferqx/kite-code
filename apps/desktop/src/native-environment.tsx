@@ -61,7 +61,11 @@ export function environmentDisplay(
     // Automatic title generation stays in execution history, outside this task list.
     if (
       e.definitionId === 'agent/session-title' ||
-      (!e.childSessionId && e.definitionId !== 'shell.command')
+      (!e.childSessionId &&
+        (e.definitionId !== 'shell.command' ||
+          item.sourceTool?.id !== e.parentExecutionId ||
+          item.sourceTool?.definitionId !== 'shell.launch' ||
+          item.sourceTool?.definitionVersion !== '1'))
     )
       continue;
     const restored = e.originStoreId !== storeId;

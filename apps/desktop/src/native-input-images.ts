@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useReducer, useRef } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useReducer, useRef } from 'react';
 import {
   encodeInputImageChunk,
   hashInputImage,
@@ -8,6 +8,7 @@ import {
 } from './input-image-encoding';
 import { inputImageCount, inputImageWindowCount } from './input-images-bridge';
 import type { NativeBridge } from './native-bridge';
+import { NativeImagePreviews } from './native-image-previews';
 
 type ImageDraft = {
   id: string;
@@ -18,6 +19,7 @@ type ImageDraft = {
   abort: AbortController;
   loading?: boolean;
   error?: string;
+  previewError?: string;
 };
 const mediaTypes = ['image/png', 'image/jpeg', 'image/webp', 'image/gif'] as const;
 type FileDraft = { id: string; name: string; uri: string; generation: number };
@@ -32,6 +34,8 @@ export function useNativeInputImages(
   generation: number | undefined,
   storeId: string | undefined,
 ) {
+  // biome-ignore lint/correctness/useExhaustiveDependencies: Derived content cannot cross a connection, generation or Store boundary.
+  const previews = useMemo(() => new NativeImagePreviews(), [bridge, generation, storeId]);
   const drafts = useRef(new Map<string, (ImageDraft | FileDraft)[]>());
   const preparation = useRef(Promise.resolve());
   const [, redraw] = useReducer((value) => value + 1, 0);
@@ -41,6 +45,7 @@ export function useNativeInputImages(
   });
   useEffect(() => {
     return () => {
+      previews.clear();
       for (const images of drafts.current.values())
         for (const image of images) {
           if (!('url' in image)) continue;
@@ -53,7 +58,7 @@ export function useNativeInputImages(
         }
       drafts.current.clear();
     };
-  }, [bridge, generation, storeId]);
+  }, [bridge, generation, storeId, previews]);
   function all(key: string) {
     return drafts.current.get(key)?.filter((image) => image.generation === generation) ?? [];
   }
@@ -182,10 +187,22 @@ export function useNativeInputImages(
       const prepare = async () => {
         if (!alive()) return;
         try {
-          item.url = URL.createObjectURL(file);
-          redraw();
           const hash = await hashInputImage(file, item.abort.signal);
           if (!alive()) return;
+          try {
+            const preview = await previews.prepare(
+              file.slice(0, file.size, mediaType),
+              hash,
+              item.abort.signal,
+            );
+            if (!alive()) return;
+            item.url = URL.createObjectURL(preview.blob);
+          } catch {
+            if (!alive()) return;
+            // Preview failure does not change or prevent the original image submission.
+            item.previewError = '预览不可用';
+          }
+          redraw();
           await bridge.request({
             method: 'input.images.begin',
             generation,
@@ -234,5 +251,5 @@ export function useNativeInputImages(
       });
     return bridge.fileReferences(selected);
   }
-  return { get, files, add, addFiles, removeIds, move, fileReferences };
+  return { get, files, add, addFiles, removeIds, move, fileReferences, previews };
 }

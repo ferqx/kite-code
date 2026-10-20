@@ -44,10 +44,16 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from './components/ui/dropdown-menu';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from './components/ui/tooltip';
 import { cn } from './lib/utils';
 import { ModelEffortSelector, type ModelOption, type ThinkingEffort } from './ModelEffortSelector';
 import { PromptEditor, type PromptEditorHandle } from './PromptEditor';
 import { Button } from './ui';
+
+const contextTokenFormat = new Intl.NumberFormat('en-US', {
+  notation: 'compact',
+  maximumFractionDigits: 1,
+});
 
 const permissionModes = [
   { value: 'accept_edits', icon: UserQuestion01Icon },
@@ -58,7 +64,7 @@ const permissionModes = [
 const permissionCopy = {
   zh: {
     name: '权限',
-    loading: '读取审核方式…',
+    placeholder: '审核方式',
     heading: '如何处理操作请求？',
     helper: '为当前对话选择审批方式',
     accept_edits: {
@@ -89,7 +95,7 @@ const permissionCopy = {
   },
   en: {
     name: 'Permission',
-    loading: 'Reading approval mode…',
+    placeholder: 'Approval mode',
     heading: 'How should actions be approved?',
     helper: 'Choose an approval mode for this conversation',
     accept_edits: {
@@ -133,7 +139,14 @@ export interface ComposerProps {
   onRemoveFile?: (id: string) => void;
   onImageFiles?: (files: readonly File[]) => void;
   imageLimit?: number;
-  images?: readonly { id: string; name: string; url: string; loading?: boolean; error?: string }[];
+  images?: readonly {
+    id: string;
+    name: string;
+    url: string;
+    loading?: boolean;
+    error?: string;
+    previewError?: string;
+  }[];
   onRemoveImage?: (id: string) => void;
   imageError?: string;
   context?: ReactNode;
@@ -162,6 +175,10 @@ export interface ComposerProps {
   permissionDisabled?: boolean;
   permissionPending?: boolean;
   sessionLoading?: boolean;
+  contextUsage?: {
+    readonly totalInputTokens: number;
+    readonly contextWindowTokens?: number;
+  };
   cacheMetrics?: {
     readonly cacheHitTokens: number;
     readonly cacheMissTokens: number;
@@ -327,12 +344,23 @@ export function Composer(props: ComposerProps) {
   const permissionText = permissionCopy[permissionLanguage];
   const permissionLabel = props.permission
     ? permissionText[props.permission].label
-    : permissionText.loading;
+    : permissionText.placeholder;
   const cacheTokenTotal =
     (props.cacheMetrics?.cacheHitTokens ?? 0) + (props.cacheMetrics?.cacheMissTokens ?? 0);
   const cacheHitPercentage =
     cacheTokenTotal > 0
       ? Math.round(((props.cacheMetrics?.cacheHitTokens ?? 0) / cacheTokenTotal) * 100)
+      : undefined;
+  const contextTokens = props.contextUsage?.totalInputTokens;
+  const contextWindowTokens = props.contextUsage?.contextWindowTokens;
+  const contextPercentage =
+    contextTokens !== undefined &&
+    Number.isSafeInteger(contextTokens) &&
+    contextTokens >= 0 &&
+    contextWindowTokens !== undefined &&
+    Number.isSafeInteger(contextWindowTokens) &&
+    contextWindowTokens > 0
+      ? Math.round((contextTokens / contextWindowTokens) * 100)
       : undefined;
   const canSend =
     !!props.onSend &&
@@ -450,11 +478,18 @@ export function Composer(props: ComposerProps) {
             ))}
             {props.images?.map((image) => (
               <div className="composer-attachment" key={image.id}>
-                <div className="composer-attachment-preview">
-                  {image.url && <img src={image.url} alt={image.name} />}
+                <div
+                  className="composer-attachment-preview"
+                  aria-busy={(!image.url && !image.previewError && !image.error) || undefined}
+                >
+                  {image.url ? (
+                    <img src={image.url} alt={image.name} decoding="async" />
+                  ) : image.previewError || image.error ? (
+                    <span>{image.previewError ?? '预览不可用'}</span>
+                  ) : null}
                 </div>
                 <span className="composer-attachment-name" title={image.error ?? image.name}>
-                  {image.error ?? (image.loading ? '正在准备…' : image.name)}
+                  {image.error ?? image.name}
                 </span>
                 {props.onRemoveImage && (
                   <Button
@@ -577,7 +612,7 @@ export function Composer(props: ComposerProps) {
                     )}
                     data-permission-trigger
                     data-preserve-enabled={previousPresentation?.permission || undefined}
-                    aria-busy={props.permissionPending || undefined}
+                    aria-busy={props.permissionPending || props.sessionLoading || undefined}
                     aria-label={`${permissionText.name}${permissionLanguage === 'zh' ? '：' : ': '}${permissionLabel}${props.permissionPending ? (permissionLanguage === 'zh' ? '，切换中' : ', changing') : ''}`}
                     disabled={props.permissionDisabled || !props.permission}
                   >
@@ -648,69 +683,127 @@ export function Composer(props: ComposerProps) {
                 </DropdownMenuContent>
               </DropdownMenu>
             )}
-            {cacheHitPercentage !== undefined && (
-              <span
-                className="composer-cache-rate"
-                title={`缓存命中 ${props.cacheMetrics!.cacheHitTokens} / ${cacheTokenTotal} tokens`}
-              >
-                缓存 {cacheHitPercentage}%
-              </span>
-            )}
           </div>
-          <div className="composer-actions">
-            {showStop ? (
-              <Button
-                className="primary composer-action stop-action"
-                size="icon-sm"
-                aria-label={props.stopping ? '正在停止…' : '停止任务'}
-                title={props.stopping ? '正在停止…' : '停止任务'}
-                onClick={props.onCancel}
-                disabled={props.stopping || props.cancelDisabled}
-                data-preserve-enabled={
-                  (!!previousPresentation?.stop && !props.stopping) || undefined
-                }
-              >
-                <HugeiconsIcon icon={StopIcon} fill="currentColor" strokeWidth={0} />
-              </Button>
-            ) : (
-              <Button
-                className="primary composer-action"
-                size="icon-sm"
-                type="submit"
-                aria-label={
-                  props.sendLabel ??
-                  (props.sending
-                    ? '正在发送消息'
-                    : props.submitStatus
-                      ? `发送消息：${props.submitStatus}`
-                      : props.active
-                        ? '发送运行中引导'
-                        : '发送消息')
-                }
-                title={
-                  props.sendLabel ??
-                  (props.sending
-                    ? '正在发送消息'
-                    : props.submitStatus || (props.active ? '发送运行中引导' : '发送消息'))
-                }
-                aria-busy={props.sending || undefined}
-                disabled={!canSend}
-                data-preserve-enabled={
-                  (!!previousPresentation?.send &&
-                    !props.sending &&
-                    !pickingFiles &&
-                    !props.images?.some((image) => image.loading || image.error) &&
-                    (!!props.draft.trim() || !!props.images?.length || !!props.files?.length)) ||
-                  undefined
-                }
-              >
-                <HugeiconsIcon
-                  icon={props.sending ? Loading03Icon : ArrowUp02Icon}
-                  className={props.sending ? 'motion-safe:animate-spin' : undefined}
-                  strokeWidth={2}
-                />
-              </Button>
+          <div className="composer-trailing">
+            {(cacheHitPercentage !== undefined || props.contextUsage) && (
+              <div className="composer-metrics">
+                {cacheHitPercentage !== undefined && (
+                  <span
+                    className="composer-cache-rate"
+                    title={`缓存命中 ${props.cacheMetrics!.cacheHitTokens} / ${cacheTokenTotal} tokens`}
+                  >
+                    缓存 {cacheHitPercentage}%
+                  </span>
+                )}
+                {props.contextUsage && (
+                  <TooltipProvider delayDuration={200}>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <Button
+                          className="composer-context-usage"
+                          variant="ghost"
+                          size="icon-sm"
+                          aria-label={
+                            contextPercentage === undefined
+                              ? '上下文占用未知'
+                              : `上下文占用约 ${contextPercentage}%`
+                          }
+                          aria-description={`上下文估算 ${contextTokens} / ${contextWindowTokens ?? '未知'} tokens`}
+                        >
+                          <svg viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                            <circle className="composer-context-track" cx="8" cy="8" r="6" />
+                            {contextPercentage !== undefined && contextPercentage > 0 && (
+                              <circle
+                                cx="8"
+                                cy="8"
+                                r="6"
+                                pathLength="100"
+                                strokeDasharray={`${Math.min(contextPercentage, 100)} 100`}
+                                transform="rotate(-90 8 8)"
+                              />
+                            )}
+                          </svg>
+                        </Button>
+                      </TooltipTrigger>
+                      <TooltipContent
+                        className="kite-client composer-context-tooltip"
+                        side="top"
+                        sideOffset={8}
+                        collisionPadding={12}
+                      >
+                        <span>上下文窗口</span>
+                        <span>
+                          {contextPercentage === undefined
+                            ? '占用比例未知'
+                            : `约 ${contextPercentage}% 已用`}
+                        </span>
+                        <span>
+                          已用 {contextTokenFormat.format(contextTokens!).toLowerCase()} 标记，
+                          {contextWindowTokens === undefined
+                            ? '总量未知'
+                            : `共 ${contextTokenFormat.format(contextWindowTokens).toLowerCase()}`}
+                        </span>
+                      </TooltipContent>
+                    </Tooltip>
+                  </TooltipProvider>
+                )}
+              </div>
             )}
+            <div className="composer-actions">
+              {showStop ? (
+                <Button
+                  className="primary composer-action stop-action"
+                  size="icon-sm"
+                  aria-label={props.stopping ? '正在停止…' : '停止任务'}
+                  title={props.stopping ? '正在停止…' : '停止任务'}
+                  onClick={props.onCancel}
+                  disabled={props.stopping || props.cancelDisabled}
+                  data-preserve-enabled={
+                    (!!previousPresentation?.stop && !props.stopping) || undefined
+                  }
+                >
+                  <HugeiconsIcon icon={StopIcon} fill="currentColor" strokeWidth={0} />
+                </Button>
+              ) : (
+                <Button
+                  className="primary composer-action"
+                  size="icon-sm"
+                  type="submit"
+                  aria-label={
+                    props.sendLabel ??
+                    (props.sending
+                      ? '正在发送消息'
+                      : props.submitStatus
+                        ? `发送消息：${props.submitStatus}`
+                        : props.active
+                          ? '发送运行中引导'
+                          : '发送消息')
+                  }
+                  title={
+                    props.sendLabel ??
+                    (props.sending
+                      ? '正在发送消息'
+                      : props.submitStatus || (props.active ? '发送运行中引导' : '发送消息'))
+                  }
+                  aria-busy={props.sending || undefined}
+                  disabled={!canSend}
+                  data-preserve-enabled={
+                    (!!previousPresentation?.send &&
+                      !props.sending &&
+                      !pickingFiles &&
+                      !props.images?.some((image) => image.loading || image.error) &&
+                      (!!props.draft.trim() || !!props.images?.length || !!props.files?.length)) ||
+                    undefined
+                  }
+                >
+                  <HugeiconsIcon
+                    icon={props.sending ? Loading03Icon : ArrowUp02Icon}
+                    className={props.sending ? 'motion-safe:animate-spin' : undefined}
+                    strokeWidth={2}
+                  />
+                </Button>
+              )}
+            </div>
           </div>
         </div>
       </form>

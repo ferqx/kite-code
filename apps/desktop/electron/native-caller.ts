@@ -1126,6 +1126,7 @@ export class NativeCaller {
         'toolMessages.list',
         'toolMessages.runs',
         'toolMessages.usage',
+        'toolMessages.contextUsage',
         'toolMessages.close',
         'input.image.open',
         'input.image.read',
@@ -1251,6 +1252,9 @@ export class NativeCaller {
         break;
       case 'toolMessages.runs':
         result = await this.toolMessages.runs(request);
+        break;
+      case 'toolMessages.contextUsage':
+        result = await this.toolMessages.contextUsage(request);
         break;
       case 'toolMessages.usage':
         result = await this.toolMessages.usage(request);

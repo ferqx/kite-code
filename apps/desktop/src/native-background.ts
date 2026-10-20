@@ -82,6 +82,9 @@ export async function readNativeBackground(input: BackgroundRead) {
           decimal(item.seq) <= lastSeq ||
           ids.has(item.execution.id) ||
           item.execution.kind !== 'job' ||
+          (item.sourceTool &&
+            (item.sourceTool.id !== item.execution.parentExecutionId ||
+              item.sourceTool.id === item.execution.id)) ||
           !item.execution.originStoreId ||
           item.execution.sessionId !== item.session.id ||
           item.execution.rootSessionId !== item.rootSession.id ||

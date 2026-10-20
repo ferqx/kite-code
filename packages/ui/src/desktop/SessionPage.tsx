@@ -1,4 +1,5 @@
 import {
+  BrowserIcon,
   InformationCircleIcon,
   PanelLeftCloseIcon,
   PanelLeftOpenIcon,
@@ -28,6 +29,7 @@ import {
   ScheduledTasks,
   type ScheduledTasksProps,
 } from './ScheduledTasks';
+import { type SessionBrowserPageProps, SessionTabs, useSessionTabs } from './SessionTabs';
 import { type PageActions, Sidebar } from './Sidebar';
 import type { Message, TurnActivity, WorkspaceSummary } from './types';
 import { Button } from './ui';
@@ -105,6 +107,8 @@ export interface SessionPageProps {
   fileChanges?: readonly Message[];
   /** Host receipt reader rendered within the retained FileChanges sidebar. */
   fileChangesContent?: ReactNode;
+  renderBrowser?: (props: SessionBrowserPageProps) => ReactNode;
+  closeBrowser?: (id: string) => void;
   newConversation?: NewConversationProps;
   workbench?: boolean;
   scheduledTasks?: ScheduledTasksProps;
@@ -139,13 +143,22 @@ export function SessionPage({ messages, fileChanges, ...props }: SessionPageProp
   const navigationPanel = useRef<PanelImperativeHandle>(null);
   const detailsPanel = useRef<PanelImperativeHandle>(null);
   const panelGroupElement = useRef<HTMLDivElement>(null);
+  const contentGroupElement = useRef<HTMLDivElement>(null);
   const navigationPanelFrame = useRef<number | undefined>(undefined);
   const panelAnimationTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const detailsPanelFrame = useRef<number | undefined>(undefined);
   const retainedRightSidebarPanel = useRef<ReactNode>(null);
-  const [changesKey, setChangesKey] = useState<string>();
-  const hasFileChanges = fileChanges !== undefined || props.fileChangesContent !== undefined;
-  const changesOpen = changesKey === props.readingKey && hasFileChanges;
+  const [tabsKey, setTabsKey] = useState<string>();
+  const [detailsCollapsed, setDetailsCollapsed] = useState<boolean>();
+  const presentedTabsKey = useRef<string | undefined>(undefined);
+  const hasTabs =
+    !props.workbench &&
+    !props.scheduledTasks &&
+    (props.renderBrowser !== undefined ||
+      fileChanges !== undefined ||
+      props.fileChangesContent !== undefined);
+  const tabModel = useSessionTabs(hasTabs ? props.readingKey : 'inactive', props.closeBrowser);
+  const tabsOpen = tabsKey === props.readingKey && hasTabs;
   const scheduledEditorGeneration = useRef(0);
   const [scheduledEditor, setScheduledEditor] = useState<{
     generation: number;
@@ -183,13 +196,22 @@ export function SessionPage({ messages, fileChanges, ...props }: SessionPageProp
   const previousEnvironmentMode = useRef(environmentMode);
   const hostDetailsOpen = !!props.detailPanel;
   useLayoutEffect(() => {
-    if (hostDetailsOpen) setChangesKey(undefined);
+    if (hostDetailsOpen) setTabsKey(undefined);
   }, [hostDetailsOpen]);
   const detailClose = useRef(props.detailPanel?.onClose);
   detailClose.current = props.detailPanel?.onClose;
   const rightSidebarOpen =
-    hostDetailsOpen || changesOpen || (!!scheduledEditor && !!props.scheduledTasks);
-  const changesToggle = useRef<HTMLButtonElement>(null);
+    hostDetailsOpen || tabsOpen || (!!scheduledEditor && !!props.scheduledTasks);
+  const tabsVisible = tabsOpen && detailsCollapsed !== true;
+  const tabsPresent =
+    tabsVisible ||
+    (!rightSidebarOpen && panelsAnimating && presentedTabsKey.current === props.readingKey);
+  useLayoutEffect(() => {
+    if (tabsVisible) presentedTabsKey.current = props.readingKey;
+    else if (!panelsAnimating || hostDetailsOpen || props.covered)
+      presentedTabsKey.current = undefined;
+  }, [tabsVisible, panelsAnimating, hostDetailsOpen, props.covered, props.readingKey]);
+  const tabsToggle = useRef<HTMLButtonElement>(null);
   const scheduledEditorToggle = useRef<HTMLButtonElement | null>(null);
   const focusControlAfterCommit = useCallback((control: { current: HTMLButtonElement | null }) => {
     queueMicrotask(() => control.current?.focus());
@@ -203,7 +225,8 @@ export function SessionPage({ messages, fileChanges, ...props }: SessionPageProp
     ) => {
       if (frame.current !== undefined) cancelAnimationFrame(frame.current);
       frame.current = undefined;
-      const currentGroup = panelGroupElement.current;
+      const groupElement = panel === detailsPanel ? contentGroupElement : panelGroupElement;
+      const currentGroup = groupElement.current;
       if (
         commit &&
         (!currentGroup ||
@@ -217,7 +240,7 @@ export function SessionPage({ messages, fileChanges, ...props }: SessionPageProp
         frame.current = undefined;
         // The header affordance and the panel layout must start in one commit.
         commit?.();
-        const group = panelGroupElement.current;
+        const group = groupElement.current;
         if (!group || group.offsetWidth <= 0 || group.getBoundingClientRect().width <= 0) return;
         const target = panel.current;
         if (!target || target.isCollapsed() !== open) return;
@@ -264,6 +287,13 @@ export function SessionPage({ messages, fileChanges, ...props }: SessionPageProp
     () => schedulePanelChange(detailsPanelFrame, detailsPanel, false),
     [schedulePanelChange],
   );
+  const changeTabsOpen = useCallback(
+    (open: boolean) =>
+      schedulePanelChange(detailsPanelFrame, detailsPanel, open, () => {
+        setTabsKey(open ? props.readingKey : undefined);
+      }),
+    [schedulePanelChange, props.readingKey],
+  );
   const closeScheduledEditor = useCallback(
     (generation: number) => {
       if (scheduledEditorGeneration.current !== generation) return;
@@ -295,11 +325,11 @@ export function SessionPage({ messages, fileChanges, ...props }: SessionPageProp
     setEnvironmentAnimationKey(undefined);
   }, [props.readingKey]);
   useLayoutEffect(() => {
-    if (changesKey !== undefined && changesKey !== props.readingKey) {
+    if (tabsKey !== undefined && tabsKey !== props.readingKey) {
       collapseDetails();
-      setChangesKey(undefined);
+      setTabsKey(undefined);
     }
-  }, [changesKey, props.readingKey, collapseDetails]);
+  }, [tabsKey, props.readingKey, collapseDetails]);
   useEffect(() => {
     if (!props.scheduledTasks) {
       collapseDetails();
@@ -314,7 +344,7 @@ export function SessionPage({ messages, fileChanges, ...props }: SessionPageProp
       return;
     }
     expandDetails();
-    const group = panelGroupElement.current;
+    const group = contentGroupElement.current;
     if (!group || typeof ResizeObserver === 'undefined') return;
     const observer = new ResizeObserver(expandDetails);
     observer.observe(group);
@@ -401,11 +431,11 @@ export function SessionPage({ messages, fileChanges, ...props }: SessionPageProp
         return;
       if (rightSidebarOpen) {
         detailClose.current?.();
-        collapseDetails();
-        setChangesKey(undefined);
+        if (tabsOpen) changeTabsOpen(false);
+        else collapseDetails();
         scheduledEditorGeneration.current++;
         setScheduledEditor(undefined);
-        focusControlAfterCommit(changesOpen ? changesToggle : scheduledEditorToggle);
+        focusControlAfterCommit(tabsOpen ? tabsToggle : scheduledEditorToggle);
         return;
       }
       if (narrow) {
@@ -417,10 +447,11 @@ export function SessionPage({ messages, fileChanges, ...props }: SessionPageProp
     return () => window.removeEventListener('keydown', cancel);
   }, [
     narrow,
-    changesOpen,
+    tabsOpen,
     rightSidebarOpen,
     focusControlAfterCommit,
     collapseDetails,
+    changeTabsOpen,
     setSidebarOpen,
   ]);
   useEffect(() => {
@@ -515,10 +546,9 @@ export function SessionPage({ messages, fileChanges, ...props }: SessionPageProp
     if (props.detailPanel) {
       collapseDetails();
       props.detailPanel.onClose();
-    } else if (changesOpen) {
-      collapseDetails();
-      setChangesKey(undefined);
-      focusControlAfterCommit(changesToggle);
+    } else if (tabsOpen) {
+      changeTabsOpen(false);
+      focusControlAfterCommit(tabsToggle);
     } else if (scheduledEditor && props.scheduledTasks) {
       closeScheduledEditor(scheduledEditor.generation);
     }
@@ -529,22 +559,6 @@ export function SessionPage({ messages, fileChanges, ...props }: SessionPageProp
       label={props.detailPanel.label}
       tabs={[
         { value: 'details', label: props.detailPanel.label, content: props.detailPanel.content },
-      ]}
-      onClose={closeRightSidebar}
-    />
-  ) : changesOpen ? (
-    <RightSidebar
-      key="file-changes"
-      id="session-file-changes"
-      label="文件变更"
-      tabs={[
-        {
-          value: 'changes',
-          label: '文件变更',
-          content: props.fileChangesContent ?? (
-            <FileChanges messages={fileChanges!} openFile={props.actions.openFile} />
-          ),
-        },
       ]}
       onClose={closeRightSidebar}
     />
@@ -625,7 +639,6 @@ export function SessionPage({ messages, fileChanges, ...props }: SessionPageProp
           if (!narrow && group && group.offsetWidth > 0 && group.getBoundingClientRect().width > 0)
             setWideSidebarCollapsed((layout.navigation ?? 0) === 0);
           if (!meta.isUserInteraction) return;
-          if (rightSidebarOpen && detailsPanel.current?.isCollapsed()) closeRightSidebar();
           if (narrow) return;
           setWideSidebarOpen((layout.navigation ?? 0) > 0);
           const groupWidth = Array.from(
@@ -687,225 +700,273 @@ export function SessionPage({ messages, fileChanges, ...props }: SessionPageProp
             </div>
           </>
         )}
-        <ResizablePanel id="content" minSize="360px">
-          <div className="client-main-panel" inert={narrow && sidebarOpen}>
-            {/* biome-ignore lint/a11y/noStaticElementInteractions: Desktop uses the header surface for native window dragging. */}
-            <header className="session-header" onMouseDown={handleHeaderMouseDown}>
-              <div className="session-heading">
-                <div
-                  className="session-sidebar-toggle"
-                  data-open={!sidebarOpen ? 'true' : undefined}
-                >
-                  {narrow && !sidebarOpen && (
-                    <Button
-                      ref={toggle}
-                      className="ghost sidebar-toggle"
-                      size="icon-sm"
-                      aria-expanded={sidebarOpen}
-                      aria-label="展开侧栏"
-                      title="展开侧栏"
-                      onClick={() => setSidebarOpen(true)}
-                    >
-                      <HugeiconsIcon icon={PanelLeftOpenIcon} />
-                    </Button>
-                  )}
-                </div>
-                <div className="breadcrumb">
-                  {props.scheduledTasks ? (
-                    <strong>安排任务</strong>
-                  ) : props.workbench ? (
-                    <strong>工作台</strong>
-                  ) : props.newConversation ? (
-                    <strong>新对话</strong>
-                  ) : (
-                    <strong title={props.sessionLabel}>
-                      {sessionHeaderLabel(props.sessionLabel)}
-                    </strong>
-                  )}
-                </div>
-              </div>
-              {props.headerActions}
-              {props.environmentInformation && (
-                <Button
-                  className="ghost environment-information-toggle"
-                  size="icon-sm"
-                  aria-expanded={environmentVisible}
-                  aria-controls="session-environment-information"
-                  aria-label={environmentVisible ? '隐藏环境信息' : '显示环境信息'}
-                  title={environmentVisible ? '隐藏环境信息' : '显示环境信息'}
-                  onClick={() => {
-                    startEnvironmentAnimation();
-                    setEnvironmentPreference(environmentVisible ? 'closed' : 'open');
-                  }}
-                >
-                  <HugeiconsIcon icon={InformationCircleIcon} />
-                </Button>
-              )}
-              {hasFileChanges && (
-                <Button
-                  ref={changesToggle}
-                  className="ghost"
-                  aria-expanded={changesOpen}
-                  aria-controls="session-file-changes"
-                  onClick={() => {
-                    if (changesOpen) collapseDetails();
-                    else {
-                      props.detailPanel?.onClose();
-                      expandDetails();
-                    }
-                    setChangesKey(changesOpen ? undefined : props.readingKey);
-                  }}
-                >
-                  {changesOpen ? '收起变更' : '文件变更'}
-                </Button>
-              )}
-            </header>
-            <main
-              className={
-                props.newConversation
-                  ? 'new-conversation-page'
-                  : props.scheduledTasks
-                    ? 'scheduled-tasks-page'
-                    : props.workbench
-                      ? 'workbench-page'
-                      : undefined
-              }
+        <ResizablePanel
+          id="workspace"
+          minSize={rightSidebarOpen ? '660px' : '360px'}
+          style={{ overflow: 'visible' }}
+        >
+          <div className="client-content-frame">
+            <ResizablePanelGroup
+              id="content-layout"
+              orientation="horizontal"
+              elementRef={contentGroupElement}
+              className="client-content-panels"
+              data-animate-width={panelsAnimating ? 'true' : undefined}
+              onLayoutChanged={(layout, meta) => {
+                const group = contentGroupElement.current;
+                if (group && group.offsetWidth > 0 && group.getBoundingClientRect().width > 0)
+                  setDetailsCollapsed((layout.details ?? 0) === 0);
+                if (
+                  meta.isUserInteraction &&
+                  rightSidebarOpen &&
+                  detailsPanel.current?.isCollapsed()
+                )
+                  closeRightSidebar();
+              }}
             >
-              {props.notices}
-              <div className="session-body">
-                <div
-                  className={`session-view environment-information-${environmentMode}${animateEnvironment ? ' environment-information-animated' : ''}`}
-                  ref={setSessionViewElement}
-                >
-                  {props.environmentInformation}
-                  {props.beforeConversation}
-                  {props.scheduledTasks ? (
-                    <ScheduledTasks
-                      {...props.scheduledTasks}
-                      onEditTask={(task, trigger) => {
-                        scheduledEditorToggle.current = trigger;
-                        setScheduledEditor({
-                          generation: ++scheduledEditorGeneration.current,
-                          task,
-                        });
-                        expandDetails();
-                      }}
-                      onNewTask={(trigger) => {
-                        scheduledEditorToggle.current = trigger;
-                        setScheduledEditor({ generation: ++scheduledEditorGeneration.current });
-                        expandDetails();
-                      }}
-                    />
-                  ) : props.workbench ? (
-                    <Workbench
-                      workspaces={props.workspaces}
-                      onOpen={props.onOpen ? open : undefined}
-                    />
-                  ) : (
-                    props.diagnosticView
-                  )}
-                  <section
-                    className="history-panel"
-                    style={historyVisible ? undefined : { display: 'none' }}
-                    role={props.historyPanel ? 'tabpanel' : undefined}
-                    id={props.historyPanel?.id}
-                    aria-labelledby={props.historyPanel?.labelledBy}
-                  >
-                    {historyVisible &&
-                      (welcoming ? (
-                        <NewConversationWelcome
-                          onSuggest={(value) => {
-                            props.composer!.onChange(
-                              props.composer!.draft ? `${props.composer!.draft}\n${value}` : value,
-                            );
-                            focusComposerAfterCommit(true);
-                          }}
-                        />
-                      ) : props.historyError ? (
-                        <section className="notice error" role="alert">
-                          <strong>{props.historyError.title}</strong>
-                          <p>{props.historyError.detail}</p>
-                          <Button onClick={props.historyError.retry}>重试</Button>
-                        </section>
-                      ) : keepAlive ? null : (
-                        conversation
-                      ))}
-                    {keepAlive && (
-                      <ConversationCache
-                        identity={props.readingKey}
-                        loading={props.loading}
-                        visible={historyVisible && !welcoming && !props.historyError}
-                        cache={props.conversationCache!}
+              <ResizablePanel id="content" minSize="360px" style={{ overflow: 'hidden' }}>
+                <div className="client-main-panel" inert={narrow && sidebarOpen}>
+                  {/* biome-ignore lint/a11y/noStaticElementInteractions: Desktop uses the header surface for native window dragging. */}
+                  <header className="session-header" onMouseDown={handleHeaderMouseDown}>
+                    <div className="session-heading">
+                      <div
+                        className="session-sidebar-toggle"
+                        data-open={!sidebarOpen ? 'true' : undefined}
                       >
-                        {conversation}
-                      </ConversationCache>
-                    )}
-                  </section>
-                  {!props.workbench && !props.scheduledTasks && (
-                    <footer className="conversation-footer">
-                      <div className="bottom-controls">
-                        {props.statusNotice}
-                        {props.interaction && (
-                          <div className="interaction-area">{props.interaction}</div>
-                        )}
-                        {props.composer ? (
-                          <Composer
-                            {...props.composer}
-                            scopeKey={props.composer.scopeKey ?? props.readingKey}
-                            promptHidden={!!props.interaction}
-                            inputRef={composerInput}
-                            context={
-                              <>
-                                {props.composer.context}
-                                {props.newConversation && (
-                                  <NewConversationContext {...props.newConversation} />
-                                )}
-                              </>
-                            }
-                          />
-                        ) : (
-                          props.readOnlyReason && (
-                            <p className="hint" role="status">
-                              {props.readOnlyReason}
-                            </p>
-                          )
+                        {narrow && !sidebarOpen && (
+                          <Button
+                            ref={toggle}
+                            className="ghost sidebar-toggle"
+                            size="icon-sm"
+                            aria-expanded={sidebarOpen}
+                            aria-label="展开侧栏"
+                            title="展开侧栏"
+                            onClick={() => setSidebarOpen(true)}
+                          >
+                            <HugeiconsIcon icon={PanelLeftOpenIcon} />
+                          </Button>
                         )}
                       </div>
-                    </footer>
-                  )}
+                      <div className="breadcrumb">
+                        {props.scheduledTasks ? (
+                          <strong>安排任务</strong>
+                        ) : props.workbench ? (
+                          <strong>工作台</strong>
+                        ) : props.newConversation ? (
+                          <strong>新对话</strong>
+                        ) : (
+                          <strong title={props.sessionLabel}>
+                            {sessionHeaderLabel(props.sessionLabel)}
+                          </strong>
+                        )}
+                      </div>
+                    </div>
+                    {props.headerActions}
+                    {props.environmentInformation && (
+                      <Button
+                        className="ghost environment-information-toggle"
+                        size="icon-sm"
+                        aria-expanded={environmentVisible}
+                        aria-controls="session-environment-information"
+                        aria-label={environmentVisible ? '隐藏环境信息' : '显示环境信息'}
+                        title={environmentVisible ? '隐藏环境信息' : '显示环境信息'}
+                        onClick={() => {
+                          startEnvironmentAnimation();
+                          setEnvironmentPreference(environmentVisible ? 'closed' : 'open');
+                        }}
+                      >
+                        <HugeiconsIcon icon={InformationCircleIcon} />
+                      </Button>
+                    )}
+                    {hasTabs && (
+                      <Button
+                        ref={tabsToggle}
+                        className="ghost"
+                        aria-expanded={tabsOpen}
+                        size="icon-sm"
+                        aria-label="标签页"
+                        title="标签页"
+                        aria-controls="session-tabs"
+                        onClick={() => {
+                          if (!tabsOpen) props.detailPanel?.onClose();
+                          changeTabsOpen(!tabsOpen);
+                        }}
+                      >
+                        <HugeiconsIcon icon={BrowserIcon} />
+                      </Button>
+                    )}
+                  </header>
+                  <main
+                    className={
+                      props.newConversation
+                        ? 'new-conversation-page'
+                        : props.scheduledTasks
+                          ? 'scheduled-tasks-page'
+                          : props.workbench
+                            ? 'workbench-page'
+                            : undefined
+                    }
+                  >
+                    {props.notices}
+                    <div className="session-body">
+                      <div
+                        className={`session-view environment-information-${environmentMode}${animateEnvironment ? ' environment-information-animated' : ''}`}
+                        ref={setSessionViewElement}
+                      >
+                        {props.environmentInformation}
+                        {props.beforeConversation}
+                        {props.scheduledTasks ? (
+                          <ScheduledTasks
+                            {...props.scheduledTasks}
+                            onEditTask={(task, trigger) => {
+                              scheduledEditorToggle.current = trigger;
+                              setScheduledEditor({
+                                generation: ++scheduledEditorGeneration.current,
+                                task,
+                              });
+                              expandDetails();
+                            }}
+                            onNewTask={(trigger) => {
+                              scheduledEditorToggle.current = trigger;
+                              setScheduledEditor({
+                                generation: ++scheduledEditorGeneration.current,
+                              });
+                              expandDetails();
+                            }}
+                          />
+                        ) : props.workbench ? (
+                          <Workbench
+                            workspaces={props.workspaces}
+                            onOpen={props.onOpen ? open : undefined}
+                          />
+                        ) : (
+                          props.diagnosticView
+                        )}
+                        <section
+                          className="history-panel"
+                          style={historyVisible ? undefined : { display: 'none' }}
+                          role={props.historyPanel ? 'tabpanel' : undefined}
+                          id={props.historyPanel?.id}
+                          aria-labelledby={props.historyPanel?.labelledBy}
+                        >
+                          {historyVisible &&
+                            (welcoming ? (
+                              <NewConversationWelcome
+                                onSuggest={(value) => {
+                                  props.composer!.onChange(
+                                    props.composer!.draft
+                                      ? `${props.composer!.draft}\n${value}`
+                                      : value,
+                                  );
+                                  focusComposerAfterCommit(true);
+                                }}
+                              />
+                            ) : props.historyError ? (
+                              <section className="notice error" role="alert">
+                                <strong>{props.historyError.title}</strong>
+                                <p>{props.historyError.detail}</p>
+                                <Button onClick={props.historyError.retry}>重试</Button>
+                              </section>
+                            ) : keepAlive ? null : (
+                              conversation
+                            ))}
+                          {keepAlive && (
+                            <ConversationCache
+                              identity={props.readingKey}
+                              loading={props.loading}
+                              visible={historyVisible && !welcoming && !props.historyError}
+                              cache={props.conversationCache!}
+                            >
+                              {conversation}
+                            </ConversationCache>
+                          )}
+                        </section>
+                        {!props.workbench && !props.scheduledTasks && (
+                          <footer className="conversation-footer">
+                            <div className="bottom-controls">
+                              {props.statusNotice}
+                              {props.interaction && (
+                                <div className="interaction-area">{props.interaction}</div>
+                              )}
+                              {props.composer ? (
+                                <Composer
+                                  {...props.composer}
+                                  scopeKey={props.composer.scopeKey ?? props.readingKey}
+                                  promptHidden={!!props.interaction}
+                                  inputRef={composerInput}
+                                  context={
+                                    <>
+                                      {props.composer.context}
+                                      {props.newConversation && (
+                                        <NewConversationContext {...props.newConversation} />
+                                      )}
+                                    </>
+                                  }
+                                />
+                              ) : (
+                                props.readOnlyReason && (
+                                  <p className="hint" role="status">
+                                    {props.readOnlyReason}
+                                  </p>
+                                )
+                              )}
+                            </div>
+                          </footer>
+                        )}
+                      </div>
+                    </div>
+                  </main>
                 </div>
-              </div>
-            </main>
-          </div>
-        </ResizablePanel>
-        {/* Re-register neighboring panels when resize availability changes. */}
-        <ResizableHandle
-          key={rightSidebarOpen ? 'details-open' : 'details-closed'}
-          id="details-resize"
-          className="collapsible-sidebar-handle"
-          data-open={rightSidebarOpen ? 'true' : 'false'}
-          disabled={!rightSidebarOpen}
-          withHandle
-        />
-        <ResizablePanel
-          id="details"
-          className="collapsible-sidebar-viewport"
-          style={{ overflow: 'hidden' }}
-          panelRef={detailsPanel}
-          disabled={!rightSidebarOpen}
-          collapsible
-          collapsedSize="0px"
-          defaultSize="0px"
-          minSize="300px"
-          maxSize="640px"
-        >
-          <div
-            className="collapsible-sidebar-content"
-            style={{ minWidth: '300px' }}
-            aria-hidden={!rightSidebarOpen}
-            inert={!rightSidebarOpen}
-          >
-            {rightSidebarPanel ?? retainedRightSidebarPanel.current}
+              </ResizablePanel>
+              {/* Re-register neighboring panels when resize availability changes. */}
+              <ResizableHandle
+                key={rightSidebarOpen ? 'details-open' : 'details-closed'}
+                id="details-resize"
+                className="collapsible-sidebar-handle"
+                data-open={rightSidebarOpen ? 'true' : 'false'}
+                disabled={!rightSidebarOpen}
+                withHandle
+              />
+              <ResizablePanel
+                id="details"
+                className="collapsible-sidebar-viewport"
+                style={{ overflow: 'hidden' }}
+                panelRef={detailsPanel}
+                disabled={!rightSidebarOpen}
+                collapsible
+                collapsedSize="0px"
+                defaultSize="0px"
+                minSize="300px"
+                maxSize="640px"
+              >
+                <div
+                  className="collapsible-sidebar-content"
+                  style={{ minWidth: '300px' }}
+                  aria-hidden={!rightSidebarOpen}
+                  inert={!rightSidebarOpen}
+                >
+                  {hasTabs && (
+                    <SessionTabs
+                      key={props.readingKey}
+                      model={tabModel}
+                      visible={tabsVisible && !props.covered && !props.detailPanel}
+                      present={tabsPresent && !props.covered && !props.detailPanel}
+                      renderBrowser={props.renderBrowser}
+                      changes={
+                        props.fileChangesContent ?? (
+                          <FileChanges
+                            messages={fileChanges ?? []}
+                            openFile={props.actions.openFile}
+                          />
+                        )
+                      }
+                      onClose={closeRightSidebar}
+                    />
+                  )}
+                  {rightSidebarPanel ?? retainedRightSidebarPanel.current}
+                </div>
+              </ResizablePanel>
+            </ResizablePanelGroup>
           </div>
         </ResizablePanel>
       </ResizablePanelGroup>

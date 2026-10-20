@@ -16,8 +16,15 @@ html[data-input-modality="pointer"] :focus {
 }
 
 :root {
-  --font-geist: "Geist Variable", sans-serif;
+  --font-geist: var(--font-ui);
   --font-geist-mono: "Geist Mono Variable", monospace;
+  --native-content-shadow: 0 1px 6px rgb(0 0 0 / 6%);
+  --native-content-border: rgb(0 0 0 / 5%);
+}
+
+[data-theme="dark"] {
+  --native-content-shadow: 0 1px 6px rgb(0 0 0 / 28%);
+  --native-content-border: rgb(255 255 255 / 10%);
 }
 
 html,
@@ -204,9 +211,6 @@ html[data-platform="macos"][data-theme="dark"] .kite-client.shell {
     opacity var(--sidebar-motion-duration) var(--sidebar-motion-easing),
     visibility 0s;
 }
-.kite-client .desktop-settings .settings-editor-panel > .right-sidebar {
-  border-left: 1px solid var(--border);
-}
 .kite-client .desktop-settings .settings-editor-panel .right-sidebar-content {
   flex: 1;
   min-height: 0;
@@ -296,7 +300,7 @@ html[data-platform="macos"] .kite-client .desktop-settings-dialog .settings-edit
 .kite-client .desktop-settings .extension-settings .settings-section-heading h2 {
   margin: 0 0 44px;
   font-size: 24px;
-  font-weight: 600;
+  font-weight: 500;
 }
 .kite-client .desktop-settings .extension-settings .settings-section-heading {
   align-items: flex-start;
@@ -304,7 +308,7 @@ html[data-platform="macos"] .kite-client .desktop-settings-dialog .settings-edit
 .kite-client .desktop-settings .settings-content h3 {
   margin: 0 0 18px;
   font-size: 14px;
-  font-weight: 600;
+  font-weight: 500;
 }
 .kite-client .settings-card {
   padding: 0 20px;
@@ -332,7 +336,7 @@ html[data-platform="macos"] .kite-client .desktop-settings-dialog .settings-edit
 }
 .kite-client .settings-row strong {
   font-size: 14px;
-  font-weight: 600;
+  font-weight: 500;
 }
 .kite-client .settings-row small,
 .kite-client .settings-hint {
@@ -363,7 +367,7 @@ html[data-platform="macos"] .kite-client .desktop-settings-dialog .settings-edit
 }
 .kite-client .desktop-settings .settings-content legend {
   padding: 0 6px;
-  font-weight: 600;
+  font-weight: 500;
 }
 .kite-client .desktop-settings .settings-content input,
 .kite-client .desktop-settings .settings-content select {
@@ -439,7 +443,7 @@ html[data-platform="macos"] .kite-client .desktop-settings-dialog .settings-edit
 .kite-client .desktop-settings .settings-models-title h2 {
   margin: 0;
   font-size: 24px;
-  font-weight: 600;
+  font-weight: 500;
   letter-spacing: -0.5px;
 }
 .kite-client .desktop-settings .settings-model-current {
@@ -523,7 +527,7 @@ html[data-platform="macos"] .kite-client .desktop-settings-dialog .settings-edit
 }
 .kite-client .desktop-settings .settings-model-provider-heading strong {
   font-size: 14px;
-  font-weight: 600;
+  font-weight: 500;
 }
 .kite-client .desktop-settings .settings-model-provider-identity > span {
   color: var(--muted-foreground);
@@ -860,7 +864,7 @@ html[data-native-window]
 html[data-native-window]
   .kite-client
   :where(.client-panels[data-animate-width="true"])
-  .client-main-panel {
+  .client-content-frame {
   transition:
     margin-left var(--sidebar-motion-duration) var(--sidebar-motion-easing),
     width var(--sidebar-motion-duration) var(--sidebar-motion-easing);
@@ -870,7 +874,7 @@ html[data-native-window]
   html[data-native-window]
     .kite-client
     :where(.client-panels[data-animate-width="true"])
-    :is(.session-header, .client-main-panel) {
+    :is(.session-header, .client-content-frame) {
     transition: none;
   }
 }
@@ -974,34 +978,56 @@ html[data-native-window]:is(
   margin-top: var(--native-panel-inset);
 }
 
+/* One surface contains the reading pane and its tools; only its outer edge owns the frame. */
+html[data-native-window] .kite-client .client-content-frame {
+  box-shadow: var(--native-content-shadow);
+}
+
+html[data-native-window] .kite-client :is(.desktop-settings .settings-content, .right-sidebar) {
+  box-shadow: var(--native-content-shadow);
+}
+
+/* The right rail owns the single seam; borders must not change the allocated panel width. */
+html[data-native-window] .kite-client .right-sidebar {
+  border: 0;
+  border-left: 1px solid var(--border);
+}
+
+html[data-native-window] .kite-client #details-resize::before {
+  background: transparent;
+}
+
 html[data-native-window]:is([data-window-material="mica"], [data-window-material="vibrancy"])
   .kite-client
-  :is(.client-main-panel, .settings-content, .right-sidebar) {
+  .client-content-frame {
+  width: calc(100% - var(--native-panel-inset) * 2);
+  height: calc(100% - var(--native-panel-inset) * 2);
+  margin: var(--native-panel-inset);
+  border-radius: var(--radius);
+}
+
+html[data-native-window]:is([data-window-material="mica"], [data-window-material="vibrancy"])
+  .kite-client
+  .client-content-frame::after {
+  position: absolute;
+  z-index: 1;
+  inset: 0;
+  border: 1px solid var(--native-content-border);
+  border-radius: inherit;
+  pointer-events: none;
+  content: "";
+}
+
+html[data-native-window]:is([data-window-material="mica"], [data-window-material="vibrancy"])
+  .kite-client
+  :is(.settings-content, .right-sidebar) {
   height: calc(100% - var(--native-panel-inset) * 2);
   margin: var(--native-panel-inset);
   margin-right: var(--native-content-end-inset, var(--native-panel-inset));
   border-radius: var(--radius);
-  box-shadow: 0 0 0 1px color-mix(in srgb, var(--foreground) 6%, transparent);
-}
-
-html[data-native-window]:is([data-window-material="mica"], [data-window-material="vibrancy"])
-  .kite-client
-  :is(.client-main-panel, .right-sidebar) {
-  overflow: hidden;
-}
-
-html[data-native-window]:is([data-window-material="mica"], [data-window-material="vibrancy"])
-  .kite-client
-  .client-main-panel {
-  width: calc(
-    100% -
-    var(--native-panel-inset) -
-    var(--native-content-end-inset, var(--native-panel-inset))
-  );
-  /* Draw inside the panel so its flush left edge survives the resize viewport's clipping. */
-  outline: 1px solid color-mix(in srgb, var(--foreground) 6%, transparent);
-  outline-offset: -1px;
-  box-shadow: none;
+  box-shadow:
+    0 0 0 1px var(--native-content-border),
+    var(--native-content-shadow);
 }
 
 /* Every right rail shares the main surface's inset and joins it with square inner corners. */
@@ -1013,30 +1039,24 @@ html[data-native-window]:is(
   width: calc(100% - var(--native-panel-inset));
   margin-left: 0;
   border-radius: 0 var(--radius) var(--radius) 0;
+  box-shadow: var(--native-content-shadow);
 }
 
-html[data-native-window]:is([data-window-material="mica"], [data-window-material="vibrancy"])
-  .kite-client
-  .client-panels:has(> #details-resize[data-open="true"])
-  .client-main-panel {
-  --native-content-end-inset: 0px;
-  border-top-right-radius: 0;
-  border-bottom-right-radius: 0;
-}
-
-html[data-native-window]:is([data-window-material="mica"], [data-window-material="vibrancy"])
-  .kite-client
-  #details-resize {
-  height: calc(100% - var(--native-panel-inset) * 2);
-  margin-block: var(--native-panel-inset);
+/* The right pane is a section of the shared surface, without its own exterior or inset. */
+html[data-native-window] .kite-client .client-content-frame .right-sidebar {
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  border-radius: 0;
+  box-shadow: none;
 }
 
 html[data-native-window][data-platform="windows"][data-window-material="mica"]
   .kite-client.shell.sidebar-visible
   #navigation-resize[aria-valuenow]:not([aria-valuenow="0"])
-  ~ #content
-  .client-main-panel {
-  width: calc(100% - var(--native-content-end-inset, var(--native-panel-inset)));
+  ~ #workspace
+  .client-content-frame {
+  width: calc(100% - var(--native-panel-inset));
   margin-left: 0;
 }
 
@@ -1079,6 +1099,7 @@ html[data-native-window]:is([data-window-material="mica"], [data-window-material
     --native-content-end-inset: 0px;
     border-top-right-radius: 0;
     border-bottom-right-radius: 0;
+    clip-path: inset(-8px 0 -8px -8px);
   }
 }
 
@@ -1089,4 +1110,89 @@ html[data-native-window][data-platform="macos"]
   border-radius: 0;
   box-shadow: none;
   outline: none;
+}
+
+html[data-native-window][data-platform="macos"] .kite-client .client-content-frame {
+  margin: 0;
+  border-radius: 0;
+}
+
+html[data-native-window][data-platform="macos"] .kite-client .client-content-frame::after {
+  border: 0;
+}
+
+html[data-native-window][data-platform="macos"]
+  .kite-client
+  :is(.desktop-settings .settings-content, .right-sidebar) {
+  box-shadow: var(--native-content-shadow);
+}
+
+.native-browser-page {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  flex-direction: column;
+}
+.native-browser-toolbar {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 3px;
+  padding: 6px 8px;
+}
+.kite-client .native-browser-toolbar > .button {
+  flex: none;
+  width: 28px;
+  height: 30px;
+  min-height: 30px;
+  padding: 5px;
+}
+.kite-client .native-browser-toolbar .native-browser-address {
+  flex: 1;
+  min-width: 0;
+  height: 32px;
+  padding: 4px 10px;
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  background: var(--control-hover);
+  color: var(--foreground);
+  font: inherit;
+  font-size: 12px;
+}
+.kite-client .native-browser-toolbar .native-browser-address::placeholder {
+  color: var(--muted-foreground);
+  text-align: center;
+}
+.kite-client
+  .native-browser-toolbar
+  .native-browser-address:focus-visible:where(:root:not([data-input-modality="pointer"]) *) {
+  outline: none;
+  border-color: var(--input);
+}
+.native-browser-surface {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  padding: 0 1px 1px;
+}
+.native-browser-viewport {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  border-radius: var(--radius);
+  background: var(--page-background);
+}
+html[data-platform="macos"] .native-browser-viewport {
+  border-radius: 0;
+}
+.native-browser-error {
+  width: 100%;
+  padding: 24px 20px;
+  color: var(--muted-foreground);
+  font-size: 12px;
+}
+.native-browser-error-message {
+  margin: 0 0 12px;
 }

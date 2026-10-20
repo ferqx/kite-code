@@ -2042,11 +2042,13 @@ export type BackgroundExecutionQuery = {
   limit?: number;
   workspaceId?: string;
   snapshotCursor?: string;
+  includeSourceTool?: boolean;
   rootSessionId?: string;
   executionId?: string;
 };
 export type BackgroundExecutionItem = {
   seq: string;
+  sourceTool?: { id: string; definitionId: string; definitionVersion: string };
   execution: {
     id: string;
     sessionId: string;
@@ -2181,6 +2183,7 @@ export type BackgroundExecutionPage = {
   snapshotCursor: string;
   items: Array<{
     seq: string;
+    sourceTool?: { id: string; definitionId: string; definitionVersion: string };
     execution: {
       id: string;
       sessionId: string;

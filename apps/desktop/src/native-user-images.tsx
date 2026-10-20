@@ -7,6 +7,7 @@ import {
 } from '@kite-ai/ui/desktop';
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { NativeBridge } from './native-bridge';
+import type { NativeImagePreviews } from './native-image-previews';
 
 type Props = {
   bridge: NativeBridge;
@@ -15,6 +16,7 @@ type Props = {
   historyEpoch: number;
   message: Message;
   readAvailable: boolean;
+  previews: NativeImagePreviews;
 };
 async function readImage(props: Props, index: number, image: InputImage, signal: AbortSignal) {
   const readId = crypto.randomUUID(),
@@ -97,9 +99,15 @@ async function readImage(props: Props, index: number, image: InputImage, signal:
 // when several historical messages enter the viewport together.
 const previewReads = new WeakMap<NativeBridge, Promise<void>>();
 function queueImage(props: Props, index: number, image: InputImage, signal: AbortSignal) {
-  const pending = (previewReads.get(props.bridge) ?? Promise.resolve()).then(() => {
+  const pending = (previewReads.get(props.bridge) ?? Promise.resolve()).then(async () => {
     signal.throwIfAborted();
-    return readImage(props, index, image, signal);
+    const bytes = await readImage(props, index, image, signal);
+    signal.throwIfAborted();
+    return props.previews.prepare(
+      new Blob([bytes.buffer as ArrayBuffer], { type: image.reference.mediaType }),
+      image.reference.hash,
+      signal,
+    );
   });
   const tail = pending.then(
     () => {},
@@ -192,20 +200,18 @@ function NativeUserImage({ image, index, ...props }: Props & { image: InputImage
       setError('');
       try {
         const { props, image, index } = current.current;
-        const bytes = await queueImage(props, index, image, abort.signal);
+        const preview = await queueImage(props, index, image, abort.signal);
         if (read.current !== abort || abort.signal.aborted) return;
-        const next = URL.createObjectURL(
-          new Blob([bytes.buffer as ArrayBuffer], { type: image.reference.mediaType }),
-        );
+        const next = URL.createObjectURL(preview.blob);
         ownedUrl.current = next;
         unregister.current = retention?.retain({
-          bytes: bytes.byteLength,
+          bytes: preview.cost,
           release: clear,
           releaseOnWindowHide: true,
         });
         setUrl(next);
       } catch {
-        if (!abort.signal.aborted) setError('图片读取失败，请重试。');
+        if (!abort.signal.aborted) setError('图片预览失败，请重试。');
       } finally {
         if (read.current === abort) {
           read.current = undefined;
@@ -223,7 +229,7 @@ function NativeUserImage({ image, index, ...props }: Props & { image: InputImage
   }, [nearby, visible, readAvailable, readScope, clear, open, stopRead]);
   return (
     <div ref={card} className="composer-attachment native-user-image">
-      <div className="composer-attachment-preview">
+      <div className="composer-attachment-preview" aria-busy={loading || undefined}>
         {url ? (
           <img src={url} alt={image.name} decoding="async" />
         ) : error ? (
@@ -234,11 +240,9 @@ function NativeUserImage({ image, index, ...props }: Props & { image: InputImage
             aria-label={`重试读取图片：${image.name}`}
             title={error}
           >
-            读取失败，重试
+            预览失败，重试
           </Button>
-        ) : (
-          <span role="status">正在读取…</span>
-        )}
+        ) : null}
       </div>
       <span className="composer-attachment-name" title={image.name}>
         {image.name}

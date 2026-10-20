@@ -1,5 +1,7 @@
 # 通用 Agent
 
+原后台 Job 目录可显式请求直接父 Tool 的有限只读来源，供 Desktop 区分后台启动与前台执行；默认响应、取消边与 Job 生命周期保持。[Store owner](src/storage/README.md#跨会话原-job-目录)维护事务范围、敏感字段排除及冷恢复证据。
+
 ## 用户图片输入
 
 普通文件附件通过 start/steer/follow-up 的可选 `files` 保存最多 128 个名称与 `file:` URI，原消息正文保持用户原文。受理核闭合字段、URI 与长度，路径引用不赋予读取权限。[模型历史组装](src/runtime.ts)通过[文件引用编码](src/input-files.ts)在 user 内容中追加明确的低权限路径数据，仍由现有 Files 工具检查目标、保护范围和权限；不自动读取文件、不加载外部目录的项目说明。Fork 与冷历史沿消息 source JSON 保留引用，无 SQL 表或迁移；[真实 HTTP](../../apps/service/test/isolated/input-images.test.ts)核附件单独发送、模型得到路径与展示正文分离，[真实 Store](test/isolated/artifacts/input-images.test.ts)核混合图片／文件在后继、Fork 与冷重开时保留。

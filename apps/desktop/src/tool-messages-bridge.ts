@@ -40,6 +40,18 @@ export type NativeToolRunPage = {
   scope: NativeToolMessageScope;
   runs: NativeRunFact[];
 };
+export type NativeContextUsage = {
+  modelId: string;
+  contextSelectionId: string;
+  totalInputTokens: number;
+  contextWindowTokens?: number;
+};
+export type NativeContextUsagePage = {
+  kind: 'toolMessages.contextUsage';
+  readId: string;
+  scope: NativeToolMessageScope;
+  context?: NativeContextUsage;
+};
 export type NativeModelUsageFact = {
   messageId: string;
   executionId: string;
@@ -89,6 +101,14 @@ export function presentableRun(run: NativeRunFact, storeId: string, sessionId: s
 }
 
 export type NativeToolMessageRequest =
+  | {
+      method: 'toolMessages.contextUsage';
+      generation: number;
+      viewSelection: number;
+      historyEpoch: number;
+      readId: string;
+      messageIds: string[];
+    }
   | {
       method: 'toolMessages.usage';
       generation: number;

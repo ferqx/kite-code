@@ -536,7 +536,7 @@ export function NativeProviderSettings({
     </section>
   );
   return (
-    <section aria-label="提供商设置" className="provider-settings">
+    <section aria-label="提供商设置" className="provider-settings" aria-busy={reading || undefined}>
       <header className="provider-page-heading">
         <div>
           <h2>提供商</h2>
@@ -567,11 +567,6 @@ export function NativeProviderSettings({
           </button>
         </div>
       </header>
-      {reading && (
-        <p className="provider-notice" role="status">
-          正在读取提供商配置。
-        </p>
-      )}
       {!panelMode && error && (
         <p className="provider-notice provider-notice-error" role="alert">
           {error}

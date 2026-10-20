@@ -409,16 +409,13 @@ export function NativeMcpSettings({
   const exactReview = (previewReading || review) && (
     <section
       className="provider-form-section"
-      aria-label={previewReading ? 'MCP removal preview loading' : 'Confirm exact MCP operation'}
+      aria-label="Confirm exact MCP operation"
+      aria-busy={previewReading || undefined}
     >
       <h4 ref={reviewHeading} tabIndex={-1}>
-        {previewReading ? '正在核对删除影响' : '确认准确操作'}
+        确认准确操作
       </h4>
-      {previewReading ? (
-        <p role="status">Reading exact source removal preview.</p>
-      ) : (
-        <pre>{JSON.stringify(review, null, 2)}</pre>
-      )}
+      {!previewReading && <pre>{JSON.stringify(review, null, 2)}</pre>}
       {review?.kind === 'remove' && removal && (
         <section aria-label="Exact source removal preview">
           <h4>Declaration to remove</h4>
@@ -443,7 +440,11 @@ export function NativeMcpSettings({
     </section>
   );
   return (
-    <section aria-label="MCP settings" className="catalogue-settings mcp-settings">
+    <section
+      aria-label="MCP settings"
+      className="catalogue-settings mcp-settings"
+      aria-busy={reading || undefined}
+    >
       <header className="provider-page-heading">
         <div>
           <h2>MCP</h2>
@@ -476,11 +477,6 @@ export function NativeMcpSettings({
           Select a current Session to manage MCP settings. Original submissions remain available
           below.
         </div>
-      )}
-      {reading && (
-        <p className="provider-notice" role="status">
-          正在读取 MCP 配置…
-        </p>
       )}
       {error && !panel && (
         <p className="provider-notice provider-notice-error" role="alert">
@@ -1130,9 +1126,11 @@ export function NativeMcpSettings({
                     </>
                   )}
                   {panel.kind === 'tools' && (
-                    <section className="provider-form-section">
+                    <section
+                      className="provider-form-section"
+                      aria-busy={toolsLoading || undefined}
+                    >
                       <h4>不可变工具快照</h4>
-                      {toolsLoading && <p role="status">正在读取工具快照…</p>}
                       {!tools ? (
                         !toolsLoading && (
                           <p className="provider-field-help">暂未取得工具快照，请关闭后重试。</p>

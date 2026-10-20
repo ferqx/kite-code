@@ -135,7 +135,11 @@ export function NativeSkillsSettings({
   }, [detailId, panelHost, editorControl]);
 
   return (
-    <section className="catalogue-settings skills-settings" aria-label="Skills 目录">
+    <section
+      className="catalogue-settings skills-settings"
+      aria-label="Skills 目录"
+      aria-busy={busy || undefined}
+    >
       <header className="provider-page-heading">
         <div>
           <h2>Skills</h2>
@@ -162,12 +166,6 @@ export function NativeSkillsSettings({
         </p>
       ) : (
         <>
-          {busy && (
-            <p className="provider-notice" role="status">
-              正在读取完整 Skills 目录…
-              {facts && '当前显示上次完整目录，正在核对最新状态。'}
-            </p>
-          )}
           {error && (
             <p className="provider-notice provider-notice-error" role="alert">
               Skills 目录读取失败：{error}。
@@ -249,7 +247,10 @@ export function NativeSkillsSettings({
             title="Skill 详情"
             onClose={close}
           >
-            <div className="catalogue-settings skills-settings provider-panel-content">
+            <div
+              className="catalogue-settings skills-settings provider-panel-content"
+              aria-busy={busy || undefined}
+            >
               <div className="provider-editor">
                 <header className="provider-editor-heading">
                   <div>
@@ -268,11 +269,6 @@ export function NativeSkillsSettings({
                   )}
                 </header>
                 <div className="provider-editor-body">
-                  {busy && (
-                    <p className="provider-notice" role="status">
-                      正在刷新 Skills 目录，当前详情为上次完整目录。
-                    </p>
-                  )}
                   {error && (
                     <p className="provider-notice provider-notice-error" role="alert">
                       详情尚未确认最新状态：{error}。保留上次完整目录。

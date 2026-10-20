@@ -8,7 +8,7 @@ import { NativeBackgroundPanel } from '../src/native-background-panel';
 import type { NativeBridge, NativeRequest, NativeSelection } from '../src/native-bridge';
 import { NativeDiagnosticsProvider } from '../src/native-diagnostics';
 import { environmentDisplay, useNativeEnvironment } from '../src/native-environment';
-import { backgroundItem } from './background-item.fixture';
+import { backgroundItem, backgroundShellItem } from './background-item.fixture';
 
 async function fixture(
   run: (
@@ -72,14 +72,17 @@ const click = (host: HTMLElement, name: string) =>
   });
 
 test('retained environment card separates Shell and named children, exact stop, read-only child return and stale presentation', async () => {
-  const shell = backgroundItem(1),
+  const shell = backgroundShellItem(1),
     child = backgroundItem(2, true),
-    other = backgroundItem(3);
+    other = backgroundItem(3),
+    foreground = backgroundShellItem(4);
+  foreground.sourceTool!.definitionId = 'shell.execute';
+  foreground.execution.cancelWithParent = false;
   shell.execution.definitionId = 'shell.command';
   other.execution.definitionId = 'mcp.job';
   child.childSession!.title = '原子智能体';
-  child.execution.status = 'succeeded';
-  const items = [shell, child, other],
+  child.execution.status = 'running';
+  const items = [shell, child, other, foreground],
     calls: NativeRequest[] = [];
   const selection: NativeSelection = {
     viewGeneration: 1,
@@ -112,7 +115,8 @@ test('retained environment card separates Shell and named children, exact stop, 
       modelOutputs: [],
     }),
   );
-  let failed = false;
+  let failed = false,
+    revision = 0;
   let finishChildRead!: () => void;
   const childReadFinished = new Promise<void>((resolve) => {
     finishChildRead = resolve;
@@ -183,7 +187,7 @@ test('retained environment card separates Shell and named children, exact stop, 
       bridge: port,
       generation: 1,
       selection,
-      revision: 0,
+      revision,
       unavailable: false,
       onChanged: async () => undefined,
     });
@@ -214,10 +218,16 @@ test('retained environment card separates Shell and named children, exact stop, 
       // The shared fixture mounts the real hook and retained card; no effect is created by navigation.
       await render(port);
       const region = host.querySelector('[aria-label="环境信息"]')!;
-      expect(region.textContent).toContain('当前运行的 Shell');
+      expect(region.querySelector('[aria-label="Shell"]')).not.toBeNull();
+      expect(region.querySelector('header button')).toBeNull();
+      const children = region.querySelector('[aria-label="子智能体"]')!;
+      expect(children.textContent).toContain('运行中');
+      expect(children.querySelector('.background-execution-stop')).toBeNull();
+      expect(region.querySelectorAll('.background-execution-stop')).toHaveLength(1);
       expect(region.textContent).toContain(shell.execution.id);
       expect(region.textContent).toContain('原子智能体');
       expect(region.textContent).not.toContain(other.execution.id);
+      expect(region.textContent).not.toContain(foreground.execution.id);
       await act(async () => {
         (
           region.querySelector('[aria-label="查看子 Agent 详情：原子智能体"]') as HTMLElement
@@ -241,15 +251,17 @@ test('retained environment card separates Shell and named children, exact stop, 
       expect(calls.filter((request) => request.method === 'background.stop')).toHaveLength(1);
       expect(host.textContent).toContain('正在停止');
       failed = true;
-      await act(async () =>
-        (host.querySelector('[aria-label="刷新子 Agent"]') as HTMLElement).click(),
-      );
-      expect(host.textContent).toContain('上次状态 · 正在核对');
+      revision++;
+      await render(port);
+      expect(host.textContent).toContain('上次状态 · 待核实');
       expect(host.textContent).toContain('原子智能体');
       expect(host.textContent).toContain('directory_changed');
       expect(
         [...host.querySelectorAll('button')].some((button) => button.textContent === '停止'),
       ).toBe(false);
+      failed = false;
+      await click(host, '重试');
+      expect(host.querySelector('.background-execution-error')).toBeNull();
     },
     () => <Surface />,
   );
@@ -258,7 +270,7 @@ test('retained environment card separates Shell and named children, exact stop, 
 test('environment excludes internal title generation while retaining delegated children with the same display name', () => {
   const title = backgroundItem(1, true),
     delegated = backgroundItem(2, true),
-    shell = backgroundItem(3);
+    shell = backgroundShellItem(3);
   title.execution.definitionId = 'agent/session-title';
   title.childSession!.title = 'Renamed internal child';
   delegated.execution.definitionId = 'agent/research';
@@ -289,6 +301,28 @@ test('environment excludes internal title generation while retaining delegated c
   const display = environmentDisplay([title], 'store');
   expect(display.rows).toEqual([]);
   expect(display.children.size).toBe(0);
+});
+
+test('environment Shell rows require the exact background launch Tool, independent of cancellation attachment', () => {
+  for (const definitionId of ['shell.launch', 'shell.execute', 'fixture/tool']) {
+    for (const cancelWithParent of [true, false]) {
+      const shell = backgroundShellItem(1);
+      shell.sourceTool!.definitionId = definitionId;
+      shell.execution.cancelWithParent = cancelWithParent;
+      const original = JSON.stringify(shell);
+      expect(environmentDisplay([shell], 'store').rows.map((row) => row.executionId)).toEqual(
+        definitionId === 'shell.launch' ? [shell.execution.id] : [],
+      );
+      expect(JSON.stringify(shell)).toBe(original);
+    }
+  }
+  for (const variant of ['missing', 'wrong-parent', 'unknown-version']) {
+    const shell = backgroundShellItem(1);
+    if (variant === 'missing') delete shell.sourceTool;
+    else if (variant === 'wrong-parent') shell.sourceTool!.id = 'another-tool';
+    else shell.sourceTool!.definitionVersion = 'future';
+    expect(environmentDisplay([shell], 'store').rows).toEqual([]);
+  }
 });
 
 test('environment adapter keeps unknown and restored child facts distinct and never infers cleanup', () => {

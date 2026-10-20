@@ -171,7 +171,10 @@ test('opening model settings loads the retained list once, groups all models and
   try {
     await f.render();
     expect(f.calls).toEqual([{ method: 'settings.models.read', generation: 1, scope: 'user' }]);
-    expect(f.element.textContent).toContain('正在读取原作用域配置');
+    expect(f.element.textContent).not.toContain('正在读取');
+    expect(f.element.querySelector('[aria-label="模型设置"]')?.getAttribute('aria-busy')).toBe(
+      'true',
+    );
     expect(f.button('默认模型').disabled).toBe(true);
     await act(async () => read.resolve(structuredClone(facts)));
     expect(f.element.querySelector('.settings-models .model-list')).not.toBeNull();

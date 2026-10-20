@@ -10,6 +10,42 @@ import { useNativeDiagnostics } from './native-diagnostics';
 import { NativeDisplayCache } from './native-display-cache';
 
 export type NativeModelChoice = { modelId?: string; reasoningEffort?: NativeReasoningEffort };
+
+function object(value: unknown): Record<string, unknown> | undefined {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : undefined;
+}
+
+/** Restore only the current Session's latest frozen model choice. */
+function previousSessionEffort(
+  selection: NativeSelection | undefined,
+  modelId: string | undefined,
+): NativeReasoningEffort | undefined {
+  if (!selection || !modelId) return;
+  let latest: NativeSelection['runs'][number] | undefined;
+  for (const run of selection.runs ?? []) {
+    if (
+      run.sessionId === selection.session.id &&
+      run.originStoreId === selection.storeId &&
+      Number.isSafeInteger(run.createdAt) &&
+      (!latest || run.createdAt > latest.createdAt)
+    )
+      latest = run;
+  }
+  const manifest = object(latest?.configuration);
+  if (manifest?.modelId !== modelId) return;
+  const snapshot = object(manifest.snapshot);
+  if (snapshot?.version !== 1 || typeof snapshot.digest !== 'string') return;
+  const models = object(snapshot.configuration)?.models;
+  if (!Array.isArray(models)) return;
+  const matches = models.filter((model) => object(model)?.id === modelId);
+  if (matches.length !== 1) return;
+  const effort = object(object(matches[0])?.options)?.reasoningEffort;
+  return (['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'ultar'] as const).find(
+    (value) => value === effort,
+  );
+}
 function errorCode(cause: unknown) {
   const code = (cause as { code?: string })?.code ?? (cause as Error)?.message;
   return /^[a-z][a-z0-9_]{0,80}$/.test(code ?? '') ? code : 'model_selection_unavailable';
@@ -145,9 +181,14 @@ export function NativeModelPicker({
   const selectedId = requestedId ?? facts?.defaultModelId;
   const selected = models.find((model) => model.id === selectedId);
   const supported = selected?.reasoningEffortChoices ?? [];
-  const effort = value.reasoningEffort ?? selected?.reasoningEffort;
+  const previousEffort = preparing ? undefined : previousSessionEffort(selection, selected?.id);
+  const requestEffort = value.reasoningEffort ?? previousEffort;
+  const effort = requestEffort ?? selected?.reasoningEffort;
   const allowedEffort =
-    value.reasoningEffort === undefined || supported.includes(value.reasoningEffort);
+    requestEffort === undefined ||
+    supported.includes(requestEffort) ||
+    (value.reasoningEffort === undefined &&
+      (previousEffort === 'none' || previousEffort === 'minimal'));
   const ready = !!selected && allowedEffort && !reading && !error && !disabled;
   const readyId = ready ? selected?.id : undefined;
   useEffect(() => {
@@ -157,13 +198,11 @@ export function NativeModelPicker({
       readyId
         ? {
             modelId: readyId,
-            ...(value.reasoningEffort === undefined
-              ? {}
-              : { reasoningEffort: value.reasoningEffort }),
+            ...(requestEffort === undefined ? {} : { reasoningEffort: requestEffort }),
           }
         : undefined,
     );
-  }, [readKey, ready, readyId, value.reasoningEffort]);
+  }, [readKey, ready, readyId, requestEffort]);
   // biome-ignore lint/correctness/useExhaustiveDependencies: Reads follow exact scope and settings revision; callbacks and temporary effort do not restart IO.
   useEffect(() => {
     const original = readKey,
@@ -194,7 +233,7 @@ export function NativeModelPicker({
       onChange({ modelId });
   }
   function setEffort(reasoningEffort: NativeReasoningEffort) {
-    if (!ready || !selected || !supported.includes(reasoningEffort)) return;
+    if (reading || error || disabled || !selected || !supported.includes(reasoningEffort)) return;
     onChange({
       ...value,
       ...(value.modelId === undefined ? { modelId: selected.id } : {}),
@@ -231,7 +270,6 @@ export function NativeModelPicker({
         }}
         onReasoningEffortChange={(effort) => setEffort(effort)}
       />
-      {reading && diagnostics && <p role="status">正在读取可选模型。</p>}
       {error && <p role="alert">模型目录不可用：{error}</p>}
       {!reading && !error && !selected && (requestedId || diagnostics) && (
         <p role="alert">

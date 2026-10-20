@@ -201,7 +201,8 @@ test('routine recalibration retains the approval mode, while an actual permissio
     expect(f.host.querySelector('.background-execution-stop')).toBeNull();
     await f.refresh(true);
     await f.until(() => !!f.host.querySelector('[data-permission-trigger]'));
-    expect(f.query('[data-permission-trigger]').textContent).toBe('读取审核方式…');
+    expect(f.query('[data-permission-trigger]').textContent).toBe('审核方式');
+    expect(f.query('[data-permission-trigger]').getAttribute('aria-busy')).toBe('true');
     await f.fail(false);
     await f.ready('a');
     expect(f.query('[data-permission-trigger]').textContent).toBe('自动审核');

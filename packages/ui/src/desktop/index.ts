@@ -92,6 +92,14 @@ export {
   type ScheduledTasksProps,
 } from './ScheduledTasks';
 export { SessionPage, type SessionPageProps } from './SessionPage';
+export {
+  type SessionBrowserPageProps,
+  SessionBrowserToolbar,
+  type SessionBrowserToolbarProps,
+  SessionTabs,
+  type SessionTabsModel,
+  useSessionTabs,
+} from './SessionTabs';
 export { type DirectoryProps, type PageActions, Sidebar } from './Sidebar';
 export { statusLabel } from './status';
 export { ToolActivity, ToolRow } from './ToolActivity';

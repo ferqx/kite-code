@@ -233,7 +233,7 @@ export function ModelOutputMessage({
       </>
     );
   return (
-    <div className="model-output-message">
+    <div className="model-output-message" aria-busy={loading || undefined}>
       <p>
         {full
           ? full.output.complete
@@ -268,7 +268,6 @@ export function ModelOutputMessage({
       {body.readAvailability === 'unsupported' && (
         <p>Full body unavailable · unsupported original content format</p>
       )}
-      {loading && <p role="status">Reading complete verified Model output</p>}
       {error && <p role="alert">Full Model output unavailable · {error}</p>}
       {showReasoning && full?.output.reasoning && (
         <details>

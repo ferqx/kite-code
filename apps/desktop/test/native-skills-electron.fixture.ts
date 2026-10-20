@@ -155,10 +155,7 @@ try {
   }
   async function complete(count: number) {
     await panel().getByText(`已完整读取 ${count} 项 Skill。`, { exact: true }).waitFor();
-    await panel()
-      .getByRole('status')
-      .filter({ hasText: '正在读取完整' })
-      .waitFor({ state: 'hidden' });
+    await page.locator('[aria-label="Skills 目录"]:not([aria-busy="true"])').waitFor();
     assert.equal(await panel().locator('li').count(), count);
   }
   async function refresh(count: number) {

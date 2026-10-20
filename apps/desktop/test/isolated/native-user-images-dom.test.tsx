@@ -5,7 +5,9 @@ import { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import { ConversationCache } from '../../../../packages/ui/src/desktop/ConversationCache';
 import type { NativeBridge, NativeRequest, NativeResult } from '../../src/native-bridge';
+import { NativeImagePreviews } from '../../src/native-image-previews';
 import { NativeUserImages } from '../../src/native-user-images';
+import { installImagePreviewWorker } from '../image-preview-worker.fixture';
 
 const data =
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wl6VQAAAABJRU5ErkJggg==';
@@ -13,6 +15,8 @@ const bytes = Buffer.from(data, 'base64');
 const hash = new Bun.CryptoHasher('sha256').update(bytes).digest('hex');
 
 function fixture() {
+  const restoreWorker = installImagePreviewWorker();
+  const previews = new NativeImagePreviews();
   const dom = new JSDOM('<div id="root"></div>', { pretendToBeVisual: true });
   const globals = ['window', 'document', 'IS_REACT_ACT_ENVIRONMENT'] as const;
   const old = globals.map(
@@ -116,6 +120,7 @@ function fixture() {
             <NativeUserImages
               key={index}
               bridge={bridge}
+              previews={previews}
               generation={1}
               viewSelection={viewSelection}
               historyEpoch={0}
@@ -185,12 +190,14 @@ function fixture() {
       }),
     async close() {
       await act(async () => root.unmount());
+      previews.clear();
       await act(async () => {
         for (const resolve of pending.splice(0)) resolve();
       });
       URL.createObjectURL = create;
       URL.revokeObjectURL = revoke;
       dom.window.close();
+      restoreWorker();
       for (const [key, descriptor] of old)
         if (descriptor) Object.defineProperty(globalThis, key, descriptor);
         else Reflect.deleteProperty(globalThis, key);
@@ -269,7 +276,7 @@ test('image metadata failures provide a retry without repeated reads and do not 
     await f.intersect(true);
     await f.release();
     await f.until(() => !!f.host.querySelector('button'));
-    expect(f.host.textContent).toContain('读取失败，重试');
+    expect(f.host.textContent).toContain('预览失败，重试');
     expect(f.urls).toHaveLength(0);
     await f.render();
     expect(f.calls.filter((request) => request.method === 'input.image.open')).toHaveLength(1);

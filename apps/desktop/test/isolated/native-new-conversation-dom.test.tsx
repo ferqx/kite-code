@@ -507,6 +507,250 @@ function fixture(
   };
 }
 
+test('late saved prompt reads preserve newer input, including an explicitly empty draft', async () => {
+  for (const text of ['new prompt 雪🙂', '']) {
+    const f = fixture(true);
+    const bridge = f.dom.window.kiteNative! as NativeBridge;
+    const request = bridge.request;
+    let release: (() => void) | undefined;
+    bridge.request = async (input) => {
+      const result = await request(input);
+      if (input.method === 'draft.read' && input.sessionId === 'b')
+        await new Promise<void>((resolve) => {
+          release = resolve;
+        });
+      return result;
+    };
+    try {
+      await act(async () => f.root.render(<NativeDesktop />));
+      await f.click('Original A');
+      await f.click('Other B');
+      expect(release).toBeDefined();
+      expect(f.input('当前会话私有草稿')?.getAttribute('contenteditable')).toBe('true');
+      await f.edit('an intermediate edit', '当前会话私有草稿');
+      await f.edit(text, '当前会话私有草稿');
+      await act(async () => release?.());
+      expect(promptValue(f.input('当前会话私有草稿'))).toBe(text);
+      bridge.request = request;
+      await f.click('Original A');
+      await f.click('Other B');
+      expect(promptValue(f.input('当前会话私有草稿'))).toBe(text);
+      expect(f.calls.some((call) => call.method === 'submit')).toBe(false);
+    } finally {
+      await act(async () => release?.());
+      await f.close();
+    }
+  }
+});
+
+test('an accepted prompt is removed from its own cache after leaving, while unknown and rejected submissions retain it', async () => {
+  for (const phase of [
+    'accepted',
+    'applied',
+    'terminal',
+    'submitting',
+    'unknown',
+    'failed',
+    'rejected',
+  ] as const) {
+    const f = fixture(true);
+    const bridge = f.dom.window.kiteNative! as NativeBridge;
+    const request = bridge.request;
+    let release: (() => void) | undefined;
+    bridge.request = async (input) => {
+      const result = await request(input);
+      if (input.method !== 'submit') return result;
+      await new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      return {
+        sessionId: input.sessionId,
+        intent: {
+          kind: input.intent.kind,
+          expectedStoreId: input.intent.expectedStoreId,
+          commandId: input.intent.commandId,
+        },
+        phase,
+      };
+    };
+    try {
+      await act(async () => f.root.render(<NativeDesktop />));
+      await f.click('Original A');
+      await f.edit('original submitted prompt 雪🙂', '当前会话私有草稿');
+      await f.click('发送明确的新轮次');
+      expect(release).toBeDefined();
+      await f.click('Other B');
+      expect(promptValue(f.input('当前会话私有草稿'))).toBe('saved B');
+      // One successful receipt also arrives after A has already become visible again.
+      if (phase === 'applied') await f.click('Original A');
+      await act(async () => release?.());
+      if (phase !== 'applied') expect(promptValue(f.input('当前会话私有草稿'))).toBe('saved B');
+      else expect(promptValue(f.input('当前会话私有草稿'))).toBe('');
+      await f.click('Original A');
+      expect(promptValue(f.input('当前会话私有草稿'))).toBe(
+        ['accepted', 'applied', 'terminal'].includes(phase) ? '' : 'original submitted prompt 雪🙂',
+      );
+      expect(f.calls.filter((call) => call.method === 'submit')).toHaveLength(1);
+    } finally {
+      await act(async () => release?.());
+      await f.close();
+    }
+  }
+});
+
+test('a later confirmed original receipt consumes only its submitted draft when another Session is visible', async () => {
+  for (const source of ['input', 'caller'] as const) {
+    for (const later of [undefined, '', 'newer draft after submission']) {
+      const f = fixture(true);
+      const bridge = f.dom.window.kiteNative! as NativeBridge;
+      const request = bridge.request;
+      let confirmed = false;
+      let submission: NativeState['inputSubmissions'][number] | undefined;
+      bridge.request = async (input) => {
+        if (input.method === 'submit') {
+          f.calls.push(input);
+          submission = {
+            sessionId: input.sessionId,
+            intent: {
+              kind: input.intent.kind,
+              expectedStoreId: input.intent.expectedStoreId,
+              commandId: input.intent.commandId,
+            },
+            phase: 'unknown',
+          };
+          return submission;
+        }
+        const value = await request(input);
+        if (!value || !('generation' in value) || !submission) return value;
+        return {
+          ...value,
+          inputSubmissions:
+            source === 'input'
+              ? [{ ...submission, phase: confirmed ? 'accepted' : 'unknown' }]
+              : [],
+          callerSubmissions:
+            source === 'caller'
+              ? [
+                  {
+                    scope: { storeId: 'store', workspaceId: 'w', sessionId: 'a' },
+                    subjectId: 'local-user',
+                    target: { kind: 'session', id: 'a' },
+                    bodyDigest: '0'.repeat(64),
+                    requestDigest: '0'.repeat(64),
+                    request: submission.intent,
+                    phase: confirmed ? 'applied' : 'unknown',
+                  } as NonNullable<NativeState['callerSubmissions']>[number],
+                ]
+              : [],
+        };
+      };
+      try {
+        await act(async () => f.root.render(<NativeDesktop />));
+        await f.click('Original A');
+        await f.edit('original unknown input', '当前会话私有草稿');
+        await f.click('发送明确的新轮次');
+        expect(promptValue(f.input('当前会话私有草稿'))).toBe('original unknown input');
+        if (later !== undefined) await f.edit(later, '当前会话私有草稿');
+        await f.click('Other B');
+        confirmed = true;
+        await f.refreshFacts();
+        expect(promptValue(f.input('当前会话私有草稿'))).toBe('saved B');
+        await f.click('Original A');
+        expect(promptValue(f.input('当前会话私有草稿'))).toBe(later ?? '');
+        expect(f.calls.filter((call) => call.method === 'submit')).toHaveLength(1);
+      } finally {
+        await f.close();
+      }
+    }
+  }
+});
+
+test('looking up an original first submission cannot overwrite a later prompt in its created Session', async () => {
+  for (const text of ['later prompt 雪🙂', '', 'original unknown first prompt']) {
+    const f = fixture(true);
+    const bridge = f.dom.window.kiteNative! as NativeBridge;
+    const request = bridge.request;
+    bridge.request = async (input) => {
+      const result = await request(input);
+      if (
+        input.method === 'conversation.lookup' &&
+        result &&
+        'kind' in result &&
+        result.kind === 'conversation'
+      )
+        return { ...result, phase: 'accepted', code: undefined };
+      return result;
+    };
+    try {
+      await act(async () => f.root.render(<NativeDesktop />));
+      await f.click('在 Workspace 中新建对话');
+      await f.edit('original unknown first prompt');
+      await f.click('发送首条消息');
+      await f.resolve('unknown');
+      await f.edit('an intermediate later prompt', '当前会话私有草稿');
+      await f.edit(text, '当前会话私有草稿');
+      await f.click('查询原首次提交');
+      expect(promptValue(f.input('当前会话私有草稿'))).toBe(text);
+      expect(f.calls.filter((call) => call.method === 'conversation.send')).toHaveLength(1);
+      expect(f.calls.filter((call) => call.method === 'conversation.lookup')).toHaveLength(1);
+    } finally {
+      await f.close();
+    }
+  }
+});
+
+test('querying a still unknown first creation cannot restore a preparation draft the user has cleared', async () => {
+  const f = fixture(true);
+  const bridge = f.dom.window.kiteNative! as NativeBridge;
+  const request = bridge.request;
+  bridge.request = async (input) => {
+    const result = await request(input);
+    if (
+      input.method === 'conversation.lookup' &&
+      result &&
+      'kind' in result &&
+      result.kind === 'conversation'
+    )
+      return { ...result, phase: 'unknown', creation: undefined, code: undefined };
+    return result;
+  };
+  try {
+    await act(async () => f.root.render(<NativeDesktop />));
+    await f.click('在 Workspace 中新建对话');
+    await f.edit('unknown first creation prompt');
+    await f.click('发送首条消息');
+    await f.resolve('unknown', false);
+    expect(promptValue(f.input())).toBe('unknown first creation prompt');
+    await f.edit('');
+    await f.click('查询原首次提交');
+    expect(promptValue(f.input())).toBe('');
+    expect(f.calls.filter((call) => call.method === 'conversation.send')).toHaveLength(1);
+    expect(f.calls.filter((call) => call.method === 'conversation.lookup')).toHaveLength(1);
+  } finally {
+    await f.close();
+  }
+});
+
+test('switching before React commits the latest edit preserves the actual prompt event', async () => {
+  const f = fixture(true);
+  try {
+    await act(async () => f.root.render(<NativeDesktop />));
+    await f.click('Original A');
+    await f.edit('earlier prompt', '当前会话私有草稿');
+    await act(async () => {
+      await setPromptText(f.input('当前会话私有草稿')!, 'latest prompt 雪🙂');
+      [...f.host.querySelectorAll<HTMLButtonElement>('.session-row')]
+        .find((button) => button.textContent?.includes('Other B'))!
+        .click();
+    });
+    await f.click('Original A');
+    expect(promptValue(f.input('当前会话私有草稿'))).toBe('latest prompt 雪🙂');
+    expect(f.calls.some((call) => call.method === 'submit')).toBe(false);
+  } finally {
+    await f.close();
+  }
+});
+
 test('switching from a Session to global or project preparation retains the input and never inserts a model loading paragraph', async () => {
   const f = fixture(true);
   try {

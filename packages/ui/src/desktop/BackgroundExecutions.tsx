@@ -70,12 +70,12 @@ export function BackgroundExecutions({
       >
         <header>
           <span>环境信息</span>
-          {stale && <span className="background-stale">上次状态 · 正在核对</span>}
+          {stale && <span className="background-stale">上次状态 · 待核实</span>}
         </header>
         <ExecutionGroup
           icon={TerminalIcon}
-          label="当前运行的 Shell"
-          emptyLabel="无运行中的 Shell"
+          label="Shell"
+          emptyLabel="空闲"
           executions={shells}
           stoppingExecutionId={stoppingExecutionId}
           onStop={stale ? undefined : onStop}
@@ -84,10 +84,8 @@ export function BackgroundExecutions({
         <ExecutionGroup
           icon={BotIcon}
           label="子智能体"
-          emptyLabel="暂无子智能体记录"
+          emptyLabel="暂无"
           executions={subagents}
-          stoppingExecutionId={stoppingExecutionId}
-          onStop={stale ? undefined : onStop}
           busy={busy}
           subagentDetails={subagentDetails}
         />
@@ -149,26 +147,23 @@ function ExecutionGroup({
   readonly busy: boolean;
 }) {
   return (
-    <section className="background-execution-group" aria-label={label}>
+    <section
+      className="background-execution-group"
+      aria-label={label}
+      aria-busy={busy || subagentDetails?.loading || undefined}
+    >
       <h3>
         <HugeiconsIcon icon={icon} />
         <span>{label}</span>
-        <span className="background-execution-count">{executions.length}</span>
-        {subagentDetails && (
-          <Button
-            className="ghost background-execution-refresh"
-            size="xs"
-            disabled={busy || subagentDetails.loading}
-            aria-label="刷新子 Agent"
-            onClick={subagentDetails.onRefresh}
-          >
-            刷新
-          </Button>
+        {executions.length > 0 ? (
+          <span className="background-execution-count">{executions.length}</span>
+        ) : (
+          !subagentDetails?.loading && (
+            <span className="background-execution-empty">{emptyLabel}</span>
+          )
         )}
       </h3>
-      {executions.length === 0 ? (
-        <p className="background-execution-empty">{emptyLabel}</p>
-      ) : (
+      {executions.length > 0 && (
         <ul>
           {executions.map((execution) => {
             const childSessionId = subagentDetails?.sessionIdsByExecutionId.get(
@@ -209,9 +204,6 @@ function ExecutionGroup({
             );
           })}
         </ul>
-      )}
-      {subagentDetails?.loading && executions.length === 0 && (
-        <p role="status">正在读取子 Agent…</p>
       )}
       {subagentDetails?.error && (
         <p role="alert" className="background-execution-error">

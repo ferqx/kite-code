@@ -1491,6 +1491,12 @@ export const SessionDirectoryPageSchema = z.object({
     .max(200),
 });
 export const BackgroundExecutionQuerySchema = SessionDirectoryQuerySchema.extend({
+  includeSourceTool: z
+    .preprocess(
+      (value) => (value === 'true' ? true : value === 'false' ? false : value),
+      z.boolean(),
+    )
+    .optional(),
   rootSessionId: id.optional(),
   executionId: id.optional(),
   snapshotCursor: sequence.optional(),
@@ -1546,6 +1552,9 @@ const backgroundSession = schemas.Session.extend({
 }).strict();
 export const BackgroundExecutionItemSchema = z.strictObject({
   seq: sequence,
+  sourceTool: z
+    .strictObject({ id, definitionId: z.string(), definitionVersion: z.string() })
+    .optional(),
   execution: backgroundExecution,
   session: backgroundSession,
   rootSession: backgroundSession,

@@ -1,5 +1,10 @@
 # 本机 Agent Service
 
+## 后台目录的来源投影
+
+公开后台目录查询可显式带 `includeSourceTool:true`；HTTP 仅将严格的 true／false 字符串转为布尔值，其他值及重复参数仍拒绝。默认／false 保留原响应结构；true 可返回可选 `sourceTool:{id,definitionId,definitionVersion}`，字段来源和作用域归[Store owner](../../packages/agent/src/storage/README.md#跨会话原-job-目录)。同一[生成 schema](src/http/schema/index.ts)同步 OpenAPI、Client 类型与闭合 validator；来源不含工具正文，不增加路由、执行权限或恢复资格。
+
+
 ## 图片输入协议
 
 具备 Artifact port 的 Runtime 宣告 `input_images`；认证写入口 `POST /v1/sessions/{id}/input-images` 接收 expectedStoreId、稳定发布 ID、名称、明确图片 MIME 与 base64，主体由可信宿主提供。闭合 schema 与最多 24 MiB 的请求体先准入，Runtime 再按单张 16 MiB 和真实字节校验，返回完整不可变引用。路径、URL 和 PDF 二进制不属于此协议；普通文件另以 `files` 路径引用发送，Native 的统一入口按类型自动分流。

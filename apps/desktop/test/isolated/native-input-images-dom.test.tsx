@@ -3,9 +3,11 @@ import { JSDOM } from 'jsdom';
 import { act, useState } from 'react';
 import type { NativeBridge, NativeRequest } from '../../src/native-bridge';
 import { useNativeInputImages } from '../../src/native-input-images';
+import { installImagePreviewWorker } from '../image-preview-worker.fixture';
 import { prepareDesktopDom, promptValue, setPromptText } from '../native-page-dom.fixture';
 
 test('Native attachments preserve original scopes and distinguish an outdated Main from ordinary picker failures', async () => {
+  const restoreWorker = installImagePreviewWorker();
   const dom = new JSDOM('<div id="root"></div>', { pretendToBeVisual: true });
   const old = {
     window: globalThis.window,
@@ -68,6 +70,35 @@ test('Native attachments preserve original scopes and distinguish an outdated Ma
       id: draft.id,
       offset: 0,
       data: 'AQID',
+    });
+    const worker = globalThis.Worker;
+    images.previews.clear();
+    Object.defineProperty(globalThis, 'Worker', {
+      configurable: true,
+      writable: true,
+      value: undefined,
+    });
+    await act(async () =>
+      images.add('preview-failure', [
+        new dom.window.File([new Uint8Array([4, 5, 6])], 'still-send.png', {
+          type: 'image/png',
+        }) as unknown as File,
+      ]),
+    );
+    const failedPreview = images.get('preview-failure')[0]!;
+    expect(failedPreview.previewError).toBe('预览不可用');
+    expect(failedPreview.error).toBeUndefined();
+    expect(failedPreview.loading).toBe(false);
+    expect(
+      calls.find(
+        (request) => request.method === 'input.images.append' && request.id === failedPreview.id,
+      ),
+    ).toMatchObject({ data: 'BAUG' });
+    await act(async () => images.removeIds([failedPreview.id]));
+    Object.defineProperty(globalThis, 'Worker', {
+      configurable: true,
+      writable: true,
+      value: worker,
     });
     await act(async () => images.addFiles('a', files));
     await act(async () => images.addFiles('a', files));
@@ -175,10 +206,12 @@ test('Native attachments preserve original scopes and distinguish an outdated Ma
     URL.createObjectURL = createObjectURL;
     URL.revokeObjectURL = revokeObjectURL;
     dom.window.close();
+    restoreWorker();
   }
 });
 
 test('real Composer switches scopes during image encoding and removes only the selected attachment without finishing cancelled bytes', async () => {
+  const restoreWorker = installImagePreviewWorker();
   const dom = new JSDOM('<div id="root"></div>', { pretendToBeVisual: true });
   const restoreLayout = prepareDesktopDom(dom);
   const previous = {
@@ -308,5 +341,6 @@ test('real Composer switches scopes during image encoding and removes only the s
     URL.createObjectURL = createObjectURL;
     URL.revokeObjectURL = revokeObjectURL;
     dom.window.close();
+    restoreWorker();
   }
 });

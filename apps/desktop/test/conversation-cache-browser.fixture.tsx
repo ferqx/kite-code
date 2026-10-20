@@ -9,14 +9,20 @@ import { ConversationCache } from '../../../packages/ui/src/desktop/Conversation
 import { MessageContent } from '../../../packages/ui/src/desktop/MessageContent';
 import type { Message as DisplayMessage } from '../../../packages/ui/src/desktop/types';
 import type { NativeBridge, NativeRequest } from '../src/native-bridge';
+import { NativeImagePreviews } from '../src/native-image-previews';
 import { NativeModelOutputMessage } from '../src/native-model-output-message';
 import { NativeUserImages } from '../src/native-user-images';
 import '../src/native-tailwind.css';
 import '@kite-ai/ui/desktop/style.css';
 
-const encoded =
-  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wl6VQAAAABJRU5ErkJggg==';
-const bytes = Uint8Array.from(atob(encoded), (char) => char.charCodeAt(0));
+// Generate a valid PNG: the old embedded sample was img-tolerated but rejected by createImageBitmap.
+const sourceCanvas = new OffscreenCanvas(1, 1);
+sourceCanvas.getContext('2d')!.fillRect(0, 0, 1, 1);
+const bytes = new Uint8Array(
+  await (await sourceCanvas.convertToBlob({ type: 'image/png' })).arrayBuffer(),
+);
+sourceCanvas.width = sourceCanvas.height = 0;
+const encoded = btoa(String.fromCharCode(...bytes));
 const hash = [...new Uint8Array(await crypto.subtle.digest('SHA-256', bytes))]
   .map((value) => value.toString(16).padStart(2, '0'))
   .join('');
@@ -41,6 +47,7 @@ const imageMessage = {
   images: [{ name: 'cached.png', reference }],
 };
 const metrics = { opens: 0, urls: 0, revoked: 0, copies: 0, fileOpens: 0 };
+const previews = new NativeImagePreviews();
 const create = URL.createObjectURL.bind(URL),
   revoke = URL.revokeObjectURL.bind(URL);
 URL.createObjectURL = (blob) => {
@@ -268,6 +275,7 @@ function App() {
                     <p className="user-text">{message.text}</p>
                     <NativeUserImages
                       bridge={bridge}
+                      previews={previews}
                       generation={1}
                       viewSelection={view.version}
                       historyEpoch={0}

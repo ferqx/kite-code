@@ -10,9 +10,21 @@ Composer 在原停止按钮内使用 Hugeicons `StopIcon` 的实心方块，填�
 
 [Conversation](src/desktop/Conversation.tsx)按浏览器实际夹紧后的 `scrollTop` 记录自己的滚动写入；来自该位置的迟到 scroll 事件不改变跟随状态，用户改变位置时继续按原底部阈值切换跟随，恢复与“回到最新消息”共用同一写入。避免新一段内容增长先于旧 scroll 通知抵达时误判为用户上翻；[阅读滚动回归](test/isolated/desktop-conversation-scroll.test.tsx)覆盖这一顺序、手动阅读、恢复及重复卸载的观察器／监听清理。Native 图片挂载与资源生命周期见 [Desktop owner](../../apps/desktop/README.md#markdown-与附件输入)。
 
+[Conversation](src/desktop/Conversation.tsx)首次呈现历史时，对默认展开的活动轮次同样登记 `data-restored-expanded`，直接进入完整高度，避免首次打开重播300ms展开动画而带动正文移动。缓存恢复与冷历史共用原恢复标记，后续手动开合由 `onToggle` 清除标记并继续动画；不改变展开选择、消息顺序或滚动跟随。[轮次回归](test/desktop-reasoning-turns.test.tsx)核冷／恢复两种入口；生产组件浏览器耗时、逐帧高度及连续流式证据归 [Desktop owner](../../apps/desktop/README.md#会话消息渲染验证)。
+
+同一组件的 `.response-status` 沿[共享 CSS](src/desktop/style.css)正常参与正文排版，为“正在回复…”保留实际行高；不再用绝对定位将其放到消息盒外，避免活动过程的折叠裁剪层截去状态末行。底部跟随继续由同一消息高度驱动；浏览器回归核状态文字完整位于viewport与各级裁剪容器内。
+
+Composer 的图片卡片保持固定预览区域，接受宿主交付的小尺寸URL并提示异步解码；等待URL时显示准备占位，可选 `previewError` 只显示预览失败，不改变原 `loading/error` 的发送门禁。图片转换、缓存与原字节校验归 [Desktop owner](../../apps/desktop/README.md#markdown-与附件输入)，UI不读取或转换原图。Native登记给ConversationCache的图片成本现包含缩略图编码字节与RGBA像素估算，继续使用原媒体／DOM预算、停用和释放协议；派生Blob的独立有界缓存由原窗口owner管理，不能恢复旧读取资格。
+
 ## Markdown 提示词编辑
 
-[PromptEditor](src/desktop/PromptEditor.tsx) 使用固定 Lexical 0.52.0 实时渲染和编辑 Markdown，`Composer` 继续通过 Markdown `draft/onChange` 与宿主交接；未编辑的外部草稿保留原源文。输入法确认、Enter 发送、Shift+Enter、撤销与 scope 切换由该组件处理，链接点击不导航，粘贴只解析 plain text Markdown，不执行 HTML 或获取远程图片。组件 handle 提供 focus/caret 操作，不再暴露 textarea。
+[PromptEditor](src/desktop/PromptEditor.tsx) 使用固定 Lexical 0.52.0 实时渲染和编辑 Markdown，`Composer` 继续通过 Markdown `draft/onChange` 与宿主交接；未编辑的外部草稿保留原源文。正文、占位提示与代码默认使用 14px 字号，Markdown 标题保持独立层级。Composer 内模型／思考、审批及项目／分支选择器的触发文字、缓存统计及上下文详情统一为 14px，模型与项目／分支的展开菜单保持 14px；附件、模型、审批、项目／分支和发送／停止的操作图标，以及相关菜单图标统一为 16px。底部控件统一 32px 高；`composer-options` 将附件、模型与审批放在左侧，`composer-trailing` 将缓存率／上下文状态组与发送／停止放在右侧，状态组与发送按钮间距为 16px。底栏按实际可用宽度在两组之间换行，右组整体右对齐；左组保持同一行，模型名称在可用空间内省略，保留原完整名称提示和无障碍名称。Native 模型容器使用 Grid 承接按钮和后续错误信息。权限菜单使用 `max-content` 按标题、名称及说明自适应宽度，同时受视口留白与 Radix 可用宽度限制，达到上限时自然换行；常规宽度下标题区单行排列，标题与选项名为 13px／18px，辅助说明为 11px／14px，均为 400 字重；容器、标题、RadioItem 和分隔线直接使用组件库默认的 padding／margin，选项高度按内容与默认内边距自然形成；名称与说明无额外行间空隙。窄区域允许说明自然换行，不裁剪内容。输入法确认、Enter 发送、Shift+Enter、撤销与 scope 切换由该组件处理，链接点击不导航，粘贴只解析 plain text Markdown，不执行 HTML 或获取远程图片。组件 handle 提供 focus/caret 操作，不再暴露 textarea。
+
+`Composer` 的缓存命中率恢复为独立文字，分子与分母仍来自原累计命中／未命中用量。旁边16px静态圆环仅消费宿主的 `contextUsage`：当前上下文输入估算除以模型完整窗口，不能用缓存命中率、累计输入或扣除输出预留后的可用输入预算替代。悬停或键盘聚焦时沿原 Radix Tooltip 在上方显示三行居中详情：上下文窗口、约多少百分比已用、已用／总窗口标记数，较大数字缩写为 k／m 等；完整数值保留在按钮无障碍描述中。未知容量显示空环与“占用比例未知／总量未知”，真实零仍为0%；超过容量时环最多一圈，详情保留实际超过100%的估算。浮层使用主题卡片色、共享圆角和视口避让，Escape关闭；无对应估算时隐藏圆环，缓存率仍独立显示。宿主读取与会话／模型隔离归 [Desktop owner](../../apps/desktop/README.md#输入区上下文占用)，UI不读取上下文正文或发起业务请求。
+
+[上下文占用回归](../../apps/desktop/test/isolated/native-context-usage-dom.test.tsx)核缓存99%而上下文68%的反例、完整窗口分母、零、未知容量、超过容量、迟到响应、会话与模型隔离；原[累计缓存回归](../../apps/desktop/test/isolated/native-cache-metrics-dom.test.tsx)继续核统计保留、真实零与无样本。
+
+2026-10-20，Windows x64／Bun1.4.3，`5dba8a6b`工作树加本次左右分组修改：对上述上下文、缓存回归及[共享页面](test/desktop-page.test.tsx)执行 `bun test --parallel=1 --max-concurrency=1`，22项／214断言通过；UI／Desktop的 `tsc --noEmit`、两个源码文件的Biome及文档检查通过。Chrome155以实际Composer和生产样式检查深浅主题、320–1100px输入区、中英文、长模型名与思考档位，并沿隔离Main夹具检查实际NativeDesktop的会话切换及缩窄，共23组通过；核分组边界、模型省略、菜单、上下文浮层、无指标、DOM身份和停止按钮。未运行安装版窗口或其他平台。
 
 `Composer` 的 `+` 菜单以输入框等宽的“添加”列表向上展开，只有“添加文件”一行，使用图标、12px 文字与整行高亮；菜单沿原 Radix 键盘／焦点合同，按 form 和 trigger 的实际边界定位，`ResizeObserver` 在输入框尺寸变化时更新宽度和顶边间距，切换 scope 时关闭。一个无类型过滤的多选 file input 交付实际 File 对象；同次选择、粘贴或拖入先按 MIME／已知图片扩展名分流，图片交给 `onImageFiles`，普通文件由 `onFileReferences` 只解析名称／URI，再由 `onFilesSelected` 交给原 scope。默认每条消息 10 张图片，宿主通过 `imageLimit` 表达同一准入值；已有与新增合计超限时不调用任何附件 port。文件拖入在捕获阶段接管，避免 Lexical 再处理同一份附件。迟到或取消的选择不进入后来 scope。两类附件以受控 `images/files` 在正文上方横向展示并独立移除，不改写 Markdown 草稿；准备中或错误的图片阻止发送，两类附件均可单独发送。UI 不读取本地路径、上传图片或拥有 Artifact 读取权限。[编辑器测试](test/isolated/prompt-editor.test.tsx)核 Markdown、IME、混选、取消、切换、10／11 张边界及粘贴／拖入累计，实际图片 owner 见 [Native](../../apps/desktop/README.md#markdown-与附件输入)。
 
@@ -24,11 +36,19 @@ Composer 在原停止按钮内使用 Hugeicons `StopIcon` 的实心方块，填�
 
 ## 原桌面展示层
 
+共享样式以 `--font-ui` 统一正文、控件与浮层字体，优先使用 Geist Variable；中文回退到系统界面字体，Windows 优先 Microsoft YaHei UI。普通文字为 400，界面标题与 `font-semibold` token 为 500；Markdown 标题、加粗和等宽代码保留内容层级。Native 字体资源及阅读区变量由 [Desktop owner](../../apps/desktop/README.md#复用原桌面展示层)接入。
+
+共享[桌面样式](src/desktop/style.css)的主体背景由 `--page-background` 跟随 `--background`：深色为炭黑 `#191919`，亮色为浅灰 `#fafafa`；输入框使用独立的 `--composer-background`，深色为 `#202020`、亮色为 `#fff`，与阅读区保留轻微明度层次；卡片和浮层继续使用 `--card` 的深色 `#242424`／亮色 `#fff`。会话标题、阅读区、设置内容与右侧详情沿同一主体变量，会话与右侧栏的标题栏下方均不绘制分隔线；文字、交互叠层和侧栏实色回退值保持。原生透明侧栏与窗口底色由 [Desktop owner](../../apps/desktop/README.md#原主题与窗口背景联动)负责。
+
+输入框的1px描边使用 `--composer-border-color`，亮色为黑色10%、深色为白色5%；键盘焦点边色使用 `--composer-focus-border-color`，亮色为黑色14%、深色为白色12%。投影色由 `--composer-shadow-color` 管理，亮色为黑色4%、深色为黑色24%；焦点外圈由 `--composer-focus-ring-color` 管理，亮色为黑色4%、深色为白色4%。常态投影保持 `0 1px 2px`，键盘聚焦时额外绘制 `3px` 淡外圈，继续遵循原输入方式判定。
+
 [Sidebar](src/desktop/Sidebar.tsx) 的会话悬浮提示只显示完整名称与 `updatedAt` 的本地化时间；缺失或非法时间只保留名称。状态仍供列表标记与 `aria-description` 使用，不重复写入悬浮内容。
 
-环境卡 [BackgroundExecutions](src/desktop/BackgroundExecutions.tsx)以可选 `busy` 表示短时校准：保留正文和停止按钮，沿 `disabled` 禁止停止／刷新并提供 `aria-busy`；`stale` 继续表示实际不可用／失败。首次读取文字由 `subagentDetails.loading` 控制，已有空列表不会在普通刷新时重新显示加载文字。环境卡忙碌时保留禁用按钮的原透明度和悬停外观，原 disabled、事件和真实异常显示保持；其他消费者默认透明度与行为不变。
+环境卡 [BackgroundExecutions](src/desktop/BackgroundExecutions.tsx)以可选 `busy` 表示短时校准：保留正文和停止按钮，沿 `disabled` 禁止停止并提供 `aria-busy`；`stale` 继续表示实际不可用／失败。首次子 Agent 读取同样只标记忙碌，不插入加载文字或提前显示空列表；真实 stale 显示“上次状态 · 待核实”。环境卡忙碌时保留禁用按钮的原透明度和悬停外观，原 disabled、事件和真实异常显示保持；其他消费者默认透明度与行为不变。
 
-共享 [Composer](src/desktop/Composer.tsx)用 `sessionLoading` 区分普通读取等待与真实不可用。按 `scopeKey` 有界保存最近12项已启用的控件外观，临时只读保留输入、发送／停止及附件的透明度；空草稿等原本禁用的发送仍保持原样。已知审核标签与模型在校准中保持原节点和悬停，未知审核方式使用静态读取占位；原生 disabled、事件捕获和当前回调门禁继续阻止操作。会话／确认范围变化或权限暂不可操作时关闭旧审核菜单和 Full 确认，模型弹层同样拒绝禁用状态下打开。
+共享 [Composer](src/desktop/Composer.tsx)用 `sessionLoading` 区分普通读取等待与真实不可用。按 `scopeKey` 有界保存最近12项已启用的控件外观，临时只读保留输入、发送／停止及附件的透明度；空草稿等原本禁用的发送仍保持原样。已知审核标签与模型在校准中保持原节点和悬停，未知审核方式使用静态“审核方式”／“Approval mode”标签；原生 disabled、事件捕获和当前回调门禁继续阻止操作。会话／确认范围变化或权限暂不可操作时关闭旧审核菜单和 Full 确认，模型弹层同样拒绝禁用状态下打开。
+
+目录、[安排任务](src/desktop/ScheduledTasks.tsx)、[文件操作](src/desktop/FileChanges.tsx)及共享[模型输入](src/model-input.tsx)／[输出](src/model-output.tsx)读取不显示临时加载文案，忙碌由区域的 `aria-busy` 和原控件状态表达。安排任务与文件操作只在读取完成后展示空状态，已有内容仍可保留；附件准备期间保持原文件名和预览占位，不插入准备提示，失败仍可见。会话原转圈及其无障碍名称保留。
 
 共享 [Composer](src/desktop/Composer.tsx)把内嵌菜单的鼠标事件留给菜单自身处理，菜单项及其文字不触发输入区空白处的 输入框聚焦逻辑。审批触发器以原 `permissionPending` 提供 `aria-busy` 和切换中标签，原禁用门禁保持；会话权限状态是否需要占据主区由 Native 宿主负责。
 
@@ -40,15 +60,17 @@ Composer 在原停止按钮内使用 Hugeicons `StopIcon` 的实心方块，填�
 
 2026-10-14 Windows x64／Bun 1.4.2，当前 `006b79d3` 工作树上的该变量修改：实际 Chrome headless 载入当前 Tailwind 编译 CSS 及共享 Sidebar／Button 的静态标记，用鼠标悬停核亮／暗、Mica／实色四种组合。亮色空间、会话、主要导航、用户按钮及设置返回样式与普通按钮均为 `rgb(236,236,236)`，选中会话与设置分类沿同值；临时替换 `--accent` 后亮色侧栏与按钮同步变化。暗色保原侧栏 `rgb(48,48,48)`，Mica 侧栏承载层仍透明。该次定向 Biome 核对保留了当时三项 `!important` 提示；此 CSS 核对不代证原生壁纸合成或完整客户端交互。
 
+[SessionPage](src/desktop/SessionPage.tsx) 的外层 Group 分配导航与 `workspace`；工作区内的 `.client-content-frame` 包住第二层 Group，由它分配阅读区 `content` 和工具区 `details`。右栏开合只改变框内两区的宽度，外框到应用右侧的留白保持固定；描边、阴影、圆角与材质留白由 [Native owner](../../apps/desktop/README.md#windows-原生-mica)在共同外框上绘制。右栏展开时，工作区将两区合计660px最小宽度交给外层约束，保留紧凑窗口中导航让出空间的行为。布局取舍见[共同外框记录](../../.agents/notes/implemented/bug-fix/2026-10-20-session-content-frame.md)。
+
 当前两侧可折叠面板在 [SessionPage](src/desktop/SessionPage.tsx) 通过 `ResizablePanel` 已有的 `style` 端口设置原 `overflow: hidden`，该值落在库默认 `overflow: auto` 的同一内容节点，保留原裁剪和滚动行为。会话阅读区由 [Conversation](src/desktop/Conversation.tsx) 的原生 `div` 渲染，没有第三方内联 `display`／`min-width`；对应共享 CSS 保持 `display: block`、`min-width: 0`，无需 `!important`。布局、宽度、滚动恢复及事件仍由原组件负责。
 
 `@kite-ai/ui/desktop` 的 [SessionPage](src/desktop/SessionPage.tsx)、Sidebar、Conversation、Composer、RightSidebar 与 shadcn 控件从原 kite-client-ui 展示源码迁入，保留原 CSS、交互和依赖版本；[样式导出](src/desktop/style.css)供正式 Native 的原 Vite/Tailwind 管线编译。此层不导入旧 workspace 或 Runtime，事实映射和写入 authority 属 [Desktop host](../../apps/desktop/README.md#复用原桌面展示层)。
 
 桌面圆角在[共享样式](src/desktop/style.css)的根变量 `--radius: 16px` 统一定义。面板、卡片、输入框、按钮、列表、菜单和提示框均引用该值；Tailwind 的 `--radius-xs` 到 `--radius-4xl` 也只作为同一变量的别名，避免 shadcn 弹层另用尺寸。圆形控件、滚动条、调宽把手保留圆形或胶囊轮廓，拼接内侧和全屏容器保留必要的直角；Native 设置样式、Mica 面板及正文排版也消费这一根变量。调整只改外观，不增加请求、写入或阅读权限；实际编译后的值和窗口验证归 [Native owner](../../apps/desktop/README.md#统一桌面圆角)。
 
-同一共享样式的 `--resize-handle-width: 1px` 管理调宽线。导航分隔以该值占位，收起时归零；右侧分隔始终不占布局宽度，以伪元素覆盖接缝，保留原命中区、把手和键盘操作，避免右栏开合改变三栏可分配宽度。Native Mica 以导航分隔和内容留白计算玻璃导航的外侧间距，具体视觉边界与实窗证据由 [Native owner](../../apps/desktop/README.md#玻璃导航间距)维护。
+同一共享样式的 `--resize-handle-width: 1px` 管理调宽线。导航分隔以该值占位，收起时归零；阅读区与右侧工具之间的分隔始终不占布局宽度，以伪元素覆盖接缝，保留原命中区、把手和键盘操作，避免右栏开合改变共同外框的可分配宽度。Native Mica 以导航分隔和内容留白计算玻璃导航的外侧间距，具体视觉边界与实窗证据由 [Native owner](../../apps/desktop/README.md#玻璃导航间距)维护。
 
-[SessionPage](src/desktop/SessionPage.tsx) 的 `schedulePanelChange` 在实际开合时统一开启 Group 的 `data-animate-width`，三栏、分隔与标题占位均消费[共享样式](src/desktop/style.css)的 `--sidebar-motion-duration`／`--sidebar-motion-easing`，默认180ms／ease-out，两种方向相同；不对已在目标状态的面板重复启动。调宽分隔收到鼠标／触摸或键盘操作后立即结束程序动画，拖动直接跟随；原240ms动画清理计时器在卸载时释放，减少动画设置同时关闭面板及分隔过渡。各用途的 RightSidebar、关闭与阅读生命周期保持。
+[SessionPage](src/desktop/SessionPage.tsx) 的 `schedulePanelChange` 在实际开合时统一开启内外 Group 的 `data-animate-width`，面板、分隔与标题占位均消费[共享样式](src/desktop/style.css)的 `--sidebar-motion-duration`／`--sidebar-motion-easing`，默认180ms／ease-out，两种方向相同；导航与右栏分别按所属 Group 测量和调宽，不对已在目标状态的面板重复启动。调宽分隔收到鼠标／触摸或键盘操作后立即结束程序动画，拖动直接跟随；原240ms动画清理计时器在卸载时释放，减少动画设置同时关闭面板及分隔过渡。各用途的 RightSidebar、关闭与阅读生命周期保持。
 
 [Sheet](src/desktop/components/ui/sheet.tsx) 的浮层与遮罩通过 `data-slot`／`data-side` 采用相同动画参数，Radix Presence 等待退出动画结束后移除节点，退出时不接收指针操作；减少动画时直接关闭。环境卡的透明度、位移与占位也消费这两个变量，宽度不足或恢复均启动过渡，新挂载卡用 `@starting-style` 进入。宿主详情开启时清除旧的内部右栏缓存，关闭仍立即卸载当前详情读者，退出的栏体不会显示之前另一面板的内容。
 
@@ -62,7 +84,7 @@ Composer 在原停止按钮内使用 Hugeicons `StopIcon` 的实心方块，填�
 
 右侧 `details` 面板及分隔在 `rightSidebarOpen=false` 时一同禁用，隐藏分隔不再响应鼠标／键盘，也不能经其他面板间接展开空栏。分隔以开合状态重新挂载，启用时重新登记相邻面板，保留重开后的键盘调宽。真实用户调宽至库确认的折叠状态时，沿当前 RightSidebar 的同一个关闭回调处理宿主详情、文件变更或安排任务编辑；原读取释放、焦点返回与编辑代次保护保持。正常展开时仍沿300–640px约束调宽。
 
-右栏展开同步同时响应600px断点造成的 Group 重建，并在展开意图存在时观察 Group 尺寸，宽度重新足够后恢复被约束折叠的面板；收起或卸载即释放该 ResizeObserver。窗口缩放不调用用户关闭回调，显式关闭仍清除展开意图。
+右栏展开同步同时响应600px断点造成的 Group 重建，并在展开意图存在时观察内部内容 Group 尺寸；窗口或导航释放空间后，恢复被约束折叠的右栏。收起或卸载即释放该 ResizeObserver。窗口缩放不调用用户关闭回调，显式关闭仍清除展开意图。
 
 2026-10-19 Windows x64／Bun 1.4.3，基于 `f734245a` 加本轮工作区改动：共享[页面](test/desktop-page.test.tsx)、[安排任务](test/isolated/scheduled-tasks.test.tsx)、Native [页面](../../apps/desktop/test/isolated/native-new-conversation-dom.test.tsx)和[后台](../../apps/desktop/test/native-background-panel.test.tsx)四个整文件54项／849断言及 UI／Desktop typecheck 通过。Chrome 155 隔离夹具沿实际 SessionPage、固定面板库和 Native CSS 复现关闭右栏仍可拉出640px空白，修复后保持0；2048／1240px、亮暗／Mica与实色下核实际拖拽、300–640px约束、键盘收起、详情组件卸载、重开及关闭按钮，500px另核收起右栏与窗口缩放。未运行安装版窗口、其他平台或全量默认测试；既有嵌套 `@keyframes` 优化提示保留。
 
@@ -80,9 +102,11 @@ Composer 在原停止按钮内使用 Hugeicons `StopIcon` 的实心方块，填�
 
 有限 renderMessage、Composer 控件/输入标签/发送门禁 slot 和 detailPanel 让宿主接入已验证公共正文 reader、准确 controller 与原右侧栏；缺省保持原展示契约。侧栏开关不卸载 Conversation，宿主 detailPanel 关闭则卸载所属工具内容以释放原读取，不沿旧动画缓存保留隐藏 reader。Sidebar 在连接标签为空且未提供 connection action 时不生成连接行，用户菜单独立保留；Native 的测试辅助入口显示规则归 [Desktop owner](../../apps/desktop/README.md#普通客户端与测试诊断)。UI 不读文件、发请求或取消业务。缺少真实操作回调时不从 view model 推造能力；Message completion 不能提升为 final reply 或旧 Tool grouping。
 
-原 [FileChanges／FileDiff](src/desktop/FileChanges.tsx)公开给宿主复用，`renderDetail` 只在展开项挂载、`loading` 表示宿主读取状态；原 messages／openFile 缺省展示保持。SessionPage 的 `fileChangesContent` 接原“文件变更”入口，关闭即卸载宿主内容；会话工具与文件变更切换先关闭原面板，各用途保独立 RightSidebar 身份，栏宽跟随总体开关。实际文件回执、读取释放和编辑器目标校验归 [Desktop owner](../../apps/desktop/README.md#原文件变更面板与编辑器)，此层不取得文件或执行权限。
+[SessionTabs](src/desktop/SessionTabs.tsx)由 SessionPage 标题栏的“标签页”图标打开，替代原直接“文件变更”按钮。受控 Radix Tabs 提供新标签页、加号、切换、关闭和收起，最多8项；首页工具只提供唯一“变更”标签。`useSessionTabs` 位于响应式 Group 之上，调宽、宽窄重挂载与收起保留当前会话标签，换 readingKey 或页面卸载通过 `closeBrowser` 释放旧网页。`renderBrowser` 接收稳定 ID、可见性、工具入口和标题回调；共享 `SessionBrowserToolbar` 只交付导航事件，不接触宿主接口。标签栏以 `visible` 控制交互、原生网页可见性和工具 reader；收起时立即设置 `aria-hidden`／`inert` 并卸载变更读取，保留栏体外壳供父面板沿原180ms宽度动画裁切退出。开关意图与父面板宽度在同一帧提交，阅读区与右栏共用180ms缓出过渡，并在共同外框内裁切；外框右侧留白不参与开合动画。`present` 仅在实际展开或退出动画期间保留外壳，结束、覆盖页面或让位其他详情面板时设置 `hidden`；空间不足导致实际折叠时也隐藏网页并卸载工具 reader，展开意图仍可在拉宽后恢复。外层 `#details` 使用不占布局空间的裁切，避免面板库的外层 `overflow: visible` 让300px最小内容宽度越界；减少动画和直接调宽继续遵循原规则。
 
-SessionPage 的可选 `covered` 保留主panel树、尺寸和阅读实例，以opacity0／inert／aria-hidden退出绘制与交互；`overlays` 仍在同级可见层。窄侧栏模态在covered期间暂时关闭，记住原开关，避免旧模态与宿主新视图竞争焦点。该属性不关闭reader、取消任务或重新选择会话，默认不覆盖页面。原 [DialogContent](src/desktop/components/ui/dialog.tsx)新增可选 `showOverlay`，默认true保旧遮罩；Native全屏设置明确false，仍由原Radix内容保焦点、Escape与模态语义。具体玻璃层和状态恢复由 [Native owner](../../apps/desktop/README.md#windows-原生-mica)维护。
+原 [FileChanges／FileDiff](src/desktop/FileChanges.tsx)与 `fileChangesContent` 继续复用；只有当前可见且选中的变更标签挂载 reader，切换、覆盖或收起即卸载，其他标签不在后台读取。`renderDetail` 仍只在展开项挂载。实际网页、文件回执和编辑器目标校验归 [Desktop owner](../../apps/desktop/README.md#会话标签页与内置浏览器)。[标签生命周期回归](test/isolated/desktop-session-tabs.test.tsx)覆盖入口、reader、会话释放、宽窄重挂载和数量边界；UI 不取得文件或执行权限。
+
+SessionPage 的可选 `covered` 保留主panel树、尺寸和阅读实例，以opacity0／inert／aria-hidden退出绘制与交互；`overlays` 仍在同级可见层。窄侧栏模态在covered期间暂时关闭，记住原开关，避免旧模态与宿主新视图竞争焦点。该属性不取消任务或重新选择会话；标签页隐藏网页并卸载当前工具reader，其余宿主reader保持原合同，默认不覆盖页面。原 [DialogContent](src/desktop/components/ui/dialog.tsx)新增可选 `showOverlay`，默认true保旧遮罩；Native全屏设置明确false，仍由原Radix内容保焦点、Escape与模态语义。具体玻璃层和状态恢复由 [Native owner](../../apps/desktop/README.md#windows-原生-mica)维护。
 
 原 [MessageContent](src/desktop/MessageContent.tsx)和 [ToolActivity / ToolRow](src/desktop/ToolActivity.tsx)公开给 Native 复用，文件操作仍只调用显式宿主回调。`ModelOutputMessage.renderText` 可为同一预览或已验证全文提供宿主展示；不改完整读取、身份／字节门禁、关闭与 onContent，未传时继续 SafeMessageMarkdown。当前 Native 的消息路径与默认模型摘要归 [Desktop owner](../../apps/desktop/README.md#原消息文件路径与常规摘要)，纯 UI 不取得文件、来源核验或编辑器权限。
 
@@ -102,7 +126,7 @@ SessionPage 的可选 `covered` 保留主panel树、尺寸和阅读实例，以o
 
 SessionPage／Conversation 的 `renderMessageContent` 和 `renderToolActivity` 让宿主复用原消息外层、轮次折叠、最终回复复制和分组阅读状态，工具 slot 接完整分组与原展开控制；原 `renderMessage` 及未传新 slot 的缺省行为保持。`copyText=null` 表示当前正文仅可读预览，不能当全文复制；`TurnActivity.cancelling/unavailable` 只表达宿主确认的停止中／上次确认状态。ToolActivity 的 `unverified` 在未提供执行 status 时显示“状态待核对”，已提供的真实执行状态仍优先；该标记仅控制展示，不建立执行结果。`openFileForMessage` 保每项独立回调，`ask.cancelled` 表达取消信息回答，与工具／Run 终态分开。准确公共 Run、原问答结果和完整正文资格归 [Desktop owner](../../apps/desktop/README.md#原轮次阅读聚合与问答回执)，纯 UI 不建立来源或业务 authority。
 
-[ModelEffortSelector](src/desktop/ModelEffortSelector.tsx)复用原双栏浮层与 [GemSlider](src/desktop/GemSlider.tsx)。选中模型且宿主提供变更回调时即可调整思考程度，不接收模型支持能力开关。六档「轻度、中、高、极高、Max、Ultar」分别回调 `low/medium/high/xhigh/max/ultar`，不提供配置默认或关闭思考按钮及回调。模型按钮和浮层当前值只显示宿主明确提供的档位；未配置时不补“默认”或空的档位节点，打开滑块也不自动发送选择。宿主可传准确 `ModelOption.id` 与 `reasoningEffortChoices`；选择、列表键和当前标记按 ID 区分，同一提供商内同名模型补显示 ID。滑块映射宿主提供的六档子集；一档用按钮，零档不造滑块。旧 none/minimal 可作为已配置值显示，不生成额外选项。[浮层回归](test/isolated/model-effort.test.tsx)核无能力元数据的模型可调整与缺失路由；[Native DOM](../../apps/desktop/test/isolated/native-model-picker-dom.test.tsx)核 Ultar 回调、稀疏档位、两按钮缺席、旧 none 配置及切换模型后清除临时值。
+[ModelEffortSelector](src/desktop/ModelEffortSelector.tsx)复用原双栏浮层与 [GemSlider](src/desktop/GemSlider.tsx)。思考面板采用12px外层留白，标题组内8px间隔、模型按钮至滑块操作区4px间隔，使模型文字上下两段可见间距一致。浮层内滑轨高24px且无边框，保留32px操作区域与22px白色按钮；按钮在悬停和拖动时通过变换放大25%，结束后恢复，不改变布局或档位映射。仅在允许动态效果时使用150ms过渡。选中模型且宿主提供变更回调时即可调整思考程度，不接收模型支持能力开关。六档「轻度、中、高、极高、Max、Ultar」分别回调 `low/medium/high/xhigh/max/ultar`，不提供配置默认或关闭思考按钮及回调。模型按钮和浮层当前值只显示宿主明确提供的档位；未配置时不补“默认”或空的档位节点，打开滑块也不自动发送选择。宿主可传准确 `ModelOption.id` 与 `reasoningEffortChoices`；选择、列表键和当前标记按 ID 区分，同一提供商内同名模型补显示 ID。滑块映射宿主提供的六档子集；一档用按钮，零档不造滑块。旧 none/minimal 可作为已配置值显示，不生成额外选项。[浮层回归](test/isolated/model-effort.test.tsx)核无能力元数据的模型可调整与缺失路由；[Native DOM](../../apps/desktop/test/isolated/native-model-picker-dom.test.tsx)核 Ultar 回调、稀疏档位、两按钮缺席、旧 none 配置及切换模型后清除临时值。
 
 [Desktop 构建](scripts/build-desktop.ts)在普通 workspace 与源码外候选中均输出实际 desktop/index.js 和原样 desktop/style.css，补齐新增 exports；Native renderer 编译 CSS/字体并纳入原递归 manifest。[原页面测试](test/desktop-page.test.tsx)迁回原 12 项展示断言。正式 macOS 窗口、原身份读写和剩余旧页面迁移范围由 Desktop owner 维护。
 
@@ -110,7 +134,7 @@ SessionPage／Conversation 的 `renderMessageContent` 和 `renderToolActivity` �
 
 原 SessionPage 欢迎区、建议、项目／分支菜单与 Composer 已接正式 Native 新对话准备。纯 UI 只追加／聚焦草稿和回调宿主选择，项目字段承载宿主 ID，不据此读取目录或执行 Git。创建、权限、实际模型及首次消息接管归 [Desktop owner](../../apps/desktop/README.md#native-新对话准备与首次发送)；不将准备页状态转为 Session 或执行 authority。
 
-原 [BackgroundExecutions](src/desktop/BackgroundExecutions.tsx)环境信息卡已由 Native 的 SessionPage 消费，保留 Shell／子 Agent 分组、名称、当前任务和子详情回调。宿主可声明 queued／starting／unknown／restored 状态；当前环境模式 `currentOnly` 的 Shell 列表保运行／停止中，子列表保全部记录，逐项 `canStop=false` 或缺少停止回调时不提供停止入口，状态本身不证明进程清理。300px 卡及宽窄窗口停靠／浮层仍由原 SessionPage 管理。停靠时共享 CSS 先利用 844px 阅读列右侧的留白，再按可用宽度将右侧占位限制在 28–344px；不再固定缩为 720px。留白足够时正文和输入区的原位置与宽度保持，空间不足时才调整。停靠栏因宽度不足收起时恢复 `default` 偏好，拉宽后自动停靠；显式 `closed` 保持关闭，窄窗仍可手动打开浮层。原滚动条和动画保持。完整目录、准确停止、只读子详情和草稿往返归 [Desktop owner](../../apps/desktop/README.md#native-当前会话环境信息与子详情)，UI 不取得新执行或读取 authority。
+原 [BackgroundExecutions](src/desktop/BackgroundExecutions.tsx)环境信息卡已由 Native 的 SessionPage 消费，保留 Shell／子 Agent 分组、名称、当前任务和子详情回调。宿主可声明 queued／starting／unknown／restored 状态；当前环境模式 `currentOnly` 的 Shell 由宿主先核验后台启动来源，再保留运行／停止中；前后台身份归 Native 适配，UI 不按取消关系推断。Shell 逐项 `canStop=false` 或缺少停止回调时不提供停止入口；子列表保全部记录，只提供状态和只读详情，不接收停止回调，运行中的子 Agent 也不能在卡片上手动停止。状态本身不证明进程清理。300px 卡及宽窄窗口停靠／浮层仍由原 SessionPage 管理。卡片采用12px上下、14px左右留白；空分组在标题同行显示 Shell“空闲”或子智能体“暂无”，不重复显示零计数和独立空状态。环境状态由宿主通知自动更新，标题不提供手动刷新按钮；有记录时显示计数、列表及原操作，读取失败时保留原处重试。停靠时共享 CSS 先利用 844px 阅读列右侧的留白，再按可用宽度将右侧占位限制在 28–344px；不再固定缩为 720px。留白足够时正文和输入区的原位置与宽度保持，空间不足时才调整。停靠栏因宽度不足收起时恢复 `default` 偏好，拉宽后自动停靠；显式 `closed` 保持关闭，窄窗仍可手动打开浮层。原滚动条和动画保持。完整目录、准确停止、只读子详情和草稿往返归 [Desktop owner](../../apps/desktop/README.md#native-当前会话环境信息与子详情)，UI 不取得新执行或读取 authority。
 
 原 [Approval](src/desktop/Approval.tsx)可经 `InteractionCard.renderApproval` 接入宿主，保主按钮、拒绝和范围菜单。slot 只接原卡、disabled、原完整附件正文与已获准的回答回调；附件未验证时没有回答回调，换卡即失效。缺省普通／MCP／问题表单保持。ToolActivity 的 `submitted`／`unavailable`／`cancelled` 与 `dispatchCommitted` 只表达宿主确认的审批和派发事实，不把批准当工具成功；准确来源、accepted decision 和原提交链归 [Desktop owner](../../apps/desktop/README.md#原审批面板与授权观察)。
 
@@ -167,7 +191,7 @@ P3 的 `InteractionCard` 直接消费生成的 Interaction：真实来源 Sessio
 
 桌面 `SessionPage` 的[阅读状态缓存](src/desktop/reading-state.ts)只保存滚动与展开数据，最多32项、256KiB估算载荷、每项512个展开ID；保存时裁剪当前消息中已不存在的展开项。`Conversation`一次建立各轮运行工具和thinking集合，避免每轮重扫全部消息。缺省切换仍卸载原消息DOM和effect；Native 通过可选 `conversationCache` 启用下述有界停用树，不保活全部会话；[阅读缓存回归](test/desktop-reading-state.test.ts)核容量、淘汰和裁剪。恢复时，原轮次过程与工具层分别用 `data-restored-expanded` 跳过自己的展开动画，包括未显式选择但默认展开的活动轮次；后续手动开合清除本层恢复标记，父层标记不抑制嵌套工具的手动动画。[轮次回归](test/desktop-reasoning-turns.test.tsx)与[Native 往返回归](../../apps/desktop/test/isolated/native-history-presentation-dom.test.tsx)核恢复和手动选择。
 
-[ConversationCache](src/desktop/ConversationCache.tsx)为最近3个非当前会话保留原 portal 容器、组件状态与 DOM，停用容器脱离可见文档，Activity 统一清理 effect。DOM 与登记的图片编码载荷合计估算总预算16MiB／20,000节点，单项8MiB／10,000节点，超过预算先淘汰最近最少使用项；活动超长正文不裁剪，离开后可释放。新 scope 清全部，revision 清非当前项，实际失效由宿主定义。命中项在新数据未就绪时先显示原树，fieldset的 `aria-disabled` 和事件捕获隔离旧操作，保留原透明度与悬停命中，不用原生 `disabled` 或 `inert` 改变整树外观；`readActive` 与当前本地展开的 `interactive` 分开，显示不成为读取权限。恢复的展开和 Markdown 节点沿原组件保留；容器捕获嵌套区域的实际 scroll 位置并在重新接入的 layout 阶段恢复，丢弃已移除节点，不覆盖 Conversation 自有 viewport 的跟随／手动策略。计时在临时不可读时冻结已有文字。缓存资源通过 `useConversationResourceRetention` 登记给 Activity 外的 entry owner，停用时保留已核验资源，真正移除、淘汰或 scope 失效时释放；窗口隐藏统一释放媒体。资源仍计入原体积预算，不声称限制解码后的像素、完整 snapshot 或总 heap。重新接入的首个绘制周期暂时取消后代过渡，随后恢复正常交互动画；复制反馈停用时清计时器，恢复时按原到期时间继续，不能由迟到的剪贴板答复改写。纯 UI 不导入 Native／Runtime；[缓存 DOM 回归](test/isolated/desktop-conversation-cache.test.tsx)覆盖节点身份、原 textarea／表格状态、LRU、条数／体积／节点预算与100轮 effect 清理，[全文回归](test/model-output.test.tsx)核 Activity 停用后原全文 DOM、lease abort及late隔离。详见[取舍](../../.agents/notes/implemented/architecture/2026-10-19-native-conversation-dom-cache.md)。
+[ConversationCache](src/desktop/ConversationCache.tsx)为最近3个非当前会话保留原 portal 容器、组件状态与 DOM，停用容器脱离可见文档，Activity 统一清理 effect。DOM 与宿主登记的媒体估算合计总预算16MiB／20,000节点，单项8MiB／10,000节点，超过预算先淘汰最近最少使用项；活动超长正文不裁剪，离开后可释放。新 scope 清全部，revision 清非当前项，实际失效由宿主定义。命中项在新数据未就绪时先显示原树，fieldset的 `aria-disabled` 和事件捕获隔离旧操作，保留原透明度与悬停命中，不用原生 `disabled` 或 `inert` 改变整树外观；`readActive` 与当前本地展开的 `interactive` 分开，显示不成为读取权限。恢复的展开和 Markdown 节点沿原组件保留；容器捕获嵌套区域的实际 scroll 位置并在重新接入的 layout 阶段恢复，丢弃已移除节点，不覆盖 Conversation 自有 viewport 的跟随／手动策略。计时在临时不可读时冻结已有文字。缓存资源通过 `useConversationResourceRetention` 登记给 Activity 外的 entry owner，停用时保留已核验资源，真正移除、淘汰或 scope 失效时释放；窗口隐藏统一释放媒体。资源仍计入原体积预算，不声称限制解码后的像素、完整 snapshot 或总 heap。重新接入的首个绘制周期暂时取消后代过渡，随后恢复正常交互动画；复制反馈停用时清计时器，恢复时按原到期时间继续，不能由迟到的剪贴板答复改写。纯 UI 不导入 Native／Runtime；[缓存 DOM 回归](test/isolated/desktop-conversation-cache.test.tsx)覆盖节点身份、原 textarea／表格状态、LRU、条数／体积／节点预算与100轮 effect 清理，[全文回归](test/model-output.test.tsx)核 Activity 停用后原全文 DOM、lease abort及late隔离。详见[取舍](../../.agents/notes/implemented/architecture/2026-10-19-native-conversation-dom-cache.md)。
 
 `Conversation` 的消息区使用局部原生滚动viewport，保留原outer／viewport／reading-column、region／ARIA、细滚动条和gutter；自动跟随、手动阅读位置与跳到最新保持。同一个ResizeObserver观察viewport与reading-column，正文内部读取、折叠动画或窗口变化引起高度更新时，在绘制前同步跟随，不要求Conversation重新render，也不延后一帧；手动阅读时不改位置。真实多会话窗口曾保留13棵旧消息树，heap引用链为Document动画controller→RAF callback→旧viewport；对应原Radix ScrollAreaThumb滚动后立即卸载时遗漏持续RAF清理。因此消息区不再挂载该thumb，不修改其他ScrollArea消费者或全局RAF。[滚动生命周期回归](test/isolated/desktop-conversation-scroll.test.tsx)执行100轮滚动后立即卸载，核零自有待执行RAF、ResizeObserver与keydown监听释放，并核内部内容增高／跟随／手动位置／跳最新；实际窗口DOM与heap证据归[Native owner](../../apps/desktop/README.md#native-当前会话环境信息与子详情)。
 

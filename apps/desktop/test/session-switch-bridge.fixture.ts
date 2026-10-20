@@ -5,7 +5,7 @@ import type {
   NativeResult,
   NativeState,
 } from '../src/native-bridge';
-import { backgroundItem } from './background-item.fixture';
+import { backgroundShellItem } from './background-item.fixture';
 
 /** Explicit fixture port, shared by real Native DOM and browser tests. */
 export function sessionSwitchBridge(
@@ -17,7 +17,7 @@ export function sessionSwitchBridge(
     modelNames?: Record<string, string>;
   } = {},
 ) {
-  const base = backgroundItem();
+  const base = backgroundShellItem();
   const sessions = ['a', 'b'].map((id) => ({
     ...base.rootSession,
     id,

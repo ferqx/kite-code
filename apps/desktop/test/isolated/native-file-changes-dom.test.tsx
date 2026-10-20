@@ -8,7 +8,7 @@ import type { NativeBridge, NativeRequest, NativeSelection } from '../../src/nat
 import { NativeFileChanges } from '../../src/native-file-changes';
 import { prepareDesktopDom } from '../native-page-dom.fixture';
 
-test('retained FileChanges mounts only on the original header action, reads all metadata pages and lazy saved bodies, and routes the selected editor by observation ID', async () => {
+test('retained FileChanges mounts only through the selected changes tab, reads all metadata pages and lazy saved bodies, and routes the selected editor by observation ID', async () => {
   const dom = new JSDOM('<div id="root"></div>', {
     url: 'http://localhost',
     pretendToBeVisual: true,
@@ -133,7 +133,7 @@ test('retained FileChanges mounts only on the original header action, reads all 
     );
   const button = (text: string) =>
     [...dom.window.document.querySelectorAll('button')].find(
-      (button) => button.textContent === text,
+      (button) => button.textContent === text || button.getAttribute('aria-label') === text,
     )!;
   try {
     await act(async () => {
@@ -141,7 +141,11 @@ test('retained FileChanges mounts only on the original header action, reads all 
     });
     expect(requests).toHaveLength(0);
     await act(async () => {
-      button('文件变更').click();
+      button('标签页').click();
+    });
+    expect(requests).toHaveLength(0);
+    await act(async () => {
+      button('变更').click();
       await new Promise((resolve) => setTimeout(resolve, 0));
     });
     expect(
@@ -199,18 +203,18 @@ test('retained FileChanges mounts only on the original header action, reads all 
     await act(async () => {
       button('会话工具').click();
     });
-    expect(button('文件变更').getAttribute('aria-expanded')).toBe('false');
-    expect(dom.window.document.querySelector('#session-file-changes')).toBeNull();
+    expect(button('标签页').getAttribute('aria-expanded')).toBe('false');
+    expect(dom.window.document.querySelector('.session-tab-changes')).toBeNull();
     await act(async () => {
-      button('文件变更').click();
+      button('标签页').click();
     });
-    expect(button('收起变更').getAttribute('aria-expanded')).toBe('true');
+    expect(button('标签页').getAttribute('aria-expanded')).toBe('true');
     await act(async () => {
       dom.window.dispatchEvent(
         new dom.window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }),
       );
     });
-    expect(dom.window.document.querySelector('#session-file-changes')).toBeNull();
+    expect(dom.window.document.querySelector('.session-tab-changes')).toBeNull();
     expect(requests.some((request) => request.method === 'fileChanges.close')).toBe(true);
     expect(requests.every((request) => request.method.startsWith('fileChanges.'))).toBe(true);
   } finally {

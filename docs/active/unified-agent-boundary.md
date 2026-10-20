@@ -4,6 +4,8 @@
 
 状态：active
 
+后台 Job 目录的来源观察沿 [Store](../../packages/agent/src/storage/README.md#跨会话原-job-目录) → [Service](../../apps/service/README.md#后台目录的来源投影) → [Client](../../packages/client/README.md) → [Native](../../apps/desktop/README.md#native-当前会话环境信息与子详情) 交接。`includeSourceTool:true` 只读取同原 Session／Store／root work 的直接父 Tool ID／定义／版本；默认响应保持原闭合结构，工具正文和授权材料不进入来源投影。来源缺失不推断后台身份，取消边不作为前后台标记。该观察不扩大读取或停止 authority，不改原 Job、取消和冷恢复边界。
+
 [模型工具投影](../../packages/agent/src/model-tools.README.md)在 Agent 的实际 `ModelAdapter` 边界完成：内部 ModelRequest／ToolCall 保留原定义 ID/version 和规范参数，leaf 的纯 `ToolDefinition.model` 仅描述公开名、声明字段映射与隐藏资格。完整模型调用先按本轮准确目录校验、转回内部参数，再进入原来源、权限、资源、计划、派发与终态链路；未知工具、坏参数和碰撞不得形成效果。声明字段可转 snake_case，任意业务 JSON 与动态 MCP 原 schema/arguments 不改写；baseline、操作 key 和去重身份保留。持久 `ToolCall.model` 只存原公开名称、精简字段路径及必要错误，后继模型历史不借当前定义重解释原调用；`metadata.context.toolSurface` 封存当时公开工具，公开 Inspector 使用该原快照并保持既有完整正文与 scope 核验。本次不提供旧会话工具消息兼容，不增加旧名 alias；原 Store/Runtime authority 不随命名变化。任务等待的模型入口统一为必填 `task_ids` 数组，事件等待 `wait_agent_event` 只接 `after_seq/timeout_ms`；隐藏的 `task_wait` 仍是内部注册定义，不获得新的模型入口。跨层实现归 [Execution](../../packages/agent/src/execution/index.ts)、[Model metadata](../../packages/agent/src/model-snapshot.ts)和上述 owner，具体验证以本轮实际测试范围为准。
 
 Extension 通过 `lifecycle.onRunStart/onRunEnd/onModelStart/onModelEnd` 观察原 Run/Model 事实；Model start 在派发准入 ACK 和取消复核后发布，Run start 在激活 ACK 后发布，end 以已提交终态为准。Model 使用实际冻结 Step 的注册，Run 使用原 Run 绑定。通知是有限冻结投影，不提供 SQL、owner、正文、Provider raw、operations 或资源句柄；权限、必要条件和完成 CAS 继续独立执行。有限观察队列可以丢通知，异常局部停用，不持 Run lease/permit、不参与执行成功或关闭判定。Run 终态与 Job 实际停止/资源释放保持分离；普通读取和重复原 Command 不重放，恢复只观察本次推进到的 Model 边界和新到达的 Run 终态，不补发原 Run start。需要可靠后续业务仍须登记原受控意图。当前接口、执行图、压力与真实 SQLite/恢复证据归[Agent 生命周期 owner](../../packages/agent/README.md#生命周期扩展)及[生命周期观察决定](../../.agents/notes/implemented/architecture/2026-10-18-settled-lifecycle-observers.md)。
@@ -109,6 +111,8 @@ Native Skills 目录只经 [Main 的有限 reader](../../apps/desktop/electron/s
 独立 Native `/v1/lifecycle` 与 `/v1/lifecycle/shutdown` 用 lifecycleVersion 和原 profile/instance 核对目标，业务 API 不兼容或 Store 不可用不阻断有限诊断。无 Origin 的 bearer 请求才可进入，Browser gateway 不暴露；202 仅为受理，成功资源关闭及所属进程退出另行确认。公共 Lifecycle Client 丢回复后只查询原实例，不自动重发或改绑。成功 HTTP 关闭明确结束 runner 自己的父管道读取；普通网络退出仍不等于父死亡。理由见[原子关闭决定](../../.agents/notes/implemented/architecture/2026-10-02-atomic-service-shutdown.md)；正式 daemon 目标发现与 CLI 切换尚未由此完成。
 
 [`client`](../../packages/client/README.md)只依赖生成 schema 和网络能力；[`ui`](../../packages/ui/README.md)消费公开投影、React 与便携展示控件，不知道参考扩展业务。SSE 的 ready/heartbeat 不推进 cursor；变化应用成功后确认，过滤范围的 checkpoint 只来自一致页。快照页不代表全局事件应用成功，切换 scope 需要相应水位。reset 后先冻结原 Store 的全局集合基线，再完整重读所需事实；SDK `startAfter` 仅设置重开 scan 起点，保留原 ACK，不将单对象 snapshotCursor 冒充全局应用。validated `onReady` 可确认流准入并等待应用准备，仍不 ACK；正常 EOF 且 ACK 尚未到达重读基线时沿原起点重开。原 Store 改变、读取失败或未完成时不解除对应写门禁，也不重发业务意图。
+
+Native 会话浏览器属于用户操作的独立窗口能力，不经 Agent／Service 执行。Main 的封闭浏览器 IPC 只接受当前主窗口准确 mainFrame／renderer URL，地址和有限几何校验后创建最多8个隔离 WebContentsView。网页使用独立内存 session、无应用 preload、无 Node／webview／权限申请，不继承应用 Cookie、业务 IPC 或文件打开资格；只支持 HTTP／HTTPS，下载及外部协议拒绝。标签关闭、会话变化、root 导航／崩溃和窗口退出释放旧 view，显示 metadata 不构成 authority。当前实现、测试及平台限制见 [Desktop owner](../../apps/desktop/README.md#会话标签页与内置浏览器)，原 Files reader 继续核独立 scope。
 
 正式 Native 已复用 [UI 的原桌面展示层](../../packages/ui/README.md#原桌面展示层)，SessionPage、侧栏、消息区、输入框、右侧栏与样式由纯展示 owner 维护；[Desktop adapter](../../apps/desktop/src/native-presentation.ts)只映射实际公共事实。有限宿主 slot 接原完整正文与写入回调，打开右侧工具不卸载消息区。旧 Host/Runtime/私有存储没有迁入此层。声明的 CSS export 必须解析到实际仓库资产，缺失、越界与旧目标仍拒绝；CSS 不作为 TypeScript 执行模块，实际编译资产闭包另由候选 manifest 和窗口验收证明。显式 UI 构建脚本属于 I/O 宿主，UI source 经 export/import 到达该脚本时仍按便携依赖检查；不存在整个 UI workspace 的 I/O 豁免。
 
@@ -358,6 +362,8 @@ Native MCP 的 renderer通过固定IPC提交有限参数，Main固定真实观�
 ## 三项 token 口径
 
 Core 分离累计实际用量、最近请求实际输入与下一请求上下文预测。新增只读 Store usage 聚合只取本 Store／Session 原 Model 终态，覆盖缺失保留未知，读取不写入；不受有限 View 截断。跨包 `CompressionInput` 传实际工具及经 scope／路由核验的测量基线；纯投影在原输入被改写、移除或换工具时全量回退。已测输入与新增估算不会伪装成新的 Provider 统计或派发资格。Service、Client 与 TUI 的只读预测保准确原请求和 selection/upper，不捕获新来源、不初始化模型。完整接口与验证归[Core owner](../../packages/agent/src/context-estimate.README.md)。
+
+Native普通输入区可经已有Tool Message read lease读取该预测的有限数值，入口为 toolMessages.contextUsage：只接一个当前已观察的完整原助手Message ID，核Store／Session／Run／Model、正文和当前context selection，响应只含模型及输入／窗口数字；切换、历史重置或退出取消所属读取，不开放测试Context正文面板或任何写权限。圆环按当前输入估算除以完整窗口绘制，不使用缓存命中率、累计输入或API的可用输入预算比例；模型切换和未知容量不能继承旧窗口。Main与Renderer边界及验证归[Native owner](../../apps/desktop/README.md#输入区上下文占用)。
 
 ## Desktop 本地定时任务
 

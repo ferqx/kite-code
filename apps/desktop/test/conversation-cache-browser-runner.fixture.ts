@@ -63,6 +63,7 @@ try {
     const errors: string[] = [];
     page.on('pageerror', (error) => errors.push(error.message));
     await page.goto(server.url.toString());
+    await page.locator('.kite-client').waitFor();
     await page.evaluate((theme) => {
       document.documentElement.className = theme;
       document.body.className = theme;

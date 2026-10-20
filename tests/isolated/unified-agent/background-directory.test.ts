@@ -1,7 +1,6 @@
 import { Database } from 'bun:sqlite';
 import { afterAll, beforeAll, expect, test } from 'bun:test';
-import { chmodSync, mkdtempSync, realpathSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { createRuntime } from '@kite-ai/agent';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
@@ -10,6 +9,7 @@ import { startService } from '../../../apps/service/src';
 import { BackgroundExecutionPageSchema } from '../../../apps/service/src/http/schema';
 import { semanticDigest } from '../../../packages/agent/src/json';
 import { createProfileBackup, restoreProfileBackup } from '../../../packages/agent/src/maintenance';
+import { temporaryDirectory } from '../../fixtures/test-filesystem';
 import { prepareQualifiedSqliteFixture } from '../../fixtures/unified-agent/qualified-sqlite-fixture';
 
 let qualified: Awaited<ReturnType<typeof prepareQualifiedSqliteFixture>>;
@@ -19,8 +19,7 @@ beforeAll(async () => {
 afterAll(() => qualified?.close());
 
 test('public background directory reads all original Jobs beyond history, scopes before paging and fences snapshots without writes', async () => {
-  const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-background-directory-')));
-  chmodSync(root, 0o700);
+  const root = temporaryDirectory('kite-background-directory-');
   let store = await openSqliteStore({ dataRoot: root, profile: 'test' });
   const storeId = (await store.getMetadata()).storeId;
   let db = new Database(join(root, 'test', 'core.db'));
@@ -256,14 +255,29 @@ test('public background directory reads all original Jobs beyond history, scopes
           (db.query(`SELECT count(*) AS count FROM ${table}`).get() as { count: number }).count,
       );
     const beforeCounts = counts();
+    const legacyPage = await client.listBackgroundExecutions({ storeId });
+    expect(legacyPage.items.every((item) => !('sourceTool' in item))).toBe(true);
+    const excludedPage = await client.listBackgroundExecutions({
+      storeId,
+      includeSourceTool: false,
+    });
+    expect(excludedPage.items.every((item) => !('sourceTool' in item))).toBe(true);
     const first = await client.listBackgroundExecutions(
-      { storeId },
+      { storeId, includeSourceTool: true },
       { signal: AbortSignal.timeout(3000) },
     );
     expect(first.items).toHaveLength(200);
     expect(first.items[0]!.seq).toBe('206');
-    const all = await client.listAllBackgroundExecutions({ signal: AbortSignal.timeout(3000) });
+    const all = await client.listAllBackgroundExecutions({
+      includeSourceTool: true,
+      signal: AbortSignal.timeout(3000),
+    });
     expect(all).toHaveLength(207);
+    expect(all[0]!.sourceTool).toEqual({
+      id: 'history-0',
+      definitionId: 'fixture/parent',
+      definitionVersion: '1',
+    });
     expect(new Set(all.map((i) => i.execution.id)).size).toBe(207);
     expect(
       all.every(
@@ -278,6 +292,11 @@ test('public background directory reads all original Jobs beyond history, scopes
     const descendant = all.find((i) => i.execution.id === nested.executionId)!;
     expect(descendant.session.id).toBe(activation.session.id);
     expect(descendant.rootSession.id).toBe('s');
+    expect(descendant.sourceTool).toEqual({
+      id: 'nested-parent',
+      definitionId: 'fixture/parent',
+      definitionVersion: '1',
+    });
     expect(descendant.run?.id).toBe(activation.run.id);
     expect(
       (
@@ -433,9 +452,14 @@ test('public background directory reads all original Jobs beyond history, scopes
       await restoredClient.connect();
       const before = counts(),
         cursor = (await store.getMetadata()).lastChangeCursor;
-      const restoredItems = await restoredClient.listAllBackgroundExecutions();
+      const restoredItems = await restoredClient.listAllBackgroundExecutions({
+        includeSourceTool: true,
+      });
 
       expect(restoredItems).toHaveLength(208 + pass);
+      expect(
+        restoredItems.find((item) => item.execution.id === all[0]!.execution.id)?.sourceTool,
+      ).toEqual(all[0]!.sourceTool);
       expect(originalIds.every((id) => restoredItems.some((i) => i.execution.id === id))).toBe(
         true,
       );

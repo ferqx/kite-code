@@ -10,6 +10,7 @@ import type {
   NativeState,
 } from '../../src/native-bridge';
 import { backgroundItem } from '../background-item.fixture';
+import { installImagePreviewWorker } from '../image-preview-worker.fixture';
 import { prepareDesktopDom } from '../native-page-dom.fixture';
 
 const bootstrap = new JSDOM('<div></div>', { pretendToBeVisual: true });
@@ -33,6 +34,7 @@ const summary = 'PRIVATE_COMPRESSION_SUMMARY';
 const raw = 'ORIGINAL_TOOL_RECEIPT';
 type Reader = 'runs' | 'tools';
 function fixture(failTools = false, failRuns = false, withImage = false) {
+  const restoreWorker = withImage ? installImagePreviewWorker() : () => {};
   const dom = new JSDOM('<div id="root"></div>', {
     url: 'http://localhost',
     pretendToBeVisual: true,
@@ -398,6 +400,7 @@ function fixture(failTools = false, failRuns = false, withImage = false) {
       Object.assign(globalThis, prior);
       URL.createObjectURL = createUrl;
       URL.revokeObjectURL = revokeUrl;
+      restoreWorker();
     },
   };
 }

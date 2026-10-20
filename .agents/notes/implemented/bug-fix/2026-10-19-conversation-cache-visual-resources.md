@@ -2,6 +2,8 @@
 
 Status: implemented
 
+2026-10-20 的[原生缩略图缓存](../architecture/2026-10-20-native-image-preview-cache.md)部分更新原图URL与编码计量：显示改用小尺寸派生图并计入RGBA估算，另保留有界派生Blob；本篇的当前gate、URL owner、可见性及DOM恢复规则继续适用。
+
 ## Problem
 
 用户反馈缓存会话切回时复制按钮、图片和高亮组件仍闪动。原 DOM 虽保留，原生 fieldset disabled 使子按钮临时透明度降至0.45，未悬停的复制按钮反而闪现再淡出；Activity 重建 effect 又重置复制反馈、撤回已核验复制展示，并释放图片 URL。图片 key 含 viewSelection／historyEpoch，返回后继续重建卡片。原节点保留本身不能保证外观连续。后续完整 Native 页面检查发现，缓存树外的审核标签又绑定了读取编号，Composer 未收到普通加载状态；原生禁用使选择器与发送按钮变淡，Main 确认前提前切换草稿，环境 hook 把选中切换误标成真实不可用。正文夹具无法覆盖这些壳层问题。

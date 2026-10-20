@@ -856,3 +856,176 @@ test('only exact Core pre-dispatch freshness receipts gain neutral display facts
     f.manager.release();
   }
 });
+
+test('current context uses the original request forecast and full window, independently of cached or cumulative usage', async () => {
+  const f = fixture();
+  const message: Message = {
+    id: 'context-message',
+    sessionId: 's',
+    runId: 'run',
+    seq: '1',
+    role: 'assistant',
+    status: 'complete',
+    content: 'answer',
+    sourceIds: ['model'],
+  };
+  f.messages.set(message.id, message);
+  f.executions.set('model', {
+    id: 'model',
+    originStoreId: 'store',
+    sessionId: 's',
+    runId: 'run',
+    kind: 'model',
+    definitionId: 'route',
+    definitionVersion: '1',
+    resultRevision: '1',
+    cancelRequestedAt: null,
+    status: 'succeeded',
+    result: { content: 'answer', usage: { inputTokens: 100000, cachedInputTokens: 99000 } },
+  } as Execution);
+  const reads: unknown[] = [];
+  Object.assign(f.client, {
+    getContextEstimate: async (sessionId: string, query: unknown) => {
+      reads.push([sessionId, query]);
+      return {
+        storeId: 'store',
+        sessionId: 's',
+        runId: 'run',
+        modelId: 'route',
+        modelInputExecutionId: 'model',
+        contextSelectionId: 'selected',
+        totalInputTokens: 340,
+        contextWindowTokens: 500,
+        usableInputTokens: 100,
+        utilization: 3.4,
+        cumulativeUsage: { inputTokens: 1000000, cachedInputTokens: 990000 },
+      };
+    },
+    getView: async () => ({
+      storeId: 'store',
+      session: { id: 's', workspaceId: 'w', contextSelectionId: 'selected', deletedAt: null },
+    }),
+  });
+  const request = {
+    method: 'toolMessages.contextUsage' as const,
+    generation: 1,
+    viewSelection: 2,
+    historyEpoch: 0,
+    readId: 'context-read',
+    messageIds: [message.id],
+  };
+  const result = await f.manager.contextUsage({ ...request, messageIds: [...request.messageIds] });
+  expect(reads).toEqual([['s', { storeId: 'store', executionId: 'model' }]]);
+  expect(result.context).toEqual({
+    modelId: 'route',
+    contextSelectionId: 'selected',
+    totalInputTokens: 340,
+    contextWindowTokens: 500,
+  });
+  expect(JSON.stringify(result)).not.toContain('cachedInputTokens');
+  expect(JSON.stringify(result)).not.toContain('answer');
+  expect(decodeNativeRequest(request)).toEqual(request);
+  for (const invalid of [
+    { ...request, messageIds: [] },
+    { ...request, messageIds: ['a', 'b'] },
+    { ...request, viewSelection: 0 },
+    { ...request, historyEpoch: -1 },
+    { ...request, path: 'arbitrary' },
+  ])
+    expect(() => decodeNativeRequest(invalid)).toThrow();
+});
+
+test('context forecasts reject changed selections, departed reads, foreign receipts and invented counts', async () => {
+  const f = fixture();
+  const message: Message = {
+    id: 'context-message',
+    sessionId: 's',
+    runId: 'run',
+    seq: '1',
+    role: 'assistant',
+    status: 'complete',
+    content: 'answer',
+    sourceIds: ['model'],
+  };
+  f.messages.set(message.id, message);
+  const execution = {
+    id: 'model',
+    originStoreId: 'store',
+    sessionId: 's',
+    runId: 'run',
+    kind: 'model',
+    definitionId: 'route',
+    definitionVersion: '1',
+    resultRevision: '1',
+    cancelRequestedAt: null,
+    status: 'succeeded',
+    result: { content: 'answer' },
+  } as Execution;
+  f.executions.set('model', execution);
+  const estimate = {
+    storeId: 'store',
+    sessionId: 's',
+    runId: 'run',
+    modelId: 'route',
+    modelInputExecutionId: 'model',
+    contextSelectionId: 'selected',
+    totalInputTokens: 0,
+    contextWindowTokens: 500,
+  };
+  let next: Record<string, unknown> = estimate;
+  Object.assign(f.client, {
+    getContextEstimate: async () => next,
+    getView: async () => ({
+      storeId: 'store',
+      session: { id: 's', workspaceId: 'w', contextSelectionId: 'selected', deletedAt: null },
+    }),
+  });
+  const read = () =>
+    f.manager.contextUsage({
+      method: 'toolMessages.contextUsage',
+      generation: 1,
+      viewSelection: 2,
+      historyEpoch: 0,
+      readId: 'context-read',
+      messageIds: [message.id],
+    });
+  expect((await read()).context?.totalInputTokens).toBe(0);
+  next = { ...estimate, contextWindowTokens: undefined };
+  expect((await read()).context?.contextWindowTokens).toBeUndefined();
+  for (const invalid of [
+    { contextSelectionId: 'different' },
+    { storeId: 'other' },
+    { modelInputExecutionId: 'other' },
+    { totalInputTokens: -1 },
+    { totalInputTokens: Number.NaN },
+    { contextWindowTokens: 0 },
+  ]) {
+    next = { ...estimate, ...invalid };
+    await expect(read()).rejects.toBeDefined();
+  }
+  next = estimate;
+  f.executions.set('model', { ...execution, originStoreId: 'other' });
+  await expect(read()).rejects.toMatchObject({ code: 'model_usage_identity_mismatch' });
+  f.executions.set('model', execution);
+  let release!: () => void;
+  let signal: AbortSignal | undefined;
+  Object.assign(f.client, {
+    getContextEstimate: async (
+      _sessionId: string,
+      _query: unknown,
+      options: { signal: AbortSignal },
+    ) => {
+      signal = options.signal;
+      await new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      return estimate;
+    },
+  });
+  const pending = read();
+  while (!release) await Bun.sleep(1);
+  f.manager.release();
+  release();
+  await expect(pending).rejects.toMatchObject({ code: 'native_selection_changed' });
+  expect(signal?.aborted).toBe(true);
+});

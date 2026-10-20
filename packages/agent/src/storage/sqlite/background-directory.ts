@@ -36,6 +36,7 @@ export function readBackgroundExecutions(
           'upperSeq',
           'snapshotCursor',
           'limit',
+          'includeSourceTool',
         ].includes(key),
     )
   )
@@ -46,6 +47,8 @@ export function readBackgroundExecutions(
   for (const field of ['workspaceId', 'rootSessionId', 'executionId'] as const)
     if (input[field] !== undefined && (typeof input[field] !== 'string' || !input[field]))
       throw new AgentError('invalid_page');
+  if (input.includeSourceTool !== undefined && typeof input.includeSourceTool !== 'boolean')
+    throw new AgentError('invalid_page');
   const limit = input.limit ?? 200;
   if (!Number.isInteger(limit) || limit < 1 || limit > 200) throw new AgentError('invalid_page');
   db.db.run('BEGIN');
@@ -80,8 +83,13 @@ export function readBackgroundExecutions(
           AND c.root_work_command_id=carrier.root_work_command_id AND c.root_work_seq=carrier.root_work_seq)
       ) SELECT e.id,e.session_id,e.run_id,e.origin_command_id,e.origin_store_id,e.root_work_command_id,e.root_work_seq,
       e.parent_execution_id,e.child_session_id,e.root_session_id,e.cancel_with_parent,e.step_id,e.call_id,e.attempt,e.adapter_id,e.definition_version,e.state,
-      e.owner_generation,e.cancel_requested,e.cancel_requested_at,e.result_revision,e.delivery,e.delivery_reason,e.delivery_target_session_id,e.context_selection_id,json_extract(e.reference_json,'$.runId') AS reference_run_id,CAST(e.rowid AS TEXT) AS directory_seq FROM execution e
+      e.owner_generation,e.cancel_requested,e.cancel_requested_at,e.result_revision,e.delivery,e.delivery_reason,e.delivery_target_session_id,e.context_selection_id,json_extract(e.reference_json,'$.runId') AS reference_run_id,
+      origin_tool.id AS source_tool_id,origin_tool.adapter_id AS source_tool_definition_id,origin_tool.definition_version AS source_tool_definition_version,
+      CAST(e.rowid AS TEXT) AS directory_seq FROM execution e
       JOIN eligible s ON s.id=e.session_id JOIN command source ON source.id=e.origin_command_id AND source.session_id=e.session_id
+      LEFT JOIN execution origin_tool ON origin_tool.id=e.parent_execution_id AND origin_tool.kind='tool'
+      AND origin_tool.session_id=e.session_id AND origin_tool.origin_store_id=e.origin_store_id
+      AND origin_tool.root_work_command_id=e.root_work_command_id AND origin_tool.root_work_seq=e.root_work_seq
       WHERE e.kind='job' AND e.rowid>? AND e.rowid<=? AND (? IS NULL OR e.id=?)
       AND (e.origin_store_id=? OR s.restored=1) AND source.origin_store_id=e.origin_store_id AND source.subject_id=?
       AND e.root_session_id=s.root_id AND source.root_work_command_id=e.root_work_command_id AND source.root_work_seq=e.root_work_seq
@@ -241,6 +249,15 @@ export function readBackgroundExecutions(
         throw new AgentError('directory_identity_conflict');
       return {
         seq: String(row.directory_seq),
+        ...(input.includeSourceTool && row.source_tool_id !== null
+          ? {
+              sourceTool: {
+                id: String(row.source_tool_id),
+                definitionId: String(row.source_tool_definition_id),
+                definitionVersion: String(row.source_tool_definition_version),
+              },
+            }
+          : {}),
         execution,
         session,
         rootSession,

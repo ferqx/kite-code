@@ -23,6 +23,7 @@ import {
   serveDevelopmentReload,
 } from './development';
 import { parseNativeAssets, resolveNativeCandidate, verifyNativeAsset } from './native-assets';
+import { registerNativeBrowserIpc } from './native-browser';
 import { NativeCaller } from './native-caller';
 import {
   registerNativeIpc,
@@ -478,6 +479,7 @@ void app
         },
       }),
     );
+    registerNativeBrowserIpc({ ipcMain, window, rendererUrl });
     registerNativeThemeIpc({
       ipcMain,
       window: () => window,

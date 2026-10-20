@@ -625,3 +625,238 @@ test('a prepared catalogue from another Store cannot qualify the current picker'
     await f.close();
   }
 });
+
+function previousRun(
+  effort: unknown,
+  overrides: Partial<NativeSelection['runs'][number]> = {},
+): NativeSelection['runs'][number] {
+  return {
+    id: 'last-run',
+    sessionId: 's',
+    originStoreId: 'store',
+    originCommandId: 'last-command',
+    status: 'completed',
+    isActive: false,
+    createdAt: 20,
+    finishedAt: 21,
+    reason: null,
+    configuration: {
+      modelId: 'a',
+      snapshot: {
+        version: 1,
+        digest: 'f'.repeat(64),
+        configuration: {
+          models: [{ id: 'a', options: effort === undefined ? {} : { reasoningEffort: effort } }],
+        },
+      },
+    },
+    ...overrides,
+  } as NativeSelection['runs'][number];
+}
+
+test('the first paint restores the Session effort and hands the same value to the next input before any slider interaction', async () => {
+  const f = fixture(),
+    calls: NativeRequest[] = [],
+    changes: NativeModelChoice[] = [];
+  const selection = {
+    ...selected('s'),
+    runs: [
+      previousRun('low', { id: 'older', createdAt: 10 }),
+      previousRun('max', { id: 'foreign-store', originStoreId: 'other', createdAt: 40 }),
+      previousRun('high', { id: 'other-session', sessionId: 'other', createdAt: 30 }),
+      previousRun('xhigh'),
+    ],
+  };
+  const bridge: NativeBridge = {
+    watch: () => () => {},
+    request: async (request) => {
+      calls.push(request);
+      return facts;
+    },
+  };
+  let observed: NativeModelChoice = {},
+    resolved: NativeModelChoice | undefined;
+  function Host() {
+    const [value, setValue] = useState<NativeModelChoice>({});
+    observed = value;
+    return (
+      <NativeModelPicker
+        bridge={bridge}
+        generation={1}
+        selection={selection}
+        value={value}
+        onChange={(choice) => {
+          changes.push(choice);
+          setValue(choice);
+        }}
+        onReady={(_ready, choice) => {
+          resolved = choice;
+        }}
+      />
+    );
+  }
+  try {
+    await act(async () => f.root.render(<Host />));
+    expect(f.element.querySelector('.model-effort-summary')?.textContent).toBe('极高');
+    expect(resolved).toEqual({ modelId: 'a', reasoningEffort: 'xhigh' });
+    expect(observed).toEqual({});
+    expect(changes).toEqual([]);
+    const { nativeTextIntent } = await import('../../src/native-input');
+    expect(
+      nativeTextIntent(selection, 'next-command', 'next input', false, resolved),
+    ).toMatchObject({
+      kind: 'run.start',
+      modelId: 'a',
+      reasoningEffort: 'xhigh',
+    });
+    await f.click('模型：remote-a，思考程度：极高');
+    expect(f.element.querySelector('.effort-value')?.textContent).toBe('极高');
+    const slider = f.element.querySelector<HTMLElement>('[role="slider"]')!;
+    expect(slider.getAttribute('aria-valuetext')).toBe('极高');
+    expect(slider.getAttribute('aria-valuenow')).toBe('3');
+    expect(f.element.textContent).not.toContain('默认');
+    expect(changes).toEqual([]);
+    await act(async () => {
+      slider.dispatchEvent(
+        new f.dom.window.KeyboardEvent('keydown', { key: 'Home', bubbles: true }),
+      );
+    });
+    expect(observed).toEqual({ modelId: 'a', reasoningEffort: 'low' });
+    expect(resolved).toEqual(observed);
+    expect(f.element.querySelector('.effort-value')?.textContent).toBe('轻度');
+    await act(async () => f.root.render(<Host />));
+    expect(resolved?.reasoningEffort).toBe('low');
+    expect(calls).toEqual([{ method: 'input.models.read', generation: 1 }]);
+  } finally {
+    await f.close();
+  }
+});
+
+test('new conversations use configured effort while foreign, stale and malformed history cannot supply a Session choice', async () => {
+  const f = fixture(),
+    calls: NativeRequest[] = [],
+    changes: NativeModelChoice[] = [];
+  const bridge: NativeBridge = {
+    watch: () => () => {},
+    request: async (request) => {
+      calls.push(request);
+      return facts;
+    },
+  };
+  let view = 0,
+    resolved: NativeModelChoice | undefined;
+  const render = (runs: NativeSelection['runs'], preparing = false) =>
+    act(async () => {
+      f.root.render(
+        <NativeModelPicker
+          bridge={bridge}
+          generation={1}
+          selection={{ ...selected('s', ++view), runs }}
+          preparing={preparing ? { storeId: 'store' } : undefined}
+          value={{}}
+          onChange={(value) => changes.push(value)}
+          onReady={(_ready, value) => {
+            resolved = value;
+          }}
+        />,
+      );
+    });
+  try {
+    const histories = [
+      [],
+      [previousRun('max', { sessionId: 'foreign' })],
+      [previousRun('max', { originStoreId: 'foreign' })],
+      [previousRun('max', { configuration: { modelId: 'b' } })],
+      [previousRun('max', { id: 'older', createdAt: 10 }), previousRun(undefined)],
+      [previousRun('provider-only')],
+      [previousRun('max', { configuration: { modelId: 'a', snapshot: { version: 2 } } })],
+      [
+        previousRun('max', {
+          configuration: {
+            modelId: 'a',
+            snapshot: {
+              version: 1,
+              digest: 'f',
+              configuration: {
+                models: [{ id: 'a', options: { reasoningEffort: 'max' } }, { id: 'a' }],
+              },
+            },
+          },
+        }),
+      ],
+    ];
+    for (const history of histories) {
+      await render(history);
+      expect(f.element.querySelector('.model-effort-summary')?.textContent).toBe('轻度');
+      expect(resolved).toEqual({ modelId: 'a' });
+    }
+    await render([previousRun('max')]);
+    expect(f.element.querySelector('.model-effort-summary')?.textContent).toBe('Max');
+    expect(resolved).toEqual({ modelId: 'a', reasoningEffort: 'max' });
+    await render([previousRun('max')], true);
+    expect(f.element.querySelector('.model-effort-summary')?.textContent).toBe('轻度');
+    expect(resolved).toEqual({ modelId: 'a' });
+    await f.click('模型：remote-a，思考程度：轻度');
+    expect(f.element.querySelector('.effort-value')?.textContent).toBe('轻度');
+    expect(f.element.querySelector('[role="slider"]')?.getAttribute('aria-valuetext')).toBe('轻度');
+    expect(calls.at(-1)).toEqual({ method: 'conversation.models.read', generation: 1 });
+    expect(changes).toEqual([]);
+  } finally {
+    await f.close();
+  }
+});
+
+test('restored legacy effort remains usable and an unavailable saved level requires a supported replacement', async () => {
+  const f = fixture();
+  const bridge: NativeBridge = {
+    watch: () => () => {},
+    request: async () => ({
+      ...facts,
+      models: [{ ...facts.models[0]!, reasoningEffortChoices: ['low', 'high'] }],
+    }),
+  };
+  let ready = false,
+    resolved: NativeModelChoice | undefined;
+  function Host({ previous }: { previous: string }) {
+    const [value, setValue] = useState<NativeModelChoice>({});
+    return (
+      <NativeModelPicker
+        bridge={bridge}
+        generation={1}
+        selection={{ ...selected('s'), runs: [previousRun(previous)] }}
+        value={value}
+        onChange={setValue}
+        onReady={(isReady, choice) => {
+          ready = isReady;
+          resolved = choice;
+        }}
+      />
+    );
+  }
+  try {
+    for (const previous of ['none', 'minimal'] as const) {
+      await act(async () => f.root.render(<Host key={previous} previous={previous} />));
+      expect(ready).toBe(true);
+      expect(resolved).toEqual({ modelId: 'a', reasoningEffort: previous });
+      expect(f.element.querySelector('.model-effort-summary')?.textContent).toBe(
+        previous === 'none' ? '关闭' : 'minimal',
+      );
+    }
+    await act(async () => f.root.render(<Host key="max" previous="max" />));
+    expect(ready).toBe(false);
+    expect(resolved).toBeUndefined();
+    expect(f.element.textContent).toContain('原临时思考档位当前不可用');
+    await f.click('模型：remote-a，思考程度：Max');
+    const slider = f.element.querySelector<HTMLElement>('[role="slider"]')!;
+    await act(async () => {
+      slider.dispatchEvent(
+        new f.dom.window.KeyboardEvent('keydown', { key: 'End', bubbles: true }),
+      );
+    });
+    expect(ready).toBe(true);
+    expect(resolved).toEqual({ modelId: 'a', reasoningEffort: 'high' });
+    expect(f.element.querySelector('.effort-value')?.textContent).toBe('高');
+  } finally {
+    await f.close();
+  }
+});

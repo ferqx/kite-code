@@ -1,6 +1,7 @@
 import { type AgentClient, ClientError, type Message } from '@kite-ai/client';
 import {
   modelUsageMessageKey,
+  type NativeContextUsagePage,
   type NativeModelUsagePage,
   type NativeToolMessagePage,
   type NativeToolMessageRequest,
@@ -200,6 +201,99 @@ export class NativeToolMessages {
       await this.client.verifyConnection({ signal: lease.abort.signal });
       this.check(lease);
       return { kind: 'toolMessages.runs', readId: input.readId, scope: { ...scope }, runs };
+    } finally {
+      this.close(input.readId);
+    }
+  }
+  /** Numeric forecast of the current selected context, separate from cumulative cache receipts. */
+  async contextUsage(
+    input: Extract<NativeToolMessageRequest, { method: 'toolMessages.contextUsage' }>,
+  ): Promise<NativeContextUsagePage> {
+    if (input.messageIds.length !== 1) throw new ClientError('invalid_native_request');
+    const lease = this.open(input),
+      { scope } = lease;
+    try {
+      const page: NativeContextUsagePage = {
+        kind: 'toolMessages.contextUsage',
+        readId: input.readId,
+        scope: { ...scope },
+      };
+      await this.client.verifyConnection({ signal: lease.abort.signal });
+      this.check(lease);
+      const message = this.messages().get(input.messageIds[0]!);
+      if (!message || message.sessionId !== scope.sessionId)
+        throw new ClientError('tool_message_unavailable');
+      if (
+        message.role !== 'assistant' ||
+        message.status !== 'complete' ||
+        message.originMessage ||
+        message.compression ||
+        message.contentFormat === 'unsupported' ||
+        !message.runId ||
+        message.sourceIds?.length !== 1
+      )
+        return page;
+      const key = modelUsageMessageKey(message),
+        content = message.content;
+      const execution = await this.client.getExecution(message.sourceIds[0]!, {
+        signal: lease.abort.signal,
+      });
+      this.check(lease);
+      if (
+        execution.id !== message.sourceIds[0] ||
+        execution.sessionId !== scope.sessionId ||
+        execution.originStoreId !== scope.storeId ||
+        execution.runId !== message.runId
+      )
+        throw new ClientError('model_usage_identity_mismatch');
+      if (
+        execution.kind !== 'model' ||
+        execution.status !== 'succeeded' ||
+        object(execution.result)?.content !== content
+      )
+        return page;
+      const estimate = await this.client.getContextEstimate(
+        scope.sessionId,
+        { storeId: scope.storeId, executionId: execution.id },
+        { signal: lease.abort.signal },
+      );
+      this.check(lease);
+      const view = await this.client.getView(scope.sessionId, { signal: lease.abort.signal });
+      await this.client.verifyConnection({ signal: lease.abort.signal });
+      this.check(lease);
+      const current = this.messages().get(message.id);
+      if (!current || modelUsageMessageKey(current) !== key || current.content !== content)
+        throw new ClientError('native_selection_changed');
+      if (
+        view.storeId !== scope.storeId ||
+        view.session.id !== scope.sessionId ||
+        view.session.workspaceId !== scope.workspaceId ||
+        view.session.deletedAt !== null ||
+        estimate.storeId !== scope.storeId ||
+        estimate.sessionId !== scope.sessionId ||
+        estimate.runId !== execution.runId ||
+        estimate.modelInputExecutionId !== execution.id ||
+        estimate.contextSelectionId !== view.session.contextSelectionId
+      )
+        throw new ClientError('context_selection_changed');
+      if (
+        !Number.isSafeInteger(estimate.totalInputTokens) ||
+        estimate.totalInputTokens < 0 ||
+        !estimate.modelId ||
+        (estimate.contextWindowTokens !== undefined &&
+          (!Number.isSafeInteger(estimate.contextWindowTokens) ||
+            estimate.contextWindowTokens <= 0))
+      )
+        throw new ClientError('context_estimate_unavailable');
+      page.context = {
+        modelId: estimate.modelId,
+        contextSelectionId: estimate.contextSelectionId,
+        totalInputTokens: estimate.totalInputTokens,
+        ...(estimate.contextWindowTokens === undefined
+          ? {}
+          : { contextWindowTokens: estimate.contextWindowTokens }),
+      };
+      return page;
     } finally {
       this.close(input.readId);
     }

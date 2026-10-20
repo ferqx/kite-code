@@ -59,6 +59,7 @@ const fields: Record<NativeRequest['method'], readonly string[]> = {
     'actionIndex',
   ],
   'extensions.lookup': ['commandId'],
+  'toolMessages.contextUsage': ['readId', 'messageIds', 'viewSelection', 'historyEpoch'],
   'toolMessages.usage': ['readId', 'messageIds', 'viewSelection', 'historyEpoch'],
   'toolMessages.list': ['readId', 'messageIds', 'viewSelection', 'historyEpoch'],
   'toolMessages.runs': ['readId', 'messageIds', 'viewSelection', 'historyEpoch'],
@@ -409,6 +410,7 @@ export function decodeNativeRequest(value: unknown): NativeRequest {
       method === 'toolMessages.list' ||
       method === 'toolMessages.runs' ||
       method === 'toolMessages.usage' ||
+      method === 'toolMessages.contextUsage' ||
       method === 'messageFile.open') &&
     (!Number.isSafeInteger(input.viewSelection) ||
       Number(input.viewSelection) < 1 ||
@@ -567,13 +569,16 @@ export function decodeNativeRequest(value: unknown): NativeRequest {
       method === 'fileTargets.list' ||
       method === 'toolMessages.list' ||
       method === 'toolMessages.runs' ||
-      method === 'toolMessages.usage') &&
+      method === 'toolMessages.usage' ||
+      method === 'toolMessages.contextUsage') &&
     (!Array.isArray(input.messageIds) ||
       input.messageIds.length < 1 ||
       input.messageIds.length > 32 ||
       !input.messageIds.every(resourceId) ||
       new Set(input.messageIds).size !== input.messageIds.length)
   )
+    throw Error('invalid_native_request');
+  if (method === 'toolMessages.contextUsage' && (input.messageIds as unknown[]).length !== 1)
     throw Error('invalid_native_request');
   if (
     (method === 'fileChanges.detail' || method === 'fileChanges.open') &&

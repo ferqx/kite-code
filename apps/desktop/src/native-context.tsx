@@ -162,7 +162,7 @@ export function NativeContextView({
       ['planned', 'dispatching', 'running', 'outcome_unknown'].includes(execution.status),
     );
   return (
-    <section aria-label="当前所选上下文">
+    <section aria-label="当前所选上下文" aria-busy={reading || undefined}>
       {selection.canReadContext ? (
         <button type="button" disabled={reading} onClick={() => void read()}>
           读取当前所选上下文
@@ -170,7 +170,6 @@ export function NativeContextView({
       ) : (
         <p>上下文能力不可用；当前只读。</p>
       )}
-      {reading && <p role="status">正在读取原会话上下文…</p>}
       {error && <p role="alert">上下文不可写：{error}。原选择与命令仍按原身份保存。</p>}
       {facts && (
         <section aria-label="手动上下文压缩">

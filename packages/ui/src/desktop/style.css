@@ -9,8 +9,15 @@
 
 body {
   margin: 0;
+  font-family: var(--font-ui);
+  font-weight: 400;
+  font-synthesis: none;
 }
 :root {
+  --font-ui:
+    "Geist Variable", -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+    "Microsoft YaHei UI", "Microsoft YaHei", sans-serif;
+  --font-weight-semibold: 500;
   /* Shared desktop corner radius for surfaces and controls. */
   --radius: 16px;
   --radius-xs: var(--radius);
@@ -25,8 +32,13 @@ body {
   --sidebar-motion-duration: 180ms;
   --sidebar-motion-easing: ease-out;
   --background: #fafafa;
-  --page-background: var(--card);
+  --page-background: var(--background);
   --card: #fff;
+  --composer-background: var(--card);
+  --composer-border-color: rgb(0 0 0 / 10%);
+  --composer-focus-border-color: rgb(0 0 0 / 14%);
+  --composer-shadow-color: rgb(0 0 0 / 4%);
+  --composer-focus-ring-color: rgb(0 0 0 / 4%);
   --sidebar: #f5f5f5;
   --foreground: #222;
   --muted-foreground: #666;
@@ -75,9 +87,8 @@ body {
     --collapsible-expand-easing: cubic-bezier(0.2, 0.7, 0.2, 1);
     --collapsible-collapse-duration: 240ms;
     --collapsible-collapse-easing: ease-in-out;
-    font-family:
-      Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei",
-      sans-serif;
+    font-family: var(--font-ui);
+    font-weight: 400;
     color-scheme: light;
     color: var(--foreground);
     background: var(--background);
@@ -202,6 +213,7 @@ body {
     overflow: hidden;
   }
   .client-panels,
+  .client-content-panels,
   .client-sidebar-panel,
   .client-main-panel {
     display: flex;
@@ -210,14 +222,18 @@ body {
     min-width: 0;
   }
   .client-panels > [data-panel],
-  .client-panels > [data-panel] > div {
+  .client-panels > [data-panel] > div,
+  .client-content-panels > [data-panel],
+  .client-content-panels > [data-panel] > div {
     height: 100%;
     min-height: 0;
   }
-  .client-panels > [data-panel] {
+  .client-panels > [data-panel],
+  .client-content-panels > [data-panel] {
     transition: none;
   }
-  .client-panels[data-animate-width="true"] > [data-panel] {
+  .client-panels[data-animate-width="true"] > [data-panel],
+  .client-content-panels[data-animate-width="true"] > [data-panel] {
     transition: flex-grow var(--sidebar-motion-duration) var(--sidebar-motion-easing);
   }
   .collapsible-sidebar-content {
@@ -229,6 +245,10 @@ body {
   .collapsible-sidebar-viewport {
     overflow: hidden;
   }
+  /* The library outer panel keeps overflow visible; clip its animated allocation too. */
+  .client-content-panels > #details {
+    clip-path: inset(0);
+  }
   .client-sidebar-panel,
   .client-main-panel {
     flex-direction: column;
@@ -236,6 +256,16 @@ body {
   .client-sidebar-panel {
     --control-pressed: var(--control-hover);
     background: var(--sidebar);
+  }
+  .client-content-frame {
+    position: relative;
+    display: flex;
+    width: 100%;
+    height: 100%;
+    min-width: 0;
+    min-height: 0;
+    overflow: hidden;
+    background: var(--page-background);
   }
   .client-main-panel {
     background: var(--page-background);
@@ -339,10 +369,10 @@ body {
     padding: 0;
   }
   .brand {
-    font-family: Inter, sans-serif;
+    font-family: inherit;
     font-size: 18px;
     line-height: 28px;
-    font-weight: 600;
+    font-weight: 500;
   }
   .sidebar-toggle svg {
     display: block;
@@ -568,7 +598,6 @@ body {
     min-height: var(--app-header-height);
     gap: var(--session-header-gap);
     padding: 10px var(--session-header-start-padding);
-    border-bottom: 0.5px solid color-mix(in srgb, var(--foreground) 16%, transparent);
     flex: none;
     min-width: 0;
     background: var(--page-background);
@@ -764,9 +793,7 @@ body {
     white-space: nowrap;
   }
   .response-status {
-    position: absolute;
-    top: 100%;
-    left: 0;
+    display: block;
     margin-top: 2px;
     color: var(--muted-foreground);
     font-size: 11px;
@@ -890,21 +917,21 @@ body {
   .composer {
     display: flex;
     flex-direction: column;
-    border: 1px solid var(--border);
+    border: 1px solid var(--composer-border-color);
     border-radius: var(--radius);
-    background: var(--card);
+    background: var(--composer-background);
     min-height: 112px;
     padding: 10px 12px 4px;
-    box-shadow: 0 1px 2px #20221e0a;
+    box-shadow: 0 1px 2px var(--composer-shadow-color);
     transition:
       border-color 120ms,
       box-shadow 120ms;
   }
   .composer:focus-within:where(:root:not([data-input-modality="pointer"]) *) {
-    border-color: var(--input);
+    border-color: var(--composer-focus-border-color);
     box-shadow:
-      0 1px 2px #20221e0a,
-      0 0 0 3px #20221e0a;
+      0 1px 2px var(--composer-shadow-color),
+      0 0 0 3px var(--composer-focus-ring-color);
   }
   .composer textarea {
     border: 0;
@@ -926,35 +953,62 @@ body {
   }
   .composer-bottom {
     display: flex;
-    align-items: center;
+    flex-wrap: wrap;
+    align-items: flex-end;
     justify-content: space-between;
     margin-top: auto;
-    gap: 8px;
+    gap: 4px 16px;
   }
   .composer-options {
     display: flex;
     align-items: center;
     min-width: 0;
+    max-width: 100%;
     gap: 4px;
+  }
+  .composer-trailing {
+    display: flex;
+    flex: none;
+    align-items: center;
+    margin-inline-start: auto;
+    gap: 16px;
+  }
+  .composer-metrics {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+  }
+  .composer-options :where(.model-trigger) {
+    flex-shrink: 1;
+  }
+  .composer [data-model-picker] {
+    display: grid;
+    min-width: 0;
+    max-width: 100%;
   }
   .model-trigger,
   .permission-trigger,
   .composer-cache-rate {
     font-family: inherit;
-    font-size: 12px;
     font-weight: 400;
     line-height: 20px;
+  }
+  .model-trigger,
+  .permission-trigger {
+    font-size: 14px;
   }
   .model-trigger > svg,
   .permission-trigger > svg,
   .composer-action > svg {
-    width: 14px;
-    height: 14px;
+    width: 16px;
+    height: 16px;
   }
   .model-trigger {
-    max-width: 220px;
-    min-height: 26px;
-    padding: 2px 6px;
+    max-width: min(220px, 100%);
+    min-width: 0;
+    height: 32px;
+    min-height: 32px;
+    padding: 4px 8px;
     gap: 4px;
     color: var(--muted-foreground);
   }
@@ -985,8 +1039,9 @@ body {
     color: var(--foreground);
   }
   .permission-trigger {
-    min-height: 26px;
-    padding: 2px 6px;
+    height: 32px;
+    min-height: 32px;
+    padding: 4px 8px;
     gap: 4px;
     background-color: transparent;
     color: var(--muted-foreground);
@@ -1027,46 +1082,68 @@ body {
     background: var(--primary-hover);
   }
   .composer-cache-rate {
+    display: inline-flex;
+    align-items: center;
+    height: 32px;
     flex: none;
+    font-size: 14px;
     color: var(--muted-foreground);
     white-space: nowrap;
   }
+  .composer-context-usage {
+    width: 32px;
+    height: 32px;
+    flex: none;
+    padding: 8px;
+    border: 0;
+    background: transparent;
+    color: var(--muted-foreground);
+  }
+  .composer-context-usage > svg {
+    width: 16px;
+    height: 16px;
+    stroke: currentColor;
+    stroke-width: 2.5px;
+  }
+  .composer-context-track {
+    opacity: 0.25;
+  }
   .permission-menu {
-    width: 288px;
+    width: max-content;
     min-width: 0;
-    max-width: calc(100vw - 24px);
-    padding: 4px;
-    font-size: 12px;
-    line-height: 16px;
+    max-width: min(calc(100vw - 24px), var(--radix-dropdown-menu-content-available-width, 100vw));
+    font-size: 13px;
+    font-weight: 400;
+    line-height: 18px;
   }
   .permission-menu-heading {
     display: flex;
-    flex-direction: column;
-    gap: 2px;
-    padding: 6px 8px 8px;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 8px;
     font-size: inherit;
+    font-weight: 400;
     line-height: inherit;
   }
   .permission-menu-heading small {
     color: var(--muted-foreground);
-    font-size: inherit;
+    font-size: 11px;
     font-weight: 400;
+    line-height: 14px;
   }
   .permission-menu-item {
-    min-height: 48px;
     gap: 8px;
-    padding: 6px 24px 6px 8px;
     border-radius: var(--radius);
     font-size: inherit;
+    font-weight: 400;
     line-height: inherit;
   }
   .permission-menu-item svg {
-    width: 14px;
-    height: 14px;
+    width: 16px;
+    height: 16px;
     flex: none;
   }
   .permission-menu-divider {
-    margin: 4px 8px;
     background: var(--border);
   }
   .permission-menu-item-danger,
@@ -1081,27 +1158,27 @@ body {
     display: flex;
     flex-direction: column;
     min-width: 0;
-    gap: 2px;
+    gap: 0;
     overflow-wrap: anywhere;
   }
   .permission-menu-copy > span {
     font-size: inherit;
-    font-weight: 600;
+    font-weight: 400;
     line-height: inherit;
   }
   .permission-menu-copy small {
     color: var(--muted-foreground);
-    font-size: inherit;
-    line-height: inherit;
+    font-size: 11px;
+    line-height: 14px;
   }
   .permission-menu-item-danger .permission-menu-copy small {
     opacity: 0.88;
   }
   .composer-action {
     flex: none;
-    width: 26px;
-    height: 26px;
-    min-height: 26px;
+    width: 32px;
+    height: 32px;
+    min-height: 32px;
     padding: 0;
     border-radius: 50%;
   }
@@ -1122,7 +1199,7 @@ body {
   .model-button {
     max-width: calc(100% - 70px);
     overflow-wrap: anywhere;
-    font-size: 12px;
+    font-size: 14px;
     color: var(--muted-foreground);
     text-align: left;
   }
@@ -1207,7 +1284,7 @@ body {
   .ask-questionnaire-title {
     padding: 0;
     font-size: 14px;
-    font-weight: 600;
+    font-weight: 500;
   }
   .ask-questionnaire-description {
     margin: 2px 0 8px;
@@ -1255,7 +1332,7 @@ body {
     gap: 2px;
   }
   .ask-questionnaire-info-content strong {
-    font-weight: 600;
+    font-weight: 500;
   }
   .ask-questionnaire-input {
     width: 100%;
@@ -1326,7 +1403,7 @@ body {
     margin-bottom: 14px;
     padding: 0;
     font-size: 16px;
-    font-weight: 600;
+    font-weight: 500;
     overflow-wrap: anywhere;
   }
   .questionnaire-description {
@@ -1431,7 +1508,7 @@ body {
     overflow-wrap: anywhere;
   }
   .questionnaire-tooltip strong {
-    font-weight: 600;
+    font-weight: 500;
   }
   .questionnaire-text-answer {
     display: flex;
@@ -1507,7 +1584,7 @@ body {
   .settings summary,
   .results summary {
     cursor: pointer;
-    font-weight: 600;
+    font-weight: 500;
   }
   .settings fieldset {
     border: 1px solid var(--border);
@@ -1597,9 +1674,6 @@ body {
     .conversation-footer {
       padding: 0 12px 12px;
     }
-    .composer-bottom {
-      gap: 4px;
-    }
     .message.user {
       max-width: 95%;
     }
@@ -1624,6 +1698,26 @@ body {
   min-width: 0;
   padding-left: 5px;
   padding-right: var(--sidebar-inline-padding);
+}
+.kite-client.composer-context-tooltip {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-width: min(calc(100vw - 24px), var(--radix-tooltip-content-available-width));
+  padding: 8px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--card);
+  color: var(--foreground);
+  font-size: 14px;
+  font-weight: 400;
+  line-height: 20px;
+  text-align: center;
+  text-wrap: wrap;
+  box-shadow: 0 4px 12px #0002;
+}
+.kite-client.composer-context-tooltip > span:not(:last-child) {
+  color: var(--muted-foreground);
 }
 .kite-client.directory-tooltip {
   display: flex;
@@ -1719,8 +1813,13 @@ body {
 }
 [data-theme="dark"] {
   --background: #191919;
-  --page-background: #191919;
+  --page-background: var(--background);
   --card: #242424;
+  --composer-background: #202020;
+  --composer-border-color: rgb(255 255 255 / 5%);
+  --composer-focus-border-color: rgb(255 255 255 / 12%);
+  --composer-shadow-color: rgb(0 0 0 / 24%);
+  --composer-focus-ring-color: rgb(255 255 255 / 4%);
   --sidebar: #242424;
   --foreground: #ededed;
   --muted-foreground: #b5b5b5;
@@ -1753,9 +1852,6 @@ body {
 }
 [data-theme="dark"] .kite-client {
   color-scheme: dark;
-}
-[data-theme="dark"] .kite-client .session-header {
-  border-bottom-color: var(--border);
 }
 @media (max-width: 600px) {
   .kite-client .client-sidebar-panel.narrow {
@@ -1797,7 +1893,7 @@ body {
 .kite-client .scheduled-page h1 {
   font-size: 24px;
   line-height: 32px;
-  font-weight: 600;
+  font-weight: 500;
   letter-spacing: -0.02em;
 }
 .kite-client .scheduled-page-heading p,
@@ -1838,7 +1934,7 @@ body {
 .kite-client .scheduled-editor h2 {
   font-size: 16px;
   line-height: 24px;
-  font-weight: 600;
+  font-weight: 500;
 }
 .kite-client .scheduled-empty p {
   max-width: 480px;
@@ -2336,12 +2432,11 @@ body {
 .kite-client .right-sidebar-heading {
   min-height: 52px;
   padding: 8px 16px;
-  border-bottom: 1px solid var(--border);
 }
 .kite-client .right-sidebar-heading h2,
 .kite-client .settings h2 {
   font-size: 14px;
-  font-weight: 600;
+  font-weight: 500;
   margin: 0;
 }
 .kite-client .right-sidebar-heading [data-slot="tabs-list"] {
@@ -2390,6 +2485,7 @@ body {
 }
 @media (prefers-reduced-motion: reduce) {
   .kite-client .client-panels[data-animate-width="true"] > [data-panel],
+  .kite-client .client-content-panels[data-animate-width="true"] > [data-panel],
   .kite-client .client-panels[data-animate-width="true"] .session-sidebar-toggle,
   .kite-client .client-panels[data-animate-width="true"] .desktop-sidebar-toggle > .sidebar-toggle,
   .kite-client #details-resize,
@@ -3241,7 +3337,7 @@ body {
   border-radius: var(--radius) var(--radius) 0 0;
   background: transparent;
   color: var(--foreground);
-  font-size: 13px;
+  font-size: 14px;
   line-height: 18px;
 }
 .kite-client .context-selector {
@@ -3263,13 +3359,13 @@ body {
   white-space: nowrap;
 }
 .kite-client .context-trigger svg {
-  width: 15px;
-  height: 15px;
+  width: 16px;
+  height: 16px;
   flex-shrink: 0;
 }
 .kite-client .context-trigger .context-trigger-chevron {
-  width: 12px;
-  height: 12px;
+  width: 16px;
+  height: 16px;
   margin-left: 1px;
   color: var(--muted-foreground);
   transition: transform 120ms ease;
@@ -3288,6 +3384,7 @@ body {
   background: var(--control-selected);
 }
 .kite-client .context-menu {
+  font-size: 14px;
   width: max-content;
   min-width: min(160px, calc(100vw - 32px));
   max-width: min(240px, calc(100vw - 32px));
@@ -3301,6 +3398,7 @@ body {
   padding: 5px;
 }
 .kite-client .context-menu-item {
+  font-size: inherit;
   display: flex;
   gap: 8px;
   width: 100%;
@@ -3313,6 +3411,11 @@ body {
   text-align: left;
   overflow-wrap: anywhere;
   white-space: normal;
+}
+.kite-client .context-menu-item svg {
+  width: 16px;
+  height: 16px;
+  flex: none;
 }
 .kite-client .context-menu-item[role="menuitemradio"] {
   padding-right: 32px;
@@ -3328,7 +3431,7 @@ body {
   overflow: hidden;
   color: var(--muted-foreground);
   font-weight: 400;
-  font-size: 12px;
+  font-size: inherit;
   line-height: 18px;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -3474,7 +3577,7 @@ body {
   margin: 16px 16px 0 0;
   width: min(300px, calc(100% - 32px));
   max-height: calc(100% - 32px);
-  padding: 18px 20px;
+  padding: 12px 14px;
   border-radius: var(--radius);
   background: var(--card);
   font-size: 14px;
@@ -3551,7 +3654,8 @@ body {
   transition: margin-right var(--sidebar-motion-duration) var(--sidebar-motion-easing);
 }
 .kite-client .environment-information > header {
-  margin-bottom: 14px;
+  min-height: 24px;
+  margin-bottom: 6px;
   font-size: inherit;
   line-height: inherit;
   color: var(--muted-foreground);
@@ -3570,8 +3674,14 @@ body {
   background: var(--control-hover);
 }
 .kite-client .environment-information .background-execution-group + .background-execution-group {
-  margin-top: 14px;
-  padding-top: 14px;
+  margin-top: 4px;
+}
+.kite-client
+  .environment-information
+  .background-execution-group:has(ul)
+  + .background-execution-group {
+  margin-top: 10px;
+  padding-top: 10px;
   border-top: 1px solid var(--border);
 }
 .kite-client .environment-information .background-execution-group h3 {
@@ -3579,7 +3689,7 @@ body {
   align-items: center;
   gap: 8px;
   margin: 0;
-  min-height: 24px;
+  min-height: 28px;
   font-size: inherit;
   line-height: inherit;
   font-weight: 400;
@@ -3589,21 +3699,14 @@ body {
   height: 18px;
   color: var(--muted-foreground);
 }
-.kite-client .environment-information .background-execution-count {
+.kite-client .environment-information .background-execution-count,
+.kite-client .environment-information .background-execution-empty {
   margin-left: auto;
   color: var(--muted-foreground);
   font-weight: 400;
 }
-.kite-client .environment-information .background-execution-refresh {
-  margin-left: 4px;
-}
 .kite-client .environment-information .background-execution-group ul {
   margin-top: 6px;
-}
-.kite-client .environment-information .background-execution-empty {
-  margin: 6px 0 0;
-  padding-left: 26px;
-  color: var(--muted-foreground);
 }
 .kite-client .environment-information .background-execution-group li {
   min-height: 30px;
@@ -3705,7 +3808,6 @@ body {
 .gem-slider [data-slot="slider-track"] {
   height: var(--gem-track-size);
   background: var(--accent);
-  border: 1px solid var(--border);
 }
 .gem-slider [data-slot="slider-range"] {
   min-width: calc(var(--gem-thumb-size) / 2);
@@ -3863,7 +3965,7 @@ body {
 .kite-client .model-effort-trigger {
   height: 32px;
   min-height: 32px;
-  max-width: 280px;
+  max-width: min(280px, 100%);
   padding: 4px 8px;
 }
 .model-effort-summary {
@@ -3879,10 +3981,8 @@ body {
   border-color: var(--border);
   background: var(--card);
   color: var(--foreground);
-  font-family:
-    Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei",
-    sans-serif;
-  font-size: 12px;
+  font-family: var(--font-ui);
+  font-size: 14px;
   line-height: 18px;
   box-sizing: border-box;
 }
@@ -3896,8 +3996,8 @@ body {
   color: inherit;
 }
 .model-effort-popover :is(.model-effort-switch, .model-effort-option) > svg {
-  width: 14px;
-  height: 14px;
+  width: 16px;
+  height: 16px;
 }
 .model-effort-popover-models {
   width: 288px;
@@ -3911,8 +4011,17 @@ body {
 }
 .model-effort-popover .gem-slider {
   height: 32px;
-  --gem-track-size: 20px;
+  --gem-track-size: 24px;
   --gem-thumb-size: 22px;
+}
+.model-effort-popover .gem-slider [data-slot="slider-thumb"]:hover,
+.model-effort-popover .gem-slider:active [data-slot="slider-thumb"] {
+  transform: scale(1.25);
+}
+@media (prefers-reduced-motion: no-preference) {
+  .model-effort-popover .gem-slider [data-slot="slider-thumb"] {
+    transition: transform 150ms ease-out;
+  }
 }
 .model-effort-popover .model-effort-switch {
   height: 28px;
@@ -4018,7 +4127,7 @@ body {
   overflow: auto;
   outline: none;
   font: inherit;
-  font-size: 12px;
+  font-size: 14px;
   line-height: 20px;
   overflow-wrap: anywhere;
   user-select: text;
@@ -4040,7 +4149,7 @@ body {
   top: 3px;
   left: 0;
   color: var(--muted-foreground);
-  font-size: 12px;
+  font-size: 14px;
   line-height: 20px;
   pointer-events: none;
 }
@@ -4074,13 +4183,13 @@ body {
   padding: 6px 8px;
   background: var(--accent);
   border-radius: var(--radius);
-  font: 12px / 20px var(--font-geist-mono, monospace);
+  font: 14px / 20px var(--font-geist-mono, monospace);
 }
 .kite-client .prompt-inline-code {
   padding: 1px 3px;
   border-radius: var(--radius);
   background: var(--accent);
-  font: 12px / 20px var(--font-geist-mono, monospace);
+  font: 14px / 20px var(--font-geist-mono, monospace);
 }
 .kite-client ul.prompt-list {
   margin: 0;
@@ -4101,8 +4210,9 @@ body {
   text-underline-offset: 3px;
 }
 .kite-client .composer-attach {
-  width: 26px;
-  height: 26px;
+  width: 32px;
+  height: 32px;
+  min-height: 32px;
   border-radius: 50%;
   color: var(--muted-foreground);
 }
@@ -4111,8 +4221,8 @@ body {
   color: var(--foreground);
 }
 .kite-client .composer-attach > svg {
-  width: 14px;
-  height: 14px;
+  width: 16px;
+  height: 16px;
 }
 .kite-client .composer-attach-menu {
   box-sizing: border-box;
@@ -4144,8 +4254,8 @@ body {
   line-height: inherit;
 }
 .kite-client .composer-attach-menu [role="menuitem"] > svg {
-  width: 14px;
-  height: 14px;
+  width: 16px;
+  height: 16px;
   color: var(--muted-foreground);
 }
 .kite-client .composer-attach-menu [role="menuitem"]:is(:hover, [data-highlighted]) {
@@ -4271,4 +4381,134 @@ body {
 .conversation-cache-container[data-restoring] *::before,
 .conversation-cache-container[data-restoring] *::after {
   transition: none;
+}
+
+/* Browser and tool tabs share the existing rightmost panel. */
+.kite-client .session-tabs {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  flex-direction: column;
+}
+.kite-client .session-tabs[hidden] {
+  display: none;
+}
+.kite-client .session-tabs-root {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  flex-direction: column;
+}
+.kite-client .session-tabs .session-tabs-heading {
+  min-height: 52px;
+  padding: 6px 8px;
+  gap: 4px;
+}
+.kite-client .session-tabs [data-slot="tabs-list"] {
+  flex: 1;
+  min-width: 0;
+  height: 36px;
+  justify-content: flex-start;
+  padding: 0;
+  gap: 4px;
+  overflow-x: auto;
+  border-radius: 0;
+  background: transparent;
+  scrollbar-width: thin;
+}
+.kite-client .session-tab {
+  display: flex;
+  flex: none;
+  align-items: center;
+  min-width: 90px;
+  max-width: 180px;
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+}
+.kite-client .session-tab[data-active="true"] {
+  border-color: var(--border);
+  background: var(--control-hover);
+}
+.kite-client .session-tabs .session-tabs-heading [data-slot="tabs-trigger"] {
+  flex: 1;
+  min-width: 0;
+  max-width: 150px;
+  min-height: 30px;
+  justify-content: flex-start;
+  padding: 4px 6px;
+  gap: 6px;
+  background: transparent;
+  box-shadow: none;
+  color: var(--foreground);
+}
+.kite-client .session-tab [data-slot="tabs-trigger"] > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.kite-client .session-tab [data-slot="tabs-trigger"] > svg {
+  flex: none;
+  width: 14px;
+  height: 14px;
+}
+.kite-client .session-tab .session-tab-close {
+  flex: none;
+  width: 22px;
+  height: 24px;
+  min-height: 24px;
+  margin-right: 4px;
+  padding: 3px;
+}
+.kite-client .session-tab .session-tab-close > svg {
+  width: 12px;
+  height: 12px;
+}
+.kite-client .session-tabs .session-tab-add {
+  flex: none;
+}
+.kite-client .session-tabs [data-slot="tabs-content"] {
+  padding: 0;
+  flex: 1;
+  min-height: 0;
+  margin: 0;
+  outline: none;
+}
+.kite-client .session-tabs [data-slot="tabs-content"][data-state="inactive"] {
+  display: none;
+}
+.kite-client .session-tabs [data-slot="tabs-content"][data-state="active"] {
+  display: flex;
+  flex-direction: column;
+}
+.kite-client .session-tab-changes {
+  padding: 18px;
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+.kite-client .session-browser-start {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 24px 20px;
+}
+.kite-client .session-browser-tools {
+  width: 100%;
+  max-width: 440px;
+  margin: 16px auto 0;
+}
+.kite-client .session-browser-tools > h2 {
+  margin: 0 0 12px;
+  font-size: 14px;
+  font-weight: 600;
+}
+.kite-client .session-browser-tool {
+  width: 100%;
+  min-height: 40px;
+  justify-content: flex-start;
+  gap: 10px;
+  border: 0;
+  background: var(--control-hover);
 }

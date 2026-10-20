@@ -128,11 +128,12 @@ function Workspace({
         </TooltipTrigger>
         <TooltipContent className="kite-client directory-tooltip" side="right" sideOffset={8}>
           <strong>{workspace.label}</strong>
-          <span>{workspace.state === 'idle' ? '未加载' : `${workspace.sessionCount} 个会话`}</span>
+          {(workspace.state === 'loaded' || workspace.sessions.length > 0) && (
+            <span>{workspace.sessionCount} 个会话</span>
+          )}
         </TooltipContent>
       </Tooltip>
       <div className="sidebar-sessions" hidden={!expanded}>
-        {workspace.state === 'loading' && <p role="status">正在加载会话…</p>}
         {workspace.state === 'unavailable' && (
           <Button onClick={() => props.onExpand?.(workspace.id)}>会话暂不可用 · 重试</Button>
         )}
@@ -140,6 +141,7 @@ function Workspace({
           id={id}
           ref={list}
           aria-label="当前项目会话"
+          aria-busy={workspace.state === 'loading' || undefined}
           onKeyDown={(event) => {
             if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) return;
             const buttons = Array.from(

@@ -116,8 +116,9 @@ async function readOriginalFileChanges(page: import('playwright').Page) {
   );
   await page.getByRole('combobox', { name: '默认编辑器', exact: true }).selectOption('textedit');
   await page.getByRole('button', { name: '返回应用', exact: true }).click();
-  await page.getByRole('button', { name: '文件变更', exact: true }).click();
-  const pane = page.getByRole('complementary', { name: '文件变更', exact: true });
+  await page.getByRole('button', { name: '标签页', exact: true }).click();
+  await page.locator('.session-browser-tool:visible').click();
+  const pane = page.getByRole('complementary', { name: '标签页', exact: true });
   await pane.getByText('1 次文件操作', { exact: true }).waitFor();
   assert.equal(await pane.locator('details.file-change').count(), 1);
   await pane.locator('details.file-change > summary').click();
@@ -309,7 +310,7 @@ async function readOriginalTheme(page: import('playwright').Page, cold: boolean)
       await page.evaluate(
         () => getComputedStyle(document.querySelector('.client-main-panel')!).backgroundColor,
       ),
-      appearance.dark ? 'rgb(25, 25, 25)' : 'rgb(255, 255, 255)',
+      appearance.dark ? 'rgb(25, 25, 25)' : 'rgb(250, 250, 250)',
     );
   }
   async function choose(preference: 'dark' | 'light' | 'system', label: string) {

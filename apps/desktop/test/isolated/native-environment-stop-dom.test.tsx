@@ -4,7 +4,7 @@ import { JSDOM } from 'jsdom';
 import { act } from 'react';
 import type { NativeBridge, NativeSelection } from '../../src/native-bridge';
 import { useNativeEnvironment } from '../../src/native-environment';
-import { backgroundItem } from '../background-item.fixture';
+import { backgroundShellItem } from '../background-item.fixture';
 
 const bootstrap = new JSDOM('<div/>');
 const prior = {
@@ -41,7 +41,7 @@ function fixture() {
     IS_REACT_ACT_ENVIRONMENT: true,
   });
   const root = createRoot(dom.window.document.getElementById('root')!);
-  const item = backgroundItem(1, true);
+  const item = backgroundShellItem(1);
   let observation = 0,
     opens = 0,
     stops = 0,
@@ -186,7 +186,6 @@ test('routine environment refresh retains card text and controls while blocking 
     const card = f.host.querySelector('[aria-label="环境信息"]')!;
     const text = card.textContent;
     const stop = card.querySelector<HTMLButtonElement>('.background-execution-stop')!;
-    const refresh = card.querySelector<HTMLButtonElement>('[aria-label="刷新子 Agent"]')!;
     expect(stop).not.toBeNull();
     expect(stop.disabled).toBe(false);
     held = f.holdDirectory();
@@ -196,7 +195,6 @@ test('routine environment refresh retains card text and controls while blocking 
     expect(card.querySelector('.background-stale')).toBeNull();
     expect(card.querySelector('.background-execution-stop')).toBe(stop);
     expect(stop.disabled).toBe(true);
-    expect(refresh.disabled).toBe(true);
     await act(async () => stop.click());
     expect(f.stops).toBe(0);
     await f.render();
@@ -212,7 +210,7 @@ test('routine environment refresh retains card text and controls while blocking 
     f.controlUnavailable(false);
     f.failDirectory(true);
     await f.render();
-    expect(card.textContent).toContain('上次状态 · 正在核对');
+    expect(card.textContent).toContain('上次状态 · 待核实');
     expect(card.textContent).toContain('fixture_environment_unavailable');
     expect(card.querySelector('.background-execution-stop')).toBeNull();
     f.unavailable(true);
@@ -233,7 +231,7 @@ test('a verified empty environment does not insert loading text during a backgro
     await f.render();
     const card = f.host.querySelector('[aria-label="环境信息"]')!;
     const text = card.textContent;
-    expect(text).toContain('暂无子智能体记录');
+    expect(card.querySelector('[aria-label="子智能体"]')?.textContent).toContain('暂无');
     held = f.holdDirectory();
     await f.render();
     expect(card.textContent).toBe(text);

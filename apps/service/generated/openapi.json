@@ -790,6 +790,14 @@
             }
           },
           {
+            "name": "includeSourceTool",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
             "name": "rootSessionId",
             "in": "query",
             "required": false,
@@ -14345,6 +14353,9 @@
             "type": "string",
             "pattern": "^(0|[1-9][0-9]*)$"
           },
+          "includeSourceTool": {
+            "type": "boolean"
+          },
           "rootSessionId": {
             "type": "string",
             "minLength": 1,
@@ -14368,6 +14379,25 @@
           "seq": {
             "type": "string",
             "pattern": "^(0|[1-9][0-9]*)$"
+          },
+          "sourceTool": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128,
+                "pattern": "^[A-Za-z0-9_-]+$"
+              },
+              "definitionId": {
+                "type": "string"
+              },
+              "definitionVersion": {
+                "type": "string"
+              }
+            },
+            "required": ["id", "definitionId", "definitionVersion"],
+            "additionalProperties": false
           },
           "execution": {
             "type": "object",
@@ -15198,6 +15228,25 @@
                 "seq": {
                   "type": "string",
                   "pattern": "^(0|[1-9][0-9]*)$"
+                },
+                "sourceTool": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 128,
+                      "pattern": "^[A-Za-z0-9_-]+$"
+                    },
+                    "definitionId": {
+                      "type": "string"
+                    },
+                    "definitionVersion": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["id", "definitionId", "definitionVersion"],
+                  "additionalProperties": false
                 },
                 "execution": {
                   "type": "object",

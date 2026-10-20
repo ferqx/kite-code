@@ -100,9 +100,7 @@ function ChangeDetail({
           {body.truncated && <p role="status">差异预览已截断；编辑器打开文件的当前内容。</p>}
           <FileDiff message={message} />
         </>
-      ) : (
-        !error && <p role="status">正在读取原文件差异。</p>
-      )}
+      ) : null}
     </>
   );
 }

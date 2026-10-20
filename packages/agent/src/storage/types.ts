@@ -839,6 +839,8 @@ export type BackgroundExecution = Omit<
 > & { rootSessionId: string; cancelRequested: boolean };
 export interface BackgroundExecutionItem {
   seq: string;
+  /** Read-only identity of the directly owning Tool, verified in the original execution scope. */
+  sourceTool?: { id: string; definitionId: string; definitionVersion: string };
   execution: BackgroundExecution;
   session: SessionRecord;
   rootSession: SessionRecord;

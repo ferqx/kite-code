@@ -371,7 +371,6 @@ export function Conversation({
 }) {
   const readingActivity = useConversationActivity();
   const previousResume = useRef(readingActivity.resume);
-  const resumed = useRef(false);
   const viewport = useRef<HTMLDivElement>(null);
   const content = useRef<HTMLDivElement>(null);
   const reading = useRef<ReadingState>(initialReading ?? { top: 0, follow: true, expanded: {} });
@@ -395,7 +394,6 @@ export function Conversation({
   const [expanded, setExpanded] = useState(reading.current.expanded);
   if (previousResume.current !== readingActivity.resume) {
     previousResume.current = readingActivity.resume;
-    resumed.current = true;
     restore.current = true;
     for (const [id, open] of Object.entries(expanded)) if (open) restoredExpanded.current.add(id);
   }
@@ -896,10 +894,10 @@ export function Conversation({
     // container so the old process cannot repaint during its exit animation.
     const turnKey = `turn:${entry.turnId}:${settled ? 'complete' : 'process'}`;
     const open = expanded[turnKey] ?? !settled;
-    // Restoring a reading also restores the default-open active process.
+    // Cold history and restored readings start at their full height. Replaying
+    // the default-open process moves the transcript for the entire animation.
     // A later user toggle removes this marker and keeps the normal animation.
-    if (restore.current && (initialReading || resumed.current) && open)
-      restoredExpanded.current.add(turnKey);
+    if (restore.current && open) restoredExpanded.current.add(turnKey);
     const elapsedPrefix =
       finishedDuration !== undefined || (runningTimer && label === '已处理')
         ? ' '

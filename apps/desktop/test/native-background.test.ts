@@ -17,6 +17,7 @@ import { memoryPrivateData } from './private-data.fixture';
 
 function fixture(items: BackgroundExecutionItem[]) {
   const calls: string[] = [],
+    sourceRequests: boolean[] = [],
     current = { generation: 1, storeId: 'store', subjectId: 'user' },
     selected = { rootSessionId: 'root', viewSelection: 1 };
   const port = {
@@ -29,7 +30,11 @@ function fixture(items: BackgroundExecutionItem[]) {
       calls.push('GET server');
       return port.serverInfo;
     },
-    listAllBackgroundExecutions: async (options: { rootSessionId?: string }) => {
+    listAllBackgroundExecutions: async (options: {
+      rootSessionId?: string;
+      includeSourceTool?: boolean;
+    }) => {
+      sourceRequests.push(options.includeSourceTool === true);
       calls.push('GET directory');
       return structuredClone(
         items.filter(
@@ -131,7 +136,7 @@ function fixture(items: BackgroundExecutionItem[]) {
       }
     },
   };
-  return { main, environment, bridge, port, calls, current, selected };
+  return { main, environment, bridge, port, calls, current, selected, sourceRequests };
 }
 
 test('selected environment exhausts the original root independently of the open global overview, and old selection loses control', async () => {
@@ -153,6 +158,7 @@ test('selected environment exhausts the original root independently of the open 
         environment: { rootSessionId: 'root', viewSelection: 1 },
       });
     const selected = await read();
+    expect(f.sourceRequests).toEqual([false, true]);
     expect(selected.items.map((item) => item.execution.id)).toEqual(
       items.map((item) => item.execution.id),
     );

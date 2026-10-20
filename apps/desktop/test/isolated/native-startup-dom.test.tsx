@@ -150,6 +150,7 @@ test('retained startup hides the entire product until admitted attach and the co
     expect(f.host.querySelector('main[aria-label="Kite 启动页"]')?.getAttribute('aria-busy')).toBe(
       'true',
     );
+    expect(f.host.textContent).not.toContain('正在准备');
     expect(f.host.querySelector('.shell')).toBeNull();
     expect(f.host.querySelector('[role="textbox"][contenteditable]')).toBeNull();
     expect(f.host.querySelector('.native-window-titlebar')).toBeNull();

@@ -148,7 +148,7 @@ export function NewConversationContext(props: NewConversationProps) {
       {props.workspace && props.branch?.repository === true && (
         <ContextMenu
           name="分支"
-          label={props.branch?.label ?? (props.busy ? '正在读取分支…' : '分支暂不可用')}
+          label={props.branch?.label ?? (props.busy ? '分支' : '分支暂不可用')}
           icon={GitBranchIcon}
           selected={props.branch?.current}
           options={props.branch?.branches.map((branch) => ({ value: branch, label: branch })) ?? []}

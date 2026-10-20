@@ -209,7 +209,7 @@ test('hidden reasoning does not split adjacent exploration calls and failure rec
   expect(failed.html).toContain('Actual failure');
 });
 
-test('restored active processes skip their opening animation even without an explicit expansion choice', () => {
+test('cold and restored active processes start fully expanded without replaying an opening animation', () => {
   const messages: Message[] = [
     {
       id: 'reply',
@@ -240,7 +240,7 @@ test('restored active processes skip their opening animation even without an exp
         dom.window.document
           .querySelector('.agent-turn-process')
           ?.getAttribute('data-restored-expanded'),
-      ).toBe(restored ? 'true' : null);
+      ).toBe('true');
       expect(
         dom.window.document.querySelector('.agent-turn-process-messages')?.textContent,
       ).toContain('Working');
