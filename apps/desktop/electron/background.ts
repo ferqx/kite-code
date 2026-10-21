@@ -13,7 +13,9 @@ import {
   nativeBackgroundPageBytes,
 } from '../src/background-bridge';
 import type { NativeJobOutputScope } from '../src/job-output-bridge';
+import { nativeRunFact, nativeToolExecution, presentableRun } from '../src/tool-messages-bridge';
 import { NativeJobOutputReads } from './job-output-reads';
+import { nativeToolMessageEligible, nativeToolMessageFact } from './tool-message-fact';
 
 type Scope = {
   generation: number;
@@ -519,6 +521,65 @@ export class NativeBackground {
         decimal(final.session.nextSeq) < decimal(upperSeq)
       )
         throw new ClientError('background_child_binding_changed');
+      let presentation: NativeBackgroundChild['presentation'];
+      if (lease.scope.rootSessionId) {
+        const runs = new Map(
+          final.runs
+            .filter((run) => presentableRun(run, lease.scope.storeId, childId))
+            .map((run) => [run.id, nativeRunFact(run)]),
+        );
+        const tools: NonNullable<NativeBackgroundChild['presentation']>['tools'] = [];
+        let unavailable: true | undefined;
+        try {
+          for (const message of messages) {
+            if (message.originMessage || !message.runId || runs.has(message.runId)) continue;
+            const run = await this.client.getRun(message.runId, { signal });
+            this.check(lease);
+            if (run.id !== message.runId || run.sessionId !== childId)
+              throw new ClientError('background_child_history_mismatch');
+            if (presentableRun(run, lease.scope.storeId, childId))
+              runs.set(run.id, nativeRunFact(run));
+          }
+          for (const message of messages) {
+            if (!nativeToolMessageEligible(message)) continue;
+            const execution = await this.client.getExecution(message.sourceIds[0], { signal });
+            this.check(lease);
+            const fact = nativeToolMessageFact({
+              execution,
+              message,
+              messages,
+              sessionId: childId,
+            });
+            if (fact) tools.push(fact);
+          }
+        } catch (cause) {
+          this.check(lease);
+          if (
+            cause instanceof ClientError &&
+            ['background_child_history_mismatch', 'tool_message_identity_mismatch'].includes(
+              cause.code,
+            )
+          )
+            throw cause;
+          // Optional presentation failure must not hide the independently verified transcript.
+          unavailable = true;
+        }
+        presentation = {
+          ...(unavailable ? { unavailable } : {}),
+          runs: [...runs.values()],
+          tools,
+          executions: final.executions
+            .filter(
+              (execution) =>
+                execution.kind === 'tool' &&
+                execution.sessionId === childId &&
+                execution.originStoreId === lease.scope.storeId &&
+                execution.runId !== null &&
+                runs.has(execution.runId),
+            )
+            .map(nativeToolExecution),
+        };
+      }
       for (const original of parents) {
         const fresh = await this.client.getExecution(original.id, { signal });
         this.check(lease);
@@ -542,6 +603,7 @@ export class NativeBackground {
       );
       const controlIds = new Set(controlRuns.map((run) => run.id));
       const body: NativeBackgroundChild = {
+        ...(presentation ? { presentation } : {}),
         control: {
           runs: controlRuns.map(
             ({

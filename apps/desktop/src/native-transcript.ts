@@ -1,4 +1,4 @@
-import type { Execution, Message } from '@kite-ai/client';
+import type { Message } from '@kite-ai/client';
 import { completeRunReplies } from '@kite-ai/ui';
 import type { Message as DesktopMessage, TurnActivity } from '@kite-ai/ui/desktop';
 import { useEffect, useMemo, useRef, useState } from 'react';
@@ -7,20 +7,11 @@ import { desktopMessages } from './native-presentation';
 import { desktopToolMessage, desktopToolPresentation } from './native-tool-messages';
 import {
   type NativeRunFact,
+  type NativeToolExecution,
   type NativeToolMessageFact,
+  nativeRunFact,
   presentableRun,
 } from './tool-messages-bridge';
-
-const runFact = (run: NativeRunFact): NativeRunFact => ({
-  id: run.id,
-  originStoreId: run.originStoreId,
-  sessionId: run.sessionId,
-  status: run.status,
-  isActive: run.isActive,
-  createdAt: run.createdAt,
-  finishedAt: run.finishedAt,
-  reason: run.reason,
-});
 
 /** Read admitted Run facts without replacing a sealed Fork/Include boundary with later source state. */
 export function useNativeRuns({
@@ -67,7 +58,7 @@ export function useNativeRuns({
       JSON.stringify(
         selection?.runs
           .filter((run) => storeId && sessionId && presentableRun(run, storeId, sessionId))
-          .map(runFact) ?? [],
+          .map(nativeRunFact) ?? [],
       ),
     [selection?.runs, storeId, sessionId],
   );
@@ -283,7 +274,7 @@ export function desktopTranscript({
   messages: readonly Message[];
   runs: readonly NativeRunFact[];
   tools: readonly NativeToolMessageFact[];
-  executions?: readonly Execution[];
+  executions?: readonly NativeToolExecution[];
   storeId: string;
   sessionId: string;
   fullReply?: (message: Message) => string | undefined;

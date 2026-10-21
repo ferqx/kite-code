@@ -6,6 +6,7 @@ import {
 import { type NativeBackgroundChild, nativeBackgroundPageBytes } from './background-bridge';
 import { readNativeBodyChunks } from './native-body-chunks';
 import type { NativeBridge } from './native-bridge';
+import { presentableRun } from './tool-messages-bridge';
 
 const decimal = (value: string) => {
   if (!/^(0|[1-9][0-9]*)$/.test(value) || BigInt(value) > 9223372036854775807n)
@@ -139,7 +140,12 @@ export async function readNativeBackgroundChild(
 ): Promise<NativeBackgroundChild> {
   const surface = input.environment ? { surface: 'environment' as const } : {};
   const previous = input.previous;
-  const incremental = !!(input.incremental && previous && input.environment);
+  const incremental = !!(
+    input.incremental &&
+    previous &&
+    input.environment &&
+    !previous.presentation?.unavailable
+  );
   if (
     previous &&
     (previous.session.id !== input.item.execution.childSessionId ||
@@ -150,8 +156,30 @@ export async function readNativeBackgroundChild(
     throw new ClientError('background_child_history_mismatch');
   let afterSeq = '0';
   if (incremental && previous) {
+    const activeRuns = new Set(
+      previous.presentation?.runs.filter((run) => run.isActive).map((run) => run.id),
+    );
+    const receiptKey = (message: NativeBackgroundChild['messages'][number], callId: string) =>
+      JSON.stringify([
+        message.originMessage?.storeId,
+        message.originMessage?.sessionId ?? message.sessionId,
+        message.originMessage ? message.originMessage.runId : message.runId,
+        callId,
+      ]);
+    const receipts = new Set(
+      previous.messages.flatMap((message) =>
+        message.role === 'tool' && message.status === 'complete' && message.toolCallId
+          ? [receiptKey(message, message.toolCallId)]
+          : [],
+      ),
+    );
     for (const message of previous.messages) {
-      if (message.status !== 'complete' || (message.outputBody && !message.outputBody.complete))
+      if (
+        (!message.originMessage && message.runId !== null && activeRuns.has(message.runId)) ||
+        message.status !== 'complete' ||
+        (message.outputBody && !message.outputBody.complete) ||
+        message.toolCalls?.some((call) => !receipts.has(receiptKey(message, call.id)))
+      )
         break;
       afterSeq = message.seq;
     }
@@ -301,6 +329,35 @@ export async function readNativeBackgroundChild(
       lastSeq = decimal(message.seq);
       messages.set(message.id, message);
     }
+    if (body.presentation) {
+      const { runs, tools, executions } = body.presentation;
+      if (
+        !Array.isArray(runs) ||
+        !Array.isArray(tools) ||
+        !Array.isArray(executions) ||
+        new Set(runs.map((run) => run.id)).size !== runs.length ||
+        new Set(tools.map((tool) => tool.messageId)).size !== tools.length ||
+        new Set(executions.map((execution) => execution.id)).size !== executions.length ||
+        runs.some((run) => !presentableRun(run, input.storeId, childId!)) ||
+        tools.some((tool) => {
+          const message = messages.get(tool.messageId);
+          return (
+            message?.role !== 'tool' ||
+            message.status !== 'complete' ||
+            message.sourceIds?.length !== 1 ||
+            message.sourceIds[0] !== tool.executionId
+          );
+        }) ||
+        executions.some(
+          (execution) =>
+            execution.kind !== 'tool' ||
+            execution.sessionId !== childId ||
+            execution.originStoreId !== input.storeId ||
+            !runs.some((run) => run.id === execution.runId),
+        )
+      )
+        throw new ClientError('background_child_history_mismatch');
+    }
     const outputs = new Set<string>();
     for (const entry of body.modelOutputs) {
       const message = messages.get(entry.messageId),
@@ -348,6 +405,20 @@ export async function readNativeBackgroundChild(
         ...previous.modelOutputs.filter((entry) => ids.has(entry.messageId)),
         ...body.modelOutputs,
       ];
+      if (body.presentation) {
+        body.presentation.tools = [
+          ...(previous.presentation?.tools.filter((tool) => ids.has(tool.messageId)) ?? []),
+          ...body.presentation.tools,
+        ];
+        body.presentation.runs = [
+          ...new Map([
+            ...(previous.presentation?.runs
+              .filter((run) => !run.isActive)
+              .map((run) => [run.id, run] as const) ?? []),
+            ...body.presentation.runs.map((run) => [run.id, run] as const),
+          ]).values(),
+        ];
+      }
     }
     return body;
   } finally {

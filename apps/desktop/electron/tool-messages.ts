@@ -9,6 +9,7 @@ import {
   type NativeToolRunPage,
   presentableRun,
 } from '../src/tool-messages-bridge';
+import { nativeToolMessageEligible, nativeToolMessageFact } from './tool-message-fact';
 
 type Lease = { readId: string; scope: NativeToolMessageScope; abort: AbortController };
 const object = (value: unknown): Record<string, unknown> | undefined =>
@@ -48,94 +49,6 @@ export class NativeToolMessages {
       )
     )
       throw new ClientError('native_selection_changed');
-  }
-  private callInput(message: Message, definitionId: string, scope: NativeToolMessageScope) {
-    if (!message.toolCallId) return undefined;
-    const original = source(message);
-    const calls = [...this.messages().values()].flatMap((candidate) => {
-      const origin = source(candidate);
-      return candidate.role === 'assistant' &&
-        candidate.status === 'complete' &&
-        candidate.contentFormat !== 'unsupported' &&
-        candidate.sessionId === scope.sessionId &&
-        candidate.originMessage?.storeId === message.originMessage?.storeId &&
-        origin.sessionId === original.sessionId &&
-        origin.runId === original.runId &&
-        BigInt(candidate.seq) < BigInt(message.seq)
-        ? (candidate.toolCalls ?? []).filter((call) => call.id === message.toolCallId)
-        : [];
-    });
-    if (calls.length !== 1 || calls[0]!.name !== definitionId) return undefined;
-    try {
-      return object(JSON.parse(calls[0]!.arguments));
-    } catch {
-      return undefined;
-    }
-  }
-  private target(
-    input: Record<string, unknown> | undefined,
-    definitionId: string,
-    definitionVersion: string,
-  ) {
-    if (
-      input &&
-      definitionId === 'files.list' &&
-      definitionVersion === '1' &&
-      (input.path === undefined || input.path === '')
-    )
-      return '.';
-    const key =
-      definitionId === 'shell.launch'
-        ? 'command'
-        : definitionId.startsWith('shell.')
-          ? 'shellId'
-          : definitionId === 'files.glob'
-            ? 'pattern'
-            : definitionId === 'files.search'
-              ? 'text'
-              : definitionId.startsWith('files.')
-                ? 'path'
-                : undefined;
-    const target = key ? input?.[key] : undefined;
-    // A request target remains text; even a known Files request does not grant a file action.
-    if (typeof target !== 'string') return undefined;
-    const points = [...target];
-    return points.slice(0, 4096).join('') + (points.length > 4096 ? '…' : '');
-  }
-  private ask(input: Record<string, unknown> | undefined, content: string) {
-    let result: Record<string, unknown> | undefined;
-    try {
-      result = object(JSON.parse(content));
-    } catch {
-      return;
-    }
-    if (!result) return;
-    const questions =
-      Array.isArray(input?.questions) && input.questions.length >= 1 && input.questions.length <= 3
-        ? input.questions.flatMap((value, index) => {
-            const question = object(value);
-            return typeof question?.question === 'string' && question.question.trim()
-              ? [{ id: `q${index + 1}`, question: question.question.trim() }]
-              : [];
-          })
-        : [];
-    if (result.cancelled === true && Object.keys(result).length === 1)
-      return { questions, cancelled: true };
-    const answers = object(result.answers);
-    if (
-      Object.keys(result).length !== 2 ||
-      typeof result.answer !== 'string' ||
-      !answers ||
-      Object.entries(answers).some(
-        ([key, value]) => !/^q[1-3]$/.test(key) || typeof value !== 'string',
-      ) ||
-      !Object.keys(answers).length ||
-      (questions.length &&
-        (Object.keys(answers).length !== questions.length ||
-          questions.some((question) => !Object.hasOwn(answers, question.id))))
-    )
-      return;
-    return { questions, summary: result.answer, answers: answers as Record<string, string> };
   }
   private open(input: Extract<NativeToolMessageRequest, { messageIds: string[] }>): Lease {
     if (
@@ -410,66 +323,18 @@ export class NativeToolMessages {
         const message = this.messages().get(id);
         if (!message || message.sessionId !== scope.sessionId)
           throw new ClientError('tool_message_unavailable');
-        const origin = source(message);
-        if (
-          message.role !== 'tool' ||
-          message.status !== 'complete' ||
-          message.sourceIds?.length !== 1 ||
-          message.contentFormat === 'unsupported' ||
-          !origin.runId
-        )
-          continue;
+        if (!nativeToolMessageEligible(message)) continue;
         const execution = await this.client.getExecution(message.sourceIds[0]!, {
           signal: lease.abort.signal,
         });
         this.check(lease);
-        if (
-          execution.id !== message.sourceIds[0] ||
-          !execution.originStoreId ||
-          (message.originMessage && execution.originStoreId !== message.originMessage.storeId) ||
-          execution.sessionId !== origin.sessionId ||
-          execution.runId !== origin.runId
-        )
-          throw new ClientError('tool_message_identity_mismatch');
-        const result = object(execution.result);
-        if (
-          execution.kind !== 'tool' ||
-          !['succeeded', 'failed', 'cancelled', 'outcome_unknown'].includes(execution.status) ||
-          result?.outcome !== execution.status ||
-          result.content !== message.content
-        )
-          continue;
-        const call = this.callInput(message, execution.definitionId, scope);
-        const details = object(result.details);
-        const decisionRefresh =
-          execution.status === 'failed' &&
-          execution.authorization?.dispatched === false &&
-          details?.adapterAttempted === false &&
-          details.dispatchCommitted === false &&
-          ['context_refresh_required', 'capability_refresh_required'].includes(
-            String(details.code),
-          ) &&
-          result.content === details.code
-            ? (details.code as 'context_refresh_required' | 'capability_refresh_required')
-            : undefined;
-        entries.push({
-          messageId: message.id,
-          executionId: execution.id,
-          definitionId: execution.definitionId,
-          definitionVersion: execution.definitionVersion,
-          status: execution.status,
-          resultRevision: execution.resultRevision,
-          ...(decisionRefresh ? { decisionRefresh } : {}),
-          target: this.target(call, execution.definitionId, execution.definitionVersion),
-          ...(!message.originMessage && execution.authorization
-            ? { authorization: execution.authorization }
-            : {}),
-          ...(execution.definitionId === 'ask_user' &&
-          execution.definitionVersion === '1' &&
-          execution.status === 'succeeded'
-            ? { ask: this.ask(call, message.content) }
-            : {}),
+        const fact = nativeToolMessageFact({
+          execution,
+          message,
+          messages: this.messages().values(),
+          sessionId: scope.sessionId,
         });
+        if (fact) entries.push(fact);
       }
       await this.client.verifyConnection({ signal: lease.abort.signal });
       this.check(lease);

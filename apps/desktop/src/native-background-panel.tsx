@@ -5,6 +5,7 @@ import { readNativeBackground, readNativeBackgroundChild } from './native-backgr
 import type { NativeBridge } from './native-bridge';
 import { NativeDiagnostic, useNativeDiagnostics } from './native-diagnostics';
 import { NativeJobOutputPanel } from './native-job-output-panel';
+import { NativeModelOutputMessage } from './native-model-output-message';
 
 const safeError = (cause: unknown) => {
   const code = (cause as { code?: string; message?: string })?.code ?? (cause as Error)?.message;
@@ -471,24 +472,21 @@ function BackgroundChildPanel({
                         · {message.seq} · 轮次 {message.runId ?? '未记录'}
                       </NativeDiagnostic>
                     </small>
-                    <pre style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>
-                      {output?.output.content ?? message.content}
-                    </pre>
-                    {output?.output.reasoning && (
-                      <details>
-                        <summary>推理记录</summary>
-                        <pre style={{ whiteSpace: 'pre-wrap' }}>{output.output.reasoning}</pre>
-                      </details>
-                    )}
-                    {(output?.output.toolCalls ?? message.toolCalls)?.map((call) => (
-                      <pre key={call.id}>
-                        {diagnostics
-                          ? JSON.stringify(call, null, 2)
-                          : `${call.name}\n${call.arguments}`}
-                      </pre>
-                    ))}
-                    {output && !output.output.complete && <p>原模型输出不完整。</p>}
-                    {message.contentFormat === 'unsupported' && <p>原正文不可用。</p>}
+                    <NativeModelOutputMessage
+                      message={message}
+                      storeId={storeId}
+                      canReadRestoredOrigin
+                      verifiedSnapshot={output}
+                      showReasoning={diagnostics}
+                      onRead={
+                        output
+                          ? async ({ signal }) => {
+                              signal.throwIfAborted();
+                              return output;
+                            }
+                          : undefined
+                      }
+                    />
                   </article>
                 );
               })}

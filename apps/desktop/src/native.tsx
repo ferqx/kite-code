@@ -24,7 +24,6 @@ import {
   DialogDescription,
   DialogHeader,
   DialogTitle,
-  MessageContent,
   SessionPage,
   type SessionPageProps,
   ToolActivity,
@@ -70,7 +69,6 @@ import { useNativeInputImages } from './native-input-images';
 import { readNativeInteractionAttachment } from './native-interaction-attachment';
 import { NativeInteractionHistory } from './native-interaction-history';
 import { NativeJobOutputPanel } from './native-job-output-panel';
-import { nativePreparedMarkdown } from './native-markdown';
 import { NativeMcpSettings } from './native-mcp-settings';
 import { createNativeModelInputPort } from './native-model-input';
 import { readNativeModelOutput } from './native-model-output';
@@ -951,13 +949,9 @@ function NativeDesktopContent({
   });
   const childDetail = environment.child,
     childFacts = childDetail?.facts;
-  const childMessages = useMemo(
-    () => (childFacts ? desktopMessages(childFacts.messages) : []),
-    [childFacts],
-  );
-  const childMessagesById = useMemo(
-    () => new Map(childFacts?.messages.map((message) => [message.id, message])),
-    [childFacts],
+  const displayMessages = useMemo(
+    () => (childDetail ? (childFacts?.messages ?? []) : messages),
+    [childDetail, childFacts, messages],
   );
   const childOutputsById = useMemo(
     () => new Map(childFacts?.modelOutputs.map((output) => [output.messageId, output.snapshot])),
@@ -992,8 +986,22 @@ function NativeDesktopContent({
     observationRevision: selection?.viewGeneration ?? 0,
   });
   const liveTools = useMemo(
-    () => liveToolMessages(readingParent ? state?.selection : undefined, messages),
-    [readingParent, state?.selection, messages],
+    () =>
+      liveToolMessages(
+        childDetail
+          ? childFacts?.presentation && selection
+            ? {
+                storeId: selection.storeId,
+                session: childFacts.session,
+                ...childFacts.presentation,
+              }
+            : undefined
+          : readingParent
+            ? state?.selection
+            : undefined,
+        displayMessages,
+      ),
+    [childDetail, childFacts, selection, readingParent, state?.selection, displayMessages],
   );
   const runMessages = useNativeRuns({
     bridge,
@@ -1641,42 +1649,42 @@ function NativeDesktopContent({
             ))),
     );
   // biome-ignore lint/correctness/useExhaustiveDependencies: The revision invalidates the current-view body map after verified reads and reader disposal.
-  const freshTranscript = useMemo(
-    () =>
-      !readingParent
-        ? { messages: [] }
-        : selection
-          ? desktopTranscript({
-              messages,
-              runs: runMessages.runs,
-              compressionProgress:
-                !selection.viewLoading && !selection.permissionUnavailable
-                  ? selection.compressionProgress
-                  : undefined,
-              tools: toolMessages.entries,
-              executions: selection.executions,
-              storeId: selection.storeId,
-              sessionId: selection.session.id,
-              fullReply: (message) => {
-                const body = verifiedReplyBodies.current.get(
-                  JSON.stringify([replyDisplayScope, message.id]),
-                );
-                return body?.identity === nativeReplyKey(replyDisplayScope, message)
-                  ? body.text
-                  : undefined;
-              },
-            })
-          : { messages: desktopMessages(messages) },
-    [
-      readingParent,
-      messages,
-      runMessages.runs,
-      toolMessages.entries,
-      selection,
-      replyDisplayScope,
-      verifiedReplyRevision,
-    ],
-  );
+  const freshTranscript = useMemo(() => {
+    if (!readingParent && !childDetail) return { messages: [] };
+    if (!selection) return { messages: desktopMessages(displayMessages) };
+    return desktopTranscript({
+      messages: displayMessages,
+      runs: childDetail ? (childFacts?.presentation?.runs ?? []) : runMessages.runs,
+      tools: childDetail ? (childFacts?.presentation?.tools ?? []) : toolMessages.entries,
+      executions: childDetail ? childFacts?.presentation?.executions : selection.executions,
+      compressionProgress:
+        !childDetail && !selection.viewLoading && !selection.permissionUnavailable
+          ? selection.compressionProgress
+          : undefined,
+      storeId: selection.storeId,
+      sessionId: childDetail ? childDetail.sessionId : selection.session.id,
+      fullReply: (message) => {
+        if (childDetail) return childOutputsById.get(message.id)?.output.content;
+        const body = verifiedReplyBodies.current.get(
+          JSON.stringify([replyDisplayScope, message.id]),
+        );
+        return body?.identity === nativeReplyKey(replyDisplayScope, message)
+          ? body.text
+          : undefined;
+      },
+    });
+  }, [
+    readingParent,
+    childDetail,
+    childFacts,
+    childOutputsById,
+    displayMessages,
+    runMessages.runs,
+    toolMessages.entries,
+    selection,
+    replyDisplayScope,
+    verifiedReplyRevision,
+  ]);
   const transcript = transcriptDisplay.current.project({
     bridge,
     boundary: JSON.stringify([state?.generation, directory?.storeId ?? selection?.storeId]),
@@ -1690,8 +1698,8 @@ function NativeDesktopContent({
             state?.historyEpoch ?? 0,
           ])
         : undefined,
-    messages,
-    replies: messages.map((message) =>
+    messages: displayMessages,
+    replies: displayMessages.map((message) =>
       verifiedReplyBodies.current.get(JSON.stringify([replyDisplayScope, message.id])),
     ),
     transcript: freshTranscript,
@@ -1710,51 +1718,8 @@ function NativeDesktopContent({
   });
   const messageModels = useMemo(() => {
     const models = preparing ? [] : [...transcript.messages];
-    for (const entry of liveTools) {
-      const run = runMessages.runs.find(
-        (run) =>
-          run.id === entry.execution.runId &&
-          run.isActive &&
-          run.originStoreId === selection?.storeId &&
-          run.sessionId === selection?.session.id,
-      );
-      const approvals =
-        selection?.interactions.filter(
-          (card) =>
-            card.kind === 'approval' &&
-            card.state === 'pending' &&
-            card.originStoreId === selection.storeId &&
-            card.sessionId === entry.execution.sessionId &&
-            card.runId === entry.execution.runId &&
-            card.executionId === entry.execution.id &&
-            card.definitionId === entry.execution.definitionId &&
-            card.definitionVersion === entry.execution.definitionVersion,
-        ) ?? [];
-      models.push({
-        ...entry.message,
-        ...(run && selection
-          ? {
-              turnId: JSON.stringify([
-                'native-run',
-                selection.storeId,
-                selection.session.id,
-                run.id,
-              ]),
-            }
-          : {}),
-        ...(approvals.length === 1
-          ? {
-              approval: {
-                state: 'awaiting_user' as const,
-                source: 'user' as const,
-                interactionId: approvals[0]!.id,
-                reason: entry.execution.authorization?.review?.reason ?? undefined,
-              },
-            }
-          : {}),
-      });
-    }
-    if (firstVisible && !firstSaved)
+    models.push(...liveTools.map((entry) => entry.message));
+    if (!childDetail && firstVisible && !firstSaved)
       models.unshift({
         id: firstSubmission.commandId,
         role: 'user',
@@ -1773,17 +1738,16 @@ function NativeDesktopContent({
     return groupNativeToolMessages(models);
   }, [
     preparing,
+    childDetail,
     transcript.messages,
     liveTools,
-    runMessages.runs,
-    selection,
     firstVisible,
     firstSaved,
     firstSubmission,
   ]);
   const messagesById = useMemo(
-    () => new Map(messages.map((message) => [message.id, message])),
-    [messages],
+    () => new Map(displayMessages.map((message) => [message.id, message])),
+    [displayMessages],
   );
   const interactionCards =
     selection && state
@@ -2555,34 +2519,7 @@ function NativeDesktopContent({
     },
   });
   const renderNativeMessage: NonNullable<SessionPageProps['renderMessageContent']> = (model) => {
-    if (childDetail) {
-      const message = childMessagesById.get(model.id),
-        snapshot = childOutputsById.get(model.id);
-      return message ? (
-        <NativeModelOutputMessage
-          message={message}
-          storeId={selection!.storeId}
-          canReadRestoredOrigin
-          verifiedSnapshot={snapshot}
-          renderText={
-            message.contentFormat === 'unsupported'
-              ? undefined
-              : (text, verified) => (
-                  <MessageContent text={text} prepared={nativePreparedMarkdown(verified, text)} />
-                )
-          }
-          onRead={
-            snapshot
-              ? async ({ signal }) => {
-                  signal.throwIfAborted();
-                  return snapshot;
-                }
-              : undefined
-          }
-        />
-      ) : null;
-    }
-    if (firstVisible && !firstSaved && model.id === firstSubmission.commandId)
+    if (!childDetail && firstVisible && !firstSaved && model.id === firstSubmission.commandId)
       return (
         <>
           {!!firstSubmission.files?.length && (
@@ -2609,11 +2546,15 @@ function NativeDesktopContent({
       );
     const message = messagesById.get(model.id);
     if (!message || !selection || !state) return null;
+    const snapshot = childDetail ? childOutputsById.get(model.id) : undefined;
     const openable =
-      !selection.viewLoading && historyState.phase === 'complete' && !directory?.unavailable;
+      !childDetail &&
+      !selection.viewLoading &&
+      historyState.phase === 'complete' &&
+      !directory?.unavailable;
     return (
       <>
-        {(!!message.images?.length || !!message.files?.length) && (
+        {!childDetail && (!!message.images?.length || !!message.files?.length) && (
           <NativeUserImages
             bridge={bridge}
             previews={imageDrafts.previews}
@@ -2628,66 +2569,72 @@ function NativeDesktopContent({
           key={JSON.stringify([
             state.generation,
             selection.storeId,
-            selection.session.id,
+            childDetail?.sessionId ?? selection.session.id,
             message.id,
           ])}
           message={message}
           storeId={selection.storeId}
           canReadRestoredOrigin
-          renderText={
-            message.contentFormat === 'unsupported'
+          verifiedSnapshot={snapshot}
+          openFile={
+            childDetail
               ? undefined
-              : (text, verified) => (
-                  <MessageContent
-                    text={text}
-                    prepared={nativePreparedMarkdown(verified, text)}
-                    openFile={(path) => {
-                      if (!openable || selected.current !== selection.session.id) return;
-                      void report(() =>
-                        bridge.request({
-                          method: 'messageFile.open',
-                          generation: state.generation,
-                          viewSelection: selection.viewSelection ?? selection.viewGeneration,
-                          historyEpoch: state.historyEpoch ?? 0,
-                          messageId: message.id,
-                          path,
-                          editor,
-                        }),
-                      );
-                    }}
-                  />
-                )
-          }
-          onContent={(text) => {
-            const key = JSON.stringify([replyDisplayScope, message.id]);
-            const before = verifiedReplyBodies.current.get(key),
-              identity = nativeReplyKey(replyDisplayScope, message);
-            if (text === undefined) verifiedReplyBodies.current.delete(key);
-            else verifiedReplyBodies.current.set(key, { identity, text });
-            if (before?.text !== text || (before && before.identity !== identity))
-              renderVerifiedReply((value) => value + 1);
-          }}
-          onRead={
-            selection.canReadModelOutput
-              ? async ({ sessionId, executionId, signal }) => {
-                  const current = state.generation,
-                    nonce = viewIntent.current;
-                  return readNativeModelOutput({
-                    bridge,
-                    generation: current,
-                    expectedStoreId: selection.storeId,
-                    sessionId,
-                    viewSessionId: selection.session.id,
-                    messageId: message.id,
-                    executionId,
-                    signal,
-                    isCurrent: () =>
-                      generation.current === current &&
-                      viewIntent.current === nonce &&
-                      selected.current === selection.session.id,
-                  });
+              : (path) => {
+                  if (!openable || selected.current !== selection.session.id) return;
+                  void report(() =>
+                    bridge.request({
+                      method: 'messageFile.open',
+                      generation: state.generation,
+                      viewSelection: selection.viewSelection ?? selection.viewGeneration,
+                      historyEpoch: state.historyEpoch ?? 0,
+                      messageId: message.id,
+                      path,
+                      editor,
+                    }),
+                  );
                 }
-              : undefined
+          }
+          onContent={
+            childDetail
+              ? undefined
+              : (text) => {
+                  const key = JSON.stringify([replyDisplayScope, message.id]);
+                  const before = verifiedReplyBodies.current.get(key),
+                    identity = nativeReplyKey(replyDisplayScope, message);
+                  if (text === undefined) verifiedReplyBodies.current.delete(key);
+                  else verifiedReplyBodies.current.set(key, { identity, text });
+                  if (before?.text !== text || (before && before.identity !== identity))
+                    renderVerifiedReply((value) => value + 1);
+                }
+          }
+          onRead={
+            childDetail
+              ? snapshot
+                ? async ({ signal }) => {
+                    signal.throwIfAborted();
+                    return snapshot;
+                  }
+                : undefined
+              : selection.canReadModelOutput
+                ? async ({ sessionId, executionId, signal }) => {
+                    const current = state.generation,
+                      nonce = viewIntent.current;
+                    return readNativeModelOutput({
+                      bridge,
+                      generation: current,
+                      expectedStoreId: selection.storeId,
+                      sessionId,
+                      viewSessionId: selection.session.id,
+                      messageId: message.id,
+                      executionId,
+                      signal,
+                      isCurrent: () =>
+                        generation.current === current &&
+                        viewIntent.current === nonce &&
+                        selected.current === selection.session.id,
+                    });
+                  }
+                : undefined
           }
         />
       </>
@@ -2697,14 +2644,17 @@ function NativeDesktopContent({
     group,
     controls,
   ) => {
+    const displayTools = childDetail
+      ? (childFacts?.presentation?.tools ?? [])
+      : toolMessages.entries;
+    const displayTargets = childDetail ? [] : fileTargets.entries;
     const unverified = new Set(
       group
         .filter(
           (model) =>
-            childDetail ||
-            (!toolMessages.entries.some((entry) => entry.messageId === model.id) &&
-              !fileTargets.entries.some((entry) => entry.messageId === model.id) &&
-              !liveTools.some((entry) => entry.message.id === model.id)),
+            !displayTools.some((entry) => entry.messageId === model.id) &&
+            !displayTargets.some((entry) => entry.messageId === model.id) &&
+            !liveTools.some((entry) => entry.message.id === model.id),
         )
         .map((model) => model.id),
     );
@@ -2712,7 +2662,11 @@ function NativeDesktopContent({
       const live = liveTools.find((entry) => entry.message.id === model.id);
       const status = !live
         ? undefined
-        : selection?.viewLoading || selection?.permissionUnavailable
+        : (
+              childDetail
+                ? !!childDetail.error
+                : selection?.viewLoading || selection?.permissionUnavailable
+            )
           ? '上次确认状态'
           : live.execution.cancelRequestedAt !== null
             ? '已请求停止，等待执行结果。'
@@ -2779,7 +2733,7 @@ function NativeDesktopContent({
       );
     }
     const models = group.map((model) => {
-      const target = fileTargets.entries.find((entry) => entry.messageId === model.id);
+      const target = displayTargets.find((entry) => entry.messageId === model.id);
       return target?.path && target.operation
         ? {
             ...model,
@@ -2800,8 +2754,9 @@ function NativeDesktopContent({
           messages={models}
           renderChildren={() => null}
           openFileForMessage={(model) => {
-            const target = fileTargets.entries.find((entry) => entry.messageId === model.id);
+            const target = displayTargets.find((entry) => entry.messageId === model.id);
             if (
+              childDetail ||
               !selection ||
               !state ||
               selection.viewLoading ||
@@ -2941,19 +2896,20 @@ function NativeDesktopContent({
             ? !!childFacts && !childDetail.loading
             : historyState.phase === 'complete' && !historyMetadataLoading),
       }}
-      messages={childDetail ? childMessages : messageModels}
+      messages={messageModels}
       renderMessageContent={renderNativeMessage}
       renderToolActivity={renderNativeTools}
       turnActivity={
-        childDetail || preparing || !transcript.turnActivity
+        preparing || !transcript.turnActivity
           ? undefined
           : {
               ...transcript.turnActivity,
               // Read admission is revoked during scans; the last observed Run still owns its label.
-              unavailable:
-                executionUnconfirmed ||
-                historyState.phase === 'unavailable' ||
-                !!(state?.selection?.permissionUnavailable && !state.selection.viewLoading),
+              unavailable: childDetail
+                ? !!childDetail.error || childFacts?.presentation?.unavailable
+                : executionUnconfirmed ||
+                  historyState.phase === 'unavailable' ||
+                  !!(state?.selection?.permissionUnavailable && !state.selection.viewLoading),
             }
       }
       notices={
@@ -3267,6 +3223,11 @@ function NativeDesktopContent({
               ))}
           {childDetail ? (
             <>
+              {childFacts?.presentation?.unavailable && (
+                <p role="alert">
+                  无法核对子会话轮次或工具状态，已保留原消息；可刷新子日志重新核对。
+                </p>
+              )}
               {childDetail.error && (
                 <p role="alert">
                   子日志读取失败：{childDetail.error}。

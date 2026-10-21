@@ -2,7 +2,11 @@ import type { Execution, Message } from '@kite-ai/client';
 import { type Message as DesktopMessage, ToolActivity, ToolRow } from '@kite-ai/ui/desktop';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { NativeBridge, NativeSelection } from './native-bridge';
-import type { NativeToolMessageFact } from './tool-messages-bridge';
+import type {
+  NativeRunFact,
+  NativeToolExecution,
+  NativeToolMessageFact,
+} from './tool-messages-bridge';
 
 const labels: Record<string, readonly [readonly string[], string]> = {
   'files.read': [['2', '3', '4'], '读取'],
@@ -185,9 +189,17 @@ export function NativeToolMessage({ message }: { message: DesktopMessage }) {
   );
 }
 export function liveToolMessages(
-  selection: NativeSelection | undefined,
+  selection:
+    | {
+        storeId: string;
+        session: { id: string };
+        runs: readonly NativeRunFact[];
+        executions: readonly NativeToolExecution[];
+        interactions?: NativeSelection['interactions'];
+      }
+    | undefined,
   messages: readonly Message[],
-): { message: DesktopMessage; execution: Execution }[] {
+): { message: DesktopMessage; execution: NativeToolExecution }[] {
   if (!selection) return [];
   const runIds = new Set(selection.runs.filter((run) => run.isActive).map((run) => run.id));
   const results = new Set(
@@ -217,10 +229,53 @@ export function liveToolMessages(
         runIds.has(execution.runId) &&
         !results.has(JSON.stringify([execution.id, execution.runId])),
     )
-    .map((execution) => ({
-      execution,
-      message: desktopToolMessage(execution, `native-execution:${execution.id}`, ''),
-    }));
+    .map((execution) => {
+      const run = selection.runs.find(
+        (run) =>
+          run.id === execution.runId &&
+          run.isActive &&
+          run.originStoreId === selection.storeId &&
+          run.sessionId === selection.session.id,
+      );
+      const approvals =
+        selection.interactions?.filter(
+          (card) =>
+            card.kind === 'approval' &&
+            card.state === 'pending' &&
+            card.originStoreId === selection.storeId &&
+            card.sessionId === execution.sessionId &&
+            card.runId === execution.runId &&
+            card.executionId === execution.id &&
+            card.definitionId === execution.definitionId &&
+            card.definitionVersion === execution.definitionVersion,
+        ) ?? [];
+      return {
+        execution,
+        message: {
+          ...desktopToolMessage(execution, `native-execution:${execution.id}`, ''),
+          ...(run
+            ? {
+                turnId: JSON.stringify([
+                  'native-run',
+                  selection.storeId,
+                  selection.session.id,
+                  run.id,
+                ]),
+              }
+            : {}),
+          ...(approvals.length === 1
+            ? {
+                approval: {
+                  state: 'awaiting_user' as const,
+                  source: 'user' as const,
+                  interactionId: approvals[0]!.id,
+                  reason: execution.authorization?.review?.reason ?? undefined,
+                },
+              }
+            : {}),
+        },
+      };
+    });
 }
 export function NativeLiveToolMessage({
   message,
@@ -228,7 +283,7 @@ export function NativeLiveToolMessage({
   unavailable,
 }: {
   message: DesktopMessage;
-  execution: Execution;
+  execution: NativeToolExecution;
   unavailable: boolean;
 }) {
   return (

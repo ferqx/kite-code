@@ -7,6 +7,11 @@ import type {
   Session,
 } from '@kite-ai/client';
 import type { NativeJobOutputPage } from './job-output-bridge';
+import type {
+  NativeRunFact,
+  NativeToolExecution,
+  NativeToolMessageFact,
+} from './tool-messages-bridge';
 
 export const nativeBackgroundPageBytes = 524288;
 export type NativeBackgroundRequest = (
@@ -62,6 +67,13 @@ export type NativeBackgroundPage = {
   entries: BackgroundExecutionItem[];
 };
 export type NativeBackgroundChild = {
+  /** Verified conversation presentation, separate from the exact carrier's control observations. */
+  presentation?: {
+    unavailable?: true;
+    runs: NativeRunFact[];
+    tools: NativeToolMessageFact[];
+    executions: NativeToolExecution[];
+  };
   control?: {
     runs: Pick<
       Run,

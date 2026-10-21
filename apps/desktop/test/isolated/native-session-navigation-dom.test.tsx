@@ -1,8 +1,9 @@
 import { expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
-import type { Message } from '@kite-ai/client';
+import type { Message, ModelOutputSnapshot } from '@kite-ai/client';
 import { JSDOM } from 'jsdom';
 import { act, useLayoutEffect } from 'react';
+import type { NativeBackgroundChild } from '../../src/background-bridge';
 import type {
   NativeBridge,
   NativeDirectory,
@@ -79,6 +80,10 @@ function fixture(activeParent = false, pendingToolMetadata = false) {
     : [parentMessage];
   const metadataReleases = new Set<() => void>();
   let metadataPending = pendingToolMetadata;
+  let childBody:
+    | Pick<NativeBackgroundChild, 'messages' | 'modelOutputs' | 'presentation' | 'upperSeq'>
+    | undefined;
+  const copied: string[] = [];
   let childText = 'Child prefix',
     revision = 1,
     holdNext = false,
@@ -296,6 +301,7 @@ function fixture(activeParent = false, pendingToolMetadata = false) {
                 },
               ],
               modelOutputs: [],
+              ...childBody,
             }),
           );
           bytes.set(request.readId, body);
@@ -341,7 +347,14 @@ function fixture(activeParent = false, pendingToolMetadata = false) {
       }
     },
   };
-  Object.defineProperty(dom.window, 'kiteNative', { value: bridge });
+  Object.defineProperty(dom.window, 'kiteNative', {
+    value: {
+      ...bridge,
+      writeClipboardText: async (text: string) => {
+        copied.push(text);
+      },
+    },
+  });
   const host = dom.window.document.getElementById('root')!,
     root = createRoot(host);
   // WebCrypto completes on a later event-loop turn; wait for the actual committed text.
@@ -361,6 +374,11 @@ function fixture(activeParent = false, pendingToolMetadata = false) {
     });
   return {
     host,
+    copied,
+    childBody: (body: NonNullable<typeof childBody>) => {
+      childBody = body;
+      item.childSession!.nextSeq = body.upperSeq;
+    },
     waitForText,
     requests,
     listeners,
@@ -1343,5 +1361,215 @@ test('NativeDesktop marks an unowned active Run unverified without changing dura
     } finally {
       await f.close();
     }
+  }
+});
+
+test('a completed child uses the shared collapsed process, concise exploration and verified final reply while preserving its parent', async () => {
+  const f = fixture();
+  const reply = '# Child final answer\n\n**Verified** child reply 雪🙂\r\n',
+    output = { complete: true, content: reply, reasoning: '', toolCalls: [] },
+    encoded = JSON.stringify(output);
+  const snapshot: ModelOutputSnapshot = {
+    storeId: 'store',
+    sessionId: 'child',
+    rootSessionId: 'root',
+    runId: 'finished-child-run',
+    executionId: 'child-model',
+    originCommandId: 'child-work',
+    rootWorkCommandId: 'start',
+    rootWorkSeq: '1',
+    attempt: 1,
+    status: 'succeeded',
+    snapshotCursor: '1',
+    bodyHash: createHash('sha256').update(encoded).digest('hex'),
+    bodyBytes: String(Buffer.byteLength(encoded)),
+    contentBytes: String(Buffer.byteLength(reply)),
+    reasoningBytes: '0',
+    output,
+  };
+  const rows: Message[] = [
+    { id: 'child-user', role: 'user', content: 'Inspect the child files' },
+    {
+      id: 'child-explanation',
+      role: 'assistant',
+      content: 'Child process explanation',
+      toolCalls: [
+        { id: 'read-a', name: 'files.read', arguments: '{"path":"child-a.txt"}' },
+        { id: 'read-b', name: 'files.read', arguments: '{"path":"child-b.txt"}' },
+      ],
+    },
+    {
+      id: 'child-read-a',
+      role: 'tool',
+      content: 'RAW_CHILD_RECEIPT_A',
+      sourceIds: ['child-tool-a'],
+      toolCallId: 'read-a',
+    },
+    {
+      id: 'child-read-b',
+      role: 'tool',
+      content: 'RAW_CHILD_RECEIPT_B',
+      sourceIds: ['child-tool-b'],
+      toolCallId: 'read-b',
+    },
+    {
+      id: 'child-final',
+      role: 'assistant',
+      content: 'CHILD_REPLY_PREVIEW',
+      outputBody: {
+        kind: 'model_output',
+        executionId: snapshot.executionId,
+        complete: true,
+        contentBytes: snapshot.contentBytes,
+        reasoningBytes: '0',
+        toolCallCount: 0,
+      },
+    },
+  ].map((row, index) => ({
+    ...row,
+    sessionId: 'child',
+    runId: snapshot.runId,
+    seq: String(index + 1),
+    status: 'complete',
+  })) as Message[];
+  f.childBody({
+    upperSeq: '5',
+    messages: rows,
+    modelOutputs: [{ messageId: 'child-final', snapshot }],
+    presentation: {
+      runs: [
+        {
+          id: snapshot.runId!,
+          sessionId: 'child',
+          originStoreId: 'store',
+          status: 'completed',
+          isActive: false,
+          createdAt: 1000,
+          finishedAt: 3000,
+          reason: null,
+        },
+      ],
+      tools: ['a', 'b'].map((suffix) => ({
+        messageId: `child-read-${suffix}`,
+        executionId: `child-tool-${suffix}`,
+        definitionId: 'files.read',
+        definitionVersion: '3',
+        status: 'succeeded',
+        resultRevision: '1',
+        target: `child-${suffix}.txt`,
+      })),
+      executions: [],
+    },
+  });
+  try {
+    await f.render();
+    await f.click('Original');
+    await f.edit('Keep the parent draft exactly 雪🙂');
+    const parentNode = [...f.host.querySelectorAll('p')].find(
+      (node) => node.textContent === 'Parent transcript',
+    );
+    expect(parentNode).toBeDefined();
+    const beforeChild = f.requests.length;
+    await f.open();
+    await f.waitForText('Child final answer');
+    const final = f.host.querySelector('.agent-turn-final');
+    expect(final).not.toBeNull();
+    expect(final!.querySelector('h1')!.textContent).toBe('Child final answer');
+    expect(final!.querySelector('strong')!.textContent).toBe('Verified');
+    expect(final!.textContent).not.toContain('Child process explanation');
+    expect(f.host.textContent).not.toContain('CHILD_REPLY_PREVIEW');
+    expect(f.host.textContent).not.toContain('Parent transcript');
+    expect(f.host.querySelector('[role="textbox"][contenteditable]')).toBeNull();
+    const process = f.host.querySelector<HTMLButtonElement>('.agent-turn-summary')!;
+    expect(process.getAttribute('aria-expanded')).toBe('false');
+    expect(f.host.querySelector('[aria-label="复制本轮Agent回复"]')).not.toBeNull();
+    await f.click('复制本轮Agent回复');
+    expect(f.copied).toEqual([reply]);
+    await act(async () => process.click());
+    expect(f.host.textContent).toContain('Child process explanation');
+    const exploration = f.host.querySelector<HTMLButtonElement>('button.tool-activity-summary')!;
+    expect(exploration).not.toBeNull();
+    expect(exploration.textContent).toContain('2');
+    await act(async () => exploration.click());
+    expect(f.host.querySelectorAll('.tool-activity-steps .tool-activity-step')).toHaveLength(2);
+    expect(f.host.textContent).toContain('child-a.txt');
+    expect(f.host.textContent).toContain('child-b.txt');
+    expect(f.host.textContent).toContain('读取');
+    expect(f.host.textContent).not.toContain('状态待核对');
+    expect(f.host.textContent).not.toContain('RAW_CHILD_RECEIPT_A');
+    expect(f.host.textContent).not.toContain('RAW_CHILD_RECEIPT_B');
+    expect(f.host.querySelectorAll('button.file-link')).toHaveLength(0);
+    expect(f.host.querySelectorAll('.composer-attachments')).toHaveLength(0);
+    const childRequests = f.requests.slice(beforeChild);
+    expect(
+      childRequests.filter(
+        (request) =>
+          request.method.startsWith('toolMessages.') ||
+          request.method.startsWith('fileTargets.') ||
+          request.method === 'messages',
+      ),
+    ).toHaveLength(0);
+    expect(
+      childRequests.filter(
+        (request) =>
+          /^(input|permission|interaction|messageFile)\./.test(request.method) &&
+          !request.method.endsWith('.read'),
+      ),
+    ).toHaveLength(0);
+    await f.click('返回主会话');
+    await f.waitForText('Parent transcript');
+    expect(f.host.contains(parentNode!)).toBe(true);
+    expect(promptValue(f.host.querySelector('[role="textbox"][contenteditable]'))).toBe(
+      'Keep the parent draft exactly 雪🙂',
+    );
+  } finally {
+    await f.close();
+  }
+});
+
+test('child metadata failure keeps its verified transcript readable and an explicit refresh restores presentation', async () => {
+  const f = fixture();
+  const body = {
+    upperSeq: '1',
+    messages: [
+      {
+        id: 'readable-child',
+        sessionId: 'child',
+        runId: null,
+        seq: '1',
+        role: 'assistant' as const,
+        status: 'complete' as const,
+        content: 'Verified child text while metadata is unavailable',
+      },
+    ],
+    modelOutputs: [],
+    presentation: { runs: [], tools: [], executions: [] },
+  };
+  f.childBody({ ...body, presentation: { ...body.presentation, unavailable: true } });
+  try {
+    await f.render();
+    await f.click('Original');
+    await f.open();
+    await f.waitForText(body.messages[0]!.content);
+    expect(f.host.textContent).toContain(body.messages[0]!.content);
+    expect(f.host.querySelector('[role="alert"]')?.textContent).toContain(
+      '无法核对子会话轮次或工具状态',
+    );
+    expect(f.host.textContent).not.toContain('子日志读取失败');
+    f.childBody(body);
+    await f.click('刷新子日志');
+    for (let attempt = 0; attempt < 50 && f.host.querySelector('[role="alert"]'); attempt++)
+      await act(async () => {
+        await new Promise<void>((resolve) => setTimeout(resolve, 0));
+      });
+    expect(f.host.querySelector('[role="alert"]')).toBeNull();
+    expect(f.host.textContent).toContain(body.messages[0]!.content);
+    expect(
+      f.requests.some(
+        (request) => request.method === 'caller.submit' || request.method === 'submit',
+      ),
+    ).toBe(false);
+  } finally {
+    await f.close();
   }
 });

@@ -1,6 +1,12 @@
 import { expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
-import type { BackgroundExecutionItem, ExecutionOutputPage } from '@kite-ai/client';
+import {
+  type BackgroundExecutionItem,
+  canonicalModelBody,
+  type ExecutionOutputPage,
+  type Message,
+  type ModelOutputSnapshot,
+} from '@kite-ai/client';
 import { JSDOM } from 'jsdom';
 import { act, type ReactNode, useState } from 'react';
 import { createRoot } from 'react-dom/client';
@@ -74,6 +80,212 @@ const click = (host: HTMLElement, name: string) =>
   act(async () => {
     [...host.querySelectorAll('button')].find((button) => button.textContent === name)!.click();
   });
+
+test('diagnostic child log uses the shared Markdown and verified Model output reader without adding writes or body reads', async () =>
+  fixture(async (host, render) => {
+    const item = backgroundItem(1, true),
+      calls: NativeRequest[] = [];
+    const output = {
+      complete: true,
+      content: '# Verified full reply\n\n**Full body** 🙂',
+      reasoning: 'Diagnostic reasoning only',
+      toolCalls: [{ id: 'call', name: 'files.read', arguments: '{"path":"a.ts"}' }],
+    };
+    const snapshot: ModelOutputSnapshot = {
+      storeId: 'store',
+      sessionId: item.childSession!.id,
+      rootSessionId: item.rootSession.id,
+      runId: item.childRun!.id,
+      executionId: 'model-complete',
+      originCommandId: 'command',
+      rootWorkCommandId: 'command',
+      rootWorkSeq: '1',
+      attempt: 1,
+      status: 'succeeded',
+      bodyHash: createHash('sha256').update(canonicalModelBody(output)).digest('hex'),
+      bodyBytes: String(Buffer.byteLength(canonicalModelBody(output))),
+      contentBytes: String(Buffer.byteLength(output.content)),
+      reasoningBytes: String(Buffer.byteLength(output.reasoning)),
+      snapshotCursor: '1',
+      output,
+    };
+    const base = {
+      sessionId: item.childSession!.id,
+      role: 'assistant' as const,
+      status: 'complete' as const,
+      contentFormat: 'plain' as const,
+      runId: item.childRun!.id,
+    };
+    const prefix = {
+      complete: false,
+      content: '**Recorded prefix**',
+      reasoning: '',
+      toolCalls: [],
+    };
+    const prefixSnapshot: ModelOutputSnapshot = {
+      ...snapshot,
+      executionId: 'model-prefix',
+      status: 'cancelled',
+      bodyHash: createHash('sha256').update(canonicalModelBody(prefix)).digest('hex'),
+      bodyBytes: String(Buffer.byteLength(canonicalModelBody(prefix))),
+      contentBytes: String(Buffer.byteLength(prefix.content)),
+      reasoningBytes: '0',
+      output: prefix,
+    };
+    const messages = [
+      { ...base, id: 'markdown', seq: '1', content: '**Ordinary Markdown**' },
+      {
+        ...base,
+        id: 'complete',
+        seq: '2',
+        content: 'Preview only',
+        outputBody: {
+          kind: 'model_output',
+          executionId: snapshot.executionId,
+          complete: true,
+          contentBytes: snapshot.contentBytes,
+          reasoningBytes: snapshot.reasoningBytes,
+          toolCallCount: 1,
+        },
+      },
+      {
+        ...base,
+        id: 'unsupported',
+        seq: '3',
+        contentFormat: 'unsupported',
+        content: '<script>untrusted()</script> **Unsupported preview**',
+      },
+      {
+        ...base,
+        id: 'prefix',
+        seq: '4',
+        status: 'incomplete',
+        content: 'Prefix preview',
+        outputBody: {
+          kind: 'model_output',
+          executionId: prefixSnapshot.executionId,
+          complete: false,
+          contentBytes: prefixSnapshot.contentBytes,
+          reasoningBytes: '0',
+          toolCallCount: 0,
+        },
+      },
+    ] as Message[];
+    const body = Buffer.from(
+      JSON.stringify({
+        item,
+        session: item.childSession,
+        upperSeq: '4',
+        messages,
+        modelOutputs: [
+          { messageId: 'complete', snapshot },
+          { messageId: 'prefix', snapshot: prefixSnapshot },
+        ],
+      }),
+    );
+    let finish!: () => void;
+    let readFinished = new Promise<void>((resolve) => {
+      finish = resolve;
+    });
+    const bridge: NativeBridge = {
+      watch: () => () => undefined,
+      request: async (request) => {
+        calls.push(request);
+        if (request.method === 'background.open')
+          return {
+            kind: 'background.page',
+            viewGeneration: 1,
+            storeId: 'store',
+            readId: request.readId,
+            observationId: 1,
+            startIndex: 0,
+            nextIndex: 1,
+            total: 1,
+            complete: true,
+            entries: [item],
+          };
+        if (request.method === 'background.child.open')
+          return {
+            kind: 'background.child.opened',
+            viewGeneration: 1,
+            storeId: 'store',
+            readId: request.readId,
+            observationId: 1,
+            executionId: item.execution.id,
+            childSessionId: item.childSession!.id,
+            childRunId: item.childRun!.id,
+            wireBytes: String(body.length),
+            wireHash: createHash('sha256').update(body).digest('hex'),
+          };
+        if (request.method === 'background.child.read')
+          return {
+            kind: 'background.child.chunk',
+            readId: request.readId,
+            offset: 0,
+            nextOffset: body.length,
+            eof: true,
+            data: body.toString('base64'),
+          };
+        if (request.method === 'background.child.close') finish();
+        if (!['background.close', 'background.child.close'].includes(request.method))
+          throw Error('unexpected_operation');
+        return null;
+      },
+    };
+    await render(bridge, undefined, true);
+    await click(host, '打开后台总览');
+    await act(async () => {
+      [...host.querySelectorAll('button')]
+        .find((button) => button.textContent === '读取完整子日志')!
+        .click();
+      await readFinished;
+    });
+    expect(host.textContent).toContain('已完整读取子会话日志');
+    const ordinary = host.querySelector('[aria-label="子消息 · markdown"]')!,
+      complete = host.querySelector<HTMLElement>('[aria-label="子消息 · complete"]')!,
+      unsupported = host.querySelector('[aria-label="子消息 · unsupported"]')!;
+    expect(ordinary.querySelector('strong')?.textContent).toBe('Ordinary Markdown');
+    expect(complete.querySelector('.model-output-message')).not.toBeNull();
+    expect(complete.querySelector('h1')?.textContent).toBe('Verified full reply');
+    expect(complete.querySelector('strong')?.textContent).toBe('Full body');
+    expect(complete.textContent).toContain('Complete Model output');
+    expect(complete.textContent).toContain('Recorded reasoning');
+    expect(complete.textContent).toContain('Original complete Tool calls');
+    expect(complete.textContent).toContain('Diagnostic reasoning only');
+    expect(unsupported.textContent).toContain('Unsupported content format');
+    expect(unsupported.querySelector('script')).toBeNull();
+    const incomplete = host.querySelector('[aria-label="子消息 · prefix"]')!;
+    expect(incomplete.textContent).toContain('Complete recorded incomplete prefix');
+    expect(incomplete.querySelector('strong')?.textContent).toBe('Recorded prefix');
+    expect(incomplete.textContent).not.toContain('Original complete Tool calls');
+    expect(host.querySelectorAll('article > pre')).toHaveLength(0);
+    const bodyReads = calls.filter((call) => call.method === 'background.child.read').length;
+    await click(complete, 'Close full Model output');
+    expect(complete.textContent).toContain('Preview only');
+    expect(complete.textContent).not.toContain('Diagnostic reasoning only');
+    await click(complete, 'Read complete recorded Model output');
+    expect(complete.querySelector('h1')?.textContent).toBe('Verified full reply');
+    expect(calls.filter((call) => call.method === 'background.child.read')).toHaveLength(bodyReads);
+    await render(bridge);
+    expect(host.textContent).not.toContain('Diagnostic reasoning only');
+    expect(host.textContent).not.toContain('Recorded reasoning');
+    expect(host.querySelector('.model-output-message h1')?.textContent).toBe('Verified full reply');
+    readFinished = new Promise<void>((resolve) => {
+      finish = resolve;
+    });
+    await act(async () => {
+      [...host.querySelectorAll('button')]
+        .find((button) => button.textContent === '刷新子日志')!
+        .click();
+      await readFinished;
+    });
+    expect(calls.filter((call) => call.method === 'background.child.open')).toHaveLength(2);
+    await click(host, '关闭子日志');
+    expect(host.querySelector('.model-output-message')).toBeNull();
+    expect(calls.every((call) => call.method.startsWith('background.'))).toBe(true);
+    expect(calls.some((call) => call.method === 'background.stop')).toBe(false);
+    expect(calls.filter((call) => call.method === 'background.child.close')).toHaveLength(2);
+  }));
 
 test('retained environment card separates Shell and named children, exact stop, read-only child return and stale presentation', async () => {
   const shell = backgroundShellItem(1),

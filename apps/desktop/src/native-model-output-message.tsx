@@ -1,9 +1,19 @@
 import { ModelOutputMessage, type ModelOutputMessageProps } from '@kite-ai/ui';
-import { useConversationReadActive, useConversationResourceRetention } from '@kite-ai/ui/desktop';
+import {
+  MessageContent,
+  useConversationReadActive,
+  useConversationResourceRetention,
+} from '@kite-ai/ui/desktop';
 import { useCallback, useEffect, useRef } from 'react';
+import { useNativeDiagnostics } from './native-diagnostics';
+import { nativePreparedMarkdown } from './native-markdown';
 
 /** Keep verified copy display with its cached DOM; current activity still gates every action. */
-export function NativeModelOutputMessage(props: ModelOutputMessageProps) {
+export function NativeModelOutputMessage({
+  openFile,
+  ...props
+}: ModelOutputMessageProps & { openFile?: (path: string) => void }) {
+  const diagnostics = useNativeDiagnostics();
   const readActive = useConversationReadActive();
   const retention = useConversationResourceRetention();
   const current = useRef({ readActive, onContent: props.onContent });
@@ -33,5 +43,24 @@ export function NativeModelOutputMessage(props: ModelOutputMessageProps) {
     },
     [retention],
   );
-  return <ModelOutputMessage {...props} onContent={publishDisplay} readActive={readActive} />;
+  return (
+    <ModelOutputMessage
+      {...props}
+      renderText={
+        props.message.contentFormat === 'unsupported'
+          ? undefined
+          : (props.renderText ??
+            ((text, verified) => (
+              <MessageContent
+                text={text}
+                prepared={nativePreparedMarkdown(verified, text)}
+                openFile={openFile}
+              />
+            )))
+      }
+      showReasoning={diagnostics && props.showReasoning === true}
+      onContent={publishDisplay}
+      readActive={readActive}
+    />
+  );
 }

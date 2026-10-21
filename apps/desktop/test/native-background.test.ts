@@ -4,6 +4,8 @@ import type {
   AgentClient,
   BackgroundExecutionItem,
   Command,
+  Execution,
+  Message,
   ModelOutputSnapshot,
 } from '@kite-ai/client';
 import { NativeBackground } from '../electron/background';
@@ -62,6 +64,12 @@ function fixture(items: BackgroundExecutionItem[]) {
             childSessionId: null,
           }
         : items.find((item) => item.execution.id === id)!.execution;
+    },
+    getRun: async (id: string) => {
+      calls.push(`GET run ${id}`);
+      const run = items.flatMap((item) => [item.run, item.childRun]).find((run) => run?.id === id);
+      if (!run) throw Error('fixture_run_missing');
+      return structuredClone(run);
     },
     listExecutionOutput: async (
       id: string,
@@ -529,7 +537,7 @@ test('live child tail reuses only stable verified rows and resets on context rep
     {
       id: 'stable',
       sessionId: 'child',
-      runId: 'original-child-run',
+      runId: 'completed-child-run',
       seq: '1',
       status: 'complete' as const,
       role: 'user' as const,
@@ -547,6 +555,10 @@ test('live child tail reuses only stable verified rows and resets on context rep
   ];
   let context = 'context';
   const after: string[] = [];
+  f.port.getRun = async (id) => {
+    expect(id).toBe('completed-child-run');
+    return { ...item.childRun!, id, status: 'completed', isActive: false, finishedAt: 2 };
+  };
   f.port.getView = async () =>
     ({
       storeId: 'store',
@@ -921,6 +933,335 @@ for (const boundary of ['identity', 'scope'] as const) {
     } finally {
       f.release();
       await pending;
+      f.environment.release();
+      f.main.release();
+    }
+  });
+}
+
+for (const corruption of ['none', 'foreign run', 'foreign tool'] as const) {
+  test(`environment child presentation reuses exact historical Run and tool facts with ${corruption}`, async () => {
+    const item = backgroundItem(1, true),
+      f = fixture([item]);
+    const oldRun = {
+      ...item.childRun!,
+      id: 'old-child-run',
+      status: 'completed' as const,
+      isActive: false,
+      finishedAt: 2,
+    };
+    const currentRun = { ...item.childRun!, carrierExecutionId: item.execution.id };
+    const askContent = JSON.stringify({ answer: 'Use blue', answers: { q1: 'blue' } });
+    const rows: Message[] = [
+      {
+        id: 'old-request',
+        seq: '1',
+        role: 'assistant',
+        content: '',
+        toolCalls: [{ id: 'list-call', name: 'files.list', arguments: '{}' }],
+      },
+      {
+        id: 'old-result',
+        seq: '2',
+        role: 'tool',
+        content: 'listed original directory',
+        toolCallId: 'list-call',
+        sourceIds: ['list-execution'],
+      },
+      {
+        id: 'question-request',
+        seq: '3',
+        role: 'assistant',
+        content: '',
+        toolCalls: [
+          {
+            id: 'ask-call',
+            name: 'ask_user',
+            arguments: JSON.stringify({ questions: [{ question: 'Which color?' }] }),
+          },
+        ],
+      },
+      {
+        id: 'question-result',
+        seq: '4',
+        role: 'tool',
+        content: askContent,
+        toolCallId: 'ask-call',
+        sourceIds: ['ask-execution'],
+      },
+    ].map((row, index) => ({
+      ...row,
+      sessionId: 'child',
+      runId: index < 2 ? oldRun.id : currentRun.id,
+      status: 'complete',
+    })) as Message[];
+    const tool = (id: string, runId: string, definitionId: string, content: string): Execution =>
+      ({
+        ...item.execution,
+        id,
+        sessionId: 'child',
+        runId,
+        kind: 'tool',
+        definitionId,
+        definitionVersion: '1',
+        status: 'succeeded',
+        resultRevision: '7',
+        result: { outcome: 'succeeded', content },
+      }) as Execution;
+    const listExecution = tool('list-execution', oldRun.id, 'files.list', rows[1]!.content),
+      askExecution = tool('ask-execution', currentRun.id, 'ask_user', askContent);
+    f.port.getView = async () =>
+      ({
+        storeId: 'store',
+        session: { ...item.childSession!, nextSeq: '4' },
+        runs: [currentRun],
+        executions: [askExecution],
+      }) as never;
+    f.port.listMessages = async (_id, options) =>
+      structuredClone(rows.filter((row) => BigInt(row.seq) > BigInt(options!.afterSeq!)));
+    const getExecution = f.port.getExecution;
+    f.port.getExecution = async (id, options) => {
+      const execution =
+        id === listExecution.id ? listExecution : id === askExecution.id ? askExecution : undefined;
+      if (!execution) return getExecution(id, options);
+      f.calls.push(`GET execution ${id}`);
+      return structuredClone(
+        corruption === 'foreign tool' && id === listExecution.id
+          ? { ...execution, sessionId: 'another-child' }
+          : execution,
+      );
+    };
+    const getRun = f.port.getRun;
+    f.port.getRun = async (id, options) => {
+      if (id !== oldRun.id) return getRun(id, options);
+      f.calls.push(`GET run ${id}`);
+      return structuredClone(
+        corruption === 'foreign run' ? { ...oldRun, sessionId: 'another-child' } : oldRun,
+      );
+    };
+    try {
+      const page = await f.environment.open('presentation-directory');
+      f.environment.close(page.readId);
+      const reading = readNativeBackgroundChild({
+        bridge: f.bridge,
+        generation: 1,
+        storeId: 'store',
+        observationId: page.observationId,
+        item,
+        signal: new AbortController().signal,
+        isCurrent: () => true,
+        environment: { rootSessionId: 'root', viewSelection: 1 },
+      });
+      if (corruption !== 'none') {
+        await expect(reading).rejects.toMatchObject({
+          code:
+            corruption === 'foreign run'
+              ? 'background_child_history_mismatch'
+              : 'tool_message_identity_mismatch',
+        });
+      } else {
+        const body = await reading;
+        expect(body.session.id).toBe('child');
+        expect(body.session.rootSessionId).toBe('root');
+        expect(body.item.execution.id).toBe(item.execution.id);
+        expect(body.presentation!.runs.map((run) => run.id).sort()).toEqual(
+          [oldRun.id, currentRun.id].sort(),
+        );
+        expect(body.presentation!.runs.find((run) => run.id === oldRun.id)!.status).toBe(
+          'completed',
+        );
+        expect(body.presentation!.runs.find((run) => run.id === currentRun.id)!.status).toBe(
+          'running',
+        );
+        expect(body.presentation!.tools).toMatchObject([
+          {
+            messageId: 'old-result',
+            executionId: listExecution.id,
+            definitionId: 'files.list',
+            definitionVersion: '1',
+            status: 'succeeded',
+            resultRevision: '7',
+            target: '.',
+          },
+          {
+            messageId: 'question-result',
+            executionId: askExecution.id,
+            definitionId: 'ask_user',
+            ask: {
+              questions: [{ id: 'q1', question: 'Which color?' }],
+              summary: 'Use blue',
+              answers: { q1: 'blue' },
+            },
+          },
+        ]);
+        expect(body.presentation!.executions).toHaveLength(1);
+        expect(body.presentation!.executions[0]!.id).toBe(askExecution.id);
+        expect(body.presentation!.executions[0]).not.toHaveProperty('result');
+        expect(body.presentation!.executions[0]).not.toHaveProperty('childSessionId');
+        const refreshedDirectory = await f.environment.open('presentation-refresh');
+        f.environment.close(refreshedDirectory.readId);
+        const refreshed = await readNativeBackgroundChild({
+          bridge: f.bridge,
+          generation: 1,
+          storeId: 'store',
+          observationId: refreshedDirectory.observationId,
+          item,
+          signal: new AbortController().signal,
+          isCurrent: () => true,
+          environment: { rootSessionId: 'root', viewSelection: 1 },
+          incremental: true,
+          previous: body,
+        });
+        expect(refreshed.messages).toEqual(body.messages);
+        expect(refreshed.presentation!.tools).toEqual(body.presentation!.tools);
+        expect(refreshed.presentation!.runs.map((run) => run.id).sort()).toEqual(
+          [oldRun.id, currentRun.id].sort(),
+        );
+      }
+      expect(f.calls.filter((call) => call === `GET run ${oldRun.id}`)).toHaveLength(1);
+      expect(f.calls.every((call) => call.startsWith('GET'))).toBe(true);
+    } finally {
+      f.environment.release();
+      f.main.release();
+    }
+  });
+}
+
+for (const scenario of [
+  'run unavailable',
+  'tool unavailable',
+  'active Run retires',
+  'incomplete Tool',
+] as const) {
+  test(`child presentation preserves readable history and recalibrates ${scenario}`, async () => {
+    const item = backgroundItem(1, true),
+      f = fixture([item]);
+    let first = true;
+    const run = {
+      ...item.childRun!,
+      status: scenario === 'active Run retires' ? 'running' : 'completed',
+      isActive: scenario === 'active Run retires',
+      finishedAt: scenario === 'active Run retires' ? null : 2,
+    };
+    const rows: Message[] = [
+      { id: 'user', role: 'user', content: 'Read the original child file' },
+      {
+        id: 'request',
+        role: 'assistant',
+        content: 'Original request',
+        toolCalls: [
+          { id: 'read-call', name: 'files.read', arguments: '{"path":"original-child.txt"}' },
+        ],
+      },
+      {
+        id: 'receipt',
+        role: 'tool',
+        content: 'Original file result',
+        sourceIds: ['read-execution'],
+        toolCallId: 'read-call',
+      },
+    ].map((row, index) => ({
+      ...row,
+      sessionId: 'child',
+      runId: run.id,
+      seq: String(index + 1),
+      status: scenario === 'incomplete Tool' && index === 2 ? 'incomplete' : 'complete',
+    })) as Message[];
+    const execution = {
+      ...item.execution,
+      id: 'read-execution',
+      sessionId: 'child',
+      runId: run.id,
+      kind: 'tool',
+      definitionId: 'files.read',
+      definitionVersion: '3',
+      status: 'succeeded',
+      resultRevision: '1',
+      result: { outcome: 'succeeded', content: rows[2]!.content },
+    } as Execution;
+    f.port.getView = async () =>
+      ({
+        storeId: 'store',
+        session: { ...item.childSession!, nextSeq: '3' },
+        runs: scenario === 'active Run retires' && first ? [structuredClone(run)] : [],
+        executions: [],
+      }) as never;
+    const cursors: string[] = [];
+    f.port.listMessages = async (_id, options) => {
+      cursors.push(options!.afterSeq!);
+      return structuredClone(rows.filter((row) => BigInt(row.seq) > BigInt(options!.afterSeq!)));
+    };
+    f.port.getRun = async (id) => {
+      f.calls.push(`GET run ${id}`);
+      if (first && scenario === 'run unavailable') throw Error('temporary_run_read_failure');
+      expect(id).toBe(run.id);
+      return structuredClone(run) as never;
+    };
+    const getExecution = f.port.getExecution;
+    f.port.getExecution = async (id, options) => {
+      if (id !== execution.id) return getExecution(id, options);
+      f.calls.push(`GET execution ${id}`);
+      if (first && scenario === 'tool unavailable') throw Error('temporary_execution_read_failure');
+      return structuredClone(execution);
+    };
+    const read = async (previous?: Awaited<ReturnType<typeof readNativeBackgroundChild>>) => {
+      const directory = await f.environment.open(crypto.randomUUID());
+      f.environment.close(directory.readId);
+      return readNativeBackgroundChild({
+        bridge: f.bridge,
+        generation: 1,
+        storeId: 'store',
+        observationId: directory.observationId,
+        item,
+        signal: new AbortController().signal,
+        isCurrent: () => true,
+        environment: { rootSessionId: 'root', viewSelection: 1 },
+        incremental: !!previous,
+        previous,
+      });
+    };
+    try {
+      const initial = await read();
+      expect(initial.messages.map((message) => message.content)).toEqual(
+        rows.map((message) => message.content),
+      );
+      if (scenario.endsWith('unavailable')) {
+        expect(initial.presentation!.unavailable).toBe(true);
+        expect(initial.presentation!.tools).toEqual([]);
+      } else if (scenario === 'active Run retires') {
+        expect(initial.presentation!.runs[0]).toMatchObject({
+          id: run.id,
+          isActive: true,
+          status: 'running',
+        });
+      } else {
+        expect(initial.messages[2]!.status).toBe('incomplete');
+        expect(initial.presentation!.tools).toEqual([]);
+      }
+      first = false;
+      run.status = 'completed';
+      run.isActive = false;
+      run.finishedAt = 2;
+      rows[2]!.status = 'complete';
+      const recovered = await read(initial);
+      expect(recovered.messages).toEqual(rows);
+      expect(recovered.presentation!.unavailable).toBeUndefined();
+      expect(recovered.presentation!.runs).toMatchObject([
+        { id: run.id, status: 'completed', isActive: false },
+      ]);
+      expect(recovered.presentation!.tools).toMatchObject([
+        {
+          messageId: 'receipt',
+          executionId: execution.id,
+          status: 'succeeded',
+          target: 'original-child.txt',
+        },
+      ]);
+      // Failed metadata forces a full read. Active Runs and unresolved requests remain in the tail.
+      expect(cursors).toEqual(['0', scenario === 'incomplete Tool' ? '1' : '0']);
+      expect(f.calls.filter((call) => call === `GET run ${run.id}`).length).toBeGreaterThan(0);
+      expect(f.calls.every((call) => call.startsWith('GET'))).toBe(true);
+    } finally {
       f.environment.release();
       f.main.release();
     }

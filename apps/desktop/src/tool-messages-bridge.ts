@@ -91,6 +91,56 @@ export type NativeRunFact = Pick<
   | 'reason'
 >;
 
+/** Display facts only; no result body, request payload, or control capability. */
+export type NativeToolExecution = Pick<
+  Execution,
+  | 'id'
+  | 'originStoreId'
+  | 'sessionId'
+  | 'runId'
+  | 'kind'
+  | 'definitionId'
+  | 'definitionVersion'
+  | 'status'
+  | 'resultRevision'
+  | 'authorization'
+  | 'cancelRequestedAt'
+>;
+
+export function nativeRunFact(run: NativeRunFact): NativeRunFact {
+  const { id, originStoreId, sessionId, status, isActive, createdAt, finishedAt, reason } = run;
+  return { id, originStoreId, sessionId, status, isActive, createdAt, finishedAt, reason };
+}
+
+export function nativeToolExecution(execution: NativeToolExecution): NativeToolExecution {
+  const {
+    id,
+    originStoreId,
+    sessionId,
+    runId,
+    kind,
+    definitionId,
+    definitionVersion,
+    status,
+    resultRevision,
+    authorization,
+    cancelRequestedAt,
+  } = execution;
+  return {
+    id,
+    originStoreId,
+    sessionId,
+    runId,
+    kind,
+    definitionId,
+    definitionVersion,
+    status,
+    resultRevision,
+    authorization,
+    cancelRequestedAt,
+  };
+}
+
 /** Restored terminal facts retain their original Store; they grant no active authority. */
 export function presentableRun(run: NativeRunFact, storeId: string, sessionId: string): boolean {
   return (
