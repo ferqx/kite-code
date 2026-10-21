@@ -9,7 +9,7 @@ import { createRuntime } from '@kite-ai/agent';
 import { createArtifactStore } from '@kite-ai/agent/artifacts';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import { createFixedModel, type ModelEvent } from '@kite-ai/ai';
-import { createClient } from '@kite-ai/client';
+import { createClient, readOrdinaryCommandApplication } from '@kite-ai/client';
 import { startService } from '@kite-ai/service';
 import {
   compressContext,
@@ -115,7 +115,11 @@ test('CLI public management commits once after physical lost response; original 
     const end = Date.now() + 10000;
     while (Date.now() < end) {
       const fact = await client.getCommand(commandId);
-      if (fact.status === 'applied' || fact.status === 'rejected') return fact;
+      if (fact.status === 'rejected') return fact;
+      if (fact.status === 'applied') {
+        const application = await readOrdinaryCommandApplication(client, fact);
+        if (application?.run && !application.run.isActive) return fact;
+      }
       await Bun.sleep(2);
     }
     throw Error('fixture_wait');
@@ -158,10 +162,20 @@ test('CLI public management commits once after physical lost response; original 
         expectedStoreId,
         commandId: `run-${i}`,
         kind: 'run.start',
-        content: `user ${i}`,
+        content: i === 0 ? `user ${i}` : `New task: user ${i}`,
       });
-      expect((await until(`run-${i}`)).status).toBe('applied');
+      const command = await until(`run-${i}`);
+      expect(command.status).toBe('applied');
+      const application = await readOrdinaryCommandApplication(client, command);
+      expect(application?.observation).toBeNull();
+      expect(application?.run).toMatchObject({
+        status: 'completed',
+        isActive: false,
+        originCommandId: application!.sourceCommandId,
+        rootWorkCommandId: command.id,
+      });
     }
+    expect(model.requests).toHaveLength(101);
     const finishDeadline = Date.now() + 5000;
     while ((await client.getView('s')).runs.some((run) => run.isActive)) {
       if (Date.now() > finishDeadline) throw Error('original_model_not_terminal');
@@ -177,6 +191,7 @@ test('CLI public management commits once after physical lost response; original 
     expect(context.messages).toHaveLength(202);
     expect(context.messages.at(-1)?.seq).toBe(view.session.nextSeq);
     expect(context.nextAfterSeq).toBeNull();
+    expect(model.requests).toHaveLength(101);
     const fork = await forkSession(
       's',
       {
@@ -258,6 +273,7 @@ test('CLI public management commits once after physical lost response; original 
     const branchExecutions = await store.listExecutions('fork');
     expect(branchExecutions.filter((execution) => execution.kind !== 'model')).toHaveLength(0);
     expect(branchExecutions.filter((execution) => execution.kind === 'model')).toHaveLength(1);
+    expect(model.requests).toHaveLength(102);
   } finally {
     client.disposeNetwork();
     for (const socket of sockets) socket.destroy();

@@ -47,7 +47,7 @@ test.skipIf(process.platform !== 'darwin')(
     const observation = openNativeShellObservation(),
       trees = new Map<string, NativeShellProcessIdentity[]>(),
       processes = new Map<number, NativeShellProcessIdentity>(),
-      calls: { marker: string; tools: number }[] = [],
+      calls: { marker: string; content: string; tools: number }[] = [],
       controlEvidence: unknown[] = [];
     let driver: Bun.Subprocess<'ignore', 'pipe', 'pipe'> | undefined,
       stdout: Promise<string> | undefined,
@@ -232,17 +232,19 @@ test.skipIf(process.platform !== 'darwin')(
             .find(
               (message) =>
                 message.role === 'user' &&
-                ['HOST_FIRST', 'HOST_SERVICE'].includes(String(message.content)),
+                ['HOST_FIRST', 'New task: HOST_SERVICE'].includes(String(message.content)),
             ),
-          marker =
+          content =
             typeof latest?.content === 'string' ? latest.content : JSON.stringify(latest?.content),
           start = body.messages.lastIndexOf(latest!),
           tools = body.messages
             .slice(start + 1)
             .filter((message) => message.role === 'tool').length;
-        if (!['HOST_FIRST', 'HOST_SERVICE'].includes(marker))
+        if (!['HOST_FIRST', 'New task: HOST_SERVICE'].includes(content))
           return new Response('unexpected_model_input', { status: 500 });
-        calls.push({ marker, tools });
+        // Preserve the complete human instruction while keeping protocol call IDs stable.
+        const marker = content === 'HOST_FIRST' ? 'HOST_FIRST' : 'HOST_SERVICE';
+        calls.push({ marker, content, tools });
         const delta = tools
           ? { content: `${marker}_DONE` }
           : {
@@ -430,6 +432,12 @@ test.skipIf(process.platform !== 'darwin')(
       );
       expect(readFileSync(effects, 'utf8').trim().split('\n').sort()).toEqual(labels.sort());
       expect(calls).toHaveLength(4);
+      expect(calls.map(({ marker, content }) => ({ marker, content }))).toEqual([
+        { marker: 'HOST_FIRST', content: 'HOST_FIRST' },
+        { marker: 'HOST_FIRST', content: 'HOST_FIRST' },
+        { marker: 'HOST_SERVICE', content: 'New task: HOST_SERVICE' },
+        { marker: 'HOST_SERVICE', content: 'New task: HOST_SERVICE' },
+      ]);
       expect(trees.size).toBe(3);
       expect(
         controlEvidence.filter(

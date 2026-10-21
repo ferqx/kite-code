@@ -166,7 +166,7 @@ export async function recoveryProfile(
       JSON.stringify({
         modelId: 'fixed',
         // This recovery case owns one Files effect; defaults merge by tool ID.
-        tools: ordinaryHostConfigurationDefaults(true).tools.map(({ id }) => ({
+        tools: ordinaryHostConfigurationDefaults(true, true).tools.map(({ id }) => ({
           id,
           enabled: id === 'ask_user' || id === 'files.write',
           ...(id === 'files.write' ? { definitionVersion: '2' } : {}),

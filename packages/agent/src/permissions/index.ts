@@ -335,5 +335,5 @@ export {
   requireFileRestoreApproval,
   requireWorkflowApproval,
 } from './constraints';
-
+export { intersectPermissionPolicies } from './inheritance';
 export { createPermissionReviewContextReader } from './review-context';

@@ -82,6 +82,7 @@ async function faultChild(root: string, packetPath: string) {
     },
   }));
   const { createRuntime } = await import('@kite-ai/agent');
+  const { initializeLivePermissionFixture } = await import('../fixtures/live-permission-fixture');
   const { createArtifactStore } = await import('@kite-ai/agent/artifacts');
   const { createTemporaryCredentialBackend } = await import('@kite-ai/agent/config');
   const { selectProfile } = await import('@kite-ai/agent/profile');
@@ -175,6 +176,16 @@ async function faultChild(root: string, packetPath: string) {
       workspaceId: 'w',
       subjectId: 'owner',
       title: 'owned',
+    });
+    await initializeLivePermissionFixture({
+      runtime,
+      profile,
+      expectedStoreId: storeId,
+      subjectId: 'owner',
+      sessionId: 's',
+      workspaceId: 'w',
+      mode: 'full',
+      trusted: true,
     });
     service = await startService({
       runtime,

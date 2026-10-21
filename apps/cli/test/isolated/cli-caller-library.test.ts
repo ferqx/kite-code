@@ -30,7 +30,7 @@ test('actual library run requires durable host port; original new Work request s
         kind: 'run.start' as const,
         expectedStoreId: f.storeId,
         commandId: 'library-work',
-        content: '新Work完整🙂e\u0301\r\n',
+        content: '新任务：新Work完整🙂e\u0301\r\n',
       },
       options = {
         client: warm.client,
@@ -44,8 +44,23 @@ test('actual library run requires durable host port; original new Work request s
     const original = j.list()[0]!.intent;
     expect(original.request).toEqual(request);
     expect(original.draft).toBeUndefined();
-    const originalRun = (await warm.client.getCommand('library-work')).receipt as { runId: string };
-    expect((await warm.client.getRun(originalRun.runId)).originCommandId).toBe('library-work');
+    const applied = await warm.client.getCommand('library-work');
+    const originalRun = applied.receipt as {
+      runId: string;
+      businessCommandId: string;
+      humanInputCommandId: string;
+      decisionCommandId: string;
+    };
+    expect(applied.status).toBe('applied');
+    const raw = await warm.client.getCommand(originalRun.humanInputCommandId);
+    expect(raw.kind).toBe('human.input');
+    expect(raw.receipt).toMatchObject({
+      businessCommandId: originalRun.businessCommandId,
+      decisionCommandId: originalRun.decisionCommandId,
+    });
+    const business = await warm.client.getCommand(originalRun.businessCommandId);
+    expect(business.status).toBe('applied');
+    expect((await warm.client.getRun(originalRun.runId)).originCommandId).toBe(business.id);
     const calls = f.calls();
     expect(await runNonInteractive(['work', 's', JSON.stringify(request)], options)).toBe(3);
     expect(f.calls()).toBe(calls);

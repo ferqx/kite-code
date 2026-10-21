@@ -17,6 +17,7 @@ import type {
   TuiMcpSnapshot,
 } from '@kite-ai/ui/tui';
 import { privateDirectory, temporaryDirectory } from '../../../../tests/fixtures/test-filesystem';
+import { createPermissionManagement } from '../../../service/src/permission-management';
 import { createMcpConnectionRecord } from '../../host/mcp-connection-intents';
 import { openMcpConnectionJournal } from '../../host/mcp-connection-journal';
 import { createTuiMcpPort } from '../../host/tui-mcp';
@@ -249,6 +250,29 @@ async function fixture(ask = false) {
       commandId: 'create-s',
       workspaceId: 'w',
       title: 'owned',
+    });
+    // Bind the intended fixture policy to current durable root controls.
+    const permissionControl = createPermissionManagement({ runtime: runtime!, profile });
+    const identity = { expectedStoreId: storeId, subjectId: 'owned-subject' };
+    const trust = await permissionControl.readTrust({ ...identity, workspaceId: 'w' });
+    await permissionControl.setTrust({
+      ...identity,
+      workspaceId: 'w',
+      commandId: 'fixture-workspace-trust',
+      canonicalIdentity: trust.canonicalIdentity,
+      externalReadScopeDigest: trust.externalReadScopeDigest,
+      trusted: true,
+      ifRevision: trust.revision,
+    });
+    const mode = await permissionControl.readMode({ ...identity, sessionId: 's' });
+    await permissionControl.setMode({
+      ...identity,
+      sessionId: 's',
+      commandId: 'fixture-current-mode',
+      mode: ask ? 'accept_edits' : 'full',
+      makeDefault: false,
+      ifRevision: mode.revision,
+      ifDefaultRevision: mode.defaultRevision,
     });
     const directory = await createTuiMcpPort(tracked, storeId).read(
       's',

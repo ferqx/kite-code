@@ -334,12 +334,14 @@ test('fresh full candidate formal wrappers run, reuse daemon Web and shared 80x2
       const user = [...body.messages]
         .reverse()
         .find(
-          (m) => m.role === 'user' && ['formal source task', 'formal TUI task'].includes(m.content),
+          (m) =>
+            m.role === 'user' &&
+            ['formal source task', 'New task: formal TUI task'].includes(m.content),
         )?.content;
       if (user === undefined) return new Response('unexpected original work', { status: 500 });
-      expect(['formal source task', 'formal TUI task'].includes(user)).toBe(true);
+      expect(['formal source task', 'New task: formal TUI task'].includes(user)).toBe(true);
       calls++;
-      if (user === 'formal TUI task') {
+      if (user === 'New task: formal TUI task') {
         writeFileSync(join(root, 'tui-model-started'), 'original model waiting');
         while (!stopped && !existsSync(join(root, 'release-tui-model'))) await Bun.sleep(5);
       }
@@ -584,8 +586,8 @@ async function selectDeleteTarget(){
 try{
  await readUntil('FORMAL CLI COMPLETE',10);
  await readUntil('New Run >',10);
- action=true;await owned.key('formal TUI task');
- await readUntil('formal TUI task',10);
+ action=true;await owned.key('New task: formal TUI task');
+ await readUntil('New task: formal TUI task',10);
  await owned.key('\\r');
  await readUntil('Working',10);
  const end=Date.now()+10000;
@@ -668,6 +670,23 @@ try{
     expect(facts.runs).toHaveLength(2);
     expect(facts.runs.every((r: { status: string }) => r.status === 'completed')).toBe(true);
     expect(facts.executions).toHaveLength(2);
+    const proofDb = new Database(databasePath, { readonly: true });
+    try {
+      const tuiRun = facts.runs[1];
+      const publicCommand = proofDb
+        .query<{ request_json: string; receipt_json: string }, [string]>(
+          'SELECT request_json,receipt_json FROM command WHERE id=?',
+        )
+        .get(tuiRun.rootWorkCommandId)!;
+      expect(JSON.parse(publicCommand.request_json).content).toBe('New task: formal TUI task');
+      expect(tuiRun.originCommandId).not.toBe(tuiRun.rootWorkCommandId);
+      expect(JSON.parse(publicCommand.receipt_json)).toMatchObject({
+        runId: tuiRun.id,
+        businessCommandId: tuiRun.originCommandId,
+      });
+    } finally {
+      proofDb.close();
+    }
     expect(facts.unexpectedExecutions).toEqual([]);
     expect(facts.titleExecutions).toEqual(first.titleExecutions);
     expect(calls).toBe(2);

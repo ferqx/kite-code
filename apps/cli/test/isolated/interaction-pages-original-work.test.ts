@@ -185,7 +185,7 @@ test('actual CLI answers original second-page question while 20 unrelated earlie
       kind: 'run.start' as const,
       expectedStoreId: storeId,
       commandId: 'later-original-work',
-      content: 'question after earlier unrelated approvals',
+      content: 'New task: question after earlier unrelated approvals',
     };
     await client.startRun('s', original);
     const waiting = await observeCommand('s', original, {

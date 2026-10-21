@@ -230,7 +230,7 @@ test('unsupported fixed and custom resolver persist a rejection without model or
           commandId: kind,
           request: {
             kind,
-            content: 'text',
+            content: 'New task: text',
             extensionInputs: [],
             ...(kind === 'input.follow_up' ? { afterRunId: null, contextSelectionId } : {}),
           } as CommandRequest,
@@ -238,6 +238,7 @@ test('unsupported fixed and custom resolver persist a rejection without model or
         await runtime.submitCommand(input);
         const rejected = await runtime.waitForCommand(kind, { timeoutMs: 3000 });
         expect(rejected.status).toBe('rejected');
+        expect((rejected.request as { content: string }).content).toBe('New task: text');
         expect(JSON.stringify(rejected.receipt)).toContain('extension_inputs_unavailable');
         expect((await runtime.submitCommand(input)).requestDigest).toBe(rejected.requestDigest);
         expect(calls).toBe(0);
@@ -370,7 +371,19 @@ test('trusted generic initialization preserves original intent and seals scoped 
     expect(finished.status).toBe('applied');
     expect(modelCalls).toBe(1);
     expect(fixed.requests).toHaveLength(1);
-    expect((await f.store.getView('s')).runs[0]?.status).toBe('completed');
+    const application = finished.receipt as { runId: string; businessCommandId?: string };
+    const businessId = application.businessCommandId ?? finished.id;
+    expect(await f.store.getRun(application.runId)).toMatchObject({
+      status: 'completed',
+      originCommandId: businessId,
+    });
+    expect(await f.store.getCommand(businessId)).toMatchObject({
+      status: 'applied',
+      request: intent.request,
+    });
+    expect(
+      fixed.requests[0]!.messages.find((message) => message.sourceIds?.includes(businessId)),
+    ).toMatchObject({ content: intent.request.content, sourceIds: [businessId] });
     await runtime.submitCommand(intent);
     expect(initialized).toBe(1);
     expect(modelCalls).toBe(1);
@@ -379,12 +392,13 @@ test('trusted generic initialization preserves original intent and seals scoped 
       commandId: 'wrong-version',
       request: {
         kind: 'run.start',
-        content: 'unsupported',
+        content: 'New task: unsupported',
         extensionInputs: [{ extensionId: 'fixture', definitionVersion: '2', input: {} }],
       },
     });
     const denied = await runtime.waitForCommand('wrong-version', { timeoutMs: 3000 });
     expect(denied.status).toBe('rejected');
+    expect((denied.request as { content: string }).content).toBe('New task: unsupported');
     expect(JSON.stringify(denied.receipt)).toContain('extension_input_unavailable');
     expect(initialized).toBe(1);
     expect(modelCalls).toBe(1);

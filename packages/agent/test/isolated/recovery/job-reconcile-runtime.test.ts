@@ -24,6 +24,44 @@ async function until(check: () => Promise<boolean>) {
   }
 }
 
+async function assertExplicitBusinessWork(
+  runtime: ReturnType<typeof createRuntime>,
+  store: Awaited<ReturnType<typeof openSqliteStore>>,
+  expectedStoreId: string,
+) {
+  const original = await runtime.waitForCommand('explicit-next');
+  expect(original.status).toBe('applied');
+  const receipt = original.receipt as { runId: string; businessCommandId: string };
+  const business = (await store.getCommand(receipt.businessCommandId))!;
+  expect(business).toMatchObject({
+    status: 'applied',
+    rootWorkCommandId: original.id,
+    request: { content: (original.request as { content: string }).content },
+    receipt: { runId: receipt.runId },
+  });
+  expect(await store.getRun(receipt.runId)).toMatchObject({
+    status: 'completed',
+    originCommandId: business.id,
+    rootWorkCommandId: original.id,
+  });
+  const models = (await store.listExecutions('s')).filter(
+    (execution) => execution.runId === receipt.runId && execution.kind === 'model',
+  );
+  expect(models).toHaveLength(1);
+  expect(models[0]).toMatchObject({ status: 'succeeded', originCommandId: business.id });
+  const input = await runtime.readModelInput({
+    expectedStoreId,
+    sessionId: 's',
+    subjectId: 'owner',
+    executionId: models[0]!.id,
+  });
+  expect(input.request.messages).toContainEqual({
+    role: 'user',
+    content: (original.request as { content: string }).content,
+    sourceIds: [business.id],
+  });
+}
+
 test('SIGKILL after persisted Job reference preserves original unknown and explicitly verifies its external ledger', async () => {
   const directory = realpathSync(mkdtempSync(join(tmpdir(), 'kite-job-reconcile-kill-')));
   const child = Bun.spawn(
@@ -492,9 +530,9 @@ for (const mode of [
           sessionId: 's',
           subjectId: 'owner',
           commandId: 'explicit-next',
-          request: { kind: 'run.start', content: 'new explicit work' },
+          request: { kind: 'run.start', content: 'New task: new explicit work' },
         });
-        await runtime.waitForCommand('explicit-next');
+        await assertExplicitBusinessWork(runtime, store, expectedStoreId);
         expect(resumedModels).toBe(1);
         expect((await store.getView('s')).runs).toHaveLength(2);
         expect(await store.getCommand(input.commandId)).toEqual(originalQuery);
@@ -550,9 +588,9 @@ for (const mode of [
           sessionId: 's',
           subjectId: 'owner',
           commandId: 'explicit-next',
-          request: { kind: 'run.start', content: 'new explicit work after proof' },
+          request: { kind: 'run.start', content: 'New task: new explicit work after proof' },
         });
-        await runtime.waitForCommand('explicit-next');
+        await assertExplicitBusinessWork(runtime, store, expectedStoreId);
         expect(resumedModels).toBe(1);
         const untouched = (await store.getExecution(job.id))!;
         expect(untouched.resultAcceptance).toEqual(originalJob.resultAcceptance);

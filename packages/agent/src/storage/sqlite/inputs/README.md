@@ -2,7 +2,9 @@
 
 Closed public command kinds are `input.steer` and `input.follow_up`. Steer requires content, exact targetRunId and current contextSelectionId. Follow-up requires content, exact afterRunId (null only without a current Run), current contextSelectionId and optional modelId/reasoningEffort. Inputs belong to the public root Session; original subject is checked from the actual Session creator and steer Run command. Child public input is rejected rather than granting a second group authority. Bodies reject unexpected keys; each nonblank content is bounded at 1 MiB and never silently truncated. There is no old eight-input queue threshold.
 
-Admission preserves command ID, request digest and server sequence. Steer inherits its original Run rootWorkCommandId/seq and cannot drift to a newer Run. Follow-up is an explicit new top-level work intention with its own rootWork identity; local cancellation of the preceding Run does not expand to that new intent, while root full stop covers its accepted sequence. expectedStoreId precedes idempotency. Exact contextSelection is checked both at admission and application, and never replaced with the current branch during a late retry.
+Admission preserves command ID, request digest and server sequence. Steer inherits its original Run rootWorkCommandId/seq and cannot drift to a newer Run. The raw public follow-up remains an immutable explicit input intention; its applied business work may be an independently verified same-work continuation or a new work; local cancellation of the preceding Run does not expand to that new intent, while root full stop covers its accepted sequence. expectedStoreId precedes idempotency. Exact contextSelection is checked both at admission and application, and never replaced with the current branch during a late retry.
+
+真实公共输入允许保留全空白原文作为待澄清事实；直接私有 raw 登记仍拒绝空白，空字符串及原正文上限不变。没有有效当前指令时，模型提案不能因此生成业务决定。public/raw 已提交后，可信宿主可在解释revision捕获前只保存本会话标题元数据；它不选择工作、不准入执行，也不改变只读处理轮因果。具体原文兜底、幂等rename和手动改名保护归[命名模块](../../../business/session-title/index.ts)与[Agent owner](../../../../README.md)。
 
 follow-up 保存可信宿主的完整 Run configuration，与 root `startRun` 一致，不对配置副本单独施加 1 MiB 上限；公开输入正文与 Worker 队列背压仍遵守各自限制。重复应用已 applied 的原 Command 返回同一回执和 Run，不覆盖原配置。非 Workflow SQLite 测试覆盖超过 1 MiB 的配置、准确尾部和冷重开读取。
 
@@ -20,7 +22,51 @@ Private Agent input admission is a separate owner-only finite path. The actual d
 
 Public Runtime `listPendingInputs` checks the expected Store and rejects child Sessions with group_root_required. The trusted child Loop reads Store pending inputs directly and only sees sealed Agent-origin commands. The internal child read needed for safe checkpoints does not expand the public additional-input surface; child execution/history projections remain independently readable.
 
-活动显式结果选入复用同一输入 checkpoint：`result.include` 封准确原 Run/selection/result revision，owner-only `applyInput(kind=result_include)` 按 steer 顺序保存一条明确选入意图和低信任来源引用。列表的 steer 过滤同时观察这些定向意图；公共 child 输入仍拒绝。pending 引用不构成 selected/resultAcceptance；应用、planned Tool 配对终态、审批收束和回执同事务。精确 Run 取消覆盖它，单独取消选入不触碰原历史 Tool/Job。
+活动显式结果选入复用同一输入 checkpoint：`result.include` 封准确原 Run/selection/result revision，owner-only `applyInput(kind=result_include)` 按 steer 顺序保存一条明确选入意图和低信任来源引用。列表的 steer 过滤同时观察这些定向意图；公共 child 输入仍拒绝。pending 引用不形成新的选入或接纳；应用、planned Tool 配对终态、审批收束和回执同事务。复用已有来源也须经过该检查点，并证明原来源仍在当前所选范围；应用消息的发布序号决定新的显式读取资格，不修改原来源和自动接纳事实。精确 Run 取消覆盖它，未应用的单独取消不产生来源，已应用选入保留为历史，不触碰原 Tool/Job。
 
 
 Public root run.start and input.follow_up accept the optional string enum reasoningEffort: none|minimal|low|medium|high|xhigh|max. It remains part of the original immutable Command request and canonical digest. Steer rejects both model and effort choices; it never changes the original Run configuration. Core validates this closed intent without knowing Provider support; Service freezes supported effective settings before a new Run. [Actual HTTP selection tests](../../../../../../apps/service/test/isolated/run-model-selection.test.ts) verify original Command, wire and recovery configuration.
+
+## 真实输入与工作选择
+
+上述两个公共输入协议保留原合同。可信 Runtime 可先通过 [human-work-control owner](../human-work-control.ts) 的 `registerHumanInput` 耐久登记真实人类输入，随后由 `decideHumanInput` 保存关联决定；[私有类型](../../human-work-control.ts)不进入模型六工具，也不允许客户端自报 rootWork。`human.input` 的不可变 request 保存原文、原 selection、观察 Run、候选工作及被澄清输入，原 receipt 保存登记时的选择与 control revision。登记与 Session `control_revision` 增加同事务；待决输入只阻挡原准确候选工作的后续派发与通知接纳，不猜测取消 child。
+
+决定将原输入 ID/digest、`same_work / independent_work / unresolved`、用途、准确目标、选择变化及可信依据封为 `human.input.decision`。宿主须核实依据是当前真实指令；引用、代码、附件和 child 邮件不取得控制资格。Store 重核原文引用、原主体／Store／Session、目标、selection 和当前 revision，在同一短事务保存决定、选择、原输入应用回执及唯一派生业务 Command。进度、澄清、暂停、停止不为凑流程创建业务轮；unresolved 保持只读处理／新真实输入澄清。已封存决定不重新计算；新澄清引用旧输入，追加新决定，不改旧正文。 尚有待澄清输入、但没有已选工作时，普通纯文本不走“首个独立任务”的快速推断，先由无工具解释轮核实是否回答原待决；明确 New task 等独立意图仍按原路径处理。首条待决没有候选工作和原选择时，准确的新澄清可用 independent_work/work 准入首业务；它不能推断已有工作、执行控制或改写原封存决定。已有候选工作的澄清仍须 same_work 且目标属于原候选。
+
+当前控制观察只读取 `origin_store_id` 等于当前 Store 的选择、待决输入和最新输入，Runtime 的工作候选遵循同一边界。恢复到新 Store 的旧命令仍可读取原正文、回执与出处，但不会被当作新输入的默认工作，也不会阻挡新独立工作；同 Store 冷重开不清除原选择或待决事实。[实际 SQLite 回归](../../../../test/isolated/storage/human-work-control.test.ts)核历史只读且 cursor 不变，Service 的[真实离线 A→B 恢复](../../../../../../apps/service/test/isolated/file-checkpoint-restored-profile.test.ts)另核新工作、文件效果与独立授权。
+
+独立工作 B 的选择与 queued 业务 Command 先提交，A 新效果随最终 gate 暂缓。业务 Run 仍须等待原轮安全交接，不能创建第二个活动父 Run。同工作活动补充封为准确 steer；idle 续接封为私有 follow-up，技术 `afterRunId` 与 A 的 rootWork 分开保存。决定保留准确 A 配置，最终应用不能借最新技术前驱 B 的配置。原 input、decision 与 business Command 分别可查，Run 尚未创建时回执明确 `runId:null`。重复决定／应用查回同一 Command、Run 和 Message；提交未知时不产生替代调用。
+
+`readWorkEligibility` 为通知接纳与最终派发共用的纯 SQL helper。它读取持久选择、准确工作控制、原 selection、停止/取消边界和待决候选，返回 eligible／deferred／revoked 及准确 control revision。取消 B 不删除 B 的选择边界，也不自动回选 A； B 尚 queued 即取消时，A 仍凭原准确未取消的独立工作决定、取消前 queued 业务封存链和当前 B 选择完成技术 handoff，不因 raw 已取消而反复创建必被拒绝的 Model。该例外只收束 A，不准入 B、不改写取消或选择；原 A 取消、Rewind、unknown、未结算执行及必要结果门禁保持。单个 child 的局部 Run 取消不成为根工作或兄弟的停止事实。暂停后明确继续可恢复未消费结果的有限后续资格，停止、替换、root stop、Rewind 和 unknown 不由普通继续绕过；原结果和旧 suppressed report 仍保留历史。typed 压缩/reset 与受管 runless Action 不要求等于选中的人类工作；其原身份、停止/取消、权限及恢复门禁仍检查，unknown 继续由原执行域 gate 核实。
+
+无活动轮且需要模型解释时，`beginHumanInputProcessing` 创建一个唯一 queued 普通 Run Command，以本次解释自身因果记录，不选择 A/B。原输入保存 processing 绑定及可信宿主封存的只读 Tool ID/version；`humanInputProcessing` 在普通启动回执改写后仍可恢复该绑定。最终 SQL gate 仅允许这轮的 Model 和封存的只读 Tool，拒绝 Job、其他 Tool 及跨因果调用。处理完成不把自身 rootWork 改签 A；业务准入沿原决定交接。Runtime 仍负责模型提案解释、只读配置与业务钩子范围，Store 的封存依据不代替自然语言解释。
+
+pending 读取与处理准备之间若真实业务决定先提交，原 SQL 仍返回 `input_processing_unavailable`。Runtime 只凭准确已提交的 public/raw/decision/business 链放弃这次过期准备；核当前根 scope、原 digest、取消与 selection、状态和回执归属后，业务仍须经过原应用和最终派发校验。选择变化、取消、未封存、错误 digest 或缺失业务不取得这条恢复资格。[真实竞争回归](../../../../test/isolated/recovery/human-input-processing-race.test.ts)固定两个入口的交错，并保留原热态提案竞争与两次 SIGKILL 恢复。
+
+[实际 SQLite 回归](../../../../test/isolated/storage/human-work-control.test.ts)验证登记优先、决定 revision 竞争、B 取消不回 A、澄清与原文不变、暂停／继续／停止、真实触发器失败全回滚、跨主体／Store／范围拒绝、A 跨 B 前驱恢复准确配置，以及解释轮的 Model／只读 Tool 派发边界。测试使用受控 SQLite 与普通 Store，不声明真实模型、客户端完整交互、全部通知恢复或平台负载已通过；原公共输入的独立回归保持。
+
+`inputProcessingCommand` 从原处理 Command/Run snapshot 与 raw processing 绑定重建解释范围；输入的 Model 结果、真实观察答案与 clarification 分别保存，公开视图只投影原成功解释正文，Inspector 保留原封存 JSON。实际 Model prepared Source 仍是解释是否发生的证据。 当前 raw Source 在旧历史之后出现，JSON 解释指令仍为 system；同工作新增／更正要求与只问进度／缺失信息分开，不能把“刚才没说清”的新约束丢成无业务观察。明确 stop 在原决定事务保存准确 rootWork 取消意图，已经派发效果和 unknown 不被虚构回滚。
+
+要求重新读取或核验当前文件是新的业务 `work`，须交给准确原工作；只读限制约束解释轮自身，不能把新读取请求替换成旧回执或澄清。解释提案同时明确现有选择合同：progress/clarify/pause/stop及unresolved保持选择，continue/replace与独立工作须选择准确工作；Host仍独立重核。
+
+宿主未能直接判定当前输入时，登记同Store、同Session的真实候选集合（最多16项），不能只保存当前B而丢掉可能被指向的旧A；登记本身不选择、批准或取消工作。明确的“我指的是 A。现在继续 A。”及英文确认由同一受限解析关联唯一原待决：首句必须肯定准确候选ID，紧接的控制句须独立指向同一ID或与它一致的当前范围。分析/示例、引文、否定、问题、多个目标以及未知ID后缀不能借前句或附注里的合法ID补足目标。句末英文点保留ID边界，原有点分ID不被当成较短ID。两个原待决都匹配时仍不猜测关闭哪条。[中英Runtime闭环](../../../../test/isolated/business/task/human-work-runtime.test.ts)与[控制反例](../../../../test/isolated/business/human-input-intent.test.ts)核原文/决定不改写、B选择期间准确续A及零跨目标控制；真实模型I08/I09/I10的准确范围归[逐项live记录](../../../../../../tests/e2e/live/model/collaboration-v1.1-cases.md)。
+
+进度解释只报告上下文中已有的事实：`accepted/queued` 等历史 Tool 回执只证明当时状态；没有当前观察时必须区分最后已知事实与当前未知。没有返回报告只说明父端暂无可报告的已验证发现，不能推断 child 尚未开始、进度为零或已经完成。观察所指工作与保持选择的工作分开：问A进展、同时保持B安排时，不能因B仍被选择而将观察目标写成B。宿主对单一明确观察问句中的唯一准确ID独立核target，历史陈述/引文不取得这项依据；校验降为未决时清除原答案与澄清关联，原Model仍按事实保存。自然主题关联仍依赖模型解释，不能由准确ID回归推断全部语义已通过。真实样本的独立语义复核见[协作 live 用例](../../../../../../tests/e2e/live/model/collaboration-v1.1-cases.md)。
+
+宿主在采用模型的用途标签前，先核真实当前问句中的模糊控制目标。“是不是应该停掉其中一个？”及相应英文问句不能因被模型标为`progress`或`work`而越过未决澄清；普通“另外”前缀也不授独立任务资格。判断以去除引用后的当前分句为限，历史停止陈述加准确进度问题、以及明确新任务中的独立分析请求分别处理。后续分句否定同一控制时，不得沿前句执行；否定其他控制不撤回原准确指令。受控反例及真实双活动工作复验归上述测试入口，不据有限句式承诺任意自然语言解析。
+
+准确控制以肯定控制分句定位目标，后文的历史工作说明或工具约束不自动成为第二个控制目标；限制句中的英文“or”也不单独变成目标问句。后续实际控制必须与首句的用途、准确目标一致，确认句复用同一尾句检查；控制疑问、另一个目标、未知后缀和同用途否定仍进入未决。`current/same work`只在已证范围内回指；重述准确ID时保持大小写和完整边界，首句的current须与实际选择一致，后句须与首句已证目标一致。剥离引文不能制造原本不存在的裸Continue资格。有限中英正反例归[输入意图测试](../../../../test/isolated/business/human-input-intent.test.ts)，准确B续接且后文提及A的真实Runtime/SQLite链归[工作运行测试](../../../../test/isolated/business/task/human-work-runtime.test.ts)；这些受控证据与真实模型资格分开。
+
+明确继续已经停止或撤销的工作时，`decideHumanInput` 的最终资格检查将已知拒绝与原 raw/public/decision 链同事务封存：决定 request 保留原 `continue / select_work` 提案，决定状态为现有 `rejected`，receipt 的实际 `selectionEffect:keep`、`businessCommandId:null` 和 `human_input_rejected / work_resume_unavailable` 说明没有选择或执行业务。原 raw 变为 `decided / applicationState:rejected`，原 public Command 返回准确已拒回执、`runId:null` 和撤销原因；不再永久 pending，也不降成虚假的澄清或独立新工作。原 selection、已发生控制及报告压制事实不改，拒绝决定不进入有效 latest-control、选择和继续资格扫描。同一 invocation 只查原已拒，新的独立 B 仍可正常开始；Runtime/SDK 返回保存的 rejected Command，既有 CLI/caller 按已知拒绝收束，不新增 API 状态。
+
+继续资格最终检查若确定原工作存在未知效果，或真实执行组 guard 正在阻断，则分别封存原 `work_resume_outcome_unknown`、`execution_group_fenced` 拒绝；只捕获同步 Store 最终门明确给出的这两种拒绝，不泛化宿主或 Provider 错误。原 Execution unknown、guard 和所有安全水位保持，损坏 guard 或不可用安全读取仍按原错误失败。[Store 控制回归](../../../../test/isolated/storage/human-work-control.test.ts)使用正式 plan/dispatch/finish 的真实未知执行与完整 guard，另核替换后继续不能遮盖原 `work_replaced` 或改选旧工作。
+
+真实只读 Model 已成功解释但业务被最终拒绝时，保存其准确 observation 并正常结束这轮只读解释；不把拒绝伪装成业务成功。如果拒绝先于已准备的 Model 派发，只在原 Store 专用封存证明完整时经 `input_processing_decided` 正常收尾，Provider 零增量；准备 pending 读与最终拒绝相交时也核完整同 Store/raw digest/decision request/public 回执链再跳过过期准备。被破坏的证明及 Provider 自抛同名错误不取得该资格，实际 Model/Run 失败仍如实保留。[停止后继续拒绝回归](../../../../test/isolated/recovery/human-input-resume-rejection.test.ts)核直接拒绝、真实解释、同 key 重放、新 B、准备／派发两处交错及破坏证明负例；[Store 控制回归](../../../../test/isolated/storage/human-work-control.test.ts)另核拒绝不遮盖原停止。
+
+原输入一旦保存 `decisionCommandId`，即使状态仍为 unresolved，后续 Model 也不能重新解释或改签这条决定。无工具的解释轮仍会为 Provider 返回的无效 Tool call 保存准确 `tool_not_available` 结果，完整结算后沿普通 Loop 收尾；独立处理轮后来的提案不改写首次 clarification，活动原工作则按安全交接保存 `human_work_deferred`，不误取消 child。[真实 Runtime 回归](../../../../test/isolated/business/task/human-work-runtime.test.ts)分别核两种路径、完整 Model/Tool 配对、原选择与待决范围，以及冷读取和原 invocation 重试零新执行。[真实 SIGKILL 回归](../../../../test/isolated/recovery/human-input-processing-crash.test.ts)另在 unresolved 决定提交、Tool 尚未创建时退出；显式冷恢复只补准确失败结果和后续只读 Model，不重放原成功 Model、不追加业务效果，重复恢复和再次冷读不改原决定或水位。
+
+只读解释的初始 context 保在原 Run snapshot，每个 Model continuation 另保存该次实际 context。原成功 Model 后 control revision 变化时，不给旧提案替换版本施控；下一普通 Model 重读当前选择/候选/revision，并替换同 raw 的旧解释 Source。两次真实 SIGKILL 与热竞争由[并发恢复测试](../../../../test/isolated/recovery/human-input-processing-race.test.ts)核原模型不改、决定唯一及业务效果一次。
+
+准备解释请求与最终派发之间，准确原输入可能已被真实直接指令保存为决定。`humanInputInterpretation` 先保留原 ID/digest、Store、主体、Session、selection、活动 Run 和零 Tool 绑定校验，再核同范围已应用决定、原回执和派生业务链。证明完整时，业务 Run 返回既有 `context_refresh_required`，让 Runtime 重建当前消息及工具；旧解释零派发，原决定不重新计算，合法继续不因此使报告续轮失败。若原 Run 是准确绑定该输入的独立只读处理轮，则返回 `input_processing_decided`，因为这轮已经没有待解释的输入。Core 只在真实 `Store.markDispatching` 接点以模块私有错误记录 `dispatchCommitted:false`；Runtime 核准确失败 Model 的 scope、原绑定和这项 Core 证明后，经原 completion requirements 与 `finishRun` 正常收尾，释放后续业务，不虚构 Model 回复。取消、owner/fence、unknown 和未结算执行仍由原门禁决定；Provider 或权限回调仅抛出同名错误不取得收尾资格。
+
+缺失或冲突的决定、错误绑定及未封存输入仍拒绝为不可核实。[并发回归](../../../../test/isolated/recovery/human-input-processing-race.test.ts)通过实际 Runtime/SQLite 的准备／派发 gate 核业务刷新与独立处理轮收尾，单列取消优先、真实 Provider／派发前回调同名错误和被破坏的封存证明负例。原[默认报告整文件](../../../../../../apps/service/test/isolated/default-after-turn.test.ts)保留原等待预算及失败时的有限状态诊断；透明隔离门禁只控制原调用返回顺序，不伪造输入、决定或执行结果。

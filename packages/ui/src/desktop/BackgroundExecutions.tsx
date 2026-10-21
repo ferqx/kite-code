@@ -3,6 +3,7 @@ import { HugeiconsIcon } from '@hugeicons/react';
 import { Button } from './ui';
 
 export interface BackgroundExecutionSummary {
+  readonly activity?: string;
   readonly executionId: string;
   readonly displayName?: string;
   readonly kind: 'shell' | 'service' | 'subagent';
@@ -38,7 +39,7 @@ export interface BackgroundExecutionsProps {
     readonly sessionIdsByExecutionId: ReadonlyMap<string, string>;
     readonly loading?: boolean;
     readonly error?: string;
-    readonly onOpen: (childSessionId: string) => void;
+    readonly onOpen: (childSessionId: string, executionId?: string) => void;
     readonly onRefresh: () => void;
   };
 }
@@ -104,7 +105,7 @@ export function BackgroundExecutions({
             <li key={execution.executionId}>
               <span>{kindLabel(execution.kind)}</span>
               <code>{execution.executionId}</code>
-              <span>{statusLabel(execution.status)}</span>
+              <span>{execution.activity ?? statusLabel(execution.status)}</span>
               <span>{execution.cleanupConfirmed ? '清理已确认' : '清理未确认'}</span>
               {execution.cursor !== undefined && <span>游标 {execution.cursor}</span>}
               {onStop && !stale && execution.status === 'running' && (
@@ -176,7 +177,7 @@ function ExecutionGroup({
                       className="background-execution-detail"
                       title={execution.displayName ?? execution.executionId}
                       aria-label={`查看子 Agent 详情：${execution.displayName ?? execution.executionId}`}
-                      onClick={() => subagentDetails?.onOpen(childSessionId)}
+                      onClick={() => subagentDetails?.onOpen(childSessionId, execution.executionId)}
                     >
                       <span>{execution.displayName ?? execution.executionId}</span>
                       <HugeiconsIcon icon={ArrowRight01Icon} aria-hidden="true" />
@@ -187,7 +188,9 @@ function ExecutionGroup({
                     <code>{execution.executionId}</code>
                   )}
                 </span>
-                <span className="background-execution-status">{statusLabel(execution.status)}</span>
+                <span className="background-execution-status">
+                  {execution.activity ?? statusLabel(execution.status)}
+                </span>
                 {onStop && execution.status === 'running' && execution.canStop !== false && (
                   <Button
                     className="background-execution-stop"

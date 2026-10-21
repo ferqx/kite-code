@@ -3,6 +3,8 @@ import { canonicalJson } from '../../json';
 import type { AcceptAgentInput, InterruptAgentInput } from '../port';
 import { AgentError, type CommandRecord, type Json } from '../types';
 import { cancelWorkBody } from './cancel-operations';
+import { ensureAgent } from './child-operations';
+import { stableAgentsBody } from './child-query-operations';
 import { verifyNamespace } from './extension-operations';
 import { validateInputAdmission } from './input-operations';
 import type { SqliteOperations } from './operations';
@@ -289,5 +291,217 @@ export function interruptAgent(db: SqliteOperations, input: InterruptAgentInput)
       input.commandId,
     );
     return { ...cancelled };
+  });
+}
+
+/** The invocation lookup, exact target selection and actual mutation share this transaction. */
+export function applyAgentCommand(
+  db: SqliteOperations,
+  input: import('../agent-collaboration').ApplyAgentCommandInput,
+): import('../agent-collaboration').CollaborationCommandResult {
+  return db.tx(() => {
+    db.identity(input.expectedStoreId);
+    const body = {
+      kind: 'agent.control',
+      action: input.kind,
+      agentId: input.agentId,
+      content: input.content ?? null,
+      sourceExecutionId: input.parentExecutionId,
+    };
+    const requestDigest = digest(body);
+    const prior = db.row('SELECT * FROM command WHERE id=?', input.commandId);
+    if (prior) {
+      if (
+        prior.origin_store_id !== input.expectedStoreId ||
+        prior.session_id !== input.sessionId ||
+        prior.extension_id !== input.extensionId ||
+        prior.request_digest !== requestDigest
+      )
+        throw new AgentError('operation_conflict');
+      const receipt = JSON.parse(
+        String(prior.receipt_json),
+      ) as import('../agent-collaboration').AgentCommandReceipt;
+      return { receipt, start: receipt.mode === 'new_turn' };
+    }
+    const origin = db.active(input.owner, input.originCommandId);
+    const sender = db.row(
+      'SELECT * FROM execution WHERE id=? AND origin_command_id=? AND session_id=?',
+      input.parentExecutionId,
+      input.originCommandId,
+      input.sessionId,
+    );
+    if (
+      !sender ||
+      sender.kind !== 'tool' ||
+      sender.origin_store_id !== input.expectedStoreId ||
+      !['dispatching', 'running'].includes(String(sender.state))
+    )
+      throw new AgentError('invalid_operation_parent');
+    db.ancestors(input.owner, input.parentExecutionId);
+    verifyNamespace(db, input.extensionId, origin, input.parentExecutionId);
+    const page = stableAgentsBody(db, {
+      expectedStoreId: input.expectedStoreId,
+      sessionId: input.sessionId,
+      extensionId: input.extensionId,
+      subjectId: String(origin.subject_id),
+      agentIds: [input.agentId],
+      callerRootWorkCommandId: String(sender.root_work_command_id),
+      callerRootWorkSeq: String(sender.root_work_seq),
+    });
+    const target = page.items[0];
+    if (!target) throw new AgentError('agent_unavailable');
+    const carrier = db.row('SELECT * FROM execution WHERE id=?', target.ref.executionId!)!;
+    if (carrier.state === 'outcome_unknown') throw new AgentError('operation_needs_review');
+    const active = !['succeeded', 'failed', 'cancelled'].includes(String(carrier.state));
+    if (active && target.workRelation !== 'same_work')
+      throw new AgentError(
+        input.kind === 'interrupt' ? 'permission_denied' : 'input_target_changed',
+      );
+    let receipt: import('../agent-collaboration').AgentCommandReceipt;
+    if (input.kind === 'interrupt') {
+      if (active) {
+        cancelWorkBody(db, {
+          expectedStoreId: input.expectedStoreId,
+          commandId: `${input.commandId}-cancel`,
+          sessionId: input.sessionId,
+          subjectId: String(origin.subject_id),
+          kind: 'execution.cancel',
+          executionId: String(carrier.id),
+        });
+      }
+      receipt = {
+        accepted: true,
+        agentId: input.agentId,
+        state: target.state,
+        outcome: active ? 'cancel_requested' : 'idle',
+        ref: target.ref,
+      };
+    } else {
+      if (
+        typeof input.content !== 'string' ||
+        !input.content.trim() ||
+        Buffer.byteLength(input.content) > 1048576
+      )
+        throw new AgentError('invalid_request');
+      if (active) {
+        if (carrier.cancel_requested) throw new AgentError('input_target_stopped');
+        const content = canonicalJson({
+          kind: 'agent_message',
+          sourceSessionId: input.sessionId,
+          sourceExecutionId: input.parentExecutionId,
+          carrierExecutionId: String(carrier.id),
+          content: input.content,
+        });
+        if (target.runId) {
+          const run = db.row(
+            'SELECT * FROM run WHERE id=? AND session_id=? AND is_active=1',
+            target.runId,
+            input.agentId,
+          );
+          if (!run || run.cancel_requested) throw new AgentError('input_target_stopped');
+          const request = {
+            kind: 'input.steer',
+            targetRunId: target.runId,
+            contextSelectionId: target.contextSelectionId,
+            content,
+          };
+          const derived = {
+            expectedStoreId: input.expectedStoreId,
+            commandId: `${input.commandId}-input`,
+            sessionId: input.agentId,
+            subjectId: String(origin.subject_id),
+            request,
+          };
+          const binding = validateInputAdmission(db, derived as never, true)!;
+          db.insertCommand(derived as never, request, digest(request), 'accepted', {
+            commandId: derived.commandId,
+          });
+          db.run(
+            'UPDATE command SET input_target_run_id=?,input_context_selection_id=?,root_work_command_id=?,root_work_seq=?,agent_source_execution_id=?,agent_carrier_execution_id=? WHERE id=?',
+            binding.targetRunId,
+            binding.contextSelectionId,
+            binding.rootWorkCommandId,
+            binding.rootWorkSeq,
+            sender.id!,
+            carrier.id!,
+            derived.commandId,
+          );
+          db.event(input.agentId, derived.commandId, 'command.accepted');
+        } else {
+          const request = { kind: 'agent.queued_input', content };
+          const derived = {
+            expectedStoreId: input.expectedStoreId,
+            commandId: `${input.commandId}-input`,
+            sessionId: input.agentId,
+            subjectId: String(origin.subject_id),
+            request,
+          };
+          db.insertCommand(derived as never, request, digest(request), 'accepted', {
+            carrierId: String(carrier.id),
+          });
+          db.run(
+            'UPDATE command SET agent_source_execution_id=?,agent_carrier_execution_id=?,root_work_command_id=?,root_work_seq=? WHERE id=?',
+            sender.id!,
+            carrier.id!,
+            sender.root_work_command_id!,
+            sender.root_work_seq!,
+            derived.commandId,
+          );
+          db.event(input.agentId, derived.commandId, 'command.accepted');
+        }
+        receipt = {
+          accepted: true,
+          agentId: input.agentId,
+          mode: 'steer',
+          state: target.state,
+          ref: target.ref,
+        };
+      } else {
+        if (!target.runId) throw new AgentError('operation_needs_review');
+        const ref = ensureAgent(
+          db,
+          input,
+          false,
+          {
+            ...input,
+            previous: target.ref,
+            afterRunId: target.runId,
+            contextSelectionId: target.contextSelectionId,
+          },
+          true,
+        );
+        receipt = {
+          accepted: true,
+          agentId: input.agentId,
+          mode: 'new_turn',
+          state: 'queued',
+          ref,
+        };
+      }
+    }
+    db.insertCommand(
+      {
+        expectedStoreId: input.expectedStoreId,
+        commandId: input.commandId,
+        sessionId: input.sessionId,
+        subjectId: String(origin.subject_id),
+        request: body,
+      } as never,
+      body,
+      requestDigest,
+      'applied',
+      receipt as unknown as Json,
+    );
+    db.run(
+      'UPDATE command SET extension_id=?,agent_source_execution_id=?,agent_carrier_execution_id=?,root_work_command_id=?,root_work_seq=? WHERE id=?',
+      input.extensionId,
+      sender.id!,
+      receipt.ref.executionId!,
+      sender.root_work_command_id!,
+      sender.root_work_seq!,
+      input.commandId,
+    );
+    db.event(input.sessionId, input.commandId, 'agent.control_applied');
+    return { receipt, start: receipt.mode === 'new_turn' };
   });
 }

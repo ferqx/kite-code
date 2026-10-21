@@ -567,7 +567,25 @@ test('80x24 basic source Add and exact Remove retain independent approval, cold 
         } else if (path === '/warm-complete') {
           expect(posts()).toHaveLength(2);
           expect(new Set(posts().map((row) => row.body!.commandId)).size).toBe(2);
-          journalBytes = readFileSync(journalPath);
+          // Other saved Tool output may already be visible while this exact
+          // original lookup is still updating its local journal receipt.
+          journalBytes = await until(
+            'exact_original_source_receipts_saved',
+            async () => {
+              const bytes = readFileSync(journalPath);
+              const records = (
+                JSON.parse(bytes.toString('utf8')) as { records: unknown[] }
+              ).records.map(parseMcpSourceMutationRecord);
+              expect(records).toHaveLength(2);
+              expect(records.map((row) => row.intent.request.commandId).sort()).toEqual(
+                posts()
+                  .map((row) => row.body!.commandId!)
+                  .sort(),
+              );
+              return records.every((row) => row.phase === 'saved') ? bytes : undefined;
+            },
+            closing.signal,
+          );
           journalHash = sha(journalBytes);
           expect(
             (JSON.parse(journalBytes.toString('utf8')) as { records: unknown[] }).records,

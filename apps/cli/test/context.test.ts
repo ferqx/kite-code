@@ -142,7 +142,7 @@ test('actual paired Context rewind/include saves exact source without replay; on
             expectedStoreId,
             commandId: 'new-work',
             kind: 'run.start',
-            content: 'use selected context',
+            content: '新任务：use selected context',
           },
           options,
         )

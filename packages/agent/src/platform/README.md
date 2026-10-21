@@ -62,6 +62,8 @@ Windows 的 attached 与无 attachment 锁都只在原 `CloseHandle` 成功后�
 
 [Shell Job owner](../jobs/README.md)负责固定 launcher、Seatbelt、资产/目录新鲜度及 macOS 运行范围。私有 [owned-child port](process/darwin-owned-child.ts)保留准确原根直到真实停止证明与精确回收，所有结束入口加入同一次 closing。普通 POSIX 只监督原组、confined 固定拒绝 fork；默认宿主另由[launchd broker](process/darwin-launchd-supervisor.ts)创建独占 resource coalition，[coalition port](process/darwin-owned-coalition.ts)以原 guardian 身份、内核 task count 和原 pidversion 信号核允许 fork/setsid 的完整后代。控制秘密、父 EOF/SIGKILL、准确注册清理与实际测试范围归 Jobs owner；数值 PGID、PID 枚举或 bootout 本身不构成全树证明。冷 import 不加载 native 库，不从持久 reference 重建旧执行。
 
+owned-child的非阻塞pipe每轮通过 `readSync` 读取最多32KiB，使用同次原生异常保存的错误，避免在FFI返回和JS转换之后再取线程errno。`EAGAIN`／`EINTR`只继续原轮询，其他错误沿原helper失败收束；node:fs不接管FD的关闭或原根所有权。真实暂态错误后的errno干扰、完整双流与准确reap由[原生回归](../../test/isolated/jobs/darwin-owned-child.test.ts)验证；自然负载EPERM的历史触发源仍未知。
+
 
 共享 launchd broker 在创建原私有目录后，控制 socket 的 listen、plist 写入与 bootstrap 同属启动收尾。失败先等待控制 server 的实际关闭；尚未 attempt bootstrap 时只按原 dev／ino 清理准备目录，已 attempt 且业务尚未派发时须沿准确原 label／domain 撤销并核 `print` code 113，不能把 bootstrap 回复失败当成未登记。控制关闭或准确撤销未确认时保原目录和首次错误；业务已可能派发时不据此制造 transport `ended`。原0600私有失败记录保存有限 message／causeCode／syscall／address 和原8KiB stderr，不记录配置或秘密。[启动回归](../../test/isolated/jobs/darwin-launchd-startup.test.ts)只覆盖原 listen 拒绝与 bootstrap 回复未确认两项准备缺口；完整 MCP／Shell 和正式安装调用者的本机资格归[当前进度](../../../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-11macos-mcp-stdio-完整连接与正常退出)。
 

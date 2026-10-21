@@ -239,6 +239,8 @@ export function assertReadonlyProof(
       !c ||
       c.subject_id !== scope.subjectId ||
       c.session_id !== e.session_id ||
+      c.root_work_command_id !== e.root_work_command_id ||
+      String(c.root_work_seq) !== String(e.root_work_seq) ||
       e.root_session_id !== s.sessionId ||
       c.origin_store_id !== e.origin_store_id ||
       e.origin_store_id !== s.originStoreId ||
@@ -249,11 +251,14 @@ export function assertReadonlyProof(
       return fail();
     if (s.runId) {
       const run = db.row('SELECT * FROM run WHERE id=?', s.runId);
+      // Derived business origin and human root work are distinct immutable identities.
       if (
         !run ||
         run.session_id !== s.sessionId ||
         run.origin_store_id !== s.originStoreId ||
-        run.origin_command_id !== e.root_work_command_id
+        run.origin_command_id !== e.origin_command_id ||
+        run.root_work_command_id !== e.root_work_command_id ||
+        String(run.root_work_seq) !== String(e.root_work_seq)
       )
         return fail();
     }

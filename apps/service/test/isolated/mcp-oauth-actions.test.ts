@@ -16,6 +16,7 @@ import { createDefaultProcessConfiguration } from '../../src/configuration';
 import { startService } from '../../src/index';
 import { createMcpOAuthActions } from '../../src/mcp-oauth-actions';
 import { McpOAuthSessionError } from '../../src/mcp-oauth-session';
+import { initializeLivePermissionFixture } from '../fixtures/live-permission-fixture';
 
 const digest = 'a'.repeat(64);
 const readSet: McpSourceReadSet = {
@@ -217,6 +218,17 @@ async function fixture(
     subjectId: 'owner',
     title: 'owned',
   });
+  if (defaultHost)
+    await initializeLivePermissionFixture({
+      runtime,
+      profile,
+      expectedStoreId: storeId,
+      subjectId: 'owner',
+      sessionId: 's',
+      workspaceId: 'w',
+      mode: 'full',
+      trusted: true,
+    });
   const service = await startService({
     runtime,
     profile: {

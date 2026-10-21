@@ -26,7 +26,7 @@ export async function nativeCallerJobsProfile() {
         const message = body.messages[index]!;
         if (
           message.role === 'user' &&
-          message.content === 'two explicitly configured independent jobs'
+          message.content === 'New task: two explicitly configured independent jobs'
         ) {
           taskIndex = index;
           break;
@@ -96,6 +96,30 @@ export async function nativeCallerJobsProfile() {
         commandId: 'before-native-jobs',
         decision: 'interrupt',
       });
+      const before = await warm.client.getPermissionMode('s', { storeId: f.storeId });
+      const mutation = await warm.client.setPermissionMode('s', {
+        expectedStoreId: f.storeId,
+        commandId: 'native-jobs-current-full',
+        mode: 'full',
+        makeDefault: false,
+        ifRevision: before.revision,
+        ifDefaultRevision: before.defaultRevision,
+      });
+      const after = await warm.client.getPermissionMode('s', { storeId: f.storeId });
+      const trust = await warm.client.getWorkspaceTrust('w', { storeId: f.storeId });
+      if (
+        mutation.state !== 'applied' ||
+        after.mode !== 'full' ||
+        after.scopeSessionId !== 's' ||
+        after.revision !== mutation.receipt?.revision ||
+        trust.storeId !== f.storeId ||
+        !trust.trusted
+      )
+        throw Error('native_jobs_current_controls_unavailable');
+      console.info(
+        'native_jobs_current_controls',
+        JSON.stringify({ before, mutation, after, trust }),
+      );
     } finally {
       await warm.close();
     }

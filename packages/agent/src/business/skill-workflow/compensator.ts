@@ -10,7 +10,8 @@ import type { Extension, JobDefinition, JobHandle, Json } from '../../extensions
 import { canonicalJson } from '../../json';
 import type { KnowledgeReadScope } from '../../platform/knowledge-reads';
 import type { CompiledSkillWorkflow, WorkflowCapability } from '../../skills/workflow-contract';
-import { validateWorkflowArguments } from '../../skills/workflow-contract/schema';
+import type { WorkflowCompilerSession } from '../../skills/workflow-contract/async';
+import { validateWorkflowArgumentsAsync } from '../../skills/workflow-contract/async';
 import { AgentError } from '../../storage/types';
 import {
   assertDirectory,
@@ -20,6 +21,7 @@ import {
 } from './compensation-assets';
 
 export interface SkillWorkflowCompensatorOptions {
+  readonly compiler?: WorkflowCompilerSession;
   readonly knowledgeScope?: KnowledgeReadScope;
   readonly entries: readonly CompiledSkillWorkflow[];
   readonly resolveCapability?: (id: string) => WorkflowCapability | undefined;
@@ -30,7 +32,7 @@ export interface SkillWorkflowCompensatorOptions {
 interface LiveCompensation {
   shell: JobDefinition;
   handle: JobHandle;
-  release(): void;
+  release(): Promise<void>;
   cleanup(): void;
   timedOut: boolean;
   timeoutSettled(): Promise<void>;
@@ -141,24 +143,26 @@ export function createSkillWorkflowCompensator(options: SkillWorkflowCompensator
       const entry = entries.get(skillId);
       if (!entry || !supports(entry) || entry.descriptor.revision !== revision)
         throw new AgentError('workflow_compensation_unavailable');
-      if (validateWorkflowArguments(entry.contract!.outputSchema, output))
+      if (
+        await validateWorkflowArgumentsAsync(entry.contract!.outputSchema, output, {
+          compiler: options.compiler,
+          signal: context.signal,
+        })
+      )
         throw new AgentError('workflow_output_schema_invalid');
       assertDirectory(workspace);
       assertDirectory(base);
       protectedPaths.forEach(assertDirectory);
-      const assets = sealCompensationAssets(
+      const assets = await sealCompensationAssets(
         entry,
         base.canonical,
         resolver,
         options.knowledgeScope,
+        context.signal,
+        options.compiler,
       );
-      let released = false;
-      const release = () => {
-        if (!released) {
-          assets.cleanup();
-          released = true;
-        }
-      };
+      let releasePromise: Promise<void> | undefined;
+      const release = () => (releasePromise ??= assets.cleanup());
       const controller = new AbortController();
       const abort = () => controller.abort(context.signal.reason);
       context.signal.addEventListener('abort', abort, { once: true });
@@ -168,7 +172,7 @@ export function createSkillWorkflowCompensator(options: SkillWorkflowCompensator
       let settlement: Promise<void> = Promise.resolve();
       const timeout = entry.contract!.execution.timeoutMs;
       if (!Number.isSafeInteger(timeout) || timeout < 1 || timeout > 2147483647) {
-        release();
+        await release();
         context.signal.removeEventListener('abort', abort);
         throw new AgentError('workflow_compensation_timeout_invalid');
       }
@@ -190,7 +194,7 @@ export function createSkillWorkflowCompensator(options: SkillWorkflowCompensator
             : createMacosConfinedShellJob(confined);
       } catch (error) {
         context.signal.removeEventListener('abort', abort);
-        release();
+        await release();
         throw error;
       }
       const timer = setTimeout(() => {
@@ -260,7 +264,7 @@ export function createSkillWorkflowCompensator(options: SkillWorkflowCompensator
         }
         state.cleanup();
         await state.timeoutSettled();
-        if (event.supervision === 'ended') state.release();
+        if (event.supervision === 'ended') await state.release();
         yield state.timedOut
           ? {
               ...event,
@@ -281,7 +285,7 @@ export function createSkillWorkflowCompensator(options: SkillWorkflowCompensator
       const state = get(handle),
         confirmation = await state.shell.cancel(state.handle);
       if (confirmation.status === 'stopped' || confirmation.status === 'already_finished')
-        state.release();
+        await state.release();
       return confirmation;
     },
     async dispose(handle) {
@@ -289,7 +293,7 @@ export function createSkillWorkflowCompensator(options: SkillWorkflowCompensator
       try {
         const confirmation = await state.shell.cancel(state.handle);
         if (confirmation.status === 'stopped' || confirmation.status === 'already_finished')
-          state.release();
+          await state.release();
         await state.shell.dispose(state.handle);
       } finally {
         state.cleanup();

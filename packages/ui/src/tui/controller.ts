@@ -4244,7 +4244,16 @@ export class TuiController {
         )
           this.publish({
             mcpDirectoryAuth: Object.freeze(auth),
-            mcpSource: { facts: freezeIntent(structuredClone(source)), read: 'ready' },
+            // An open Source panel owns its independent complete read. A late
+            // directory read must not replace that observation or dismiss Review.
+            ...(!this.value.mcpSourceOpen
+              ? {
+                  mcpSource: {
+                    facts: freezeIntent(structuredClone(source)),
+                    read: 'ready' as const,
+                  },
+                }
+              : {}),
           });
       }
     } catch (error) {

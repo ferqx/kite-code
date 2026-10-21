@@ -17,11 +17,12 @@ import { KnowledgeReadCleanupError, type KnowledgeReadScope } from '../../platfo
 import type { RunRequirementInitializer } from '../../runtime';
 import {
   type CompiledSkillWorkflow,
-  readWorkflowReference,
-  revalidateSkillWorkflow,
+  readWorkflowReferenceAsync,
+  revalidateSkillWorkflowAsync,
   type WorkflowCapability,
+  type WorkflowCompilerSession,
 } from '../../skills/workflow-contract';
-import { validateWorkflowArguments } from '../../skills/workflow-contract/schema';
+import { validateWorkflowArgumentsAsync } from '../../skills/workflow-contract/async';
 import { AgentError, type RequirementEvaluation, type RequirementRef } from '../../storage/types';
 
 export const skillWorkflowExtensionId = 'builtin.skill-workflow';
@@ -87,6 +88,7 @@ export interface SkillWorkflowOptions {
     definitionVersion: string;
   }[];
   /** Trusted ordinary supervised Job. The callback describes input; it never executes the script. */
+  readonly compiler?: WorkflowCompilerSession;
   readonly verificationJob?: {
     definitionId: string;
     definitionVersion: string;
@@ -166,6 +168,7 @@ export function createSkillWorkflow(supplied: SkillWorkflowOptions) {
     (supplied.forkConfigurations ?? []).map((role) => [role.agent, Object.freeze({ ...role })]),
   );
   const resolver = supplied.resolveCapability;
+  const compiler = supplied.compiler;
   const verificationJob = supplied.verificationJob ? { ...supplied.verificationJob } : undefined;
   const compensationJob = supplied.compensationJob ? { ...supplied.compensationJob } : undefined;
   const enabled = flags.skillActivation && flags.skillWorkflow;
@@ -188,14 +191,18 @@ export function createSkillWorkflow(supplied: SkillWorkflowOptions) {
       throw new AgentError('workflow_activation_input_unverifiable');
     return value;
   }
-  function current(
+  async function current(
     id: string,
     revision?: string,
-  ): CompiledSkillWorkflow & { contract: NonNullable<CompiledSkillWorkflow['contract']> } {
+    signal?: AbortSignal,
+  ): Promise<CompiledSkillWorkflow & { contract: NonNullable<CompiledSkillWorkflow['contract']> }> {
     const sealed = entries.get(id);
     if (!sealed?.contract || sealed.descriptor.availability !== 'available')
       throw new AgentError('workflow_unavailable');
-    const actual = revalidateSkillWorkflow(sealed, resolver, supplied.knowledgeScope);
+    const actual = await revalidateSkillWorkflowAsync(sealed, resolver, supplied.knowledgeScope, {
+      signal,
+      compiler,
+    });
     if (
       !actual.contract ||
       actual.descriptor.availability !== 'available' ||
@@ -204,15 +211,16 @@ export function createSkillWorkflow(supplied: SkillWorkflowOptions) {
       throw new AgentError('workflow_source_changed');
     return { ...actual, contract: actual.contract };
   }
-  function prepare(
+  async function prepare(
     input: WorkflowActivationInput,
     requestedBy: 'user' | 'model',
     runId: string,
     sessionId: string,
-  ): Json {
+    signal?: AbortSignal,
+  ): Promise<Json> {
     if (!enabled) throw new AgentError('workflow_disabled');
     if (!/^[A-Za-z0-9_.-]{1,128}$/.test(input.key)) throw new AgentError('workflow_input_invalid');
-    const entry = current(input.skillId),
+    const entry = await current(input.skillId, undefined, signal),
       contract = entry.contract;
     if (
       !(requestedBy === 'user'
@@ -220,7 +228,10 @@ export function createSkillWorkflow(supplied: SkillWorkflowOptions) {
         : contract.invocation.allowImplicit)
     )
       throw new AgentError('workflow_activation_not_allowed');
-    const error = validateWorkflowArguments(contract.inputSchema, input.input);
+    const error = await validateWorkflowArgumentsAsync(contract.inputSchema, input.input, {
+      compiler,
+      signal,
+    });
     if (error) throw new AgentError('workflow_input_schema_invalid');
     const risk = Object.values(contract.effectiveEffects).some((effect) =>
       ['write', 'destructive', 'unknown'].includes(effect),
@@ -375,7 +386,7 @@ export function createSkillWorkflow(supplied: SkillWorkflowOptions) {
       invalidated: await context.records.get(`${path}/invalidated`),
       entry: settled
         ? boundEntry(frame)
-        : current(string(frame.skillId), string(frame.skillRevision)),
+        : await current(string(frame.skillId), string(frame.skillRevision), context.signal),
     };
   }
   async function safety(context: Pick<ReadContext, 'readRunExecutionSafety'>, runId: string) {
@@ -501,21 +512,23 @@ export function createSkillWorkflow(supplied: SkillWorkflowOptions) {
     )
       throw new AgentError('workflow_activation_input_unverifiable');
     const keys = new Set<string>();
-    const values = payload.activations.map((value) => {
-      const item = object(value);
-      if (Object.keys(item).sort().join(',') !== 'input,key,skillId')
-        throw new AgentError('workflow_input_invalid');
-      const key = string(item.key);
-      if (keys.has(key)) throw new AgentError('workflow_duplicate_activation');
-      keys.add(key);
-      originalInputs.set(frameKey(input.run.id, key), json(item.input!));
-      return prepare(
-        { key, skillId: string(item.skillId), input: item.input! },
-        'user',
-        input.run.id,
-        input.run.sessionId,
-      );
-    });
+    const values = await Promise.all(
+      payload.activations.map(async (value) => {
+        const item = object(value);
+        if (Object.keys(item).sort().join(',') !== 'input,key,skillId')
+          throw new AgentError('workflow_input_invalid');
+        const key = string(item.key);
+        if (keys.has(key)) throw new AgentError('workflow_duplicate_activation');
+        keys.add(key);
+        originalInputs.set(frameKey(input.run.id, key), json(item.input!));
+        return prepare(
+          { key, skillId: string(item.skillId), input: item.input! },
+          'user',
+          input.run.id,
+          input.run.sessionId,
+        );
+      }),
+    );
     const context = await input.forExtension(skillWorkflowExtensionId),
       refs: RequirementRef[] = [];
     for (const value of values) {
@@ -618,7 +631,11 @@ export function createSkillWorkflow(supplied: SkillWorkflowOptions) {
     };
     let proof: Json;
     if (entry.contract.verification.strategy !== 'script') {
-      if (validateWorkflowArguments(entry.contract.outputSchema, closed.output))
+      if (
+        await validateWorkflowArgumentsAsync(entry.contract.outputSchema, closed.output, {
+          compiler,
+        })
+      )
         throw new AgentError('workflow_output_schema_invalid');
       proof = { ...binding, outcome: 'passed', kind: 'schema', executionId: context.executionId };
     } else {
@@ -662,7 +679,7 @@ export function createSkillWorkflow(supplied: SkillWorkflowOptions) {
       const latest = await get(context, activationId, attempt);
       if (latest.headRecord.revision !== active.headRecord.revision)
         throw new AgentError('workflow_attempt_stale');
-      current(string(frame.skillId), string(frame.skillRevision));
+      await current(string(frame.skillId), string(frame.skillRevision), context.signal);
       const passed =
         execution.status === 'succeeded' && object(execution.result).outcome === 'succeeded';
       proof = {
@@ -690,7 +707,7 @@ export function createSkillWorkflow(supplied: SkillWorkflowOptions) {
       attempt,
     );
     if (invalidated) throw new AgentError('workflow_invalidated');
-    if (validateWorkflowArguments(entry.contract.outputSchema, output))
+    if (await validateWorkflowArgumentsAsync(entry.contract.outputSchema, output, { compiler }))
       throw new AgentError('workflow_output_schema_invalid');
     let forkProof: Json = null;
     if (entry.contract.context.mode === 'fork') {
@@ -1168,7 +1185,7 @@ export function createSkillWorkflow(supplied: SkillWorkflowOptions) {
     headRecord: ExtensionRecord,
     boundary: PublicExecution | null,
     parent: PublicExecution | null,
-    entry: ReturnType<typeof current>,
+    entry: Awaited<ReturnType<typeof current>>,
   ) {
     if (
       !userDecisions?.allowCompensation ||
@@ -1358,11 +1375,12 @@ export function createSkillWorkflow(supplied: SkillWorkflowOptions) {
             activationId = string(value.key),
             key = frameKey(context.runId, activationId);
           let anchor = await context.records.get(key);
-          const prepared = prepare(
+          const prepared = await prepare(
             { key: activationId, skillId: string(value.skill_id), input: value.input! },
             anchor && object(anchor.value).requestedBy === 'user' ? 'user' : 'model',
             context.runId,
             context.sessionId,
+            context.signal,
           );
           if (
             anchor &&
@@ -1390,7 +1408,10 @@ export function createSkillWorkflow(supplied: SkillWorkflowOptions) {
               phase: requirement.phase,
             },
           ]);
-          if (current(string(value.skill_id)).contract.context.mode === 'fork')
+          if (
+            (await current(string(value.skill_id), undefined, context.signal)).contract.context
+              .mode === 'fork'
+          )
             return fork(context, activationId);
           const active = await get(context, activationId);
           return result({
@@ -1423,11 +1444,12 @@ export function createSkillWorkflow(supplied: SkillWorkflowOptions) {
           if (active.closed) throw new AgentError('workflow_already_closed');
           return result(
             json(
-              readWorkflowReference(
+              await readWorkflowReferenceAsync(
                 active.entry,
                 string(value.path),
                 resolver,
                 supplied.knowledgeScope,
+                { signal: context.signal, compiler },
               ),
             ),
           );
@@ -1529,7 +1551,7 @@ export function createSkillWorkflow(supplied: SkillWorkflowOptions) {
                 verification?.outcome !== 'passed' &&
                 !head.waiverKey))
           )
-            current(string(frame.skillId), string(frame.skillRevision));
+            await current(string(frame.skillId), string(frame.skillRevision));
         }
         const intents = activeFrames
           .filter(({ frame }) => frame.requestedBy === 'user')
@@ -1701,11 +1723,11 @@ export function createSkillWorkflow(supplied: SkillWorkflowOptions) {
               }
             }
             const settled = closed && (frame.verificationMode !== 'required' || verified || waived);
-            let entry: ReturnType<typeof current>;
+            let entry: Awaited<ReturnType<typeof current>>;
             try {
               entry = settled
                 ? boundEntry(frame)
-                : current(string(frame.skillId), string(frame.skillRevision));
+                : await current(string(frame.skillId), string(frame.skillRevision));
             } catch (error) {
               if (error instanceof KnowledgeReadCleanupError) throw error;
               return answer('unsatisfied', 'workflow_source_changed');
@@ -1808,7 +1830,9 @@ export function createSkillWorkflow(supplied: SkillWorkflowOptions) {
               closed.attempt !== attempt ||
               closed.anchorRevision !== reference.revision ||
               closed.outputDigest !== hash(canonicalJson(closed.output!)) ||
-              validateWorkflowArguments(entry.contract.outputSchema, closed.output)
+              (await validateWorkflowArgumentsAsync(entry.contract.outputSchema, closed.output, {
+                compiler,
+              }))
             )
               return answer('unsatisfied', 'workflow_active');
             if (entry.contract.context.mode === 'fork') {
@@ -1874,7 +1898,11 @@ export function createSkillWorkflow(supplied: SkillWorkflowOptions) {
       },
     })),
   };
-  return { extension: registered, initializeRequirements, enabled };
+  return {
+    extension: registered,
+    initializeRequirements,
+    enabled,
+  };
 }
 export type {
   CompiledSkillWorkflow,
@@ -1883,8 +1911,15 @@ export type {
 } from '../../skills/workflow-contract';
 export {
   compileSkillWorkflow,
+  compileSkillWorkflowAsync,
+  createWorkflowCompilerSession,
   readWorkflowReference,
+  readWorkflowReferenceAsync,
   revalidateSkillWorkflow,
+  revalidateSkillWorkflowAsync,
+  validateWorkflowArgumentsAsync,
+  type WorkflowCompilerSession,
+  workflowCompilerAssets,
 } from '../../skills/workflow-contract';
 export { validateWorkflowArguments } from '../../skills/workflow-contract/schema';
 export {

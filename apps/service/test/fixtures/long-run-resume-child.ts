@@ -88,7 +88,7 @@ try {
     expectedStoreId: storeId,
     commandId: 'work',
     kind: 'run.start',
-    content: 'Continue the original long task and preserve all original effects.',
+    content: 'New task: Continue the original long task and preserve all original effects.',
   });
   await new Promise<void>(() => {});
 } catch (error) {

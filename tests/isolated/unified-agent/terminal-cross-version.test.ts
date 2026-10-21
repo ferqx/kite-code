@@ -42,7 +42,11 @@ import {
 
 const repositoryRoot = resolve(import.meta.dir, '../../..');
 const sessionId = 'terminal-version-session';
-const tasks = ['cross-version-A-before', 'cross-version-B-produced', 'cross-version-A-after'];
+const tasks = [
+  'cross-version-A-before',
+  'New task: cross-version-B-produced',
+  'cross-version-A-after',
+];
 const bodies = [
   'ORIGINAL A BODY',
   `B CURRENT FULL BODY\n${'\u4e8c\u4ee3\u{1f642}\n'.repeat(32000)}B EXACT ORIGINAL TAIL`,
@@ -276,7 +280,25 @@ test('real Terminal code upgrade and cold rollback preserve new data and continu
         const output = result.outputs.find((value) => value.executionId === executionId)!;
         expect(output).toBeDefined();
         expect(output.storeId).toBe(result.store.storeId);
-        expect(output.originCommandId).toBe(commandIds[index]!);
+        const receipt = result.receipts[index]!.receipt;
+        if (!receipt || typeof receipt !== 'object' || Array.isArray(receipt))
+          throw Error('terminal_version_command_receipt_missing');
+        const sourceCommandId =
+          typeof receipt.businessCommandId === 'string'
+            ? receipt.businessCommandId
+            : commandIds[index]!;
+        expect(output.originCommandId).toBe(sourceCommandId);
+        const run = result.view.runs.find((value) => value.id === output.runId)!;
+        expect(run.originCommandId).toBe(sourceCommandId);
+        if (typeof receipt.runId !== 'string') throw Error('terminal_version_run_receipt_missing');
+        expect(run.id).toBe(receipt.runId);
+        if (index === 1) {
+          expect(receipt.businessCommandId).toBeString();
+          expect(sourceCommandId).not.toBe(commandIds[index]!);
+          // The predecessor reads the original business origin but predates this optional DTO field.
+          if (candidate.candidateId === newer.candidateId)
+            expect(run.rootWorkCommandId).toBe(commandIds[index]!);
+        } else expect(sourceCommandId).toBe(commandIds[index]!);
         expect(output.output.complete).toBe(true);
         expect(output.output.content === bodies[index]).toBe(true);
         expect(hash(output.output.content)).toBe(hash(bodies[index]!));

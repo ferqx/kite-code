@@ -168,10 +168,11 @@ export function createFileTools(
             'Maximum lines to return; defaults to 200. Continue at selection.nextOffset to read the next page, or request explicit max_lines.',
         },
       },
-      call: (i) =>
+      call: (i, context) =>
         files.read(string(i.path), {
           ...(i.offset === undefined ? {} : { offset: Number(i.offset) }),
           limit: i.limit === undefined ? 200 : Number(i.limit),
+          signal: context.signal,
         }),
     },
     {
@@ -250,13 +251,16 @@ export function createFileTools(
         after: { type: 'string', maxLength: 4096 },
         limit: { type: 'integer', minimum: 1, maximum: 200 },
       },
-      call: (i) =>
-        files.glob({
-          pattern: string(i.pattern),
-          ...(i.path === undefined ? {} : { path: string(i.path) }),
-          ...(i.after === undefined ? {} : { after: string(i.after) }),
-          ...(i.limit === undefined ? {} : { limit: Number(i.limit) }),
-        }),
+      call: (i, context) =>
+        files.glob(
+          {
+            pattern: string(i.pattern),
+            ...(i.path === undefined ? {} : { path: string(i.path) }),
+            ...(i.after === undefined ? {} : { after: string(i.after) }),
+            ...(i.limit === undefined ? {} : { limit: Number(i.limit) }),
+          },
+          { signal: context.signal },
+        ),
     },
     {
       name: 'search',
@@ -267,13 +271,16 @@ export function createFileTools(
         after: { type: 'string', maxLength: 4110 },
         limit: { type: 'integer', minimum: 1, maximum: 200 },
       },
-      call: (i) =>
-        files.search({
-          text: string(i.text),
-          ...(i.path === undefined ? {} : { path: string(i.path) }),
-          ...(i.after === undefined ? {} : { after: string(i.after) }),
-          ...(i.limit === undefined ? {} : { limit: Number(i.limit) }),
-        }),
+      call: (i, context) =>
+        files.search(
+          {
+            text: string(i.text),
+            ...(i.path === undefined ? {} : { path: string(i.path) }),
+            ...(i.after === undefined ? {} : { after: string(i.after) }),
+            ...(i.limit === undefined ? {} : { limit: Number(i.limit) }),
+          },
+          { signal: context.signal },
+        ),
     },
   ];
   const modelNames: Record<string, string> = {
@@ -297,8 +304,8 @@ export function createFileTools(
   const descriptions: Record<string, string> = {
     read: 'Read UTF-8 file lines. Line numbers start at 1; return at most 200 lines by default. Continue at selection.nextOffset. The returned baseline describes the complete file and is required for later modifications.',
     write:
-      'Create or replace a complete UTF-8 file. Pass base=null only to create a new file; replacing a file requires its exact complete-file baseline. Supply exactly one of content or content_artifact.',
-    edit: 'Replace exact, non-overlapping literal text in a UTF-8 file using its complete-file baseline. expected_matches must equal the actual number of matches. Supply old_text and new_text, or the corresponding immutable Artifact references.',
+      'Create or replace a complete UTF-8 file. Pass base=null only to create a new file; replacing a file requires its exact complete-file baseline. Supply exactly one of content or content_artifact. Each invocation has its own outcome; a baseline conflict does not report current file content or roll back other successful operations.',
+    edit: 'Replace exact, non-overlapping literal text in a UTF-8 file using its complete-file baseline. expected_matches must equal the actual number of matches. Supply old_text and new_text, or the corresponding immutable Artifact references. Each invocation has its own outcome; a baseline conflict does not report current file content or roll back other successful operations.',
     list: 'List immediate directory entries, with name-based pagination. Defaults to the workspace root and 100 entries; limit is 1–200. Continue using the returned name cursor.',
     glob: 'Find file paths matching a glob, including **/ for zero or more directory levels. Defaults to the workspace root and 100 paths; limit is 1–200. Continue using the returned path cursor.',
     search:
@@ -354,6 +361,7 @@ export function createFileTools(
             : { ...parameters, path: files.relativePath(string(parameters.path)) },
           context,
         );
+        if (['read', 'list', 'glob', 'search'].includes(d.name)) context.signal.throwIfAborted();
         const mutationResult =
           d.name === 'write' || d.name === 'edit' ? (value as FileSnapshot) : undefined;
         const change = mutationResult?.change;
@@ -421,6 +429,10 @@ export function createFileTools(
           ...(change ? { details: { fileChange: change } as unknown as Json } : {}),
         };
       } catch (error) {
+        const baselineConflict =
+          (d.name === 'write' || d.name === 'edit') &&
+          error instanceof AgentError &&
+          error.code === 'file_baseline_conflict';
         return {
           outcome:
             error instanceof AgentError && error.code === 'file_publish_outcome_unknown'
@@ -428,7 +440,11 @@ export function createFileTools(
               : context.signal.aborted
                 ? 'cancelled'
                 : 'failed',
-          content: error instanceof Error ? error.message : String(error),
+          content: baselineConflict
+            ? 'file_baseline_conflict: This invocation did not publish its requested change because its supplied baseline or create-only precondition was rejected. The baseline describes the complete file identity and version; this conflict does not prove that another edit targeted the same text. Compare each invocation using its own requested change and receipt. Earlier read content is historical; this failure does not report the current file content. Other successful operations are not rolled back. Do not infer that the file still has its earlier values. Before any separately authorized new edit, read the current file and use its fresh complete-file baseline.'
+            : error instanceof Error
+              ? error.message
+              : String(error),
           details: { code: error instanceof AgentError ? error.code : 'file_io_failed' },
         };
       }

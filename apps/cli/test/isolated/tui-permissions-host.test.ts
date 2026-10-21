@@ -5,7 +5,9 @@ import { mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from '
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { createRuntime } from '@kite-ai/agent';
 import { selectProfile } from '@kite-ai/agent/profile';
+import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import { launchPairedService } from '@kite-ai/service/paired';
 import { privateDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { ownedUserConfiguration } from '../../../service/test/fixtures/user-configuration-fixture';
@@ -59,10 +61,11 @@ test('built Service and actual PTY permission controls create exact Shell grants
       }
       calls++;
       const last = body.messages.reduce(
-          (last, m, i) => (m.role === 'user' && /^owned-[123]$/.test(m.content) ? i : last),
+          (last, m, i) =>
+            m.role === 'user' && /^(?:New task: )?owned-[123]$/.test(m.content) ? i : last,
           -1,
         ),
-        key = body.messages[last]!.content,
+        key = body.messages[last]!.content.replace(/^New task: /, ''),
         results = body.messages.slice(last + 1).filter((m) => m.role === 'tool');
       const call =
         results.length === 0
@@ -197,6 +200,85 @@ test('built Service and actual PTY permission controls create exact Shell grants
     expect(exit).toBe(0);
     expect(err).toBe('');
     expect(out).toContain('PERMISSIONS_ORIGINAL_COMPLETE');
+    const proofStore = await openSqliteStore({
+      dataRoot: profile.dataRoot,
+      profile: profile.profile,
+      mode: 'readonly',
+    });
+    const proofRuntime = createRuntime({
+      store: proofStore,
+      permissions: { authorize: async () => ({ allowed: false, revision: 'readonly-proof' }) },
+    });
+    const proofDb = new Database(profile.databasePath, { readonly: true });
+    try {
+      const before = (await proofStore.getMetadata()).lastChangeCursor;
+      for (const expected of [
+        { content: 'owned-1', models: 3 },
+        { content: 'New task: owned-2', models: 3 },
+        { content: 'New task: owned-3', models: 1 },
+      ]) {
+        const originals = proofDb
+          .query(
+            "SELECT id FROM command WHERE kind='run.start' AND root_work_command_id=id AND json_extract(request_json,'$.content')=?",
+          )
+          .all(expected.content) as { id: string }[];
+        expect(originals).toHaveLength(1);
+        const original = (await proofStore.getCommand(originals[0]!.id))!;
+        const receipt = original.receipt as {
+          businessCommandId?: string;
+          humanInputCommandId?: string;
+          runId: string;
+        };
+        const businessId = receipt.businessCommandId ?? original.id;
+        expect(original.status).toBe('applied');
+        const run = (await proofStore.getRun(receipt.runId))!;
+        expect(run).toMatchObject({ originCommandId: businessId, rootWorkCommandId: original.id });
+        if (expected.content.startsWith('New task:')) {
+          expect(receipt.businessCommandId).toBeString();
+          expect(businessId).not.toBe(original.id);
+          expect(await proofStore.getCommand(receipt.humanInputCommandId!)).toMatchObject({
+            request: {
+              publicCommandId: original.id,
+              content: expected.content,
+              originalRequest: original.request,
+            },
+            receipt: { businessCommandId: businessId, state: 'decided' },
+          });
+          expect(await proofStore.getCommand(businessId)).toMatchObject({
+            status: 'applied',
+            receipt: { runId: run.id },
+          });
+        }
+        const models = (await proofStore.listExecutions(original.sessionId)).filter(
+          (execution) => execution.kind === 'model' && execution.runId === run.id,
+        );
+        expect(models).toHaveLength(expected.models);
+        const input = await proofRuntime.readModelInput({
+          expectedStoreId: original.originStoreId,
+          sessionId: original.sessionId,
+          subjectId: original.subjectId,
+          executionId: models[0]!.id,
+        });
+        expect(input.confirmation).toBe('succeeded');
+        expect(
+          input.request.messages.find((message) => message.sourceIds?.includes(businessId)),
+        ).toMatchObject({ content: expected.content, sourceIds: [businessId] });
+        expect(run.status).toBe(expected.content.endsWith('owned-3') ? 'cancelled' : 'completed');
+        if (expected.content.endsWith('owned-3')) {
+          const cancel = proofDb
+            .query(
+              "SELECT request_json FROM command WHERE kind='command.cancel' AND json_extract(request_json,'$.targetCommandId')=?",
+            )
+            .all(businessId);
+          expect(cancel).toHaveLength(1);
+        }
+      }
+      expect((await proofStore.getMetadata()).lastChangeCursor).toBe(before);
+    } finally {
+      proofDb.close();
+      await proofRuntime.close();
+    }
+
     expect(readFileSync(join(workspace, 'effects'), 'utf8')).toBe('owned\nowned\n');
     expect(calls).toBe(7);
     expect(reviewCalls).toBe(3);

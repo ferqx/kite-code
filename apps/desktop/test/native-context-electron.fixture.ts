@@ -67,7 +67,9 @@ try {
     .waitFor();
   assert.equal(await selected.getByText(/^Source /).count(), 0);
   assert.equal(Number(await (await fetch(`${control}/count`)).text()), 2);
-  await page.getByRole('textbox', { name: '当前会话私有草稿' }).fill('second active checkpoint');
+  await page
+    .getByRole('textbox', { name: '当前会话私有草稿' })
+    .fill('New task: second active checkpoint');
   await page.getByRole('button', { name: '发送明确的新轮次' }).click();
   await fetch(`${control}/third-entered`);
   await context.getByRole('button', { name: '读取当前所选上下文' }).press('Enter');

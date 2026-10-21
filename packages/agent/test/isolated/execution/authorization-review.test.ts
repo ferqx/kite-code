@@ -1020,6 +1020,7 @@ test('actual source changes during review invalidate the old target and reach th
 test('review decisionContext is derived from the actual succeeded Model input after steer', async () => {
   let release!: () => void;
   let reviews = 0;
+  let steerBusinessCommandId: string | undefined;
   const gate = new Promise<void>((resolve) => {
     release = resolve;
   });
@@ -1041,7 +1042,13 @@ test('review decisionContext is derived from the actual succeeded Model input af
           expect(JSON.stringify(payload.decisionContext.messages)).toContain(
             'updated precise instruction',
           );
-          expect(JSON.stringify(payload.decisionContext.messages)).toContain('steer');
+          const appliedSteer = await f.store.getCommand('steer');
+          const appliedReceipt = appliedSteer?.receipt as { businessCommandId?: string };
+          steerBusinessCommandId = appliedReceipt.businessCommandId;
+          expect(steerBusinessCommandId).toBeTruthy();
+          expect(JSON.stringify(payload.decisionContext.messages)).toContain(
+            steerBusinessCommandId!,
+          );
         }
         yield {
           type: 'text_delta',
@@ -1064,7 +1071,7 @@ test('review decisionContext is derived from the actual succeeded Model input af
       subjectId: 'owner',
       request: {
         kind: 'input.steer',
-        content: 'updated precise instruction',
+        content: '补充：updated precise instruction',
         targetRunId: target.runId!,
         contextSelectionId: session.contextSelectionId,
       },

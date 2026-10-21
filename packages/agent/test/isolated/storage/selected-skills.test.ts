@@ -165,7 +165,7 @@ test('unsupported fixed and custom resolver persist a rejection without model or
           commandId: kind,
           request: {
             kind,
-            content: 'text',
+            content: 'New task: text',
             selectedSkills: [],
             ...(kind === 'input.follow_up' ? { afterRunId: null, contextSelectionId } : {}),
           } as CommandRequest,
@@ -173,6 +173,7 @@ test('unsupported fixed and custom resolver persist a rejection without model or
         await runtime.submitCommand(input);
         const rejected = await runtime.waitForCommand(kind, { timeoutMs: 3000 });
         expect(rejected.status).toBe('rejected');
+        expect((rejected.request as { content: string }).content).toBe('New task: text');
         expect(JSON.stringify(rejected.receipt)).toContain('selected_skills_unavailable');
         expect((await runtime.submitCommand(input)).requestDigest).toBe(rejected.requestDigest);
         expect(calls).toBe(0);

@@ -12,13 +12,15 @@ import { createServer } from 'node:http';
 import type { Socket } from 'node:net';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { createRuntime } from '@kite-ai/agent';
 import type { Json } from '@kite-ai/agent/extensions';
 import { selectProfile } from '@kite-ai/agent/profile';
 import type { openSqliteStore } from '@kite-ai/agent/sqlite';
-import type { AgentClient } from '@kite-ai/client';
+import { type AgentClient, readOrdinaryCommandApplication } from '@kite-ai/client';
 import { launchPairedService } from '@kite-ai/service/paired';
 import { privateDirectory, temporaryDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { verifyTerminalBundle } from '../../../cli/host/terminal-artifact';
+import { initializeLivePermissionFixture } from '../fixtures/live-permission-fixture';
 
 const repo = resolve(import.meta.dir, '../../../..');
 const obj = (value: unknown) => value as Record<string, Json>;
@@ -334,6 +336,38 @@ test('actual cold Service needs a new explicit MCP connection and independent ap
         title: sessionId,
       });
     }
+    // This isolated Host owns an external permission ceiling, so its public controls
+    // remain read-only. Prepare the actual durable defaults through the trusted fixture.
+    const preparationSqlite = (await import(
+      join(candidate.root, 'node_modules/@kite-ai/agent/sqlite.js')
+    )) as { openSqliteStore: typeof openSqliteStore };
+    const preparationStore = await preparationSqlite.openSqliteStore({
+      dataRoot: profile.dataRoot,
+      profile: profile.profile,
+    });
+    const preparationRuntime = createRuntime({
+      store: preparationStore,
+      permissions: {
+        async authorize() {
+          return { allowed: false, revision: 'fixture-control-preparation-no-execution' };
+        },
+      },
+    });
+    try {
+      for (const sessionId of ['s', 'd'])
+        await initializeLivePermissionFixture({
+          runtime: preparationRuntime,
+          profile,
+          expectedStoreId: storeId,
+          subjectId: subjectId!,
+          sessionId,
+          workspaceId: 'w',
+          mode: 'full',
+          trusted: true,
+        });
+    } finally {
+      await preparationRuntime.close();
+    }
     const query = async (client: AgentClient, sessionId = 's') =>
       obj((await client.queryExtension(sessionId, 'builtin.mcp', 'mcp.catalogue', {}))[0]!.payload)
         .items as Record<string, Json>[];
@@ -435,13 +469,21 @@ test('actual cold Service needs a new explicit MCP connection and independent ap
         expectedStoreId: storeId,
         commandId,
         kind: 'run.start',
-        content: commandId,
+        content: phase === 'cold' ? `New task: ${commandId}` : commandId,
       });
-      const run = await until(commandId, async () =>
-        (await client.getView('s')).runs.find(
-          (row) => row.originCommandId === commandId && !row.isActive,
-        ),
-      );
+      const command = await until(commandId, async () => {
+        const saved = await client.getCommand(commandId);
+        return saved.status === 'applied' ? saved : undefined;
+      });
+      const application = await readOrdinaryCommandApplication(client, command);
+      expect(application?.observation).toBeNull();
+      expect(application?.run).not.toBeNull();
+      const run = await until(commandId, async () => {
+        const saved = await client.getRun(application!.run!.id);
+        return saved.isActive ? undefined : saved;
+      });
+      expect(run.originCommandId).toBe(application!.sourceCommandId);
+      expect(run.rootWorkCommandId).toBe(commandId);
       expect(run.status).toBe('completed');
       expect(effects.length).toBe(before + 1);
       const view = await client.getView('s');

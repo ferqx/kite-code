@@ -20,6 +20,7 @@ import { initializeSqliteEngine } from '@kite-ai/agent/sqlite-engine';
 import { createDefaultProcessConfiguration } from '@kite-ai/service/configuration';
 import { verifyNativeRuntimeBundle } from '@kite-ai/service/native-runtime-assets';
 import { privateDirectory, temporaryDirectory } from '../../../../tests/fixtures/test-filesystem';
+import { initializeLivePermissionFixture } from '../../../service/test/fixtures/live-permission-fixture';
 import { userConfigurationPath } from '../../../service/test/fixtures/user-configuration-fixture';
 import { buildNativeCandidate } from '../../scripts/build-native';
 
@@ -469,6 +470,7 @@ async function seedJob({
     modelConcurrency: 1,
     processConcurrency: 1,
   });
+  host.permissionManagement?.(runtime);
   try {
     const storeId = (await store.getMetadata()).storeId;
     await runtime.createWorkspace({
@@ -488,6 +490,17 @@ async function seedJob({
         sessionId: sessionId!,
         workspaceId: 'w',
         title: title!,
+      });
+    for (const sessionId of ['job-output-window', 'second-output-window'])
+      await initializeLivePermissionFixture({
+        runtime,
+        profile,
+        expectedStoreId: storeId,
+        subjectId: 'local-user',
+        sessionId,
+        workspaceId: 'w',
+        mode: 'full',
+        trusted: true,
       });
     await runtime.submitCommand({
       expectedStoreId: storeId,

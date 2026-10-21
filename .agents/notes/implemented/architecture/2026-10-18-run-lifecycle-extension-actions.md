@@ -24,7 +24,11 @@ SQLite 消息写入不再推导标题或隐式增加控制修订；首条消息�
 
 公开回调已按用户后续要求统一为 Extension.lifecycle 的 beforeRun/beforeRunComplete，不再依赖传入 phase 分支；原 before_start/before_complete 仍只作为持久命令 key，保证旧操作的 Command ID 与幂等关系不变。通用 onRunStart/onRunEnd、onModelStart/onModelEnd 只读事件与平铺执行规则见[生命周期观察决定](2026-10-18-settled-lifecycle-observers.md)。
 
+2026-10-19，用户明确确认待澄清首输入仍保留原文标题兜底。可信宿主的 sessionInputMetadata 在真实 public/raw 耐久保存后、解释 revision 捕获前，只沿本会话 rename CAS 保存兜底；它不调度 Action、Tool、Job 或 Model，也不选择工作。原始主体、Store、Session、observed revision 0、空 selection/历史及准确保留注册事件均须可核；手动改名和事件缺口拒绝推断，同一 metadata Command 去重。实际业务随后沿 public/raw/decision/business 回执确认同一原文，由原启动 Action 补 marker，AI 仍只在业务正常完成前经原受管 child 执行。原 processing guard、两业务钩子范围和只读 on* 均保持，Core 不包含标题规则、公开用途字段或专用恢复格式。
+
 ## Alternatives considered
+
+- 将首输入一概作为业务、放开解释轮通用 Action，或等到业务准入后才保存标题：前两者会给未决输入业务效果，后者违背用户确认的原文兜底承诺。选择可信宿主的有限本会话元数据接点，复用原 rename CAS；AI 资格仍须真实业务证明，元数据不成为执行许可。
 
 - 仅截取首条正文：不满足正常情况下由 AI 概括主题的要求；提取自然语言主题作兜底也不符合用户明确要求的原文截断；后续只规整连续空白的要求不授予主题改写。原文只作为等待或失败时的例外，成功结果仍须是可读的简短名称。
 - 将模型命名放在原任务首次模型请求前：会延迟原任务首次回复，因此启动前只保存本地原文兜底，AI 请求留在首次任务完成前。

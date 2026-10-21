@@ -1,5 +1,6 @@
 import type { DispatchInput, PermissionControlRead } from '../port';
 import { AgentError } from '../types';
+import { assertHumanWorkDispatch } from './human-work-control';
 import type { SqliteOperations } from './operations';
 
 type Row = Record<string, string | number | bigint | null | undefined>;
@@ -9,6 +10,7 @@ export function verifyHostControlDispatch(
   execution: Row,
   input: DispatchInput,
 ): void {
+  assertHumanWorkDispatch(db, execution as Parameters<typeof assertHumanWorkDispatch>[1]);
   verifyHostControlReads(db, execution, input.expectedStoreId, input.authorization.controlReads);
 }
 export function verifyHostControlReads(

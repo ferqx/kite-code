@@ -1,9 +1,12 @@
+import { Database } from 'bun:sqlite';
 import { expect, test } from 'bun:test';
 import { createHash, randomUUID } from 'node:crypto';
 import { readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { createRuntime } from '@kite-ai/agent';
 import { selectProfile } from '@kite-ai/agent/profile';
+import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import { privateDirectory } from '@kite-ai/agent/windows-path-security';
 import { ClientError, createClient, createServiceLifecycleClient } from '@kite-ai/client';
 import { bootstrapSchema, selectDaemonEndpoint } from '@kite-ai/service/daemon';
@@ -290,6 +293,95 @@ for (const mode of ['paired', 'shared'] as const)
       if (exit) console.error(out, err);
       expect(exit).toBe(0);
       expect(out).toContain('MODEL_ORIGINAL_COMPLETE');
+      const proofStore = await openSqliteStore({
+        dataRoot: profile.dataRoot,
+        profile: profile.profile,
+        mode: 'readonly',
+      });
+      const proofRuntime = createRuntime({
+        store: proofStore,
+        permissions: { authorize: async () => ({ allowed: false, revision: 'readonly-proof' }) },
+      });
+      const proofDb = new Database(profile.databasePath, { readonly: true });
+      try {
+        const before = (await proofStore.getMetadata()).lastChangeCursor;
+        for (const expected of [
+          { content: 'held-original', models: 1, modelId: 'one', effort: undefined },
+          { content: 'New task: next-original', models: 1, modelId: 'two', effort: 'high' },
+        ]) {
+          const originals = proofDb
+            .query(
+              "SELECT id FROM command WHERE kind='run.start' AND root_work_command_id=id AND json_extract(request_json,'$.content')=?",
+            )
+            .all(expected.content) as { id: string }[];
+          expect(originals).toHaveLength(1);
+          const original = (await proofStore.getCommand(originals[0]!.id))!;
+          const receipt = original.receipt as {
+            businessCommandId?: string;
+            humanInputCommandId?: string;
+            runId: string;
+          };
+          const businessId = receipt.businessCommandId ?? original.id;
+          expect(original.status).toBe('applied');
+          const run = (await proofStore.getRun(receipt.runId))!;
+          expect(run).toMatchObject({
+            originCommandId: businessId,
+            rootWorkCommandId: original.id,
+          });
+          if (expected.content.startsWith('New task:')) {
+            expect(receipt.businessCommandId).toBeString();
+            expect(businessId).not.toBe(original.id);
+            expect(await proofStore.getCommand(receipt.humanInputCommandId!)).toMatchObject({
+              request: {
+                publicCommandId: original.id,
+                content: expected.content,
+                originalRequest: original.request,
+              },
+              receipt: { businessCommandId: businessId, state: 'decided' },
+            });
+            expect(await proofStore.getCommand(businessId)).toMatchObject({
+              status: 'applied',
+              receipt: { runId: run.id },
+            });
+          }
+          const models = (await proofStore.listExecutions(original.sessionId)).filter(
+            (execution) => execution.kind === 'model' && execution.runId === run.id,
+          );
+          expect(models).toHaveLength(expected.models);
+          const input = await proofRuntime.readModelInput({
+            expectedStoreId: original.originStoreId,
+            sessionId: original.sessionId,
+            subjectId: original.subjectId,
+            executionId: models[0]!.id,
+          });
+          expect(input.confirmation).toBe('succeeded');
+          expect(
+            input.request.messages.find((message) => message.sourceIds?.includes(businessId)),
+          ).toMatchObject({ content: expected.content, sourceIds: [businessId] });
+          expect(run.status).toBe('completed');
+          const configuration = run.configuration as {
+            modelId: string;
+            snapshot: {
+              configuration: {
+                modelId: string;
+                models: { id: string; options?: { reasoningEffort?: string } }[];
+              };
+            };
+          };
+          expect(configuration.modelId).toBe(expected.modelId);
+          expect(configuration.snapshot.configuration.modelId).toBe(expected.modelId);
+          expect(
+            configuration.snapshot.configuration.models.find(
+              (model) => model.id === expected.modelId,
+            )?.options?.reasoningEffort,
+          ).toBe(expected.effort);
+        }
+        expect((await proofStore.getMetadata()).lastChangeCursor).toBe(before);
+      } finally {
+        proofDb.close();
+        await proofRuntime.close();
+      }
+
       expect(calls).toEqual([
         { model: 'one', reasoning_effort: undefined },
         { model: 'two', reasoning_effort: 'high' },

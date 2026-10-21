@@ -38,6 +38,8 @@ export function waitForNativeDirectory<T>(promise: Promise<T>, signal: AbortSign
 type Child = {
   scope: string;
   sessionId: string;
+  executionId?: string;
+  title?: string;
   loading: boolean;
   facts?: NativeBackgroundChild;
   error?: string;
@@ -48,6 +50,49 @@ const safeError = (cause: unknown) => {
     ? code
     : 'environment_unavailable';
 };
+
+/** Saved human authorization wins over review progress only within this exact carrier Run. */
+export function nativeChildActivity(facts: NativeBackgroundChild): string | undefined {
+  const carrier = facts.item.execution;
+  if (
+    !['planned', 'dispatching', 'running'].includes(carrier.status) ||
+    carrier.cancelRequested ||
+    carrier.cancelRequestedAt !== null
+  )
+    return;
+  const runs =
+    facts.control?.runs.filter(
+      (run) =>
+        run.isActive &&
+        run.carrierExecutionId === carrier.id &&
+        run.sessionId === carrier.childSessionId &&
+        run.originStoreId === carrier.originStoreId &&
+        run.rootWorkCommandId === carrier.rootWorkCommandId &&
+        run.rootWorkSeq === carrier.rootWorkSeq,
+    ) ?? [];
+  if (runs.length !== 1) return;
+  const executions = facts.control!.executions.filter(
+    (execution) =>
+      execution.runId === runs[0]!.id &&
+      execution.sessionId === carrier.childSessionId &&
+      execution.originStoreId === carrier.originStoreId &&
+      execution.rootWorkCommandId === carrier.rootWorkCommandId &&
+      execution.rootWorkSeq === carrier.rootWorkSeq &&
+      execution.cancelRequestedAt === null &&
+      ['planned', 'dispatching', 'running'].includes(execution.status),
+  );
+  if (executions.some((execution) => execution.authorization?.human?.state === 'pending'))
+    return '等待你的批准';
+  if (
+    executions.some((execution) =>
+      ['dispatching', 'running'].includes(execution.authorization?.review?.status ?? ''),
+    )
+  )
+    return '正在自动审核';
+  if (executions.some((execution) => execution.authorization?.review?.status === 'planned'))
+    return '等待自动审核';
+  return undefined;
+}
 
 /** Only public metadata is adapted; lifecycle does not prove process cleanup. */
 export function environmentDisplay(
@@ -144,6 +189,9 @@ export function useNativeEnvironment({
   type ChildJob = {
     scope: string;
     sessionId: string;
+    executionId?: string;
+    title?: string;
+    targetResolved: boolean;
     abort: AbortController;
     running: boolean;
     queued: boolean;
@@ -156,7 +204,9 @@ export function useNativeEnvironment({
   };
   const childJob = useRef<ChildJob | undefined>(undefined);
   // Explicit navigation is synchronous; stale passive effects cannot reopen a departed child.
-  const childNavigation = useRef<{ scope: string; sessionId: string } | undefined>(undefined);
+  const childNavigation = useRef<
+    { scope: string; sessionId: string; executionId?: string } | undefined
+  >(undefined);
   const latest = useRef(view);
   latest.current = view;
   const readable = useRef(!unavailable);
@@ -197,7 +247,12 @@ export function useNativeEnvironment({
     }
     const abort = new AbortController();
     directoryQueued.current = false;
-    setView({ scope, display, busy: true });
+    setView({
+      scope,
+      display,
+      facts: latest.current?.scope === scope ? latest.current.facts : undefined,
+      busy: true,
+    });
     const promise = readNativeBackground({
       bridge,
       generation,
@@ -282,21 +337,62 @@ export function useNativeEnvironment({
         const full = job.full;
         job.full = false;
         try {
-          const facts =
-            pendingRead.current?.scope === job.scope
+          const previous = latest.current?.scope === job.scope ? latest.current.facts : undefined;
+          const pinned =
+            job.targetResolved &&
+            previous?.items.some(
+              (entry) =>
+                entry.execution.id === job.executionId &&
+                entry.execution.childSessionId === job.sessionId,
+            );
+          // A known exact carrier can be freshly checked by Main without waiting
+          // for an unrelated full directory. Session-only discovery still waits.
+          const facts = pinned
+            ? previous
+            : pendingRead.current?.scope === job.scope
               ? await waitForNativeDirectory(pendingRead.current.promise, job.abort.signal)
-              : latest.current?.scope === job.scope
-                ? latest.current.facts
-                : undefined;
+              : previous;
           job.abort.signal.throwIfAborted();
           if (live.current !== job.scope || !readable.current || childJob.current !== job) return;
+          if (!facts) throw new Error('background_child_unavailable');
+          if (!job.targetResolved) {
+            job.targetResolved = true;
+            const candidates = facts?.items.filter(
+              (entry) => entry.execution.childSessionId === job.sessionId,
+            );
+            if (candidates?.length !== 1) {
+              childNavigation.current = undefined;
+              throw new Error('background_child_target_unavailable');
+            }
+            job.executionId = candidates[0]!.execution.id;
+            childNavigation.current = {
+              scope: job.scope,
+              sessionId: job.sessionId,
+              executionId: job.executionId,
+            };
+          }
+          if (!job.executionId) throw new Error('background_child_target_unavailable');
           const item = facts?.items.find(
-            (entry) => entry.execution.childSessionId === job.sessionId,
+            (entry) =>
+              entry.execution.id === job.executionId &&
+              entry.execution.childSessionId === job.sessionId,
           );
           if (!item || !facts || !bridge || !storeId || !rootSessionId || !viewSelection)
             throw new Error('background_child_unavailable');
+          job.title = item.childSession?.title;
           job.directoryFacts = facts;
           if (job.queuedDirectoryFacts === facts) job.queued = false;
+          if (!job.facts && !job.cached)
+            job.cached = childCache.current.get(
+              JSON.stringify([
+                generation,
+                historyEpoch,
+                storeId,
+                rootSessionId,
+                job.sessionId,
+                job.executionId,
+              ]),
+            )?.facts;
           if (!job.facts && job.cached) {
             const owner = new NativeMarkdownOwner(job.abort.signal);
             try {
@@ -316,6 +412,8 @@ export function useNativeEnvironment({
             setChild({
               scope: job.scope,
               sessionId: job.sessionId,
+              executionId: job.executionId,
+              title: job.title,
               loading: true,
               facts: job.cached,
             });
@@ -360,6 +458,7 @@ export function useNativeEnvironment({
             storeId,
             rootSessionId,
             job.sessionId,
+            job.executionId,
           ]);
           // Bound all retained strings and metadata, including tool arguments and
           // source IDs, without serializing full bodies or allocating wire copies.
@@ -372,7 +471,14 @@ export function useNativeEnvironment({
             total -= childCache.current.get(oldest)!.bytes;
             childCache.current.delete(oldest);
           }
-          setChild({ scope: job.scope, sessionId: job.sessionId, loading: false, facts: result });
+          setChild({
+            scope: job.scope,
+            sessionId: job.sessionId,
+            executionId: job.executionId,
+            title: job.title,
+            loading: false,
+            facts: result,
+          });
         } catch (cause) {
           // A failed full calibration cannot turn cached data into a verified
           // prefix for this visit. The next revision must retry the whole read.
@@ -386,6 +492,8 @@ export function useNativeEnvironment({
             setChild({
               scope: job.scope,
               sessionId: job.sessionId,
+              executionId: job.executionId,
+              title: job.title,
               loading: false,
               facts: job.facts,
               error: safeError(cause),
@@ -396,25 +504,31 @@ export function useNativeEnvironment({
       job.running = false;
     }
   }
-  function openChild(sessionId: string) {
+  function openChild(sessionId: string, executionId?: string) {
     if (!bridge || !scope || !storeId || !rootSessionId || !viewSelection || unavailable) return;
-    childNavigation.current = { scope, sessionId };
+    childNavigation.current = { scope, sessionId, executionId };
     childRead.current?.abort();
     const abort = new AbortController();
     childRead.current = abort;
-    const key = JSON.stringify([generation, historyEpoch, storeId, rootSessionId, sessionId]);
-    const cached = childCache.current.get(key)?.facts;
     const job: ChildJob = {
       scope,
       sessionId,
+      executionId,
+      title:
+        latest.current?.scope === scope && executionId
+          ? latest.current.facts?.items.find(
+              (item) =>
+                item.execution.id === executionId && item.execution.childSessionId === sessionId,
+            )?.childSession?.title
+          : undefined,
+      targetResolved: executionId !== undefined,
       abort,
       running: false,
       queued: true,
       full: true,
-      cached,
     };
     childJob.current = job;
-    setChild({ scope, sessionId, loading: true });
+    setChild({ scope, sessionId, executionId, title: job.title, loading: true });
     void runChild(job);
   }
   // A completed directory revision queues one tail read; changes during a read coalesce.
@@ -434,7 +548,7 @@ export function useNativeEnvironment({
     const job = childJob.current;
     const navigation = childNavigation.current;
     if (!job && navigation && navigation.scope === scope) {
-      openChild(navigation.sessionId);
+      openChild(navigation.sessionId, navigation.executionId);
       return;
     }
     if (!job || job.scope !== scope || job.directoryFacts === view.facts) return;
@@ -539,7 +653,7 @@ export function useNativeEnvironment({
   const visibleChild = child?.scope === scope ? child : undefined;
   return {
     child: visibleChild,
-    openChild: (sessionId: string) => void openChild(sessionId),
+    openChild,
     closeChild: () => {
       childNavigation.current = undefined;
       childRead.current?.abort();
@@ -547,7 +661,11 @@ export function useNativeEnvironment({
       setChild(undefined);
     },
     refreshChild: () => {
-      if (visibleChild) void openChild(visibleChild.sessionId);
+      if (visibleChild)
+        void openChild(
+          visibleChild.sessionId,
+          visibleChild.executionId ?? visibleChild.facts?.item.execution.id,
+        );
     },
     card: scope ? (
       <>
@@ -556,6 +674,11 @@ export function useNativeEnvironment({
           executions={
             display?.rows.map((row) => ({
               ...row,
+              ...(visibleChild?.facts?.item.execution.id === row.executionId &&
+              !visibleChild.loading &&
+              !visibleChild.error
+                ? { activity: nativeChildActivity(visibleChild.facts) }
+                : {}),
               canStop: row.canStop && !blocked.has(row.executionId),
             })) ?? []
           }
@@ -567,7 +690,7 @@ export function useNativeEnvironment({
             sessionIdsByExecutionId: display?.children ?? new Map(),
             loading: current?.busy ?? true,
             error: current?.error,
-            onOpen: (sessionId) => void openChild(sessionId),
+            onOpen: (sessionId, executionId) => void openChild(sessionId, executionId),
             onRefresh: () => setRefresh((value) => value + 1),
           }}
         />

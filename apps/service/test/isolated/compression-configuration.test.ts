@@ -203,9 +203,16 @@ for (const { guardedReset, rejectedSummary } of [
         expectedStoreId,
         commandId: 'additional-history',
         kind: 'run.start',
-        content: 'Additional settled user turn',
+        content: '新任务：Additional settled user turn',
       });
-      await runtime.waitForCommand('additional-history', { timeoutMs: 5000 });
+      const settled = await runtime.waitForCommand('additional-history', { timeoutMs: 5000 });
+      const settledApplication = settled.receipt as { runId: string; businessCommandId: string };
+      expect(
+        (await client.getView('s')).runs.find((run) => run.id === settledApplication.runId),
+      ).toMatchObject({
+        originCommandId: settledApplication.businessCommandId,
+        rootWorkCommandId: 'additional-history',
+      });
       const history = await client.listMessages('s'),
         original = await client.getContext('s', { storeId: expectedStoreId });
       expect((await client.getView('s')).runs[0]!.status).toBe('completed');
@@ -273,12 +280,19 @@ for (const { guardedReset, rejectedSummary } of [
           expectedStoreId,
           commandId: 'next',
           kind: 'run.start',
-          content: 'Next explicit work',
+          content: '新任务：Next explicit work',
         });
-        await runtime.waitForCommand('next', { timeoutMs: 5000 });
+        const nextApplied = await runtime.waitForCommand('next', { timeoutMs: 5000 });
+        const nextApplication = nextApplied.receipt as { runId: string; businessCommandId: string };
+        expect(
+          (await client.getView('s')).runs.find((run) => run.id === nextApplication.runId),
+        ).toMatchObject({
+          originCommandId: nextApplication.businessCommandId,
+          rootWorkCommandId: 'next',
+        });
         expect(requests).toHaveLength(4);
         const next = (await client.listModelInputs('s')).items.find(
-          (item) => item.originCommandId === 'next',
+          (item) => item.originCommandId === nextApplication.businessCommandId,
         )!;
         expect(
           (await client.getModelInput('s', next.executionId)).request.messages.some(
@@ -350,12 +364,19 @@ for (const { guardedReset, rejectedSummary } of [
         expectedStoreId,
         commandId: 'next',
         kind: 'run.start',
-        content: 'Next explicit work',
+        content: '新任务：Next explicit work',
       });
-      await runtime.waitForCommand('next', { timeoutMs: 5000 });
+      const nextApplied = await runtime.waitForCommand('next', { timeoutMs: 5000 });
+      const nextApplication = nextApplied.receipt as { runId: string; businessCommandId: string };
+      expect(
+        (await client.getView('s')).runs.find((run) => run.id === nextApplication.runId),
+      ).toMatchObject({
+        originCommandId: nextApplication.businessCommandId,
+        rootWorkCommandId: 'next',
+      });
       expect(requests).toHaveLength(4);
       const nextInput = (await client.listModelInputs('s')).items.find(
-        (item) => item.originCommandId === 'next',
+        (item) => item.originCommandId === nextApplication.businessCommandId,
       )!;
       const actual = await client.getModelInput('s', nextInput.executionId);
       expect(

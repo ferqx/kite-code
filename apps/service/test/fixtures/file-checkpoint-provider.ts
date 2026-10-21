@@ -23,14 +23,15 @@ export function createFileCheckpointProvider(
         .reverse()
         .find(
           (message) =>
-            message.role === 'user' && /^(FIRST|SECOND)_ACTUAL_RUN:/.test(message.content),
+            message.role === 'user' &&
+            /^(?:New task: )?(FIRST|SECOND)_ACTUAL_RUN:/.test(message.content),
         )?.content;
       const markers: Record<string, string> = {
         'FIRST_ACTUAL_RUN: read then update original and create first file': 'first',
         'SECOND_ACTUAL_RUN: read then update original and create second file': 'second',
         ...additionalMarkers,
       };
-      const key = user === undefined ? undefined : markers[user];
+      const key = user === undefined ? undefined : markers[user.replace(/^New task: /, '')];
       if (!key) throw Error('actual_file_user_marker_unavailable');
       const step = steps.get(key) ?? 0;
       if (step >= 4) throw Error('actual_file_model_route_exhausted');

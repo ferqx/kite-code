@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { canonicalJson } from '../../json';
 import type { CancelCommandInput, CancelWorkInput } from '../port';
 import { AgentError, type Json } from '../types';
+import { cancelHumanCommandBindings } from './human-work-control';
 import type { SqliteOperations } from './operations';
 
 /** Page a complete effect set inside the caller's single cancellation transaction. */
@@ -123,6 +124,9 @@ export function cancelWorkBody(db: SqliteOperations, input: CancelCommandInput |
   if (isCommand) {
     subject(input.targetCommandId);
     commandIds.add(input.targetCommandId);
+    const related = cancelHumanCommandBindings(db, input.targetCommandId, Date.now());
+    for (const commandId of related.commandIds) commandIds.add(commandId);
+    for (const runId of related.runIds) runSeed(runId, false);
     for (const run of rows(
       db,
       'SELECT id FROM run WHERE origin_command_id=? AND session_id=?',
@@ -226,6 +230,13 @@ export function cancelWorkBody(db: SqliteOperations, input: CancelCommandInput |
       ))
         commandIds.add(String(childCommand.id));
     }
+    // Queued guidance belongs to one exact carrier even before its Run exists.
+    for (const queuedInput of rows(
+      db,
+      "SELECT id FROM command WHERE kind='agent.queued_input' AND agent_carrier_execution_id=? AND status='accepted'",
+      id,
+    ))
+      commandIds.add(String(queuedInput.id));
     const receipt = own.receipt_json
       ? (JSON.parse(String(own.receipt_json)) as { executionId?: string })
       : {};

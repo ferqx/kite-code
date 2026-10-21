@@ -1,3 +1,4 @@
+import { constants, Database } from 'bun:sqlite';
 import { expect, test } from 'bun:test';
 import { execFileSync } from 'node:child_process';
 import { mkdirSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from 'node:fs';
@@ -8,6 +9,7 @@ import { acquireArtifactAccess } from '@kite-ai/agent/artifact-access';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import { initializeSqliteEngine } from '@kite-ai/agent/sqlite-engine';
+import type { Command, Interaction } from '@kite-ai/client';
 import { verifyNativeRuntimeBundle } from '@kite-ai/service/native-runtime-assets';
 import { privateDirectory, temporaryDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { userConfigurationPath } from '../../../service/test/fixtures/user-configuration-fixture';
@@ -329,8 +331,75 @@ else throw Error('owned_credential_operation_invalid');
         persisted: { version: number };
         submissions: NativeMcpSubmission[];
         after: { method: string }[];
+        remoteAnswers: { card: Interaction; command: Command }[];
+        completedToolRun: string;
       };
       for (const pid of report.pids) expect(() => process.kill(pid, 0)).toThrow();
+      const database = new Database(
+        profile.databasePath,
+        constants.SQLITE_OPEN_READONLY | constants.SQLITE_OPEN_NOFOLLOW,
+      );
+      try {
+        database.run('PRAGMA query_only=ON');
+        expect(report.remoteAnswers.length).toBeGreaterThan(0);
+        for (const { card, command } of report.remoteAnswers) {
+          const answers = database
+            .query(
+              "SELECT id,status,request_digest,request_json,receipt_json FROM command WHERE kind='interaction.answer' AND session_id=? AND json_extract(request_json,'$.interactionId')=? AND json_extract(request_json,'$.expectedRevision')=?",
+            )
+            .all(card.presentationSessionId, card.id, card.revision) as {
+            id: string;
+            status: string;
+            request_digest: string;
+            request_json: string;
+            receipt_json: string;
+          }[];
+          expect(answers).toHaveLength(1);
+          const answer = answers[0]!;
+          expect(answer.id).toBe(command.id);
+          expect(answer.status).toBe('applied');
+          expect(answer.request_digest).toBe(command.requestDigest!);
+          expect(JSON.parse(answer.request_json)).toMatchObject({
+            interactionId: card.id,
+            expectedRevision: card.revision,
+            answer: { kind: 'approval', decision: 'approve', grant: 'approve_once' },
+          });
+          expect(JSON.parse(answer.receipt_json)).toEqual(command.receipt);
+          expect(command.receipt).toMatchObject({
+            interactionId: card.id,
+            outcome: 'answer_saved',
+            decisionRevision: String(BigInt(card.revision) + 1n),
+          });
+          const original = database
+            .query(
+              'SELECT execution_id,run_id,revision,accepted_decision_revision,state FROM interaction WHERE id=?',
+            )
+            .get(card.id);
+          expect(original).toMatchObject({
+            execution_id: card.executionId,
+            run_id: report.completedToolRun,
+            revision: Number(BigInt(card.revision) + 1n),
+            accepted_decision_revision: Number(BigInt(card.revision) + 1n),
+            state: 'answered',
+          });
+        }
+        expect(
+          database
+            .query('SELECT status,is_active FROM run WHERE id=?')
+            .get(report.completedToolRun),
+        ).toEqual({ status: 'completed', is_active: 0 });
+        expect(
+          database
+            .query('SELECT kind,state,dispatched FROM execution WHERE run_id=? ORDER BY kind,id')
+            .all(report.completedToolRun),
+        ).toEqual([
+          { kind: 'model', state: 'succeeded', dispatched: 1 },
+          { kind: 'model', state: 'succeeded', dispatched: 1 },
+          { kind: 'tool', state: 'succeeded', dispatched: 1 },
+        ]);
+      } finally {
+        database.close();
+      }
       expect(report.persisted.version).toBe(7);
       expect(
         report.submissions.some(

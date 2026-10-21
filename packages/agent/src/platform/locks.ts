@@ -81,10 +81,27 @@ export function acquireInheritedSharedFileLock(path: string, fd: number): FileLo
   }
   return acquirePosixFd(path, fd, 'shared');
 }
-function acquirePosixFd(path: string, fd: number, mode: FileLock['mode']): FileLock {
+/** Observe an existing exclusive owner without creating a coordination file or taking execution authority. */
+export function acquireExistingSharedFileLock(
+  path: string,
+  security?: WindowsPathSecurity,
+): FileLock {
+  if (process.platform === 'win32')
+    return acquireWindowsLock(path, 'shared', security ?? defaultWindowsPathSecurity(), false);
+  if (process.platform !== 'darwin' && process.platform !== 'linux')
+    throw new Error('Unsupported lock platform.');
+  const fd = openSync(path, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
+  return acquirePosixFd(path, fd, 'shared', true);
+}
+function acquirePosixFd(
+  path: string,
+  fd: number,
+  mode: FileLock['mode'],
+  observation = false,
+): FileLock {
   try {
     verify(path, fd);
-    if (posixFlock(fd, (mode === 'shared' ? 1 : 2) | 4) !== 0)
+    if (posixFlock(fd, (mode === 'shared' ? 1 : 2) | 4, observation) !== 0)
       throw new LockBusyError('Lock is busy.');
     verify(path, fd);
     let released = false;
@@ -126,28 +143,44 @@ function verify(path: string, fd: number): void {
     throw new Error('Lock is not a stable private regular file.');
 }
 let flock: ((fd: number, operation: number) => number) | undefined;
-function posixFlock(fd: number, operation: number): number {
-  const { dlopen } = require('bun:ffi') as typeof import('bun:ffi');
-  flock ??= dlopen(process.platform === 'darwin' ? '/usr/lib/libSystem.B.dylib' : 'libc.so.6', {
-    flock: { args: ['i32', 'i32'], returns: 'i32' },
-  }).symbols.flock;
-  return flock(fd, operation);
+let flockError: (() => number) | undefined;
+function posixFlock(fd: number, operation: number, observation = false): number {
+  if (!flock) {
+    const { dlopen, toArrayBuffer } = require('bun:ffi') as typeof import('bun:ffi');
+    const errorSymbol = process.platform === 'darwin' ? '__error' : '__errno_location';
+    const api = dlopen(process.platform === 'darwin' ? '/usr/lib/libSystem.B.dylib' : 'libc.so.6', {
+      flock: { args: ['i32', 'i32'], returns: 'i32' },
+      [errorSymbol]: { args: [], returns: 'ptr' },
+    }).symbols;
+    flock = api.flock!;
+    flockError = () => {
+      const address = (api[errorSymbol]! as () => import('bun:ffi').Pointer | null)();
+      if (address === null) throw new Error('Lock observation unavailable.');
+      return new DataView(toArrayBuffer(address, 0, 4)).getInt32(0, true);
+    };
+  }
+  const result = flock(fd, operation);
+  if (observation && result !== 0 && flockError!() !== (process.platform === 'darwin' ? 35 : 11))
+    throw new Error('Lock observation unavailable.');
+  return result;
 }
 function acquireWindowsLock(
   path: string,
   mode: FileLock['mode'],
   security?: WindowsPathSecurity,
+  create = true,
 ): FileLock {
   if (!security) throw new Error('Windows locking requires verified path security.');
   const native = defaultWindowsPathSecurity()!;
   native.verifyPath(path);
-  if (!existsSync(path)) native.createFile(path);
+  if (create && !existsSync(path)) native.createFile(path);
   security.verifyFile(path);
   const { dlopen, ptr } = require('bun:ffi') as typeof import('bun:ffi');
   const api = dlopen('kernel32.dll', {
     CreateFileW: { args: ['ptr', 'u32', 'u32', 'ptr', 'u32', 'u32', 'u64'], returns: 'u64' },
     GetFileInformationByHandle: { args: ['u64', 'ptr'], returns: 'bool' },
     LockFileEx: { args: ['u64', 'u32', 'u32', 'u32', 'u32', 'ptr'], returns: 'bool' },
+    GetLastError: { args: [], returns: 'u32' },
     UnlockFileEx: { args: ['u64', 'u32', 'u32', 'u32', 'ptr'], returns: 'bool' },
     CloseHandle: { args: ['u64'], returns: 'bool' },
   });
@@ -178,8 +211,11 @@ function acquireWindowsLock(
     const overlapped = new Uint8Array(process.arch === 'ia32' ? 20 : 32);
     if (
       !api.symbols.LockFileEx(handle, 1 | (mode === 'exclusive' ? 2 : 0), 0, 1, 0, ptr(overlapped))
-    )
+    ) {
+      if (!create && api.symbols.GetLastError() !== 33)
+        throw new Error('Lock observation unavailable.');
       throw new LockBusyError('Lock is busy.');
+    }
     let released = false;
     let nativeClosed = false;
     let apiClosed = false;

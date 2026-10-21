@@ -238,7 +238,7 @@ test('actual argv CLI runs and resumes its exact persisted Session through built
     expect(f.counts()).toEqual(counts);
     expect(f.calls()).toBe(1);
     expect(f.titleCalls()).toBe(1);
-    const resumed = await f.run(['resume', '--thread', 'original', '--task', 'again']);
+    const resumed = await f.run(['resume', '--thread', 'original', '--task', 'Follow up: again']);
     expect(resumed.code).toBe(0);
     expect(resumed.stderr).toBe('');
     const second = JSON.parse(
@@ -250,6 +250,70 @@ test('actual argv CLI runs and resumes its exact persisted Session through built
     expect(second.content).toBe('second complete answer');
     expect(second.sessionId).toBe('original');
     expect(second.commandId).not.toBe(intent.commandId);
+    const database = new Database(f.profile.databasePath, { readonly: true });
+    try {
+      const publicCommand = database
+        .query('SELECT status,request_json,receipt_json FROM command WHERE id=?')
+        .get(second.commandId) as { status: string; request_json: string; receipt_json: string };
+      expect(publicCommand.status).toBe('applied');
+      expect(JSON.parse(publicCommand.request_json)).toEqual({
+        kind: 'run.start',
+        content: 'Follow up: again',
+      });
+      const receipt = JSON.parse(publicCommand.receipt_json);
+      expect(receipt).toMatchObject({ outcome: 'human_input_applied' });
+      const raw = database
+        .query('SELECT request_json FROM command WHERE id=?')
+        .get(receipt.humanInputCommandId) as { request_json: string };
+      expect(JSON.parse(raw.request_json)).toMatchObject({
+        kind: 'human.input',
+        publicCommandId: second.commandId,
+        content: 'Follow up: again',
+      });
+      const decision = database
+        .query('SELECT request_json FROM command WHERE id=?')
+        .get(receipt.decisionCommandId) as { request_json: string };
+      expect(JSON.parse(decision.request_json)).toMatchObject({
+        inputCommandId: receipt.humanInputCommandId,
+        proposal: {
+          relation: 'same_work',
+          purpose: 'work',
+          targetRootWorkCommandId: intent.commandId,
+        },
+      });
+      expect(
+        database
+          .query('SELECT status,root_work_command_id FROM command WHERE id=?')
+          .get(receipt.businessCommandId),
+      ).toEqual({ status: 'applied', root_work_command_id: intent.commandId });
+      expect(
+        database
+          .query('SELECT origin_command_id,root_work_command_id,status FROM run WHERE id=?')
+          .get(receipt.runId),
+      ).toEqual({
+        origin_command_id: receipt.businessCommandId,
+        root_work_command_id: intent.commandId,
+        status: 'completed',
+      });
+      const user = database
+        .query("SELECT source_json FROM message WHERE run_id=? AND role='user'")
+        .get(receipt.runId) as { source_json: string };
+      expect(JSON.parse(user.source_json)).toMatchObject({
+        content: 'Follow up: again',
+        sourceIds: [receipt.businessCommandId],
+      });
+      expect(
+        database
+          .query(
+            "SELECT origin_command_id,root_work_command_id FROM execution WHERE run_id=? AND kind='model'",
+          )
+          .all(receipt.runId),
+      ).toEqual([
+        { origin_command_id: receipt.businessCommandId, root_work_command_id: intent.commandId },
+      ]);
+    } finally {
+      database.close();
+    }
     expect(f.calls()).toBe(2);
     expect(f.titleCalls()).toBe(1);
     expect(f.observed[1]!.some((text) => text.endsWith('\u0000original α tail'))).toBe(true);

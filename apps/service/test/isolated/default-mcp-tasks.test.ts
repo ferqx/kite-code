@@ -7,11 +7,13 @@ import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { createRuntime } from '@kite-ai/agent';
 import { createTemporaryCredentialBackend } from '@kite-ai/agent/config';
+import { createPermissionPolicy } from '@kite-ai/agent/permissions';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import { createDefaultProcessConfiguration } from '../../src/configuration';
 import { createMcpConfiguration } from '../../src/mcp-configuration';
 import { createMcpHttpTransportPort } from '../../src/mcp-http-port';
+import { initializeLivePermissionFixture } from '../fixtures/live-permission-fixture';
 
 function deferred() {
   let resolve!: () => void;
@@ -195,8 +197,9 @@ async function fixture() {
       };
       models.push(body);
       const marker = body.messages
-        .filter((m) => m.role === 'user' && m.content.startsWith('task-run-'))
-        .slice(-1)[0]!.content;
+        .filter((m) => m.role === 'user' && m.content.startsWith('新任务：task-run-'))
+        .slice(-1)[0]!
+        .content.replace(/^新任务：/, '');
       const step = steps.get(marker) ?? 0;
       steps.set(marker, step + 1);
       const connect = marker.includes('connect'),
@@ -245,30 +248,43 @@ async function fixture() {
       }),
     );
   writeConfig();
+  const taskCeiling = createPermissionPolicy({
+    readPolicy: (request) => ({
+      mode: askTask ? 'accept_edits' : 'full',
+      workspaceTrust: true,
+      revision: 'trusted-task-ceiling-1',
+      allowed: denyTask
+        ? []
+        : [
+            {
+              kind: request.kind,
+              definitionId: request.definitionId,
+              definitionVersion: request.definitionVersion,
+            },
+          ],
+    }),
+    describeCapability: (request) => ({
+      kind: request.kind,
+      definitionId: request.definitionId,
+      definitionVersion: request.definitionVersion,
+      revision: 'fixture-task-effect-1',
+      effects: ['unknown'],
+      hardAllowed: true,
+      safeRead: false,
+    }),
+  });
   const host = createDefaultProcessConfiguration({
     userConfigurationPath: profile.profilePath + '/config.jsonc',
     profile,
     credentialBackend: createTemporaryCredentialBackend(),
     mcp: { servers: [{ id: 'local', transport }], transportPort: port },
-    permissionPolicy: {
-      readPolicy: (request) => ({
-        mode:
-          askTask && request.kind === 'job' && request.definitionId.endsWith('.task')
-            ? 'accept_edits'
-            : 'full',
-        workspaceTrust: true,
-        revision: 'trusted-fixture-1',
-        allowed:
-          denyTask && request.kind === 'job' && request.definitionId.endsWith('.task')
-            ? []
-            : [
-                {
-                  kind: request.kind,
-                  definitionId: request.definitionId,
-                  definitionVersion: request.definitionVersion,
-                },
-              ],
-      }),
+    // This trusted ceiling narrows only Task Jobs; the real root remains Full.
+    permissions: {
+      authorize(request) {
+        return request.kind === 'job' && request.definitionId.endsWith('.task')
+          ? taskCeiling.authorize(request)
+          : Promise.resolve({ allowed: true, revision: 'trusted-non-task-ceiling-1' });
+      },
     },
   });
   const runtime = createRuntime({
@@ -277,6 +293,21 @@ async function fixture() {
     permissions: host.permissions!,
     resolveRunConfiguration: host.resolveRunConfiguration,
   });
+  host.permissionManagement?.(runtime);
+  const prepareMode = async () => {
+    for (const sessionId of ['a', 'b'])
+      await initializeLivePermissionFixture({
+        runtime,
+        profile,
+        expectedStoreId: storeId,
+        sessionId,
+        subjectId: 'owner',
+        workspaceId: 'w',
+        mode: 'full',
+        trusted: true,
+      });
+  };
+  await prepareMode();
   const connect = async (sessionId: string) => {
     const commandId = `connect-${sessionId}`;
     await runtime.submitCommand({
@@ -300,7 +331,7 @@ async function fixture() {
       commandId,
       sessionId,
       subjectId: 'owner',
-      request: { kind: 'run.start', content: `task-run-${commandId}` },
+      request: { kind: 'run.start', content: `新任务：task-run-${commandId}` },
     });
     return runtime.waitForCommand(commandId, { timeoutMs: 5000 });
   };
@@ -327,7 +358,9 @@ async function fixture() {
     get calls() {
       return taskCalls;
     },
-    set ask(value: boolean) {
+    async setAsk(value: boolean) {
+      // Root Full permits the connection/Tool; the extra trusted policy independently asks for Task Jobs.
+      await prepareMode();
       askTask = value;
     },
     set deny(value: boolean) {
@@ -406,7 +439,7 @@ test('default compatible Model learns captured Task tools after connection, ordi
 test('default Ask requires independent Task Job approval after Full connection/Tool; cancellation does not create task', async () => {
   const f = await fixture();
   try {
-    f.ask = true;
+    await f.setAsk(true);
     await f.run('a', 'connect-ask');
     const cards = await until(
         () =>

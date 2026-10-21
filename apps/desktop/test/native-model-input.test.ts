@@ -6,7 +6,12 @@ import { pathToFileURL } from 'node:url';
 import { createRuntime } from '@kite-ai/agent';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import { createFixedModel, type ModelEvent } from '@kite-ai/ai';
-import { type AgentClient, createClient, type ModelInputSnapshot } from '@kite-ai/client';
+import {
+  type AgentClient,
+  createClient,
+  type ModelInputSnapshot,
+  readOrdinaryCommandApplication,
+} from '@kite-ai/client';
 import { startService } from '@kite-ai/service';
 import { readModelDirectory } from '@kite-ai/ui';
 import { temporaryDirectory } from '../../../tests/fixtures/test-filesystem';
@@ -264,7 +269,7 @@ test('actual Core fixed Adapter records 205 original requests; Native public SDK
         sessionId: 's',
         subjectId: 'owner',
         expectedStoreId: storeId,
-        request: { kind: 'run.start', content: `original-${i}` },
+        request: { kind: 'run.start', content: `新任务：original-${i}` },
       });
       await runtime.waitForCommand(commandId, { timeoutMs: 5000 });
     }
@@ -296,7 +301,10 @@ test('actual Core fixed Adapter records 205 original requests; Native public SDK
     expect(BigInt(queries[1]!.afterSeq!)).toBeGreaterThan(0n);
     const last = await port.getModelInput!('s', directory[204]!.executionId, {});
     expect(last.request as unknown).toEqual(model.requests[204]!);
-    expect(last.originCommandId).toBe('fixed-original-204');
+    const original = await client.getCommand('fixed-original-204');
+    const applied = await readOrdinaryCommandApplication(client, original);
+    expect(applied?.run?.id).toBe(last.runId);
+    expect(last.originCommandId).toBe(applied!.sourceCommandId);
     expect(last.confirmation).toBe('succeeded');
     expect(model.requests).toHaveLength(205);
     expect((await store.getMetadata()).lastChangeCursor).toBe(cursor);

@@ -9,6 +9,7 @@ import { selectProfile } from '@kite-ai/agent/profile';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import { privateDirectory, temporaryDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { createDefaultProcessConfiguration } from '../../src/configuration';
+import { initializeLivePermissionFixture } from '../fixtures/live-permission-fixture';
 
 async function until<T>(read: () => Promise<T>, predicate: (value: T) => boolean) {
   const end = Date.now() + 5000;
@@ -150,6 +151,14 @@ test('default Service seals trusted Workflow decision policy and rejects cold po
       commandId: 'create',
       workspaceId: 'w',
       title: 'fixture',
+    });
+    await initializeLivePermissionFixture({
+      runtime,
+      profile,
+      ...base,
+      workspaceId: 'w',
+      mode: 'full',
+      trusted: true,
     });
     await runtime.submitCommand({
       ...base,

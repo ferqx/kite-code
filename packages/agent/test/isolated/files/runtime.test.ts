@@ -72,9 +72,44 @@ test('fixed model uses ordinary UnifiedExecution file tools; read returns the ex
         commandId,
         sessionId: 's',
         subjectId: 'owner',
-        request: { kind: 'run.start', content: commandId },
+        request: { kind: 'run.start', content: `New task: ${commandId}` },
       });
-      await runtime.waitForCommand(commandId);
+      const command = await runtime.waitForCommand(commandId);
+      expect(command.status).toBe('applied');
+      const receipt = command.receipt as { runId: string; businessCommandId?: string };
+      const businessId = receipt.businessCommandId ?? command.id;
+      const business = await store.getCommand(businessId);
+      expect(business).toMatchObject({
+        status: 'applied',
+        sessionId: 's',
+        rootWorkCommandId: commandId,
+      });
+      expect((business!.request as { content: string }).content).toBe(`New task: ${commandId}`);
+      const actualRun = await store.getRun(receipt.runId);
+      expect(actualRun).toMatchObject({
+        status: 'completed',
+        originCommandId: businessId,
+        rootWorkCommandId: commandId,
+      });
+      const executions = (await store.listExecutions('s')).filter(
+        (execution) => execution.runId === actualRun!.id,
+      );
+      const models = executions.filter((execution) => execution.kind === 'model');
+      expect(models).toHaveLength(2);
+      for (const execution of models) {
+        expect(execution).toMatchObject({
+          status: 'succeeded',
+          originCommandId: businessId,
+          rootWorkCommandId: commandId,
+        });
+        expect(
+          model.requests
+            .find((request) => request.requestId === execution.id)
+            ?.messages.find((message) => message.sourceIds?.includes(businessId)),
+        ).toMatchObject({ content: `New task: ${commandId}`, sourceIds: [businessId] });
+      }
+      for (const tool of executions.filter((execution) => execution.kind === 'tool'))
+        expect(tool).toMatchObject({ originCommandId: businessId, rootWorkCommandId: commandId });
     };
     await submit('write');
     expect(readFileSync(join(root, 'actual'), 'utf8')).toBe('hello');

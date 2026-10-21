@@ -13,6 +13,10 @@ interface Locator {
 }
 interface Page {
   setDefaultTimeout(value: number): void;
+  waitForFunction<T>(
+    fn: (argument: T) => boolean | Promise<boolean>,
+    argument: T,
+  ): Promise<unknown>;
   getByRole(role: string, options: { name: string; exact?: boolean }): Locator;
   getByText(text: string, options: { exact: boolean }): Locator;
   evaluate<T>(fn: () => Promise<T>): Promise<T>;
@@ -144,6 +148,17 @@ try {
     .getByRole('navigation', { name: '当前项目会话', exact: true })
     .getByRole('button', { name: 'Native installed', exact: true })
     .click();
+  await page.waitForFunction(async (storeId) => {
+    const state = (await window.kiteNative!.request({
+      method: 'state',
+      generation: 1,
+    })) as NativeState;
+    return (
+      state.selection?.storeId === storeId &&
+      state.selection.session.id === 's' &&
+      !state.selection.viewLoading
+    );
+  }, storeId);
   const state = await page.evaluate(
     async () => await window.kiteNative!.request({ method: 'state', generation: 1 }),
   );

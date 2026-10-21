@@ -12,6 +12,7 @@ import { ModelAttemptError } from '@kite-ai/ai';
 import { createClient } from '@kite-ai/client';
 import { startService } from '@kite-ai/service';
 import { createDefaultProcessConfiguration } from '@kite-ai/service/configuration';
+import { initializeLivePermissionFixture } from '../fixtures/live-permission-fixture';
 
 for (const window of [4096, undefined])
   test(`SDK assembly repeatedly compresses one task after an interrupted summary; ${window ? `declared window=${window}` : 'unknown window with explicit threshold=32768'}`, async () => {
@@ -129,6 +130,16 @@ for (const window of [4096, undefined])
         subjectId: 'owner',
         title: 'long task',
       });
+      await initializeLivePermissionFixture({
+        runtime,
+        profile,
+        expectedStoreId,
+        subjectId: 'owner',
+        sessionId: 's',
+        workspaceId: 'w',
+        mode: 'full',
+        trusted: true,
+      });
       await runtime.submitCommand({
         expectedStoreId,
         sessionId: 's',
@@ -238,7 +249,7 @@ test('public HTTP and generated Client retain retry attempt six with an unlimite
       expectedStoreId,
       commandId: 'work',
       kind: 'run.start',
-      content: 'Continue through temporary failure',
+      content: 'New task: Continue through temporary failure',
     });
     await runtime.waitForCommand('work');
     const view = await client.getView('s');

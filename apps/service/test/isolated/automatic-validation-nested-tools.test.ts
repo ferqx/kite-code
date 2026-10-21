@@ -242,11 +242,31 @@ test('HTTP Run automatically verifies nested ordinary file Tools with persistent
     expect(JSON.parse((checked.result as { content: string }).content).baseline.hash).toBe(
       createHash('sha256').update(finalContent).digest('hex'),
     );
+    while ((await store.getSession('s'))!.ownerInstanceId !== null) {
+      if (Date.now() > until) throw Error('nested_automatic_owner_not_released');
+      await Bun.sleep(10);
+    }
+    const stableView = await client.getView('s');
+    const ownerGeneration = view.session.ownerGeneration;
+    const stableOwnerGeneration = stableView.session.ownerGeneration;
+    if (typeof ownerGeneration !== 'string' || typeof stableOwnerGeneration !== 'string')
+      throw Error('nested_automatic_owner_generation_missing');
+    expect([ownerGeneration, String(BigInt(ownerGeneration) + 1n)]).toContain(
+      stableOwnerGeneration,
+    );
+    expect(stableView).toEqual({
+      ...view,
+      session: {
+        ...view.session,
+        ownerInstanceId: null,
+        ownerGeneration: stableView.session.ownerGeneration,
+      },
+    });
     const before = { ...counts };
     expect(await client.getRun(run.id)).toEqual(run);
     for (const child of nested)
       expect((await client.getExecution(child.id)).result).toEqual(child.result);
-    expect(await client.getView('s')).toEqual(view);
+    expect(await client.getView('s')).toEqual(stableView);
     expect(counts).toEqual(before);
     expect(readFileSync(join(workspace, 'result.txt'), 'utf8')).toBe(finalContent);
     passed = true;

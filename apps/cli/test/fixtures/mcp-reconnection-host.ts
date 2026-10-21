@@ -1,3 +1,4 @@
+import { strict as assert } from 'node:assert';
 import { existsSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -19,6 +20,7 @@ import type {
   TuiMcpReconnectionObservation,
 } from '@kite-ai/ui/tui';
 import { privateDirectory, temporaryDirectory } from '../../../../tests/fixtures/test-filesystem';
+import { createPermissionManagement } from '../../../service/src/permission-management';
 import { openMcpConnectionJournal } from '../../host/mcp-connection-journal';
 import { openMcpReconnectionJournal } from '../../host/mcp-reconnection-journal';
 import { openMcpSourceApprovalJournal } from '../../host/mcp-source-approval-journal';
@@ -501,6 +503,59 @@ export async function reconnectionHostFixture(ask = false, many = false) {
       workspaceId: 'w_zz',
       title: 'owned',
     });
+    // A custom policy is a ceiling, so establish only this fixture's real root controls.
+    const controls = createPermissionManagement({ runtime: runtime!, profile });
+    const identity = { expectedStoreId: storeId, subjectId: 'owner' };
+    const mode = await controls.readMode({ ...identity, sessionId: 's' });
+    assert.equal(
+      (
+        await controls.setMode({
+          ...identity,
+          sessionId: 's',
+          commandId: 'fixture-current-mode',
+          mode: ask ? 'accept_edits' : 'full',
+          makeDefault: false,
+          ifRevision: mode.revision,
+          ifDefaultRevision: mode.defaultRevision,
+        })
+      ).state,
+      'applied',
+    );
+    const trust = await controls.readTrust({ ...identity, workspaceId: 'w_zz' });
+    assert.equal(
+      (
+        await controls.setTrust({
+          ...identity,
+          workspaceId: 'w_zz',
+          commandId: 'fixture-current-trust',
+          trusted: true,
+          ifRevision: trust.revision,
+          canonicalIdentity: trust.canonicalIdentity,
+          externalReadScopeDigest: trust.externalReadScopeDigest,
+        })
+      ).state,
+      'applied',
+    );
+    const currentMode = await controls.readMode({ ...identity, sessionId: 's' });
+    const currentTrust = await controls.readTrust({ ...identity, workspaceId: 'w_zz' });
+    const [modeControl, trustControl] = await Promise.all([
+      store!.readHostControl({ ...identity, kind: 'permission.mode', scope: 'session:s' }),
+      store!.readHostControl({ ...identity, kind: 'workspace.trust', scope: 'workspace:w_zz' }),
+    ]);
+    assert.equal(modeControl.record?.id, 'fixture-current-mode');
+    assert.equal(modeControl.record?.state, 'applied');
+    assert.equal(trustControl.record?.id, 'fixture-current-trust');
+    assert.equal(trustControl.record?.state, 'applied');
+    assert.ok(BigInt(modeControl.revision) > BigInt(mode.revision));
+    assert.ok(BigInt(trustControl.revision) > BigInt(trust.revision));
+    assert.equal(currentMode.mode, ask ? 'accept_edits' : 'full');
+    assert.equal(currentMode.scopeSessionId, 's');
+    assert.equal(currentMode.revision, modeControl.revision);
+    assert.equal(currentMode.defaultRevision, mode.defaultRevision);
+    assert.equal(currentTrust.trusted, true);
+    assert.equal(currentTrust.revision, trustControl.revision);
+    assert.equal(currentTrust.canonicalIdentity, trust.canonicalIdentity);
+    assert.equal(currentTrust.externalReadScopeDigest, trust.externalReadScopeDigest);
     const facts = await management().read('s', new AbortController().signal);
     const sources = await sourcePort().read('s', new AbortController().signal);
     const ownedId = sources.items.find((row) => row.name === 'owned')?.id;

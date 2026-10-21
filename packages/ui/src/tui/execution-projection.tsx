@@ -165,6 +165,12 @@ export function inkToolName(
     'builtin.ask-user/ask_user': 'ask_user',
     'builtin.task/task': 'task',
     'builtin.task/task.execute': 'task',
+    'builtin.task/task.spawn': 'spawn_agent',
+    'builtin.task/task.follow_up': 'follow_up_agent',
+    'builtin.task/task.message': 'send_agent_message',
+    'builtin.task/task.events': 'wait_agent_events',
+    'builtin.task/task.list': 'list_agents',
+    'builtin.task/task.interrupt': 'interrupt_agent',
     'builtin.mcp/mcp.resources.list': 'list_mcp_resources',
     'builtin.mcp/mcp.resources.read': 'read_mcp_resource',
   };
@@ -255,6 +261,15 @@ function actualCarrierParent(job: Execution, tool: Execution, snapshot: TuiSnaps
         run.originStoreId === tool.originStoreId &&
         run.sessionId === tool.sessionId,
     )
+  );
+}
+function taskCarrierTool(tool: Execution, snapshot: TuiSnapshot): boolean {
+  return (
+    frozenBuiltin(tool, snapshot, 'builtin.task', 'task') ||
+    frozenBuiltin(tool, snapshot, 'builtin.task', 'task.execute') ||
+    (tool.definitionVersion === '1' &&
+      (frozenBuiltin(tool, snapshot, 'builtin.task', 'task.spawn') ||
+        frozenBuiltin(tool, snapshot, 'builtin.task', 'task.follow_up')))
   );
 }
 function displayArguments(args: Record<string, unknown>): Record<string, unknown> {
@@ -623,15 +638,24 @@ export function projectInkChild(
     (item) =>
       item.id === execution.parentExecutionId &&
       item.kind === 'tool' &&
-      (frozenBuiltin(item, snapshot, 'builtin.task', 'task') ||
-        frozenBuiltin(item, snapshot, 'builtin.task', 'task.execute')) &&
+      taskCarrierTool(item, snapshot) &&
       item.originStoreId === execution.originStoreId &&
       item.sessionId === execution.sessionId &&
       actualCarrierParent(execution, item, snapshot),
   );
   if (!parent) return undefined;
   const args = inkToolArguments(parent, snapshot, loadedOutputs);
-  if (typeof args?.role !== 'string') return undefined;
+  if (!args) return undefined;
+  const legacy =
+    frozenBuiltin(parent, snapshot, 'builtin.task', 'task') ||
+    frozenBuiltin(parent, snapshot, 'builtin.task', 'task.execute');
+  if (legacy && typeof args.role !== 'string') return undefined;
+  const role =
+    typeof args.role === 'string'
+      ? args.role
+      : typeof args.preset === 'string'
+        ? args.preset
+        : 'worker';
   const childViews = (
     snapshot as TuiSnapshot & { childViews?: readonly { executionId: string; view: SessionView }[] }
   ).childViews;
@@ -646,75 +670,108 @@ export function projectInkChild(
         child.view.session.workspaceId === snapshot.view.session.workspaceId,
     ) ?? [];
   const child = matches.length === 1 ? matches[0]!.view : undefined;
+  const runMatches =
+    child?.runs.filter(
+      (run) =>
+        ((run.carrierExecutionId === execution.id &&
+          run.rootWorkCommandId === execution.rootWorkCommandId &&
+          run.rootWorkSeq === execution.rootWorkSeq) ||
+          (run.carrierExecutionId === undefined &&
+            run.originCommandId === `child-start-${execution.id}`)) &&
+        run.originStoreId === execution.originStoreId &&
+        run.sessionId === execution.childSessionId &&
+        (run.rootWorkCommandId === undefined ||
+          run.rootWorkCommandId === execution.rootWorkCommandId) &&
+        (run.rootWorkSeq === undefined || run.rootWorkSeq === execution.rootWorkSeq),
+    ) ?? [];
+  const activeRuns = runMatches.filter((run) => run.isActive);
+  const childRun =
+    activeRuns.length === 1 ? activeRuns[0] : runMatches.length === 1 ? runMatches[0] : undefined;
+  const childRunIds = new Set(runMatches.map((run) => run.id));
+  const exactChildExecution = (item: Execution) =>
+    childRunIds.size > 0 &&
+    item.kind === 'tool' &&
+    item.originStoreId === snapshot.storeId &&
+    item.sessionId === child!.session.id &&
+    item.runId !== null &&
+    childRunIds.has(item.runId) &&
+    item.rootWorkCommandId === execution.rootWorkCommandId &&
+    item.rootWorkSeq === execution.rootWorkSeq;
   const childSnapshot = child
     ? { ...snapshot, view: child, messages: child.messages, executionTimings: undefined }
     : undefined;
   const steps = childSnapshot
-    ? childSnapshot.view.executions
-        .filter(
-          (item) =>
-            item.kind === 'tool' &&
-            item.originStoreId === snapshot.storeId &&
-            item.sessionId === child!.session.id,
-        )
-        .map((item) => ({
-          stepId: item.id,
-          toolCallId: item.toolCallId ?? item.id,
-          toolName: terminalText(inkToolName(item.definitionId, item, childSnapshot)),
-          toolArgs: displayArguments(
-            frozenBuiltin(item, childSnapshot, 'builtin.files', 'files.search') &&
-              (inkToolArguments(item, childSnapshot)?.path === undefined ||
-                inkToolArguments(item, childSnapshot)?.path === '')
-              ? { ...inkToolArguments(item, childSnapshot), path: '.' }
-              : (inkToolArguments(item, childSnapshot) ?? {}),
-          ),
-          status:
-            item.status === 'succeeded'
-              ? ('success' as const)
-              : item.status === 'failed' || item.status === 'outcome_unknown'
-                ? ('error' as const)
-                : item.status === 'cancelled'
-                  ? ('cancelled' as const)
-                  : ('pending' as const),
-          summary: inkResultSummary(item.result),
-          fileNotice: inkFileChangeSummary(
-            item,
-            childSnapshot,
-            inkToolArguments(item, childSnapshot) ?? {},
-          ),
-        }))
+    ? childSnapshot.view.executions.filter(exactChildExecution).map((item) => ({
+        stepId: item.id,
+        toolCallId: item.toolCallId ?? item.id,
+        toolName: terminalText(inkToolName(item.definitionId, item, childSnapshot)),
+        toolArgs: displayArguments(
+          frozenBuiltin(item, childSnapshot, 'builtin.files', 'files.search') &&
+            (inkToolArguments(item, childSnapshot)?.path === undefined ||
+              inkToolArguments(item, childSnapshot)?.path === '')
+            ? { ...inkToolArguments(item, childSnapshot), path: '.' }
+            : (inkToolArguments(item, childSnapshot) ?? {}),
+        ),
+        status:
+          item.status === 'succeeded'
+            ? ('success' as const)
+            : item.status === 'failed' || item.status === 'outcome_unknown'
+              ? ('error' as const)
+              : item.status === 'cancelled'
+                ? ('cancelled' as const)
+                : ('pending' as const),
+        summary: inkResultSummary(item.result),
+        fileNotice: inkFileChangeSummary(
+          item,
+          childSnapshot,
+          inkToolArguments(item, childSnapshot) ?? {},
+        ),
+      }))
     : [];
-  const pendingChild = child?.executions.find(
-    (item) =>
-      item.kind === 'tool' &&
-      item.originStoreId === snapshot.storeId &&
-      item.sessionId === child.session.id &&
-      ['planned', 'dispatching', 'running'].includes(item.status) &&
-      (item.authorization?.human?.state === 'pending' ||
-        item.authorization?.review?.status === 'planned' ||
-        item.authorization?.review?.status === 'running'),
-  );
+  const pendingChild =
+    ['planned', 'dispatching', 'running'].includes(execution.status) &&
+    execution.cancelRequestedAt === null &&
+    childRun?.isActive
+      ? child?.executions.find(
+          (item) =>
+            exactChildExecution(item) &&
+            item.runId === childRun.id &&
+            item.cancelRequestedAt === null &&
+            ['planned', 'dispatching', 'running'].includes(item.status) &&
+            (item.authorization?.human?.state === 'pending' ||
+              item.authorization?.review?.status === 'planned' ||
+              item.authorization?.review?.status === 'dispatching' ||
+              item.authorization?.review?.status === 'running'),
+        )
+      : undefined;
   const approvalState =
     pendingChild?.authorization?.human?.state === 'pending'
       ? ('awaiting_user' as const)
-      : pendingChild?.authorization?.review?.status === 'running'
+      : pendingChild?.authorization?.review?.status === 'running' ||
+          pendingChild?.authorization?.review?.status === 'dispatching'
         ? ('auto_reviewing' as const)
         : pendingChild?.authorization?.review?.status === 'planned'
           ? ('queued_auto_review' as const)
           : undefined;
   const input = record(args.input);
   const task =
-    typeof input?.name === 'string'
-      ? input.name
-      : typeof args.input === 'string'
-        ? args.input
-        : typeof input?.content === 'string'
-          ? input.content
-          : typeof input?.task === 'string'
-            ? input.task
-            : typeof args.key === 'string'
-              ? args.key
-              : (child?.session.title ?? execution.definitionId);
+    typeof args.taskName === 'string' && args.taskName.trim()
+      ? args.taskName
+      : typeof args.prompt === 'string'
+        ? args.prompt
+        : typeof args.content === 'string'
+          ? args.content
+          : typeof input?.name === 'string'
+            ? input.name
+            : typeof args.input === 'string'
+              ? args.input
+              : typeof input?.content === 'string'
+                ? input.content
+                : typeof input?.task === 'string'
+                  ? input.task
+                  : typeof args.key === 'string'
+                    ? args.key
+                    : (child?.session.title ?? execution.definitionId);
   const timing = snapshot.executionTimings?.[execution.id];
   const startedAt =
     timing?.availability === 'recorded_dispatch' &&
@@ -740,7 +797,7 @@ export function projectInkChild(
           'agent/code': 'code',
           'agent/review': 'review',
         } as Readonly<Record<string, string>>
-      )[args.role] ?? args.role,
+      )[role] ?? role,
     ),
     task: terminalText(task),
     status:
@@ -752,13 +809,7 @@ export function projectInkChild(
             ? 'suspended'
             : execution.status === 'cancelled'
               ? 'cancelled'
-              : execution.status === 'planned' &&
-                  !child?.runs.some(
-                    (run) =>
-                      run.isActive &&
-                      run.originStoreId === snapshot.storeId &&
-                      run.sessionId === child.session.id,
-                  )
+              : execution.status === 'planned' && !childRun?.isActive
                 ? 'creating'
                 : 'running',
     summary: inkResultSummary(execution.result),
@@ -1047,9 +1098,7 @@ export function projectInkExecutionGroups(
     flush();
     const carriers = sources
       .flatMap((source) =>
-        source &&
-        (frozenBuiltin(source, snapshot, 'builtin.task', 'task') ||
-          frozenBuiltin(source, snapshot, 'builtin.task', 'task.execute'))
+        source && taskCarrierTool(source, snapshot)
           ? snapshot.view.executions
               .filter(
                 (job) =>

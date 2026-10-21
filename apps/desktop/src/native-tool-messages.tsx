@@ -17,6 +17,12 @@ const labels: Record<string, readonly [readonly string[], string]> = {
   'shell.wait': [['1'], '等待后台 Shell'],
   'shell.stop': [['1'], '请求停止后台 Shell'],
   ask_user: [['1'], '询问用户'],
+  'task.spawn': [['1'], '创建子 Agent'],
+  'task.follow_up': [['1'], '继续子 Agent'],
+  'task.message': [['1'], '发送 Agent 消息'],
+  'task.events': [['1'], '等待 Agent 事件'],
+  'task.list': [['1'], '列出子 Agent'],
+  'task.interrupt': [['1'], '中断子 Agent'],
 };
 const exploration = new Set([
   'files.read',
@@ -40,6 +46,12 @@ export function desktopToolPresentation(
             'files.read_path': 'read_file',
             'files.write': 'write_file',
             'files.edit': 'edit_file',
+            'task.spawn': 'spawn_agent',
+            'task.follow_up': 'follow_up_agent',
+            'task.message': 'send_agent_message',
+            'task.events': 'wait_agent_events',
+            'task.list': 'list_agents',
+            'task.interrupt': 'interrupt_agent',
           } as Record<string, string>
         )[fact.definitionId] ?? fact.definitionId)
       : undefined,

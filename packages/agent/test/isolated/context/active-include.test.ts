@@ -132,7 +132,7 @@ for (const mode of ['apply', 'cancel', 'approval'] as const)
       await runtime.submitCommand({
         ...base,
         commandId: 'active-work',
-        request: { kind: 'run.start', content: 'new exact foreground' },
+        request: { kind: 'run.start', content: 'New task: new exact foreground' },
       });
       await ready.promise;
       let cardId: string | undefined;
@@ -151,7 +151,16 @@ for (const mode of ['apply', 'cancel', 'approval'] as const)
         }
         expect(cardId).toBeDefined();
       }
-      const run = (await store.getView('s')).runs.find((run) => run.isActive)!;
+      const active = (await store.getCommand('active-work'))!;
+      const receipt = active.receipt as { businessCommandId: string; runId: string };
+      expect(active.status).toBe('applied');
+      const run = (await store.getRun(receipt.runId))!;
+      expect(run).toMatchObject({
+        originCommandId: receipt.businessCommandId,
+        rootWorkCommandId: active.id,
+        isActive: true,
+      });
+      expect((await store.getExecution(requests[2]!.requestId))?.runId).toBe(run.id);
       const input = {
         ...base,
         commandId: 'include',

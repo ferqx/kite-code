@@ -1,4 +1,5 @@
 import { dlopen, ptr, toArrayBuffer } from 'bun:ffi';
+import { readSync } from 'node:fs';
 import { Readable } from 'node:stream';
 import {
   type OwnedProcessIdentity,
@@ -22,7 +23,6 @@ function loadSystem() {
     pipe: { args: ['ptr'], returns: 'i32' },
     // Fixed-arity kernel entry: libc fcntl is variadic (Darwin arm64 stack ABI).
     __fcntl: { args: ['i32', 'i32', 'i32'], returns: 'i32' },
-    read: { args: ['i32', 'ptr', 'u64'], returns: 'i64' },
     close: { args: ['i32'], returns: 'i32' },
     waitid: { args: ['i32', 'u32', 'ptr', 'i32'], returns: 'i32' },
     waitpid: { args: ['i32', 'ptr', 'i32'], returns: 'i32' },
@@ -82,7 +82,7 @@ export function startDarwinOwnedChild(input: {
   }
   const api = system.symbols;
   const errno = () => new DataView(toArrayBuffer(api.__error()!, 0, 4)).getInt32(0, true);
-  const failure = (operation: string, code: number): Error =>
+  const failure = (operation: string, code: number | null): Error =>
     Object.assign(Error(`darwin_owned_child_${operation}`), { errno: code });
   const check = (operation: string, result: number) => {
     if (result !== 0) throw failure(operation, result);
@@ -131,8 +131,28 @@ export function startDarwinOwnedChild(input: {
     const pump = () => {
       timer = undefined;
       if (!demand || stream.destroyed) return;
-      // One bounded native nonblocking read per turn; push owns a copied chunk.
-      const count = Number(api.read(fd, ptr(data), data.length));
+      // readSync captures errno in the native call's exception. Reading TLS
+      // errno after an FFI return would cross JS allocation/conversion first.
+      // The stream still owns this FD and makes one bounded read per turn.
+      let count: number;
+      try {
+        count = readSync(fd, data, 0, data.length, null);
+      } catch (error) {
+        const failed = error as NodeJS.ErrnoException;
+        if (failed.code === 'EAGAIN' || failed.code === 'EINTR') {
+          if (demand) timer = setTimeout(pump, 10);
+        } else {
+          stream.destroy(
+            failure(
+              'read',
+              typeof failed.errno === 'number' && Number.isSafeInteger(failed.errno)
+                ? Math.abs(failed.errno)
+                : null,
+            ),
+          );
+        }
+        return;
+      }
       if (count > 0) {
         demand = stream.push(Buffer.from(data.subarray(0, count)));
       } else if (count === 0) {
@@ -141,14 +161,8 @@ export function startDarwinOwnedChild(input: {
         release();
         stream.push(null);
         return;
-      } else {
-        const code = errno();
-        if (code !== 35 && code !== 4) {
-          stream.destroy(failure('read', code));
-          return;
-        }
       }
-      if (demand) timer = setTimeout(pump, count > 0 ? 0 : 10);
+      if (demand) timer = setTimeout(pump, 0);
     };
     const stream = new Readable({
       highWaterMark: 32 * 1024,

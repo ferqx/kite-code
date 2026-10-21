@@ -244,9 +244,13 @@ test.skipIf(process.platform !== 'darwin')(
               { headers: { 'content-type': 'text/event-stream' } },
             );
           }
-          const serialized = JSON.stringify(body.messages);
           const sessionId = ['a', 'b', 'd', 'c'].find((id) =>
-            serialized.includes(`NATIVE_PLAN_${id.toUpperCase()}`),
+            body.messages.some(
+              (message) =>
+                message.role === 'user' &&
+                message.content ===
+                  `${id === 'b' ? '新任务：' : ''}NATIVE_PLAN_${id.toUpperCase()} exact original task`,
+            ),
           )!;
           expect(sessionId).toBeDefined();
           const stage = stages.get(sessionId) ?? 0;
@@ -628,7 +632,7 @@ test.skipIf(process.platform !== 'darwin')(
           expect(review.reviewer.id).toBe('builtin.auto');
           expect(review.reviewer.modelId).toBe('fixed');
           expect(review.originCommandRequest.content).toBe(
-            `NATIVE_PLAN_${review.target.sessionId.toUpperCase()} exact original task`,
+            `${review.target.sessionId === 'b' ? '新任务：' : ''}NATIVE_PLAN_${review.target.sessionId.toUpperCase()} exact original task`,
           );
           expect(review.rootWorkRequest.content).toBe(review.originCommandRequest.content);
           expect(review.target.originStoreId).toBe(storeId);

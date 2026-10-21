@@ -7,7 +7,7 @@ import { createRuntime } from '@kite-ai/agent';
 import { openSqliteStore, resolveProfile } from '@kite-ai/agent/sqlite';
 import { createFixedModel, type ModelAdapter, type ModelRequest } from '@kite-ai/ai';
 import { startService } from '../../../apps/service/src';
-import { createClient } from '../../../packages/client/src';
+import { createClient, readOrdinaryCommandApplication } from '../../../packages/client/src';
 
 async function until<T>(read: () => Promise<T>, valid: (value: T) => boolean): Promise<T> {
   const deadline = Date.now() + 5000;
@@ -179,6 +179,7 @@ async function fixture(oldTool = false) {
 test('real Loop applies twelve accepted steer inputs before old Tool dispatch; public provenance and immutable first Model are preserved', async () => {
   const f = await fixture(true);
   try {
+    const businessIds: string[] = [];
     for (let i = 0; i < 12; i++) {
       const receipt = await f.client.steer('s', {
         expectedStoreId: f.expectedStoreId,
@@ -190,6 +191,7 @@ test('real Loop applies twelve accepted steer inputs before old Tool dispatch; p
       });
       expect(receipt.id).toBe(`steer-${i}`);
       expect(receipt.status).toBe('accepted');
+      businessIds.push((receipt.receipt as { businessCommandId: string }).businessCommandId);
     }
     const ids: string[] = [];
     let afterSeq: string | undefined;
@@ -209,7 +211,8 @@ test('real Loop applies twelve accepted steer inputs before old Tool dispatch; p
         });
       afterSeq = page.nextAfterSeq ?? undefined;
     } while (afterSeq);
-    expect(ids).toEqual(Array.from({ length: 12 }, (_, i) => `steer-${i}`));
+    expect(ids).toEqual(businessIds);
+    expect(new Set(businessIds).size).toBe(12);
     expect(
       f.model.requests[0]?.messages.some((message) => message.content.startsWith('steer content')),
     ).toBe(false);
@@ -232,17 +235,28 @@ test('real Loop applies twelve accepted steer inputs before old Tool dispatch; p
     for (let i = 0; i < 12; i++) {
       const command = await f.client.getCommand(`steer-${i}`);
       expect(command.status).toBe('applied');
-      expect(command.receipt).toMatchObject({ outcome: 'input_applied', runId: f.run.id });
-      expect(messages.find((message) => message.originCommandId === `steer-${i}`)).toMatchObject({
+      expect(command.receipt).toMatchObject({ outcome: 'human_input_applied', runId: f.run.id });
+      const application = (await readOrdinaryCommandApplication(f.client, command))!;
+      expect(application.run?.id).toBe(f.run.id);
+      const businessId = application.sourceCommandId;
+      expect(businessId).not.toBe(command.id);
+      const raw = await f.store.getCommand(
+        (command.receipt as { humanInputCommandId: string }).humanInputCommandId,
+      );
+      expect(raw?.request).toMatchObject({
+        content: `steer content ${i}`,
+        publicCommandId: command.id,
+      });
+      expect(messages.find((message) => message.originCommandId === businessId)).toMatchObject({
         content: `steer content ${i}`,
         inputKind: 'input.steer',
         contextSelectionId: f.contextSelectionId,
-        sourceIds: [`steer-${i}`],
+        sourceIds: [businessId],
       });
       expect(f.model.requests[1]?.messages).toContainEqual({
         role: 'user',
         content: `steer content ${i}`,
-        sourceIds: [`steer-${i}`],
+        sourceIds: [businessId],
       });
     }
     const original = await f.client.getCommand('steer-0');
@@ -256,8 +270,11 @@ test('real Loop applies twelve accepted steer inputs before old Tool dispatch; p
         contextSelectionId: f.contextSelectionId,
       }),
     ).toEqual(original);
+    const originalApplication = (await readOrdinaryCommandApplication(f.client, original))!;
     expect(
-      (await f.client.listMessages('s')).filter((message) => message.originCommandId === 'steer-0'),
+      (await f.client.listMessages('s')).filter(
+        (message) => message.originCommandId === originalApplication.sourceCommandId,
+      ),
     ).toHaveLength(1);
     expect(
       (await f.client.listPendingInputs('s', { storeId: f.expectedStoreId })).commands,
@@ -306,6 +323,7 @@ test('a complete one MiB escaped input fits the HTTP frame and precise cancellat
 test('precise original Run cancellation preserves queued explicit follow-up while cancelling another input by original command ID creates no new Run/message', async () => {
   const f = await fixture();
   try {
+    const content = { 'follow-one': 'New task: follow-one', 'follow-two': 'follow-two' };
     for (const id of ['follow-one', 'follow-two'])
       expect(
         (
@@ -313,23 +331,42 @@ test('precise original Run cancellation preserves queued explicit follow-up whil
             expectedStoreId: f.expectedStoreId,
             commandId: id,
             kind: 'input.follow_up',
-            content: id,
+            content: content[id as keyof typeof content],
             afterRunId: f.run.id,
             contextSelectionId: f.contextSelectionId,
           })
         ).status,
       ).toBe('accepted');
+    const queued = await f.client.getCommand('follow-one');
+    const queuedBusinessId = (queued.receipt as { businessCommandId: string }).businessCommandId;
     expect(
       (await f.client.listPendingInputs('s', { storeId: f.expectedStoreId })).commands.map(
         (command) => command.id,
       ),
-    ).toEqual(['follow-one', 'follow-two']);
+    ).toEqual([queuedBusinessId]);
+    const pendingInput = await f.client.getCommand('follow-two');
+    const pendingRawId = (pendingInput.receipt as { humanInputCommandId: string })
+      .humanInputCommandId;
+    expect(pendingInput.status).toBe('accepted');
+    expect((await f.store.getCommand(pendingRawId))?.receipt).toMatchObject({ state: 'pending' });
     await f.client.cancelCommand('s', {
       expectedStoreId: f.expectedStoreId,
       commandId: 'cancel-follow-two',
       kind: 'command.cancel',
       targetCommandId: 'follow-two',
     });
+    const cancelledRaw = await f.store.getCommand(pendingRawId);
+    expect(cancelledRaw?.cancelRequestedAt).not.toBeNull();
+    expect(cancelledRaw?.receipt).not.toHaveProperty('decisionCommandId');
+    expect(
+      (
+        await f.store.readHumanWorkState({
+          expectedStoreId: f.expectedStoreId,
+          sessionId: 's',
+          subjectId: 'owner',
+        })
+      ).selectedWork?.rootWorkCommandId,
+    ).toBe('follow-one');
     await f.client.cancelRun('s', {
       expectedStoreId: f.expectedStoreId,
       commandId: 'cancel-original',
@@ -337,28 +374,33 @@ test('precise original Run cancellation preserves queued explicit follow-up whil
       runId: f.run.id,
     });
     await f.runtime.waitForCommand('follow-one', { timeoutMs: 5000 });
+    const followCommand = await f.client.getCommand('follow-one');
+    const application = (await readOrdinaryCommandApplication(f.client, followCommand))!;
+    const businessId = application.sourceCommandId;
     const view = await f.client.getView('s');
     expect(view.runs.find((run) => run.id === f.run.id)?.status).toBe('cancelled');
-    expect(view.runs.find((run) => run.originCommandId === 'follow-one')?.status).toBe('completed');
+    expect(view.runs.find((run) => run.id === application.run?.id)).toMatchObject({
+      originCommandId: businessId,
+      rootWorkCommandId: 'follow-one',
+      status: 'completed',
+    });
     expect(view.runs).toHaveLength(2);
     expect(await f.client.getCommand('follow-two')).toMatchObject({
       status: 'rejected',
       receipt: { outcome: 'cancelled_before_apply' },
     });
     expect(view.messages.some((message) => message.originCommandId === 'follow-two')).toBe(false);
-    expect(view.messages.find((message) => message.originCommandId === 'follow-one')).toMatchObject(
-      {
-        inputKind: 'input.follow_up',
-        contextSelectionId: f.contextSelectionId,
-        sourceIds: ['follow-one'],
-        content: 'follow-one',
-      },
-    );
+    expect(view.messages.find((message) => message.originCommandId === businessId)).toMatchObject({
+      inputKind: 'input.follow_up',
+      contextSelectionId: f.contextSelectionId,
+      sourceIds: [businessId],
+      content: content['follow-one'],
+    });
     expect(f.model.requests).toHaveLength(2);
     expect(f.model.requests[1]?.messages).toContainEqual({
       role: 'user',
-      content: 'follow-one',
-      sourceIds: ['follow-one'],
+      content: content['follow-one'],
+      sourceIds: [businessId],
     });
     expect(
       (await f.client.listPendingInputs('s', { storeId: f.expectedStoreId })).commands,

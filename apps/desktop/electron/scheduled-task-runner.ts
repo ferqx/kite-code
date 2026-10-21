@@ -4,6 +4,7 @@ import {
   ClientError,
   type Command,
   canonicalCallerCommandRequest,
+  readOrdinaryCommandApplication,
   type SessionView,
   type StartCommandRequest,
 } from '@kite-ai/client';
@@ -430,23 +431,22 @@ export class ScheduledTaskRunner {
       });
       return;
     }
-    const receipt = command.receipt;
-    if (
-      !receipt ||
-      typeof receipt !== 'object' ||
-      Array.isArray(receipt) ||
-      typeof receipt.runId !== 'string'
-    ) {
-      this.update(run, { status: command.status === 'needs_review' ? 'waiting' : 'unknown' });
+    const application = await readOrdinaryCommandApplication(this.client, command);
+    if (!application?.run || application.observation) {
+      this.update(run, {
+        status: ['accepted', 'needs_review'].includes(command.status) ? 'waiting' : 'unknown',
+      });
       return;
     }
-    const actual = await this.client.getRun(receipt.runId);
+    const actual = application.run;
+    const controlledWorkId =
+      actual.rootWorkCommandId ??
+      (application.sourceCommandId === run.startCommandId ? run.startCommandId : undefined);
     this.assertStore(run.task.storeId);
     if (
-      actual.id !== receipt.runId ||
       actual.sessionId !== run.sessionId ||
       actual.originStoreId !== run.task.storeId ||
-      actual.originCommandId !== run.startCommandId
+      !controlledWorkId
     )
       throw Error('scheduled_identity_mismatch');
     let status: ScheduledTaskRunUpdate['status'] =
@@ -490,7 +490,7 @@ export class ScheduledTaskRunner {
           throw Error('scheduled_identity_mismatch');
         if (
           item.execution.originStoreId !== run.task.storeId ||
-          item.execution.rootWorkCommandId !== run.startCommandId
+          item.execution.rootWorkCommandId !== controlledWorkId
         )
           continue;
         unknown ||= item.execution.status === 'outcome_unknown';
@@ -556,7 +556,7 @@ export class ScheduledTaskRunner {
         for (const execution of view.executions) {
           if (
             execution.originStoreId !== run.task.storeId ||
-            (execution.rootWorkCommandId !== run.startCommandId && execution.runId !== actual.id)
+            (execution.rootWorkCommandId !== controlledWorkId && execution.runId !== actual.id)
           )
             continue;
           if (execution.sessionId !== view.session.id) throw Error('scheduled_identity_mismatch');

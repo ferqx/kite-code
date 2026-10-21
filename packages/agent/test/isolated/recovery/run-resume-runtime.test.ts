@@ -8,6 +8,7 @@ import { createArtifactStore } from '../../../src/artifacts';
 import { createRuntime } from '../../../src/runtime';
 import { openSqliteStore } from '../../../src/sqlite';
 import type { Store } from '../../../src/storage/port';
+import type { CommandRecord, RunRecord } from '../../../src/storage/types';
 import { binding } from './run-resume-fixture';
 
 async function until(check: () => Promise<boolean>) {
@@ -115,8 +116,19 @@ for (const mode of [
       let releasePreflight!: () => void;
       const gate = new Promise<void>((resolve) => {
         releasePreflight = resolve;
-        releaseHeld = resolve;
       });
+      let releaseContinuation!: () => void;
+      const continuationGate = new Promise<void>((resolve) => {
+        releaseContinuation = resolve;
+      });
+      releaseHeld = () => {
+        releasePreflight();
+        releaseContinuation();
+      };
+      const recoveryInputs: { command: Readonly<CommandRecord>; run: Readonly<RunRecord> }[] = [];
+      const preparationDisposals: number[] = [];
+      const originalWork = (await store.getCommand('work'))!;
+      const originalRun = (await store.getRun(ready.runId))!;
       let entered = false;
       let historicalPages = 0;
       const wrapped = new Proxy(store, {
@@ -141,13 +153,13 @@ for (const mode of [
                         kind: 'input.follow_up',
                         afterRunId: ready.runId,
                         contextSelectionId: session.contextSelectionId,
-                        content: 'next requested work',
+                        content: 'Continue current work: next requested work',
                       }
                     : {
                         kind: 'input.steer',
                         targetRunId: ready.runId,
                         contextSelectionId: session.contextSelectionId,
-                        content: 'new exact input',
+                        content: 'Follow up: new exact input',
                       },
               });
               return target.finishRun(input);
@@ -170,8 +182,14 @@ for (const mode of [
           : {}),
         permissions: binding(directory, seedMode).permissions!,
         artifacts: createArtifactStore({ profile, store: wrapped }),
-        resolveRecoveryRunConfiguration: async () => {
+        resolveRecoveryRunConfiguration: async (input) => {
+          recoveryInputs.push({ command: input.command, run: input.run });
+          // Continue restores A again after its first recovery lease is released.
+          // Keep that separate preparation outside the original resume assertions.
+          if (mode === 'follow_up' && !input.run.isActive) await continuationGate;
           resolves++;
+          const preparation = preparationDisposals.length;
+          preparationDisposals.push(0);
           if (mode === 'cancel_preparation' || mode === 'concurrent_preparation') {
             entered = true;
             await gate;
@@ -182,6 +200,7 @@ for (const mode of [
             ...(mode === 'version' ? { snapshot: { changed: true } } : {}),
             dispose: async () => {
               disposals++;
+              preparationDisposals[preparation]!++;
               if (mode === 'cleanup') throw Error('owned disposer failure');
             },
           };
@@ -290,15 +309,57 @@ for (const mode of [
       });
       await until(async () => !(await store!.getRun(ready.runId))!.isActive);
       await until(async () => disposals === 1);
+      if (mode === 'follow_up') {
+        await until(async () => recoveryInputs.length === 2);
+        expect(recoveryInputs[0]!.command).toEqual(originalWork);
+        expect(recoveryInputs[0]!.run).toEqual(originalRun);
+        expect(recoveryInputs[1]!.command).toEqual(originalWork);
+        expect(recoveryInputs[1]!.run).toMatchObject({
+          id: ready.runId,
+          originCommandId: originalWork.id,
+          originStoreId: ready.expectedStoreId,
+          rootWorkCommandId: originalWork.rootWorkCommandId,
+          rootWorkSeq: originalWork.rootWorkSeq,
+          configuration: originalRun.configuration,
+          isActive: false,
+          status: 'completed',
+        });
+        expect(preparationDisposals).toEqual([1]);
+      }
       expect(await runtime.resumeRun(input)).toEqual(receipt);
       expect(resolves).toBe(1);
       expect(historicalPages).toBe(0);
       if (mode === 'follow_up') {
-        await until(async () =>
-          (await store!.getView('s')).runs.some(
-            (run) => run.originCommandId === 'follow-up' && !run.isActive,
-          ),
+        releaseContinuation();
+        await until(async () => {
+          const saved = await store!.getCommand('follow-up');
+          if (saved?.status !== 'applied') return false;
+          const runId = (saved.receipt as { runId: string }).runId;
+          return (await store!.getRun(runId))?.isActive === false;
+        });
+        const followup = (await store.getCommand('follow-up'))!;
+        const receipt = followup.receipt as { runId: string; businessCommandId: string };
+        const business = await store.getCommand(receipt.businessCommandId);
+        expect(followup.receipt).toMatchObject({ outcome: 'human_input_applied' });
+        expect(business).toMatchObject({ status: 'applied', rootWorkCommandId: 'work' });
+        expect(business?.receipt).toMatchObject({ runId: receipt.runId });
+        expect(await store.getRun(receipt.runId)).toMatchObject({
+          originCommandId: business!.id,
+          rootWorkCommandId: 'work',
+          status: 'completed',
+        });
+        const user = (await store.listMessages('s')).find(
+          (message) => message.runId === receipt.runId && message.role === 'user',
         );
+        expect(user).toMatchObject({
+          content: 'Continue current work: next requested work',
+          sourceIds: [business!.id],
+        });
+        await until(async () => disposals === 2);
+        expect(resolves).toBe(2);
+        expect(preparationDisposals).toEqual([1, 1]);
+        expect(await runtime.resumeRun(input)).toEqual(await promise);
+        expect(resolves).toBe(2);
         expect((await store.getView('s')).runs.length).toBe(2);
         expect((await store.getCommand('follow-up'))!.status).toBe('applied');
       }

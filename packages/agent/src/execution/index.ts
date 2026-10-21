@@ -37,6 +37,11 @@ import {
   type ToolCall,
 } from '../storage/types';
 import {
+  type AuthorizationChangeWait,
+  AuthorizationRefreshRequired,
+  modeControlsChanged,
+} from './authorization-refresh';
+import {
   type AcceptedAuthorization,
   AuthorizationDeniedError,
   InteractionGate,
@@ -69,12 +74,21 @@ interface RequirementObservation {
   }[];
 }
 /** Only Core's own inconsistent read-set observation qualifies for a fresh read. */
+/** Only the model Store dispatch gate can issue this internal completion proof. */
+class InputProcessingDecidedAdmission extends AgentError {
+  constructor() {
+    super('input_processing_decided');
+  }
+}
+
 class ConditionSnapshotChangedError extends AgentError {
   constructor() {
     super('necessary_condition_snapshot_changed');
   }
 }
 export interface ExecutionScope {
+  /** Core-owned interpretation of one durable human input, never a business grant. */
+  humanInputInterpretation?: { inputCommandId: string; inputDigest: string };
   toolAdmission?: ToolDispatchAdmission;
   modelRetry?: import('../model-attempt').ModelRetrySource;
   compressionId?: string;
@@ -133,6 +147,7 @@ function identity(scope: ToolScope) {
       };
 }
 export interface ExecutionOptions {
+  waitForChange?: AuthorizationChangeWait;
   /** Internal observation after dispatch acknowledgement, before entering the adapter. */
   onModelStart?: (scope: ExecutionScope, execution: ExecutionRecord) => void;
   /** Internal post-commit observation; never a gate or an extension execution context. */
@@ -193,13 +208,18 @@ export class UnifiedExecution {
   private readonly options: ExecutionOptions;
   private readonly interactions: InteractionGate;
   private readonly authorizationReviews = new Map<string, ReadAuthorizationReviewInput>();
+  private readonly authorizationDecisions = new Map<string, AcceptedAuthorization>();
   private readonly unconfirmedJobs = new Map<
     string,
     { definition: JobDefinition; handle?: JobHandle; release: () => void | Promise<void> }
   >();
   constructor(options: ExecutionOptions) {
     this.options = options;
-    this.interactions = new InteractionGate(options.store, options.permissions);
+    this.interactions = new InteractionGate(
+      options.store,
+      options.permissions,
+      options.waitForChange,
+    );
   }
   private interactionScope(scope: ToolScope, executionId: string) {
     return {
@@ -234,7 +254,11 @@ export class UnifiedExecution {
   }
   interactionRequesterWithReceipt(scope: ToolScope, executionId: string) {
     const gate = scope.bindings?.permissions
-      ? new InteractionGate(this.options.store, scope.bindings.permissions)
+      ? new InteractionGate(
+          this.options.store,
+          scope.bindings.permissions,
+          this.options.waitForChange,
+        )
       : this.interactions;
     return gate.informationRequester(this.interactionScope(scope, executionId));
   }
@@ -245,31 +269,54 @@ export class UnifiedExecution {
     final = false,
   ): Promise<AcceptedAuthorization> {
     const gate = scope.bindings?.permissions
-      ? new InteractionGate(this.options.store, scope.bindings.permissions)
+      ? new InteractionGate(
+          this.options.store,
+          scope.bindings.permissions,
+          this.options.waitForChange,
+        )
       : this.interactions;
-    return gate.authorize(
-      {
-        ...this.interactionScope(scope, request.executionId),
-        final,
-        previousReview: this.authorizationReviews.get(request.executionId),
-        ...(!final && this.options.reviewAuthorization
-          ? {
-              review: async (decision: import('../extensions').PermissionDecision) => {
-                const reference = await this.options.reviewAuthorization!(
-                  scope,
-                  request,
-                  source,
-                  decision,
-                );
-                if (reference) this.authorizationReviews.set(request.executionId, reference);
-                return reference;
-              },
-            }
-          : {}),
-      },
-      request,
-      source,
-    );
+    return gate
+      .authorize(
+        {
+          ...this.interactionScope(scope, request.executionId),
+          final,
+          previousReview: this.authorizationReviews.get(request.executionId),
+          previousPolicy: this.authorizationDecisions.get(request.executionId),
+          ...(!final && this.options.reviewAuthorization
+            ? {
+                review: async (
+                  decision: import('../extensions').PermissionDecision,
+                  signal: AbortSignal,
+                ) => {
+                  const reference = await this.options.reviewAuthorization!(
+                    { ...scope, signal },
+                    { ...request, signal },
+                    source,
+                    decision,
+                  );
+                  if (reference && !signal.aborted)
+                    this.authorizationReviews.set(request.executionId, reference);
+                  return reference;
+                },
+              }
+            : {}),
+        },
+        request,
+        source,
+      )
+      .then((decision) => {
+        this.authorizationDecisions.set(request.executionId, decision);
+        const review = this.authorizationReviews.get(request.executionId);
+        // An ask-user review is not a review grant. Keep its exact reference
+        // after human acceptance so final dispatch can still verify the review
+        // request and policy without starting another resource-bound review.
+        if (
+          !decision.reviewExecutionId &&
+          (!decision.interactionId || review?.policyRevision !== decision.revision)
+        )
+          this.authorizationReviews.delete(request.executionId);
+        return decision;
+      });
   }
   private async liveScope<T extends ToolScope, R>(
     scope: T,
@@ -286,6 +333,7 @@ export class UnifiedExecution {
       return await work(bound);
     } finally {
       this.authorizationReviews.delete(executionId);
+      this.authorizationDecisions.delete(executionId);
       release?.();
       scope.signal.removeEventListener('abort', abort);
     }
@@ -628,6 +676,163 @@ export class UnifiedExecution {
         : {}),
     });
   }
+  /** Reacquire only before dispatch; completed/unknown effects never enter this loop. */
+  private async acquireDispatch(
+    scope: ToolScope,
+    executionId: string,
+    definitionId: string,
+    definitionVersion: string,
+    input: Json,
+    source: Json,
+    resources: Parameters<ExecutionResources['acquire']>[0],
+    kind: AuthorizationRequest['kind'] = 'tool',
+    onStoreCancellation?: () => void,
+    admit?: (signal: AbortSignal) => Promise<(() => void) | undefined>,
+  ) {
+    const work = identity(scope);
+    for (;;) {
+      const cursor = (await this.options.store.getMetadata()).lastChangeCursor;
+      const request = {
+        kind,
+        sessionId: work.sessionId,
+        runId: work.runId,
+        executionId,
+        definitionId,
+        definitionVersion,
+        input,
+        signal: scope.signal,
+      };
+      const decision = await this.authorize(scope, request, source);
+      let releaseAdmission: (() => void) | undefined;
+      let releaseResources: (() => void) | undefined;
+      const release = () => {
+        releaseResources?.();
+        releaseResources = undefined;
+        releaseAdmission?.();
+        releaseAdmission = undefined;
+      };
+      try {
+        const controller = new AbortController();
+        const abort = () => controller.abort(scope.signal.reason);
+        scope.signal.addEventListener('abort', abort, { once: true });
+        if (scope.signal.aborted) abort();
+        const gate = new InteractionGate(
+          this.options.store,
+          scope.bindings?.permissions ?? this.options.permissions,
+          this.options.waitForChange,
+        );
+        try {
+          await Promise.race([
+            (async () => {
+              releaseAdmission = await admit?.(controller.signal);
+              controller.signal.throwIfAborted();
+              releaseResources = await this.options.resources.acquire(
+                resources,
+                { sessionId: work.sessionId, workspaceId: scope.workspaceId },
+                controller.signal,
+              );
+              if (controller.signal.aborted) {
+                release();
+                controller.signal.throwIfAborted();
+              }
+            })().catch((error) => {
+              release();
+              throw error;
+            }),
+            gate.policyChanged(
+              { ...this.interactionScope(scope, executionId), signal: controller.signal },
+              { ...request, signal: controller.signal },
+              decision,
+              cursor,
+            ),
+          ]);
+        } finally {
+          controller.abort();
+          scope.signal.removeEventListener('abort', abort);
+        }
+        const authorization = await this.dispatch(
+          scope,
+          executionId,
+          definitionId,
+          definitionVersion,
+          input,
+          source,
+          kind,
+          onStoreCancellation,
+        );
+        return { release, authorization };
+      } catch (error) {
+        release();
+        if (
+          kind === 'job' &&
+          'command' in scope &&
+          error instanceof AgentError &&
+          ['input_unresolved', 'work_not_selected', 'work_paused'].includes(error.code) &&
+          this.options.waitForChange
+        ) {
+          const execution = await this.options.store.getExecution(executionId);
+          // Only Core-managed, never-dispatched child carriers have this retry boundary.
+          // A work selection defers new effects; it does not retire an accepted assignment.
+          if (execution?.childSessionId && execution.status === 'planned') {
+            for (;;) {
+              scope.signal.throwIfAborted();
+              const state = await this.options.store.readHumanWorkEligibility({
+                expectedStoreId: work.originStoreId,
+                sessionId: execution.sessionId,
+                subjectId: scope.command.subjectId,
+                rootWorkCommandId: execution.rootWorkCommandId,
+                rootWorkSeq: execution.rootWorkSeq,
+              });
+              if (state.state === 'eligible') break;
+              if (
+                !['input_unresolved', 'work_not_selected', 'work_paused'].includes(
+                  state.reason ?? '',
+                )
+              ) {
+                const current = await this.options.store.getExecution(executionId);
+                if (!current?.cancelRequestedAt)
+                  throw new AgentError(state.reason ?? 'human_work_blocked');
+                // Let the ordinary live-execution cancellation watcher settle its
+                // exact original scope; a revoked selection alone is not cancellation.
+              }
+              await this.options.waitForChange(state.cursor, scope.signal, 30000);
+            }
+            this.authorizationReviews.delete(executionId);
+            this.authorizationDecisions.delete(executionId);
+            continue;
+          }
+        }
+        if (
+          !(error instanceof AgentError) ||
+          !['authorization_refresh_required', 'permission_control_changed'].includes(error.code)
+        )
+          throw error;
+        if (
+          error.code === 'authorization_refresh_required' &&
+          !(error instanceof AuthorizationRefreshRequired)
+        )
+          throw error;
+        const current = await this.options.store.getExecution(executionId);
+        if (current?.status !== 'planned') throw error;
+        if (error.code === 'permission_control_changed') {
+          const refreshed = await (
+            scope.bindings?.permissions ?? this.options.permissions
+          ).authorize(request);
+          // Re-reading a revision is not a new policy decision. Trust revocation and
+          // opaque/static injected policies retain the original fail-closed boundary.
+          if (
+            !modeControlsChanged(decision.controlReads, refreshed.controlReads) ||
+            refreshed.revision === decision.revision
+          )
+            throw error;
+        }
+        this.authorizationReviews.delete(executionId);
+        this.authorizationDecisions.delete(executionId);
+        scope.signal.throwIfAborted();
+      }
+    }
+  }
+
   private async dispatch(
     scope: ToolScope,
     executionId: string,
@@ -692,6 +897,12 @@ export class UnifiedExecution {
     } catch (error) {
       if (error instanceof AgentError && error.code === 'cancelled_before_dispatch')
         onStoreCancellation?.();
+      if (
+        kind === 'model' &&
+        error instanceof AgentError &&
+        error.code === 'input_processing_decided'
+      )
+        throw new InputProcessingDecidedAdmission();
       throw error;
     }
     return {
@@ -728,6 +939,9 @@ export class UnifiedExecution {
       ? structuredClone(planned.decisionSource)
       : {
           kind: 'model_request',
+          ...(scope.humanInputInterpretation
+            ? { humanInputInterpretation: { ...scope.humanInputInterpretation } }
+            : {}),
           ...(scope.modelRetry ? { retry: { ...scope.modelRetry } } : {}),
           ...(scope.compressionId ? { compressionId: scope.compressionId } : {}),
           ...(scope.continuation ? { continuation: scope.continuation } : {}),
@@ -819,15 +1033,20 @@ export class UnifiedExecution {
         ? await this.options.openModelInput(scope, input)
         : request;
       scope.signal.throwIfAborted();
-      release = await this.options.resources.acquire(
+      const acquired = await this.acquireDispatch(
+        scope,
+        executionId,
+        request.modelId,
+        '1',
+        input,
+        source,
         { slot: 'model' },
-        { sessionId: scope.run.sessionId, workspaceId: scope.workspaceId },
-        scope.signal,
+        'model',
+        () => {
+          cancelledByStoreAdmission = true;
+        },
       );
-      await this.dispatch(scope, executionId, request.modelId, '1', input, source, 'model', () => {
-        // Durable cancellation may be visible before its local abort notification arrives.
-        cancelledByStoreAdmission = true;
-      });
+      release = acquired.release;
       dispatched = true;
       scope.signal.throwIfAborted();
       try {
@@ -975,6 +1194,10 @@ export class UnifiedExecution {
                   ? error.message
                   : 'model_failed',
             incomplete: true,
+            // Core-local dispatch proof, never a field supplied by the Adapter.
+            ...(error instanceof InputProcessingDecidedAdmission && !dispatched
+              ? { dispatchCommitted: false }
+              : {}),
             ...(recordedUsage === undefined ? {} : { usage: recordedUsage }),
             content: output ? preview() : content.slice(0, 64 * 1024),
             reasoning: output ? '' : reasoning.slice(0, 64 * 1024),
@@ -1204,29 +1427,26 @@ export class UnifiedExecution {
           });
         }
       }
-      if (!resuming)
-        await this.authorize(
-          scope,
-          {
-            kind: 'tool',
-            sessionId: work.sessionId,
-            runId: work.runId,
-            executionId,
-            definitionId: definition.id,
-            definitionVersion: definition.version,
-            input,
-            signal: scope.signal,
-          },
-          source,
+      let dispatchAuthorization: Awaited<ReturnType<UnifiedExecution['dispatch']>> | undefined;
+      if (resuming)
+        release = await this.options.resources.acquire(
+          definition.resources,
+          { sessionId: work.sessionId, workspaceId: scope.workspaceId },
+          scope.signal,
         );
-      release = await this.options.resources.acquire(
-        definition.resources,
-        { sessionId: work.sessionId, workspaceId: scope.workspaceId },
-        scope.signal,
-      );
-      const dispatchAuthorization = resuming
-        ? undefined
-        : await this.dispatch(scope, executionId, definition.id, definition.version, input, source);
+      else {
+        const acquired = await this.acquireDispatch(
+          scope,
+          executionId,
+          definition.id,
+          definition.version,
+          input,
+          source,
+          definition.resources,
+        );
+        release = acquired.release;
+        dispatchAuthorization = acquired.authorization;
+      }
       dispatched = true;
       if ('run' in scope) scope.toolAdmission?.dispatched();
       scope.signal.throwIfAborted();
@@ -1548,44 +1768,6 @@ export class UnifiedExecution {
       if (!observedTerminal) throw new AgentError('job_terminal_missing');
     };
     try {
-      if (!input.resumedChild)
-        await this.authorize(
-          scope,
-          {
-            kind: 'job',
-            sessionId: scope.command.sessionId,
-            runId: null,
-            executionId,
-            definitionId: definition.id,
-            definitionVersion: definition.version,
-            input: input.request,
-            signal: scope.signal,
-          },
-          input.source,
-        );
-      release = await this.options.admitJob?.(definition, scope);
-      const releaseAdmission = release;
-      const releaseResources = await this.options.resources.acquire(
-        definition.resources,
-        { sessionId: scope.command.sessionId, workspaceId: scope.workspaceId },
-        scope.signal,
-      );
-      // The original implementation must remain alive with an unconfirmed handle,
-      // beyond the observer operation's ordinary binding lease.
-      let releaseBinding: (() => Promise<void>) | undefined;
-      try {
-        releaseBinding = scope.bindings?.retain();
-      } catch (error) {
-        releaseResources();
-        await releaseAdmission?.();
-        release = undefined;
-        throw error;
-      }
-      release = async () => {
-        releaseResources();
-        await releaseAdmission?.();
-        await releaseBinding?.();
-      };
       if (!input.resumedChild && definition.recovery && definition.reconcile) {
         const extension = scope.bindings?.extensions.find((candidate) =>
           candidate.jobs?.some(
@@ -1612,17 +1794,42 @@ export class UnifiedExecution {
           },
         });
       }
-      const dispatchAuthorization = input.resumedChild
-        ? undefined
-        : await this.dispatch(
-            scope,
-            executionId,
-            definition.id,
-            definition.version,
-            input.request,
-            input.source,
-            'job',
-          );
+      let dispatchAuthorization: Awaited<ReturnType<UnifiedExecution['dispatch']>> | undefined;
+      if (input.resumedChild) {
+        const releaseAdmission = await this.options.admitJob?.(definition, scope);
+        let releaseResources: (() => void) | undefined;
+        release = () => {
+          releaseResources?.();
+          releaseAdmission?.();
+        };
+        releaseResources = await this.options.resources.acquire(
+          definition.resources,
+          { sessionId: scope.command.sessionId, workspaceId: scope.workspaceId },
+          scope.signal,
+        );
+      } else {
+        const acquired = await this.acquireDispatch(
+          scope,
+          executionId,
+          definition.id,
+          definition.version,
+          input.request,
+          input.source,
+          definition.resources,
+          'job',
+          undefined,
+          (signal) =>
+            this.options.admitJob?.(definition, { ...scope, signal }) ?? Promise.resolve(undefined),
+        );
+        release = acquired.release;
+        dispatchAuthorization = acquired.authorization;
+      }
+      const releaseExecutionResources = release;
+      const releaseBinding = scope.bindings?.retain();
+      release = async () => {
+        releaseExecutionResources?.();
+        await releaseBinding?.();
+      };
       scope.signal.throwIfAborted();
       attempted = true;
       handle =
@@ -1844,34 +2051,17 @@ export class UnifiedExecution {
     let attempted = false;
     let result: ToolResult;
     try {
-      await this.authorize(
-        scope,
-        {
-          kind: 'job',
-          sessionId: scope.command.sessionId,
-          runId: null,
-          executionId: input.executionId,
-          definitionId,
-          definitionVersion: input.definition.version,
-          input: input.prepared,
-          signal: scope.signal,
-        },
-        input.decisionSource,
-      );
-      release = await this.options.resources.acquire(
-        input.definition.resources,
-        { sessionId: scope.command.sessionId, workspaceId: scope.workspaceId },
-        scope.signal,
-      );
-      await this.dispatch(
+      const acquired = await this.acquireDispatch(
         scope,
         input.executionId,
         definitionId,
         input.definition.version,
         input.prepared,
         input.decisionSource,
+        input.definition.resources,
         'job',
       );
+      release = acquired.release;
       scope.signal.throwIfAborted();
       attempted = true;
       result = await input.execute(scope.signal);

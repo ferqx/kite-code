@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { isAbsolute, relative, resolve } from 'node:path';
+import { setImmediate } from 'node:timers/promises';
 import { AgentError } from '../storage/types';
 import { fileChangePreview } from './files-diff';
 import { createWorkspaceFileIo } from './files-io';
@@ -63,13 +64,14 @@ export interface WorkspaceFiles {
     maxBytes: number;
   }): Promise<FileByteSnapshot>;
   remove(input: { path: string; base: FileBaseline; maxBytes: number }): Promise<FileRemoval>;
-  read(path: string, options?: { offset?: number; limit?: number }): Promise<FileSnapshot>;
-  glob(input: {
-    pattern: string;
-    path?: string;
-    after?: string;
-    limit?: number;
-  }): Promise<{ paths: string[]; next: string | null }>;
+  read(
+    path: string,
+    options?: { offset?: number; limit?: number; signal?: AbortSignal },
+  ): Promise<FileSnapshot>;
+  glob(
+    input: { pattern: string; path?: string; after?: string; limit?: number },
+    options?: { signal?: AbortSignal },
+  ): Promise<{ paths: string[]; next: string | null }>;
   write(input: { path: string; content: string; base: FileBaseline | null }): Promise<FileSnapshot>;
   edit(input: {
     path: string;
@@ -83,12 +85,10 @@ export interface WorkspaceFiles {
     afterName?: string;
     limit?: number;
   }): Promise<{ entries: FileEntry[]; next: string | null }>;
-  search(input: {
-    text: string;
-    path?: string;
-    after?: string;
-    limit?: number;
-  }): Promise<{ matches: { path: string; line: number; content: string }[]; next: string | null }>;
+  search(
+    input: { text: string; path?: string; after?: string; limit?: number },
+    options?: { signal?: AbortSignal },
+  ): Promise<{ matches: { path: string; line: number; content: string }[]; next: string | null }>;
   close(): Promise<void>;
 }
 const missing = (error: unknown) => (error as { code?: string }).code === 'ENOENT';
@@ -166,6 +166,8 @@ export function createWorkspaceFiles(options: {
   const io = createWorkspaceFileIo(root, protectedPaths, protectReads);
   const rootFd = io.root;
   let closed = false;
+  const activeReads = new Set<Promise<unknown>>();
+  let closing: Promise<void> | undefined;
   function check(): void {
     if (closed) fail('file_closed');
     io.verifyRoot();
@@ -216,7 +218,88 @@ export function createWorkspaceFiles(options: {
     if (failed) throw failure;
     return result!;
   }
+  function trackRead<T>(work: () => Promise<T>): Promise<T> {
+    const pending = work().finally(() => activeReads.delete(pending));
+    activeReads.add(pending);
+    return pending;
+  }
+  async function withReadParent<T>(
+    path: string,
+    work: (parent: number, name: string) => Promise<T>,
+  ): Promise<T> {
+    check();
+    const parts = segments(path);
+    if (!parts.length) fail('file_path_invalid');
+    if (protectReads && isProtected(parts.join('/'))) fail('file_path_protected');
+    const opened: number[] = [];
+    let fd = rootFd;
+    let failed = false;
+    let failure: unknown;
+    let result: T | undefined;
+    try {
+      for (const part of parts.slice(0, -1)) {
+        fd = io.openAt(fd, part, 'directory');
+        opened.push(fd);
+      }
+      result = await work(fd, parts.at(-1)!);
+    } catch (error) {
+      failed = true;
+      failure = error;
+    } finally {
+      for (const child of opened.reverse()) {
+        try {
+          io.closeHandle(child);
+        } catch (error) {
+          if (!failed) {
+            failed = true;
+            failure = error;
+          }
+        }
+      }
+    }
+    if (failed) throw failure;
+    return result!;
+  }
+
   function readAt(path: number, name: string, logical: string, expectedLinks = 1n): FileSnapshot {
+    const steps = readSteps(path, name, logical, expectedLinks);
+    for (;;) {
+      const step = steps.next();
+      if (step.done) return step.value;
+    }
+  }
+  async function readAtAsync(
+    parent: number,
+    name: string,
+    logical: string,
+    signal?: AbortSignal,
+    selection?: { offset: number; limit?: number },
+  ): Promise<FileSnapshot> {
+    signal?.throwIfAborted();
+    const checkpoint = queryCheckpoint(signal);
+    const steps = readSteps(parent, name, logical, 1n, selection);
+    try {
+      for (;;) {
+        const step = steps.next();
+        if (step.done) {
+          signal?.throwIfAborted();
+          check();
+          return step.value;
+        }
+        const pause = checkpoint();
+        if (pause) await pause;
+      }
+    } finally {
+      steps.return(undefined as never);
+    }
+  }
+  function* readSteps(
+    path: number,
+    name: string,
+    logical: string,
+    expectedLinks = 1n,
+    selection?: { offset: number; limit?: number },
+  ): Generator<void, FileSnapshot, void> {
     const fd = io.openAt(path, name, 'read');
     try {
       const before = io.stat(fd);
@@ -231,6 +314,29 @@ export function createWorkspaceFiles(options: {
       const decoder = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true });
       const parts: string[] = [];
       let count = 0;
+      let line = 1;
+      let characters = 0;
+      let finalNewline = false;
+      const lastLine =
+        selection?.limit === undefined ? Infinity : selection.offset + selection.limit - 1;
+      function accept(text: string) {
+        if (!selection) {
+          parts.push(text);
+          return;
+        }
+        characters += text.length;
+        if (text.length) finalNewline = text.endsWith('\n');
+        let from = 0;
+        for (;;) {
+          const newline = text.indexOf('\n', from);
+          const end = newline === -1 ? text.length : newline + 1;
+          if (line >= selection.offset && line <= lastLine && end > from)
+            parts.push(text.slice(from, end));
+          if (newline === -1) break;
+          line++;
+          from = end;
+        }
+      }
       while (true) {
         const read = io.read(fd, buffer);
         if (!read) break;
@@ -240,11 +346,12 @@ export function createWorkspaceFiles(options: {
         const bytes = buffer.subarray(0, read);
         digest.update(bytes);
         try {
-          parts.push(decoder.decode(bytes, { stream: true }));
+          accept(decoder.decode(bytes, { stream: true }));
         } catch {
           fail('file_encoding_invalid');
         }
         if (count === read) checkTextSample(bytes);
+        yield;
       }
       const after = io.stat(fd);
       if (options.strictReads) {
@@ -262,7 +369,7 @@ export function createWorkspaceFiles(options: {
         fail('file_changed');
       let content: string;
       try {
-        parts.push(decoder.decode());
+        accept(decoder.decode());
         content = parts.join('');
       } catch {
         return fail('file_encoding_invalid');
@@ -270,6 +377,20 @@ export function createWorkspaceFiles(options: {
       return {
         path: logical,
         content,
+        ...(selection
+          ? {
+              selection: {
+                fromLine: selection.offset,
+                toLine:
+                  characters === 0 || selection.offset > line - Number(finalNewline)
+                    ? null
+                    : Math.min(lastLine, line - Number(finalNewline)),
+                totalLines: characters === 0 ? 0 : line - Number(finalNewline),
+                nextOffset:
+                  characters !== 0 && lastLine < line - Number(finalNewline) ? lastLine + 1 : null,
+              },
+            }
+          : {}),
         baseline: {
           hash: digest.digest('hex'),
           size: count,
@@ -573,6 +694,21 @@ export function createWorkspaceFiles(options: {
       return result.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
     });
   }
+  /** Cooperative budget; each caller retains ownership of its live handles until finally. */
+  function queryCheckpoint(signal?: AbortSignal) {
+    let remaining = 64;
+    let until = performance.now() + 8;
+    return () => {
+      signal?.throwIfAborted();
+      if (--remaining > 0 && performance.now() < until) return;
+      return setImmediate(undefined, { signal }).then(() => {
+        signal?.throwIfAborted();
+        check();
+        remaining = 64;
+        until = performance.now() + 8;
+      });
+    };
+  }
   return {
     relativePath(path) {
       if (
@@ -645,6 +781,7 @@ export function createWorkspaceFiles(options: {
       return remove(input);
     },
     async read(path, options = {}) {
+      options.signal?.throwIfAborted();
       const offset = options.offset ?? 1;
       if (
         !Number.isSafeInteger(offset) ||
@@ -652,39 +789,14 @@ export function createWorkspaceFiles(options: {
         (options.limit !== undefined && (!Number.isSafeInteger(options.limit) || options.limit < 1))
       )
         fail('file_read_range_invalid');
-      const snapshot = withParent(path, (parent, name) => readAt(parent, name, path));
-      const starts: number[] = [];
-      if (snapshot.content.length) {
-        starts.push(0);
-        for (let at = 0; at < snapshot.content.length; at++)
-          if (snapshot.content.charCodeAt(at) === 10 && at + 1 < snapshot.content.length)
-            starts.push(at + 1);
-      }
-      const totalLines = starts.length;
-      const from = offset - 1;
-      const through =
-        options.limit === undefined
-          ? totalLines
-          : Math.min(totalLines, from + Math.min(options.limit, totalLines));
-      const content =
-        from >= totalLines
-          ? ''
-          : snapshot.content.slice(
-              starts[from],
-              through >= totalLines ? snapshot.content.length : starts[through],
-            );
-      return {
-        ...snapshot,
-        content,
-        selection: {
-          fromLine: offset,
-          toLine: from >= totalLines ? null : through,
-          totalLines,
-          nextOffset: through < totalLines && from < totalLines ? through + 1 : null,
-        },
-      };
+      return trackRead(() =>
+        withReadParent(path, (parent, name) =>
+          readAtAsync(parent, name, path, options.signal, { offset, limit: options.limit }),
+        ),
+      );
     },
-    async glob(input) {
+    async glob(input, options) {
+      options?.signal?.throwIfAborted();
       const scope = segments(input.path ?? '').join('/');
       if (
         typeof input.pattern !== 'string' ||
@@ -710,32 +822,52 @@ export function createWorkspaceFiles(options: {
       } catch {
         return fail('file_glob_invalid');
       }
+      // Only complete literal directory components can exclude a subtree. Basename
+      // patterns still match at every depth, and all wildcard semantics stay with Bun.
+      const prefix: string[] = [];
+      if (input.pattern.includes('/')) {
+        for (const part of input.pattern.split('/').slice(0, -1)) {
+          if (/[*?[\]{}()!+@]/.test(part)) break;
+          prefix.push(part);
+        }
+      }
+      const checkpoint = queryCheckpoint(options?.signal);
       const matches: string[] = [];
-      function walk(path: string): void {
-        for (const entry of entries(path)) {
+      async function walk(path: string): Promise<boolean> {
+        // A directory's descendants begin with "name/", not "name". This order
+        // makes DFS equal complete-path order (including a.ts before a/child.ts).
+        const ordered = entries(path).sort((a, b) => {
+          const ak = a.name + (a.kind === 'directory' ? '/' : ''),
+            bk = b.name + (b.kind === 'directory' ? '/' : '');
+          return ak < bk ? -1 : ak > bk ? 1 : 0;
+        });
+        for (const entry of ordered) {
+          await checkpoint();
           const child = path ? `${path}/${entry.name}` : entry.name;
-          if (entry.kind === 'directory') walk(child);
-          else if (entry.kind === 'file') {
-            const local = scope ? child.slice(scope.length + 1) : child;
+          const local = scope ? child.slice(scope.length + 1) : child;
+          if (entry.kind === 'directory') {
+            const parts = local.split('/');
+            if (prefix.some((part, index) => index < parts.length && parts[index] !== part))
+              continue;
+            if (await walk(child)) return true;
+          } else if (entry.kind === 'file') {
             if (
               matcher.match(input.pattern.includes('/') ? local : entry.name) &&
               (input.after === undefined || child > input.after)
             ) {
               matches.push(child);
-              matches.sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
-              if (matches.length > limit + 1) matches.pop();
+              if (matches.length > limit) return true;
             }
           }
         }
+        return false;
       }
-      walk(scope);
-      matches.sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
-      const selected = matches
-        .filter((path) => input.after === undefined || path > input.after)
-        .slice(0, limit + 1);
+      await walk(scope);
+      options?.signal?.throwIfAborted();
+      check();
       return {
-        paths: selected.slice(0, limit),
-        next: selected.length > limit ? selected[limit - 1]! : null,
+        paths: matches.slice(0, limit),
+        next: matches.length > limit ? matches[limit - 1]! : null,
       };
     },
     async write(input) {
@@ -796,7 +928,8 @@ export function createWorkspaceFiles(options: {
       const selected = all.slice(0, limit);
       return { entries: selected, next: all.length > limit ? selected.at(-1)!.name : null };
     },
-    async search(input) {
+    async search(input, options) {
+      options?.signal?.throwIfAborted();
       if (typeof input.text !== 'string' || !input.text || Buffer.byteLength(input.text) > 1024)
         fail('file_search_invalid');
       if (input.after !== undefined) {
@@ -808,37 +941,56 @@ export function createWorkspaceFiles(options: {
       }
       const limit = input.limit === undefined ? undefined : pageLimit(input.limit);
       const matches: { path: string; line: number; content: string }[] = [];
-      function walk(path: string): void {
+      const checkpoint = queryCheckpoint(options?.signal);
+      async function walk(path: string): Promise<void> {
         for (const entry of entries(path)) {
+          await checkpoint();
           const child = path ? `${path}/${entry.name}` : entry.name;
-          if (entry.kind === 'directory') walk(child);
+          if (entry.kind === 'directory') await walk(child);
           else if (entry.kind === 'file') {
             let snapshot: FileSnapshot;
             try {
-              snapshot = withParent(child, (parent, name) => readAt(parent, name, child));
+              snapshot = await trackRead(() =>
+                withReadParent(child, (parent, name) =>
+                  readAtAsync(parent, name, child, options?.signal),
+                ),
+              );
             } catch (error) {
               if (error instanceof AgentError && error.code === 'file_binary') continue;
               throw error;
             }
-            for (const [index, line] of snapshot.content.split('\n').entries())
+            let offset = 0;
+            let index = 0;
+            for (;;) {
+              const pause = checkpoint();
+              if (pause) await pause;
+              const newline = snapshot.content.indexOf('\n', offset);
+              const line = snapshot.content.slice(offset, newline === -1 ? undefined : newline);
               if (line.includes(input.text)) {
                 const match = { path: child, line: index + 1, content: line };
                 const cursor = `${match.path}\0${String(match.line).padStart(12, '0')}`;
-                if (input.after && cursor <= input.after) continue;
-                matches.push(match);
-                if (limit !== undefined && matches.length > limit + 1) {
-                  matches.sort((a, b) => {
-                    const ak = `${a.path}\0${String(a.line).padStart(12, '0')}`,
-                      bk = `${b.path}\0${String(b.line).padStart(12, '0')}`;
-                    return ak < bk ? -1 : ak > bk ? 1 : 0;
-                  });
-                  matches.pop();
+                if (!input.after || cursor > input.after) {
+                  matches.push(match);
+                  if (limit !== undefined && matches.length > limit + 1) {
+                    matches.sort((a, b) => {
+                      const ak = `${a.path}\0${String(a.line).padStart(12, '0')}`,
+                        bk = `${b.path}\0${String(b.line).padStart(12, '0')}`;
+                      return ak < bk ? -1 : ak > bk ? 1 : 0;
+                    });
+                    matches.pop();
+                  }
                 }
               }
+              if (newline === -1) break;
+              offset = newline + 1;
+              index++;
+            }
           }
         }
       }
-      walk(input.path ?? '');
+      await walk(input.path ?? '');
+      options?.signal?.throwIfAborted();
+      check();
       const key = (m: { path: string; line: number }) =>
         `${m.path}\0${String(m.line).padStart(12, '0')}`;
       matches.sort((a, b) => (key(a) < key(b) ? -1 : 1));
@@ -850,9 +1002,15 @@ export function createWorkspaceFiles(options: {
         next: limit !== undefined && selected.length > limit ? key(selected[limit - 1]!) : null,
       };
     },
-    async close() {
-      closed = true;
-      io.close();
+    close() {
+      if (!closing) {
+        closed = true;
+        closing = (async () => {
+          await Promise.allSettled([...activeReads]);
+          io.close();
+        })();
+      }
+      return closing;
     },
   };
 }

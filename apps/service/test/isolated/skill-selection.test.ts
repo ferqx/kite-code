@@ -1,15 +1,23 @@
+import { Database } from 'bun:sqlite';
 import { expect, test } from 'bun:test';
+import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { createRuntime } from '@kite-ai/agent';
-import type { Extension, Json } from '@kite-ai/agent/extensions';
+import { mcpCanonical } from '@kite-ai/agent/config';
+import type { Extension, Json, Permissions } from '@kite-ai/agent/extensions';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import { temporaryDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { createWorkspaceAssembly } from '../../src/assembly';
 import { readSkillSelection } from '../../src/child-configuration';
 import { createDefaultProcessConfiguration } from '../../src/configuration';
+import {
+  createMcpSourceConfiguration,
+  type McpSelectedSourceSnapshot,
+} from '../../src/mcp-source-configuration';
+import { initializeLivePermissionFixture } from '../fixtures/live-permission-fixture';
 
 async function until<T>(read: () => Promise<T>, done: (value: T) => boolean) {
   const deadline = Date.now() + 5000;
@@ -169,10 +177,45 @@ async function fixture(runlessTools = false, nested = true) {
       },
     ],
   };
+  // These two callbacks belong only to this fixture; the default host still
+  // authorizes every builtin, model and child scope through its original policy.
+  const fixturePermissions = (original: Permissions): Permissions => ({
+    ...original,
+    async authorize(request) {
+      const decision = await original.authorize(request);
+      const fixtureCapability =
+        request.definitionVersion === '1' &&
+        ((request.kind === 'tool' && request.definitionId === 'fixture.delegate') ||
+          (request.kind === 'job' && request.definitionId === 'fixture/fixture.runless'));
+      if (!fixtureCapability) return decision;
+      expect(decision.revision).toBeString();
+      expect(decision.controlReads).toHaveLength(3);
+      return {
+        allowed: true,
+        revision: decision.revision,
+        controlReads: decision.controlReads,
+        snapshot: decision.snapshot,
+      };
+    },
+  });
   const runtime = createRuntime({
     ...host,
     store,
-    permissions: host.permissions!,
+    permissions: fixturePermissions(host.permissions!),
+    async resolveRunConfiguration(input) {
+      const configuration = await host.resolveRunConfiguration!(input);
+      return {
+        ...configuration,
+        permissions: fixturePermissions(configuration.permissions ?? host.permissions!),
+      };
+    },
+    async resolveChildRunConfiguration(input) {
+      const configuration = await host.resolveChildRunConfiguration!(input);
+      return {
+        ...configuration,
+        permissions: fixturePermissions(configuration.permissions ?? host.permissions!),
+      };
+    },
     extensions: [...host.extensions!, delegate],
   });
   const storeId = (await store.getMetadata()).storeId;
@@ -191,6 +234,15 @@ async function fixture(runlessTools = false, nested = true) {
     title: 'root',
   });
   const base = { expectedStoreId: storeId, subjectId: 'owner', sessionId: 's' };
+  host.permissionManagement?.(runtime);
+  await initializeLivePermissionFixture({
+    runtime,
+    profile,
+    ...base,
+    workspaceId: 'w',
+    mode: 'full',
+    trusted: true,
+  });
   return {
     root,
     workspace,
@@ -256,14 +308,29 @@ test('per-Run root, child and grandchild seal exact inherited IDs despite name c
       commandId: 'fresh-followup',
       request: {
         kind: 'input.follow_up',
-        content: 'fresh independent',
+        content: 'New task: fresh independent',
         afterRunId: root.id,
         contextSelectionId: selection,
         selectedSkills: ['beta'],
       },
     });
-    await f.runtime.waitForCommand('fresh-followup');
-    const second = (await f.store.getView('s')).runs[1]!;
+    const fresh = await f.runtime.waitForCommand('fresh-followup');
+    const freshReceipt = fresh.receipt as { businessCommandId: string; runId: string };
+    expect(fresh.status).toBe('applied');
+    const second = (await f.store.getRun(freshReceipt.runId))!;
+    expect(second).toMatchObject({
+      originCommandId: freshReceipt.businessCommandId,
+      rootWorkCommandId: fresh.id,
+      status: 'completed',
+    });
+    expect(
+      (await f.store.listExecutions('s')).find(
+        (execution) => execution.kind === 'model' && execution.runId === second.id,
+      ),
+    ).toMatchObject({
+      originCommandId: freshReceipt.businessCommandId,
+      rootWorkCommandId: fresh.id,
+    });
     expect(readSkillSelection(second.configuration)).toEqual({
       requested: ['beta'],
       resolvedIds: ['beta'],
@@ -273,13 +340,29 @@ test('per-Run root, child and grandchild seal exact inherited IDs despite name c
       commandId: 'omitted-followup',
       request: {
         kind: 'input.follow_up',
-        content: 'default independent',
+        content: 'New task: default independent',
         afterRunId: second.id,
         contextSelectionId: selection,
       },
     });
-    await f.runtime.waitForCommand('omitted-followup');
-    expect(readSkillSelection((await f.store.getView('s')).runs[2]!.configuration)).toEqual({
+    const omitted = await f.runtime.waitForCommand('omitted-followup');
+    const omittedReceipt = omitted.receipt as { businessCommandId: string; runId: string };
+    expect(omitted.status).toBe('applied');
+    const third = (await f.store.getRun(omittedReceipt.runId))!;
+    expect(third).toMatchObject({
+      originCommandId: omittedReceipt.businessCommandId,
+      rootWorkCommandId: omitted.id,
+      status: 'completed',
+    });
+    expect(
+      (await f.store.listExecutions('s')).find(
+        (execution) => execution.kind === 'model' && execution.runId === third.id,
+      ),
+    ).toMatchObject({
+      originCommandId: omittedReceipt.businessCommandId,
+      rootWorkCommandId: omitted.id,
+    });
+    expect(readSkillSelection(third.configuration)).toEqual({
       requested: null,
       resolvedIds: expect.arrayContaining(['alpha', 'beta']),
     });
@@ -312,7 +395,11 @@ test('empty and unavailable selectors persist original facts before credentials 
       await f.runtime.submitCommand({
         ...f.base,
         commandId: id,
-        request: { kind: 'run.start', content: 'must reject', selectedSkills: [...selectors] },
+        request: {
+          kind: 'run.start',
+          content: 'New task: must reject',
+          selectedSkills: [...selectors],
+        },
       });
       const command = await f.runtime.waitForCommand(id);
       expect(command.status).toBe('rejected');
@@ -457,6 +544,264 @@ test('a trusted truly runless Action Tool bridge keeps explicit role model and n
       });
     expect(f.records.some((record) => record.model === 'parent')).toBe(false);
     expect(existsSync(join(f.root, 'script-effect'))).toBe(false);
+    const workerSession = (await f.store.getSession(f.children[0]!))!;
+    const workerRun = (await f.store.getView(workerSession.id)).runs[0]!;
+    const grandRun = (await f.store.getView(f.children[1]!)).runs[0]!;
+    const marker = (configuration: Json) =>
+      (
+        configuration as unknown as {
+          snapshot: { configuration: { mcp: { sources: McpSelectedSourceSnapshot } } };
+        }
+      ).snapshot.configuration.mcp.sources;
+    const workerSources = marker(workerRun.configuration);
+    expect(workerSources).toMatchObject({
+      servers: [],
+      readSet: null,
+      selection: { present: false, serverIds: [] },
+      inheritance: { parentRunId: null, parentSessionId: 's', rootWorkCommandId: 'runless' },
+    });
+    expect(marker(grandRun.configuration).inheritance).toMatchObject({
+      parentRunId: workerRun.id,
+      parentSnapshot: workerSources,
+    });
+    const rootExecutions = await f.store.listExecutions('s');
+    const rootTool = rootExecutions.find((execution) => execution.kind === 'tool')!;
+    const carrier = rootExecutions.find(
+      (execution) => execution.childSessionId === workerSession.id,
+    )!;
+    const workerTool = (await f.store.listExecutions(workerSession.id)).find(
+      (execution) => execution.kind === 'tool',
+    )!;
+    const workspace = (await f.store.getWorkspace('w'))!;
+    const sources = createMcpSourceConfiguration({
+      profile: f.profile,
+      runtime: () => f.runtime,
+      credentialVault: {
+        async resolve() {
+          throw Error('unexpected_runless_mcp_credential');
+        },
+      },
+    });
+    const parent = async () => ({
+      parentExecution: (await f.store.getExecution(workerTool.id))!,
+      parentRun: (await f.store.getRun(workerRun.id))!,
+      parentSession: workerSession,
+      workspace,
+      command: (await f.store.getCommand(workerTool.originCommandId))!,
+    });
+    const before = f.counts();
+    const omitted = await sources.deriveChildSelection(
+      { ...(await parent()), parentRun: null },
+      { present: false, configurations: [] },
+    );
+    expect(omitted.snapshot).toMatchObject({ servers: [], readSet: null });
+    expect(omitted.snapshot.inheritance).toBeUndefined();
+    expect(
+      (await sources.deriveChildSelection(await parent(), { present: false, configurations: [] }))
+        .servers,
+    ).toEqual([]);
+    const db = new Database(f.profile.databasePath);
+    db.run('PRAGMA busy_timeout=1000');
+    const saved = {
+      run: db.query('SELECT config_json FROM run WHERE id=?').get(workerRun.id) as {
+        config_json: string;
+      },
+      tool: db
+        .query('SELECT intent_json,parent_execution_id FROM execution WHERE id=?')
+        .get(rootTool.id) as { intent_json: string; parent_execution_id: string },
+      command: db
+        .query(
+          'SELECT request_json,request_digest,subject_id,root_work_command_id FROM command WHERE id=?',
+        )
+        .get(rootTool.originCommandId) as {
+        request_json: string;
+        request_digest: string;
+        subject_id: string;
+        root_work_command_id: string;
+      },
+      root: db.query('SELECT request_json FROM command WHERE id=?').get('runless') as {
+        request_json: string;
+      },
+      start: db
+        .query('SELECT request_json FROM command WHERE id=?')
+        .get(workerRun.originCommandId) as { request_json: string },
+      carrier: db
+        .query('SELECT child_configuration_json FROM execution WHERE id=?')
+        .get(carrier.id) as { child_configuration_json: string },
+      carrierCommand: db
+        .query('SELECT request_json,request_digest FROM command WHERE id=?')
+        .get(carrier.originCommandId) as { request_json: string; request_digest: string },
+    };
+    const restore = () => {
+      db.query('UPDATE run SET config_json=? WHERE id=?').run(saved.run.config_json, workerRun.id);
+      db.query('UPDATE execution SET intent_json=?,parent_execution_id=? WHERE id=?').run(
+        saved.tool.intent_json,
+        saved.tool.parent_execution_id,
+        rootTool.id,
+      );
+      db.query(
+        'UPDATE command SET request_json=?,request_digest=?,subject_id=?,root_work_command_id=? WHERE id=?',
+      ).run(
+        saved.command.request_json,
+        saved.command.request_digest,
+        saved.command.subject_id,
+        saved.command.root_work_command_id,
+        rootTool.originCommandId,
+      );
+      db.query('UPDATE command SET request_json=? WHERE id=?').run(
+        saved.root.request_json,
+        'runless',
+      );
+      db.query('UPDATE command SET request_json=? WHERE id=?').run(
+        saved.start.request_json,
+        workerRun.originCommandId,
+      );
+      db.query('UPDATE execution SET child_configuration_json=? WHERE id=?').run(
+        saved.carrier.child_configuration_json,
+        carrier.id,
+      );
+      db.query('UPDATE command SET request_json=?,request_digest=? WHERE id=?').run(
+        saved.carrierCommand.request_json,
+        saved.carrierCommand.request_digest,
+        carrier.originCommandId,
+      );
+    };
+    const changedMarker = (
+      change: (snapshot: McpSelectedSourceSnapshot) => void,
+      coherent = false,
+    ) => {
+      const configuration = JSON.parse(saved.run.config_json) as Json;
+      change(marker(configuration));
+      db.query('UPDATE run SET config_json=? WHERE id=?').run(
+        mcpCanonical(configuration),
+        workerRun.id,
+      );
+      if (coherent) {
+        const sealed = JSON.parse(saved.carrier.child_configuration_json);
+        sealed.snapshot = configuration;
+        const request = JSON.parse(saved.carrierCommand.request_json);
+        request.childConfiguration = sealed;
+        db.query('UPDATE execution SET child_configuration_json=? WHERE id=?').run(
+          mcpCanonical(sealed),
+          carrier.id,
+        );
+        db.query('UPDATE command SET request_json=?,request_digest=? WHERE id=?').run(
+          mcpCanonical(request),
+          createHash('sha256').update(mcpCanonical(request)).digest('hex'),
+          carrier.originCommandId,
+        );
+      }
+    };
+    const corruptions = [
+      () =>
+        db
+          .query('UPDATE execution SET intent_json=? WHERE id=?')
+          .run('{"forged":true}', rootTool.id),
+      () => db.query('UPDATE execution SET parent_execution_id=NULL WHERE id=?').run(rootTool.id),
+      () =>
+        db
+          .query('UPDATE command SET subject_id=? WHERE id=?')
+          .run('foreign', rootTool.originCommandId),
+      () =>
+        db
+          .query('UPDATE command SET root_work_command_id=? WHERE id=?')
+          .run('foreign', rootTool.originCommandId),
+      () =>
+        db
+          .query('UPDATE command SET request_json=? WHERE id=?')
+          .run(
+            JSON.stringify({ ...JSON.parse(saved.root.request_json), input: { forged: true } }),
+            'runless',
+          ),
+      () =>
+        db.query('UPDATE command SET request_json=? WHERE id=?').run(
+          JSON.stringify({
+            ...JSON.parse(saved.start.request_json),
+            parentExecutionId: 'foreign',
+          }),
+          workerRun.originCommandId,
+        ),
+      () =>
+        changedMarker((snapshot) => {
+          snapshot.scope.storeId = 'foreign';
+        }),
+      () =>
+        changedMarker((snapshot) => {
+          snapshot.servers = [{} as McpSelectedSourceSnapshot['servers'][number]];
+        }, true),
+      () =>
+        changedMarker((snapshot) => {
+          snapshot.selection.serverIds = ['foreign'];
+        }, true),
+      () =>
+        changedMarker((snapshot) => {
+          snapshot.readSet = {} as NonNullable<McpSelectedSourceSnapshot['readSet']>;
+        }, true),
+    ];
+    try {
+      for (const corrupt of corruptions) {
+        restore();
+        corrupt();
+        let rejected: unknown;
+        try {
+          await sources.deriveChildSelection(await parent(), {
+            present: false,
+            configurations: [],
+          });
+        } catch (error) {
+          rejected = error;
+        }
+        expect(rejected).toMatchObject({ code: 'mcp_source_scope_invalid' });
+        expect(f.counts()).toEqual(before);
+      }
+    } finally {
+      restore();
+      db.close();
+    }
+    expect(
+      (await sources.deriveChildSelection(await parent(), { present: false, configurations: [] }))
+        .servers,
+    ).toEqual([]);
+    expect(f.counts()).toEqual(before);
+    const cold = await openSqliteStore({ ...f.profile, mode: 'readonly' });
+    try {
+      const reads = new Set([
+        'getMetadata',
+        'getSession',
+        'getWorkspace',
+        'getExecution',
+        'getRun',
+        'getView',
+        'getCommand',
+      ]);
+      const host = new Proxy(f.runtime, {
+        get(target, key) {
+          const owner = typeof key === 'string' && reads.has(key) ? cold : target;
+          const value = Reflect.get(owner, key, owner);
+          return typeof value === 'function' ? value.bind(owner) : value;
+        },
+      });
+      const restored = createMcpSourceConfiguration({
+        profile: f.profile,
+        runtime: () => host,
+        credentialVault: {
+          async resolve() {
+            throw Error('unexpected_cold_runless_mcp_credential');
+          },
+        },
+      });
+      const cursor = (await cold.getMetadata()).lastChangeCursor;
+      const derived = await restored.deriveChildSelection(await parent(), {
+        present: false,
+        configurations: [],
+      });
+      expect(derived.snapshot.inheritance?.parentSnapshot).toEqual(workerSources);
+      expect(derived.servers).toEqual([]);
+      expect((await cold.getMetadata()).lastChangeCursor).toBe(cursor);
+      expect(f.counts()).toEqual(before);
+    } finally {
+      await cold.close();
+    }
   } finally {
     await f.close();
   }
@@ -535,7 +880,7 @@ test('real default Run and descendants keep 301 resolved Skills while unselected
     await f.runtime.submitCommand({
       ...f.base,
       commandId: 'default-many',
-      request: { kind: 'run.start', content: 'delegate root' },
+      request: { kind: 'run.start', content: 'New task: delegate root' },
     });
     expect((await f.runtime.waitForCommand('default-many')).status).toBe('applied');
     await until(

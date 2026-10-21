@@ -96,11 +96,14 @@ test('an ordinary command sharing a prior compression Model ID remains an actual
     });
     const originalInput = await runtime.readModelInput({ ...base, executionId: compression.id });
     const content = 'ordinary user with a legitimate Command/Execution namespace collision';
-    await runtime.submitCommand({
+    const collisionInput = {
       ...base,
       commandId: compression.id,
-      request: { kind: 'run.start', content },
-    });
+      request: { kind: 'run.start' as const, content },
+    };
+    // Exercise an admitted Command/Execution Source-ID collision, not human intent inference.
+    await store.acceptCommand(collisionInput);
+    await runtime.submitCommand(collisionInput);
     await runtime.waitForCommand(compression.id);
     const raw = (await runtime.listMessages('s')).find(
       (message) => message.role === 'user' && message.content === content,
@@ -168,11 +171,13 @@ test('an ordinary command sharing a prior compression Model ID remains an actual
     )!;
     const forkContent =
       'fork ordinary User retains original fork scope despite its prior compression Model UUID';
-    await runtime.submitCommand({
+    const forkCollisionInput = {
       ...forkBase,
       commandId: forkCompression.id,
-      request: { kind: 'run.start', content: forkContent },
-    });
+      request: { kind: 'run.start' as const, content: forkContent },
+    };
+    await store.acceptCommand(forkCollisionInput);
+    await runtime.submitCommand(forkCollisionInput);
     await runtime.waitForCommand(forkCompression.id);
     const forkPage = await runtime.getSelectedContext({
       expectedStoreId: storeId,

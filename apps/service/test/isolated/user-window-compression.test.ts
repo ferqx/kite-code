@@ -9,6 +9,7 @@ import { createTemporaryCredentialBackend } from '@kite-ai/agent/config';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import { createDefaultProcessConfiguration } from '@kite-ai/service/configuration';
+import { initializeLivePermissionFixture } from '../fixtures/live-permission-fixture';
 
 for (const mode of ['legacy-1m', 'default-256k', 'explicit-threshold'] as const)
   test(`user provider window and compression threshold survive default SDK assembly: ${mode}`, async () => {
@@ -86,11 +87,6 @@ for (const mode of ['legacy-1m', 'default-256k', 'explicit-threshold'] as const)
       profile,
       userConfigurationPath: configurationPath,
       credentialBackend: createTemporaryCredentialBackend(),
-      permissions: {
-        async authorize() {
-          return { allowed: true, revision: 'owned' };
-        },
-      },
     });
     const runtime = createRuntime({
       ...host,
@@ -113,6 +109,14 @@ for (const mode of ['legacy-1m', 'default-256k', 'explicit-threshold'] as const)
         workspaceId: 'w',
         commandId: 'create',
         title: 'user model window',
+      });
+      await initializeLivePermissionFixture({
+        runtime,
+        profile,
+        ...scope,
+        workspaceId: 'w',
+        mode: 'full',
+        trusted: true,
       });
       await runtime.submitCommand({
         ...scope,

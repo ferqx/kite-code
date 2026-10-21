@@ -1,10 +1,28 @@
 # Task 子协作叶子
 
-模型接口以 `spawn_agent/run_agent/read_agent/cancel_agent_task/send_agent_message/followup_agent` 表达创建、前台运行、查询、carrier取消、邮件和后继工作，其他协作接口为 `list_agents/interrupt_agent/wait_agents/wait_agent_event`。声明属性使用 snake_case，任意 `input` JSON 保持原值；key、准确 Run/selection 绑定和内部 `task*` 身份不变。`task_wait` 保留注册与原执行合同，但隐藏于模型目录，以 `wait_agents` 为等待子任务的规范入口。模型的 `wait_agent_event` 只接受 `after_seq/timeout_ms`，等待自身邮件、输入或交互；准确任务目标的 wait-any 仍由原内部 `wait_agent` 合同保留。毫秒超时默认30000，不取消目标。
+子 Agent 协作 V1.1 的六工具、稳定协作者、真实工作选择、可靠结果接纳及运行中审批模式跟随已交付。产品行为归[执行手册](../../../../../docs/handbook/features/execution.md)，80项合同与实际运行证据归[测试 owner](../../../../../tests/README.md#子-agent-协作-v11-验证)，长期取舍归[稳定协作者决定](../../../../../.agents/notes/implemented/architecture/2026-10-18-stable-agent-collaboration-and-human-work-selection.md)。以下历史接口说明只适用于实际封存工具和可信内部调用。
 
-`createTaskExtension({roles})` 显式装配 `task/task.execute/task_read/task_wait/task_cancel/send_message/followup_task/list_agents/interrupt_agent/wait_agents/wait_agent` ordinary Tools。可信宿主选择 role→已注册 child configuration，模型不能提交新配置、权限或 Provider；构造/import 不执行 I/O。定义继续经过统一 Tool 权限与执行路径，child 使用既有 `operations.ensure(kind:agent)` 和唯一 Loop。
+普通模型目录只展示 `spawn_agent / send_agent_message / follow_up_agent / wait_agent_events / list_agents / interrupt_agent`。spawn 仅要求 `prompt`，可选显示名称 `task_name`；默认通用 child；只有可信工厂登记的 prompt 预设才出现 `preset`。`task_name` 不参与查找、权限或去重。对应准确内部 Tool ID 为 `task.spawn / task.message / task.follow_up / task.events / task.list / task.interrupt`，均为 v1。旧 `task/task.execute/task_read/task_wait/task_cancel/send_message/followup_task/list_agents/interrupt_agent/wait_agents/wait_agent` 保留可信内部调用及原历史恢复定义，全部隐藏于当前模型目录；没有旧名称 alias。
 
-[默认角色](roles.ts)保留 worker／code，并提供完整 explore／plan／review 只读分析能力。Task 与前台 Task 的实际 role schema 和说明包含五个角色、实施任务适用条件以及独立兄弟任务并行语义；描述不是权限。三个只读角色只取父调用当前步骤的冻结工具身份与可信角色范围的交集，再由 Agent 纯 `isReadOnlyTaskTool` 核冻结定义的 extension owner、ID 与版本；同名自定义工具、未来版本、文件写入、进程／联网派发及未知 MCP 不能借角色名称进入 child。新增角色不增加默认三个槽位，也不替代父子权限、计划、取消和真实记录核验。[真实默认角色测试](../../../../../apps/service/test/isolated/default-task-roles.test.ts)覆盖 plan／review 的实际 child、读取、Scope、记录与完整结果。
+工厂 `createTaskExtension({roles,defaultRole?,presets?})` 与 Service 可信装配共同解析配置。模型不能传 key、Run、selection、Provider、权限或 detached；普通 Tool invocation 的原 execution 派生受理身份。新 spawn 与 idle follow-up 没有 required completion 义务，而是封存 `agent_completion` 通知意图；通知和自动父轮授权是两份事实，没有自动授权不能启动 idle 父轮。旧显式 `after_turn` 仍必须由原可信策略授权。以下 legacy 章节说明仍有实际使用者的内部合同，不能据此向普通模型重新开放旧表面。
+
+## 稳定身份、准确命令和观察
+
+稳定目标邮件在原入队事务重新核准确 carrier、selection、工作关系和真实 Run.isActive；目录保留的已完成历史 Run 不成为活动投递目标。idle 邮件持久保存 targetRunId:null，只排队且不创建 child Run/Model；显式同工作 follow-up 再按原 predecessor 与双水位接纳。六工具回归另核这条 idle 正例的原 carrier、零激活及唯一邮件 Source，真实模型结果归测试 owner。
+
+`agent_id` 即原 child Session ID。`applyAgentCommand` 在一个 Store 写事务内先查原 invocation 回执，再选择其当前唯一 carrier，核准确直接父子、工作、Store、主体、来源、控制与取消关系。运行中/queued 的同工作 follow-up 返回 `mode:steer`；queued 引导绑定原 carrier 并在其实际 activation 后接入，不改写原委派。idle 时在同事务通过原 `ensureAgent` 建唯一 successor，复用 Session 与原配置；跨工作活动引导拒绝。interrupt 取消首次准入选定的 carrier，包含尚无 Run 的 queued carrier，后续新轮不被迟到重试改投。跨工作普通消息/中断不取得接管资格。受理响应丢失时 Host 查回原持久证明；受理时 `state` 保留原快照，不用后来状态改写历史。
+
+`list_agents` 按首次 `operation.agent` Command 的不可变 seq 每个 child Session 只列一次；当前状态取准确最近 carrier，follow-up 不移动锚点。ID 过滤先整体核直接归属，固定 Decimal64 上界与 limit+1 判断真正后页；恰好 limit 且无后项返回 null。职责、最近引导与结果的完整原文通过本次 Tool 的受验证正文交付，大目录使用当前 Tool scope 的完整 Artifact，模型不必使用私有 OperationRef。目录查询和来源展开不接纳结果、不推进模型已读、不调用 Provider。
+
+`wait_agent_events` 从持久 `change_event` 的已确认邮件与 carrier 真正终态读取有界摘要；`next_seq` 只到实际返回事件。省略/null `wait_ms` 在 Tool 内重复至多30秒的有限等待，显式0只取快照；每段重核输入、期限与取消。根调用者额外观察真实 human.input 持久状态及 control revision，raw public 输入即使尚未转 business、被 listPendingInputs 排除，也返回 input；通知不充当人类输入。child 的普通邮件遵循原邮箱范围。timeout 保原位置，不取消 child。观察与 Source 接纳、实际 prepared 分开；生命周期 on* 不参与可靠结果或唤醒。超过 replay floor 的缺口明确返回 cursor_expired 和可核实恢复边界。
+
+模型说明明确区分稳定协作者与本次工作：同一 `agent_id` 可以经历多轮，`accepted/state/mode` 是原请求受理时的事实，不是本次工作完成证明。邮箱 `seq/next_seq` 只是观察位置；`after_seq:0` 可返回旧轮事件，follow-up 不重置邮箱，继续观察沿最近已返回的 `next_seq`，但推进游标不代表接纳或已读结果。`completed` 摘要本身不能关联为最新 follow-up 的终态。目录的 `current_work_source/state` 与 `last_outcome/last_result_source` 分开解释，后者可能仍是上一终态结果；须以当前可见工作关系和准确完整结果来源核实本次完成，无法关联时保留未确认，不猜 Run 或私有 carrier。后来收到结果也不倒写较早 Model 输入当时已有的来源。这些仅为现有回执和观察语义的说明，不增加公开字段、宿主状态转换或接纳权限。
+
+错误使用有限 `error.code/message/next_action`；命令受理 true/false/null 区分有证明、已知未受理与不可核实，list/wait 不带 accepted。只读观察的已知取消投影为 `operation_cancelled/none`，不误报回执不可核实；写命令取消时若仍可能已经受理，继续保留未知并查原回执，不推断未受理。未知不自动重放、不换身份。需要父/人类答复的 child 提示只允许一次显式有限30秒观察，无有效答复时正常收束为诚实待决结果；附着 Job/cleanup 或 unknown 仍守原结算门禁。这项提示不等于已验证所有模型都会遵守，也不伪造业务完成。
+
+[六工具真实回归](../../../test/isolated/business/task/collaboration-surface.test.ts)独立核 Model 实际目录、spawn/follow-up提交后响应丢失、稳定职责/最近来源、超过32KiB目录的完整 Artifact 实际模型正文、同 invocation 回执、queued 引导与准确取消、active跨工作拒绝与idle复用、raw human 唤醒且不跳邮箱 cursor，以及有限错误/受理三态投影。历史工具测试通过明确隔离的 [legacy fixture](../../../test/fixtures/legacy-task-surface.ts)验证原内部合同，不能折算为六工具全量运行通过。
+
+可信内部旧接口的[默认角色](roles.ts)保留 worker／code，并提供完整 explore／plan／review 只读分析能力；这些 role schema 不向普通六工具目录开放。旧 Task 与前台 Task 的实际说明包含五个角色、实施任务适用条件以及独立兄弟任务并行语义；描述不是权限。三个只读角色只取父调用当前步骤的冻结工具身份与可信角色范围的交集，再由 Agent 纯 `isReadOnlyTaskTool` 核冻结定义的 extension owner、ID 与版本；同名自定义工具、未来版本、文件写入、进程／联网派发及未知 MCP 不能借角色名称进入 child。新增角色不增加默认三个槽位，也不替代父子权限、计划、取消和真实记录核验。[真实默认角色测试](../../../../../apps/service/test/isolated/default-task-roles.test.ts)覆盖 plan／review 的实际 child、读取、Scope、记录与完整结果。
 
 原调用 key/Store/主体/父 execution 由 Host 绑定；leaf 在自己的 namespace 保存 immutable 原 OperationRef。重复原调用只查回原 carrier，同 key 不能更换角色、输入、父关系或取消域。创建回执只表示 accepted，read/wait 返回真实 carrier；timeout 不停止 child，cancel 回执仅为 cancel_requested，停止以持久终态或 unknown 为准。正常 detached child 可在父完成后继续，读取历史不调用模型。
 
@@ -30,18 +48,22 @@ child Model／Run结束后，原carrier仍须等待该child范围内未结算的
 
 [port.ts](port.ts) 给出有限公共合同。普通 Task 使用原 durable ensure 受理，默认三个 ChildSlots 仅调度同时运行数量；第四个任务保留实际 child Session/carrier 并等待空位，不因固定排队长度或时长失败，激活时才开始自身 30 分钟期限。可信宿主接受正整数并发配置。底层显式 `admission=fail_if_full` 的调用仍表达调用方明确选择的立即拒绝语义，普通 Task 不再隐式选择它。许可由原 Job admission 在真实终态幂等释放，没有第二 manager。
 
+已受理但从未派发的 child carrier 在取得空位后，仍须通过当前准确工作资格。未决输入、暂停或另一个工作被选中使它暂缓时，[执行协调器](../../execution/index.ts)释放刚取得的 child 槽和资源，保留原 planned 身份，通过原 Store change cursor 等待；明确恢复原工作后重新核权限和最终派发，不沿用旧授权。停止、替换、取消、unknown 和 owner fence 仍走原拒绝或取消路径。等待期间没有 child Run/Model，也没有提前开始 30 分钟期限。[真实 Runtime/SQLite 回归](../../../test/isolated/business/task/queued-work-eligibility.test.ts)覆盖继续、停止、替换及恢复前权限拒绝，并用下一条同工作排队 carrier 实际取得已释放的槽作为证据。
+
 `operations.readAgent` 按原 ref 和准确 carrier 启动命令投影 child Run.deadlineAt/contextSelectionId，重复查询不激活历史。用户 steer 与 Agent 的 QueueOnly 邮件各有准确来源和受理事实；公共 HTTP/Store child 用户输入仍被拒。
 
 `followup_task` 必须指定旧 task、准确 predecessor Run、当前 selection 和新 key。它创建新的 carrier 与 accepted follow-up 命令，保留原 Session 创建血缘与 history；旧 carrier/Run 真正终态后才以当前可信配置、父 catalogue/permission 交集和原容量进入同一 Loop。新 Run 重新取得 activation+30 分钟期限，不续签或重启旧执行。unknown、旧 Store、错关系或 context 不明不能自动接续。根 stop/delete 最后核实仍覆盖迟到 activation；两个 carrier 的最终事务维护唯一前台。只读历史没有 Model 或自动恢复。
 
 `task` 和 `followup_task` 默认 `resultDisposition=required`，只有显式 `background` 才不登记本 Run 的结果义务。Store 在原 ensure 同一事务封存 carrier、不可变结果 metadata 与原父 Run completion ref；原 key 重试不能补加、移除或改变处置。Run 义务及完整等待集合不设累计数量或字节额度，真实65个 required child 的同父 Run 等待与结算由上述 required 回归验证。准确已知终态结果由原父 Run/current selection 一次接纳为具名低信任来源，并进入下一 Model 输入后才解除完成等待。child failed/cancelled 保留实际状态，父可如实报告；unknown 只接纳一次状态诊断来源，不能满足义务或伪成功。取消后 suppressed/execution_cancel 的 required Task 仅接纳状态，不导入完整外部结果、不改回 pending；普通 suppressed Job 不消费。
 
-Model 完成候选只剩准确 pending required carrier 时，同一 Run 复用 waiting_execution 与 waitingForResults 范围，通过既有 controls/持久变化水位等待；progress 和第一份 staggered 结果不轮询调用 Model。全部结果准确接纳后才重新请求一次 Model；完成评估期间刚结算的 carrier 也会在该边界重新核实并接纳，未知仍只产生一次状态诊断；新引导、取消和真实 interaction 使安全边界重新处理。`task_wait` 接受 1–64 个去重目标，等待任一真实终态/interaction/新输入，默认最多 30 秒且不超过调用 child Run 的原固定期限。超时或新引导不取消目标。QueueOnly 邮件与 idle follow-up 接纳见下节；根父、嵌套 Task 及 followup_task 的 after_turn 见下节。完整 retry/delivery 尚未实施；默认 Service metadata 与 assembly 由 Service owner 接入。
+Model 完成候选只剩准确 pending required carrier 时，同一 Run 复用 waiting_execution 与 waitingForResults 范围，通过既有 controls/持久变化水位等待；progress 和第一份 staggered 结果不轮询调用 Model。全部结果准确接纳后才重新请求一次 Model；完成评估期间刚结算的 carrier 也会在该边界重新核实并接纳，未知仍只产生一次状态诊断；新引导、取消和真实 interaction 使安全边界重新处理。`task_wait` 接受 1–64 个去重目标，等待任一真实终态/interaction/新输入，默认最多 30 秒且不超过调用 child Run 的原固定期限。超时或新引导不取消目标。 Host 仅在 `observeUpdates=true` 且存在准确 Run 时，在变更 cursor 后读取该 Run 的 pending steer/result.include 快照；根会话真实 raw 输入另核原 observedRunId、selection、主体与未决事实，不仅依赖旧 command.accepted 事件。无准确 Run 绑定或普通 child 消息不成为人类输入，终态型 operations.wait 保持原合同。QueueOnly 邮件与 idle follow-up 接纳见下节；根父、嵌套 Task 及 followup_task 的 after_turn 见下节。完整 retry/delivery 尚未实施；默认 Service metadata 与 assembly 由 Service owner 接入。
 
 普通 `operations.wait(ref)` 保留单目标终态等待契约：输入/interaction 事件仅唤醒重新核实，不使已派发的等待 Tool 失败或推断 child 已停止；原绝对 timeout 不重置，真实取消 signal 仍生效。新引导留在 durable input ledger，待该 Tool 返回后的安全边界处理。`waitAny` 的 input/interaction 返回继续用于 Task 的显式等待边界。真实 Desktop paired 测试覆盖等待 child 时 steer 与后续 Run 排队、释放后原 Run 正常完成。
 
 
 ## 当前协作目录与准确 interrupt
+
+本节记录仍有实际调用者的内部旧 `list_agents`／`interrupt_agent`／wait-any 定义；其 Tool ID 与普通模型名称不同。当前模型的同名公开入口分别映射准确 `task.list@1`／`task.interrupt@1`，使用本页开头的稳定 Session 合同，不接受下述旧 taskId/targetRunId 参数。
 
 `list_agents` 通过普通 Operations 的有限 `listAgents` 读取本 extension/Session/原主体的实际 child operation Commands 与 carrier，而非把自有引用记录当第二权威。每页 1–200 项，Decimal64 `afterSeq/upperSeq/highWaterSeq/nextAfterSeq` 按持久 Command seq 枚举；首屏固定上界，后续新受理对象留到下一次查询。`snapshotCursor` 是该页读时水位，不承诺所有页共享可变状态快照。摘要只含准确身份、status、attempt、创建/执行组关系和原 carrier 对应 Run 的 status/active/deadline；不拉取 Model/Tool 正文、result 或完整 getView。引用缓存缺失时可通过准确受范围限制的 `getAgentRef` 查回已登记 child，不新建、换 key 或恢复。
 

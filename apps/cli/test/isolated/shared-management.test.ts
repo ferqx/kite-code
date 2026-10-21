@@ -6,7 +6,7 @@ import type { AddressInfo, Socket } from 'node:net';
 import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { selectProfile } from '@kite-ai/agent/profile';
-import { createClient } from '@kite-ai/client';
+import { createClient, readOrdinaryCommandApplication } from '@kite-ai/client';
 import {
   inspectProcess,
   readDaemonReservation,
@@ -198,9 +198,27 @@ nativeTest(
         expectedStoreId: f.storeId,
         commandId: 'peer-held',
         kind: 'run.start',
-        content: 'hold external',
+        content: 'New task: hold external',
       });
       await until(() => existsSync(join(f.base, 'entered-peer')));
+      const peerCommand = await f.client.getCommand('peer-held');
+      const peerWork = await readOrdinaryCommandApplication(f.client, peerCommand);
+      expect(peerWork?.observation).toBeNull();
+      expect(peerWork?.run).toMatchObject({
+        sessionId: 'peer',
+        rootWorkCommandId: peerCommand.id,
+        originCommandId: peerWork?.sourceCommandId,
+        isActive: true,
+      });
+      expect(
+        await f.client.getExecution(readFileSync(join(f.base, 'entered-peer'), 'utf8')),
+      ).toMatchObject({
+        kind: 'tool',
+        definitionId: 'fixture.held',
+        sessionId: 'peer',
+        runId: peerWork!.run!.id,
+      });
+      expect(readFileSync(join(f.base, 'models'), 'utf8').trim().split('\n')).toHaveLength(1);
       expect(
         await limit(
           f.run({

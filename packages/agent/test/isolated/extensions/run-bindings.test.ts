@@ -301,15 +301,37 @@ test('unknown or duplicate host selections reject before any Model; failed admis
   });
   try {
     for (const id of ['unknown', 'duplicate']) {
-      await f.submit(id);
+      await f.submit(id, 's', {
+        kind: 'run.start',
+        content: id === 'duplicate' ? 'New task: duplicate' : id,
+      });
       const result = await f.done(id);
       expect(result.command.status).toBe('rejected');
       expect(result.run).toBeNull();
     }
     expect((await f.store.getCommand('unknown'))?.receipt).toEqual({ reason: 'tool_unavailable' });
-    expect((await f.store.getCommand('duplicate'))?.receipt).toEqual({
+    expect((await f.store.getCommand('duplicate'))?.receipt).toMatchObject({
       reason: 'invalid_tool_configuration',
     });
+    const duplicate = (await f.store.getCommand('duplicate'))!;
+    const receipt = duplicate.receipt as {
+      businessCommandId: string;
+      humanInputCommandId: string;
+      runId: null;
+    };
+    expect(receipt.runId).toBeNull();
+    expect(receipt.businessCommandId).toBeString();
+    expect(receipt.businessCommandId).not.toBe(duplicate.id);
+    expect(await f.store.getCommand(receipt.humanInputCommandId)).toMatchObject({
+      request: {
+        publicCommandId: duplicate.id,
+        content: 'New task: duplicate',
+        originalRequest: duplicate.request,
+      },
+    });
+    const business = (await f.store.getCommand(receipt.businessCommandId))!;
+    expect(business.status).toBe('rejected');
+    expect(business.receipt).toEqual({ reason: 'invalid_tool_configuration' });
     expect(model.requests).toHaveLength(0);
     expect(disposed).toBe(2);
   } finally {
@@ -551,9 +573,51 @@ test('ordinary background Job retains dynamic Run binding beyond parent completi
     expect(bindingDisposals).toEqual([0, 0]);
     expect(jobDisposals).toEqual([0, 0]);
     expect((await f.store.getExecution(refs[0]!.executionId!))?.definitionVersion).toBe('1');
-    await f.submit('second');
+    await f.submit('second', 's', { kind: 'run.start', content: 'New task: second' });
     await started[1]!.promise;
     expect((await f.done('second')).run?.status).toBe('completed');
+    const second = (await f.store.getCommand('second'))!;
+    const receipt = second.receipt as {
+      businessCommandId: string;
+      humanInputCommandId: string;
+      runId: string;
+    };
+    expect(second).toMatchObject({
+      status: 'applied',
+      request: { kind: 'run.start', content: 'New task: second' },
+    });
+    expect(receipt.businessCommandId).toBeString();
+    expect(receipt.businessCommandId).not.toBe(second.id);
+    expect(await f.store.getCommand(receipt.humanInputCommandId)).toMatchObject({
+      request: {
+        publicCommandId: second.id,
+        content: 'New task: second',
+        originalRequest: second.request,
+      },
+    });
+    expect(await f.store.getCommand(receipt.businessCommandId)).toMatchObject({
+      status: 'applied',
+      request: { content: 'New task: second' },
+      receipt: { runId: receipt.runId },
+    });
+    expect(await f.store.getRun(receipt.runId)).toMatchObject({
+      originCommandId: receipt.businessCommandId,
+      rootWorkCommandId: second.id,
+    });
+    const models = (await f.store.listExecutions('s')).filter(
+      (e) => e.runId === receipt.runId && e.kind === 'model',
+    );
+    expect(models).toHaveLength(2);
+    const input = await f.runtime.readModelInput({
+      expectedStoreId: f.expectedStoreId,
+      sessionId: 's',
+      subjectId: 'owner',
+      executionId: models[0]!.id,
+    });
+    expect(input.confirmation).toBe('succeeded');
+    expect(input.request.messages.find((m) => m.content === 'New task: second')?.sourceIds).toEqual(
+      [receipt.businessCommandId],
+    );
     expect(bindingDisposals).toEqual([0, 0]);
     expect(starts).toEqual([1, 1]);
     expect((await f.store.getExecution(refs[1]!.executionId!))?.definitionVersion).toBe('2');

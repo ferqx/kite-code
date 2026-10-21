@@ -13,7 +13,10 @@ import {
 } from '@kite-ai/agent/config';
 import { inspectShellAssets } from '@kite-ai/agent/permissions/shell';
 import type { ProfileSelection } from '@kite-ai/agent/profile';
-import { validateWorkflowArguments } from '@kite-ai/agent/skill-workflow';
+import {
+  createWorkflowCompilerSession,
+  validateWorkflowArgumentsAsync,
+} from '@kite-ai/agent/skill-workflow';
 import { createKnowledgeReadScope, KnowledgeReadCleanupError } from '@kite-ai/agent/sources';
 import type { z } from 'zod';
 import { defaultConfiguration } from './configuration-defaults';
@@ -90,7 +93,9 @@ export function createDefaultSkillCatalogueSource(options: {
   const allowedCapabilities = [...(options.allowedCapabilities ?? [])];
   const knowledgeScope = createKnowledgeReadScope();
   const pending = new Set<Promise<SkillCataloguePage>>();
-  const retainedPreparationFailures = new Set<ConfigurationPreparationCleanupError>();
+  const retainedPreparationFailures = new Set<
+    ConfigurationPreparationCleanupError | KnowledgeReadCleanupError
+  >();
   let sealed = false;
   let disposal: Promise<void> | undefined;
   const isCleanupFailure = (error: unknown) =>
@@ -172,6 +177,7 @@ export function createDefaultSkillCatalogueSource(options: {
         contextMode: null as 'inline' | 'fork' | null,
       });
       for (const row of entries) row.workflow = base();
+      const compiler = createWorkflowCompilerSession();
       try {
         const flags = readSkillWorkflowFlags(profile);
         workflowFacts = { flags };
@@ -194,6 +200,7 @@ export function createDefaultSkillCatalogueSource(options: {
             profile,
             source,
             listed,
+            compiler,
             resolveCapability: (id) => capabilities.get(id),
           });
           let assets: Awaited<ReturnType<typeof inspectShellAssets>> | null = null;
@@ -245,7 +252,7 @@ export function createDefaultSkillCatalogueSource(options: {
               revision: entry.descriptor.revision,
               manualAllowed: contract?.invocation.allowManual ?? false,
               emptyInputValid: contract
-                ? !validateWorkflowArguments(contract.inputSchema, {})
+                ? !(await validateWorkflowArgumentsAsync(contract.inputSchema, {}, { compiler }))
                 : false,
               contextMode: contract?.context.mode ?? null,
             };
@@ -284,6 +291,8 @@ export function createDefaultSkillCatalogueSource(options: {
             state: row.enabled ? 'unavailable' : 'disabled',
             reason: row.enabled ? 'workflow_configuration_unavailable' : 'workflow_disabled',
           };
+      } finally {
+        await compiler.dispose();
       }
     }
     const revision = hash({
@@ -343,7 +352,10 @@ export function createDefaultSkillCatalogueSource(options: {
       if (retainedPreparationFailures.size)
         return Promise.reject(retainedPreparationFailures.values().next().value);
       const task = list(context).catch((error) => {
-        if (error instanceof ConfigurationPreparationCleanupError)
+        if (
+          error instanceof ConfigurationPreparationCleanupError ||
+          error instanceof KnowledgeReadCleanupError
+        )
           retainedPreparationFailures.add(error);
         throw error;
       });

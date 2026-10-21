@@ -11,25 +11,34 @@ export function desktopDirectory(
   const summary = (session: NativeDirectory['sessions'][number]) => {
     if (session.activity) {
       const { run, queued, pendingInteractions, updatedAt } = session.activity;
-      const waiting = run?.isActive && run.status === 'waiting_execution' && run.waitingForResults;
+      const unconfirmed =
+        session.activity.executionOwner === 'unheld' ||
+        session.activity.executionOwner === 'unknown';
+      const waiting =
+        !unconfirmed &&
+        run?.isActive &&
+        run.status === 'waiting_execution' &&
+        run.waitingForResults;
       return {
         sessionId: session.id,
         displayName: session.title || '新对话',
         status: directory.unavailable
           ? '上次确认状态'
-          : run?.isActive
-            ? run.status === 'waiting_interaction' || waiting
-              ? 'waiting'
-              : run.status === 'waiting_execution'
-                ? '等待执行结果'
-                : run.status === 'cancelling'
-                  ? '正在停止'
-                  : run.status
-            : queued
-              ? 'queued'
-              : (run?.status ?? 'idle'),
+          : unconfirmed
+            ? '执行状态待核实'
+            : run?.isActive
+              ? run.status === 'waiting_interaction' || waiting
+                ? 'waiting'
+                : run.status === 'waiting_execution'
+                  ? '等待执行结果'
+                  : run.status === 'cancelling'
+                    ? '正在停止'
+                    : run.status
+              : queued
+                ? 'queued'
+                : (run?.status ?? 'idle'),
         ...(updatedAt !== null ? { updatedAt: new Date(updatedAt).toISOString() } : {}),
-        ...(!directory.unavailable ? { pendingInteractions } : {}),
+        ...(!directory.unavailable && !unconfirmed ? { pendingInteractions } : {}),
         ...(!directory.unavailable && waiting
           ? { waitingReason: 'required_background' as const }
           : {}),
@@ -43,7 +52,7 @@ export function desktopDirectory(
       displayName: session.title || '新对话',
       status: !observed
         ? '状态待读取'
-        : directory.unavailable || selection.viewLoading || selection.permissionUnavailable
+        : directory.unavailable || (selection.permissionUnavailable && !selection.viewLoading)
           ? '上次确认状态'
           : active?.status === 'waiting_interaction'
             ? 'waiting'

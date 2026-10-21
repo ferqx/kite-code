@@ -162,25 +162,39 @@ test('manual Workflow HTTP projection is same-source, independently unavailable,
       accessKey: profile.profileAccessKey,
     },
   });
-  const get = async (query = '') => {
+  // Observe actual production Worker construction; no mocked compiler or result.
+  const OriginalWorker = globalThis.Worker;
+  let compilerWorkers = 0;
+  globalThis.Worker = class extends OriginalWorker {
+    constructor(...args: ConstructorParameters<typeof Worker>) {
+      super(...args);
+      if (String(args[0]).endsWith('/skills/workflow-contract/worker.js')) compilerWorkers++;
+    }
+  };
+  const get = async (query = '', expectedCompilers?: number) => {
+    const beforeCompilers = compilerWorkers;
     const response = await fetch(
       `${service.endpoint}/v1/workspaces/w/skills?storeId=${storeId}${query}`,
       { headers: { authorization: `Bearer ${service.bootstrap.token}` } },
     );
-    return { status: response.status, body: (await response.json()) as SkillCataloguePage };
+    const body = (await response.json()) as SkillCataloguePage;
+    if (expectedCompilers !== undefined)
+      expect(compilerWorkers - beforeCompilers).toBe(expectedCompilers);
+    return { status: response.status, body };
   };
   try {
     const before = await runtime.getChanges({ after: '0' });
-    const knowledge = await get('&limit=37');
+    const knowledge = await get('&limit=37', 0);
     expect(knowledge.status).toBe(200);
     expect(knowledge.body.entries.every((row) => !('workflow' in row))).toBe(true);
-    let page = await get('&workflow=manual&limit=37');
+    let page = await get('&workflow=manual&limit=37', 1);
     expect(page.status).toBe(200);
     const first = page.body;
     const entries = [...first.entries];
     while (!page.body.complete) {
       page = await get(
         `&workflow=manual&limit=37&revision=${first.revision}&afterId=${page.body.nextAfterId}`,
+        1,
       );
       expect(page.status).toBe(200);
       entries.push(...page.body.entries);
@@ -236,14 +250,14 @@ test('manual Workflow HTTP projection is same-source, independently unavailable,
       state: 'disabled',
       reason: 'workflow_disabled',
     });
-    expect((await get('&limit=37')).body).toEqual(knowledge.body);
+    expect((await get('&limit=37', 0)).body).toEqual(knowledge.body);
     writeFileSync(flagsPath, JSON.stringify({ version: 1, features: flags }));
     write('good-000', { ...manifest('good-000'), description: 'changed source' });
     expect(
       (await get(`&workflow=manual&revision=${first.revision}&afterId=${first.nextAfterId}`))
         .status,
     ).toBe(409);
-    const changed = await get('&workflow=manual&limit=37');
+    const changed = await get('&workflow=manual&limit=37', 1);
     expect(changed.body.revision).not.toBe(first.revision);
     writeFileSync(
       configPath,
@@ -317,6 +331,7 @@ test('manual Workflow HTTP projection is same-source, independently unavailable,
       await binding.dispose?.();
     }
   } finally {
+    globalThis.Worker = OriginalWorker;
     await service.close();
     await runtime.close();
     rmSync(root, { recursive: true, force: true });

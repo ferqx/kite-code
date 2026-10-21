@@ -1,10 +1,12 @@
-import { chmodSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { chmodSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
 const destination = resolve(process.argv[2] ?? 'dist', 'mcp');
 mkdirSync(destination, { recursive: true });
 const result = await Bun.build({
   entrypoints: [
+    resolve(import.meta.dir, 'schema-worker.ts'),
     resolve(import.meta.dir, 'stdio-guardian.ts'),
     resolve(import.meta.dir, 'windows-stdio-guardian.ts'),
   ],
@@ -13,6 +15,10 @@ const result = await Bun.build({
   naming: '[name].js',
 });
 if (!result.success) throw new Error('mcp_stdio_guardian_build_failed');
+const schemaHash = createHash('sha256')
+  .update(readFileSync(resolve(destination, 'schema-worker.js')))
+  .digest('hex');
+writeFileSync(resolve(destination, 'schema-worker.sha256'), `${schemaHash}\n`);
 
 if (process.platform === 'linux') {
   if (!['x64', 'arm64'].includes(process.arch)) throw Error('linux_stdio_arch_unsupported');

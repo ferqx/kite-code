@@ -14,12 +14,14 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { createRuntime } from '@kite-ai/agent';
 import { createArtifactStore } from '@kite-ai/agent/artifacts';
 import { filesNativeAssets } from '@kite-ai/agent/files';
+import { mcpSchemaWorkerAssets } from '@kite-ai/agent/mcp';
 import { selectProfile } from '@kite-ai/agent/profile';
+import { workflowCompilerAssets } from '@kite-ai/agent/skill-workflow';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import { privateDirectory } from '@kite-ai/agent/windows-path-security';
 import { createDefaultProcessConfiguration } from '../../src/configuration';
 
-test('actual default Service keeps native loader/assets protected in Full while an ordinary external file remains readable', async () => {
+test('actual default Service keeps native and compiler assets protected in Full while an ordinary external file remains readable', async () => {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-files-native-service-')));
   const workspace = join(root, 'workspace');
   mkdirSync(workspace);
@@ -29,6 +31,11 @@ test('actual default Service keeps native loader/assets protected in Full while 
   const metadata = join(assets[1]!, 'manifest.json');
   const deniedNew = join(assets[1]!, `qualification-denied-${process.pid}.txt`);
   const original = readFileSync(metadata);
+  const compilerAssets = [mcpSchemaWorkerAssets(), workflowCompilerAssets()].flatMap((assets) => [
+    assets.worker,
+    assets.checksum,
+  ]);
+  const originalCompilerBytes = compilerAssets.map((path) => readFileSync(path));
   expect(existsSync(deniedNew)).toBe(false);
   const ordinary = join(root, 'ordinary.txt');
   writeFileSync(ordinary, 'complete external ordinary text');
@@ -47,6 +54,10 @@ test('actual default Service keeps native loader/assets protected in Full while 
         [find('read'), { path: metadata }],
         [find('read'), { path: assets[0] }],
         [find('write'), { path: deniedNew, content: 'must not publish', base: null }],
+        ...compilerAssets.flatMap((path) => [
+          [find('read'), { path }],
+          [find('write'), { path, content: 'must not overwrite', base: null }],
+        ]),
       ];
       const delta =
         modelCalls++ === 0
@@ -138,12 +149,12 @@ test('actual default Service keeps native loader/assets protected in Full while 
       subjectId: 'owner',
       request: {
         kind: 'run.start',
-        content: 'Verify the exact ordinary read and native protection.',
+        content: '新任务：Verify the exact ordinary read and native protection.',
       },
     });
     await runtime.waitForCommand('work', { timeoutMs: 10000 });
     const tools = (await store.listExecutions('s')).filter((row) => row.kind === 'tool');
-    expect(tools).toHaveLength(4);
+    expect(tools).toHaveLength(4 + compilerAssets.length * 2);
     expect(tools[0]!.status).toBe('succeeded');
     expect((tools[0]!.result as { content: string }).content).toContain(
       'complete external ordinary text',
@@ -161,6 +172,8 @@ test('actual default Service keeps native loader/assets protected in Full while 
     }
     expect(existsSync(deniedNew)).toBe(false);
     expect(readFileSync(metadata)).toEqual(original);
+    for (const [index, path] of compilerAssets.entries())
+      expect(readFileSync(path)).toEqual(originalCompilerBytes[index]!);
     expect(readFileSync(ordinary, 'utf8')).toBe('complete external ordinary text');
     expect(modelCalls).toBe(2);
   } finally {

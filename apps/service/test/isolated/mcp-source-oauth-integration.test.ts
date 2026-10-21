@@ -27,6 +27,7 @@ import {
   decodeMcpOAuthLauncherEvidence,
   type McpOAuthLauncherEvidence,
 } from '../../src/mcp-oauth-launcher-evidence';
+import { initializeLivePermissionFixture } from '../fixtures/live-permission-fixture';
 
 const object = (v: unknown): Record<string, Json> =>
   v !== null && typeof v === 'object' && !Array.isArray(v) ? (v as Record<string, Json>) : {};
@@ -347,7 +348,7 @@ const result=await fetch(callback);if(result.status!==200)process.exit(3);`,
         name: 'owned',
         rootUri: pathToFileURL(`${workspace}/`).href,
       });
-    if (!(await store.getSession(sessionId)))
+    if (!(await store.getSession(sessionId))) {
       await runtime.createSession({
         expectedStoreId: storeId,
         commandId: `create-${sessionId}`,
@@ -356,6 +357,17 @@ const result=await fetch(callback);if(result.status!==200)process.exit(3);`,
         title: 'owned',
         subjectId: 'owner',
       });
+      await initializeLivePermissionFixture({
+        runtime,
+        profile,
+        expectedStoreId: storeId,
+        subjectId: 'owner',
+        sessionId,
+        workspaceId: 'w',
+        mode: options.ask ? 'accept_edits' : 'full',
+        trusted: true,
+      });
+    }
     const service = await startService({
       runtime,
       subjectId: 'owner',

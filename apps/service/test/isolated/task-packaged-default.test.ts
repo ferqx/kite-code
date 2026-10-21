@@ -28,7 +28,7 @@ function canonical(value: unknown): string {
   return JSON.stringify(value);
 }
 
-test('source-free default Task preserves full child result and emits exactly one after-turn report, with required/background controls', async () => {
+test('source-free default collaboration preserves full child result and emits exactly one authorized idle report', async () => {
   const root = realpathSync(temporaryDirectory('kite-packaged-task-'));
   const workspace = join(root, 'workspace');
   const home = join(root, 'home');
@@ -67,7 +67,25 @@ test('source-free default Task preserves full child result and emits exactly one
   )) as typeof import('../../src/paired');
   const profile = selectProfile({ dataRoot: join(root, 'data'), profile: 'owned' });
   privateDirectory(profile.profilePath);
-  let disposition: 'after_turn' | 'required' | 'background' = 'after_turn';
+  const publicTaskTools = [
+    'spawn_agent',
+    'follow_up_agent',
+    'interrupt_agent',
+    'send_agent_message',
+    'wait_agent_events',
+    'list_agents',
+  ];
+  const legacyTaskTools = [
+    'read_agent',
+    'task_wait',
+    'followup_agent',
+    'cancel_agent_task',
+    'run_agent',
+    'wait_agents',
+    'wait_agent_event',
+  ];
+  const parentToolDirectories: string[][] = [];
+  let disposition = 'after_turn';
   let parentCalls = 0,
     childCalls = 0,
     reports = 0,
@@ -84,6 +102,7 @@ test('source-free default Task preserves full child result and emits exactly one
       const body = (await request.json()) as {
         model: string;
         messages: { role: string; content: string | null }[];
+        tools?: { type: string; function: { name: string } }[];
       };
       const review = body.messages.some((message) => {
         if (message.role !== 'user' || !message.content) return false;
@@ -97,6 +116,8 @@ test('source-free default Task preserves full child result and emits exactly one
         !review &&
         body.messages.some((message) => message.content?.includes('PACKAGED_CHILD_INPUT'));
       const report = !review && !child && reportActive();
+      if (!review && !child)
+        parentToolDirectories.push((body.tools ?? []).map((tool) => tool.function.name));
       let selected: unknown = null;
       let content: string;
       if (review) {
@@ -113,11 +134,7 @@ test('source-free default Task preserves full child result and emits exactly one
         const index = parentCalls++;
         if (index === 0)
           selected = {
-            key: 'original',
-            role: 'worker',
-            input: { content: 'PACKAGED_CHILD_INPUT' },
-            cancellation: 'detached',
-            result_disposition: disposition,
+            prompt: 'PACKAGED_CHILD_INPUT',
           };
         content = 'PACKAGED_PARENT_DONE';
       }
@@ -154,7 +171,6 @@ test('source-free default Task preserves full child result and emits exactly one
           modelCapabilities: { contextWindowTokens: 1000000 },
         },
       ],
-      tools: [{ id: 'task', definitionVersion: '1' }],
     }),
   );
   let paired: Awaited<ReturnType<typeof launchPairedService>> | undefined;
@@ -211,7 +227,7 @@ test('source-free default Task preserves full child result and emits exactly one
         })
       ).state,
     ).toBe('applied');
-    for (const scenario of ['after_turn', 'required', 'background'] as const) {
+    for (const scenario of ['after_turn'] as const) {
       disposition = scenario;
       parentCalls = 0;
       childCalls = 0;
@@ -267,6 +283,24 @@ test('source-free default Task preserves full child result and emits exactly one
       const held = await client.getView(sessionId);
       const heldParent = held.runs.find((run) => run.originCommandId === work)!;
       expect(heldParent).toBeDefined();
+      const parentModel = held.executions.find(
+        (execution) => execution.kind === 'model' && execution.runId === heldParent.id,
+      )!;
+      expect(parentModel).toBeDefined();
+      const parentInput = await client.getModelInput(sessionId, parentModel.id, {
+        expectedStoreId,
+      });
+      const parentToolIds = parentInput.request.tools.map((tool) => tool.id);
+      expect(parentToolDirectories.length).toBeGreaterThan(0);
+      for (const ids of [parentToolIds, ...parentToolDirectories]) {
+        for (const id of publicTaskTools)
+          expect(ids.filter((candidate) => candidate === id)).toHaveLength(1);
+        for (const id of legacyTaskTools) expect(ids).not.toContain(id);
+      }
+      console.log(
+        'packaged-task-default-tool-directory',
+        JSON.stringify({ parentRun: heldParent.id, parentToolIds, parentToolDirectories }),
+      );
       console.log(
         'packaged-task-single-slot-window',
         JSON.stringify({
@@ -283,7 +317,7 @@ test('source-free default Task preserves full child result and emits exactly one
       expect(carrier.childSessionId).toBeTruthy();
       expect(carrier.runId).toBeNull();
       const task = held.executions.find(
-        (execution) => execution.definitionId === 'task' && execution.runId === heldParent.id,
+        (execution) => execution.definitionId === 'task.spawn' && execution.runId === heldParent.id,
       )!;
       expect(task).toBeDefined();
       expect(task.id).not.toBe(carrier.id);
@@ -345,20 +379,15 @@ test('source-free default Task preserves full child result and emits exactly one
       }
       const accepted = JSON.parse((task.result as { content: string }).content);
       expect(accepted.accepted).toBe(true);
-      expect(accepted.ref).toMatchObject({
-        originStoreId: expectedStoreId,
-        sessionId,
-        extensionId: 'builtin.task',
-        key: 'original',
-        executionId: carrier.id,
-        childSessionId: carrier.childSessionId,
-        commandId: (
-          database.query('SELECT origin_command_id FROM execution WHERE id=?').get(carrier.id) as {
-            origin_command_id: string;
-          }
-        ).origin_command_id,
-      });
-      expect((await client.getCommand(accepted.ref.commandId)).receipt).toMatchObject({
+      expect(accepted.agent_id).toBe(carrier.childSessionId);
+      expect(accepted.state).toBe('queued');
+      expect(accepted.ref).toBeUndefined();
+      const exactCarrierCommandId = (
+        database.query('SELECT origin_command_id FROM execution WHERE id=?').get(carrier.id) as {
+          origin_command_id: string;
+        }
+      ).origin_command_id;
+      expect((await client.getCommand(exactCarrierCommandId)).receipt).toMatchObject({
         executionId: carrier.id,
       });
       expect(
@@ -377,18 +406,22 @@ test('source-free default Task preserves full child result and emits exactly one
         `completed-${scenario}`,
         () => client.getView(sessionId),
         (view) =>
-          view.runs.filter((run) => run.status === 'completed').length ===
-            (scenario === 'after_turn' ? 2 : 1) &&
+          view.runs.filter((run) => run.status === 'completed').length === 2 &&
           view.executions.some(
             (execution) => execution.id === carrier.id && execution.status === 'succeeded',
           ),
       );
       // Required result delivery adds the post-delivery completion step; the earlier completion proposal cannot finish the parent.
-      expect(parentCalls).toBe(scenario === 'required' ? 3 : 2);
+      expect(parentCalls).toBe(2);
       expect(childCalls).toBe(1);
       // Independent default record-only authorizations dispatch no reviewer Model or human answer; child effects retain their own ordinary gates.
       expect(reviews).toBe(0);
-      expect(reports).toBe(scenario === 'after_turn' ? 1 : 0);
+      expect(reports).toBe(1);
+      for (const ids of parentToolDirectories) {
+        for (const id of publicTaskTools)
+          expect(ids.filter((candidate) => candidate === id)).toHaveLength(1);
+        for (const id of legacyTaskTools) expect(ids).not.toContain(id);
+      }
       const parent = view.runs.find((run) => run.originCommandId === work)!;
       const childView = await client.getView(carrier.childSessionId!);
       expect(childView.runs).toHaveLength(1);

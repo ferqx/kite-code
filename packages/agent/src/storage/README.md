@@ -44,6 +44,8 @@ Run resume／Job recovery lease同样分开记录SQL逻辑释放与原OS锁：�
 
 Worker 的首次和积压 pump 使用 `setImmediate`，每个宏任务至多执行一个同步事务后让出。原控制/正文/查询加权队列、容量预留和 close 排空此前已接纳请求保持；不把积压改成连续 microtask。原长 Run 的有界 DbTiming 诊断显示 7850 个请求累计排队约 11.95s、SQL 约 2.06s、COMMIT 约 0.31s，原 `setTimeout(0)` 的排队中位数约 1.26ms；取消和关闭确认。原[双 Worker timing](../../test/isolated/storage/timing.test.ts)继续核 control/body 早于末尾 query及观察异常不影响写入，不能以纯 queue 测试替代。该调度修复不证明 RSS 或完整资源资格。
 
+`registerArtifact` 的完整字节验证在事务前按 8ms／64 个 64KiB 块分片；只暂停原请求的私有 generator，不并发执行 SQL。原 request ID、arrival、容量和同类别队首保留，其他类别的正文／查询可推进，close 继续等待此前准入请求。每次暂停先释放原语句并核无未结事务；真实 EOF、完整 hash 和原文件身份全部确认后才进入原短事务，再核 identity／scope。验证状态不接受调用参数中的 proof 标志，也不跨请求复用。首个 BEGIN 尚未开始的正常写锁等待可保留同一完整证明，但每次进入事务前仍核原路径无 symlink 及 dev／inode／size／ctime／mtime／mode；漂移明确拒绝。失败或最终 ACK 清理原 generator，关闭其原 FD，不重发已开始事务。真实 [注册响应性回归](../../test/isolated/storage/artifact-verification.test.ts)验证同 Store metadata／View 在大 Blob 注册完成前可读、原 close 排空与冷 hash，以及分片中的字节／scope 漂移和完整验证后写锁等待中的漂移均零 reference 效果；受控暂停只在隔离 Worker fixture 中存在。
+
 ## 写锁竞争的正常等待
 
 成功打开的 SQLite 写 Worker 对正常请求使用 25ms 原生等待，再在原队列内短暂让出。Core 仅在本请求首个 `BEGIN IMMEDIATE` 返回 `SQLITE_BUSY`、数据库确认不在事务且回调尚未开始时，产生私有的未开始证明；Worker 保留准确 request ID、容量、原 arrival 和同类别队首位置后继续等待，不设置累计锁等待期限。其他类别的只读观察可以继续，close 仍须排空此前已接纳请求。打开及初始化沿原 1000ms 原生等待，只读连接与启动格式 preflight 保留 100ms；这些启动路径没有取得上述请求重试资格。
@@ -76,6 +78,8 @@ Run安全观察完整流式扫描递归成员，执行组安全观察完整流�
 
 这个投影不是全部 Run/Execution 历史。旧记录仍可按准确 ID 独立读取；完整 Message 历史和输出沿各自固定上界的分页，不从当前视图数量推导 EOF。消息首屏、公共 DTO、执行/授权/恢复事务与读取预算保持各自原合同。
 
+Run 的可选 `carrierExecutionId` 只来自原 Command、准确 child/report 来源链及完整 scope 核验。离线 GC 清除 Command 正文后，来源关联不可核实便省略该字段，完整 Run ledger 仍可读取，不猜测 carrier。[来源回归](../../test/isolated/storage/background-follow-up.test.ts)核初始与 follow-up 的正文清除及只读水位；[Native 实际维护链](../../../../apps/desktop/test/isolated/native-background-bundle.test.ts)核窗口、备份恢复、过宽限 GC 和清除后历史读取。
+
 [真实长会话回归](../../../../tests/isolated/unified-agent/active-view.test.ts)通过公开 Runtime/HTTP/Client 完成205轮实际模型执行，第206轮已派发时保留当前 Run、当前 Model及最早的真实 detached Job，并核便携 Desktop controller、只读游标不增长、准确取消当前 Run不停止旧 Job。它不证明跨会话后台总览、所有历史Execution分页或实际三平台窗口；准确执行结果见[当前进度](../../../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-07长会话当前工作投影)。
 
 [显式中断 history owner](sqlite/recovery/README.md) 负责原取消 Tool 的准确 Model call 绑定、完整封存输出读取和最终恢复事务消息 CAS；它不恢复派发，也不改变 SDK 的配对要求，真实 unknown 沿原收束与阻挡条件保留。
@@ -103,6 +107,10 @@ Run安全观察完整流式扫描递归成员，执行组安全观察完整流�
 Workspace 沿用原 profile 范围，核对 expectedStoreId；现有 Workspace 没有主体创建字段，不从 Session 推造所有权，合法空 Workspace 仍可列出。Session 仅列 root、未请求删除的记录，先核当前 Store 准入，再核对真实 `session.create` Command 的宿主主体；恢复保留的旧创建出处不要求等于当前 Store，并在 SQL 分页前执行 workspace 过滤。child 入口保持 Task/父视图的独立权限，不因目录分页扩大。旧 `listWorkspaces/listSessions` 是明确当前页内部接口，不能用它们的默认 100 项证明目录已经读完。
 
 Session 每项附有限 `activity`：准确 active Run 优先、否则 latest Run 的 ID/status/isActive/是否仍有必需结果，未取消且越过停止边界的 accepted run.start/follow-up、同主体当前 Store 的 pending presentation Interaction 数量。没有 Run 不伪造完成，排队不替换尚活动的 Run。时间来自原 Session 最后 cursor 的私人 `kite.session-log@1.occurredAt`；旧／未知／损坏／非整数时间明确 null，不用读取时钟、Run 开始时间或其他会话时间填补。只读取有限字段，不公开原事件 payload、Run config 或输入。没有新增表／列、baseline checksum、Store major 或维护资产，冷读取不写事件。日志封存理由仍归[原决定](../../../../.agents/notes/implemented/architecture/2026-10-03-bounded-session-log-observation.md)，目录取舍见[本决定](../../../../.agents/notes/implemented/architecture/2026-10-08-session-directory-activity-observation.md)。
+
+活动 Run 的目录摘要另含可选 `executionOwner: held/unheld/unknown`，由 [Store adapter](../sqlite.ts) 在 SQL 快照后，对准确 root Session 的既有排他锁做同步 shared probe。探针只读打开现存私有锁文件，不创建文件、不写 owner generation、不结算历史；确定争用才返回 held，缺失／校验或系统错误保 unknown，成功取得并释放才返回 unheld。释放失败保原锁并使读取失败，不能伪造 unheld。锁观察与 SQL 快照分开，held 不证明模型仍在推进，unheld 不证明外部资源清理完成；恢复／派发继续核原合同。无 active Run 的历史和独立未结算 Job 不增加此字段。
+
+[原 owner 丢失回归](../../test/isolated/storage/directory-owner-observation.test.ts)核真实双 Store 的 held、关闭原 Store 后冷 readonly unheld、另一 root 仍 held、缺锁 unknown 且零创建，以及完整元数据和原 Run／Execution／Command 零变化；[锁观察回归](../../test/isolated/storage/lock-observation.test.ts)核本机真实争用、私有路径拒绝和非争用系统错误。
 
 [真实目录测试](../../../../tests/isolated/unified-agent/directory.test.ts) 使用具名创建命令、超过 200 项 Workspace/root Session、多主体、Native/Browser HTTP 与冷 readonly Store，核对固定上界、准确过滤、空 Workspace、零读取事件/Model 和原身份；另核改名没有 Run 的真实事件时间、queued/active/latest 与未知时间保留，不伪造 Model 成功记录。
 
@@ -197,3 +205,22 @@ Host 自动封存 prepare 中 session namespace 的 `records.get/list` 完整原
 ## 持久权限模式
 
 `permission.mode` 控制只接受 `accept_edits`、`auto`、`full`。写入校验发生在创建 mutation 之前；读出既有控制、幂等回执和冷只读路径同样验证模式。旧 `ask` 记录以 `invalid_host_control` 拒绝，原行和 cursor 保持，不静默改为其他策略。`getHostMutation` 在只读事务提交前解码，保留原拒绝原因。完整 [控制测试](../../test/isolated/storage/host-controls.test.ts)与[派发测试](../../test/isolated/storage/host-control-dispatch.test.ts)核验三策略、CAS、幂等、旧模式拒绝与零 Tool 效果；用户策略由 Service 负责。
+
+暂停后的原完成订阅沿 [继续资格 owner](sqlite/job-report-continuation-README.md)处理：真实 continue 决定同事务保存有限 carrier/start/subscription 依据，旧 suppressed report 保留历史，新 `job.report.continue` 仍由既有 Source/ack 事务唯一接纳。原停止、unknown、Rewind 与 fence 不因继续而解除。
+
+
+## 人类工作与完成报告事务
+
+[输入 owner](sqlite/inputs/README.md)负责公共请求、raw 人类输入、关联/选择/control revision 和唯一业务准入的分离；[安全交接](sqlite/human-work-handoff.ts)只在原准确 Run 的必要结果、计划条件、交互和未知效果都允许时技术收束。工作选择只门禁人类工作因果，不代替显式压缩或 runless Action 的原资格。等待与解释不持有 SQL 事务；原已派发效果与 unknown 始终按原执行域处理。
+
+恢复生成新 Store 后，原 Command/Run/Message 保留真实出处并可按各自只读合同读取；当前选择、待决输入、最新输入与 Runtime 候选只取当前 Store 的人类控制事实。历史 A 不能成为新 Store 中 B 的默认目标，也不阻挡 B 的独立准入；同 Store 冷重开仍保原选择和待决边界。Fork 的封存历史证明分别核业务 origin 与 rootWork ID/序号，不将旧工作当前是否可执行作为历史只读资格。
+
+[报告 owner](sqlite/job-report-operations.ts)在原结果终态保存时同事务登记唯一报告，接纳时以准确 result revision、Store/主体/原父 work/selection、当前 control revision 与取消/恢复事实核资格。active/idle 共用同一 Source/ack 事务：最终选目标，必要时建一个 idle Run，再保存 Source、consume Command、report receipt 和 delivery。C2 可进入 C1 唤起的同工作 R；不将 R.origin 当作每份结果的接纳身份。原 applied 重试只读原 target/Source，不能改投后来 Run。
+
+嵌套报告在原 child Run 已完成、但其外层 carrier 尚在真实收束时，先以完整 report/start/subject/Store/rootWork/result revision 证明核准确祖先，仅保存 `report_deferred/report_carrier_active`，不创建 Run、Source 或 ack。deferred 的有限等待指纹包含准确 carrier ancestry 的状态及取消事实，真实终态提交后才重新准入；原配置 binding 保持。普通及继续报告的派发仍由严格 sealed ancestry guard 要求合法终态，取消、unknown、错关系与过期 deadline 不取得执行资格；不通用重试 `report_unverifiable`。[嵌套整例](../../test/isolated/business/task/nested-after-turn.test.ts)用真实 carrier 最终提交门固定该窗口，并核零提前采用与最终唯一 Source/Run。
+
+祖先origin按类型互斥证明：`job.report`／`job.report.continue` 必须以原receipt准确关联父Run并递归成功；关联损坏时立即拒绝，不从额外 `parentExecutionId` 退回child.start查找。只有准确child.start或既有follow-up分支可直接定位carrier。原整例新增两类破损report的克隆反例，同时核running准入和terminal严格入口拒绝，Run／Source零增加且原结果未被接纳；合法child.start对照仍在running时defer、终态后接纳。这是损坏记录的证明边界，不声称普通客户端已经能构造该记录。
+
+[继续资格](sqlite/job-report-continuation-README.md)将暂停后的新资格与旧 suppressed report 分开。报告前继续绑定原 start/carrier/订阅，报告后继续引用原唯一结果；新 `job.report.continue` 仍核当前最终资格，停止/fence 不被抹去。QueueOnly 后继采用由[邮件 owner](sqlite/agent-mail-operations.ts)按准确 predecessor/selection/work 及 seq/completed_cursor 双水位保存；结果已含完整问题时只关联已接纳 Source，不制造第二份消息或 prepared 事实。
+
+[事务故障与丢响应](../../test/isolated/business/task/collaboration-report-transactions.test.ts)实际触发 Source/ack 插入故障，核 Run/Source/consume/receipt 整体回滚与准确重试；提交后返回丢失沿原 target 恢复、零重复 Model。输入优先、ack 后停止、观察队列溢出和永不结算 observer 均由同一原事实验证，可靠结果不依赖 on*。工作控制及交接的 SQL 触发器、revision 竞争与准确范围由各自测试维护；只读查询不取得接纳、执行或恢复权。

@@ -1451,11 +1451,7 @@ test('actual after-turn report admission and its active Run block scheduling unt
           id: 'delegate',
           name: 'spawn_agent',
           arguments: JSON.stringify({
-            key: 'child',
-            role: 'reader',
-            result_disposition: 'after_turn',
-            cancellation: 'detached',
-            input: { content: 'Harmless child' },
+            prompt: 'Harmless child',
           }),
         };
         yield { ...finish, reason: 'tool_calls' as const };

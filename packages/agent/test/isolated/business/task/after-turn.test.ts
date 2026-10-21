@@ -7,10 +7,10 @@ import { pathToFileURL } from 'node:url';
 import type { ModelAdapter, ModelEvent, ModelRequest } from '@kite-ai/ai';
 import { createArtifactStore } from '../../../../src/artifacts';
 import type { Extension } from '../../../../src/extensions';
-import { createTaskExtension } from '../../../../src/extensions/task';
 import { semanticDigest } from '../../../../src/json';
 import { createRuntime } from '../../../../src/runtime';
 import { openSqliteStore } from '../../../../src/sqlite';
+import { createLegacyTaskFixture as createTaskExtension } from '../../../fixtures/legacy-task-surface';
 
 const finish: ModelEvent = {
   type: 'finish',
@@ -24,6 +24,56 @@ const gate = () => {
   });
   return { promise, release };
 };
+async function expectHumanBusiness(
+  runtime: ReturnType<typeof createRuntime>,
+  store: Awaited<ReturnType<typeof openSqliteStore>>,
+  storeId: string,
+  commandId: string,
+  content: string,
+) {
+  const command = (await store.getCommand(commandId))!;
+  expect(command).toMatchObject({
+    status: 'applied',
+    request: { kind: 'run.start', content },
+  });
+  const receipt = command.receipt as {
+    businessCommandId: string;
+    humanInputCommandId: string;
+    runId: string;
+  };
+  expect(receipt.businessCommandId).toBeString();
+  expect(receipt.businessCommandId).not.toBe(commandId);
+  expect(await store.getCommand(receipt.humanInputCommandId)).toMatchObject({
+    kind: 'human.input',
+    request: { publicCommandId: commandId, content, originalRequest: command.request },
+  });
+  expect(await store.getCommand(receipt.businessCommandId)).toMatchObject({
+    status: 'applied',
+    request: { content },
+    receipt: { runId: receipt.runId },
+  });
+  expect(await store.getRun(receipt.runId)).toMatchObject({
+    status: 'completed',
+    rootWorkCommandId: commandId,
+    originCommandId: receipt.businessCommandId,
+  });
+  const models = (await store.listExecutions('root')).filter(
+    (execution) => execution.runId === receipt.runId && execution.kind === 'model',
+  );
+  expect(models.length).toBeGreaterThan(0);
+  expect(models[0]!.status).toBe('succeeded');
+  const inspected = await runtime.readModelInput({
+    expectedStoreId: storeId,
+    sessionId: 'root',
+    subjectId: 'owner',
+    executionId: models[0]!.id,
+  });
+  expect(inspected.confirmation).toBe('succeeded');
+  expect(
+    inspected.request.messages.find((message) => message.content === content)?.sourceIds,
+  ).toEqual([receipt.businessCommandId]);
+}
+
 for (const mode of [
   'report',
   'failed',
@@ -261,10 +311,11 @@ for (const mode of [
           sessionId: 'root',
           subjectId: 'owner',
           commandId: 'human',
-          request: { kind: 'run.start', content: 'human preferred' },
+          request: { kind: 'run.start', content: 'New task: human preferred' },
         });
         applyGate.release();
         await runtime.waitForCommand('human', { timeoutMs: 6000 });
+        await expectHumanBusiness(runtime, store, storeId, 'human', 'New task: human preferred');
       }
       if (mode === 'rewind') {
         await applyReady.promise;
@@ -339,11 +390,18 @@ for (const mode of [
           sessionId: 'root',
           subjectId: 'owner',
           commandId: 'later-human',
-          request: { kind: 'run.start', content: 'later human stays separate' },
+          request: { kind: 'run.start', content: 'New task: later human stays separate' },
         });
         expect((await store.getRun(activeReport.id))!.isActive).toBe(true);
         reportGate.release();
         await runtime.waitForCommand('later-human', { timeoutMs: 6000 });
+        await expectHumanBusiness(
+          runtime,
+          store,
+          storeId,
+          'later-human',
+          'New task: later human stays separate',
+        );
       }
       await runtime.waitForCommand(reportId, { timeoutMs: 6000 });
       const report = (await store.getCommand(reportId))!,

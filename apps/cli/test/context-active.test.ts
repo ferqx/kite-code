@@ -82,7 +82,7 @@ test('active include is queued for original Run; actual checkpoint supplies exac
     ).toBe('applied');
     const work = run(
       's',
-      { expectedStoreId, commandId: 'active', kind: 'run.start', content: 'waiting' },
+      { expectedStoreId, commandId: 'active', kind: 'run.start', content: '新任务：waiting' },
       options,
     );
     view = await until(

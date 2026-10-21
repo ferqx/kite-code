@@ -2,6 +2,7 @@ import { renameSync, writeFileSync } from 'node:fs';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { createDefaultProcessConfiguration } from '../../src/configuration';
 import { runServiceProcess } from '../../src/main';
+import { createPermissionManagement } from '../../src/permission-management';
 import { mixedShellConfiguration } from './multi-session-shell-load.shared';
 import type { LoadTelemetry } from './multi-session-stream-load.types';
 
@@ -45,8 +46,8 @@ await runServiceProcess({
     };
     timer = setInterval(sample, 100);
     sample();
-    const tools = ['task', 'shell.launch', 'shell.read', 'shell.wait', 'shell.stop'];
-    return createDefaultProcessConfiguration({
+    const tools = ['task.spawn', 'shell.launch', 'shell.read', 'shell.wait', 'shell.stop'];
+    const configuration = createDefaultProcessConfiguration({
       profile,
       observerSubjectId: host.subjectId,
       userConfigurationPath: `${profile.profilePath}/config.jsonc`,
@@ -84,6 +85,15 @@ await runServiceProcess({
         }),
       },
     });
+    const bindPermissions = configuration.permissionManagement!;
+    return {
+      ...configuration,
+      permissionManagement(runtime: Parameters<typeof bindPermissions>[0]) {
+        bindPermissions(runtime);
+        // This isolated host explicitly owns its mode controller; the production external-authority rejection remains.
+        return createPermissionManagement({ runtime, profile });
+      },
+    };
   },
   decorateConfiguration(configuration) {
     return slots === 4

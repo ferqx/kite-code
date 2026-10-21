@@ -14,12 +14,14 @@ async function fixture(model: ModelAdapter) {
   const expectedStoreId = (await store.getMetadata()).storeId;
   let effects = 0,
     authorizations = 0;
+  const authorizationExecutions: string[] = [];
   const runtime = createRuntime({
     store,
     model,
     permissions: {
-      async authorize() {
+      async authorize(request) {
         authorizations++;
+        authorizationExecutions.push(request.executionId);
         return { allowed: true, revision: 'actual' };
       },
     },
@@ -65,6 +67,7 @@ async function fixture(model: ModelAdapter) {
     get authorizations() {
       return authorizations;
     },
+    authorizationExecutions,
     async close() {
       await runtime.close();
       await store.close();
@@ -98,7 +101,9 @@ test('each safe transport attempt is a separate failed/successful execution with
     const models = view.executions.filter((e) => e.kind === 'model');
     expect(attempts).toBe(2);
     expect(f.effects).toBe(0);
-    expect(f.authorizations).toBe(2);
+    expect(f.authorizations).toBe(4);
+    for (const model of models)
+      expect(f.authorizationExecutions.filter((id) => id === model.id)).toHaveLength(2);
     expect(models.map((e) => e.status)).toEqual(['failed', 'succeeded']);
     expect(models[0]!.result).toMatchObject({
       content: 'Original partial',
@@ -149,14 +154,21 @@ test('safe transient failures continue beyond five attempts in the same Run', as
     await f.runtime.submitCommand({
       ...f.input,
       commandId: 'followup',
-      request: { kind: 'run.start', content: 'new work' },
+      request: { kind: 'run.start', content: 'New task: new work' },
     });
-    await f.runtime.waitForCommand('followup');
+    const followup = await f.runtime.waitForCommand('followup');
+    const receipt = followup.receipt as { runId: string; businessCommandId: string };
+    const business = await f.runtime.getCommand(receipt.businessCommandId);
+    expect(business?.receipt).toMatchObject({ runId: receipt.runId });
+    expect(business?.id).not.toBe(followup.id);
     expect(attempts).toBe(7);
     expect(
-      (await f.runtime.getView('session')).runs.find((r) => r.originCommandId === 'followup')
-        ?.status,
-    ).toBe('completed');
+      (await f.runtime.getView('session')).runs.find((r) => r.id === receipt.runId),
+    ).toMatchObject({
+      status: 'completed',
+      originCommandId: business!.id,
+      rootWorkCommandId: 'followup',
+    });
   } finally {
     await f.close();
   }

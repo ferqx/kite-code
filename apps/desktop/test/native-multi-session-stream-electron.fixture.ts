@@ -261,24 +261,30 @@ try {
       const observed = await until(
         state,
         (value) => value.selection!.executions.filter((row) => !!row.childSessionId).length === 3,
-        'three actual Task workers admitted',
+        'three actual spawn_agent workers admitted',
       );
       const toolRows = observed.selection!.executions.filter(
-        (row) => row.kind === 'tool' && row.definitionId === 'task',
+        (row) => row.kind === 'tool' && row.definitionId === 'task.spawn',
       );
       const rootJobs = observed
         .selection!.executions.filter((row) => !!row.childSessionId)
         .map((job) => {
           const tool = toolRows.find((row) => row.id === job.parentExecutionId)!;
-          const input = tool.toolInput as { input: { content: string } };
+          assert.ok(tool, 'each actual child carrier belongs to its precise spawn Tool');
+          assert.equal(tool.definitionVersion, '1');
+          const input = tool.toolInput as { prompt: string; task_name: string };
           return {
             id: job.id,
             childId: job.childSessionId!,
-            marker: input.input.content.replace('MULTI_', ''),
+            marker: input.prompt.replace('MULTI_', ''),
           };
         })
         .sort((a, b) => a.marker.localeCompare(b.marker));
       jobs.set(index, rootJobs);
+      assert.deepEqual(
+        rootJobs.map((job) => job.marker),
+        Array.from({ length: 3 }, (_, child) => `CHILD_${index}_${child}`),
+      );
       await until(
         provider,
         (value) =>

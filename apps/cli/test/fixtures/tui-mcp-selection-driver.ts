@@ -143,8 +143,8 @@ const check = async (path: string) => {
 };
 try {
   await wait('New Run');
-  await key('owned pending task');
-  await wait('owned pending task');
+  await key('New task: owned pending task');
+  await wait('New task: owned pending task');
   await key('\r');
   await wait('approval [');
   await check('baseline');

@@ -32,6 +32,8 @@ Host 在自己拥有的 Action prepare/execute、Query 与 context capture callb
 
 Fork 最终 SQL 在原实际 source group 已静止且没有 accepted work 时，独立核原 Execution/Run/Command/assistant Message、Model body metadata、声明 refs 和原 stamps，连同新 Session/记录/回执同事务封存 versioned private proof。不扫描未来 Execution/ref，也不要求 mutable 原 namespace/head 之后仍未变化；inherited 输出不扩已封存范围。若 Fork 等待期间来源变化、unknown/活动工作出现，拒绝整个 Fork。copy 和未 opt-in rebuild 不获得媒体/执行来源观察。
 
+派生业务输入的原 `originCommandId` 与人类工作的 `rootWorkCommandId/seq` 是两条独立因果：Run 的业务 origin 必须等于 Execution 的实际 origin，原 Command、Run 与 Execution 的 rootWork ID 和序号必须一致；不要求业务 Command ID 等于公开人类工作 ID。原 version 1 stamp 字段与摘要保持，读取历史证明不重新要求该工作仍是当前选择。真实新工作经公开输入、业务 Model/Tool、Fork 与冷只读的[回归](../../../test/isolated/storage/fork-readonly-sources.test.ts)同时核合法派生链和 origin、rootWork ID/序号漂移拒绝。
+
 `ReadContext.openForkSourceProjection(localKey)` 仅由当前实际 Session/namespace anchor 开放精确集合。projection 的 storeId 是当前观察 Store，sources 保各自原 Session/originStore/Run/Execution，Tool 的 modelExecutionId 为实际自动绑定。getExecution/getRun 只读精确声明集合；readModelInput/output 沿原 full reader，完整 bodyHash 与封存 proof 一致；artifacts.read 只允许精确已声明 refs，读取结束后再核原 anchor/来源并校验完整 bytes/hash。普通 getExecution/getRun/artifacts 范围保持。Query 返回这些准确 refs 时 Host 再核原 projection proof，不能把任意 foreign ref 混入。
 
 aliases 按当前完整 selected Message 与每层真实 applied Fork receipt/selection/upper 重建，列出当前及所有真实中间祖先 ID/seq，不以 sourceIds 或 seq 单独推来源。getMessage(messageId) 只返回这些 exact alias 的原完整 Message 与新增有限 ordered parts（ordinal/kind/contentVersion/revision/value）；不是 foreign Session 列表。parts 上限 8192、完整返回 1MiB；无法完整返回则拒绝。全部原 Message/parts 摘要进入 binding。合法 User commandId 可与 Model executionId 相同，只有 actual assistant+Model 关系形成 Model 证明。未选中 Tool 的 readonly 后像证据不使它的 trigger 变为可选节点。

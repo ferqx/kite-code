@@ -150,9 +150,15 @@ test('actual HTTP context selection is idle CAS with original durable receipt an
       expectedStoreId,
       commandId: 'new-run',
       kind: 'run.start',
-      content: 'fresh selected input',
+      content: 'New task: fresh selected input',
     });
-    await runtime.waitForCommand('new-run', { timeoutMs: 5000 });
+    const fresh = await runtime.waitForCommand('new-run', { timeoutMs: 5000 });
+    const freshReceipt = fresh.receipt as { runId: string; businessCommandId: string };
+    expect(await client.getRun(freshReceipt.runId)).toMatchObject({
+      status: 'completed',
+      originCommandId: freshReceipt.businessCommandId,
+      rootWorkCommandId: 'new-run',
+    });
     expect((await client.getView('s')).runs.at(-1)!.status).toBe('completed');
     expect(model.requests).toHaveLength(2);
     expect(
@@ -163,13 +169,13 @@ test('actual HTTP context selection is idle CAS with original durable receipt an
     ).toBe(false);
     expect(model.requests[1]!.messages).toContainEqual({
       role: 'user',
-      content: 'fresh selected input',
-      sourceIds: ['new-run'],
+      content: 'New task: fresh selected input',
+      sourceIds: [freshReceipt.businessCommandId],
     });
-    const fullContent = '\0'.repeat(1048576);
-    const predecessor = (await client.getView('s')).runs.find(
-      (run) => run.originCommandId === 'new-run',
-    )!;
+    const prefix = 'Follow up: ';
+    const fullContent = prefix + '\0'.repeat(1048576 - Buffer.byteLength(prefix));
+    expect(Buffer.byteLength(fullContent)).toBe(1048576);
+    const predecessor = await client.getRun(freshReceipt.runId);
     await client.followUp('s', {
       expectedStoreId,
       commandId: 'full-context',
@@ -178,16 +184,26 @@ test('actual HTTP context selection is idle CAS with original durable receipt an
       afterRunId: predecessor.id,
       contextSelectionId: selectedContext.selection.id,
     });
-    await runtime.waitForCommand('full-context', { timeoutMs: 5000 });
+    const full = await runtime.waitForCommand('full-context', { timeoutMs: 5000 });
+    const fullReceipt = full.receipt as { runId: string; businessCommandId: string };
+    expect(await client.getRun(fullReceipt.runId)).toMatchObject({
+      status: 'completed',
+      originCommandId: fullReceipt.businessCommandId,
+      rootWorkCommandId: 'new-run',
+    });
     expect((await client.getView('s')).runs.at(-1)!.status).toBe('completed');
     expect(
       model.requests[2]!.messages.some(
-        (message) => message.content === fullContent && message.sourceIds?.includes('full-context'),
+        (message) =>
+          message.content === fullContent &&
+          message.sourceIds?.includes(fullReceipt.businessCommandId),
       ),
     ).toBe(true);
     const fullPage = await client.getContext('s', { storeId: expectedStoreId, byteLimit: 8388608 });
     expect(
-      fullPage.messages.find((message) => message.sourceIds?.includes('full-context'))?.content,
+      fullPage.messages.find((message) =>
+        message.sourceIds?.includes(fullReceipt.businessCommandId),
+      )?.content,
     ).toBe(fullContent);
     await code(
       client.getContext('s', { storeId: expectedStoreId, byteLimit: 4194304 }),

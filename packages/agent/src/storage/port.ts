@@ -143,6 +143,8 @@ export interface RecordScope {
   sessionId: string;
 }
 export interface EnsureOperationInput extends OwnedWrite, RecordScope {
+  /** Ordinary collaboration always registers a finite completion, even without idle wake authority. */
+  collaborationCompletion?: true;
   resultDelivery?: 'caller';
   originCommandId: string;
   parentExecutionId: string;
@@ -228,6 +230,42 @@ export interface AuthorizationReviewResult {
 
 /** Host/adapter boundary. Ordinary extensions never receive this port. */
 export interface Store {
+  registerHumanInput(
+    input: import('./human-work-control').RegisterHumanInput,
+  ): Promise<CommandRecord>;
+  registerHumanCommand(
+    input: import('./human-work-control').RegisterHumanCommand,
+  ): Promise<CommandRecord>;
+  decideHumanInput(
+    input: import('./human-work-control').DecideHumanInput,
+  ): Promise<import('./human-work-control').HumanInputDecision>;
+  readHumanWorkState(
+    input: import('./human-work-control').HumanWorkScope,
+  ): Promise<import('./human-work-control').HumanWorkState>;
+  readHumanWorkEligibility(
+    input: import('./human-work-control').ReadHumanWorkEligibility,
+  ): Promise<import('./human-work-control').HumanWorkEligibility & { cursor: string }>;
+  beginHumanInputProcessing(
+    input: import('./human-work-control').BeginHumanInputProcessing,
+  ): Promise<CommandRecord>;
+  handoffHumanRun(
+    input: import('./human-work-handoff').HandoffHumanRunInput,
+  ): Promise<import('./human-work-handoff').HandoffHumanRunResult>;
+  refreshApproval(
+    input: import('../execution/authorization-refresh').RefreshApprovalInput,
+  ): Promise<InteractionRecord>;
+  invalidateAuthorizationReview(
+    input: import('../execution/authorization-refresh').InvalidateAuthorizationReviewInput,
+  ): Promise<void>;
+  applyAgentCommand(
+    input: import('./agent-collaboration').ApplyAgentCommandInput,
+  ): Promise<import('./agent-collaboration').CollaborationCommandResult>;
+  listStableAgents(
+    input: import('./agent-collaboration').ListStableAgentsInput,
+  ): Promise<import('./agent-collaboration').StableAgentPage>;
+  listAgentEvents(
+    input: import('./agent-collaboration').ListAgentEventsInput,
+  ): Promise<import('./agent-collaboration').AgentEventPage>;
   readForkNamespacePage(
     input: Omit<Parameters<Store['forkSession']>[0], 'namespacePlan'> & {
       afterSeq?: string;
@@ -341,6 +379,9 @@ export interface Store {
     input: OwnedWrite & {
       commandId: string;
       authorization: import('./types').AfterTurnAuthorization | null;
+      activeOnly?: boolean;
+      /** Complete confirmed questions proved to be present in this exact result body. */
+      carriedMessageIds?: string[];
       recovery?: {
         commandId: string;
         subjectId: string;
@@ -372,6 +413,7 @@ export interface Store {
   ): Promise<{ sessionId: string; contextSelectionId: string; targetRunId: string | null }>;
   queueAgentMessage(
     input: OwnedWrite & {
+      stableTarget?: string;
       commandId: string;
       originCommandId: string;
       sourceExecutionId: string;
@@ -697,6 +739,7 @@ export interface Store {
       runId: string;
       status: Extract<RunStatus, 'completed' | 'failed' | 'cancelled' | 'interrupted'>;
       reason?: string;
+      inputHandoffCommandId?: string;
       requirements: RequirementEvaluation[];
     },
   ): Promise<RunRecord>;

@@ -14,7 +14,11 @@ import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { acquireProfileAccess, acquireProfileDataLock } from '@kite-ai/agent/profile-access';
-import { createClient, requiresInteractionAttachment } from '@kite-ai/client';
+import {
+  createClient,
+  readOrdinaryCommandApplication,
+  requiresInteractionAttachment,
+} from '@kite-ai/client';
 import { launchPairedService } from '@kite-ai/service/paired';
 import { privateDirectory } from '../../../../tests/fixtures/test-filesystem';
 import type { CLIServiceArtifact } from '../../host';
@@ -416,19 +420,33 @@ test('80x24 source-free MCP selection and clear preserve original pending work a
               expectedStoreId: storeId,
               commandId,
               kind: 'run.start',
-              content: 'second owned pending task',
+              content: 'New task: second owned pending task',
             });
-            const view = await until(async () => {
-              const row = await client.getView('a');
-              return row.runs.some(
-                (run) => run.originCommandId === commandId && run.status === 'waiting_interaction',
-              )
-                ? row
-                : undefined;
+            const { view, application, command } = await until(async () => {
+              const command = await client.getCommand(commandId);
+              if (command.status !== 'applied') return undefined;
+              const application = await readOrdinaryCommandApplication(client, command);
+              if (!application?.run || application.observation)
+                throw Error('second_pending_work_has_no_business_run');
+              if (application.run.status !== 'waiting_interaction') return undefined;
+              return { view: await client.getView('a'), application, command };
             });
-            const run = view.runs.find((run) => run.originCommandId === commandId)!;
+            const run = application.run!;
+            expect(run.originCommandId).toBe(application.sourceCommandId);
+            expect(run.rootWorkCommandId).toBe(commandId);
+            expect(command.receipt).toMatchObject({
+              outcome: 'human_input_applied',
+              businessCommandId: application.sourceCommandId,
+              runId: run.id,
+            });
             originalRun = run.id;
-            originalCommand = commandId;
+            originalCommand = application.sourceCommandId;
+            receipts.push({
+              stage: 'second_pending_business_bound',
+              commandId: command.id,
+              businessCommandId: application.sourceCommandId,
+              runId: run.id,
+            });
             originalCompleted = false;
             expectedCalls = 4;
             const card = (

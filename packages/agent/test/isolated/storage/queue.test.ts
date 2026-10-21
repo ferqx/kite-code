@@ -51,3 +51,24 @@ test('an unstarted writer retains its queue position, capacity and close barrier
   expect(queue.next()?.method).toBe('close');
   expect(queue.size).toBe(0);
 });
+
+test('artifact verification continues the same control head while body/query progress and close waits', () => {
+  const queue = new WorkerQueue();
+  const registration = request(1, 'registerArtifact');
+  queue.push(registration);
+  queue.push(request(2, 'cancelCommand'));
+  queue.push(request(3, 'getMetadata'));
+  queue.push(request(4, 'appendExecutionOutput'));
+  queue.push(request(5, 'close'));
+  for (let segment = 0; segment < 4; segment++) {
+    expect(queue.next()).toBe(registration);
+    queue.deferArtifactVerification(registration);
+    expect(queue.size).toBe(5);
+  }
+  expect(queue.next()?.method).toBe('appendExecutionOutput');
+  expect(queue.next()?.method).toBe('getMetadata');
+  expect(queue.next()).toBe(registration);
+  expect(queue.next()?.method).toBe('cancelCommand');
+  expect(queue.next()?.method).toBe('close');
+  expect(queue.size).toBe(0);
+});

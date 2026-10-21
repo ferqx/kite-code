@@ -101,7 +101,9 @@ export async function readNativeBackground(input: BackgroundRead) {
           (item.childRun !== null &&
             (item.childRun.sessionId !== item.execution.childSessionId ||
               item.childRun.originCommandId !== `child-start-${item.execution.id}` ||
-              item.childRun.originStoreId !== item.execution.originStoreId)) ||
+              item.childRun.originStoreId !== item.execution.originStoreId ||
+              item.childRun.rootWorkCommandId !== item.execution.rootWorkCommandId ||
+              item.childRun.rootWorkSeq !== item.execution.rootWorkSeq)) ||
           (item.run !== null &&
             (item.run.sessionId !== item.session.id ||
               item.run.originStoreId !== item.execution.originStoreId ||
@@ -233,9 +235,17 @@ export async function readNativeBackgroundChild(
       body.item.execution.id !== executionId ||
       body.item.execution.childSessionId !== childId ||
       body.item.execution.originStoreId !== input.item.execution.originStoreId ||
+      body.item.execution.rootWorkCommandId !== input.item.execution.rootWorkCommandId ||
+      body.item.execution.rootWorkSeq !== input.item.execution.rootWorkSeq ||
+      body.item.execution.parentExecutionId !== input.item.execution.parentExecutionId ||
       body.item.session.id !== input.item.session.id ||
       body.item.rootSession.id !== input.item.rootSession.id ||
       (body.item.childRun?.id ?? null) !== opened.childRunId ||
+      (body.item.childRun !== null &&
+        (body.item.childRun.originCommandId !== `child-start-${executionId}` ||
+          body.item.childRun.originStoreId !== input.item.execution.originStoreId ||
+          body.item.childRun.rootWorkCommandId !== input.item.execution.rootWorkCommandId ||
+          body.item.childRun.rootWorkSeq !== input.item.execution.rootWorkSeq)) ||
       body.session.id !== childId ||
       body.session.parentSessionId !== input.item.session.id ||
       body.session.rootSessionId !== input.item.rootSession.id ||
@@ -251,6 +261,31 @@ export async function readNativeBackgroundChild(
     if (body.afterSeq !== undefined && decimal(body.afterSeq) > decimal(body.upperSeq))
       throw new ClientError('background_child_history_mismatch');
     let lastSeq = decimal(body.afterSeq ?? '0');
+    if (body.control) {
+      const runs = body.control.runs;
+      if (
+        !Array.isArray(runs) ||
+        !Array.isArray(body.control.executions) ||
+        new Set(runs.map((run) => run.id)).size !== runs.length ||
+        runs.some(
+          (run) =>
+            run.carrierExecutionId !== executionId ||
+            run.sessionId !== childId ||
+            run.originStoreId !== input.item.execution.originStoreId ||
+            run.rootWorkCommandId !== input.item.execution.rootWorkCommandId ||
+            run.rootWorkSeq !== input.item.execution.rootWorkSeq,
+        ) ||
+        body.control.executions.some(
+          (execution) =>
+            execution.sessionId !== childId ||
+            execution.originStoreId !== input.item.execution.originStoreId ||
+            execution.rootWorkCommandId !== input.item.execution.rootWorkCommandId ||
+            execution.rootWorkSeq !== input.item.execution.rootWorkSeq ||
+            !runs.some((run) => run.id === execution.runId),
+        )
+      )
+        throw new ClientError('background_child_binding_changed');
+    }
     const messages = new Map<string, NativeBackgroundChild['messages'][number]>();
     for (const message of body.messages) {
       if (

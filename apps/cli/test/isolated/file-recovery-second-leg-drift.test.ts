@@ -80,7 +80,7 @@ for (const drift of ['external_edit', 'later_run'] as const)
           expectedStoreId: storeId,
           commandId: 'later-work',
           kind: 'run.start',
-          content: 'Read and change again in a distinct Run.',
+          content: 'New task: Read and change again in a distinct Run.',
         });
         const command = await until(
           () => client.getCommand('later-work'),
@@ -90,6 +90,14 @@ for (const drift of ['external_edit', 'later_run'] as const)
           () => client.getRun((command.receipt as { runId: string }).runId),
           (r) => !r.isActive,
         );
+        const receipt = command.receipt as {
+          businessCommandId: string;
+          humanInputCommandId: string;
+        };
+        expect((await client.getCommand(receipt.humanInputCommandId)).receipt).toMatchObject({
+          businessCommandId: receipt.businessCommandId,
+        });
+        expect(run.originCommandId).toBe(receipt.businessCommandId);
         expect(run.status).toBe('completed');
         expect(f.calls()).toBe(6);
       }

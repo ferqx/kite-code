@@ -180,24 +180,32 @@ test('public view keeps the current Run and an old live Job after 205 real compl
     await bounded(jobEntered.promise);
     await runtime.waitForCommand('launch-old-job', { timeoutMs: 5000 });
     let firstRun = '';
+    const historyOrigins: string[] = [];
     for (let i = 0; i < 205; i++) {
       const commandId = `history-${i}`;
       await client.startRun('s', {
         expectedStoreId: storeId,
         commandId,
         kind: 'run.start',
-        content: `complete real turn ${i}`,
+        content: `New task: complete real turn ${i}`,
       });
       const command = await runtime.waitForCommand(commandId, { timeoutMs: 5000 });
       const runId = (command.receipt as { runId: string }).runId;
-      expect((await client.getRun(runId)).status).toBe('completed');
+      const origin =
+        (command.receipt as { businessCommandId?: string }).businessCommandId ?? command.id;
+      historyOrigins.push(origin);
+      expect(await client.getRun(runId)).toMatchObject({
+        status: 'completed',
+        originCommandId: origin,
+        rootWorkCommandId: commandId,
+      });
       if (i === 0) firstRun = runId;
     }
     await client.startRun('s', {
       expectedStoreId: storeId,
       commandId: 'active-late',
       kind: 'run.start',
-      content: 'hold the current real model request',
+      content: 'New task: hold the current real model request',
     });
     await bounded(modelEntered.promise);
     const original = await client.getCommand('active-late'),
@@ -206,8 +214,12 @@ test('public view keeps the current Run and an old live Job after 205 real compl
       view = await client.getView('s');
     expect(view.runs.find((run) => run.isActive)?.id).toBe(runId);
     expect(view.runs).toHaveLength(200);
-    expect(view.runs[0]?.originCommandId).toBe('history-6');
-    expect(view.runs.at(-1)?.originCommandId).toBe('active-late');
+    expect(view.runs[0]?.originCommandId).toBe(historyOrigins[6]);
+    expect(view.runs[0]?.rootWorkCommandId).toBe('history-6');
+    expect(view.runs.at(-1)?.originCommandId).toBe(
+      (original.receipt as { businessCommandId: string }).businessCommandId,
+    );
+    expect(view.runs.at(-1)?.rootWorkCommandId).toBe('active-late');
     expect(view.runs.some((run) => run.id === firstRun)).toBe(false);
     expect((await client.getRun(firstRun)).status).toBe('completed');
     expect(view.executions).toHaveLength(201);

@@ -207,7 +207,8 @@ try {
           expectedStoreId: scope.storeId,
           commandId: 'native-later-run',
           kind: 'run.start',
-          content: 'LATER_ACTUAL_RUN: actual fresh read then write and create after code success',
+          content:
+            'New task: LATER_ACTUAL_RUN: actual fresh read then write and create after code success',
         });
         const command = await until(
           () => client.getCommand('native-later-run'),

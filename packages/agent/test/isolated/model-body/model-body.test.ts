@@ -329,10 +329,48 @@ test('17 MiB Tool body reaches actual Model and durable Auto reviewer completely
         sessionId: 's',
         commandId: 'cold',
         subjectId: 'owner',
-        request: { kind: 'run.start', content: 'read precise original history' },
+        request: { kind: 'run.start', content: 'New task: read precise original history' },
       });
-      await reopened.waitForCommand('cold');
+      const command = await reopened.waitForCommand('cold');
+      expect(command).toMatchObject({
+        status: 'applied',
+        request: { kind: 'run.start', content: 'New task: read precise original history' },
+      });
+      const receipt = command.receipt as {
+        businessCommandId: string;
+        humanInputCommandId: string;
+        runId: string;
+      };
+      expect(receipt.businessCommandId).toBeString();
+      expect(receipt.businessCommandId).not.toBe(command.id);
+      expect(await store.getCommand(receipt.humanInputCommandId)).toMatchObject({
+        request: {
+          publicCommandId: command.id,
+          content: 'New task: read precise original history',
+          originalRequest: command.request,
+        },
+      });
+      expect(await store.getCommand(receipt.businessCommandId)).toMatchObject({
+        status: 'applied',
+        request: { content: 'New task: read precise original history' },
+        receipt: { runId: receipt.runId },
+      });
+      expect(await store.getRun(receipt.runId)).toMatchObject({
+        status: 'completed',
+        originCommandId: receipt.businessCommandId,
+        rootWorkCommandId: command.id,
+      });
       expect(model.requests).toHaveLength(1);
+      expect(await store.getExecution(model.requests[0]!.requestId)).toMatchObject({
+        runId: receipt.runId,
+        originCommandId: receipt.businessCommandId,
+        status: 'succeeded',
+      });
+      expect(
+        model.requests[0]!.messages.find(
+          (m) => m.content === 'New task: read precise original history',
+        )?.sourceIds,
+      ).toEqual([receipt.businessCommandId]);
       expect(model.requests[0]!.messages.some((message) => message.content.endsWith(body))).toBe(
         true,
       );

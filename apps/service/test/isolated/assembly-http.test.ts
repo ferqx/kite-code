@@ -3,10 +3,12 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { createRuntime } from '@kite-ai/agent';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import { privateDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { launchPairedService } from '../../src/paired';
+import { initializeLivePermissionFixture } from '../fixtures/live-permission-fixture';
 
 interface AssemblyObservation {
   stage(phase: string): void;
@@ -153,6 +155,30 @@ async function setup(
     title: 'Assembly',
     expectedStoreId: storeId,
   });
+  // The isolated Host has an external permission ceiling; public controls stay read-only.
+  const preparation = await openSqliteStore({ dataRoot: profile.dataRoot, profile: 'test' });
+  const preparationRuntime = createRuntime({
+    store: preparation,
+    permissions: {
+      async authorize() {
+        return { allowed: false, revision: 'fixture-control-preparation-no-execution' };
+      },
+    },
+  });
+  try {
+    await initializeLivePermissionFixture({
+      runtime: preparationRuntime,
+      profile,
+      expectedStoreId: storeId,
+      subjectId: (await handle.client.getCommand('create')).subjectId!,
+      sessionId: 'session',
+      workspaceId: 'workspace',
+      mode: 'full',
+      trusted: true,
+    });
+  } finally {
+    await preparationRuntime.close();
+  }
   observation?.stage('setup.readonly_store');
   const store = await openSqliteStore({
     dataRoot: profile.dataRoot,
@@ -338,7 +364,7 @@ test('Skill dependency claims do not grant a host capability and unknown selecte
     await f.handle.client.startRun('session', {
       commandId: 'unknown',
       kind: 'run.start',
-      content: 'Refuse unknown Tool',
+      content: 'New task: Refuse unknown Tool',
       expectedStoreId: f.storeId,
     });
     await until(async () => (await f.handle.client.getCommand('unknown')).status === 'rejected');
@@ -378,20 +404,23 @@ test('a newly disabled file capability affects the next Run while an admitted wa
     await f.handle.client.startRun('session', {
       commandId: 'future',
       kind: 'run.start',
-      content: 'Future config',
+      content: 'New task: Future config',
       expectedStoreId: f.storeId,
     });
-    await until(async () =>
-      (await f.handle.client.getView('session')).runs.some(
-        (run) => run.originCommandId === 'future' && !run.isActive,
-      ),
-    );
+    await until(async () => (await f.handle.client.getCommand('future')).status === 'applied');
+    const futureCommand = await f.handle.client.getCommand('future');
+    const futureReceipt = futureCommand.receipt as { runId: string; businessCommandId: string };
+    await until(async () => !(await f.handle.client.getRun(futureReceipt.runId)).isActive);
     const current = await f.handle.client.getView('session');
     expect(existsSync(join(f.workspace, 'future.txt'))).toBe(false);
     expect(
       JSON.stringify(current.runs.find((run) => run.originCommandId === 'run')!.configuration),
     ).toBe(original);
-    const future = current.runs.find((run) => run.originCommandId === 'future')!;
+    const future = current.runs.find((run) => run.id === futureReceipt.runId)!;
+    expect(future).toMatchObject({
+      originCommandId: futureReceipt.businessCommandId,
+      rootWorkCommandId: 'future',
+    });
     expect(future.configuration).toMatchObject({
       tools: [{ id: 'ask_user', version: '1' }],
     });

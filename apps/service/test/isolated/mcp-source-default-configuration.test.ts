@@ -18,6 +18,7 @@ import {
 import { privateDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { startService } from '../../src';
 import { createDefaultProcessConfiguration } from '../../src/configuration';
+import { initializeLivePermissionFixture } from '../fixtures/live-permission-fixture';
 
 type ToolCall = { name: string; input: Json } | null;
 async function until<T>(read: () => Promise<T | null>) {
@@ -290,6 +291,16 @@ process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:rpc.id,result})+'\\n');}})
     sessionId: 's',
     workspaceId: 'w',
     title: 'default raw source',
+  });
+  await initializeLivePermissionFixture({
+    runtime,
+    profile,
+    expectedStoreId,
+    subjectId: 'user',
+    sessionId: 's',
+    workspaceId: 'w',
+    mode: options.ask ? 'accept_edits' : 'full',
+    trusted: true,
   });
   const f = {
     root,

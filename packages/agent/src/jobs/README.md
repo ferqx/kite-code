@@ -14,6 +14,8 @@ guardian 连续排空 stdout/stderr，不等待业务观察回调；每块 UTF-8
 
 stdout／stderr读取拒绝按helper失败收尾，不调用用户取消入口。两项drain各关闭自己的stream，closing等待两项settled后沿原组／coalition证明清理；未确认停止仍unknown。首次输出错误只保128字节内的安全标识符与可用整数errno，不保存stack、路径或命令。私有terminal的failureCode／failureErrno由Shell adapter严格核验后保为结果details.supervisorFailure／supervisorErrno，原自然退出／取消／首个closing及输出预算不变。[独立输出失败整例](../../test/isolated/jobs/shell-drain-failure.test.ts)在私有真实guardian注入迭代拒绝，核failed、helper125、原组停止与原错误；适用macOS／Linux，Windows沿原unsupported skip。本机执行不授Linux原生或完整资源观测资格，也不证明之前间歇连续任务的首个触发源。
 
+Darwin pipe读取使用 `readSync` 的同次原生错误快照，仅 `EAGAIN`／`EINTR` 继续原有轮询；其他错误保留helper失败及可用的正整数errno。原非阻塞FD仍由owned-child关闭，每轮最多32KiB，buffer、backpressure和准确回收保持。[原生整文件回归](../../test/isolated/jobs/darwin-owned-child.test.ts)在真实空pipe返回暂态错误后立即将线程errno改成EPERM，仍须取得完整双流、exit23及准确reap；旧分离FFI读取版本在同一干扰下报 `darwin_owned_child_read/1`。这证明错误观测边界的修复，不证明2026-10-19默认负载中自然EPERM的具体底层触发源，原失败现场继续保留。
+
 [build-assets](build-assets.ts) 将 guardian bundle 到 `dist/platform/process/shell-supervisor.js`。built `dist/jobs/shell.js` 自动定位该资产，固定当前 Bun 执行它；源码测试显式传入已编译 guardian 路径，不回退到 `.ts` 源码。编译为单一 executable 的宿主应从发行资产根显式选定 supervisorPath，不能依赖虚拟 import.meta 路径。凭据/env 经私有管道传递，不进入 helper argv。
 
 其他公开 leaf（包括 Workflow verifier）通过 `@kite-ai/agent/jobs/shell` 使用此实现，完整包构建保留独立公开依赖。不能把含相对资产定位的实现以内部相对 import 合并进任意共享 chunk；实际完整 manifest 的源码树外测试同时验证多个入口装配与 guardian 路径。

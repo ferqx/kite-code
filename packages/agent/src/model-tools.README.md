@@ -18,7 +18,7 @@
 
 `snakeCase:true` 只转换 JSON Schema 明确声明的 `properties`，并同步该节点的 `required`；组合分支按本次实际实参选择，仅保留激活且存在的字段规则。`parameterNames` 使用内部字段点路径指定公开 key，例如 `offset → start_line`、`limit → max_lines`，数组元素配置路径用 `*`，实际调用记录具体元素索引，避免改变 opaque 兄弟元素。记录的路径是输入字段位置，不是对象内容的搜索替换。
 
-`omitParameters` 按内部顶层字段名收窄公开入口，`requiredParameters` 将已声明且未移除的顶层字段设为公开必填，不能添加不存在的字段。它们只约束本次模型 schema，内部控制合同仍保留。例如 `wait_agents` 移除单值 `taskId` 并要求 `taskIds`，事件入口移除两种任务目标；合法输入最终仍转回原定义校验。
+`omitParameters` 按内部顶层字段名收窄公开入口，`requiredParameters` 将已声明且未移除的顶层字段设为公开必填，不能添加不存在的字段。它们只约束本次模型 schema，内部控制合同仍保留；合法输入最终仍转回原定义校验。旧内部等待定义保留这些投影元数据，但均已对模型隐藏；当前六个 Task 工具使用自己的闭合 schema。
 
 没有声明属性的任意 JSON 保持原样，包括 Task 的 `input`、Workflow 的业务 `input/output`、prompt 的 `arguments`、远端 MCP schema 和 schema/default 等数据。模型投影不递归猜测业务 key，也不修改 JSON Schema 关键字。需要字段改名的 schema 若包含无法支持的 `$ref`，明确拒绝，不能只改表面或偷偷放宽校验。
 
@@ -37,8 +37,8 @@
 | `files.read_path/write_path/edit_path` | `read_user_file`、`write_user_file`、`edit_user_file` | 沿文件字段规则，独立绝对路径和原目标权限 |
 | `shell.execute/launch/read/wait/stop` | `shell_execute`、`shell_launch`、`shell_read`、`shell_wait`、`shell_stop` | 前台执行时限 `execution_timeout_ms`；等待时限 `wait_timeout_ms`；其他声明字段转 snake_case |
 | 普通问题、网页 | `ask_user`、`web_fetch` | 问题保留闭合 `{questions}`；网页使用 `max_chars/timeout_ms` |
-| `task/task.execute/task_read/followup_task/send_message/task_cancel` | `spawn_agent`、`run_agent`、`read_agent`、`followup_agent`、`send_agent_message`、`cancel_agent_task` | 保留操作 `key` 和 opaque `input`，声明字段转 snake_case |
-| `wait_agents/wait_agent/list_agents/interrupt_agent` | `wait_agents`、`wait_agent_event`、`list_agents`、`interrupt_agent` | 任务等待必须传 `task_ids` 数组；事件等待仅 `after_seq/timeout_ms`，无任务目标；旧 `task_wait` 内部仍注册但对模型隐藏 |
+| `task.spawn/message/follow_up/interrupt` | `spawn_agent`、`send_agent_message`、`follow_up_agent`、`interrupt_agent` | 创建使用 `prompt/task_name/preset`；后续协作使用稳定 `agent_id`，消息可明确 `target:parent`；不接受内部操作键、Provider 或 Run 身份 |
+| `task.events/list` | `wait_agent_events`、`list_agents` | 事件使用 `after_seq/wait_ms`；列表使用 `agent_ids/after_seq/upper_seq/limit`；旧 Task 工具仅保内部注册，对模型隐藏 |
 | `planning.read/write/review/update` | `read_plan`、`write_plan`、`request_plan_review`、`update_plan_progress` | 只改模型名称和声明字段，原计划批准与版本 CAS 保持 |
 | `validation.define/check/rebind/request_waiver/auto_check` | `define_validation_checks`、`run_validation_checks`、`rebind_validation_checks`、`request_validation_waiver`、`check_file_changes` | 原实际执行、期待值、验证和 waiver 资格保持 |
 | `skills.load/resource` | `load_skill`、`read_skill_resource` | `id → skill_id` |

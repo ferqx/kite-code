@@ -6,6 +6,12 @@ import type { ChildRole } from './child-configuration';
 export { defaultTaskRoles } from '@kite-ai/agent/task';
 
 const taskIds = new Set([
+  'task.spawn',
+  'task.message',
+  'task.follow_up',
+  'task.events',
+  'task.list',
+  'task.interrupt',
   'task',
   'task.execute',
   'task_read',
@@ -27,6 +33,8 @@ export function createTaskConfiguration(
   const extension =
     roles.length && roles.length <= 64
       ? createTaskExtension({
+          defaultRole: roles.some((role) => role.id === 'worker') ? 'worker' : roles[0]!.id,
+          presets: roles.filter((role) => role.id !== 'worker').map((role) => role.id),
           roles: roles.map(({ id, description }) => ({
             id,
             configurationId: id,

@@ -20,6 +20,7 @@ import { startService } from '@kite-ai/service';
 import { createDefaultProcessConfiguration } from '@kite-ai/service/configuration';
 import type { TuiMcpSourceApprovalIntent, TuiMcpSourceSnapshot } from '@kite-ai/ui/tui';
 import { privateDirectory, temporaryDirectory } from '../../../../tests/fixtures/test-filesystem';
+import { initializeLivePermissionFixture } from '../../../service/test/fixtures/live-permission-fixture';
 import { mcpSha } from '../../host/mcp-selection-intents';
 import { openMcpSourceApprovalJournal } from '../../host/mcp-source-approval-journal';
 import { createTuiMcpPort } from '../../host/tui-mcp';
@@ -264,6 +265,17 @@ async function fixture(many = false) {
         sessionId: s,
         workspaceId: 'w-zz',
         title: 'owned',
+      });
+    for (const sessionId of ['s', 'another-s'])
+      await initializeLivePermissionFixture({
+        runtime: runtime!,
+        profile,
+        expectedStoreId: id,
+        subjectId: 'owner',
+        sessionId,
+        workspaceId: 'w-zz',
+        mode: 'full',
+        trusted: true,
       });
     return {
       root,
@@ -523,12 +535,18 @@ test('changed Source page versions and malformed finite envelopes never yield a 
         return result;
       },
     };
-    await expect(
-      createTuiMcpSourceApprovalPort(altered, f.client.serverInfo!.storeId!, f.journal).read(
+    let changedPageError: unknown;
+    try {
+      await createTuiMcpSourceApprovalPort(altered, f.client.serverInfo!.storeId!, f.journal).read(
         's',
         new AbortController().signal,
-      ),
-    ).rejects.toThrow('mcp_source_approval_directory_changed');
+      );
+    } catch (error) {
+      changedPageError = error;
+    }
+    expect(changedPageError).toBeInstanceOf(Error);
+    if (!(changedPageError instanceof Error)) throw Error('expected_source_directory_rejection');
+    expect(changedPageError.message).toContain('mcp_source_approval_directory_changed');
     expect(pages).toBe(2);
     expect(f.counts().posts).toBe(0);
     expect(f.journal.list()).toHaveLength(0);

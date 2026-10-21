@@ -11,6 +11,7 @@ import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import { privateDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { type ChildRole, createChildConfiguration } from '../../src/child-configuration';
 import { createDefaultProcessConfiguration } from '../../src/configuration';
+import { initializeLivePermissionFixture } from '../fixtures/live-permission-fixture';
 
 function gate() {
   let resolve!: () => void;
@@ -40,12 +41,17 @@ function provider() {
       const parent =
         body.model === 'parent' &&
         messages.some(
-          (message) => message.role === 'user' && ['work', 'next'].includes(message.content),
+          (message) =>
+            message.role === 'user' &&
+            ['work', 'next', 'New task: work', 'New task: next'].includes(message.content),
         );
       const start = parent
         ? messages.reduce(
             (found, message, index) =>
-              message.role === 'user' && ['work', 'next'].includes(message.content) ? index : found,
+              message.role === 'user' &&
+              ['work', 'next', 'New task: work', 'New task: next'].includes(message.content)
+                ? index
+                : found,
             -1,
           )
         : -1;
@@ -106,6 +112,7 @@ async function fixture(
     tools?: string[];
     sharedKey?: boolean;
     extra?: Extension;
+    permissionMode?: 'auto' | 'accept_edits' | 'full';
     permissionPolicy?: Pick<PermissionPolicyOptions, 'readPolicy'>;
   } = {},
 ) {
@@ -185,37 +192,49 @@ async function fixture(
       },
     ],
   };
+  // These private test adapters are outside the product capability catalogue.
+  // Actual agent carriers, Models and Files retain the Host policy and injected ceiling.
+  function withFixtureCapabilities(current: Permissions): Permissions {
+    return {
+      ...(current.toolDispatchOrder ? { toolDispatchOrder: current.toolDispatchOrder } : {}),
+      authorize: (request) => {
+        const ownTool =
+          request.kind === 'tool' &&
+          ((request.definitionId === 'fixture.delegate' && request.definitionVersion === '1') ||
+            options.extra?.tools?.some(
+              (tool) =>
+                tool.id === request.definitionId && tool.version === request.definitionVersion,
+            ));
+        const ownJob =
+          request.kind === 'job' &&
+          options.extra?.jobs?.some(
+            (job) => job.id === request.definitionId && job.version === request.definitionVersion,
+          );
+        return ownTool || ownJob
+          ? (permissions?.authorize(request) ??
+              Promise.resolve({ allowed: true, revision: 'trusted-test-only-adapter' }))
+          : current.authorize(request);
+      },
+    };
+  }
   const runtime = createRuntime({
     ...host,
     store,
     modelConcurrency: 1,
     permissions: host.permissions!,
-    ...(options.permissionPolicy
-      ? {
-          resolveRunConfiguration: async (
-            input: Parameters<NonNullable<typeof host.resolveRunConfiguration>>[0],
-          ) => {
-            const binding = await host.resolveRunConfiguration!(input);
-            return {
-              ...binding,
-              permissions: {
-                authorize: (request: Parameters<Permissions['authorize']>[0]) =>
-                  request.kind === 'tool' &&
-                  request.definitionId === 'fixture.delegate' &&
-                  request.definitionVersion === '1'
-                    ? Promise.resolve({ allowed: true, revision: 'trusted-test-only-delegation' })
-                    : binding.permissions!.authorize(request),
-              },
-            };
-          },
-        }
-      : {}),
+    resolveRunConfiguration: async (
+      input: Parameters<NonNullable<typeof host.resolveRunConfiguration>>[0],
+    ) => {
+      const binding = await host.resolveRunConfiguration!(input);
+      return { ...binding, permissions: withFixtureCapabilities(binding.permissions!) };
+    },
     extensions: [...host.extensions!, delegate, ...(options.extra ? [options.extra] : [])],
     resolveChildRunConfiguration: async (input) => {
       resolutions++;
       const result = await host.resolveChildRunConfiguration!(input);
       return {
         ...result,
+        permissions: withFixtureCapabilities(result.permissions!),
         dispose: async () => {
           disposals++;
           await result.dispose?.();
@@ -232,6 +251,14 @@ async function fixture(
     rootUri: pathToFileURL(workspace).href,
   });
   await runtime.createSession({ ...base, commandId: 'create', workspaceId: 'w', title: 'parent' });
+  await initializeLivePermissionFixture({
+    runtime,
+    profile,
+    ...base,
+    workspaceId: 'w',
+    mode: options.permissionMode ?? 'full',
+    trusted: true,
+  });
   return {
     runtime,
     store,
@@ -257,7 +284,7 @@ async function fixture(
       runtime.submitCommand({
         ...base,
         commandId,
-        request: { kind: 'run.start', content: commandId },
+        request: { kind: 'run.start', content: `New task: ${commandId}` },
       }),
     async child() {
       return until(async () =>
@@ -474,7 +501,7 @@ test('a cold original operation key returns its saved child reference without re
       await cold.submitCommand({
         ...f.base,
         commandId: 'work',
-        request: { kind: 'run.start', content: 'work' },
+        request: { kind: 'run.start', content: 'New task: work' },
       }),
     ).toEqual(oldCommand);
     expect(
@@ -582,6 +609,7 @@ test('a detached child Job retains the fresh Workspace binding after both Runs f
 test('trusted role carrier is an independent exact unknown-effect Job: Ask approves it once, while Model-only and untrusted policy cannot start the child Provider', async () => {
   for (const mode of ['allow', 'only-model', 'untrusted'] as const) {
     const f = await fixture({
+      permissionMode: 'accept_edits',
       permissionPolicy: {
         readPolicy: () => ({
           mode: 'accept_edits',

@@ -469,7 +469,7 @@ try {
     originalJobId: main.id,
   });
   await coldRead(afterMain, afterMainCalls);
-  await send('HOST_SERVICE', 2);
+  await send('New task: HOST_SERVICE', 2);
   const service = await originalJob('service');
   await currentPhysical();
   await read('signal', { pid: String(servicePid) });

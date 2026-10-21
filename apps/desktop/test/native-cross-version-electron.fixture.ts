@@ -10,11 +10,14 @@ import type { WebPreferences } from 'electron';
 import type { ElectronApplication, Page } from 'playwright';
 import type {
   NativeCallerMetadata,
+  NativeModelInputChunk,
+  NativeModelInputOpen,
   NativeModelOutputChunk,
   NativeModelOutputOpen,
   NativeState,
   NativeWorkspaceRemoval,
 } from '../src/native-bridge';
+import { readNativeModelInput } from '../src/native-model-input';
 import { readNativeModelOutput } from '../src/native-model-output';
 
 async function openSessionTools(page: import('playwright').Page) {
@@ -374,6 +377,89 @@ async function run(page: Page, index: number) {
       value.selection?.runs.length === index + 1 &&
       value.selection.runs.every((run) => run.status === 'completed'),
   );
+  if (index === 1) {
+    // The hot submission retains its original acceptance. Look up that same
+    // public ID before proving its completed business Run and Model request.
+    const observed = await page.evaluate(
+      async (commandId) =>
+        (await window.kiteNative!.request({
+          method: 'lookupInput',
+          generation: 1,
+          commandId,
+        })) as unknown,
+      completed.inputSubmissions.at(-1)!.command!.id,
+    );
+    const command = (
+      observed as { command?: { id: string; status: string; receipt: unknown } } | null
+    )?.command;
+    assert.ok(command);
+    assert.equal(command.id, completed.inputSubmissions.at(-1)!.command!.id);
+    assert.equal(command.status, 'applied');
+    const confirmed = await state(page);
+    for (const original of completed.callerSubmissions!)
+      assert.deepEqual(
+        confirmed.callerSubmissions!.find(
+          (value) => value.request.commandId === original.request.commandId,
+        ),
+        original.request.commandId === command.id ? { ...original, phase: 'applied' } : original,
+      );
+    const receipt = command.receipt as { runId: string; businessCommandId: string };
+    assert.ok(receipt.businessCommandId);
+    assert.notEqual(receipt.businessCommandId, command.id);
+    assert.ok(
+      completed.selection!.runs.some(
+        (run) =>
+          run.id === receipt.runId &&
+          run.originCommandId === receipt.businessCommandId &&
+          run.rootWorkCommandId === command.id &&
+          run.status === 'completed',
+      ),
+    );
+    const models = completed.selection!.executions.filter(
+      (execution) => execution.kind === 'model' && execution.runId === receipt.runId,
+    );
+    assert.equal(models.length, 1);
+    const input = await readNativeModelInput({
+      bridge: {
+        request: async (request) => {
+          if (
+            request.method !== 'modelInput.open' &&
+            request.method !== 'modelInput.read' &&
+            request.method !== 'modelInput.close'
+          )
+            throw Error('native_version_input_method_invalid');
+          return await page.evaluate(
+            async (value) =>
+              (await window.kiteNative!.request(value)) as
+                | NativeModelInputOpen
+                | NativeModelInputChunk
+                | null,
+            request,
+          );
+        },
+        watch: () => () => {},
+      },
+      generation: completed.generation,
+      expectedStoreId: expected.storeId,
+      sessionId: expected.sessionId,
+      executionId: models[0]!.id,
+      signal: new AbortController().signal,
+      isCurrent: () => true,
+    });
+    assert.equal(input.confirmation, 'succeeded');
+    assert.deepEqual(
+      input.request.messages.find((message) =>
+        message.sourceIds?.includes(receipt.businessCommandId),
+      )?.sourceIds,
+      [receipt.businessCommandId],
+    );
+    assert.equal(
+      input.request.messages.find((message) =>
+        message.sourceIds?.includes(receipt.businessCommandId),
+      )?.content,
+      expected.tasks[index],
+    );
+  }
   // Input submissions describe this process's hot bindings. Cold originals remain in the
   // persistent caller directory; reading them must not promote them into new hot work.
   assert.equal(completed.inputSubmissions.length, 1);
@@ -385,7 +471,11 @@ async function run(page: Page, index: number) {
       ),
       record,
     );
-  assert.ok(completed.callerSubmissions!.every((value) => value.phase === 'accepted'));
+  const currentCaller = completed.callerSubmissions!.find(
+    (value) => value.request.commandId === completed.inputSubmissions[0]!.command!.id,
+  );
+  assert.ok(currentCaller);
+  assert.equal(currentCaller.phase, 'accepted');
   assert.ok(completed.inputSubmissions.every((value) => value.phase === 'accepted'));
   await page
     .getByText('历史已完整读取至固定高水位；当前执行事实仍须核实。', { exact: true })

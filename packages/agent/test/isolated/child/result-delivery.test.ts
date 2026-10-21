@@ -178,9 +178,18 @@ test.each([
     await runtime.submitCommand({
       ...base,
       commandId: 'later',
-      request: { kind: 'run.start', content: 'Continue ordinary work' },
+      request: { kind: 'run.start', content: 'Continue work.' },
     });
-    await runtime.waitForCommand('later');
+    const later = await runtime.waitForCommand('later');
+    expect(later.status).toBe('applied');
+    const laterRun = (await store.getView('s')).runs.find(
+      (run) => run.id === (later.receipt as { runId: string }).runId,
+    );
+    expect(laterRun).toMatchObject({
+      rootWorkCommandId: 'work',
+      status: 'completed',
+      isActive: false,
+    });
     expect(model.requests).toHaveLength(3);
     expect(JSON.stringify(model.requests.at(-1)!.messages).includes(childText)).toBe(
       delivery === 'session',

@@ -166,7 +166,7 @@ async function replayPolicy(root: string, e: CaseEvidence) {
   try {
     const sessionId = await f.session('history');
     for (let i = 0; i < 13; i++) {
-      const run = await f.start(sessionId, `ordinary-${i}`);
+      const run = await f.start(sessionId, `New task: ordinary-${i}`);
       check(
         e.assertions,
         `run_completed_${i}`,
@@ -226,7 +226,7 @@ async function replayPolicy(root: string, e: CaseEvidence) {
     check(e.assertions, 'replay_exact_cursor', count >= 10000 && after === upper, true);
     const holdS = await f.session('held'),
       nextS = await f.session('waiting');
-    const hold = await f.start(holdS, 'hold-slot');
+    const hold = await f.start(holdS, 'New task: hold-slot');
     await until(
       async () => held,
       (v) => v,
@@ -713,7 +713,7 @@ async function mcpChurn(root: string, e: CaseEvidence, stdioAssets?: McpSoakStdi
     changed = true;
     adapter.invalidateCatalogue();
     await scope.snapshotTools();
-    const stale = await f.start(sessionId, 'old definition');
+    const stale = await f.start(sessionId, 'New task: old definition');
     await f.finish(stale.runId);
     const executions = (await f.store.getView(sessionId)).executions.filter(
       (v) => v.runId === stale.runId && v.kind === 'tool',

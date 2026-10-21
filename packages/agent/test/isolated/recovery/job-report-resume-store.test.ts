@@ -7,13 +7,13 @@ import { pathToFileURL } from 'node:url';
 import { createFixedModel, type ModelEvent } from '@kite-ai/ai';
 import { createArtifactStore } from '../../../src/artifacts';
 import type { Extension } from '../../../src/extensions';
-import { createTaskExtension } from '../../../src/extensions/task';
 import { semanticDigest } from '../../../src/json';
 import { createRuntime } from '../../../src/runtime';
 import { openSqliteStore } from '../../../src/sqlite';
 import type { Store } from '../../../src/storage/port';
 import type { JobReportRecovery } from '../../../src/storage/sqlite/job-report-operations';
 import { AgentError, type Json } from '../../../src/storage/types';
+import { createLegacyTaskFixture as createTaskExtension } from '../../fixtures/legacy-task-surface';
 
 const finish: Extract<ModelEvent, { type: 'finish' }> = {
   type: 'finish',

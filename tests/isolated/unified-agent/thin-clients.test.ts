@@ -10,7 +10,7 @@ import { createFixedModel, type ModelAdapter, type ModelEvent } from '@kite-ai/a
 import { invokeExtension, queryExtension, run } from '../../../apps/cli/src';
 import { createDesktopController } from '../../../apps/desktop/src';
 import { startService } from '../../../apps/service/src';
-import { createClient } from '../../../packages/client/src';
+import { createClient, readOrdinaryCommandApplication } from '../../../packages/client/src';
 
 const finish: ModelEvent = {
   type: 'finish',
@@ -114,7 +114,7 @@ test('CLI acceptance stays pending until real Run terminal; Ctrl+C targets origi
         expectedStoreId: f.expectedStoreId,
         commandId: 'accepted-not-completed',
         kind: 'run.start',
-        content: 'Hold',
+        content: 'New task: Hold',
       },
       {
         client: f.client,
@@ -132,6 +132,15 @@ test('CLI acceptance stays pending until real Run terminal; Ctrl+C targets origi
     expect(completed).toBe(false);
     held.release();
     expect((await running).exitCode).toBe(0);
+    const application = await readOrdinaryCommandApplication(
+      f.client,
+      await f.client.getCommand('accepted-not-completed'),
+    );
+    expect(application?.observation).toBeNull();
+    expect(application?.run).toMatchObject({
+      status: 'completed',
+      rootWorkCommandId: 'accepted-not-completed',
+    });
     const interrupt = new AbortController();
     const cancellations: string[] = [];
     const cancel = f.client.cancelCommand.bind(f.client);
@@ -146,7 +155,7 @@ test('CLI acceptance stays pending until real Run terminal; Ctrl+C targets origi
         expectedStoreId: f.expectedStoreId,
         commandId: 'exact-original-command',
         kind: 'run.start',
-        content: 'Cancel queued',
+        content: 'New task: Cancel queued',
       },
       {
         client: f.client,
@@ -184,7 +193,7 @@ test('Desktop selection generations reject old response; switching/network dispo
       expectedStoreId: f.expectedStoreId,
       commandId: 'desktop-active',
       kind: 'run.start',
-      content: 'Hold',
+      content: 'New task: Hold',
     });
     await started.wait;
     const delay = barrier();
@@ -217,14 +226,24 @@ test('Desktop selection generations reject old response; switching/network dispo
     const stream = desktop.observe();
     expect(desktop.observe()).toBe(stream);
     const drained = stream.catch(() => {});
-    expect((await actualGetView('s')).runs[0]?.isActive).toBe(true);
+    const active = (await actualGetView('s')).runs.find((run) => run.isActive);
+    expect(active?.isActive).toBe(true);
     desktop.disposeNetwork();
     await drained;
     expect(stopped).toBe(0);
     held.release();
     await f.runtime.waitForCommand('desktop-active', { timeoutMs: 5000 });
     await f.client.connect();
-    expect((await f.client.getView('s')).runs[0]?.status).toBe('completed');
+    const application = await readOrdinaryCommandApplication(
+      f.client,
+      await f.client.getCommand('desktop-active'),
+    );
+    expect(application?.observation).toBeNull();
+    expect(application?.run).toMatchObject({
+      id: active!.id,
+      rootWorkCommandId: 'desktop-active',
+      status: 'completed',
+    });
     expect(modelAborted).toBe(false);
   } finally {
     held.release();

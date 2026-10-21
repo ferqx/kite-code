@@ -23,6 +23,7 @@ import { privateDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { startService } from '../../src';
 import { createDefaultProcessConfiguration } from '../../src/configuration';
 import { readBusinessRunInputs } from '../../src/planning-configuration';
+import { initializeLivePermissionFixture } from '../fixtures/live-permission-fixture';
 
 const intent = {
   extensionId: planningExtensionId,
@@ -225,6 +226,18 @@ async function fixture(script: (step: number, f: Fixture) => Promise<Call>) {
     workspaceId: 'w',
     title: 'per Run',
   });
+  const applyPolicy = () =>
+    initializeLivePermissionFixture({
+      runtime,
+      profile,
+      expectedStoreId,
+      subjectId: 'user',
+      sessionId: 's',
+      workspaceId: 'w',
+      mode,
+      trusted,
+    });
+  await applyPolicy();
   const f = {
     root,
     workspace,
@@ -248,17 +261,22 @@ async function fixture(script: (step: number, f: Fixture) => Promise<Call>) {
     reviewDecision(next: 'approve_once' | 'ask_user') {
       reviewDecision = next;
     },
-    policy(nextMode: PermissionMode, nextTrust = true) {
+    async policy(nextMode: PermissionMode, nextTrust = true) {
       mode = nextMode;
       trusted = nextTrust;
       revision++;
+      await applyPolicy();
     },
     async record(key: string) {
       return store.getExtensionRecord({ sessionId: 's', extensionId: planningExtensionId, key });
     },
     async run() {
       const view = await store.getView('s');
-      return view.runs.find((run) => run.originCommandId === workId)!;
+      const command = await store.getCommand(workId);
+      const receipt = command?.receipt as Record<string, Json> | null;
+      return view.runs.find(
+        (run) => run.originCommandId === (receipt?.businessCommandId ?? workId),
+      )!;
     },
     async submit(id = 'work', plan = true) {
       workId = id;
@@ -267,7 +285,7 @@ async function fixture(script: (step: number, f: Fixture) => Promise<Call>) {
         expectedStoreId,
         commandId: id,
         kind: 'run.start',
-        content: id,
+        content: `New task: ${id}`,
         ...(plan ? { extensionInputs: [intent] } : {}),
       });
     },
@@ -528,12 +546,12 @@ test('plan approval never overrides newly current Auto human decision or trust d
     await f.approvePlan('accept_edits');
     await until(async () => (entered ? true : null));
     f.reviewDecision('ask_user');
-    f.policy('auto');
+    await f.policy('auto');
     release();
     const card = await f.card('approval');
     expect(card.definitionId).toBe('files.write');
     expect(existsSync(join(f.workspace, 'after.txt'))).toBe(false);
-    f.policy('full', false);
+    await f.policy('full', false);
     await f.client.answerInteraction('s', card.id, {
       expectedStoreId: f.expectedStoreId,
       commandId: 'write-answer',
@@ -559,7 +577,7 @@ test('closed business envelopes preserve original Workflow input; malformed inte
   };
   const request = {
     kind: 'run.start' as const,
-    content: 'exact original',
+    content: 'New task: exact original',
     extensionInputs: [workflow, intent],
   };
   const digest = JSON.stringify(request);

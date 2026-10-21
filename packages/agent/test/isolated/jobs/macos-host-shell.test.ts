@@ -136,7 +136,13 @@ macTest(
       expect(await invoke('bootstrap', registration.domain, plist)).toBe(0);
       expect(await invoke('print', target)).toBe(0);
       expect(await invoke('bootout', target)).toBe(0);
-      expect(await invoke('print', target)).toBe(113);
+      const absentBy = Date.now() + 2000;
+      let absence = await invoke('print', target);
+      while (absence === 0 && Date.now() < absentBy) {
+        await Bun.sleep(20);
+        absence = await invoke('print', target);
+      }
+      expect(absence).toBe(113);
       await removeLaunchdRegistration(registration);
       expect(existsSync(path)).toBe(false);
     } finally {

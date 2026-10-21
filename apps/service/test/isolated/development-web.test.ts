@@ -569,7 +569,7 @@ test('Cookie Browser reads the accurate original Run beyond the recent View with
         expectedStoreId: f.storeId,
         commandId,
         kind: 'run.start',
-        content: `Explicit newer work ${index}`,
+        content: `New task: Explicit newer work ${index}`,
       });
       await f.runtime.waitForCommand(commandId, { timeoutMs: 5000 });
     }

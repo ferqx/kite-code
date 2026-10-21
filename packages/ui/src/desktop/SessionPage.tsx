@@ -80,6 +80,8 @@ export interface SessionPageProps {
   headerActions?: ReactNode;
   onHeaderMouseDown?: (clickCount: 1 | 2) => void;
   interaction?: ReactNode;
+  /** Child interactions may remain actionable beside the parent input. Defaults to true. */
+  interactionHidesPrompt?: boolean;
   statusNotice?: ReactNode;
   /** Ephemeral parent-run wait indicator supplied by a host; never a transcript message. */
   requiredSubagentWait?: boolean;
@@ -727,7 +729,9 @@ export function SessionPage({ messages, fileChanges, ...props }: SessionPageProp
                         {props.composer ? (
                           <Composer
                             {...props.composer}
-                            promptHidden={!!props.interaction}
+                            promptHidden={
+                              !!props.interaction && props.interactionHidesPrompt !== false
+                            }
                             inputRef={composerInput}
                             context={
                               <>

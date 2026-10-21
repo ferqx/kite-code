@@ -2,9 +2,13 @@ import { Database } from 'bun:sqlite';
 import { expect, test } from 'bun:test';
 import { chmodSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
+import { createFixedModel } from '@kite-ai/ai';
 import { temporaryDirectory } from '../../../../../tests/fixtures/test-filesystem';
+import { createArtifactStore } from '../../../src/artifacts';
 import { semanticDigest } from '../../../src/json';
+import { createRuntime } from '../../../src/runtime';
 import { openSqliteStore } from '../../../src/sqlite';
+import type { InteractionRecord } from '../../../src/storage/types';
 
 async function rejected(work: Promise<unknown>, code: string) {
   let error: unknown;
@@ -161,6 +165,462 @@ async function fixture() {
     },
   };
 }
+test('explicit reuse of an automatic source admits its full body to new work only at the selected Include publication', async () => {
+  const f = await fixture();
+  const finish = {
+    type: 'finish' as const,
+    reason: 'stop' as const,
+    usage: { inputTokens: 1, outputTokens: 1 },
+  };
+  const model = createFixedModel([[finish], [finish], [finish]]);
+  const runtime = createRuntime({
+    store: f.store,
+    artifacts: createArtifactStore({ profile: f.profile, store: f.store }),
+    model,
+    modelId: 'fixed',
+    permissions: {
+      async authorize() {
+        return { allowed: true, revision: '1' };
+      },
+    },
+  });
+  try {
+    const body = `FULL RESULT\n${'exact original body '.repeat(5000)}\nEND RESULT`;
+    const job = await f.job('automatic');
+    await f.settle(job, body);
+    await f.finish();
+    const consumed = await f.consume('consume-original', job);
+    const boundary = await f.newRun('retained-boundary');
+    const retained = await f.rewind('retain', f.initial, boundary);
+    await f.store.releaseSessionOwner(f.write.owner);
+    const start = async (id: string) => {
+      await runtime.submitCommand({
+        ...f.base,
+        commandId: id,
+        request: { kind: 'run.start', content: `New task: ${id}` },
+      });
+      const command = await runtime.waitForCommand(id, { timeoutMs: 4000 });
+      expect(command.status).toBe('applied');
+      const receipt = command.receipt as { businessCommandId?: string; runId: string };
+      expect(await f.store.getRun(receipt.runId)).toMatchObject({
+        status: 'completed',
+        rootWorkCommandId: id,
+        originCommandId: receipt.businessCommandId ?? id,
+      });
+      expect((await f.store.getExecution(model.requests.at(-1)!.requestId))!.runId).toBe(
+        receipt.runId,
+      );
+    };
+    await start('without-include');
+    expect(
+      model.requests[0]!.messages.some((message) =>
+        message.sourceIds?.includes(consumed.source.id),
+      ),
+    ).toBe(false);
+    const frozen = await f.read();
+    const originalAcceptance = (await f.store.getExecution(job))!.resultAcceptance;
+    const input = {
+      ...f.base,
+      commandId: 'explicit-original',
+      executionId: job,
+      resultRevision: '1',
+      expectedContextSelectionId: retained.selection.id,
+    };
+    const included = await f.store.includeResult(input);
+    expect(included.command.status).toBe('applied');
+    expect(included.source.id).toBe(consumed.source.id);
+    expect(included.source.originStoreId).toBe(consumed.source.originStoreId);
+    expect((await f.read()).resultSources).toEqual([{ ...consumed.source, inclusion: 'explicit' }]);
+    expect((await f.store.getExecution(job))!.resultAcceptance).toEqual(originalAcceptance);
+    f.db.query("UPDATE command SET request_digest='unverifiable' WHERE id=?").run(input.commandId);
+    expect((await f.read()).resultSources).toEqual([consumed.source]);
+    f.db
+      .query('UPDATE command SET request_digest=? WHERE id=?')
+      .run(included.command.requestDigest, input.commandId);
+    f.db
+      .query(
+        "UPDATE command SET receipt_json=json_set(receipt_json,'$.executionId','foreign') WHERE id=?",
+      )
+      .run(input.commandId);
+    expect((await f.read()).resultSources).toEqual([consumed.source]);
+    f.db
+      .query('UPDATE command SET receipt_json=? WHERE id=?')
+      .run(JSON.stringify(included.command.receipt), input.commandId);
+    expect(
+      (
+        await f.store.getSelectedContext({
+          expectedStoreId: f.expectedStoreId,
+          sessionId: 's',
+          upperSeq: frozen.highWaterSeq,
+        })
+      ).resultSources,
+    ).toEqual(frozen.resultSources);
+    expect(
+      f.db.query('SELECT inclusion,seq FROM context_snapshot WHERE id=?').get(consumed.source.id),
+    ).toEqual({ inclusion: 'automatic', seq: Number(consumed.source.seq) });
+    const cursor = (await f.store.getMetadata()).lastChangeCursor;
+    expect(await f.store.includeResult(input)).toEqual(included);
+    expect((await f.store.getMetadata()).lastChangeCursor).toBe(cursor);
+    expect((await f.store.getExecution(job))!.resultAcceptance).toEqual(originalAcceptance);
+    await start('with-include');
+    const messages = model.requests[1]!.messages.filter((message) =>
+      message.sourceIds?.includes(consumed.source.id),
+    );
+    expect(messages).toHaveLength(1);
+    expect(
+      JSON.parse(messages[0]!.content.slice(messages[0]!.content.indexOf('\n') + 1)).result.content,
+    ).toBe(body);
+    const coldIncluded = await openSqliteStore({ ...f.profile, mode: 'readonly' });
+    try {
+      const before = await coldIncluded.getMetadata();
+      expect(
+        (
+          await coldIncluded.getSelectedContext({
+            expectedStoreId: f.expectedStoreId,
+            sessionId: 's',
+          })
+        ).resultSources,
+      ).toEqual([{ ...consumed.source, inclusion: 'explicit' }]);
+      expect(await coldIncluded.getMetadata()).toEqual(before);
+      expect(model.requests).toHaveLength(2);
+    } finally {
+      await coldIncluded.close();
+    }
+    const excluded = await f.rewind('exclude-include', retained.selection.id, boundary);
+    expect((await f.read()).resultSources).toEqual([consumed.source]);
+    await start('after-exclusion');
+    expect(
+      model.requests[2]!.messages.some((message) =>
+        message.sourceIds?.includes(consumed.source.id),
+      ),
+    ).toBe(false);
+    expect((await f.store.getExecution(job))!.delivery).toBe('consumed');
+    expect(f.db.query("SELECT count(*) AS n FROM execution WHERE kind='job'").get()).toEqual({
+      n: 1,
+    });
+    expect(model.requests).toHaveLength(3);
+    await runtime.close();
+    const cold = await openSqliteStore({ ...f.profile, mode: 'readonly' });
+    try {
+      const before = await cold.getMetadata();
+      expect(
+        (
+          await cold.getSelectedContext({
+            expectedStoreId: f.expectedStoreId,
+            sessionId: 's',
+            contextSelectionId: excluded.selection.id,
+          })
+        ).resultSources,
+      ).toEqual([consumed.source]);
+      expect(await cold.getMetadata()).toEqual(before);
+      expect(model.requests).toHaveLength(3);
+    } finally {
+      await cold.close();
+    }
+  } finally {
+    await runtime.close();
+    await f.cleanup();
+  }
+}, 10000);
+
+test('active Include of a retained automatic source stays queued until the exact checkpoint and does not change frozen source pages', async () => {
+  const f = await fixture();
+  try {
+    const job = await f.job('automatic');
+    await f.settle(job, 'complete original automatic result');
+    await f.finish();
+    const consumed = await f.consume('consume-original', job);
+    const boundary = await f.newRun('retained-boundary');
+    const retained = await f.rewind('retain', f.initial, boundary);
+    await f.store.acceptCommand({
+      ...f.base,
+      commandId: 'active',
+      request: { kind: 'run.start', content: 'new work' },
+    });
+    const run = await f.store.startRun({ ...f.write, commandId: 'active', configuration: {} });
+    const input = {
+      ...f.base,
+      commandId: 'active-existing-include',
+      executionId: job,
+      resultRevision: '1',
+      expectedContextSelectionId: retained.selection.id,
+      targetRunId: run.id,
+    };
+    const originalAcceptance = (await f.store.getExecution(job))!.resultAcceptance;
+    const cancelled = await f.store.includeResult({ ...input, commandId: 'cancelled-include' });
+    expect(cancelled.command.status).toBe('accepted');
+    await f.store.cancelCommand({
+      ...f.base,
+      commandId: 'cancel-queued-include',
+      targetCommandId: cancelled.command.id,
+    });
+    expect(await f.store.getCommand(cancelled.command.id)).toMatchObject({
+      status: 'rejected',
+      receipt: { outcome: 'cancelled_before_apply' },
+    });
+    expect((await f.read()).resultSources).toEqual([consumed.source]);
+    expect((await f.store.getExecution(job))!.resultAcceptance).toEqual(originalAcceptance);
+    const queued = await f.store.includeResult(input);
+    expect((await f.store.getExecution(job))!.resultAcceptance).toEqual(originalAcceptance);
+    expect(queued.command.status).toBe('accepted');
+    expect(queued.source.id).toBe(consumed.source.id);
+    expect((await f.read()).resultSources).toEqual([consumed.source]);
+    const frozen = await f.read();
+    await rejected(
+      f.store.finishRun({ ...f.write, runId: run.id, status: 'completed', requirements: [] }),
+      'input_pending',
+    );
+    const selectionSnapshot = f.db
+      .query<{ request_json: string }, [string]>(
+        "SELECT request_json FROM context_snapshot WHERE id=? AND kind='selection'",
+      )
+      .get(retained.selection.id)!;
+    f.db.query('DELETE FROM context_snapshot WHERE id=?').run(retained.selection.id);
+    await rejected(
+      f.store.applyInput({
+        ...f.write,
+        commandId: input.commandId,
+        kind: 'result_include',
+        runId: run.id,
+      }),
+      'context_source_unverifiable',
+    );
+    f.db
+      .query(
+        "INSERT INTO context_snapshot(id,session_id,selection_id,sources_json,request_json,kind) VALUES(?,'s',?,'[]',?,'selection')",
+      )
+      .run(retained.selection.id, retained.selection.id, selectionSnapshot.request_json);
+    const applied = await f.store.applyInput({
+      ...f.write,
+      commandId: input.commandId,
+      kind: 'result_include',
+      runId: run.id,
+    });
+    expect(applied.command.status).toBe('applied');
+    expect((await f.read()).resultSources).toEqual([{ ...consumed.source, inclusion: 'explicit' }]);
+    expect((await f.store.getExecution(job))!.resultAcceptance).toEqual(originalAcceptance);
+    expect(
+      (
+        await f.store.getSelectedContext({
+          expectedStoreId: f.expectedStoreId,
+          sessionId: 's',
+          upperSeq: frozen.highWaterSeq,
+        })
+      ).resultSources,
+    ).toEqual(frozen.resultSources);
+    const cursor = (await f.store.getMetadata()).lastChangeCursor;
+    expect(
+      await f.store.applyInput({
+        ...f.write,
+        commandId: input.commandId,
+        kind: 'result_include',
+        runId: run.id,
+      }),
+    ).toEqual(applied);
+    expect((await f.store.getMetadata()).lastChangeCursor).toBe(cursor);
+    expect((await f.store.getExecution(job))!.resultAcceptance).toEqual(originalAcceptance);
+    expect(await f.store.includeResult(input)).toMatchObject({
+      command: applied.command,
+      source: queued.source,
+    });
+    await f.store.cancelWork({
+      ...f.base,
+      commandId: 'cancel-after-include',
+      kind: 'run.cancel',
+      runId: run.id,
+    });
+    expect((await f.store.getCommand(input.commandId))!.cancelRequestedAt).not.toBeNull();
+    expect((await f.store.getCommand(input.commandId))!.status).toBe('applied');
+    expect((await f.read()).resultSources).toEqual([{ ...consumed.source, inclusion: 'explicit' }]);
+    expect((await f.store.getExecution(job))!.resultAcceptance).toEqual(originalAcceptance);
+    await f.store.finishRun({ ...f.write, runId: run.id, status: 'cancelled', requirements: [] });
+    const cold = await openSqliteStore({ ...f.profile, mode: 'readonly' });
+    try {
+      const before = await cold.getMetadata();
+      expect(
+        (await cold.getSelectedContext({ expectedStoreId: f.expectedStoreId, sessionId: 's' }))
+          .resultSources,
+      ).toEqual([{ ...consumed.source, inclusion: 'explicit' }]);
+      expect((await cold.getExecution(job))!.resultAcceptance).toEqual(originalAcceptance);
+      expect(await cold.getMetadata()).toEqual(before);
+    } finally {
+      await cold.close();
+    }
+    expect(
+      f.db.query('SELECT inclusion FROM context_snapshot WHERE id=?').get(consumed.source.id),
+    ).toEqual({ inclusion: 'automatic' });
+  } finally {
+    await f.cleanup();
+  }
+});
+
+test('active reuse of an automatic result retires the exact old approval before the next real Model reads its full body', async () => {
+  const f = await fixture();
+  let release!: () => void, entered!: () => void;
+  const checkpoint = new Promise<void>((resolve) => {
+    entered = resolve;
+  });
+  const proceed = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const finish = {
+    type: 'finish' as const,
+    reason: 'stop' as const,
+    usage: { inputTokens: 1, outputTokens: 1 },
+  };
+  const model = createFixedModel([
+    [
+      { type: 'tool_call', id: 'old-call', name: 'fixture.effect', arguments: '{}' },
+      { ...finish, reason: 'tool_calls' },
+    ],
+    [finish],
+  ]);
+  let effects = 0;
+  const runtime = createRuntime({
+    store: new Proxy(f.store, {
+      get(target, key) {
+        if (key === 'applyInput')
+          return async (input: Parameters<typeof target.applyInput>[0]) => {
+            if (input.kind === 'result_include') {
+              entered();
+              await proceed;
+            }
+            return target.applyInput(input);
+          };
+        const value = Reflect.get(target, key);
+        return typeof value === 'function' ? value.bind(target) : value;
+      },
+    }),
+    model,
+    modelId: 'fixed',
+    permissions: {
+      async authorize(request) {
+        return request.kind === 'model'
+          ? { allowed: true, revision: '1' }
+          : {
+              allowed: false,
+              revision: '1',
+              approval: { request: { title: 'Exact unstarted effect' } },
+            };
+      },
+    },
+    extensions: [
+      {
+        id: 'fixture',
+        version: '1',
+        apiMajor: 1,
+        tools: [
+          {
+            id: 'fixture.effect',
+            version: '1',
+            description: 'Unstarted effect',
+            inputSchema: { type: 'object' },
+            async execute() {
+              effects++;
+              return { outcome: 'succeeded', content: 'effect' };
+            },
+          },
+        ],
+      },
+    ],
+  });
+  try {
+    const job = await f.job('automatic');
+    await f.settle(job, 'EXACT COMPLETE AUTOMATIC RESULT');
+    await f.finish();
+    const consumed = await f.consume('consume-original', job);
+    const boundary = await f.newRun('retained-boundary');
+    const retained = await f.rewind('retain', f.initial, boundary);
+    await f.store.releaseSessionOwner(f.write.owner);
+    await runtime.submitCommand({
+      ...f.base,
+      commandId: 'active-work',
+      request: { kind: 'run.start', content: 'New task: exact foreground' },
+    });
+    const deadline = Date.now() + 4000;
+    let card: InteractionRecord | undefined;
+    while (!card) {
+      card = (
+        await runtime.listInteractions({
+          expectedStoreId: f.expectedStoreId,
+          sessionId: 's',
+          state: 'pending',
+        })
+      ).interactions[0];
+      if (Date.now() > deadline) throw Error('explicit_reuse_approval_timeout');
+      if (!card) await Bun.sleep(5);
+    }
+    const receipt = (await f.store.getCommand('active-work'))!.receipt as { runId: string };
+    const original = structuredClone(model.requests[0]!);
+    expect(
+      original.messages.some((message) => message.sourceIds?.includes(consumed.source.id)),
+    ).toBe(false);
+    const input = {
+      ...f.base,
+      commandId: 'active-reuse',
+      expectedContextSelectionId: retained.selection.id,
+      targetRunId: receipt.runId,
+      executionId: job,
+      resultRevision: '1',
+    };
+    const originalAcceptance = (await f.store.getExecution(job))!.resultAcceptance;
+    const queued = await runtime.includeResult(input);
+    expect(queued.command.status).toBe('accepted');
+    expect((await f.store.getExecution(job))!.resultAcceptance).toEqual(originalAcceptance);
+    await checkpoint;
+    expect((await f.store.getCommand(input.commandId))!.status).toBe('accepted');
+    expect((await f.read()).resultSources).toEqual([consumed.source]);
+    expect(model.requests).toEqual([original]);
+    const frozen = await f.read();
+    release();
+    await runtime.waitForCommand('active-work', { timeoutMs: 4000 });
+    expect((await f.store.getRun(receipt.runId))!.status).toBe('completed');
+    expect((await f.store.getCommand(input.commandId))!.status).toBe('applied');
+    expect((await f.store.getExecution(job))!.resultAcceptance).toEqual(originalAcceptance);
+    expect(model.requests).toHaveLength(2);
+    expect(model.requests[0]).toEqual(original);
+    expect(
+      (await runtime.readModelInput({ ...f.base, executionId: original.requestId })).request,
+    ).toEqual(original);
+    const messages = model.requests[1]!.messages.filter((message) =>
+      message.sourceIds?.includes(consumed.source.id),
+    );
+    expect(messages).toHaveLength(1);
+    expect(messages[0]!.content).toContain('EXACT COMPLETE AUTOMATIC RESULT');
+    expect(
+      model.requests[1]!.messages.find((message) => message.toolCallId === 'old-call')!.content,
+    ).toContain('superseded_by_user_input');
+    expect(await f.store.getExecution(card.executionId)).toMatchObject({
+      status: 'cancelled',
+      authorization: { dispatched: false },
+      result: { details: { adapterAttempted: false } },
+    });
+    expect(
+      await f.store.getInteraction({
+        expectedStoreId: f.expectedStoreId,
+        sessionId: 's',
+        interactionId: card.id,
+      }),
+    ).toMatchObject({ state: 'cancelled' });
+    expect((await f.read()).resultSources).toEqual([{ ...consumed.source, inclusion: 'explicit' }]);
+    expect(
+      (
+        await f.store.getSelectedContext({
+          expectedStoreId: f.expectedStoreId,
+          sessionId: 's',
+          upperSeq: frozen.highWaterSeq,
+        })
+      ).resultSources,
+    ).toEqual(frozen.resultSources);
+    expect(effects).toBe(0);
+    expect((await f.store.getExecution(job))!.delivery).toBe('consumed');
+  } finally {
+    release();
+    await runtime.close();
+    await f.cleanup();
+  }
+}, 10000);
+
 test('R10 Rewind before/after startup suppresses pending, rejects old accepted work and explicit include adds source without any replay', async () => {
   for (const afterStartup of [false, true]) {
     const f = await fixture();

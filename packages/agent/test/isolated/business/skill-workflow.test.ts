@@ -12,6 +12,7 @@ import {
 import { createArtifactStore } from '../../../src/artifacts';
 import {
   createSkillWorkflow,
+  createWorkflowCompilerSession,
   skillWorkflowExtensionId,
   type WorkflowActivationInput,
 } from '../../../src/business/skill-workflow';
@@ -107,8 +108,12 @@ async function fixture(
   let starts = 0,
     effects = 0,
     compensationStarts = 0;
-  const makeWorkflow = (initialActivations: readonly WorkflowActivationInput[] | undefined) =>
-    createSkillWorkflow({
+  const compilers: ReturnType<typeof createWorkflowCompilerSession>[] = [];
+  const makeWorkflow = (initialActivations: readonly WorkflowActivationInput[] | undefined) => {
+    const compiler = createWorkflowCompilerSession();
+    compilers.push(compiler);
+    return createSkillWorkflow({
+      compiler,
       flags: {
         skillActivation: !options.disabled,
         skillWorkflow: true,
@@ -161,6 +166,7 @@ async function fixture(
           }
         : {}),
     });
+  };
   const originalActivations = options.dynamic
     ? undefined
     : [{ key: 'one', skillId: 'skill:fixture', input: options.activationInput ?? {} }];
@@ -467,6 +473,7 @@ async function fixture(
     async close() {
       releasePermission();
       await runtime.close();
+      await Promise.all(compilers.map((compiler) => compiler.dispose()));
       rmSync(root, { recursive: true, force: true });
     },
   };

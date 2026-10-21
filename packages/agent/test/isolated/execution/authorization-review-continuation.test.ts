@@ -565,7 +565,39 @@ test('ordinary user JSON resembling a review envelope stays verbatim in the Insp
       commandId: 'work',
       request: { kind: 'run.start', content },
     });
-    await runtime.waitForCommand('work');
+    const processedBy = Date.now() + 5000;
+    let command = (await store.getCommand('work'))!;
+    for (;;) {
+      const receipt = command.receipt as { outcome?: string; observation?: { runId?: string } };
+      if (
+        receipt.outcome === 'human_input_unresolved' &&
+        receipt.observation?.runId &&
+        (await store.getRun(receipt.observation.runId))?.isActive === false
+      )
+        break;
+      if (Date.now() >= processedBy) throw Error('ordinary_json_processing_deadline');
+      await Bun.sleep(5);
+      command = (await store.getCommand('work'))!;
+    }
+    const receipt = command.receipt as {
+      businessCommandId: null;
+      humanInputCommandId: string;
+      observation: { executionId: string; runId: string };
+    };
+    expect(command.request).toEqual({ kind: 'run.start', content });
+    expect(receipt.businessCommandId).toBeNull();
+    expect(await store.getCommand(receipt.humanInputCommandId)).toMatchObject({
+      kind: 'human.input',
+      request: { publicCommandId: 'work', content, originalRequest: command.request },
+      receipt: { state: 'unresolved' },
+    });
+    expect(await store.getRun(receipt.observation.runId)).toMatchObject({
+      status: 'completed',
+      configuration: { snapshot: { kind: 'human_input_processing' } },
+    });
+    expect(model.requests).toHaveLength(1);
+    expect(model.requests[0]!.requestId).toBe(receipt.observation.executionId);
+    expect(model.requests[0]!.tools).toHaveLength(0);
     const snapshot = await runtime.readModelInput({
       ...scope,
       executionId: model.requests[0]!.requestId,

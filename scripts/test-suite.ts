@@ -161,7 +161,8 @@ export async function runTestJob(
     '--only-failures',
     ...(process.platform === 'darwin' ? [] : ['--timeout=30000']),
     ...(maxConcurrency ? [`--max-concurrency=${maxConcurrency}`] : []),
-    ...displayFiles,
+    // Bare relative strings are Bun discovery filters, not exact planned files.
+    ...job.files.map((file) => resolve(repositoryRoot, file)),
   ];
   try {
     const child = Bun.spawn(args, {

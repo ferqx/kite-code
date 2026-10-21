@@ -236,7 +236,7 @@ async function fixture(
       return runtime.submitCommand({
         ...base,
         commandId,
-        request: { kind: 'run.start', content: 'explicit business task' },
+        request: { kind: 'run.start', content: '新任务：explicit business task' },
       });
     },
     async done(commandId = 'work', timeoutMs = 5000) {

@@ -9,6 +9,50 @@ import { openSqliteStore, resolveProfile } from '@kite-ai/agent/sqlite';
 import { createFixedModel, type ModelEvent } from '@kite-ai/ai';
 import { startService } from '../../src';
 
+async function assertBusinessInput(
+  runtime: ReturnType<typeof createRuntime>,
+  commandId: string,
+  content: string,
+) {
+  const command = (await runtime.getCommand(commandId))!;
+  const receipt = command.receipt as {
+    businessCommandId: string;
+    humanInputCommandId: string;
+    runId: string;
+  };
+  expect(command).toMatchObject({ status: 'applied', request: { kind: 'run.start', content } });
+  expect(receipt.businessCommandId).toBeString();
+  expect(receipt.businessCommandId).not.toBe(commandId);
+  expect(await runtime.getCommand(receipt.humanInputCommandId)).toMatchObject({
+    request: { publicCommandId: commandId, content, originalRequest: command.request },
+  });
+  expect(await runtime.getCommand(receipt.businessCommandId)).toMatchObject({
+    status: 'applied',
+    request: { content },
+    receipt: { runId: receipt.runId },
+  });
+  const run = (await runtime.getRun(receipt.runId))!;
+  expect(run).toMatchObject({
+    originCommandId: receipt.businessCommandId,
+    rootWorkCommandId: commandId,
+  });
+  const view = await runtime.getView('session');
+  const model = view.executions.find((item) => item.kind === 'model' && item.runId === run.id)!;
+  expect(model).toBeDefined();
+  const input = await runtime.readModelInput({
+    expectedStoreId: command.originStoreId,
+    sessionId: 'session',
+    subjectId: 'owner',
+    executionId: model.id,
+  });
+  expect(input.confirmation).toBe('succeeded');
+  const source = input.request.messages.find((message) =>
+    message.sourceIds?.includes(receipt.businessCommandId),
+  );
+  expect(source).toMatchObject({ content, sourceIds: [receipt.businessCommandId] });
+  return run;
+}
+
 function gate<T>() {
   let resolve!: (value: T) => void;
   const promise = new Promise<T>((done) => {
@@ -313,7 +357,7 @@ test('cross HTTP Run cancel uses the submitted exact Run and preserves detached 
             expectedStoreId: f.metadata.storeId,
             commandId: 'new-run',
             kind: 'run.start',
-            content: 'New explicit work',
+            content: 'New task: New explicit work',
           },
           f.service,
         )
@@ -321,6 +365,9 @@ test('cross HTTP Run cancel uses the submitted exact Run and preserves detached 
     ).toBe(202);
     const next = await f.runtime.waitForCommand('new-run');
     const newId = (next.receipt as { runId: string }).runId;
+    expect(
+      await assertBusinessInput(f.runtime, 'new-run', 'New task: New explicit work'),
+    ).toMatchObject({ id: newId, status: 'completed' });
     expect(await f.runtime.getRun(newId)).toMatchObject({ status: 'completed' });
     expect((await f.post(control)).status).toBe(202);
     expect(await f.runtime.getRun(newId)).toMatchObject({ status: 'completed' });
@@ -360,13 +407,16 @@ test('cross HTTP Session stop with background closes its selected old causal wor
             expectedStoreId: f.metadata.storeId,
             commandId: 'after-stop',
             kind: 'run.start',
-            content: 'Fresh user intent',
+            content: 'New task: Fresh user intent',
           },
           f.service,
         )
       ).status,
     ).toBe(202);
     const next = await f.runtime.waitForCommand('after-stop');
+    expect(
+      await assertBusinessInput(f.runtime, 'after-stop', 'New task: Fresh user intent'),
+    ).toMatchObject({ status: 'completed' });
     expect(await f.runtime.getRun((next.receipt as { runId: string }).runId)).toMatchObject({
       status: 'completed',
     });

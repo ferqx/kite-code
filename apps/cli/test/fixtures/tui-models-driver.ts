@@ -199,7 +199,7 @@ try {
   await (await fetch(input.releaseURL)).text();
   await wait('DONE one');
   await wait('New Run >');
-  await send('next-original');
+  await send('New task: next-original');
   await wait('DONE two');
   assert.deepEqual(await requests(), [
     { model: 'one' },

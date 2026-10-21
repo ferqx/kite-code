@@ -7,7 +7,7 @@ import { pathToFileURL } from 'node:url';
 import { createRuntime } from '@kite-ai/agent';
 import { createArtifactStore } from '@kite-ai/agent/artifacts';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
-import type { ModelAdapter } from '@kite-ai/ai';
+import type { ModelAdapter, ModelRequest } from '@kite-ai/ai';
 import {
   type CallerCommandRequest,
   canonicalCallerCommandRequest,
@@ -25,8 +25,10 @@ test('authenticated original Command proofs match the complete caller request fo
     release = resolve;
   });
   let requests = 0;
+  let modelRequest: ModelRequest | undefined;
   const model: ModelAdapter = {
-    async *stream(_request, { signal }) {
+    async *stream(request, { signal }) {
+      modelRequest = request;
       requests++;
       await Promise.race([
         gate,
@@ -80,7 +82,7 @@ test('authenticated original Command proofs match the complete caller request fo
       workspaceId: 'w',
       title: 'proof',
     });
-    const content = '原正文 e\u0301\r\n"空格 \\ 路径"'.repeat(3000);
+    const content = `New task: ${'原正文 e\u0301\r\n"空格 \\ 路径"'.repeat(3000)}`;
     const start: CallerCommandRequest = {
       commandId: 'original-work',
       expectedStoreId: storeId,
@@ -96,12 +98,24 @@ test('authenticated original Command proofs match the complete caller request fo
     }
     const view = await client.getView('s');
     const run = view.runs.find((candidate) => candidate.isActive)!;
+    expect(run).toMatchObject({
+      isActive: true,
+      originCommandId: start.commandId,
+      rootWorkCommandId: start.commandId,
+    });
     const modelExecution = view.executions.find((execution) => execution.kind === 'model')!;
+    expect(await store.getExecution(modelExecution.id)).toMatchObject({
+      runId: run.id,
+      originCommandId: start.commandId,
+    });
+    expect(
+      modelRequest!.messages.find((message) => message.content === content)?.sourceIds,
+    ).toEqual([start.commandId]);
     const steer: CallerCommandRequest = {
       expectedStoreId: storeId,
       commandId: 'original-steer',
       kind: 'input.steer',
-      content: '精确原 Run \r\n',
+      content: 'Follow up: 精确原 Run \r\n',
       targetRunId: run.id,
       contextSelectionId: view.session.contextSelectionId,
     };
@@ -111,12 +125,38 @@ test('authenticated original Command proofs match the complete caller request fo
       expectedStoreId: storeId,
       commandId: 'original-follow',
       kind: 'input.follow_up',
-      content: '完整排队正文 e\u0301',
+      content: 'Follow up: 完整排队正文 e\u0301',
       afterRunId: run.id,
       contextSelectionId: view.session.contextSelectionId,
     };
     originals.push(follow);
     await client.followUp('s', follow);
+    for (const input of [steer, follow]) {
+      const command = (await store.getCommand(input.commandId))!;
+      const receipt = command.receipt as {
+        businessCommandId: string;
+        humanInputCommandId: string;
+      };
+      expect(receipt.businessCommandId).toBeString();
+      expect(receipt.businessCommandId).not.toBe(input.commandId);
+      expect(await store.getCommand(receipt.humanInputCommandId)).toMatchObject({
+        kind: 'human.input',
+        request: {
+          publicCommandId: input.commandId,
+          content: input.content,
+          originalRequest: command.request,
+        },
+      });
+      expect(await store.getCommand(receipt.businessCommandId)).toMatchObject({
+        kind: 'input.steer',
+        request: {
+          kind: 'input.steer',
+          targetRunId: run.id,
+          contextSelectionId: view.session.contextSelectionId,
+          content: input.content,
+        },
+      });
+    }
     const cancel: CallerCommandRequest = {
       expectedStoreId: storeId,
       commandId: 'cancel-original-follow',

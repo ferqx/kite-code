@@ -19,6 +19,9 @@ export interface TaskRole {
 }
 export interface TaskOptions {
   readonly roles: readonly TaskRole[];
+  /** Default trusted prompt configuration. No model-provided configuration identity. */
+  readonly defaultRole?: string;
+  readonly presets?: readonly string[];
   /** Trusted host registration, still requiring an independent Runtime policy. */
   readonly afterTurn?: { enabled: true };
 }
@@ -504,7 +507,7 @@ export function createTaskExtension(options: TaskOptions): Extension {
     if (created.outcome !== 'succeeded') return created;
     return completeForegroundTask(await reference(context, text(args, 'key')), context);
   };
-  return {
+  const legacy: Extension = {
     ...extension,
     tools: [
       ...extension.tools!,
@@ -622,6 +625,297 @@ export function createTaskExtension(options: TaskOptions): Extension {
           return result({ outcome: 'cancel_requested', ref: ref as unknown as Json, ...receipt });
         },
       },
+    ],
+  };
+  return collaborationSurface(legacy, options, roles);
+}
+
+/** A compact public protocol over the original controlled operations, not a second Agent Loop. */
+function collaborationSurface(
+  legacy: Extension,
+  options: TaskOptions,
+  roles: ReadonlyMap<string, TaskRole>,
+): Extension {
+  const defaultRole =
+    options.defaultRole ?? (roles.has('worker') ? 'worker' : [...roles.keys()][0]!);
+  if (!roles.has(defaultRole) || options.presets?.some((id) => !roles.has(id)))
+    throw new AgentError('invalid_task_roles');
+  const presets = options.presets ?? [];
+  const content = { type: 'string', minLength: 1, maxLength: 1048576 };
+  const agentId = { type: 'string', minLength: 1, maxLength: 128 };
+  const cursor = { type: 'string', pattern: '^(0|[1-9][0-9]*)$' };
+  const errors: Record<string, [string, string, boolean | null]> = {
+    invalid_task_arguments: ['invalid_request', 'correct_request', false],
+    invalid_input_request: ['invalid_request', 'correct_request', false],
+    invalid_agent_message: ['invalid_request', 'correct_request', false],
+    invalid_wait_timeout: ['invalid_request', 'correct_request', false],
+    child_configuration_unavailable: ['recovery_required', 'request_recovery', null],
+    task_result_unverifiable: ['recovery_required', 'request_recovery', null],
+    invalid_request: ['invalid_request', 'correct_request', false],
+    task_role_unavailable: ['invalid_request', 'correct_request', false],
+    invalid_cursor: ['invalid_cursor', 'restart_observation', false],
+    cursor_expired: ['cursor_expired', 'restart_observation', false],
+    cursor_ahead: ['invalid_cursor', 'restart_observation', false],
+    invalid_mail_cursor: ['invalid_cursor', 'restart_observation', false],
+    agent_unavailable: ['agent_unavailable', 'check_agent_id', false],
+    task_not_found: ['agent_unavailable', 'check_agent_id', false],
+    input_target_changed: ['target_changed', 'observe_then_new_call', false],
+    input_target_stopped: ['target_changed', 'observe_then_new_call', false],
+    operation_conflict: ['operation_conflict', 'inspect_original', false],
+    command_conflict: ['operation_conflict', 'inspect_original', false],
+    permission_denied: ['permission_denied', 'resolve_permission', false],
+    input_cancelled: ['operation_cancelled', 'none', false],
+    command_cancelled: ['operation_cancelled', 'none', false],
+    operation_needs_review: ['recovery_required', 'request_recovery', false],
+    operation_unverifiable: ['recovery_required', 'request_recovery', null],
+  };
+  const safe =
+    (command: boolean, execute: (input: Json, context: ToolContext) => Promise<ToolResult>) =>
+    async (input: Json, context: ToolContext): Promise<ToolResult> => {
+      try {
+        return await execute(input, context);
+      } catch (error) {
+        const code = error instanceof AgentError ? error.code : '';
+        const cancelledObservation = code === 'cancel_requested' && !command;
+        const projected = cancelledObservation
+          ? ['operation_cancelled', 'none', false]
+          : (errors[code] ?? ['receipt_unverifiable', 'inspect_original', null]);
+        const details: Json = {
+          ...(command ? { accepted: projected[2] } : {}),
+          ...(code === 'cursor_expired'
+            ? {
+                resume_after_seq:
+                  error instanceof AgentError && /^(0|[1-9][0-9]*)$/.test(error.message)
+                    ? error.message
+                    : null,
+              }
+            : {}),
+          error: {
+            code: projected[0],
+            message: cancelledObservation
+              ? 'Agent observation was cancelled.'
+              : `Agent operation could not be verified (${projected[0]}).`,
+            next_action: projected[1],
+          },
+        };
+        return {
+          outcome: 'failed',
+          content: canonicalJson(details),
+          details: {
+            ...(details as Record<string, Json>),
+            diagnostic: { code: code || 'internal_fault' },
+          },
+        };
+      }
+    };
+  const make = (
+    id: string,
+    name: string,
+    description: string,
+    schema: Readonly<Record<string, Json>>,
+    command: boolean,
+    execute: (input: Json, context: ToolContext) => Promise<ToolResult>,
+  ) => {
+    const guarded = safe(command, execute);
+    return {
+      id,
+      version: '1',
+      model: { name, snakeCase: true },
+      description,
+      inputSchema: schema,
+      ...(command ? { recovery: { version: '1' }, resume: guarded } : {}),
+      execute: guarded,
+    };
+  };
+  const command =
+    (kind: 'follow_up' | 'interrupt') => async (input: Json, context: ToolContext) => {
+      const args = value(input);
+      if (!context.operations.applyAgentCommand) throw new AgentError('operation_unverifiable');
+      const receipt = await context.operations.applyAgentCommand({
+        agentId: text(args, 'agentId'),
+        kind,
+        ...(kind === 'follow_up' ? { content: text(args, 'content') } : {}),
+      });
+      return result({
+        accepted: receipt.accepted,
+        agent_id: receipt.agentId,
+        state: receipt.state,
+        ...(receipt.mode ? { mode: receipt.mode } : {}),
+        ...(receipt.outcome ? { outcome: receipt.outcome } : {}),
+      });
+    };
+  return {
+    ...legacy,
+    tools: [
+      ...(legacy.tools ?? []).map((tool) => ({ ...tool, model: { ...tool.model!, hidden: true } })),
+      make(
+        'task.spawn',
+        'spawn_agent',
+        'Delegate prompt to a reusable general child Agent. task_name is display only. Acceptance may remain queued. Parent normal completion does not cancel the child. No Provider, permission or Run identity can be supplied.',
+        object(
+          {
+            prompt: content,
+            taskName: { type: 'string', minLength: 1, maxLength: 120 },
+            ...(presets.length ? { preset: { type: 'string', enum: [...presets] } } : {}),
+          },
+          ['prompt'],
+        ),
+        true,
+        async (input, context) => {
+          const args = value(input);
+          const selected = typeof args.preset === 'string' ? args.preset : defaultRole;
+          if ((args.preset !== undefined && !presets.includes(selected)) || !roles.has(selected))
+            throw new AgentError('task_role_unavailable');
+          const ref = await context.operations.ensure({
+            key: `spawn-${context.executionId}`,
+            request: {
+              kind: 'agent',
+              configurationId: roles.get(selected)!.configurationId,
+              input: {
+                content: text(args, 'prompt'),
+                ...(typeof args.taskName === 'string' ? { name: args.taskName } : {}),
+              },
+            },
+            cancellation: 'attached',
+            continuation: { kind: 'agent_completion' },
+          });
+          return result({ accepted: true, agent_id: ref.childSessionId!, state: 'queued' });
+        },
+      ),
+      make(
+        'task.follow_up',
+        'follow_up_agent',
+        'Continue the same collaborator. Same-work running or queued work receives guidance at a safe boundary; idle starts one ordinary new turn in the same Session. The same agent_id spans turns. accepted and state describe this request at admission, not its completion; earlier results or completed events for that agent do not prove this follow-up finished. Cross-work active guidance is rejected. No preset change.',
+        object({ agentId, content }, ['agentId', 'content']),
+        true,
+        command('follow_up'),
+      ),
+      make(
+        'task.interrupt',
+        'interrupt_agent',
+        'Request interruption of the exact current or queued child work selected atomically at admission. Idle stays idle. Acknowledgment is not stopped confirmation and the collaborator remains reusable.',
+        object({ agentId }, ['agentId']),
+        true,
+        command('interrupt'),
+      ),
+      make(
+        'task.message',
+        'send_agent_message',
+        'Queue a complete message to a direct child or parent. Idle recipients stay idle. Accepted/received/prepared are distinct. If a child needs a reply to proceed, wait at most one explicit finite 30000ms observation window; without a valid reply, finish with an honest pending-decision result containing the complete question and completed/unfinished facts. Do not wait indefinitely for an idle parent.',
+        {
+          ...object({ agentId, target: { enum: ['parent'] }, content }, ['content']),
+          oneOf: [
+            { required: ['agentId'], not: { required: ['target'] } },
+            { required: ['target'], not: { required: ['agentId'] } },
+          ],
+        },
+        true,
+        async (input, context) => {
+          const args = value(input);
+          if (!context.operations.sendStableAgentMessage)
+            throw new AgentError('operation_unverifiable');
+          await context.operations.sendStableAgentMessage(
+            args.target === 'parent' ? 'parent' : text(args, 'agentId'),
+            text(args, 'content'),
+          );
+          return result({ accepted: true, delivery: 'queued' });
+        },
+      ),
+      make(
+        'task.events',
+        'wait_agent_events',
+        'Observe only this Agent mailbox. after_seq defaults to "0" and may return historical events; continue from the last returned next_seq to avoid rereading returned events. seq is an observation position, not a turn identity; follow-up does not reset the mailbox. A completed event or its summary alone does not prove the latest request for that agent finished. Confirm using current work/state and an attributable complete result Source; if the relationship is not evidenced, leave completion unverified. Omitted/null wait_ms continuously waits in finite internal segments; zero takes a snapshot. Events do not acknowledge results; complete results/messages are adopted at ordinary safe checkpoints. Timeout does not cancel children.',
+        object(
+          {
+            afterSeq: cursor,
+            waitMs: { type: ['integer', 'null'], minimum: 0, maximum: Number.MAX_SAFE_INTEGER },
+          },
+          [],
+        ),
+        false,
+        async (input, context) => {
+          const args = value(input);
+          if (!context.operations.waitAgentEvents) throw new AgentError('operation_unverifiable');
+          const waited = await context.operations.waitAgentEvents({
+            ...(typeof args.afterSeq === 'string' ? { afterSeq: args.afterSeq } : {}),
+            ...(args.waitMs === null || typeof args.waitMs === 'number'
+              ? { waitMs: args.waitMs }
+              : {}),
+          });
+          return result({
+            reason: waited.reason,
+            next_seq: waited.nextSeq,
+            events: waited.events.map((event) => ({
+              seq: event.seq,
+              agent_id: event.agentId,
+              kind: event.kind,
+              ...(event.outcome ? { outcome: event.outcome } : {}),
+              summary: event.summary,
+            })),
+          });
+        },
+      ),
+      make(
+        'task.list',
+        'list_agents',
+        'Read a stable direct-child directory anchored at first creation, with responsibility and recent-work sources. Fixed upper_seq bounds identities, each page reflects current status. current_work_source describes current work; last_outcome and last_result_source describe the most recent terminal result, which may precede current queued/running/waiting work. Do not label that older result as completion of a new follow-up. No activation, result consumption or Model request. Source content is the complete original text in this verified Tool body.',
+        object(
+          {
+            agentIds: {
+              type: 'array',
+              minItems: 1,
+              maxItems: 200,
+              uniqueItems: true,
+              items: agentId,
+            },
+            afterSeq: cursor,
+            upperSeq: cursor,
+            limit: { type: 'integer', minimum: 1, maximum: 200 },
+          },
+          [],
+        ),
+        false,
+        async (input, context) => {
+          const args = value(input);
+          if (!context.operations.listStableAgents) throw new AgentError('operation_unverifiable');
+          const page = await context.operations.listStableAgents(
+            args as Parameters<NonNullable<typeof context.operations.listStableAgents>>[0],
+          );
+          const details = {
+            items: page.items.map((item) => ({
+              agent_id: item.agentId,
+              task_name: item.taskName,
+              assignment_summary: item.assignmentSummary,
+              assignment_source: item.assignmentSource,
+              current_work_summary: item.currentWorkSummary,
+              current_work_source: item.currentWorkSource,
+              work_relation: item.workRelation,
+              state: item.state,
+              last_outcome: item.lastOutcome,
+              last_result_source: item.lastResultSource,
+              last_result_summary: item.lastResultSource?.content.slice(0, 512) ?? null,
+            })),
+            upper_seq: page.upperSeq,
+            next_after_seq: page.nextAfterSeq,
+          } as unknown as Json;
+          const complete = canonicalJson(details);
+          if (new TextEncoder().encode(complete).byteLength > 32768 && context.artifacts) {
+            const reference = await context.artifacts.publish({
+              key: 'agents-directory',
+              content: new TextEncoder().encode(complete),
+              mediaType: 'application/json; charset=utf-8',
+            });
+            return {
+              outcome: 'succeeded',
+              content: 'Complete Agent directory and sources.',
+              details,
+              artifactRefs: [reference],
+              modelContent: { kind: 'artifact', reference, encoding: 'utf-8' },
+            };
+          }
+          return result(details);
+        },
+      ),
     ],
   };
 }

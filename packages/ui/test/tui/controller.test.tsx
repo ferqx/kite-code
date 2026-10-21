@@ -540,6 +540,12 @@ for (const surface of ['approval', 'composer'] as const) {
     const app = render(<TuiSession testDiagnostics controller={c} />);
     try {
       await Bun.sleep(20);
+      if (surface === 'approval') {
+        app.stdin.write('\x02');
+        await Bun.sleep(20);
+        app.stdin.write('\r');
+        await Bun.sleep(20);
+      }
       app.stdin.write('\u001b[200~\u0003\u0003\u001b[201~');
       await Bun.sleep(20);
       expect(f.cancels).toHaveLength(0);
@@ -571,6 +577,10 @@ test('rapid native approval selection and Enter deny the offered execution rathe
   const app = render(<TuiSession testDiagnostics controller={c} />);
   try {
     await Bun.sleep(20);
+    app.stdin.write('\x02');
+    await Bun.sleep(20);
+    app.stdin.write('\r');
+    await Bun.sleep(20);
     expect(app.lastFrame()).toContain('same command in original Session');
     expect(f.writes).toHaveLength(0);
     // This offered three-option menu begins unselected: first Down selects
@@ -588,6 +598,117 @@ test('rapid native approval selection and Enter deny the offered execution rathe
     });
     expect(f.cancels).toHaveLength(0);
   } finally {
+    app.unmount();
+    app.cleanup();
+    c.dispose();
+  }
+});
+test('ordinary selected child approval Escape denies only the exact card, preserves its sibling and keeps global Ctrl+C', async () => {
+  const f = fixture();
+  let cards: Interaction[] = [
+    {
+      ...card,
+      id: 'first',
+      request: {
+        grants: ['approve_once', 'same_command'],
+        input: { path: '/synthetic/first.txt' },
+      },
+    },
+    {
+      ...card,
+      id: 'second',
+      sessionId: 'sibling',
+      ancestry: ['a', 'sibling'],
+      runId: 'siblingrun',
+      executionId: 'sibling-effect',
+      request: { grants: ['approve_once'], input: { path: '/synthetic/second.txt' } },
+    },
+  ];
+  f.port.readSession = async () => ({ ...snapshot(), interactions: cards });
+  const savedAnswer = f.port.answer;
+  let release!: () => void;
+  const pending = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  f.port.answer = async (session, id, request) => {
+    const receipt = await savedAnswer(session, id, request);
+    if (id === 'first') await pending;
+    cards = cards.map((current) =>
+      current.id === id
+        ? {
+            ...current,
+            state: 'cancelled',
+            answer: request.answer,
+            acceptedDecisionRevision: null,
+            revision: '8',
+          }
+        : current,
+    );
+    return receipt;
+  };
+  const c = new TuiController(f.port);
+  await c.select('a');
+  c.setDraft('keep parent draft');
+  const app = render(<TuiSession controller={c} />);
+  const key = async (value: string) => {
+    app.stdin.write(value);
+    await Bun.sleep(25);
+  };
+  try {
+    await Bun.sleep(25);
+    await key('\x02');
+    expect(app.lastFrame()).toContain('Pending cards · 2');
+    await key('\r');
+    expect(app.lastFrame()).toContain('/synthetic/first.txt');
+    expect(app.lastFrame()).toContain('same command in original Session');
+    await key('\x1b');
+    await key('\x1b');
+    expect(f.writes).toEqual([
+      {
+        id: 'a',
+        card: 'first',
+        intent: {
+          commandId: 'id1',
+          expectedStoreId: 'store',
+          expectedRevision: '7',
+          answer: { kind: 'approval', decision: 'deny' },
+        },
+      },
+    ]);
+    expect(f.cancels).toHaveLength(0);
+    expect(cards[1]).toMatchObject({ id: 'second', state: 'pending', answer: null, revision: '7' });
+    expect(c.state.snapshot?.view.runs[0]).toMatchObject({
+      isActive: true,
+      originCommandId: 'original',
+    });
+    expect(c.state.draft).toBe('keep parent draft');
+    release();
+    await Bun.sleep(50);
+    await c.select('a');
+    await key('\x02');
+    expect(app.lastFrame()).toContain('Pending cards · 1');
+    await key('\r');
+    expect(app.lastFrame()).toContain('/synthetic/second.txt');
+    await key('\x1b[B');
+    await key('\r');
+    expect(f.writes).toHaveLength(2);
+    expect(f.writes[1]).toMatchObject({
+      id: 'a',
+      card: 'second',
+      intent: {
+        expectedStoreId: 'store',
+        expectedRevision: '7',
+        answer: { kind: 'approval', decision: 'deny' },
+      },
+    });
+    expect(f.cancels).toHaveLength(0);
+    expect(c.state.snapshot?.view.runs[0]?.isActive).toBe(true);
+    await key('\x03');
+    expect(f.cancels).toHaveLength(1);
+    expect(f.cancels[0]).toMatchObject({ id: 'a', intent: { targetCommandId: 'original' } });
+    expect(f.writes).toHaveLength(2);
+  } finally {
+    release();
     app.unmount();
     app.cleanup();
     c.dispose();
@@ -1153,6 +1274,8 @@ test('pending chooser preserves independent original card drafts and clears only
   };
   try {
     await Bun.sleep(20);
+    await key('\x02');
+    await key('\r');
     await key('A独立草稿');
     await key('\x02');
     expect(app.lastFrame()).toContain('Pending cards · 3');
@@ -1257,6 +1380,8 @@ test('open pending chooser freezes exact original rows when the paged directory 
   };
   try {
     await Bun.sleep(20);
+    await key('\x02');
+    await key('\r');
     await key('\x02');
     await key('\x1b[B');
     cards = [{ ...cards[0]! }, { ...cards[1]!, revision: '8' }, { ...card, id: 'new-card' }];

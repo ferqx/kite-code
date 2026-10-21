@@ -6,6 +6,7 @@ import {
   type Command,
   type FollowUpCommandRequest,
   type Run,
+  readOrdinaryCommandApplication,
   type StartCommandRequest,
   type SteerCommandRequest,
 } from '@kite-ai/client';
@@ -71,18 +72,6 @@ function identity(value: unknown): string {
     .map(([key, child]) => `${JSON.stringify(key)}:${identity(child)}`)
     .join(',')}}`;
 }
-function runId(state: InputSubmission): string | undefined {
-  if (state.intent.kind === 'command.cancel') return undefined;
-  if (state.intent.kind === 'input.steer') return state.intent.targetRunId;
-  const receipt = state.command?.receipt;
-  return receipt &&
-    typeof receipt === 'object' &&
-    !Array.isArray(receipt) &&
-    typeof receipt.runId === 'string'
-    ? receipt.runId
-    : undefined;
-}
-
 /** Intent ownership is independent of selected view and Service lifetime. */
 export class DesktopInput {
   private readonly client: AgentClient;
@@ -238,16 +227,17 @@ export class DesktopInput {
         : this.client.getCommand(commandId, { signal: controller.signal }));
       if (generation !== entry.readGeneration) return entry.state;
       this.acceptCommand(entry, command);
-      const id = runId(entry.state);
-      if (id) {
-        const run = await this.client.getRun(id, { signal: controller.signal });
+      if (entry.state.intent.kind !== 'command.cancel') {
+        const application = await readOrdinaryCommandApplication(this.client, command, {
+          signal: controller.signal,
+          ...(entry.state.intent.kind === 'input.steer'
+            ? { targetRunId: entry.state.intent.targetRunId }
+            : {}),
+        });
         if (generation !== entry.readGeneration) return entry.state;
-        if (
-          run.sessionId !== entry.state.sessionId ||
-          run.originStoreId !== entry.state.intent.expectedStoreId ||
-          (entry.state.intent.kind !== 'input.steer' && run.originCommandId !== commandId)
-        )
-          throw new Error('input_run_identity_mismatch');
+        // A processing Run proves an observation; it is not the input's business Run.
+        const run = application?.observation ? undefined : application?.run;
+        if (!run) return entry.state;
         this.publish(entry, {
           ...entry.state,
           run,

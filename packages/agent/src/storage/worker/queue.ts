@@ -29,12 +29,19 @@ export class WorkerQueue {
     this.bytes += bytes;
   }
   deferUnstartedWrite(request: WorkerRequest): void {
+    this.defer(request, Date.now() + 25);
+  }
+  /** Same admitted request, before its transaction; other categories may progress. */
+  deferArtifactVerification(request: WorkerRequest): void {
+    this.defer(request, Date.now());
+  }
+  private defer(request: WorkerRequest, readyAt: number): void {
     // Called synchronously after next(), before another message can consume its slot.
     const bytes = new TextEncoder().encode(JSON.stringify(request)).byteLength;
     this.queues[categoryOf(request.method)].unshift({
       request,
       bytes,
-      readyAt: Date.now() + 25,
+      readyAt,
     });
     this.count++;
     this.bytes += bytes;

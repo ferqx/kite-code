@@ -127,7 +127,7 @@ test('Native fixed checkpoint GETs preserve two-Fork aliases, original media sco
     ).toBe('applied');
     for (const [commandId, content] of [
       ['first', 'FIRST_ACTUAL_RUN: read then update original and create first file'],
-      ['second', 'SECOND_ACTUAL_RUN: read then update original and create second file'],
+      ['second', 'New task: SECOND_ACTUAL_RUN: read then update original and create second file'],
     ] as const) {
       await client.startRun('s', {
         expectedStoreId: storeId,
@@ -139,7 +139,8 @@ test('Native fixed checkpoint GETs preserve two-Fork aliases, original media sco
         () => client.getCommand(commandId),
         (value) => value.status === 'applied',
       );
-      const runId = (command.receipt as { runId: string }).runId;
+      const application = command.receipt as { runId: string; businessCommandId?: string };
+      const runId = application.runId;
       const run = await until(
         () => client.getRun(runId),
         (value) => ['completed', 'failed', 'cancelled', 'interrupted'].includes(value.status),
@@ -149,6 +150,8 @@ test('Native fixed checkpoint GETs preserve two-Fork aliases, original media sco
           'actual_default_files_run_failure',
           JSON.stringify({ command, run, view: await client.getView('s') }),
         );
+      expect(run.originCommandId).toBe(application.businessCommandId ?? commandId);
+      expect(run.rootWorkCommandId).toBe(commandId);
       expect(run.status).toBe('completed');
     }
 

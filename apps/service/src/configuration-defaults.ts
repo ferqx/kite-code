@@ -10,9 +10,9 @@ export const defaultConfiguration = {
 };
 
 /** Ordinary packaged clients have a useful tool surface before any tool settings exist.
- * Selection never grants execution permission, and absent Shell assets stay unavailable.
+ * Selection never grants execution permission, and absent host capabilities stay unavailable.
  */
-export function ordinaryHostConfigurationDefaults(shellAvailable: boolean) {
+export function ordinaryHostConfigurationDefaults(shellAvailable: boolean, taskAvailable: boolean) {
   return {
     ...defaultConfiguration,
     tools: [
@@ -26,6 +26,16 @@ export function ordinaryHostConfigurationDefaults(shellAvailable: boolean) {
         'files.search',
         ...(shellAvailable ? shellToolIds : []),
         'web_fetch',
+        ...(taskAvailable
+          ? [
+              'task.spawn',
+              'task.message',
+              'task.follow_up',
+              'task.events',
+              'task.list',
+              'task.interrupt',
+            ]
+          : []),
       ].map((id) => ({ id })),
     ],
   };

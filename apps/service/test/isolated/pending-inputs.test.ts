@@ -136,10 +136,29 @@ test('HTTP pending inputs preserve mixed original result inclusion and follow-up
       expectedStoreId,
       commandId: 'active-work',
       kind: 'run.start',
-      content: 'new exact foreground',
+      content: 'New task: new exact foreground',
     });
     await ready.promise;
-    const run = (await store.getView('s')).runs.find((item) => item.isActive)!;
+    const started = (await store.getCommand('active-work'))!;
+    const startReceipt = started.receipt as { businessCommandId: string; runId: string };
+    expect(started.status).toBe('applied');
+    expect(startReceipt.businessCommandId).toBeString();
+    expect(startReceipt.businessCommandId).not.toBe(started.id);
+    const run = (await store.getRun(startReceipt.runId))!;
+    expect(run).toMatchObject({
+      isActive: true,
+      rootWorkCommandId: 'active-work',
+      originCommandId: startReceipt.businessCommandId,
+    });
+    expect(await store.getExecution(requests[2]!.requestId)).toMatchObject({
+      kind: 'model',
+      runId: run.id,
+      originCommandId: startReceipt.businessCommandId,
+    });
+    expect(
+      requests[2]!.messages.find((message) => message.content === 'New task: new exact foreground')
+        ?.sourceIds,
+    ).toEqual([startReceipt.businessCommandId]);
     const included = await client.includeResult('s', old.id, {
       expectedStoreId,
       commandId: 'include',
@@ -147,7 +166,7 @@ test('HTTP pending inputs preserve mixed original result inclusion and follow-up
       targetRunId: run.id,
       resultRevision: old.resultRevision,
     });
-    const content = '完整后继🙂\r\nKeep the exact original result.';
+    const content = 'Follow up: 完整后继🙂\r\nKeep the exact original result.';
     const followed = await client.followUp('s', {
       expectedStoreId,
       commandId: 'follow',
@@ -158,6 +177,23 @@ test('HTTP pending inputs preserve mixed original result inclusion and follow-up
     });
     expect(included.command.status).toBe('accepted');
     expect(followed.status).toBe('accepted');
+    const publicFollow = (await store.getCommand('follow'))!;
+    const followReceipt = publicFollow.receipt as {
+      businessCommandId: string;
+      humanInputCommandId: string;
+    };
+    expect(followReceipt.businessCommandId).toBeString();
+    expect(followReceipt.businessCommandId).not.toBe('follow');
+    expect(publicFollow.request).toEqual({
+      kind: 'input.follow_up',
+      content,
+      afterRunId: run.id,
+      contextSelectionId: selection.selection.id,
+    });
+    expect(await store.getCommand(followReceipt.humanInputCommandId)).toMatchObject({
+      kind: 'human.input',
+      request: { publicCommandId: 'follow', content, originalRequest: publicFollow.request },
+    });
     const first = await client.listPendingInputs('s', {
       storeId: expectedStoreId,
       afterSeq: '0',
@@ -179,10 +215,10 @@ test('HTTP pending inputs preserve mixed original result inclusion and follow-up
       limit: 1,
     });
     expect(second.commands).toHaveLength(1);
-    expect(second.commands[0]!.id).toBe('follow');
+    expect(second.commands[0]!.id).toBe(followReceipt.businessCommandId);
     expect(second.commands[0]!.request).toEqual({
-      kind: 'input.follow_up',
-      afterRunId: run.id,
+      kind: 'input.steer',
+      targetRunId: run.id,
       contextSelectionId: selection.selection.id,
       content,
     });
@@ -193,6 +229,18 @@ test('HTTP pending inputs preserve mixed original result inclusion and follow-up
     release.release();
     await runtime.waitForCommand('active-work', { timeoutMs: 5000 });
     await runtime.waitForCommand('follow', { timeoutMs: 5000 });
+    expect((await store.getCommand('follow'))!.receipt).toMatchObject({
+      businessCommandId: followReceipt.businessCommandId,
+      runId: run.id,
+    });
+    expect(requests).toHaveLength(4);
+    expect(await store.getExecution(requests[3]!.requestId)).toMatchObject({
+      runId: run.id,
+      status: 'succeeded',
+    });
+    expect(requests[3]!.messages.find((message) => message.content === content)?.sourceIds).toEqual(
+      [followReceipt.businessCommandId],
+    );
     expect(effects).toBe(1);
     expect((await store.getExecution(old.id))!.result).toEqual(old.result);
     expect((await store.getCommand('include'))!.status).toBe('applied');

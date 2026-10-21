@@ -382,12 +382,27 @@ async function fixture(workflow?: 'enabled' | 'disabled' | 'structured') {
       });
     }
     async function finished(id: string, commandId: string) {
-      return until(
-        () => a.getView(id),
-        (view) => view.runs.some((value) => value.originCommandId === commandId && !value.isActive),
+      const completed = await until(
+        async () => ({ command: await a.getCommand(commandId), view: await a.getView(id) }),
+        ({ command, view }) => {
+          const receipt = command.receipt as { runId?: string } | null;
+          return (
+            command.status === 'applied' &&
+            typeof receipt?.runId === 'string' &&
+            view.runs.some((run) => run.id === receipt.runId && !run.isActive)
+          );
+        },
       );
+      const receipt = completed.command.receipt as { runId: string; businessCommandId?: string };
+      const commandRun = completed.view.runs.find((run) => run.id === receipt.runId)!;
+      expect(commandRun.originCommandId).toBe(receipt.businessCommandId ?? commandId);
+      return { ...completed.view, commandRun };
     }
-    function intent(commandId: string, selectedSkills?: readonly string[], content = 'ordinary') {
+    function intent(
+      commandId: string,
+      selectedSkills?: readonly string[],
+      content = 'New task: ordinary',
+    ) {
       return {
         kind: 'run.start' as const,
         expectedStoreId: storeId,
@@ -502,29 +517,33 @@ nativeTest(
       );
       expect(existsSync(join(f.base, 'script-effect'))).toBe(false);
       await f.trust();
-      const startA = f.a.startRun('a', f.intent('alpha', ['AlphaSkill', 'alpha'], 'HOLD_ALPHA'));
+      const startA = f.a.startRun(
+        'a',
+        f.intent('alpha', ['AlphaSkill', 'alpha'], 'New task: HOLD_ALPHA'),
+      );
       await until(
         async () =>
-          f.requests.some((request) => JSON.stringify(request.messages).includes('HOLD_ALPHA')),
+          f.requests.some((request) =>
+            JSON.stringify(request.messages).includes('New task: HOLD_ALPHA'),
+          ),
         Boolean,
       );
       await f.b.startRun('b', f.intent('beta', ['beta']));
       await f.finished('b', 'beta');
-      const original = f.sql<{ config_json: string }>(
-        'SELECT config_json FROM run WHERE origin_command_id=?',
-        'alpha',
-      )[0]!.config_json;
+      const snapshot = async (commandId: string) => {
+        const command = await f.a.getCommand(commandId);
+        const receipt = command.receipt as { runId: string; businessCommandId?: string };
+        const run = await f.a.getRun(receipt.runId);
+        expect(run.originCommandId).toBe(receipt.businessCommandId ?? commandId);
+        return f.sql<{ config_json: string }>('SELECT config_json FROM run WHERE id=?', run.id)[0]!
+          .config_json;
+      };
+      const original = await snapshot('alpha');
       f.release.resolve();
       await startA;
       await f.finished('a', 'alpha');
-      const alpha = f.sql<{ config_json: string }>(
-        'SELECT config_json FROM run WHERE origin_command_id=?',
-        'alpha',
-      )[0]!.config_json;
-      const beta = f.sql<{ config_json: string }>(
-        'SELECT config_json FROM run WHERE origin_command_id=?',
-        'beta',
-      )[0]!.config_json;
+      const alpha = await snapshot('alpha');
+      const beta = await snapshot('beta');
       expect(alpha).toBe(original);
       const facts = (config: string) => JSON.parse(config).snapshot.actualCapabilities.skills;
       expect(facts(alpha)).toEqual([
@@ -570,7 +589,7 @@ nativeTest(
           await runSelectedCLI({
             arguments: {
               kind,
-              task: 'CLI ordinary',
+              task: 'New task: CLI ordinary',
               thread: 'cli',
               server: f.endpoint.socket,
               skills: [...skills],
@@ -881,7 +900,7 @@ nativeTest(
         makeDefault: false,
         mode: 'full',
       });
-      await f.a.startRun('active', f.intent('held-original', ['beta'], 'HOLD_ALPHA'));
+      await f.a.startRun('active', f.intent('held-original', ['beta'], 'New task: HOLD_ALPHA'));
       await until(
         async () => f.requests.length,
         (value) => value === 1,
@@ -893,7 +912,7 @@ nativeTest(
         '--thread',
         'active',
         '--task',
-        'activation after held',
+        'New task: activation after held',
         '--server',
         f.endpoint.socket,
         '--activate-skill',
@@ -904,19 +923,19 @@ nativeTest(
       await until(
         async () =>
           f.sql<{ request_json: string }>(
-            "SELECT request_json FROM command WHERE kind='input.follow_up'",
+            "SELECT public.request_json FROM command public JOIN command raw ON raw.id=public.target_command_id AND raw.kind='human.input' WHERE public.session_id='active' AND public.kind='input.follow_up'",
           ),
         (rows) => rows.length === 1,
       );
       const request = JSON.parse(
         f.sql<{ request_json: string }>(
-          "SELECT request_json FROM command WHERE kind='input.follow_up'",
+          "SELECT public.request_json FROM command public JOIN command raw ON raw.id=public.target_command_id AND raw.kind='human.input' WHERE public.session_id='active' AND public.kind='input.follow_up'",
         )[0]!.request_json,
       );
       expect(request.afterRunId).toBe(held.id);
       expect(request.contextSelectionId).toBe(before.session.contextSelectionId);
       expect(request.selectedSkills).toEqual(['beta']);
-      expect(request.content).toBe('activation after held');
+      expect(request.content).toBe('New task: activation after held');
       expect(request.extensionInputs[0].input.activations).toEqual([
         { key: 'manual-1', skillId: 'skill:alpha-skill', input: {} },
       ]);
@@ -939,7 +958,11 @@ nativeTest(
           JSON.stringify(r.messages).includes('SHARED_WORKFLOW_INLINE_ORIGINAL_BODY'),
         ),
       ).toBe(true);
-      expect(f.sql("SELECT id FROM command WHERE kind='input.follow_up'").length).toBe(1);
+      expect(
+        f.sql(
+          "SELECT public.request_json FROM command public JOIN command raw ON raw.id=public.target_command_id AND raw.kind='human.input' WHERE public.session_id='active' AND public.kind='input.follow_up'",
+        ).length,
+      ).toBe(1);
     } finally {
       await f.close();
     }

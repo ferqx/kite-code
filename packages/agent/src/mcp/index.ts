@@ -12,8 +12,10 @@ import {
   ReadResourceResultSchema,
   type Tool,
 } from '@modelcontextprotocol/sdk/types.js';
-import Ajv from 'ajv';
 import type { JobDefinition, Json, ToolContext, ToolDefinition, ToolResult } from '../extensions';
+import { isWorkerCleanupFailure } from '../platform/process/owned-worker';
+import { McpAdapterError } from './errors';
+import { createMcpSchemaValidation } from './schema-validation';
 import { createTaskBinding } from './tasks';
 import { BoundedStdioTransport, boundedFetch } from './transport';
 
@@ -64,13 +66,8 @@ export interface McpAdapterOptions {
     timeoutMs?: number;
   };
 }
-export class McpAdapterError extends Error {
-  readonly code: string;
-  constructor(code: string) {
-    super(code);
-    this.code = code;
-  }
-}
+export { McpAdapterError } from './errors';
+export { mcpSchemaWorkerAssets } from './schema-validation';
 /** A trusted HTTP transport's exact negative authentication response to this RPC. */
 export class McpHttpAuthRejection extends McpAdapterError {
   readonly rejection: Readonly<{
@@ -193,14 +190,44 @@ export function createMcpAdapter(options: McpAdapterOptions) {
     });
   }
 
+  const schemaSessions = new Set<ReturnType<typeof createMcpSchemaValidation>>();
+  const schemaClosures = new Set<Promise<void>>();
+  const schemaCatalogues = new Map<ReturnType<typeof createMcpSchemaValidation>, Cache>();
+  const schemaCloseTasks = new WeakMap<
+    ReturnType<typeof createMcpSchemaValidation>,
+    Promise<void>
+  >();
+  function closeSchema(session: ReturnType<typeof createMcpSchemaValidation>) {
+    const existing = schemaCloseTasks.get(session);
+    if (existing) return existing;
+    const closing = session.close().then(() => {
+      schemaSessions.delete(session);
+      schemaCatalogues.delete(session);
+    });
+    schemaCloseTasks.set(session, closing);
+    schemaClosures.add(closing);
+    void closing.then(
+      () => schemaClosures.delete(closing),
+      () => {},
+    );
+    return closing;
+  }
+  async function joinSchemas() {
+    const results = await Promise.allSettled([...schemaClosures]);
+    const failures = results.flatMap((result) =>
+      result.status === 'rejected' ? [result.reason] : [],
+    );
+    if (failures.length === 1) throw failures[0];
+    if (failures.length) throw new AggregateError(failures, 'MCP schema cleanup failed.');
+  }
   function invalidateCatalogue() {
+    for (const session of schemaSessions) void closeSchema(session).catch(() => {});
     catalogueGeneration++;
     cache = undefined;
   }
   let inflight = 0;
   let closeTask: Promise<void> | undefined;
   const idle = new Set<() => void>();
-  const ajv = new Ajv({ strict: false, allErrors: false, validateFormats: false });
   function bounded(value: unknown) {
     if (Buffer.byteLength(JSON.stringify(value)) > maximum)
       throw new McpAdapterError('mcp_payload_limit');
@@ -212,6 +239,7 @@ export function createMcpAdapter(options: McpAdapterOptions) {
     current = undefined;
     clientTask = undefined;
     if (client) await client.close().catch(() => {});
+    await joinSchemas();
   }
   async function connection() {
     if (closed) throw new McpAdapterError('mcp_adapter_closed');
@@ -344,11 +372,30 @@ export function createMcpAdapter(options: McpAdapterOptions) {
             .toLowerCase() || 'tool';
         return `mcp_${segment(serverId).slice(0, 20)}_${segment(remoteName).slice(0, 29)}_${digest({ serverId, remoteName }).slice(0, 8)}`;
       }
+      const schemaBindings = new Map<Cache, ReturnType<typeof createMcpSchemaValidation>>();
+      function schemas(captured: Cache) {
+        for (const [previous, binding] of schemaBindings)
+          if (!schemaSessions.has(binding)) schemaBindings.delete(previous);
+        let binding = schemaBindings.get(captured);
+        if (!binding) {
+          binding = createMcpSchemaValidation(
+            captured.tools.map((descriptor) => ({
+              input: descriptor.inputSchema,
+              ...(descriptor.outputSchema ? { output: descriptor.outputSchema } : {}),
+            })),
+            timeout,
+          );
+          schemaBindings.set(captured, binding);
+          schemaSessions.add(binding);
+          schemaCatalogues.set(binding, captured);
+        }
+        return binding;
+      }
       function bindTools(captured: Cache): readonly ToolDefinition[] {
         const names = new Set<string>();
         const jobs: JobDefinition[] = [];
         const tools = Object.freeze(
-          captured.tools.map((raw) => {
+          captured.tools.map((raw, schemaIndex) => {
             if (names.has(raw.name) || raw.name.length > 256)
               throw new McpAdapterError('mcp_duplicate_tool');
             names.add(raw.name);
@@ -356,10 +403,7 @@ export function createMcpAdapter(options: McpAdapterOptions) {
             bounded(descriptor);
             if (descriptor.execution?.taskSupport === 'required' && !options.tasks)
               throw new McpAdapterError('mcp_task_unsupported');
-            const outputValidator = descriptor.outputSchema
-              ? ajv.compile(descriptor.outputSchema)
-              : undefined;
-            const inputValidator = ajv.compile(descriptor.inputSchema);
+            const validation = schemas(captured);
             const version = definitionVersion(captured, descriptor);
             if (descriptor.execution?.taskSupport === 'required' && options.tasks) {
               const capabilities = captured.client.getServerCapabilities();
@@ -387,17 +431,19 @@ export function createMcpAdapter(options: McpAdapterOptions) {
                 client: captured.client,
                 timeout,
                 request,
-                validateInput: (input) => {
+                validateInput: async (input, signal) => {
                   bounded(input);
                   return (
                     input !== null &&
                     typeof input === 'object' &&
                     !Array.isArray(input) &&
-                    !!inputValidator(input)
+                    (await validation.validate('input', schemaIndex, input, signal))
                   );
                 },
-                validateOutput: (input) =>
-                  !outputValidator || (input !== undefined && !!outputValidator(input)),
+                validateOutput: async (input, signal) =>
+                  !descriptor.outputSchema ||
+                  (input !== undefined &&
+                    (await validation.validate('output', schemaIndex, input, signal))),
                 async beforeStart(signal) {
                   const assert = () => {
                     check();
@@ -475,13 +521,31 @@ export function createMcpAdapter(options: McpAdapterOptions) {
                     details: { adapterAttempted: false },
                   };
                 }
-                if (
-                  argumentsSnapshot === null ||
-                  typeof argumentsSnapshot !== 'object' ||
-                  Array.isArray(argumentsSnapshot) ||
-                  !inputValidator(argumentsSnapshot)
-                )
-                  return { outcome: 'failed', content: 'mcp_arguments_invalid' };
+                try {
+                  if (
+                    argumentsSnapshot === null ||
+                    typeof argumentsSnapshot !== 'object' ||
+                    Array.isArray(argumentsSnapshot) ||
+                    !(await validation.validate(
+                      'input',
+                      schemaIndex,
+                      argumentsSnapshot,
+                      context.signal,
+                    ))
+                  )
+                    return { outcome: 'failed', content: 'mcp_arguments_invalid' };
+                } catch (error) {
+                  if (isWorkerCleanupFailure(error)) throw error;
+                  return {
+                    outcome: context.signal.aborted ? 'cancelled' : 'failed',
+                    content: context.signal.aborted
+                      ? 'mcp_cancelled_before_call'
+                      : error instanceof McpAdapterError
+                        ? error.code
+                        : 'mcp_admission_rejected',
+                    details: { remoteStopConfirmed: false, adapterAttempted: false },
+                  };
+                }
                 const binding: McpCallBinding = freeze({
                   serverId,
                   scopeId,
@@ -526,9 +590,15 @@ export function createMcpAdapter(options: McpAdapterOptions) {
                       details: { remoteStopConfirmed: false },
                     };
                   if (
-                    outputValidator &&
+                    descriptor.outputSchema &&
                     !result.isError &&
-                    (!result.structuredContent || !outputValidator(result.structuredContent))
+                    (!result.structuredContent ||
+                      !(await validation.validate(
+                        'output',
+                        schemaIndex,
+                        result.structuredContent,
+                        context.signal,
+                      )))
                   )
                     return {
                       outcome: 'outcome_unknown',
@@ -538,12 +608,14 @@ export function createMcpAdapter(options: McpAdapterOptions) {
                         actualResult: JSON.parse(JSON.stringify(result)) as Json,
                       },
                     };
+                  assertFresh();
                   return {
                     outcome: result.isError ? 'failed' : 'succeeded',
                     content: JSON.stringify(result.content),
                     details: JSON.parse(JSON.stringify(result)) as Json,
                   };
                 } catch (error) {
+                  if (isWorkerCleanupFailure(error)) throw error;
                   if (
                     attempted &&
                     !context.signal.aborted &&
@@ -638,12 +710,42 @@ export function createMcpAdapter(options: McpAdapterOptions) {
               catalogueGeneration: catalogueGeneration + 1,
               digest: catalogueDigest,
             };
-            const definitions = bindTools(candidate); // validate before publishing the cache
+            const definitions = bindTools(candidate);
+            await schemas(candidate).prepare(); // Complete original schemas before publishing.
+            check();
+            if (
+              dead ||
+              current !== client ||
+              generation !== connectionGeneration ||
+              catalogueGeneration !== revision
+            )
+              throw new McpAdapterError('mcp_catalogue_stale');
+            for (const [session, previous] of schemaCatalogues)
+              if (previous !== candidate) void closeSchema(session).catch(() => {});
+            await joinSchemas();
+            check();
+            if (
+              dead ||
+              current !== client ||
+              generation !== connectionGeneration ||
+              catalogueGeneration !== revision
+            )
+              throw new McpAdapterError('mcp_catalogue_stale');
             catalogueGeneration++;
             cache = candidate;
             boundCache = candidate;
             boundTools = definitions;
           }
+          const prepared = cache!;
+          await schemas(prepared).prepare();
+          check();
+          if (
+            cache !== prepared ||
+            dead ||
+            current !== client ||
+            generation !== connectionGeneration
+          )
+            throw new McpAdapterError('mcp_catalogue_stale');
           return getCachedTools();
         },
         /** One explicit refresh on the captured live client; never lazy-connects. */
@@ -693,6 +795,11 @@ export function createMcpAdapter(options: McpAdapterOptions) {
                     digest: catalogueDigest,
                   };
                   const definitions = bindTools(candidate);
+                  await schemas(candidate).prepare(options.signal);
+                  fresh(options.signal);
+                  for (const [session, previous] of schemaCatalogues)
+                    if (previous !== candidate) void closeSchema(session).catch(() => {});
+                  await joinSchemas();
                   fresh(options.signal);
                   catalogueGeneration++;
                   cache = candidate;
@@ -710,6 +817,7 @@ export function createMcpAdapter(options: McpAdapterOptions) {
                   },
                 };
               } catch (error) {
+                if (isWorkerCleanupFailure(error)) throw error;
                 return {
                   outcome: attempted
                     ? 'outcome_unknown'
@@ -918,6 +1026,7 @@ export function createMcpAdapter(options: McpAdapterOptions) {
           released = true;
           leases.delete(lease);
           releaseTask = (async () => {
+            await Promise.all([...schemaBindings.values()].map(closeSchema));
             if (leases.size) return;
             if (inflight) await new Promise<void>((resolve) => idle.add(resolve));
             if (!leases.size) await disconnect();

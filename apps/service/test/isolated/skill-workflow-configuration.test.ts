@@ -13,6 +13,7 @@ import {
   workflowForkFence,
   workflowSnapshotDigest,
 } from '../../src/skill-workflow-configuration';
+import { initializeLivePermissionFixture } from '../fixtures/live-permission-fixture';
 
 function fixture() {
   const root = mkdtempSync(join(tmpdir(), 'kite-workflow-service-'));
@@ -534,6 +535,7 @@ test.each(
     permissions: host.permissions!,
     extensions: host.extensions,
     resolveRunConfiguration: host.resolveRunConfiguration,
+    resolveRecoveryRunConfiguration: host.resolveRecoveryRunConfiguration,
     supportsExtensionInputs: host.supportsExtensionInputs,
   });
   host.permissionManagement?.(runtime);
@@ -561,6 +563,15 @@ test.each(
       workspaceId: 'w',
       title: 'fixture',
     });
+    await initializeLivePermissionFixture({
+      runtime,
+      profile: f.profile,
+      ...base,
+      workspaceId: 'w',
+      mode: 'full',
+      trusted: true,
+      nativeShellRead: shell?.platform === 'darwin' && process.platform === 'darwin',
+    });
     await runtime.submitCommand({
       ...base,
       commandId: 'bad',
@@ -576,21 +587,24 @@ test.each(
     await runtime.submitCommand({
       ...base,
       commandId: 'good',
-      request: { kind: 'run.start', content: 'explicit', extensionInputs: [f.input] },
+      request: { kind: 'run.start', content: '新任务：explicit', extensionInputs: [f.input] },
     });
     const command = await until(
       () => store.getCommand('good'),
       (command) => command?.status === 'applied',
     );
     expect(command?.status).toBe('applied');
+    const applied = command!.receipt as { runId: string; businessCommandId?: string };
+    const actualRun = (await store.getRun(applied.runId))!;
+    expect(actualRun.originCommandId).toBe(applied.businessCommandId ?? 'good');
+    expect(actualRun.rootWorkCommandId).toBe('good');
     if (verification.startsWith('large')) {
       const view = await until(
         () => store.getView('s'),
         (view) =>
-          requests.length > 0 ||
-          view.runs.some((run) => run.originCommandId === 'good' && !run.isActive),
+          requests.length > 0 || view.runs.some((run) => run.id === actualRun.id && !run.isActive),
       );
-      const original = view.runs.find((run) => run.originCommandId === 'good');
+      const original = view.runs.find((run) => run.id === actualRun.id);
       if (original && !original.isActive)
         throw Error(`large_workflow_initialization_failed:${original.reason}`);
     }
@@ -624,7 +638,7 @@ test.each(
       expect(original?.instructions).toBe(expectedInstructions);
       expect(original?.input?.blob).toBe(expectedInputBlob);
     }
-    const run = (await store.getView('s')).runs.find((run) => run.originCommandId === 'good')!;
+    const run = (await store.getView('s')).runs.find((run) => run.id === actualRun.id)!;
     expect(run.requirements.some((ref) => ref.extensionId === 'builtin.skill-workflow')).toBe(true);
     expect(
       (await store.listExecutions('s')).find(
@@ -688,7 +702,9 @@ test.each(
         )?.result,
       ).toMatchObject({ details: { code: 'workflow_verifier_asset_changed' } });
     }
-    const original = await store.getCommand('good');
+    const originalPublic = await store.getCommand('good');
+    expect(originalPublic?.request).toMatchObject({ extensionInputs: [f.input] });
+    const original = await store.getCommand(run.originCommandId);
     expect(original?.request).toMatchObject({ extensionInputs: [f.input] });
     if (verification === 'large_follow_up') {
       await runtime.submitCommand({
@@ -696,7 +712,7 @@ test.each(
         commandId: 'large-follow-up',
         request: {
           kind: 'input.follow_up',
-          content: 'Continue the original session',
+          content: '补充 good：Continue the original session',
           afterRunId: run.id,
           contextSelectionId: (await store.getSession('s'))!.contextSelectionId,
         },
@@ -846,6 +862,7 @@ test.each([
     permissions: host.permissions!,
     extensions: host.extensions,
     resolveRunConfiguration: host.resolveRunConfiguration,
+    resolveRecoveryRunConfiguration: host.resolveRecoveryRunConfiguration,
     childConfigurations: host.childConfigurations,
     resolveChildRunConfiguration: host.resolveChildRunConfiguration,
     supportsExtensionInputs: host.supportsExtensionInputs,
@@ -861,6 +878,14 @@ test.each([
       rootUri: pathToFileURL(f.root).href,
     });
     await runtime.createSession({ ...base, commandId: 'create', workspaceId: 'w', title: 'fork' });
+    await initializeLivePermissionFixture({
+      runtime,
+      profile: f.profile,
+      ...base,
+      workspaceId: 'w',
+      mode: 'full',
+      trusted: true,
+    });
     await runtime.submitCommand({
       ...base,
       commandId: 'fork',

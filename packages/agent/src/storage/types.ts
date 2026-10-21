@@ -282,6 +282,8 @@ export interface RequirementRecordRead {
   originStoreId: string | null;
 }
 export interface RunRecord {
+  /** Exact original child carrier, including verified report continuation ancestry. */
+  carrierExecutionId?: string;
   /** Actual immutable selection captured by the original Run activation transaction. */
   contextSelectionId: string;
   waitingForResults: string[];
@@ -831,6 +833,8 @@ export interface BackgroundExecutionPage {
 /** Read-only activity facts captured with the directory page, never execution authority. */
 export interface SessionDirectoryActivity {
   updatedAt: number | null;
+  /** Current root lock observation for an unfinished Run; neither liveness nor cleanup proof. */
+  executionOwner?: 'held' | 'unheld' | 'unknown';
   run: {
     id: string;
     status: RunRecord['status'];

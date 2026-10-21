@@ -4,8 +4,15 @@ import { canonicalJson } from '../../json';
 import type { AcceptCommandInput, ApplyInputInput, Store } from '../port';
 import { AgentError, type InputApplication, type Json, type PendingInputPage } from '../types';
 import { validateAgentSource } from './agent-input-operations';
-import { hasPendingAgentMail } from './agent-mail-operations';
+import { hasPendingAgentMail, sealParentAgentMailAdoption } from './agent-mail-operations';
+import { filter, selected } from './context-selection-operations';
 import { assertNoExecutionGroupFence } from './execution-group-safety';
+import {
+  assertHumanBusinessInput,
+  humanInputProcessing,
+  readWorkEligibility,
+  recordHumanBusinessApplication,
+} from './human-work-control';
 import type { SqliteOperations } from './operations';
 
 type Row = Record<string, string | number | bigint | null>;
@@ -219,8 +226,29 @@ export function validateInputAdmission(
     rootWorkSeq: null,
   };
 }
-export function assertInputBoundary(db: SqliteOperations, runId: string): void {
-  const run = db.row('SELECT session_id FROM run WHERE id=?', runId);
+export function assertInputBoundary(
+  db: SqliteOperations,
+  runId: string,
+  interpretationInputId?: string,
+): void {
+  const run = db.row('SELECT * FROM run WHERE id=?', runId);
+  // An already dispatched child/reviewer may settle its actual result while the
+  // root interprets new input. Blocking this pure settlement would leave the
+  // root waiting for a reviewer that itself waits for the root's safe boundary.
+  // New Model/Tool dispatch remains subject to the original work/input gate.
+  if (
+    run &&
+    db.row('SELECT parent_id FROM session WHERE id=?', run.session_id!)?.parent_id === null
+  ) {
+    const work = readWorkEligibility(db, {
+      sessionId: String(run.session_id),
+      rootWorkCommandId: String(run.root_work_command_id),
+      rootWorkSeq: String(run.root_work_seq),
+      ignoreInputCommandId:
+        interpretationInputId ?? humanInputProcessing(db, runId)?.inputCommandId,
+    });
+    if (work.reason === 'input_unresolved') throw new AgentError('input_pending');
+  }
   if (
     db.row(
       "SELECT id FROM command WHERE cancelled=0 AND kind IN ('input.steer','result.include') AND input_target_run_id=? AND status='accepted' LIMIT 1",
@@ -278,6 +306,43 @@ export function applyInputWork(db: SqliteOperations, input: ApplyInputInput): In
     throw new AgentError('input_target_changed');
   if (command.status === 'applied') return applied(db, command);
   if (command.status !== 'accepted' || command.cancelled) throw new AgentError('input_cancelled');
+  assertHumanBusinessInput(db, command);
+  let continuationRequirements: Json | undefined;
+  if (input.kind === 'follow_up' && command.target_command_id !== null) {
+    const decision = db.row(
+      "SELECT receipt_json FROM command WHERE id=? AND kind='human.input.decision'",
+      command.target_command_id!,
+    );
+    const decisionReceipt = decision ? JSON.parse(String(decision.receipt_json)) : null;
+    const configuration = decisionReceipt?.configuration ?? null;
+    if (
+      configuration !== null &&
+      canonicalJson(configuration) !== canonicalJson(input.configuration)
+    )
+      throw new AgentError('work_configuration_changed');
+    if (configuration !== null) {
+      const original = db.row(
+        'SELECT * FROM run WHERE id=? AND session_id=?',
+        decisionReceipt.continuationRunId,
+        command.session_id!,
+      );
+      if (
+        !original ||
+        original.root_work_command_id !== command.root_work_command_id ||
+        String(original.root_work_seq) !== String(command.root_work_seq) ||
+        original.context_selection_id !== command.input_context_selection_id ||
+        canonicalJson(JSON.parse(String(original.config_json))) !== canonicalJson(configuration)
+      )
+        throw new AgentError('work_configuration_unverifiable');
+      continuationRequirements = JSON.parse(String(original.requirements_json)) as Json;
+      if (
+        input.requirements &&
+        canonicalJson(input.requirements as unknown as Json) !==
+          canonicalJson(continuationRequirements)
+      )
+        throw new AgentError('work_requirements_changed');
+    }
+  }
   const value = request(command);
   validateAgentSource(db, command);
   selection(
@@ -392,7 +457,7 @@ export function applyInputWork(db: SqliteOperations, input: ApplyInputInput): In
       throw new AgentError('session_busy');
     if (
       db.row(
-        "SELECT id FROM command WHERE session_id=? AND kind='input.follow_up' AND status='accepted' AND cancelled=0 AND seq<? LIMIT 1",
+        "SELECT id FROM command WHERE session_id=? AND kind='input.follow_up' AND status='accepted' AND cancelled=0 AND COALESCE(json_extract(receipt_json,'$.outcome'),'') NOT IN('human_input_pending','human_input_queued','human_input_unresolved') AND seq<? LIMIT 1",
         String(command.session_id),
         command.seq!,
       )
@@ -413,7 +478,7 @@ export function applyInputWork(db: SqliteOperations, input: ApplyInputInput): In
       String(command.root_work_command_id),
       command.root_work_seq,
       canonicalJson(input.configuration),
-      canonicalJson((input.requirements ?? []) as unknown as Json),
+      canonicalJson(continuationRequirements ?? ((input.requirements ?? []) as unknown as Json)),
       startedAt,
       deadlineAt,
       db.row('SELECT context_selection_id FROM session WHERE id=?', command.session_id!)!
@@ -446,6 +511,27 @@ export function applyInputWork(db: SqliteOperations, input: ApplyInputInput): In
       command.session_id!,
     );
     const execution = source && db.row('SELECT * FROM execution WHERE id=?', source.execution_id!);
+    const current = db.row('SELECT * FROM session WHERE id=?', command.session_id!)!;
+    const scope = filter(selected(db, current), 'seq');
+    // An inherited source needs the actual selection snapshot. The implicit
+    // initial-selection fallback cannot prove retention across a Rewind.
+    const selectionProof =
+      source &&
+      (source.selection_id === command.input_context_selection_id ||
+        db.row(
+          "SELECT id FROM context_snapshot WHERE id=? AND session_id=? AND kind='selection'",
+          command.input_context_selection_id!,
+          command.session_id!,
+        ));
+    const selectedSource =
+      source &&
+      selectionProof &&
+      db.row(
+        `SELECT id FROM context_snapshot WHERE id=? AND session_id=? AND ${scope.sql}`,
+        source.id!,
+        command.session_id!,
+        ...scope.args,
+      );
     if (
       !source ||
       !execution ||
@@ -453,7 +539,7 @@ export function applyInputWork(db: SqliteOperations, input: ApplyInputInput): In
       String(source.result_revision) !== value.resultRevision ||
       String(execution.result_revision) !== value.resultRevision ||
       source.origin_store_id !== execution.origin_store_id ||
-      source.selection_id !== command.input_context_selection_id ||
+      !selectedSource ||
       !['succeeded', 'failed', 'cancelled', 'outcome_unknown'].includes(String(execution.state))
     )
       throw new AgentError('context_source_unverifiable');
@@ -493,6 +579,13 @@ export function applyInputWork(db: SqliteOperations, input: ApplyInputInput): In
     input.commandId,
   );
   db.event(String(command.session_id), input.commandId, 'input.applied');
+  recordHumanBusinessApplication(db, command, String(run.id), messageId);
+  if (input.kind === 'follow_up') {
+    const current = db.row('SELECT receipt_json FROM command WHERE id=?', input.commandId)!;
+    const parentRunId = (JSON.parse(String(current.receipt_json)) as { continuationRunId?: string })
+      .continuationRunId;
+    if (parentRunId) sealParentAgentMailAdoption(db, { runId: String(run.id), parentRunId });
+  }
   return applied(db, db.row('SELECT * FROM command WHERE id=?', input.commandId)!);
 }
 export function listPendingInputs(
@@ -517,7 +610,7 @@ export function listPendingInputs(
       throw new AgentError('invalid_input_cursor');
     if (BigInt(after) > BigInt(session.next_seq!)) throw new AgentError('cursor_ahead');
     const rows = db.rows(
-      `SELECT * FROM command WHERE session_id=? AND origin_store_id=? AND kind IN ('input.steer','input.follow_up','result.include') AND status='accepted' AND cancelled=0 AND seq>?${session.parent_id !== null ? ' AND agent_source_execution_id IS NOT NULL' : ''}${input.kind === 'input.steer' ? " AND kind IN ('input.steer','result.include')" : input.kind ? ' AND kind=?' : ''}${input.targetRunId ? ' AND input_target_run_id=?' : ''} ORDER BY seq LIMIT ?`,
+      `SELECT * FROM command WHERE session_id=? AND origin_store_id=? AND kind IN ('input.steer','input.follow_up','result.include') AND status='accepted' AND cancelled=0 AND COALESCE(json_extract(receipt_json,'$.outcome'),'') NOT IN('human_input_pending','human_input_queued','human_input_unresolved') AND seq>?${session.parent_id !== null ? ' AND agent_source_execution_id IS NOT NULL' : ''}${input.kind === 'input.steer' ? " AND kind IN ('input.steer','result.include')" : input.kind ? ' AND kind=?' : ''}${input.targetRunId ? ' AND input_target_run_id=?' : ''} ORDER BY seq LIMIT ?`,
       input.sessionId,
       input.expectedStoreId,
       after,

@@ -1,7 +1,9 @@
 import type {
   BackgroundExecutionItem,
+  Execution,
   Message,
   ModelOutputSnapshot,
+  Run,
   Session,
 } from '@kite-ai/client';
 import type { NativeJobOutputPage } from './job-output-bridge';
@@ -60,6 +62,31 @@ export type NativeBackgroundPage = {
   entries: BackgroundExecutionItem[];
 };
 export type NativeBackgroundChild = {
+  control?: {
+    runs: Pick<
+      Run,
+      | 'id'
+      | 'sessionId'
+      | 'originStoreId'
+      | 'originCommandId'
+      | 'carrierExecutionId'
+      | 'rootWorkCommandId'
+      | 'rootWorkSeq'
+      | 'isActive'
+    >[];
+    executions: Pick<
+      Execution,
+      | 'id'
+      | 'sessionId'
+      | 'originStoreId'
+      | 'runId'
+      | 'rootWorkCommandId'
+      | 'rootWorkSeq'
+      | 'authorization'
+      | 'status'
+      | 'cancelRequestedAt'
+    >[];
+  };
   item: BackgroundExecutionItem;
   session: Session;
   upperSeq: string;

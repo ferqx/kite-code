@@ -2,7 +2,7 @@
 
 工具可以读取、执行命令、修改文件或访问外部系统。可发现、可请求、获准执行和执行成功是不同状态。
 
-普通 CLI、TUI 和 Desktop 的 Agent 宿主默认提供工作区文件读取、列目录、搜索和编辑，以及 `ask_user`、`web_fetch`；宿主具备合格 Shell 后端时也提供命令执行与管理工具。配置好模型后即可使用这些日常能力，无需先手工添加工具列表。显式禁用或移除的工具仍不提供给后续运行；实际调用继续遵守工作区信任、三种权限策略与当前平台能力限制。
+普通 CLI、TUI 和 Desktop 的 Agent 宿主默认提供工作区文件读取、列目录、搜索和编辑，以及 `ask_user`、`web_fetch` 和子 Agent 的创建、消息、追问、事件等待、列表与中断六工具；宿主具备合格 Shell 后端时也提供命令执行与管理工具。配置好模型后即可使用这些日常能力，无需先手工添加工具列表。显式禁用或移除的工具仍不提供给后续运行；实际调用继续遵守工作区信任、三种权限策略与当前平台能力限制。
 
 ## 模型工具名称
 
@@ -15,11 +15,11 @@
 | 工作区外用户文件 | `read_user_file`、`write_user_file`、`edit_user_file` | 独立绝对路径与准确目标权限；不进入工作区检查点 |
 | Shell | `shell_execute`、`shell_launch`、`shell_read`、`shell_wait`、`shell_stop` | 前台执行、后台启动、读取、等待和停止分别处理；保留原操作 `key` |
 | 问题与网页 | `ask_user`、`web_fetch` | 普通问题只收集信息；网页时限用 `timeout_ms` |
-| 子 Agent | `run_agent`、`spawn_agent`、`read_agent`、`followup_agent`、`send_agent_message`、`cancel_agent_task` | 前台返回完整子结果，后台启动只返回受理；后续操作绑定原任务 |
-| 子 Agent 等待与目录 | `wait_agents`、`wait_agent_event`、`list_agents`、`interrupt_agent` | `wait_agents` 必须传 `task_ids` 数组，单目标也是数组；`wait_agent_event` 只等自身事件，不指定任务目标 |
+| 子 Agent | `spawn_agent`、`follow_up_agent`、`send_agent_message`、`interrupt_agent` | 默认通用协作者；稳定 `agent_id`，每次受理仍绑定准确 carrier/轮次；消息只排队，显式追问才续轮 |
+| 子 Agent 等待与目录 | `wait_agent_events`、`list_agents` | 事件等待只读自身邮箱，使用 `after_seq/wait_ms`；列表按稳定身份分页，并提供原委派/最近工作/结果的可读来源 |
 | 计划与验证 | `read_plan`、`write_plan`、`request_plan_review`、`update_plan_progress`、`define_validation_checks`、`run_validation_checks`、`rebind_validation_checks`、`request_validation_waiver`、`check_file_changes` | 计划保存、批准、进度及真实验证仍分别核实 |
 
-`shell_execute.execution_timeout_ms` 是执行截止时限；到期申请取消，并继续核实真实停止。`shell_wait.wait_timeout_ms` 和 Agent 等待的 `timeout_ms` 只限制本次等待，不停止目标。等待与取消回执不能冒充执行成功或停止确认。
+`shell_execute.execution_timeout_ms` 是执行截止时限；到期申请取消，并继续核实真实停止。`shell_wait.wait_timeout_ms` 与 `wait_agent_events.wait_ms` 只限制本次等待，不停止目标；Agent 等待省略或 null 时在内部持续有限分段，0 为当前只读快照。等待与取消回执不能冒充执行成功或停止确认。
 
 `read_file` 和 `read_user_file` 省略 `max_lines` 时默认返回 200 行；`start_line` 从 1 开始，可将结果的 `selection.nextOffset` 作为下一次 `start_line` 继续分页。每页保留完整文件的 hash、字节大小和对象基线，不能把页正文当成全文。显式读取范围仍可能很大，行数也不能限制单行字节数；大正文保留完整 Artifact，并继续接受上下文压缩与容量检查。
 
@@ -63,9 +63,11 @@ Auto 下需要审查的调用按当前任务、准确参数和授权进入审批
 
 拒绝的调用没有执行；失败调用可能产生部分作用；未知结果需要核实。审批提交失败时，客户端应保留未解决请求，不显示虚假的已批准状态。
 
+文件修改因基线冲突被拒绝时，本次请求没有发布，之前成功的其他修改仍保留。基线核对完整文件的身份与版本，冲突不证明两次编辑修改了同一段文字。旧读取不能证明冲突后的当前内容；需要继续编辑时，应在原任务授权范围内重新读取并使用新基线。冲突回执不代表整批回滚，也不自动授权重做。
+
 通用 Agent 的大人工审批请求使用完整附件，有限卡保留原调用与可选授权范围；读取附件后再决定。正文大小不使后端截断参数或扩张授权。普通问题的回答只提供信息；即使问题用于 Workflow replan/waiver，也不等于批准后续工具。等待期间现行权限变化时，旧答案不能授予执行。
 
-文件工具不再因过去的整文件、搜索匹配数、修改原文或模型结果长度上限拒绝操作或隐去结果。读取工具按显式 `start_line`、`max_lines` 或默认 200 行选择内容，并给出续读位置。文件路径权限、二进制检查、目标身份、原文摘要和原子发布检查仍生效。数据能被读取不代表任意模型均能在一个请求中接收它；Provider 的真实请求容量仍生效。
+文件工具不再因过去的整文件、搜索匹配数、修改原文或模型结果长度上限拒绝操作或隐去结果。读取工具按显式 `start_line`、`max_lines` 或默认 200 行选择内容，并给出续读位置。读取大文件、搜索单个大文件以及读取完整 Artifact 正文期间，其他会话可以继续处理，取消会在读取检查点生效；返回成功前仍核完整文件和原引用，部分正文不表示全文已验证。文件路径权限、二进制检查、目标身份、原文摘要和原子发布检查仍生效。数据能被读取不代表任意模型均能在一个请求中接收它；Provider 的真实请求容量仍生效。
 
 Windows x64 本地 Workspace 的六文件工具及检查点原字节恢复已接入源码后端，完整 Windows 运行与安装版资格仍待验证。操作绑定原 Workspace 对象，不修改已有文件或目录的 ACL。Windows 的备用数据流、设备名、尾点／空格、重解析路径及短名别名会明确拒绝；受保护目录不能借大小写变体绕过。实际能力和验证边界见[Files owner](../../../packages/agent/src/tools/files/README.md#windows-workspace-文件源码)。
 
@@ -73,10 +75,12 @@ Windows x64 本地 Workspace 的六文件工具及检查点原字节恢复已接
 
 访问工作区外的用户文件使用独立绝对路径工具；外部写入遵守当前权限模式，获准后仍检查准确目标和原文件基线。Windows 的普通路径大小写变体可使用，受保护路径不能借此绕过限制。外部文件修改不进入工作区检查点，工作区恢复不会撤销它们；实际平台验证范围见上述 Files owner。
 
-`glob_files` 的文件 glob 中，完整目录段 `**/` 匹配零层或多层目录，因此 `**/*.ts` 包含搜索根目录的 `.ts` 文件。`search_content` 按字面文本搜索文件内容，不把输入解释为正则表达式。MCP 工具使用 `search_mcp_tools` 查找本轮已选择的工具；`list_mcp_sources` 查看来源目录，来源目录不代表全量工具清单。
+`glob_files` 的文件 glob 中，完整目录段 `**/` 匹配零层或多层目录，因此 `**/*.ts` 包含搜索根目录的 `.ts` 文件。`search_content` 按字面文本搜索文件内容，不把输入解释为正则表达式。 文件查找和内容搜索在遍历期间允许其他会话继续响应，停止原任务可中断其在途遍历；分页仍按原完整路径游标继续，不以扫描量上限隐藏后续结果。MCP 工具使用 `search_mcp_tools` 查找本轮已选择的工具；`list_mcp_sources` 查看来源目录，来源目录不代表全量工具清单。
 
 `web_fetch` 默认返回完整提取正文，不再使用旧的 8K 默认长度或 16K 参数上限；显式 `max_chars` 是该次调用选择的内容长度。有效跳转链不再受默认 3 次限制，真实循环仍会被拒绝，每次跳转继续检查网络权限与 SSRF。请求时限和取消仍生效。外网响应体在读取过程中按实际字节检查 5 MB 解析安全上限，防止远端无界响应耗尽内存；这不计入 Run 累计产物用量。
 
 请求批准的 `web_fetch` 在用户批准前不开始 DNS 或连接；Auto 使用实际模型审查，明确拒绝无网络效果；Full 不走常规审批。普通开发配置下，获准的 `web_fetch` 可访问公开网站及其公开跳转目标；每次请求继续检查实际 DNS 地址并拒绝私有、保留和本机地址。封存执行配置仍按明确的网络关闭或主机名单限制执行，审批不会扩大该范围。
 
 [TUI 审批](../clients/tui/guides/approvals-and-questions.md)提供交互入口；Web 只读查看，不回答审批。
+
+子孙 Agent 的审批模式动态跟随所属根会话当前已应用模式，待批、审核和资源等待中的未派发动作会重新判断。旧卡片失效后保留历史，不准许迟到答案授权其他轮；Full 仍不能解除只读预设、工具范围、工作区信任或未知效果限制。模式与一次性准确批准分别核实，详见[执行与结果](execution.md#工作选择审批与恢复)。

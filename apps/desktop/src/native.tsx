@@ -53,7 +53,7 @@ import {
   NativeDiagnosticsProvider,
   useNativeDiagnostics,
 } from './native-diagnostics';
-import { useNativeEnvironment } from './native-environment';
+import { nativeChildActivity, useNativeEnvironment } from './native-environment';
 import { NativeExtensions } from './native-extensions';
 import { NativeFileChanges } from './native-file-changes';
 import { NativeFileRecoveryPanel } from './native-file-recovery';
@@ -89,6 +89,33 @@ import { NativeTrustConfirmation } from './native-trust';
 import { NativeWindowFrame } from './native-window-frame';
 
 /** The renderer owns only public presentation; all I/O is the named preload bridge. */
+export function nativeRootInteractionBlocksComposer(selection: NativeState['selection']): boolean {
+  return !!selection?.interactions.some(
+    (card) =>
+      ['approval', 'question', 'plan_review'].includes(card.kind) &&
+      card.state === 'pending' &&
+      card.originStoreId === selection.storeId &&
+      card.sessionId === selection.session.id &&
+      card.presentationSessionId === selection.session.id &&
+      selection.executions.some(
+        (execution) =>
+          execution.id === card.executionId &&
+          execution.originStoreId === selection.storeId &&
+          execution.sessionId === selection.session.id &&
+          execution.runId === card.runId &&
+          ['planned', 'dispatching', 'running'].includes(execution.status),
+      ) &&
+      (card.runId === null ||
+        selection.runs.some(
+          (run) =>
+            run.id === card.runId &&
+            run.originStoreId === selection.storeId &&
+            run.sessionId === selection.session.id &&
+            run.isActive,
+        )),
+  );
+}
+
 export function NativeDesktop({
   testDiagnostics = false,
   nativeWindow = false,
@@ -678,6 +705,12 @@ function NativeDesktopContent({
     selection?.viewSelection,
   ]);
   const activeInputRun = selection?.runs.find((run) => run.isActive);
+  const executionOwner =
+    !directory?.unavailable && directory?.storeId === selection?.storeId
+      ? directory?.sessions.find((session) => session.id === selection?.session.id)?.activity
+          ?.executionOwner
+      : undefined;
+  const executionUnconfirmed = executionOwner === 'unheld' || executionOwner === 'unknown';
   const jobs =
     selection?.executions.filter(
       (execution) =>
@@ -840,41 +873,9 @@ function NativeDesktopContent({
     historyComplete: historyState.phase === 'complete',
     observationRevision: selection?.viewGeneration ?? 0,
   });
-  const historyPresentationScope = JSON.stringify([
-    state?.generation,
-    selection?.storeId,
-    selection?.session.id,
-    selection?.viewSelection ?? selection?.viewGeneration,
-  ]);
-  const admittedHistoryPresentation = useRef<string | undefined>(undefined);
-  const historyMetadataLoading = runMessages.loading || toolMessages.loading || fileTargets.loading;
-  const historyMetadataUnavailable =
-    historyState.phase === 'unavailable' ||
-    !!(state?.selection?.permissionUnavailable && !state.selection.viewLoading);
-  // On entry, publish the history with its verified Turn ownership and tool
-  // grouping together. A partially restored layout would move compression
-  // rows and briefly expose tool-verification placeholders. Once admitted,
-  // normal live updates keep rendering while their metadata catches up.
-  const historyPresentationLoading =
-    admittedHistoryPresentation.current !== historyPresentationScope &&
-    !historyMetadataUnavailable &&
-    historyMetadataLoading;
-  useLayoutEffect(() => {
-    if (
-      readingParent &&
-      selection &&
-      selected.current === selection.session.id &&
-      ((historyState.phase === 'complete' && !historyMetadataLoading) || historyMetadataUnavailable)
-    )
-      admittedHistoryPresentation.current = historyPresentationScope;
-  }, [
-    readingParent,
-    selection,
-    historyState.phase,
-    historyMetadataLoading,
-    historyMetadataUnavailable,
-    historyPresentationScope,
-  ]);
+  // Auxiliary metadata enriches saved messages without hiding their complete
+  // reading. Individual tool rows retain their verification boundary, while
+  // writes still require the current history EOF and fresh selection authority.
   const replyScope = JSON.stringify([
     state?.generation ?? generation.current,
     selection?.storeId,
@@ -1324,7 +1325,9 @@ function NativeDesktopContent({
     (card) =>
       ['approval', 'question', 'plan_review'].includes(card.kind) && card.state === 'pending',
   );
-  const canCompose = !!selection && !selection.session.parentSessionId && !hasPendingInteraction;
+  const hasPendingRootInteraction = nativeRootInteractionBlocksComposer(selection);
+  const canCompose =
+    !!selection && !selection.session.parentSessionId && !hasPendingRootInteraction;
   const firstVisible =
     firstSubmission &&
     directory?.storeId === firstSubmission.creation.expectedStoreId &&
@@ -1479,7 +1482,18 @@ function NativeDesktopContent({
           );
           return (
             <InteractionCard
-              key={draftKey}
+              key={JSON.stringify([
+                draftKey,
+                interaction.kind === 'plan_review' &&
+                  selection.runs.some(
+                    (run) =>
+                      run.id === interaction.runId &&
+                      run.sessionId === interaction.sessionId &&
+                      run.originStoreId === interaction.originStoreId &&
+                      run.status === 'cancelled' &&
+                      !run.isActive,
+                  ),
+              ])}
               interaction={interaction}
               renderApproval={(props) => (
                 <NativeApproval
@@ -2559,7 +2573,7 @@ function NativeDesktopContent({
       }
       sessionLabel={
         childDetail
-          ? (childFacts?.session.title ?? childDetail.sessionId)
+          ? (childFacts?.session.title ?? childDetail.title ?? childDetail.sessionId)
           : preparing
             ? '新对话'
             : selection
@@ -2586,6 +2600,7 @@ function NativeDesktopContent({
               ...transcript.turnActivity,
               // Read admission is revoked during scans; the last observed Run still owns its label.
               unavailable:
+                executionUnconfirmed ||
                 historyState.phase === 'unavailable' ||
                 !!(state?.selection?.permissionUnavailable && !state.selection.viewLoading),
             }
@@ -2657,9 +2672,8 @@ function NativeDesktopContent({
           : !preparing &&
             !(firstVisible && !firstSaved) &&
             !!selection &&
-            (historyPresentationLoading ||
-              (historyState.phase === 'loading' &&
-                (!messages.length || selected.current !== selection.session.id)))
+            historyState.phase === 'loading' &&
+            (!messages.length || selected.current !== selection.session.id)
       }
       fileChangesContent={
         !childDetail && !preparing && !scheduledTasksView && selection ? (
@@ -2676,6 +2690,7 @@ function NativeDesktopContent({
       }
       environmentInformation={!childDetail ? environment.card : undefined}
       requiredSubagentWait={
+        !executionUnconfirmed &&
         !childDetail &&
         !preparing &&
         historyState.phase === 'complete' &&
@@ -2906,6 +2921,7 @@ function NativeDesktopContent({
                 <p>
                   已完整读取子日志至固定序号 {childFacts.upperSeq}，原子轮次{' '}
                   {childFacts.item.childRun?.id ?? '尚未确认'}。
+                  {!childDetail.loading && !childDetail.error && nativeChildActivity(childFacts)}
                 </p>
               )}
             </>
@@ -2962,6 +2978,14 @@ function NativeDesktopContent({
               .map((run) => (
                 <p key={run.id}>轮次：{run.status}</p>
               ))}
+            {executionUnconfirmed && (
+              <p role="status" aria-label="会话执行状态待核实">
+                {executionOwner === 'unheld'
+                  ? '原执行者已释放，执行状态待核实。'
+                  : '无法核实原执行者，执行状态待核实。'}
+                历史记录已保留，尚未确认的执行结果不会自动重试。
+              </p>
+            )}
             {(diagnostics ||
               unfinishedJobs > 0 ||
               unknownJobs > 0 ||
@@ -2969,6 +2993,7 @@ function NativeDesktopContent({
               state?.backgroundUnavailable) && (
               <p role="status" aria-label="当前会话后台状态">
                 后台状态：{unfinishedJobs} 项未结束，{unknownJobs} 项未知
+                {executionUnconfirmed ? ' · 执行状态待核实' : ''}
                 {state?.selection?.viewLoading ||
                 state?.selection?.permissionUnavailable ||
                 state?.backgroundUnavailable
@@ -2982,6 +3007,7 @@ function NativeDesktopContent({
       interaction={
         !childDetail && !preparing && hasPendingInteraction ? interactionCards : undefined
       }
+      interactionHidesPrompt={!!hasPendingRootInteraction}
       composer={
         childDetail
           ? undefined

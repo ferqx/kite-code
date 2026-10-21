@@ -15,6 +15,7 @@ import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { acquireProfileAccess, acquireProfileDataLock } from '@kite-ai/agent/profile-access';
+import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import { startService } from '@kite-ai/service';
 import { launchPairedService } from '@kite-ai/service/paired';
 import { openRecoveryJournal } from '../../../apps/cli/host/recovery-journal';
@@ -483,7 +484,7 @@ test('actual development wrapper new argv binds original Work, cold caller, File
         .find(
           (m) =>
             m.role === 'user' &&
-            ['seed actual checkpoint', '完整 wrapper work 😀\r\n'].includes(m.content),
+            ['seed actual checkpoint', 'New task: 完整 wrapper work 😀\r\n'].includes(m.content),
         )?.content;
       if (user === undefined) return new Response('unexpected original work', { status: 500 });
       let call: { name: string; input: unknown } | undefined;
@@ -501,7 +502,7 @@ test('actual development wrapper new argv binds original Work, cold caller, File
             },
           };
         seedStep++;
-      } else expect(user).toBe('完整 wrapper work 😀\r\n');
+      } else expect(user).toBe('New task: 完整 wrapper work 😀\r\n');
       const frame = (delta: unknown, finish_reason: string | null) =>
         `data: ${JSON.stringify({ id: 'fixed', object: 'chat.completion.chunk', model: 'fixture', choices: [{ index: 0, delta, finish_reason }] })}\n\n`;
       return new Response(
@@ -701,7 +702,7 @@ test('actual development wrapper new argv binds original Work, cold caller, File
       kind: 'run.start',
       expectedStoreId: storeId,
       commandId: 'wrapper-work',
-      content: '完整 wrapper work 😀\r\n',
+      content: 'New task: 完整 wrapper work 😀\r\n',
     };
     const workOutput = await argv(['work', 's', '--input', JSON.stringify(work)]);
     expect(workOutput).toContain('completed');
@@ -775,9 +776,20 @@ test('actual development wrapper new argv binds original Work, cold caller, File
       sessionId: 's',
       status: 'applied',
     });
-    expect((await seed.client.getRun((original.receipt as { runId: string }).runId)).status).toBe(
-      'completed',
-    );
+    const receipt = original.receipt as { runId: string; businessCommandId: string };
+    expect(receipt.businessCommandId).not.toBe('wrapper-work');
+    const business = await seed.client.getCommand(receipt.businessCommandId);
+    expect(business).toMatchObject({
+      id: receipt.businessCommandId,
+      sessionId: 's',
+      status: 'applied',
+    });
+    expect((business.receipt as { runId: string }).runId).toBe(receipt.runId);
+    expect(await seed.client.getRun(receipt.runId)).toMatchObject({
+      status: 'completed',
+      originCommandId: business.id,
+      rootWorkCommandId: 'wrapper-work',
+    });
     const socket = join(root, 'shared.sock');
     sharedOwner = await reserveDaemonEndpoint(
       selectDaemonEndpoint({ profileAccessKey: profile.profileAccessKey, explicitSocket: socket }),
@@ -813,6 +825,349 @@ test('actual development wrapper new argv binds original Work, cold caller, File
     }
     await sharedOwner?.close();
     await seed?.close();
+    provider.stop(true);
+    rmSync(root, { recursive: true, force: true });
+  }
+}, 30000);
+
+test('actual development JSON Work exits with the complete clarification and cold same-intent lookup is GET-only without a business Run', async () => {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-cli-dev-clarification-')));
+  const userConfiguration = ownedUserConfiguration(join(root, 'home'));
+  const workspace = join(root, 'workspace');
+  mkdirSync(workspace);
+  const clarification = '请明确这条输入要补充哪项工作😀？\n第二行完整保留 e\u0301 与引号“原文”。';
+  let requests = 0;
+  const provider = Bun.serve({
+    hostname: '127.0.0.1',
+    port: 0,
+    async fetch(request) {
+      const body = (await request.json()) as {
+        messages: { role: string; content: string }[];
+        tools?: unknown[];
+      };
+      requests++;
+      const instruction = body.messages.find(
+        (message) =>
+          message.role === 'system' && message.content.includes('Original input identity: '),
+      )?.content;
+      let content = 'Original A completed.';
+      if (instruction) {
+        expect(body.tools ?? []).toEqual([]);
+        const identity = JSON.parse(
+          instruction
+            .split('\n')
+            .find((line) => line.startsWith('Original input identity: '))!
+            .slice('Original input identity: '.length),
+        );
+        content = JSON.stringify({
+          ...identity,
+          relation: 'unresolved',
+          purpose: 'clarify',
+          target_root_work_command_id: null,
+          selection_effect: 'keep',
+          answer: null,
+          clarification,
+          clarifies_input_id: null,
+        });
+      } else
+        expect(
+          body.messages.some((message) => message.content === 'Original clarification host A'),
+        ).toBe(true);
+      const frame = (delta: unknown, finish_reason: string | null) =>
+        `data: ${JSON.stringify({ id: 'clarification-host', object: 'chat.completion.chunk', model: 'fixture', choices: [{ index: 0, delta, finish_reason }] })}\n\n`;
+      return new Response(`${frame({ content }, null)}${frame({}, 'stop')}data: [DONE]\n\n`, {
+        headers: { 'content-type': 'text/event-stream' },
+      });
+    },
+  });
+  let service: Awaited<ReturnType<typeof launchPairedService>> | undefined;
+  let endpoint: Awaited<ReturnType<typeof reserveDaemonEndpoint>> | undefined;
+  let proxy: ReturnType<typeof Bun.serve> | undefined;
+  let running: ReturnType<typeof Bun.spawn> | undefined;
+  let reader: Awaited<ReturnType<typeof openSqliteStore>> | undefined;
+  try {
+    const profile = selectProfile({ dataRoot: join(root, 'data'), profile: 'development' });
+    privateDirectory(profile.profilePath);
+    writeFileSync(
+      userConfiguration.path,
+      JSON.stringify({
+        modelId: 'fixed',
+        models: [
+          {
+            id: 'fixed',
+            provider: 'compatible',
+            model: 'fixture',
+            baseURL: `${provider.url.href}v1`,
+          },
+        ],
+        tools: [],
+      }),
+      { mode: 0o600 },
+    );
+    const outdir = join(root, 'apps/service/dist');
+    mkdirSync(outdir, { recursive: true });
+    symlinkSync(join(repositoryRoot, 'node_modules'), join(root, 'node_modules'), 'dir');
+    symlinkSync(
+      join(repositoryRoot, 'apps/service/node_modules'),
+      join(root, 'apps/service/node_modules'),
+      'dir',
+    );
+    expect(
+      (
+        await Bun.build({
+          entrypoints: [join(repositoryRoot, 'apps/service/src/main.ts')],
+          target: 'bun',
+          packages: 'external',
+          outdir,
+          naming: 'main.js',
+        })
+      ).success,
+    ).toBe(true);
+    const selected = selectDevelopmentCLI(['files', 'checkpoints', 's'], root).resolveArtifact!();
+    const launch = () =>
+      launchPairedService({
+        ...selected,
+        spawnChild: userConfiguration.spawnChild,
+        profile,
+        instanceId: 'clarification-host',
+        requiredCapabilities: ['commands', 'sessions'],
+      });
+    service = await launch();
+    const client = service.client;
+    const storeId = service.bootstrap.storeId!;
+    await client.createWorkspace({
+      expectedStoreId: storeId,
+      id: 'w',
+      name: 'owned',
+      rootUri: pathToFileURL(workspace).href,
+    });
+    await client.createSession({
+      expectedStoreId: storeId,
+      commandId: 'create',
+      sessionId: 's',
+      workspaceId: 'w',
+      title: 'clarification',
+    });
+    await client.startRun('s', {
+      kind: 'run.start',
+      expectedStoreId: storeId,
+      commandId: 'A',
+      content: 'Original clarification host A',
+    });
+    const deadline = Date.now() + 5000;
+    for (;;) {
+      const command = await client.getCommand('A');
+      const id = (command.receipt as { runId?: string })?.runId;
+      if (id && !(await client.getRun(id)).isActive) {
+        expect((await client.getRun(id)).status).toBe('completed');
+        break;
+      }
+      if (Date.now() > deadline) throw Error('clarification_original_A_deadline');
+      await Bun.sleep(10);
+    }
+    expect(requests).toBe(1);
+    await service.close();
+    service = undefined;
+    const driver = join(root, 'driver.ts');
+    writeFileSync(
+      driver,
+      `import {runDevelopmentCLI} from ${JSON.stringify(join(repositoryRoot, 'scripts/development/unified-cli.ts'))};\nprocess.exitCode=await runDevelopmentCLI({root:${JSON.stringify(root)}});\n`,
+    );
+    const invocation = {
+      kind: 'run.start',
+      expectedStoreId: storeId,
+      commandId: 'ambiguous',
+      content: '先处理一下',
+    };
+    const argv = async (shared?: string) => {
+      const child = Bun.spawn(
+        [
+          process.execPath,
+          driver,
+          'work',
+          's',
+          '--input',
+          JSON.stringify(invocation),
+          '--data-root',
+          profile.dataRoot,
+          ...(shared ? ['--server', shared] : []),
+        ],
+        {
+          cwd: workspace,
+          stdin: 'ignore',
+          stdout: 'pipe',
+          stderr: 'pipe',
+          env: {
+            PATH: process.env.PATH ?? '',
+            LANG: 'C.UTF-8',
+            ...userConfiguration.homeEnvironment,
+          },
+        },
+      );
+      running = child;
+      const [code, stdout, stderr] = await Promise.all([
+        child.exited,
+        new Response(child.stdout).text(),
+        new Response(child.stderr).text(),
+      ]);
+      expect(code).toBe(3);
+      expect(stderr).toBe(
+        shared
+          ? 'Shared client disconnected; daemon work remains owned by Service'
+          : "Paired host exit stops only this Service instance's remaining owned work",
+      );
+      const events = stdout
+        .trim()
+        .split('\n')
+        .map((line) => JSON.parse(line));
+      const outcomes = events.filter((event) => event.kind === 'work.outcome');
+      expect(outcomes).toHaveLength(1);
+      const outcome = outcomes[0]!;
+      expect(outcome).toMatchObject({
+        kind: 'work.outcome',
+        sessionId: 's',
+        storeId,
+        commandId: invocation.commandId,
+        status: 'needs_clarification',
+        exitCode: 3,
+        clarification: { answer: null, clarification },
+      });
+      expect(Object.hasOwn(outcome, 'run')).toBe(false);
+      expect(
+        events.some(
+          (event) =>
+            event.kind === 'work.event' && event.line.startsWith('terminal ambiguous succeeded'),
+        ),
+      ).toBe(false);
+      return outcome;
+    };
+    const first = await argv();
+    expect(requests).toBe(2);
+    reader = await openSqliteStore({ ...profile, mode: 'readonly' });
+    const original = (await reader.getCommand(invocation.commandId))!;
+    expect(original).toMatchObject({
+      status: 'accepted',
+      receipt: {
+        outcome: 'human_input_unresolved',
+        runId: null,
+        businessCommandId: null,
+        observation: first.clarification,
+      },
+    });
+    const receipt = original.receipt as { humanInputCommandId: string; decisionCommandId: string };
+    const raw = (await reader.getCommand(receipt.humanInputCommandId))!;
+    const decision = (await reader.getCommand(receipt.decisionCommandId))!;
+    expect(raw).toMatchObject({
+      kind: 'human.input',
+      request: { content: invocation.content, originalRequest: { content: invocation.content } },
+      receipt: { state: 'unresolved', decisionCommandId: decision.id, businessCommandId: null },
+    });
+    expect(decision).toMatchObject({
+      kind: 'human.input.decision',
+      status: 'applied',
+      receipt: { businessCommandId: null },
+    });
+    const view = await reader.getView('s');
+    expect(view.runs).toHaveLength(2);
+    expect(view.runs.every((run) => !run.isActive)).toBe(true);
+    expect(view.executions).toHaveLength(2);
+    expect(
+      view.executions.every(
+        (execution) => execution.kind === 'model' && execution.status === 'succeeded',
+      ),
+    ).toBe(true);
+    const scope = { expectedStoreId: storeId, sessionId: 's', subjectId: original.subjectId };
+    const manifest = await reader.beginSessionExport(scope);
+    const commands = await reader.readSessionExportPage({
+      ...scope,
+      manifest,
+      section: 'commands',
+      limit: 100,
+    });
+    expect(commands.nextAfterSeq).toBeNull();
+    expect(
+      commands.records.filter(
+        (record) => (record.record as { kind: string }).kind === 'human.input',
+      ),
+    ).toHaveLength(1);
+    expect(
+      commands.records.filter(
+        (record) => (record.record as { kind: string }).kind === 'human.input.decision',
+      ),
+    ).toHaveLength(1);
+    expect(
+      commands.records.some((record) =>
+        /cancel|interaction.answer/.test((record.record as { kind: string }).kind),
+      ),
+    ).toBe(false);
+    await reader.close();
+    reader = undefined;
+    service = await launch();
+    const wire: { method: string; path: string }[] = [];
+    proxy = Bun.serve({
+      hostname: '127.0.0.1',
+      port: 0,
+      fetch(request) {
+        const url = new URL(request.url);
+        wire.push({ method: request.method, path: url.pathname });
+        const forwarded = new Request(
+          `${service!.bootstrap.endpoint}${url.pathname}${url.search}`,
+          request,
+        );
+        forwarded.headers.delete('host');
+        return fetch(forwarded);
+      },
+    });
+    const socket = join(root, 'cold.sock');
+    endpoint = await reserveDaemonEndpoint(
+      selectDaemonEndpoint({ profileAccessKey: profile.profileAccessKey, explicitSocket: socket }),
+      {
+        profile: {
+          dataRoot: profile.dataRoot,
+          name: profile.profile,
+          accessKey: profile.profileAccessKey,
+        },
+        instanceId: 'clarification-host',
+        buildId: selected.buildId,
+        workspace,
+      },
+    );
+    await endpoint.listen({
+      httpEndpoint: proxy.url.href.replace(/\/$/, ''),
+      token: service.bootstrap.token,
+      webOrigin: service.bootstrap.endpoint,
+    });
+    expect(await argv(socket)).toEqual(first);
+    expect(wire.length).toBeGreaterThan(0);
+    expect(wire.every((event) => event.method === 'GET')).toBe(true);
+    expect(requests).toBe(2);
+    expect(await service.client.getCommand(invocation.commandId)).toMatchObject({
+      status: original.status,
+      receipt: original.receipt,
+      requestDigest: original.requestDigest,
+    });
+    await endpoint.close();
+    endpoint = undefined;
+    proxy.stop(true);
+    proxy = undefined;
+    await service.close();
+    service = undefined;
+    reader = await openSqliteStore({ ...profile, mode: 'readonly' });
+    expect(await reader.getCommand(invocation.commandId)).toEqual(original);
+    expect(await reader.getCommand(raw.id)).toEqual(raw);
+    expect(await reader.getCommand(decision.id)).toEqual(decision);
+    expect((await reader.getView('s')).runs).toHaveLength(2);
+    expect(await reader.listExecutions('s')).toHaveLength(2);
+    expect(requests).toBe(2);
+  } finally {
+    if (running && running.exitCode === null) {
+      running.kill('SIGTERM');
+      await running.exited;
+    }
+    await reader?.close();
+    await endpoint?.close();
+    proxy?.stop(true);
+    await service?.close();
     provider.stop(true);
     rmSync(root, { recursive: true, force: true });
   }

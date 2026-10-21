@@ -12,8 +12,10 @@ const nativeCommit = '9ff6904a0f49213f06c483a08615ff69f099720a';
 const titleCommit = 'bcf70ce843463194ab91ca3938b9fa1375cb22bc';
 export const REVIEWED_LIVE_TOOL_SCRIPT =
   '    "test:model:tools:live": "bun run tests/e2e/live/model/model-tools.live.ts",\n';
+const reviewedCollaborationLiveScript =
+  '    "test:model:collaboration:live": "bun run tests/e2e/live/model/collaboration.live.ts",\n';
 
-// These six final raw inputs include only the named commits and this task's exact live script.
+// These six final raw inputs include only the named commits and the two exact live scripts.
 // Both new resolved OpenAI blocks, all old resolved packages and every whitespace byte are pinned.
 const reviewedInputs: Readonly<
   Record<
@@ -33,7 +35,7 @@ const reviewedInputs: Readonly<
     },
   },
   'package.json': {
-    currentSha256: '73d61858bfa4d4f467bfa307e5b6f6e207e945c89f87fca9137b4a765d401df6',
+    currentSha256: '4c7e7320475e5c030c4221e30f408bb21b290de5a4c73fcd830f5efb4f0e4a14',
     previousSha256: {
       compatible: 'ec897a40fed5f88c2cab423797efb6837f7a8564feb0ce8152e42737cdd1dc88',
       terminal_legacy: 'b71511f0e48a943b42d4c7fa9283ca9fadce83d710193cf4c2edbf246bf24b37',
@@ -98,7 +100,7 @@ export function matchReviewedPredecessorInput(
           : [nativeCommit];
   const increments =
     path === 'package.json'
-      ? ['native_build_scripts', 'model_tools_live_script']
+      ? ['native_build_scripts', 'model_tools_live_script', 'model_collaboration_live_script']
       : path === 'bun.lock'
         ? ['responses_exact_resolved_closure', 'ui_react_dom_peer']
         : path === 'packages/ai/package.json'
@@ -111,12 +113,20 @@ export function matchReviewedPredecessorInput(
   return {
     match: 'reviewed_locked_input_increment' as const,
     // These reasons cover this additional review, not the legacy guard's earlier increments.
-    reviewScope: 'approved_input_increments_2026_10_18' as const,
+    reviewScope:
+      path === 'package.json'
+        ? ('approved_input_increments_2026_10_19' as const)
+        : ('approved_input_increments_2026_10_18' as const),
     predecessorCommit: REVIEWED_PREDECESSOR_COMMITS[predecessor],
     previousSha256,
     currentSha256,
     commits,
     increments,
-    ...(path === 'package.json' ? { liveScript: REVIEWED_LIVE_TOOL_SCRIPT } : {}),
+    ...(path === 'package.json'
+      ? {
+          liveScript: REVIEWED_LIVE_TOOL_SCRIPT,
+          collaborationLiveScript: reviewedCollaborationLiveScript,
+        }
+      : {}),
   };
 }

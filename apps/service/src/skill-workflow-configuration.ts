@@ -22,15 +22,17 @@ import {
 import type { ProfileSelection } from '@kite-ai/agent/profile';
 import {
   type CompiledSkillWorkflow,
-  compileSkillWorkflow,
+  compileSkillWorkflowAsync,
   createSkillWorkflow,
   createSkillWorkflowCompensator,
   createSkillWorkflowVerifier,
-  revalidateSkillWorkflow,
+  createWorkflowCompilerSession,
+  revalidateSkillWorkflowAsync,
   skillWorkflowExtensionId,
-  validateWorkflowArguments,
+  validateWorkflowArgumentsAsync,
   type WorkflowActivationInput,
   type WorkflowCapability,
+  type WorkflowCompilerSession,
 } from '@kite-ai/agent/skill-workflow';
 import {
   createKnowledgeReadScope,
@@ -82,6 +84,7 @@ export async function compileConfiguredWorkflows(options: {
   listed: Awaited<ReturnType<ReturnType<typeof createConfiguredSkillSource>['list']>>;
   resolveCapability: (id: string) => WorkflowCapability | undefined;
   strict?: boolean;
+  compiler?: WorkflowCompilerSession;
 }) {
   const entries: CompiledSkillWorkflow[] = [];
   const byConfiguredId = new Map<string, CompiledSkillWorkflow>();
@@ -93,7 +96,7 @@ export async function compileConfiguredWorkflows(options: {
     const id = options.source.configuredId(summary);
     try {
       await options.source.load({ id: summary.id, version: summary.version });
-      const entry = compileSkillWorkflow(
+      const entry = await compileSkillWorkflowAsync(
         {
           skillDir: dirname(summary.location),
           source: summary.location.startsWith(`${canonicalProfile}/skills/`) ? 'user' : 'project',
@@ -101,6 +104,7 @@ export async function compileConfiguredWorkflows(options: {
           resolveCapability: options.resolveCapability,
         },
         options.source.knowledgeScope,
+        { compiler: options.compiler },
       );
       await options.source.load({ id: summary.id, version: summary.version });
       entries.push(entry);
@@ -160,6 +164,7 @@ export async function createWorkflowConfiguration(options: {
   const resolveCapability = (id: string) => facts.get(id);
   const knowledgeScope = options.knowledgeScope ?? createKnowledgeReadScope();
   const source = createConfiguredSkillSource({ ...options, knowledgeScope });
+  const compiler = createWorkflowCompilerSession();
   try {
     const listed = enabled ? await source.list() : { entries: [], states: [] };
     const { entries } = await compileConfiguredWorkflows({
@@ -168,6 +173,7 @@ export async function createWorkflowConfiguration(options: {
       listed,
       resolveCapability,
       strict: true,
+      compiler,
     });
     const initialActivations: WorkflowActivationInput[] = [];
     if (Array.isArray(inputs)) {
@@ -192,7 +198,11 @@ export async function createWorkflowConfiguration(options: {
             throw new AgentError('workflow_skill_unavailable');
           if (!entry.contract.invocation.allowManual)
             throw new AgentError('workflow_invocation_denied');
-          if (validateWorkflowArguments(entry.contract.inputSchema, item.input))
+          if (
+            await validateWorkflowArgumentsAsync(entry.contract.inputSchema, item.input, {
+              compiler,
+            })
+          )
             throw new AgentError('workflow_input_schema_invalid');
           initialActivations.push({
             key: item.key,
@@ -227,6 +237,7 @@ export async function createWorkflowConfiguration(options: {
     const verifier =
       scriptEntries.length && assets && options.shell
         ? createSkillWorkflowVerifier({
+            compiler,
             knowledgeScope,
             entries,
             resolveCapability,
@@ -263,6 +274,7 @@ export async function createWorkflowConfiguration(options: {
           entry.descriptor.availability === 'available' && entry.contract?.recovery.compensation,
       )
         ? createSkillWorkflowCompensator({
+            compiler,
             knowledgeScope,
             entries,
             resolveCapability,
@@ -358,6 +370,7 @@ export async function createWorkflowConfiguration(options: {
       'workflow_compensator_asset_changed',
     );
     const workflow = createSkillWorkflow({
+      compiler,
       knowledgeScope,
       flags: options.flags,
       ...(options.userDecisions ? { userDecisions: structuredClone(options.userDecisions) } : {}),
@@ -374,7 +387,10 @@ export async function createWorkflowConfiguration(options: {
     });
     return {
       ...workflow,
-      dispose: () => source.dispose(),
+      dispose: async () => {
+        await compiler.dispose();
+        await source.dispose();
+      },
       verifierExtension,
       compensatorExtension,
       snapshot: structuredClone({
@@ -413,12 +429,13 @@ export async function createWorkflowConfiguration(options: {
     };
   } catch (error) {
     try {
+      await compiler.dispose();
       await source.dispose();
     } catch (cleanupError) {
       throw new ConfigurationPreparationCleanupError({
         originalError: error,
         cleanupError,
-        resources: { source, knowledgeScope },
+        resources: { source, knowledgeScope, compiler },
       });
     }
     throw error;
@@ -684,7 +701,7 @@ export function workflowSnapshotDigest(value: Json) {
   return JSON.stringify(normalize(value));
 }
 
-export function assertWorkflowForkCurrent(
+export async function assertWorkflowForkCurrent(
   fence: NonNullable<Awaited<ReturnType<typeof workflowForkFence>>>,
   knowledgeScope?: KnowledgeReadScope,
 ) {
@@ -695,7 +712,7 @@ export function assertWorkflowForkCurrent(
       return [String(fact.capabilityId), fact as unknown as WorkflowCapability] as const;
     }),
   );
-  const current = revalidateSkillWorkflow(
+  const current = await revalidateSkillWorkflowAsync(
     fence.compiledEntry,
     (id) => facts.get(id),
     knowledgeScope,

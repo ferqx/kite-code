@@ -71,6 +71,7 @@ async function fixture(count = 2) {
     ],
     [finish],
     [finish],
+    [finish],
   ]);
   const runtime = createRuntime({
     store,
@@ -418,7 +419,7 @@ test('denying one actual child ends its original round without cancelling a queu
       expectedStoreId: f.expectedStoreId,
       commandId: 'new-explicit',
       kind: 'run.start',
-      content: 'independent later user intent',
+      content: 'New task: independent later user intent',
     });
     await f.answer(a, 'deny');
     await f.settled('a');
@@ -427,15 +428,52 @@ test('denying one actual child ends its original round without cancelling a queu
     expect((await f.client.getCommand('new-explicit')).cancelRequestedAt).toBeNull();
     expect((await f.client.getCommand('original')).cancelRequestedAt).toBeNull();
     expect(f.effects).toHaveLength(0);
+    await f.runtime.waitForCommand('new-explicit', { timeoutMs: 5000 });
+    const independent = await f.client.getCommand('new-explicit');
+    const independentRunId = (independent.receipt as { runId: string }).runId;
+    await until(
+      () => f.client.getView('root'),
+      (view) => view.runs.every((run) => !run.isActive),
+    );
+    expect((await f.client.getRun(independentRunId)).status).toBe('completed');
+    expect((await f.client.getExecution(b.executionId)).cancelRequestedAt).toBeNull();
+    expect(
+      (await f.client.getInteraction('root', b.id, { storeId: f.expectedStoreId })).state,
+    ).toBe('pending');
+    expect(
+      (
+        await f.store.readHumanWorkState({
+          expectedStoreId: f.expectedStoreId,
+          sessionId: 'root',
+          subjectId: 'owner',
+        })
+      ).selectedWork?.rootWorkCommandId,
+    ).toBe('new-explicit');
+    // Finishing independent B does not select original A; only this new human input does.
+    await f.peer.startRun('root', {
+      expectedStoreId: f.expectedStoreId,
+      commandId: 'continue-original',
+      kind: 'run.start',
+      content: 'Continue original',
+    });
+    await f.runtime.waitForCommand('continue-original', { timeoutMs: 5000 });
+    const continued = await f.client.getCommand('continue-original');
+    const continuedRun = await f.client.getRun((continued.receipt as { runId: string }).runId);
+    const originalRun = (await f.client.getView('root')).runs.find(
+      (run) => run.originCommandId === 'original',
+    )!;
+    expect(continuedRun.rootWorkCommandId).toBe('original');
+    expect(continuedRun.id).not.toBe(originalRun.id);
+    expect(continuedRun.status).toBe('completed');
+    expect((await f.store.getRun(continuedRun.id))?.configuration).toEqual(
+      (await f.store.getRun(originalRun.id))?.configuration,
+    );
     await f.answer(b);
     await f.settled('b');
     await f.runtime.waitForCommand('new-explicit', { timeoutMs: 5000 });
     expect(f.effects).toEqual(['b']);
-    expect(
-      (await f.client.getView('root')).runs.find((run) => run.originCommandId === 'new-explicit')
-        ?.status,
-    ).toBe('completed');
-    expect(f.model.requests).toHaveLength(3);
+    expect((await f.client.getRun(independentRunId)).status).toBe('completed');
+    expect(f.model.requests).toHaveLength(4);
     expect(f.observerModel.requests).toHaveLength(0);
   } finally {
     await f.close();

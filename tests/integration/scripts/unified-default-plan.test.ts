@@ -2,6 +2,7 @@ import { expect, test } from 'bun:test';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { runTestJob } from '../../../scripts/test-suite';
 import {
   FINITE_ROOT_SCRIPT_TESTS,
   UNIFIED_EXCLUSIVE_TEST_FILES,
@@ -76,6 +77,46 @@ test('selection uses owned paths, preserving negative legacy strings without dis
       );
     }
     expect(unifiedTestInventory(fixture)).toEqual([current]);
+  } finally {
+    rmSync(fixture, { recursive: true, force: true });
+  }
+});
+
+test('default jobs run only their explicit planned files despite ignored archived same-name tests', async () => {
+  const fixture = mkdtempSync(join(tmpdir(), 'kite-unified-exact-plan-'));
+  const planned = 'apps/service/test/isolated/only.test.ts';
+  const archived = `dist/unified-evidence/original-paths/snapshot/${planned}`;
+  try {
+    for (const file of [planned, archived])
+      mkdirSync(join(fixture, file, '..'), { recursive: true });
+    writeFileSync(join(fixture, '.gitignore'), 'dist/\n');
+    writeFileSync(
+      join(fixture, planned),
+      "import {expect,test} from 'bun:test';test('original planned file',()=>expect(true).toBe(true));\n",
+    );
+    writeFileSync(
+      join(fixture, archived),
+      "import './deliberately-unavailable-archived-fixture';\n",
+    );
+    for (const file of UNIFIED_EXCLUSIVE_TEST_FILES) {
+      mkdirSync(join(fixture, file, '..'), { recursive: true });
+      writeFileSync(
+        join(fixture, file),
+        "import {test} from 'bun:test';test('listed fixture',()=>{});\n",
+      );
+    }
+    const inventory = unifiedTestInventory(fixture),
+      plan = unifiedTestPlan(fixture, 2);
+    const jobs = [...plan.concurrent, ...plan.exclusive];
+    expect(inventory).toEqual([planned, ...UNIFIED_EXCLUSIVE_TEST_FILES].sort());
+    expect(jobs).toHaveLength(1 + UNIFIED_EXCLUSIVE_TEST_FILES.length);
+    const target = jobs.find((job) => job.files.includes(join(fixture, planned)))!;
+    expect(target.files).toEqual([join(fixture, planned)]);
+    const before = JSON.stringify(plan);
+    expect(await runTestJob(fixture, target)).toBe(0);
+    expect(JSON.stringify(plan)).toBe(before);
+    expect(unifiedTestInventory(fixture)).toEqual(inventory);
+    expect(unifiedTestPlan(fixture, 2)).toEqual(plan);
   } finally {
     rmSync(fixture, { recursive: true, force: true });
   }

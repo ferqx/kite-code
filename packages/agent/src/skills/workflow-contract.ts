@@ -117,7 +117,7 @@ const SEMVER = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/;
 const EFFECTS = new Set(['none', 'read', 'write', 'destructive', 'unknown']);
 const EFFECT_ORDER = ['none', 'read', 'write', 'destructive', 'unknown'] as const;
 const APPROVAL_ORDER = ['none', 'auto_review', 'user'] as const;
-const SKILL_SCAN_IGNORED_DIRECTORIES = new Set([
+export const SKILL_SCAN_IGNORED_DIRECTORIES = new Set([
   '.cache',
   '.git',
   '.next',
@@ -355,6 +355,7 @@ function safeDeclaredPath(
   value: string,
   field: string,
   diagnostics: SkillDiagnostic[],
+  knownFiles?: ReadonlySet<string>,
 ): string | undefined {
   if (!value || value.includes('\0') || value.split(/[\\/]/).includes('..')) {
     diagnostic(
@@ -367,7 +368,12 @@ function safeDeclaredPath(
   }
   const target = resolve(skillDir, value);
   const root = `${resolve(skillDir)}${sep}`;
-  if (!target.startsWith(root) || !existsSync(target) || !statSync(target).isFile()) {
+  if (
+    !target.startsWith(root) ||
+    (knownFiles
+      ? !knownFiles.has(relative(resolve(skillDir), target).split(sep).join('/'))
+      : !existsSync(target) || !statSync(target).isFile())
+  ) {
     diagnostic(
       diagnostics,
       'missing_path',
@@ -452,21 +458,27 @@ function buildDescriptor(input: {
 function compile(
   input: CompileSkillWorkflowInput,
   filesAccess: KnowledgeFileAccess,
+  snapshot?: WorkflowCompileSnapshot,
 ): CompiledSkillWorkflow {
-  const diagnostics: SkillDiagnostic[] = [];
+  const diagnostics: SkillDiagnostic[] = snapshot ? [...snapshot.diagnostics] : [];
   let sourceBinding: CompiledSkillWorkflow['sourceBinding'];
-  try {
-    const canonicalRoot = realpathSync(input.skillDir);
-    const root = lstatSync(canonicalRoot);
-    if (!root.isDirectory() || root.isSymbolicLink())
-      throw new Error('Skill root is not a directory.');
-    sourceBinding = Object.freeze({ canonicalRoot, device: root.dev, inode: root.ino });
-  } catch (error) {
-    diagnostic(diagnostics, 'invalid_path', `Unable to bind Skill source: ${String(error)}`);
-  }
-  const files = sourceBinding
-    ? readSkillFiles(sourceBinding.canonicalRoot, diagnostics, filesAccess)
-    : [];
+  if (snapshot) sourceBinding = snapshot.sourceBinding;
+  else
+    try {
+      const canonicalRoot = realpathSync(input.skillDir);
+      const root = lstatSync(canonicalRoot);
+      if (!root.isDirectory() || root.isSymbolicLink())
+        throw new Error('Skill root is not a directory.');
+      sourceBinding = Object.freeze({ canonicalRoot, device: root.dev, inode: root.ino });
+    } catch (error) {
+      diagnostic(diagnostics, 'invalid_path', `Unable to bind Skill source: ${String(error)}`);
+    }
+  const files = snapshot
+    ? snapshot.files.map((file) => ({ path: file.path, content: Buffer.from(file.content) }))
+    : sourceBinding
+      ? readSkillFiles(sourceBinding.canonicalRoot, diagnostics, filesAccess)
+      : [];
+  const knownFiles = snapshot ? new Set(files.map((file) => file.path)) : undefined;
   const skillFile = files.find((file) => file.path === 'SKILL.md');
   if (!skillFile) {
     diagnostic(diagnostics, 'missing_skill_file', 'SKILL.md is required.', 'SKILL.md');
@@ -683,7 +695,14 @@ function compile(
           'verification.entrypoint cannot be inside an ignored Skill directory.',
           'verification.entrypoint',
         );
-      else safeDeclaredPath(input.skillDir, entrypoint, 'verification.entrypoint', diagnostics);
+      else
+        safeDeclaredPath(
+          input.skillDir,
+          entrypoint,
+          'verification.entrypoint',
+          diagnostics,
+          knownFiles,
+        );
     }
     const verificationTimeout =
       verification?.timeout_ms === undefined
@@ -702,7 +721,14 @@ function compile(
           'recovery.compensation cannot be inside an ignored Skill directory.',
           'recovery.compensation',
         );
-      else safeDeclaredPath(input.skillDir, compensation, 'recovery.compensation', diagnostics);
+      else
+        safeDeclaredPath(
+          input.skillDir,
+          compensation,
+          'recovery.compensation',
+          diagnostics,
+          knownFiles,
+        );
     }
     const effectiveCapabilityCeiling = capabilitiesValid
       ? [...new Set(required as string[])]
@@ -928,3 +954,25 @@ export function readWorkflowReference(
     };
   });
 }
+
+/** Complete owned-read snapshot for the private CPU compiler; not capability authority. */
+export interface WorkflowCompileSnapshot {
+  sourceBinding?: CompiledSkillWorkflow['sourceBinding'];
+  diagnostics: SkillDiagnostic[];
+  files: { path: string; content: Uint8Array }[];
+}
+export function compileWorkflowSnapshot(
+  input: CompileSkillWorkflowInput,
+  snapshot: WorkflowCompileSnapshot,
+) {
+  return immutable(compile(input, {} as KnowledgeFileAccess, snapshot));
+}
+export {
+  compileSkillWorkflowAsync,
+  createWorkflowCompilerSession,
+  readWorkflowReferenceAsync,
+  revalidateSkillWorkflowAsync,
+  validateWorkflowArgumentsAsync,
+  type WorkflowCompilerSession,
+  workflowCompilerAssets,
+} from './workflow-contract/async';

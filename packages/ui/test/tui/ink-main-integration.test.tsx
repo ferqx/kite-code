@@ -446,6 +446,10 @@ test('first question Escape cancels the exact presented original execution once'
   const app = render(<TuiSession controller={controller} />);
   try {
     await tick();
+    app.stdin.write('\x02');
+    await tick();
+    app.stdin.write('\r');
+    await tick();
     app.stdin.write('\u001b');
     await tick();
     app.stdin.write('\u001b');

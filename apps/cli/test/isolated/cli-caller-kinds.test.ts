@@ -43,7 +43,7 @@ for (const kind of ['input.steer', 'input.follow_up', 'command.cancel'] as const
         kind: 'run.start',
         expectedStoreId: f.storeId,
         commandId: 'work-after-interrupt',
-        content: 'held original Work',
+        content: 'New task: held original Work',
       });
       await untilRecovery(
         async () =>

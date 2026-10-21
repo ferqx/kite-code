@@ -29,6 +29,7 @@ import { createDefaultProcessConfiguration } from '@kite-ai/service/configuratio
 import { createMcpHttpTransportPort } from '@kite-ai/service/mcp-http-port';
 import type { TuiMcpIntent, TuiMcpSnapshot } from '@kite-ai/ui/tui';
 import { privateDirectory, temporaryDirectory } from '../../../../tests/fixtures/test-filesystem';
+import { createPermissionManagement } from '../../../service/src/permission-management';
 import { createMcpSelectionRecord, mcpCanonical } from '../../host/mcp-selection-intents';
 import { openMcpSelectionJournal } from '../../host/mcp-selection-journal';
 import { createTuiMcpPort } from '../../host/tui-mcp';
@@ -205,6 +206,29 @@ async function fixture(source = false) {
     workspaceId: 'w',
     title: 'mcp',
   });
+  // Bind the intended fixture policy to current durable root controls.
+  const permissionControl = createPermissionManagement({ runtime: runtime, profile });
+  const identity = { expectedStoreId: storeId, subjectId: 'owned-subject' };
+  const trust = await permissionControl.readTrust({ ...identity, workspaceId: 'w' });
+  await permissionControl.setTrust({
+    ...identity,
+    workspaceId: 'w',
+    commandId: 'fixture-workspace-trust',
+    canonicalIdentity: trust.canonicalIdentity,
+    externalReadScopeDigest: trust.externalReadScopeDigest,
+    trusted: true,
+    ifRevision: trust.revision,
+  });
+  const mode = await permissionControl.readMode({ ...identity, sessionId: 'a' });
+  await permissionControl.setMode({
+    ...identity,
+    sessionId: 'a',
+    commandId: 'fixture-current-mode',
+    mode: 'full',
+    makeDefault: false,
+    ifRevision: mode.revision,
+    ifDefaultRevision: mode.defaultRevision,
+  });
   let posts = 0;
   const tracked = {
     get serverInfo() {
@@ -243,7 +267,17 @@ async function fixture(source = false) {
     get credentialReads() {
       return credentialReads;
     },
-    set ask(value: boolean) {
+    async setAsk(value: boolean) {
+      const current = await permissionControl.readMode({ ...identity, sessionId: 'a' });
+      await permissionControl.setMode({
+        ...identity,
+        sessionId: 'a',
+        commandId: 'fixture-ask-mode',
+        mode: value ? 'accept_edits' : 'full',
+        makeDefault: false,
+        ifRevision: current.revision,
+        ifDefaultRevision: current.defaultRevision,
+      });
       ask = value;
     },
     async close() {
@@ -349,7 +383,7 @@ test('actual source CAS drift fails before effect and explicit approval waits wi
     });
     expect(failed.execution?.status).toBe('failed');
     expect(readFileSync(f.configPath, 'utf8')).toBe(unchanged);
-    f.ask = true;
+    await f.setAsk(true);
     const saved = intent(await port.read('a', signal), 'approved-project', 'workspace');
     await port.submit(saved);
     const pending = await until(async () => {

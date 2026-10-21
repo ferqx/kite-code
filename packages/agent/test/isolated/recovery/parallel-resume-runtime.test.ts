@@ -151,8 +151,14 @@ test('SIGKILL with original A planned and B succeeded resumes only A, preserves 
       expectedRevision: card.revision,
       answer: { kind: 'approval', decision: 'approve', grant: 'approve_once' },
     });
-    await until(async () => !(await store!.getRun(ready.runId))!.isActive && disposals === 1);
+    await until(
+      async () =>
+        !(await store!.getRun(ready.runId))!.isActive &&
+        disposals === 1 &&
+        (await store!.getSession('s'))!.ownerInstanceId === null,
+    );
     const after = await store.getView('s');
+    expect(after.session.ownerInstanceId).toBeNull();
     expect(after.runs).toHaveLength(1);
     expect(after.runs[0]).toMatchObject({
       id: ready.runId,

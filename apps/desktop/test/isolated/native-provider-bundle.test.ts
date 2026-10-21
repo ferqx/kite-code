@@ -310,7 +310,19 @@ test.skipIf(process.platform !== 'darwin')(
           const command = await cold.getCommand(original!.originCommandId);
           expect(command!.originStoreId).toBe(storeId!);
           expect(command!.sessionId).toBe(run.sessionId);
-          expect(object(command!.request).content).toBe(run.marker);
+          expect(object(command!.request).content).toBe(run.content);
+          const publicCommand = (await cold.getCommand(original!.rootWorkCommandId))!;
+          expect(publicCommand).toMatchObject({
+            status: 'applied',
+            sessionId: run.sessionId,
+            originStoreId: storeId!,
+          });
+          if (publicCommand.id !== command!.id)
+            expect(publicCommand.receipt).toMatchObject({
+              outcome: 'human_input_applied',
+              businessCommandId: command!.id,
+              runId: original!.id,
+            });
           expect(object(command!.request).modelId).toBe(run.modelId);
           const executions = (await cold.listExecutions(run.sessionId)).filter(
             (x) => x.runId === run.id && x.kind === 'model',
@@ -362,7 +374,7 @@ test.skipIf(process.platform !== 'darwin')(
         const steer = await cold.getCommand(report.steers[0]!.request.commandId);
         expect(steer!.request).toMatchObject({
           kind: 'input.steer',
-          content: 'NATIVE_plain_steer',
+          content: 'Follow up: NATIVE_plain_steer',
           targetRunId: report.runs.find((r) => r.marker.endsWith('_held'))!.id,
         });
         expect('modelId' in object(steer!.request)).toBe(false);

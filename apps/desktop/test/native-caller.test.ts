@@ -3,10 +3,18 @@ import { createHash } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import type { AgentClient, Message, ModelOutputSnapshot, ServerInfo } from '@kite-ai/client';
+import type {
+  AgentClient,
+  CallerCommandRequest,
+  Command,
+  Message,
+  ModelOutputSnapshot,
+  Run,
+  ServerInfo,
+} from '@kite-ai/client';
 import { canonicalCallerCommandRequest, createClient } from '@kite-ai/client';
 import type { BrowserWindow, IpcMain, IpcMainInvokeEvent } from 'electron';
-import { callerTextDigest } from '../electron/caller-journal';
+import { callerTextDigest, NativeCallerJournal } from '../electron/caller-journal';
 import { NativeCaller } from '../electron/native-caller';
 import { assertNativeSender, decodeNativeRequest, registerNativeIpc } from '../electron/native-ipc';
 import { inspectNativeQuitWork } from '../electron/quit-settlement';
@@ -63,6 +71,16 @@ function client() {
     },
   } as unknown as AgentClient & { writes: number };
 }
+async function waitForCallerState(
+  caller: NativeCaller,
+  predicate: (state: NativeState) => boolean,
+) {
+  const deadline = Date.now() + 1000;
+  while (!predicate(caller.state())) {
+    if (Date.now() >= deadline) throw Error('native_state_observation_deadline');
+    await Bun.sleep(1);
+  }
+}
 function authority() {
   const frame = { url: pathToFileURL(join(tmpdir(), 'native', 'index.html')).href };
   const contents = { mainFrame: frame };
@@ -72,6 +90,256 @@ function authority() {
     frame,
   };
 }
+
+async function ordinaryJournal(
+  kind: 'run.start' | 'input.steer' | 'input.follow_up' = 'run.start',
+) {
+  const port = client();
+  const common = {
+    kind,
+    commandId: 'public-input',
+    expectedStoreId: 'store',
+    content: 'New task: 完整🙂é\r\n原输入',
+  };
+  const request: CallerCommandRequest =
+    kind === 'input.steer'
+      ? { ...common, kind, targetRunId: 'original-run', contextSelectionId: 'selection' }
+      : kind === 'input.follow_up'
+        ? { ...common, kind, afterRunId: 'original-run', contextSelectionId: 'selection' }
+        : { ...common, kind };
+  const command = {
+    id: request.commandId,
+    kind,
+    sessionId: 's',
+    originStoreId: 'store',
+    subjectId: 'local-user',
+    requestDigest: callerTextDigest(canonicalCallerCommandRequest(request)),
+    status: 'applied',
+    cancelRequestedAt: null,
+    receipt: {
+      outcome: 'human_input_applied',
+      businessCommandId: 'business',
+      sourceCommandId: 'business',
+      runId: 'business-run',
+    },
+  } as Command;
+  const business = {
+    ...command,
+    id: 'business',
+    kind: 'input.follow_up',
+    receipt: { runId: 'business-run' },
+  } as Command;
+  const run = {
+    id: 'business-run',
+    sessionId: 's',
+    originStoreId: 'store',
+    originCommandId: 'business',
+    rootWorkCommandId: 'business',
+    status: 'completed',
+    isActive: false,
+  } as Run;
+  const reads: string[] = [];
+  port.getCommand = async (id) => {
+    reads.push(`command:${id}`);
+    if (id === request.commandId) return structuredClone(command);
+    if (id === business.id) return structuredClone(business);
+    throw Error('unexpected_command_read');
+  };
+  port.getRun = async (id) => {
+    reads.push(`run:${id}`);
+    if (id === 'original-run') return { ...run, id, originCommandId: 'earlier-business' };
+    if (id === run.id) return structuredClone(run);
+    throw Error('unexpected_run_read');
+  };
+  port.getExecution = async (id) => {
+    reads.push(`execution:${id}`);
+    if (id !== 'processing-model') throw Error('unexpected_execution_read');
+    return {
+      id,
+      kind: 'model',
+      status: 'succeeded',
+      sessionId: 's',
+      originStoreId: 'store',
+      runId: run.id,
+    } as Awaited<ReturnType<AgentClient['getExecution']>>;
+  };
+  let writes = 0;
+  for (const method of ['startRun', 'steer', 'followUp', 'cancelCommand', 'cancelExecution'])
+    Object.assign(port, {
+      [method]: async () => {
+        writes++;
+        throw Error('lookup_must_not_write');
+      },
+    });
+  const data = memoryPrivateData();
+  const prepared = await new NativeCallerJournal(port, data).prepare('s', request);
+  reads.length = 0;
+  return {
+    port,
+    request,
+    command,
+    business,
+    run,
+    reads,
+    data,
+    prepared,
+    // Reopen the journal: the saved original request grants no first POST authority.
+    journal: new NativeCallerJournal(port, data),
+    writes: () => writes,
+  };
+}
+
+test('Native ordinary journal cold lookup confirms the exact derived business Run for every original input kind', async () => {
+  for (const kind of ['run.start', 'input.follow_up', 'input.steer'] as const) {
+    const f = await ordinaryJournal(kind);
+    try {
+      for (let lookup = 0; lookup < 2; lookup++) {
+        expect(await f.journal.lookup(f.request.commandId)).toEqual(f.command);
+        expect(f.data.callers()[0]).toEqual({ ...f.prepared, phase: 'applied' });
+      }
+      expect(f.reads).toEqual(
+        Array.from({ length: 2 }, () => [
+          'command:public-input',
+          'run:business-run',
+          'command:business',
+        ]).flat(),
+      );
+      expect(f.writes()).toBe(0);
+    } finally {
+      f.data.close();
+    }
+  }
+});
+
+test('Native ordinary journal accepts applied same-Run human supplements with the original Run origin', async () => {
+  const f = await ordinaryJournal('input.steer');
+  try {
+    f.business.kind = 'input.steer';
+    f.business.receipt = { runId: 'original-run' };
+    f.command.receipt = {
+      outcome: 'human_input_applied',
+      businessCommandId: 'business',
+      sourceCommandId: 'business',
+      runId: 'original-run',
+    };
+    expect(await f.journal.lookup(f.request.commandId)).toEqual(f.command);
+    expect(f.data.callers()[0]!.phase).toBe('applied');
+    expect(f.writes()).toBe(0);
+  } finally {
+    f.data.close();
+  }
+});
+
+test('Native ordinary journal preserves null business Run observations and accepted unresolved inputs', async () => {
+  for (const outcome of ['human_input_observed', 'human_input_unresolved', 'control'] as const) {
+    const f = await ordinaryJournal('input.steer');
+    try {
+      f.run.originCommandId = 'processing-command';
+      f.command.status = outcome === 'human_input_unresolved' ? 'accepted' : 'applied';
+      f.command.receipt = {
+        outcome: outcome === 'control' ? 'human_input_observed' : outcome,
+        runId: null,
+        businessCommandId: null,
+        humanInputCommandId: 'raw-input',
+        decisionCommandId: 'decision',
+        ...(outcome === 'control'
+          ? {}
+          : {
+              observation: {
+                runId: f.run.id,
+                executionId: 'processing-model',
+                messageId: 'processing-message',
+                answer: outcome === 'human_input_observed' ? '真实观察' : null,
+                clarification: outcome === 'human_input_unresolved' ? '请澄清原输入' : null,
+              },
+            }),
+      };
+      expect(await f.journal.lookup(f.request.commandId)).toEqual(f.command);
+      expect(f.data.callers()[0]!.phase).toBe(f.command.status);
+      expect(f.reads.includes('command:business')).toBe(false);
+      expect(f.reads.includes('execution:processing-model')).toBe(
+        outcome === 'human_input_observed',
+      );
+      expect(f.writes()).toBe(0);
+    } finally {
+      f.data.close();
+    }
+  }
+});
+
+test('Native ordinary journal rejects foreign, unapplied, or forged public and business bindings without replay', async () => {
+  const changes: ((f: Awaited<ReturnType<typeof ordinaryJournal>>) => void)[] = [
+    (f) => {
+      f.command.id = 'foreign';
+    },
+    (f) => {
+      f.command.requestDigest = 'foreign';
+    },
+    (f) => {
+      f.command.subjectId = 'foreign';
+    },
+    (f) => {
+      f.business.originStoreId = 'foreign';
+    },
+    (f) => {
+      f.business.sessionId = 'foreign';
+    },
+    (f) => {
+      f.business.subjectId = 'foreign';
+    },
+    (f) => {
+      f.business.status = 'accepted';
+    },
+    (f) => {
+      f.business.receipt = { runId: 'foreign' };
+    },
+    (f) => {
+      f.run.originCommandId = 'foreign';
+    },
+    (f) => {
+      f.run.sessionId = 'foreign';
+    },
+    (f) => {
+      f.command.receipt = { ...(f.command.receipt as object), sourceCommandId: 'foreign' };
+    },
+    (f) => {
+      const getView = f.port.getView.bind(f.port);
+      f.port.getView = async (id) => {
+        const view = await getView(id);
+        return { ...view, session: { ...view.session, workspaceId: 'foreign' } };
+      };
+    },
+  ];
+  for (const change of changes) {
+    const f = await ordinaryJournal();
+    try {
+      change(f);
+      await expect(f.journal.lookup(f.request.commandId)).rejects.toThrow();
+      expect(f.data.callers()[0]).toEqual({ ...f.prepared, phase: 'unknown' });
+      expect(f.writes()).toBe(0);
+    } finally {
+      f.data.close();
+    }
+  }
+});
+
+test('Native ordinary journal retains original target and context selection checks for legacy technical steer', async () => {
+  for (const invalid of ['target', 'selection'] as const) {
+    const f = await ordinaryJournal('input.steer');
+    try {
+      f.command.receipt = {
+        runId: invalid === 'target' ? 'business-run' : 'original-run',
+        contextSelectionId: invalid === 'selection' ? 'foreign' : 'selection',
+      };
+      await expect(f.journal.lookup(f.request.commandId)).rejects.toThrow();
+      expect(f.data.callers()[0]!.phase).toBe('unknown');
+      expect(f.writes()).toBe(0);
+    } finally {
+      f.data.close();
+    }
+  }
+});
+
 test('environment child and directory reads survive a held same-selection refresh, but selection, reset, and refresh failure revoke them', async () => {
   for (const invalidation of ['select', 'reset', 'failure'] as const) {
     const connection = client();
@@ -221,6 +489,7 @@ test('environment child and directory reads survive a held same-selection refres
       else {
         releaseParent();
         await caller.invoke({ method: 'state', generation: 1 });
+        await waitForCallerState(caller, (state) => state.environmentReadUnavailable === true);
         expect(caller.state().selection?.permissionUnavailable).toBe(true);
       }
       await expect(
@@ -363,6 +632,7 @@ for (const refresh of ['automatic', 'permission'] as const)
         if (refresh === 'automatic') {
           notify();
           await caller.invoke({ method: 'state', generation: 1 });
+          await waitForCallerState(caller, (state) => state.environmentReadUnavailable === true);
         } else
           await expect(
             caller.invoke({ method: 'permission.refresh', generation: 1 }),
@@ -872,6 +1142,142 @@ test('formal Native metadata port reads only messages observed through the curre
     expect(connection.writes).toBe(0);
   } finally {
     releaseRefresh?.();
+    await caller.close();
+  }
+});
+test('parent history and loading state do not wait for a held same-selection metadata refresh', async () => {
+  const connection = client();
+  const message: Message = {
+    id: 'retained-parent-message',
+    sessionId: 'parent',
+    runId: null,
+    seq: '1',
+    status: 'complete',
+    role: 'user',
+    content: 'Original parent history before opening a child',
+  };
+  const originalView = connection.getView.bind(connection);
+  let holding = false;
+  let entered!: () => void;
+  let release!: () => void;
+  const started = new Promise<void>((resolve) => {
+    entered = resolve;
+  });
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  connection.getView = async (id) => {
+    if (id === 'parent' && holding) {
+      entered();
+      await gate;
+    }
+    const view = await originalView(id);
+    return { ...view, session: { ...view.session, nextSeq: '1' } };
+  };
+  connection.listMessages = async (id) => (id === 'parent' ? [structuredClone(message)] : []);
+  connection.verifyConnection = async () => connection.serverInfo!;
+  let notify!: Parameters<AgentClient['observe']>[0]['onChange'];
+  connection.observe = async (options) => {
+    notify = options.onChange;
+    await new Promise<void>((resolve) =>
+      options.signal!.addEventListener('abort', () => resolve(), { once: true }),
+    );
+  };
+  const caller = new NativeCaller(connection, () => {});
+  const history = {
+    method: 'messages' as const,
+    generation: 1,
+    sessionId: 'parent',
+    expectedStoreId: 'store',
+    afterSeq: '0',
+    upperSeq: '1',
+    limit: 32,
+  };
+  const bounded = async <T>(promise: Promise<T>) => {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      return await Promise.race([
+        promise.then((value) => ({ completed: true as const, value })),
+        new Promise<{ completed: false }>((resolve) => {
+          timer = setTimeout(() => resolve({ completed: false }), 1000);
+        }),
+      ]);
+    } finally {
+      clearTimeout(timer);
+    }
+  };
+  try {
+    await caller.invoke({ method: 'attach' });
+    await caller.invoke({ method: 'select', generation: 1, sessionId: 'parent' });
+    expect(await caller.invoke({ ...history, readId: 'before-child' })).toMatchObject({
+      messages: [message],
+      highWaterSeq: '1',
+      nextAfterSeq: null,
+    });
+    await caller.invoke({ method: 'messages.close', generation: 1, readId: 'before-child' });
+    holding = true;
+    await notify?.(sessionChange('parent'));
+    expect((await bounded(started)).completed).toBe(true);
+    const pendingHistory = caller.invoke({ ...history, readId: 'return-from-child' });
+    const pendingState = caller.invoke({ method: 'state', generation: 1 });
+    const pendingPermission = caller
+      .invoke({
+        method: 'permission.mode',
+        generation: 1,
+        observationId: 1,
+        mode: 'full',
+        makeDefault: false,
+      })
+      .catch((cause: unknown) => cause);
+    const [readBeforeRelease, stateBeforeRelease, permissionBeforeRelease] = await Promise.all([
+      bounded(pendingHistory),
+      bounded(pendingState),
+      bounded(pendingPermission),
+    ]);
+    // Release regardless of the assertions below: a red regression must not leave Main hung.
+    holding = false;
+    release();
+    await Promise.all([pendingHistory, pendingState, pendingPermission]);
+    await caller.invoke({ method: 'select', generation: 1, sessionId: 'other' });
+    await expect(caller.invoke({ ...history, readId: 'late-parent' })).rejects.toMatchObject({
+      code: 'native_selection_changed',
+    });
+    await expect(
+      caller.invoke({
+        ...history,
+        sessionId: 'other',
+        expectedStoreId: 'foreign-store',
+        readId: 'foreign',
+      }),
+    ).rejects.toMatchObject({ code: 'store_identity_mismatch' });
+    await expect(
+      caller.invoke({ ...history, generation: 0, readId: 'old-generation' }),
+    ).rejects.toMatchObject({ code: 'native_generation_changed' });
+    expect(() => decodeNativeRequest({ method: 'unknown.write', generation: 1 })).toThrow();
+    expect(connection.writes).toBe(0);
+    expect(permissionBeforeRelease.completed).toBe(false);
+    expect({
+      historyCompleted: readBeforeRelease.completed,
+      stateCompleted: stateBeforeRelease.completed,
+    }).toEqual({ historyCompleted: true, stateCompleted: true });
+    if (readBeforeRelease.completed)
+      expect(readBeforeRelease.value).toMatchObject({
+        messages: [message],
+        highWaterSeq: '1',
+        nextAfterSeq: null,
+      });
+    expect(stateBeforeRelease.completed).toBe(true);
+    if (stateBeforeRelease.completed)
+      expect(stateBeforeRelease.value).toMatchObject({
+        selection: {
+          session: { id: 'parent' },
+          viewLoading: true,
+          permissionUnavailable: true,
+          permissions: undefined,
+        },
+      });
+  } finally {
+    release();
     await caller.close();
   }
 });
@@ -1912,6 +2318,7 @@ test('global observation routes foreign metadata away from the selected View whi
     expect(during.environmentReadUnavailable).toBe(false);
     release();
     await caller.invoke({ method: 'state', generation: 1 });
+    await waitForCallerState(caller, (state) => state.environmentReadUnavailable === true);
     expect(caller.state().environmentReadUnavailable).toBe(true);
     expect(caller.state().selection!.permissionUnavailable).toBe(true);
     reset();

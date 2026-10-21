@@ -4,7 +4,6 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { createRuntime } from '@kite-ai/agent';
-import type { Extension } from '@kite-ai/agent/extensions';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import type { CommandRequest } from '@kite-ai/agent/storage';
@@ -16,6 +15,7 @@ import {
 } from '@kite-ai/client';
 import { createDefaultProcessConfiguration } from '../../src/configuration';
 import { startService } from '../../src/index';
+import { createPermissionManagement } from '../../src/permission-management';
 import { userConfigurationPath } from '../fixtures/user-configuration-fixture';
 
 async function until<T>(read: () => Promise<T>, ready: (value: T) => boolean): Promise<T> {
@@ -79,7 +79,7 @@ async function fixture(
       )?.find((tool) =>
         readUserConfiguration
           ? tool.function.name === 'read_file'
-          : tool.function.description === 'Trusted fixture delegation',
+          : tool.function.name === 'spawn_agent',
       );
       const delta =
         readUserConfiguration && requests.length === 1
@@ -107,7 +107,10 @@ async function fixture(
                     index: 0,
                     id: 'delegate',
                     type: 'function',
-                    function: { name: selectedTool!.function.name, arguments: '{}' },
+                    function: {
+                      name: selectedTool!.function.name,
+                      arguments: JSON.stringify({ prompt: 'child' }),
+                    },
                   },
                 ],
               }
@@ -129,7 +132,7 @@ async function fixture(
     modelId: 'a',
     models,
     tools: delegateChild
-      ? [{ id: 'fixture.delegate' }]
+      ? [{ id: 'task.spawn', definitionVersion: '1' }]
       : readUserConfiguration
         ? [{ id: 'files.read', definitionVersion: '4' }]
         : [],
@@ -142,7 +145,6 @@ async function fixture(
   const host = createDefaultProcessConfiguration({
     userConfigurationPath: file,
     profile,
-    knownToolIds: ['fixture.delegate'],
     credentialBackend: {
       kind: 'temporary',
       put: async (id, secret) => {
@@ -156,34 +158,33 @@ async function fixture(
     },
     permissions: { authorize: async () => ({ allowed: true, revision: 'trusted-fixture' }) },
     child: [{ id: 'worker', version: '1', modelId: 'openai', toolIds: [] }],
+    ...(delegateChild
+      ? {
+          // This model-selection fixture authorizes only its exact child and public spawn tool.
+          permissionPolicy: {
+            readPolicy: () => ({
+              mode: 'full' as const,
+              workspaceTrust: true,
+              revision: 'trusted-delegation-fixture',
+              allowed: [
+                ...models.map((model) => ({
+                  kind: 'model' as const,
+                  definitionId: model.id,
+                  definitionVersion: '1',
+                })),
+                { kind: 'tool' as const, definitionId: 'task.spawn', definitionVersion: '1' },
+                { kind: 'job' as const, definitionId: 'agent/worker', definitionVersion: '1' },
+              ],
+            }),
+          },
+        }
+      : {}),
   });
   const store = await openSqliteStore({ dataRoot: profile.dataRoot, profile: profile.profile });
-  const delegate: Extension = {
-    id: 'fixture',
-    version: '1',
-    apiMajor: 1,
-    tools: [
-      {
-        id: 'fixture.delegate',
-        version: '1',
-        description: 'Trusted fixture delegation',
-        inputSchema: { type: 'object', additionalProperties: false },
-        async execute(_input, context) {
-          const ref = await context.operations.ensure({
-            key: 'child',
-            request: { kind: 'agent', configurationId: 'worker', input: { content: 'child' } },
-            cancellation: 'detached',
-          });
-          return { outcome: 'succeeded', content: JSON.stringify(ref) };
-        },
-      },
-    ],
-  };
   const runtime = createRuntime({
     ...host,
     store,
     permissions: host.permissions!,
-    extensions: [...host.extensions!, ...(delegateChild ? [delegate] : [])],
   });
   host.permissionManagement?.(runtime);
   const expectedStoreId = (await store.getMetadata()).storeId;
@@ -195,6 +196,28 @@ async function fixture(
     rootUri: pathToFileURL(workspace).href,
   });
   await runtime.createSession({ ...base, commandId: 'create', workspaceId: 'w', title: 'fixture' });
+  if (delegateChild) {
+    const control = createPermissionManagement({ runtime, profile });
+    const trust = await control.readTrust({ ...base, workspaceId: 'w' });
+    await control.setTrust({
+      ...base,
+      workspaceId: 'w',
+      commandId: 'trusted-delegation-workspace',
+      canonicalIdentity: trust.canonicalIdentity,
+      externalReadScopeDigest: trust.externalReadScopeDigest,
+      trusted: true,
+      ifRevision: trust.revision,
+    });
+    const mode = await control.readMode(base);
+    await control.setMode({
+      ...base,
+      commandId: 'trusted-delegation-mode',
+      mode: 'full',
+      makeDefault: false,
+      ifRevision: mode.revision,
+      ifDefaultRevision: mode.defaultRevision,
+    });
+  }
   const service = await startService({
     runtime,
     subjectId: base.subjectId,
@@ -237,10 +260,24 @@ async function fixture(
       if (request.kind === 'run.start')
         await client.startRun(base.sessionId, { ...request, ...identity });
       else await client.followUp(base.sessionId, { ...request, ...identity });
-      return until(
-        () => store.getView('s'),
-        (view) => view.runs.some((run) => run.originCommandId === commandId && !run.isActive),
+      const completed = await until(
+        async () => ({
+          command: await store.getCommand(commandId),
+          view: await store.getView('s'),
+        }),
+        ({ command, view }) => {
+          const receipt = command?.receipt as { runId?: string } | null;
+          return (
+            command?.status === 'applied' &&
+            typeof receipt?.runId === 'string' &&
+            view.runs.some((run) => run.id === receipt.runId && !run.isActive)
+          );
+        },
       );
+      const receipt = completed.command!.receipt as { runId: string; businessCommandId?: string };
+      const commandRun = completed.view.runs.find((run) => run.id === receipt.runId)!;
+      expect(commandRun.originCommandId).toBe(receipt.businessCommandId ?? commandId);
+      return { ...completed.view, commandRun };
     },
     async close() {
       client.disposeNetwork();
@@ -301,7 +338,7 @@ test('existing user configuration drives the catalog, saved selection and actual
       ['custom', 'user-second'],
     ]);
     expect(JSON.stringify(read)).not.toContain('OWNED_INLINE_KEY');
-    await f.submit('user-first', { kind: 'run.start', content: 'hello' });
+    await f.submit('user-first', { kind: 'run.start', content: 'New task: hello' });
     expect(f.requests.at(-1)!.body.model).toBe('user-first');
     expect(f.requests.at(-1)!.authorization).toBe('Bearer OWNED_INLINE_KEY');
     await manager.updateModels({
@@ -313,7 +350,7 @@ test('existing user configuration drives the catalog, saved selection and actual
       operation: { kind: 'default', modelId: read.models[1]!.id },
     });
     expect(JSON.parse(readFileSync(f.file, 'utf8')).model).toBe('custom:user-second');
-    await f.submit('user-second', { kind: 'run.start', content: 'hello' });
+    await f.submit('user-second', { kind: 'run.start', content: 'New task: hello' });
     expect(f.requests.at(-1)!.body.model).toBe('user-second');
     expect(f.credentialReads).toBe(0);
     const providers = await manager.readProviders({ expectedStoreId: f.base.expectedStoreId });
@@ -351,7 +388,7 @@ test('existing user configuration drives the catalog, saved selection and actual
     const replaced = readFileSync(f.file, 'utf8');
     expect(replaced).not.toContain('OWNED_REPLACEMENT_KEY');
     expect(JSON.parse(replaced).provider.custom.apiKey).toBeUndefined();
-    await f.submit('user-after-key-save', { kind: 'run.start', content: 'hello' });
+    await f.submit('user-after-key-save', { kind: 'run.start', content: 'New task: hello' });
     expect(f.requests.at(-1)!.authorization).toBe('Bearer OWNED_REPLACEMENT_KEY');
     await expect(
       manager.readModels({
@@ -392,7 +429,7 @@ test('explicit per-Run model chooses its actual provider route and name while de
   const f = await fixture();
   try {
     for (const family of ['openai', 'deepseek', 'ollama']) {
-      await f.submit(family, { kind: 'run.start', content: 'hello', modelId: family });
+      await f.submit(family, { kind: 'run.start', content: 'New task: hello', modelId: family });
       const executions = await f.store.listExecutions('s');
       const execution = executions.at(-1)!;
       const input = await f.store.getModelInputSnapshot({ ...f.base, executionId: execution.id });
@@ -404,7 +441,7 @@ test('explicit per-Run model chooses its actual provider route and name while de
         body: { model: `actual-${family}` },
       });
     }
-    await f.submit('default', { kind: 'run.start', content: 'hello' });
+    await f.submit('default', { kind: 'run.start', content: 'New task: hello' });
     expect(f.requests.at(-1)).toMatchObject({
       path: '/compatible/v1/chat/completions',
       body: { model: 'actual-compatible' },
@@ -423,7 +460,7 @@ test('HTTP temporary effort is original command intent, frozen before digest, re
   try {
     const view = await f.submit('effort', {
       kind: 'run.start',
-      content: 'hello',
+      content: 'New task: hello',
       modelId: 'openai',
       reasoningEffort: 'high',
     });
@@ -475,12 +512,16 @@ test('HTTP temporary effort is original command intent, frozen before digest, re
       executionId: (await f.store.listExecutions('s'))[0]!.id,
     });
     expect(input.metadata).toMatchObject({ adapter: { settings: { reasoningEffort: 'high' } } });
-    await f.submit('ordinary', { kind: 'run.start', content: 'hello', modelId: 'openai' });
+    await f.submit('ordinary', {
+      kind: 'run.start',
+      content: 'New task: hello',
+      modelId: 'openai',
+    });
     expect(f.requests[1]!.body.reasoning_effort).toBe('low');
     const current = await f.store.getSession('s');
     await f.submit('follow', {
       kind: 'input.follow_up',
-      content: 'hello',
+      content: 'New task: hello',
       modelId: 'openai',
       reasoningEffort: 'minimal',
       afterRunId: null,
@@ -570,13 +611,11 @@ test('every provider sends configured and temporary effort regardless of model c
         const commandId = `${model.id}-${effort ?? 'configured'}`;
         const view = await f.submit(commandId, {
           kind: 'run.start',
-          content: 'hello',
+          content: 'New task: hello',
           modelId: model.id,
           ...(effort === undefined ? {} : { reasoningEffort: effort }),
         });
-        expect(view.runs.find((run) => run.originCommandId === commandId)?.status).toBe(
-          'completed',
-        );
+        expect(view.commandRun.status).toBe('completed');
         expect(f.requests.at(-1)!.body.reasoning_effort).toBe(effort ?? 'low');
         const execution = view.executions.filter((execution) => execution.kind === 'model').at(-1)!;
         const input = await f.store.getModelInputSnapshot({ ...f.base, executionId: execution.id });
@@ -598,7 +637,7 @@ test('a remote effort rejection remains a failed model request without fallback 
   try {
     const view = await f.submit('remote-effort-rejection', {
       kind: 'run.start',
-      content: 'hello',
+      content: 'New task: hello',
       modelId: 'deepseek',
       reasoningEffort: 'high',
     });
@@ -614,7 +653,7 @@ test('a remote effort rejection remains a failed model request without fallback 
   }
 });
 
-test('new child selects its configured preset without inheriting the root temporary effort', async () => {
+test('public spawn selects the trusted default child model without inheriting the root temporary effort', async () => {
   const f = await fixture(true);
   try {
     await f.submit('root', {

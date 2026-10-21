@@ -271,6 +271,205 @@ export function verifyInteractionDispatch(
     throw new AgentError('interaction_binding_changed');
 }
 export function callInteraction(db: SqliteOperations, method: string, args: unknown[]): unknown {
+  if (method === 'invalidateAuthorizationReview')
+    return db.tx(() => {
+      const input =
+        args[0] as import('../../execution/authorization-refresh').InvalidateAuthorizationReviewInput;
+      db.identity(input.expectedStoreId);
+      const target = db.row('SELECT * FROM execution WHERE id=?', input.executionId);
+      if (!target) throw new AgentError('execution_not_found');
+      live(db, target, input.owner);
+      if (target.state !== 'planned' || target.dispatched)
+        throw new AgentError('interaction_not_active');
+      verifyHostControlReads(db, target, input.expectedStoreId, input.controlReads);
+      if (input.previousPolicyRevision === input.policyRevision)
+        throw new AgentError('authorization_review_binding_changed');
+      const reviews = db.rows(
+        "SELECT e.id,c.request_json FROM execution e JOIN command c ON c.id=e.origin_command_id WHERE c.kind='authorization.review' AND e.parent_execution_id=? AND e.session_id=? AND e.origin_store_id=?",
+        target.id!,
+        target.session_id!,
+        input.expectedStoreId,
+      );
+      for (const review of reviews) {
+        const request = decode<{ request: { input: { policyRevision: string } } }>(
+          review.request_json,
+        );
+        // ensureAgent envelopes preserve the original review payload under request.input.
+        const policy =
+          request.request?.input?.policyRevision ??
+          (request as unknown as { input?: { policyRevision?: string } }).input?.policyRevision;
+        if (
+          policy !== input.previousPolicyRevision ||
+          (input.reviewExecutionId !== undefined && review.id !== input.reviewExecutionId)
+        )
+          continue;
+        const requestFact: Json = {
+          kind: 'authorization.invalidate',
+          targetExecutionId: input.executionId,
+          reviewExecutionId: String(review.id),
+          previousPolicyRevision: input.previousPolicyRevision,
+          policyRevision: input.policyRevision,
+          controlReads: (input.controlReads ?? []) as unknown as Json,
+        };
+        const id = `review-refresh-${digest(requestFact)}`;
+        if (db.row('SELECT id FROM command WHERE id=?', id)) continue;
+        const origin = db.row(
+          'SELECT subject_id FROM command WHERE id=?',
+          target.origin_command_id!,
+        )!;
+        db.allocateSessionSequence(String(target.session_id));
+        const seq = db.row('SELECT next_seq FROM session WHERE id=?', target.session_id!)!
+          .next_seq!;
+        db.run(
+          "INSERT INTO command(id,session_id,seq,kind,subject_id,request_digest,request_json,status,receipt_json,origin_store_id,root_work_command_id,root_work_seq) VALUES(?,?,?,'authorization.invalidate',?,?,?,'applied',?,?,?,?)",
+          id,
+          target.session_id!,
+          seq,
+          origin.subject_id!,
+          digest(requestFact),
+          canonicalJson(requestFact),
+          canonicalJson({
+            reason: 'permission_policy_changed',
+            targetExecutionId: input.executionId,
+            reviewExecutionId: String(review.id),
+            policyRevision: input.policyRevision,
+          }),
+          input.expectedStoreId,
+          target.root_work_command_id!,
+          target.root_work_seq!,
+        );
+        db.event(String(target.session_id), String(review.id), 'authorization.invalidated', {
+          commandId: id,
+          reason: 'permission_policy_changed',
+          targetExecutionId: input.executionId,
+          policyRevision: input.policyRevision,
+        });
+      }
+    });
+  if (method === 'refreshApproval')
+    return db.tx(() => {
+      const input = args[0] as import('../../execution/authorization-refresh').RefreshApprovalInput;
+      db.identity(input.expectedStoreId);
+      const row = db.row('SELECT * FROM interaction WHERE id=?', input.interactionId);
+      const execution = db.row('SELECT * FROM execution WHERE id=?', input.executionId);
+      if (
+        !row ||
+        !execution ||
+        row.origin_store_id !== input.expectedStoreId ||
+        row.execution_id !== input.executionId ||
+        row.kind !== 'approval'
+      )
+        throw new AgentError('interaction_binding_changed');
+      live(db, execution, input.owner);
+      if (execution.state !== 'planned') throw new AgentError('interaction_not_active');
+      verifyHostControlReads(db, execution, input.expectedStoreId, input.controlReads);
+      const invalidationId = `approval-refresh-${digest({ interactionId: input.interactionId, policyRevision: input.policyRevision })}`;
+      const prior = db.row('SELECT id FROM command WHERE id=?', invalidationId);
+      if (prior) return record(row);
+      // A real refusal or cancellation wins over policy relaxation. Keep its answer intact.
+      if (
+        row.state === 'cancelled' ||
+        (row.answer_json !== null &&
+          decode<InteractionAnswer>(row.answer_json).kind === 'approval' &&
+          (decode<InteractionAnswer>(row.answer_json) as { decision: string }).decision === 'deny')
+      )
+        throw new AgentError('approval_denied');
+      const ref =
+        execution.interaction_binding_json === null
+          ? null
+          : decode<{ interactionId: string }>(execution.interaction_binding_json);
+      if (
+        ref?.interactionId !== input.interactionId ||
+        row.policy_revision === input.policyRevision
+      )
+        throw new AgentError('interaction_binding_changed');
+      if (decimal(String(row.revision)) === 9223372036854775807n)
+        throw new AgentError('sequence_exhausted');
+      db.run(
+        "UPDATE interaction SET state='cancelled',revision=revision+1 WHERE id=?",
+        input.interactionId,
+      );
+      db.run('UPDATE execution SET interaction_binding_json=NULL WHERE id=?', input.executionId);
+      const origin = db.row(
+        'SELECT subject_id FROM command WHERE id=?',
+        execution.origin_command_id!,
+      )!;
+      if (
+        db.row(
+          'SELECT id FROM permission_grant WHERE id=? AND revoked_seq IS NULL',
+          input.interactionId,
+        )
+      ) {
+        db.run(
+          "INSERT INTO permission_grant_change(origin_store_id,subject_id,session_id,kind) VALUES(?,?,?,'clear')",
+          input.expectedStoreId,
+          origin.subject_id!,
+          execution.session_id!,
+        );
+        const revision = db.row(
+          'SELECT CAST(MAX(seq) AS TEXT) AS revision FROM permission_grant_change',
+        )!.revision!;
+        db.run(
+          'UPDATE permission_grant SET revoked_seq=? WHERE id=? AND revoked_seq IS NULL',
+          revision,
+          input.interactionId,
+        );
+      }
+      const request: Json = {
+        kind: 'interaction.invalidate',
+        interactionId: input.interactionId,
+        previousRevision: String(row.revision),
+        policyRevision: input.policyRevision,
+        controlReads: (input.controlReads ?? []) as unknown as Json,
+      };
+      db.allocateSessionSequence(String(row.presentation_session_id));
+      const seq = db.row(
+        'SELECT next_seq FROM session WHERE id=?',
+        row.presentation_session_id!,
+      )!.next_seq;
+      db.run(
+        "INSERT INTO command(id,session_id,seq,kind,subject_id,request_digest,request_json,status,receipt_json,origin_store_id,root_work_command_id,root_work_seq) VALUES(?,?,?,'interaction.invalidate',?,?,?,'applied',?,?,?,?)",
+        invalidationId,
+        row.presentation_session_id!,
+        seq!,
+        origin.subject_id!,
+        digest(request),
+        canonicalJson(request),
+        canonicalJson({
+          interactionId: input.interactionId,
+          reason: 'permission_policy_changed',
+          policyRevision: input.policyRevision,
+        }),
+        input.expectedStoreId,
+        execution.root_work_command_id!,
+        execution.root_work_seq!,
+      );
+      if (
+        execution.run_id !== null &&
+        !db.row(
+          "SELECT id FROM interaction WHERE run_id=? AND (state='pending' OR (state='answered' AND accepted_decision_revision IS NULL)) LIMIT 1",
+          execution.run_id!,
+        )
+      )
+        db.run(
+          "UPDATE run SET status='running' WHERE id=? AND is_active=1 AND status='waiting_interaction'",
+          execution.run_id!,
+        );
+      const payload = {
+        reason: 'permission_policy_changed',
+        commandId: invalidationId,
+        policyRevision: input.policyRevision,
+      };
+      db.event(String(row.session_id), input.interactionId, 'interaction.invalidated', payload);
+      if (row.session_id !== row.presentation_session_id)
+        db.event(
+          String(row.presentation_session_id),
+          input.interactionId,
+          'interaction.invalidated',
+          payload,
+        );
+      return record(db.row('SELECT * FROM interaction WHERE id=?', input.interactionId)!);
+    });
   if (method === 'getInteraction' || method === 'listInteractions') {
     const input = args[0] as Parameters<Store['listInteractions']>[0] & { interactionId: string };
     db.db.run('BEGIN');

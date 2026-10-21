@@ -11,13 +11,15 @@ import { canonicalJson } from '../../json';
 import type { KnowledgeReadScope } from '../../platform/knowledge-reads';
 import {
   type CompiledSkillWorkflow,
-  revalidateSkillWorkflow,
+  revalidateSkillWorkflowAsync,
   type WorkflowCapability,
 } from '../../skills/workflow-contract';
-import { validateWorkflowArguments } from '../../skills/workflow-contract/schema';
+import type { WorkflowCompilerSession } from '../../skills/workflow-contract/async';
+import { validateWorkflowArgumentsAsync } from '../../skills/workflow-contract/async';
 import { AgentError } from '../../storage/types';
 
 export interface SkillWorkflowVerifierOptions {
+  readonly compiler?: WorkflowCompilerSession;
   readonly knowledgeScope?: KnowledgeReadScope;
   readonly entries: readonly CompiledSkillWorkflow[];
   readonly resolveCapability?: (id: string) => WorkflowCapability | undefined;
@@ -99,7 +101,9 @@ export function createSkillWorkflowVerifier(options: SkillWorkflowVerifierOption
         original.descriptor.revision !== revision
       )
         throw new AgentError('workflow_source_changed');
-      const entry = revalidateSkillWorkflow(original, resolver, options.knowledgeScope);
+      const entry = await revalidateSkillWorkflowAsync(original, resolver, options.knowledgeScope, {
+        signal: context.signal,
+      });
       if (
         !entry.contract ||
         entry.descriptor.availability !== 'available' ||
@@ -108,7 +112,12 @@ export function createSkillWorkflowVerifier(options: SkillWorkflowVerifierOption
       )
         throw new AgentError('workflow_source_changed');
       const contract = entry.contract;
-      if (validateWorkflowArguments(contract.outputSchema, output))
+      if (
+        await validateWorkflowArgumentsAsync(contract.outputSchema, output, {
+          compiler: options.compiler,
+          signal: context.signal,
+        })
+      )
         throw new AgentError('workflow_output_schema_invalid');
       if (contract.verification.strategy !== 'script' || !contract.verification.entrypoint)
         throw new AgentError('workflow_verifier_unavailable');

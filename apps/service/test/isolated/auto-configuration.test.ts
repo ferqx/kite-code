@@ -352,8 +352,25 @@ test('default Auto uses the selected actual SDK route and one tool-free durable 
     expect(f.normalRequests).toHaveLength(2);
     f.configuration.modelId = 'b';
     f.writeConfiguration();
-    await f.run('work-two');
-    await f.done();
+    await f.run('work-two', 'New task: exact harmless file task');
+    const next = await f.done();
+    const receipt = next.receipt as { businessCommandId: string; runId: string };
+    expect(next.status).toBe('applied');
+    expect(await f.store.getRun(receipt.runId)).toMatchObject({
+      originCommandId: receipt.businessCommandId,
+      rootWorkCommandId: next.id,
+      status: 'completed',
+    });
+    const models = (await f.store.listExecutions('s')).filter(
+      (execution) => execution.kind === 'model' && execution.runId === receipt.runId,
+    );
+    expect(models).toHaveLength(2);
+    for (const model of models)
+      expect(model).toMatchObject({
+        originCommandId: receipt.businessCommandId,
+        rootWorkCommandId: next.id,
+        definitionId: 'b',
+      });
     expect(f.reviews).toHaveLength(2);
     expect(f.reviews[1]!.route).toBe('b');
     expect(f.reviews[1]!.body.model).toBe('remote-b');

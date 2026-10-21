@@ -8,6 +8,12 @@
 
 Host 从同 Scope 的公开 SessionView 取得原 owner，并提供当前已认证连接实例；[活动资格](controller.ts)只在有未终结记录时比较它们。不同实例显示当前连接无法核实、仍可能在另一执行者运行，停止 Working／Thinking 及工具／子任务活动动画，保完整正文与原状态；不声明 owner 死亡、任务已中断或取消已完成，不自动恢复。缺少这些可选事实的旧 Port 保原观察行为，已经完成的历史不因此标未知。
 
+[子卡投影](execution-projection.tsx)识别准确注册的 `task.spawn`／`task.follow_up` v1 carrier，保留旧 `task`／`task.execute` 历史。无 preset 的新协作者不要求 role 参数；名称只作展示。稳定 child Session 的多轮历史分别通过 `child-start-${carrier.id}` 的唯一原 Run 关联，只显示同 Store／Session／Run／rootWork 的工具与审批，不将另一轮待审批展示在旧卡上；正在取消和已终态 carrier 不显示活动批准提示。准确人工 pending 优先显示“等待你的批准”。当前根会话准确活动 Run 的交互自动聚焦；child 卡通过 Ctrl+B 明确选择，Ctrl+B 后 Esc 返回父输入，原批准／问题答复仍绑定原卡和 revision。公开 Run 的 `carrierExecutionId` 沿准确启动／续接和封存报告父 Run 证明 report 后续轮；只把同 carrier／Store／rootWork 的步骤归入原卡，人工状态还须来自唯一活动 Run 的准确 authorization。旧 DTO 缺证明时保守不归入后续轮，不猜最新 Run；子完整日志仍按原只读入口可读。
+
+[Ink 回归](../../test/tui/execution-ink-projection.test.tsx)实际验证新建／追问卡、同 Session 两轮步骤与审批隔离及等待文案；[80×24 PTY](../../test/isolated/tui/executions.test.ts)实际验证原准确 Job 停止、完整分页输出和父普通结束后的 child 日志。新增[六工具80×24 PTY](../../test/isolated/tui/collaboration.test.ts)在真实 Service/Runtime/SQLite 上通过正式按键核双 child 独立待批、父输入保持、准确批准 A、稳定 A Session 新 Run、旧卡停止不改投 A2、准确批准 A2 与停止 B。原8秒单等待预算保留；与原完整日志门禁组合2项通过。迟到旧答案的真实桥接与冷重开零重放归 Desktop 窗口门禁，不由投影单测替代。
+
+当前审批卡中的Esc沿原 `controller.answer(card,'deny')` 拒绝准确卡片，不取消根工作；Ctrl+B目标选择中的Esc仍只返回父输入，全局Ctrl+C仍是明确停止。[真实模型普通PTY](../../../../tests/e2e/live/model/collaboration-tui-window.live.ts)发现并复现过Esc错误调用根cancel，修复后在同一冻结版本三个独立样本核两真实child一批一拒、仅被拒child的原工作取消、兄弟与父正常完成、效果一次及冷客户端零重放。[按键回归](../../test/tui/controller.test.tsx)另核原卡revision、重复Esc去重、same_command初始无选择、Deny+Enter对照及全局停止；原17文件范围137项/1094断言通过。精确模型、代码、原红与未测范围归[69/80执行记录](../../../../tests/e2e/live/model/collaboration-v1.1-cases.md)，不升级为全部TUI、冷后端或其他平台资格。
+
 模型重试提示只消费同 Store／Session／Run／root work 的实际失败前驱与 `modelRetry` 元数据；`maxAttempts=null` 表示无本地次数上限，只显示实际 attempt，历史有限上界仍显示分母。没有消息正文的真实模型失败仍显示。活动思考的尾段在完整回答之前收束一次，原 Static 历史不因进度、输入或菜单刷新重复输出。已批准计划进度保留实际标题及步骤，真实 Files 效果和 Core CAS 收据才能完成步骤。
 
 探索阶段仅在真实工具归属与 Thought 或连续工具调用模型均成立时消费过程旁白；独立问题、写操作和无 Thought 的单次读取保留原模型文字在交互／工具之前的顺序，未知或混合归属不能隐藏正文。待审批卡的命令与私人草稿使用原卡／revision 的独立 ComposerBuffer；打开 MCP、清理显示及刷新不回答、取消或重绑原审批。诊断模式只优先展示原结果已有的 Execution 身份及 toolsMetadata，完整字段不删减，普通结果展示不变。
@@ -73,9 +79,9 @@ controller固定读取代次及原Store/Session/Workspace/identity/read-set，�
 
 [专用Question识别](mcp-source-question.ts)只接准确Source Action@1、pending question、原Execution/Store/S及request.kind。schema须闭合object/additionalProperties:false/required decision enum三值，choices同顺序string。[输入层](index.tsx)沿完整interactionKey隔离原Store/source/presentation/id/revision，初始unset；上下显式approved/rejected/cancel，空Enter零Answer。revision/scope清旧选择；该Question的Esc仅清选择/草稿，Ctrl+C再closePanel，均不业务取消；其他Question和credential分支保持。
 
-controller的SourceReader沿Abort、generation、原S/W、panel及原Command ID阻止迟到覆盖。原ID按同Workspace可跨Session或显示foreign Store，选择零GET、明确Check原S/Command才lookup；关闭/返回/切scope只结束所属读取。新申请冲突只核当前Store+Workspace+Server，unknown/pending不因换S解除。迟到submit结果更新原记录，不能覆盖后来选中的ID。cold journal终态只显示unknown；saved/failed/cancelled文案还要求有限fact匹配准确Store/S/Command/server/phase，pending只表示等待。
+controller的SourceReader沿Abort、generation、原S/W、panel及原Command ID阻止迟到覆盖。Source面板打开后由自己的完整读取维护观察；后台管理目录的认证补充读取不得替换该观察或清空已进入的Review。面板关闭时管理目录仍可发布完整Source事实，独立刷新及Session/Store变化继续使旧审批观察失效。原ID按同Workspace可跨Session或显示foreign Store，选择零GET、明确Check原S/Command才lookup；关闭/返回/切scope只结束所属读取。新申请冲突只核当前Store+Workspace+Server，unknown/pending不因换S解除。迟到submit结果更新原记录，不能覆盖后来选中的ID。cold journal终态只显示unknown；saved/failed/cancelled文案还要求有限fact匹配准确Store/S/Command/server/phase，pending只表示等待。
 
-[Source controller/Ink](../../test/tui/mcp-source.test.tsx)当前24项132断言通过，原四controller/MCP/connection/Tools邻接63项873断言通过；固定文案沿[presentation](presentation.tsx)翻译，原Server metadata不翻译。当前证据涵盖明确选择/空Enter、schema/revision/presentation反例、同W跨S/foreign记录、removed/failed目录、迟到及关闭读取，不新增真实HTTP、PTY或异常清理资格；真实Host与源码外keyboard由[CLI owner](../../../../apps/cli/README.md#tui-mcp-项目来源决定与原申请)和[总体进度](../../../../docs/plans/unified-agent-refactor-v1-progress.md)分别维护。
+[Source controller/Ink](../../test/tui/mcp-source.test.tsx)当前27项152断言通过，原四controller/MCP/connection/Tools邻接63项873断言通过；固定文案沿[presentation](presentation.tsx)翻译，原Server metadata不翻译。当前证据涵盖明确选择/空Enter、schema/revision/presentation反例、同W跨S/foreign记录、removed/failed目录、迟到及关闭读取，不新增真实HTTP、PTY或异常清理资格；真实Host与源码外keyboard由[CLI owner](../../../../apps/cli/README.md#tui-mcp-项目来源决定与原申请)和[总体进度](../../../../docs/plans/unified-agent-refactor-v1-progress.md)分别维护。
 
 ## MCP 显式连接与原申请
 

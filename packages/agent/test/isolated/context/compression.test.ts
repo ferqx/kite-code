@@ -99,7 +99,7 @@ async function fixture(
       ? {
           async shouldCompress(input) {
             return (
-              input.messages.some((m) => m.content === 'new auto work') &&
+              input.messages.some((m) => m.content === 'New task: new auto work') &&
               !input.messages.some((m) => m.sourceIds?.some((id) => id.startsWith('compression-')))
             );
           },
@@ -184,7 +184,9 @@ async function fixture(
     ...(options.automatic && !options.skipGovernance
       ? {
           async initializeRunRequirements(input) {
-            if ((input.command.request as { content?: string }).content !== 'new auto work')
+            if (
+              (input.command.request as { content?: string }).content !== 'New task: new auto work'
+            )
               return [];
             const ctx = await input.forExtension('fixture'),
               key = `run/${input.run.id}/completion`;
@@ -308,6 +310,17 @@ async function fixture(
     get completed() {
       return completed;
     },
+    async businessRun(commandId: string, sessionId = 's') {
+      const command = await store.getCommand(commandId);
+      const receipt = command?.receipt as { runId?: string; businessCommandId?: string } | null;
+      if (typeof receipt?.runId !== 'string')
+        throw Error(`actual_business_receipt_missing:${commandId}`);
+      const run = await store.getRun(receipt.runId);
+      if (receipt.businessCommandId) expect(run?.originCommandId).toBe(receipt.businessCommandId);
+      if (!run || run.sessionId !== sessionId)
+        throw Error(`actual_business_run_missing:${commandId}`);
+      return run;
+    },
     async work(commandId: string, content: string) {
       await runtime.submitCommand({ ...base, commandId, request: { kind: 'run.start', content } });
       return runtime.waitForCommand(commandId, { timeoutMs: 15000 });
@@ -341,7 +354,7 @@ test('accepted follow-up between summary completion and publication does not cha
           commandId: 'queued-after-summary',
           request: {
             kind: 'input.follow_up',
-            content: 'queued after maintenance',
+            content: '追加 original：queued after maintenance',
             afterRunId: input.runId,
             contextSelectionId: selection,
           },
@@ -366,10 +379,7 @@ test('accepted follow-up between summary completion and publication does not cha
         .compression,
     ).toBeDefined();
     await f.runtime.waitForCommand('queued-after-summary', { timeoutMs: 10000 });
-    expect(
-      (await f.store.getView('s')).runs.find((r) => r.originCommandId === 'queued-after-summary')
-        ?.status,
-    ).toBe('completed');
+    expect((await f.businessRun('queued-after-summary')).status).toBe('completed');
     expect(f.requests).toHaveLength(3);
     expect(
       f.requests[2]?.messages.some(
@@ -468,7 +478,7 @@ test('manual compression has recorded Model/usage and exact immutable coverage, 
     });
     expect((await f.store.getMetadata()).lastChangeCursor).toBe(water);
     expect(f.requests).toHaveLength(2);
-    await f.work('next', 'new explicit work');
+    await f.work('next', 'New task: new explicit work');
     const actual = f.requests[2]!;
     expect(actual.messages.some((m) => m.content === 'original work')).toBe(false);
     expect(actual.messages.filter((m) => m.sourceIds?.includes(page.compression!.id))).toHaveLength(
@@ -493,7 +503,7 @@ test('manual compression has recorded Model/usage and exact immutable coverage, 
       ...f.base,
       sessionId: 'fork',
       commandId: 'fork-work',
-      request: { kind: 'run.start', content: 'fork new work' },
+      request: { kind: 'run.start', content: 'New task: fork new work' },
     });
     await f.runtime.waitForCommand('fork-work', { timeoutMs: 10000 });
     expect(f.requests[3]!.messages.some((m) => m.content.includes(f.summary))).toBe(true);
@@ -517,7 +527,7 @@ test('manual compression has recorded Model/usage and exact immutable coverage, 
   }
 });
 for (const fault of ['provider', 'commit', 'cancel', 'append', 'source'] as const)
-  test(`compression ${fault} keeps old selected context without partial effective summary`, async () => {
+  test(`compression ${fault} keeps old selected context without partial effective summary${fault === 'append' ? ' (applied low-level input)' : ''}`, async () => {
     const f = await fixture({ fault });
     let physical: Database | undefined;
     try {
@@ -547,7 +557,9 @@ for (const fault of ['provider', 'commit', 'cancel', 'append', 'source'] as cons
         });
       if (fault === 'append') {
         const run = (await f.store.getView('s')).runs.find((r) => r.originCommandId === 'compact')!;
-        await f.runtime.submitCommand({
+        // This low-level publication fixture requires an already applied message,
+        // not a public human input which may legitimately queue another business Run.
+        await f.store.acceptCommand({
           ...f.base,
           commandId: 'steer',
           request: {
@@ -557,6 +569,20 @@ for (const fault of ['provider', 'commit', 'cancel', 'append', 'source'] as cons
             content: 'new admitted input',
           },
         });
+        const session = (await f.store.getSession('s'))!;
+        const applied = await f.store.applyInput({
+          expectedStoreId: f.storeId,
+          owner: {
+            sessionId: 's',
+            instanceId: session.ownerInstanceId!,
+            generation: session.ownerGeneration,
+          },
+          commandId: 'steer',
+          kind: 'steer',
+          runId: run.id,
+        });
+        expect(applied.message.runId).toBe(run.id);
+        expect(applied.message.content).toBe('new admitted input');
       }
       if (fault === 'source') f.mutateMemory();
       f.held.release();
@@ -583,7 +609,7 @@ test('trusted automatic slot orders actual contributions → compression → nor
   try {
     await f.work('original', 'original work');
     f.order.length = 0;
-    await f.work('auto', 'new auto work');
+    await f.work('auto', 'New task: new auto work');
     expect(f.requests).toHaveLength(4);
     expect(f.requests[1]!.tools).toHaveLength(0);
     expect(
@@ -647,7 +673,7 @@ test('reset safely restores history without Provider, wrong point/unsafe window 
         });
         await f.runtime.waitForCommand('noop');
         expect(f.requests.length).toBe(count);
-        await f.work('next', 'after reset');
+        await f.work('next', 'New task: after reset');
         expect(
           f.requests.at(-1)!.messages.some((m) => m.content === 'actual original answer'),
         ).toBe(true);
@@ -743,7 +769,7 @@ test('complete >=17MiB summary retains original Artifact provenance through Fork
       ...f.base,
       sessionId: 'copy',
       commandId: 'copy-work',
-      request: { kind: 'run.start', content: 'read summary' },
+      request: { kind: 'run.start', content: 'New task: read summary' },
     });
     await f.runtime.waitForCommand('copy-work', { timeoutMs: 300000 });
     const actual = f.requests.at(-1)!;
@@ -768,14 +794,11 @@ test('complete >=17MiB summary retains original Artifact provenance through Fork
       ...f.base,
       sessionId: 'copy',
       commandId: 'corrupt-work',
-      request: { kind: 'run.start', content: 'must not dispatch' },
+      request: { kind: 'run.start', content: 'New task: must not dispatch' },
     });
     await f.runtime.waitForCommand('corrupt-work', { timeoutMs: 300000 });
     expect(f.requests.length).toBe(priorCalls);
-    expect(
-      (await f.store.getView('copy')).runs.find((r) => r.originCommandId === 'corrupt-work')!
-        .status,
-    ).toBe('failed');
+    expect((await f.businessRun('corrupt-work', 'copy')).status).toBe('failed');
     rewriteArtifact(path, bytes);
     await f.runtime.close();
     const store = await openSqliteStore({ ...f.profile, mode: 'readonly' }),
@@ -896,7 +919,7 @@ test('manual-only default never auto invokes slot and reset publication rollback
   const f = await fixture();
   let physical: Database | undefined;
   try {
-    await f.work('original', 'new auto work');
+    await f.work('original', 'New task: new auto work');
     expect(f.requests).toHaveLength(1);
     expect(f.order).not.toContain('compression');
     const selection = (await f.store.getSession('s'))!.contextSelectionId;
@@ -992,7 +1015,7 @@ test('invalid summary tool call remains only original history and cannot poison 
         message.toolCalls?.some((call) => call.id === 'forbidden-summary-call'),
       ),
     ).toBe(false);
-    await f.work('next', 'ordinary after invalid summary');
+    await f.work('next', 'New task: ordinary after invalid summary');
     expect(
       f.requests
         .at(-1)!
@@ -1065,7 +1088,7 @@ test('trusted actual summary/window preflight rejects an ineffective result and 
     const original = (
       await f.store.getSelectedContext({ expectedStoreId: f.storeId, sessionId: 's' })
     ).compression!;
-    await f.work('new-tail', 'actual new work');
+    await f.work('new-tail', 'New task: actual new work');
     f.rejectNextSummary();
     await f.runtime.compressContext({
       ...f.base,
@@ -1081,7 +1104,7 @@ test('trusted actual summary/window preflight rejects an ineffective result and 
     expect(run.status).toBe('failed');
     expect(run.reason).toBe('compression_not_reducible');
     expect(context.compression!.id).toBe(original.id);
-    expect(context.messages.some((m) => m.content === 'actual new work')).toBe(true);
+    expect(context.messages.some((m) => m.content === 'New task: actual new work')).toBe(true);
     expect(context.messages.some((m) => m.content === f.summary)).toBe(false);
   } finally {
     await f.close();
@@ -1098,8 +1121,8 @@ test('automatic Provider failure preserves old input, unchanged Model-refresh do
   });
   try {
     await f.work('original', 'original work');
-    await f.work('automatic', 'new auto work');
-    const first = (await f.store.getView('s')).runs.find((r) => r.originCommandId === 'automatic')!;
+    await f.work('automatic', 'New task: new auto work');
+    const first = await f.businessRun('automatic');
     expect(first.status).toBe('completed');
     expect(
       f.requests.filter((request) =>
@@ -1109,7 +1132,9 @@ test('automatic Provider failure preserves old input, unchanged Model-refresh do
     expect(f.order.filter((entry) => entry === 'compression')).toHaveLength(1);
     const ordinary = f.requests.at(-1)!;
     expect(ordinary.messages.some((message) => message.content === 'original work')).toBe(true);
-    expect(ordinary.messages.some((message) => message.content === 'new auto work')).toBe(true);
+    expect(ordinary.messages.some((message) => message.content === 'New task: new auto work')).toBe(
+      true,
+    );
     expect(ordinary.messages.some((message) => message.content.includes('actual summary'))).toBe(
       false,
     );
@@ -1117,15 +1142,13 @@ test('automatic Provider failure preserves old input, unchanged Model-refresh do
       (await f.store.getSelectedContext({ expectedStoreId: f.storeId, sessionId: 's' }))
         .compression,
     ).toBeUndefined();
-    await f.work('new-context', 'actual new input after failed compression');
+    await f.work('new-context', 'New task: actual new input after failed compression');
     expect(
       f.requests.filter((request) =>
         request.messages.some((message) => message.content.includes('SUMMARIZE EXACT INPUT')),
       ),
     ).toHaveLength(2);
-    expect(
-      (await f.store.getView('s')).runs.find((r) => r.originCommandId === 'new-context')!.status,
-    ).toBe('completed');
+    expect((await f.businessRun('new-context')).status).toBe('completed');
     const selection = (await f.store.getSession('s'))!.contextSelectionId;
     await f.runtime.compressContext({
       ...f.base,
@@ -1186,16 +1209,14 @@ test('automatic SQL publication failure is not classified as a safe Provider fai
     physical.run(
       "CREATE TRIGGER unsafe_auto_write BEFORE UPDATE OF kind ON context_snapshot WHEN NEW.kind='compression' BEGIN SELECT RAISE(ABORT,'unconfirmed Store publication'); END",
     );
-    await f.work('automatic', 'new auto work');
+    await f.work('automatic', 'New task: new auto work');
     expect(f.requests).toHaveLength(2);
     expect(
       f.requests
         .at(-1)!
         .messages.some((message) => message.content.includes('SUMMARIZE EXACT INPUT')),
     ).toBe(true);
-    expect(
-      (await f.store.getView('s')).runs.find((run) => run.originCommandId === 'automatic')!.status,
-    ).toBe('failed');
+    expect((await f.businessRun('automatic')).status).toBe('failed');
     expect(
       (await f.store.getSelectedContext({ expectedStoreId: f.storeId, sessionId: 's' }))
         .compression,
@@ -1221,12 +1242,9 @@ test('ordinary Model continuation refuses unsupported Parts while readonly histo
         await f.store.getSelectedContext({ expectedStoreId: f.storeId, sessionId: 's' })
       ).messages.some((message) => message.content === 'original work'),
     ).toBe(true);
-    await f.work('unsupported', 'new explicit work');
+    await f.work('unsupported', 'New task: new explicit work');
     expect(f.requests.length).toBe(count);
-    expect(
-      (await f.store.getView('s')).runs.find((run) => run.originCommandId === 'unsupported')!
-        .reason,
-    ).toBe('context_content_unsupported');
+    expect((await f.businessRun('unsupported')).reason).toBe('context_content_unsupported');
   } finally {
     physical?.close();
     await f.close();

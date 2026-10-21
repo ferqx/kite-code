@@ -1,4 +1,4 @@
-import type { AgentClient, Command } from '@kite-ai/client';
+import { type AgentClient, type Command, readOrdinaryCommandApplication } from '@kite-ai/client';
 import type {
   TuiCallerIntent,
   TuiCallerOutcome,
@@ -80,22 +80,18 @@ async function checked(
     // Command applied is not a credential/result proof, even for a terminal Execution.
   }
   if (['run.start', 'input.steer', 'input.follow_up'].includes(intent.request.kind)) {
-    if (typeof receipt.runId !== 'string') throw Error('caller_receipt_identity_mismatch');
     admit();
-    const run = await client.getRun(receipt.runId, { signal });
+    const applied = await readOrdinaryCommandApplication(client, command, {
+      signal,
+      ...(intent.request.kind === 'input.steer' ? { targetRunId: intent.request.targetRunId } : {}),
+    });
+    if (!applied) throw Error('caller_receipt_unavailable');
     if (
-      run.id !== receipt.runId ||
-      run.originStoreId !== intent.scope.storeId ||
-      run.sessionId !== intent.scope.sessionId
+      intent.request.kind === 'input.steer' &&
+      receipt.outcome !== 'human_input_applied' &&
+      receipt.outcome !== 'human_input_observed' &&
+      receipt.contextSelectionId !== intent.request.contextSelectionId
     )
-      throw Error('caller_receipt_identity_mismatch');
-    if (intent.request.kind === 'input.steer') {
-      if (
-        run.id !== intent.request.targetRunId ||
-        receipt.contextSelectionId !== intent.request.contextSelectionId
-      )
-        throw Error('caller_receipt_identity_mismatch');
-    } else if (run.originCommandId !== intent.request.commandId)
       throw Error('caller_receipt_identity_mismatch');
   }
   return { intent, phase: 'applied', command };

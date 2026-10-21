@@ -54,10 +54,29 @@ import {
   runSettledEvent,
   runStartedEvent,
 } from './extensions/lifecycle';
+import {
+  directHumanInputProposal,
+  explicitHumanConfirmationTarget,
+  type HumanWorkCandidate,
+  validateHumanInputProposal,
+} from './human-input-intent';
+import {
+  createHumanInputProcessingConfiguration,
+  type HumanInputProcessingContext,
+  humanInputProcessingSources,
+  parseHumanInputProcessingProposal,
+} from './human-input-processing';
 import { canonicalJson, semanticDigest } from './json';
-import { defaultLoop, type LoopContext, recordToolOutcome, type ToolFailureStreak } from './loop';
+import {
+  defaultLoop,
+  type LoopContext,
+  outputLengthContinuation,
+  recordToolOutcome,
+  type ToolFailureStreak,
+} from './loop';
 import { type ModelRetrySource, modelRetryReason, waitForModelRetry } from './model-attempt';
 import { bodyReference, jsonBody, persistedModelRequest, utf8Body } from './model-body';
+import { semanticDigestBytes } from './model-body/digest';
 import { assembleModelContext, modelHistory } from './model-context';
 import { modelOutputReference, readModelOutput } from './model-output';
 import { type ModelInputMetadata, modelInputMetadata } from './model-snapshot';
@@ -131,9 +150,6 @@ export interface ModelOutputSnapshot extends Omit<ModelInputIdentity, 'modelId' 
     complete: boolean;
   };
 }
-
-const semanticDigestBytes = async (bytes: Uint8Array) =>
-  createHash('sha256').update(bytes).digest('hex');
 
 function freeze<T>(value: T): T {
   if (value && typeof value === 'object') {
@@ -304,6 +320,7 @@ function sealSources(sources: ContextSources | undefined): ContextSources | unde
 }
 
 type RunBinding = {
+  humanInputProcessing?: HumanInputProcessingContext;
   compressor?: ContextCompressor;
   afterTurn?: AfterTurnPolicy;
   authorizationReview?: AuthorizationReviewBinding;
@@ -333,6 +350,11 @@ type RunExecutionCheckpoint = {
 };
 
 export interface RuntimeOptions {
+  /** Trusted Host metadata for an accepted public input, before interpretation starts.
+   * It cannot select work, dispatch Tools/Jobs/Models, or confer business permission. */
+  sessionInputMetadata?: {
+    preserve(command: Readonly<CommandRecord>): Promise<void>;
+  };
   compressor?: ContextCompressor;
   afterTurn?: AfterTurnPolicy;
   authorizationReview?: AuthorizationReviewBinding;
@@ -427,6 +449,9 @@ export type RuntimeShutdownResult =
       readonly completion: Promise<void>;
     };
 
+/** Internal control flow after the exact restricted Run has durably completed. */
+class InputProcessingCompleted extends Error {}
+
 export class AgentRuntime {
   private readonly lifecycleObservers = new LifecycleObservers();
   readonly supportsSelectedSkills: boolean;
@@ -460,6 +485,10 @@ export class AgentRuntime {
   private readonly reportBindings = new Map<
     string,
     { binding: RunBinding; release: () => Promise<void> }
+  >();
+  private readonly deferredReports = new Map<
+    string,
+    { controller: AbortController; task: Promise<void> }
   >();
   private readonly defaultReviewer: AuthorizationReviewBinding | undefined;
   private readonly childSlots = new ChildSlots();
@@ -521,6 +550,10 @@ export class AgentRuntime {
   private readonly options: RuntimeOptions;
   constructor(options: RuntimeOptions) {
     this.options = { ...options };
+    if (options.sessionInputMetadata)
+      this.options.sessionInputMetadata = Object.freeze({
+        preserve: options.sessionInputMetadata.preserve.bind(options.sessionInputMetadata),
+      });
     this.supportsSelectedSkills =
       options.supportsSelectedSkills === true && !!options.resolveRunConfiguration;
     this.supportsExtensionInputs =
@@ -607,7 +640,10 @@ export class AgentRuntime {
             type: 'object',
             required: ['content'],
             additionalProperties: false,
-            properties: { content: { type: 'string' } },
+            properties: {
+              content: { type: 'string' },
+              name: { type: 'string', minLength: 1, maxLength: 256 },
+            },
           },
         ),
       });
@@ -627,6 +663,11 @@ export class AgentRuntime {
         this.verifyApprovalRequest(scope, executionId, saved, actual),
       reviewAuthorization: (scope, request, source, decision) =>
         this.reviewAuthorization(scope, request, source, decision),
+      waitForChange: (cursor, signal, timeoutMs) => {
+        const waiting = this.changeWaits.wait(cursor, signal, timeoutMs);
+        this.watchControls();
+        return waiting;
+      },
       permissions: options.permissions,
       conditions: options.conditions,
       conditionContext: (scope, reference, onRecord, boundaryExecutionId) =>
@@ -860,6 +901,9 @@ export class AgentRuntime {
   }
   getLifecycleState(): RuntimeLifecycleState {
     const reasons: RuntimeBusyReason[] = [];
+    const deferredBindings = new Set(
+      [...this.deferredReports.keys()].map((id) => this.reportBindings.get(id)?.binding),
+    );
     if (this.admissions) reasons.push('admission');
     if (this.tasks.size || this.pendingSessions.size || this.wakeups.size) reasons.push('dispatch');
     if (this.active.size || this.activeExecutions.size || this.authorizationReviewTasks.size)
@@ -867,8 +911,8 @@ export class AgentRuntime {
     if (this.extensionHost.operationCount || this.execution.unconfirmedJobCount)
       reasons.push('background');
     if (
-      this.runBindingLeases.size ||
-      this.reportBindings.size ||
+      [...this.runBindingLeases.values()].some(({ binding }) => !deferredBindings.has(binding)) ||
+      [...this.reportBindings.entries()].some(([id]) => !this.deferredReports.has(id)) ||
       this.reportRecoveryCleanupFailed ||
       this.jobReconcileCleanupFailed ||
       this.runResumeCleanupFailed ||
@@ -1745,7 +1789,7 @@ export class AgentRuntime {
               version: 1,
               modelExecutionId,
               modelOutputDigest: await semanticDigest(snapshot.output as unknown as Json),
-              contentHash: await semanticDigestBytes(Buffer.from(full.content)),
+              contentHash: await semanticDigestBytes(Buffer.from(full.content), signal),
               answer,
             };
             if (!this.options.artifacts) throw new AgentError('artifact_content_unavailable');
@@ -2160,7 +2204,7 @@ export class AgentRuntime {
     }
     // Public digest describes the public body; original receipt verification stays private above.
     const bytes = Buffer.from(canonicalJson(request as unknown as Json));
-    const bodyHash = await semanticDigestBytes(bytes);
+    const bodyHash = await semanticDigestBytes(bytes, input.signal);
     input.signal?.throwIfAborted();
     return { ...snapshot, request, metadata, bodyHash, bodyBytes: String(bytes.byteLength) };
   }
@@ -2206,7 +2250,7 @@ export class AgentRuntime {
     } else {
       request = persistedModelRequest(stored);
       const bytes = Buffer.from(canonicalJson(stored));
-      hash = await semanticDigestBytes(bytes);
+      hash = await semanticDigestBytes(bytes, signal);
       size = String(bytes.byteLength);
     }
     if (
@@ -2283,7 +2327,7 @@ export class AgentRuntime {
       ...identity,
       storeId: snapshot.storeId,
       snapshotCursor: snapshot.snapshotCursor,
-      bodyHash: await semanticDigestBytes(bytes),
+      bodyHash: await semanticDigestBytes(bytes, signal),
       bodyBytes: String(bytes.byteLength),
       contentBytes: String(Buffer.byteLength(output.content)),
       reasoningBytes: String(Buffer.byteLength(output.reasoning)),
@@ -2291,12 +2335,15 @@ export class AgentRuntime {
     };
   }
   async readArtifact(input: ArtifactReadInput) {
+    const { signal, ...referenceInput } = input;
+    signal?.throwIfAborted();
     if (input.refId.startsWith('model-output-')) throw new AgentError('artifact_scope_denied');
     if (!this.options.artifacts) throw new AgentError('artifact_content_unavailable');
     const legacyBody = input.refId.startsWith('model-body-');
     const reference = legacyBody
-      ? await this.options.store.getLegacyReviewArtifactReference(input)
-      : await this.options.store.getArtifactReference(input);
+      ? await this.options.store.getLegacyReviewArtifactReference(referenceInput)
+      : await this.options.store.getArtifactReference(referenceInput);
+    signal?.throwIfAborted();
     if (!reference)
       throw new AgentError(legacyBody ? 'artifact_scope_denied' : 'artifact_reference_not_found');
     // Model transport bodies are private even when their immutable IDs can be inferred.
@@ -2372,6 +2419,7 @@ export class AgentRuntime {
       sourceLimit: 1,
     };
     const before = await this.options.store.getModelContext(query);
+    const contextCommand = await this.options.store.getCommand(run.originCommandId);
     const history = await this.modelMessages(
       input.sessionId,
       input.expectedStoreId,
@@ -2379,6 +2427,10 @@ export class AgentRuntime {
       input.subjectId,
       false,
       before.highWaterSeq,
+      contextCommand &&
+        ['context.compress', 'context.compression.reset'].includes(contextCommand.kind)
+        ? undefined
+        : run,
     );
     const after = await this.options.store.getModelContext(query);
     if (
@@ -2696,8 +2748,58 @@ export class AgentRuntime {
   listExecutionOutput(input: Parameters<Store['listExecutionOutput']>[0]) {
     return this.options.store.listExecutionOutput(input);
   }
-  listMessages(id: string, options?: Parameters<Store['listMessages']>[1]) {
-    return this.options.store.listMessages(id, options);
+  async listMessages(id: string, options?: Parameters<Store['listMessages']>[1]) {
+    return Promise.all(
+      (await this.options.store.listMessages(id, options)).map((message) =>
+        this.publicHumanInputMessage(message),
+      ),
+    );
+  }
+  private async publicHumanInputMessage(
+    message: import('./storage/types').MessageRecord,
+    known?: ExecutionRecord,
+  ) {
+    if (message.role !== 'assistant' || message.sourceIds?.length !== 1) return message;
+    const execution = known ?? (await this.options.store.getExecution(message.sourceIds[0]!));
+    const marker = (
+      execution?.decisionSource as {
+        humanInputInterpretation?: { inputCommandId?: string; inputDigest?: string };
+      } | null
+    )?.humanInputInterpretation;
+    if (
+      !marker?.inputCommandId ||
+      !marker.inputDigest ||
+      execution?.sessionId !== message.sessionId ||
+      execution.runId !== message.runId
+    )
+      return message;
+    const raw = await this.options.store.getCommand(marker.inputCommandId);
+    if (
+      raw?.kind !== 'human.input' ||
+      raw.requestDigest !== marker.inputDigest ||
+      raw.sessionId !== message.sessionId ||
+      raw.originStoreId !== execution.originStoreId
+    )
+      return message;
+    const observation = (
+      raw.receipt as {
+        observation?: {
+          executionId?: string;
+          messageId?: string;
+          answer?: string | null;
+          clarification?: string | null;
+        };
+      }
+    ).observation;
+    const exact = observation?.executionId === execution.id && observation.messageId === message.id;
+    // The original Model response remains available in its exact inspector and
+    // stored history. Ordinary conversation displays the bounded human answer.
+    const content = exact
+      ? observation.clarification || observation.answer || '输入关联已记录。'
+      : message.status === 'incomplete'
+        ? '正在核实这条输入与原工作的关联…'
+        : '输入解释已保存，等待核实原输入的关联。';
+    return { ...message, content, modelOutput: undefined };
   }
   getChanges(input: Parameters<Store['getChanges']>[0]) {
     return this.options.store.getChanges(input);
@@ -2713,9 +2815,17 @@ export class AgentRuntime {
     }
   > {
     const original = await this.options.store.getView(id);
+    const executions = new Map(original.executions.map((execution) => [execution.id, execution]));
     const view = {
       ...original,
       runs: await Promise.all(original.runs.map((run) => this.publicRun(run))),
+      messages: await Promise.all(
+        original.messages.map((message) => {
+          const execution =
+            message.sourceIds?.length === 1 ? executions.get(message.sourceIds[0]!) : undefined;
+          return execution ? this.publicHumanInputMessage(message, execution) : message;
+        }),
+      ),
     };
     const progress = this.compressionProgress.get(id);
     return progress &&
@@ -3246,6 +3356,7 @@ export class AgentRuntime {
         lease = begun.lease;
         const workspace = await this.options.store.getWorkspace(state.session.workspaceId);
         if (!workspace) throw new AgentError('workspace_not_found');
+        const processing = await this.inputProcessingCommand(state.originalCommand, state.run);
         let resolved: RunConfiguration | undefined;
         if (this.options.resolveRecoveryRunConfiguration) {
           resolved = await this.resolvePreparation(() =>
@@ -3261,6 +3372,18 @@ export class AgentRuntime {
           dispose = this.preparationDisposer(resolved);
         } else if (this.options.resolveRunConfiguration)
           throw new AgentError('run_recovery_binding_unavailable');
+        if (processing) {
+          const manifest = state.run.configuration as { snapshot: { originalConfiguration: Json } };
+          resolved = createHumanInputProcessingConfiguration(
+            resolved ?? {
+              model: this.options.model,
+              modelId: this.options.modelId ?? 'fixed',
+              snapshot: manifest.snapshot.originalConfiguration,
+            },
+            processing,
+            resolved?.permissions ?? this.options.permissions,
+          );
+        }
         controller.signal.throwIfAborted();
         const model = resolved?.model ?? this.options.model;
         if (!model) throw new AgentError('run_recovery_binding_unavailable');
@@ -3270,7 +3393,9 @@ export class AgentRuntime {
           this.options.modelId ??
           'fixed';
         const catalogue = this.runDefinitions(resolved?.extensions, resolved?.toolIds);
-        const reviewer = sealReview(resolved?.authorizationReview ?? this.defaultReviewer);
+        const reviewer = processing
+          ? undefined
+          : sealReview(resolved?.authorizationReview ?? this.defaultReviewer);
         const snapshot = resolved?.snapshot ?? null;
         const configuration = this.configurationSnapshot(
           modelId,
@@ -3291,6 +3416,7 @@ export class AgentRuntime {
         if (canonicalJson(configuration) !== canonicalJson(state.run.configuration))
           throw new AgentError('run_configuration_mismatch');
         const binding: RunBinding = {
+          ...(processing ? { humanInputProcessing: processing } : {}),
           model,
           modelId,
           definitions: catalogue.definitions,
@@ -3298,12 +3424,13 @@ export class AgentRuntime {
           extensions: catalogue.extensions,
           sources: sealSources(resolved?.sources),
           permissions: resolved?.permissions,
-          conditions: resolved?.conditions,
-          initializeRequirements:
-            resolved?.initializeRequirements ?? this.options.initializeRunRequirements,
+          conditions: processing ? undefined : resolved?.conditions,
+          initializeRequirements: processing
+            ? undefined
+            : (resolved?.initializeRequirements ?? this.options.initializeRunRequirements),
           authorizationReview: reviewer,
           readStepCapabilities: resolved?.readStepCapabilities,
-          afterTurn: resolved?.afterTurn ?? this.options.afterTurn,
+          afterTurn: processing ? undefined : (resolved?.afterTurn ?? this.options.afterTurn),
           compressor: sealCompressor(resolved?.compressor ?? this.options.compressor),
           dispose,
         };
@@ -3384,6 +3511,7 @@ export class AgentRuntime {
           })),
         });
         owner = committed.owner;
+        this.dispatchFailures.delete(input.sessionId);
         lease = null;
         transferred = true;
         for (const { child, agent, parent, checkpoint: childCheckpoint } of recoveredChildren) {
@@ -3966,11 +4094,15 @@ export class AgentRuntime {
             };
         }
         controller.signal.throwIfAborted();
-        const applied = await this.options.store.applyJobReport({
+        const applied = await this.applyJobReportWithReceipt({
           expectedStoreId: input.expectedStoreId,
           owner,
           commandId: report.id,
           authorization,
+          carriedMessageIds:
+            (carrier?.afterTurn as { kind?: string } | null)?.kind === 'agent_completion'
+              ? await this.carriedAgentMessageIds(report, carrier!, controller.signal)
+              : [],
           recovery: {
             commandId: input.commandId,
             subjectId: input.subjectId,
@@ -3979,6 +4111,7 @@ export class AgentRuntime {
         });
         const receipt = await this.options.store.getCommand(input.commandId);
         if (!receipt) throw new AgentError('report_recovery_receipt_missing');
+        this.dispatchFailures.delete(input.sessionId);
         this.reportRecoveryPreparations.delete(controller);
         complete(receipt);
         if (applied.run && applied.started) {
@@ -4037,6 +4170,490 @@ export class AgentRuntime {
     void task.catch((error) => this.stopDispatchPolling(input.sessionId, error));
     return ready;
   }
+  private async humanCandidates(
+    sessionId: string,
+    selected: import('./storage/human-work-control').HumanWorkIdentity | null,
+  ): Promise<HumanWorkCandidate[]> {
+    const view = await this.options.store.getView(sessionId);
+    const ids = [
+      ...new Set([
+        ...(selected ? [selected.rootWorkCommandId] : []),
+        ...view.runs
+          .slice()
+          .reverse()
+          .filter(
+            (run) =>
+              (run.configuration as { snapshot?: { kind?: string } }).snapshot?.kind !==
+              'human_input_processing',
+          )
+          .map((run) => run.rootWorkCommandId),
+      ]),
+    ].slice(0, 16);
+    const candidates: HumanWorkCandidate[] = [];
+    for (const id of ids) {
+      const command = await this.options.store.getCommand(id);
+      const request = command?.request as { content?: string } | null;
+      if (
+        command?.sessionId === sessionId &&
+        command.originStoreId === view.storeId &&
+        command.rootWorkCommandId === command.id &&
+        typeof request?.content === 'string'
+      )
+        candidates.push({
+          rootWorkCommandId: command.id,
+          rootWorkSeq: command.rootWorkSeq,
+          content: request.content,
+        });
+    }
+    return candidates;
+  }
+  private async humanProcessingContext(raw: CommandRecord): Promise<HumanInputProcessingContext> {
+    const state = await this.options.store.readHumanWorkState({
+      expectedStoreId: raw.originStoreId,
+      sessionId: raw.sessionId,
+      subjectId: raw.subjectId,
+    });
+    const candidates = await this.humanCandidates(raw.sessionId, state.selectedWork);
+    const pendingClarifications: NonNullable<
+      HumanInputProcessingContext['pendingClarifications']
+    >[number][] = [];
+    for (const id of state.pendingInputIds.filter((id) => id !== raw.id).slice(-16)) {
+      const previous = await this.options.store.getCommand(id);
+      const fact = previous?.receipt as {
+        state?: string;
+        candidateWorkCommandIds?: string[];
+        observation?: { clarification?: string | null };
+      } | null;
+      if (previous?.kind === 'human.input' && fact?.state === 'unresolved')
+        pendingClarifications.push({
+          inputCommandId: previous.id,
+          inputDigest: previous.requestDigest,
+          content: (previous.request as { content: string }).content,
+          candidateWorkCommandIds: fact.candidateWorkCommandIds ?? [],
+          question: fact.observation?.clarification ?? null,
+        });
+    }
+    return {
+      inputCommandId: raw.id,
+      inputDigest: raw.requestDigest,
+      content: (raw.request as { content: string }).content,
+      candidateWorkCommandIds: candidates.map((item) => item.rootWorkCommandId),
+      candidateWorks: candidates,
+      controlRevision: state.controlRevision,
+      selectedWork: state.selectedWork,
+      pendingClarifications,
+    };
+  }
+  private async routeHumanCommand(command: CommandRecord): Promise<void> {
+    const receipt = command.receipt as { humanInputCommandId?: string } | null;
+    if (!receipt?.humanInputCommandId) return;
+    const raw = await this.options.store.getCommand(receipt.humanInputCommandId);
+    if (
+      raw?.kind !== 'human.input' ||
+      raw.sessionId !== command.sessionId ||
+      raw.subjectId !== command.subjectId
+    )
+      throw new AgentError('input_proposal_unverifiable');
+    const fact = raw.receipt as { state?: string; processingCommandId?: string };
+    if (fact.state !== 'pending') return;
+    const state = await this.options.store.readHumanWorkState({
+      expectedStoreId: raw.originStoreId,
+      sessionId: raw.sessionId,
+      subjectId: raw.subjectId,
+    });
+    const context = await this.humanProcessingContext(raw);
+    const proposal = directHumanInputProposal({
+      content: context.content,
+      kind: command.kind as 'run.start' | 'input.steer' | 'input.follow_up',
+      selectedWork: state.selectedWork,
+      candidates: context.candidateWorks ?? [],
+      hasPendingClarifications: (context.pendingClarifications?.length ?? 0) > 0,
+    });
+    if (proposal && !['progress', 'clarify'].includes(proposal.purpose)) {
+      await this.options.store.decideHumanInput({
+        expectedStoreId: raw.originStoreId,
+        sessionId: raw.sessionId,
+        subjectId: raw.subjectId,
+        inputCommandId: raw.id,
+        inputDigest: raw.requestDigest,
+        decisionId: `human-decision-${await semanticDigest([raw.originStoreId, raw.id])}`,
+        expectedControlRevision: state.controlRevision,
+        proposal,
+      });
+      return;
+    }
+    const view = await this.options.store.getView(command.sessionId);
+    if (!view.runs.some((run) => run.isActive))
+      await this.options.store.beginHumanInputProcessing({
+        expectedStoreId: raw.originStoreId,
+        sessionId: raw.sessionId,
+        subjectId: raw.subjectId,
+        inputCommandId: raw.id,
+        inputDigest: raw.requestDigest,
+      });
+  }
+  private async pendingHumanInterpretation(
+    run: RunRecord,
+    command: CommandRecord,
+  ): Promise<HumanInputProcessingContext | undefined> {
+    const session = await this.options.store.getSession(run.sessionId);
+    if (session?.parentSessionId !== null) return undefined;
+    const state = await this.options.store.readHumanWorkState({
+      expectedStoreId: run.originStoreId,
+      sessionId: run.sessionId,
+      subjectId: command.subjectId,
+    });
+    for (const id of state.pendingInputIds) {
+      const raw = await this.options.store.getCommand(id);
+      if (!raw || (raw.receipt as { state?: string }).state !== 'pending') continue;
+      const candidates =
+        (raw.receipt as { candidateWorkCommandIds?: string[] }).candidateWorkCommandIds ?? [];
+      if (
+        !candidates.length ||
+        candidates.includes(run.rootWorkCommandId) ||
+        (raw.request as { observedRunId?: string }).observedRunId === run.id
+      )
+        return this.humanProcessingContext(raw);
+    }
+    return undefined;
+  }
+  private async acceptHumanInterpretation(
+    context: HumanInputProcessingContext,
+    response: import('./execution').ModelResponse,
+    command: CommandRecord,
+  ) {
+    const raw = await this.options.store.getCommand(context.inputCommandId);
+    if (!raw || raw.requestDigest !== context.inputDigest)
+      throw new AgentError('input_proposal_unverifiable');
+    const fact = raw.receipt as { state?: string; decisionCommandId?: string };
+    // An unresolved decision is sealed too; another Model cannot reinterpret
+    // this raw input. A later real clarification is registered separately.
+    if (
+      fact.state === 'decided' ||
+      fact.state === 'clarified' ||
+      fact.decisionCommandId !== undefined
+    )
+      return;
+    let proposal: import('./storage/human-work-control').HumanInputProposal;
+    let answer: string | null = null,
+      clarification: string | null = null;
+    let clarifiesInputId: string | undefined;
+    try {
+      const parsed = parseHumanInputProcessingProposal(response.content, context);
+      proposal = validateHumanInputProposal(
+        parsed.proposal,
+        context.content,
+        context.candidateWorks ?? [],
+        context.selectedWork ?? null,
+      );
+      answer = parsed.answer;
+      clarification = parsed.clarification;
+      clarifiesInputId = parsed.clarifiesInputId;
+      if (proposal.relation === 'unresolved' && parsed.proposal.relation !== 'unresolved') {
+        answer = null;
+        clarification = '请说明这条输入要补充哪项工作，或要另开一项工作。';
+        clarifiesInputId = undefined;
+      }
+    } catch {
+      proposal = {
+        relation: 'unresolved',
+        purpose: 'clarify',
+        targetRootWorkCommandId: null,
+        selectionEffect: 'keep',
+        basis: { kind: 'model_proposal', instruction: context.content },
+      };
+      clarification = '请说明这条输入要补充哪项工作，或要另开一项工作。';
+    }
+    const state = await this.options.store.readHumanWorkState({
+      expectedStoreId: raw.originStoreId,
+      sessionId: raw.sessionId,
+      subjectId: command.subjectId,
+    });
+    await this.options.store.decideHumanInput({
+      expectedStoreId: raw.originStoreId,
+      sessionId: raw.sessionId,
+      subjectId: raw.subjectId,
+      inputCommandId: raw.id,
+      inputDigest: raw.requestDigest,
+      decisionId: `human-decision-${await semanticDigest([raw.originStoreId, raw.id])}`,
+      expectedControlRevision: context.controlRevision ?? state.controlRevision,
+      proposal,
+      ...(clarifiesInputId ? { clarifiesInputId } : {}),
+      interpretation: { executionId: response.executionId, answer, clarification },
+    });
+  }
+  private async inputProcessingCommand(
+    command: CommandRecord,
+    run?: RunRecord,
+  ): Promise<HumanInputProcessingContext | undefined> {
+    const receipt = command.receipt as { inputCommandId?: string } | null;
+    const configuration = run?.configuration as
+      | {
+          snapshot?: {
+            kind?: string;
+            inputCommandId?: string;
+            inputDigest?: string;
+            processingContext?: HumanInputProcessingContext;
+          };
+        }
+      | undefined;
+    const snapshot = configuration?.snapshot;
+    const isProcessing = snapshot?.kind === 'human_input_processing';
+    const id = receipt?.inputCommandId ?? (isProcessing ? snapshot.inputCommandId : undefined);
+    if (!id) {
+      if (isProcessing) throw new AgentError('input_proposal_unverifiable');
+      return undefined;
+    }
+    const raw = await this.options.store.getCommand(id);
+    const valid =
+      raw?.kind === 'human.input' &&
+      raw.originStoreId === command.originStoreId &&
+      raw.sessionId === command.sessionId &&
+      raw.subjectId === command.subjectId &&
+      (raw.receipt as { processingCommandId?: string }).processingCommandId === command.id;
+    if (
+      !valid ||
+      (isProcessing &&
+        (snapshot.inputCommandId !== raw!.id || snapshot.inputDigest !== raw!.requestDigest))
+    ) {
+      if (isProcessing) throw new AgentError('input_proposal_unverifiable');
+      return undefined;
+    }
+    if (isProcessing && snapshot.processingContext) {
+      const context = snapshot.processingContext;
+      if (
+        context.inputCommandId !== raw!.id ||
+        context.inputDigest !== raw!.requestDigest ||
+        context.content !== (raw!.request as { content: string }).content
+      )
+        throw new AgentError('input_proposal_unverifiable');
+      return structuredClone(context);
+    }
+    return this.humanProcessingContext(raw!);
+  }
+  private async preparePendingHumanInputs(sessionId: string): Promise<void> {
+    const session = await this.options.store.getSession(sessionId);
+    if (!session || session.parentSessionId !== null) return;
+    const view = await this.options.store.getView(sessionId);
+    if (view.runs.some((run) => run.isActive)) return;
+    const first = view.runs[0];
+    const origin = first ? await this.options.store.getCommand(first.originCommandId) : null;
+    if (!origin) return;
+    const state = await this.options.store.readHumanWorkState({
+      expectedStoreId: view.storeId,
+      sessionId,
+      subjectId: origin.subjectId,
+    });
+    for (const id of state.pendingInputIds) {
+      const raw = await this.options.store.getCommand(id);
+      if (!raw || (raw.receipt as { state?: string }).state !== 'pending') continue;
+      try {
+        await this.options.store.beginHumanInputProcessing({
+          expectedStoreId: view.storeId,
+          sessionId,
+          subjectId: raw.subjectId,
+          inputCommandId: raw.id,
+          inputDigest: raw.requestDigest,
+        });
+      } catch (error) {
+        // Intake can seal an exact business decision or refusal after this pending read.
+        // Only that durable outcome supersedes preparation; SQL still rejects
+        // cancelled inputs, changed selections and unverifiable decisions.
+        if (
+          !(error instanceof AgentError) ||
+          error.code !== 'input_processing_unavailable' ||
+          (!(await this.hasCommittedHumanBusinessDecision(raw)) &&
+            !(await this.hasCommittedHumanRejection(raw)))
+        )
+          throw error;
+      }
+      return;
+    }
+  }
+  private async hasCommittedHumanRejection(original: CommandRecord): Promise<boolean> {
+    const raw = await this.options.store.getCommand(original.id);
+    const session = await this.options.store.getSession(original.sessionId);
+    const sameScope = (command: CommandRecord | null): command is CommandRecord =>
+      !!command &&
+      command.originStoreId === original.originStoreId &&
+      command.sessionId === original.sessionId &&
+      command.subjectId === original.subjectId &&
+      command.cancelRequestedAt === null;
+    const body = raw?.request as Record<string, Json> | null;
+    const fact = raw?.receipt as Record<string, Json> | null;
+    if (
+      !sameScope(raw) ||
+      raw.kind !== 'human.input' ||
+      raw.status !== 'applied' ||
+      raw.requestDigest !== original.requestDigest ||
+      !session ||
+      session.parentSessionId !== null ||
+      session.deletedAt !== null ||
+      session.contextSelectionId !== body?.contextSelectionId ||
+      fact?.state !== 'decided' ||
+      fact.applicationState !== 'rejected' ||
+      fact.businessCommandId !== null ||
+      typeof fact.decisionCommandId !== 'string' ||
+      typeof fact.controlRevision !== 'string' ||
+      !/^(0|[1-9][0-9]*)$/.test(fact.controlRevision) ||
+      BigInt(fact.controlRevision) > BigInt(session.controlRevision) ||
+      typeof body?.publicCommandId !== 'string'
+    )
+      return false;
+    const decision = await this.options.store.getCommand(fact.decisionCommandId);
+    const publicCommand = await this.options.store.getCommand(body.publicCommandId);
+    const input = decision?.request as Record<string, Json> | null;
+    const receipt = decision?.receipt as Record<string, Json> | null;
+    const proposal = input?.proposal as Record<string, Json> | undefined;
+    const basis = proposal?.basis as Record<string, Json> | undefined;
+    const proof = fact.rejection as Record<string, Json> | undefined;
+    return !!(
+      sameScope(decision) &&
+      decision.kind === 'human.input.decision' &&
+      decision.status === 'rejected' &&
+      decision.requestDigest === (await semanticDigest(decision.request)) &&
+      input?.inputCommandId === raw.id &&
+      input.inputDigest === raw.requestDigest &&
+      proposal?.relation === 'same_work' &&
+      proposal.purpose === 'continue' &&
+      proposal.selectionEffect === 'select_work' &&
+      basis?.instruction === body.content &&
+      receipt?.purpose === 'continue' &&
+      receipt.selectionEffect === 'keep' &&
+      receipt.targetRootWorkCommandId === proposal.targetRootWorkCommandId &&
+      receipt.businessCommandId === null &&
+      receipt.controlRevision === fact.controlRevision &&
+      receipt.requiresReadOnlyProcessing === false &&
+      proof?.outcome === 'human_input_rejected' &&
+      ['work_resume_unavailable', 'work_resume_outcome_unknown', 'execution_group_fenced'].includes(
+        String(proof.reason),
+      ) &&
+      proof.humanInputCommandId === raw.id &&
+      proof.decisionCommandId === decision.id &&
+      proof.businessCommandId === null &&
+      proof.runId === null &&
+      proof.controlRevision === fact.controlRevision &&
+      canonicalJson(receipt.rejection ?? null) === canonicalJson(proof) &&
+      sameScope(publicCommand) &&
+      publicCommand.status === 'rejected' &&
+      canonicalJson(publicCommand.request) === canonicalJson(body.originalRequest ?? null) &&
+      canonicalJson(publicCommand.receipt) === canonicalJson(proof)
+    );
+  }
+  private async hasCommittedHumanBusinessDecision(original: CommandRecord): Promise<boolean> {
+    const raw = await this.options.store.getCommand(original.id);
+    const session = await this.options.store.getSession(original.sessionId);
+    const sameScope = (command: CommandRecord | null): command is CommandRecord =>
+      !!command &&
+      command.originStoreId === original.originStoreId &&
+      command.sessionId === original.sessionId &&
+      command.subjectId === original.subjectId &&
+      command.cancelRequestedAt === null;
+    const input = raw?.request as {
+      content?: string;
+      contextSelectionId?: string;
+      publicCommandId?: string;
+      originalRequest?: Json;
+    } | null;
+    const fact = raw?.receipt as {
+      state?: string;
+      applicationState?: string;
+      decisionCommandId?: string;
+      businessCommandId?: string;
+      controlRevision?: string;
+    } | null;
+    if (
+      !sameScope(raw) ||
+      raw.kind !== 'human.input' ||
+      raw.status !== 'applied' ||
+      raw.requestDigest !== original.requestDigest ||
+      !session ||
+      session.parentSessionId !== null ||
+      session.deletedAt !== null ||
+      session.contextSelectionId !== input?.contextSelectionId ||
+      fact?.state !== 'decided' ||
+      !['queued', 'applied'].includes(fact.applicationState ?? '') ||
+      typeof fact.decisionCommandId !== 'string' ||
+      typeof fact.businessCommandId !== 'string' ||
+      typeof fact.controlRevision !== 'string' ||
+      !/^(0|[1-9][0-9]*)$/.test(fact.controlRevision) ||
+      BigInt(fact.controlRevision) > BigInt(session.controlRevision)
+    )
+      return false;
+    try {
+      await this.options.store.readHumanWorkState({
+        expectedStoreId: original.originStoreId,
+        sessionId: original.sessionId,
+        subjectId: original.subjectId,
+      });
+    } catch {
+      return false;
+    }
+    const decision = await this.options.store.getCommand(fact.decisionCommandId);
+    const decisionInput = decision?.request as {
+      inputCommandId?: string;
+      inputDigest?: string;
+      proposal?: { relation?: string; purpose?: string };
+    } | null;
+    const decisionFact = decision?.receipt as {
+      businessCommandId?: string;
+      controlRevision?: string;
+      requiresReadOnlyProcessing?: boolean;
+    } | null;
+    const business = await this.options.store.getCommand(fact.businessCommandId);
+    const businessInput = business?.request as {
+      content?: string;
+      contextSelectionId?: string;
+    } | null;
+    const businessFact = business?.receipt as {
+      inputCommandId?: string;
+      humanInputCommandId?: string;
+      decisionCommandId?: string;
+      outcome?: string;
+    } | null;
+    if (
+      !sameScope(decision) ||
+      decision.kind !== 'human.input.decision' ||
+      decision.status !== 'applied' ||
+      decisionInput?.inputCommandId !== raw.id ||
+      decisionInput.inputDigest !== raw.requestDigest ||
+      !['same_work', 'independent_work'].includes(decisionInput.proposal?.relation ?? '') ||
+      !['work', 'continue', 'replace'].includes(decisionInput.proposal?.purpose ?? '') ||
+      decisionFact?.businessCommandId !== fact.businessCommandId ||
+      decisionFact.controlRevision !== fact.controlRevision ||
+      decisionFact.requiresReadOnlyProcessing !== false ||
+      !sameScope(business) ||
+      !['accepted', 'applied'].includes(business.status) ||
+      !['input.steer', 'input.follow_up'].includes(business.kind) ||
+      business.rootWorkCommandId !== decision.rootWorkCommandId ||
+      business.rootWorkSeq !== decision.rootWorkSeq ||
+      businessInput?.content !== input.content ||
+      businessInput?.contextSelectionId !== session.contextSelectionId ||
+      businessFact?.outcome !==
+        (business.status === 'accepted' ? 'human_business_queued' : 'input_applied') ||
+      (businessFact?.inputCommandId ?? businessFact?.humanInputCommandId) !== raw.id ||
+      businessFact?.decisionCommandId !== decision.id
+    )
+      return false;
+    if (typeof input.publicCommandId !== 'string') return false;
+    const publicCommand = await this.options.store.getCommand(input.publicCommandId);
+    const publicFact = publicCommand?.receipt as {
+      humanInputCommandId?: string;
+      decisionCommandId?: string;
+      businessCommandId?: string;
+      outcome?: string;
+    } | null;
+    return (
+      sameScope(publicCommand) &&
+      ['accepted', 'applied'].includes(publicCommand.status) &&
+      publicFact?.outcome ===
+        (publicCommand.status === 'accepted' ? 'human_input_queued' : 'human_input_applied') &&
+      canonicalJson(publicCommand.request) === canonicalJson(input.originalRequest ?? null) &&
+      publicFact?.humanInputCommandId === raw.id &&
+      publicFact.decisionCommandId === decision.id &&
+      publicFact.businessCommandId === business.id
+    );
+  }
   async submitCommand(input: AcceptCommandInput): Promise<CommandRecord> {
     if (
       ![
@@ -4057,7 +4674,80 @@ export class AgentRuntime {
     if (input.request.kind === 'extension.invoke' && !existing)
       this.extensionHost.validateAction(input.request);
     if (this.closing) throw new AgentError('runtime_draining');
-    const command = await this.options.store.acceptCommand(input);
+    const human = ['run.start', 'input.steer', 'input.follow_up'].includes(input.request.kind);
+    const state = human
+      ? await this.options.store.readHumanWorkState({
+          expectedStoreId: input.expectedStoreId,
+          sessionId: input.sessionId,
+          subjectId: input.subjectId,
+        })
+      : null;
+    // The first explicit work is already an unambiguous independent intention.
+    // Later input is registered before interpretation or any business dispatch.
+    let bridge: import('./storage/human-work-control').RegisterHumanCommand = input;
+    let needsHumanBridge = false;
+    if (human && state) {
+      const candidates = await this.humanCandidates(input.sessionId, state.selectedWork);
+      const proposal = directHumanInputProposal({
+        content: (input.request as { content: string }).content,
+        kind: input.request.kind as 'run.start' | 'input.steer' | 'input.follow_up',
+        selectedWork: state.selectedWork,
+        candidates,
+        hasPendingClarifications: state.pendingInputIds.length > 0,
+      });
+      needsHumanBridge =
+        !!state.selectedWork ||
+        state.pendingInputIds.length > 0 ||
+        !proposal ||
+        ['progress', 'clarify'].includes(proposal.purpose);
+      const candidateWorkCommandIds =
+        proposal?.relation === 'same_work' && proposal.targetRootWorkCommandId
+          ? [proposal.targetRootWorkCommandId]
+          : !proposal
+            ? candidates.map((candidate) => candidate.rootWorkCommandId)
+            : state.selectedWork
+              ? [state.selectedWork.rootWorkCommandId]
+              : [];
+      bridge = { ...input, candidateWorkCommandIds };
+      if (
+        proposal?.relation === 'same_work' &&
+        (explicitHumanConfirmationTarget(
+          (input.request as { content: string }).content,
+          candidates,
+        ) === proposal.targetRootWorkCommandId ||
+          /^(?:我指|指的是|就是|补充|更正|澄清|clarif|i\s+mean)/i.test(
+            (input.request as { content: string }).content.trim(),
+          ))
+      ) {
+        const pending = await Promise.all(
+          state.pendingInputIds.map((id) => this.options.store.getCommand(id)),
+        );
+        const matching = pending.filter(
+          (raw) =>
+            raw &&
+            (raw.receipt as { state?: string }).state === 'unresolved' &&
+            (
+              raw?.receipt as { candidateWorkCommandIds?: string[] }
+            ).candidateWorkCommandIds?.includes(proposal.targetRootWorkCommandId!),
+        );
+        if (matching.length === 1) bridge.clarifiesInputId = matching[0]!.id;
+      }
+    }
+    let command = needsHumanBridge
+      ? await this.options.store.registerHumanCommand(bridge)
+      : await this.options.store.acceptCommand(input);
+    if (
+      human &&
+      (command.receipt as { humanInputCommandId?: string } | null)?.humanInputCommandId
+    ) {
+      // A local metadata failure never admits business work or changes its outcome.
+      // Await this trusted Host boundary before capturing the interpretation revision.
+      await this.options.sessionInputMetadata
+        ?.preserve(freeze(structuredClone(command)))
+        .catch(() => {});
+      await this.routeHumanCommand(command);
+      command = (await this.options.store.getCommand(command.id))!;
+    }
     // Acceptance may already be durable when sealing happens. It grants no local
     // execution ownership: a surviving legitimate owner may still advance it.
     if (this.closing) return command;
@@ -4286,7 +4976,16 @@ export class AgentRuntime {
   private async releaseOwner(owner: OwnerRef): Promise<boolean> {
     // A terminal ledger cannot prove that hot configuration cleanup has ended.
     // Host retains this owner until its operations and their disposers have settled.
-    if (this.hasUnconfirmedCleanup() || this.extensionHost.hasActiveOperations(owner.sessionId))
+    if (
+      this.hasUnconfirmedCleanup() ||
+      this.extensionHost.hasActiveOperations(owner.sessionId) ||
+      [...this.active.values()].some(
+        (live) =>
+          live.owner.sessionId === owner.sessionId &&
+          live.owner.instanceId === owner.instanceId &&
+          live.owner.generation === owner.generation,
+      )
+    )
       return false;
     const key = this.ownerReleaseKey(owner);
     try {
@@ -4324,6 +5023,7 @@ export class AgentRuntime {
   private async pumpOwned(sessionId: string, owner: OwnerRef): Promise<void> {
     while (!this.closing) {
       if (this.hasUnconfirmedCleanup()) throw new AgentError('shutdown_cleanup_unconfirmed');
+      await this.preparePendingHumanInputs(sessionId);
       // Recovery query receipts never become ordinary model work, including accepted unknowns.
       const commands = (await this.options.store.listAcceptedCommands(sessionId, 32)).filter(
         (command) => command.kind !== 'job.reconcile',
@@ -4357,14 +5057,7 @@ export class AgentRuntime {
           });
           continue;
         }
-        if (command.kind === 'job.report') {
-          const parentRun = await this.options.store.getRun(
-            (command.request as { parentRunId: string }).parentRunId,
-          );
-          if (parentRun?.isActive) {
-            this.pendingSessions.add(sessionId);
-            return;
-          }
+        if (command.kind === 'job.report' || command.kind === 'job.report.continue') {
           await this.runJobReport(command, owner);
           continue;
         }
@@ -4449,7 +5142,13 @@ export class AgentRuntime {
       !execution ||
       !run ||
       !session ||
-      !['run.start', 'input.follow_up', 'child.start'].includes(scope.command.kind) ||
+      ![
+        'run.start',
+        'input.follow_up',
+        'child.start',
+        'job.report',
+        'job.report.continue',
+      ].includes(scope.command.kind) ||
       !policy ||
       execution.kind !== 'tool' ||
       execution.originCommandId !== scope.command.id ||
@@ -4477,16 +5176,250 @@ export class AgentRuntime {
     if (!execution || !fact?.parentRunId) return;
     const commandId = `report-${await semanticDigest([execution.originStoreId, id, execution.resultRevision])}`;
     const command = await this.options.store.getCommand(commandId);
-    if (command?.status !== 'accepted' || this.closing) return;
+    if (this.closing) return;
+    const pending: CommandRecord[] = command?.status === 'accepted' ? [command] : [];
+    let afterSeq = '0';
+    for (;;) {
+      const page = await this.options.store.listPendingJobReports({
+        expectedStoreId: execution.originStoreId,
+        sessionId: execution.sessionId,
+        afterSeq,
+        limit: 100,
+      });
+      for (const continued of page.commands) {
+        if (
+          continued.kind === 'job.report.continue' &&
+          (continued.request as { originalReportCommandId?: string }).originalReportCommandId ===
+            commandId
+        )
+          pending.push(continued);
+      }
+      if (page.nextAfterSeq === null) break;
+      afterSeq = page.nextAfterSeq;
+    }
     const retained = this.runBindingLeases.get(fact.parentRunId);
-    if (!retained || this.reportBindings.has(commandId)) return;
-    this.reportBindings.set(commandId, { binding: retained.binding, release: retained.retain() });
-    this.schedule(scope.command.sessionId);
+    if (!retained) return;
+    for (const report of pending) {
+      if (!this.reportBindings.has(report.id))
+        this.reportBindings.set(report.id, {
+          binding: retained.binding,
+          release: retained.retain(),
+        });
+    }
+    if (pending.length) this.schedule(scope.command.sessionId);
+  }
+  private watchDeferredReport(command: CommandRecord): void {
+    if (this.closing || this.deferredReports.has(command.id)) return;
+    const controller = new AbortController();
+    const task = (async () => {
+      while (!this.closing) {
+        controller.signal.throwIfAborted();
+        // Read the durable change position before the predicate. A change between
+        // these reads remains visible to the next bounded wait.
+        const cursor = (await this.options.store.getMetadata()).lastChangeCursor;
+        const current = await this.options.store.getCommand(command.id);
+        if (current?.status !== 'accepted') return;
+        const runnable = await this.options.store.listAcceptedCommands(command.sessionId, 200);
+        if (runnable.some((item) => item.id === command.id)) {
+          this.pendingSessions.add(command.sessionId);
+          this.schedule(command.sessionId);
+          return;
+        }
+        const waiting = this.changeWaits.wait(cursor, controller.signal, 30000);
+        this.watchControls();
+        await waiting;
+      }
+    })()
+      .catch((error) => {
+        if (!this.closing && !controller.signal.aborted)
+          this.stopDispatchPolling(command.sessionId, error);
+      })
+      .finally(() => {
+        if (this.deferredReports.get(command.id)?.controller === controller)
+          this.deferredReports.delete(command.id);
+      });
+    this.deferredReports.set(command.id, { controller, task });
+  }
+  private async releaseReportBinding(commandId: string) {
+    const retained = this.reportBindings.get(commandId);
+    if (retained && this.reportBindings.delete(commandId)) await retained.release();
+  }
+  /** Safe active checkpoint: each result keeps its own Source and durable ack. */
+  private async applyJobReportWithReceipt(input: Parameters<Store['applyJobReport']>[0]) {
+    try {
+      return await this.options.store.applyJobReport(input);
+    } catch (error) {
+      // Recover only this invocation's committed receipt. Repeating the same
+      // Store admission takes its applied/read-only branch; it cannot choose a
+      // different Run or publish another Source.
+      const original = await this.options.store.getCommand(input.commandId).catch(() => null);
+      if (original?.status !== 'applied') throw error;
+      const result = await this.options.store.applyJobReport(input);
+      const receipt = result.command.receipt as {
+        runId?: string;
+        sourceId?: string;
+        executionId?: string;
+        resultRevision?: string;
+        generation?: string;
+        mode?: string;
+      };
+      const execution = receipt.executionId
+        ? await this.options.store.getExecution(receipt.executionId)
+        : null;
+      if (
+        !result.run ||
+        result.command.id !== original.id ||
+        result.command.originStoreId !== input.expectedStoreId ||
+        receipt.runId !== result.run.id ||
+        receipt.generation !== input.owner.generation ||
+        result.run.sessionId !== result.command.sessionId ||
+        result.run.originStoreId !== input.expectedStoreId ||
+        result.run.rootWorkCommandId !== result.command.rootWorkCommandId ||
+        result.run.rootWorkSeq !== result.command.rootWorkSeq ||
+        execution?.resultAcceptance?.runId !== result.run.id ||
+        execution.resultAcceptance.sourceId !== receipt.sourceId ||
+        execution.resultAcceptance.resultRevision !== receipt.resultRevision ||
+        execution.resultRevision !== receipt.resultRevision
+      )
+        throw new AgentError('report_application_unverifiable');
+      return {
+        ...result,
+        started:
+          receipt.mode === 'idle_new_turn' &&
+          result.run.isActive &&
+          result.run.originCommandId === result.command.id &&
+          !this.runBindingLeases.has(result.run.id),
+      };
+    }
+  }
+  private async carriedAgentMessageIds(
+    command: CommandRecord,
+    execution: ExecutionRecord,
+    signal: AbortSignal,
+  ): Promise<string[]> {
+    if (
+      !execution.childSessionId ||
+      !execution.result ||
+      typeof execution.result !== 'object' ||
+      Array.isArray(execution.result)
+    )
+      return [];
+    const eligibility = await this.options.store.readHumanWorkEligibility({
+      expectedStoreId: command.originStoreId,
+      sessionId: command.sessionId,
+      subjectId: command.subjectId,
+      rootWorkCommandId: command.rootWorkCommandId,
+      rootWorkSeq: command.rootWorkSeq,
+    });
+    if (eligibility.state !== 'eligible') return [];
+    const result = execution.result as Record<string, Json>;
+    const complete = result.modelContent
+      ? await this.resultModelContent(execution, result, command.originStoreId, signal)
+      : typeof result.content === 'string'
+        ? result.content
+        : '';
+    if (!complete) return [];
+    const ids: string[] = [];
+    let afterSeq = '0',
+      upperSeq: string | undefined;
+    for (;;) {
+      const page = await this.options.store.listAgentMessages({
+        expectedStoreId: command.originStoreId,
+        sessionId: command.sessionId,
+        subjectId: command.subjectId,
+        confirmedOnly: true,
+        pendingOnly: true,
+        afterSeq,
+        ...(upperSeq === undefined ? {} : { upperSeq }),
+        limit: 100,
+      });
+      upperSeq ??= page.upperSeq;
+      for (const mail of page.items) {
+        if (
+          mail.state !== 'accepted' ||
+          mail.sourceSessionId !== execution.childSessionId ||
+          mail.targetRunId !== null
+        )
+          continue;
+        const original = await this.options.store.getCommand(mail.id);
+        if (
+          (original?.request as { carrierExecutionId?: string } | null)?.carrierExecutionId !==
+            execution.id ||
+          original?.rootWorkCommandId !== execution.rootWorkCommandId ||
+          original.rootWorkSeq !== execution.rootWorkSeq
+        )
+          continue;
+        const body = utf8Body(await this.readBody(mail.body, signal, command.originStoreId));
+        if (body.length && complete.includes(body)) ids.push(mail.id);
+        if (ids.length === 100) return ids;
+      }
+      if (page.nextAfterSeq === null) return ids;
+      afterSeq = page.nextAfterSeq;
+    }
+  }
+  private async receiveReports(
+    run: RunRecord,
+    owner: OwnerRef,
+    signal: AbortSignal,
+  ): Promise<number> {
+    let received = 0,
+      afterSeq = '0';
+    let upperSeq: string | undefined;
+    for (;;) {
+      signal.throwIfAborted();
+      const page = await this.options.store.listPendingJobReports({
+        expectedStoreId: run.originStoreId,
+        sessionId: run.sessionId,
+        afterSeq,
+        ...(upperSeq === undefined ? {} : { upperSeq }),
+        limit: 100,
+      });
+      upperSeq ??= page.upperSeq;
+      for (const command of page.commands) {
+        if (
+          command.rootWorkCommandId !== run.rootWorkCommandId ||
+          command.rootWorkSeq !== run.rootWorkSeq
+        )
+          continue;
+        const carrier = await this.options.store.getExecution(
+          (command.request as { executionId: string }).executionId,
+        );
+        if (
+          !carrier ||
+          (carrier.afterTurn as { kind?: string } | null)?.kind !== 'agent_completion'
+        )
+          continue;
+        const carriedMessageIds = await this.carriedAgentMessageIds(command, carrier, signal);
+        const applied = await this.applyJobReportWithReceipt({
+          expectedStoreId: run.originStoreId,
+          owner,
+          commandId: command.id,
+          authorization: null,
+          activeOnly: true,
+          carriedMessageIds,
+        });
+        if (applied.command.status === 'applied') {
+          received++;
+          await this.releaseReportBinding(command.id);
+        } else if (applied.command.status === 'accepted') this.watchDeferredReport(applied.command);
+        else await this.releaseReportBinding(command.id);
+      }
+      if (page.nextAfterSeq === null) return received;
+      afterSeq = page.nextAfterSeq;
+    }
   }
   private async runJobReport(command: CommandRecord, owner: OwnerRef) {
     let retained = this.reportBindings.get(command.id);
+    const originalReportCommandId = (command.request as { originalReportCommandId?: string })
+      .originalReportCommandId;
+    if (!retained && command.kind === 'job.report.continue' && originalReportCommandId) {
+      retained = this.reportBindings.get(originalReportCommandId);
+      if (retained) {
+        this.reportBindings.delete(originalReportCommandId);
+        this.reportBindings.set(command.id, retained);
+      }
+    }
     if (!retained) {
-      // Terminal SQL can be visible before its observer transfers the exact parent lease.
       const parentRunId = (command.request as { parentRunId?: string }).parentRunId;
       const parent = parentRunId && this.runBindingLeases.get(parentRunId);
       if (parent) {
@@ -4494,20 +5427,54 @@ export class AgentRuntime {
         this.reportBindings.set(command.id, retained);
       }
     }
-    if (!retained) {
-      await this.options.store.rejectCommand({
-        expectedStoreId: command.originStoreId,
-        owner,
-        commandId: command.id,
-        reason: 'report_recovery_required',
-        needsReview: true,
-      });
-      return;
-    }
     const controller = new AbortController();
     const release = this.trackLive(command, owner, controller);
     let deferred = false;
     try {
+      const originalCarrier = await this.options.store.getExecution(
+        (command.request as { executionId: string }).executionId,
+      );
+      const collaboration =
+        (originalCarrier?.afterTurn as { kind?: string } | null)?.kind === 'agent_completion';
+      const carriedMessageIds =
+        collaboration && originalCarrier
+          ? await this.carriedAgentMessageIds(command, originalCarrier, controller.signal)
+          : [];
+      if (collaboration) {
+        const active = await this.applyJobReportWithReceipt({
+          expectedStoreId: command.originStoreId,
+          owner,
+          commandId: command.id,
+          authorization: null,
+          activeOnly: true,
+          carriedMessageIds,
+        });
+        if (active.command.status !== 'accepted') return;
+        const reason = (active.command.receipt as { reason?: string }).reason;
+        if (reason !== 'idle_authorization_required') {
+          deferred = true;
+          this.watchDeferredReport(active.command);
+          return;
+        }
+      } else {
+        const parent = await this.options.store.getRun(
+          (command.request as { parentRunId: string }).parentRunId,
+        );
+        if (parent?.isActive) {
+          deferred = true;
+          return;
+        }
+      }
+      if (!retained) {
+        await this.options.store.rejectCommand({
+          expectedStoreId: command.originStoreId,
+          owner,
+          commandId: command.id,
+          reason: 'report_recovery_required',
+          needsReview: true,
+        });
+        return;
+      }
       const request = command.request as { executionId: string; parentRunId: string };
       const carrier = await this.options.store.getExecution(request.executionId);
       const fact = carrier?.afterTurn as {
@@ -4543,13 +5510,15 @@ export class AgentRuntime {
             ...(decision.controlReads ? { controlReads: decision.controlReads } : {}),
           };
       }
-      const applied = await this.options.store.applyJobReport({
+      const applied = await this.applyJobReportWithReceipt({
         expectedStoreId: command.originStoreId,
         owner,
         commandId: command.id,
         authorization,
+        carriedMessageIds,
       });
       if (applied.started && applied.run) {
+        if (this.runBindingLeases.has(applied.run.id)) return;
         this.reportBindings.delete(command.id);
         await this.executeRun(
           applied.command,
@@ -4560,13 +5529,17 @@ export class AgentRuntime {
         );
         return;
       }
+      if (applied.command.status === 'accepted') {
+        deferred = true;
+        this.watchDeferredReport(applied.command);
+      }
     } catch (error) {
       if (
         error instanceof AgentError &&
-        ['report_parent_active', 'session_busy', 'execution_group_fenced'].includes(error.code)
+        ['session_busy', 'execution_group_fenced'].includes(error.code)
       ) {
         deferred = true;
-        this.pendingSessions.add(command.sessionId);
+        this.watchDeferredReport(command);
         return;
       }
       await this.options.store.rejectCommand({
@@ -4578,7 +5551,7 @@ export class AgentRuntime {
       });
     } finally {
       release();
-      if (!deferred && this.reportBindings.delete(command.id)) await retained.release();
+      if (!deferred) await this.releaseReportBinding(command.id);
     }
   }
   private async runLifecycleActions(
@@ -4591,6 +5564,7 @@ export class AgentRuntime {
     // Pair both business hooks on explicit input. Internal child.start/job.report
     // Runs have observations, but cannot recursively dispatch lifecycle Actions.
     if (origin.kind !== 'run.start' && origin.kind !== 'input.follow_up') return;
+    if (await this.inputProcessingCommand(origin, run ?? undefined)) return;
     // These persisted keys predate the public callback names. Keep their original
     // values so a rename cannot create a second Command for already accepted work.
     const phase = hook === 'beforeRun' ? 'before_start' : 'before_complete';
@@ -4654,6 +5628,7 @@ export class AgentRuntime {
     }
   }
   private async run(command: CommandRecord, owner: OwnerRef): Promise<void> {
+    const processing = await this.inputProcessingCommand(command);
     let modelId =
       (command.request as { modelId?: string }).modelId ?? this.options.modelId ?? 'fixed';
     let model = this.options.model;
@@ -4671,7 +5646,36 @@ export class AgentRuntime {
     let dispose: (() => Promise<void>) | undefined;
     let run: RunRecord;
     let preparationResources: RunConfiguration | undefined;
+    let continuationRun: RunRecord | null = null;
     try {
+      const queued = command.receipt as { decisionCommandId?: string } | null;
+      if (!processing && queued?.decisionCommandId) {
+        const decision = await this.options.store.getCommand(queued.decisionCommandId);
+        const fact = decision?.receipt as {
+          businessCommandId?: string;
+          continuationRunId?: string | null;
+          configuration?: Json;
+        } | null;
+        if (
+          decision?.kind !== 'human.input.decision' ||
+          decision.sessionId !== command.sessionId ||
+          decision.subjectId !== command.subjectId ||
+          fact?.businessCommandId !== command.id
+        )
+          throw new AgentError('input_proposal_unverifiable');
+        if (fact.continuationRunId) {
+          continuationRun = await this.options.store.getRun(fact.continuationRunId);
+          if (
+            !continuationRun ||
+            continuationRun.originStoreId !== command.originStoreId ||
+            continuationRun.sessionId !== command.sessionId ||
+            continuationRun.rootWorkCommandId !== command.rootWorkCommandId ||
+            continuationRun.rootWorkSeq !== command.rootWorkSeq ||
+            canonicalJson(continuationRun.configuration) !== canonicalJson(fact.configuration!)
+          )
+            throw new AgentError('work_configuration_unverifiable');
+        }
+      }
       await this.runLifecycleActions('beforeRun', command, owner, null);
       let snapshot: Json = null;
       if (
@@ -4686,18 +5690,72 @@ export class AgentRuntime {
         !this.supportsExtensionInputs
       )
         throw new AgentError('extension_inputs_unavailable');
-      if (this.options.resolveRunConfiguration) {
+      if (this.options.resolveRunConfiguration || continuationRun) {
         const session = await this.options.store.getSession(command.sessionId);
         if (!session) throw new AgentError('session_not_found');
         const workspace = await this.options.store.getWorkspace(session.workspaceId);
         if (!workspace) throw new AgentError('workspace_not_found');
-        const resolved = await this.resolvePreparation(() =>
-          this.options.resolveRunConfiguration!({
-            command: structuredClone(command),
-            session,
-            workspace,
-          }),
-        );
+        const retained = continuationRun && this.runBindingLeases.get(continuationRun.id);
+        const manifest = continuationRun?.configuration as
+          | { modelId?: string; snapshot?: Json; tools?: { id: string }[] }
+          | undefined;
+        let resolved: RunConfiguration;
+        if (retained && manifest) {
+          resolved = {
+            ...retained.binding,
+            snapshot: manifest.snapshot ?? null,
+            toolIds: manifest.tools?.map((tool) => tool.id) ?? [],
+            extensions: retained.binding.extensions?.filter(
+              (extension) => !this.extensions.some((base) => base.id === extension.id),
+            ),
+            dispose: retained.retain(),
+          };
+        } else if (continuationRun && this.options.resolveRecoveryRunConfiguration) {
+          const original = await this.options.store.getCommand(continuationRun.originCommandId);
+          if (!original) throw new AgentError('work_configuration_unverifiable');
+          const signal = new AbortController().signal;
+          resolved = await this.resolvePreparation(() =>
+            this.options.resolveRecoveryRunConfiguration!({
+              command: original,
+              run: continuationRun!,
+              session,
+              workspace,
+              signal,
+            }),
+          );
+        } else if (continuationRun && this.options.resolveRunConfiguration) {
+          throw new AgentError('work_configuration_unverifiable');
+        } else if (continuationRun && manifest) {
+          resolved = {
+            model,
+            modelId: manifest.modelId ?? modelId,
+            snapshot: manifest.snapshot ?? null,
+            toolIds: manifest.tools?.map((tool) => tool.id) ?? [],
+            extensions: bindings.extensions.filter(
+              (extension) => !this.extensions.some((base) => base.id === extension.id),
+            ),
+            afterTurn,
+            authorizationReview,
+            permissions,
+            sources,
+            conditions,
+            initializeRequirements,
+            compressor,
+          };
+        } else
+          resolved = await this.resolvePreparation(() =>
+            this.options.resolveRunConfiguration!({
+              command: structuredClone(command),
+              session,
+              workspace,
+            }),
+          );
+        if (processing)
+          resolved = createHumanInputProcessingConfiguration(
+            resolved,
+            processing,
+            resolved.permissions ?? this.options.permissions,
+          );
         preparationResources = resolved;
         dispose = this.preparationDisposer(resolved);
         model = resolved.model;
@@ -4714,6 +5772,28 @@ export class AgentRuntime {
         snapshot = structuredClone(resolved.snapshot);
         bindings = this.runDefinitions(resolved.extensions, resolved.toolIds);
         definitions = bindings.definitions;
+      }
+      if (processing && !this.options.resolveRunConfiguration) {
+        const resolved = createHumanInputProcessingConfiguration(
+          { model, modelId, snapshot, sources, permissions },
+          processing,
+          permissions ?? this.options.permissions,
+        );
+        sources = resolved.sources;
+        permissions = resolved.permissions;
+        snapshot = resolved.snapshot;
+        bindings = this.runDefinitions([], []);
+        definitions = bindings.definitions;
+        afterTurn = undefined;
+        authorizationReview = undefined;
+        initializeRequirements = undefined;
+      }
+      if (processing) {
+        afterTurn = undefined;
+        authorizationReview = undefined;
+        initializeRequirements = undefined;
+        conditions = undefined;
+        readStepCapabilities = undefined;
       }
       if (!model) throw new AgentError('model_unavailable');
       const configuration = this.configurationSnapshot(
@@ -4762,7 +5842,9 @@ export class AgentRuntime {
       });
       return;
     }
+    command = (await this.options.store.getCommand(command.id))!;
     await this.executeRun(command, owner, run, {
+      ...(processing ? { humanInputProcessing: processing } : {}),
       model,
       modelId,
       definitions,
@@ -5002,6 +6084,8 @@ export class AgentRuntime {
       }
       let inputVersion = 0;
       let capturedInputVersion = 0;
+      let inboxVersion = 0;
+      let capturedInboxVersion = 0;
       let inputTask: Promise<number> | undefined;
       const applySteer = () => {
         if (inputTask) return inputTask;
@@ -5048,7 +6132,9 @@ export class AgentRuntime {
             }
             if (!page.nextAfterSeq) break;
           }
-          return applied + (await applyMail());
+          const reports = await this.receiveReports(run, owner, controller.signal);
+          if (reports) inboxVersion++;
+          return applied + (await applyMail()) + reports;
         })().finally(() => {
           inputTask = undefined;
         });
@@ -5098,7 +6184,7 @@ export class AgentRuntime {
           : { receivedSeq };
         if (observed.receivedSeq !== observedMailSeq) {
           observedMailSeq = observed.receivedSeq;
-          inputVersion++;
+          inboxVersion++;
           return 1;
         }
         return 0;
@@ -5182,6 +6268,9 @@ export class AgentRuntime {
             contextSelectionId: run.contextSelectionId,
             sourceRequestJournal: sourceRequestJournal as unknown as Json,
             toolFailureStreak: { ...failureStreak },
+            ...(binding.humanInputProcessing && humanInterpretation
+              ? { humanInputProcessingContext: humanInterpretation as unknown as Json }
+              : {}),
           };
         }
         return {
@@ -5192,7 +6281,52 @@ export class AgentRuntime {
             .filter(([key]) => key !== 'model')
             .map(([, request]) => request as unknown as Json),
           toolFailureStreak: { ...failureStreak },
+          ...(binding.humanInputProcessing && humanInterpretation
+            ? { humanInputProcessingContext: humanInterpretation as unknown as Json }
+            : {}),
         };
+      };
+      let humanInterpretation = binding.humanInputProcessing;
+      const savedProcessing = (
+        resumed?.modelSource?.continuation as
+          | { humanInputProcessingContext?: HumanInputProcessingContext }
+          | undefined
+      )?.humanInputProcessingContext;
+      if (binding.humanInputProcessing && savedProcessing) {
+        if (
+          savedProcessing.inputCommandId !== binding.humanInputProcessing.inputCommandId ||
+          savedProcessing.inputDigest !== binding.humanInputProcessing.inputDigest ||
+          savedProcessing.content !== binding.humanInputProcessing.content
+        )
+          throw new AgentError('run_continuation_invalid');
+        humanInterpretation = structuredClone(savedProcessing);
+      }
+      let childWorkObservation:
+        | (import('./storage/human-work-control').HumanWorkEligibility & { cursor: string })
+        | undefined;
+      const childWorkEligibility = () =>
+        this.options.store.readHumanWorkEligibility({
+          expectedStoreId: run.originStoreId,
+          sessionId: run.sessionId,
+          subjectId: command.subjectId,
+          rootWorkCommandId: run.rootWorkCommandId,
+          rootWorkSeq: run.rootWorkSeq,
+          contextSelectionId: run.contextSelectionId,
+        });
+      const waitForChildWork = async (signal: AbortSignal) => {
+        if (session.parentSessionId === null) return;
+        for (;;) {
+          signal.throwIfAborted();
+          const state = await childWorkEligibility();
+          if (state.state === 'eligible') return;
+          if (
+            !['input_unresolved', 'work_not_selected', 'work_paused'].includes(state.reason ?? '')
+          )
+            throw new AgentError(state.reason ?? 'human_work_blocked');
+          const waiting = this.changeWaits.wait(state.cursor, signal, 30000);
+          this.watchControls();
+          await waiting;
+        }
       };
       let captured: ContextSource[] = [];
       let capturedRequests = new Map<string, SourceRequest>();
@@ -5210,6 +6344,14 @@ export class AgentRuntime {
         }));
         const addHostSources = (values: ContextSource[]) => {
           if (!Array.isArray(values)) throw new AgentError('context_source_invalid');
+          // The sealed processing configuration remains immutable. Its dynamic
+          // interpretation source is rebuilt from current verified human state.
+          if (binding.humanInputProcessing)
+            values = values.filter(
+              (source) =>
+                source.scope !== binding.humanInputProcessing!.inputCommandId ||
+                !['human_input_processing', 'human_input'].includes(source.kind),
+            );
           addSources(values);
           for (const source of values) hostSources?.set(source.id, source);
         };
@@ -5234,6 +6376,20 @@ export class AgentRuntime {
             requests: requestList,
           }),
         );
+        if (humanInterpretation) addSources(await humanInputProcessingSources(humanInterpretation));
+        if (childWorkObservation) {
+          const content = `The original work is currently blocked: ${childWorkObservation.reason}. This Model step is read-only. Report only the actual completed and unfinished facts, including any question that still requires a decision. Do not execute business work, change the selected work, approve an action or create an Agent. A technical turn ending does not mean the business objective is complete.`;
+          addSources([
+            {
+              id: `human-work-observation-${run.id}-${childWorkObservation.controlRevision}`,
+              kind: 'human_work_observation',
+              scope: run.id,
+              digest: await semanticDigest(content),
+              role: 'system',
+              content,
+            },
+          ]);
+        }
         if (continuationSource) {
           if (sources.has(continuationSource.id))
             throw new AgentError('context_source_namespace_collision');
@@ -5470,11 +6626,97 @@ export class AgentRuntime {
             this.compressionProgress.delete(session.id);
         }
       };
+      const checkHumanHandoff = async () => {
+        if (session.parentSessionId !== null || binding.humanInputProcessing) return;
+        for (;;) {
+          controller.signal.throwIfAborted();
+          const cursor = (await this.options.store.getMetadata()).lastChangeCursor;
+          const state = await this.options.store.readHumanWorkState({
+            expectedStoreId: run.originStoreId,
+            sessionId: run.sessionId,
+            subjectId: command.subjectId,
+          });
+          if (!state.latestInputCommandId) return;
+          const raw = await this.options.store.getCommand(state.latestInputCommandId);
+          if (!raw) return;
+          const fact = raw.receipt as {
+            state?: string;
+            candidateWorkCommandIds?: string[];
+            decisionCommandId?: string;
+          };
+          if (
+            !fact.candidateWorkCommandIds?.includes(run.rootWorkCommandId) ||
+            fact.state === 'pending' ||
+            fact.state === 'clarified'
+          )
+            return;
+          if (fact.state === 'decided') {
+            const decision = fact.decisionCommandId
+              ? await this.options.store.getCommand(fact.decisionCommandId)
+              : null;
+            const proposal = (
+              decision?.request as {
+                proposal?: import('./storage/human-work-control').HumanInputProposal;
+              } | null
+            )?.proposal;
+            if (
+              !proposal ||
+              (proposal.relation !== 'independent_work' &&
+                !['pause', 'replace', 'stop'].includes(proposal.purpose))
+            )
+              return;
+          }
+          const { evaluations } = await this.execution.requirementEvaluation(
+            scope,
+            'completion',
+            undefined,
+            true,
+          );
+          const handoff = await this.options.store.handoffHumanRun({
+            expectedStoreId: run.originStoreId,
+            owner,
+            runId: run.id,
+            inputCommandId: raw.id,
+            expectedControlRevision: state.controlRevision,
+            requirements: evaluations,
+          });
+          if (handoff.handedOff) throw new AgentError('human_work_handed_off');
+          if (
+            [
+              'run_not_active',
+              'input_or_work_cancelled',
+              'input_does_not_require_handoff',
+            ].includes(handoff.reason ?? '')
+          )
+            return;
+          const waiting = this.changeWaits.wait(cursor, controller.signal, 30000);
+          this.watchControls();
+          await waiting;
+        }
+      };
       const messages = async () => {
         await applySteer();
+        await checkHumanHandoff();
         await this.consumeJobResults(run, owner, controller.signal);
+        if (binding.humanInputProcessing) {
+          const raw = await this.options.store.getCommand(
+            binding.humanInputProcessing.inputCommandId,
+          );
+          if (!raw || raw.requestDigest !== binding.humanInputProcessing.inputDigest)
+            throw new AgentError('input_proposal_unverifiable');
+          humanInterpretation = await this.humanProcessingContext(raw);
+        } else humanInterpretation = await this.pendingHumanInterpretation(run, command);
+        if (session.parentSessionId !== null) {
+          const state = await childWorkEligibility();
+          childWorkObservation =
+            state.state !== 'eligible' &&
+            ['input_unresolved', 'work_not_selected', 'work_paused'].includes(state.reason ?? '')
+              ? state
+              : undefined;
+        }
         await selectCapabilities();
         capturedInputVersion = inputVersion;
+        capturedInboxVersion = inboxVersion;
         captured = await captureModelSources();
         const assembled = assembleModelContext(
           captured,
@@ -5483,6 +6725,11 @@ export class AgentRuntime {
             run.originStoreId,
             controller.signal,
             command.subjectId,
+            false,
+            undefined,
+            ['context.compress', 'context.compression.reset'].includes(command.kind)
+              ? undefined
+              : run,
           ),
         );
         if (
@@ -5496,6 +6743,9 @@ export class AgentRuntime {
               run.originStoreId,
               controller.signal,
               command.subjectId,
+              false,
+              undefined,
+              run,
             ),
           );
         return assembled;
@@ -5511,7 +6761,7 @@ export class AgentRuntime {
           throw new AgentError('context_refresh_required');
       };
       const modelTools = () =>
-        [...scope.bindings.tools.values()]
+        (humanInterpretation || childWorkObservation ? [] : [...scope.bindings.tools.values()])
           .sort((a, b) => a.id.localeCompare(b.id))
           .map((tool) => ({
             id: tool.id,
@@ -5573,6 +6823,150 @@ export class AgentRuntime {
           };
         },
         executeModel: async (request, stepId) => {
+          const tail = request.messages.at(-1);
+          const lengthSourceId =
+            tail?.sourceIds?.length === 1 &&
+            canonicalJson(tail as unknown as Json) ===
+              canonicalJson(outputLengthContinuation(tail.sourceIds[0]!) as unknown as Json)
+              ? tail.sourceIds[0]!
+              : undefined;
+          const retryMessages = async () => {
+            // Refresh persisted history, current human input, capabilities and Sources
+            // normally. Only the loop's non-persistent length suffix is restored.
+            const fresh = await messages();
+            if (!lengthSourceId) return fresh;
+            const source = await this.options.store.getExecution(lengthSourceId);
+            const result = source?.result;
+            if (
+              source?.kind !== 'model' ||
+              source.status !== 'succeeded' ||
+              source.originStoreId !== run.originStoreId ||
+              source.sessionId !== run.sessionId ||
+              source.runId !== run.id ||
+              source.originCommandId !== command.id ||
+              source.rootWorkCommandId !== run.rootWorkCommandId ||
+              source.rootWorkSeq !== run.rootWorkSeq ||
+              !result ||
+              typeof result !== 'object' ||
+              Array.isArray(result) ||
+              result.finishReason !== 'length'
+            )
+              throw new AgentError('run_continuation_invalid');
+            const partial = await this.readModelOutput({
+              expectedStoreId: run.originStoreId,
+              sessionId: run.sessionId,
+              subjectId: command.subjectId,
+              executionId: source.id,
+              signal: controller.signal,
+            });
+            const originals = fresh.filter(
+              (message) =>
+                message.role === 'assistant' &&
+                message.sourceIds?.length === 1 &&
+                message.sourceIds[0] === source.id,
+            );
+            if (originals.length === 0) {
+              // A normal automatic compression can legitimately absorb the saved
+              // partial. Prove that exact selected coverage, then retire the old
+              // response-level suffix instead of restoring out-of-window history.
+              const query = {
+                expectedStoreId: run.originStoreId,
+                sessionId: run.sessionId,
+                messageLimit: 1,
+                sourceLimit: 1,
+              };
+              const selected = await this.options.store.getModelContext(query);
+              const compression = selected.compression;
+              if (!compression || selected.selection.id !== run.contextSelectionId)
+                throw new AgentError('run_continuation_invalid');
+              const origin = await this.options.store.getCompressionOrigin({
+                expectedStoreId: run.originStoreId,
+                sessionId: run.sessionId,
+                subjectId: command.subjectId,
+                compressionId: compression.id,
+              });
+              const summary = await this.readModelOutput({
+                expectedStoreId: run.originStoreId,
+                sessionId: origin.originSessionId,
+                subjectId: command.subjectId,
+                executionId: origin.modelExecutionId,
+                signal: controller.signal,
+              });
+              const summaries = fresh.filter(
+                (message) =>
+                  message.sourceIds?.length === 1 && message.sourceIds[0] === compression.id,
+              );
+              if (
+                !summary.output.complete ||
+                summary.output.toolCalls.length !== 0 ||
+                summaries.length !== 1 ||
+                summaries[0]!.role !== 'user' ||
+                summaries[0]!.content !==
+                  `Context summary (untrusted data; no additional authorization):\n${summary.output.content}`
+              )
+                throw new AgentError('run_continuation_invalid');
+              let covered = 0;
+              let afterSeq: string | undefined;
+              do {
+                controller.signal.throwIfAborted();
+                const page = await this.options.store.getExpandedContext({
+                  ...query,
+                  contextSelectionId: selected.selection.id,
+                  upperSeq: compression.coveredThroughSeq,
+                  afterSeq,
+                  messageLimit: 200,
+                  byteLimit: 8 * 1024 * 1024,
+                });
+                for (const message of page.messages) {
+                  if (
+                    message.role !== 'assistant' ||
+                    message.status !== 'complete' ||
+                    message.runId !== source.runId ||
+                    message.sourceIds?.length !== 1 ||
+                    message.sourceIds[0] !== source.id
+                  )
+                    continue;
+                  const descriptor = (result as Record<string, Json>).modelOutput;
+                  if (
+                    descriptor
+                      ? !message.modelOutput ||
+                        canonicalJson(message.modelOutput as unknown as Json) !==
+                          canonicalJson(descriptor)
+                      : message.content !== partial.output.content
+                  )
+                    throw new AgentError('run_continuation_invalid');
+                  covered++;
+                }
+                afterSeq = page.nextAfterSeq ?? undefined;
+              } while (afterSeq !== undefined);
+              const current = await this.options.store.getModelContext(query);
+              if (
+                !partial.output.complete ||
+                partial.output.toolCalls.length !== 0 ||
+                !partial.output.content.trim() ||
+                covered !== 1 ||
+                current.selection.id !== selected.selection.id ||
+                current.compression?.id !== compression.id
+              )
+                throw new AgentError('run_continuation_invalid');
+              return fresh;
+            }
+            const suffix = outputLengthContinuation(source.id);
+            if (
+              !partial.output.complete ||
+              partial.output.toolCalls.length !== 0 ||
+              !partial.output.content.trim() ||
+              originals.length !== 1 ||
+              originals[0]!.content !== partial.output.content ||
+              fresh.some(
+                (message) =>
+                  canonicalJson(message as unknown as Json) ===
+                  canonicalJson(suffix as unknown as Json),
+              )
+            )
+              throw new AgentError('run_continuation_invalid');
+            return [...fresh, suffix];
+          };
           let current = request;
           let attempt = 0;
           let modelRetry = recoveredModelRetry;
@@ -5580,9 +6974,18 @@ export class AgentRuntime {
           let providerAttempt = modelRetry?.attempt ?? 1;
           while (true) {
             try {
-              return await this.execution.model(
+              const interpreting = humanInterpretation;
+              const response = await this.execution.model(
                 {
                   ...scope,
+                  ...(interpreting
+                    ? {
+                        humanInputInterpretation: {
+                          inputCommandId: interpreting.inputCommandId,
+                          inputDigest: interpreting.inputDigest,
+                        },
+                      }
+                    : {}),
                   decisionSources: captured,
                   checkFreshness,
                   ...(modelRetry ? { modelRetry } : {}),
@@ -5595,7 +6998,68 @@ export class AgentRuntime {
                   ? resumed.plannedModel
                   : undefined,
               );
+              if (interpreting)
+                await this.acceptHumanInterpretation(interpreting, response, command);
+              return response;
             } catch (error) {
+              if (
+                binding.humanInputProcessing &&
+                error instanceof AgentError &&
+                error.code === 'input_processing_decided'
+              ) {
+                const previous = await this.options.store.getExecution(current.requestId);
+                const interpretation = (
+                  previous?.decisionSource as {
+                    humanInputInterpretation?: { inputCommandId?: string; inputDigest?: string };
+                  } | null
+                )?.humanInputInterpretation;
+                const raw = await this.options.store.getCommand(
+                  binding.humanInputProcessing.inputCommandId,
+                );
+                if (
+                  previous?.kind !== 'model' ||
+                  previous.status !== 'failed' ||
+                  previous.runId !== run.id ||
+                  previous.sessionId !== run.sessionId ||
+                  previous.originStoreId !== run.originStoreId ||
+                  previous.originCommandId !== command.id ||
+                  previous.rootWorkCommandId !== run.rootWorkCommandId ||
+                  previous.rootWorkSeq !== run.rootWorkSeq ||
+                  (previous.result as { code?: string } | null)?.code !==
+                    'input_processing_decided' ||
+                  (previous.result as { dispatchCommitted?: boolean } | null)?.dispatchCommitted !==
+                    false ||
+                  (previous.result as { incomplete?: boolean } | null)?.incomplete !== true ||
+                  interpretation?.inputCommandId !== binding.humanInputProcessing.inputCommandId ||
+                  interpretation.inputDigest !== binding.humanInputProcessing.inputDigest ||
+                  raw?.kind !== 'human.input' ||
+                  raw.sessionId !== run.sessionId ||
+                  raw.originStoreId !== run.originStoreId ||
+                  raw.subjectId !== command.subjectId ||
+                  raw.cancelRequestedAt !== null ||
+                  raw.requestDigest !== interpretation.inputDigest ||
+                  (raw.receipt as { state?: string } | null)?.state !== 'decided'
+                )
+                  throw new AgentError('input_proposal_unverifiable');
+                // The Store emitted this code only after verifying the original sealed
+                // decision and dedicated processing marker. Never invent a Model response.
+                controller.signal.throwIfAborted();
+                const { evaluations } = await this.execution.requirementEvaluation(
+                  scope,
+                  'completion',
+                  undefined,
+                  true,
+                );
+                controller.signal.throwIfAborted();
+                await this.options.store.finishRun({
+                  expectedStoreId: run.originStoreId,
+                  owner,
+                  runId: run.id,
+                  status: 'completed',
+                  requirements: evaluations,
+                });
+                throw new InputProcessingCompleted();
+              }
               const retryReason = modelRetryReason(error);
               if (retryReason) {
                 controller.signal.throwIfAborted();
@@ -5628,7 +7092,7 @@ export class AgentRuntime {
                 current = {
                   ...current,
                   requestId: crypto.randomUUID(),
-                  messages: await messages(),
+                  messages: await retryMessages(),
                   tools: modelTools(),
                 };
                 attempt++;
@@ -5641,6 +7105,9 @@ export class AgentRuntime {
                   'capability_refresh_required',
                   'input_pending',
                   'superseded_by_user_input',
+                  'human_control_changed',
+                  'work_not_selected',
+                  'work_paused',
                 ].includes(error.code)
               )
                 throw error;
@@ -5657,6 +7124,7 @@ export class AgentRuntime {
           }
         },
         executeTool: async (call, stepId, source, signal) => {
+          await waitForChildWork(signal);
           const decisionSources = structuredClone(captured);
           const modelRequests = new Map(structuredClone([...capturedRequests.entries()]));
           const decisionRequests = new Map(modelRequests);
@@ -5861,6 +7329,22 @@ export class AgentRuntime {
         await compress(await messages(), 'manual');
         return;
       }
+      // A successful ordinary interpretation can be durable before its decision.
+      // Recovery consumes that exact result under the restored processing marker.
+      if (binding.humanInputProcessing && resumed?.loop?.kind === 'response') {
+        try {
+          await this.acceptHumanInterpretation(
+            humanInterpretation!,
+            resumed.loop.response,
+            command,
+          );
+        } catch (error) {
+          if (!(error instanceof AgentError) || error.code !== 'human_control_changed') throw error;
+          // Preserve the successful old interpretation as history. Only a new
+          // ordinary Model may propose against the freshly read human control.
+          loopContext.checkpoint = undefined;
+        }
+      }
       complete: while (true) {
         await this.options.store.setRunResultWait({
           expectedStoreId: run.originStoreId,
@@ -5869,7 +7353,13 @@ export class AgentRuntime {
           executionIds: [],
         });
         await defaultLoop(loopContext);
-        if ((await applySteer()) > 0 || inputVersion !== capturedInputVersion) continue;
+        await checkHumanHandoff();
+        if (
+          (await applySteer()) > 0 ||
+          inputVersion !== capturedInputVersion ||
+          inboxVersion !== capturedInboxVersion
+        )
+          continue;
         let resultChanged = false;
         const seenInteractions = new Set<string>();
         settle: for (;;) {
@@ -5888,7 +7378,12 @@ export class AgentRuntime {
             resultChanged = true;
             continue;
           }
-          if ((await applySteer()) > 0 || inputVersion !== capturedInputVersion) continue complete;
+          if (
+            (await applySteer()) > 0 ||
+            inputVersion !== capturedInputVersion ||
+            inboxVersion !== capturedInboxVersion
+          )
+            continue complete;
           const blocked = evaluations.filter((evaluation) => evaluation.outcome === 'unsatisfied');
           if (!blocked.length) {
             if (resultChanged) continue complete;
@@ -5917,6 +7412,7 @@ export class AgentRuntime {
                 continue;
               if (!(error instanceof AgentError) || error.code !== 'input_pending') throw error;
               if ((await applySteer()) > 0) continue complete;
+              if (await this.pendingHumanInterpretation(run, command)) continue complete;
               continue;
             }
           }
@@ -5925,9 +7421,14 @@ export class AgentRuntime {
           const latest = await this.options.store.getRun(run.id);
           for (const extension of scope.bindings.extensions) {
             if (!extension.completionGovernance) continue;
-            if ((await applySteer()) > 0 || inputVersion !== capturedInputVersion)
+            if (
+              (await applySteer()) > 0 ||
+              inputVersion !== capturedInputVersion ||
+              inboxVersion !== capturedInboxVersion
+            )
               continue complete;
             const preparationInputVersion = inputVersion;
+            const preparationInboxVersion = inboxVersion;
             const preparationCapabilities = capabilityFingerprint;
             const preparationBindings = scope.bindings;
             const preparationRequests = structuredClone([...capturedRequests.values()]);
@@ -5962,7 +7463,11 @@ export class AgentRuntime {
                 },
               },
             });
-            if ((await applySteer()) > 0 || inputVersion !== preparationInputVersion)
+            if (
+              (await applySteer()) > 0 ||
+              inputVersion !== preparationInputVersion ||
+              inboxVersion !== preparationInboxVersion
+            )
               continue complete;
             const preparedCapabilities = await readCapabilities();
             if (
@@ -6164,6 +7669,8 @@ export class AgentRuntime {
         }
       }
     } catch (error) {
+      if (error instanceof InputProcessingCompleted) return;
+      if (error instanceof AgentError && error.code === 'human_work_handed_off') return;
       const errors: unknown[] = error instanceof AggregateError ? error.errors : [error];
       if (
         errors.some(
@@ -6438,6 +7945,11 @@ export class AgentRuntime {
       if ('dispatchFailure' in command) throw new AgentError(command.dispatchFailure.code);
       if (command.status === 'rejected' || command.status === 'needs_review') return command;
       if (
+        command.status === 'applied' &&
+        (command.receipt as { outcome?: string } | null)?.outcome === 'human_input_observed'
+      )
+        return command;
+      if (
         (command.kind === 'input.steer' || command.kind === 'result.include') &&
         command.status === 'applied'
       )
@@ -6448,7 +7960,7 @@ export class AgentRuntime {
         if (run && !run.isActive) return command;
       }
       const executionId = (command.receipt as { executionId?: string } | null)?.executionId;
-      if (executionId && command.kind !== 'job.report') {
+      if (executionId && !['job.report', 'job.report.continue'].includes(command.kind)) {
         const execution = await this.options.store.getExecution(executionId);
         const pendingAttempt = (command.receipt as { preparingNextAttempt?: boolean } | null)
           ?.preparingNextAttempt;
@@ -6469,7 +7981,10 @@ export class AgentRuntime {
     return result.completion;
   }
   private async drain(options: RuntimeShutdownOptions): Promise<void> {
+    for (const pending of this.deferredReports.values())
+      pending.controller.abort(new AgentError('runtime_draining'));
     this.changeWaits.close();
+    await Promise.allSettled([...this.deferredReports.values()].map((pending) => pending.task));
     if (this.controlTimer) clearTimeout(this.controlTimer);
     this.controlTimer = undefined;
     this.pendingSessions.clear();
@@ -6656,7 +8171,7 @@ export class AgentRuntime {
     signal?.throwIfAborted();
     if (
       String(content.byteLength) !== reference.size ||
-      (await semanticDigestBytes(content)) !== reference.hash
+      (await semanticDigestBytes(content, signal)) !== reference.hash
     )
       throw new AgentError('model_body_invalid');
     return content;
@@ -6690,7 +8205,7 @@ export class AgentRuntime {
     )
       throw new AgentError('interaction_binding_changed');
     scope.signal.throwIfAborted();
-    const hash = await semanticDigestBytes(content);
+    const hash = await semanticDigestBytes(content, scope.signal);
     const reference = await this.options.artifacts.publish({
       expectedStoreId: command.originStoreId,
       sessionId: command.sessionId,
@@ -6805,7 +8320,7 @@ export class AgentRuntime {
     if (!command) throw new AgentError('command_not_found');
     scope.signal.throwIfAborted();
     const content = Buffer.from(canonicalJson(value));
-    const hash = await semanticDigestBytes(content);
+    const hash = await semanticDigestBytes(content, scope.signal);
     const reference = await this.options.artifacts.publish({
       expectedStoreId: command.originStoreId,
       sessionId: command.sessionId,
@@ -6843,7 +8358,7 @@ export class AgentRuntime {
     )
       throw new AgentError('model_output_scope_denied');
     const content = Buffer.from(canonicalJson(value));
-    const hash = await semanticDigestBytes(content);
+    const hash = await semanticDigestBytes(content, scope.signal);
     return this.options.artifacts.publish({
       expectedStoreId: command.originStoreId,
       sessionId: command.sessionId,
@@ -7068,6 +8583,7 @@ export class AgentRuntime {
     subjectId?: string,
     expanded = false,
     fixedUpperSeq?: string,
+    resultWork?: Pick<RunRecord, 'rootWorkCommandId' | 'rootWorkSeq'>,
   ): Promise<ModelMessage[]> {
     const storeId = expectedStoreId ?? (await this.options.store.getMetadata()).storeId;
     const result = new Map<string, { seq: string; message: ModelMessage }>();
@@ -7272,6 +8788,22 @@ export class AgentRuntime {
         });
       }
       for (const source of page.resultSources) {
+        // Automatic delivery belongs to the exact admitted work. Historical
+        // context and explicitly selected sources remain readable across work.
+        const sourceExecution =
+          resultWork && source.inclusion === 'automatic'
+            ? await this.options.store.getExecution(source.executionId)
+            : undefined;
+        if (resultWork && source.inclusion === 'automatic') {
+          if (!sourceExecution || sourceExecution.originStoreId !== source.originStoreId)
+            throw new AgentError('context_source_unverifiable');
+          if (
+            sourceExecution.sessionId === sessionId &&
+            (sourceExecution.rootWorkCommandId !== resultWork.rootWorkCommandId ||
+              sourceExecution.rootWorkSeq !== resultWork.rootWorkSeq)
+          )
+            continue;
+        }
         let fullBody = '';
         if (
           source.result &&
@@ -7279,7 +8811,8 @@ export class AgentRuntime {
           !Array.isArray(source.result) &&
           source.result.modelContent
         ) {
-          const execution = await this.options.store.getExecution(source.executionId);
+          const execution =
+            sourceExecution ?? (await this.options.store.getExecution(source.executionId));
           if (!execution || execution.originStoreId !== source.originStoreId)
             throw new AgentError('model_content_invalid');
           fullBody = await this.resultModelContent(execution, source.result, storeId, signal);
@@ -7322,25 +8855,27 @@ export class AgentRuntime {
   }
 }
 
-/** History retains completion seq; each Model sees its paired results in original call order. */
+/** Preserve raw history while presenting each complete tool batch before later inbox data. */
 function orderModelToolResults(messages: ModelMessage[]): ModelMessage[] {
-  const ordered = [...messages];
-  for (let index = 0; index < ordered.length; index++) {
-    const assistant = ordered[index]!;
+  const ordered: ModelMessage[] = [];
+  for (let index = 0; index < messages.length; index++) {
+    const assistant = messages[index]!;
+    ordered.push(assistant);
     if (assistant.role !== 'assistant' || !assistant.toolCalls?.length) continue;
     const calls = new Map(assistant.toolCalls.map((call, position) => [call.id, position]));
-    const positions: number[] = [];
-    for (let next = index + 1; next < ordered.length; next++) {
-      const message = ordered[next]!;
-      if (message.role === 'assistant') break;
+    let end = index + 1;
+    const results: ModelMessage[] = [],
+      remaining: ModelMessage[] = [];
+    while (end < messages.length && messages[end]!.role !== 'assistant') {
+      const message = messages[end++]!;
       if (message.role === 'tool' && message.toolCallId && calls.has(message.toolCallId))
-        positions.push(next);
+        results.push(message);
+      else remaining.push(message);
     }
-    const results = positions
-      .map((position) => ordered[position]!)
-      .sort((a, b) => calls.get(a.toolCallId!)! - calls.get(b.toolCallId!)!);
-    for (let position = 0; position < positions.length; position++)
-      ordered[positions[position]!] = results[position]!;
+    results.sort((a, b) => calls.get(a.toolCallId!)! - calls.get(b.toolCallId!)!);
+    for (const message of results) ordered.push(message);
+    for (const message of remaining) ordered.push(message);
+    index = end - 1;
   }
   return ordered;
 }

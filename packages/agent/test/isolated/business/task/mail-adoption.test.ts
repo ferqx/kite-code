@@ -227,7 +227,10 @@ test('explicit follow-up seals the idle mail set: complete private body once, ol
       sessionId: 'root',
       subjectId: 'owner',
       commandId: 'explicit-followup',
-      request: { kind: 'run.start', content: 'explicit new child work after root-only rewind' },
+      request: {
+        kind: 'run.start',
+        content: 'New task: explicit new child work after root-only rewind',
+      },
     });
     await runtime.waitForCommand('explicit-followup', { timeoutMs: 7000 });
     expect(next).toBeDefined();
@@ -301,7 +304,7 @@ test('explicit follow-up seals the idle mail set: complete private body once, ol
       sessionId: 'root',
       subjectId: 'owner',
       commandId: 'later-human',
-      request: { kind: 'run.start', content: 'ordinary later human work' },
+      request: { kind: 'run.start', content: 'New task: ordinary later human work' },
     });
     await runtime.waitForCommand('later-human', { timeoutMs: 4000 });
     expect(requests).toHaveLength(2);
@@ -454,7 +457,7 @@ test('root stop at the new carrier permission barrier preserves idle mail but ad
         sessionId: 'root',
         subjectId: 'owner',
         commandId,
-        request: { kind: 'run.start', content: commandId },
+        request: { kind: 'run.start', content: `New task: ${commandId}` },
       });
       if (commandId === 'first') await runtime.waitForCommand(commandId, { timeoutMs: 5000 });
     }

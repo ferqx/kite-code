@@ -196,13 +196,13 @@ async function fixture(
     title: 'temporary',
     subjectId: 'owner',
   });
-  const submit = (commandId = 'work') =>
+  const submit = (commandId = 'work', content = commandId) =>
     runtime.submitCommand({
       expectedStoreId,
       commandId,
       sessionId: 's',
       subjectId: 'owner',
-      request: { kind: 'run.start', content: commandId },
+      request: { kind: 'run.start', content },
     });
   const terminal = (key: string) =>
     until(async () => {
@@ -357,13 +357,22 @@ test('idle pending Jobs do not call Model; frozen completion cursor leaves later
     expect(f.requests).toHaveLength(2);
     expect((await f.store.getMetadata()).lastChangeCursor).toBe(cursor);
     expect((await f.context()).resultSources).toEqual([]);
-    await f.submit('explicit-next');
+    await f.submit('explicit-next', 'Follow up: explicit-next');
     await bounded(frozenPage.waiting);
     f.gates.get(lower![0])!.release();
     const low = await f.terminal(lower![0]);
     expect(low.id < high.id).toBe(true);
     releasePage.release();
-    await f.runtime.waitForCommand('explicit-next');
+    const next = await f.runtime.waitForCommand('explicit-next');
+    const receipt = next.receipt as { businessCommandId: string; runId: string };
+    expect(next.status).toBe('applied');
+    expect(await f.store.getRun(receipt.runId)).toMatchObject({
+      originCommandId: receipt.businessCommandId,
+      rootWorkCommandId: 'work',
+      status: 'completed',
+    });
+    for (const request of f.requests.slice(2))
+      expect((await f.store.getExecution(request.requestId))?.runId).toBe(receipt.runId);
     const sources = (await f.context()).resultSources;
     const highSource = sources.find((value) => value.executionId === high.id)!;
     const lowSource = sources.find((value) => value.executionId === low.id)!;

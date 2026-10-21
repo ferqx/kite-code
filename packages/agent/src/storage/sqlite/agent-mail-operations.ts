@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import { canonicalJson } from '../../json';
 import type { Store } from '../port';
 import { AgentError, type AgentMessage, type ArtifactReference, type Json } from '../types';
-import { getAgentSummary } from './child-query-operations';
+import { getAgentSummary, stableAgentsBody } from './child-query-operations';
 import { verifyNamespace } from './extension-operations';
 import type { SqliteOperations } from './operations';
 
@@ -54,9 +54,45 @@ function project(row: Row): AgentMessage {
   };
 }
 /** Only the exact internally sealed follow-up can adopt old unbound intent. */
-function adoption(db: SqliteOperations, runId: string, sessionId: string) {
+function adoption(db: SqliteOperations, runId: string, sessionId: string): Row | null {
+  const successor = db.row(
+    'SELECT r.*,c.kind,c.receipt_json,c.request_json,c.mail_adoption_upper_seq,c.mail_adoption_cursor,c.subject_id FROM run r JOIN command c ON c.id=r.origin_command_id WHERE r.id=? AND r.session_id=?',
+    runId,
+    sessionId,
+  );
+  const sealed = successor && parse(successor.receipt_json).mailAdoption;
+  if (sealed) {
+    const parent = db.row('SELECT * FROM run WHERE id=?', sealed.parentRunId);
+    if (
+      !parent ||
+      sealed.version !== 1 ||
+      parent.session_id !== sessionId ||
+      parent.id === runId ||
+      successor!.mail_adoption_upper_seq === null ||
+      successor!.mail_adoption_cursor === null ||
+      parent.origin_store_id !== successor!.origin_store_id ||
+      parent.root_work_command_id !== successor!.root_work_command_id ||
+      String(parent.root_work_seq) !== String(successor!.root_work_seq) ||
+      parent.context_selection_id !== successor!.context_selection_id ||
+      sealed.contextSelectionId !== successor!.context_selection_id ||
+      sealed.rootWorkCommandId !== successor!.root_work_command_id ||
+      sealed.rootWorkSeq !== String(successor!.root_work_seq) ||
+      (['job.report', 'job.report.continue'].includes(String(successor!.kind))
+        ? parse(successor!.request_json).parentRunId !== parent.id ||
+          parse(successor!.request_json).executionId !== sealed.carrierExecutionId
+        : successor!.kind !== 'input.follow_up' ||
+          parse(successor!.receipt_json).continuationRunId !== parent.id)
+    )
+      throw new AgentError('agent_message_unverifiable');
+    return {
+      ...successor!,
+      input_context_selection_id: successor!.context_selection_id!,
+      parent_mail_run_id: parent.id!,
+      parent_mail_carrier_id: sealed.carrierExecutionId ?? null,
+    };
+  }
   const row = db.row(
-    `SELECT r.origin_store_id,r.root_work_command_id,r.root_work_seq,c.id,c.kind,c.session_id,c.subject_id,c.origin_store_id AS start_store,c.root_work_command_id AS start_work,c.root_work_seq AS start_seq,c.agent_carrier_execution_id,c.input_context_selection_id,c.mail_adoption_upper_seq,c.mail_adoption_cursor,e.child_session_id,e.origin_store_id AS carrier_store,e.root_work_command_id AS carrier_work,e.root_work_seq AS carrier_seq,e.predecessor_execution_id FROM run r JOIN command c ON c.id=r.origin_command_id JOIN execution e ON e.id=c.agent_carrier_execution_id WHERE r.id=? AND r.session_id=?`,
+    `SELECT r.origin_store_id,r.root_work_command_id,r.root_work_seq,c.id,c.kind,c.session_id,c.subject_id,c.origin_store_id AS start_store,c.root_work_command_id AS start_work,c.root_work_seq AS start_seq,c.agent_carrier_execution_id,c.input_context_selection_id,c.mail_adoption_upper_seq,c.mail_adoption_cursor,e.child_session_id,e.origin_store_id AS carrier_store,e.root_work_command_id AS carrier_work,e.root_work_seq AS carrier_seq,e.predecessor_execution_id,e.after_turn_json AS carrier_notification FROM run r JOIN command c ON c.id=r.origin_command_id JOIN execution e ON e.id=c.agent_carrier_execution_id WHERE r.id=? AND r.session_id=?`,
     runId,
     sessionId,
   );
@@ -88,6 +124,11 @@ function eligibleAdoption(mail: Row, binding: Row | null): boolean {
     mail.mail_selection_id !== binding.input_context_selection_id ||
     mail.subject_id !== binding.subject_id ||
     mail.origin_store_id !== binding.origin_store_id ||
+    ((binding.parent_mail_run_id ||
+      (binding.carrier_notification &&
+        parse(binding.carrier_notification).kind === 'agent_completion')) &&
+      (mail.root_work_command_id !== binding.root_work_command_id ||
+        String(mail.root_work_seq) !== String(binding.root_work_seq))) ||
     !mail.mail_confirmed ||
     mail.source_state !== 'succeeded' ||
     mail.source_completed_cursor === null ||
@@ -96,23 +137,269 @@ function eligibleAdoption(mail: Row, binding: Row | null): boolean {
   )
     return false;
   const request = parse(mail.request_json) as { carrierExecutionId: string };
+  if (binding.parent_mail_run_id)
+    return (
+      binding.parent_mail_carrier_id === null ||
+      request.carrierExecutionId === binding.parent_mail_carrier_id
+    );
   return request.carrierExecutionId === binding.predecessor_execution_id;
+}
+function carrierPredicate(binding: Row) {
+  if (!binding.parent_mail_run_id)
+    return {
+      sql: "json_extract(c.request_json,'$.carrierExecutionId')=?",
+      args: [binding.predecessor_execution_id!],
+    };
+  return {
+    sql: `EXISTS(SELECT 1 FROM execution k JOIN execution p ON p.id=k.parent_execution_id WHERE k.id=json_extract(c.request_json,'$.carrierExecutionId') AND k.session_id=c.mail_target_session_id AND k.child_session_id=c.session_id AND k.origin_store_id=c.origin_store_id AND k.root_work_command_id=c.root_work_command_id AND k.root_work_seq=c.root_work_seq AND (p.run_id=? OR EXISTS(SELECT 1 FROM context_snapshot x WHERE x.kind='result_ref' AND x.execution_id=k.id AND x.session_id=k.session_id AND x.selection_id=c.mail_selection_id AND json_extract(x.request_json,'$.targetRunId')=? AND COALESCE(json_extract(x.request_json,'$.pendingInput'),0)=0)) ${binding.parent_mail_carrier_id ? 'AND k.id=?' : ''})`,
+    args: [
+      binding.parent_mail_run_id!,
+      binding.parent_mail_run_id!,
+      ...(binding.parent_mail_carrier_id ? [binding.parent_mail_carrier_id] : []),
+    ],
+  };
 }
 function runPredicate(db: SqliteOperations, runId: string, sessionId: string) {
   const binding = adoption(db, runId, sessionId);
+  const carrier = binding && carrierPredicate(binding);
+  const work =
+    binding &&
+    (binding.parent_mail_run_id ||
+      (binding.carrier_notification &&
+        parse(binding.carrier_notification).kind === 'agent_completion'));
   return binding
     ? {
-        sql: `(c.mail_target_run_id=? OR (c.mail_target_run_id IS NULL AND c.rowid<=? AND e.completed_cursor IS NOT NULL AND e.completed_cursor<=? AND c.mail_selection_id=? AND c.origin_store_id=? AND json_extract(c.request_json,'$.carrierExecutionId')=?))`,
+        sql: `(c.mail_target_run_id=? OR (c.mail_target_run_id IS NULL AND c.rowid<=? AND e.completed_cursor IS NOT NULL AND e.completed_cursor<=? AND c.mail_selection_id=? AND c.origin_store_id=? ${work ? 'AND c.root_work_command_id=? AND c.root_work_seq=?' : ''} AND ${carrier!.sql}))`,
         args: [
           runId,
           binding.mail_adoption_upper_seq!,
           binding.mail_adoption_cursor!,
           binding.input_context_selection_id!,
           binding.origin_store_id!,
-          binding.predecessor_execution_id!,
+          ...(work ? [binding.root_work_command_id!, binding.root_work_seq!] : []),
+          ...carrier!.args,
         ],
       }
     : { sql: 'c.mail_target_run_id=?', args: [runId] };
+}
+/** Called inside an already authorized successor activation transaction. */
+export function sealParentAgentMailAdoption(
+  db: SqliteOperations,
+  input: {
+    runId: string;
+    parentRunId: string;
+    carrierExecutionId?: string;
+  },
+): void {
+  const run = db.row('SELECT * FROM run WHERE id=?', input.runId);
+  const parent = db.row('SELECT * FROM run WHERE id=?', input.parentRunId);
+  const command = run && db.row('SELECT * FROM command WHERE id=?', run.origin_command_id!);
+  if (
+    !run ||
+    !parent ||
+    !command ||
+    run.id === parent.id ||
+    parent.is_active ||
+    parent.status !== 'completed' ||
+    run.session_id !== parent.session_id ||
+    run.origin_store_id !== parent.origin_store_id ||
+    run.root_work_command_id !== parent.root_work_command_id ||
+    String(run.root_work_seq) !== String(parent.root_work_seq) ||
+    run.context_selection_id !== parent.context_selection_id ||
+    run.config_json !== parent.config_json
+  )
+    throw new AgentError('agent_message_unverifiable');
+  const receipt = parse(command.receipt_json) as Record<string, Json>;
+  const request = parse(command.request_json) as Record<string, Json>;
+  if (['job.report', 'job.report.continue'].includes(String(command.kind))) {
+    if (request.parentRunId !== parent.id || request.executionId !== input.carrierExecutionId)
+      throw new AgentError('agent_message_unverifiable');
+  } else {
+    const decision =
+      typeof receipt.decisionCommandId === 'string'
+        ? db.row('SELECT * FROM command WHERE id=?', receipt.decisionCommandId)
+        : null;
+    const fact = decision && parse(decision.receipt_json);
+    const originalId = decision && parse(decision.request_json).inputCommandId;
+    const original =
+      typeof originalId === 'string'
+        ? db.row('SELECT * FROM command WHERE id=?', originalId)
+        : null;
+    const publicId = original && parse(original.request_json).publicCommandId;
+    const publicCommand =
+      typeof publicId === 'string' ? db.row('SELECT * FROM command WHERE id=?', publicId) : null;
+    if (
+      command.kind !== 'input.follow_up' ||
+      receipt.continuationRunId !== parent.id ||
+      input.carrierExecutionId ||
+      !decision ||
+      decision.kind !== 'human.input.decision' ||
+      decision.session_id !== run.session_id ||
+      decision.subject_id !== command.subject_id ||
+      fact.businessCommandId !== command.id ||
+      fact.continuationRunId !== parent.id ||
+      fact.targetRootWorkCommandId !== parent.root_work_command_id ||
+      !original ||
+      !publicCommand ||
+      original.kind !== 'human.input' ||
+      original.cancelled ||
+      publicCommand.cancelled ||
+      decision.cancelled ||
+      original.session_id !== run.session_id ||
+      publicCommand.session_id !== run.session_id ||
+      original.origin_store_id !== run.origin_store_id ||
+      publicCommand.origin_store_id !== run.origin_store_id ||
+      original.subject_id !== command.subject_id ||
+      publicCommand.subject_id !== command.subject_id ||
+      parse(original.receipt_json).businessCommandId !== command.id ||
+      parse(publicCommand.receipt_json).businessCommandId !== command.id ||
+      parse(publicCommand.receipt_json).humanInputCommandId !== original.id ||
+      parse(publicCommand.receipt_json).decisionCommandId !== decision.id ||
+      parse(decision.request_json).proposal?.relation !== 'same_work'
+    )
+      throw new AgentError('agent_message_unverifiable');
+  }
+  const proof: Json = {
+    version: 1,
+    parentRunId: String(parent.id),
+    carrierExecutionId: input.carrierExecutionId ?? null,
+    contextSelectionId: String(run.context_selection_id),
+    rootWorkCommandId: String(run.root_work_command_id),
+    rootWorkSeq: String(run.root_work_seq),
+  };
+  if (receipt.mailAdoption) {
+    if (canonicalJson(receipt.mailAdoption) !== canonicalJson(proof))
+      throw new AgentError('agent_message_unverifiable');
+    return;
+  }
+  const upper = db.row(
+    "SELECT COALESCE(MAX(rowid),0) AS value FROM command WHERE kind='agent.message' AND mail_target_session_id=? AND subject_id=?",
+    run.session_id!,
+    command.subject_id!,
+  )!.value;
+  db.run(
+    'UPDATE command SET mail_adoption_upper_seq=?,mail_adoption_cursor=?,receipt_json=? WHERE id=?',
+    upper!,
+    BigInt(db.metadata().lastChangeCursor),
+    canonicalJson({ ...receipt, mailAdoption: proof }),
+    command.id!,
+  );
+}
+
+/** Runtime supplies IDs only after verifying the complete original result contains their complete bodies. */
+export function associateAgentMailWithResult(
+  db: SqliteOperations,
+  input: {
+    runId: string;
+    carrierExecutionId: string;
+    resultRevision: string;
+    sourceId: string;
+    messageIds: readonly string[];
+  },
+): void {
+  if (
+    !Array.isArray(input.messageIds) ||
+    input.messageIds.length > 100 ||
+    new Set(input.messageIds).size !== input.messageIds.length
+  )
+    throw new AgentError('invalid_agent_messages');
+  if (!input.messageIds.length) return;
+  const run = db.row('SELECT * FROM run WHERE id=?', input.runId);
+  const carrier = db.row('SELECT * FROM execution WHERE id=?', input.carrierExecutionId);
+  const source = db.row(
+    "SELECT * FROM context_snapshot WHERE id=? AND kind='result_ref'",
+    input.sourceId,
+  );
+  if (
+    !run ||
+    run.cancel_requested ||
+    !carrier ||
+    !source ||
+    String(carrier.result_revision) !== input.resultRevision ||
+    !['succeeded', 'failed'].includes(String(carrier.state)) ||
+    carrier.delivery !== 'consumed' ||
+    carrier.cancel_requested ||
+    carrier.session_id !== run.session_id ||
+    carrier.origin_store_id !== run.origin_store_id ||
+    carrier.root_work_command_id !== run.root_work_command_id ||
+    String(carrier.root_work_seq) !== String(run.root_work_seq) ||
+    source.execution_id !== carrier.id ||
+    String(source.result_revision) !== input.resultRevision ||
+    source.session_id !== run.session_id ||
+    source.selection_id !== run.context_selection_id ||
+    parse(source.request_json).targetRunId !== run.id ||
+    parse(source.request_json).pendingInput ||
+    parse(source.request_json).diagnostic
+  )
+    throw new AgentError('agent_message_unverifiable');
+  const filter = runPredicate(db, input.runId, String(run.session_id));
+  for (const id of input.messageIds) {
+    const mail = query(db, id);
+    if (
+      !mail ||
+      mail.mail_received_message_id ||
+      mail.cancelled ||
+      !mail.mail_confirmed ||
+      mail.source_state !== 'succeeded' ||
+      mail.mail_target_session_id !== run.session_id ||
+      parse(mail.request_json).carrierExecutionId !== carrier.id ||
+      !db.row(
+        `SELECT c.id FROM command c JOIN execution e ON e.id=c.agent_source_execution_id WHERE c.id=? AND ${filter.sql}`,
+        id,
+        ...filter.args,
+      )
+    )
+      throw new AgentError('agent_message_unverifiable');
+    const sender = db.row('SELECT * FROM execution WHERE id=?', mail.agent_source_execution_id!);
+    const origin = sender && db.row('SELECT * FROM command WHERE id=?', sender.origin_command_id!);
+    const body = parse(mail.request_json).body as ArtifactReference;
+    const published =
+      body &&
+      db.row(
+        'SELECT r.*,b.size FROM blob_ref r JOIN blob b ON b.hash=r.blob_hash WHERE r.id=?',
+        body.id,
+      );
+    if (
+      !sender ||
+      !origin ||
+      !published ||
+      published.blob_hash !== body.hash ||
+      String(published.size) !== body.size ||
+      published.owner_kind !== 'execution' ||
+      published.owner_id !== sender.id ||
+      published.session_id !== sender.session_id ||
+      published.subject_id !== mail.subject_id ||
+      published.origin_store_id !== run.origin_store_id ||
+      published.media_type !== body.mediaType ||
+      sender.origin_store_id !== run.origin_store_id ||
+      origin.subject_id !== mail.subject_id ||
+      sender.root_work_command_id !== run.root_work_command_id ||
+      String(sender.root_work_seq) !== String(run.root_work_seq) ||
+      sender.cancel_requested ||
+      stopped(db, origin) ||
+      db.childCarrier(origin, sender.run_id === null ? null : String(sender.run_id))?.id !==
+        carrier.id
+    )
+      throw new AgentError('agent_message_unverifiable');
+    const receipt = parse(mail.receipt_json) as Record<string, Json>;
+    const proof: Json = {
+      executionId: input.carrierExecutionId,
+      resultRevision: input.resultRevision,
+      sourceId: input.sourceId,
+      runId: input.runId,
+    };
+    if (receipt.carriedByResult) {
+      if (canonicalJson(receipt.carriedByResult) !== canonicalJson(proof))
+        throw new AgentError('agent_message_unverifiable');
+      continue;
+    }
+    db.run(
+      'UPDATE command SET receipt_json=? WHERE id=?',
+      canonicalJson({ ...receipt, carriedByResult: proof }),
+      id,
+    );
+    db.event(String(run.session_id), id, 'agent.message_carried_by_result');
+  }
 }
 export function hasPendingAgentMail(
   db: SqliteOperations,
@@ -121,7 +408,7 @@ export function hasPendingAgentMail(
 ): boolean {
   const filter = runPredicate(db, runId, sessionId);
   return !!db.row(
-    `SELECT c.id FROM command c JOIN execution e ON e.id=c.agent_source_execution_id WHERE c.kind='agent.message' AND c.mail_target_session_id=? AND c.mail_confirmed=1 AND c.status='applied' AND c.cancelled=0 AND c.mail_received_message_id IS NULL AND e.state='succeeded' AND ${filter.sql} LIMIT 1`,
+    `SELECT c.id FROM command c JOIN execution e ON e.id=c.agent_source_execution_id WHERE c.kind='agent.message' AND c.mail_target_session_id=? AND c.mail_confirmed=1 AND c.status='applied' AND c.cancelled=0 AND c.mail_received_message_id IS NULL AND json_extract(c.receipt_json,'$.carriedByResult') IS NULL AND e.state='succeeded' AND ${filter.sql} LIMIT 1`,
     sessionId,
     ...filter.args,
   );
@@ -263,6 +550,50 @@ export function queueAgentMessage(
       !/^[A-Za-z0-9_.-]{1,128}$/.test(input.commandId)
     )
       throw new AgentError('invalid_operation_key');
+    if (input.stableTarget) {
+      const prior = db.row('SELECT * FROM command WHERE id=?', input.commandId);
+      if (prior) {
+        const body = parse(prior.request_json) as Record<string, Json>;
+        if (
+          prior.origin_store_id !== input.expectedStoreId ||
+          prior.extension_id !== input.extensionId ||
+          body.stableTarget !== input.stableTarget ||
+          body.sourceExecutionId !== input.sourceExecutionId ||
+          canonicalJson(body.body!) !== canonicalJson(input.body as unknown as Json)
+        )
+          throw new AgentError('operation_conflict');
+        return db.command(prior);
+      }
+    }
+    if (input.stableTarget && input.stableTarget !== 'parent') {
+      const original = db.row('SELECT subject_id FROM command WHERE id=?', input.originCommandId);
+      const sender = db.row('SELECT * FROM execution WHERE id=?', input.sourceExecutionId);
+      if (!original || !sender) throw new AgentError('invalid_operation_parent');
+      const target = stableAgentsBody(db, {
+        expectedStoreId: input.expectedStoreId,
+        sessionId: String(sender.session_id),
+        extensionId: input.extensionId,
+        subjectId: String(original.subject_id),
+        agentIds: [input.stableTarget],
+        callerRootWorkCommandId: String(sender.root_work_command_id),
+        callerRootWorkSeq: String(sender.root_work_seq),
+      }).items[0];
+      if (!target) throw new AgentError('agent_unavailable');
+      if (target.workRelation !== 'same_work') throw new AgentError('permission_denied');
+      const current = getAgentSummary(db, {
+        expectedStoreId: input.expectedStoreId,
+        subjectId: String(original.subject_id),
+        ref: target.ref,
+      });
+      input = {
+        ...input,
+        targetSessionId: target.agentId,
+        targetCarrierExecutionId: target.ref.executionId!,
+        contextSelectionId: target.contextSelectionId,
+        // The stable directory retains historical Runs; only an active Run can bind mail.
+        targetRunId: current.run?.isActive ? current.run.id : undefined,
+      };
+    }
     const execution = db.row(
       'SELECT * FROM execution WHERE id=? AND origin_command_id=?',
       input.sourceExecutionId,
@@ -313,6 +644,12 @@ export function queueAgentMessage(
         carrier.origin_store_id !== input.expectedStoreId
       )
         throw new AgentError('agent_message_relation_invalid');
+      if (
+        input.stableTarget &&
+        (carrier.root_work_command_id !== execution.root_work_command_id ||
+          String(carrier.root_work_seq) !== String(execution.root_work_seq))
+      )
+        throw new AgentError('permission_denied');
       carrierId = String(carrier.id);
     }
     const targetCreator = reader(db, input.targetSessionId, String(origin.subject_id));
@@ -348,6 +685,7 @@ export function queueAgentMessage(
       throw new AgentError('artifact_scope_denied');
     const request: Json = {
       kind: 'agent.message',
+      ...(input.stableTarget ? { stableTarget: input.stableTarget } : {}),
       key: input.key,
       targetSessionId: input.targetSessionId,
       targetRunId: input.targetRunId ?? null,
@@ -450,6 +788,7 @@ export function receiveAgentMessages(
     const target = db.owner(input.owner, String(run.session_id));
     db.active(input.owner, String(run.origin_command_id), input.runId);
     const frozen = adoption(db, input.runId, String(target.id));
+    const runFilter = runPredicate(db, input.runId, String(target.id));
     const result: string[] = [];
     for (const id of input.messageIds) {
       const mail = query(db, id);
@@ -457,13 +796,20 @@ export function receiveAgentMessages(
         !mail ||
         mail.origin_store_id !== input.expectedStoreId ||
         mail.mail_target_session_id !== target.id ||
-        (mail.mail_target_run_id !== run.id && !eligibleAdoption(mail, frozen))
+        (mail.mail_target_run_id !== run.id &&
+          (!eligibleAdoption(mail, frozen) ||
+            !db.row(
+              `SELECT c.id FROM command c JOIN execution e ON e.id=c.agent_source_execution_id WHERE c.id=? AND ${runFilter.sql}`,
+              id,
+              ...runFilter.args,
+            )))
       )
         throw new AgentError('agent_message_not_found');
       if (mail.mail_received_message_id) {
         result.push(String(mail.mail_received_message_id));
         continue;
       }
+      if (parse(mail.receipt_json).carriedByResult) continue;
       const source = db.row('SELECT * FROM session WHERE id=?', mail.session_id!);
       if (!source) throw new AgentError('agent_message_relation_invalid');
       relation(source, target);
@@ -585,7 +931,7 @@ export function listAgentMessages(
     const filter =
       input.runId === undefined ? null : runPredicate(db, input.runId, input.sessionId);
     const rows = db.rows(
-      `SELECT c.*,c.rowid AS mail_seq,e.state AS source_state,e.completed_cursor AS source_completed_cursor FROM command c JOIN execution e ON e.id=c.agent_source_execution_id WHERE c.kind='agent.message' AND c.mail_target_session_id=? AND c.subject_id=? AND c.rowid>? AND c.rowid<=? ${filter ? `AND ${filter.sql}` : ''} ${input.confirmedOnly ? "AND c.mail_confirmed=1 AND c.status='applied'" : ''} ${input.pendingOnly ? "AND c.mail_confirmed=1 AND c.mail_received_message_id IS NULL AND c.status='applied'" : ''} ORDER BY c.rowid LIMIT ?`,
+      `SELECT c.*,c.rowid AS mail_seq,e.state AS source_state,e.completed_cursor AS source_completed_cursor FROM command c JOIN execution e ON e.id=c.agent_source_execution_id WHERE c.kind='agent.message' AND c.mail_target_session_id=? AND c.subject_id=? AND c.rowid>? AND c.rowid<=? ${filter ? `AND ${filter.sql}` : ''} ${input.confirmedOnly ? "AND c.mail_confirmed=1 AND c.status='applied'" : ''} ${input.pendingOnly ? "AND c.mail_confirmed=1 AND c.mail_received_message_id IS NULL AND c.status='applied' AND json_extract(c.receipt_json,'$.carriedByResult') IS NULL" : ''} ORDER BY c.rowid LIMIT ?`,
       input.sessionId,
       input.subjectId,
       after,

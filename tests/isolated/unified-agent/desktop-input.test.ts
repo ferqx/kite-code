@@ -87,7 +87,7 @@ test('paired child waiting accepts steer in the original Run and queues followup
       kind: 'input.steer',
       expectedStoreId: f.expectedStoreId,
       commandId: 'guide',
-      content: 'exact new guide',
+      content: 'Follow up: exact new guide',
       targetRunId: run.id,
       contextSelectionId: selection,
     });
@@ -96,7 +96,7 @@ test('paired child waiting accepts steer in the original Run and queues followup
       kind: 'input.follow_up',
       expectedStoreId: f.expectedStoreId,
       commandId: 'next',
-      content: 'later task',
+      content: 'Continue current work: later task',
       afterRunId: run.id,
       contextSelectionId: selection,
     });
@@ -111,9 +111,15 @@ test('paired child waiting accepts steer in the original Run and queues followup
     expect((await input.lookup('work')).run?.status).toBe('completed');
     expect((await input.lookup('guide')).run?.id).toBe(run.id);
     expect((await input.lookup('next')).run?.id).not.toBe(run.id);
+    const nextState = await input.lookup('next');
+    expect(nextState.run?.rootWorkCommandId).toBe('work');
+    expect(nextState.run?.originCommandId).toBe(
+      (nextState.command?.receipt as { businessCommandId: string }).businessCommandId,
+    );
     const requests = readFileSync(join(f.profile.profilePath, 'models'), 'utf8');
     expect(requests).toContain('exact new guide');
     expect(requests).toContain('later task');
+    expect(requests.trim().split('\n')).toHaveLength(3);
     expect(readFileSync(join(f.profile.profilePath, 'child-finished'), 'utf8')).toBe('one\n');
     expect(
       states
@@ -165,7 +171,11 @@ test('paired response loss only queries saved command; precise cancel is dedupli
     expect((await input.lookup('original')).run?.status).toBe('cancelled');
     f.client.startRun = original;
     const another = new DesktopInput({ admittedClient: f.client });
-    await another.start('b', { ...intent, commandId: 'independent', content: 'continue' });
+    await another.start('b', {
+      ...intent,
+      commandId: 'independent',
+      content: 'New task: continue',
+    });
     another.disposeObserver();
     await until(async () =>
       (await f.client.getView('b')).runs.some((run) => run.status === 'completed'),

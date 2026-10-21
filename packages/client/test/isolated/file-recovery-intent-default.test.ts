@@ -61,7 +61,10 @@ test('actual packaged default SDK three scopes seal durable raw digests, indepen
     hostname: '127.0.0.1',
     port: 0,
     async fetch(request) {
-      const body = (await request.json()) as { messages: { role: string; content: string }[] };
+      const body = (await request.json()) as {
+        messages: { role: string; content: string }[];
+        tools?: { function: { name: string } }[];
+      };
       providerBodies.push(body);
       const user = body.messages
         .slice()
@@ -69,8 +72,9 @@ test('actual packaged default SDK three scopes seal durable raw digests, indepen
         .find(
           (message) =>
             message.role === 'user' &&
-            /^(session|code|both|drift)_(FIRST|SECOND|LATER):/.test(message.content),
-        )?.content;
+            /^(?:New task: )?(session|code|both|drift)_(FIRST|SECOND|LATER):/.test(message.content),
+        )
+        ?.content.replace(/^New task: /, '');
       if (
         !user ||
         !(
@@ -106,6 +110,11 @@ test('actual packaged default SDK three scopes seal durable raw digests, indepen
           name: 'write_file',
           input: { path: `${session}/${round}-created.txt`, base: null, content: 'new file\r\n' },
         };
+      const requestedTool = call?.name;
+      if (requestedTool && !body.tools?.some((tool) => tool.function.name === requestedTool))
+        throw Error(
+          `actual_file_recovery_tool_not_advertised:${user}:${requestedTool}:${JSON.stringify(body.tools?.map((tool) => tool.function.name) ?? [])}`,
+        );
       const frame = (delta: unknown, finish_reason: string | null) =>
         `data: ${JSON.stringify({ id: `fixed-${providerBodies.length}`, object: 'chat.completion.chunk', model: 'fixed', choices: [{ index: 0, delta, finish_reason }] })}\n\n`;
       return new Response(
@@ -399,7 +408,8 @@ test('actual packaged default SDK three scopes seal durable raw digests, indepen
           expectedStoreId: storeId,
           commandId: id,
           kind: 'run.start',
-          content: `${s}_${round}: actual read/write/create`,
+          // Each independent checkpoint-producing round owns its own business work.
+          content: `${round === 'SECOND' ? 'New task: ' : ''}${s}_${round}: actual read/write/create`,
         });
         const c = await until(
             () => client.getCommand(id),
@@ -586,7 +596,7 @@ test('actual packaged default SDK three scopes seal durable raw digests, indepen
               expectedStoreId: storeId,
               commandId: 'later-distinct-work',
               kind: 'run.start',
-              content: 'drift_LATER: actual later write',
+              content: 'New task: drift_LATER: actual later write',
             });
             const applied = await until(
               () => client.getCommand(c.id),

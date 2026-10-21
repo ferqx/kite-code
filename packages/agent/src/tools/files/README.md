@@ -4,6 +4,10 @@
 
 公开入口 `@kite-ai/agent/files` 的 import 不打开资源。宿主显式调用 `createWorkspaceFiles({root,maxFileBytes?})` 选定一个物理 Workspace 根，再用 `createFileTools(files)` 将六个普通 ToolDefinition 装配进扩展；工具仍走 UnifiedExecution 的权限、来源复查、计划、派发和终态。没有 CodingAgent、Git 或旧 filesystem authority 依赖。
 
+只读 `read` 的可信 options 可携带 `signal`；普通 `read_file` 和绝对 `read_user_file` 从实际 ToolContext 传入，不新增模型字段。完整文件读取仍以 64 KiB 块核 hash、UTF-8 解码及前后身份，在 8ms 或 64 块预算后通过真实 event loop 让出；行选区在块内统计完整 totalLines，只保留请求正文，不建立全文行起点数组。BOM、CRLF、跨块 UTF-8 和完整 baseline 不变，行窗口不构成字节截断。search 的单文件读取复用该异步读取，逐行匹配另按预算让出；原分页、全部命中和字面量语义不变。
+
+异步读取保留原目录及文件 FD，恢复时核原根和取消，EOF 后再次核完整文件身份；漂移不发布旧结果。`close()` 先拒绝新读取并让在途只读退出、关闭各自 FD 后再关闭 native owner，多次 close 共用同一结果。取消和异常不关闭别的读取句柄。写入/edit 的共享读取按同步方式消费同一分块校验，不在原最后 CAS 与发布之间插入让出；字节恢复和发布后 unknown 合同不变。合作让出不能给单次慢磁盘 native read/fsync 承诺耗时上限，也不为完整正文增加文件额度。
+
 ## Node-API 文件后端
 
 文件工具的手写 Bun FFI 已由 [cap-std＋napi-rs 模块](../../../native/files/README.md)替换，[唯一加载器](../../files-native-binding.ts)保持原 `WorkspaceFileIo` 交接，TS 继续拥有完整字节／UTF-8、baseline、CAS、查询与 checkpoint 语义。Windows 由官方生成的 windows-sys 绑定补齐完整 FileID、原 HANDLE 路径与发布、私有创建和关闭未知；仅套用 cap-std 的 metadata／rename 不能满足这些边界。原 `files-native.ts/files-windows.ts` 已删除，没有旧后端回退；Profile／SQLite／Shell 等独立原生 owner 不随此迁移。
@@ -75,11 +79,15 @@ Model 可调用的 `files.read/files.read_path` 缺省 `limit=200`，通过 `sel
 
 默认没有整文件、原文、搜索匹配数或长行总额度。读取使用固定 64 KiB 字节块，严格增量 UTF-8 解码、完整 hash 与前后 FD 事实校验；默认 read 返回全部剩余行。宿主显式 `maxFileBytes` 可声明该宿主的单文件能力约束，未设置时不回退为旧 8 MiB。真实内存、磁盘、IO 与字符串表示能力仍可能局部失败，不把它们假装 Provider 窗口。二进制控制字节采样检查和严格 UTF-8 保留，BOM/CRLF 不规范化；search 不将已识别二进制当文本。
 
-search 未指定 limit 返回全部匹配；显式 limit<=200 给出完整 next keyset，path/line 稳定排序。glob 的 **/ 匹配零或多层目录，页 limit<=200，完整路径 keyset；去除旧目录数、访问项数门槛，遍历不跟随 symlink，不执行 shell/rg。显式分页仅保留该页候选，不把下一页隐去。list 仍使用明确名字分页；跨页外部变化不构成一致快照。未知目录项类型明确 file_directory_type_unavailable。
+search 未指定 limit 返回全部匹配；显式 limit<=200 给出完整 next keyset，path/line 稳定排序。glob 的 **/ 匹配零或多层目录，页 limit<=200，完整路径 keyset；去除旧目录数、访问项数门槛，遍历不跟随 symlink，不执行 shell/rg。glob 按目录名加 `/` 与文件名的完整路径顺序深度遍历，取得准确的 limit+1 个匹配后结束本页；仅完整的字面目录前缀可排除不可能匹配的分支。无斜杠的 basename 模式仍跨层匹配，未新增忽略目录、扫描上限或结果截断。list 仍使用明确名字分页；跨页外部变化不构成一致快照。未知目录项类型明确 file_directory_type_unavailable。
+
+glob/search 的原生操作仍绑定原根及 FD 链；遍历每64项或累计8ms检查一次批次，让出真实事件循环，避免一个 child 的文件查询阻挡其他 Run、HTTP 和等待定时器。yield 前关闭本次目录／文件 handles，恢复后重新核根和关闭状态；可信宿主第二参数的 signal 来自原 ToolContext，取消不成为 Model 输入或额外权限。单次原生枚举和单文件读取仍是同步操作，该批次不是单次 IO 的硬时限。[响应与取消回归](../../../test/isolated/files/query-responsiveness.test.ts)用自有真实小树核宏任务期间独立读取、原 Tool 取消、完整路径分页、保护范围及符号链接；不调用 Provider。
 
 普通 Tool 的小结果内联 JSON；大 read/search 等结果通过真实 `context.artifacts.publish` 保存完整不可变正文。read Artifact 是完整所选 UTF-8 正文，summary 保留完整文件 baseline/selection；search Artifact 是完整结果 JSON。结果包含准确 Artifact refs、`body.complete=true` 和 `inlineBody=false`，这表示完整正文已保存；通用 `modelContent` 另指向相同准确正文，Core 完整校验后将其送入实际下一 Model 请求。没有 Artifact 能力时明确 artifact_publication_unavailable，不把摘要冒充全文。read/write/edit/search/glob 的新定义版本保留行为差异；write 的 contentArtifact、edit 的 findArtifact/replaceArtifact 接受准确原 scope 的完整 UTF-8 Artifact，与对应 inline 参数互斥，不能凭 hash 或猜当前 scope 读取。
 
 文件写入先校验原完整基线、再临时发布。发布后同步/读取失败返回 file_publish_outcome_unknown；Tool 保留 outcome_unknown，不把已发生替换假报为零效果失败。
+
+`write/edit` 的 `file_baseline_conflict` 解释本次基线或仅创建前置条件被拒绝、本次没有发布，但不返回当前文件正文。基线描述完整文件的身份与版本；冲突不证明另一编辑修改了同一段文字，须按各次请求的修改和各自回执区分。此前读取只代表当时观察，不能从冲突推断文件仍保留旧值；其他已经成功的操作不会回滚。后续另获授权的新编辑先读取当前文件并使用新完整基线，错误说明本身不授权重读或重做。绝对用户文件工具复用这项结果语义；发布后确认失败仍保留原 unknown。
 
 ## 逐操作文件变更预览
 

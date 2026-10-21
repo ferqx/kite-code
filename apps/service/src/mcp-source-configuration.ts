@@ -128,7 +128,7 @@ export interface McpChildSourceInheritance {
   version: 1;
   parentExecutionId: string;
   parentExecutionDigest: string;
-  parentRunId: string;
+  parentRunId: string | null;
   parentSessionId: string;
   rootSessionId: string;
   rootWorkCommandId: string;
@@ -845,15 +845,93 @@ export function createMcpSourceConfiguration(options: McpSourceConfigurationOpti
     input: McpChildSourceInput,
     narrowing: McpSourceSelectionInput,
   ) {
-    if (!input.parentRun)
-      return {
-        ...unboundSelection({
-          command: input.command,
-          session: input.parentSession,
-          workspace: input.workspace,
-        }),
-        async assertExecutionScope(_request: AuthorizationRequest) {},
+    if (!input.parentRun) {
+      const empty = unboundSelection({
+        command: input.command,
+        session: input.parentSession,
+        workspace: input.workspace,
+      });
+      const parent = await scope(input.parentSession.id);
+      const [execution, command] = await Promise.all([
+        parent.host.getExecution(input.parentExecution.id),
+        parent.host.getCommand(input.command.id),
+      ]);
+      if (
+        !execution ||
+        !command ||
+        execution.originCommandId !== command.id ||
+        execution.sessionId !== parent.session.id ||
+        execution.originStoreId !== parent.sourceScope.storeId ||
+        command.sessionId !== parent.session.id ||
+        command.originStoreId !== parent.sourceScope.storeId ||
+        command.subjectId !== input.command.subjectId ||
+        command.requestDigest !== input.command.requestDigest ||
+        hash(command.request) !== hash(input.command.request) ||
+        hash(execution.input) !== hash(input.parentExecution.input) ||
+        execution.rootWorkCommandId !== command.rootWorkCommandId ||
+        execution.rootWorkSeq !== command.rootWorkSeq ||
+        input.workspace.id !== parent.workspace.id
+      )
+        throw new McpAdapterError('mcp_source_scope_invalid');
+      // Omitting a real parent Run still yields no MCP authority, but cannot
+      // manufacture the runless lineage needed by another generation.
+      if (!(await runlessAncestry(parent.host, execution, command)))
+        return { ...empty, async assertExecutionScope(_request: AuthorizationRequest) {} };
+      const snapshot: McpSelectedSourceSnapshot = seal({
+        ...empty.snapshot,
+        inheritance: {
+          version: 1,
+          parentExecutionId: execution.id,
+          parentExecutionDigest: hash(execution.input),
+          parentRunId: null,
+          parentSessionId: parent.session.id,
+          rootSessionId: parent.session.rootSessionId,
+          rootWorkCommandId: execution.rootWorkCommandId,
+          rootWorkSeq: execution.rootWorkSeq,
+          parentSnapshotDigest: hash(empty.snapshot),
+          parentSnapshot: empty.snapshot,
+        },
+      });
+      const validate = async (sessionId: string, runId?: string) => {
+        const child = await scope(sessionId);
+        const run = runId
+          ? await parent.host.getRun(runId)
+          : (await parent.host.getView(sessionId)).runs.find((value) => value.isActive);
+        const candidate = run && selectedSourceSnapshot(run.configuration);
+        let ancestor = candidate;
+        for (let depth = 0; ancestor && depth < 32; depth++) {
+          if (hash(ancestor) === hash(snapshot)) {
+            await inherited(child, run!, candidate!);
+            return;
+          }
+          ancestor = ancestor.inheritance?.parentSnapshot;
+        }
+        throw new McpAdapterError('mcp_source_scope_invalid');
       };
+      return {
+        ...empty,
+        snapshot,
+        async assertExecutionScope(request: AuthorizationRequest) {
+          const own = await parent.host.getExecution(request.executionId);
+          if (
+            !own ||
+            own.sessionId !== request.sessionId ||
+            own.runId !== request.runId ||
+            own.originStoreId !== parent.sourceScope.storeId
+          )
+            throw new McpAdapterError('mcp_source_scope_invalid');
+          await validate(request.sessionId, request.runId ?? undefined);
+        },
+        sources: {
+          async capture(request: Parameters<ContextSources['capture']>[0]) {
+            if (request.workspaceId !== parent.workspace.id)
+              throw new McpAdapterError('mcp_source_scope_invalid');
+            await validate(request.sessionId);
+            return [];
+          },
+        },
+      };
+    }
     const parent = await scope(input.parentSession.id);
     const actualRun = await parent.host.getRun(input.parentRun.id);
     const actualExecution = await parent.host.getExecution(input.parentExecution.id);
@@ -891,23 +969,28 @@ export function createMcpSourceConfiguration(options: McpSourceConfigurationOpti
       !Array.isArray(saved.selection?.serverIds)
     )
       throw new McpAdapterError('mcp_source_capture_unavailable');
-    const state = await original(parent, actualExecution, actualRun);
-    for (const id of state.snapshot.selection.serverIds)
-      assertSnapshot(
-        parent,
-        state.snapshot,
-        id,
-        new AbortController().signal,
-        'derivations' in state ? state.derivations : [],
-      );
-    const picked = select({ ...state.capture, servers: state.snapshot.servers }, narrowing);
-    if (!picked.servers.length)
-      return { ...picked, async assertExecutionScope(_request: AuthorizationRequest) {} };
+    const picked = select({ ...observe(parent).capture, servers: saved.servers }, narrowing);
+    const empty = picked.servers.length === 0;
+    const state =
+      empty && saved.inheritance
+        ? await inherited(parent, actualRun, saved, 0, true)
+        : await original(parent, actualExecution, actualRun);
+    if (!empty)
+      for (const id of state.snapshot.selection.serverIds)
+        assertSnapshot(
+          parent,
+          state.snapshot,
+          id,
+          new AbortController().signal,
+          'derivations' in state && Array.isArray(state.derivations) ? state.derivations : [],
+        );
+    // Empty selections still carry their exact parent derivation. A later nested
+    // child must not interpret the parent's scope digest as its own capture.
     const snapshot: McpSelectedSourceSnapshot = seal({
       ...picked.snapshot,
       scope: saved.scope,
       scopeDigest: saved.scopeDigest,
-      readSet: saved.readSet,
+      readSet: empty ? picked.snapshot.readSet : saved.readSet,
       inheritance: {
         version: 1,
         parentExecutionId: actualExecution.id,
@@ -1028,11 +1111,69 @@ export function createMcpSourceConfiguration(options: McpSourceConfigurationOpti
     }
     return false;
   }
+  async function runlessAncestry(host: Host, execution: ExecutionRecord, command: CommandRecord) {
+    let ancestor: ExecutionRecord | null = execution;
+    const seen = new Set<string>();
+    while (ancestor && seen.size < 64) {
+      if (
+        seen.has(ancestor.id) ||
+        ancestor.runId !== null ||
+        ancestor.sessionId !== execution.sessionId ||
+        ancestor.originStoreId !== execution.originStoreId ||
+        ancestor.rootWorkCommandId !== execution.rootWorkCommandId ||
+        ancestor.rootWorkSeq !== execution.rootWorkSeq
+      )
+        return false;
+      seen.add(ancestor.id);
+      const origin = await host.getCommand(ancestor.originCommandId);
+      if (
+        !origin ||
+        origin.originStoreId !== execution.originStoreId ||
+        origin.sessionId !== execution.sessionId ||
+        origin.subjectId !== command.subjectId ||
+        origin.rootWorkCommandId !== execution.rootWorkCommandId ||
+        origin.rootWorkSeq !== execution.rootWorkSeq ||
+        hash(origin.request) !== origin.requestDigest
+      )
+        return false;
+      const request = object(origin.request);
+      if (origin.kind === 'extension.invoke') {
+        const decision = object(ancestor.decisionSource);
+        if (
+          request.kind !== 'extension.invoke' ||
+          ancestor.kind !== 'job' ||
+          ancestor.definitionId !== `${request.extensionId}/${request.actionId}` ||
+          ancestor.definitionVersion !== request.definitionVersion ||
+          object(origin.receipt).executionId !== ancestor.id ||
+          decision.kind !== 'action_decision' ||
+          decision.commandId !== origin.id ||
+          decision.extensionId !== request.extensionId ||
+          decision.actionId !== request.actionId ||
+          decision.definitionVersion !== request.definitionVersion ||
+          decision.preparedDigest !== hash(ancestor.input)
+        )
+          return false;
+        if (!ancestor.parentExecutionId) return true;
+      } else if (
+        !ancestor.parentExecutionId ||
+        request.kind !== `operation.${ancestor.kind}` ||
+        request.parentExecutionId !== ancestor.parentExecutionId ||
+        request.definitionId !== ancestor.definitionId ||
+        request.definitionVersion !== ancestor.definitionVersion ||
+        hash(request.input) !== hash(ancestor.input) ||
+        object(origin.receipt).executionId !== ancestor.id
+      )
+        return false;
+      ancestor = await host.getExecution(ancestor.parentExecutionId);
+    }
+    return false;
+  }
   async function inherited(
     source: Awaited<ReturnType<typeof scope>>,
     run: RunRecord,
     saved: McpSelectedSourceSnapshot,
     depth = 0,
+    lineageOnly = false,
   ): Promise<
     ReturnType<typeof observe> & { snapshot: McpSelectedSourceSnapshot; derivations: Derivation[] }
   > {
@@ -1053,7 +1194,7 @@ export function createMcpSourceConfiguration(options: McpSourceConfigurationOpti
     const [parent, origin, parentRun, parentExecution] = await Promise.all([
       scope(proof.parentSessionId),
       source.host.getCommand(run.originCommandId),
-      source.host.getRun(proof.parentRunId),
+      proof.parentRunId === null ? null : source.host.getRun(proof.parentRunId),
       source.host.getExecution(proof.parentExecutionId),
     ]);
     // The persisted child-start Command names its original carrier. Read that actual
@@ -1070,9 +1211,21 @@ export function createMcpSourceConfiguration(options: McpSourceConfigurationOpti
       carrierId ? parent.host.getExecution(carrierId) : null,
     ]);
     const role = object(object(run.configuration).snapshot);
+    const runless = proof.parentRunId === null;
+    const { inheritance: _inheritance, ...ownSnapshot } = saved;
+    const parentSnapshot =
+      runless && parentCommand
+        ? unboundSelection({
+            command: parentCommand,
+            session: parent.session,
+            workspace: parent.workspace,
+          }).snapshot
+        : parentRun
+          ? selectedSourceSnapshot(parentRun.configuration)
+          : undefined;
     if (
       !origin ||
-      !parentRun ||
+      (!runless && !parentRun) ||
       !parentExecution ||
       !parentCommand ||
       !carrier ||
@@ -1086,14 +1239,18 @@ export function createMcpSourceConfiguration(options: McpSourceConfigurationOpti
       run.originStoreId !== source.sourceScope.storeId ||
       origin.sessionId !== source.session.id ||
       origin.originStoreId !== run.originStoreId ||
+      (runless && hash(origin.request) !== origin.requestDigest) ||
       origin.subjectId !== parentCommand.subjectId ||
       parentCommand.originStoreId !== run.originStoreId ||
       parentCommand.sessionId !== parent.session.id ||
-      parentRun.sessionId !== parent.session.id ||
-      parentRun.originStoreId !== run.originStoreId ||
+      (parentRun &&
+        (parentRun.sessionId !== parent.session.id ||
+          parentRun.originStoreId !== run.originStoreId)) ||
       parentExecution.sessionId !== parent.session.id ||
       parentExecution.originStoreId !== run.originStoreId ||
-      !(await belongsToRun(parent.host, parentExecution, parentRun)) ||
+      (runless
+        ? !(await runlessAncestry(parent.host, parentExecution, parentCommand))
+        : !(await belongsToRun(parent.host, parentExecution, parentRun!))) ||
       hash(parentExecution.input) !== proof.parentExecutionDigest ||
       carrier.kind !== 'job' ||
       carrier.sessionId !== parent.session.id ||
@@ -1101,26 +1258,109 @@ export function createMcpSourceConfiguration(options: McpSourceConfigurationOpti
       carrier.childSessionId !== source.session.id ||
       carrier.parentExecutionId !== parentExecution.id ||
       !carrier.childConfiguration ||
+      originRequest.configurationId !== carrier.childConfiguration.id ||
+      originRequest.configurationVersion !== carrier.childConfiguration.version ||
       (role.roleId !== undefined &&
         (carrier.childConfiguration.id !== role.roleId ||
           carrier.childConfiguration.version !== role.roleVersion)) ||
       hash(carrier.childConfiguration.snapshot) !== hash(run.configuration) ||
-      [run, origin, parentRun, parentExecution, carrier, parentCommand].some(
+      [
+        run,
+        origin,
+        ...(parentRun ? [parentRun] : []),
+        parentExecution,
+        carrier,
+        parentCommand,
+      ].some(
         (fact) =>
           fact.rootWorkCommandId !== proof.rootWorkCommandId ||
           fact.rootWorkSeq !== proof.rootWorkSeq,
       ) ||
-      hash(selectedSourceSnapshot(parentRun.configuration)) !== proof.parentSnapshotDigest
+      hash(parentSnapshot) !== proof.parentSnapshotDigest ||
+      (runless &&
+        (hash(ownSnapshot) !== hash(parentSnapshot) ||
+          saved.servers.length !== 0 ||
+          saved.selection.serverIds.length !== 0 ||
+          saved.readSet !== null))
     )
       throw new McpAdapterError('mcp_source_scope_invalid');
+    if (runless) {
+      const carrierCommand = await source.host.getCommand(carrier.originCommandId);
+      const request = object(carrierCommand?.request);
+      if (
+        carrierCommand?.kind !== 'operation.agent' ||
+        carrierCommand.subjectId !== parentCommand.subjectId ||
+        carrierCommand.sessionId !== parent.session.id ||
+        carrierCommand.originStoreId !== run.originStoreId ||
+        carrierCommand.rootWorkCommandId !== proof.rootWorkCommandId ||
+        carrierCommand.rootWorkSeq !== proof.rootWorkSeq ||
+        hash(carrierCommand.request) !== carrierCommand.requestDigest ||
+        request.parentExecutionId !== parentExecution.id ||
+        hash(request.childConfiguration) !== hash(carrier.childConfiguration)
+      )
+        throw new McpAdapterError('mcp_source_scope_invalid');
+      const now = observe(source);
+      return {
+        ...now,
+        snapshot: seal({
+          ...proof.parentSnapshot,
+          scope: now.capture.scope,
+          scopeDigest: now.capture.scopeDigest,
+        }),
+        derivations: [],
+      };
+    }
+    if (
+      lineageOnly ||
+      (saved.servers.length === 0 &&
+        saved.selection.serverIds.length === 0 &&
+        saved.readSet === null)
+    ) {
+      // An empty descendant needs the sealed ancestry, never its ancestors' raw
+      // source bytes or read-set authority. Validate every persisted link first.
+      if (proof.parentSnapshot.inheritance)
+        await inherited(parent, parentRun!, proof.parentSnapshot, depth + 1, true);
+      else if (proof.parentSnapshot.scopeDigest !== observe(parent).capture.scopeDigest)
+        throw new McpAdapterError('mcp_source_capture_unavailable');
+      const now = observe(source);
+      return {
+        ...now,
+        snapshot: seal({
+          version: 1,
+          scope: now.capture.scope,
+          scopeDigest: now.capture.scopeDigest,
+          selection: { present: saved.selection.present, serverIds: [] },
+          servers: [],
+          readSet: null,
+        }),
+        derivations: [],
+      };
+    }
     const boundParent = proof.parentSnapshot.inheritance
-      ? await inherited(parent, parentRun, proof.parentSnapshot, depth + 1)
+      ? await inherited(parent, parentRun!, proof.parentSnapshot, depth + 1)
       : { ...observe(parent), snapshot: proof.parentSnapshot, derivations: [] as Derivation[] };
     if (
-      !boundParent.snapshot.readSet ||
-      boundParent.snapshot.scopeDigest !== observe(parent).capture.scopeDigest
+      boundParent.snapshot.scopeDigest !== observe(parent).capture.scopeDigest ||
+      (!boundParent.snapshot.readSet && saved.servers.length)
     )
       throw new McpAdapterError('mcp_source_capture_unavailable');
+    if (!boundParent.snapshot.readSet) {
+      // There is no raw-source capability to inherit. Retain the verified lineage,
+      // but bind the empty observation to this actual child scope without inventing a read-set.
+      const now = observe(source);
+      return {
+        ...now,
+        snapshot: seal({
+          version: 1,
+          scope: now.capture.scope,
+          scopeDigest: now.capture.scopeDigest,
+          selection: saved.selection,
+          servers: [],
+          readSet: null,
+        }),
+        derivations: boundParent.derivations,
+      };
+    }
     const derivation = {
       parent: parent.sourceOptions,
       readSet: boundParent.snapshot.readSet,
@@ -1711,7 +1951,7 @@ export function createMcpSourceConfiguration(options: McpSourceConfigurationOpti
           state.snapshot,
           id,
           context.signal,
-          'derivations' in state ? state.derivations : [],
+          'derivations' in state && Array.isArray(state.derivations) ? state.derivations : [],
         );
       return {
         outcome: 'succeeded',

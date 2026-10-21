@@ -212,17 +212,17 @@ try {
   );
   const originalState = await until(
     state,
-    (value) => value.selection!.runs.some((row) => row.status === 'waiting_execution'),
-    'original required parent waiting',
+    (value) =>
+      value.selection!.runs.some((row) => row.status === 'completed') &&
+      value.selection!.executions.filter((row) => !!row.childSessionId).length === 3,
+    'ordinary parent completed while three accepted children remain live',
   );
-  const originalRun = originalState.selection!.runs.find(
-    (row) => row.status === 'waiting_execution',
-  )!;
+  const originalRun = originalState.selection!.runs.find((row) => row.status === 'completed')!;
   const tasks = originalState.selection!.executions.filter((row) => !!row.childSessionId);
   assert.equal(tasks.length, 3);
   // Task keys and child Session IDs are original durable facts, not manufactured lifecycle rows.
   const taskKeys = tasks.map((row) => ({ id: row.id, childSessionId: row.childSessionId }));
-  stage('original_waiting_tasks', {
+  stage('ordinary_parent_completed_with_live_children', {
     runId: originalRun.id,
     status: originalRun.status,
     required: originalRun.waitingForResults,
@@ -240,15 +240,25 @@ try {
   )!;
   assert.equal(
     settled.selection!.runs.find((row) => row.id === originalRun.id)!.status,
-    'waiting_execution',
+    'completed',
   );
-  const stillRequired = settled.selection!.runs.find(
-    (row) => row.id === originalRun.id,
-  )!.waitingForResults;
-  const stopId = tasks.find(
-    (row) => stillRequired?.includes(row.id) && row.id !== completed.id,
+  const stopId = tasks.find((row) =>
+    originalState.selection!.executions.some(
+      (tool) =>
+        tool.id === row.parentExecutionId &&
+        typeof tool.toolInput === 'object' &&
+        tool.toolInput !== null &&
+        !Array.isArray(tool.toolInput) &&
+        tool.toolInput.prompt === 'STOP_CHILD',
+    ),
   )!.id;
   const detachedId = tasks.find((row) => row.id !== completed.id && row.id !== stopId)!.id;
+  await until(
+    state,
+    (value) =>
+      value.selection!.runs.length >= 2 && !value.selection!.runs.some((run) => run.isActive),
+    'reliable completed-child report accepted and its ordinary parent turn settled',
+  );
   const beforeEnvironment = (await count()).count;
   const showEnvironment = page.getByRole('button', { name: '显示环境信息', exact: true });
   if (await showEnvironment.isVisible()) await showEnvironment.click();
@@ -279,7 +289,7 @@ try {
     'retained child conversation renders the complete original Unicode body',
   );
   await page.getByRole('button', { name: '返回主会话', exact: true }).click();
-  await page.getByText('正在等待子 Agent 结果', { exact: true }).waitFor();
+  await page.getByText('ORIGINAL_PARENT_DONE', { exact: true }).first().waitFor();
   assert.equal(
     (await count()).count,
     beforeEnvironment,
@@ -295,8 +305,11 @@ try {
   await until(count, (value) => value.held.includes('NEWER_CHILD'), 'newer original task held');
   const newerState = await until(
     state,
-    (value) => value.selection!.executions.some((row) => !!row.childSessionId),
-    'newer task',
+    (value) =>
+      value.selection!.executions.some((row) => !!row.childSessionId) &&
+      value.selection!.runs.some((row) => row.status === 'completed') &&
+      !value.selection!.runs.some((row) => row.isActive),
+    'newer ordinary parent completed with its live child retained',
   );
   const newerTask = newerState.selection!.executions.find((row) => !!row.childSessionId)!;
   const beforeReadonly = (await count()).count;
@@ -308,7 +321,7 @@ try {
   assert.match(await card(completed.id).innerText(), /· succeeded/);
   assert.match(
     await card(stopId).innerText(),
-    new RegExp(`原父轮次 ${originalRun.id} · waiting_execution`),
+    new RegExp(`原父轮次 ${originalRun.id} · completed`),
   );
   const savedOutput = card(completed.id).getByRole('region', {
     name: `Job 已保存输出 · ${completed.id}`,
@@ -389,8 +402,12 @@ try {
   await until(
     state,
     (value) =>
-      value.selection!.runs.find((row) => row.id === originalRun.id)?.status === 'completed',
-    'original parent complete after precise stop',
+      value.selection!.runs.find((row) => row.id === originalRun.id)?.status === 'completed' &&
+      value
+        .selection!.executions.filter((row) => !!row.childSessionId)
+        .every((row) => ['succeeded', 'failed', 'cancelled'].includes(row.status)) &&
+      !value.selection!.runs.some((row) => row.isActive),
+    'original parent and reliable result continuations settled after precise stop',
   );
   await select('Newer Background', 'newer-root');
   await until(

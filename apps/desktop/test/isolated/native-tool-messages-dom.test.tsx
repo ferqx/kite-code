@@ -8,6 +8,7 @@ import { NativeToolMessages } from '../../electron/tool-messages';
 import type { NativeBridge, NativeRequest, NativeSelection } from '../../src/native-bridge';
 import {
   desktopToolMessage,
+  desktopToolPresentation,
   liveToolMessages,
   NativeLiveToolMessage,
   NativeToolMessage,
@@ -16,6 +17,25 @@ import {
 import { desktopTranscript } from '../../src/native-transcript';
 import type { NativeToolMessagePage } from '../../src/tool-messages-bridge';
 import { prepareDesktopDom } from '../native-page-dom.fixture';
+
+test('collaboration tool labels use exact new definitions and versions without inferring an Agent outcome', () => {
+  expect(
+    desktopToolPresentation({ definitionId: 'task.spawn', definitionVersion: '1' }),
+  ).toMatchObject({ toolName: 'spawn_agent', title: '创建子 Agent' });
+  expect(
+    desktopToolPresentation({ definitionId: 'task.follow_up', definitionVersion: '1' }),
+  ).toMatchObject({ toolName: 'follow_up_agent', title: '继续子 Agent' });
+  expect(
+    desktopToolPresentation({ definitionId: 'task.spawn', definitionVersion: '9' }).toolName,
+  ).toBeUndefined();
+  expect(
+    desktopToolMessage(
+      { definitionId: 'task.spawn', definitionVersion: '1', status: 'succeeded' },
+      'spawn',
+      'accepted',
+    ),
+  ).toMatchObject({ status: 'completed', title: '创建子 Agent' });
+});
 
 function fixture() {
   const dom = new JSDOM('<div id="root"></div>', {

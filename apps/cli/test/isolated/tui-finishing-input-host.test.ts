@@ -294,7 +294,7 @@ test('real cancelling Run accepts TUI successor; late receipt preserves B draft 
       );
     }
     expect(display.executionTimings[firstModel.id]?.availability).toBe('recorded_dispatch');
-    const body = '完整中🙂e\u0301\r\nnext line\r\n';
+    const body = 'New task: 完整中🙂e\u0301\r\nnext line\r\n';
     controller.setDraft(body);
     const sending = controller.send();
     await Promise.race([
@@ -310,12 +310,41 @@ test('real cancelling Run accepts TUI successor; late receipt preserves B draft 
     if (saved.intent.request.kind !== 'input.follow_up') throw Error('successor_kind_mismatch');
     expect(saved.intent.request.content === body).toBe(true);
     expect(saved.intent.request.afterRunId).toBe(originalRun.id);
-    expect((await client.getCommand(saved.intent.request.commandId)).status).toBe('accepted');
-    expect(
-      (await readTuiPendingInputs(client, storeId, 'a', new AbortController().signal)).map(
-        (input) => input.request.content,
-      ),
-    ).toEqual([body]);
+    const pending = await client.getCommand(saved.intent.request.commandId);
+    expect(pending.status).toBe('accepted');
+    const pendingReceipt = pending.receipt as {
+      humanInputCommandId: string;
+      businessCommandId: string;
+      decisionCommandId: string;
+      outcome: string;
+      runId: string | null;
+    };
+    expect(pendingReceipt).toMatchObject({ outcome: 'human_input_queued', runId: null });
+    const raw = await client.getCommand(pendingReceipt.humanInputCommandId);
+    expect(raw.kind).toBe('human.input');
+    expect(raw.receipt).toMatchObject({
+      state: 'decided',
+      applicationState: 'queued',
+      businessCommandId: pendingReceipt.businessCommandId,
+      decisionCommandId: pendingReceipt.decisionCommandId,
+    });
+    expect((await store.getCommand(raw.id))!.request).toMatchObject({
+      content: body,
+      publicCommandId: pending.id,
+      originalRequest: {
+        kind: saved.intent.request.kind,
+        content: body,
+        afterRunId: originalRun.id,
+        contextSelectionId: saved.intent.request.contextSelectionId,
+      },
+    });
+    const queued = await readTuiPendingInputs(client, storeId, 'a', new AbortController().signal);
+    expect(queued.map((input) => input.request.content)).toEqual([body]);
+    expect(queued.map((input) => input.id)).toEqual([pendingReceipt.businessCommandId]);
+    expect((await store.getCommand(pendingReceipt.decisionCommandId))!.request).toMatchObject({
+      inputCommandId: raw.id,
+      proposal: { relation: 'independent_work', purpose: 'work' },
+    });
     await controller.select('b');
     controller.setDraft('B original draft');
     receiptReleased.release();
@@ -332,6 +361,22 @@ test('real cancelling Run accepts TUI successor; late receipt preserves B draft 
     expect(await readTuiPendingInputs(client, storeId, 'a', new AbortController().signal)).toEqual(
       [],
     );
+    const applied = await client.getCommand(saved.intent.request.commandId);
+    const appliedReceipt = applied.receipt as {
+      businessCommandId: string;
+      decisionCommandId: string;
+      humanInputCommandId: string;
+      runId: string;
+    };
+    expect(applied.status).toBe('applied');
+    expect(appliedReceipt.humanInputCommandId).toBe(raw.id);
+    expect((await client.getCommand(raw.id)).receipt).toMatchObject({
+      businessCommandId: appliedReceipt.businessCommandId,
+      decisionCommandId: appliedReceipt.decisionCommandId,
+    });
+    const business = await client.getCommand(appliedReceipt.businessCommandId);
+    expect(business.status).toBe('applied');
+    expect((await client.getRun(appliedReceipt.runId)).originCommandId).toBe(business.id);
     expect(finalView.runs.find((run) => run.id === originalRun.id)?.status).toBe('cancelled');
     expect(model.requests.length).toBe(2);
     expect(model.requests[1]!.messages.some((message) => message.content === body)).toBe(true);

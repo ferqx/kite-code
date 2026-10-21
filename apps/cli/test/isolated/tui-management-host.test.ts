@@ -98,8 +98,8 @@ test('actual development PTY slash routes manage Session/Fork/current Context an
             message.role === 'user' &&
             [
               'Owned ordinary task',
-              'Qualifying historical task',
-              'Queued after maintenance',
+              'New task: Qualifying historical task',
+              '新任务Queued after maintenance',
             ].includes(message.content),
         )?.content;
       if (!summary && !task) throw Error('management_original_model_task_unavailable');
@@ -107,8 +107,8 @@ test('actual development PTY slash routes manage Session/Fork/current Context an
       if (summary && body.includes('ORIGINAL_FULL_TAIL')) summaryFullInput = true;
       if (summary && body.includes('preserve original facts')) summaryFocus = true;
       if (
-        task === 'Queued after maintenance' &&
-        body.includes('Queued after maintenance') &&
+        task === '新任务Queued after maintenance' &&
+        body.includes('新任务Queued after maintenance') &&
         body.includes('Summary of owned task')
       )
         followupFullInput = true;
@@ -118,7 +118,7 @@ test('actual development PTY slash routes manage Session/Fork/current Context an
         ? 'Summary of owned task and original answer.'
         : task === 'Owned ordinary task'
           ? `${'Original factual text. '.repeat(2000)}\n\nORIGINAL_FULL_TAIL`
-          : task === 'Qualifying historical task'
+          : task === 'New task: Qualifying historical task'
             ? 'QUALIFYING_SETTLED_HISTORY'
             : 'FOLLOWUP_COMPLETED';
       const frame = (delta: unknown, finish_reason: string | null) =>
@@ -293,7 +293,7 @@ test('actual development PTY slash routes manage Session/Fork/current Context an
       expect(
         db
           .query(
-            "SELECT count(*) AS n FROM run r JOIN command c ON c.id=r.origin_command_id WHERE r.session_id='a' AND r.status='completed' AND json_extract(c.request_json,'$.content') IN ('Owned ordinary task','Queued after maintenance')",
+            "SELECT count(*) AS n FROM run r JOIN command c ON c.id=r.origin_command_id WHERE r.session_id='a' AND r.status='completed' AND json_extract(c.request_json,'$.content') IN ('Owned ordinary task','新任务Queued after maintenance')",
           )
           .get(),
       ).toEqual({ n: 2 });

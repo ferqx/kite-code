@@ -279,11 +279,8 @@ test.skipIf(process.platform !== 'darwin')(
                 function: {
                   name: 'spawn_agent',
                   arguments: JSON.stringify({
-                    key: `child-${index}`,
-                    role: 'worker',
-                    input: { content: `MULTI_CHILD_${rootIndex}_${index}` },
-                    cancellation: 'attached',
-                    result_disposition: 'required',
+                    prompt: `MULTI_CHILD_${rootIndex}_${index}`,
+                    task_name: `child-${index}`,
                   }),
                 },
               })),
@@ -333,7 +330,7 @@ test.skipIf(process.platform !== 'darwin')(
               modelCapabilities: { contextWindowTokens: 1_000_000 },
             },
           ],
-          tools: ['task', ...(shell ? ['shell.launch', 'shell.read', 'shell.stop'] : [])].map(
+          tools: ['task.spawn', ...(shell ? ['shell.launch', 'shell.read', 'shell.stop'] : [])].map(
             (id) => ({ id, definitionVersion: '1' }),
           ),
         }),

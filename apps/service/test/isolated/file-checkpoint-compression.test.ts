@@ -150,6 +150,8 @@ for (const collision of ['published-summary', 'generated-instruction'] as const)
         ],
       });
     let child: Awaited<ReturnType<typeof launch>> | undefined, reader: Store | undefined;
+    let admittedCommands: Store | undefined;
+    let subjectId: string | undefined;
     try {
       child = await launch('live');
       const client = child.client,
@@ -213,13 +215,35 @@ for (const collision of ['published-summary', 'generated-instruction'] as const)
       };
       const work = async (commandId: string, content: string, nextPhase: string) => {
         phase = nextPhase;
+        const request = { kind: 'run.start' as const, content };
+        if (subjectId) {
+          admittedCommands ??= await openSqliteStore({
+            dataRoot: profile.dataRoot,
+            profile: profile.profile,
+          });
+          // These internal Source-identity collisions require already admitted business facts.
+          // Use the real Store port, then let the original paired HTTP Runtime reuse that exact ID.
+          await admittedCommands.acceptCommand({
+            expectedStoreId: storeId,
+            sessionId: 's',
+            subjectId,
+            commandId,
+            request,
+          });
+          expect((await admittedCommands.getCommand(commandId))?.request).toEqual(request);
+        }
         await client.startRun('s', {
           expectedStoreId: storeId,
           commandId,
           kind: 'run.start',
           content,
         });
-        return complete(commandId);
+        const runId = await complete(commandId);
+        const command = await client.getCommand(commandId);
+        subjectId ??= command.subjectId;
+        expect(command.receipt).toEqual({ runId });
+        expect((await client.getRun(runId)).originCommandId).toBe(commandId);
+        return runId;
       };
       const compress = async (commandId: string, focus: string) => {
         const before = await client.getContext('s', { storeId });
@@ -338,6 +362,8 @@ for (const collision of ['published-summary', 'generated-instruction'] as const)
         'actual compressed write\r\n',
       );
       await work('later-not-consumed', 'NEWER_ACTUAL_USER_NOT_IN_WRITER_MODEL', 'later');
+      await admittedCommands?.close();
+      admittedCommands = undefined;
       reader = await openSqliteStore({
         dataRoot: profile.dataRoot,
         profile: profile.profile,
@@ -542,6 +568,7 @@ for (const collision of ['published-summary', 'generated-instruction'] as const)
       expect(requests).toHaveLength(9);
       expect(requests.slice(1)).toHaveLength(8);
     } finally {
+      await admittedCommands?.close();
       await reader?.close();
       await child?.close();
       provider.stop(true);

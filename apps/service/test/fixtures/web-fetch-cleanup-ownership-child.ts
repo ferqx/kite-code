@@ -7,6 +7,7 @@ import { createClient } from '@kite-ai/client';
 import { privateDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { createDefaultProcessConfiguration } from '../../src/configuration';
 import { assembleProcessService } from '../../src/process-service';
+import { initializeLivePermissionFixture } from './live-permission-fixture';
 
 // Only this parent's explicit protocol retires the deliberately retained real Worker.
 process.once('SIGTERM', () => process.exit(143));
@@ -187,6 +188,17 @@ try {
     sessionId: 's',
     workspaceId: 'w',
     title: 'original',
+  });
+  const creator = (await runtime!.getCommand('create'))!;
+  await initializeLivePermissionFixture({
+    runtime: runtime!,
+    profile,
+    expectedStoreId: storeId,
+    subjectId: creator.subjectId,
+    sessionId: 's',
+    workspaceId: 'w',
+    mode: 'full',
+    trusted: true,
   });
   const input = 'Original user data 中🙂e\u0301\r\n原第二行';
   await client.startRun('s', {

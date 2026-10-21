@@ -185,14 +185,8 @@ test.skipIf(process.platform !== 'darwin')(
               function: {
                 name: 'spawn_agent',
                 arguments: JSON.stringify({
-                  key: `child-${index}`,
-                  role: 'worker',
-                  input: { content },
-                  cancellation: 'detached',
-                  result_disposition:
-                    content === 'UNICODE_CHILD' || content === 'STOP_CHILD'
-                      ? 'required'
-                      : 'background',
+                  prompt: content,
+                  task_name: content,
                 }),
               },
             })),
@@ -299,7 +293,14 @@ test.skipIf(process.platform !== 'darwin')(
               baseURL: `${provider.url.href}v1`,
             },
           ],
-          tools: [{ id: 'task', definitionVersion: '1' }],
+          tools: [
+            'task.spawn',
+            'task.follow_up',
+            'task.message',
+            'task.events',
+            'task.list',
+            'task.interrupt',
+          ].map((id) => ({ id, definitionVersion: '1' })),
         }),
         { mode: 0o600 },
       );
@@ -338,7 +339,7 @@ test.skipIf(process.platform !== 'darwin')(
           credentials: false,
           home,
           storeId: storeId!,
-          producer: 'default worker task via compatible SDKHTTP',
+          producer: 'six-tool default collaborator via compatible SDKHTTP',
         }),
       );
       driver = Bun.spawn(

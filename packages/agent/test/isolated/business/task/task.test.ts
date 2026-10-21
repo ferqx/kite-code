@@ -13,8 +13,8 @@ import type {
   Permissions,
   ToolDefinition,
 } from '../../../../src/extensions';
-import { createTaskExtension } from '../../../../src/extensions/task';
 import { openSqliteStore } from '../../../../src/sqlite';
+import { createLegacyTaskFixture as createTaskExtension } from '../../../fixtures/legacy-task-surface';
 
 const finish: Extract<ModelEvent, { type: 'finish' }> = {
   type: 'finish',

@@ -10,7 +10,9 @@
 
 [扩展契约](src/extensions/index.ts)的 `lifecycle.beforeRun/beforeRunComplete` 分别在显式任务输入的启动前与正常完成前选择本 namespace 的已注册 Action。Core 在模型配置解析前、最终完成 CAS 前按注册顺序调度普通真实 Action；内部 child 激活和自动 Job report 不进入这两个业务钩子。稳定 Command ID 去重，完成重试和冷读不重复执行，失败保留 Action 自身结果，不替代主 Run 的业务结果。Action 继续通过原受控 operations 请求子执行；`resultDelivery:caller` 仅将普通 child 的自动交付标为调用扩展所有，实际状态、结果与取消证据保持。省略时保留原会话投递；它不能与必要结果义务或 after-turn 自动报告组合。[生命周期测试](test/isolated/execution/run-lifecycle.test.ts)与[结果交付测试](test/isolated/child/result-delivery.test.ts)验证这些通用合同，并核实未安装命名扩展时空标题及控制修订保持不变。
 
-[会话命名扩展](src/business/session-title/index.ts)用启动前 Action 先保存首条原文规整空白后的前10个Unicode码点及自有 CAS marker，在首次主任务完成前通过按本轮选定模型装配的无工具内部 child 尝试一次可读标题。标题专用副本去掉首尾空白，将连续空白合并为一个空格，再分别截取兜底的10码点或命名输入的8192码点；按需读取原文，只构造有界副本，原消息及主模型输入保持不变。全为空白时保存“新会话”且不发起命名模型请求。扩展持有10秒取消、32KiB输出限制、[标题校验](src/business/session-title/title.ts)与原 Session rename CAS；AI 输出裁至10码点后再次校验可读性，拒绝只剩表情、数字或符号的标题。模型不可用、重试等待、失败和迟到手动改名仍保原文兜底或手动名称。独立子会话及 caller 交付隔离正文，无 Core 标题开关、公共用途字段或专用恢复格式；后续输入和冷读不补发命名。[命名集成](test/isolated/execution/session-title-generation.test.ts)核真实 SQLite、连续空白与原文隔离、取消、手动竞争、已有空标题历史不补命名、父上下文隔离及普通主恢复点；[Store](src/storage/README.md#session-标题写入)只保存消息和执行显式 rename，不再从用户正文推导标题。设计理由与限制见[生命周期取舍](../../.agents/notes/implemented/architecture/2026-10-18-run-lifecycle-extension-actions.md)。
+[会话命名扩展](src/business/session-title/index.ts)用启动前 Action 先保存首条原文规整空白后的前10个Unicode码点及自有 CAS marker，在首次主任务满足正常完成条件后、最终成功状态提交前，通过按本轮选定模型装配的无工具内部 child 尝试一次可读标题。标题专用副本去掉首尾空白，将连续空白合并为一个空格，再分别截取兜底的10码点或命名输入的8192码点；按需读取原文，只构造有界副本，原消息及主模型输入保持不变。全为空白时保存“新会话”且不发起命名模型请求。扩展持有10秒取消、32KiB输出限制、[标题校验](src/business/session-title/title.ts)与原 Session rename CAS；AI 输出裁至10码点后再次校验可读性，拒绝只剩表情、数字或符号的标题。模型不可用、重试等待、失败和迟到手动改名仍保原文兜底或手动名称。独立子会话及 caller 交付隔离正文，无 Core 标题开关、公共用途字段或专用恢复格式；后续输入和冷读不补发命名。[命名集成](test/isolated/execution/session-title-generation.test.ts)核真实 SQLite、连续空白与原文隔离、取消、手动竞争、已有空标题历史不补命名、父上下文隔离及普通主恢复点；[Store](src/storage/README.md#session-标题写入)只保存消息和执行显式 rename，不再从用户正文推导标题。设计理由与限制见[生命周期取舍](../../.agents/notes/implemented/architecture/2026-10-18-run-lifecycle-extension-actions.md)。
+
+需要解释的首输入先经可信宿主 `sessionInputMetadata.preserve` 保存本会话标题兜底，再捕获解释所用控制修订；该接点不属于 Run 的业务钩子，不准入 Action、Tool、Job 或 Model。默认标题实现核真实 public/raw、主体、初始控制与空历史，并沿稳定 rename Command 和原 CAS 保存本地名称；保留的原注册事件核手动改名，注册锚点不可核时拒绝推断。准确业务随后沿 public/raw/decision/business 回执核原文；首条未决输入经真实澄清形成首业务时，另核原待决、准确 clarifying input、新决定与业务的完整链，标题继续锚定首条原文，原启动 Action 只补 marker。明确独立新任务不借此前待决输入命名，手动标题仍受原 CAS 保护。AI 只在准确业务满足正常完成条件后、最终成功状态提交前生成；解释轮本身不触发业务 Action。全空白只可从真实公共输入登记为待澄清，不取得工作选择或执行权。
 
 - [根入口](src/index.ts)：`createRuntime`，import 不打开资源。Runtime 的短命令受理与异步运行分开；模型和工具等待不占控制入口。
 - [扩展入口](src/extensions/index.ts)：具版本 Tool/Action/Query、JSON schema、公开内容 envelope 与有限操作。扩展只获得当前 Session、自有 namespace 的记录 CAS、公开 Run/Execution 和受控子工具；不取得 SQL、owner 或完整运行状态。
@@ -126,7 +128,7 @@ Job.start 的可选只读 `dispatchAuthorization` 来自资源等待后的最终
 
 可信宿主的 `readRunExtensionRecord({sessionId,runId,extensionId,key})` 只观测准确当前 Store、实际 Run manifest 所含 namespace 的原记录，拒绝外部 origin/fork provenance；返回 clone/freeze。它属于 Runtime 的普通只读资源生命周期，不取得执行 owner、不初始化 Provider，也不增加 HTTP 或 Model 能力。Service 可由原 immutable activation anchor 读取最低审批，不能用模型输入或有限当前视图猜权限。
 
-普通 Task 在真实 carrier 受理后按 ChildSlots 排队，激活时才开始子 Run。`task` 和 `followup_task` 默认在 carrier 的 ensure 事务登记原父 Run 的 required 结果义务，不设累计数量或字节额度；明确 background 才只保留后台事实。已知失败或取消可以被原父 Run 如实接纳，unknown 只给一次状态诊断，不能满足完成义务。等待复用中央变化水位与 `waiting_execution`，完整等待集合不设累计数量额度，不反复调用 Model；普通单目标 `operations.wait` 保留终态等待，新输入在该 Tool 返回后的安全边界应用。受控 `send_message` 与 follow-up 只作用于原直接 child、Run 和 selection；公开 HTTP 不能借此向任意 child 写输入。详细交付及邮箱/after_turn 边界由 Task owner 维护。
+普通 Task 的模型表面由[六工具 owner](src/extensions/task/README.md)维护，默认通用 child 异步受理并在 carrier ensure 事务保存有限 `agent_completion` 订阅，不让模型选择 required/background/after_turn。稳定 Agent 以 child Session 为身份，每轮仍有准确 carrier、Run、配置、结果 revision 和取消范围。已受理 child 在工作选择使其暂缓时保留原 planned carrier，释放槽位后等准确资格恢复，激活前重新核当前权限；具体边界和回归由同一六工具 owner 维护。可信内部调用的 required 义务、caller 交付及旧记录恢复继续保持各自封存合同；它们不成为普通模型的兼容 alias。
 
 child 在实际激活时持久保存 `deadlineAt=startedAt+1_800_000`，根 Run 的 `deadlineAt=null`。Runtime 计时器与 SQL 最后派发使用同一固定期限，到期按真实 Run 提交取消并停止 attached 域；已激活独立 child 与 detached Job 保持自己的适用域。迟到 partial、终态或 unknown 可以保存，不能启动新工作。没有公开短期限或累计 token/Tool/attempt 额度。期限 owner 与真实持续等待证据见[child README](test/isolated/child/README.md)。
 
@@ -152,11 +154,15 @@ child 在实际激活时持久保存 `deadlineAt=startedAt+1_800_000`，根 Run 
 
 唯一 Loop 的主 Run 无总期限或累计额度，子 Run 激活后固定 30 分钟，包含等待后代的时间。暂时性 Model 失败不设尝试次数上限，按原失败 Execution 血缘退避且响应取消；公开重试 `maxAttempts=null`。长度截断的纯文本作为真实响应段保留并继续，截断工具批次零派发，摘要长度截断不发布。来源／能力变化可反复重新准备。完成治理不以重复诊断 key 代替当前必要条件核验。Shell 只有明确 `timeoutMs` 才有单次总期限。
 
+长度续写请求遇到可重试 Provider 失败时，Runtime 仍从当前持久历史、真实人类补充、权限、工具和 Host Sources 重新准备，只恢复 Loop 的准确临时续写尾项。该尾项须绑定同 Store/Session/Run/工作/原 Command 的成功纯文本 length Execution；完整原输出与新历史中的唯一原 assistant 正文一致才允许追加。若当前已发布压缩已准确覆盖该原 assistant，则验证同 selection 的覆盖上界、原正文或完整 descriptor 及当前真实摘要后退役旧尾项，沿新摘要继续，不把旧正文灌回窗口。无效证明拒绝继续，普通重试不增加尾项，也不把失败尝试的部分文本加入上下文。[长度后重试回归](test/isolated/execution/model-length-retry.test.ts)核超过64KiB原 Artifact、真实 Tool、人类补充及 Source/权限刷新和错工作反例。
+
 模型顺序中的同 Tool／相同 JSON 参数连续五次 `failed` 触发 `repeated_tool_failure`，经原 `run.cancel` 域停止当前 Run 与 attached 后代。Core 确认未派发的 `context_refresh_required/capability_refresh_required` 是中性准备失效，不增加也不清空计数；其他调用换工具、参数或返回非失败结果时重置。唯一 Loop 从 [UnifiedExecution](src/execution/index.ts) 的内部 `ToolExecutionResult` 接收真实 dispatch 标记，和扩展可自报的 `ToolResult.details` 分开；原 `tool()` 调用者仍取得同一业务结果，不增加逐 Tool SQL 查询。并行批次先保存所有已启动结果，再按原调用顺序计算。计数跨完成检查保存，显式原 Run 接续从原 Model/Tool ledger 重建；历史扫描和最后 checkpoint 都将 Store 的 `authorization.dispatched` 交给同一分类函数，缺少证据时保守计数，不能通过压缩、重启或伪造扩展详情重置。[长任务回归](test/isolated/execution/long-running.test.ts)核5／128个新目录指令退回、前四次真实失败保留和伪造详情；[重试](test/isolated/execution/model-attempt.test.ts)和[真实强杀接续](test/isolated/recovery/run-resume-runtime.test.ts)分别核模型和两种 Tool 恢复边界。定向通过不代表实际连续数周或完整平台资格。
 
 普通来源发现与旧依据变化分别处理。[文件工具工厂](src/tools/files-tools.ts)仅为 read/list/glob/search 提供可信 `ToolDefinition.contextDiscovery=read_only`；Core 冻结原 Model 的 source requests，各 Tool 用原请求集加本次准确输入复核，不混入同批兄弟刚引入的目标。只有宿主捕获的低权限项目指令新增、原模型全部来源仍不变时，合格只读调用可以继续；下一 Model 同时取得新指令与真实结果，不追溯改写旧 Model。未知工具、扩展自报同 kind 和不透明来源没有该资格。[混合批次回归](test/isolated/context/tool-batch-freshness.test.ts)验证正常四项各一次及旧来源改写／删除保守拒绝；[真实 SIGKILL 恢复](test/isolated/recovery/source-discovery-resume.test.ts)核原 response 和下一 Model planned 两个边界，四个读取不重放。
 
 [模型上下文组装](src/model-context.ts)统一普通请求、压缩请求和展开校验的来源位置。默认宿主显式装配纯 `agentContractSource`，静态规则及可缓存工作区事实不混入动态计划状态。[项目来源](src/platform/project-sources.ts)将完整 AGENTS／CLAUDE 正文标为带出处的低权限 user 数据，放在真实历史之后。`ContextSource.placement` 仅允许 user 的 `after_history` 或 `runtime`；最多一个 runtime 来源组成唯一尾部观察块，非法或冲突明确拒绝。无 placement 的既有来源保原前缀行为；原 source IDs、完整工具配对、摘要及派发前 freshness 不变。
+
+同一生产 contract 区分真实执行凭据、工具正文里的领域状态、历史观察与当前效果。正文写着 pending 不证明读取尚未返回；相同标记、长度或措辞也不自动证明身份、因果或编码。完整文件基线冲突不证明两次编辑修改了相同文字，按各自请求和回执描述；稳定 agent ID 与旧完成事件也不能证明新 follow-up 完成，须核当前工作及准确完整结果来源。后来收到 Source 不倒写较早输入的知识范围。自己或已观察child没有写入，不证明其他参与者没有修改；新旧读取不同时报告实际变化，不猜writer或原因。缺少明确回执时只描述实际返回内容及未知，不从 Tool 消息角色推导 succeeded。精确文本按解码后的原码点核实，外观近似或归一化不能代替字节/编码证据。
 
 内部 `SourceRequest.runId` 由 Core 的当前捕获边界覆盖，不从模型参数推定。[Planning](src/business/planning/README.md#计划与真实来源)按实际 Run 与原批准证明贡献动态 phase；来源位置和描述均不授执行权，权限与业务必要条件仍独立核验。该合同不改变 HTTP schema、Store 格式或旧数据基线。来源／组装／压缩回归见 [model-context](test/isolated/context/model-context.test.ts)与[生产 Prompt 原旅程](../../tests/tui-system/scenarios/prompt-contract-v2-production.test.ts)。
 
@@ -174,7 +180,7 @@ Core 只依赖中立 `ArtifactContentStore` 端口；Tool/Action 以当前 execu
 
 Run 的初始化三态与原 selection 保持。明确 root 接续可在同一 OS 锁/generation 下原子接管所选 Run 的活动 child 树，沿原配置、权限交集、carrier 与截止时间继续；queued、激活前、已结束子结果、原审批和前台 task.execute 共用普通监督与唯一 Loop。纯 Model 中断结束旧尝试并创建新请求；自动压缩 pending/未发布摘要重新尝试，已发布点保持。普通工具和外部 Job 的未知效果、半完成任意 initializer、无法重建的绑定继续拒绝；受限 continuation 合同不按工具名称放行。资源和证明边界归[协议 owner](src/storage/sqlite/run-resume.README.md)。
 
-显式 `recoverSession(decision='interrupt')` 取得原 Session OS 锁并 fencing，原子中断遗留 Run、保留 partial 和原执行来源。可证明未派发的同 Store 计划取消；可能产生效果的工具/Job 保持 `outcome_unknown`，不会重做启动。该入口不返回普通执行 owner，未知仍限制该 Session；其他 Session 可继续。已有持久根报告的显式冷恢复由 `resumeJobReport` 和专门 `resolveRecoveryRunConfiguration` 负责，详细资格与生命周期见 [Task owner](src/extensions/task/README.md#task-的-after_turn)。外部 adapter 的显式核实见下方“显式 Job 外部核实”；原适配器必须提供可靠查询能力。离线备份恢复由 maintenance owner 单独负责。
+显式 `recoverSession(decision='interrupt')` 取得原 Session OS 锁并 fencing，原子中断遗留 Run、保留 partial 和原执行来源。可证明未派发的同 Store 计划取消；可能产生效果的工具/Job 保持 `outcome_unknown`，不会重做启动。该入口不返回普通执行 owner，未知仍限制该 Session；其他 Session 可继续。已有持久根报告的显式冷恢复由 `resumeJobReport` 和专门 `resolveRecoveryRunConfiguration` 负责，详细资格与生命周期见 [Task owner](src/extensions/task/README.md)。外部 adapter 的显式核实见下方“显式 Job 外部核实”；原适配器必须提供可靠查询能力。离线备份恢复由 maintenance owner 单独负责。
 
 Job 输出与终态分开保存：单 chunk 32 KiB，内容的 JSON 编码与固定行开销共用 1 MiB 保留预算；每 stream 至多一个合并丢失区间。生产方主动丢弃只关闭该 stream 的保留尾部，其他 stream 仍可使用剩余总预算；任何丢失与总预算耗尽分别记录。独立 64 位高水位不依赖输出行是否保留。每页先确定最多 200 条正常行的上界，再合入与该页相交的至多三条 gap；裁剪区间返回准确 `throughSeq` 和无法精确归属时的 null 字节量。跨 stream 的 gap 可以重叠并包含别的 stream 正常行，消费方保留各条事实并以本页最大 `throughSeq` 推进。纯读取不写回截断结果，终态不受输出预算限制。
 
@@ -195,6 +201,32 @@ Runtime/Session 的 [串行资源 owner](src/execution/resources.ts)只保留仍
 `Extension.context.capture` 只接收本 namespace 的只读投影，来源 ID 必须属于该 Extension；Core 强制将其作为 `user` 数据加入实际模型输入。显式宿主项目指令仍保留自身放置位置。来源身份、格式和数量在 Model I/O 前检查，大正文通过准确 scope Artifact 完整交接，传输阈值不裁剪实际来源；变化使旧 Tool 决策失效，下一 Model 才取得新来源。Query 和普通历史读取不会调用贡献回调、模型或工具。
 
 可选 `Extension.context.captureBatch` 接收该检查点同一 Session 的全部完整请求及一个只读 context；全部 Session scope 在贡献回调前核实，返回最多 128 个自有 namespace 来源，Core 强制 `user` 并核总唯一来源。未选择批量回调的扩展保持逐项捕获；Planning 的批量贡献只在当前检查点读取一次真实计划，不跨检查点缓存。[扩展回归](test/isolated/extensions/context-contributions.test.ts)核完整不同输入、下一检查点刷新、scope/namespace/数量和冲突拒绝，原单项贡献合同保持。
+
+## 人类输入、工作选择与可靠结果
+
+[真实输入 owner](src/storage/sqlite/inputs/README.md)把原公共 Command、耐久 `human.input`、关联/选择 `human.input.decision` 和实际业务 Command 分开。`human-input-intent.ts` 只直接识别当前未引用的明确控制；未知正文由 `human-input-processing.ts` 提供封存身份及候选原文，在同一普通 Loop 的无工具 Model 中提出关联。Host 独立校验提案、当前选择及原输入 digest；Store 以 control revision CAS 保存决定。引用、邮件、代码和自报批准不能产生控制。对外回执分别给出原输入、决定、业务 Command 与可空 Run，Client/CLI 沿实际业务 Run 观察，不把输入受理当完成。
+
+idle pump 读到 pending 后，输入入口可能已经提交准确业务决定。`preparePendingHumanInputs` 只在真实 SQL 返回 `input_processing_unavailable` 且 `hasCommittedHumanBusinessDecision` 查回同 scope、digest、selection 的已封存决定及 public/raw/business 完整归属时放弃过期准备，随后仍沿原业务派发门禁。取消、Rewind、未封存或缺失/伪造证明保持原失败，不能因一次过期读取污染合法业务，也不能把异常一概忽略。[确定性竞争回归](test/isolated/recovery/human-input-processing-race.test.ts)用真实 SQLite 与有限 Action 唤醒原 pump，核两次业务 Model、零额外处理 Run，以及五个失败反例。
+
+处理准备先登记的相反顺序中，技术 Run 可失败并保留已登记、经最终 SQL 拒绝的 Model 请求。它与实际业务 Run 分开核验，不能仅凭 Run 或 Execution 总数判为重复业务。[组恢复回归](test/isolated/recovery/run-resume-group-runtime.test.ts)固定真实登记顺序，核准确 public/raw/decision/business 和 processing 身份；已有处理请求必须失败、无派发和执行授权，业务 Provider、效果及资源释放仍按原 ledger 精确计数。
+
+处理轮每个新 Model 边界重读当前选择、候选与 control revision，只有新鲜唯一解释 Source 进入请求；准确当前 raw 用既有 after_history 放在完整原历史之后，避免把旧业务请求误作最新输入，原历史与工具配对仍保留。新增或更正任务要求按 work 交接，仅问已有进度／缺失信息才保持只读观察。旧成功提案观察过期时沿同一普通 Loop 重新解释。每次 Model continuation 封存其当时解释上下文，冷恢复不修改原 Run snapshot 或成功 Model 历史。处理轮使用自身因果，禁用业务 extensions、初始化义务、afterTurn、reviewer 及可变工具能力；不会替 A/B 执行工作。新真实澄清可准确关闭原 unresolved 输入。A 的进度/澄清保留订阅，B 的选择不撤销 A；取消 B 不自动回选 A。 queued B 取消后，原 A 的技术 handoff 重核已封存 B 决定、准确取消业务与当前选择，避免安全门禁拒绝后仍生成失败 Model 的空转；不为取消的 B 派发工作。同工作补充沿准确原 Run，idle 继续保留 A 配置与 current permission；热态使用原 binding lease，冷态只从准确原 A Run/Command 的 recovery resolver 复原，不能借最新 B 配置。独立 B 先保存 queued，原 A 仅在真实安全边界以 `human_work_deferred` 技术收束；该状态不宣称 A 的业务已完成。
+
+要求重新读取或核验当前文件是新的业务 `work`，须交给准确原工作；只读限制约束解释轮自身，不能把新读取请求替换成旧回执或澄清。解释提案同时明确现有选择合同：progress/clarify/pause/stop及unresolved保持选择，continue/replace与独立工作须选择准确工作；Host仍独立重核。
+
+进度解释只报告上下文中已有的事实：`accepted/queued` 等历史 Tool 回执只证明当时状态；没有当前观察时必须区分最后已知事实与当前未知。没有返回报告只说明父端暂无可报告的已验证发现，不能推断 child 尚未开始、进度为零或已经完成。真实样本的独立语义复核见[协作 live 用例](../../tests/e2e/live/model/collaboration-v1.1-cases.md)。
+
+[共享资格 helper](src/storage/sqlite/human-work-control.ts)在短事务检查原 Store/主体/工作/selection、停止与取消、控制、待决候选及人类工作选择。显式压缩、重置和受管 runless Action 保持其原权限与恢复门禁，不被误当作一个需要选择的人类任务。最终 Model/Tool/Job 派发及报告接纳消费相同资格；暂停或选择其他工作时，child 仅可用封存无工具 Model 如实交付诊断，效果调用继续暂缓。显式 stop 保存准确取消命令，不能停止复用到 B 的新轮。unknown 仍由原执行域与恢复协议处理。
+
+`executeRun` 的原 `messages` checkpoint 读取持久报告，与热态 idle 报告共用 `applyJobReport`。准确结果键、目标 Run、独立低信任 Source、consume Command 和 ack 同事务；C1 创建后续 Run 后，C2 可进入同工作活动 R，不要求 R.origin 等于每个 report。普通 Model 自动展开的结果 Source 按实际 Run rootWork 过滤；显式历史/Include 来源仍可读。低信任 inbox 与人类 steer 使用独立版本，子结果到达不使当前合法 Tool 批次被误记为 superseded。Model 历史投影把同一 assistant 的 Tool results 按原 call 顺序紧接其后，再呈现后来的 inbox/用户数据；报告恰在工具中途到达也不破坏 Provider 配对，原数据库 seq、消息和来源身份保持。
+
+报告暂缓只等待持久相关变化，不在全局无关事件上反复调用 policy/Model，不占 SQL 事务或 Model/child 槽位。真正撤销保存准确原因并释放通知 binding；无法恢复的冷绑定 needs_review、零 Provider。提交后返回丢失时，Runtime 仅查回原报告的准确 applied Run/Source/resultAcceptance 再继续，不重选目标。暂停继续沿[有限资格 owner](src/storage/sqlite/job-report-continuation-README.md)新增准入，保留旧 suppressed report 与不可变订阅；停止/fence 不复活。
+
+QueueOnly 仍不启动 idle 接收者。后继父采用旧邮件需要准确 predecessor/selection/work 及邮件 seq、成功 sender completed cursor 双上界；原明确 R1 目标不改投 R2。完整结果已携带原问题时只关联该 result Source，不复制邮件、不伪造 received/prepared。`on*` 生命周期回调保持可丢失观察；可靠终态、报告登记与结果采用由原 Store 链路负责，内部 child/report 不扩大 beforeRun/beforeRunComplete 范围。
+
+[解释轮真实强杀](test/isolated/recovery/human-input-processing-crash.test.ts)核 Model 成功未决定和决定/queued 已提交未结束两窗口；[控制并发强杀](test/isolated/recovery/human-input-processing-race.test.ts)核旧提案、新鲜第二提案和当前 B 选择，cold 读取零 Provider、准确原 Run 显式恢复、原解释不重复，真实业务文件效果新增一次。[冷报告丢响应及携带问题](test/isolated/business/task/collaboration-cold-report.test.ts)核原 Source/Run 查回和邮件只关联、不重复接收。
+
+验证分别由[真实人类输入](test/isolated/business/task/human-work-runtime.test.ts)、[热冷 A 配置](test/isolated/business/task/collaboration-config-continuation.test.ts)、[通知](test/isolated/business/task/collaboration-notifications.test.ts)、[事务与丢响应](test/isolated/business/task/collaboration-report-transactions.test.ts)、[暂停继续](test/isolated/business/task/collaboration-continuation.test.ts)、[父子待决闭环及压缩](test/isolated/business/task/question-loop.test.ts)与[并发 Files](test/isolated/business/task/collaboration-files.test.ts)核对应事实；审批运行中切换、物理强杀与客户端真实交互的范围分别见权限、Service、TUI 和 Native owner。受控 Adapter 证据不等同付费 Provider 或其他操作系统资格。
 
 ## 同一 Step 的并行工具批次
 
@@ -226,7 +258,7 @@ Operation 等待共享持久变化水位，最多 64 个活动 wake registration
 
 真实强杀探针和显式中断测试位于[test/isolated/recovery](test/isolated/recovery)，来源与重新准备位于[test/isolated/context](test/isolated/context)。跨平台、实际安装制品、外部 adapter 核实窗口与完整客户端资格分开记录；局部测试通过不代表整个重构已完成。
 
-[完整包制品回归](../../tests/isolated/unified-agent/built-package.test.ts)按实际manifest同次构建当前24个公开入口及其运行资产，准确核全部key→built路径；新增 `sqlite-engine` 提供宿主固定引擎选择，`windows-path-security`提供惰性Windows私有路径leaf，不由本机import推导Windows syscall资格。源码树外实际运行Worker/SQL、Shell、文件、Skills、MCP guardian、默认web_fetch解析Worker与完整Artifact及Service/Client认证读取；外部npm复用已安装模块，不代表独立安装或三平台发行。新增 ask-user 入口后本轮1项63断言通过，含公开Workflow编译器、输出schema、原skill-workflow.jsonc字节/摘要和准确无Desktop manifest v5的备份恢复。自建stdio生命周期先核default恰有一个同id再显式替换，其他default extensions保留；重复定义拒绝不放宽。原child20s/test30s期限、全部源外消费者与guardian无源码fallback保持。旧21入口/54断言只属于当时窗口，相关红日志保留。
+[完整包制品回归](../../tests/isolated/unified-agent/built-package.test.ts)按实际manifest同次构建当前29个公开入口及其运行资产，准确核全部key→built路径；新增 `sqlite-engine` 提供宿主固定引擎选择，`windows-path-security`提供惰性Windows私有路径leaf，不由本机import推导Windows syscall资格。源码树外实际运行Worker/SQL、Shell、文件、Skills、MCP guardian、默认web_fetch解析Worker与完整Artifact及Service/Client认证读取；外部npm复用已安装模块，不代表独立安装或三平台发行。本轮1项73断言通过，含完整MCP／Workflow计算Worker的实际built定位、SHA及缺失资产拒绝、公开异步Workflow编译器与原同步结果一致、输出schema、原skill-workflow.jsonc字节/摘要和准确无Desktop manifest v5的备份恢复。自建stdio生命周期先核default恰有一个同id再显式替换，其他default extensions保留；重复定义拒绝不放宽。原child20s/test30s期限、全部源外消费者与guardian无源码fallback保持。旧21入口/54断言只属于当时窗口，相关红日志保留。
 
 此前加入 maintenance 的18入口1/48与 profile-access 的19入口1/49只证明当时范围，包含v2原配置字节/摘要、原媒体/Store出处和新Store核对，零额外业务执行。源文件变化按Worker严格关闭SQLite缓存语句修复；恢复后 Artifact 读取曾混用当前 Store 与原来源，现分别校验当前 Store 准入、完整原执行链与原引用。当前源码外包继续通过实际 HTTP/Client 在新 Store 读取原 Artifact 全文，保留原 Store/hash/字节，冷读取零 Model。
 

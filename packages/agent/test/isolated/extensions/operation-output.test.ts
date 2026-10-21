@@ -221,10 +221,51 @@ test('Host output pages bind original Store/namespace/Session/ref, freeze upper 
       sessionId: 's',
       commandId: 'cold-read',
       subjectId: 'owner',
-      request: { kind: 'run.start', content: 'explicit read' },
+      request: { kind: 'run.start', content: 'New task: explicit read' },
     });
-    await runtime.waitForCommand('cold-read', { timeoutMs: 5000 });
+    const command = await runtime.waitForCommand('cold-read', { timeoutMs: 5000 });
+    expect(command).toMatchObject({
+      status: 'applied',
+      request: { kind: 'run.start', content: 'New task: explicit read' },
+    });
+    const receipt = command.receipt as {
+      businessCommandId: string;
+      humanInputCommandId: string;
+      runId: string;
+    };
+    expect(receipt.businessCommandId).toBeString();
+    expect(receipt.businessCommandId).not.toBe(command.id);
+    expect(await store.getCommand(receipt.humanInputCommandId)).toMatchObject({
+      request: {
+        publicCommandId: command.id,
+        content: 'New task: explicit read',
+        originalRequest: command.request,
+      },
+    });
+    expect(await store.getCommand(receipt.businessCommandId)).toMatchObject({
+      status: 'applied',
+      request: { content: 'New task: explicit read' },
+      receipt: { runId: receipt.runId },
+    });
+    expect(await store.getRun(receipt.runId)).toMatchObject({
+      status: 'completed',
+      originCommandId: receipt.businessCommandId,
+      rootWorkCommandId: command.id,
+    });
     expect(model.requests).toHaveLength(2);
+    expect(await store.getExecution(model.requests[0]!.requestId)).toMatchObject({
+      runId: receipt.runId,
+      originCommandId: receipt.businessCommandId,
+      status: 'succeeded',
+    });
+    expect(
+      model.requests[0]!.messages.find((m) => m.content === 'New task: explicit read')?.sourceIds,
+    ).toEqual([receipt.businessCommandId]);
+    expect(
+      (await store.listExecutions('s')).find(
+        (e) => e.runId === receipt.runId && e.definitionId === cold.id,
+      ),
+    ).toMatchObject({ status: 'succeeded', originCommandId: receipt.businessCommandId });
     expect(starts).toBe(1);
     expect(cancels).toBe(0);
     expect((await store.getExecution(original.executionId!))?.resultRevision).toBe('1');

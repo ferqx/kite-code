@@ -4,6 +4,7 @@ import { readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import type { CallerCommandRequest } from '@kite-ai/client';
 import { canonicalCallerCommandRequest } from '@kite-ai/client';
+import { callerDigest } from '../../electron/caller-journal';
 
 for (const kind of ['run.start', 'input.steer', 'input.follow_up', 'command.cancel'] as const)
   test(`actual Node Native ${kind} durable POST loss and SIGKILL; cold physical first GET loss never repeats original request`, async () => {
@@ -339,5 +340,243 @@ test('actual Node Native execution.cancel preserves original independent Job thr
       await child.exited;
     }
     await f.close();
+  }
+}, 30000);
+
+test('actual Node Native cold lookup confirms the original public input through its completed derived business without replay', async () => {
+  const sessionId = 'native-derived',
+    module = await import('../../../cli/test/fixtures/recovery-profile'),
+    f = await module.recoveryProfile({ completeModelSessionId: sessionId });
+  let warm: Awaited<ReturnType<typeof f.launch>> | undefined,
+    child: Bun.Subprocess<'ignore', 'pipe', 'pipe'> | undefined;
+  const wire = `${f.root}-native-derived.wire.jsonl`;
+  try {
+    warm = await f.launch();
+    await warm.client.createSession({
+      expectedStoreId: f.storeId,
+      commandId: 'native-derived-create',
+      sessionId,
+      workspaceId: 'w',
+      title: 'Native derived business',
+    });
+    const input: CallerCommandRequest = {
+      kind: 'run.start',
+      expectedStoreId: f.storeId,
+      commandId: 'native-derived-original',
+      content: 'New task: complete the original Native business\n完整原文🙂é\r\nEXACT TAIL',
+    };
+    for (const [entrypoint, target, naming] of [
+      ['../../electron/profile-access-helper.ts', 'bun', 'native-profile-access.js'],
+      ['../native-caller-node.fixture.ts', 'node', 'native-caller-node.js'],
+    ] as const) {
+      const build = await Bun.build({
+        entrypoints: [resolve(import.meta.dir, entrypoint)],
+        target,
+        format: 'esm',
+        packages: 'bundle',
+        outdir: f.root,
+        naming,
+      });
+      expect(build.success).toBe(true);
+    }
+    const hash = (path: string) => createHash('sha256').update(readFileSync(path)).digest('hex');
+    const launch = async (mode: string) => {
+      child = Bun.spawn(
+        [
+          realpathSync(Bun.which('node')!),
+          join(f.root, 'native-caller-node.js'),
+          mode,
+          JSON.stringify({ dataRoot: f.profile.dataRoot, profile: 'owned' }),
+          JSON.stringify({
+            endpoint: warm!.bootstrap.endpoint,
+            token: warm!.bootstrap.token,
+            profile: warm!.bootstrap.profile,
+          }),
+          realpathSync(process.execPath),
+          hash(process.execPath),
+          join(f.root, 'native-profile-access.js'),
+          hash(join(f.root, 'native-profile-access.js')),
+          JSON.stringify(input),
+          wire,
+          sessionId,
+        ],
+        { stdin: 'ignore', stdout: 'pipe', stderr: 'pipe' },
+      );
+      const out = new Response(child.stdout).text(),
+        err = new Response(child.stderr).text(),
+        timer = setTimeout(() => child?.kill('SIGKILL'), 15000);
+      try {
+        const code = await child.exited,
+          error = await err;
+        if (code !== 0 && mode !== 'post') console.error(error);
+        return { code, out: await out };
+      } finally {
+        clearTimeout(timer);
+      }
+    };
+    const seed = await warm.client.startRun(sessionId, {
+      kind: 'run.start',
+      expectedStoreId: f.storeId,
+      commandId: 'native-derived-seed',
+      content: 'New task: establish the original completed Native work',
+    });
+    await module.untilRecovery(async () => {
+      const command = await warm!.client.getCommand(seed.id);
+      const receipt = command.receipt as { runId?: string } | null;
+      return (
+        command.status === 'applied' &&
+        typeof receipt?.runId === 'string' &&
+        (await warm!.client.getRun(receipt.runId)).status === 'completed'
+      );
+    });
+    const seedRun = (await warm.client.getView(sessionId)).runs.find(
+      (run) => run.originCommandId === seed.id,
+    )!;
+    expect(seedRun.status).toBe('completed');
+    expect(
+      f.rows(`SELECT kind,state,origin_command_id FROM execution WHERE run_id='${seedRun.id}'`),
+    ).toEqual([{ kind: 'model', state: 'succeeded', origin_command_id: seed.id }]);
+    const callsBefore = f.calls();
+    expect((await launch('post')).code).not.toBe(0);
+    await module.untilRecovery(async () => {
+      const command = await warm!.client.getCommand(input.commandId);
+      const receipt = command.receipt as { runId?: string } | null;
+      return (
+        command.status === 'applied' &&
+        typeof receipt?.runId === 'string' &&
+        (await warm!.client.getRun(receipt.runId)).status === 'completed'
+      );
+    });
+    const original = await warm.client.getCommand(input.commandId),
+      receipt = original.receipt as {
+        runId: string;
+        humanInputCommandId: string;
+        decisionCommandId: string;
+        businessCommandId: string;
+        sourceCommandId: string;
+      },
+      business = await warm.client.getCommand(receipt.businessCommandId),
+      run = await warm.client.getRun(receipt.runId);
+    expect(original.status).toBe('applied');
+    const publicRow = f.rows(
+      "SELECT request_json,request_digest FROM command WHERE id='native-derived-original'",
+    )[0] as { request_json: string; request_digest: string };
+    expect(JSON.parse(publicRow.request_json)).toEqual({
+      kind: input.kind,
+      content: input.content,
+    });
+    expect(original.requestDigest).toBe(publicRow.request_digest);
+    expect(publicRow.request_digest).toBe(
+      createHash('sha256').update(canonicalCallerCommandRequest(input)).digest('hex'),
+    );
+    expect(receipt).toMatchObject({ outcome: 'human_input_applied', sourceCommandId: business.id });
+    expect(business.id).not.toBe(original.id);
+    expect(business).toMatchObject({
+      status: 'applied',
+      sessionId,
+      subjectId: original.subjectId,
+      originStoreId: f.storeId,
+      receipt: { runId: run.id },
+    });
+    expect(run).toMatchObject({
+      status: 'completed',
+      originCommandId: business.id,
+      rootWorkCommandId: original.id,
+    });
+    const raw = f.rows(
+      `SELECT request_json,request_digest,receipt_json FROM command WHERE id='${receipt.humanInputCommandId}'`,
+    )[0] as { request_json: string; request_digest: string; receipt_json: string };
+    expect(JSON.parse(raw.request_json)).toMatchObject({
+      publicCommandId: original.id,
+      content: input.content,
+      originalRequest: { kind: input.kind, content: input.content },
+    });
+    expect(JSON.parse(raw.receipt_json)).toMatchObject({
+      state: 'decided',
+      decisionCommandId: receipt.decisionCommandId,
+      businessCommandId: business.id,
+    });
+    const decision = f.rows(
+      `SELECT status,request_json,receipt_json FROM command WHERE id='${receipt.decisionCommandId}'`,
+    )[0] as { status: string; request_json: string; receipt_json: string };
+    expect(decision.status).toBe('applied');
+    expect(JSON.parse(decision.request_json)).toMatchObject({
+      inputCommandId: receipt.humanInputCommandId,
+      inputDigest: raw.request_digest,
+      proposal: { relation: 'independent_work', purpose: 'work' },
+    });
+    expect(JSON.parse(decision.receipt_json)).toMatchObject({ businessCommandId: business.id });
+    expect(
+      f.rows(
+        `SELECT kind,state,origin_command_id,root_work_command_id FROM execution WHERE run_id='${run.id}'`,
+      ),
+    ).toEqual([
+      {
+        kind: 'model',
+        state: 'succeeded',
+        origin_command_id: business.id,
+        root_work_command_id: original.id,
+      },
+    ]);
+    const model = (await warm.client.getView(sessionId)).executions.find(
+      (execution) => execution.kind === 'model' && execution.runId === run.id,
+    )!;
+    const modelInput = await warm.client.getModelInput(sessionId, model.id);
+    expect(modelInput.confirmation).toBe('succeeded');
+    expect(
+      modelInput.request.messages.find((message) => message.sourceIds?.includes(business.id)),
+    ).toMatchObject({ content: input.content, sourceIds: [business.id] });
+    expect(f.calls()).toBe(callsBefore + 1);
+    const snapshot = () => ({
+      cursor: f.rows('SELECT last_change_cursor FROM storage_meta'),
+      commands: f.rows('SELECT * FROM command ORDER BY id'),
+      runs: f.rows('SELECT * FROM run ORDER BY id'),
+      executions: f.rows('SELECT * FROM execution ORDER BY id'),
+      ledger: readFileSync(f.ledger, 'utf8'),
+      calls: f.calls(),
+    });
+    const before = snapshot();
+    expect(JSON.parse((await launch('get')).out).phase).toBe('unknown');
+    for (let index = 0; index < 2; index++) {
+      const recovered = await launch('normal');
+      expect(recovered.code).toBe(0);
+      const row = JSON.parse(recovered.out);
+      expect(row.phase).toBe('applied');
+      expect(row.scope).toEqual({ storeId: f.storeId, workspaceId: 'w', sessionId });
+      expect(row.subjectId).toBe(original.subjectId);
+      expect(row.bodyDigest).toBe(callerDigest(input));
+      expect(row.lookupError).toBeUndefined();
+      expect(row.requestDigest).toBe(
+        createHash('sha256').update(canonicalCallerCommandRequest(input)).digest('hex'),
+      );
+    }
+    expect(snapshot()).toEqual(before);
+    expect(await warm.client.getCommand(input.commandId)).toEqual(original);
+    const requests = readFileSync(wire, 'utf8')
+      .trim()
+      .split('\n')
+      .map((line) => JSON.parse(line));
+    expect(requests.filter((request) => request.method === 'POST')).toHaveLength(1);
+    expect(requests.find((request) => request.method === 'POST').body).toEqual(input);
+    expect(
+      requests
+        .filter((request) => request.mode !== 'post')
+        .every((request) => request.method === 'GET'),
+    ).toBe(true);
+    expect(
+      requests.filter((request) => request.path === `/v1/commands/${input.commandId}`),
+    ).toHaveLength(3);
+    writeFileSync(
+      `${wire}.facts.json`,
+      JSON.stringify({ original, raw, decision, business, run, modelInput, before }),
+    );
+    console.log('native derived caller retained', wire);
+  } finally {
+    if (child?.exitCode === null) {
+      child.kill('SIGKILL');
+      await child.exited;
+    }
+    await warm?.close();
+    f.close();
   }
 }, 30000);

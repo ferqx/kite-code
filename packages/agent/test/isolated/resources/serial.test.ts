@@ -108,21 +108,54 @@ test('ordinary serial Tool completion and cancellation preserve original cold re
       subjectId: 'owner',
       title: 'original',
     });
-    const submit = (commandId: string) =>
+    const submit = (commandId: string, content = commandId) =>
       runtime.submitCommand({
         expectedStoreId: storeId,
         sessionId: 's',
         commandId,
         subjectId: 'owner',
-        request: { kind: 'run.start', content: commandId },
+        request: { kind: 'run.start', content },
       });
     await submit('complete');
     await runtime.waitForCommand('complete');
     const completed = (await store.getView('s')).executions.find((row) => row.kind === 'tool')!;
     expect(completed.status).toBe('succeeded');
     expect(completed.result).toMatchObject({ content: body });
-    await submit('cancelled');
+    await submit('cancelled', 'New task: cancelled');
     await entered.promise;
+    const publicCommand = (await store.getCommand('cancelled'))!;
+    const receipt = publicCommand.receipt as { businessCommandId: string; runId: string };
+    const business = (await store.getCommand(receipt.businessCommandId))!;
+    expect(publicCommand).toMatchObject({
+      status: 'applied',
+      receipt: { outcome: 'human_input_applied' },
+    });
+    expect(business).toMatchObject({
+      status: 'applied',
+      kind: 'input.follow_up',
+      request: { content: 'New task: cancelled', afterRunId: completed.runId },
+      originStoreId: storeId,
+      sessionId: 's',
+      subjectId: 'owner',
+      rootWorkCommandId: 'cancelled',
+      receipt: { runId: receipt.runId },
+    });
+    expect(await store.getRun(receipt.runId)).toMatchObject({
+      originCommandId: business.id,
+      sessionId: 's',
+      isActive: true,
+    });
+    expect(
+      (await store.listExecutions('s')).find(
+        (execution) => execution.runId === receipt.runId && execution.kind === 'tool',
+      ),
+    ).toMatchObject({
+      definitionId: 'fixture.serial',
+      status: 'dispatching',
+      authorization: { dispatched: true },
+      originCommandId: business.id,
+      rootWorkCommandId: 'cancelled',
+    });
     await runtime.cancelCommand({
       expectedStoreId: storeId,
       sessionId: 's',

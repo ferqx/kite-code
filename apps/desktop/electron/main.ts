@@ -93,6 +93,8 @@ const windowMaterial: NativeWindowAppearance['backgroundMaterial'] = mica
     : 'none';
 let window: BrowserWindow | undefined, caller: NativeCaller | undefined;
 let opening: Promise<NativeCaller> | undefined;
+let closingNativeResources: Promise<void> | undefined;
+let stoppingNativeProcess: Promise<void> | undefined;
 let paired: Awaited<ReturnType<typeof launchPairedService>> | undefined;
 let ownedPairedChild: ReturnType<typeof spawnNodePairedChild> | undefined;
 let privateData: PrivateData | undefined;
@@ -282,25 +284,53 @@ async function openCaller(): Promise<NativeCaller> {
   });
   return opening;
 }
-async function closeNativeResources() {
-  await opening?.catch(() => {});
-  await scheduledTasks?.stop();
-  scheduledTasks = undefined;
-  await caller?.close();
-  privateData?.close();
-  privateAccess?.close();
-  await paired?.close();
-  if (paired && (await paired.exited) !== 0) throw Error('native_service_cleanup_unverified');
-  for (const lease of artifactAccess.reverse()) lease.close();
-  artifactAccess = [];
-  windowsArtifactAccess = undefined;
-  caller = undefined;
-  opening = undefined;
-  paired = undefined;
-  privateData = undefined;
-  privateAccess = undefined;
-  ownedPairedChild = undefined;
+function closeNativeResources(): Promise<void> {
+  if (closingNativeResources) return closingNativeResources;
+  const closing = (async () => {
+    await opening?.catch(() => {});
+    await scheduledTasks?.stop();
+    scheduledTasks = undefined;
+    await caller?.close();
+    privateData?.close();
+    privateAccess?.close();
+    await paired?.close();
+    if (paired && (await paired.exited) !== 0) throw Error('native_service_cleanup_unverified');
+    for (const lease of artifactAccess.reverse()) lease.close();
+    artifactAccess = [];
+    windowsArtifactAccess = undefined;
+    caller = undefined;
+    opening = undefined;
+    paired = undefined;
+    privateData = undefined;
+    privateAccess = undefined;
+    ownedPairedChild = undefined;
+  })();
+  closingNativeResources = closing;
+  void closing.then(
+    () => {
+      if (closingNativeResources === closing) closingNativeResources = undefined;
+    },
+    () => {},
+  );
+  return closing;
 }
+function stopNativeProcess(code = 0): void {
+  if (exitAllowed || stoppingNativeProcess) return;
+  setQuitting(true);
+  stoppingNativeProcess = (async () => {
+    await developmentReload?.catch(() => {});
+    await closeNativeResources();
+    exitAllowed = true;
+    app.exit(code);
+  })().catch(() => forceExit());
+}
+const terminateNativeProcess = () => stopNativeProcess();
+process.on('SIGINT', terminateNativeProcess);
+process.on('SIGTERM', terminateNativeProcess);
+app.once('will-quit', () => {
+  process.removeListener('SIGINT', terminateNativeProcess);
+  process.removeListener('SIGTERM', terminateNativeProcess);
+});
 async function reloadDevelopmentService(request: DevelopmentServiceReload) {
   if (!development || quitting || developmentReload) throw Error('native_draining');
   const next = parseNativeAssets({
@@ -331,7 +361,7 @@ if (development) {
       `${JSON.stringify({ kind: 'desktop.ready', token: development.control.token })}\n`,
     ),
   );
-  parent.on('error', () => app.exit(1));
+  parent.on('error', () => stopNativeProcess(1));
   const stop = serveDevelopmentReload({
     stream: parent,
     reply: (line) => {
@@ -343,15 +373,8 @@ if (development) {
     stop();
     parent.destroy();
   });
-  parent.once('end', () => {
-    setQuitting(true);
-    void (async () => {
-      await developmentReload?.catch(() => {});
-      await closeNativeResources();
-      exitAllowed = true;
-      app.exit(0);
-    })().catch(() => forceExit());
-  });
+  parent.once('end', () => stopNativeProcess());
+  parent.once('close', (hadError) => stopNativeProcess(hadError ? 1 : 0));
 }
 void app
   .whenReady()
@@ -572,11 +595,14 @@ app.on('before-quit', (event) => {
     window.show();
     window.focus();
   }
+  const ownsQuit = () => !stoppingNativeProcess && !exitAllowed;
   void (async () => {
     await developmentReload?.catch(() => {});
+    if (!ownsQuit()) return;
     const active = caller
       ? await inspectNativeQuitWork((signal) => caller!.hasActiveWork(signal), 2000)
       : !!opening;
+    if (!ownsQuit()) return;
     if (active) {
       const result = await dialog.showMessageBox(window!, {
         type: 'warning',
@@ -585,6 +611,7 @@ app.on('before-quit', (event) => {
         defaultId: 0,
         cancelId: 0,
       });
+      if (!ownsQuit()) return;
       if (result.response !== 1) {
         setQuitting(false);
         return;
@@ -592,12 +619,13 @@ app.on('before-quit', (event) => {
     }
     const outcome = await settleDesktopQuit({
       closeService: closeNativeResources,
-      confirmForceExit: () => showQuitWarning(true),
+      confirmForceExit: async () => (ownsQuit() ? showQuitWarning(true) : false),
       warnFailedCleanup: async () => {
-        await showQuitWarning(false);
+        if (ownsQuit()) await showQuitWarning(false);
       },
       waitMs: 20000,
     });
+    if (!ownsQuit()) return;
     if (outcome === 'force') {
       forceExit();
       return;
@@ -605,6 +633,7 @@ app.on('before-quit', (event) => {
     exitAllowed = true;
     app.quit();
   })().catch(() => {
+    if (!ownsQuit()) return;
     setQuitting(false);
     dialog.showErrorBox('服务结果待核实', '无法确认清理完成；没有将未知结果标记为成功。');
   });

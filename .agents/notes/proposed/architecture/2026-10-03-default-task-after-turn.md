@@ -36,6 +36,10 @@ required/background/普通Shell不产生自动报告。unknown、取消/删除�
 
 2026-10-11 原完整默认发现三个 planned 场景的夹具时序失败。两槽场景在独立 carrier 审批后让父先完成，原当前来源的 approval 因父 inactive 变 null，真实 freshness 因而在 child adapter 前拒绝；单槽场景在 Provider 内等待父继续，持有唯一 Model 槽，却等子 Model 完成才释放，构成循环等待。当前仅在真实 SQLite `planExecution` 后、取得 Model 槽前协调原父 Model：先等实际原 child Provider 进入，再允许父更新计划；单槽原父完成等待也移到该边界。实际持久结果和授权仍由原 Core 决定，不保留 inactive 批准、不修改 Model 资源或 source guard。原 11 例、全部断言与预算保持，完整文件 11pass/104expects；准确红绿与默认回归范围归[进度](../../../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-11默认-task-完整回归的父子时序)，提案状态仍为 proposed。
 
+## 当前适用范围补充
+
+[稳定协作者与真实工作选择决定](../../implemented/architecture/2026-10-18-stable-agent-collaboration-and-human-work-selection.md)已按已确认V1.1交付，部分替代本提案的普通模型角色/disposition、后来人类输入一概取消报告，以及单report独占receiver-origin的假设。普通六工具默认通用child，进度/澄清保订阅，独立B只暂缓A，多个同工作结果可进入一个普通父轮。这里关于可信当前自动授权、准确配置/计划来源、原期限、unknown和显式冷恢复的理由仍适用；本提案仍为proposed，不因局部替代而宣称原全部发布/平台资格完成。
+
 ## Acceptance criteria
 
 真实无child/afterTurn注入的默认factory及源码外default进程：Task/独立carrier各审批、父先或子先完成均准确一次报告Model采用原低信任完整结果；required/background/Shell零报告；失败如实汇报而unknown/cancel不报告。原control/source/Planning在request/apply/final SQL漂移拒绝，无新授权和外部重做；报告不递归after_turn，nested不新建deadline。SIGKILL冷读零Model，显式原恢复与丢回执原GET保持一次消费。当前正式入口/平台资格单独记录。

@@ -15,6 +15,8 @@ import type {
   ToolDefinition,
   ToolResult,
 } from '../extensions';
+import { isWorkerCleanupFailure } from '../platform/process/owned-worker';
+import { McpAdapterError } from './errors';
 
 /** Private live adapter: no cold restoration and no I/O until the ordinary Job starts. */
 export function createTaskBinding(options: {
@@ -23,8 +25,8 @@ export function createTaskBinding(options: {
   identity: Json;
   client: Client;
   timeout: number;
-  validateInput(input: Json): boolean;
-  validateOutput(input: unknown): boolean;
+  validateInput(input: Json, signal: AbortSignal): Promise<boolean>;
+  validateOutput(input: unknown, signal: AbortSignal): Promise<boolean>;
   beforeStart(signal: AbortSignal): Promise<void>;
   retain(): () => Promise<void>;
   request<T>(work: () => Promise<T>): Promise<T>;
@@ -153,7 +155,8 @@ export function createTaskBinding(options: {
             }>('tasks/result', { taskId: active.taskId }, CallToolResultSchema, active.signal);
             active.ended = true;
             result =
-              !value.isError && !options.validateOutput(value.structuredContent)
+              !value.isError &&
+              !(await options.validateOutput(value.structuredContent, active.signal))
                 ? unknown('mcp_task_output_invalid')
                 : {
                     outcome: value.isError ? 'failed' : 'succeeded',
@@ -193,7 +196,8 @@ export function createTaskBinding(options: {
             if (active.signal.aborted) onAbort();
           });
         }
-      } catch {
+      } catch (error) {
+        if (isWorkerCleanupFailure(error)) throw error;
         if (active.cancellation) await active.cancellation;
         result = active.terminal ?? unknown('mcp_task_unconfirmed');
       }
@@ -238,10 +242,16 @@ export function createTaskBinding(options: {
     async execute(input, context) {
       const captured = structuredClone(input);
       try {
-        if (!options.validateInput(captured))
+        if (!(await options.validateInput(captured, context.signal)))
           return { outcome: 'failed', content: 'mcp_arguments_invalid' };
-      } catch {
-        return { outcome: 'failed', content: 'mcp_payload_limit' };
+      } catch (error) {
+        if (isWorkerCleanupFailure(error)) throw error;
+        if (context.signal.aborted)
+          return { outcome: 'cancelled', content: 'mcp_cancelled_before_call' };
+        return {
+          outcome: 'failed',
+          content: error instanceof McpAdapterError ? error.code : 'mcp_payload_limit',
+        };
       }
       context.signal.throwIfAborted();
       const own = await context.getExecution(context.executionId);

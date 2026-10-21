@@ -24,6 +24,7 @@ import { createClient } from '@kite-ai/client';
 import { privateDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { createDefaultProcessConfiguration } from '../../src/configuration';
 import { startService } from '../../src/index';
+import { initializeLivePermissionFixture } from '../fixtures/live-permission-fixture';
 
 const obj = (value: unknown) => value as Record<string, Json>;
 const sha = (value: unknown) => createHash('sha256').update(mcpCanonical(value)).digest('hex');
@@ -139,6 +140,16 @@ async function fixture(options: { mode?: 'full' | 'auto' | 'deny'; observer?: st
     workspaceId: 'w',
     subjectId: 'owner',
     title: 'owned',
+  });
+  await initializeLivePermissionFixture({
+    runtime,
+    profile,
+    expectedStoreId: storeId,
+    subjectId: 'owner',
+    sessionId: 's',
+    workspaceId: 'w',
+    mode: options.mode === 'auto' ? 'auto' : 'full',
+    trusted: true,
   });
   const service = await startService({
     runtime,

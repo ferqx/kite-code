@@ -57,8 +57,8 @@ def wait(text,ready=False):
    try: receive(os.read(reader,65536))
    except OSError: raise RuntimeError('PTY ended '+tail)
 try:
- wait('New Run');matching='';os.write(master,b'work');wait('New Run > work');matching='';os.write(master,b'\\r');wait('approval [')
- ${mode === 'complete' ? `wait('❯ Allow once',ready=True);matching='';os.write(master,b'\\x1b[B');wait('❯ Deny',ready=True);matching='';os.write(master,b'\\x1b[A');wait('❯ Allow once',ready=True);matching='';os.write(master,b'\\r');wait('Original choice ID');matching='';os.write(master,b'\\x1b[B');wait('❯ 1. internal-choice',ready=True);matching='';os.write(master,b'\\r');wait('Original completed Run / complete output preview ready');matching='';os.write(master,b'\\x0f');wait('VERIFIED TAIL')` : mode === 'cancel' ? `matching='';os.write(master,b'\\x03');time.sleep(.1);os.write(master,b'\\x03');wait('Idle')` : `os.close(master);master=-1;time.sleep(.3)`}
+ wait('New Run');matching='';os.write(master,b'work');wait('New Run > work');matching='';os.write(master,b'\\r');wait('Original child approval pending');os.write(master,b'\\x02');wait('Pending cards ·');os.write(master,b'\\r');wait('approval [')
+ ${mode === 'complete' ? `wait('❯ Allow once',ready=True);matching='';os.write(master,b'\\x1b[B');wait('❯ Deny',ready=True);matching='';os.write(master,b'\\x1b[A');wait('❯ Allow once',ready=True);matching='';os.write(master,b'\\r');wait('Original child choice pending');os.write(master,b'\\x02');wait('Pending cards ·');os.write(master,b'\\r');wait('Original choice ID');matching='';os.write(master,b'\\x1b[B');wait('❯ 1. internal-choice',ready=True);matching='';os.write(master,b'\\r');wait('Original completed Run / complete output preview ready');matching='';os.write(master,b'\\x0f');wait('VERIFIED TAIL')` : mode === 'cancel' ? `matching='';os.write(master,b'\\x03');time.sleep(.1);os.write(master,b'\\x03');wait('Idle')` : `os.close(master);master=-1;time.sleep(.3)`}
  os.kill(p.pid,signal.SIGTERM)
  deadline=time.monotonic()+5
  while not eof_mode and p.poll() is None and time.monotonic()<deadline:

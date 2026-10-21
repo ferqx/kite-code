@@ -84,11 +84,7 @@ function provider(shellCommand: (label: string) => string, slots: number) {
             ? Array.from({ length: 3 }, (_, i) => ({
                 name: 'spawn_agent',
                 args: {
-                  key: `task-${root}-${i}`,
-                  role: 'worker',
-                  input: { content: `MIXED_ROOT_${root} MIXED_CHILD_${root}_${i}` },
-                  cancellation: 'attached',
-                  result_disposition: 'required',
+                  prompt: `MIXED_ROOT_${root} MIXED_CHILD_${root}_${i}`,
                 },
               }))
             : []),
@@ -226,10 +222,12 @@ for (const slots of [4, 16])
             // This finite load provider routes by original task markers; compression has its own fixtures.
             modelCapabilities: { contextWindowTokens: 1_000_000 },
           })),
-          tools: ['task', 'shell.launch', 'shell.read', 'shell.wait', 'shell.stop'].map((id) => ({
-            id,
-            definitionVersion: '1',
-          })),
+          tools: ['task.spawn', 'shell.launch', 'shell.read', 'shell.wait', 'shell.stop'].map(
+            (id) => ({
+              id,
+              definitionVersion: '1',
+            }),
+          ),
         }),
       );
       let host: Awaited<ReturnType<typeof launchPairedService>> | undefined;
@@ -284,6 +282,15 @@ for (const slots of [4, 16])
               sessionId: `root-${index}`,
               workspaceId: 'w',
               title: `Mixed root ${index}`,
+            });
+            const live = await client.getPermissionMode(`root-${index}`, { storeId });
+            await client.setPermissionMode(`root-${index}`, {
+              expectedStoreId: storeId,
+              commandId: `fixture-live-mode-${index}`,
+              mode: 'full',
+              ifRevision: live.revision,
+              makeDefault: false,
+              ifDefaultRevision: live.defaultRevision,
             });
             await client.startRun(`root-${index}`, {
               expectedStoreId: storeId,
@@ -644,7 +651,11 @@ for (const slots of [4, 16])
             [...labelsBySession.keys()].map((sessionId) => client.getView(sessionId)),
           );
           return (
-            !source.active.size && views.every((view) => view.runs.every((run) => !run.isActive))
+            !source.active.size &&
+            views.every((view) => view.runs.every((run) => !run.isActive)) &&
+            (
+              await Promise.all([...jobsByLabel.values()].map((id) => client.getExecution(id)))
+            ).every((job) => ['succeeded', 'cancelled'].includes(job.status))
           );
         }, 'all-session-runs-drained');
         const terminalViews = await Promise.all(

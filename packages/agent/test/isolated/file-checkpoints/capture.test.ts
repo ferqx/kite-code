@@ -484,7 +484,7 @@ async function fixture(
         commandId,
         sessionId: 's',
         subjectId: 'owner',
-        request: { kind: 'run.start', content: 'change next files' },
+        request: { kind: 'run.start', content: '新任务：change next files' },
       });
       await runtime.waitForCommand(commandId);
     },
@@ -494,7 +494,7 @@ async function fixture(
         commandId: 'work',
         sessionId: 's',
         subjectId: 'owner',
-        request: { kind: 'run.start', content: 'change actual files' },
+        request: { kind: 'run.start', content: '新任务：change actual files' },
       });
       await runtime.waitForCommand('work');
     },

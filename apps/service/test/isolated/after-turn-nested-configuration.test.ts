@@ -1,3 +1,4 @@
+import { Database } from 'bun:sqlite';
 import { expect, test } from 'bun:test';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -10,6 +11,7 @@ import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import { privateDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { readSkillSelection } from '../../src/child-configuration';
 import { createDefaultProcessConfiguration } from '../../src/configuration';
+import { initializeLivePermissionFixture } from '../fixtures/live-permission-fixture';
 
 function gate() {
   let release!: () => void;
@@ -36,8 +38,7 @@ async function fixture(mode: 'nested' | 'followup') {
   const waiting = gate();
   const calls: { model: string; messages: { role: string; content: string | null }[] }[] = [];
   const approvals: { phase: string; definitionId: string; commandId: string; runId: string }[] = [];
-  let afterRunId = '',
-    contextSelectionId = '',
+  let childId = '',
     unexpected = 0;
   const later = Bun.serve({
     hostname: '127.0.0.1',
@@ -58,32 +59,24 @@ async function fixture(mode: 'nested' | 'followup') {
         input: unknown;
       if (body.model === 'parent' && count === 1) {
         name = 'spawn_agent';
-        input = {
-          key: 'first',
-          role: 'worker',
-          input: { content: 'initial' },
-          cancellation: 'detached',
-          result_disposition: 'background',
-        };
+        input = { prompt: 'initial' };
       } else if (mode === 'nested' && body.model === 'child' && count === 1) {
         name = 'spawn_agent';
-        input = {
-          key: 'nested',
-          role: 'grandworker',
-          input: { content: 'nested' },
-          cancellation: 'detached',
-          result_disposition: 'after_turn',
-        };
-      } else if (mode === 'followup' && body.model === 'parent' && count === 3) {
-        name = 'followup_agent';
-        input = {
-          task_id: 'first',
-          key: 'second',
-          after_run_id: afterRunId,
-          context_selection_id: contextSelectionId,
-          content: 'new explicitly requested work',
-          result_disposition: 'after_turn',
-        };
+        input = { prompt: 'nested', preset: 'grandworker' };
+      } else if (
+        mode === 'followup' &&
+        body.model === 'parent' &&
+        body.messages.some(
+          (message) =>
+            message.role === 'user' &&
+            message.content === 'New task: independently authorized new work',
+        ) &&
+        !body.messages.some(
+          (message) => message.role === 'tool' && message.content?.includes('new_turn'),
+        )
+      ) {
+        name = 'follow_up_agent';
+        input = { agent_id: childId, content: 'new explicitly requested work' };
       }
       if (
         body.model === 'grandchild' ||
@@ -113,7 +106,7 @@ async function fixture(mode: 'nested' | 'followup') {
   const configPath = join(profile.profilePath, 'config.jsonc');
   const configuration = {
     modelId: 'parent',
-    tools: ['task', 'followup_task'].map((id) => ({ id, definitionVersion: '1' })),
+    tools: ['task.spawn', 'task.follow_up'].map((id) => ({ id, definitionVersion: '1' })),
     skills: ['alpha', 'beta'].map((id) => ({ id, path: id })),
     models: ['parent', 'child', 'grandchild'].map((id) => ({
       id,
@@ -134,6 +127,8 @@ async function fixture(mode: 'nested' | 'followup') {
     async authorize(input) {
       input.signal.throwIfAborted();
       expect(Object.isFrozen(input.command)).toBe(true);
+      if (input.execution.definitionId === 'task.spawn' && input.execution.sessionId === 'root')
+        return { allowed: false, revision: 'initial-no-idle-report' };
       approvals.push({
         phase: input.phase,
         definitionId: input.execution.definitionId,
@@ -144,7 +139,7 @@ async function fixture(mode: 'nested' | 'followup') {
     },
   };
   const host = createDefaultProcessConfiguration({
-    userConfigurationPath: profile.profilePath + '/config.jsonc',
+    userConfigurationPath: `${profile.profilePath}/config.jsonc`,
     profile,
     afterTurn: policy,
     permissions: {
@@ -153,10 +148,36 @@ async function fixture(mode: 'nested' | 'followup') {
       },
     },
     child: [
-      { id: 'worker', version: '7', modelId: 'child', toolIds: mode === 'nested' ? ['task'] : [] },
+      {
+        id: 'worker',
+        version: '7',
+        modelId: 'child',
+        toolIds: mode === 'nested' ? ['task.spawn'] : [],
+      },
       { id: 'grandworker', version: '8', modelId: 'grandchild', toolIds: [] },
     ],
   });
+  if (mode === 'nested') {
+    const spawn = host.extensions
+      ?.find((extension) => extension.id === 'builtin.task')
+      ?.tools?.find((tool) => tool.id === 'task.spawn');
+    if (!spawn) throw Error('missing trusted nested spawn');
+    const execute = spawn.execute;
+    const trustedExecute: typeof execute = (input, context) =>
+      execute(input, {
+        ...context,
+        operations: {
+          ...context.operations,
+          ensure(options) {
+            return context.operations.ensure({
+              ...options,
+              cancellation: context.sessionId === 'root' ? 'attached' : 'detached',
+            });
+          },
+        },
+      });
+    Object.assign(spawn, { execute: trustedExecute, resume: trustedExecute });
+  }
   const store = await openSqliteStore({ dataRoot: profile.dataRoot, profile: profile.profile });
   const runtime = createRuntime({
     ...host,
@@ -182,7 +203,17 @@ async function fixture(mode: 'nested' | 'followup') {
     workspaceId: 'w',
     title: 'nested SDK',
   });
+  host.permissionManagement?.(runtime);
+  await initializeLivePermissionFixture({
+    runtime,
+    profile,
+    ...identity,
+    workspaceId: 'w',
+    mode: 'full',
+    trusted: true,
+  });
   return {
+    profile,
     store,
     runtime,
     identity,
@@ -190,9 +221,8 @@ async function fixture(mode: 'nested' | 'followup') {
     calls,
     approvals,
     unexpected: () => unexpected,
-    followup(run: string, selection: string) {
-      afterRunId = run;
-      contextSelectionId = selection;
+    followup(id: string) {
+      childId = id;
     },
     replace() {
       writeFileSync(
@@ -235,29 +265,94 @@ for (const mode of ['nested', 'followup'] as const) {
       await f.runtime.waitForCommand(first.originCommandId, { timeoutMs: 7000 });
       const before = await f.store.getView(first.childSessionId!);
       expect(before.runs[0]!.status).toBe('completed');
+      const emptyMcp = (
+        before.runs[0]!.configuration as {
+          snapshot: {
+            configuration: {
+              mcp: {
+                sources: {
+                  servers: unknown[];
+                  readSet: unknown;
+                  inheritance: { parentSessionId: string };
+                };
+              };
+            };
+          };
+        }
+      ).snapshot.configuration.mcp.sources;
+      expect(emptyMcp.servers).toHaveLength(0);
+      expect(emptyMcp.readSet).toBeNull();
+      expect(emptyMcp.inheritance.parentSessionId).toBe('root');
       let carrier = before.executions.find((e) => e.childSessionId);
+      let followupRunId: string | undefined;
       if (mode === 'followup') {
-        f.followup(before.runs[0]!.id, before.session.contextSelectionId);
+        f.followup(first.childSessionId!);
         await f.runtime.submitCommand({
           ...f.identity,
           commandId: 'followup-work',
           request: {
             kind: 'run.start',
-            content: 'independently authorized new work',
+            content: 'New task: independently authorized new work',
             selectedSkills: ['AlphaGuide'],
           },
         });
-        await f.runtime.waitForCommand('followup-work', { timeoutMs: 7000 });
+        const command = await f.runtime.waitForCommand('followup-work', { timeoutMs: 7000 });
+        const receipt = command.receipt as { businessCommandId: string; runId: string };
+        followupRunId = receipt.runId;
+        expect(command.status).toBe('applied');
+        expect(await f.store.getRun(receipt.runId)).toMatchObject({
+          originCommandId: receipt.businessCommandId,
+          rootWorkCommandId: command.id,
+          status: 'completed',
+        });
+        const models = (await f.store.listExecutions('root')).filter(
+          (execution) => execution.kind === 'model' && execution.runId === receipt.runId,
+        );
+        expect(models).toHaveLength(2);
+        for (const model of models)
+          expect(model).toMatchObject({
+            originCommandId: receipt.businessCommandId,
+            rootWorkCommandId: command.id,
+          });
         carrier = (await f.store.getView('root')).executions.find(
           (e) => e.childSessionId && e.id !== first.id,
         );
         expect(carrier!.childSessionId).toBe(first.childSessionId!);
         expect(carrier!.afterTurn).toMatchObject({
-          definitionId: 'followup_task',
-          parentRunId: (await f.store.getView('root')).runs[1]!.id,
+          definitionId: 'task.follow_up',
+          parentRunId: receipt.runId,
         });
+        const followupTool = (await f.store.listExecutions('root')).find(
+          (execution) =>
+            execution.kind === 'tool' &&
+            execution.definitionId === 'task.follow_up' &&
+            execution.runId === receipt.runId,
+        )!;
+        expect(carrier!.parentExecutionId).toBe(followupTool.id);
+        expect(carrier!.afterTurn).toMatchObject({ sourceExecutionId: followupTool.id });
       }
       expect(carrier).toBeDefined();
+      if (mode === 'nested') {
+        const grandchild = await f.store.getView(carrier!.childSessionId!);
+        const inheritedEmpty = (
+          grandchild.runs[0]!.configuration as {
+            snapshot: {
+              configuration: {
+                mcp: {
+                  sources: {
+                    servers: unknown[];
+                    readSet: unknown;
+                    inheritance: { parentSessionId: string };
+                  };
+                };
+              };
+            };
+          }
+        ).snapshot.configuration.mcp.sources;
+        expect(inheritedEmpty.servers).toHaveLength(0);
+        expect(inheritedEmpty.readSet).toBeNull();
+        expect(inheritedEmpty.inheritance.parentSessionId).toBe(first.childSessionId!);
+      }
       await until(async () =>
         f.calls.find(
           (call) =>
@@ -276,16 +371,17 @@ for (const mode of ['nested', 'followup'] as const) {
         ),
       );
       await f.runtime.waitForCommand(report.originCommandId, { timeoutMs: 7000 });
+      if (mode === 'nested')
+        expect((await f.store.getRun(report.id))!.carrierExecutionId).toBe(first.id);
       expect(f.approvals.map((a) => a.phase)).toEqual(['request', 'apply']);
       expect(f.approvals[0]).toMatchObject({
-        definitionId: mode === 'nested' ? 'task' : 'followup_task',
+        definitionId: mode === 'nested' ? 'task.spawn' : 'task.follow_up',
       });
       expect(f.approvals[1]).toEqual({ ...f.approvals[0]!, phase: 'apply' });
       expect(f.unexpected()).toBe(0);
       expect((await f.store.getExecution(first.id))!.status).toBe('succeeded');
       expect((await f.store.getRun(before.runs[0]!.id))!.status).toBe('completed');
-      const funding =
-        mode === 'nested' ? before.runs[0]! : (await f.store.getView('root')).runs[1]!;
+      const funding = mode === 'nested' ? before.runs[0]! : (await f.store.getRun(followupRunId!))!;
       expect(report.deadlineAt).toBe(funding.deadlineAt);
       const view = await f.store.getView(target);
       const model = view.executions.find((e) => e.kind === 'model' && e.runId === report.id)!;
@@ -305,15 +401,15 @@ for (const mode of ['nested', 'followup'] as const) {
             ),
         ),
       ).toBe(true);
-      const originalRef = await f.store.getOperation({
+      const originalDirectory = await f.store.listStableAgents({
         sessionId: 'root',
         extensionId: 'builtin.task',
         subjectId: f.identity.subjectId,
-        originStoreId: f.identity.expectedStoreId,
-        key: 'first',
+        expectedStoreId: f.identity.expectedStoreId,
       });
-      expect(originalRef?.executionId).toBe(first.id);
-      expect(originalRef?.childSessionId).toBe(first.childSessionId!);
+      expect(originalDirectory.items).toHaveLength(1);
+      expect(originalDirectory.items[0]!.agentId).toBe(first.childSessionId!);
+      expect(originalDirectory.items[0]!.assignmentSource.content).toBe('initial');
       expect(f.calls.filter((c) => c.model === 'parent')).toHaveLength(mode === 'nested' ? 2 : 5);
       expect(f.calls.filter((c) => c.model === 'child')).toHaveLength(mode === 'nested' ? 3 : 2);
       expect((await f.store.getExecution(carrier!.id))!.delivery).toBe('consumed');
@@ -321,11 +417,105 @@ for (const mode of ['nested', 'followup'] as const) {
         ...(await f.store.getView('root')).runs,
         ...(await f.store.getView(first.childSessionId!)).runs,
         ...(mode === 'nested' ? (await f.store.getView(carrier!.childSessionId!)).runs : []),
-      ])
+      ]) {
+        const snapshot = (
+          run.configuration as {
+            snapshot?: { kind?: string; inputCommandId?: string; inputDigest?: string };
+          }
+        ).snapshot;
+        if (snapshot?.kind === 'human_input_processing') {
+          expect(mode).toBe('followup');
+          expect(run).toMatchObject({ status: 'completed', reason: null, isActive: false });
+          const raw = (await f.store.getCommand(snapshot.inputCommandId!))!;
+          expect(raw).toMatchObject({
+            kind: 'human.input',
+            requestDigest: snapshot.inputDigest,
+            request: { publicCommandId: 'followup-work' },
+            receipt: { state: 'decided', processingCommandId: run.originCommandId },
+          });
+          const sealedReceipt = raw.receipt as {
+            decisionCommandId: string;
+            businessCommandId: string;
+          };
+          const decision = (await f.store.getCommand(sealedReceipt.decisionCommandId))!;
+          expect(decision).toMatchObject({
+            kind: 'human.input.decision',
+            status: 'applied',
+            sessionId: raw.sessionId,
+            originStoreId: raw.originStoreId,
+            subjectId: raw.subjectId,
+            request: { inputCommandId: raw.id, inputDigest: raw.requestDigest },
+            receipt: { businessCommandId: sealedReceipt.businessCommandId },
+          });
+          const publicCommand = (await f.store.getCommand('followup-work'))!;
+          expect(publicCommand).toMatchObject({
+            status: 'applied',
+            receipt: {
+              humanInputCommandId: raw.id,
+              decisionCommandId: decision.id,
+              businessCommandId: sealedReceipt.businessCommandId,
+              runId: followupRunId,
+            },
+          });
+          expect(await f.store.getCommand(sealedReceipt.businessCommandId)).toMatchObject({
+            status: 'applied',
+            sessionId: raw.sessionId,
+            originStoreId: raw.originStoreId,
+            subjectId: raw.subjectId,
+            rootWorkCommandId: publicCommand.id,
+            receipt: { runId: followupRunId },
+          });
+          const processingExecutions = (await f.store.listExecutions(run.sessionId)).filter(
+            (execution) => execution.runId === run.id,
+          );
+          expect(processingExecutions).toHaveLength(1);
+          const database = new Database(f.profile.databasePath, { readonly: true });
+          try {
+            for (const execution of processingExecutions) {
+              expect(execution).toMatchObject({
+                kind: 'model',
+                status: 'failed',
+                originCommandId: run.originCommandId,
+                originStoreId: run.originStoreId,
+                rootWorkCommandId: run.rootWorkCommandId,
+                result: {
+                  code: 'input_processing_decided',
+                  dispatchCommitted: false,
+                  incomplete: true,
+                },
+                input: { tools: [] },
+                decisionSource: {
+                  humanInputInterpretation: {
+                    inputCommandId: raw.id,
+                    inputDigest: raw.requestDigest,
+                  },
+                  continuation: {
+                    runId: run.id,
+                    humanInputProcessingContext: {
+                      inputCommandId: raw.id,
+                      inputDigest: raw.requestDigest,
+                      content: (raw.request as { content: string }).content,
+                    },
+                  },
+                  toolBindings: [],
+                },
+              });
+              expect(
+                database
+                  .query('SELECT dispatched,dispatch_authorization_json FROM execution WHERE id=?')
+                  .get(execution.id),
+              ).toEqual({ dispatched: 0, dispatch_authorization_json: null });
+            }
+          } finally {
+            database.close();
+          }
+          continue;
+        }
         expect(readSkillSelection(run.configuration)).toEqual({
           requested: ['AlphaGuide'],
           resolvedIds: ['alpha'],
         });
+      }
       expect(JSON.stringify(f.calls)).not.toContain('BetaGuide');
       expect(JSON.stringify(f.calls)).toContain('AlphaGuide');
       const metadata = await f.store.getMetadata();
@@ -338,6 +528,7 @@ for (const mode of ['nested', 'followup'] as const) {
       const nested = childView?.executions.find((e) => e.childSessionId);
       console.error(
         JSON.stringify({
+          approvals: f.approvals,
           calls: f.calls.map((c) => c.model),
           lifecycle: f.runtime.getLifecycleState(),
           metadata: await f.store.getMetadata(),
@@ -392,6 +583,12 @@ for (const mode of ['nested', 'followup'] as const) {
           accepted: await f.store.listAcceptedCommands('root'),
           pendingReports: await f.store.listPendingJobReports(f.identity),
           childSession: childView?.session,
+          childReports: childView
+            ? await f.store.listPendingJobReports({
+                ...f.identity,
+                sessionId: childView.session.id,
+              })
+            : [],
           childExecutions: childView?.executions.map(
             ({
               id,

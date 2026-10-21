@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { createFixedModel, type ModelEvent } from '@kite-ai/ai';
-import { createRuntime } from '../../../src';
+import { AgentError, createRuntime } from '../../../src';
 import { createFileTools, createWorkspaceFiles, type FileChangePreview } from '../../../src/files';
 import { openSqliteStore } from '../../../src/sqlite';
 
@@ -123,7 +123,72 @@ test('failed baselines and uncertain post-publication capture never save a succe
     );
     expect(failed.outcome).toBe('failed');
     expect(failed.details).toEqual({ code: 'file_baseline_conflict' });
+    expect(failed.content).toContain('This invocation did not publish');
+    expect(failed.content).toContain('does not report the current file content');
+    expect(failed.content).toContain('Other successful operations are not rolled back');
+    expect(failed.content).not.toContain('actual published');
     expect(readFileSync(join(f.root, 'published'), 'utf8')).toBe('actual published');
+  } finally {
+    await f.close();
+  }
+});
+
+test('a stale edit reports its own rejected effect without claiming the historical read is current', async () => {
+  const f = fixture();
+  try {
+    const initial = 'A=0\r\nB=0\r\n';
+    writeFileSync(join(f.root, 'shared'), initial);
+    const old = await f.files.read('shared');
+    const current = await f.files.edit({
+      path: 'shared',
+      base: old.baseline,
+      find: 'B=0',
+      replace: 'B=1',
+      occurrences: 1,
+    });
+    const tool = createFileTools(f.files).find((item) => item.id === 'files.edit')!;
+    const result = await tool.execute(
+      { path: 'shared', base: { ...old.baseline }, find: 'A=0', replace: 'A=1', occurrences: 1 },
+      { signal: new AbortController().signal } as Parameters<typeof tool.execute>[1],
+    );
+    expect(result.outcome).toBe('failed');
+    expect(result.details).toEqual({ code: 'file_baseline_conflict' });
+    expect(result.content).toContain('Earlier read content is historical');
+    expect(result.content).toContain('baseline describes the complete file identity and version');
+    expect(result.content).toContain('does not prove that another edit targeted the same text');
+    expect(result.content).toContain('does not report the current file content');
+    expect(result.content).not.toContain('B=0');
+    expect(result.content).not.toContain('B=1');
+    expect(await f.files.read('shared')).toMatchObject({
+      content: 'A=0\r\nB=1\r\n',
+      baseline: current.baseline,
+    });
+
+    const captured = createFileTools(f.files, {
+      capture: {
+        async before() {
+          return {};
+        },
+        async after() {
+          throw new AgentError('file_baseline_conflict');
+        },
+        async failed() {},
+      },
+    }).find((item) => item.id === 'files.edit')!;
+    const unknown = await captured.execute(
+      {
+        path: 'shared',
+        base: { ...current.baseline },
+        find: 'A=0',
+        replace: 'A=1',
+        occurrences: 1,
+      },
+      { signal: new AbortController().signal } as Parameters<typeof captured.execute>[1],
+    );
+    expect(unknown.outcome).toBe('outcome_unknown');
+    expect(unknown.details).toEqual({ code: 'file_publish_outcome_unknown' });
+    expect(unknown.content).not.toContain('did not publish');
+    expect(readFileSync(join(f.root, 'shared'), 'utf8')).toBe('A=1\r\nB=1\r\n');
   } finally {
     await f.close();
   }
@@ -149,9 +214,10 @@ test('real Core saves the preview in original Execution receipts; repeated call 
     ],
     [finish],
   ]);
+  const model = createFixedModel(calls);
   const runtime = createRuntime({
     store,
-    model: createFixedModel(calls),
+    model,
     extensions: [{ id: 'files', version: '1', apiMajor: 1, tools: createFileTools(f.files) }],
     permissions: {
       async authorize() {
@@ -181,9 +247,44 @@ test('real Core saves the preview in original Execution receipts; repeated call 
         commandId,
         sessionId: 's',
         subjectId: 'owner',
-        request: { kind: 'run.start', content: commandId },
+        request: { kind: 'run.start', content: `New task: ${commandId}` },
       });
-      await runtime.waitForCommand(commandId);
+      const command = await runtime.waitForCommand(commandId);
+      expect(command.status).toBe('applied');
+      const receipt = command.receipt as { runId: string; businessCommandId?: string };
+      const businessId = receipt.businessCommandId ?? command.id;
+      const business = await store.getCommand(businessId);
+      expect(business).toMatchObject({
+        status: 'applied',
+        sessionId: 's',
+        rootWorkCommandId: commandId,
+      });
+      expect((business!.request as { content: string }).content).toBe(`New task: ${commandId}`);
+      const actualRun = await store.getRun(receipt.runId);
+      expect(actualRun).toMatchObject({
+        status: 'completed',
+        originCommandId: businessId,
+        rootWorkCommandId: commandId,
+      });
+      const executions = (await store.listExecutions('s')).filter(
+        (execution) => execution.runId === actualRun!.id,
+      );
+      const models = executions.filter((execution) => execution.kind === 'model');
+      expect(models).toHaveLength(2);
+      for (const execution of models) {
+        expect(execution).toMatchObject({
+          status: 'succeeded',
+          originCommandId: businessId,
+          rootWorkCommandId: commandId,
+        });
+        expect(
+          model.requests
+            .find((request) => request.requestId === execution.id)
+            ?.messages.find((message) => message.sourceIds?.includes(businessId)),
+        ).toMatchObject({ content: `New task: ${commandId}`, sourceIds: [businessId] });
+      }
+      for (const tool of executions.filter((execution) => execution.kind === 'tool'))
+        expect(tool).toMatchObject({ originCommandId: businessId, rootWorkCommandId: commandId });
     }
     const messages = (await store.listMessages('s')).filter((message) => message.role === 'tool');
     expect(messages).toHaveLength(2);

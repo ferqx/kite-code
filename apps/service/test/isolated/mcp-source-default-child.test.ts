@@ -111,11 +111,7 @@ async function fixture(scenario: Scenario) {
         call = {
           name: 'spawn_agent',
           input: {
-            key: 'owned-child',
-            role: 'worker',
-            input: { content: 'CHILD_OWNED_REQUEST' },
-            cancellation: 'attached',
-            result_disposition: 'required',
+            prompt: 'CHILD_OWNED_REQUEST',
           },
         };
       else if (child && index === 0)
@@ -127,11 +123,7 @@ async function fixture(scenario: Scenario) {
         call = {
           name: 'spawn_agent',
           input: {
-            key: 'owned-grandchild',
-            role: 'worker',
-            input: { content: 'GRANDCHILD_OWNED_REQUEST' },
-            cancellation: 'attached',
-            result_disposition: 'required',
+            prompt: 'GRANDCHILD_OWNED_REQUEST',
           },
         };
       else if (child && index === 1 && scenario !== 'deny') {
@@ -142,20 +134,28 @@ async function fixture(scenario: Scenario) {
         expect(tool).toBeDefined();
         call = { name: tool!.function.name, input: { value: 'exact' } };
       }
+      // Current spawn is asynchronous; the ordinary event wait keeps each parent at its safe
+      // result-adoption boundary without an extra Provider turn or a legacy required obligation.
+      const calls = call
+        ? [
+            call,
+            ...(scenario === 'nested' && call.name === 'spawn_agent'
+              ? [{ name: 'wait_agent_events', input: { wait_ms: 30000 } }]
+              : []),
+          ]
+        : [];
       const frame = (delta: unknown, finish_reason: string | null) =>
         `data: ${JSON.stringify({ id: `fixed-${bodies.length}`, object: 'chat.completion.chunk', model: 'fixed', choices: [{ index: 0, delta, finish_reason }] })}\n\n`;
       return new Response(
         frame(
           call
             ? {
-                tool_calls: [
-                  {
-                    index: 0,
-                    id: `call-${bodies.length}`,
-                    type: 'function',
-                    function: { name: call.name, arguments: JSON.stringify(call.input) },
-                  },
-                ],
+                tool_calls: calls.map((selected, index) => ({
+                  index,
+                  id: `${index === 0 ? 'call' : 'wait'}-${bodies.length}`,
+                  type: 'function',
+                  function: { name: selected.name, arguments: JSON.stringify(selected.input) },
+                })),
               }
             : { content: child ? 'CHILD_DONE_FULL_RESULT' : 'PARENT_DONE_FULL_RESULT' },
           null,
@@ -173,7 +173,10 @@ async function fixture(scenario: Scenario) {
       models: [
         { id: 'fixed', provider: 'compatible', model: 'fixed', baseURL: `${provider.url.href}v1` },
       ],
-      tools: [{ id: 'task', definitionVersion: '1' }],
+      tools: [
+        { id: 'task.spawn', definitionVersion: '1' },
+        ...(scenario === 'nested' ? [{ id: 'task.events', definitionVersion: '1' }] : []),
+      ],
     }),
   );
   // Default role resolver and durable permission manager; only owned HTTP transport opt-in is supplied.
@@ -298,6 +301,7 @@ async function fixture(scenario: Scenario) {
     runtime,
     store,
     bodies,
+    providerTimeline,
     counts,
     rpc,
     sourcePath,
@@ -325,16 +329,28 @@ async function fixture(scenario: Scenario) {
       for (;;) {
         const command = await runtime.getCommand('work');
         const view = await store.getView('parent');
-        if (
-          view.runs.some((run) => run.originCommandId === 'work' && !run.isActive) ||
-          command?.status === 'rejected'
-        )
-          break;
+        const rootFinished = view.runs.some(
+          (run) => run.originCommandId === 'work' && !run.isActive,
+        );
+        if (command?.status === 'rejected') break;
         const sessions = new Set(['parent']);
+        let settled = true;
         for (const id of sessions) {
-          for (const execution of (await client.getView(id)).executions)
+          const current = await client.getView(id);
+          if (
+            current.runs.some((run) => run.isActive) ||
+            current.executions.some(
+              (execution) =>
+                (execution.kind !== 'job' || execution.childSessionId !== null) &&
+                ['planned', 'dispatching', 'running'].includes(execution.status),
+            )
+          )
+            settled = false;
+          for (const execution of current.executions)
             if (execution.childSessionId) sessions.add(execution.childSessionId);
         }
+        // Ordinary parent completion no longer implies its already accepted children settled.
+        if (rootFinished && settled) break;
         let card:
           | Awaited<ReturnType<typeof client.listInteractions>>['interactions'][number]
           | undefined;
@@ -413,7 +429,7 @@ async function fixture(scenario: Scenario) {
     },
     async assertRecordOnlyCreation(sessionId: string) {
       const executions = await store.listExecutions(sessionId);
-      const task = executions.find((execution) => execution.definitionId === 'task')!;
+      const task = executions.find((execution) => execution.definitionId === 'task.spawn')!;
       const carrier = executions.find((execution) => execution.definitionId === 'agent/worker')!;
       expect(task).toBeDefined();
       expect(carrier).toBeDefined();
@@ -482,14 +498,9 @@ async function fixture(scenario: Scenario) {
       }
       const accepted = JSON.parse((task.result as { content: string }).content);
       expect(accepted.accepted).toBe(true);
-      expect(accepted.ref).toMatchObject({
-        originStoreId: expectedStoreId,
-        sessionId,
-        extensionId: 'builtin.task',
-        executionId: carrier.id,
-        childSessionId: carrier.childSessionId,
-        commandId: carrier.originCommandId,
-      });
+      expect(accepted.agent_id).toBe(carrier.childSessionId);
+      expect(accepted.state).toBe('queued');
+      expect(accepted.ref).toBeUndefined();
       return { task, carrier };
     },
     async close() {
@@ -509,7 +520,9 @@ test('default worker role uses inherited raw source through real SDK policy and 
     expect(f.effects).toBe(1);
     expect(cards.filter((card) => card.definitionId === 'mcp.connect')).toHaveLength(2);
     expect(cards.filter((card) => card.definitionId === 'mcp.source.connection')).toHaveLength(2);
-    expect(cards.some((card) => ['task', 'agent/worker'].includes(card.definitionId))).toBe(false);
+    expect(cards.some((card) => ['task.spawn', 'agent/worker'].includes(card.definitionId))).toBe(
+      false,
+    );
     await f.assertRecordOnlyCreation('parent');
     const carrier = (await f.store.listExecutions('parent')).find(
       (execution) => execution.definitionId === 'agent/worker',
@@ -549,7 +562,7 @@ test('default worker role uses inherited raw source through real SDK policy and 
   }
 }, 20000);
 
-test('default nested worker completes required results with original source scopes and independent approvals within its three-level fixture budget', async () => {
+test('default nested worker waits for exact completion results with original source scopes and independent approvals within its three-level fixture budget', async () => {
   const f = await fixture('nested');
   try {
     // This observer budget is specific to three layers of durable independent Ask.
@@ -558,9 +571,13 @@ test('default nested worker completes required results with original source scop
     const cards = await f.run();
     expect(f.elapsedMs).toBeLessThan(30000);
     expect(cards).toHaveLength(7);
-    expect(cards.some((card) => ['task', 'agent/worker'].includes(card.definitionId))).toBe(false);
+    expect(cards.some((card) => ['task.spawn', 'agent/worker'].includes(card.definitionId))).toBe(
+      false,
+    );
     expect(f.opens).toBe(3);
     expect(f.effects).toBe(1);
+    expect(f.counts).toEqual({ parent: 3, child: 3, grandchild: 3 });
+    expect(f.bodies).toHaveLength(9);
     expect(cards.filter((card) => card.definitionId === 'mcp.connect')).toHaveLength(3);
     expect(cards.filter((card) => card.definitionId === 'mcp.source.connection')).toHaveLength(3);
     for (const definitionId of ['mcp.connect', 'mcp.source.connection'])
@@ -597,14 +614,62 @@ test('default nested worker completes required results with original source scop
       ).mcp.sources;
     });
     const receipts = [parentExecutions, childExecutions].map(
-      (executions) => executions.find((execution) => execution.definitionId === 'task')!,
+      (executions) => executions.find((execution) => execution.definitionId === 'task.spawn')!,
     );
+    for (const [index, executions] of [parentExecutions, childExecutions].entries()) {
+      const wait = executions.find((execution) => execution.definitionId === 'task.events')!;
+      expect(wait).toMatchObject({ status: 'succeeded', input: { waitMs: 30000 } });
+      const final = f.providerTimeline.findIndex(
+        (entry) => entry.role === (index === 0 ? 'parent' : 'child') && entry.index === 2,
+      );
+      expect(final).toBeGreaterThanOrEqual(0);
+      expect(JSON.stringify(f.bodies[final]!.messages)).toContain('CHILD_DONE_FULL_RESULT');
+    }
     expect(carrier.status).toBe('succeeded');
     expect(nested.status).toBe('succeeded');
     for (const [index, originalCarrier] of [carrier, nested].entries()) {
       expect(originalCarrier.delivery).toBe('consumed');
+      const accepted = await f.store.getRun(originalCarrier.resultAcceptance!.runId!);
+      expect(accepted!.sessionId).toBe(originalCarrier.sessionId);
+      expect(accepted!.rootWorkCommandId).toBe(runs[index]!.rootWorkCommandId);
+      expect(accepted!.rootWorkSeq).toBe(runs[index]!.rootWorkSeq);
       expect(originalCarrier.resultAcceptance!.runId).toBe(runs[index]!.id);
       expect(originalCarrier.resultAcceptance!.resultRevision).toBe(originalCarrier.resultRevision);
+      const context = await f.store.getSelectedContext({
+        expectedStoreId: f.expectedStoreId,
+        sessionId: originalCarrier.sessionId,
+        contextSelectionId: originalCarrier.resultAcceptance!.selectionId,
+      });
+      expect(
+        context.resultSources.find(
+          (source) => source.id === originalCarrier.resultAcceptance!.sourceId,
+        ),
+      ).toMatchObject({
+        id: originalCarrier.resultAcceptance!.sourceId,
+        executionId: originalCarrier.id,
+        resultRevision: originalCarrier.resultRevision,
+        sessionId: originalCarrier.sessionId,
+        originStoreId: f.expectedStoreId,
+        createdSelectionId: originalCarrier.resultAcceptance!.selectionId,
+        inclusion: 'automatic',
+      });
+      const acceptedModel = [parentExecutions, childExecutions]
+        [index]!.filter(
+          (execution) => execution.kind === 'model' && execution.runId === runs[index]!.id,
+        )
+        .at(-1)!;
+      const prepared = await f.runtime.readModelInput({
+        expectedStoreId: f.expectedStoreId,
+        sessionId: originalCarrier.sessionId,
+        subjectId: 'user',
+        executionId: acceptedModel.id,
+      });
+      expect(prepared.runId).toBe(runs[index]!.id);
+      const acceptedSources = prepared.request.messages.filter((message) =>
+        message.sourceIds?.includes(originalCarrier.resultAcceptance!.sourceId),
+      );
+      expect(acceptedSources).toHaveLength(1);
+      expect(acceptedSources[0]!.content).toContain('CHILD_DONE_FULL_RESULT');
     }
     expect(readFileSync(f.sourcePath, 'utf8')).toBe(f.sourceBytes);
     for (const run of runs) {
@@ -623,14 +688,16 @@ test('default nested worker completes required results with original source scop
     for (const [index, receipt] of receipts.entries()) {
       expect(receipt.status).toBe('succeeded');
       const input = receipt.input as { [key: string]: unknown };
-      expect(input.resultDisposition).toBe('required');
-      expect(input.cancellation).toBe('attached');
+      expect(input.prompt).toBe(index === 0 ? 'CHILD_OWNED_REQUEST' : 'GRANDCHILD_OWNED_REQUEST');
+      expect(input).not.toHaveProperty('resultDisposition');
+      expect(input).not.toHaveProperty('cancellation');
       const result = receipt.result as unknown as {
-        details: { ref: { executionId: string; childSessionId: string; originStoreId: string } };
+        details: { accepted: boolean; agent_id: string; state: string };
       };
-      expect(result.details.ref.executionId).toBe([carrier, nested][index]!.id);
-      expect(result.details.ref.childSessionId).toBe([carrier, nested][index]!.childSessionId!);
-      expect(result.details.ref.originStoreId).toBe(f.expectedStoreId);
+      expect(result.details.accepted).toBe(true);
+      expect(result.details.agent_id).toBe([carrier, nested][index]!.childSessionId!);
+      expect(result.details.state).toBe('queued');
+      expect(result.details).not.toHaveProperty('ref');
     }
     expect(sources[1]!.inheritance!.parentSnapshot).toEqual(sources[0]!);
     expect(sources[2]!.inheritance!.parentSnapshot).toEqual(sources[1]!);

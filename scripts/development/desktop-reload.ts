@@ -12,6 +12,8 @@ export { startDesktopRenderer } from '../../apps/desktop/scripts/development-ren
 export async function startDesktopControl() {
   const token = randomBytes(32).toString('hex');
   let socket: Socket | undefined;
+  let stopping = false;
+  let channel: ReturnType<typeof createDesktopReloadChannel> | undefined;
   let accept: ((peer: Socket) => void) | undefined;
   const ready = new Promise<Socket>((resolve) => {
     accept = resolve;
@@ -57,6 +59,7 @@ export async function startDesktopControl() {
       peer.off('data', receive);
       peer.pause();
       socket = peer;
+      if (stopping) peer.end();
       accept!(peer);
     };
     peer.on('data', receive);
@@ -88,7 +91,7 @@ export async function startDesktopControl() {
           }),
         ]);
         let writing = Promise.resolve();
-        return createDesktopReloadChannel({
+        channel = createDesktopReloadChannel({
           stdin: {
             write(value) {
               writing = new Promise<void>((resolve, reject) =>
@@ -100,11 +103,18 @@ export async function startDesktopControl() {
           stdout: Readable.toWeb(peer),
           exited,
         });
+        if (stopping) channel.stop();
+        return channel;
       } finally {
         clearTimeout(timer);
       }
     },
-    stop: () => socket?.end(),
+    stop() {
+      if (stopping) return;
+      stopping = true;
+      channel?.stop();
+      socket?.end();
+    },
     async close() {
       for (const peer of candidates) peer.destroy();
       await new Promise<void>((resolve) => server.close(() => resolve()));
@@ -205,8 +215,8 @@ export function createDesktopReloadChannel(
   let pending: { id: string; resolve: () => void; reject: (error: Error) => void } | undefined,
     failure: Error | undefined;
   const fail = (error: Error) => {
-    failure = error;
-    pending?.reject(error);
+    failure ??= error;
+    pending?.reject(failure);
     pending = undefined;
   };
   const read = (async () => {
@@ -261,6 +271,7 @@ export function createDesktopReloadChannel(
   void child.exited.then(() => fail(Error('development_desktop_exited')));
   return {
     read,
+    stop: () => fail(Error('development_desktop_stopping')),
     async reload(request: DevelopmentServiceReload) {
       if (failure) throw failure;
       if (pending) throw Error('development_service_reload_busy');

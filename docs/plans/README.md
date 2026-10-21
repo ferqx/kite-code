@@ -4,6 +4,8 @@
 
 ## 正在实施
 
+[子 Agent 协作 V1.1 真实模型验证收束](subagent-collaboration-live-validation.md)：优先解决 F02/F04 原真实失败，再补齐 69 主用例与 80 合同矩阵中的精确缺口；保留全部历史失败，受控全量、真实模型与平台资格分别验收。
+
 [通用 Agent 一体化重构与持续演进方案](unified-agent-refactor-v1.md)：以完整用户能力迁移、统一公共边界、正式旧路径退役和阶段退出为主线；执行目标与阶段边界见[总体进度](unified-agent-refactor-v1-progress.md#执行目标与阶段边界)。外部工具、真实 SQLite Worker、唯一 Loop 和两进程重启读取已有最小闭环。实际调用者切换、完整 T/E 场景与发行资格按[进度证据](unified-agent-refactor-v1-progress.md)及[能力映射](unified-agent-refactor-v1-capabilities.tsv)核对；总体尚未完成。
 
 [客户端启动、服务生命周期与发布升级规范](daemon-upgrade-lifecycle.md)：阶段 1、2 已完成本机实现与验证，阶段 3 的发布门禁已接入；Linux/Windows hosted 资格仍待验证。覆盖默认 TUI/CLI 配套服务、共享 daemon 与 Web；未来桌面端仅规定接入边界。

@@ -19,9 +19,9 @@ import type { ArtifactReferenceReadInput } from './artifact-port';
 import {
   artifactChunkBytes,
   artifactPath,
-  readPublishedArtifact,
-  readPublishedArtifactChunks,
-  verifyPublishedArtifact,
+  readPublishedArtifactAsync,
+  readPublishedArtifactChunksAsync,
+  verifyPublishedArtifactAsync,
 } from './artifacts-files';
 import { canonicalJson } from './json';
 import { acquireProfileAccess, assertNoSymlinkPath, type ProfileOptions } from './platform/profile';
@@ -416,7 +416,7 @@ export function createArtifactStore(options: {
           temporary.publish(hash, String(size));
           temporary.close();
           signal?.throwIfAborted();
-          verifyPublishedArtifact(access.profilePath, hash, String(size));
+          await verifyPublishedArtifactAsync(access.profilePath, hash, String(size), signal);
           return await options.store.registerArtifact({ ...sealed, hash, size: String(size) });
         } finally {
           temporary.close();
@@ -471,7 +471,7 @@ export function createArtifactStore(options: {
         // Removing the same-inode temporary changes ctime; finish it before verification/registration.
         unlinkSync(temp);
         temporaryExists = false;
-        verifyPublishedArtifact(access.profilePath, hash, String(size));
+        await verifyPublishedArtifactAsync(access.profilePath, hash, String(size), signal);
         const directory = openSync(
           dirname(target),
           constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW,
@@ -537,7 +537,7 @@ export function createArtifactStore(options: {
         const ref = await options.store.getArtifactReference(sealed);
         signal?.throwIfAborted();
         if (!ref) throw new AgentError('artifact_reference_not_found');
-        return readPublishedArtifact(access.profilePath, ref.hash, ref.size);
+        return readPublishedArtifactAsync(access.profilePath, ref.hash, ref.size, signal);
       });
     },
     async readReference(input) {
@@ -572,7 +572,12 @@ export function createArtifactStore(options: {
               canonicalJson(reference as unknown as Json)
           )
             throw new AgentError('artifact_reference_mismatch');
-          return readPublishedArtifact(access.profilePath, original.hash, original.size);
+          return readPublishedArtifactAsync(
+            access.profilePath,
+            original.hash,
+            original.size,
+            signal,
+          );
         },
       );
     },
@@ -585,7 +590,12 @@ export function createArtifactStore(options: {
         const ref = await options.store.getArtifactReference(sealed);
         signal?.throwIfAborted();
         if (!ref) throw new AgentError('artifact_reference_not_found');
-        for (const chunk of readPublishedArtifactChunks(access.profilePath, ref.hash, ref.size)) {
+        for await (const chunk of readPublishedArtifactChunksAsync(
+          access.profilePath,
+          ref.hash,
+          ref.size,
+          signal,
+        )) {
           signal?.throwIfAborted();
           yield chunk;
         }

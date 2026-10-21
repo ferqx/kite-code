@@ -1006,6 +1006,20 @@ export function verifyAuthorizationReviewDispatch(
   db: SqliteOperations,
   input: DispatchInput,
 ): void {
+  const invalidated = (reviewExecutionId: string): boolean =>
+    !!db.row(
+      `SELECT c.id FROM command c JOIN execution e ON e.id=? JOIN command origin ON origin.id=e.origin_command_id
+     WHERE c.kind='authorization.invalidate' AND c.status='applied' AND c.cancelled=0
+       AND c.origin_store_id=? AND c.session_id=e.session_id AND c.subject_id=origin.subject_id
+       AND c.root_work_command_id=e.root_work_command_id AND c.root_work_seq=e.root_work_seq
+       AND json_extract(c.receipt_json,'$.targetExecutionId')=e.id
+       AND json_extract(c.receipt_json,'$.reviewExecutionId')=?
+       AND json_extract(c.receipt_json,'$.policyRevision')=? LIMIT 1`,
+      input.executionId,
+      input.expectedStoreId,
+      reviewExecutionId,
+      input.authorization.revision,
+    );
   if (input.authorization.reviewExecutionId) {
     const review = fact(
       db,
@@ -1024,16 +1038,19 @@ export function verifyAuthorizationReviewDispatch(
       "SELECT e.id FROM command c JOIN execution e ON e.origin_command_id=c.id WHERE c.kind='authorization.review' AND e.parent_execution_id=? AND e.state='succeeded'",
       input.executionId,
     )) {
+      if (invalidated(String(carrier.id))) continue;
       const review = fact(db, input.executionId, String(carrier.id), input.authorization.revision);
       if (review.payload.requireApproval === true && review.result.decision === 'approve_once')
         throw new AgentError('authorization_review_required');
     }
   } else if (
     !input.authorization.interactionId &&
-    db.row(
-      "SELECT c.id FROM command c JOIN execution e ON e.origin_command_id=c.id WHERE c.kind='authorization.review' AND e.parent_execution_id=?",
-      input.executionId,
-    )
+    db
+      .rows(
+        "SELECT e.id FROM command c JOIN execution e ON e.origin_command_id=c.id WHERE c.kind='authorization.review' AND e.parent_execution_id=?",
+        input.executionId,
+      )
+      .some((carrier) => !invalidated(String(carrier.id)))
   )
     throw new AgentError('authorization_review_required');
 }

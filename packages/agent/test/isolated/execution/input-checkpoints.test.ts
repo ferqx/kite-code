@@ -161,6 +161,23 @@ async function fixture(
     submit,
     steer,
     pending,
+    async appliedSteer(commandId: string) {
+      const command = (await store.getCommand(commandId))!;
+      const request = command.request as { content: string; targetRunId: string };
+      const receipt = command.receipt as { businessCommandId: string; runId: string };
+      const run = (await store.getRun(request.targetRunId))!;
+      expect(command).toMatchObject({ status: 'applied', receipt: { runId: run.id } });
+      expect(receipt.businessCommandId).toBeString();
+      expect(receipt.businessCommandId).not.toBe(commandId);
+      expect(await store.getCommand(receipt.businessCommandId)).toMatchObject({
+        kind: 'input.steer',
+        rootWorkCommandId: run.rootWorkCommandId,
+        status: 'applied',
+        request: { content: request.content, targetRunId: run.id },
+        receipt: { runId: run.id },
+      });
+      return receipt.businessCommandId;
+    },
     async close() {
       await runtime.close();
       rmSync(root, { recursive: true, force: true });
@@ -195,8 +212,9 @@ test('steer supersedes an unstarted approved decision with paired result, fresh 
     await f.submit();
     const old = await f.pending();
     const oldExecution = await f.store.getExecution(old.executionId);
-    await f.steer('steer', 'new user direction');
+    await f.steer('steer', 'Follow up: new user direction');
     const next = await f.pending(old.id);
+    const steerId = await f.appliedSteer('steer');
     expect(
       (
         await f.runtime.getInteraction({
@@ -206,7 +224,10 @@ test('steer supersedes an unstarted approved decision with paired result, fresh 
         })
       )?.state,
     ).toBe('cancelled');
-    expect((await f.store.getExecution(old.executionId))?.status).toBe('cancelled');
+    expect(await f.store.getExecution(old.executionId)).toMatchObject({
+      status: 'cancelled',
+      authorization: { dispatched: false },
+    });
     expect(
       (
         await f.runtime.getInteraction({
@@ -226,8 +247,8 @@ test('steer supersedes an unstarted approved decision with paired result, fresh 
     expect(next.inputDigest).not.toBe(old.inputDigest);
     const second = model.requests[1]!;
     expect(
-      second.messages.find((value) => value.content === 'new user direction')?.sourceIds,
-    ).toEqual(['steer']);
+      second.messages.find((value) => value.content === 'Follow up: new user direction')?.sourceIds,
+    ).toEqual([steerId]);
     expect(second.messages.find((value) => value.content === 'original work')?.sourceIds).toContain(
       'work',
     );
@@ -251,6 +272,7 @@ test('steer supersedes an unstarted approved decision with paired result, fresh 
     expect(effects).toEqual(['new']);
     expect(view.runs).toHaveLength(1);
     expect(view.runs[0]?.status).toBe('completed');
+    expect(model.requests).toHaveLength(3);
     expect(
       view.executions
         .filter((value) => value.kind === 'tool')
@@ -293,15 +315,17 @@ test('queued B model refreshes accepted input before first dispatch when shared 
       'B planned model',
     );
     expect(b.requests).toHaveLength(0);
-    await f.steer('b-steer', 'B updated before dispatch', 'b');
+    await f.steer('b-steer', 'Follow up: B updated before dispatch', 'b');
     held.release();
     await f.runtime.waitForCommand('a-work');
     await f.runtime.waitForCommand('b-work');
+    const steerId = await f.appliedSteer('b-steer');
     expect(b.requests).toHaveLength(1);
     expect(
-      b.requests[0]?.messages.find((value) => value.content === 'B updated before dispatch')
-        ?.sourceIds,
-    ).toEqual(['b-steer']);
+      b.requests[0]?.messages.find(
+        (value) => value.content === 'Follow up: B updated before dispatch',
+      )?.sourceIds,
+    ).toEqual([steerId]);
     expect(
       b.requests[0]?.messages.find((value) => value.content === 'original b-work')?.sourceIds,
     ).toContain('b-work');
@@ -353,17 +377,18 @@ test('real finish transaction rejects intervening steer and continues same Run i
     await f.submit();
     await entered(held);
     const original = (await f.runtime.getView('s')).runs[0]!;
-    await f.steer('last-steer', 'accepted at final transaction gate');
+    await f.steer('last-steer', 'Follow up: accepted at final transaction gate');
     expect((await f.store.getRun(original.id))?.isActive).toBe(true);
     held.release();
     await f.runtime.waitForCommand('work');
+    const steerId = await f.appliedSteer('last-steer');
     expect(failures).toEqual(['input_pending']);
     expect(model.requests).toHaveLength(2);
     expect(
       model.requests[1]?.messages.find(
-        (value) => value.content === 'accepted at final transaction gate',
+        (value) => value.content === 'Follow up: accepted at final transaction gate',
       )?.sourceIds,
-    ).toEqual(['last-steer']);
+    ).toEqual([steerId]);
     const view = await f.runtime.getView('s');
     expect(view.runs).toHaveLength(1);
     expect(view.runs[0]?.id).toBe(original.id);
@@ -393,7 +418,9 @@ test('steer never rewrites an already dispatched physical tool; cancelled pendin
     const execution = before.executions.find((value) => value.kind === 'tool')!;
     const originalModel = before.executions.find((value) => value.kind === 'model')!;
     expect(execution.status).toBe('dispatching');
-    await f.steer('discarded', 'must not enter context');
+    const discarded = await f.steer('discarded', 'Follow up: must not enter context');
+    const discardedId = (discarded.receipt as { businessCommandId: string }).businessCommandId;
+    expect(discardedId).toBeString();
     await f.runtime.cancelCommand({
       expectedStoreId: f.expectedStoreId,
       commandId: 'cancel-discarded',
@@ -401,25 +428,32 @@ test('steer never rewrites an already dispatched physical tool; cancelled pendin
       subjectId: 'owner',
       targetCommandId: 'discarded',
     });
-    await f.steer('steer-live', 'direction after physical dispatch');
+    await f.steer('steer-live', 'Follow up: direction after physical dispatch');
     expect((await f.store.getExecution(execution.id))?.input).toEqual(execution.input);
     expect((await f.store.getExecution(originalModel.id))?.result).toEqual(originalModel.result);
     expect((await f.store.getExecution(execution.id))?.status).toBe('dispatching');
     expect(readFileSync(ledger, 'utf8')).toBe('original-effect\n');
     held.release();
     await f.runtime.waitForCommand('work');
+    const steerId = await f.appliedSteer('steer-live');
     expect(readFileSync(ledger, 'utf8')).toBe('original-effect\n');
     expect(model.requests).toHaveLength(2);
     expect(
       model.requests[1]?.messages.find(
-        (value) => value.content === 'direction after physical dispatch',
+        (value) => value.content === 'Follow up: direction after physical dispatch',
       )?.sourceIds,
-    ).toEqual(['steer-live']);
+    ).toEqual([steerId]);
     expect(
-      model.requests[1]?.messages.some((value) => value.sourceIds?.includes('discarded')),
+      model.requests[1]?.messages.some((value) =>
+        value.sourceIds?.some((id) => id === 'discarded' || id === discardedId),
+      ),
     ).toBe(false);
     const view = await f.runtime.getView('s');
-    expect(view.messages.some((value) => value.sourceIds?.includes('discarded'))).toBe(false);
+    expect(
+      view.messages.some((value) =>
+        value.sourceIds?.some((id) => id === 'discarded' || id === discardedId),
+      ),
+    ).toBe(false);
     expect((await f.store.getExecution(execution.id))?.input).toEqual(execution.input);
     expect((await f.store.getExecution(execution.id))?.status).toBe('succeeded');
     expect((await f.store.getExecution(originalModel.id))?.input).toEqual(originalModel.input);

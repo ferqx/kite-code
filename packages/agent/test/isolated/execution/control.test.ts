@@ -56,13 +56,13 @@ async function setup(tool: ToolDefinition, permissions: Permissions, responses: 
     subjectId: 'owner',
     expectedStoreId,
   });
-  const submit = (commandId: string) =>
+  const submit = (commandId: string, content = commandId) =>
     runtime.submitCommand({
       commandId,
       sessionId: 'session',
       subjectId: 'owner',
       expectedStoreId,
-      request: { kind: 'run.start', content: commandId },
+      request: { kind: 'run.start', content },
     });
   const cancel = (
     commandId: string,
@@ -326,7 +326,7 @@ test('cancel commits during tool authorization before dispatch, then old cancel 
   const authorizeTool = barrier();
   const secondModel = barrier();
   const authorizeSecondModel = barrier();
-  let modelAuthorizations = 0;
+  const authorizedModels = new Set<string>();
   let secondSignal: AbortSignal | undefined;
   let calls = 0;
   const data = await setup(
@@ -344,10 +344,13 @@ test('cancel commits during tool authorization before dispatch, then old cancel 
           toolAuthorization.release();
           await authorizeTool.waiting;
         }
-        if (request.definitionId === 'fixed' && ++modelAuthorizations === 2) {
-          secondSignal = request.signal;
-          secondModel.release();
-          await authorizeSecondModel.waiting;
+        if (request.definitionId === 'fixed' && !authorizedModels.has(request.executionId)) {
+          authorizedModels.add(request.executionId);
+          if (authorizedModels.size === 2) {
+            secondSignal = request.signal;
+            secondModel.release();
+            await authorizeSecondModel.waiting;
+          }
         }
         return { allowed: true, revision: '1' };
       },
@@ -364,17 +367,25 @@ test('cancel commits during tool authorization before dispatch, then old cancel 
     expect(calls).toBe(0);
     const original = (await data.runtime.getView('session')).runs[0]!;
     expect(original.status).toBe('cancelled');
-    await data.submit('later');
+    await data.submit('later', 'New task: later');
     await secondModel.waiting;
     expect(await data.cancel('cancel-original')).toEqual(receipt);
     expect(secondSignal!.aborted).toBe(false);
     authorizeSecondModel.release();
-    await data.runtime.waitForCommand('later');
+    const later = await data.runtime.waitForCommand('later');
+    const laterReceipt = later.receipt as { runId: string; businessCommandId: string };
+    const business = await data.runtime.getCommand(laterReceipt.businessCommandId);
+    expect(business?.receipt).toMatchObject({ runId: laterReceipt.runId });
     const view = await data.runtime.getView('session');
-    expect(view.runs.find((run) => run.originCommandId === 'later')!.status).toBe('completed');
+    expect(view.runs.find((run) => run.id === laterReceipt.runId)).toMatchObject({
+      status: 'completed',
+      originCommandId: business!.id,
+      rootWorkCommandId: 'later',
+    });
     expect(view.runs.find((run) => run.originCommandId === 'original')!.status).toBe('cancelled');
     expect(calls).toBe(0);
     expect(existsSync(ledger)).toBe(false);
+    expect(authorizedModels.size).toBe(2);
   } finally {
     authorizeTool.release();
     authorizeSecondModel.release();

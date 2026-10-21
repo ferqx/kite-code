@@ -10,6 +10,7 @@ import { selectProfile } from '@kite-ai/agent/profile';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import { privateDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { createDefaultProcessConfiguration } from '../../src/configuration';
+import { createPermissionManagement } from '../../src/permission-management';
 import { createTaskConfiguration } from '../../src/task-configuration';
 
 async function until<T>(read: () => Promise<T | undefined>) {
@@ -34,37 +35,41 @@ function endpoint(role = 'worker') {
         body.model === 'parent' &&
         messages.some(
           (message) =>
-            message.role === 'user' && ['work', 'second'].includes(message.content ?? ''),
+            message.role === 'user' && ['work', 'New task: second'].includes(message.content ?? ''),
         );
       const cut = parent
         ? messages.reduce(
             (found, message, at) =>
-              message.role === 'user' && ['work', 'second'].includes(message.content ?? '')
+              message.role === 'user' &&
+              ['work', 'New task: second'].includes(message.content ?? '')
                 ? at
                 : found,
             -1,
           )
         : -1;
       const results = messages.slice(cut + 1).filter((message) => message.role === 'tool');
-      const key = parent && messages[cut]?.content === 'second' ? 'second' : 'work';
       const names =
         (body.tools as { function: { name: string } }[] | undefined)?.map(
           (tool) => tool.function.name,
         ) ?? [];
       let call: { name: string; input: Json } | undefined;
       if (parent && names.includes('spawn_agent')) {
+        let agentId: string | undefined;
+        try {
+          agentId = JSON.parse(results[0]?.content ?? '{}').agent_id;
+        } catch {
+          /* Prior rejection. */
+        }
         const calls: { name: string; input: Json }[] = [
           {
             name: 'spawn_agent',
             input: {
-              key,
-              role,
-              input: { content: 'read full actual input' },
-              cancellation: 'detached',
+              prompt: 'read full actual input',
+              ...(role === 'worker' ? {} : { preset: role }),
             },
           },
-          { name: 'wait_agents', input: { task_ids: [key], timeout_ms: 4000 } },
-          { name: 'read_agent', input: { task_id: key } },
+          { name: 'wait_agent_events', input: { wait_ms: 4000 } },
+          { name: 'list_agents', input: agentId ? { agent_ids: [agentId] } : {} },
         ];
         call = calls[results.length];
       } else if (!parent && !results.length)
@@ -123,10 +128,10 @@ async function fixture(
       { id: 'child', provider: 'compatible', model: 'child-v1', baseURL: a.baseURL },
     ],
     tools: [
-      'task',
-      'task_read',
-      'wait_agents',
-      'task_cancel',
+      'task.spawn',
+      'task.list',
+      'task.events',
+      'task.interrupt',
       'files.read',
       ...(options.defaultRole ? ['files.write'] : []),
     ].map((id) => ({
@@ -155,8 +160,8 @@ async function fixture(
             { kind: 'model' as const, definitionId: 'parent', definitionVersion: '1' },
             { kind: 'model' as const, definitionId: 'child', definitionVersion: '1' },
             { kind: 'tool' as const, definitionId: 'files.read', definitionVersion: '4' },
-            ...['task', 'task_read', 'wait_agents', 'task_cancel']
-              .filter((id) => id !== options.deny)
+            ...['task.spawn', 'task.list', 'task.events', 'task.interrupt']
+              .filter((id) => id !== (options.deny === 'task' ? 'task.spawn' : options.deny))
               .map((id) => ({ kind: 'tool' as const, definitionId: id, definitionVersion: '1' })),
             ...(options.deny === 'carrier'
               ? []
@@ -190,6 +195,16 @@ async function fixture(
     rootUri: pathToFileURL(workspace).href,
   });
   await runtime.createSession({ ...base, commandId: 'create', workspaceId: 'w', title: 'task' });
+  const control = createPermissionManagement({ runtime, profile });
+  const activeMode = await control.readMode(base);
+  await control.setMode({
+    ...base,
+    commandId: 'fixture-live-mode',
+    mode: options.mode ?? 'full',
+    makeDefault: false,
+    ifRevision: activeMode.revision,
+    ifDefaultRevision: activeMode.defaultRevision,
+  });
   return {
     get runtime() {
       return runtime;
@@ -203,11 +218,11 @@ async function fixture(
     b,
     workspace,
     base,
-    submit: (id = 'work') =>
+    submit: (id = 'work', content = id) =>
       runtime.submitCommand({
         ...base,
         commandId: id,
-        request: { kind: 'run.start', content: id },
+        request: { kind: 'run.start', content },
       }),
     done: (id = 'work') => runtime.waitForCommand(id, { timeoutMs: 7000 }),
     async approve(definitionId: string, commandId: string) {
@@ -267,18 +282,17 @@ test('default Task uses one global factory and the actual shared Loop/model slot
     expect(children).toHaveLength(1);
     expect(children[0]!.definitionVersion).toBe('1');
     expect(children[0]!.status).toBe('succeeded');
-    const record = await f.store.getExtensionRecord({
+    const directory = await f.store.listStableAgents({
+      expectedStoreId: f.base.expectedStoreId,
       sessionId: 's',
       extensionId: 'builtin.task',
-      key: 'task/work',
+      subjectId: f.base.subjectId,
     });
-    expect(record?.value).toMatchObject({
-      role: 'worker',
-      ref: {
-        childSessionId: children[0]!.childSessionId,
-        executionId: children[0]!.id,
-        originStoreId: f.base.expectedStoreId,
-      },
+    expect(directory.items).toHaveLength(1);
+    expect(directory.items[0]).toMatchObject({
+      agentId: children[0]!.childSessionId,
+      assignmentSource: { content: 'read full actual input' },
+      ref: { executionId: children[0]!.id },
     });
     expect(
       (await f.store.listExecutions(children[0]!.childSessionId!)).filter(
@@ -286,9 +300,9 @@ test('default Task uses one global factory and the actual shared Loop/model slot
       ),
     ).toHaveLength(1);
     const operations = await f.store.listExecutions('s');
-    expect(operations.filter((row) => row.definitionId === 'task')).toHaveLength(1);
-    expect(operations.find((row) => row.definitionId === 'wait_agents')?.status).toBe('succeeded');
-    expect(operations.find((row) => row.definitionId === 'task_read')?.status).toBe('succeeded');
+    expect(operations.filter((row) => row.definitionId === 'task.spawn')).toHaveLength(1);
+    expect(operations.find((row) => row.definitionId === 'task.events')?.status).toBe('succeeded');
+    expect(operations.find((row) => row.definitionId === 'task.list')?.status).toBe('succeeded');
     const first = f.a.requests[0]!.tools as { function: { name: string } }[];
     expect(first.filter((tool) => tool.function.name === 'spawn_agent')).toHaveLength(1);
     const calls = f.a.requests.length;
@@ -318,7 +332,7 @@ test('Task Tool approval does not authorize its exact child carrier Job; both or
   const f = await fixture({ mode: 'accept_edits' });
   try {
     await f.submit();
-    const tool = await f.approve('task', 'approve-tool');
+    const tool = await f.approve('task.spawn', 'approve-tool');
     expect(tool.request).toMatchObject({ policy: { effects: ['unknown', 'record_write'] } });
     expect(f.a.requests.filter((row) => row.model !== 'parent')).toHaveLength(0);
     const carrier = await f.approve('agent/worker', 'approve-carrier');
@@ -382,7 +396,7 @@ test('JSONC cannot invent roles or Tool versions; no-role Task selection rejects
       version.configurationPath,
       JSON.stringify({
         ...version.configuration,
-        tools: [{ id: 'task', definitionVersion: 'wrong' }],
+        tools: [{ id: 'task.spawn', definitionVersion: 'wrong' }],
       }),
     );
     await version.submit();
@@ -421,6 +435,12 @@ test('JSONC cannot invent roles or Tool versions; no-role Task selection rejects
       'interrupt_agent',
       'wait_agents',
       'wait_agent',
+      'task.spawn',
+      'task.message',
+      'task.follow_up',
+      'task.events',
+      'task.list',
+      'task.interrupt',
     ].sort(),
   );
   for (const id of ['list_agents', 'wait_agents', 'wait_agent']) {
@@ -452,17 +472,34 @@ test('a new trusted role version and SDK route bind only new Run work; original 
     await f.submit();
     await f.done();
     const old = (await f.store.listExecutions('s')).find((row) => row.childSessionId !== null)!;
-    const record = await f.store.getExtensionRecord({
+    const originalDirectory = await f.store.listStableAgents({
+      expectedStoreId: f.base.expectedStoreId,
       sessionId: 's',
       extensionId: 'builtin.task',
-      key: 'task/work',
+      subjectId: f.base.subjectId,
     });
+    const originalAssignment = originalDirectory.items[0]!.assignmentSource;
     f.configuration.models[1]!.model = 'child-v2';
     f.configuration.models[1]!.baseURL = f.b.baseURL;
     writeFileSync(f.configurationPath, JSON.stringify(f.configuration));
     await f.reopen('2');
-    await f.submit('second');
-    await f.done('second');
+    await f.submit('second', 'New task: second');
+    const command = await f.done('second');
+    const receipt = command.receipt as { businessCommandId: string; runId: string };
+    expect(command.status).toBe('applied');
+    const run = (await f.store.getRun(receipt.runId))!;
+    expect(run).toMatchObject({
+      originCommandId: receipt.businessCommandId,
+      rootWorkCommandId: command.id,
+      status: 'completed',
+    });
+    const model = (await f.store.listExecutions('s')).find(
+      (execution) => execution.kind === 'model' && execution.runId === run.id,
+    );
+    expect(model).toMatchObject({
+      originCommandId: receipt.businessCommandId,
+      rootWorkCommandId: command.id,
+    });
     const next = (await f.store.listExecutions('s')).find(
       (row) => row.childSessionId !== null && row.id !== old.id,
     )!;
@@ -471,13 +508,14 @@ test('a new trusted role version and SDK route bind only new Run work; original 
     expect(next.status).toBe('succeeded');
     expect(f.b.requests.every((row) => row.model === 'child-v2')).toBe(true);
     expect(f.b.requests.length).toBeGreaterThan(0);
-    expect(
-      await f.store.getExtensionRecord({
-        sessionId: 's',
-        extensionId: 'builtin.task',
-        key: 'task/work',
-      }),
-    ).toEqual(record);
+    const afterDirectory = await f.store.listStableAgents({
+      expectedStoreId: f.base.expectedStoreId,
+      sessionId: 's',
+      extensionId: 'builtin.task',
+      subjectId: f.base.subjectId,
+    });
+    expect(afterDirectory.items[0]!.assignmentSource).toEqual(originalAssignment);
+    expect(afterDirectory.items[0]!.ref.executionId).toBe(old.id);
     expect((await f.store.getView('s')).runs[1]!.configuration).toMatchObject({
       snapshot: { task: { roles: [{ id: 'worker', configurationVersion: '2' }] } },
     });
@@ -489,7 +527,7 @@ test('a new trusted role version and SDK route bind only new Run work; original 
 test('selected collaboration additions expose exact closed schemas to the real SDK without extra child work', async () => {
   const f = await fixture();
   try {
-    const ids = ['list_agents', 'interrupt_agent', 'wait_agents', 'wait_agent'];
+    const ids = ['task.list', 'task.interrupt', 'task.events', 'task.message', 'task.follow_up'];
     writeFileSync(
       f.configurationPath,
       JSON.stringify({
@@ -509,7 +547,17 @@ test('selected collaboration additions expose exact closed schemas to the real S
     }[];
     for (const id of ids) {
       const actual = tools.find(
-        (tool) => tool.function.name === (id === 'wait_agent' ? 'wait_agent_event' : id),
+        (tool) =>
+          tool.function.name ===
+          (
+            {
+              'task.list': 'list_agents',
+              'task.interrupt': 'interrupt_agent',
+              'task.events': 'wait_agent_events',
+              'task.message': 'send_agent_message',
+              'task.follow_up': 'follow_up_agent',
+            } as Record<string, string>
+          )[id],
       );
       expect(actual).toBeDefined();
       expect(actual?.function.parameters).toMatchObject({
@@ -519,7 +567,7 @@ test('selected collaboration additions expose exact closed schemas to the real S
     }
     expect(
       tools.find((tool) => tool.function.name === 'interrupt_agent')?.function.parameters.required,
-    ).toEqual(['task_id', 'target_run_id', 'command_id']);
+    ).toEqual(['agent_id']);
     expect(
       (await f.store.listExecutions('s')).filter((row) => row.childSessionId !== null),
     ).toHaveLength(1);
@@ -545,7 +593,7 @@ test('default plan and review run through the real Task carrier and expose only 
       const parent = (await f.store.listExecutions('s')).find(
         (row) => row.id === carrier.parentExecutionId,
       )!;
-      expect(parent.definitionId).toBe('task');
+      expect(parent.definitionId).toBe('task.spawn');
       expect(carrier.rootWorkCommandId).toBe(parent.rootWorkCommandId);
       expect(carrier.rootWorkSeq).toBe(parent.rootWorkSeq);
       const child = await f.store.getView(carrier.childSessionId!);
@@ -571,14 +619,16 @@ test('default plan and review run through the real Task carrier and expose only 
           .filter((row) => row.kind === 'tool')
           .map((row) => [row.definitionId, row.status]),
       ).toEqual([['files.read', 'succeeded']]);
-      const record = await f.store.getExtensionRecord({
+      const directory = await f.store.listStableAgents({
+        expectedStoreId: f.base.expectedStoreId,
         sessionId: 's',
         extensionId: 'builtin.task',
-        key: 'task/work',
+        subjectId: f.base.subjectId,
       });
-      expect(record?.value).toMatchObject({
-        role,
-        ref: { executionId: carrier.id, originStoreId: f.base.expectedStoreId },
+      expect(directory.items[0]).toMatchObject({
+        agentId: carrier.childSessionId,
+        assignmentSource: { content: 'read full actual input' },
+        ref: { executionId: carrier.id },
       });
       expect(readFileSync(join(f.workspace, 'input.txt'), 'utf8')).toBe(
         'actual complete private input',

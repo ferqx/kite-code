@@ -23,6 +23,7 @@ import { createClient } from '@kite-ai/client';
 import { privateDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { startService } from '../../src';
 import { createDefaultProcessConfiguration } from '../../src/configuration';
+import { initializeLivePermissionFixture } from '../fixtures/live-permission-fixture';
 
 const intent = {
   extensionId: planningExtensionId,
@@ -173,7 +174,7 @@ async function fixture(
     tools: [
       { id: 'files.read', definitionVersion: '4' },
       { id: 'files.write', definitionVersion: '2' },
-      ...['task', 'wait_agents', 'task_read'].map((id) => ({ id, definitionVersion: '1' })),
+      ...['task.spawn', 'task.events', 'task.list'].map((id) => ({ id, definitionVersion: '1' })),
       ...(scenario === 'pending_job'
         ? ['shell.launch', 'validation.define', 'validation.check'].map((id) => ({
             id,
@@ -224,9 +225,9 @@ async function fixture(
             definitionVersion: '1',
           })),
           ...[
-            'task',
-            'wait_agents',
-            'task_read',
+            'task.spawn',
+            'task.events',
+            'task.list',
             'shell.launch',
             'validation.define',
             'validation.check',
@@ -269,7 +270,7 @@ async function fixture(
             const task = executions.find(
               (e) =>
                 e.kind === 'tool' &&
-                e.definitionId === 'task' &&
+                e.definitionId === 'task.spawn' &&
                 e.originStoreId === expectedStoreId &&
                 e.originCommandId === workId &&
                 e.runId === execution.runId,
@@ -362,6 +363,15 @@ async function fixture(
     workspaceId: 'w',
     title: 'per Run',
   });
+  await initializeLivePermissionFixture({
+    runtime,
+    profile,
+    expectedStoreId,
+    subjectId: 'user',
+    sessionId: 's',
+    workspaceId: 'w',
+    mode,
+  });
   const f = {
     root,
     workspace,
@@ -382,7 +392,16 @@ async function fixture(
     get credentialReads() {
       return credentialReads;
     },
-    policy(nextMode: PermissionMode, nextTrust = true) {
+    async policy(nextMode: PermissionMode, nextTrust = true) {
+      await initializeLivePermissionFixture({
+        runtime,
+        profile,
+        expectedStoreId,
+        subjectId: 'user',
+        sessionId: 's',
+        workspaceId: 'w',
+        mode: nextMode,
+      });
       mode = nextMode;
       trusted = nextTrust;
       revision++;
@@ -392,7 +411,8 @@ async function fixture(
     },
     async run() {
       const view = await store.getView('s');
-      return view.runs.find((run) => run.originCommandId === workId)!;
+      const receipt = (await store.getCommand(workId))?.receipt as { runId?: string };
+      return view.runs.find((run) => run.originCommandId === workId || run.id === receipt?.runId)!;
     },
     async submit(id = 'work', plan = true) {
       workId = id;
@@ -403,7 +423,7 @@ async function fixture(
         expectedStoreId,
         commandId: id,
         kind: 'run.start',
-        content: id,
+        content: id === 'next' ? `New task: ${id}` : id,
         ...(plan ? { extensionInputs: [intent] } : {}),
       });
     },
@@ -520,8 +540,8 @@ async function script(model: string, step: number, f: Fixture): Promise<Call> {
   if (model === 'child') {
     if (step === 0) return { name: 'read_file', input: { path: 'original.txt' } };
     if (step === 1) {
-      if (['ask', 'head_drift', 'proof_drift'].includes(f.scenario)) f.policy('auto');
-      if (f.scenario === 'untrusted') f.policy('full', false);
+      if (['ask', 'head_drift', 'proof_drift'].includes(f.scenario)) await f.policy('auto');
+      if (f.scenario === 'untrusted') await f.policy('full', false);
       return {
         name: 'write_file',
         input: { path: 'child.txt', content: 'original child effect', base: null },
@@ -534,10 +554,7 @@ async function script(model: string, step: number, f: Fixture): Promise<Call> {
       ? {
           name: 'spawn_agent',
           input: {
-            key: f.workId,
-            role: 'worker',
-            input: { content: 'child' },
-            cancellation: 'attached',
+            prompt: 'child',
           },
         }
       : null;
@@ -580,16 +597,13 @@ async function script(model: string, step: number, f: Fixture): Promise<Call> {
     return {
       name: 'spawn_agent',
       input: {
-        key: f.workId,
-        role: 'worker',
-        input: { content: 'child' },
-        cancellation: 'attached',
+        prompt: 'child',
       },
     };
-  if (step === 3) return { name: 'wait_agents', input: { task_ids: [f.workId], timeout_ms: 4000 } };
+  if (step === 3) return { name: 'wait_agent_events', input: { wait_ms: 4000 } };
   if (step === 4 && ['approved', 'next'].includes(f.scenario)) {
     const target = (await f.store.listExecutions('s')).find(
-      (e) => e.definitionId === 'task' && e.status === 'succeeded',
+      (e) => e.definitionId === 'task.spawn' && e.status === 'succeeded',
     )!;
     return {
       name: 'update_plan_progress',
@@ -610,7 +624,7 @@ async function script(model: string, step: number, f: Fixture): Promise<Call> {
 }
 async function delegateApprovals(f: Fixture) {
   await f.approvePlan('accept_edits');
-  const task = await f.approve('task');
+  const task = await f.approve('task.spawn');
   expect(f.normal.filter((row) => row.model === 'child')).toHaveLength(0);
   const carrier = await f.approve('agent/worker');
   expect(carrier.executionId).not.toBe(task.executionId);
@@ -628,7 +642,7 @@ test('pending single-Run planning defeats current Full Task and ordinary Job wit
       expect(String(diagnostic.content)).toContain('plan_draft_pending');
       const denied = (await f.store.listExecutions('s')).find(
         (execution) =>
-          execution.definitionId === (scenario === 'pending_task' ? 'task' : 'shell.command'),
+          execution.definitionId === (scenario === 'pending_task' ? 'task.spawn' : 'shell.command'),
       )!;
       expect(denied.status).toBe('failed');
       expect(denied.authorization?.dispatched).toBe(false);
@@ -658,10 +672,10 @@ test('approved accept_edits under current Full independently challenges Task/car
     const parent = await f.done();
     expect(parent.status).toBe('completed');
     const wait = (await f.store.listExecutions('s')).find(
-      (execution) => execution.definitionId === 'wait_agents',
+      (execution) => execution.definitionId === 'task.events',
     )!;
     expect(wait.status).toBe('succeeded');
-    expect(wait.input).toEqual({ taskIds: ['work'], timeoutMs: 4000 });
+    expect(wait.input).toEqual({ waitMs: 4000 });
     expect(readFileSync(join(f.workspace, 'child.txt'), 'utf8')).toBe('original child effect');
     const carrier = (await f.store.listExecutions('s')).find(
       (e) => e.definitionId === 'agent/worker',
@@ -791,6 +805,17 @@ test('original parent head/proof drift during child approval refuses dispatch an
     ).length;
     await f.submit('next');
     const { run, diagnostic } = await f.incomplete();
+    const next = (await f.store.getCommand('next'))!;
+    const receipt = next.receipt as { businessCommandId: string; runId: string };
+    expect(next).toMatchObject({
+      status: 'applied',
+      request: { content: 'New task: next' },
+      receipt: { outcome: 'human_input_applied' },
+    });
+    expect(receipt.businessCommandId).not.toBe('next');
+    expect(run.id).toBe(receipt.runId);
+    expect(run.originCommandId).toBe(receipt.businessCommandId);
+    expect(run.rootWorkCommandId).toBe('next');
     expect(run.isActive).toBe(true);
     expect(run.status).toBe('running');
     expect(String(diagnostic.content)).toContain('plan_draft_pending');

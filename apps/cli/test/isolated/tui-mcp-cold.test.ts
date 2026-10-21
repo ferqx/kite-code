@@ -109,8 +109,8 @@ test('source-free original MCP prepare and physical first GET loss survive calle
       instanceId: randomUUID(),
       requiredCapabilities: ['sessions', 'commands'],
     });
-    const client = service.client,
-      storeId = service.bootstrap.storeId;
+    let client = service.client;
+    const storeId = service.bootstrap.storeId;
     if (!storeId) throw Error('store_missing');
     await client.createWorkspace({
       expectedStoreId: storeId,
@@ -125,6 +125,45 @@ test('source-free original MCP prepare and physical first GET loss survive calle
       workspaceId: 'w',
       title: 'cold',
     });
+    const originalPid = service.pid;
+    const subjectId = client.serverInfo!.subjectId;
+    if (!subjectId) throw Error('seed_subject_unavailable');
+    await service.close();
+    service = undefined;
+    expect(() => process.kill(originalPid, 0)).toThrow();
+    settings.seed = { storeId, subjectId };
+    publish();
+    const seed = Bun.spawn([candidate.artifact.executable, entrypoint, 'seed-controls'], {
+      stdout: 'pipe',
+      stderr: 'pipe',
+    });
+    const [seedOut, seedErr, seedExit] = await Promise.all([
+      new Response(seed.stdout).text(),
+      new Response(seed.stderr).text(),
+      seed.exited,
+    ]);
+    writeFileSync(join(evidence, 'seed-controls.log'), seedOut + seedErr);
+    expect(seedExit).toBe(0);
+    const controls = JSON.parse(seedOut);
+    expect(controls).toMatchObject({
+      storeId,
+      subjectId,
+      mode: { storeId, sessionId: 's', scopeSessionId: 's', mode: 'full' },
+      trust: { storeId, workspaceId: 'w', trusted: true },
+      executions: 0,
+    });
+    expect(existsSync(join(root, 'credential-io'))).toBe(false);
+    expect(existsSync(join(root, 'mcp-admit'))).toBe(false);
+    expect(rpc).toBe(0);
+    service = await launchPairedService({
+      profile,
+      ...artifact,
+      instanceId: randomUUID(),
+      requiredCapabilities: ['sessions', 'commands'],
+    });
+    client = service.client;
+    expect(client.serverInfo?.storeId).toBe(storeId);
+    expect(client.serverInfo?.subjectId).toBe(subjectId);
     const facts = await createTuiMcpPort(client, storeId).read('s', new AbortController().signal);
     const make = (commandId: string): TuiMcpIntent => ({
       sessionId: 's',

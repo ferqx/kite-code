@@ -14,6 +14,7 @@ import { createClient } from '@kite-ai/client';
 import { createDefaultProcessConfiguration } from '@kite-ai/service/configuration';
 import { privateDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { startService } from '../../src';
+import { initializeLivePermissionFixture } from '../fixtures/live-permission-fixture';
 
 const questions = {
   questions: [
@@ -82,10 +83,7 @@ async function fixture(
             ? {
                 name: 'spawn_agent',
                 input: {
-                  key: 'child',
-                  role: 'worker',
-                  input: { content: 'Ask the user' },
-                  cancellation: 'attached',
+                  prompt: 'Ask the user',
                 },
               }
             : { name: 'ask_user', input: questions };
@@ -134,7 +132,7 @@ async function fixture(
         : []),
     ],
     ...(input.tools ? { tools: input.tools } : {}),
-    ...(input.child ? { tools: [{ id: 'task' }] } : {}),
+    ...(input.child ? { tools: [{ id: 'task.spawn' }] } : {}),
   };
   writeFileSync(join(profile.profilePath, 'config.jsonc'), JSON.stringify(config));
   const host = createDefaultProcessConfiguration({
@@ -162,7 +160,7 @@ async function fixture(
         allowed: [
           { kind: 'model', definitionId: 'fixed', definitionVersion: '1' },
           { kind: 'model', definitionId: 'child', definitionVersion: '1' },
-          ...['ask_user', 'task'].map((id) => ({
+          ...['ask_user', 'task.spawn'].map((id) => ({
             kind: 'tool' as const,
             definitionId: id,
             definitionVersion: '1',
@@ -215,6 +213,15 @@ async function fixture(
     workspaceId: 'w',
     commandId: 'create',
     title: 'Questions',
+  });
+  await initializeLivePermissionFixture({
+    runtime,
+    profile,
+    expectedStoreId,
+    subjectId: 'owner',
+    sessionId: 's',
+    workspaceId: 'w',
+    mode: input.mode ?? 'full',
   });
   return {
     root,
@@ -462,9 +469,16 @@ for (const mode of ['accept_edits', 'auto', 'full'] as const)
           expectedStoreId: f.expectedStoreId,
           commandId: 'next',
           kind: 'run.start',
-          content: 'New explicit work',
+          content: 'New task: New explicit work',
         });
-        await f.runtime.waitForCommand('next', { timeoutMs: 5000 });
+        const next = await f.runtime.waitForCommand('next', { timeoutMs: 5000 });
+        const nextReceipt = next.receipt as { runId: string; businessCommandId: string };
+        expect(next.status).toBe('applied');
+        expect(await f.client.getRun(nextReceipt.runId)).toMatchObject({
+          status: 'completed',
+          originCommandId: nextReceipt.businessCommandId,
+          rootWorkCommandId: 'next',
+        });
         const nextTools = f.requests.at(-1)!.tools as { function: { name: string } }[] | undefined;
         expect(nextTools?.some((tool) => tool.function.name === 'ask_user') ?? false).toBe(false);
         expect((await f.client.getRun(run.id)).configuration).toEqual(saved.configuration);
@@ -510,7 +524,7 @@ for (const explicitChild of [false, true])
       await f.runtime.waitForCommand('run', { timeoutMs: 5000 });
       const deadline = Date.now() + 5000;
       while (
-        f.requests.filter((body) => body.model === 'child').length < 1 &&
+        f.requests.filter((body) => body.model === 'child').length < 2 &&
         Date.now() < deadline
       )
         await Bun.sleep(10);
@@ -523,6 +537,11 @@ for (const explicitChild of [false, true])
         (execution) => execution.childSessionId,
       )?.childSessionId;
       expect(childSessionId).toBeDefined();
+      while (
+        (await f.client.getView(childSessionId!)).runs.some((run) => run.isActive) &&
+        Date.now() < deadline
+      )
+        await Bun.sleep(10);
       const view = await f.client.getView(childSessionId!);
       await assertUnavailableRecovery(f, childSessionId!, child);
       const configuration = view.runs[0]!.configuration as { tools: { id: string }[] };

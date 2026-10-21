@@ -11,6 +11,7 @@ import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import { privateDirectory, temporaryDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { createDefaultProcessConfiguration } from '../../src/configuration';
 import { workflowSnapshotDigest } from '../../src/skill-workflow-configuration';
+import { initializeLivePermissionFixture } from '../fixtures/live-permission-fixture';
 
 test.each(
   process.platform === 'darwin' ? ['repair', 'replan'] : [],
@@ -195,6 +196,15 @@ test.each(
       commandId: 'create',
       workspaceId: 'w',
       title: decision,
+    });
+    await initializeLivePermissionFixture({
+      runtime,
+      profile,
+      ...base,
+      workspaceId: 'w',
+      mode: 'full',
+      trusted: true,
+      nativeShellRead: process.platform === 'darwin',
     });
     await runtime.submitCommand({
       ...base,

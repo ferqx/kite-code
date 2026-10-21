@@ -247,7 +247,7 @@ export async function openContinuousFixture(root: string) {
                 expectedStoreId: storeId,
                 commandId,
                 kind: 'run.start',
-                content: 'load original run',
+                content: 'New task: load original run',
               });
               latencies.push(performance.now() - acceptedAt);
               commands.push(commandId);

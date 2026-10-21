@@ -2,6 +2,7 @@ import { constants as bufferConstants } from 'node:buffer';
 import { createHash } from 'node:crypto';
 import { closeSync, constants, fstatSync, lstatSync, openSync, readSync } from 'node:fs';
 import { join } from 'node:path';
+import { setImmediate as yieldToEventLoop } from 'node:timers/promises';
 import { assertNoSymlinkPath } from './platform/profile-identity';
 import { readWindowsArtifactChunks } from './platform/windows-artifact-files';
 import { AgentError } from './storage/types';
@@ -105,12 +106,21 @@ function* readPosixArtifact(
   }
 }
 /** Storage registration validates the whole object with fixed memory before saving a reference. */
-export function verifyPublishedArtifact(profilePath: string, hash: string, size: string): void {
+export function* verifyPublishedArtifactSteps(
+  profilePath: string,
+  hash: string,
+  size: string,
+): Generator<unknown, void, void> {
   const chunks =
     process.platform === 'win32'
       ? readPublishedArtifactChunks(profilePath, hash, size)
       : readPosixArtifact(profilePath, hash, artifactSize(size), 'verify');
   for (const _chunk of chunks) {
+    yield;
+  }
+}
+export function verifyPublishedArtifact(profilePath: string, hash: string, size: string): void {
+  for (const _step of verifyPublishedArtifactSteps(profilePath, hash, size)) {
     /* Full hash/identity verification at EOF. */
   }
 }
@@ -124,4 +134,88 @@ export function readPublishedArtifact(profilePath: string, hash: string, size: s
   while (!next.done) next = reading.next();
   if (next.value === undefined) throw new AgentError('artifact_content_mismatch');
   return next.value;
+}
+
+/** Keep the original file/HANDLE and complete verifier live across real event-loop turns. */
+function readCheckpoint(signal?: AbortSignal): () => Promise<void> | undefined {
+  let deadline = performance.now() + 8;
+  let chunks = 0;
+  return () => {
+    signal?.throwIfAborted();
+    if (++chunks < 64 && performance.now() < deadline) return;
+    return yieldToEventLoop().then(() => {
+      signal?.throwIfAborted();
+      chunks = 0;
+      deadline = performance.now() + 8;
+    });
+  };
+}
+
+/** A yielded prefix is unverified until the original reader reaches successful EOF. */
+export async function* readPublishedArtifactChunksAsync(
+  profilePath: string,
+  hash: string,
+  size: string,
+  signal?: AbortSignal,
+): AsyncGenerator<Uint8Array> {
+  signal?.throwIfAborted();
+  const checkpoint = readCheckpoint(signal);
+  for (const chunk of readPublishedArtifactChunks(profilePath, hash, size)) {
+    const pause = checkpoint();
+    if (pause) await pause;
+    yield chunk;
+    signal?.throwIfAborted();
+  }
+  signal?.throwIfAborted();
+}
+
+/** Publication readback keeps fixed scratch space and all original EOF/identity/hash checks. */
+export async function verifyPublishedArtifactAsync(
+  profilePath: string,
+  hash: string,
+  size: string,
+  signal?: AbortSignal,
+): Promise<void> {
+  signal?.throwIfAborted();
+  const checkpoint = readCheckpoint(signal);
+  for (const _step of verifyPublishedArtifactSteps(profilePath, hash, size)) {
+    const pause = checkpoint();
+    if (pause) await pause;
+  }
+  signal?.throwIfAborted();
+}
+
+export async function readPublishedArtifactAsync(
+  profilePath: string,
+  hash: string,
+  size: string,
+  signal?: AbortSignal,
+): Promise<Uint8Array> {
+  signal?.throwIfAborted();
+  if (process.platform === 'win32') {
+    // The native generator still proves the complete original HANDLE before success.
+    const chunks: Uint8Array[] = [];
+    for await (const chunk of readPublishedArtifactChunksAsync(profilePath, hash, size, signal))
+      chunks.push(chunk);
+    const result = Buffer.concat(chunks);
+    signal?.throwIfAborted();
+    return result;
+  }
+  const checkpoint = readCheckpoint(signal);
+  const reading = readPosixArtifact(profilePath, hash, artifactSize(size), 'whole');
+  try {
+    for (;;) {
+      signal?.throwIfAborted();
+      const next = reading.next();
+      if (next.done) {
+        signal?.throwIfAborted();
+        if (next.value === undefined) throw new AgentError('artifact_content_mismatch');
+        return next.value;
+      }
+      const pause = checkpoint();
+      if (pause) await pause;
+    }
+  } finally {
+    reading.return(undefined);
+  }
 }

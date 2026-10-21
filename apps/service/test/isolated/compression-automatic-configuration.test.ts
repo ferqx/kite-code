@@ -62,7 +62,9 @@ for (const rejectSummary of [false, true])
     const slot: ContextCompressor = {
       ...createSummaryCompressor({
         async shouldCompress(input) {
-          return input.messages.some((message) => message.content === 'Automatic next work');
+          return input.messages.some(
+            (message) => message.content === '新任务：Automatic next work',
+          );
         },
         async validateSummary(input) {
           validations++;
@@ -145,17 +147,20 @@ for (const rejectSummary of [false, true])
         expectedStoreId,
         commandId: 'next',
         kind: 'run.start',
-        content: 'Automatic next work',
+        content: '新任务：Automatic next work',
       });
-      await runtime.waitForCommand('next', { timeoutMs: 5000 });
+      const applied = await runtime.waitForCommand('next', { timeoutMs: 5000 });
+      const application = applied.receipt as { runId: string; businessCommandId: string };
       const view = await client.getView('s'),
         context = await client.getContext('s', { storeId: expectedStoreId }),
         inputs = (await client.listModelInputs('s')).items.filter(
-          (item) => item.originCommandId === 'next',
+          (item) => item.originCommandId === application.businessCommandId,
         );
-      expect(view.runs.find((run) => run.originCommandId === 'next')).toMatchObject({
+      expect(view.runs.find((run) => run.id === application.runId)).toMatchObject({
         status: 'completed',
         reason: null,
+        originCommandId: application.businessCommandId,
+        rootWorkCommandId: 'next',
       });
       expect(validations).toBe(1);
       expect(requests).toHaveLength(3);
@@ -165,7 +170,9 @@ for (const rejectSummary of [false, true])
         actual = await client.getModelInput('s', inputs[1]!.executionId);
       expect(summaryInput.request.tools).toHaveLength(0);
       expect(
-        summaryInput.request.messages.some((message) => message.content === 'Automatic next work'),
+        summaryInput.request.messages.some(
+          (message) => message.content === '新任务：Automatic next work',
+        ),
       ).toBe(true);
       expect((await client.getModelOutput('s', inputs[0]!.executionId)).output.content).toBe(
         summary,

@@ -22,7 +22,13 @@ export function recordToolOutcome(
     details &&
     typeof details === 'object' &&
     !Array.isArray(details) &&
-    (details.code === 'context_refresh_required' || details.code === 'capability_refresh_required')
+    [
+      'context_refresh_required',
+      'capability_refresh_required',
+      'input_pending',
+      'work_not_selected',
+      'work_paused',
+    ].includes(String(details.code))
   )
     // A retired decision neither consumes nor resets genuine failure attempts.
     return;
@@ -75,6 +81,16 @@ export interface LoopContext {
       };
 }
 
+/** A transient loop-owned instruction, tied only to an actual length result. */
+export function outputLengthContinuation(executionId: string): ModelMessage {
+  return {
+    role: 'user',
+    content:
+      'The preceding Model response reached its output length. Continue the original task from the saved response; do not repeat completed work. This continuation grants no additional permission.',
+    sourceIds: [executionId],
+  };
+}
+
 /** The single model/tool loop for root and child Sessions. */
 export async function defaultLoop(context: LoopContext): Promise<void> {
   context.toolFailureStreak ??= { signature: null, count: 0 };
@@ -99,16 +115,7 @@ export async function defaultLoop(context: LoopContext): Promise<void> {
                   requestId: crypto.randomUUID(),
                   messages: [
                     ...(await context.getMessages()),
-                    ...(continuation
-                      ? [
-                          {
-                            role: 'user' as const,
-                            content:
-                              'The preceding Model response reached its output length. Continue the original task from the saved response; do not repeat completed work. This continuation grants no additional permission.',
-                            sourceIds: [continuation],
-                          },
-                        ]
-                      : []),
+                    ...(continuation ? [outputLengthContinuation(continuation)] : []),
                   ],
                   tools: context.getTools(),
                 },

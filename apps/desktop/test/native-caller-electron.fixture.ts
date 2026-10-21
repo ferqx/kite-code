@@ -43,7 +43,7 @@ async function launch() {
   assert.equal(ready.selection?.viewLoading, false);
   return { app, page };
 }
-const rows = () => {
+const rows = (commandId: string = input.commandId) => {
   const db = new DatabaseSync(corePath!, { readOnly: true });
   try {
     return {
@@ -51,7 +51,7 @@ const rows = () => {
         .prepare(
           'SELECT id,kind,status,subject_id,request_digest,receipt_json FROM command WHERE id=?',
         )
-        .all(input.commandId),
+        .all(commandId),
       runs: db.prepare('SELECT id,origin_command_id,status FROM run').all(),
       executions: db.prepare('SELECT id,kind,state,cancel_requested_at FROM execution').all(),
     };
@@ -62,13 +62,14 @@ const rows = () => {
 try {
   let { app, page } = await launch();
   let siblingId: string | undefined;
+  let parentBusiness: { runId: string; businessCommandId: string } | undefined;
   if (input.kind === 'execution.cancel') {
     await page.evaluate(async (expectedStoreId) => {
       const request = {
         kind: 'run.start' as const,
         expectedStoreId,
         commandId: 'native-jobs-parent',
-        content: 'two explicitly configured independent jobs',
+        content: 'New task: two explicitly configured independent jobs',
       };
       await window.kiteNative!.request({
         method: 'caller.prepare',
@@ -91,7 +92,7 @@ try {
         })) as NativeState;
         if (
           state.selection?.runs.some(
-            (r) => r.originCommandId === 'native-jobs-parent' && r.status === 'completed',
+            (r) => r.rootWorkCommandId === 'native-jobs-parent' && r.status === 'completed',
           ) &&
           state.selection.executions.filter((e) => e.kind === 'job' && e.status === 'running')
             .length === 2
@@ -101,6 +102,37 @@ try {
       }
       throw Error('owned_jobs_fresh_scope_unavailable');
     });
+    const applied = (await page.evaluate(
+      async () =>
+        await window.kiteNative!.request({
+          method: 'caller.lookup',
+          generation: 1,
+          commandId: 'native-jobs-parent',
+        }),
+    )) as NativeCallerMetadata;
+    assert.equal(applied.request.commandId, 'native-jobs-parent');
+    assert.equal(applied.phase, 'applied');
+    const commands = rows('native-jobs-parent').commands;
+    assert.equal(commands.length, 1);
+    assert.equal(commands[0]!.status, 'applied');
+    const receipt = JSON.parse(String(commands[0]!.receipt_json)) as {
+      businessCommandId: string;
+      sourceCommandId: string;
+      runId: string;
+    };
+    assert.ok(receipt.businessCommandId);
+    assert.notEqual(receipt.businessCommandId, applied.request.commandId);
+    assert.equal(receipt.sourceCommandId, receipt.businessCommandId);
+    parentBusiness = { runId: receipt.runId, businessCommandId: receipt.businessCommandId };
+    assert.ok(
+      state.selection!.runs.some(
+        (run) =>
+          run.id === receipt.runId &&
+          run.originCommandId === receipt.businessCommandId &&
+          run.rootWorkCommandId === applied.request.commandId &&
+          run.status === 'completed',
+      ),
+    );
     const jobs = state.selection!.executions.filter(
       (e) => e.kind === 'job' && e.status === 'running',
     );
@@ -165,6 +197,8 @@ try {
   assert.deepEqual(await readNativeCallerRequest(page, 1, input.commandId), input);
   assert.equal(rows().commands.length, 1);
   if (siblingId) {
+    const originalParent = parentBusiness;
+    assert.ok(originalParent);
     const facts = rows();
     const a = facts.executions.find((e) => e.id === input.executionId),
       b = facts.executions.find((e) => e.id === siblingId);
@@ -174,7 +208,10 @@ try {
     assert.equal(b?.state, 'running');
     assert.equal(
       facts.runs.filter(
-        (r) => r.origin_command_id === 'native-jobs-parent' && r.status === 'completed',
+        (r) =>
+          r.id === originalParent.runId &&
+          r.origin_command_id === originalParent.businessCommandId &&
+          r.status === 'completed',
       ).length,
       1,
     );

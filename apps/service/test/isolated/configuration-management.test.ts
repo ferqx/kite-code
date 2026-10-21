@@ -1203,13 +1203,28 @@ for (const mode of ['default', 'effort'] as const)
         expectedStoreId: f.storeId,
         commandId: 'run-b',
         kind: 'run.start',
-        content: 'Next actual request',
+        content: 'New task: Next actual request',
       });
-      await until(async () =>
-        (await f.handle.client.getView('held')).runs.some(
-          (r) => r.originCommandId === 'run-b' && !r.isActive,
-        ),
-      );
+      await until(async () => {
+        const command = await f.handle.client.getCommand('run-b');
+        const receipt = command.receipt as { runId?: string } | null;
+        return (
+          command.status === 'applied' &&
+          typeof receipt?.runId === 'string' &&
+          (await f.handle.client.getView('held')).runs.some(
+            (r) => r.id === receipt.runId && !r.isActive,
+          )
+        );
+      });
+      const publicCommand = await f.handle.client.getCommand('run-b');
+      const business = publicCommand.receipt as { runId: string; businessCommandId: string };
+      const next = await f.handle.client.getRun(business.runId);
+      expect(publicCommand.kind).toBe('run.start');
+      expect(next.originCommandId).toBe(business.businessCommandId);
+      expect(next.rootWorkCommandId).toBe('run-b');
+      expect(next.id).not.toBe(old.id);
+      expect(next.status).toBe('completed');
+      expect((await f.handle.client.getRun(old.id)).configuration).toEqual(old.configuration);
       expect(requests.map((r) => r.model)).toEqual([
         'actual-model-a',
         mode === 'default' ? 'actual-model-b' : 'actual-model-a',

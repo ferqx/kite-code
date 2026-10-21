@@ -1095,6 +1095,10 @@ export class NativeCaller {
       !request.method.startsWith('interactionHistory.') &&
       !request.method.startsWith('extensions.') &&
       ![
+        // These reads use the exact retained selection and report unavailable
+        // permissions while metadata refreshes; they must not wait for that GET.
+        'state',
+        'messages',
         'select',
         'detach',
         'workspace.removal.lookup',

@@ -406,6 +406,7 @@ test('durable acceptance on closing observer Runtime does not cancel the survivi
     release = gate(),
     accepted = gate(),
     response = gate();
+  let completedTools = 0;
   const tool: ToolDefinition = {
     id: 'fixture.tool',
     version: '1',
@@ -414,10 +415,11 @@ test('durable acceptance on closing observer Runtime does not cancel the survivi
     async execute() {
       entered.release();
       await release.promise;
+      completedTools++;
       return { outcome: 'succeeded', content: 'released' };
     },
   };
-  const fixed = createFixedModel([calls, [finish], [finish]]);
+  const fixed = createFixedModel([calls, [finish]]);
   const a = await fixture(
     {
       model: fixed,
@@ -430,7 +432,11 @@ test('durable acceptance on closing observer Runtime does not cancel the survivi
   try {
     await a.submit('original');
     await entered.promise;
-    b.afterHooks.set('acceptCommand', async () => {
+    const originalModel = (await a.original.getExecution(fixed.requests[0]!.requestId))!;
+    const originalRunId = originalModel.runId!;
+    // Hold the response after the actual business admission transaction. Merely
+    // registering raw input does not yet authorize a surviving owner to run it.
+    b.afterHooks.set('decideHumanInput', async () => {
       accepted.release();
       await response.promise;
     });
@@ -439,9 +445,34 @@ test('durable acceptance on closing observer Runtime does not cancel the survivi
       sessionId: a.sessionId,
       subjectId: 'owner',
       commandId: 'durable',
-      request: { kind: 'run.start', content: 'survives observer' },
+      request: { kind: 'run.start', content: 'New task: survives observer' },
     });
     await accepted.promise;
+    const pending = (await a.original.getCommand('durable'))!;
+    const receipt = pending.receipt as {
+      businessCommandId: string;
+      humanInputCommandId: string;
+    };
+    expect(pending.status).toBe('accepted');
+    expect(receipt.businessCommandId).toBeString();
+    expect(receipt.businessCommandId).not.toBe(pending.id);
+    expect(await a.original.getCommand(receipt.businessCommandId)).toMatchObject({
+      status: 'accepted',
+      request: {
+        kind: 'input.follow_up',
+        content: 'New task: survives observer',
+        afterRunId: originalRunId,
+      },
+      rootWorkCommandId: 'durable',
+    });
+    expect(await a.original.getCommand(receipt.humanInputCommandId)).toMatchObject({
+      kind: 'human.input',
+      request: {
+        content: 'New task: survives observer',
+        publicCommandId: 'durable',
+        originalRequest: pending.request,
+      },
+    });
     const close = b.runtime.close();
     expect(b.storeCloses()).toBe(0);
     release.release();
@@ -449,7 +480,38 @@ test('durable acceptance on closing observer Runtime does not cancel the survivi
     const command = await a.runtime.getCommand('durable');
     expect(command?.status).toBe('applied');
     expect(command?.cancelRequestedAt).toBeNull();
-    expect(fixed.requests).toHaveLength(3);
+    const runId = (command!.receipt as { runId: string }).runId;
+    expect(await a.original.getRun(runId)).toMatchObject({
+      originCommandId: receipt.businessCommandId,
+      rootWorkCommandId: 'durable',
+      status: 'completed',
+    });
+    expect(await a.original.getRun(originalRunId)).toMatchObject({
+      status: 'completed',
+      reason: 'human_work_deferred',
+    });
+    const tools = (await a.original.listExecutions(a.sessionId)).filter(
+      (execution) => execution.definitionId === 'fixture.tool',
+    );
+    expect(tools).toHaveLength(1);
+    expect(tools[0]).toMatchObject({
+      runId: originalRunId,
+      status: 'succeeded',
+      authorization: { dispatched: true },
+    });
+    expect(completedTools).toBe(1);
+    // A ends at its safe Tool boundary; the second Model belongs only to B.
+    expect(fixed.requests).toHaveLength(2);
+    expect(await a.original.getExecution(fixed.requests[1]!.requestId)).toMatchObject({
+      runId,
+      originCommandId: receipt.businessCommandId,
+      status: 'succeeded',
+    });
+    expect(
+      fixed.requests[1]!.messages.find(
+        (message) => message.content === 'New task: survives observer',
+      )?.sourceIds,
+    ).toEqual([receipt.businessCommandId]);
     response.release();
     expect((await submission).id).toBe('durable');
     await close;

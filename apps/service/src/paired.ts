@@ -47,6 +47,7 @@ export interface PairedServiceOptions {
   hostConfiguration?: Json;
   runtimeProtection?: RuntimeProtection;
   startupTimeoutMs?: number;
+  /** Explicit hard stop for this owned child; ordinary close otherwise waits for durable drain. */
   shutdownTimeoutMs?: number;
   executable?: string;
   spawnChild?: PairedServiceSpawner;
@@ -231,7 +232,7 @@ export async function launchPairedService(options: PairedServiceOptions) {
   void stderrTask.catch(() => {});
   let closing: Promise<void> | undefined;
   let client: ReturnType<typeof createClient> | undefined;
-  const close = () => {
+  const closeOwnedChild = (timeoutMs?: number) => {
     if (closing) return closing;
     closing = (async () => {
       client?.disposeNetwork();
@@ -242,7 +243,8 @@ export async function launchPairedService(options: PairedServiceOptions) {
       }
       // Parent EOF is independent of every HTTP connection.
       try {
-        await deadline(child.exited, options.shutdownTimeoutMs ?? 5000, 'shutdown_timeout');
+        if (timeoutMs === undefined) await child.exited;
+        else await deadline(child.exited, timeoutMs, 'shutdown_timeout');
       } catch {
         child.kill('SIGKILL');
         await child.exited;
@@ -275,6 +277,8 @@ export async function launchPairedService(options: PairedServiceOptions) {
     })();
     return closing;
   };
+  const close = () => closeOwnedChild(options.shutdownTimeoutMs);
+  const closeFailedLaunch = () => closeOwnedChild(options.shutdownTimeoutMs ?? 5000);
   try {
     child.stdin.write(encoded);
     await child.stdin.flush();
@@ -319,7 +323,7 @@ export async function launchPairedService(options: PairedServiceOptions) {
           if (next.value.byteLength) throw new PairedServiceError('unexpected_bootstrap_data');
         }
       } catch {
-        if (!closing) await close();
+        if (!closing) await closeFailedLaunch();
       }
     })();
     void stdoutTask.catch(() => {});
@@ -337,10 +341,10 @@ export async function launchPairedService(options: PairedServiceOptions) {
       close,
     };
   } catch (error) {
-    if (!retainedArtifact) await close();
+    if (!retainedArtifact) await closeFailedLaunch();
     else {
       try {
-        await close();
+        await closeFailedLaunch();
       } catch (cleanupError) {
         const code =
           cleanupError instanceof PairedServiceError ? cleanupError.code : 'paired_close_failed';

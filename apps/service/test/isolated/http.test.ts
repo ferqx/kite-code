@@ -18,6 +18,50 @@ import { openSqliteStore, resolveProfile } from '@kite-ai/agent/sqlite';
 import { createFixedModel, type ModelEvent } from '@kite-ai/ai';
 import { startService } from '../../src';
 
+async function assertBusinessInput(
+  runtime: ReturnType<typeof createRuntime>,
+  commandId: string,
+  content: string,
+) {
+  const command = (await runtime.getCommand(commandId))!;
+  const receipt = command.receipt as {
+    businessCommandId: string;
+    humanInputCommandId: string;
+    runId: string;
+  };
+  expect(command).toMatchObject({ status: 'applied', request: { kind: 'run.start', content } });
+  expect(receipt.businessCommandId).toBeString();
+  expect(receipt.businessCommandId).not.toBe(commandId);
+  expect(await runtime.getCommand(receipt.humanInputCommandId)).toMatchObject({
+    request: { publicCommandId: commandId, content, originalRequest: command.request },
+  });
+  expect(await runtime.getCommand(receipt.businessCommandId)).toMatchObject({
+    status: 'applied',
+    request: { content },
+    receipt: { runId: receipt.runId },
+  });
+  const run = (await runtime.getRun(receipt.runId))!;
+  expect(run).toMatchObject({
+    originCommandId: receipt.businessCommandId,
+    rootWorkCommandId: commandId,
+  });
+  const view = await runtime.getView('session');
+  const model = view.executions.find((item) => item.kind === 'model' && item.runId === run.id)!;
+  expect(model).toBeDefined();
+  const input = await runtime.readModelInput({
+    expectedStoreId: command.originStoreId,
+    sessionId: 'session',
+    subjectId: 'owner',
+    executionId: model.id,
+  });
+  expect(input.confirmation).toBe('succeeded');
+  const source = input.request.messages.find((message) =>
+    message.sourceIds?.includes(receipt.businessCommandId),
+  );
+  expect(source).toMatchObject({ content, sourceIds: [receipt.businessCommandId] });
+  return run;
+}
+
 function barrier() {
   let release!: () => void;
   const waiting = new Promise<void>((resolve) => {
@@ -427,16 +471,16 @@ test('HTTP command.cancel targets the original command and rejects a stale Store
           expectedStoreId: data.startup.storeId,
           commandId: 'later',
           kind: 'run.start',
-          content: 'Later work',
+          content: 'New task: Later work',
         })
       ).status,
     ).toBe(202);
     await data.runtime.waitForCommand('later');
     expect((await data.post('/v1/sessions/session/commands', cancel)).status).toBe(202);
-    expect(
-      (await data.runtime.getView('session')).runs.find((run) => run.originCommandId === 'later')!
-        .status,
-    ).toBe('completed');
+    expect(await assertBusinessInput(data.runtime, 'later', 'New task: Later work')).toMatchObject({
+      status: 'completed',
+    });
+    expect(calls).toBe(0);
   } finally {
     proceed.release();
     await data.close();

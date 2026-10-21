@@ -4,7 +4,7 @@ import { createRuntime } from '@kite-ai/agent';
 import { createArtifactStore } from '@kite-ai/agent/artifacts';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import { createFixedModel, type ModelAdapter } from '@kite-ai/ai';
-import { createClient } from '@kite-ai/client';
+import { createClient, readOrdinaryCommandApplication } from '@kite-ai/client';
 import { startService } from '@kite-ai/service';
 
 const [root, mode, v1Path, v2Path] = process.argv.slice(2);
@@ -38,7 +38,7 @@ const runtime = createRuntime({
           type: 'tool_call',
           id: `call-${command.id}`,
           name: 'fixture.upgrade.work',
-          arguments: JSON.stringify({ mode: input.content }),
+          arguments: JSON.stringify({ mode: input.content.replace(/^New task: /, '') }),
         },
         { type: 'finish', reason: 'tool_calls', usage: { inputTokens: 1, outputTokens: 1 } },
       ],
@@ -124,13 +124,18 @@ async function run(sessionId: string, commandId: string, content: string) {
     (c) => c.status === 'applied' || c.status === 'rejected',
   );
   if (command.status !== 'applied') throw Error(`rejected:${JSON.stringify(command)}`);
-  const runId = (command.receipt as { runId: string }).runId;
+  const application = await readOrdinaryCommandApplication(client, command);
+  if (!application?.run || application.observation)
+    throw Error('upgrade_business_application_unavailable');
+  const runId = application.run.id;
   const run = await until(
     () => client.getRun(runId),
     (r) => ['completed', 'failed', 'interrupted', 'cancelled'].includes(r.status),
   );
   if (run.status !== 'completed')
     throw Error(`run_failed:${JSON.stringify(await client.getView(sessionId))}`);
+  if (run.originCommandId !== application.sourceCommandId || run.rootWorkCommandId !== commandId)
+    throw Error('upgrade_business_identity_mismatch');
   return runId;
 }
 const lifecycle = () =>
@@ -182,7 +187,7 @@ try {
     async () => lifecycle(),
     (v) => v.some((e) => e.scope === 'old-work' && e.kind === 'scope-dispose'),
   );
-  const futureRun = await run('a', 'future-work', 'future');
+  const futureRun = await run('a', 'future-work', 'New task: future');
   const futureBefore = await runtime.readRunExtensionRecord({
     sessionId: 'a',
     runId: futureRun,
@@ -190,7 +195,7 @@ try {
     key: 'future',
   });
   selected = '1';
-  await run('a', 'inspect-work', 'inspect');
+  await run('a', 'inspect-work', 'New task: inspect');
   const futureAfter = await runtime.readRunExtensionRecord({
     sessionId: 'a',
     runId: futureRun,

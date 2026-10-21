@@ -32,6 +32,77 @@ async function until<T>(read: () => Promise<T | null>): Promise<T> {
     await Bun.sleep(10);
   }
 }
+async function exactBusinessTool(
+  store: Store,
+  publicCommandId: string,
+  runtime: ReturnType<typeof createRuntime>,
+) {
+  const original = (await store.getCommand(publicCommandId))!;
+  expect(original.status).toBe('applied');
+  const receipt = original.receipt as {
+    humanInputCommandId: string;
+    decisionCommandId: string;
+    businessCommandId: string;
+    runId: string;
+  };
+  expect(receipt.humanInputCommandId).toBeString();
+  const raw = (await store.getCommand(receipt.humanInputCommandId))!;
+  expect(raw.kind).toBe('human.input');
+  expect(raw.request).toMatchObject({
+    publicCommandId,
+    content: (original.request as { content: string }).content,
+  });
+  const decision = (await store.getCommand(receipt.decisionCommandId))!;
+  expect(decision.request).toMatchObject({
+    inputCommandId: raw.id,
+    inputDigest: raw.requestDigest,
+  });
+  expect(decision.receipt).toMatchObject({ businessCommandId: receipt.businessCommandId });
+  expect(raw.receipt).toMatchObject({
+    decisionCommandId: decision.id,
+    businessCommandId: receipt.businessCommandId,
+    applicationState: 'applied',
+    runId: receipt.runId,
+  });
+  const business = (await store.getCommand(receipt.businessCommandId))!,
+    run = (await store.getRun(receipt.runId))!;
+  for (const command of [raw, decision, business]) {
+    expect(command.originStoreId).toBe(original.originStoreId);
+    expect(command.subjectId).toBe(original.subjectId);
+    expect(command.sessionId).toBe(original.sessionId);
+  }
+  expect(business.rootWorkCommandId).toBe(original.id);
+  expect(run).toMatchObject({
+    originCommandId: business.id,
+    rootWorkCommandId: original.id,
+    rootWorkSeq: original.rootWorkSeq,
+  });
+  const model = (await store.listExecutions(original.sessionId)).find(
+    (execution) => execution.kind === 'model' && execution.runId === run.id,
+  )!;
+  expect(model.originCommandId).toBe(business.id);
+  const input = await runtime.readModelInput({
+    expectedStoreId: original.originStoreId,
+    sessionId: original.sessionId,
+    subjectId: original.subjectId,
+    executionId: model.id,
+  });
+  expect(input.confirmation).toBe('succeeded');
+  expect(
+    input.request.messages.find(
+      (message) => message.content === (original.request as { content: string }).content,
+    )?.sourceIds,
+  ).toEqual([business.id]);
+  const tool = (await store.listExecutions(original.sessionId)).find(
+    (execution) =>
+      execution.kind === 'tool' &&
+      execution.runId === run.id &&
+      execution.originCommandId === business.id,
+  );
+  expect(tool).toBeDefined();
+  expect(tool?.rootWorkCommandId).toBe(original.id);
+  return tool!;
+}
 async function fixture(responses: ModelEvent[][], trustedDigest?: (input: unknown) => string) {
   const root = realpathSync(temporaryDirectory('kite-grant-core-'));
   const store = await openSqliteStore({ dataRoot: join(root, 'data'), profile: 'new' });
@@ -117,13 +188,13 @@ async function fixture(responses: ModelEvent[][], trustedDigest?: (input: unknow
     workspaceId: 'w',
     title: 's',
   });
-  const submit = (commandId: string, sessionId = 's') =>
+  const submit = (commandId: string, sessionId = 's', content = commandId) =>
     runtime.submitCommand({
       expectedStoreId,
       subjectId: 'owner',
       commandId,
       sessionId,
-      request: { kind: 'run.start', content: commandId },
+      request: { kind: 'run.start', content },
     });
   const terminal = (commandId: string) =>
     until(async () => {
@@ -203,8 +274,9 @@ test('actual accepted same_command applies only to exact original Session and fu
       sessionId: 's',
     });
     expect(f.model.requests.length).toBe(before);
-    await f.submit('second');
+    await f.submit('second', 's', 'New task: second');
     expect((await f.terminal('second')).status).toBe('completed');
+    await exactBusinessTool(f.store, 'second', f.runtime);
     expect(f.effects).toHaveLength(2);
     expect(
       (
@@ -215,7 +287,7 @@ test('actual accepted same_command applies only to exact original Session and fu
         })
       ).interactions,
     ).toHaveLength(0);
-    await f.submit('different');
+    await f.submit('different', 's', 'New task: different');
     const different = await f.pending();
     expect(different.id).not.toBe(card.id);
     expect(f.effects).toHaveLength(2);
@@ -229,6 +301,7 @@ test('actual accepted same_command applies only to exact original Session and fu
       answer: { kind: 'approval', decision: 'deny' },
     });
     await f.terminal('different');
+    await exactBusinessTool(f.store, 'different', f.runtime);
     const foreign = await f.store
       .listPermissionGrants({ expectedStoreId: 'foreign', subjectId: 'owner', sessionId: 's' })
       .catch((error) => error);
@@ -267,7 +340,7 @@ test('clear is durable CAS and final dispatch transaction rejects a proof captur
       sessionId: 's',
     });
     f.hold();
-    await f.submit('second');
+    await f.submit('second', 's', 'New task: second');
     await f.atDispatch;
     const intent = {
       expectedStoreId: f.expectedStoreId,
@@ -286,10 +359,7 @@ test('clear is durable CAS and final dispatch transaction rejects a proof captur
     f.release();
     await f.terminal('second');
     expect(f.effects).toHaveLength(1);
-    const executions = await f.store.listExecutions('s');
-    const target = executions.find(
-      (item) => item.originCommandId === 'second' && item.kind === 'tool',
-    )!;
+    const target = await exactBusinessTool(f.store, 'second', f.runtime);
     expect(target.status).not.toBe('succeeded');
     expect(
       (
@@ -347,8 +417,9 @@ test('trusted command semantics permits a new logical operation key but another 
       answer: { kind: 'approval', decision: 'approve', grant: 'same_command' },
     });
     await f.terminal('first');
-    await f.submit('second');
+    await f.submit('second', 's', 'New task: second');
     await f.terminal('second');
+    await exactBusinessTool(f.store, 'second', f.runtime);
     expect(f.effects).toEqual([
       { command: 'original', cwd: 'original', key: 'one' },
       { command: 'original', cwd: 'original', key: 'two' },
@@ -440,12 +511,10 @@ test('approve_once creates no session grant, and an existing same-command grant 
     });
     await granted.terminal('first');
     granted.denyCapability();
-    await granted.submit('denied');
+    await granted.submit('denied', 's', 'New task: denied');
     await granted.terminal('denied');
     expect(granted.effects).toHaveLength(1);
-    const execution = (await granted.store.listExecutions('s')).find(
-      (value) => value.originCommandId === 'denied' && value.kind === 'tool',
-    )!;
+    const execution = await exactBusinessTool(granted.store, 'denied', granted.runtime);
     expect(execution.status).toBe('failed');
     expect(execution.result).toMatchObject({ outcome: 'failed', content: 'permission_denied' });
   } finally {

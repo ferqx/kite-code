@@ -8,7 +8,7 @@ import { createArtifactStore } from '@kite-ai/agent/artifacts';
 import type { Extension } from '@kite-ai/agent/extensions';
 import { openSqliteStore, resolveProfile } from '@kite-ai/agent/sqlite';
 import { createFixedModel } from '@kite-ai/ai';
-import { createClient } from '@kite-ai/client';
+import { createClient, readOrdinaryCommandApplication } from '@kite-ai/client';
 import { startService } from '@kite-ai/service';
 import { JSDOM } from 'jsdom';
 import { act } from 'react';
@@ -174,7 +174,7 @@ test('Native Context finds and explicitly includes a real suppressed Job beyond 
       expectedStoreId: originalStoreId,
       commandId: 'original-run',
       kind: 'run.start',
-      content: 'Original input',
+      content: '新任务：Original input',
     });
     await runtime.waitForCommand('original-run', { timeoutMs: 5000 });
     await original.invokeExtension('session', {
@@ -219,7 +219,7 @@ test('Native Context finds and explicitly includes a real suppressed Job beyond 
         expectedStoreId: originalStoreId,
         commandId,
         kind: 'run.start',
-        content: `Later input ${index}`,
+        content: `新任务：Later input ${index}`,
       });
       await runtime.waitForCommand(commandId, { timeoutMs: 5000 });
     }
@@ -417,7 +417,7 @@ test('Native Context finds and explicitly includes a real suppressed Job beyond 
       expectedStoreId: restored.storeId,
       commandId: 'new-run',
       kind: 'run.start',
-      content: 'Use the explicitly included saved result',
+      content: '新任务：Use the explicitly included saved result',
     });
     await currentRuntime.waitForCommand('new-run', { timeoutMs: 5000 });
     expect(nextModel.requests).toHaveLength(203);
@@ -435,10 +435,14 @@ test('Native Context finds and explicitly includes a real suppressed Job beyond 
     });
     expect(await current.getExecution(jobId)).toEqual(job);
     expect(await currentStore.getExecution(jobId)).toEqual(acceptedExecution);
+    const application = await readOrdinaryCommandApplication(
+      current,
+      await current.getCommand('new-run'),
+    );
+    expect(application?.run?.status).toBe('completed');
+    expect(application?.run?.originCommandId).toBe(application?.sourceCommandId);
     expect(
-      (await current.getView('session')).runs.some(
-        (run) => run.originCommandId === 'new-run' && run.status === 'completed',
-      ),
+      (await current.getView('session')).runs.some((run) => run.id === application?.run?.id),
     ).toBe(true);
     expect(methods.filter((method) => method === 'POST')).toHaveLength(2);
     expect(starts).toBe(1);

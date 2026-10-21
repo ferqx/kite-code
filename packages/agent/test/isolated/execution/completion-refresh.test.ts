@@ -239,7 +239,9 @@ async function fixture(
           revision: record!.revision,
           rule: readFileSync(instruction, 'utf8'),
           direction: model.requests.some((request) =>
-            request.messages.some((message) => message.content === 'fresh completion direction'),
+            request.messages.some(
+              (message) => message.content === 'Follow up: fresh completion direction',
+            ),
           )
             ? 'fresh'
             : 'original',
@@ -373,7 +375,7 @@ async function fixture(
                 (mode === 'evaluate-steer' &&
                   model.requests.some((request) =>
                     request.messages.some(
-                      (message) => message.content === 'fresh completion direction',
+                      (message) => message.content === 'Follow up: fresh completion direction',
                     ),
                   ))
                   ? ('satisfied' as const)
@@ -461,6 +463,21 @@ async function fixture(
       await runtime.waitForCommand('work', { timeoutMs: 5000 });
       return run();
     },
+    async assertAppliedSteer(commandId: string, runId: string) {
+      const command = (await store.getCommand(commandId))!;
+      expect(command).toMatchObject({ status: 'applied', receipt: { runId } });
+      const receipt = command.receipt as { businessCommandId: string };
+      expect(receipt.businessCommandId).toBeString();
+      expect(receipt.businessCommandId).not.toBe(commandId);
+      const request = command.request as { content: string };
+      expect(await store.getCommand(receipt.businessCommandId)).toMatchObject({
+        kind: 'input.steer',
+        rootWorkCommandId: 'work',
+        status: 'applied',
+        request: { targetRunId: runId, content: request.content },
+        receipt: { runId },
+      });
+    },
     async bumpRecord() {
       expect(writer).toBeDefined();
       const record = (await writer!.records.get(recordKey))!;
@@ -509,7 +526,7 @@ test('steer retires a completion Tool awaiting approval and the same Run complet
         kind: 'input.steer',
         targetRunId: originalRun,
         contextSelectionId: session.contextSelectionId,
-        content: 'Use the new completion direction',
+        content: 'Follow up: Use the new completion direction',
       },
     });
     const next = await f.cardOrTerminal(old.id);
@@ -520,10 +537,11 @@ test('steer retires a completion Tool awaiting approval and the same Run complet
     }).toMatchObject({ active: true, reason: null, freshApproval: true });
     await f.approve(next.card!);
     expect(await f.done()).toMatchObject({ id: originalRun, status: 'completed' });
+    await f.assertAppliedSteer('steer', originalRun);
     expect(f.model.requests).toHaveLength(3);
     expect(
       f.model.requests[2]!.messages.some(
-        (message) => message.content === 'Use the new completion direction',
+        (message) => message.content === 'Follow up: Use the new completion direction',
       ),
     ).toBe(true);
     expect(f.effects).toHaveLength(1);
@@ -757,7 +775,7 @@ for (const change of ['steer', 'source'] as const)
             kind: 'input.steer',
             targetRunId: originalRun,
             contextSelectionId: session.contextSelectionId,
-            content: 'fresh completion direction',
+            content: 'Follow up: fresh completion direction',
           },
         });
       }
@@ -773,10 +791,11 @@ for (const change of ['steer', 'source'] as const)
         change === 'source' ? { rule: 'updated completion rule' } : { direction: 'fresh' },
       );
       if (change === 'steer') {
+        await f.assertAppliedSteer('prepare-steer', originalRun);
         expect(f.model.requests).toHaveLength(3);
         expect(
           f.model.requests[2]!.messages.some(
-            (message) => message.content === 'fresh completion direction',
+            (message) => message.content === 'Follow up: fresh completion direction',
           ),
         ).toBe(true);
       }
@@ -806,11 +825,12 @@ test('steer accepted during completion evaluation is applied before an unsatisfi
         kind: 'input.steer',
         targetRunId: originalRun,
         contextSelectionId: session.contextSelectionId,
-        content: 'fresh completion direction',
+        content: 'Follow up: fresh completion direction',
       },
     });
     f.evaluateRelease.release();
     const completed = await f.done();
+    await f.assertAppliedSteer('evaluation-steer', originalRun);
     expect({ id: completed.id, status: completed.status, reason: completed.reason }).toEqual({
       id: originalRun,
       status: 'completed',
@@ -820,7 +840,7 @@ test('steer accepted during completion evaluation is applied before an unsatisfi
     expect(f.model.requests).toHaveLength(3);
     expect(
       f.model.requests[2]!.messages.some(
-        (message) => message.content === 'fresh completion direction',
+        (message) => message.content === 'Follow up: fresh completion direction',
       ),
     ).toBe(true);
     expect(f.prepared).toEqual([]);

@@ -9,6 +9,7 @@ import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import { type AgentClient, createClient, ExecutionOutputPages } from '@kite-ai/client';
 import { startService } from '@kite-ai/service';
 import { createDefaultProcessConfiguration } from '@kite-ai/service/configuration';
+import { initializeLivePermissionFixture } from '../../../../apps/service/test/fixtures/live-permission-fixture';
 import type { CaseEvidence } from '../../../../scripts/runtime/unified-soak-cases';
 import { verifyMcpStdioJobHandoff } from '../../../../scripts/runtime/unified-soak-mcp-handoff';
 import { privateDirectory } from '../../test-filesystem';
@@ -232,6 +233,16 @@ export async function runOwnedMcpStdio(root: string, e: CaseEvidence, assets: Mc
         sessionId,
         workspaceId: 'w',
         title: 'owned stdio',
+      });
+      await initializeLivePermissionFixture({
+        runtime,
+        profile,
+        expectedStoreId: storeId,
+        subjectId: 'soak',
+        sessionId,
+        workspaceId: 'w',
+        mode: 'full',
+        trusted: true,
       });
       const commandId = randomUUID();
       await client.startRun(sessionId, {

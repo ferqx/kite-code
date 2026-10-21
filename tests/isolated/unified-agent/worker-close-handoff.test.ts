@@ -276,12 +276,22 @@ test('public web_fetch/cancellation retain original worker rights through Store/
       kind: 'run.start',
       expectedStoreId: storeId,
       commandId: 'cancelled',
-      content: 'Cancel this original fetch',
+      content: 'New task: Cancel this original fetch',
     });
     await until(() => records.filter((record) => record.kind === 'parser').length === 2);
     const cancelledParser = records.filter((record) => record.kind === 'parser')[1]!;
     await until(() => !!cancelledParser.pendingParse);
     const cancellingRun = (await client.getView('s')).runs.find((run) => run.isActive)!;
+    const cancellingCommand = await client.getCommand('cancelled');
+    const cancellingReceipt = cancellingCommand.receipt as {
+      runId: string;
+      businessCommandId: string;
+    };
+    expect(cancellingRun).toMatchObject({
+      id: cancellingReceipt.runId,
+      originCommandId: cancellingReceipt.businessCommandId,
+      rootWorkCommandId: 'cancelled',
+    });
     await client.cancelRun('s', {
       kind: 'run.cancel',
       expectedStoreId: storeId,

@@ -14,6 +14,7 @@ import type {
 } from '../../../src/extensions';
 import { openSqliteStore } from '../../../src/sqlite';
 import { AgentError } from '../../../src/storage';
+import type { InteractionRecord } from '../../../src/storage/types';
 
 const finish: Extract<ModelEvent, { type: 'finish' }> = {
   type: 'finish',
@@ -234,9 +235,47 @@ test('additional-only child modules and sources persist their own namespace; sta
       commandId: 'again',
       sessionId: 's',
       subjectId: 'owner',
-      request: { kind: 'run.start', content: 'second child' },
+      request: { kind: 'run.start', content: 'New task: second child' },
     });
-    await f.runtime.waitForCommand('again', { timeoutMs: 5000 });
+    const command = await f.runtime.waitForCommand('again', { timeoutMs: 5000 });
+    expect(command).toMatchObject({
+      status: 'applied',
+      request: { kind: 'run.start', content: 'New task: second child' },
+    });
+    const receipt = command.receipt as {
+      businessCommandId: string;
+      humanInputCommandId: string;
+      runId: string;
+    };
+    expect(receipt.businessCommandId).toBeString();
+    expect(receipt.businessCommandId).not.toBe(command.id);
+    expect(await f.store.getCommand(receipt.humanInputCommandId)).toMatchObject({
+      request: {
+        publicCommandId: command.id,
+        content: 'New task: second child',
+        originalRequest: command.request,
+      },
+    });
+    expect(await f.store.getCommand(receipt.businessCommandId)).toMatchObject({
+      status: 'applied',
+      request: { content: 'New task: second child' },
+      receipt: { runId: receipt.runId },
+    });
+    expect(await f.store.getRun(receipt.runId)).toMatchObject({
+      status: 'completed',
+      originCommandId: receipt.businessCommandId,
+      rootWorkCommandId: command.id,
+    });
+    expect(f.parent.requests).toHaveLength(4);
+    expect(child.requests).toHaveLength(4);
+    expect(await f.store.getExecution(f.parent.requests[2]!.requestId)).toMatchObject({
+      runId: receipt.runId,
+      originCommandId: receipt.businessCommandId,
+      status: 'succeeded',
+    });
+    expect(
+      f.parent.requests[2]!.messages.find((m) => m.content === 'New task: second child')?.sourceIds,
+    ).toEqual([receipt.businessCommandId]);
     expect(writes).toBe(2);
     expect(f.refs).toHaveLength(2);
     expect(disposals).toBe(0);
@@ -336,6 +375,35 @@ for (const mode of [
       },
     );
     let proofChecks = 0;
+    let answeredCard: InteractionRecord | undefined;
+    const fallbackDispatches: Parameters<typeof f.store.markDispatching>[0][] = [];
+    if (mode === 'ask_review_fallback') {
+      const dispatch = f.store.markDispatching.bind(f.store);
+      f.store.markDispatching = async (input) => {
+        const execution = await f.store.getExecution(input.executionId);
+        if (execution?.definitionId === 'extra.effect') {
+          expect(input.authorization.reviewExecutionId).toBeUndefined();
+          expect(input.authorization.interactionId).toBeString();
+          fallbackDispatches.push(structuredClone(input));
+          const before = (await f.store.getMetadata()).lastChangeCursor;
+          const {
+            interactionId: _interaction,
+            decisionRevision: _revision,
+            ...withoutHuman
+          } = input.authorization;
+          await dispatch({ ...input, authorization: withoutHuman }).then(
+            () => {
+              throw Error('ask_user without its actual human grant admitted');
+            },
+            (error) => {
+              expect(error).toBeInstanceOf(AgentError);
+            },
+          );
+          expect((await f.store.getMetadata()).lastChangeCursor).toBe(before);
+        }
+        return dispatch(input);
+      };
+    }
     if (mode === 'ask_review') {
       const dispatch = f.store.markDispatching.bind(f.store);
       f.store.markDispatching = async (input) => {
@@ -388,12 +456,17 @@ for (const mode of [
               })
             ).interactions[0],
         );
+        answeredCard = card;
         expect(effects).toBe(0);
         expect(held).toBe(0);
         expect(card.presentationSessionId).toBe('s');
         if (mode === 'dual_ask') {
           expect(JSON.stringify(card.request)).toContain('parent human');
           expect(JSON.stringify(card.request)).toContain('child human');
+        }
+        if (mode === 'ask_review_fallback') {
+          expect(JSON.stringify(card.request)).toContain('parent human');
+          expect(JSON.stringify(review.requests[0]!.messages)).toContain('child reviewer');
         }
         expect(review.requests).toHaveLength(
           mode === 'ask_review' || mode === 'ask_review_fallback' ? 1 : 0,
@@ -419,6 +492,32 @@ for (const mode of [
         (e) => e.definitionId === 'extra.effect',
       )!;
       expect(effect.status).toBe(mode === 'deny' ? 'failed' : 'succeeded');
+      if (mode === 'ask_review_fallback') {
+        expect(fallbackDispatches).toHaveLength(1);
+        const authorization = fallbackDispatches[0]!.authorization;
+        expect(authorization.interactionId).toBe(answeredCard!.id);
+        expect(authorization.reviewExecutionId).toBeUndefined();
+        expect(effect.authorization).toMatchObject({
+          dispatched: true,
+          review: { status: 'succeeded', decision: 'ask_user', requireApproval: true },
+          human: {
+            interactionId: answeredCard!.id,
+            accepted: true,
+            decision: 'approve',
+            acceptedDecisionRevision: authorization.decisionRevision,
+          },
+        });
+        expect(
+          await f.store.getInteraction({
+            expectedStoreId: f.expectedStoreId,
+            sessionId: 's',
+            interactionId: answeredCard!.id,
+          }),
+        ).toMatchObject({
+          state: 'answered',
+          acceptedDecisionRevision: authorization.decisionRevision,
+        });
+      }
       if (mode === 'dual_review') {
         const body = JSON.stringify(review.requests[0]!.messages);
         expect(body).toContain('parent reviewer');

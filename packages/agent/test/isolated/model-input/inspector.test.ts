@@ -72,11 +72,11 @@ async function setup(model: ModelAdapter, options: Partial<RuntimeOptions> = {})
     artifacts,
     runtime,
     scope,
-    async start(commandId = 'work') {
+    async start(commandId = 'work', content = 'original input') {
       await runtime.submitCommand({
         ...scope,
         commandId,
-        request: { kind: 'run.start', content: 'original input' },
+        request: { kind: 'run.start', content },
       });
     },
     async done(commandId = 'work') {
@@ -160,16 +160,30 @@ test('exact small Model input survives later steer and source changes; read auth
         kind: 'input.steer',
         targetRunId: run.id,
         contextSelectionId: (await f.store.getSession('s'))!.contextSelectionId,
-        content: 'later guide',
+        content: 'Follow up: later guide',
       },
     });
     version = 2;
     release();
     await f.done();
+    const steer = (await f.store.getCommand('steer'))!;
+    expect(steer).toMatchObject({ status: 'applied', receipt: { runId: run.id } });
+    const businessId = (steer.receipt as { businessCommandId: string }).businessCommandId;
+    expect(businessId).toBeString();
+    expect(businessId).not.toBe('steer');
+    expect(await f.store.getCommand(businessId)).toMatchObject({
+      kind: 'input.steer',
+      rootWorkCommandId: 'work',
+      status: 'applied',
+      request: { targetRunId: run.id, content: 'Follow up: later guide' },
+      receipt: { runId: run.id },
+    });
+    expect((await f.store.getView('s')).runs).toMatchObject([{ id: run.id, status: 'completed' }]);
     expect(model.requests).toHaveLength(2);
-    expect(model.requests[1]!.messages.some((message) => message.content === 'later guide')).toBe(
-      true,
-    );
+    expect(
+      model.requests[1]!.messages.find((message) => message.content === 'Follow up: later guide')
+        ?.sourceIds,
+    ).toEqual([businessId]);
     expect((await f.runtime.readModelInput(target)).request).toEqual(model.requests[0]!);
     await code(
       f.runtime.readModelInput({ ...target, expectedStoreId: 'foreign' }),
@@ -496,8 +510,16 @@ test('directory navigates more than two hundred real Store Model intents with a 
       requirements: [],
     });
     expect(await f.store.releaseSessionOwner(owner)).toBe(true);
-    await f.start('later');
+    await f.start('later', 'New task: original input');
     await f.done('later');
+    const later = (await f.store.getCommand('later'))!;
+    expect(later.status).toBe('applied');
+    const laterReceipt = later.receipt as { runId: string; businessCommandId: string };
+    expect(await f.store.getRun(laterReceipt.runId)).toMatchObject({
+      originCommandId: laterReceipt.businessCommandId,
+      rootWorkCommandId: 'later',
+      status: 'completed',
+    });
     const second = await f.runtime.listModelInputs({
       ...f.scope,
       afterSeq: first.nextAfterSeq!,
@@ -616,7 +638,7 @@ test('child Model input is readable only under its exact original child identity
     await failing.submitCommand({
       ...f.scope,
       commandId: 'failure',
-      request: { kind: 'run.start', content: 'attempt failure' },
+      request: { kind: 'run.start', content: 'New task: attempt failure' },
     });
     await failing.waitForCommand('failure', { timeoutMs: 5000 });
     const failed = (await failing.listModelInputs(f.scope)).items.find(

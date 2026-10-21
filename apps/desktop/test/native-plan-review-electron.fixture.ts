@@ -216,6 +216,108 @@ try {
     feedback: string;
     bodyText: string;
   };
+  async function establishAutoMode(sessionId: string, requireNewMutation = false) {
+    const panel = page.getByRole('region', { name: '权限与工作区信任', exact: true });
+    const exactScope = (value: NativeState) => {
+      const selection = value.selection;
+      const facts = selection?.permissions;
+      return (
+        selection?.storeId === storeId &&
+        selection.session.id === sessionId &&
+        !selection.viewLoading &&
+        !selection.permissionUnavailable &&
+        facts?.mode.sessionId === sessionId &&
+        facts.mode.scopeSessionId === sessionId &&
+        facts.trust.workspaceId === 'w' &&
+        facts.trust.trusted &&
+        !value.permissionSubmissions.some((entry) =>
+          ['saved', 'submitting', 'unknown'].includes(entry.phase),
+        )
+      );
+    };
+    const before = await until(state, exactScope, 'exact selected permission scope not ready');
+    const facts = before.selection!.permissions!;
+    const scopeText = (value: NativeState) => {
+      const mode = value.selection!.permissions!.mode;
+      return `会话：${sessionId}；权限范围：${sessionId}；版本：${mode.revision} / ${mode.defaultRevision}`;
+    };
+    await panel.getByText(scopeText(before), { exact: true }).waitFor();
+    const beforeIds = new Set(before.permissionSubmissions.map((entry) => entry.intent.commandId));
+    if (!requireNewMutation && facts.mode.mode === 'auto') {
+      const unchanged = await state();
+      assert.ok(exactScope(unchanged));
+      assert.equal(unchanged.selection!.permissions!.mode.mode, 'auto');
+      assert.equal(unchanged.selection!.permissions!.mode.revision, facts.mode.revision);
+      assert.equal(unchanged.selection!.permissions!.mode.defaultMode, 'auto');
+      assert.deepEqual(
+        unchanged.permissionSubmissions.map((entry) => entry.intent.commandId),
+        before.permissionSubmissions.map((entry) => entry.intent.commandId),
+      );
+      stage('permission_auto_already_applied_no_new_mutation', {
+        sessionId,
+        scopeSessionId: facts.mode.scopeSessionId,
+        revision: facts.mode.revision,
+        defaultRevision: facts.mode.defaultRevision,
+      });
+      return;
+    }
+    const radio = panel.locator('input[type=radio][value=auto]');
+    const save = panel.getByRole('button', { name: '保存模式选择', exact: true });
+    await until(
+      async () => {
+        const current = await state();
+        if (!exactScope(current)) return false;
+        if (!(await panel.getByText(scopeText(current), { exact: true }).isVisible())) return false;
+        if (!(await radio.isEnabled())) return false;
+        if (!(await radio.isChecked())) await radio.check();
+        const afterChoice = await state();
+        return (
+          exactScope(afterChoice) &&
+          scopeText(afterChoice) === scopeText(current) &&
+          (await radio.isChecked()) &&
+          (await save.isEnabled())
+        );
+      },
+      (ready) => ready,
+      'exact permission choice not ready on current panel',
+    );
+    await save.click();
+    const applied = await until(
+      async () => {
+        const current = await state();
+        const added = current.permissionSubmissions.filter(
+          (entry) => !beforeIds.has(entry.intent.commandId),
+        );
+        assert.ok(added.length <= 1, 'permission choice created duplicate original mutations');
+        const mutation = added[0];
+        if (mutation) {
+          assert.equal(mutation.kind, 'permission.mode');
+          assert.equal(mutation.sessionId, sessionId);
+          assert.equal(mutation.rootSessionId, sessionId);
+          assert.equal(mutation.workspaceId, 'w');
+          assert.equal(mutation.intent.expectedStoreId, storeId);
+          assert.ok(
+            !['unknown', 'failed'].includes(mutation.phase),
+            'original permission mutation not applied',
+          );
+        }
+        return { current, mutation };
+      },
+      ({ current, mutation }) =>
+        mutation?.phase === 'applied' &&
+        exactScope(current) &&
+        current.selection!.permissions!.mode.mode === 'auto' &&
+        current.selection!.permissions!.mode.defaultMode === 'auto',
+      'original permission mode mutation not applied to exact scope',
+    );
+    assert.equal(applied.mutation!.receipt?.state, 'applied');
+    assert.equal(applied.mutation!.receipt?.commandId, applied.mutation!.intent.commandId);
+    stage('permission_auto_new_original_mutation_applied', {
+      sessionId,
+      commandId: applied.mutation!.intent.commandId,
+      revision: applied.current.selection!.permissions!.mode.revision,
+    });
+  }
   // Establish workspace trust and then Auto using the actual forms before any Model request.
   await openSessionTools(page);
   await page
@@ -223,9 +325,7 @@ try {
     .check();
   await page.getByRole('button', { name: '信任所显示的范围', exact: true }).click();
   await page.getByText(/^工作区：w；信任状态：trusted；版本：/).waitFor();
-  await page.locator('input[type=radio][value=auto]').check();
-  await page.getByRole('button', { name: '保存模式选择', exact: true }).click();
-  await page.getByText('当前模式：auto；默认模式：auto', { exact: true }).waitFor();
+  await establishAutoMode('a', true);
   async function approvePlanningManagement(expectedRunId?: string) {
     const current = await state();
     const card = current.selection!.interactions.find(
@@ -337,9 +437,7 @@ try {
     stage('start_enter', { sessionId: id });
     await select(id);
     if (id !== 'a') {
-      await page.locator('input[type=radio][value=auto]').check();
-      await page.getByRole('button', { name: '保存模式选择', exact: true }).click();
-      await page.getByText('当前模式：auto；默认模式：auto', { exact: true }).waitFor();
+      await establishAutoMode(id);
     }
     if (id === 'b') {
       const parentCount = Number(await (await fetch(`${control}/count`)).text());
@@ -368,7 +466,9 @@ try {
     );
     const count = Number(await (await fetch(`${control}/count`)).text());
     const input = page.getByRole('textbox', { name: '当前会话私有草稿', exact: true });
-    await input.fill(`NATIVE_PLAN_${id.toUpperCase()} exact original task`);
+    await input.fill(
+      `${id === 'b' ? '新任务：' : ''}NATIVE_PLAN_${id.toUpperCase()} exact original task`,
+    );
     await page.getByRole('checkbox', { name: '先审核计划', exact: true }).check();
     await page
       .getByRole('button', { name: id === 'b' ? '排队新的计划任务' : '发送计划任务', exact: true })

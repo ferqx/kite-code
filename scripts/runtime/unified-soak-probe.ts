@@ -223,7 +223,7 @@ export async function runProbe(
           kind: 'run.start',
           expectedStoreId: storeId,
           commandId,
-          content: mode === 'crash' ? 'hold-soak' : 'complete-soak',
+          content: mode === 'crash' ? 'New task: hold-soak' : 'complete-soak',
         });
         if (mode === 'crash') {
           await new Promise<never>(() => {});
@@ -269,7 +269,7 @@ export async function runProbe(
           kind: 'run.start',
           expectedStoreId: storeId,
           commandId: `hold-${sequence}`,
-          content: 'hold-soak',
+          content: 'New task: hold-soak',
         });
         await waiting;
         await client.cancelCommand(cancelSession, {

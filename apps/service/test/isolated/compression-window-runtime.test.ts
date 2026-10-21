@@ -60,16 +60,34 @@ async function fixture(summary: string, options: Partial<RuntimeOptions> = {}) {
     requests,
     original,
     expectedStoreId,
-    async run(commandId: string) {
+    async run(commandId: string, content = 'Summarize what is known about this project') {
       await runtime.submitCommand({
         expectedStoreId,
         sessionId: 's',
         commandId,
         subjectId: 'owner',
-        request: { kind: 'run.start', content: 'Summarize what is known about this project' },
+        request: { kind: 'run.start', content },
       });
-      await runtime.waitForCommand(commandId, { timeoutMs: 5000 });
-      return (await store.getView('s')).runs.find((run) => run.originCommandId === commandId)!;
+      const command = await runtime.waitForCommand(commandId, { timeoutMs: 5000 });
+      const receipt = command.receipt as { businessCommandId?: string; runId: string };
+      const businessCommandId = content.startsWith('New task:')
+        ? receipt.businessCommandId
+        : command.id;
+      expect(command.status).toBe('applied');
+      expect(businessCommandId).toBeString();
+      const run = (await store.getRun(receipt.runId))!;
+      expect(run).toMatchObject({
+        originCommandId: businessCommandId,
+        rootWorkCommandId: command.id,
+      });
+      for (const model of (await store.listExecutions('s')).filter(
+        (execution) => execution.kind === 'model' && execution.runId === run.id,
+      ))
+        expect(model).toMatchObject({
+          originCommandId: businessCommandId,
+          rootWorkCommandId: command.id,
+        });
+      return run;
     },
     async close() {
       await runtime.close();
@@ -90,7 +108,10 @@ for (const scenario of [
       const before = await f.store.listMessages('s');
       const originalMessage = before.find((message) => message.role === 'assistant')!;
       expect(originalMessage).toBeDefined();
-      const run = await f.run('original-task');
+      const run = await f.run(
+        'original-task',
+        'New task: Summarize what is known about this project',
+      );
       expect(run).toMatchObject({ status: 'failed', reason: scenario.reason });
       expect(f.requests).toHaveLength(2);
       expect(f.requests[1]!.tools).toHaveLength(0);

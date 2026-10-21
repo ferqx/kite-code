@@ -23,6 +23,7 @@ import { createClient } from '@kite-ai/client';
 import { privateDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { startService } from '../../src';
 import { createDefaultProcessConfiguration } from '../../src/configuration';
+import { initializeLivePermissionFixture } from '../fixtures/live-permission-fixture';
 
 const nativeTest = process.platform === 'darwin' ? test : test.skip;
 async function until<T>(read: () => Promise<T | undefined>) {
@@ -72,26 +73,24 @@ function endpoint(
       const last = messages.reduce(
         (v, m, i) =>
           m.role === 'user' &&
-          (/^work$|^next$|^grant-[a-z-]+$/.test(m.content) ||
-            (child && m.content.includes('child-shell-task')))
+          (/^新任务：(work|next|grant-[a-z-]+)$/.test(m.content) ||
+            (child && m.content === 'child-shell-task'))
             ? i
             : v,
         -1,
       );
       const results = messages.slice(last + 1).filter((row) => row.role === 'tool');
-      const isChild = child && messages[last]?.content.includes('child-shell-task');
-      const key = isChild ? 'child-shell' : (messages[last]?.content ?? 'work');
+      const isChild = child && messages[last]?.content === 'child-shell-task';
+      const key = isChild
+        ? 'child-shell'
+        : (messages[last]?.content.replace(/^新任务：/, '') ?? 'work');
       const calls =
         child && !isChild
           ? [
               {
                 name: 'spawn_agent',
                 input: {
-                  key,
-                  role: 'worker',
-                  input: { content: 'child-shell-task' },
-                  cancellation: 'attached',
-                  result_disposition: 'required',
+                  prompt: 'child-shell-task',
                 },
               },
             ]
@@ -207,7 +206,7 @@ async function fixture(
       'shell.read',
       'shell.wait',
       'shell.stop',
-      ...(options.child ? ['task'] : []),
+      ...(options.child ? ['task.spawn'] : []),
     ].map((id) => ({
       id,
       definitionVersion: '1',
@@ -292,6 +291,14 @@ async function fixture(
   });
   await runtime.createSession({ ...base, commandId: 'create', workspaceId: 'w', title: 'shell' });
   const permissionManagement = host.permissionManagement!(runtime);
+  if (!options.persistentPermissions)
+    await initializeLivePermissionFixture({
+      runtime,
+      profile,
+      ...base,
+      workspaceId: 'w',
+      mode: options.mode ?? 'full',
+    });
   if (options.persistentPermissions) {
     const initial = await permissionManagement.readMode(base);
     await permissionManagement.setMode({
@@ -329,7 +336,7 @@ async function fixture(
       runtime.submitCommand({
         ...base,
         commandId: id,
-        request: { kind: 'run.start', content: id },
+        request: { kind: 'run.start', content: `新任务：${id}` },
       }),
     done: (id = 'work') => runtime.waitForCommand(id, { timeoutMs: 8000 }),
     async card(definitionId: string) {
@@ -441,10 +448,13 @@ nativeTest(
         (await f.store.listExecutions('s')).filter(
           (row) =>
             row.rootWorkCommandId === 'grant-child' &&
-            ['task', 'agent/worker'].includes(row.definitionId),
+            ['task.spawn', 'agent/worker'].includes(row.definitionId),
         ),
       ).toEqual([
-        expect.objectContaining({ definitionId: 'task', authorization: { dispatched: true } }),
+        expect.objectContaining({
+          definitionId: 'task.spawn',
+          authorization: { dispatched: true },
+        }),
         expect.objectContaining({
           definitionId: 'agent/worker',
           authorization: { dispatched: true },
@@ -484,6 +494,28 @@ nativeTest(
           }),
         ),
       );
+      await until(async () => {
+        const view = await f.store.getView('s');
+        const carrier = view.executions.find(
+          (execution) =>
+            execution.definitionId === 'agent/worker' &&
+            execution.rootWorkCommandId === 'grant-child',
+        );
+        if (carrier?.status !== 'succeeded' || view.runs.some((run) => run.isActive))
+          return undefined;
+        for (const run of view.runs) {
+          const command = await f.store.getCommand(run.originCommandId);
+          if (
+            command?.kind === 'job.report' &&
+            (command.request as { executionId?: string }).executionId === carrier.id &&
+            (command.receipt as { runId?: string }).runId === run.id &&
+            command.status === 'applied' &&
+            !run.isActive
+          )
+            return true;
+        }
+        return undefined;
+      });
       const requests = f.a.requests.length;
       const cursor = (await f.store.getMetadata()).lastChangeCursor;
       await f.submit('grant-child');
@@ -1301,11 +1333,19 @@ nativeTest(
         workspaceId: 'w',
         title: 'other',
       });
+      await initializeLivePermissionFixture({
+        runtime: f.runtime,
+        profile: f.profile,
+        ...f.base,
+        sessionId: 'other',
+        workspaceId: 'w',
+        mode: 'full',
+      });
       await f.runtime.submitCommand({
         ...f.base,
         sessionId: 'other',
         commandId: 'queued',
-        request: { kind: 'run.start', content: 'next' },
+        request: { kind: 'run.start', content: '新任务：next' },
       });
       const queued = await until(async () => {
         const row = (await f.store.listExecutions('other')).find(

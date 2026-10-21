@@ -4,9 +4,55 @@ import { Sidebar } from '@kite-ai/ui/desktop';
 import { JSDOM } from 'jsdom';
 import { act } from 'react';
 import { createRoot } from 'react-dom/client';
-import type { NativeDirectory } from '../src/native-bridge';
+import { renderToStaticMarkup } from 'react-dom/server';
+import type { NativeDirectory, NativeSelection } from '../src/native-bridge';
 import { desktopDirectory } from '../src/native-presentation';
+import { backgroundItem } from './background-item.fixture';
 import { prepareDesktopDom } from './native-page-dom.fixture';
+
+test('same-session permission refresh retains the observed running marker until a real observation failure', () => {
+  const item = backgroundItem();
+  const directory: NativeDirectory = {
+    storeId: 'store',
+    workspaces: [{ id: 'w', name: 'Workspace', rootUri: 'file:///workspace' }],
+    sessions: [item.rootSession],
+  };
+  const selection: NativeSelection = {
+    storeId: 'store',
+    viewGeneration: 1,
+    viewSelection: 1,
+    session: item.rootSession,
+    runs: [{ ...item.run!, status: 'running' }],
+    executions: [],
+    interactions: [],
+    interactionsAfterId: null,
+    canReadModelOutput: false,
+  };
+  for (const refreshing of [false, true]) {
+    const workspaces = desktopDirectory(directory, {
+      ...selection,
+      viewLoading: refreshing,
+      permissionUnavailable: refreshing,
+    });
+    expect(workspaces[0]!.sessions[0]!.status).toBe('running');
+    expect(
+      renderToStaticMarkup(
+        <Sidebar workspaces={workspaces} actions={{}} connectionLabel="" onOpen={() => {}} />,
+      ),
+    ).toContain('aria-label="会话运行中"');
+  }
+  expect(
+    desktopDirectory(directory, { ...selection, permissionUnavailable: true })[0]!.sessions[0]!
+      .status,
+  ).toBe('上次确认状态');
+  expect(
+    desktopDirectory({ ...directory, unavailable: true }, { ...selection, viewLoading: true })[0]!
+      .sessions[0]!.status,
+  ).toBe('上次确认状态');
+  expect(
+    desktopDirectory(directory, { ...selection, storeId: 'other' })[0]!.sessions[0]!.status,
+  ).toBe('状态待读取');
+});
 
 test('PC directory groups original IDs, keeps navigation available during creation, and folds without a business call', async () => {
   const dom = new JSDOM('<div id="root"></div>', {
@@ -243,6 +289,137 @@ test('retained Sidebar sorts real global activity, pages 5 then 10, distinguishe
     await act(async () => fold.click());
     await act(async () => fold.click());
     expect(rows()).toHaveLength(5);
+  } finally {
+    await act(async () => root.unmount());
+    restoreLayoutGlobals();
+    dom.window.close();
+    Object.assign(globalThis, prior);
+  }
+});
+
+test('directory owner observation keeps exited work unverified without a running spinner or input badge', async () => {
+  const dom = new JSDOM('<div id="root"></div>', {
+    url: 'http://localhost',
+    pretendToBeVisual: true,
+  });
+  const restoreLayoutGlobals = prepareDesktopDom(dom);
+  const prior = {
+    window: globalThis.window,
+    document: globalThis.document,
+    navigator: globalThis.navigator,
+  };
+  Object.assign(globalThis, {
+    window: dom.window,
+    document: dom.window.document,
+    navigator: dom.window.navigator,
+    IS_REACT_ACT_ENVIRONMENT: true,
+  });
+  const element = dom.window.document.getElementById('root')!;
+  const root = createRoot(element);
+  const directory: NativeDirectory = {
+    storeId: 'store',
+    workspaces: [{ id: 'workspace', name: '项目', rootUri: 'file:///workspace' }],
+    sessions: [
+      {
+        id: 'session',
+        workspaceId: 'workspace',
+        rootSessionId: 'session',
+        parentSessionId: null,
+        title: '原会话',
+        controlRevision: '0',
+        contextSelectionId: 'selection',
+        nextSeq: '0',
+        deletedAt: null,
+        activity: {
+          updatedAt: null,
+          queued: false,
+          pendingInteractions: 0,
+          executionOwner: 'unheld',
+          run: { id: 'run', status: 'running', isActive: true, waitingForResults: false },
+        },
+      },
+    ],
+  };
+  const activity = directory.sessions[0]!.activity!;
+  const render = async () => {
+    const summary = desktopDirectory(directory)[0]!.sessions[0]!;
+    await act(async () =>
+      root.render(
+        <Sidebar
+          actions={{}}
+          connectionLabel="本地 Agent"
+          workspaces={desktopDirectory(directory)}
+          selected="session"
+          defaultExpanded
+          onOpen={() => {}}
+        />,
+      ),
+    );
+    return summary;
+  };
+  const row = () => element.querySelector<HTMLButtonElement>('button.session-row')!;
+  const expectUnverified = async () => {
+    const summary = await render();
+    expect(summary.status).toBe('执行状态待核实');
+    expect(summary.waitingReason).toBeUndefined();
+    expect(Boolean(summary.pendingInteractions)).toBe(false);
+    expect(row().getAttribute('aria-description')).toBe('执行状态待核实');
+    expect(row().querySelector('[aria-label="会话运行中"]')).toBeNull();
+    expect(row().querySelector('[aria-label="任务进行中"]')).toBeNull();
+    expect(row().textContent).not.toContain('待用户输入');
+  };
+  try {
+    await expectUnverified();
+    activity.run = {
+      id: 'run',
+      status: 'waiting_execution',
+      isActive: true,
+      waitingForResults: true,
+    };
+    await expectUnverified();
+    activity.run = {
+      id: 'run',
+      status: 'waiting_interaction',
+      isActive: true,
+      waitingForResults: false,
+    };
+    activity.pendingInteractions = 1;
+    await expectUnverified();
+
+    for (const executionOwner of ['held', undefined] as const) {
+      if (executionOwner === undefined) delete activity.executionOwner;
+      else activity.executionOwner = executionOwner;
+      activity.pendingInteractions = 0;
+      activity.run = {
+        id: 'run',
+        status: 'running',
+        isActive: true,
+        waitingForResults: false,
+      };
+      expect((await render()).status).toBe('running');
+      expect(row().querySelector('[aria-label="会话运行中"]')).not.toBeNull();
+      activity.run = {
+        id: 'run',
+        status: 'waiting_execution',
+        isActive: true,
+        waitingForResults: true,
+      };
+      const waiting = await render();
+      expect(waiting.status).toBe('waiting');
+      expect(waiting.waitingReason).toBe('required_background');
+      expect(row().querySelector('[aria-label="任务进行中"]')).not.toBeNull();
+    }
+
+    activity.executionOwner = 'unheld';
+    activity.pendingInteractions = 1;
+    directory.unavailable = true;
+    const stale = await render();
+    expect(stale.status).toBe('上次确认状态');
+    expect(stale.waitingReason).toBeUndefined();
+    expect(Boolean(stale.pendingInteractions)).toBe(false);
+    expect(row().getAttribute('aria-description')).toBe('上次确认状态');
+    expect(row().querySelector('[aria-label="任务进行中"]')).toBeNull();
+    expect(row().textContent).not.toContain('待用户输入');
   } finally {
     await act(async () => root.unmount());
     restoreLayoutGlobals();

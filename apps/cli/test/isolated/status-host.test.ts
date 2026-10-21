@@ -52,6 +52,116 @@ async function until(check: () => Promise<boolean>) {
     await Bun.sleep(5);
   }
 }
+async function proveBusiness(
+  client: ReturnType<typeof createClient>,
+  databasePath: string,
+  commandId: string,
+  content: string,
+  rootWorkCommandId = commandId,
+) {
+  const db = new Database(databasePath, { readonly: true });
+  try {
+    const row = (id: string) =>
+      db
+        .query(
+          'SELECT id,kind,status,session_id,origin_store_id,subject_id,request_json,receipt_json FROM command WHERE id=?',
+        )
+        .get(id) as {
+        id: string;
+        kind: string;
+        status: string;
+        session_id: string;
+        origin_store_id: string;
+        subject_id: string;
+        request_json: string;
+        receipt_json: string;
+      };
+    const original = row(commandId);
+    expect(original.status).toBe('applied');
+    expect(JSON.parse(original.request_json)).toMatchObject({ content });
+    const receipt = JSON.parse(original.receipt_json) as {
+      runId: string;
+      businessCommandId?: string;
+      humanInputCommandId?: string;
+      decisionCommandId?: string;
+    };
+    const businessId = receipt.businessCommandId ?? original.id;
+    const publicCommand = await client.getCommand(commandId);
+    expect(publicCommand.receipt).toMatchObject({ runId: receipt.runId });
+    if (receipt.businessCommandId) {
+      expect(businessId).not.toBe(original.id);
+      const raw = row(receipt.humanInputCommandId!);
+      expect(raw).toMatchObject({
+        kind: 'human.input',
+        status: 'applied',
+        session_id: original.session_id,
+        origin_store_id: original.origin_store_id,
+        subject_id: original.subject_id,
+      });
+      expect(JSON.parse(raw.request_json)).toMatchObject({
+        publicCommandId: original.id,
+        content,
+        originalRequest: JSON.parse(original.request_json),
+      });
+      expect(JSON.parse(raw.receipt_json)).toMatchObject({
+        businessCommandId: businessId,
+        decisionCommandId: receipt.decisionCommandId,
+        state: 'decided',
+      });
+      const decision = row(receipt.decisionCommandId!);
+      expect(decision).toMatchObject({
+        kind: 'human.input.decision',
+        status: 'applied',
+        session_id: original.session_id,
+        subject_id: original.subject_id,
+      });
+      expect(JSON.parse(decision.receipt_json)).toMatchObject({ businessCommandId: businessId });
+      expect(row(businessId)).toMatchObject({ status: 'applied', session_id: original.session_id });
+      expect(JSON.parse(row(businessId).receipt_json)).toMatchObject({ runId: receipt.runId });
+    }
+    const run = await client.getRun(receipt.runId);
+    expect(run).toMatchObject({ originCommandId: businessId, rootWorkCommandId });
+    const view = await client.getView(original.session_id);
+    const model = view.executions.find(
+      (execution) => execution.kind === 'model' && execution.runId === run.id,
+    )!;
+    expect(model).toMatchObject({
+      status: 'succeeded',
+      rootWorkCommandId,
+    });
+    expect(
+      db
+        .query(
+          'SELECT origin_command_id,run_id,root_work_command_id,state FROM execution WHERE id=?',
+        )
+        .get(model.id),
+    ).toEqual({
+      origin_command_id: businessId,
+      run_id: run.id,
+      root_work_command_id: rootWorkCommandId,
+      state: 'succeeded',
+    });
+    const snapshot = await client.getModelInput(original.session_id, model.id);
+    expect(snapshot.confirmation).toBe('succeeded');
+    expect(
+      snapshot.request.messages.find((message) => message.sourceIds?.includes(businessId)),
+    ).toMatchObject({ content, sourceIds: [businessId] });
+    const tools = db
+      .query(
+        "SELECT id,adapter_id AS definitionId,run_id AS runId,origin_command_id AS originCommandId FROM execution WHERE kind='tool' AND run_id=?",
+      )
+      .all(run.id) as {
+      id: string;
+      definitionId: string;
+      runId: string;
+      originCommandId: string;
+    }[];
+    return { command: publicCommand, run, view, tools };
+  } finally {
+    db.close();
+  }
+}
+
 async function fixture() {
   const base = join(root, randomUUID());
   privateDirectory(base);
@@ -338,9 +448,25 @@ nativeTest(
         expectedStoreId: storeId,
         commandId: 'held',
         kind: 'run.start',
-        content: 'hold external',
+        content: 'New task: hold external',
       });
       await until(async () => existsSync(join(f.base, 'entered-original')));
+      const proof = await proveBusiness(
+        client,
+        f.profile.databasePath,
+        'held',
+        'New task: hold external',
+      );
+      expect(proof.run.isActive).toBe(true);
+      expect(
+        proof.tools.find(
+          (execution) => execution.id === readFileSync(join(f.base, 'entered-original'), 'utf8'),
+        ),
+      ).toMatchObject({
+        definitionId: 'fixture.held',
+        runId: proof.run.id,
+        originCommandId: proof.run.originCommandId,
+      });
       const baseline = f.counts(),
         original = (await client.getView('original')).executions.find(
           (e) => e.definitionId === 'fixture.held',

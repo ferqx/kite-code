@@ -132,6 +132,7 @@ export function ensureAgent(
   input: EnsureOperationInput,
   authorizationReview = false,
   continuation?: EnsureAgentFollowUpInput,
+  insideTransaction = false,
 ): OperationRef {
   assertOperationResultDelivery(input);
   if (continuation && input.resultDelivery !== undefined)
@@ -493,7 +494,7 @@ export function ensureAgent(
       childSessionId,
     };
   };
-  return authorizationReview ? work() : db.tx(work);
+  return authorizationReview || insideTransaction ? work() : db.tx(work);
 }
 export function activateChildRun(
   db: SqliteOperations,
@@ -574,6 +575,7 @@ export function activateChildRun(
         configuration: input.configuration,
         requirements: refs,
       });
+      activateQueuedAgentInputs(db, String(job.id), applied.run.id, String(child.id));
       return { command: applied.command, session: db.session(child), run: applied.run };
     }
     const existing = db.row('SELECT * FROM run WHERE origin_command_id=?', command.id!);
@@ -638,6 +640,7 @@ export function activateChildRun(
       },
       'user',
     );
+    activateQueuedAgentInputs(db, String(job.id), runId, String(job.child_session_id));
     db.event(String(job.child_session_id), runId, 'run.started');
     return {
       command: db.command(db.row('SELECT * FROM command WHERE id=?', command.id!)!),
@@ -677,5 +680,46 @@ export function inspectChildSettlement(
     return { pending, cursor };
   } catch (error) {
     return db.rollback(error);
+  }
+}
+
+/** Inputs accepted against one queued carrier are only attached to that carrier's actual Run. */
+function activateQueuedAgentInputs(
+  db: SqliteOperations,
+  carrierId: string,
+  runId: string,
+  childId: string,
+): void {
+  for (const command of db.rows(
+    "SELECT * FROM command WHERE kind='agent.queued_input' AND agent_carrier_execution_id=? AND status='accepted' ORDER BY seq",
+    carrierId,
+  )) {
+    if (command.cancelled) continue;
+    const source = db.row(
+      'SELECT e.cancel_requested,c.cancelled FROM execution e JOIN command c ON c.id=e.origin_command_id WHERE e.id=?',
+      command.agent_source_execution_id!,
+    );
+    if (!source || source.cancel_requested || source.cancelled) {
+      db.run(
+        "UPDATE command SET status='rejected',receipt_json=? WHERE id=?",
+        canonicalJson({ outcome: 'source_cancelled' }),
+        command.id!,
+      );
+      db.event(childId, String(command.id), 'command.settled');
+      continue;
+    }
+    const request = JSON.parse(String(command.request_json)) as { content: string };
+    db.appendMessage(
+      childId,
+      runId,
+      { content: request.content, sourceIds: [String(command.id)] },
+      'user',
+    );
+    db.run(
+      "UPDATE command SET status='applied',input_target_run_id=? WHERE id=?",
+      runId,
+      command.id!,
+    );
+    db.event(childId, String(command.id), 'command.settled');
   }
 }

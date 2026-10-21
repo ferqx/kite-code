@@ -296,7 +296,7 @@ export interface OperationOptions {
   /** Agent result is consumed by this caller instead of automatically entering Session context. */
   resultDelivery?: 'caller';
   /** Request only; the trusted Run policy must independently authorize this. */
-  continuation?: { kind: 'after_turn' };
+  continuation?: { kind: 'after_turn' | 'agent_completion' };
   resultRequirement?: import('../storage/types').ResultRequirementDeclaration;
   key: string;
   request: OperationRequest;
@@ -306,6 +306,25 @@ export interface OperationOptions {
   admission?: 'fail_if_full';
 }
 export interface Operations {
+  /** Stable collaborator APIs. Target choice and mutation are sealed in one owned transaction. */
+  sendStableAgentMessage?(target: string, content: string): Promise<void>;
+  applyAgentCommand?(input: {
+    agentId: string;
+    kind: 'follow_up' | 'interrupt';
+    content?: string;
+  }): Promise<import('../storage/agent-collaboration').AgentCommandReceipt>;
+  listStableAgents?(options?: {
+    agentIds?: string[];
+    afterSeq?: string;
+    upperSeq?: string;
+    limit?: number;
+  }): Promise<import('../storage/agent-collaboration').StableAgentPage>;
+  waitAgentEvents?(options?: { afterSeq?: string; waitMs?: number | null }): Promise<{
+    reason: 'events' | 'input' | 'timeout';
+    events: import('../storage/agent-collaboration').AgentMailboxEvent[];
+    nextSeq: string;
+  }>;
+
   readAgentMessageTarget?(
     target: OperationRef | 'parent',
   ): Promise<{ sessionId: string; contextSelectionId: string; targetRunId: string | null }>;

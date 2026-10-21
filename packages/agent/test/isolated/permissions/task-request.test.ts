@@ -22,6 +22,7 @@ test('only exact finite builtin role declarations classify Task creation and car
     for (const invocation of [
       request('task', { key: 'a', role: role.id, input: { content: 'a' } }),
       request('task.execute', { key: 'a', role: role.id, input: { content: 'a' } }),
+      request('task.spawn', { taskName: 'a', preset: role.id, prompt: 'a' }),
       request(`agent/${role.id}`, { content: 'a' }, 'job'),
     ]) {
       expect(describe(invocation)).toMatchObject({
@@ -31,6 +32,10 @@ test('only exact finite builtin role declarations classify Task creation and car
       });
     }
   }
+  expect(describe(request('task.spawn', { prompt: 'ordinary task' }))).toMatchObject({
+    internalRecordOnly: true,
+  });
+  expect(describe(request('task.spawn', { preset: 'custom', prompt: 'a' }))).toBeUndefined();
   for (const id of ['send_message', 'followup_task', 'task_cancel', 'agent/custom'])
     expect(describe(request(id, { role: 'code' }))).toBeUndefined();
   expect(describe(request('task.execute', { role: 'custom' }))).toBeUndefined();

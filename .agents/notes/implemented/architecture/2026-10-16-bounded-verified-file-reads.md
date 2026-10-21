@@ -17,7 +17,7 @@ POSIX Artifact三类消费共用原文件验证：公开chunk独占且按剩余�
 ## Alternatives considered
 
 1. 缓存启动文件digest或省略guardian复核：会把历史字节当作当前新鲜度，未采用。每次完整hash的计算与IO继续存在。
-2. 复用已经yield给调用者的公共chunk：调用者仍可持有或修改原字节，后续读取会破坏所有权，未采用。只有内部同步verify／whole消费者可复用私有存储。
+2. 复用已经yield给调用者的公共chunk：调用者仍可持有或修改原字节，后续读取会破坏所有权，未采用。只有内部verify／whole消费者可复用私有存储；[按预算完整校验](2026-10-21-nonblocking-complete-tool-verification.md)将这项所有权约束延续到内部合作分片读取，私有scratch仍不逃逸。
 3. 将chunk列表、concat及每次64KiB EOF分配保持原样，仅缩小并发或强制GC：不能解决实际放大，也会改变可用并发或将负担转为停顿，未采用。
 4. 本轮合并或替换Shell监督进程：涉及父死亡、原birth、coalition与真实回收合同，当前两处IO分配优化不需要改变该拓扑，未纳入本轮。
 

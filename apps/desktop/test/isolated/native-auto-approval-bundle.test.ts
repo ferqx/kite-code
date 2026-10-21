@@ -201,7 +201,7 @@ test.skipIf(process.platform !== 'darwin')(
             },
           ],
           // Tool configuration merges by ID; explicitly disable the ordinary tools outside this case.
-          tools: ordinaryHostConfigurationDefaults(true).tools.map(({ id }) => ({
+          tools: ordinaryHostConfigurationDefaults(true, true).tools.map(({ id }) => ({
             id,
             enabled: id === 'ask_user' || id === 'files.write',
             ...(id === 'files.write' ? { definitionVersion: '2' } : {}),

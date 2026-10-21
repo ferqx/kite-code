@@ -88,22 +88,34 @@ test('actual HTTP forwards independent original start/followup intents and publi
       expectedStoreId,
       commandId: 'empty',
       kind: 'input.follow_up',
-      content: 'text',
+      content: 'New task: text',
       afterRunId: runId,
       contextSelectionId,
       extensionInputs: [],
     });
     const empty = await runtime.waitForCommand('empty');
-    const next = (empty.receipt as { runId: string }).runId;
+    const emptyReceipt = empty.receipt as { runId: string; businessCommandId: string };
+    const next = emptyReceipt.runId;
+    expect(await client.getRun(next)).toMatchObject({
+      status: 'completed',
+      originCommandId: emptyReceipt.businessCommandId,
+      rootWorkCommandId: 'empty',
+    });
     await client.followUp('s', {
       expectedStoreId,
       commandId: 'omitted',
       kind: 'input.follow_up',
-      content: 'text',
+      content: 'New task: text',
       afterRunId: next,
       contextSelectionId,
     });
-    await runtime.waitForCommand('omitted');
+    const omitted = await runtime.waitForCommand('omitted');
+    const omittedReceipt = omitted.receipt as { runId: string; businessCommandId: string };
+    expect(await client.getRun(omittedReceipt.runId)).toMatchObject({
+      status: 'completed',
+      originCommandId: omittedReceipt.businessCommandId,
+      rootWorkCommandId: 'omitted',
+    });
     expect((await store.getCommand('start'))!.request).toMatchObject({
       extensionInputs: [
         { extensionId: 'b', definitionVersion: '1', input: { text: 'first' } },
@@ -129,7 +141,7 @@ test('actual HTTP forwards independent original start/followup intents and publi
         expectedStoreId,
         commandId: 'empty',
         kind: 'input.follow_up',
-        content: 'text',
+        content: 'New task: text',
         afterRunId: runId,
         contextSelectionId,
       })

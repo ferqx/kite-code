@@ -12,6 +12,8 @@ Status: implemented
 
 父控制使用固定 `127.0.0.1` 上随机端口的 TCP 连接及编译到私有 Main 的 32 字节随机 token；认证后仅接受闭合版本 ID／SHA 请求，Main 自己派生版本路径。token 不在 argv、renderer、Vite 或日志。旧 caller／私有数据／paired 实际关闭及退出0先于新实例，按新身份启动，再同窗口重新加载 UI。历史和原申请保留，任务不自动重发；失去可靠回执或关闭失败停止继续切换。完整当前实现归[Desktop owner](../../../../apps/desktop/README.md#开发热更新与服务重载)。
 
+2026-10-21 补充：父控制停止在连接／认证前也锁存，准确认证连接随后立即 EOF；通道停止后拒绝原 pending／后续 reload，原 unknown 不被新的停止或迟到成功覆盖。Main 的父 EOF／error／close 和 SIGINT／SIGTERM 等待同一自有资源收尾，菜单旧决定不能反向恢复调度。配套进程不再因默认5秒期限截断正常 drain；原完整退出取舍归[正常退出决定](../bug-fix/2026-10-21-paired-graceful-exit.md)。
+
 ## Alternatives considered
 
 - 仅自动重启整个 Electron：会在 UI 编辑时丢失窗口和未保存状态，无法满足已确认的 UI 热更新体验。当前 UI 保窗口，仅 backend 变更重载页面。

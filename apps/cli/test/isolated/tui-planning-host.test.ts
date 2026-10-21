@@ -276,7 +276,11 @@ for (const entrance of ['slash-task', 'draft-mode', 'active-queued', 'scope-draf
       expect(work[0].body.extensionInputs).toEqual([
         { extensionId: 'builtin.planning', definitionVersion: '1', input: { mode: 'plan' } },
       ]);
-      expect(work[0].body.content).toBe('original single plan 中文🙂');
+      expect(work[0].body.content).toBe(
+        entrance === 'active-queued'
+          ? 'New task: original single plan 中文🙂'
+          : 'original single plan 中文🙂',
+      );
       expect(
         network.filter(
           (row) =>
@@ -382,8 +386,47 @@ for (const entrance of ['slash-task', 'draft-mode', 'active-queued', 'scope-draf
           config_json: string;
           requirements_json: string;
         };
-        expect(actualRun.origin_command_id).toBe(work[0].body.commandId);
         if (entrance === 'active-queued') {
+          const publicWork = db
+            .query('SELECT status,receipt_json FROM command WHERE id=?')
+            .get(work[0].body.commandId) as { status: string; receipt_json: string };
+          const workReceipt = JSON.parse(publicWork.receipt_json);
+          expect(publicWork.status).toBe('applied');
+          expect(workReceipt).toMatchObject({
+            outcome: 'human_input_applied',
+            businessCommandId: actualRun.origin_command_id,
+            runId: actualRun.id,
+          });
+          expect(
+            db
+              .query('SELECT status,root_work_command_id FROM command WHERE id=?')
+              .get(workReceipt.businessCommandId),
+          ).toEqual({ status: 'applied', root_work_command_id: work[0].body.commandId });
+          const raw = db
+            .query('SELECT request_json FROM command WHERE id=?')
+            .get(workReceipt.humanInputCommandId) as { request_json: string };
+          expect(JSON.parse(raw.request_json)).toMatchObject({
+            kind: 'human.input',
+            publicCommandId: work[0].body.commandId,
+            content: work[0].body.content,
+            observedRunId: work[0].body.afterRunId,
+            originalRequest: {
+              kind: 'input.follow_up',
+              content: work[0].body.content,
+              afterRunId: work[0].body.afterRunId,
+              extensionInputs: work[0].body.extensionInputs,
+            },
+          });
+          const decision = db
+            .query('SELECT request_json FROM command WHERE id=?')
+            .get(workReceipt.decisionCommandId) as { request_json: string };
+          expect(JSON.parse(decision.request_json)).toMatchObject({
+            inputCommandId: workReceipt.humanInputCommandId,
+            proposal: { relation: 'independent_work', purpose: 'work' },
+          });
+          expect(
+            db.query('SELECT root_work_command_id FROM run WHERE id=?').get(actualRun.id),
+          ).toEqual({ root_work_command_id: work[0].body.commandId });
           const parent = db
             .query('SELECT id,status,config_json FROM run WHERE origin_command_id=?')
             .get(starts[0].body.commandId) as {
@@ -397,6 +440,8 @@ for (const entrance of ['slash-task', 'draft-mode', 'active-queued', 'scope-draf
           expect(db.query("SELECT COUNT(*) AS n FROM run WHERE session_id='s'").get()).toEqual({
             n: 2,
           });
+        } else {
+          expect(actualRun.origin_command_id).toBe(work[0].body.commandId);
         }
         expect(actualRun.status).toBe('completed');
         if (entrance === 'scope-draft') {

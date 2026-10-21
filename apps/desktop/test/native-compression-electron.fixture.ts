@@ -190,7 +190,7 @@ try {
   // Produce that history through the same actual Native input path.
   await page
     .getByRole('textbox', { name: '当前会话私有草稿' })
-    .fill('Qualifying second settled user turn');
+    .fill('New task: Qualifying second settled user turn');
   await page.getByRole('button', { name: '发送明确的新轮次' }).click();
   await page
     .getByTestId('content')
@@ -216,7 +216,7 @@ try {
   await waitState(page, (value) => value.selection?.activeCommand?.kind === 'context.compress');
   await page
     .getByRole('textbox', { name: '当前会话私有草稿' })
-    .fill('Explicit follow-up during original compression');
+    .fill('New task: Explicit follow-up during original compression');
   await page.getByRole('button', { name: '排队压缩后的输入' }).click();
   await waitState(page, (value) =>
     value.inputSubmissions.some(
@@ -324,7 +324,9 @@ try {
     ),
     true,
   );
-  await page.getByRole('textbox', { name: '当前会话私有草稿' }).fill('Next explicit user');
+  await page
+    .getByRole('textbox', { name: '当前会话私有草稿' })
+    .fill('New task: Next explicit user');
   await page.getByRole('button', { name: '发送明确的新轮次' }).click();
   await waitState(
     page,

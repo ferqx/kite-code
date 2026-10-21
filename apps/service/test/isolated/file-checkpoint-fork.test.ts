@@ -147,7 +147,7 @@ for (const scenario of ['fork', 'combined', 'selector'] as const) {
       ).toBe('applied');
       for (const [commandId, content] of [
         ['first', 'FIRST_ACTUAL_RUN: read then update original and create first file'],
-        ['second', 'SECOND_ACTUAL_RUN: read then update original and create second file'],
+        ['second', 'New task: SECOND_ACTUAL_RUN: read then update original and create second file'],
       ] as const) {
         await client.startRun('s', {
           expectedStoreId: storeId,
@@ -159,7 +159,8 @@ for (const scenario of ['fork', 'combined', 'selector'] as const) {
           () => client.getCommand(commandId),
           (value) => value.status === 'applied',
         );
-        const runId = (command.receipt as { runId: string }).runId;
+        const application = command.receipt as { runId: string; businessCommandId?: string };
+        const runId = application.runId;
         const run = await until(
           () => client.getRun(runId),
           (value) => ['completed', 'failed', 'cancelled', 'interrupted'].includes(value.status),
@@ -169,6 +170,8 @@ for (const scenario of ['fork', 'combined', 'selector'] as const) {
             'actual_default_files_run_failure',
             JSON.stringify({ command, run, view: await client.getView('s') }),
           );
+        expect(run.originCommandId).toBe(application.businessCommandId ?? commandId);
+        expect(run.rootWorkCommandId).toBe(commandId);
         expect(run.status).toBe('completed');
       }
       const actualView = await client.getView('s');
@@ -342,13 +345,14 @@ for (const scenario of ['fork', 'combined', 'selector'] as const) {
       expect(immutablePoint.value as unknown as FileCheckpoint).toEqual(point);
       expect(
         model.request.messages.some(
-          (message) => message.role === 'user' && message.content.startsWith('SECOND_ACTUAL_RUN'),
+          (message) =>
+            message.role === 'user' && message.content.startsWith('New task: SECOND_ACTUAL_RUN'),
         ),
       ).toBe(false);
       const currentUsers = (await reader.getView('s')).messages.filter(
         (message) => message.role === 'user',
       );
-      expect(currentUsers.at(-1)!.content.startsWith('SECOND_ACTUAL_RUN')).toBe(true);
+      expect(currentUsers.at(-1)!.content.startsWith('New task: SECOND_ACTUAL_RUN')).toBe(true);
       expect(
         currentUsers
           .find((message) => message.id === point.boundary.triggerMessageId)!
@@ -641,7 +645,9 @@ for (const scenario of ['fork', 'combined', 'selector'] as const) {
         selectedFirst.messages.some((message) => message.content.startsWith('FIRST_ACTUAL_RUN')),
       ).toBe(true);
       expect(
-        selectedFirst.messages.some((message) => message.content.startsWith('SECOND_ACTUAL_RUN')),
+        selectedFirst.messages.some((message) =>
+          message.content.startsWith('New task: SECOND_ACTUAL_RUN'),
+        ),
       ).toBe(false);
       if (!combined) expect(stamp(originalPath)).toEqual(bPhysical);
       const originalBNotSelected = await client.queryExtension(
@@ -734,7 +740,7 @@ for (const scenario of ['fork', 'combined', 'selector'] as const) {
         ).toEqual(listed.map((item) => item.checkpoint));
         expect(
           (await client.getContext(restoreSession, { storeId })).messages.some((message) =>
-            message.content.startsWith('SECOND_ACTUAL_RUN'),
+            message.content.startsWith('New task: SECOND_ACTUAL_RUN'),
           ),
         ).toBe(false);
         // Public Store host-fault probe changes only original readonly metadata after both seals.

@@ -1299,6 +1299,46 @@ export class ExtensionHost {
             if (summary.waitingInteractionId) return { reason: 'interaction' as const, executions };
           }
         }
+        if (observeUpdates && run) {
+          // The public human-input bridge registers raw intent and later creates
+          // its exact business input without emitting legacy command.accepted.
+          // Snapshot after the change cursor so both existing and racing input
+          // wake this accurate Run; ordinary terminal-only wait stays unchanged.
+          const pending = await this.options.store.listPendingInputs({
+            expectedStoreId: scope.command.originStoreId,
+            sessionId: run.sessionId,
+            targetRunId: run.id,
+            kind: 'input.steer',
+          });
+          if (pending.commands.length) return { reason: 'input' as const, executions };
+          const session = await this.options.store.getSession(run.sessionId);
+          if (session?.parentSessionId === null) {
+            const human = await this.options.store.readHumanWorkState({
+              expectedStoreId: scope.command.originStoreId,
+              sessionId: run.sessionId,
+              subjectId: scope.command.subjectId,
+            });
+            for (const id of human.pendingInputIds) {
+              const raw = await this.options.store.getCommand(id);
+              const body = raw?.request as {
+                observedRunId?: string;
+                contextSelectionId?: string;
+              } | null;
+              const fact = raw?.receipt as { state?: string } | null;
+              if (
+                raw?.kind === 'human.input' &&
+                raw.originStoreId === scope.command.originStoreId &&
+                raw.sessionId === run.sessionId &&
+                raw.subjectId === scope.command.subjectId &&
+                raw.cancelRequestedAt === null &&
+                body?.observedRunId === run.id &&
+                body.contextSelectionId === run.contextSelectionId &&
+                (fact?.state === 'pending' || fact?.state === 'unresolved')
+              )
+                return { reason: 'input' as const, executions };
+            }
+          }
+        }
         if (Date.now() >= deadline) return { reason: 'timeout' as const, executions };
         if (!this.options.waitForChange) throw new AgentError('wait_unavailable');
         const events = await this.options.waitForChange(cursor, signal, deadline - Date.now());
@@ -1556,6 +1596,24 @@ export class ExtensionHost {
               throw new AgentError('operation_definition_unavailable');
             const afterTurnAuthorization = options.continuation
               ? await (async () => {
+                  if (options.continuation?.kind === 'agent_completion') {
+                    try {
+                      return await this.options.authorizeAfterTurn?.(
+                        scope,
+                        executionId,
+                        agent!.configuration,
+                      );
+                    } catch (error) {
+                      if (
+                        !(error instanceof AgentError) ||
+                        !['after_turn_not_authorized', 'after_turn_scope_unsupported'].includes(
+                          error.code,
+                        )
+                      )
+                        throw error;
+                      return undefined;
+                    }
+                  }
                   if (
                     options.continuation?.kind !== 'after_turn' ||
                     options.request.kind !== 'agent' ||
@@ -1566,31 +1624,61 @@ export class ExtensionHost {
                   return this.options.authorizeAfterTurn(scope, executionId, agent.configuration);
                 })()
               : undefined;
-            const ref = await this.options.store.ensureOperation({
-              expectedStoreId: scope.command.originStoreId,
-              owner: scope.owner,
-              sessionId: scope.command.sessionId,
-              extensionId: extension.id,
-              originCommandId: scope.command.id,
-              parentExecutionId: executionId,
-              operationKey: options.key,
-              request: options.request,
-              ...(afterTurnAuthorization ? { afterTurnAuthorization } : {}),
-              ...(options.resultRequirement
-                ? {
-                    resultRequirement: options.resultRequirement,
-                    resultRequirementSchema: extension.records!.find(
-                      (record) =>
-                        record.contentType === options.resultRequirement!.contentType &&
-                        record.contentVersion === options.resultRequirement!.contentVersion,
-                    )!.schema,
-                  }
-                : {}),
-              cancellation: options.cancellation ?? 'attached',
-              ...(options.resultDelivery ? { resultDelivery: options.resultDelivery } : {}),
-              ...(agent ? { childConfiguration: agent.configuration } : {}),
-              ...(options.planRecordKey ? { planRecordKey: options.planRecordKey } : {}),
-            });
+            const ref = await this.options.store
+              .ensureOperation({
+                expectedStoreId: scope.command.originStoreId,
+                owner: scope.owner,
+                sessionId: scope.command.sessionId,
+                extensionId: extension.id,
+                originCommandId: scope.command.id,
+                parentExecutionId: executionId,
+                operationKey: options.key,
+                request: options.request,
+                ...(afterTurnAuthorization ? { afterTurnAuthorization } : {}),
+                ...(options.continuation?.kind === 'agent_completion'
+                  ? { collaborationCompletion: true }
+                  : {}),
+                ...(options.resultRequirement
+                  ? {
+                      resultRequirement: options.resultRequirement,
+                      resultRequirementSchema: extension.records!.find(
+                        (record) =>
+                          record.contentType === options.resultRequirement!.contentType &&
+                          record.contentVersion === options.resultRequirement!.contentVersion,
+                      )!.schema,
+                    }
+                  : {}),
+                cancellation: options.cancellation ?? 'attached',
+                ...(options.resultDelivery ? { resultDelivery: options.resultDelivery } : {}),
+                ...(agent ? { childConfiguration: agent.configuration } : {}),
+                ...(options.planRecordKey ? { planRecordKey: options.planRecordKey } : {}),
+              })
+              .catch(async (error: unknown) => {
+                if (options.continuation?.kind !== 'agent_completion') throw error;
+                const original = await this.options.store
+                  .getOperation({
+                    extensionId: extension.id,
+                    sessionId: scope.command.sessionId,
+                    key: options.key,
+                    subjectId: scope.command.subjectId,
+                    originStoreId: scope.command.originStoreId,
+                  })
+                  .catch(() => null);
+                const command = original
+                  ? await this.options.store.getCommand(original.commandId).catch(() => null)
+                  : null;
+                const request = command?.request as Record<string, Json> | undefined;
+                if (
+                  !original ||
+                  !request ||
+                  request.parentExecutionId !== executionId ||
+                  request.configurationId !==
+                    (options.request as { configurationId: string }).configurationId ||
+                  canonicalJson(request.input!) !== canonicalJson(options.request.input)
+                )
+                  throw error;
+                return original;
+              });
             const plannedJob =
               ref.executionId &&
               kind === 'job' &&
@@ -1899,6 +1987,91 @@ export class ExtensionHost {
           });
           return { commandId: command.id, status: command.status, receipt: command.receipt };
         },
+        sendStableAgentMessage: async (target, content) => {
+          this.options.assertAcceptingWork?.();
+          scope.signal.throwIfAborted();
+          if (
+            !this.options.artifacts ||
+            typeof content !== 'string' ||
+            !content.trim() ||
+            Buffer.byteLength(content) > 1048576
+          )
+            throw new AgentError('invalid_agent_message');
+          const commandId = `agent-mail-${await semanticDigest({
+            storeId: scope.command.originStoreId,
+            sessionId: scope.command.sessionId,
+            executionId,
+            extensionId: extension.id,
+          })}`;
+          const prior = await this.options.store.getCommand(commandId);
+          if (prior) {
+            const body = prior.request as Record<string, Json>;
+            const artifact = body.body as Record<string, Json>;
+            if (
+              body.stableTarget !== target ||
+              artifact.hash !== createHash('sha256').update(content).digest('hex')
+            )
+              throw new AgentError('operation_conflict');
+            return;
+          }
+          let ref: OperationRef | 'parent' = 'parent';
+          if (target !== 'parent') {
+            const page = await this.options.store.listStableAgents({
+              expectedStoreId: scope.command.originStoreId,
+              sessionId: scope.command.sessionId,
+              extensionId: extension.id,
+              subjectId: scope.command.subjectId,
+              agentIds: [target],
+            });
+            if (!page.items[0]) throw new AgentError('agent_unavailable');
+            ref = page.items[0].ref;
+          }
+          const selected = await this.options.store.readAgentMessageTarget({
+            expectedStoreId: scope.command.originStoreId,
+            sourceExecutionId: executionId,
+            extensionId: extension.id,
+            subjectId: scope.command.subjectId,
+            target: ref,
+          });
+          const body = await this.options.artifacts.publish({
+            expectedStoreId: scope.command.originStoreId,
+            sessionId: scope.command.sessionId,
+            subjectId: scope.command.subjectId,
+            refId: commandId,
+            scope: { kind: 'execution', id: executionId },
+            mediaType: 'text/plain; charset=utf-8',
+            content: new TextEncoder().encode(content),
+          });
+          await this.options.store
+            .queueAgentMessage({
+              expectedStoreId: scope.command.originStoreId,
+              owner: scope.owner,
+              commandId,
+              originCommandId: scope.command.id,
+              sourceExecutionId: executionId,
+              extensionId: extension.id,
+              key: commandId,
+              targetSessionId: selected.sessionId,
+              contextSelectionId: selected.contextSelectionId,
+              ...(ref === 'parent' ? {} : { targetCarrierExecutionId: ref.executionId! }),
+              ...(selected.targetRunId === null ? {} : { targetRunId: selected.targetRunId }),
+              stableTarget: target,
+              body,
+            })
+            .catch(async (error: unknown) => {
+              const original = await this.options.store.getCommand(commandId).catch(() => null);
+              const request = original?.request as Record<string, Json> | undefined;
+              if (
+                !original ||
+                !request ||
+                request.stableTarget !== target ||
+                request.sourceExecutionId !== executionId ||
+                canonicalJson(request.body!) !== canonicalJson(body as unknown as Json)
+              )
+                throw error;
+              return original;
+            });
+        },
         listAgentMessages: async (options = {}) => {
           if (Object.keys(options).some((key) => !['afterSeq', 'upperSeq', 'limit'].includes(key)))
             throw new AgentError('invalid_mail_cursor');
@@ -2018,6 +2191,298 @@ export class ExtensionHost {
               subjectId: scope.command.subjectId,
             });
           return actual;
+        },
+        listStableAgents: async (options = {}) => {
+          const page = await this.options.store.listStableAgents({
+            expectedStoreId: scope.command.originStoreId,
+            sessionId: scope.command.sessionId,
+            extensionId: extension.id,
+            subjectId: scope.command.subjectId,
+            callerRootWorkCommandId: scope.command.rootWorkCommandId,
+            callerRootWorkSeq: scope.command.rootWorkSeq,
+            ...options,
+          });
+          for (const item of page.items) {
+            if (!item.lastResultSource) continue;
+            const result = JSON.parse(item.lastResultSource.content) as {
+              content?: string;
+              modelContent?: { kind: string; encoding: string; reference: ArtifactRef };
+            } | null;
+            const body = result?.modelContent;
+            if (body) {
+              const reference = body.reference;
+              const sourceExecution =
+                reference?.scope?.kind === 'execution'
+                  ? await this.options.store.getExecution(reference.scope.id)
+                  : null;
+              if (
+                !this.options.artifacts ||
+                body.kind !== 'artifact' ||
+                body.encoding !== 'utf-8' ||
+                !sourceExecution ||
+                sourceExecution.originStoreId !== scope.command.originStoreId ||
+                sourceExecution.sessionId !== scope.command.sessionId ||
+                sourceExecution.childSessionId !== item.agentId ||
+                !['succeeded', 'failed', 'cancelled', 'outcome_unknown'].includes(
+                  sourceExecution.status,
+                )
+              )
+                throw new AgentError('task_result_unverifiable');
+              const bytes = await this.options.artifacts.read({
+                expectedStoreId: scope.command.originStoreId,
+                refId: reference.id,
+                sessionId: scope.command.sessionId,
+                subjectId: scope.command.subjectId,
+                scope: reference.scope!,
+                signal: scope.signal,
+              });
+              if (String(bytes.byteLength) !== reference.size)
+                throw new AgentError('task_result_unverifiable');
+              item.lastResultSource = {
+                content: new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(bytes),
+              };
+            } else if (typeof result?.content === 'string')
+              item.lastResultSource = { content: result.content };
+          }
+          return page;
+        },
+        applyAgentCommand: async (input) => {
+          this.options.assertAcceptingWork?.();
+          scope.signal.throwIfAborted();
+          const commandId = `agent-control-${await semanticDigest({
+            storeId: scope.command.originStoreId,
+            sessionId: scope.command.sessionId,
+            executionId,
+            extensionId: extension.id,
+          })}`;
+          // Recovery reads the original immutable receipt before resolving any current target.
+          const prior = await this.options.store.getCommand(commandId);
+          if (prior) {
+            const body = prior.request as Record<string, Json>;
+            if (
+              body.action !== input.kind ||
+              body.agentId !== input.agentId ||
+              body.content !== (input.content ?? null) ||
+              body.sourceExecutionId !== executionId
+            )
+              throw new AgentError('operation_conflict');
+            return prior.receipt as unknown as import('../storage/agent-collaboration').AgentCommandReceipt;
+          }
+          const page = await this.options.store.listStableAgents({
+            expectedStoreId: scope.command.originStoreId,
+            sessionId: scope.command.sessionId,
+            extensionId: extension.id,
+            subjectId: scope.command.subjectId,
+            agentIds: [input.agentId],
+          });
+          const observed = page.items[0];
+          if (!observed) throw new AgentError('agent_unavailable');
+          const sourceOperation = await this.options.store.getExecution(observed.ref.executionId!);
+          if (!sourceOperation?.childConfiguration) throw new AgentError('operation_unverifiable');
+          // Only the immutable configuration identity is taken from this preliminary read.
+          // The Store selects and pins the actual target after asynchronous resolution finishes.
+          const agent =
+            input.kind === 'follow_up' && observed.runId !== null
+              ? await this.options.resolveAgent?.(
+                  observed.configurationId,
+                  scope,
+                  executionId,
+                  source,
+                  observed.runId
+                    ? { executionId: observed.ref.executionId!, afterRunId: observed.runId }
+                    : undefined,
+                )
+              : undefined;
+          try {
+            const configuration = agent?.configuration ?? sourceOperation.childConfiguration;
+            let afterTurnAuthorization:
+              | import('../storage/types').AfterTurnAuthorization
+              | undefined;
+            if (input.kind === 'follow_up' && agent && this.options.authorizeAfterTurn) {
+              try {
+                afterTurnAuthorization = await this.options.authorizeAfterTurn(
+                  scope,
+                  executionId,
+                  agent.configuration,
+                );
+              } catch (error) {
+                if (
+                  !(error instanceof AgentError) ||
+                  !['after_turn_not_authorized', 'after_turn_scope_unsupported'].includes(
+                    error.code,
+                  )
+                )
+                  throw error;
+              }
+            }
+            const command = await this.options.store
+              .applyAgentCommand({
+                expectedStoreId: scope.command.originStoreId,
+                owner: scope.owner,
+                sessionId: scope.command.sessionId,
+                extensionId: extension.id,
+                originCommandId: scope.command.id,
+                parentExecutionId: executionId,
+                commandId,
+                operationKey: commandId,
+                agentId: input.agentId,
+                kind: input.kind,
+                ...(input.content === undefined ? {} : { content: input.content }),
+                request: {
+                  kind: 'agent',
+                  configurationId: observed.configurationId,
+                  input: { content: input.content ?? '' },
+                },
+                childConfiguration: configuration,
+                cancellation: 'attached',
+                collaborationCompletion: true,
+                ...(afterTurnAuthorization ? { afterTurnAuthorization } : {}),
+              })
+              .catch(async (error: unknown) => {
+                const original = await this.options.store.getCommand(commandId).catch(() => null);
+                const request = original?.request as Record<string, Json> | undefined;
+                if (
+                  !original ||
+                  !request ||
+                  request.action !== input.kind ||
+                  request.agentId !== input.agentId ||
+                  request.sourceExecutionId !== executionId ||
+                  request.content !== (input.content ?? null)
+                )
+                  throw error;
+                const receipt =
+                  original.receipt as unknown as import('../storage/agent-collaboration').AgentCommandReceipt;
+                return { receipt, start: receipt.mode === 'new_turn' };
+              });
+            if (command.start) {
+              if (!agent) throw new AgentError('child_configuration_unavailable');
+              const ref = command.receipt.ref;
+              const planned = await this.options.store.getExecution(ref.executionId!);
+              if (planned?.status === 'planned' && !this.operations.has(ref.commandId)) {
+                const release = scope.bindings?.retain();
+                const task = this.performOperation(
+                  ref,
+                  scope,
+                  executionId,
+                  source,
+                  agent.definition,
+                  'job',
+                ).finally(async () => {
+                  await release?.();
+                  await agent.disposeUnused();
+                });
+                this.operations.set(ref.commandId, task);
+                this.operationSessions.set(ref.commandId, scope.owner.sessionId);
+                void task
+                  .finally(() => {
+                    this.operations.delete(ref.commandId);
+                    this.operationSessions.delete(ref.commandId);
+                    this.options.onActivity?.(scope.owner.sessionId);
+                  })
+                  .catch(() => {});
+                return command.receipt;
+              }
+            }
+            await agent?.disposeUnused();
+            return command.receipt;
+          } catch (error) {
+            await agent?.disposeUnused();
+            throw error;
+          }
+        },
+        waitAgentEvents: async (options = {}) => {
+          if (!this.options.waitForChange) throw new AgentError('wait_unavailable');
+          const duration = options.waitMs;
+          if (
+            duration !== undefined &&
+            duration !== null &&
+            (!Number.isSafeInteger(duration) || duration < 0)
+          )
+            throw new AgentError('invalid_wait_timeout');
+          const current = await this.options.store.getExecution(executionId);
+          const run = current?.runId ? await this.options.store.getRun(current.runId) : null;
+          const observationEnd =
+            duration === null ||
+            duration === undefined ||
+            duration > Number.MAX_SAFE_INTEGER - Date.now()
+              ? Number.MAX_SAFE_INTEGER
+              : Date.now() + duration;
+          const deadline = Math.min(observationEnd, run?.deadlineAt ?? Number.MAX_SAFE_INTEGER);
+          let cursor = (await this.options.store.getMetadata()).lastChangeCursor;
+          const callerSession = await this.options.store.getSession(scope.command.sessionId);
+          const humanScope =
+            callerSession?.parentSessionId === null
+              ? {
+                  expectedStoreId: scope.command.originStoreId,
+                  sessionId: scope.command.sessionId,
+                  subjectId: scope.command.subjectId,
+                }
+              : null;
+          const initialHuman = humanScope
+            ? await this.options.store.readHumanWorkState(humanScope)
+            : null;
+          for (;;) {
+            scope.signal.throwIfAborted();
+            const page = await this.options.store.listAgentEvents({
+              expectedStoreId: scope.command.originStoreId,
+              sessionId: scope.command.sessionId,
+              extensionId: extension.id,
+              subjectId: scope.command.subjectId,
+              afterSeq: options.afterSeq ?? '0',
+            });
+            if (page.events.length)
+              return { reason: 'events' as const, events: page.events, nextSeq: page.nextSeq };
+            if (run) {
+              const [inputs, human] = await Promise.all([
+                this.options.store.listPendingInputs({
+                  expectedStoreId: scope.command.originStoreId,
+                  sessionId: scope.command.sessionId,
+                  kind: 'input.steer',
+                  targetRunId: run.id,
+                  limit: 1,
+                }),
+                humanScope
+                  ? this.options.store.readHumanWorkState(humanScope)
+                  : Promise.resolve(null),
+              ]);
+              const latest = human?.latestInputCommandId
+                ? await this.options.store.getCommand(human.latestInputCommandId)
+                : null;
+              const receipt = latest?.receipt as Record<string, Json> | null;
+              if (
+                inputs.commands.length ||
+                human?.pendingInputIds.length ||
+                receipt?.applicationState === 'queued' ||
+                (human &&
+                  initialHuman &&
+                  (human.latestInputCommandId !== initialHuman.latestInputCommandId ||
+                    human.controlRevision !== initialHuman.controlRevision))
+              )
+                return { reason: 'input' as const, events: [], nextSeq: page.nextSeq };
+            }
+            if (Date.now() >= deadline)
+              return { reason: 'timeout' as const, events: [], nextSeq: page.nextSeq };
+            const updates = await this.options.waitForChange(
+              cursor,
+              scope.signal,
+              Math.min(30000, deadline - Date.now()),
+            );
+            if (updates.length) cursor = updates.at(-1)!.cursor;
+            for (const event of updates) {
+              if (event.sessionId !== scope.command.sessionId) continue;
+              if (event.type === 'human.input_registered')
+                return { reason: 'input' as const, events: [], nextSeq: page.nextSeq };
+              if (event.type !== 'command.accepted') continue;
+              const command = await this.options.store.getCommand(event.objectId);
+              const body = command?.request as Record<string, Json> | undefined;
+              if (
+                body &&
+                (body.kind === 'input.steer' || body.kind === 'result.include') &&
+                body.targetRunId === run?.id
+              )
+                return { reason: 'input' as const, events: [], nextSeq: page.nextSeq };
+            }
+          }
         },
         listAgents: async (options = {}) => {
           if (Object.keys(options).some((key) => !['afterSeq', 'upperSeq', 'limit'].includes(key)))

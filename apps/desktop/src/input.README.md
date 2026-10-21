@@ -2,7 +2,11 @@
 
 [input.ts](input.ts) 的 `DesktopInput` 只消费已准入的 `AgentClient` 与生成 DTO。调用者在点击时提供准确 Session、expectedStoreId、contextSelectionId、targetRunId/afterRunId 和新用户意图的 commandId。模块不从选中视图或 activeRun 猜目标，不拥有 Runtime、Store 或 Service 生命周期。
 
-`start`、`steer`、`followUp` 保存深拷贝冻结的原请求。同 commandId/相等内容共用 in-flight Promise，响应未知后也不再发送；不同 Session/内容拒绝。`lookup` 仅查询原 Command，并在原 receipt 指向准确 Run 时读取终态。steer 查询原 targetRun；follow-up accepted 尚无新 Run 时只保持 accepted。applied 不表示模型消费完成；terminal 必须另读取真实 Run，其 completed/failed/cancelled/interrupted 字段保持，不统一伪装成功。
+`start`、`steer`、`followUp` 保存深拷贝冻结的原请求。同 commandId/相等内容共用 in-flight Promise，响应未知后也不再发送；不同 Session/内容拒绝。`lookup` 仅查询原 Command，沿 Client 的 `readOrdinaryCommandApplication` 核准确业务 Command/Run，不要求公开 ID 等于业务 Run.originCommandId。旧直接 steer 仍核原 targetRun；真实人类决定另开工作时以已封存业务回执绑定新 Run，原技术目标和请求保持不变。accepted 尚无已应用业务时不借原 targetRun 的终态冒称输入已完成。applied 不表示模型消费完成；terminal 必须另读取真实业务 Run，其 completed/failed/cancelled/interrupted 字段保持，不统一伪装成功。
+
+正式 Native 的[宿主 journal](../electron/caller-journal.ts)在核原公开 ID、请求摘要、主体和 Store/Workspace/Session 后，复用同一业务查回器。已封存的人类补充可沿实际 `input.steer` 业务绑定原 Run，独立工作可绑定新的业务 Run；旧技术 steer 仍核原 target 和 contextSelection。applied 的只读观察允许顶层 Run 为空，实际观察 Model 单独验证；unresolved 保持 accepted。冷查回只读原身份，不获得重新提交权限。[宿主回归](../test/native-caller.test.ts)覆盖这些分支与外来、未应用和伪造绑定拒绝。
+
+进度或需澄清的已封存观察可核真实解释 Model/Run，但不把解释轮投影为该输入的业务 Run。需澄清的公开命令保持 accepted，原正文通过会话视图读取；查询不创建业务、取消或替代提交。[纯回归](../test/input.test.ts)另核业务身份、外来/未应用回执拒绝、pending steer 不伪终结，以及解释观察不冒充业务轮。
 
 `cancel(originalCommandId, cancelCommandId)` 固定原工作 Session/Store/command，只提交一次取消意图；重复按键共享原取消。取消 receipt 不表示实际停止。响应未知保留原身份，通过 `lookup` 核实，不重新选取当前 Run 或换 Store。
 

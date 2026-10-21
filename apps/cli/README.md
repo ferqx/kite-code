@@ -26,6 +26,8 @@ Source 审批 Host、完整安全分页和跨 Session 原申请 journal 已接�
 
 输出分别打印 `accepted <原 command ID>` 和真实 `terminal`。HTTP 202 不产生成功退出；CLI 查询原 Command 与其 Run/Action Execution，准备下一 attempt 的 predecessor 终态不能冒充本次完成。退出码：0 成功、1 失败、2 结果未知、130 用户取消/已确认取消。缺省前台等待没有隐式总期限；只有明确提供 `timeoutMs` 才限制本地等待，超时不取消已受理的 Service 工作。等待超时及网络结果不明保留原身份，不重放意图。
 
+普通输入已封存为需澄清时，CLI 输出原 command ID、完整 clarification 及准确解释出处，以 `needs_clarification`／退出码 3 返回。公开命令保持 accepted、业务 Run 为空；JSON Work 的 outcome 不把解释轮当业务 Run。它不进入审批 stdin、不制造 Interaction、不取消原工作；重新观察只查原输入，后续由新的真实输入澄清归属。此已知待输入状态与结果未知、真实待审批分别处理，配套／共享宿主沿原退出生命周期收尾。[回归](test/ordinary-command-http.test.ts)核真实 HTTP/SQLite、冷 GET-only、无替代提交和原待决范围。
+
 Ctrl+C 保存中断意图，并用原 `expectedStoreId`/commandId 精确提交一次 cancel；即使尚无 runId，也不取消别的当前 Run。执行终态与 cancel 受理分开输出。`CommandOutcome.cancellationAttempted` 只在实际尝试提交原取消请求后为 true（丢失回执也保留）；宿主跨观察轮次依据该事实停止再次提交，不能以 signal 已 aborted 推断取消已经发送。信号在异步读取 Interaction 期间到达而本轮先返回 waiting 时，下一次观察仍须处理该取消意图。配套进程真实退出由 launcher 独立拥有，网络断开不停止 Service。
 
 验证：`bun run --cwd apps/cli typecheck`、`build`、`test` 和根 [thin-clients](../../tests/isolated/unified-agent/thin-clients.test.ts) 真实 Service 测试。P2 非交互调用者不替代 P5 完整终端交互或三平台发行验收。
@@ -80,6 +82,10 @@ plan_review 使用同一显式回答回调：收到原 Interaction 后，approve
 
 知识 `selectedSkills` 与 Workflow `extensionInputs` 可以共存，各自保留原 Command。激活前读取原 Session view；idle 使用 `run.start`，有原活动 Run 时用准确 `afterRunId/contextSelectionId` 的 `input.follow_up`。便携 [run helper](src/index.ts) 对两类意图共用冻结、原 ID 查回与观察，不重发丢回执或更改原 Run 契约。目录 revision 仅用于完整分页，Service 仍在实际开始时重新绑定可信源。[配对测试](test/isolated/host-skills.test.ts)和[共享测试](test/isolated/shared-skills.test.ts)包含真实 argv、混合知识/Workflow、关闭及结构化输入零 Model、物理断线一 POST，以及活动 Run 的后续激活；实际结果见[实施进度](../../docs/plans/unified-agent-refactor-v1-progress.md)。
 
+2026-10-19本机原[argv host](test/isolated/host.test.ts)、[Skill host](test/isolated/host-skills.test.ts)与[101轮管理](test/isolated/session-context-management.test.ts)分别2项60断言5.47秒、7项85断言6.69秒、1项335断言5.77秒通过。resume明确Follow up同工作，第二Skill与管理探针明确原独立New task；实际public/raw/decision/business/Run及Model Source逐条核验。17MiB完整正文、两份Skill快照、原2+1与4+1业务/标题Provider、101业务+1压缩/202消息/分页Fork/Rewind/reset/delete/丢回执和原45/15/30秒整例预算保持。输入已applied后继续观察准确业务Run终态，不能以原公共输入受理或数组位置代替完成。
+
+原[状态宿主](test/isolated/status-host.test.ts)与[共享 argv](test/isolated/shared-cli.test.ts)整文件共7项278断言通过：独立 hold 明确新工作，resume 明确继续当前工作，核实际业务/Run/Model Source和准确 held Tool。原只读状态零效果、peer 保持、超过84KiB正文、detach/cancel和预算不变。[普通 caller 宿主](test/isolated/cli-caller-host.test.ts)整文件3项100断言通过，完整 Unicode/combining/CRLF 请求明确独立业务并核完整 JSON/digest/Source；前两项物理 POST 丢回执、SIGKILL 与冷 GET 场景保持。局部结果不替代整轮默认门禁。
+
 开发 TUI 宿主见 [host/tui.tsx](host/tui.tsx) 与 [host/tui-main.ts](host/tui-main.ts)。公开 `/tui-host` 的 `runTUIHost` 接收明确 `artifact/dataRoot/profile/workspace/thread` 和独立宿主退出 signal；`/tui-main` 提供纯 `parseTUIArguments` 与 `runTUIProcess`。help/version 和非终端拒绝均先于 profile 创建；没有制品 source fallback、隐式服务发现、argv token 或权限模式猜测；显式 `server` 选择既有共享服务。配对启动校验既有 Service/Bun SHA、profile/instance/build/API/capabilities，私有 bootstrap 不打印到终端。
 
 制品的普通文件、非软链和准确 SHA 校验在各平台保留；POSIX 另要求执行位，Windows 按原生进程启动语义接纳选定的 Bun `.exe`，不以缺失 Unix 执行位拒绝。此检查不替代发行制品的原生保护与 lease。[制品测试](test/artifact.test.ts)核当前真实 Bun、错误摘要、非文件与改写字节；模型 PTY 使用同一宿主校验。
@@ -94,7 +100,7 @@ plan_review 使用同一显式回答回调：收到原 Interaction 后，approve
 
 Ctrl+C 的整轮取消优先原活动 Run，而不是最近 pending steer/follow-up；该输入 command 的取消 authority 只取消输入自身。两次独立 Ctrl+C 的 quit 使用既有宿主 draft flush/paired stop 或 shared disconnect，正常保存失败仍保编辑器；EOF/SIGHUP 仍只是输入结束。具体功能和普通/诊断分流由[UI owner](../../packages/ui/src/tui/README.md#原-ink-展示与明确测试诊断)负责。新增公共展示事实的分页、来源、有限缓存与去重验证见[display 测试](test/isolated/tui-display.test.ts)和[timing 测试](test/isolated/tui-timing.test.ts)，真实宿主仍用原 [tui-host](test/isolated/tui-host.test.ts)、[models-host](test/isolated/tui-models-host.test.ts)和[finishing-input](test/isolated/tui-finishing-input-host.test.ts)的全部断言；本机证据不扩大到 Win/Linux 实测或阶段退出。
 
-宿主复用公开 `@kite-ai/ui/tui` 的单一 controller，读取同 Workspace 的完整固定上界 Session 目录和会话历史；原审批附件与 Model 正文经公共 SDK 全量验证后才显示。活动输入封存准确 Run/context selection，空闲输入创建新 Run；批准保存不等于执行完成，未知仅查询原 Command，不换 ID 或重发。`Ctrl+R` 选已有 Session，`Ctrl+N` 创建同 Workspace 新 Session（未确认创建时再次按键只查询原 ID），`Ctrl+K` 查询原未知工作，`Ctrl+C` 精确取消原工作且不退出共享 Service。`Ctrl+Q` 或明确 SIGTERM 才退出并关闭本宿主拥有的 paired Service；stdin EOF 停止视图读与输入，保留原等待任务且不默认批准，直到明确宿主退出。切换会话不取消旧工作。
+宿主复用公开 `@kite-ai/ui/tui` 的单一 controller，读取同 Workspace 的完整固定上界 Session 目录和会话历史；原审批附件与 Model 正文经公共 SDK 全量验证后才显示。活动输入封存准确 Run/context selection，空闲输入创建新 Run；批准保存不等于执行完成，未知仅查询原 Command，不换 ID 或重发。`Ctrl+R` 选已有 Session，`Ctrl+N` 创建同 Workspace 新 Session（未确认创建时再次按键只查询原 ID），`Ctrl+K` 查询原未知工作，`Ctrl+C` 精确取消原工作且不退出共享 Service。`Ctrl+Q` 或明确 SIGTERM 才退出并关闭本宿主拥有的 paired Service；普通 paired close 等待原 Service 完成终态保存和资源收尾，不再默认5秒强杀。Service 自身收到 SIGINT／SIGTERM 也进入同一 drain；共享连接的原 detach 语义保持。stdin EOF 停止视图读与输入，保留原等待任务且不默认批准，直到明确宿主退出。切换会话不取消旧工作。
 
 下述有限 slash 路由及紧随其后的 5 项／56 个断言记录早期开发宿主切片，只证明当时的宿主生命周期。当前 UI 功能以上述“当前正式与开发 TUI”说明和[UI owner](../../packages/ui/src/tui/README.md#原-ink-展示与明确测试诊断)为准，不再沿用早期切片的未完成状态。旧路径整体退役和三平台资格仍由整体门禁负责。开发入口的 buildId 只证明配套 Service entry 的准确 SHA，不是完整发行 candidate 身份。[test/isolated/tui-host.test.ts](test/isolated/tui-host.test.ts) 通过真实 argv/PTy 和构建 Service 验证宿主生命周期；平台与测试结果以实际验证记录为准。
 
@@ -253,6 +259,8 @@ TUI 观察不可用独立于快照读取失败：SSE 出错而 HTTP 仍健康时
 该[完整模型文件](test/isolated/tui-models-host.test.ts)的paired／shared两个40秒整链及原有限CAS review现消费[共享驱动](test/fixtures/tui-models-driver.ts)。原held Run仍model one；default改two的首次POST已收到response后抛原owned_lost_reply，明确查询前重复保存阻挡；effort high不影响原Run，原完成one／下一真实Run two/high、POST2／原GET1／HostMutation2保持。这是原回应后异常注入，不冒称物理socket毁损。18个原Bun expect及六项原Python检查等义保留，10秒观察／150ms key／5秒provider／6＋3秒退出不改；真实runTUIHost及默认开发Service／SQLite、开发raw daemon装配保持，Windows使用SID pipe和原Profile／instance的公共Lifecycle。paired实际TUI／同birth Service正常0，shared TUI detach保daemon live后其所属普通退出另核；unknown保错误和根。macOS完整3pass／23expects／10.44秒；新增退出观察误用pid-only onLaunched的真实红已保留并改透明真实spawn观察，准确范围归[本轮进度](../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-12tui-完整管理模型设置与主机状态的三端测试)。
 
 
+2026-10-19该模型整文件3项73断言12.15秒通过；后续独立探针明确New task，并沿public/raw/business/Run核实际one与two/high封存配置和成功Model原Source，原2POST/1GET/丢回执CAS/paired与shared退出及全部预算保持。[权限PTY整文件](test/isolated/tui-permissions-host.test.ts)另1项40断言15.57秒，第二、第三轮明确独立工作，核3/3/1业务Model、准确第三业务Command取消；原7业务+3审核、两效果两答案、grant2→clear0及40秒整例保持。两个证明Runtime只以deny-all读取原Model输入，前后cursor不变，不参与实际Service授权。
+
 开发 `job reconcile <root-session> --input <ReconcileJobRequest JSON> [--server <local socket>]` 使用原 profile/Workspace 的配对或共享 Service。input 固定 `kind:"job.reconcile"`、expectedStoreId、commandId、executionId、expectedResultRevision，不能提交 adapter、关联或结果。`src/job-reconcile.ts` 在输出中保存准确原意图，丢回应只 GET 原 Command，同一 Client/commandId 不重复 POST；闭合回执必须匹配原 Store/Session/Execution/revision。verified退出0，已知拒绝1，unresolved/accepted/坏回执/未知2。0只证明核实，不表示原 Run 已恢复或工具重新执行。
 
 Ctrl+C 中止该客户端的查询等待并返回130；共享模式仅detach，不取消原 Job 或其他工作。配套模式仍由所属进程关闭机制排空。`lookupJobReconcile` 可显式再查原申请；没有自动重发或后台轮询核实。CLI resume继续新任务、maintenance reconcile核实离线恢复journal，两者语义不变。[协议和参数](test/job-reconcile.test.ts)与[实际编译argv配对/共享宿主](test/isolated/job-reconcile-host.test.ts)分别验证丢回执/坏身份及冷外部ledger只查询一次、零重复效果与所属进程清理。
@@ -316,7 +324,7 @@ CLI 保持原 Command 的 Store/Session/Run scope；原 Session 中没有独立 
 
 该完整恢复文件已移除POSIX Python驱动，由[恢复驱动](test/fixtures/tui-recovery-pty.ts)使用共用Bun PTY／ConPTY。生成宿主经现有编译夹具处理标准file URL与真实Ink/React闭包，不回退源码。10秒读取、6＋3秒退出及30秒整例保持；冷强杀先核原Service存活，POSIX实际SIGKILL／Windows所属树强制终止后核host exit、PTY EOF与原Service消失，保原6秒Service期限。冷原Store／Session／commandId、唯一warm POST、cold零POST与原GET均保留；正常退出必须0与EOF。三端CI接线和本机macOS证据分别记录，Win/Linux实际资格仍待后续执行。
 
-[recovery-report-host.test.ts](test/isolated/recovery-report-host.test.ts) 与同一 PTY fixture 使用显式 program-host afterTurn policy、冻结 reader 角色/model/Task 与真实原 `job.report`：父 Run 已完成，独立 Child Job 批准且效果一次，冷恢复只生成唯一来源绑定的 report Run，report completion 通过原 ledger/SQLite 核实。该证据只覆盖 configured host，不证明默认制品已启用后台汇报。当前 macOS 开发资格不代表完整公共报告目录、全部崩溃窗口、其他平台或正式旧入口切换。
+[recovery-report-host.test.ts](test/isolated/recovery-report-host.test.ts) 与同一 PTY fixture 使用显式 program-host afterTurn policy、冻结 reader 角色/model/Task 与真实原 `job.report`：父 Run 已完成，独立 Child Job 批准且效果一次，冷恢复只生成唯一来源绑定的 report Run，report completion 通过原 ledger/SQLite 核实。该隔离测试宿主只将准确内部 `builtin.task/task@1` 显式置于模型表面，保留原定义、schema、版本、权限和恢复屏障；初始、step及恢复共用同一真实全局定义，普通配置没有启用旧协议的开关。该证据负责内部typed报告恢复，普通六工具的结果接纳归[Task owner](../../packages/agent/src/extensions/task/README.md)。当前 macOS 开发资格不代表全部公共报告、崩溃窗口或其他平台。
 
 ## 开发 TUI 输入编辑
 
@@ -340,7 +348,7 @@ UI 的 [真实 Job/child PTY](../../packages/ui/test/isolated/tui/executions.tes
 
 开发 TUI 的 `/plan`、`/plan <任务>` 与 Shift+Tab 复用公共 extensionInputs，不增加 profile/权限写入端口。空操作只切换原 Store/Workspace/Session 的下一次草稿；Planning 正文 POST 为 run.start 或原 Run 后的 input.follow_up，原 unknown 保冻结意图并只查询原 Command。模式不成为默认 Full 或跨会话授权。
 
-[tui-planning-host.test.ts](test/isolated/tui-planning-host.test.ts) 的 slash-task/draft-mode/active-queued/scope-draft 四个真实 80×24 场景使用[共享 Planning 驱动](test/fixtures/tui-planning-pty.ts)、系统临时目录、标准 file URL 与真实 built 默认 Service，显式替换 owned 配置为 files.read/write 和固定兼容 Model，无 Skill 参与。原 Full 下先写失败；约143KB真实 Plan Artifact 由公共 SDK 完整读取一次，首 answer POST/首原 GET 丢回应后仍只有一条原答案及原 GET 两次。SQLite 核实际决定 revision、原 Run Planning snapshot、单次写入、真实 planning.update 效果 receipt/completePlan 与最终 completed；所属 Service 正常收尾。该 canonical disposable workspace 不替代普通路径 alias 平台资格，active-queued 实际冻结原 Run/selection，旧 Model 释放并完成后才运行唯一新规划；scope-draft 保另一原 Session 未提交文字与 Planning 模式，零另 Session Run。原8秒 wait／Run、100ms key pump、6＋3秒正常退出及30秒整例保持；原41个Bun断言和6项Python检查保留。最终macOS完整4case实际4pass／143expects／10.70秒；客户端强杀后的申请意图查回、其他平台原生或完整正式旧入口仍未由此资格覆盖。
+[tui-planning-host.test.ts](test/isolated/tui-planning-host.test.ts) 的 slash-task/draft-mode/active-queued/scope-draft 四个真实 80×24 场景使用[共享 Planning 驱动](test/fixtures/tui-planning-pty.ts)、系统临时目录、标准 file URL 与真实 built 默认 Service，显式替换 owned 配置为 files.read/write 和固定兼容 Model，无 Skill 参与。原 Full 下先写失败；约143KB真实 Plan Artifact 由公共 SDK 完整读取一次，首 answer POST/首原 GET 丢回应后仍只有一条原答案及原 GET 两次。SQLite 核实际决定 revision、原 Run Planning snapshot、单次写入、真实 planning.update 效果 receipt/completePlan 与最终 completed；所属 Service 正常收尾。该 canonical disposable workspace 不替代普通路径 alias 平台资格，active-queued 实际冻结原 Run/selection，明确独立新计划意图后，原Run在安全边界收束，随后沿实际业务回执运行唯一新rootWork规划；scope-draft 保另一原 Session 未提交文字与 Planning 模式，零另 Session Run。原8秒 wait／Run、100ms key pump、6＋3秒正常退出及30秒整例保持；原41个Bun断言和6项Python检查保留。本轮macOS原完整4case实际4pass／152expects／43.77秒，active-queued另核准确public/raw/decision/business及原plan extensionInputs，父原两次Model与规划权限上限分别保持；客户端强杀后的申请意图查回、其他平台原生或完整正式旧入口仍未由此资格覆盖。
 
 ## 开发 TUI Workspace 文件候选
 
@@ -469,7 +477,7 @@ accepted Command保持pending；配置已保存须原subject/Store/Command kind/
 
 [journal实际文件测试](test/mcp-connection-journal.test.ts)5项174断言通过。[真实DefaultService/SQLite/HTTP Host](test/isolated/tui-mcp-connection-host.test.ts)4项90断言通过：两个普通Ask前零RPC、真实新建及warm复用、同Store冷removed-source原GET不重POST、明确cold新申请、实际丢调用方回应与冷duplicate GET-only、source漂移/foreign主体Store/坏有限结果拒绝。第四例实际102个Workspace，旧首100页不含当前w，而完整目录核验仍新建连接；准确legacy方法调用计数为0。控制端仅批准实际原卡，Model、credential、Run均0；丢回应hook不是物理socket破坏。
 
-[实际Host备份恢复](test/isolated/tui-mcp-connection-restore.test.ts)1项37断言、743ms：真实普通连接至ready后停Service/Runtime/Store、关journal并释放Profile lease，公开create/inspect/restore v9生成B。原727字节journal、A身份/Command/subject/SHA/ready保持；B以实际serverInfo重新准入，list/选原ID、lookup和duplicate submit均HTTP GET/POST/其他0、peer RPC保持2、Model/credential0、cursor保持16、原bytes不变。没有新B连接或重标；正常所属资源关闭及ownedroot清理确认。该例补足实际Port跨Store拒绝，独立于下面同Store冷TUI。
+[实际Host备份恢复](test/isolated/tui-mcp-connection-restore.test.ts)当前1项48断言、637ms：通过正式权限管理为准确Session/Workspace保存Full/trusted并核applied、原mutation ID和当前revision；注入policy仍是能力上限。真实连接ready后停Service/Runtime/Store、关journal并释放Profile lease，公开create/inspect/restore v16生成B。原771字节journal、A身份/Command/subject/SHA/ready保持；B以实际serverInfo重新准入，list/选原ID、lookup和duplicate submit均HTTP GET/POST/其他0、peer RPC保持2、Model/credential0、cursor和原bytes不变。原8秒等待与30秒整例、正常所属关闭及ownedroot清理保持，没有新B连接或重标。原失败发生在初始Auto审批待决、尚未进入备份，生产权限和恢复逻辑未改；此例独立于下面同Store冷TUI。
 
 [此前源码外80×24 PTY](test/isolated/tui-mcp-connection-pty.test.ts)1项61断言、10.85s，在固定文案locale修复后的fresh构建上，通过真实键盘暖申请、warm复用、paired退出、removed-source冷空目录选第二原ID零GET、显式原查回零POST，再恢复owned source并独立确认新申请。warm UI HTTP GET126/POST2、cold GET197/POST1，最后cold POST来自明确新确认；原查回ready但live=false，新申请新Job/created=true。Model/credential/Run0。shared TUI exit0时held Service仍live，随后持有的subprocess handle SIGTERM关闭并exit0；两TUI exit0、paired ESRCH、cleanupConfirmed=true、ownedroot删除。candidate `e25977303279ce68fc182f4db8f11030b9cde2c183d4717aed7774920de76212`，helper `b84e4e2fc7d02b2e2c1d81a3c940781a70d10140d1d13eb300d93d881ed288d5`，packet SHA `cbb47d49834713512c77dc0a2d378cf3a83c6edbfe013722a370c2452eab082b`。实际原IDs与分段计数保存在owned packet；红日志和旧sourcewindow保留。本例为英文实际终端，中文固定文案与外部metadata保真由[UI实际Ink测试](../../packages/ui/src/tui/README.md#mcp-显式连接与原申请)单独证明；正常生命周期不推定timeout/SIGKILL/异常cleanup或其他平台。v9原字节维护由[maintenance owner](../../packages/agent/src/maintenance/README.md#mcp-连接申请的独立离线资产)负责；完整OAuth、强制warm重连、增删与三平台仍未闭合。
 
@@ -534,3 +542,5 @@ Tools、Source修改／批准、强制重连、Auth、配置与冷配置七个�
 MCP 目录自动认证观察使用独立 `readDirectory`，只在真实 target.loginAllowed 资格成立时读取安全状态。不具资格的未 challenge auto HTTP 返回有限 unavailable 分支，不探 Vault、不推断凭据存在性；显式 Auth／Remove 和冷原 ID 查回仍走原端口。协议装配及来源校验归 [Service](../service/README.md)；目录与原 credential 零读取门禁由真实终端用例保留。
 
 TUI display 分别保留原请求输入、动态 `nextContext` 与累计实际 `usage`。Host 优先读取完整会话累计与基于已保存上下文的下一请求预测，核原请求／模型／Run／Store／Session；查询失败时只保留标为 observed 的有限实际用量，动态预测不可用。不可变原输入缓存不会遮住后来收到的 usage 或新增工具结果。具体口径见 [Core](../../packages/agent/src/context-estimate.README.md)，展示见[上下文指南](../../docs/handbook/clients/tui/guides/context-and-compaction.md)。
+
+普通输入生命周期使用 Client 的 `readOrdinaryCommandApplication`：原公开 ID 保持取消／查询身份，真实业务 Run 可有不同 origin；活动同工作补充仍沿准确业务回执绑定原 Run。进度输入 `human_input_observed` 在顶层 runId=null 时从真实 succeeded ordinary Model 的 observation 收束，答案读取保留原 public ID 与实际 execution／message，不能构造假 Run。纯控制 observed 无正文时不补造答案；技术收束 `human_work_deferred` 不打印业务成功。Host caller 原 requestDigest／subject／Store／Session 核验保留，HTTP 请求形状不变。[真实 HTTP／SQLite 测试](test/ordinary-command-http.test.ts)核首次工作、第二项公开／业务 ID 分离和进度 Model 的三个真实调用；[有限 CLI 回归](test/ordinary-command.test.ts)核业务等待与活动 Run 的观察收束。

@@ -172,30 +172,263 @@ try {
     (value) => value.selection!.executions.filter((row) => !!row.childSessionId).length === 2,
     'two child tasks recorded',
   );
-  const tasks = selected.selection!.executions.filter((row) => !!row.childSessionId);
+  const spawnTools = selected.selection!.executions.filter(
+    (row) => row.kind === 'tool' && row.definitionId === 'task.spawn',
+  );
+  assert.equal(spawnTools.length, 2);
+  const tasks = selected
+    .selection!.executions.filter((row) => !!row.childSessionId)
+    .map((carrier) => {
+      const tool = spawnTools.find((row) => row.id === carrier.parentExecutionId);
+      assert.ok(tool, 'each actual child carrier belongs to its precise spawn Tool');
+      assert.equal(tool.definitionVersion, '1');
+      const input = tool.toolInput as { prompt: string; taskName: string };
+      return { ...carrier, prompt: input.prompt, taskName: input.taskName };
+    })
+    .sort((a, b) => a.taskName.localeCompare(b.taskName));
+  assert.deepEqual(
+    tasks.map((task) => [task.taskName, task.prompt]),
+    [
+      ['child-0', 'CHILD_A'],
+      ['child-1', 'CHILD_B'],
+    ],
+  );
+  assert.equal(new Set(tasks.map((task) => task.childSessionId)).size, 2);
+  phase = 'actual-parent-long-wait';
+  const waiting = await until(
+    state,
+    (value) =>
+      value.selection!.executions.some((row) => {
+        const input = row.toolInput as { afterSeq?: string; waitMs?: number } | undefined;
+        return (
+          row.kind === 'tool' &&
+          row.definitionId === 'task.events' &&
+          ['dispatching', 'running'].includes(row.status) &&
+          input?.afterSeq === '0' &&
+          input.waitMs === 180000 &&
+          value.selection!.runs.some((run) => run.id === row.runId && run.isActive)
+        );
+      }),
+    'actual parent Tool waits 180000ms while its original Run remains active',
+  );
+  const parentWait = waiting.selection!.executions.find(
+    (row) =>
+      row.kind === 'tool' &&
+      row.definitionId === 'task.events' &&
+      ['dispatching', 'running'].includes(row.status),
+  )!;
+  assert.equal((parentWait.toolInput as { waitMs: number }).waitMs, 180000);
+  console.error(
+    'actual_parent_wait',
+    JSON.stringify({
+      executionId: parentWait.id,
+      runId: parentWait.runId,
+      status: parentWait.status,
+      input: parentWait.toolInput,
+    }),
+  );
   const environment = page.getByRole('region', { name: '环境信息', exact: true });
   if (!(await environment.isVisible()))
     await page.getByRole('button', { name: '显示环境信息', exact: true }).click();
+  const content = () => page.locator('.conversation').innerText();
+  const appended = new Map<string, string[]>();
   const open = async (index: number) => {
     await environment
       .locator(`[data-execution-id="${tasks[index]!.id}"]`)
       .getByRole('button', { name: /^查看子 Agent 详情/ })
       .click();
     await page.getByRole('button', { name: '返回主会话', exact: true }).waitFor();
+    const expected = tasks[index]!.prompt;
+    const body = await until(
+      content,
+      (value) => value.includes(`${expected}_INITIAL_TAIL`),
+      `exact ${expected} history visible`,
+    );
+    for (const other of tasks.filter((_, otherIndex) => otherIndex !== index))
+      assert.ok(!body.includes(`${other.prompt}_INITIAL_TAIL`), 'another child history is absent');
+    for (const marker of appended.get(expected) ?? [])
+      assert.ok(body.includes(marker), `retained actual appended tail ${marker}`);
   };
-  const close = async () => {
-    await page.getByRole('button', { name: '返回主会话', exact: true }).click();
+  const close = async (viaSidebar = false) => {
+    await page
+      .getByRole('button', { name: viaSidebar ? 'Stream Parent' : '返回主会话', exact: true })
+      .click();
     await page.locator('.session-header').getByTitle('Stream Parent', { exact: true }).waitFor();
+    await until(
+      async () => ({ facts: await state(), body: await content() }),
+      ({ facts, body }) => {
+        const wait = facts.selection!.executions.find((row) => row.id === parentWait.id);
+        const run = facts.selection!.runs.find((row) => row.id === parentWait.runId);
+        return wait && ['dispatching', 'running'].includes(wait.status) && run?.isActive
+          ? body.includes('PARENT_WAITING')
+          : !!run && !run.isActive && body.includes('PARENT_DONE');
+      },
+      'return restores parent body qualified by its actual original wait and Run state',
+    );
+    await until(
+      () => page.locator('.conversation-loading').count(),
+      (value) => value === 0,
+      'parent history loading ends',
+    );
+    const draft = page.getByRole('textbox', { name: '当前会话私有草稿', exact: true });
+    const original = await draft.inputValue();
+    const probe = `${original}NAVIGATION_DRAFT_PROBE`;
+    await draft.fill(probe);
+    assert.equal(await draft.inputValue(), probe, 'parent composer responds after child return');
+    await draft.fill(original);
+    assert.equal(await draft.inputValue(), original, 'original parent private draft restored');
   };
-  const content = () => page.locator('.conversation').innerText();
+  phase = 'cold-first-child-held-full-directory';
+  const firstCard = environment
+    .locator(`[data-execution-id="${tasks[0]!.id}"]`)
+    .getByRole('button', { name: /^查看子 Agent 详情/ });
+  const firstLabel = await firstCard.getAttribute('aria-label');
+  assert.ok(firstLabel?.startsWith('查看子 Agent 详情：'));
+  const firstTitle = firstLabel!.slice('查看子 Agent 详情：'.length);
+  const beforeColdCalls = (await count()).calls;
+  await app.evaluate(() => {
+    const host = globalThis as typeof globalThis & {
+      coldChildDirectoryGate?: {
+        heldFull: number;
+        exactQueries: number;
+        businessPosts: number;
+        status?: number;
+        released: boolean;
+        release(): void;
+      };
+    };
+    let release!: () => void;
+    const pending = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const gate = {
+      heldFull: 0,
+      exactQueries: 0,
+      businessPosts: 0,
+      status: undefined as number | undefined,
+      released: false,
+      release() {
+        gate.released = true;
+        release();
+      },
+    };
+    host.coldChildDirectoryGate = gate;
+    const original = globalThis.fetch;
+    globalThis.fetch = Object.assign(
+      async (...args: Parameters<typeof fetch>) => {
+        const url = new URL(String(args[0]));
+        const method = args[1]?.method ?? (args[0] instanceof Request ? args[0].method : 'GET');
+        if (!gate.released && method === 'POST') gate.businessPosts++;
+        const directory = method === 'GET' && url.pathname === '/v1/background-executions';
+        if (!gate.released && directory && url.searchParams.has('executionId')) gate.exactQueries++;
+        const response = await original(...args);
+        if (
+          !gate.released &&
+          directory &&
+          url.searchParams.get('rootSessionId') === 'parent' &&
+          !url.searchParams.has('executionId')
+        ) {
+          gate.heldFull++;
+          gate.status = response.status;
+          await pending;
+        }
+        return response;
+      },
+      { preconnect: original.preconnect },
+    );
+  });
+  try {
+    await environment.getByRole('button', { name: '刷新子 Agent', exact: true }).click();
+    await until(
+      () =>
+        app.evaluate(() => {
+          const gate = (
+            globalThis as typeof globalThis & {
+              coldChildDirectoryGate?: { heldFull: number; status?: number; released: boolean };
+            }
+          ).coldChildDirectoryGate;
+          return gate && { heldFull: gate.heldFull, status: gate.status, released: gate.released };
+        }),
+      (gate) => (gate?.heldFull ?? 0) > 0 && gate?.status === 200 && !gate.released,
+      'actual same-parent full directory HTTP200 held; exact executionId GETs remain unheld',
+    );
+    const firstOpenedAt = Date.now();
+    await open(0);
+    await page.locator('.session-header').getByTitle(firstTitle, { exact: true }).waitFor();
+    const firstOpenMs = Date.now() - firstOpenedAt;
+    const active = await state();
+    assert.ok(active.selection!.runs.some((run) => run.id === parentWait.runId && run.isActive));
+    assert.ok(
+      active.selection!.executions.some(
+        (row) => row.id === parentWait.id && ['dispatching', 'running'].includes(row.status),
+      ),
+    );
+    assert.equal((await count()).children.length, 2);
+    assert.deepEqual(
+      (await count()).calls,
+      beforeColdCalls,
+      'cold readonly child open creates no Model replay',
+    );
+    const gate = await app.evaluate(() => {
+      const value = (
+        globalThis as typeof globalThis & {
+          coldChildDirectoryGate?: {
+            heldFull: number;
+            exactQueries: number;
+            businessPosts: number;
+            status?: number;
+            released: boolean;
+          };
+        }
+      ).coldChildDirectoryGate;
+      return (
+        value && {
+          heldFull: value.heldFull,
+          exactQueries: value.exactQueries,
+          businessPosts: value.businessPosts,
+          status: value.status,
+          released: value.released,
+        }
+      );
+    });
+    assert.equal(gate!.released, false);
+    assert.ok(
+      gate!.exactQueries > 0,
+      'fresh exact carrier query ran while full directory remained held',
+    );
+    assert.equal(gate!.businessPosts, 0);
+    console.log(
+      JSON.stringify({
+        coldFirstChild: {
+          gate,
+          firstOpenMs,
+          title: firstTitle,
+          exactCarrierId: tasks[0]!.id,
+          exactChildSessionId: tasks[0]!.childSessionId,
+          expectedTail: `${tasks[0]!.prompt}_INITIAL_TAIL`,
+          originalWaitStillActive: true,
+          activeChildren: 2,
+          priorChildOpens: 0,
+        },
+      }),
+    );
+  } finally {
+    await app.evaluate(() => {
+      (
+        globalThis as typeof globalThis & { coldChildDirectoryGate?: { release(): void } }
+      ).coldChildDirectoryGate?.release();
+    });
+  }
+  await close();
   phase = 'first-live-child';
   await open(0);
   const first = await until(
     content,
-    (value) => /CHILD_[AB]_INITIAL_TAIL/.test(value),
+    (value) => value.includes(`${tasks[0]!.prompt}_INITIAL_TAIL`),
     'full >100KiB active prefix rendered automatically',
   );
   const firstChild = first.includes('CHILD_A_INITIAL_TAIL') ? 'CHILD_A' : 'CHILD_B';
+  assert.equal(firstChild, tasks[0]!.prompt, 'rendered child matches its exact parent Tool prompt');
   const liveDelays: number[] = [];
   for (let tick = 0; tick < 5; tick++) {
     const marker = `${firstChild}_LIVE_${tick}`;
@@ -207,6 +440,7 @@ try {
       (value) => value.includes(marker),
       'live child marker visible without refresh',
     );
+    appended.set(firstChild, [...(appended.get(firstChild) ?? []), marker]);
     liveDelays.push(Date.now() - sent);
     console.error('live_tick', tick, Date.now() - sent, (await state()).environmentRevision);
   }
@@ -221,9 +455,19 @@ try {
     await until(
       content,
       (value) =>
-        /CHILD_[AB]_INITIAL_TAIL/.test(value) && !value.includes(`${firstChild}_INITIAL_TAIL`),
+        value.includes(`${tasks[1]!.prompt}_INITIAL_TAIL`) &&
+        !value.includes(`${firstChild}_INITIAL_TAIL`),
       'second child content isolated',
     );
+    const secondChild = tasks[1]!.prompt;
+    const secondTail = `${secondChild}_REENTRY_TAIL`;
+    await fetch(`${control}/step?child=${secondChild}&marker=${secondTail}`);
+    await until(
+      content,
+      (value) => value.includes(secondTail),
+      'second child actual appended tail visible',
+    );
+    appended.set(secondChild, [secondTail]);
     await close();
     const baselineProviderCalls = (await count()).calls;
     assert.equal(baselineProviderCalls.filter((call) => call === 'CHILD_A').length, 1);
@@ -278,18 +522,28 @@ try {
     const switches: number[] = [],
       samples: Awaited<ReturnType<typeof sample>>[] = [];
     phase = 'switch-soak';
+    const assertOriginalWaitActive = async () => {
+      const facts = await state();
+      const wait = facts.selection!.executions.find((row) => row.id === parentWait.id);
+      const run = facts.selection!.runs.find((row) => row.id === parentWait.runId);
+      assert.ok(wait && ['dispatching', 'running'].includes(wait.status));
+      assert.equal((wait.toolInput as { waitMs: number }).waitMs, 180000);
+      assert.equal(run?.isActive, true, 'original parent Run still waits for child events');
+    };
+    await assertOriginalWaitActive();
     for (let index = 0; index < 100; index++) {
       const before = Date.now();
       await open(index % 2);
       await until(
         content,
-        (value) => /CHILD_[AB]_INITIAL_TAIL/.test(value),
-        'cached child visible',
+        (value) => value.includes(`${tasks[index % 2]!.prompt}_INITIAL_TAIL`),
+        'exact cached child visible',
       );
       await close();
       switches.push(Date.now() - before);
       if ([19, 59, 99].includes(index)) samples.push(await sample());
     }
+    await assertOriginalWaitActive();
     phase = 'settled';
     const reads = await waitForFiniteReads();
     const settledSample = await sample();
@@ -330,6 +584,11 @@ try {
       },
       providerCalls: (await count()).calls,
       diagnosticsAbsent: true,
+      parentWait: {
+        executionId: parentWait.id,
+        runId: parentWait.runId,
+        input: parentWait.toolInput,
+      },
     };
     console.log(JSON.stringify(report));
     writeFileSync(
@@ -340,12 +599,356 @@ try {
       longTasks.length < 10,
       `repeated navigation produced ${longTasks.length} main-thread long tasks`,
     );
+    phase = 'held-parent-tool-metadata';
+    const toolTarget = spawnTools[0]!;
+    assert.equal(toolTarget.status, 'succeeded', 'hold only original successful spawn metadata');
+    const beforeToolSelection = (await state()).selection!.viewSelection;
+    const beforeToolCalls = (await count()).calls;
+    await app.evaluate((_electron, executionId) => {
+      const host = globalThis as typeof globalThis & {
+        childToolMetadataGate?: {
+          held: number;
+          status?: number;
+          path: string;
+          released: boolean;
+          release(): void;
+        };
+      };
+      let release!: () => void;
+      const pending = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      const gate = {
+        held: 0,
+        status: undefined as number | undefined,
+        path: `/v1/executions/${encodeURIComponent(executionId)}`,
+        released: false,
+        release() {
+          gate.released = true;
+          release();
+        },
+      };
+      host.childToolMetadataGate = gate;
+      const original = globalThis.fetch;
+      globalThis.fetch = Object.assign(
+        async (...args: Parameters<typeof fetch>) => {
+          const path = new URL(String(args[0])).pathname;
+          const method = args[1]?.method ?? (args[0] instanceof Request ? args[0].method : 'GET');
+          const response = await original(...args);
+          if (!gate.released && method === 'GET' && path === gate.path) {
+            gate.held++;
+            gate.status = response.status;
+            await pending;
+          }
+          return response;
+        },
+        { preconnect: original.preconnect },
+      );
+    }, toolTarget.id);
+    try {
+      // Formal readonly reselect creates a new real Main viewSelection. The
+      // renderer must reopen auxiliary Tool metadata for that observation scope.
+      await page.evaluate(async () => {
+        await window.kiteNative!.request({ method: 'select', generation: 1, sessionId: 'parent' });
+      });
+      const selectedAgain = await until(
+        state,
+        (value) =>
+          value.selection!.viewSelection !== beforeToolSelection &&
+          value.selection!.session.id === 'parent' &&
+          !value.selection!.viewLoading,
+        'readonly same-parent select publishes a new actual viewSelection',
+      );
+      const metadataGate = await until(
+        () =>
+          app.evaluate(() => {
+            const gate = (
+              globalThis as typeof globalThis & {
+                childToolMetadataGate?: {
+                  held: number;
+                  status?: number;
+                  path: string;
+                  released: boolean;
+                };
+              }
+            ).childToolMetadataGate;
+            return (
+              gate && {
+                held: gate.held,
+                status: gate.status,
+                path: gate.path,
+                released: gate.released,
+              }
+            );
+          }),
+        (value) => (value?.held ?? 0) > 0 && value?.status === 200 && !value.released,
+        'actual exact successful spawn getExecution HTTP200 response held',
+      );
+      const active = await state();
+      assert.ok(active.selection!.runs.some((run) => run.id === parentWait.runId && run.isActive));
+      assert.ok(
+        active.selection!.executions.some(
+          (row) => row.id === parentWait.id && ['dispatching', 'running'].includes(row.status),
+        ),
+      );
+      assert.equal((await count()).children.length, 2, 'both original child streams remain active');
+      await open(0);
+      await close(true);
+      assert.ok(
+        (await content()).includes('PARENT_WAITING'),
+        'EOF parent history stays visible while Tool metadata is held',
+      );
+      await open(0);
+      const stillActive = await state();
+      assert.ok(
+        stillActive.selection!.runs.some((run) => run.id === parentWait.runId && run.isActive),
+      );
+      assert.ok(
+        stillActive.selection!.executions.some(
+          (row) => row.id === parentWait.id && ['dispatching', 'running'].includes(row.status),
+        ),
+      );
+      assert.deepEqual(
+        (await count()).calls,
+        beforeToolCalls,
+        'readonly Tool metadata navigation creates no Model replay',
+      );
+      console.log(
+        JSON.stringify({
+          heldToolMetadata: {
+            metadataGate,
+            previousViewSelection: beforeToolSelection,
+            actualViewSelection: selectedAgain.selection!.viewSelection,
+            originalWaitId: parentWait.id,
+            originalWaitStillActive: true,
+            exactSpawnToolId: toolTarget.id,
+            activeChildren: 2,
+            readonlySelect: 1,
+            singleSidebarParentReturn: true,
+            businessPOST: 0,
+          },
+        }),
+      );
+    } finally {
+      await app.evaluate(() => {
+        (
+          globalThis as typeof globalThis & { childToolMetadataGate?: { release(): void } }
+        ).childToolMetadataGate?.release();
+      });
+    }
+    await close();
+    phase = 'held-parent-metadata-refresh';
+    await app.evaluate(() => {
+      const host = globalThis as typeof globalThis & {
+        navigationRefreshGate?: {
+          held: number;
+          released: boolean;
+          path?: string;
+          status?: number;
+          release(): void;
+        };
+      };
+      let release!: () => void;
+      const pending = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      const gate = {
+        renameStarted: false,
+        renamePosts: 0,
+        held: 0,
+        released: false,
+        path: undefined as string | undefined,
+        status: undefined as number | undefined,
+        release() {
+          gate.released = true;
+          release();
+        },
+      };
+      host.navigationRefreshGate = gate;
+      const original = globalThis.fetch;
+      globalThis.fetch = Object.assign(
+        async (...args: Parameters<typeof fetch>) => {
+          const path = new URL(String(args[0])).pathname;
+          const method = args[1]?.method ?? (args[0] instanceof Request ? args[0].method : 'GET');
+          if (method === 'POST' && path === '/v1/sessions/parent/rename') {
+            gate.renameStarted = true;
+            gate.renamePosts++;
+          }
+          const hold =
+            gate.renameStarted &&
+            !gate.released &&
+            method === 'GET' &&
+            path === '/v1/sessions/parent/view';
+          if (hold) {
+            gate.held++;
+            gate.path = path;
+          }
+          const response = await original(...args);
+          if (hold) {
+            gate.status = response.status;
+            await pending;
+          }
+          return response;
+        },
+        { preconnect: original.preconnect },
+      );
+    });
+    try {
+      // One owned same-title rename is an explicit persisted fixture mutation.
+      // Its persisted input also legitimately wakes task.events; test only after
+      // the 100 original-wait navigations, and qualify later parent state afresh.
+      await page.evaluate(async () => {
+        const facts = await window.kiteNative!.request({
+          method: 'session.observe',
+          generation: 1,
+          sessionId: 'parent',
+        });
+        if (!facts || !('observationId' in facts))
+          throw Error('parent_rename_observation_unavailable');
+        const host = window as typeof window & { navigationRefreshResult?: string };
+        void window
+          .kiteNative!.request({
+            method: 'session.rename',
+            generation: 1,
+            observationId: facts.observationId,
+            title: 'Stream Parent',
+          })
+          .then(() => {
+            host.navigationRefreshResult = 'resolved';
+          })
+          .catch((cause) => {
+            host.navigationRefreshResult = String(cause);
+          });
+      });
+      const gate = await until(
+        () =>
+          app.evaluate(() => {
+            const value = (
+              globalThis as typeof globalThis & {
+                navigationRefreshGate?: {
+                  held: number;
+                  renamePosts: number;
+                  path?: string;
+                  status?: number;
+                  released: boolean;
+                };
+              }
+            ).navigationRefreshGate;
+            return (
+              value && {
+                held: value.held,
+                renamePosts: value.renamePosts,
+                path: value.path,
+                status: value.status,
+                released: value.released,
+              }
+            );
+          }),
+        (value) => (value?.held ?? 0) >= 1 && value?.status === 200 && !value.released,
+        'actual post-rename parent GET view responses held after HTTP200',
+      );
+      assert.equal(gate!.renamePosts, 1, 'one isolated same-title metadata POST');
+      console.log(JSON.stringify({ heldParentRefreshGate: gate, controlledSameTitleRename: 1 }));
+      const refreshing = await until(
+        state,
+        (value) =>
+          value.selection?.viewLoading === true && value.selection.permissionUnavailable === true,
+        'Main state remains available with refreshing parent writes unavailable',
+      );
+      assert.equal(
+        refreshing.environmentReadUnavailable,
+        false,
+        'qualified environment readonly access survives metadata refresh',
+      );
+      assert.equal(typeof refreshing.selectedEnvironmentRevision, 'number');
+      await open(0);
+      await close();
+      console.log(
+        JSON.stringify({
+          heldParentRefreshState: {
+            viewLoading: refreshing.selection!.viewLoading,
+            permissionUnavailable: refreshing.selection!.permissionUnavailable,
+            environmentReadUnavailable: refreshing.environmentReadUnavailable,
+            selectedEnvironmentRevision: refreshing.selectedEnvironmentRevision,
+          },
+        }),
+      );
+      for (const label of ['引导当前轮次', '发送明确的新轮次']) {
+        const action = page.getByRole('button', { name: label, exact: true });
+        assert.ok(
+          (await action.count()) === 0 || !(await action.isEnabled()),
+          `${label} is absent or disabled; cached history never grants a write`,
+        );
+      }
+      const permission = page.locator('[data-permission-trigger]');
+      assert.ok(
+        (await permission.count()) === 0 || !(await permission.isEnabled()),
+        'permission writes remain gated',
+      );
+      await open(0);
+      const stillRefreshing = await state();
+      assert.equal(stillRefreshing.selection!.viewLoading, true);
+      assert.equal(stillRefreshing.selection!.permissionUnavailable, true);
+      console.log(
+        JSON.stringify({
+          heldParentRefresh: {
+            gate,
+            viewLoading: stillRefreshing.selection!.viewLoading,
+            permissionUnavailable: stillRefreshing.selection!.permissionUnavailable,
+            environmentReadUnavailable: stillRefreshing.environmentReadUnavailable,
+            selectedEnvironmentRevision: stillRefreshing.selectedEnvironmentRevision,
+          },
+        }),
+      );
+    } finally {
+      await app.evaluate(() => {
+        (
+          globalThis as typeof globalThis & { navigationRefreshGate?: { release(): void } }
+        ).navigationRefreshGate?.release();
+      });
+    }
+    await close();
     await fetch(`${control}/finish`);
     await until(
       state,
       (value) => value.selection!.runs.every((run) => !run.isActive),
       'all real runs settle',
     );
+    await until(
+      content,
+      (value) => value.includes('PARENT_DONE'),
+      'parent actually finishes after child release',
+    );
+    phase = 'completed-child-history-reentry';
+    for (let index = 0; index < tasks.length; index++) {
+      await open(index);
+      const expected = tasks[index]!.prompt;
+      await until(
+        content,
+        (value) => value.includes(`${expected}_DONE`),
+        `completed ${expected} history preserves final tail`,
+      );
+      await close();
+    }
+    // Normal child completion may create legitimate parent report turns. Snapshot
+    // after settlement; only these later readonly navigations must have zero replay.
+    const completedCalls = (await count()).calls;
+    for (let index = 0; index < tasks.length; index++) {
+      await open(index);
+      assert.ok((await content()).includes(`${tasks[index]!.prompt}_DONE`));
+      await close();
+    }
+    assert.deepEqual(
+      (await count()).calls,
+      completedCalls,
+      'completed-history navigation creates no Provider replay',
+    );
+    for (const child of ['CHILD_A', 'CHILD_B'])
+      assert.equal(
+        completedCalls.filter((call) => call === child).length,
+        1,
+        'original child Model executes exactly once',
+      );
   }
 } catch (cause) {
   console.error('native_child_stream_failed', phase, cause, diagnostics.slice(-15));
@@ -425,6 +1028,27 @@ try {
   }
   throw cause;
 } finally {
+  await app
+    .evaluate(() => {
+      (
+        globalThis as typeof globalThis & { coldChildDirectoryGate?: { release(): void } }
+      ).coldChildDirectoryGate?.release();
+    })
+    .catch(() => {});
+  await app
+    .evaluate(() => {
+      (
+        globalThis as typeof globalThis & { childToolMetadataGate?: { release(): void } }
+      ).childToolMetadataGate?.release();
+    })
+    .catch(() => {});
+  await app
+    .evaluate(() => {
+      (
+        globalThis as typeof globalThis & { navigationRefreshGate?: { release(): void } }
+      ).navigationRefreshGate?.release();
+    })
+    .catch(() => {});
   const exited = new Promise<void>((resolve) => app.process().once('exit', () => resolve()));
   await app.evaluate(({ dialog }) => {
     dialog.showMessageBox = async () => ({ response: 1, checkboxChecked: false });

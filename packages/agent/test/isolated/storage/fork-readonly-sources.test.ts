@@ -693,7 +693,7 @@ test('legal User command ID colliding with source Model never becomes Execution 
       ...f.base,
       commandId: source.executionId,
       sessionId: 's',
-      request: { kind: 'run.start', content: 'real later user collision' },
+      request: { kind: 'run.start', content: 'New task: real later user collision' },
     });
     await f.runtime.waitForCommand(source.executionId, { timeoutMs: 5000 });
     await f.fork('s', 'collision');
@@ -721,8 +721,15 @@ test('legal User command ID colliding with source Model never becomes Execution 
       messageId: original.messageId,
     });
     expect(message.role).toBe('user');
-    expect(message.content).toBe('real later user collision');
-    expect(message.sourceIds).toContain(source.executionId);
+    expect(message.content).toBe('New task: real later user collision');
+    const collisionCommand = (await f.store.getCommand(source.executionId))!;
+    const receipt = collisionCommand.receipt as { businessCommandId: string; runId: string };
+    expect(collisionCommand.id).toBe(source.executionId);
+    expect(receipt.businessCommandId).not.toBe(source.executionId);
+    const business = (await f.store.getCommand(receipt.businessCommandId))!;
+    expect(business.rootWorkCommandId).toBe(source.executionId);
+    expect((await f.store.getRun(receipt.runId))!.originCommandId).toBe(business.id);
+    expect(message.sourceIds).toEqual([business.id]);
     expect(observed.proof.sources.map((s) => s.executionId)).toEqual(
       (await f.read()).proof.sources.map((s) => s.executionId),
     );
@@ -842,6 +849,111 @@ test('new actual branch Model and sealed inherited Tool combine without reopenin
     });
     expect(f.counts()).toEqual({ calls: 3, effects: 0 });
   } finally {
+    await f.close();
+  }
+});
+
+test('derived second-work Model keeps separate business origin and public work proof through a real Fork and cold history', async () => {
+  const f = await fixture();
+  let cold: Awaited<ReturnType<typeof openSqliteStore>> | undefined;
+  try {
+    for (const commandId of ['branch-first', 'branch-second']) {
+      await f.runtime.submitCommand({
+        ...f.base,
+        commandId,
+        sessionId: 'f2',
+        request: { kind: 'run.start', content: `New task: ${commandId}` },
+      });
+      await f.runtime.waitForCommand(commandId, { timeoutMs: 5000 });
+    }
+    const publicCommand = (await f.store.getCommand('branch-second'))!;
+    const receipt = publicCommand.receipt as { runId: string; businessCommandId: string };
+    expect(receipt.businessCommandId).toBeString();
+    expect(receipt.businessCommandId).not.toBe(publicCommand.id);
+    const business = (await f.store.getCommand(receipt.businessCommandId))!;
+    const run = (await f.store.getRun(receipt.runId))!;
+    const model = (await f.store.listExecutions('f2')).find(
+      (execution) => execution.kind === 'model' && execution.runId === run.id,
+    )!;
+    expect(model.status).toBe('succeeded');
+    expect(run.originCommandId).toBe(business.id);
+    expect(model.originCommandId).toBe(business.id);
+    for (const fact of [business, run, model]) {
+      expect(fact.rootWorkCommandId).toBe(publicCommand.id);
+      expect(fact.rootWorkSeq).toBe(publicCommand.rootWorkSeq);
+    }
+    const input = {
+      ...f.base,
+      sessionId: 'f2',
+      extensionId: 'fixture',
+      declarations: [
+        {
+          kind: 'execution' as const,
+          executionKind: 'model' as const,
+          executionId: model.id,
+          artifactRefIds: [],
+        },
+      ],
+    };
+    const prepared = await f.store.prepareForkReadonlySources(input);
+    expect(prepared.version).toBe(1);
+    expect(prepared.sources.map((source) => source.executionId)).toEqual([model.id]);
+    // Before sealing, reject either work axis drifting on either causal row. Restoring
+    // each row must reproduce the original v1 proof, rather than silently retarget it.
+    for (const [table, id] of [
+      ['run', run.id],
+      ['command', business.id],
+    ] as const) {
+      for (const [column, original, invalid] of [
+        ['root_work_command_id', publicCommand.id, 'branch-first'],
+        [
+          'root_work_seq',
+          publicCommand.rootWorkSeq,
+          String(BigInt(publicCommand.rootWorkSeq) + 1n),
+        ],
+      ] as const) {
+        try {
+          f.physical.run(`UPDATE ${table} SET ${column}=? WHERE id=?`, [invalid, id]);
+          expect(await code(f.store.prepareForkReadonlySources(input))).toBe(
+            'fork_source_unverifiable',
+          );
+        } finally {
+          f.physical.run(`UPDATE ${table} SET ${column}=? WHERE id=?`, [original, id]);
+        }
+        expect(await f.store.prepareForkReadonlySources(input)).toEqual(prepared);
+      }
+    }
+    // Sharing the public work is insufficient: the exact business origin must match too.
+    try {
+      f.physical.run('UPDATE run SET origin_command_id=? WHERE id=?', [publicCommand.id, run.id]);
+      expect(await code(f.store.prepareForkReadonlySources(input))).toBe(
+        'fork_source_unverifiable',
+      );
+    } finally {
+      f.physical.run('UPDATE run SET origin_command_id=? WHERE id=?', [business.id, run.id]);
+    }
+    f.setExtraModel(model.id);
+    await f.fork('f2', 'derived-work-fork');
+    const sealed = await f.read('derived-work-fork');
+    expect(sealed.proof.version).toBe(1);
+    expect(sealed.proof.sources.map((source) => source.executionId)).toContain(model.id);
+    for (const stamp of prepared.stamps) expect(sealed.proof.stamps).toContainEqual(stamp);
+    const calls = f.counts();
+    await f.runtime.close();
+    cold = await openSqliteStore({ ...f.profile, mode: 'readonly' });
+    const cursor = (await cold.getMetadata()).lastChangeCursor;
+    const reopened = await cold.readForkSourceProjection({
+      ...f.base,
+      sessionId: 'derived-work-fork',
+      extensionId: 'fixture',
+      localKey: 'bundle',
+    });
+    expect(reopened.proof).toEqual(sealed.proof);
+    expect(reopened.binding).toEqual(sealed.binding);
+    expect((await cold.getMetadata()).lastChangeCursor).toBe(cursor);
+    expect(f.counts()).toEqual(calls);
+  } finally {
+    await cold?.close();
     await f.close();
   }
 });

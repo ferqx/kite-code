@@ -9,6 +9,50 @@ import { openSqliteStore, resolveProfile } from '@kite-ai/agent/sqlite';
 import { createFixedModel, type ModelAdapter, type ModelEvent } from '@kite-ai/ai';
 import { startService } from '../../src';
 
+async function assertBusinessInput(
+  runtime: ReturnType<typeof createRuntime>,
+  commandId: string,
+  content: string,
+) {
+  const command = (await runtime.getCommand(commandId))!;
+  const receipt = command.receipt as {
+    businessCommandId: string;
+    humanInputCommandId: string;
+    runId: string;
+  };
+  expect(command).toMatchObject({ status: 'applied', request: { kind: 'run.start', content } });
+  expect(receipt.businessCommandId).toBeString();
+  expect(receipt.businessCommandId).not.toBe(commandId);
+  expect(await runtime.getCommand(receipt.humanInputCommandId)).toMatchObject({
+    request: { publicCommandId: commandId, content, originalRequest: command.request },
+  });
+  expect(await runtime.getCommand(receipt.businessCommandId)).toMatchObject({
+    status: 'applied',
+    request: { content },
+    receipt: { runId: receipt.runId },
+  });
+  const run = (await runtime.getRun(receipt.runId))!;
+  expect(run).toMatchObject({
+    originCommandId: receipt.businessCommandId,
+    rootWorkCommandId: commandId,
+  });
+  const view = await runtime.getView('session');
+  const model = view.executions.find((item) => item.kind === 'model' && item.runId === run.id)!;
+  expect(model).toBeDefined();
+  const input = await runtime.readModelInput({
+    expectedStoreId: command.originStoreId,
+    sessionId: 'session',
+    subjectId: 'owner',
+    executionId: model.id,
+  });
+  expect(input.confirmation).toBe('succeeded');
+  const source = input.request.messages.find((message) =>
+    message.sourceIds?.includes(receipt.businessCommandId),
+  );
+  expect(source).toMatchObject({ content, sourceIds: [receipt.businessCommandId] });
+  return run;
+}
+
 function barrier() {
   let release!: () => void;
   const waiting = new Promise<void>((resolve) => {
@@ -26,7 +70,7 @@ const toolResponse: ModelEvent[] = [
   { ...finish, reason: 'tool_calls' },
 ];
 
-async function pair(gate: 'model' | 'permission' = 'model') {
+async function pair(gate: 'model' | 'permission' = 'model', modelGateAt = 1) {
   const root = mkdtempSync(join(tmpdir(), 'kite-http-pair-'));
   const dataRoot = join(root, 'data');
   // Effects deliberately live outside the recoverable profile.
@@ -52,9 +96,10 @@ async function pair(gate: 'model' | 'permission' = 'model') {
   const first = createFixedModel([toolResponse, [finish], toolResponse, [finish]]);
   const second = createFixedModel([toolResponse, [finish], toolResponse, [finish]]);
   let firstRequest = true;
+  let modelRequests = 0;
   const gated: ModelAdapter = {
     async *stream(request, options) {
-      if (firstRequest && gate === 'model') {
+      if (gate === 'model' && ++modelRequests === modelGateAt) {
         firstRequest = false;
         await waitAtGate(options.signal);
       }
@@ -199,13 +244,15 @@ async function ready(reader: ReadableStreamDefaultReader<Uint8Array>) {
 }
 
 test('two real Services retain the waiting owner and consume another host accepted command exactly once', async () => {
-  const data = await pair();
+  // The independent B intent may retire A's undispatched Tools. Hold A's next
+  // Model after its first real effect, preserving both effects and the owner wait.
+  const data = await pair('model', 2);
   const timings: Record<string, number> = {};
   const command = (id: string) => ({
     expectedStoreId: data.metadata.storeId,
     commandId: id,
     kind: 'run.start',
-    content: id,
+    content: id === 'second' ? 'New task: second' : id,
   });
   try {
     let start = performance.now();
@@ -214,6 +261,7 @@ test('two real Services retain the waiting owner and consume another host accept
     ).toBe(202);
     timings.firstHttpAcceptanceMs = performance.now() - start;
     await data.entered.waiting;
+    expect(readFileSync(data.ledger, 'utf8').trim().split('\n')).toHaveLength(1);
     const owner = (await data.storeA.getView('session')).session;
     expect(owner.ownerInstanceId).toBe('service-a');
     start = performance.now();
@@ -241,6 +289,9 @@ test('two real Services retain the waiting owner and consume another host accept
     await data.runtimeA.waitForCommand('first');
     await data.runtimeB.waitForCommand('second', { timeoutMs: 3000 });
     timings.gateReleaseToBothTerminalMs = performance.now() - start;
+    expect(await assertBusinessInput(data.runtimeB, 'second', 'New task: second')).toMatchObject({
+      status: 'completed',
+    });
     const view = await data.storeB.getView('session');
     expect(view.runs).toHaveLength(2);
     expect(view.runs.every((run) => run.status === 'completed')).toBe(true);
@@ -318,7 +369,7 @@ test.each([
           expectedStoreId: data.metadata.storeId,
           commandId: 'after-cancel',
           kind: 'run.start',
-          content: 'later',
+          content: 'New task: later',
         })
       ).status,
     ).toBe(202);
@@ -327,10 +378,8 @@ test.each([
     );
     await data.runtimeB.waitForCommand('after-cancel', { timeoutMs: 1000 });
     expect(
-      (await data.storeB.getView('session')).runs.find(
-        (run) => run.originCommandId === 'after-cancel',
-      )!.status,
-    ).toBe('completed');
+      await assertBusinessInput(data.runtimeB, 'after-cancel', 'New task: later'),
+    ).toMatchObject({ status: 'completed' });
     expect(readFileSync(data.ledger, 'utf8').trim().split('\n')).toHaveLength(1);
     console.info(
       'W14-A cross-host cancellation measurements',
@@ -361,7 +410,7 @@ test('an already accepted command advances on the surviving Service after its ow
           expectedStoreId: data.metadata.storeId,
           commandId: 'surviving-work',
           kind: 'run.start',
-          content: 'pending',
+          content: 'New task: pending',
         })
       ).status,
     ).toBe(202);
@@ -370,10 +419,8 @@ test('an already accepted command advances on the surviving Service after its ow
     await data.serviceA.close();
     await data.runtimeB.waitForCommand('surviving-work', { timeoutMs: 1000 });
     expect(
-      (await data.storeB.getView('session')).runs.find(
-        (run) => run.originCommandId === 'surviving-work',
-      )!.status,
-    ).toBe('completed');
+      await assertBusinessInput(data.runtimeB, 'surviving-work', 'New task: pending'),
+    ).toMatchObject({ status: 'completed' });
     expect(readFileSync(data.ledger, 'utf8').trim().split('\n')).toHaveLength(1);
   } finally {
     await data.close();

@@ -91,6 +91,28 @@ try {
       messages = await store.listMessages(sessionId),
       executions = await store.listExecutions(sessionId),
       commands = await Promise.all(view.runs.map((run) => store.getCommand(run.originCommandId))),
+      humanInputs = await Promise.all(
+        view.runs.map(async (run) => {
+          const publicCommand = await store.getCommand(run.rootWorkCommandId);
+          const receipt = publicCommand?.receipt as {
+            humanInputCommandId?: string;
+            decisionCommandId?: string;
+            businessCommandId?: string;
+          } | null;
+          return {
+            publicCommand,
+            input: receipt?.humanInputCommandId
+              ? await store.getCommand(receipt.humanInputCommandId)
+              : null,
+            decision: receipt?.decisionCommandId
+              ? await store.getCommand(receipt.decisionCommandId)
+              : null,
+            business: receipt?.businessCommandId
+              ? await store.getCommand(receipt.businessCommandId)
+              : null,
+          };
+        }),
+      ),
       outputs = await Promise.all(
         executions
           .filter((item) => item.kind === 'model')
@@ -159,6 +181,7 @@ try {
         }),
         persistedExecutions,
         commands,
+        humanInputs,
         outputs,
         extensionCommands,
       }),

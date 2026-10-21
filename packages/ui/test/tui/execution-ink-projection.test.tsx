@@ -178,7 +178,10 @@ test.each([
       sessionId: 'child',
       toolInput: { path: 'src/child.ts' },
     }),
-    child = view('child', { executions: [childTool] });
+    child = view('child', {
+      executions: [childTool],
+      runs: [{ ...view().runs[0]!, sessionId: 'child', originCommandId: 'child-start-carrier' }],
+    });
   const facts = {
     ...snapshot([parent, carrier]),
     childViews: [{ executionId: 'carrier', view: child }],
@@ -238,6 +241,163 @@ test('Thought tool count is one original Model message, never same-name calls fr
     { status: 'queued', summary: '' },
   ]);
   expect(projectInkThought(owner, snapshot([tool])).totalElapsedMs).toBeUndefined();
+});
+
+test('spawn and follow-up cards pin their own Run and work when one stable child contains both histories', () => {
+  const spawn = execution('spawn', {
+    definitionId: 'builtin.task/task.spawn',
+    toolInput: { prompt: 'Original work', taskName: 'Original colleague' },
+  });
+  const follow = execution('follow', {
+    definitionId: 'builtin.task/task.follow_up',
+    rootWorkCommandId: 'other-work',
+    rootWorkSeq: '2',
+    toolInput: { agentId: 'child', content: 'New work' },
+  });
+  const first = execution('carrier-one', {
+    kind: 'job',
+    runId: null,
+    parentExecutionId: spawn.id,
+    childSessionId: 'child',
+    status: 'succeeded',
+  });
+  const second = execution('carrier-two', {
+    kind: 'job',
+    runId: null,
+    parentExecutionId: follow.id,
+    childSessionId: 'child',
+    rootWorkCommandId: 'other-work',
+    rootWorkSeq: '2',
+    status: 'running',
+  });
+  const oldTool = execution('old-tool', {
+    sessionId: 'child',
+    runId: 'first-run',
+    status: 'planned',
+    authorization: {
+      dispatched: false,
+      human: {
+        interactionId: 'old-approval',
+        state: 'pending',
+        revision: '1',
+        acceptedDecisionRevision: null,
+        accepted: false,
+        decision: null,
+      },
+    },
+  });
+  const newTool = execution('new-tool', {
+    sessionId: 'child',
+    runId: 'second-run',
+    rootWorkCommandId: 'other-work',
+    rootWorkSeq: '2',
+    status: 'planned',
+    authorization: {
+      dispatched: false,
+      human: {
+        interactionId: 'new-approval',
+        state: 'pending',
+        revision: '1',
+        acceptedDecisionRevision: null,
+        accepted: false,
+        decision: null,
+      },
+    },
+  });
+  const child = view('child', {
+    executions: [oldTool, newTool, { ...newTool, id: 'foreign-work', rootWorkCommandId: 'wrong' }],
+    runs: [
+      {
+        ...view().runs[0]!,
+        id: 'first-run',
+        sessionId: 'child',
+        originCommandId: 'child-start-carrier-one',
+        isActive: false,
+        status: 'completed',
+      },
+      {
+        ...view().runs[0]!,
+        id: 'second-run',
+        sessionId: 'child',
+        originCommandId: 'child-start-carrier-two',
+      },
+    ],
+  });
+  const facts = {
+    ...snapshot([spawn, follow, first, second]),
+    childViews: [
+      { executionId: first.id, view: child },
+      { executionId: second.id, view: child },
+    ],
+  };
+  const oldCard = projectInkChild(first, facts)!;
+  const newCard = projectInkChild(second, facts)!;
+  expect(oldCard).toMatchObject({
+    task: 'Original colleague',
+    role: 'worker',
+    status: 'done',
+    steps: [{ stepId: 'old-tool' }],
+  });
+  expect(oldCard.awaitingApproval).toBeUndefined();
+  expect(newCard).toMatchObject({
+    task: 'New work',
+    steps: [{ stepId: 'new-tool' }],
+    approvalState: 'awaiting_user',
+  });
+  expect(newCard.steps).toHaveLength(1);
+  const continued = {
+    ...child,
+    executions: [...child.executions, { ...newTool, id: 'report-tool', runId: 'report-run' }],
+    runs: [
+      ...child.runs.map((run) => ({ ...run, isActive: false })),
+      {
+        ...child.runs[1]!,
+        id: 'report-run',
+        originCommandId: 'report-exact-result',
+        carrierExecutionId: second.id,
+        rootWorkCommandId: second.rootWorkCommandId,
+        rootWorkSeq: second.rootWorkSeq,
+        isActive: true,
+      },
+    ],
+  };
+  const reportCard = projectInkChild(second, {
+    ...facts,
+    childViews: [{ executionId: second.id, view: continued }],
+  })!;
+  expect(reportCard.steps.map((step) => step.stepId)).toEqual(['new-tool', 'report-tool']);
+  expect(reportCard.approvalState).toBe('awaiting_user');
+  expect(
+    projectInkChild(second, {
+      ...facts,
+      childViews: [
+        {
+          executionId: second.id,
+          view: {
+            ...continued,
+            runs: continued.runs.map((run) =>
+              run.id === 'report-run' ? { ...run, carrierExecutionId: first.id } : run,
+            ),
+          },
+        },
+      ],
+    })!.steps.map((step) => step.stepId),
+  ).toEqual(['new-tool']);
+  const app = render(<InkExecution execution={second} snapshot={facts} expanded columns={80} />);
+  try {
+    expect(app.lastFrame()).toContain('等待你的批准');
+  } finally {
+    app.unmount();
+  }
+  expect(
+    projectInkChild({ ...second, cancelRequestedAt: 10 }, facts)?.awaitingApproval,
+  ).toBeUndefined();
+  expect(
+    projectInkChild(second, {
+      ...facts,
+      childViews: [{ executionId: second.id, view: { ...child, runs: [] } }],
+    })?.steps,
+  ).toEqual([]);
 });
 test('verified child reader retains list/detail escape levels and three-line scrolling without issuing work', async () => {
   const carrier = execution('carrier', {

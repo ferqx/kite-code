@@ -1,10 +1,10 @@
 import { Database } from 'bun:sqlite';
 import { expect, test } from 'bun:test';
 import { EventEmitter } from 'node:events';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { createServer, type Socket } from 'node:net';
 import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import type { DatabaseSync } from 'node:sqlite';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import type { AgentClient } from '@kite-ai/client';
@@ -15,13 +15,15 @@ import type { NativeCreation } from '../../src/native-bridge';
 
 function deferred<T = void>() {
   let resolve!: (value: T | PromiseLike<T>) => void;
-  const promise = new Promise<T>((done) => {
+  let reject!: (error: unknown) => void;
+  const promise = new Promise<T>((done, fail) => {
     resolve = done;
+    reject = fail;
   });
-  return { promise, resolve };
+  return { promise, resolve, reject };
 }
 
-type Barrier = 'launch' | 'profile' | 'creation';
+type Barrier = 'launch' | 'profile' | 'creation' | 'none';
 type Service = {
   id: number;
   client: AgentClient;
@@ -35,7 +37,7 @@ type Service = {
  * SQLite scheduling and ScheduledTaskRunner are real. Electron, paired process admission and
  * the renderer are controlled ports; this does not establish Electron or OS cleanup qualification.
  */
-async function mainFixture(barrier: Barrier) {
+async function mainFixture(barrier: Barrier, holdServiceClose = false, holdMenu = false) {
   const root = mkdtempSync(join(tmpdir(), 'kite-main-scheduling-'));
   const mainPath = fileURLToPath(new URL('../../electron/main.ts', import.meta.url));
   const runnerPath = fileURLToPath(
@@ -50,6 +52,10 @@ async function mainFixture(barrier: Barrier) {
     runners: ScheduledTaskRunner[] = [];
   const posts: { service: number; kind: 'create' | 'start'; afterClose: boolean }[] = [];
   const resources: { service: number; closed: boolean; close(): void }[] = [];
+  const lifecyclePhases: string[] = [],
+    exitCodes: number[] = [];
+  const menuEntered = deferred(),
+    menuResult = deferred<{ response: number; checkboxChecked: boolean }>();
   const trace: string[] = [],
     errors: unknown[] = [];
   const clocks = new Map<
@@ -58,7 +64,10 @@ async function mainFixture(barrier: Barrier) {
   >();
   let open!: () => Promise<unknown>, reload!: (request: DevelopmentServiceReload) => Promise<void>;
   let profileCalls = 0;
-  const connected = deferred<Socket>();
+  const connected = deferred<Socket>(),
+    mainConnection = deferred<Socket>(),
+    serviceClosing = deferred(),
+    releaseServiceClose = deferred();
   const sockets = new Set<Socket>();
   const control = createServer((socket) => {
     sockets.add(socket);
@@ -75,7 +84,17 @@ async function mainFixture(barrier: Barrier) {
     getVersion: () => 'fixture',
     setAboutPanelOptions: () => {},
     whenReady: async () => {},
+    quit() {
+      let prevented = false;
+      app.emit('before-quit', {
+        preventDefault() {
+          prevented = true;
+        },
+      });
+      if (!prevented) app.exit(0);
+    },
     exit(code: number) {
+      exitCodes.push(code);
       app.emit('will-quit');
       exited.resolve(code);
     },
@@ -84,7 +103,9 @@ async function mainFixture(barrier: Barrier) {
     webContents = Object.assign(new EventEmitter(), {
       mainFrame: { url: 'http://127.0.0.1:43219/' },
       isDestroyed: () => false,
-      send: () => {},
+      send: (_channel: string, event: { kind: string; phase: string }) => {
+        if (event.kind === 'lifecycle') lifecyclePhases.push(event.phase);
+      },
       setWindowOpenHandler: () => {},
       setIgnoreMenuShortcuts: () => {},
       session: {
@@ -108,11 +129,19 @@ async function mainFixture(barrier: Barrier) {
   }
   const fixture = {
     errors,
+    observeConnection: (connection: Socket) => mainConnection.resolve(connection),
     electron: {
       app,
       BrowserWindow,
       clipboard: { writeText: () => {} },
-      dialog: { showErrorBox: (...args: unknown[]) => errors.push(args) },
+      dialog: {
+        showErrorBox: (...args: unknown[]) => errors.push(args),
+        showMessageBox: async () => {
+          if (!holdMenu) throw Error('unexpected_fixture_dialog');
+          menuEntered.resolve();
+          return menuResult.promise;
+        },
+      },
       ipcMain: {},
       Menu: { buildFromTemplate: () => ({}) },
       nativeTheme: Object.assign(new EventEmitter(), { shouldUseDarkColors: false }),
@@ -172,6 +201,9 @@ async function mainFixture(barrier: Barrier) {
           },
         } as unknown as AgentClient,
         async close() {
+          trace.push(`${id}:service:closing`);
+          serviceClosing.resolve();
+          if (holdServiceClose) await releaseServiceClose.promise;
           service.closed = true;
           trace.push(`${id}:service:close`);
         },
@@ -253,6 +285,9 @@ async function mainFixture(barrier: Barrier) {
         this.client = client;
       }
       setScheduledTasks() {}
+      hasActiveWork() {
+        return holdMenu;
+      }
       detach() {}
       async close() {
         trace.push(`${services.find((s) => s.client === this.client)!.id}:caller:close`);
@@ -337,6 +372,20 @@ async function mainFixture(barrier: Barrier) {
         {
           name: 'finite-native-main-host',
           setup(build) {
+            build.onLoad({ filter: /main\.ts$/ }, (args) => {
+              if (resolve(args.path) !== mainPath) return undefined;
+              const source = readFileSync(mainPath, 'utf8');
+              const boundary = '  const stop = serveDevelopmentReload({';
+              if (!source.includes(boundary)) throw Error('fixture_parent_observation_missing');
+              return {
+                contents: source.replace(
+                  boundary,
+                  `  globalThis[${JSON.stringify(key)}].observeConnection(parent);\n${boundary}`,
+                ),
+                loader: 'ts',
+                resolveDir: dirname(mainPath),
+              };
+            });
             build.onResolve({ filter: /.*/ }, (args) => {
               if (resolve(args.importer) === mainPath && Object.hasOwn(mocks, args.path))
                 return { path: args.path, namespace: 'native-main-fixture' };
@@ -373,11 +422,33 @@ async function mainFixture(barrier: Barrier) {
     clocks,
     trace,
     errors,
-    async close() {
+    lifecyclePhases,
+    exitCodes,
+    quit: () => app.quit(),
+    menuEntered: menuEntered.promise,
+    retainService: () => menuResult.resolve({ response: 0, checkboxChecked: false }),
+    rejectMenu: () => menuResult.reject(Error('fixture_cancelled_dialog')),
+    connection: await mainConnection.promise,
+    parent: await connected.promise,
+    serviceClosing: serviceClosing.promise,
+    releaseServiceClose: () => releaseServiceClose.resolve(),
+    exited: exited.promise,
+    async close(expectedExit = 0) {
       release.resolve();
+      releaseServiceClose.resolve();
       const parent = await connected.promise;
       parent.end();
-      const code = await exited.promise;
+      let timeout: ReturnType<typeof setTimeout> | undefined;
+      const code = await Promise.race([
+        exited.promise,
+        new Promise<number>((resolve) => {
+          timeout = setTimeout(() => {
+            // Red-path fixture cleanup cannot be counted as production settlement.
+            app.exit(expectedExit);
+            resolve(expectedExit);
+          }, 100);
+        }),
+      ]).finally(() => clearTimeout(timeout));
       // Also drain a leaked runner on a red assertion so the fixture owns its cleanup.
       for (const runner of runners) await runner.stop();
       for (const resource of resources) resource.close();
@@ -385,7 +456,7 @@ async function mainFixture(barrier: Barrier) {
       await new Promise<void>((resolve) => control.close(() => resolve()));
       delete global[key];
       rmSync(root, { recursive: true, force: true });
-      expect({ code, errors, trace }).toEqual({ code: 0, errors: [], trace });
+      expect({ code, errors, trace }).toEqual({ code: expectedExit, errors: [], trace });
     },
   };
 }
@@ -449,6 +520,98 @@ test('Main reload drains the original scheduler creation before closing its data
     await original.tick();
     expect(f.posts).toHaveLength(before);
     expect(f.posts.some((post) => post.afterClose)).toBe(false);
+    expect(f.errors).toEqual([]);
+  } finally {
+    await f.close();
+  }
+}, 15000);
+
+for (const reason of ['end', 'error', 'close', 'SIGINT', 'SIGTERM'] as const) {
+  test(`Main ${reason} waits for one original Service close before process exit`, async () => {
+    const f = await mainFixture('none', true);
+    const exitCode = reason === 'error' ? 1 : 0;
+    try {
+      await f.open();
+      if (reason === 'end') f.parent.end();
+      else if (reason === 'error') f.connection.destroy(Error('fixture_control_reset'));
+      else if (reason === 'close') f.connection.emit('close', false);
+      else process.emit(reason);
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const first = await Promise.race([
+        f.serviceClosing.then(() => 'closing'),
+        f.exited.then(() => 'exited'),
+        new Promise<string>((resolve) => {
+          timer = setTimeout(() => resolve('timeout'), 1000);
+        }),
+      ]).finally(() => clearTimeout(timer));
+      expect(first).toBe('closing');
+      expect(f.services[0]!.closed).toBe(false);
+      expect(f.trace.filter((item) => item === '1:service:closing')).toHaveLength(1);
+      // A second signal and a late stream close share the exact original drain.
+      process.emit('SIGINT');
+      f.connection.destroy();
+      await Promise.resolve();
+      expect(f.trace.filter((item) => item === '1:service:closing')).toHaveLength(1);
+      f.releaseServiceClose();
+      expect(await f.exited).toBe(exitCode);
+      expect(f.services[0]!.closed).toBe(true);
+      expect(f.resources.every((resource) => resource.closed)).toBe(true);
+      expect(f.posts.some((post) => post.afterClose)).toBe(false);
+    } finally {
+      await f.close(exitCode);
+    }
+  }, 15000);
+}
+
+for (const reason of ['SIGINT', 'end'] as const) {
+  for (const answer of ['retain', 'reject'] as const) {
+    test(`Main ${reason} drain cannot be revoked by a late menu ${answer}`, async () => {
+      const f = await mainFixture('none', true, true);
+      try {
+        await f.open();
+        await f.runners[0]!.tick();
+        const posts = f.posts.length;
+        f.quit();
+        await f.menuEntered;
+        if (reason === 'end') f.parent.end();
+        else process.emit('SIGINT');
+        await f.serviceClosing;
+        if (answer === 'retain') f.retainService();
+        else f.rejectMenu();
+        // Flush the actual menu continuation and its catch while Service close stays held.
+        await new Promise<void>((resolve) => setTimeout(resolve, 0));
+        expect(f.lifecyclePhases).not.toContain('active');
+        await expect(f.open()).rejects.toThrow('native_draining');
+        expect(f.posts).toHaveLength(posts);
+        expect(f.exitCodes).toEqual([]);
+        expect(f.trace.filter((item) => item === '1:service:closing')).toHaveLength(1);
+        expect(f.errors).toEqual([]);
+        f.releaseServiceClose();
+        expect(await f.exited).toBe(0);
+        expect(f.exitCodes).toEqual([0]);
+        expect(f.clocks.get(f.services[0]!.client)!.timers.size).toBe(0);
+        expect(f.posts.some((post) => post.afterClose)).toBe(false);
+      } finally {
+        await f.close();
+      }
+    }, 15000);
+  }
+}
+
+test('Main still permits an ordinary menu cancellation to retain the original Service', async () => {
+  const f = await mainFixture('none', false, true);
+  try {
+    const caller = await f.open();
+    await f.runners[0]!.tick();
+    f.quit();
+    await f.menuEntered;
+    f.retainService();
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    expect(f.lifecyclePhases).toEqual(['quitting', 'active']);
+    expect(await f.open()).toBe(caller);
+    expect(f.services[0]!.closed).toBe(false);
+    expect(f.exitCodes).toEqual([]);
+    expect(f.trace).not.toContain('1:service:closing');
     expect(f.errors).toEqual([]);
   } finally {
     await f.close();

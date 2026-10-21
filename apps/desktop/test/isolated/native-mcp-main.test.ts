@@ -12,6 +12,7 @@ import { type AgentClient, createClient, type Json } from '@kite-ai/client';
 import { startService } from '@kite-ai/service';
 import { createDefaultProcessConfiguration } from '@kite-ai/service/configuration';
 import { privateDirectory, temporaryDirectory } from '../../../../tests/fixtures/test-filesystem';
+import { createPermissionManagement } from '../../../service/src/permission-management';
 import { NativeMcpSettings } from '../../electron/mcp-settings';
 import { verifyNativeMcpSourceAnswer } from '../../electron/mcp-source-answer';
 import type { NativeMcpOperation, NativeMcpSubmission } from '../../src/native-bridge';
@@ -86,7 +87,7 @@ async function fixture() {
   const backend = createTemporaryCredentialBackend();
   const authorizations: string[] = [];
   const host = createDefaultProcessConfiguration({
-    userConfigurationPath: profile.profilePath + '/config.jsonc',
+    userConfigurationPath: config,
     profile,
     observerSubjectId: 'owner',
     credentialBackend: {
@@ -135,6 +136,42 @@ async function fixture() {
     workspaceId: 'w',
     title: 'Native MCP',
   });
+  const controls = createPermissionManagement({ runtime, profile });
+  const identity = { expectedStoreId: storeId, subjectId: 'owner' };
+  const mode = await controls.readMode({ ...identity, sessionId: 's' });
+  expect(
+    (
+      await controls.setMode({
+        ...identity,
+        sessionId: 's',
+        commandId: 'fixture-mode',
+        mode: 'full',
+        makeDefault: false,
+        ifRevision: mode.revision,
+        ifDefaultRevision: mode.defaultRevision,
+      })
+    ).state,
+  ).toBe('applied');
+  const trust = await controls.readTrust({ ...identity, workspaceId: 'w' });
+  expect(
+    (
+      await controls.setTrust({
+        ...identity,
+        workspaceId: 'w',
+        commandId: 'fixture-trust',
+        trusted: true,
+        ifRevision: trust.revision,
+        canonicalIdentity: trust.canonicalIdentity,
+        externalReadScopeDigest: trust.externalReadScopeDigest,
+      })
+    ).state,
+  ).toBe('applied');
+  const currentMode = await controls.readMode({ ...identity, sessionId: 's' });
+  const currentTrust = await controls.readTrust({ ...identity, workspaceId: 'w' });
+  expect(currentMode).toMatchObject({ mode: 'full', scopeSessionId: 's' });
+  expect(currentMode.revision).not.toBe(mode.revision);
+  expect(currentTrust.trusted).toBe(true);
+  expect(currentTrust.revision).not.toBe(trust.revision);
   const service = await startService({
     runtime,
     profile: {

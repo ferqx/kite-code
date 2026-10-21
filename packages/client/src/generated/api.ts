@@ -1687,6 +1687,9 @@ export type Run = {
   sessionId: string;
   originCommandId: string;
   originStoreId: string;
+  carrierExecutionId?: string;
+  rootWorkCommandId?: string;
+  rootWorkSeq?: string;
   status:
     | 'running'
     | 'waiting_interaction'
@@ -2035,6 +2038,7 @@ export type BackgroundExecutionItem = {
   };
   run: {
     id: string;
+    carrierExecutionId?: string;
     sessionId: string;
     originCommandId: string;
     originStoreId: string;
@@ -2059,6 +2063,7 @@ export type BackgroundExecutionItem = {
   } | null;
   childRun: {
     id: string;
+    carrierExecutionId?: string;
     sessionId: string;
     originCommandId: string;
     originStoreId: string;
@@ -2169,6 +2174,7 @@ export type BackgroundExecutionPage = {
     };
     run: {
       id: string;
+      carrierExecutionId?: string;
       sessionId: string;
       originCommandId: string;
       originStoreId: string;
@@ -2193,6 +2199,7 @@ export type BackgroundExecutionPage = {
     } | null;
     childRun: {
       id: string;
+      carrierExecutionId?: string;
       sessionId: string;
       originCommandId: string;
       originStoreId: string;
@@ -2287,6 +2294,7 @@ export type SessionDirectoryPage = {
     };
     activity?: {
       updatedAt: number | null;
+      executionOwner?: 'held' | 'unheld' | 'unknown';
       run: {
         id: string;
         status:
@@ -2308,6 +2316,7 @@ export type SessionDirectoryPage = {
 };
 export type SessionDirectoryActivity = {
   updatedAt: number | null;
+  executionOwner?: 'held' | 'unheld' | 'unknown';
   run: {
     id: string;
     status:
@@ -2402,6 +2411,9 @@ export type BrowserView = {
     sessionId: string;
     originCommandId: string;
     originStoreId: string;
+    carrierExecutionId?: string;
+    rootWorkCommandId?: string;
+    rootWorkSeq?: string;
     status:
       | 'running'
       | 'waiting_interaction'
@@ -2487,6 +2499,9 @@ export type BrowserRunFacts = {
     sessionId: string;
     originCommandId: string;
     originStoreId: string;
+    carrierExecutionId?: string;
+    rootWorkCommandId?: string;
+    rootWorkSeq?: string;
     status:
       | 'running'
       | 'waiting_interaction'
@@ -2929,6 +2944,9 @@ export type SessionView = {
     sessionId: string;
     originCommandId: string;
     originStoreId: string;
+    carrierExecutionId?: string;
+    rootWorkCommandId?: string;
+    rootWorkSeq?: string;
     status:
       | 'running'
       | 'waiting_interaction'

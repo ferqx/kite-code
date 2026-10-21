@@ -14,6 +14,10 @@
 
 `scope(scopeId)` 只建立引用。`snapshotTools()` 才按需连接并读取有界目录，返回冻结的 `ToolDefinition[]`，由宿主在下一安全装配边界注册进相同 UnifiedExecution。定义 ID 绑定 server/远端名称；版本摘要绑定配置与完整 descriptor。再次 snapshot 产生新版本，不修改旧定义或自动热替换 Runtime。旧定义保留原 input/output schema 和连接以便历史说明；目录版本变化或失效后，旧定义调用在 wire 前以 `mcp_catalogue_stale` 明确拒绝，不切换到新实现。工具移除不销毁旧快照或历史。
 
+外部 schema 的完整 Ajv 编译和 input/output 校验在 [schema Worker](schema-worker.ts) 内执行，Service 线程不执行远端正则或生成校验代码。每个 scope 的准确 catalogue 拥有独立纯计算 Worker；发布目录前等待全部原 schema 编译完成。校验使用本次原参数／结果，保留相同 Ajv 配置和 schema，异步 schema 也等待其完整结果，不能把 Promise 当批准。计算排队、固定资产读取／SHA、编译与本次校验共用从调用入口开始的原 MCP 绝对 deadline，Tool 校验沿原 signal；同 Worker 的取消、超时、目录失效或释放会结算全部相关请求，并由 [owned-worker](../platform/process/owned-worker.ts) 确认原线程退出。预 wire 失败保持零 RPC，已 wire 的校验失败或取消仍为 unknown，不自动重发。清理未确认保留原失败，不能转成业务成功。
+
+Worker 是纯 schema 缓存，不持有 Model/process 资源许可。一秒空闲后释放原 Worker；后续新请求可重新核原资产并编译同一 catalogue，不能借编译缓存绕过原连接、generation 或宿主准入。source 和 built 入口均只选择构建后的 `mcp/schema-worker.js` 与 SHA-256 文件，无 TS 运行 fallback；[资产选择器](schema-validation.ts) 导出 worker/checksum 及 owned preload/modules 供宿主保护和制品 inventory。运行期间无效 schema 或缺失／不匹配资产失败关闭，不能回退到 Service 同步校验。
+
 工具执行不重试，不替调用者重新绑定远端连接。取消只让本地请求停止等待；MCP cancellation notification、断连、HTTP 失败和超时都不是远端已停止的证据，可能已派发的无确认结果返回 `outcome_unknown` 与 `remoteStopConfirmed:false`。有效 MCP `isError` 作为远端失败事实保存。输出 schema 由原快照验证；异常输出也不冒充已知零效果。普通宿主权限、输入验证与持久派发仍属于 UnifiedExecution，外部描述不扩权。
 
 多个 scope 共享一条连接。`release()` 幂等，只废弃本 scope 的后续调用；其他 scope 继续使用。最后一个 scope 等有界在途请求结束后关闭连接。`close()` 是明确宿主关闭整个 adapter 的动作，不能把一个页面卸载当全局 close。失联后，只有下一次显式目录/读取操作可建立新连接；既有工具调用不会自动重连重发。
@@ -86,7 +90,7 @@ root 原字节 SHA 即 indexDigest，节点不含自身 digest。Entry 的 label
 
 超限使整份 metadata unavailable，不截断为 complete。顺序发布与读取不扩大 Worker pending/ordinary/control 预算；部分 Artifact 未形成完整 root 不构成可用快照。metadata自身的工程极限、实际活跃安全域及恢复失败/异常清理窗口没有因有限成功例取得全部资格；正常累计历史观察沿Store流式合同。
 
-显式生命周期 owner 调用 `invalidateCatalogue()` 立即提升代次并清缓存，零 I/O；随后只能通过显式 `scope.snapshotTools()` 连接/刷新。完整 descriptor 内容变化发布新代次；未变化的同连接刷新保留代次。刷新期间发生失效/断连会拒绝该旧刷新，不能恢复已失效目录。低层 adapter 本身不订阅通知自动连接；下文的显式 lifecycle 将其已发现目录投影给 Runtime 的下一安全 Step。
+显式生命周期 owner 调用 `invalidateCatalogue()` 立即提升代次并清缓存，同时封存原 schema Worker 并异步确认退出，不连接或发送 RPC；随后只能通过显式 `scope.snapshotTools()` 连接/刷新。完整 descriptor 内容变化发布新代次；未变化的同连接刷新保留代次。刷新期间发生失效/断连会拒绝该旧刷新，不能恢复已失效目录。低层 adapter 本身不订阅通知自动连接；下文的显式 lifecycle 将其已发现目录投影给 Runtime 的下一安全 Step。
 
 每次 Tool 调用先克隆并冻结准确参数。输入 schema、字节检查与实际 RPC 使用同一个快照；调用者在 wire 准入等待期间修改原对象，不改变已绑定调用。新调用的非法 schema 或超界输入在发送前局部失败。
 
@@ -134,7 +138,7 @@ guardian 使用有界 JSON-RPC frame、控制队列、排队写和 stderr 排空
 
 macOS coalition 后端已有运行证据；Windows／Linux 已接下述独立原 Job／namespace 源码，仍缺实际平台资格。本次所属后代停止不承诺阻止网络或由其他外部 owner代启动的 daemon，也不证明整个Runtime资源、CPU／内存限制或跨平台资格。[原 stdio 整文件](../../test/isolated/mcp/stdio-port.test.ts)保全部原7整例、断言和期限；原自然退出例实际核 detached grandchild 的出生／PPID1／不同PGID及外部进程树仍存活。实际结果和启动失败记录归[本轮进度](../../../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-10正式-mcp-完整所属进程树与旧组路径退役)。持久取舍归[决定记录](../../../../.agents/notes/implemented/architecture/2026-10-10-macos-mcp-owned-coalition.md)。
 
-Agent manifest 的资产构建脚本[build-assets.ts](build-assets.ts)生成 `dist/mcp/stdio-guardian.js` 与 `dist/mcp/windows-stdio-guardian.js`。Darwin 前者仍担任 private broker或明确的launchd guardian，Windows 只选后者；`mcpStdioGuardianAsset()`只定位同包原 `.js`，缺资产失败，不回退 `.ts`。[源码树外包整例](../../../../tests/isolated/unified-agent/built-package.test.ts)沿真实 Model／SDK执行一次 Tool、原 Session取消、三角色及树证明、维护 A→B后原完整结果／输出冷读零重放。[installed默认Service恢复链](../../../../tests/isolated/unified-agent/profile-mcp-restore.test.ts)沿新Store明确连接、Session取消、Service退出及cold GET，独立libproc核出生和PPID，保原Job／输出／cursor及Model0。正式默认caller已切换到此后端；旧stdio negative-PGID停止路径已删除，Shell原组／held-root合同另行保留。以上实际 macOS 资格不外推下方 Windows 源码。
+Agent manifest 的资产构建脚本[build-assets.ts](build-assets.ts)生成 `dist/mcp/stdio-guardian.js`、`dist/mcp/windows-stdio-guardian.js`、纯计算 `dist/mcp/schema-worker.js` 及其 SHA-256 文件。Darwin 前者仍担任 private broker或明确的launchd guardian，Windows 只选后者；`mcpStdioGuardianAsset()`只定位同包原 `.js`，缺资产失败，不回退 `.ts`。[源码树外包整例](../../../../tests/isolated/unified-agent/built-package.test.ts)沿真实 Model／SDK执行一次 Tool、原 Session取消、三角色及树证明、维护 A→B后原完整结果／输出冷读零重放。[installed默认Service恢复链](../../../../tests/isolated/unified-agent/profile-mcp-restore.test.ts)沿新Store明确连接、Session取消、Service退出及cold GET，独立libproc核出生和PPID，保原Job／输出／cursor及Model0。正式默认caller已切换到此后端；旧stdio negative-PGID停止路径已删除，Shell原组／held-root合同另行保留。以上实际 macOS 资格不外推下方 Windows 源码。
 
 启动准备失败与完整 transport 停止分别核对：原目录已经归 broker，listen／plist／bootstrap 失败须保首因并收尾，bootstrap 回复未确认不证明未登记；准确控制关闭及标签清理规则归[共享 platform owner](../platform/README.md#shell-guardian-与-macos-confinement)。本机原 stdio 七整例、共享 Shell 和独立源码树外默认 Source／SDK Tool／取消／Service退出／维护恢复消费者已按本轮完整文件验收，准确失败与证据见[当前进度](../../../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-11macos-mcp-stdio-完整连接与正常退出)。公开连接／RPC取消／原 Session stop／cold零重放合同保持，旧 negative-PGID 路径仍退役；该有限 macOS 闭合不代整体 MCP、Win／Linux、RSS 或阶段资格。
 

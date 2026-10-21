@@ -12226,6 +12226,22 @@
             "maxLength": 128,
             "pattern": "^[A-Za-z0-9_-]+$"
           },
+          "carrierExecutionId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "pattern": "^[A-Za-z0-9_-]+$"
+          },
+          "rootWorkCommandId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "pattern": "^[A-Za-z0-9_-]+$"
+          },
+          "rootWorkSeq": {
+            "type": "string",
+            "pattern": "^(0|[1-9][0-9]*)$"
+          },
           "status": {
             "type": "string",
             "enum": [
@@ -14198,6 +14214,12 @@
                     "maxLength": 128,
                     "pattern": "^[A-Za-z0-9_-]+$"
                   },
+                  "carrierExecutionId": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 128,
+                    "pattern": "^[A-Za-z0-9_-]+$"
+                  },
                   "sessionId": {
                     "type": "string",
                     "minLength": 1,
@@ -14320,6 +14342,12 @@
                 "type": "object",
                 "properties": {
                   "id": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 128,
+                    "pattern": "^[A-Za-z0-9_-]+$"
+                  },
+                  "carrierExecutionId": {
                     "type": "string",
                     "minLength": 1,
                     "maxLength": 128,
@@ -15028,6 +15056,12 @@
                           "maxLength": 128,
                           "pattern": "^[A-Za-z0-9_-]+$"
                         },
+                        "carrierExecutionId": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 128,
+                          "pattern": "^[A-Za-z0-9_-]+$"
+                        },
                         "sessionId": {
                           "type": "string",
                           "minLength": 1,
@@ -15150,6 +15184,12 @@
                       "type": "object",
                       "properties": {
                         "id": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 128,
+                          "pattern": "^[A-Za-z0-9_-]+$"
+                        },
+                        "carrierExecutionId": {
                           "type": "string",
                           "minLength": 1,
                           "maxLength": 128,
@@ -15730,6 +15770,10 @@
                         }
                       ]
                     },
+                    "executionOwner": {
+                      "type": "string",
+                      "enum": ["held", "unheld", "unknown"]
+                    },
                     "run": {
                       "anyOf": [
                         {
@@ -15812,6 +15856,10 @@
                 "type": "null"
               }
             ]
+          },
+          "executionOwner": {
+            "type": "string",
+            "enum": ["held", "unheld", "unknown"]
           },
           "run": {
             "anyOf": [
@@ -16283,6 +16331,22 @@
                   "maxLength": 128,
                   "pattern": "^[A-Za-z0-9_-]+$"
                 },
+                "carrierExecutionId": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128,
+                  "pattern": "^[A-Za-z0-9_-]+$"
+                },
+                "rootWorkCommandId": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128,
+                  "pattern": "^[A-Za-z0-9_-]+$"
+                },
+                "rootWorkSeq": {
+                  "type": "string",
+                  "pattern": "^(0|[1-9][0-9]*)$"
+                },
                 "status": {
                   "type": "string",
                   "enum": [
@@ -16727,6 +16791,22 @@
                 "minLength": 1,
                 "maxLength": 128,
                 "pattern": "^[A-Za-z0-9_-]+$"
+              },
+              "carrierExecutionId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128,
+                "pattern": "^[A-Za-z0-9_-]+$"
+              },
+              "rootWorkCommandId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128,
+                "pattern": "^[A-Za-z0-9_-]+$"
+              },
+              "rootWorkSeq": {
+                "type": "string",
+                "pattern": "^(0|[1-9][0-9]*)$"
               },
               "status": {
                 "type": "string",
@@ -19370,6 +19450,22 @@
                   "minLength": 1,
                   "maxLength": 128,
                   "pattern": "^[A-Za-z0-9_-]+$"
+                },
+                "carrierExecutionId": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128,
+                  "pattern": "^[A-Za-z0-9_-]+$"
+                },
+                "rootWorkCommandId": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128,
+                  "pattern": "^[A-Za-z0-9_-]+$"
+                },
+                "rootWorkSeq": {
+                  "type": "string",
+                  "pattern": "^(0|[1-9][0-9]*)$"
                 },
                 "status": {
                   "type": "string",

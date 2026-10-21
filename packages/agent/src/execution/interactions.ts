@@ -15,6 +15,11 @@ import {
   type RequirementEvaluation,
   type RequirementRef,
 } from '../storage/types';
+import {
+  type AuthorizationChangeWait,
+  AuthorizationRefreshRequired,
+  modeControlsChanged,
+} from './authorization-refresh';
 
 /** Public authorization reasons are distinct from private adapter errors. */
 export class AuthorizationDeniedError extends AgentError {
@@ -37,7 +42,11 @@ export class QuestionCancelledError extends AgentError {
 export interface InteractionScope {
   final?: boolean;
   previousReview?: ReadAuthorizationReviewInput;
-  review?: (decision: PermissionDecision) => Promise<ReadAuthorizationReviewInput | null>;
+  previousPolicy?: PermissionDecision;
+  review?: (
+    decision: PermissionDecision,
+    signal: AbortSignal,
+  ) => Promise<ReadAuthorizationReviewInput | null>;
   expectedStoreId: string;
   owner: OwnerRef;
   executionId: string;
@@ -60,9 +69,98 @@ export type AcceptedAuthorization = PermissionDecision & {
 export class InteractionGate {
   private readonly store: Store;
   private readonly permissions: Permissions;
-  constructor(store: Store, permissions: Permissions) {
+  private readonly waitForChange?: AuthorizationChangeWait;
+  constructor(store: Store, permissions: Permissions, waitForChange?: AuthorizationChangeWait) {
     this.store = store;
     this.permissions = permissions;
+    this.waitForChange = waitForChange;
+  }
+
+  private async changes(cursor: string, signal: AbortSignal) {
+    try {
+      signal.throwIfAborted();
+      const page = await this.store.getChanges({ after: cursor, limit: 200 });
+      if (page.events.length) return { ...page, rescan: false };
+      if (this.waitForChange) await this.waitForChange(cursor, signal, 30_000);
+      else await this.pause(signal);
+      return { ...(await this.store.getChanges({ after: cursor, limit: 200 })), rescan: false };
+    } catch (error) {
+      if (!(error instanceof AgentError) || error.code !== 'cursor_expired') throw error;
+      // A compacted notification range means re-read authority, never replay work.
+      return { metadata: await this.store.getMetadata(), events: [], rescan: true };
+    }
+  }
+
+  /** Durable changes trigger fresh reads; a wake never supplies authorization. */
+  async policyChanged(
+    scope: InteractionScope,
+    request: AuthorizationRequest,
+    decision: PermissionDecision,
+    cursor: string,
+  ): Promise<never> {
+    for (;;) {
+      const page = await this.changes(cursor, scope.signal);
+      if (!page.events.length && !page.rescan) continue;
+      cursor = page.events.at(-1)?.cursor ?? page.metadata.lastChangeCursor;
+      if (!page.rescan && !page.events.some((event) => event.type === 'host_control.changed'))
+        continue;
+      await scope.checkpoint?.();
+      const current = await this.permissions.authorize(request);
+      if (current.revision !== decision.revision) {
+        if (modeControlsChanged(decision.controlReads, current.controlReads))
+          throw new AuthorizationRefreshRequired();
+        throw new AgentError('permission_control_changed');
+      }
+    }
+  }
+
+  private async refresh(
+    scope: InteractionScope,
+    interaction: InteractionRecord,
+    decision: PermissionDecision,
+  ) {
+    const original = interaction.request as {
+      approvalControlReads?: PermissionDecision['controlReads'];
+    };
+    if (!modeControlsChanged(original.approvalControlReads, decision.controlReads))
+      throw new AgentError('interaction_binding_changed');
+    await this.store.invalidateAuthorizationReview({
+      expectedStoreId: scope.expectedStoreId,
+      owner: scope.owner,
+      executionId: scope.executionId,
+      previousPolicyRevision: interaction.policyRevision,
+      policyRevision: decision.revision,
+      controlReads: decision.controlReads,
+    });
+    await this.store.refreshApproval({
+      expectedStoreId: scope.expectedStoreId,
+      owner: scope.owner,
+      executionId: scope.executionId,
+      interactionId: interaction.id,
+      policyRevision: decision.revision,
+      controlReads: decision.controlReads,
+    });
+    throw new AuthorizationRefreshRequired();
+  }
+
+  private async invalidateReview(
+    scope: InteractionScope,
+    previous: PermissionDecision | undefined,
+    current: PermissionDecision,
+    reviewExecutionId?: string,
+  ): Promise<never> {
+    if (!previous || !modeControlsChanged(previous.controlReads, current.controlReads))
+      throw new AgentError('authorization_review_binding_changed');
+    await this.store.invalidateAuthorizationReview({
+      expectedStoreId: scope.expectedStoreId,
+      owner: scope.owner,
+      executionId: scope.executionId,
+      reviewExecutionId,
+      previousPolicyRevision: previous.revision,
+      policyRevision: current.revision,
+      controlReads: current.controlReads,
+    });
+    throw new AuthorizationRefreshRequired();
   }
 
   private async pause(signal: AbortSignal): Promise<void> {
@@ -84,7 +182,7 @@ export class InteractionGate {
 
   private async wait(scope: InteractionScope, interaction: InteractionRecord, checkpoint = false) {
     while (interaction.state === 'pending') {
-      await this.pause(scope.signal);
+      const cursor = (await this.store.getMetadata()).lastChangeCursor;
       if (checkpoint) await scope.checkpoint?.();
       const current = await this.store.getInteraction({
         expectedStoreId: scope.expectedStoreId,
@@ -93,6 +191,7 @@ export class InteractionGate {
       });
       if (!current) throw new AgentError('interaction_not_found');
       interaction = current;
+      if (interaction.state === 'pending') await this.changes(cursor, scope.signal);
     }
     scope.signal.throwIfAborted();
     if (interaction.state === 'cancelled') {
@@ -133,14 +232,44 @@ export class InteractionGate {
     });
   }
 
-  async authorize(scope: InteractionScope, request: AuthorizationRequest, source: Json) {
+  async authorize(
+    scope: InteractionScope,
+    request: AuthorizationRequest,
+    source: Json,
+  ): Promise<AcceptedAuthorization> {
+    for (;;) {
+      try {
+        return await this.authorizeOnce(scope, request, source);
+      } catch (error) {
+        if (!(error instanceof AuthorizationRefreshRequired) || scope.final) throw error;
+        scope = { ...scope, previousReview: undefined, previousPolicy: undefined };
+      }
+    }
+  }
+
+  private async authorizeOnce(
+    scope: InteractionScope,
+    request: AuthorizationRequest,
+    source: Json,
+  ): Promise<AcceptedAuthorization> {
     scope.signal.throwIfAborted();
     await scope.checkpoint?.();
     await scope.checkFreshness?.();
+    const cursor = (await this.store.getMetadata()).lastChangeCursor;
     let decision = await this.permissions.authorize(request);
     scope.signal.throwIfAborted();
     const execution = await this.store.getExecution(scope.executionId);
     if (!execution) throw new AgentError('execution_not_found');
+    if (execution.interactionBinding) {
+      const original = await this.store.getInteraction({
+        expectedStoreId: scope.expectedStoreId,
+        sessionId: execution.sessionId,
+        interactionId: execution.interactionBinding.interactionId,
+      });
+      if (!original) throw new AgentError('interaction_not_found');
+      if (original.policyRevision !== decision.revision)
+        await this.refresh(scope, original, decision);
+    }
     let reference = scope.previousReview;
     let reviewedGrant: string | undefined;
     if (
@@ -150,8 +279,16 @@ export class InteractionGate {
         (reference.requireApproval === true) !== (decision.review.requireApproval === true) ||
         (reference.requestBody?.reference.hash ?? (await semanticDigest(reference.request))) !==
           (await semanticDigest(decision.review.request)))
-    )
+    ) {
+      if (modeControlsChanged(scope.previousPolicy?.controlReads, decision.controlReads))
+        await this.invalidateReview(
+          scope,
+          scope.previousPolicy,
+          decision,
+          reference.reviewExecutionId,
+        );
       throw new AgentError('authorization_review_binding_changed');
+    }
     if (!execution.interactionBinding && decision.allowed) return decision;
     if (!execution.interactionBinding && decision.approval?.grants?.includes('same_command')) {
       const grant = await this.store.getPermissionGrant({
@@ -161,15 +298,47 @@ export class InteractionGate {
           ? {}
           : { commandDigest: decision.approval!.commandDigest }),
       });
-      if (grant) return { ...decision, allowed: true, grant } satisfies AcceptedAuthorization;
+      if (grant) {
+        const original = await this.store.getInteraction({
+          expectedStoreId: scope.expectedStoreId,
+          sessionId: execution.sessionId,
+          interactionId: grant.grantId,
+        });
+        if (original?.policyRevision === decision.revision)
+          return { ...decision, allowed: true, grant } satisfies AcceptedAuthorization;
+      }
     }
     if (request.kind === 'model') throw new AgentError('permission_denied', decision.reason);
     if (decision.review && (!execution.interactionBinding || decision.review.requireApproval)) {
-      if (!reference && scope.review && !scope.final)
-        reference = (await scope.review(decision)) ?? undefined;
+      if (!reference && scope.review && !scope.final) {
+        const controller = new AbortController();
+        const abort = () => controller.abort(scope.signal.reason);
+        scope.signal.addEventListener('abort', abort, { once: true });
+        if (scope.signal.aborted) abort();
+        try {
+          reference =
+            (await Promise.race([
+              scope.review(decision, controller.signal),
+              this.policyChanged(
+                { ...scope, signal: controller.signal },
+                { ...request, signal: controller.signal },
+                decision,
+                cursor,
+              ),
+            ])) ?? undefined;
+        } catch (error) {
+          if (error instanceof AuthorizationRefreshRequired)
+            await this.invalidateReview(scope, decision, await this.permissions.authorize(request));
+          throw error;
+        } finally {
+          controller.abort();
+          scope.signal.removeEventListener('abort', abort);
+        }
+      }
       // Review/human waits are confined to the resource-free authorization phase.
       if (!reference && scope.final) throw new AgentError('authorization_refresh_required');
       if (reference) {
+        const reviewedDecision = decision;
         decision = await this.permissions.authorize(request);
         scope.signal.throwIfAborted();
         await scope.checkFreshness?.();
@@ -179,8 +348,16 @@ export class InteractionGate {
           decision.revision !== reference.policyRevision ||
           (await semanticDigest(decision.review.request)) !==
             (reference.requestBody?.reference.hash ?? (await semanticDigest(reference.request)))
-        )
+        ) {
+          if (modeControlsChanged(reviewedDecision.controlReads, decision.controlReads))
+            await this.invalidateReview(
+              scope,
+              reviewedDecision,
+              decision,
+              reference.reviewExecutionId,
+            );
           throw new AgentError('authorization_review_binding_changed');
+        }
         const reviewed = await this.store.getAuthorizationReview(reference);
         if (reviewed.decision === 'approve_once' && !decision.review.requireApproval)
           return {
@@ -260,7 +437,7 @@ export class InteractionGate {
       : await this.store.requestInteraction({
           expectedStoreId: scope.expectedStoreId,
           owner: scope.owner,
-          interactionId: `approval-${await semanticDigest({ executionId: execution.id, attempt: execution.attempt })}`,
+          interactionId: `approval-${await semanticDigest({ executionId: execution.id, attempt: execution.attempt, policyRevision: decision.revision })}`,
           executionId: execution.id,
           attempt: execution.attempt,
           kind: 'approval',
@@ -270,15 +447,45 @@ export class InteractionGate {
           policyRevision: decision.revision,
           requiredRefs: [...scope.requiredRefs],
           source,
-          request: scope.sealApprovalRequest
-            ? await scope.sealApprovalRequest(approvalRequest())
-            : approvalRequest(),
+          request: {
+            ...((scope.sealApprovalRequest
+              ? await scope.sealApprovalRequest(approvalRequest())
+              : approvalRequest()) as Record<string, Json>),
+            ...(decision.controlReads
+              ? { approvalControlReads: decision.controlReads as unknown as Json }
+              : {}),
+          },
         });
     if (!interaction) throw new AgentError('interaction_not_found');
     if (scope.final && (interaction.state !== 'answered' || !interaction.acceptedDecisionRevision))
       throw new AgentError('authorization_refresh_required');
     const waited = interaction.state === 'pending';
-    interaction = await this.wait(scope, interaction, true);
+    if (interaction.state === 'pending') {
+      const controller = new AbortController();
+      const abort = () => controller.abort(scope.signal.reason);
+      scope.signal.addEventListener('abort', abort, { once: true });
+      if (scope.signal.aborted) abort();
+      try {
+        interaction = await Promise.race([
+          this.wait({ ...scope, signal: controller.signal }, interaction, true),
+          this.policyChanged(
+            { ...scope, signal: controller.signal },
+            { ...request, signal: controller.signal },
+            decision,
+            cursor,
+          ),
+        ]);
+      } catch (error) {
+        if (error instanceof AuthorizationRefreshRequired) {
+          const current = await this.permissions.authorize(request);
+          await this.refresh(scope, interaction, current);
+        }
+        throw error;
+      } finally {
+        controller.abort();
+        scope.signal.removeEventListener('abort', abort);
+      }
+    } else interaction = await this.wait(scope, interaction, true);
     if (interaction.answer?.kind === 'approval' && interaction.answer.decision === 'deny') {
       const command = await this.store.getCommand(execution.originCommandId);
       if (!command || command.originStoreId !== scope.expectedStoreId)
@@ -298,8 +505,9 @@ export class InteractionGate {
     scope.signal.throwIfAborted();
     if (!decision.allowed && !decision.approval && !decision.review)
       throw new AgentError('permission_denied', decision.reason);
+    if (decision.revision !== interaction.policyRevision)
+      await this.refresh(scope, interaction, decision);
     if (
-      decision.revision !== interaction.policyRevision ||
       interaction.definitionId !== request.definitionId ||
       interaction.definitionVersion !== request.definitionVersion ||
       interaction.inputDigest !== inputDigest

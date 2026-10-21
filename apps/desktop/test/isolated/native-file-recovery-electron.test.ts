@@ -58,7 +58,8 @@ test.skipIf(process.platform !== 'darwin')(
           .reverse()
           .find(
             (message) =>
-              message.role === 'user' && /^(FIRST|SECOND|LATER)_ACTUAL_RUN:/.test(message.content),
+              message.role === 'user' &&
+              /^(?:New task: )?(FIRST|SECOND|LATER)_ACTUAL_RUN:/.test(message.content),
           )?.content;
         expect(user).toBeDefined();
         const key = user!.includes('SECOND_ACTUAL_RUN') ? 'second' : 'first',
@@ -201,7 +202,7 @@ test.skipIf(process.platform !== 'darwin')(
       ).toBe('applied');
       for (const [commandId, content] of [
         ['first', 'FIRST_ACTUAL_RUN: read then update original and create first file'],
-        ['second', 'SECOND_ACTUAL_RUN: read then update original and create second file'],
+        ['second', 'New task: SECOND_ACTUAL_RUN: read then update original and create second file'],
       ] as const) {
         await client.startRun('s', {
           expectedStoreId: storeId,
@@ -214,6 +215,23 @@ test.skipIf(process.platform !== 'darwin')(
           (value) => value.status === 'applied',
         );
         const runId = (command.receipt as { runId: string }).runId;
+        if (commandId === 'second') {
+          const receipt = command.receipt as { businessCommandId: string };
+          const business = await client.getCommand(receipt.businessCommandId);
+          expect(command).toMatchObject({
+            status: 'applied',
+            receipt: { outcome: 'human_input_applied' },
+          });
+          expect(business).toMatchObject({
+            status: 'applied',
+            sessionId: 's',
+            originStoreId: storeId,
+            receipt: { runId },
+          });
+          expect((await client.getRun(runId)).originCommandId).toBe(business.id);
+          expect((await client.getRun(runId)).rootWorkCommandId).toBe(commandId);
+          expect(business.id).not.toBe(commandId);
+        }
         const run = await until(
           () => client.getRun(runId),
           (value) => ['completed', 'failed', 'cancelled', 'interrupted'].includes(value.status),

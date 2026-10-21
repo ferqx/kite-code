@@ -7,7 +7,7 @@ import {
   planningExtensionId,
 } from '@kite-ai/agent/planning';
 import { skillWorkflowExtensionId } from '@kite-ai/agent/skill-workflow';
-import type { CommandRecord, RunRecord } from '@kite-ai/agent/storage';
+import type { CommandRecord, ExecutionRecord, RunRecord } from '@kite-ai/agent/storage';
 
 export type PlanningIntent = { readonly mode: 'plan' } | null;
 const object = (value: Json | undefined): value is Record<string, Json> =>
@@ -74,6 +74,148 @@ export function readPlanningIntent(snapshot: Json): PlanningIntent {
 type Planning = Pick<ReturnType<typeof createPlanningValidation>, 'readPlanningState'>;
 type PlanningRunIdentity = { runId: string; sessionId: string };
 
+/** A fresh report admission proves its protected qualification and actual human continue cause. */
+export async function readContinuedReportOrigin(
+  runtime: AgentRuntime,
+  command: Readonly<CommandRecord>,
+  carrier: Readonly<ExecutionRecord>,
+): Promise<string> {
+  const unavailable = () => new AgentError('planning_run_scope_unavailable');
+  if (command.kind !== 'job.report.continue' || !object(command.request)) throw unavailable();
+  const request = command.request;
+  const [original, qualification] = await Promise.all([
+    typeof request.originalReportCommandId === 'string'
+      ? runtime.getCommand(request.originalReportCommandId)
+      : null,
+    typeof request.continuationCommandId === 'string'
+      ? runtime.getCommand(request.continuationCommandId)
+      : null,
+  ]);
+  if (
+    !original ||
+    !qualification ||
+    !object(qualification.request) ||
+    !object(qualification.receipt)
+  )
+    throw unavailable();
+  const proof = qualification.request;
+  const [decision, start] = await Promise.all([
+    typeof proof.continueDecisionCommandId === 'string'
+      ? runtime.getCommand(proof.continueDecisionCommandId)
+      : null,
+    typeof proof.startCommandId === 'string' ? runtime.getCommand(proof.startCommandId) : null,
+  ]);
+  if (
+    !decision ||
+    !start ||
+    !object(decision.request) ||
+    !object(decision.receipt) ||
+    !object(start.request)
+  )
+    throw unavailable();
+  const [raw, root] = await Promise.all([
+    typeof decision.request.inputCommandId === 'string'
+      ? runtime.getCommand(decision.request.inputCommandId)
+      : null,
+    runtime.getSession(decision.sessionId),
+  ]);
+  const binding = carrier.afterTurn;
+  const normalized = Object.fromEntries(
+    Object.entries(request)
+      .filter(
+        ([key]) =>
+          ![
+            'originalReportCommandId',
+            'continuationCommandId',
+            'continueDecisionCommandId',
+          ].includes(key),
+      )
+      .map(([key, value]) => [key, key === 'kind' ? 'job.report' : value]),
+  ) as Json;
+  if (
+    !raw ||
+    !root ||
+    !object(raw.receipt) ||
+    !object(binding) ||
+    !object(decision.request.proposal) ||
+    original.kind !== 'job.report' ||
+    original.id !==
+      `report-${planningSnapshotDigest([carrier.originStoreId, carrier.id, carrier.resultRevision])}` ||
+    command.id !== `report-continue-${planningSnapshotDigest([qualification.id, original.id])}` ||
+    qualification.kind !== 'job.report.qualification' ||
+    qualification.status !== 'applied' ||
+    qualification.cancelRequestedAt !== null ||
+    qualification.id !==
+      `report-qualification-${planningSnapshotDigest([decision.id, carrier.id])}` ||
+    [original, qualification].some(
+      (record) =>
+        record.originStoreId !== command.originStoreId ||
+        record.sessionId !== command.sessionId ||
+        record.subjectId !== command.subjectId ||
+        record.rootWorkCommandId !== command.rootWorkCommandId ||
+        record.rootWorkSeq !== command.rootWorkSeq,
+    ) ||
+    planningSnapshotDigest(original.request) !== planningSnapshotDigest(normalized) ||
+    request.continueDecisionCommandId !== decision.id ||
+    proof.carrierExecutionId !== carrier.id ||
+    proof.subscriptionDigest !== planningSnapshotDigest(binding) ||
+    proof.startRequestDigest !== start.requestDigest ||
+    proof.controlRevision !== decision.receipt.controlRevision ||
+    qualification.receipt.outcome !== 'future_result_eligible' ||
+    binding.kind !== 'agent_completion' ||
+    start.id !== `child-start-${carrier.id}` ||
+    start.cancelRequestedAt !== null ||
+    !['child.start', 'input.follow_up'].includes(start.kind) ||
+    start.sessionId !== carrier.childSessionId ||
+    start.originStoreId !== command.originStoreId ||
+    start.subjectId !== command.subjectId ||
+    start.rootWorkCommandId !== command.rootWorkCommandId ||
+    start.rootWorkSeq !== command.rootWorkSeq ||
+    (start.kind === 'child.start' && start.request.parentExecutionId !== carrier.id) ||
+    decision.kind !== 'human.input.decision' ||
+    decision.status !== 'applied' ||
+    decision.cancelRequestedAt !== null ||
+    raw.kind !== 'human.input' ||
+    raw.status !== 'applied' ||
+    raw.cancelRequestedAt !== null ||
+    decision.originStoreId !== command.originStoreId ||
+    raw.originStoreId !== command.originStoreId ||
+    decision.subjectId !== command.subjectId ||
+    raw.subjectId !== command.subjectId ||
+    raw.sessionId !== decision.sessionId ||
+    root.parentSessionId !== null ||
+    decision.rootWorkCommandId !== command.rootWorkCommandId ||
+    decision.rootWorkSeq !== command.rootWorkSeq ||
+    decision.receipt.purpose !== 'continue' ||
+    decision.receipt.selectionEffect !== 'select_work' ||
+    decision.receipt.targetRootWorkCommandId !== command.rootWorkCommandId ||
+    decision.request.proposal.relation !== 'same_work' ||
+    decision.request.inputDigest !== raw.requestDigest ||
+    raw.receipt.decisionCommandId !== decision.id ||
+    !['decided', 'clarified'].includes(String(raw.receipt.state))
+  )
+    throw unavailable();
+  const local = await runtime.getSession(command.sessionId);
+  if (local?.rootSessionId !== root.id) throw unavailable();
+  if (start.kind === 'input.follow_up') {
+    const reference = carrier.reference;
+    const childRun =
+      object(reference) && typeof reference.runId === 'string'
+        ? await runtime.getRun(reference.runId)
+        : null;
+    if (
+      !childRun ||
+      childRun.carrierExecutionId !== carrier.id ||
+      childRun.originCommandId !== start.id ||
+      childRun.sessionId !== carrier.childSessionId ||
+      childRun.rootWorkCommandId !== carrier.rootWorkCommandId ||
+      childRun.rootWorkSeq !== carrier.rootWorkSeq
+    )
+      throw unavailable();
+  }
+  return original.id;
+}
+
 /** A report reuses its original binding only through the persisted, consumed cause. */
 export async function readBoundJobReportParent(
   runtime: AgentRuntime,
@@ -106,7 +248,7 @@ export async function readBoundJobReportParent(
     reportRun.rootWorkSeq !== parent.rootWorkSeq ||
     planningSnapshotDigest(reportRun.configuration) !==
       planningSnapshotDigest(parent.configuration) ||
-    command.kind !== 'job.report' ||
+    !['job.report', 'job.report.continue'].includes(command.kind) ||
     command.status !== 'applied' ||
     command.cancelRequestedAt !== null ||
     command.sessionId !== identity.sessionId ||
@@ -138,20 +280,27 @@ export async function readBoundJobReportParent(
     !carrier.childSessionId ||
     !carrier.childConfiguration ||
     carrier.resultRevision !== command.request.resultRevision ||
-    command.id !==
+    (command.kind === 'job.report.continue'
+      ? await readContinuedReportOrigin(runtime, command, carrier)
+      : command.id) !==
       `report-${planningSnapshotDigest([originStoreId, carrier.id, carrier.resultRevision])}` ||
     carrier.delivery !== 'consumed' ||
     carrier.resultAcceptance?.runId !== reportRun.id ||
     !object(binding) ||
-    binding.kind !== 'after_turn' ||
+    !['after_turn', 'agent_completion'].includes(String(binding.kind)) ||
     binding.parentRunId !== parent.id ||
     binding.sourceExecutionId !== carrier.parentExecutionId ||
     typeof binding.sourceExecutionId !== 'string' ||
     binding.contextSelectionId !== command.request.contextSelectionId ||
     planningSnapshotDigest(binding.configuration!) !==
       planningSnapshotDigest(carrier.childConfiguration as unknown as Json) ||
-    planningSnapshotDigest(binding.authorization!) !==
-      planningSnapshotDigest(command.request.authorization!)
+    (binding.kind === 'after_turn' &&
+      planningSnapshotDigest(binding.authorization!) !==
+        planningSnapshotDigest(command.request.authorization!)) ||
+    (binding.kind === 'agent_completion' &&
+      (command.receipt.sourceId !== carrier.resultAcceptance?.sourceId ||
+        command.receipt.resultRevision !== carrier.resultRevision ||
+        carrier.resultAcceptance?.selectionId !== command.request.contextSelectionId))
   )
     throw unavailable();
   const [source, origin, child] = await Promise.all([
@@ -181,7 +330,9 @@ export async function readBoundJobReportParent(
     origin.rootWorkSeq !== parent.rootWorkSeq ||
     origin.subjectId !== command.subjectId ||
     origin.cancelRequestedAt !== null ||
-    !['run.start', 'input.follow_up', 'child.start'].includes(origin.kind) ||
+    !['run.start', 'input.follow_up', 'child.start', 'job.report', 'job.report.continue'].includes(
+      origin.kind,
+    ) ||
     child.parentSessionId !== parent.sessionId ||
     child.rootSessionId !== session.rootSessionId ||
     child.workspaceId !== session.workspaceId ||
@@ -238,7 +389,7 @@ export async function readPlanningPermissionState(
       if (!cursor.parentExecutionId) {
         const reportRun = cursor.runId && (await runtime.getRun(cursor.runId));
         if (!reportRun) throw new AgentError('planning_run_scope_unavailable');
-        await readBoundJobReportParent(runtime, originStoreId, identity, reportRun);
+        await readBoundPlanningSuccessor(runtime, originStoreId, identity, reportRun);
         break;
       }
       const parent = await runtime.getExecution(cursor.parentExecutionId);
@@ -302,4 +453,139 @@ export async function readPlanningPermissionState(
     },
   };
   return planning.readPlanningState(read, { runId: identity.runId, originStoreId });
+}
+
+/** Follow only sealed causal links; same-work identity alone never grants a plan. */
+export async function readBoundPlanningSuccessor(
+  runtime: AgentRuntime,
+  originStoreId: string,
+  identity: PlanningRunIdentity,
+  successor: Readonly<RunRecord>,
+  suppliedCommand?: Readonly<CommandRecord>,
+): Promise<RunRecord> {
+  const seen = new Set<string>();
+  let current = successor;
+  for (;;) {
+    if (seen.has(current.id)) throw new AgentError('planning_run_scope_unavailable');
+    seen.add(current.id);
+    const command = await runtime.getCommand(current.originCommandId);
+    if (
+      !command ||
+      (suppliedCommand &&
+        current.id === successor.id &&
+        planningSnapshotDigest(suppliedCommand as unknown as Json) !==
+          planningSnapshotDigest(command as unknown as Json))
+    )
+      throw new AgentError('planning_run_scope_unavailable');
+    let parent: RunRecord;
+    if (
+      ['job.report', 'job.report.continue'].includes(command.kind) &&
+      object(command.request) &&
+      typeof command.request.parentRunId === 'string'
+    ) {
+      parent = await readBoundJobReportParent(
+        runtime,
+        originStoreId,
+        { runId: command.request.parentRunId, sessionId: identity.sessionId },
+        current,
+        command,
+      );
+    } else {
+      const receipt = command.receipt;
+      if (
+        !object(receipt) ||
+        typeof receipt.humanInputCommandId !== 'string' ||
+        typeof receipt.decisionCommandId !== 'string' ||
+        typeof receipt.continuationRunId !== 'string'
+      )
+        throw new AgentError('planning_run_scope_unavailable');
+      const [original, decision, prior] = await Promise.all([
+        runtime.getCommand(receipt.humanInputCommandId),
+        runtime.getCommand(receipt.decisionCommandId),
+        runtime.getRun(receipt.continuationRunId),
+      ]);
+      const request = decision?.request;
+      const decisionReceipt = decision?.receipt;
+      if (
+        !original ||
+        !decision ||
+        !prior ||
+        !object(original.request) ||
+        !object(original.receipt) ||
+        !object(request) ||
+        !object(request.proposal) ||
+        !object(decisionReceipt) ||
+        original.kind !== 'human.input' ||
+        decision.kind !== 'human.input.decision' ||
+        decision.status !== 'applied' ||
+        !['run.start', 'input.follow_up'].includes(command.kind) ||
+        command.status !== 'applied' ||
+        command.cancelRequestedAt !== null ||
+        original.cancelRequestedAt !== null ||
+        decision.cancelRequestedAt !== null ||
+        request.inputCommandId !== original.id ||
+        request.inputDigest !== original.requestDigest ||
+        request.proposal.relation !== 'same_work' ||
+        decisionReceipt.continuationRunId !== prior.id ||
+        decisionReceipt.targetRootWorkCommandId !== prior.rootWorkCommandId ||
+        decisionReceipt.businessCommandId !== command.id ||
+        original.receipt.businessCommandId !== command.id ||
+        original.receipt.applicationState !== 'applied' ||
+        original.receipt.runId !== current.id ||
+        receipt.runId !== current.id ||
+        prior.id === current.id ||
+        prior.isActive ||
+        prior.status !== 'completed' ||
+        [original, decision].some(
+          (record) =>
+            record.originStoreId !== originStoreId || record.sessionId !== identity.sessionId,
+        ) ||
+        [command, prior, current].some(
+          (record) =>
+            record.originStoreId !== originStoreId ||
+            record.sessionId !== identity.sessionId ||
+            record.rootWorkCommandId !== prior.rootWorkCommandId ||
+            record.rootWorkSeq !== prior.rootWorkSeq,
+        ) ||
+        original.subjectId !== command.subjectId ||
+        decision.subjectId !== command.subjectId ||
+        prior.contextSelectionId !== current.contextSelectionId ||
+        planningSnapshotDigest(prior.configuration) !==
+          planningSnapshotDigest(current.configuration) ||
+        prior.requirements.some(
+          (ref) =>
+            !current.requirements.some(
+              (inherited) =>
+                planningSnapshotDigest(ref as unknown as Json) ===
+                planningSnapshotDigest(inherited as unknown as Json),
+            ),
+        )
+      )
+        throw new AgentError('planning_run_scope_unavailable');
+      const publicId = original.request.publicCommandId;
+      const publicCommand =
+        typeof publicId === 'string' ? await runtime.getCommand(publicId) : null;
+      if (
+        !publicCommand ||
+        !object(publicCommand.receipt) ||
+        publicCommand.status !== 'applied' ||
+        publicCommand.cancelRequestedAt !== null ||
+        !['run.start', 'input.steer', 'input.follow_up'].includes(publicCommand.kind) ||
+        !object(original.request.originalRequest) ||
+        planningSnapshotDigest(publicCommand.request) !==
+          planningSnapshotDigest(original.request.originalRequest) ||
+        publicCommand.receipt.businessCommandId !== command.id ||
+        publicCommand.receipt.humanInputCommandId !== original.id ||
+        publicCommand.receipt.decisionCommandId !== decision.id ||
+        publicCommand.receipt.runId !== current.id ||
+        publicCommand.sessionId !== current.sessionId ||
+        publicCommand.originStoreId !== originStoreId ||
+        publicCommand.subjectId !== command.subjectId
+      )
+        throw new AgentError('planning_run_scope_unavailable');
+      parent = prior;
+    }
+    if (parent.id === identity.runId) return parent;
+    current = parent;
+  }
 }

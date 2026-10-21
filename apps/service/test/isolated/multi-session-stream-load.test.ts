@@ -48,11 +48,7 @@ function provider() {
           function: {
             name: 'spawn_agent',
             arguments: JSON.stringify({
-              key: `child-${index}`,
-              role: 'worker',
-              input: { content: `load-root-${root} child-index-${index}` },
-              cancellation: root === '1' ? 'detached' : 'attached',
-              result_disposition: 'required',
+              prompt: `load-root-${root} child-index-${index}`,
             }),
           },
         }));
@@ -128,6 +124,131 @@ function provider() {
     },
   };
 }
+// Observe the original transport only: no cloned body, extra read, request, or retry.
+function observeModelOutputTransport(endpoint: string) {
+  const originalFetch = globalThis.fetch;
+  const recent: Record<string, unknown>[] = [];
+  const active = new Map<number, Record<string, unknown>>();
+  let nextId = 0;
+  const errorFacts = (error: unknown, depth = 0): unknown => {
+    if (!(error instanceof Error)) return String(error).slice(0, 2000);
+    const detail = error as Error & { code?: unknown; errno?: unknown; syscall?: unknown };
+    return {
+      name: detail.name,
+      message: detail.message.slice(0, 2000),
+      code: detail.code,
+      errno: detail.errno,
+      syscall: detail.syscall,
+      stack: detail.stack?.slice(0, 4000),
+      cause:
+        depth < 3 && detail.cause !== undefined ? errorFacts(detail.cause, depth + 1) : undefined,
+    };
+  };
+  const remember = (fact: Record<string, unknown>) => {
+    recent.push({ ...fact });
+    if (recent.length > 32) recent.shift();
+  };
+  const observedFetch = new Proxy(originalFetch, {
+    apply(target, receiver, args: Parameters<typeof fetch>) {
+      const request = args[0];
+      const url = new URL(request instanceof Request ? request.url : String(request));
+      if (!url.href.startsWith(`${endpoint}/`) || !url.pathname.endsWith('/model-output'))
+        return Reflect.apply(target, receiver, args);
+      const signal = args[1]?.signal ?? (request instanceof Request ? request.signal : undefined);
+      const id = ++nextId;
+      const fact: Record<string, unknown> = {
+        id,
+        path: url.pathname,
+        started: performance.now(),
+        bytes: 0,
+        reads: 0,
+        phase: 'fetch',
+      };
+      active.set(id, fact);
+      return Reflect.apply(target, receiver, args).then(
+        (response: Response) => {
+          Object.assign(fact, {
+            phase: 'response',
+            status: response.status,
+            contentLength: response.headers.get('content-length'),
+            size: response.headers.get('x-model-output-size'),
+            hash: response.headers.get('x-model-output-hash'),
+          });
+          const body = response.body;
+          if (body) {
+            const originalGetReader = body.getReader;
+            Object.defineProperty(body, 'getReader', {
+              configurable: true,
+              value: new Proxy(originalGetReader, {
+                apply(getReader, stream, readerArgs) {
+                  const reader = Reflect.apply(
+                    getReader,
+                    stream,
+                    readerArgs,
+                  ) as ReadableStreamDefaultReader<Uint8Array>;
+                  Object.defineProperty(reader, 'read', {
+                    configurable: true,
+                    value: new Proxy(reader.read, {
+                      apply(read, owner, readArgs) {
+                        fact.phase = 'read';
+                        return Reflect.apply(read, owner, readArgs).then(
+                          (chunk: ReadableStreamReadResult<Uint8Array>) => {
+                            fact.reads = Number(fact.reads) + 1;
+                            if (chunk.done) {
+                              fact.phase = 'eof';
+                              fact.elapsedMs = performance.now() - Number(fact.started);
+                              remember(fact);
+                              active.delete(id);
+                            } else fact.bytes = Number(fact.bytes) + chunk.value.byteLength;
+                            return chunk;
+                          },
+                          (error: unknown) => {
+                            Object.assign(fact, {
+                              phase: 'read-error',
+                              elapsedMs: performance.now() - Number(fact.started),
+                              aborted: signal?.aborted,
+                              error: errorFacts(error),
+                            });
+                            remember(fact);
+                            active.delete(id);
+                            throw error;
+                          },
+                        );
+                      },
+                    }),
+                  });
+                  return reader;
+                },
+              }),
+            });
+          }
+          return response;
+        },
+        (error: unknown) => {
+          Object.assign(fact, {
+            phase: 'fetch-error',
+            elapsedMs: performance.now() - Number(fact.started),
+            aborted: signal?.aborted,
+            error: errorFacts(error),
+          });
+          remember(fact);
+          active.delete(id);
+          throw error;
+        },
+      );
+    },
+  });
+  globalThis.fetch = observedFetch;
+  return {
+    snapshot: () => ({
+      recent: [...recent],
+      active: [...active.values()].map((fact) => ({ ...fact })),
+    }),
+    restore() {
+      globalThis.fetch = originalFetch;
+    },
+  };
+}
 function percentile(values: number[], fraction: number) {
   const sorted = [...values].sort((a, b) => a - b);
   return sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * fraction))] ?? 0;
@@ -170,6 +291,9 @@ for (const stage of [
     let readFailures = 0,
       expectedAborts = 0;
     let exitCode: number | undefined;
+    let failed = false;
+    let observedExit: { code?: number; error?: string } | undefined;
+    let transport: ReturnType<typeof observeModelOutputTransport> | undefined;
     try {
       host = await launchPairedService({
         entrypoint: join(import.meta.dir, 'multi-session-stream-load.fixture.ts'),
@@ -181,6 +305,15 @@ for (const stage of [
         hostConfiguration: { baseURL: source.baseURL, slots: stage.slots, metricsPath },
         shutdownTimeoutMs: 10000,
       });
+      void host.exited.then(
+        (code) => {
+          observedExit = { code };
+        },
+        (error) => {
+          observedExit = { error: String(error) };
+        },
+      );
+      transport = observeModelOutputTransport(host.bootstrap.endpoint);
       const client = host.client,
         storeId = host.bootstrap.storeId!;
       await client.createWorkspace({
@@ -466,6 +599,25 @@ for (const stage of [
             providerCanceled: [...source.canceled],
           }),
         );
+      if (!survivors.every((item) => item.execution.status === 'running'))
+        console.error(
+          'CHILD_MODEL_ERRORS',
+          JSON.stringify(
+            await Promise.all(
+              survivors.map(async (item) => {
+                const view = await client.getView(item.execution.childSessionId!);
+                return {
+                  child: item.execution.childSessionId,
+                  executions: view.executions.map((execution) => ({
+                    id: execution.id,
+                    status: execution.status,
+                    result: execution.result,
+                  })),
+                };
+              }),
+            ),
+          ),
+        );
       expect(survivors.every((item) => item.execution.status === 'running')).toBe(true);
       const target = detached[0]!;
       await client.cancelExecution('root-1', {
@@ -481,6 +633,8 @@ for (const stage of [
       const siblings = (await client.listAllBackgroundExecutions()).filter(
         (item) => item.session.id === 'root-1' && item.execution.id !== target.execution.id,
       );
+      if (!siblings.every((item) => item.execution.status === 'running'))
+        console.error('SIBLING_DIAG', JSON.stringify(siblings));
       expect(siblings.every((item) => item.execution.status === 'running')).toBe(true);
       expect(readFailures).toBe(0);
       expect(Math.max(...healthLatencies)).toBeLessThan(2000);
@@ -493,7 +647,14 @@ for (const stage of [
         const roots = await Promise.all(
           Array.from({ length: stage.roots }, (_, index) => client.getView(`root-${index}`)),
         );
-        if (!source.active.size && roots.every((view) => view.runs.every((run) => !run.isActive))) {
+        const carriers = await client.listAllBackgroundExecutions();
+        if (
+          !source.active.size &&
+          roots.every((view) => view.runs.every((run) => !run.isActive)) &&
+          carriers.every((item) =>
+            ['succeeded', 'failed', 'cancelled', 'outcome_unknown'].includes(item.execution.status),
+          )
+        ) {
           settled = true;
           break;
         }
@@ -626,6 +787,7 @@ for (const stage of [
       expect(exitCode).toBe(0);
       console.log(JSON.stringify({ multiSessionStreamLoad: summary, exitCode }));
     } catch (error) {
+      failed = true;
       console.error(
         JSON.stringify({
           multiSessionStreamLoadFailure: {
@@ -638,6 +800,16 @@ for (const stage of [
             readFailures,
             expectedAborts,
             metrics: samples.at(-1),
+            observedExit,
+            hostDiagnostics: host?.diagnostics,
+            transport: transport?.snapshot(),
+            fixtureLifecycle: (() => {
+              try {
+                return readFileSync(`${metricsPath}.lifecycle`, 'utf8');
+              } catch {
+                return undefined;
+              }
+            })(),
           },
         }),
       );
@@ -647,6 +819,37 @@ for (const stage of [
       source.close();
       await Promise.allSettled(observers);
       await host?.close();
-      rmSync(directory, { recursive: true, force: true });
+      transport?.restore();
+      if (failed) {
+        console.error(
+          JSON.stringify({
+            multiSessionStreamLoadCleanup: {
+              stage,
+              observedExit,
+              hostDiagnostics: host?.diagnostics,
+              lifecycle: (() => {
+                try {
+                  return readFileSync(`${metricsPath}.lifecycle`, 'utf8');
+                } catch {
+                  return undefined;
+                }
+              })(),
+              metrics: (() => {
+                try {
+                  return JSON.parse(readFileSync(metricsPath, 'utf8'));
+                } catch {
+                  return undefined;
+                }
+              })(),
+              transport: transport?.snapshot(),
+            },
+          }),
+        );
+      }
+      if (failed) {
+        console.error(JSON.stringify({ multiSessionStreamLoadRetainedEvidence: directory, stage }));
+      } else {
+        rmSync(directory, { recursive: true, force: true });
+      }
     }
   }, 90000);

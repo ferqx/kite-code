@@ -8,17 +8,21 @@
 
 POSIX [文件读取](../artifacts-files.ts)为三类消费者保持同一完整验证：公开chunks按剩余大小分配独占chunk，每块最多64KiB，已yield字节不复用；内部verify只持一个最多64KiB的scratch；完整read在opened真实大小／身份通过后直接填充一个目标buffer，不保chunk列表后再concat。三者到达声明大小后仍做1字节真实EOF探测，再核完整hash／size／ctime；增长、截断或元数据变化拒绝，异常及iterator.return／throw均关闭FD。完整read仅受运行时连续Buffer能力限制，无法分配时明确 `artifact_content_unavailable`，流式读取没有新增累计内容额度。Windows原生读取与完整read的原路径保持，本轮POSIX优化不构成Windows新资格。
 
+公开 `read`、`readReference`、`readStream` 和发布后的完整回读异步消费同一验证器，每64KiB推进一块，累计8ms或64块后让出真实事件循环，并在继续读取前核原取消信号。`Promise` 或流的微任务交接不能代替这个检查点。原FD／HANDLE与活动票据一直保留到完整EOF、取消或提前return实际关闭；`close`不抢先关闭在途句柄。整个正文仍需逐字节读取、计算摘要并核对最终身份，单次系统调用和连续结果分配不承诺实时延迟。显式同步文件辅助入口保留原合同；异步分片不授予正文前缀完整资格，也不缓存授权或跳过验证。
+
 [缓冲区回归](../../test/isolated/artifacts/artifact-files.test.ts)在独立子进程内核实际分配、短读UTF-8、公开chunk所有权、三种消费者的EOF／hash／size／immutable／symlink／inode／ctime门禁与关闭。18字节tiny完整读的Buffer.alloc累计由131072降至19字节；200000字节verify由327680降至65537字节，完整read为200001字节且concat为零。这是局部分配证据，不等于RSS或整机footprint降幅；原接纳队列、scope与引用授权保持。取舍见[完整验证与有界工作内存](../../../../.agents/notes/implemented/architecture/2026-10-16-bounded-verified-file-reads.md)。
+
+[本地响应性回归](../../test/isolated/artifacts/nonblocking-read.test.ts)在真实完整Blob读取中核宏任务和Store查询进展、三种读取的中途取消、原FD关闭、提前结束、关闭排空与中途篡改拒绝；范围和预取消在正文IO前拒绝。Windows原生场景仍需实际平台运行，不由POSIX的FD观察替代。
 
 `readReference({expectedStoreId, reference})` 在同一个在途读取中实时查询准确 scope 的登记引用，逐项保持完整原 metadata（含出处、MIME、hash 和 size）的 canonical 相等，再沿同一完整文件验证返回 bytes；不缓存引用或授权。`expectedStoreId` 是当前连接准入，`reference.storeId` 是原引用出处，恢复后不能互换。中立 `ArtifactContentStore` 将这个入口设为可选：Runtime 使用它避免先查询、再由默认 `read` 重复查询同一引用；未提供该入口的自定义端口保留原 Runtime metadata 校验与 `read` 路径。包装读取的端口需要明确包装所提供的两个入口，不能把一个入口的阻塞或取消钩子当作另一个入口也已执行。Runtime 在读取前后仍核取消并复核完整 bytes 的 size/hash，发布、owner 守卫和每段持久检查点保持。
 
 每个 Artifact Store 最多接纳8个活动操作，其中读取最多6个，为真实输出发布保留进展空间。其余操作进入可取消的有界队列：最多64项、读取最多32项，排队 metadata 与已知字节数组合计预算16MiB。这是内部正式票据保留量，不是单个或累计 Artifact 的大小限制；空闲时的大文件仍可完整发布。超出预算的调用等待共享容量通知，不因正常拥塞返回 `artifact_busy`，也不重试已经发生的发布或登记。每批最多连续交接4个发布后给等待读取机会，避免读取洪峰误伤模型发布，也避免发布持续饿死读取。惰性 source 闭包和调用方保留的 Promise／载荷不由这个队列预算计量，不能据此承诺任意无限并发的常量内存。
 
-`read`、`readReference` 和 `readStream` 均接受 `AbortSignal`；Runtime 的正文读取与发布取消沿中立端口传递。排队期间取消立即移除票据，溢出等待也立即结束，不再查询 Store；已接纳的读取仍遵守原完整文件校验与取消边界。scope 和 metadata 在调用时封存，signal 不传入 Worker。`publish(Uint8Array)` 保持调用时bytes：排队预算足够时立即复制，超预算时同步按64KiB块写入未发布的私有snapshot，再等待容量；封存成功后关闭writer和目录句柄，等待期间只保原路径与identity/size/change。活动槽内重开并完整复核，最后清理snapshot，不持文件句柄或permit等待其他许可，也不提前发布Blob或登记引用。
+`read`、`readReference` 和 `readStream` 均接受 `AbortSignal`；Runtime 的正文读取与发布取消沿中立端口传递。排队期间取消立即移除票据，溢出等待也立即结束，不再查询 Store；已接纳的读取仍遵守原完整文件校验与取消边界。scope 和 metadata 在调用时封存，signal 不传入 Worker。 公开 Runtime.readArtifact 的普通／legacy 引用查询同样先剥离 signal，只把纯范围参数交给 SQLite；读取前后检查取消，实际 Artifact 读取继续收到同一 signal。取消只结束该次读取，不取消原业务、改写视图或推进水位；[真实 Runtime 回归](../../test/isolated/artifacts/context.test.ts)核未取消 signal 的完整二进制读取与预取消隔离。`publish(Uint8Array)` 保持调用时bytes：排队预算足够时立即复制，超预算时同步按64KiB块写入未发布的私有snapshot，再等待容量；封存成功后关闭writer和目录句柄，等待期间只保原路径与identity/size/change。活动槽内重开并完整复核，最后清理snapshot，不持文件句柄或permit等待其他许可，也不提前发布Blob或登记引用。
 
 close 拒绝新操作，唤醒尚未取得正式票据的调用为 `artifact_closed`，等待这些调用清理snapshot，并排空已接纳活动及队列后才释放Profile使用权。原生snapshot关闭未确认时保原错误和资源，不重复关闭旧数字fd/HANDLE；停止新准入，close明确 `artifact_snapshot_cleanup_unconfirmed`并保Profile锁，不能误报成功。原8/6并发、公平交接和完整EOF/hash/scope均保持。保留参数与公平性的理由见[原有界接纳决定](../../../../.agents/notes/implemented/architecture/2026-10-15-artifact-admission-backpressure.md)，正常拥塞继续等待的取舍见[正常Loop决定](../../../../.agents/notes/implemented/bug-fix/2026-10-17-normal-loop-checkpoints.md)。[真实背压回归](../../test/isolated/artifacts/backpressure.test.ts)核104个并发发布、bytes/scope封存、排队取消、关闭排空、单次真实Model输出完成和未确认关闭。
 
-Store 登记使用 `verifyPublishedArtifact` 固定工作内存复核全文，不把整 Blob 分配到 Worker 事务中。Windows x64 使用下面的固定原生实现；其他 Windows architecture 仍明确 unsupported。本机 macOS 证据不代表 Windows/Linux、独立安装或跨平台发行资格。
+Store 登记使用同一固定scratch的完整验证器，不把整 Blob 分配到 Worker 事务中。正式 Worker 每8ms或64块把尚未进入事务的原登记请求退回同类别队首，让正文／查询类别继续；原request ID、arrival、容量和close barrier保持，没有并发执行SQL或接受caller传入的已验证标记。实际完整EOF后才进入原短事务，再核Store／scope。证明跨首个BEGIN等待保留时，提交前仍核实际路径及dev／ino／size／ctime／mtime／mode，漂移拒绝；最终ACK或错误关闭原生成器。直接同步Operations调用保持同步完整验证。具体队列与[真实大Blob／漂移回归](../../test/isolated/storage/artifact-verification.test.ts)归[Store owner](../storage/README.md)。Windows x64 使用下面的固定原生实现；其他 Windows architecture 仍明确 unsupported。本机 macOS 证据不代表 Windows/Linux、独立安装或跨平台发行资格。
 
 Windows [内部媒体 leaf](../platform/windows-artifact-files.ts)仅在实际调用时加载固定 System DLL，读取当前 token SID，不接受 caller HANDLE、SID、ACL 或 DLL。Profile/blob 目录仍用原 [Windows 私有路径政策](../platform/windows-path-security.README.md)，未改变 Profile/config 的 FA DACL。实际流写入使用原子 CREATE_NEW 私有 temporary 和原 HANDLE，每块最多 64 KiB，保 signed-64 总字节计数。只有这个新建 temporary 可通过 SetSecurityInfo 减权为 protected currentSID-only FILE_GENERIC_READ；已有对象 ACL 不修复。owner 主动改 ACL 与 POSIX owner 主动 chmod 类似，不属于防御同一 owner 的独立安全边界。
 

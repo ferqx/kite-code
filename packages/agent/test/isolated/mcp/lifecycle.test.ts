@@ -259,7 +259,7 @@ async function fixture(
     get calls() {
       return calls;
     },
-    async run(sessionId: string, commandId: string, content = commandId) {
+    async run(sessionId: string, commandId: string, content = `New task: ${commandId}`) {
       await runtime.submitCommand({
         expectedStoreId,
         sessionId,
@@ -520,11 +520,20 @@ test('readonly Runtime reopen exposes saved catalogue without live restoration; 
       sessionId: 'a',
       subjectId: 'user',
       commandId: 'cold-retry',
-      request: { kind: 'run.start', content: 'Original key is historical, never reconnect it' },
+      request: {
+        kind: 'run.start',
+        content: 'New task: Original key is historical, never reconnect it',
+      },
     });
-    await reopened.waitForCommand('cold-retry', { timeoutMs: 5000 });
+    const command = await reopened.waitForCommand('cold-retry', { timeoutMs: 5000 });
+    const receipt = command.receipt as { runId: string; businessCommandId?: string };
+    const run = (await writable.getRun(receipt.runId))!;
+    expect(run.originCommandId).toBe(receipt.businessCommandId ?? command.id);
     const retry = (await writable.listExecutions('a')).find(
-      (item) => item.originCommandId === 'cold-retry' && item.definitionId === 'mcp.connect',
+      (item) =>
+        item.runId === run.id &&
+        item.originCommandId === run.originCommandId &&
+        item.definitionId === 'mcp.connect',
     )!;
     expect(JSON.stringify(retry.result)).toContain('mcp_historical_connection_unavailable');
     expect({ opens: f.opens, connections: f.connections, calls: f.calls }).toEqual(before);

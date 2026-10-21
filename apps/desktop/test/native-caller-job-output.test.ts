@@ -164,6 +164,11 @@ test('fixed Job output survives same-selection metadata refresh while selection,
       else {
         parentGate.resolve();
         await caller.invoke({ method: 'state', generation: 1 });
+        await promptly(
+          (async () => {
+            while (!signal.aborted) await Bun.sleep(1);
+          })(),
+        );
         expect(caller.state().selection?.permissionUnavailable).toBe(true);
       }
       expect(signal.aborted).toBe(true);

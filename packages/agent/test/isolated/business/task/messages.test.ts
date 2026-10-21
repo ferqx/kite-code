@@ -6,8 +6,8 @@ import { pathToFileURL } from 'node:url';
 import type { ModelAdapter, ModelEvent, ModelRequest } from '@kite-ai/ai';
 import { createRuntime } from '../../../../src';
 import { createArtifactStore } from '../../../../src/artifacts';
-import { createTaskExtension } from '../../../../src/extensions/task';
 import { openSqliteStore } from '../../../../src/sqlite';
+import { createLegacyTaskFixture as createTaskExtension } from '../../../fixtures/legacy-task-surface';
 
 const finish: Extract<ModelEvent, { type: 'finish' }> = {
   type: 'finish',

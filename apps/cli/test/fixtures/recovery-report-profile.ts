@@ -42,6 +42,7 @@ export async function recoveryReportProfile() {
       const body = (await request.json()) as {
         model: string;
         messages: { role: string; content: unknown }[];
+        tools?: { function: { name: string; parameters: { required?: string[] } } }[];
       };
       const review = body.messages.some((message) =>
         String(message.content).includes('"instructions":"Review only this exact operation.'),
@@ -64,6 +65,15 @@ export async function recoveryReportProfile() {
               ? 'parent-complete\n'
               : 'report\n',
         );
+      }
+      if (!review && !child && parentCalls === 1) {
+        const spawn = body.tools?.find((tool) => tool.function.name === 'spawn_agent');
+        if (
+          !['key', 'role', 'input'].every((key) =>
+            spawn?.function.parameters.required?.includes(key),
+          )
+        )
+          throw Error('original_typed_task_model_surface_missing');
       }
       const content = review
         ? JSON.stringify({
@@ -135,7 +145,34 @@ export async function recoveryReportProfile() {
     const source = join(artifactRoot, 'report-service.ts');
     writeFileSync(
       source,
-      `import {existsSync,renameSync,writeFileSync} from 'node:fs';import {selectProfile} from '@kite-ai/agent/profile';import {createDefaultProcessConfiguration} from '@kite-ai/service/configuration';import {runServiceProcess} from '@kite-ai/service/main';await runServiceProcess({configure(startup){return createDefaultProcessConfiguration({userConfigurationPath:selectProfile(startup.profile).profilePath+'/config.jsonc',profile:selectProfile(startup.profile),hostConfiguration:startup.hostConfiguration,child:[{id:'reader',version:'1',modelId:'child',toolIds:[]}],afterTurn:{async authorize(input){const allowed=input.session.id==='s'&&input.command.id==='work'&&input.execution.definitionId==='task'&&input.execution.originCommandId==='work';if(allowed&&input.phase==='apply'&&!existsSync(${JSON.stringify(ready)})){writeFileSync(${JSON.stringify(`${ready}.tmp`)},JSON.stringify({executionId:input.execution.id,parentId:input.run.id}));renameSync(${JSON.stringify(`${ready}.tmp`)},${JSON.stringify(ready)});await new Promise(()=>{});}return {allowed,revision:'owned-original-report-policy-v1'};}}});}});`,
+      `import {existsSync,renameSync,writeFileSync} from 'node:fs';
+import type {Extension} from '@kite-ai/agent/extensions';
+import {selectProfile} from '@kite-ai/agent/profile';
+import {createDefaultProcessConfiguration} from '@kite-ai/service/configuration';
+import {runServiceProcess} from '@kite-ai/service/main';
+// This isolated typed-protocol recovery fixture exposes only the selected historical task@1.
+// Ordinary hosts retain the production six-tool Model surface.
+const legacySurface=(extensions:readonly Extension[]|undefined)=>extensions?.map(extension=>
+  extension.id!=='builtin.task'?extension:{...extension,tools:extension.tools?.map(tool=>
+    tool.id==='task'&&tool.version==='1'?{...tool,model:{...tool.model!,hidden:false}}:tool)});
+await runServiceProcess({configure(startup){
+  const host=createDefaultProcessConfiguration({
+    userConfigurationPath:selectProfile(startup.profile).profilePath+'/config.jsonc',
+    profile:selectProfile(startup.profile),hostConfiguration:startup.hostConfiguration,
+    child:[{id:'reader',version:'1',modelId:'child',toolIds:[]}],
+    afterTurn:{async authorize(input){
+      const allowed=input.session.id==='s'&&input.command.id==='work'&&input.execution.definitionId==='task'&&input.execution.originCommandId==='work';
+      if(allowed&&input.phase==='apply'&&!existsSync(${JSON.stringify(ready)})){
+        writeFileSync(${JSON.stringify(`${ready}.tmp`)},JSON.stringify({executionId:input.execution.id,parentId:input.run.id}));
+        renameSync(${JSON.stringify(`${ready}.tmp`)},${JSON.stringify(ready)});
+        await new Promise(()=>{});
+      }
+      return {allowed,revision:'owned-original-report-policy-v1'};
+    }}
+  });
+  // The global registered definition is reused by initial, recovery, and step catalogues.
+  return {...host,extensions:legacySurface(host.extensions)};
+}});`,
     );
     const built = await Bun.build({
       entrypoints: [source],

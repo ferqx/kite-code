@@ -27,6 +27,7 @@ import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import { privateDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { createDefaultProcessConfiguration } from '../../src/configuration';
 import { createMcpHttpTransportPort } from '../../src/mcp-http-port';
+import { initializeLivePermissionFixture } from '../fixtures/live-permission-fixture';
 
 const hash = (value: unknown) => createHash('sha256').update(JSON.stringify(value)).digest('hex');
 const object = (value: Json) => value as Record<string, Json>;
@@ -454,6 +455,17 @@ async function fixture(
       subjectId: 'user',
       title: sessionId,
     });
+  for (const sessionId of ['a', 'b'])
+    await initializeLivePermissionFixture({
+      runtime,
+      profile,
+      expectedStoreId,
+      subjectId: 'user',
+      sessionId,
+      workspaceId: 'w',
+      mode: 'full',
+      trusted: true,
+    });
   let serial = 0;
   return {
     root,
@@ -492,8 +504,18 @@ async function fixture(
     get lastActionCommandId() {
       return `action-${serial}`;
     },
-    set ask(value: boolean) {
+    async setAsk(value: boolean) {
       ask = value;
+      for (const sessionId of ['a', 'b'])
+        await initializeLivePermissionFixture({
+          runtime,
+          profile,
+          expectedStoreId,
+          subjectId: 'user',
+          sessionId,
+          workspaceId: 'w',
+          mode: value ? 'accept_edits' : 'full',
+        });
     },
     set hold(value: typeof hold) {
       hold = value;
@@ -657,7 +679,7 @@ test('default independent resource/prompt permissions, durable Ask and wrong sco
     await f.invoke('mcp.resources.list', binding as Json);
     await f.invoke('mcp.prompts.list', binding as Json);
     for (const id of mcpReadToolIds) {
-      f.ask = true;
+      await f.setAsk(true);
       const before = f.wire.length;
       const input = {
         ...binding,
@@ -699,7 +721,7 @@ test('default independent resource/prompt permissions, durable Ask and wrong sco
           name: 'guidance',
           arguments: { subject: 'exact subject' },
         });
-      f.ask = false;
+      await f.setAsk(false);
     }
     const resourceTarget = await f.target('resources'),
       promptTarget = await f.target('prompts');
@@ -855,7 +877,7 @@ test('cancel before durable prompt permission sends no RPC; a cancelled issued r
     const binding = await f.binding();
     await f.invoke('mcp.prompts.list', binding as Json);
     await f.invoke('mcp.resources.list', binding as Json);
-    f.ask = true;
+    await f.setAsk(true);
     const before = f.wire.length;
     const beforeCall = f.invoke('mcp.prompts.get', {
       ...binding,
@@ -881,7 +903,7 @@ test('cancel before durable prompt permission sends no RPC; a cancelled issued r
     });
     expect((await beforeCall).execution.status).toBe('cancelled');
     expect(f.wire).toHaveLength(before);
-    f.ask = false;
+    await f.setAsk(false);
     let entered!: () => void;
     const seen = new Promise<void>((resolve) => {
       entered = resolve;

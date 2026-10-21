@@ -321,11 +321,16 @@ try {
       expectedStoreId: storeId,
       commandId: 'work',
       kind: 'run.start',
-      content: 'hold actual Model',
+      content: 'New task: hold actual Model',
     });
     stage = 'model';
     await bounded(modelEntered.promise);
     const active = (await control.getView('s')).runs.find((value) => value.isActive)!;
+    expect(active.originCommandId).toBe('work');
+    expect(await control.getCommand('work')).toMatchObject({
+      status: 'applied',
+      receipt: { runId: active.id },
+    });
     gateEnabled = true;
     const original = (await control.getView('s')).session;
     await control.renameSession('s', {
@@ -355,7 +360,7 @@ try {
         commandId: 'explicit-steer',
         targetRunId: active.id,
         contextSelectionId: original.contextSelectionId,
-        content: 'new exact user input',
+        content: '补充：new exact user input',
       },
     });
     first.release();
@@ -383,6 +388,53 @@ try {
     successor.release();
     modelGate.release();
     await runtime.waitForCommand('work', { timeoutMs: 5000 });
+    const publicInput = await runtime.waitForCommand('explicit-steer', { timeoutMs: 5000 });
+    const application = publicInput.receipt as {
+      humanInputCommandId: string;
+      decisionCommandId: string;
+      businessCommandId: string;
+    };
+    expect(publicInput.receipt).toMatchObject({
+      outcome: 'human_input_applied',
+      runId: active.id,
+      sourceCommandId: application.businessCommandId,
+    });
+    const raw = (await store.getCommand(application.humanInputCommandId))!;
+    expect(raw.request).toMatchObject({
+      publicCommandId: 'explicit-steer',
+      content: '补充：new exact user input',
+      originalRequest: { kind: 'input.steer', targetRunId: active.id },
+    });
+    expect(raw.receipt).toMatchObject({
+      state: 'decided',
+      decisionCommandId: application.decisionCommandId,
+      businessCommandId: application.businessCommandId,
+    });
+    expect(await store.getCommand(application.decisionCommandId)).toMatchObject({
+      status: 'applied',
+      request: {
+        inputCommandId: raw.id,
+        inputDigest: raw.requestDigest,
+        proposal: { relation: 'same_work', purpose: 'work', targetRootWorkCommandId: 'work' },
+      },
+    });
+    expect(await store.getCommand(application.businessCommandId)).toMatchObject({
+      status: 'applied',
+      kind: 'input.steer',
+      request: { targetRunId: active.id, content: '补充：new exact user input' },
+      receipt: { runId: active.id },
+    });
+    expect((await control.getView('s')).runs).toMatchObject([
+      { id: active.id, originCommandId: 'work', status: 'completed' },
+    ]);
+    expect(model.requests).toHaveLength(2);
+    expect(
+      model.requests[1]!.messages.some(
+        (message) =>
+          message.content === '补充：new exact user input' &&
+          message.sourceIds?.includes(application.businessCommandId),
+      ),
+    ).toBe(true);
   } catch (error) {
     failure = error;
     console.error(

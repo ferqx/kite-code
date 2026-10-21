@@ -16,11 +16,59 @@ import { pathToFileURL } from 'node:url';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import { privateDirectory } from '@kite-ai/agent/windows-path-security';
+import type { AgentClient } from '@kite-ai/client';
 import {
   formatServiceStartupReport,
   launchPairedService,
   PairedServiceError,
 } from '../../src/paired';
+
+async function assertBusinessInput(
+  client: AgentClient,
+  profile: ReturnType<typeof selectProfile>,
+  commandId: string,
+  content: string,
+) {
+  const command = await client.getCommand(commandId);
+  const receipt = command.receipt as {
+    businessCommandId: string;
+    humanInputCommandId: string;
+    runId: string;
+  };
+  expect(command.status).toBe('applied');
+  expect(receipt.businessCommandId).toBeString();
+  expect(receipt.businessCommandId).not.toBe(commandId);
+  const store = await openSqliteStore({ dataRoot: profile.dataRoot, profile: profile.profile });
+  try {
+    const original = (await store.getCommand(commandId))!;
+    expect(original).toMatchObject({ status: 'applied', request: { kind: 'run.start', content } });
+    expect(await store.getCommand(receipt.humanInputCommandId)).toMatchObject({
+      request: { publicCommandId: commandId, content, originalRequest: original.request },
+    });
+    expect(await store.getCommand(receipt.businessCommandId)).toMatchObject({
+      status: 'applied',
+      request: { content },
+      receipt: { runId: receipt.runId },
+    });
+  } finally {
+    await store.close();
+  }
+  const run = await client.getRun(receipt.runId);
+  expect(run).toMatchObject({
+    originCommandId: receipt.businessCommandId,
+    rootWorkCommandId: commandId,
+  });
+  const view = await client.getView('session');
+  const model = view.executions.find((item) => item.kind === 'model' && item.runId === run.id)!;
+  expect(model).toBeDefined();
+  const input = await client.getModelInput('session', model.id);
+  expect(input.confirmation).toBe('succeeded');
+  const source = input.request.messages.find((message) =>
+    message.sourceIds?.includes(receipt.businessCommandId),
+  );
+  expect(source).toMatchObject({ content, sourceIds: [receipt.businessCommandId] });
+  return run;
+}
 
 const entrypoint = join(import.meta.dir, '../fixtures/paired-child.ts');
 function fixture() {
@@ -233,9 +281,16 @@ test('two actual paired children distinguish network disconnect from parent EOF 
       expectedStoreId: storeId,
       commandId: 'closing-work',
       kind: 'run.start',
-      content: 'cancel on EOF',
+      content: 'New task: cancel on EOF',
     });
     await until(() => existsSync(hostA.entered), Boolean);
+    const closingRun = await assertBusinessInput(
+      first.client,
+      data.profile,
+      'closing-work',
+      'New task: cancel on EOF',
+    );
+    expect(closingRun.isActive).toBe(true);
     const closingCursor = (await first.client.getView('session')).snapshotCursor;
     const closingStream = await fetch(
       `${first.bootstrap.endpoint}/v1/events?storeId=${storeId}&after=${closingCursor}`,
@@ -263,9 +318,7 @@ test('two actual paired children distinguish network disconnect from parent EOF 
     expect(first.diagnostics.every((code) => !code.includes(first.bootstrap.token))).toBe(true);
     expect(first.diagnostics).toContain('unstructured_service_log');
     const cancelled = await second.client.getView('session');
-    expect(cancelled.runs.find((run) => run.originCommandId === 'closing-work')!.status).toBe(
-      'cancelled',
-    );
+    expect(cancelled.runs.find((run) => run.id === closingRun.id)!.status).toBe('cancelled');
     expect(readFileSync(hostA.ledger, 'utf8').trim().split('\n')).toHaveLength(1);
     expect((await second.client.getView('other')).runs[0]!.isActive).toBe(true);
     expect(existsSync(hostB.ledger)).toBe(false);
@@ -279,16 +332,20 @@ test('two actual paired children distinguish network disconnect from parent EOF 
       expectedStoreId: storeId,
       commandId: 'survivor',
       kind: 'run.start',
-      content: 'fresh work',
+      content: 'New task: fresh work',
     });
-    const survivingView = await until(
-      () => second.client.getView('session'),
-      (view) => {
-        const run = view.runs.find((item) => item.originCommandId === 'survivor');
-        return !!run && !run.isActive;
+    await until(
+      async () => {
+        const command = await second.client.getCommand('survivor');
+        const receipt = command.receipt as { runId?: string } | null;
+        const view = await second.client.getView('session');
+        return view.runs.find((run) => run.id === receipt?.runId);
       },
+      (run) => !!run && !run.isActive,
     );
-    expect(survivingView.runs.find((run) => run.originCommandId === 'survivor')).toMatchObject({
+    expect(
+      await assertBusinessInput(second.client, data.profile, 'survivor', 'New task: fresh work'),
+    ).toMatchObject({
       status: 'completed',
       reason: null,
     });

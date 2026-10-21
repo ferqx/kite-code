@@ -79,7 +79,7 @@ export function readBackgroundExecutions(
           AND c.subject_id=? AND o.subject_id=c.subject_id AND c.origin_store_id=carrier.origin_store_id AND o.origin_store_id=carrier.origin_store_id
           AND c.root_work_command_id=carrier.root_work_command_id AND c.root_work_seq=carrier.root_work_seq)
       ) SELECT e.id,e.session_id,e.run_id,e.origin_command_id,e.origin_store_id,e.root_work_command_id,e.root_work_seq,
-      e.parent_execution_id,e.child_session_id,e.root_session_id,e.cancel_with_parent,e.step_id,e.call_id,e.attempt,e.adapter_id,e.definition_version,e.state,
+      e.parent_execution_id,e.predecessor_execution_id,e.child_session_id,e.root_session_id,e.cancel_with_parent,e.step_id,e.call_id,e.attempt,e.adapter_id,e.definition_version,e.state,
       e.owner_generation,e.cancel_requested,e.cancel_requested_at,e.result_revision,e.delivery,e.delivery_reason,e.delivery_target_session_id,e.context_selection_id,json_extract(e.reference_json,'$.runId') AS reference_run_id,CAST(e.rowid AS TEXT) AS directory_seq FROM execution e
       JOIN eligible s ON s.id=e.session_id JOIN command source ON source.id=e.origin_command_id AND source.session_id=e.session_id
       WHERE e.kind='job' AND e.rowid>? AND e.rowid<=? AND (? IS NULL OR e.id=?)
@@ -198,11 +198,38 @@ export function readBackgroundExecutions(
         throw new AgentError('directory_identity_conflict');
       const childStart = childSession
         ? db.row(
-            "SELECT * FROM command WHERE id=? AND session_id=? AND kind='child.start'",
+            "SELECT * FROM command WHERE id=? AND session_id=? AND kind IN ('child.start','input.follow_up')",
             `child-start-${execution.id}`,
             childSession.id,
           )
         : null;
+      const childRequest = childStart ? JSON.parse(String(childStart.request_json)) : null;
+      const predecessor =
+        childStart?.kind === 'input.follow_up'
+          ? db.row(
+              `SELECT r.id,r.context_selection_id FROM run r JOIN execution previous
+             ON previous.id=? AND previous.child_session_id=r.session_id
+             WHERE r.id=? AND r.session_id=? AND r.origin_command_id='child-start-'||previous.id
+             AND r.origin_store_id=? AND previous.origin_store_id=r.origin_store_id
+             AND previous.session_id=? AND previous.root_session_id=?`,
+              row.predecessor_execution_id!,
+              childStart.after_run_id!,
+              childSession!.id,
+              execution.originStoreId,
+              session.id,
+              rootSession.id,
+            )
+          : null;
+      const exactChildBinding =
+        childStart?.kind === 'child.start'
+          ? childRequest?.parentExecutionId === execution.id
+          : childStart?.kind === 'input.follow_up' &&
+            childStart.agent_carrier_execution_id === execution.id &&
+            childStart.agent_source_execution_id === execution.parentExecutionId &&
+            predecessor !== null &&
+            childRequest?.afterRunId === predecessor.id &&
+            childRequest?.contextSelectionId === predecessor.context_selection_id &&
+            childStart.input_context_selection_id === predecessor.context_selection_id;
       if (
         childSession &&
         (!childStart ||
@@ -210,7 +237,7 @@ export function readBackgroundExecutions(
           childStart.origin_store_id !== execution.originStoreId ||
           childStart.root_work_command_id !== execution.rootWorkCommandId ||
           String(childStart.root_work_seq) !== execution.rootWorkSeq ||
-          JSON.parse(String(childStart.request_json)).parentExecutionId !== execution.id)
+          !exactChildBinding)
       )
         throw new AgentError('directory_identity_conflict');
       const childRow = childSession

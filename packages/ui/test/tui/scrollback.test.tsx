@@ -174,6 +174,34 @@ test('CtrlO loads original body and reasoning without a CtrlT shortcut or cross-
             },
           ]
         : [];
+      if (pending) {
+        current.view.runs = [
+          {
+            id: 'run',
+            sessionId: id,
+            originStoreId: 'store',
+            originCommandId: 'original-work',
+            status: 'waiting_interaction',
+            isActive: true,
+            createdAt: 1,
+            finishedAt: null,
+            reason: null,
+          },
+        ];
+        current.view.executions.push({
+          id: 'question-original',
+          originStoreId: 'store',
+          sessionId: id,
+          runId: 'run',
+          kind: 'tool',
+          definitionId: 'question',
+          definitionVersion: '1',
+          status: 'dispatching',
+          result: null,
+          resultRevision: '0',
+          cancelRequestedAt: null,
+        });
+      }
       return { ...current, messages, interactions };
     },
     readModelOutput: async (id, executionId) => {
@@ -505,6 +533,11 @@ test('long original question after running Tool keeps material bytes stable on s
   current.view.executions = [
     {
       id: 'active',
+      originStoreId: 'store',
+      sessionId: 'a',
+      runId: 'run',
+      definitionVersion: '1',
+      cancelRequestedAt: null,
       kind: 'tool',
       definitionId: 'RUNNING_ORIGINAL_TOOL',
       status: 'running',

@@ -240,9 +240,17 @@ test('a queued Job keeps its original model decision when the parent refreshes f
       commandId: 'fresh-work',
       sessionId: 's',
       subjectId: 'owner',
-      request: { kind: 'run.start', content: 'launch with current instructions' },
+      request: { kind: 'run.start', content: 'New task: launch with current instructions' },
     });
-    await bounded(runtime.waitForCommand('fresh-work'));
+    const fresh = await bounded(runtime.waitForCommand('fresh-work'));
+    const receipt = fresh.receipt as { businessCommandId: string; runId: string };
+    expect(fresh.status).toBe('applied');
+    expect(await store.getRun(receipt.runId)).toMatchObject({
+      originCommandId: receipt.businessCommandId,
+      rootWorkCommandId: fresh.id,
+      status: 'completed',
+    });
+    expect((await store.getExecution(model.requests[2]!.requestId))?.runId).toBe(receipt.runId);
     await bounded(runtime.waitForCommand(refs.get('fresh')!.commandId));
     expect(effects).toEqual([
       { key: 'first', path: 'output.txt', rule: 'old rule' },

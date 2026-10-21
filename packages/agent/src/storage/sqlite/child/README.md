@@ -8,6 +8,10 @@
 
 `ensureOperation` 原子建立 operation Command、planned Job、新 child Session、已应用创建命令及 accepted `child.start` 命令。全部继承原主体、rootWorkCommandId/seq 和父 Job 决策来源，交付目标仍为原创建 Session/contextSelection。父工具响应丢失查回同一个 childSessionId/executionId，不重建。root group 不设累计历史 Session 配额；关系深度最多 64，实际并发与每 Run 固定期限仍独立核实，不扫描整个库。
 
+后台目录的每个 child carrier 继续沿唯一 `child-start-${carrier.id}` Command 查询准确 Run。新建接纳 `child.start` 的原 parentExecutionId；同 Session 续接只接纳私有 `agent_carrier_execution_id`／`agent_source_execution_id` 准确绑定的 `input.follow_up`，同时核 predecessor carrier 的原 Session/父根/Store、原 Run 的 afterRun/contextSelection 与当前 Command 的主体/rootWork/Store。不能因稳定 Session 相同而选择最新 Run。[真实目录回归](../../../../test/isolated/storage/background-follow-up.test.ts)先完成两轮，再独立篡改七种 provenance，均拒绝且恢复原值后仍能准确读取两轮；[真实 Native 双 child 窗口](../../../../../../apps/desktop/test/isolated/native-collaboration-bundle.test.ts)覆盖同 Session 新轮的后台目录及旧卡停止不得改投。
+
+`runRecord` 只读投影可选 `carrierExecutionId`：原 child 启动／续接核上述封存关系；`job.report` 最多递归64个不同原父 Run，每层核原 report ID、resultRevision、result.afterTurn.parentRunId 与 Session/Store/rootWork/subject，直到准确 child 启动。根 Run、字段不全或来源冲突不补 carrier。公共 Run 同时公开可选 rootWork 字段；这些只读出处不授予派发资格。TUI 与 Native 仅从同 carrier 的唯一活动 Run 的真实 execution.authorization 显示人工待批，不从 waiting 状态推断。
+
 未激活的 carrier 失败或取消时，`finishExecution` 在同一事务将仍 accepted 的原 `child.start` 命令结算为 `rejected`，保留 `not_activated` 回执；carrier 未知时命令为 `needs_review`。Command 不使用 Execution 的 `cancelled` 状态。实际[排队取消与拒权回归](../../../../test/isolated/child/runtime.test.ts)核取消 carrier、零 child Model／Run，以及启动命令的合法终态。
 
 [真实累计回归](../../../../test/isolated/child/history-runtime.test.ts)在同一 root Run、一个模型槽与一个普通 child 槽下创建1003个普通 child和1001个真实自动审核 child，包含实际模型失败、准确 interrupt 取消和历史 key复用。父 Run completed、全部 child终态、Runtime closed；这项加速本机回归不代替数天或数周 soak，不放宽 unknown、owner、deadline 或跨 root取消边界。
@@ -44,11 +48,17 @@ The final attached-domain read is bounded to 32 edges. If that boundary still ha
 
 `interruptAgent` 在[agent-input-operations.ts](../agent-input-operations.ts)登记准确 child 当前 Run 的停止意图，调用既有取消事务的有限内部 body，复查与取消共享最终事务。实际 sender/namespace/subject/root group 从原 Command/Execution 推导，不能由 payload 自授予；旧 Run 结束或 carrier/reference 已换时拒绝。历史重复 command 返回原回执，无重新选目标或额外派发。附着后代与独立 detached 域保持既有取消语义，停止请求不等于已监督清理确认。
 
-[agent-mail-operations.ts](../agent-mail-operations.ts) 复用 Command 作为 QueueOnly 来源事实，message 作为幂等 inbox，不增加独立邮箱工作流表。基线 Command 的 mail_target_session_id/run_id/selection_id、mail_received_message_id 与 mail_confirmed 保存准确受理、成功 sender 和一次接收关联。源 Tool 终态与 mail_confirmed 在同一原事务结算；接收短事务再次核原 Store/主体/carrier、目标 Run/selection、取消、Artifact 与 owner generation。未来人类 Run 不继承未绑定或旧 Run 邮件。
+[agent-mail-operations.ts](../agent-mail-operations.ts) 复用 Command 作为 QueueOnly 来源事实，message 作为幂等 inbox，不增加独立邮箱工作流表。基线 Command 的 mail_target_session_id/run_id/selection_id、mail_received_message_id 与 mail_confirmed 保存准确受理、成功 sender 和一次接收关联。源 Tool 终态与 mail_confirmed 在同一原事务结算；接收短事务再次核原 Store/主体/carrier、目标 Run/selection、取消、Artifact 与 owner generation。普通新工作不继承未绑定或旧 Run 邮件；准确同工作后继只有下述封存证明可采用原 QueueOnly。
 
 目录以原目标/主体的实际 Command rowid 做 Decimal64 keyset，每页 ≤100、固定 upperSeq；receivedSeq 来自实际 inbox message seq，与 Model prepared 事实分别表示。只读摘要不会修改接收或模型水位，正文仅在原私有 Artifact。`readAgentMessageTarget` 沿原 sender 的准确 carrier/父执行链读取有限目标，不使用 Session first/last Run 猜测，也不取得 owner、调用 Provider 或重放 operation。
 
 显式 follow-up 的原启动 Command 保存 mail_adoption_upper_seq/cursor 双上界；只允许准确 predecessor carrier 的已成功 sender、原目标 selection 和 seq 范围。接收不会改 mail_target_run_id，而是同事务保存 mail_received_run_id/selection_id 与唯一 inbox message。历史读取由这些实际关联证明，不接受调用者自报的新 Run。mail.seq 在封存前但 sender.completed_cursor 在封存后的邮件仍留 QueueOnly；根 Rewind 不改子 Session 的选择域。
+
+父后继的 `sealParentAgentMailAdoption` 在合法报告（含准确 continue 新准入）或真实 same-work human 续轮激活的原事务内封存相同两条水位，receipt.mailAdoption 保留准确 predecessor Run/selection/root work；报告限定原结果 carrier，人类续轮另核 public/raw/decision/business 链。原 target=null 才可采用；旧 target=R1 不能改投 R2。sender 在 seq 水位前排队、却在完成 cursor 水位后才成功的邮件，以及后来新邮件，都不属于原后继的 inbox。历史显式 typed child follow-up 保留原冻结 predecessor 合同，新 agent_completion 表面另守同工作门禁。
+
+当原 child 结果完整逐字携带问题，Runtime 先读取原邮件 Artifact 与完整结果，Store 最终事务再核准确成功 sender/carrier、双水位、当前 selection/root work、取消和真正 result Source，仅保存 receipt.carriedByResult 的 execution/revision/source/run 关联。它不设置 received/prepared，不复制邮件正文 Source；正常接收与关联后的 pending 查询不会另造同正文。真正接收仍由唯一 Message 与准确 received Run/selection 证明。
+
+[问答闭环真实回归](../../../../test/isolated/business/task/question-loop.test.ts)不登记任何 on* 回调，使用六工具、Core/SQLite、真实根 ask_user，验证父普通结束后 child 一次有限观察并交付诚实待决结果、真实人类澄清、稳定 Session 后续 Run 和最终汇总。原邮件接收分支另覆盖真实 SQL trigger 回滚、提交后丢响应及双消费者幂等；同工作父后继分支覆盖旧 R1 目标不改投、成功 sender 双水位、晚邮件与 QueueOnly 丢回执。技术 succeeded 不替代待决正文中的业务事实。
 
 ## after_turn 因果汇报
 
@@ -57,3 +67,12 @@ The final attached-domain read is bounded to 32 edges. If that boundary still ha
 同一 Session 的已受理新 child.start 也参与优先抑制；尚活动的资金 Run 只推迟申请。Runtime 使用现有按 Session 的 pump，并解析该 Session 的 root owner，不另建调度器或取得 child OS owner。SQL 终态先可见时，只有准确原 parentRun 的热 binding lease 可移交；冷重开仍 needs_review。嵌套报告读取原结果由准确 job.report/newRun 关系证明，不将终态原来源命令恢复为 active。
 
 已在同 Store/generation 的准确 carrier 上派发且实际激活的 detached child 是独立执行域：最终祖先验证仍核原 Command、group stop/delete、Store 与 owner，但不再要求已完成的祖父 foreground carrier 保持 running，也不继承该旧父局部取消/期限。子自己的实际 carrier、activation deadline 与 active Run 仍严格核实。未激活、attached 或调用者 snapshot 不能开启这个例外。实际 Service compatible SDK nested after_turn fixture 覆盖父先完成、孙 Model 后最终派发的异步窗口；原 root stop 与期限测试保留。
+
+
+## 稳定协作者目录与原 invocation
+
+`child-query-operations.listStableAgents` 沿现有 child Session/operation Command 创建血缘聚合，首次 carrier seq 为固定锚点；目录当前状态仍读取最近准确 carrier/child-start Run，终态与未知结果分别投影。分页使用Decimal64、固定上界、limit+1和整体ID归属核实。职责与最近输入保完整原文，Host 将原结果 Artifact完整展开到调用者的受验证Tool正文；没有另建Agent registry，也不从摘要取得执行资格。
+
+`agent-input-operations.applyAgentCommand` 的原 invocation 查回、当前目标选择与实际steer/newturn/interrupt共享一个最终写事务。idle新轮通过原ensureAgent在同事务创建carrier；并行第二调用看到已受理queued代次并排入该轮。queued引导以 `agent.queued_input` Command绑定原carrier，实际activation后一次写入该准确Run，源取消则拒绝；原取消域同时清理这些待输入事实。原成功回执保存接受时state与模式，重试不追逐后来Run。
+
+`listAgentEvents` 从实际持久change_event读取成功确认邮件和carrier终态，按cursor返回实际事件与nextSeq；读取不确认、不创建Source、不调用Provider。replayFloor之前的查询明确cursor_expired，Host给出可核实恢复边界。等待和结果接纳沿不同水位与事务，真实carrier结算继续核附着Job、unknown、期限与owner。

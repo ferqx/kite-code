@@ -1,4 +1,4 @@
-import { renameSync, writeFileSync } from 'node:fs';
+import { appendFileSync, renameSync, writeFileSync } from 'node:fs';
 import { createTaskExtension } from '@kite-ai/agent/task';
 import { createCompatibleModelBinding, createSdkModelAdapter } from '@kite-ai/ai/sdk';
 import { runServiceProcess } from '../../src/main';
@@ -6,6 +6,22 @@ import type { LoadTelemetry } from './multi-session-stream-load.types';
 
 let modelSlots = 4;
 let timer: ReturnType<typeof setInterval> | undefined;
+let lifecyclePath: string | undefined;
+const lifecycle = (phase: string, error?: Error) => {
+  if (!lifecyclePath) return;
+  appendFileSync(
+    lifecyclePath,
+    `${JSON.stringify({
+      phase,
+      pid: process.pid,
+      elapsedMs: performance.now(),
+      error: error ? { name: error.name, message: error.message, stack: error.stack } : undefined,
+    })}\n`,
+  );
+};
+// This monitor observes the original fatal exception without handling or suppressing it.
+process.on('uncaughtExceptionMonitor', (error) => lifecycle('uncaughtExceptionMonitor', error));
+process.on('exit', (code) => lifecycle(`exit:${code}`));
 await runServiceProcess({
   configure(startup) {
     const input = startup.hostConfiguration as {
@@ -13,6 +29,8 @@ await runServiceProcess({
       slots: number;
       metricsPath: string;
     };
+    lifecyclePath = `${input.metricsPath}.lifecycle`;
+    lifecycle('configure');
     modelSlots = input.slots;
     const model = createSdkModelAdapter({
       models: new Map(
@@ -58,15 +76,49 @@ await runServiceProcess({
         },
       },
       extensions: [
-        createTaskExtension({
-          roles: [
-            {
-              id: 'worker',
-              configurationId: 'load-worker',
-              description: 'Isolated loopback load worker',
-            },
-          ],
-        }),
+        (() => {
+          const extension = createTaskExtension({
+            roles: [
+              {
+                id: 'worker',
+                configurationId: 'load-worker',
+                description: 'Isolated loopback load worker',
+              },
+            ],
+          });
+          return {
+            ...extension,
+            tools: extension.tools!.map((tool) =>
+              tool.id !== 'task.spawn'
+                ? tool
+                : {
+                    ...tool,
+                    async execute(input, context) {
+                      // Trusted isolated policy retains the original detached-cancellation load case.
+                      // The actual Provider sees only the six-tool prompt schema, never this switch.
+                      const detached =
+                        typeof input === 'object' &&
+                        input !== null &&
+                        !Array.isArray(input) &&
+                        typeof input.prompt === 'string' &&
+                        input.prompt.startsWith('load-root-1 ');
+                      return tool.execute(input, {
+                        ...context,
+                        operations: {
+                          ...context.operations,
+                          ensure(options) {
+                            return context.operations.ensure({
+                              ...options,
+                              cancellation: detached ? 'detached' : 'attached',
+                            });
+                          },
+                        },
+                      });
+                    },
+                  },
+            ),
+          };
+        })(),
       ],
       childConfigurations: [
         {
@@ -85,6 +137,7 @@ await runServiceProcess({
     return modelSlots === 4 ? configuration : { ...configuration, modelConcurrency: modelSlots };
   },
   async beforeResourceClose() {
+    lifecycle('beforeResourceClose');
     clearInterval(timer);
   },
 });

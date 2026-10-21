@@ -52,6 +52,77 @@ test('private loopback control rejects unauthenticated peers and carries reloads
   }
 });
 
+test('stop before authentication remains latched for the original authenticated Desktop and fences reloads', async () => {
+  for (const phase of ['before-connect', 'during-handshake', 'before-attach'] as const) {
+    const control = await startDesktopControl();
+    let finish!: (value: number) => void;
+    const exited = new Promise<number>((resolve) => {
+      finish = resolve;
+    });
+    if (phase === 'before-connect') {
+      control.stop();
+      control.stop();
+    }
+    const rejected = connect({ host: '127.0.0.1', port: control.configuration.port });
+    rejected.on('error', () => {});
+    const rejectedClosed = new Promise<void>((resolve) => rejected.once('close', () => resolve()));
+    rejected.write(`${JSON.stringify({ kind: 'desktop.ready', token: '0'.repeat(64) })}\n`);
+    await rejectedClosed;
+    const peer = connect({ host: '127.0.0.1', port: control.configuration.port });
+    peer.on('error', () => {});
+    const ended = new Promise<boolean>((resolve) => peer.once('end', () => resolve(true)));
+    let calls = 0;
+    const stopReload = serveDevelopmentReload({
+      stream: peer,
+      reply: (line) => peer.write(line),
+      reload: async () => {
+        calls++;
+      },
+    });
+    const ready = `${JSON.stringify({ kind: 'desktop.ready', token: control.configuration.token })}\n`;
+    try {
+      if (phase === 'during-handshake') {
+        peer.write(ready.slice(0, 20));
+        control.stop();
+        control.stop();
+        peer.write(ready.slice(20));
+      } else {
+        peer.write(ready);
+        if (phase === 'before-attach') {
+          control.stop();
+          control.stop();
+        }
+      }
+      const channel = await control.attach(exited);
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      try {
+        expect(
+          await Promise.race([
+            ended,
+            new Promise<boolean>((resolve) => {
+              timer = setTimeout(() => resolve(false), 250);
+            }),
+          ]),
+        ).toBe(true);
+      } finally {
+        clearTimeout(timer);
+      }
+      await expect(channel.reload({ id: 'a'.repeat(32), sha256: 'b'.repeat(64) })).rejects.toThrow(
+        'development_desktop_stopping',
+      );
+      expect(calls).toBe(0);
+      finish(0);
+      await channel.read;
+    } finally {
+      finish(0);
+      stopReload();
+      rejected.destroy();
+      peer.destroy();
+      await control.close();
+    }
+  }
+});
+
 test('reload queue coalesces saves, waits for the previous update and recovers from compilation failure', async () => {
   let calls = 0,
     concurrent = 0,
@@ -136,8 +207,43 @@ test('only matching reload acknowledgement releases a restart; an unknown outcom
   );
   await expect(channel.reload(request)).rejects.toThrow('development_service_reload_unconfirmed');
   expect(writes).toHaveLength(2);
+  channel.stop();
+  await expect(channel.reload(request)).rejects.toThrow('development_service_reload_unconfirmed');
+  expect(writes).toHaveLength(2);
   exit!(0);
   emit!.close();
+  await channel.read;
+});
+
+test('stopping a pending original reload rejects it immediately and never sends a replacement', async () => {
+  let emit!: ReadableStreamDefaultController<Uint8Array>;
+  let exit!: (code: number) => void;
+  const writes: string[] = [];
+  const channel = createDesktopReloadChannel({
+    stdin: { write: (value) => writes.push(value), flush: () => undefined },
+    stdout: new ReadableStream<Uint8Array>({
+      start(controller) {
+        emit = controller;
+      },
+    }),
+    exited: new Promise<number>((resolve) => {
+      exit = resolve;
+    }),
+  });
+  const request = { id: 'a'.repeat(32), sha256: 'b'.repeat(64) };
+  const original = channel.reload(request);
+  channel.stop();
+  channel.stop();
+  await expect(original).rejects.toThrow('development_desktop_stopping');
+  emit.enqueue(
+    new TextEncoder().encode(
+      `${JSON.stringify({ kind: 'service.reloaded', id: request.id, ok: true })}\n`,
+    ),
+  );
+  await expect(channel.reload(request)).rejects.toThrow('development_desktop_stopping');
+  expect(writes).toHaveLength(1);
+  exit(0);
+  emit.close();
   await channel.read;
 });
 

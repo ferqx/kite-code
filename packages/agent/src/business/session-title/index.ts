@@ -6,13 +6,14 @@ import {
   type Json,
   type RunBoundaryEvent,
 } from '../../extensions';
+import { canonicalJson } from '../../json';
 import type {
   AgentRuntime,
   ChildAgentConfiguration,
   RunConfiguration,
   RuntimeOptions,
 } from '../../runtime';
-import { AgentError } from '../../storage/types';
+import { AgentError, type CommandRecord } from '../../storage/types';
 import {
   fallbackSessionTitle,
   readableSessionTitle,
@@ -28,7 +29,14 @@ const instructionsDigest = createHash('sha256').update(sessionTitleInstructions)
 type ChildInput = Parameters<NonNullable<RuntimeOptions['resolveChildRunConfiguration']>>[0];
 type Runtime = Pick<
   AgentRuntime,
-  'getCommand' | 'getRun' | 'getSession' | 'getExecution' | 'renameSession' | 'listMessages'
+  | 'getCommand'
+  | 'getRun'
+  | 'getSession'
+  | 'getExecution'
+  | 'renameSession'
+  | 'listMessages'
+  | 'getChanges'
+  | 'getMetadata'
 >;
 
 function fields(value: Json): Record<string, Json> {
@@ -60,23 +68,170 @@ export function createSessionTitleExtension(options: {
     if (
       !command ||
       command.sessionId !== sessionId ||
-      command.kind !== 'run.start' ||
+      !['run.start', 'input.follow_up'].includes(command.kind) ||
       !session ||
       session.parentSessionId !== null ||
       session.deletedAt !== null ||
       typeof fields(command.request).content !== 'string'
     )
       return null;
-    return { command, session, content: fields(command.request).content as string };
+    let originalCommand = command;
+    const receipt = fields(command.receipt);
+    const inputCommandId = receipt.humanInputCommandId ?? receipt.inputCommandId;
+    if (typeof inputCommandId === 'string' && typeof receipt.decisionCommandId === 'string') {
+      const raw = await runtime.getCommand(inputCommandId);
+      const decision = await runtime.getCommand(receipt.decisionCommandId);
+      const publicId = fields(raw?.request ?? null).publicCommandId;
+      const original = typeof publicId === 'string' ? await runtime.getCommand(publicId) : null;
+      if (
+        raw?.kind !== 'human.input' ||
+        decision?.kind !== 'human.input.decision' ||
+        !original ||
+        !['run.start', 'input.follow_up'].includes(original.kind) ||
+        [raw, decision, original].some(
+          (item) =>
+            item.sessionId !== sessionId ||
+            item.originStoreId !== command.originStoreId ||
+            item.subjectId !== command.subjectId,
+        ) ||
+        fields(raw.receipt).decisionCommandId !== decision.id ||
+        fields(raw.receipt).businessCommandId !== command.id ||
+        fields(decision.receipt).businessCommandId !== command.id ||
+        fields(original.receipt).humanInputCommandId !== raw.id ||
+        fields(original.receipt).businessCommandId !== command.id ||
+        canonicalJson(fields(raw.request).originalRequest ?? null) !==
+          canonicalJson(original.request) ||
+        fields(raw.request).content !== fields(command.request).content ||
+        fields(original.request).content !== fields(command.request).content
+      )
+        return null;
+      originalCommand = original;
+      const clarificationId =
+        fields(decision.request).clarifiesInputId ?? fields(raw.request).clarifiesInputId;
+      if (typeof clarificationId === 'string') {
+        const first = await runtime.getCommand(clarificationId);
+        const firstRequest = fields(first?.request ?? null);
+        const firstReceipt = fields(first?.receipt ?? null);
+        const firstPublicId = firstRequest.publicCommandId;
+        const firstPublic =
+          typeof firstPublicId === 'string' ? await runtime.getCommand(firstPublicId) : null;
+        const firstPublicReceipt = fields(firstPublic?.receipt ?? null);
+        const proposal = fields(fields(decision.request).proposal ?? null);
+        if (
+          first?.kind !== 'human.input' ||
+          !firstPublic ||
+          !['run.start', 'input.follow_up'].includes(firstPublic.kind) ||
+          [first, firstPublic].some(
+            (item) =>
+              item.sessionId !== sessionId ||
+              item.originStoreId !== command.originStoreId ||
+              item.subjectId !== command.subjectId,
+          ) ||
+          proposal.relation !== 'independent_work' ||
+          proposal.purpose !== 'work' ||
+          proposal.targetRootWorkCommandId !== null ||
+          firstReceipt.state !== 'clarified' ||
+          firstReceipt.clarifyingInputId !== raw.id ||
+          firstReceipt.decisionCommandId !== decision.id ||
+          firstReceipt.originalSelection !== null ||
+          !Array.isArray(firstReceipt.candidateWorkCommandIds) ||
+          firstReceipt.candidateWorkCommandIds.length !== 0 ||
+          firstPublicReceipt.humanInputCommandId !== first.id ||
+          firstPublicReceipt.reason !== 'clarified_by_input' ||
+          firstPublicReceipt.clarifyingInputId !== raw.id ||
+          canonicalJson(firstRequest.originalRequest ?? null) !==
+            canonicalJson(firstPublic.request) ||
+          firstRequest.content !== fields(firstPublic.request).content
+        )
+          return null;
+        originalCommand = firstPublic;
+      }
+    }
+    return {
+      command,
+      originalCommand,
+      session,
+      content: fields(originalCommand.request).content as string,
+    };
   };
-  const lifecycleAction = (actionId: 'fallback' | 'generate', event: RunBoundaryEvent) => {
-    if (event.command.kind !== 'run.start' || event.session.parentSessionId !== null) return null;
+  const metadataId = (command: Readonly<CommandRecord>) =>
+    `title-input-fallback-${createHash('sha256')
+      .update(JSON.stringify([command.originStoreId, command.sessionId, command.id]))
+      .digest('hex')}`;
+  const noOtherRename = async (
+    sessionId: string,
+    inputCommandId: string,
+    allowedRevision?: string,
+  ) => {
+    const metadata = await options.runtime().getMetadata();
+    let after = metadata.replayFloor;
+    const upper = BigInt(metadata.lastChangeCursor);
+    let registered = false;
+    for (;;) {
+      const page = await options
+        .runtime()
+        .getChanges({ after, limit: 128, sessionIds: [sessionId] });
+      if (BigInt(page.metadata.replayFloor) > BigInt(after)) return false;
+      const events = page.events.filter((event) => BigInt(event.cursor) <= upper);
+      registered ||= events.some(
+        (event) => event.type === 'human.input_registered' && event.objectId === inputCommandId,
+      );
+      if (
+        events.some(
+          (event) =>
+            event.type === 'session.renamed' &&
+            fields(event.payload).controlRevision !== allowedRevision,
+        )
+      )
+        return false;
+      if (!events.length || BigInt(events.at(-1)!.cursor) >= upper || page.events.length < 128)
+        return registered;
+      after = events.at(-1)!.cursor;
+    }
+  };
+  const metadataFallback = async (selected: NonNullable<Awaited<ReturnType<typeof origin>>>) => {
+    const saved = await options.runtime().getCommand(metadataId(selected.originalCommand));
+    const receipt = fields(saved?.receipt ?? null);
+    const snapshot = fields(receipt.session ?? null);
+    const title = fallbackSessionTitle(selected.content);
+    const inputId = fields(selected.originalCommand.receipt).humanInputCommandId;
+    const raw = typeof inputId === 'string' ? await options.runtime().getCommand(inputId) : null;
+    if (
+      saved?.kind !== 'session.rename' ||
+      saved.status !== 'applied' ||
+      saved.sessionId !== selected.session.id ||
+      saved.originStoreId !== selected.command.originStoreId ||
+      saved.subjectId !== selected.command.subjectId ||
+      fields(saved.request).title !== title ||
+      receipt.outcome !== 'renamed' ||
+      snapshot.id !== selected.session.id ||
+      snapshot.title !== title ||
+      typeof snapshot.controlRevision !== 'string' ||
+      selected.session.title !== title ||
+      raw?.kind !== 'human.input' ||
+      fields(raw.receipt).observedControlRevision !== '0' ||
+      fields(raw.receipt).originalSelection !== null ||
+      !(await noOtherRename(selected.session.id, raw.id, snapshot.controlRevision))
+    )
+      return null;
+    return { revision: selected.session.controlRevision };
+  };
+  const lifecycleAction = async (actionId: 'fallback' | 'generate', event: RunBoundaryEvent) => {
+    if (
+      !['run.start', 'input.follow_up'].includes(event.command.kind) ||
+      event.session.parentSessionId !== null
+    )
+      return null;
+    const selected = await origin(event.session.id, { commandId: event.command.id });
+    if (!selected) return null;
+    const metadata = await metadataFallback(selected);
     if (
       actionId === 'fallback' &&
+      !metadata &&
       (event.session.title !== '' || event.session.controlRevision !== '0')
     )
       return null;
-    if (actionId === 'generate' && event.session.controlRevision !== '1') return null;
+    if (actionId === 'generate' && !metadata && event.session.controlRevision !== '1') return null;
     return {
       actionId,
       definitionVersion: '1',
@@ -119,16 +274,33 @@ export function createSessionTitleExtension(options: {
         inputSchema: schema,
         async prepare(input, context) {
           const selected = await origin(context.sessionId, input);
-          return selected?.session.title === '' &&
+          if (!selected || (await context.records.get(recordKey))) return null;
+          if (await metadataFallback(selected)) return input;
+          return selected.session.title === '' &&
             selected.session.controlRevision === '0' &&
-            !(await context.records.get(recordKey)) &&
             (await options.runtime().listMessages(context.sessionId, { limit: 1 })).length === 0
             ? input
             : null;
         },
         async execute(input, context) {
           const selected = await origin(context.sessionId, input);
-          if (selected?.session.title !== '' || selected.session.controlRevision !== '0')
+          if (!selected) return { outcome: 'succeeded', content: 'skipped' };
+          const metadata = await metadataFallback(selected);
+          if (metadata) {
+            await context.records.write({
+              key: recordKey,
+              contentType,
+              contentVersion: 1,
+              expectedRevision: null,
+              value: {
+                commandId: selected.originalCommand.id,
+                revision: metadata.revision,
+                attempted: false,
+              },
+            });
+            return { outcome: 'succeeded', content: 'fallback_saved' };
+          }
+          if (selected.session.title !== '' || selected.session.controlRevision !== '0')
             return { outcome: 'succeeded', content: 'skipped' };
           try {
             const renamed = await options.runtime().renameSession({
@@ -145,7 +317,7 @@ export function createSessionTitleExtension(options: {
               contentVersion: 1,
               expectedRevision: null,
               value: {
-                commandId: selected.command.id,
+                commandId: selected.originalCommand.id,
                 revision: renamed.session.controlRevision,
                 attempted: false,
               },
@@ -173,7 +345,7 @@ export function createSessionTitleExtension(options: {
           const runId = fields(input).runId;
           const run = typeof runId === 'string' ? await options.runtime().getRun(runId) : null;
           return selected &&
-            marker.commandId === selected.command.id &&
+            marker.commandId === selected.originalCommand.id &&
             marker.attempted === false &&
             marker.revision === selected.session.controlRevision &&
             run?.originCommandId === selected.command.id &&
@@ -190,7 +362,7 @@ export function createSessionTitleExtension(options: {
             !selected ||
             !record ||
             marker.attempted !== false ||
-            marker.commandId !== selected.command.id ||
+            marker.commandId !== selected.originalCommand.id ||
             marker.revision !== selected.session.controlRevision
           )
             return { outcome: 'succeeded', content: 'skipped' };
@@ -278,6 +450,63 @@ export function createSessionTitleExtension(options: {
   });
   return {
     extension,
+    /** Host-only metadata; no Action, Run, Tool, Model, or work selection is created. */
+    async preserveInputFallback(input: Readonly<CommandRecord>): Promise<void> {
+      const runtime = options.runtime();
+      const command = await runtime.getCommand(input.id);
+      if (
+        !command ||
+        command.requestDigest !== input.requestDigest ||
+        command.originStoreId !== input.originStoreId ||
+        command.sessionId !== input.sessionId ||
+        command.subjectId !== input.subjectId ||
+        !['run.start', 'input.follow_up'].includes(command.kind)
+      )
+        return;
+      const rawId = fields(command.receipt).humanInputCommandId;
+      const raw = typeof rawId === 'string' ? await runtime.getCommand(rawId) : null;
+      const fact = fields(raw?.receipt ?? null);
+      const rawRequest = fields(raw?.request ?? null);
+      if (
+        raw?.kind !== 'human.input' ||
+        raw.sessionId !== command.sessionId ||
+        raw.originStoreId !== command.originStoreId ||
+        raw.subjectId !== command.subjectId ||
+        rawRequest.publicCommandId !== command.id ||
+        rawRequest.content !== fields(command.request).content ||
+        fact.observedControlRevision !== '0' ||
+        fact.originalSelection !== null
+      )
+        return;
+      if (await runtime.getCommand(metadataId(command))) return;
+      const session = await runtime.getSession(command.sessionId);
+      if (
+        !session ||
+        session.parentSessionId !== null ||
+        session.deletedAt !== null ||
+        session.title !== '' ||
+        (await runtime.listMessages(command.sessionId, { limit: 1 })).length !== 0 ||
+        !(await noOtherRename(session.id, raw.id))
+      )
+        return;
+      try {
+        await runtime.renameSession({
+          expectedStoreId: command.originStoreId,
+          sessionId: session.id,
+          commandId: metadataId(command),
+          subjectId: command.subjectId,
+          ifRevision: session.controlRevision,
+          title: fallbackSessionTitle(rawRequest.content as string),
+        });
+      } catch (error) {
+        if (
+          error instanceof AgentError &&
+          ['session_revision_changed', 'session_deleted'].includes(error.code)
+        )
+          return;
+        throw error;
+      }
+    },
     childConfiguration: {
       id: configurationId,
       version: '1',

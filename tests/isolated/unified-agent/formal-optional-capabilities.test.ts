@@ -57,9 +57,11 @@ test.skipIf(!['darwin', 'linux'].includes(process.platform))(
           .find(
             (message) =>
               message.role === 'user' &&
-              ['Optional Shell selected', 'Ordinary Files', 'No optional tools'].includes(
-                message.content,
-              ),
+              [
+                'Optional Shell selected',
+                'New task: Ordinary Files',
+                'New task: No optional tools',
+              ].includes(message.content),
           )?.content;
         if (task === undefined) return new Response('unexpected original work', { status: 500 });
         const shell = task === 'Optional Shell selected';
@@ -270,7 +272,7 @@ test.skipIf(!['darwin', 'linux'].includes(process.platform))(
         kind: 'run.start',
         expectedStoreId: storeId,
         commandId: 'ordinary',
-        content: 'Ordinary Files',
+        content: 'New task: Ordinary Files',
       });
       let command = await client.getCommand('ordinary'),
         id = runId(command.receipt),
@@ -285,12 +287,17 @@ test.skipIf(!['darwin', 'linux'].includes(process.platform))(
       }
       expect(run.status).toBe('completed');
       expect(command.status).toBe('applied');
+      expect(run).toMatchObject({
+        originCommandId:
+          (command.receipt as { businessCommandId?: string }).businessCommandId ?? command.id,
+        rootWorkCommandId: 'ordinary',
+      });
       expect(readFileSync(join(root, 'neighbor.txt'), 'utf8')).toBe('ordinary 😀\r\n');
       expect(requests).toHaveLength(3 + shellCalls);
       const ordinaryMessages = requests.at(-1)!.messages;
       const ordinaryInput = ordinaryMessages.reduce(
         (found, row, index) =>
-          row.role === 'user' && row.content === 'Ordinary Files' ? index : found,
+          row.role === 'user' && row.content === 'New task: Ordinary Files' ? index : found,
         -1,
       );
       expect(ordinaryInput).toBeGreaterThanOrEqual(0);
@@ -302,7 +309,7 @@ test.skipIf(!['darwin', 'linux'].includes(process.platform))(
         kind: 'run.start',
         expectedStoreId: storeId,
         commandId: 'chat',
-        content: 'No optional tools',
+        content: 'New task: No optional tools',
       });
       const chatDeadline = Date.now() + 15000;
       let chatCommand = await client.getCommand('chat'),
@@ -317,6 +324,10 @@ test.skipIf(!['darwin', 'linux'].includes(process.platform))(
       }
       expect(chatCommand.status).toBe('applied');
       expect(chat.status).toBe('completed');
+      expect(chat).toMatchObject({
+        originCommandId: (chatCommand.receipt as { businessCommandId: string }).businessCommandId,
+        rootWorkCommandId: 'chat',
+      });
       expect(requests).toHaveLength(4 + shellCalls);
       expect(readFileSync(join(root, 'neighbor.txt'), 'utf8')).toBe('ordinary 😀\r\n');
       await service.close();

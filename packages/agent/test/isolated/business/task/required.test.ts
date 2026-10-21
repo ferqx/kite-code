@@ -8,8 +8,8 @@ import type { ModelAdapter, ModelEvent, ModelRequest } from '@kite-ai/ai';
 import { createRuntime } from '../../../../src';
 import { createArtifactStore } from '../../../../src/artifacts';
 import type { Extension, Json } from '../../../../src/extensions';
-import { createTaskExtension } from '../../../../src/extensions/task';
 import { openSqliteStore } from '../../../../src/sqlite';
+import { createLegacyTaskFixture as createTaskExtension } from '../../../fixtures/legacy-task-surface';
 
 const finish: Extract<ModelEvent, { type: 'finish' }> = {
   type: 'finish',
@@ -647,12 +647,16 @@ test('known failed required child is accepted as a failure source and parent can
   }
 }, 15000);
 
-for (const wake of ['terminal', 'input', 'include', 'timeout'] as const)
+for (const wake of ['terminal', 'input', 'raw_input', 'include', 'timeout'] as const)
   test(`task_wait ${wake} wakes without cancelling other current-owner detached targets`, async () => {
     const directory = realpathSync(mkdtempSync(join(tmpdir(), 'kite-task-wait-any-')));
     const store = await openSqliteStore({ dataRoot: join(directory, 'data'), profile: 'test' });
     const releases = new Map<string, () => void>();
     let parentModels = 0;
+    let releaseRawDecision!: () => void;
+    const rawDecision = new Promise<void>((resolve) => {
+      releaseRawDecision = resolve;
+    });
     const hold: Extension = {
       id: 'hold',
       version: '1',
@@ -690,8 +694,33 @@ for (const wake of ['terminal', 'input', 'include', 'timeout'] as const)
       },
     };
     const parent: ModelAdapter = {
-      async *stream() {
+      async *stream(request) {
         parentModels++;
+        if (wake === 'raw_input' && parentModels === 4) {
+          const instruction = request.messages.find((message) =>
+            message.content.includes('Original input identity:'),
+          )!;
+          expect(request.tools).toHaveLength(0);
+          const line = instruction.content
+            .split('\n')
+            .find((value) => value.startsWith('Original input identity: '))!;
+          const identity = JSON.parse(line.slice('Original input identity: '.length));
+          await rawDecision;
+          yield {
+            type: 'text_delta',
+            text: JSON.stringify({
+              ...identity,
+              relation: 'same_work',
+              purpose: 'progress',
+              target_root_work_command_id: 'work',
+              selection_effect: 'keep',
+              answer: 'Both original children remain pending.',
+              clarification: null,
+            }),
+          };
+          yield finish;
+          return;
+        }
         for (const event of parentModels <= 2
           ? call('task', {
               key: `child${parentModels}`,
@@ -781,9 +810,74 @@ for (const wake of ['terminal', 'input', 'include', 'timeout'] as const)
             kind: 'input.steer',
             targetRunId: waiting.runs[0]!.id,
             contextSelectionId: waiting.session.contextSelectionId,
-            content: 'new guide without cancelling children',
+            content: '补充 work：new guide without cancelling children',
           },
         });
+      if (wake === 'raw_input') {
+        await store.registerHumanInput({
+          expectedStoreId,
+          sessionId: 'root',
+          subjectId: 'owner',
+          commandId: 'unbound-raw',
+          content: '进度怎样',
+          observedRunId: null,
+          contextSelectionId: waiting.session.contextSelectionId,
+          candidateWorkCommandIds: ['work'],
+        });
+        // Registration is a real durable change, but it cannot identify this Run.
+        await Bun.sleep(25);
+        expect(parentModels).toBe(3);
+        expect(
+          (await store.getView('root')).executions.find((e) => e.definitionId === 'wait_agents')!
+            .status,
+        ).toBe('dispatching');
+        await store.cancelCommand({
+          expectedStoreId,
+          sessionId: 'root',
+          subjectId: 'owner',
+          commandId: 'cancel-unbound-raw',
+          targetCommandId: 'unbound-raw',
+        });
+        await store.registerHumanInput({
+          expectedStoreId,
+          sessionId: 'root',
+          subjectId: 'owner',
+          commandId: 'pending-raw',
+          content: '进度怎样',
+          observedRunId: waiting.runs[0]!.id,
+          contextSelectionId: waiting.session.contextSelectionId,
+          candidateWorkCommandIds: ['work'],
+        });
+        const observed = await until(
+          () => store.getView('root'),
+          (view) =>
+            view.executions.some(
+              (e) => e.definitionId === 'wait_agents' && e.status === 'succeeded',
+            ),
+        );
+        const raw = (await store.getCommand('pending-raw'))!;
+        expect(raw.receipt).toMatchObject({ state: 'pending' });
+        expect(raw.receipt).not.toHaveProperty('businessCommandId');
+        expect(
+          (
+            await store.listPendingInputs({
+              expectedStoreId,
+              sessionId: 'root',
+              targetRunId: waiting.runs[0]!.id,
+              kind: 'input.steer',
+            })
+          ).commands,
+        ).toHaveLength(0);
+        expect(
+          (
+            observed.executions.find((e) => e.definitionId === 'wait_agents')!.result as Record<
+              string,
+              Json
+            >
+          ).details,
+        ).toMatchObject({ reason: 'input', timedOut: false });
+        releaseRawDecision();
+      }
       if (wake === 'include') {
         const source = waiting.executions.find(
           (execution) => execution.definitionId === 'task' && execution.status === 'succeeded',
@@ -806,7 +900,26 @@ for (const wake of ['terminal', 'input', 'include', 'timeout'] as const)
       const waited = view.executions.find((execution) => execution.definitionId === 'wait_agents')!;
       expect(waited.status).toBe('succeeded');
       const details = (waited.result as Record<string, Json>).details as Record<string, Json>;
-      expect(details.reason).toBe(wake === 'include' ? 'input' : wake);
+      expect(details.reason).toBe(wake === 'include' || wake === 'raw_input' ? 'input' : wake);
+      if (wake === 'input') {
+        const input = await runtime.waitForCommand('steer-wait', { timeoutMs: 8000 });
+        const receipt = input.receipt as { runId: string; businessCommandId: string };
+        expect(input.status).toBe('applied');
+        expect(receipt.runId).toBe(view.runs[0]!.id);
+        expect((await store.getCommand(receipt.businessCommandId))!.kind).toBe('input.steer');
+        expect(
+          view.messages.find((message) => message.sourceIds?.includes(receipt.businessCommandId))
+            ?.content,
+        ).toBe('补充 work：new guide without cancelling children');
+      }
+      if (wake === 'raw_input') {
+        expect((await store.getCommand('pending-raw'))!.receipt).toMatchObject({
+          state: 'decided',
+          businessCommandId: null,
+          applicationState: 'observed',
+        });
+        expect(view.runs).toHaveLength(1);
+      }
       if (wake === 'include')
         expect((await store.getCommand('include-wait'))!.status).toBe('applied');
       expect(details.timedOut).toBe(wake === 'timeout');
@@ -818,6 +931,7 @@ for (const wake of ['terminal', 'input', 'include', 'timeout'] as const)
       expect(remaining.cancelRequestedAt).toBeNull();
       expect(view.runs[0]?.requirements).toHaveLength(0);
     } finally {
+      releaseRawDecision();
       for (const release of releases.values()) release();
       await runtime.close();
       rmSync(directory, { recursive: true, force: true });
@@ -1054,7 +1168,7 @@ for (const disposition of ['required', 'background'] as const)
         sessionId: 'root',
         subjectId: 'owner',
         commandId: 'work',
-        request: { kind: 'run.start', content: 'cancel child then report status' },
+        request: { kind: 'run.start', content: 'New task: cancel child then report status' },
       });
       await runtime.waitForCommand('work', { timeoutMs: 8000 });
       const view = await until(

@@ -181,9 +181,15 @@ test('actual Core original Model input reaches Native and Browser intact, remain
       expectedStoreId,
       commandId: 'new-run',
       kind: 'run.start',
-      content: 'New selected input',
+      content: 'New task: New selected input',
     });
-    await runtime.waitForCommand('new-run', { timeoutMs: 5000 });
+    const selectedCommand = await runtime.waitForCommand('new-run', { timeoutMs: 5000 });
+    const selectedReceipt = selectedCommand.receipt as { runId: string; businessCommandId: string };
+    expect(await client.getRun(selectedReceipt.runId)).toMatchObject({
+      status: 'completed',
+      originCommandId: selectedReceipt.businessCommandId,
+      rootWorkCommandId: 'new-run',
+    });
     const historical = await browser.getModelInput('session', executionId);
     expect(historical.request).toEqual(snapshot.request);
     expect(historical.bodyHash).toBe(snapshot.bodyHash);

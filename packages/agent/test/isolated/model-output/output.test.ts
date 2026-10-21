@@ -422,9 +422,16 @@ test('wrong scope and corrupted immutable head stop next Provider; cancelled rea
       await f.runtime.submitCommand({
         ...f.scope,
         commandId: 'later',
-        request: { kind: 'run.start', content: 'next' },
+        request: { kind: 'run.start', content: 'Follow up: next' },
       });
-      await f.runtime.waitForCommand('later');
+      const later = await f.runtime.waitForCommand('later');
+      const receipt = later.receipt as { businessCommandId: string; runId: string };
+      expect(later.status).toBe('applied');
+      expect(await f.store.getRun(receipt.runId)).toMatchObject({
+        originCommandId: receipt.businessCommandId,
+        rootWorkCommandId: 'work',
+        status: 'failed',
+      });
       expect(model.requests).toHaveLength(1);
       expect(f.effects).toBe(0);
     } finally {
@@ -656,12 +663,18 @@ test('opaque continuation survives tool loops and cold multi-turn history withou
       await cold.submitCommand({
         ...f.scope,
         commandId: 'again',
-        request: { kind: 'run.start', content: 'Continue' },
+        request: { kind: 'run.start', content: 'New task: Continue' },
       });
       const result = await cold.waitForCommand('again', { timeoutMs: 20000 });
-      expect((await cold.getRun((result.receipt as { runId: string }).runId))?.status).toBe(
-        'completed',
-      );
+      const receipt = result.receipt as { businessCommandId: string; runId: string };
+      expect(result.status).toBe('applied');
+      expect(await cold.getRun(receipt.runId)).toMatchObject({
+        originCommandId: receipt.businessCommandId,
+        rootWorkCommandId: result.id,
+        status: 'completed',
+      });
+      expect(next.requests).toHaveLength(1);
+      expect((await store.getExecution(next.requests[0]!.requestId))?.runId).toBe(receipt.runId);
       const assistants = next.requests[0]!.messages.filter(
         (message) => message.role === 'assistant',
       );

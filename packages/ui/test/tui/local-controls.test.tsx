@@ -65,7 +65,37 @@ function fixture() {
     storeId: 'store',
     nextCommandId: () => `command-${++next}`,
     listSessions: async () => [],
-    readSession: async (id) => snapshots.get(id)!,
+    readSession: async (id) => {
+      const snapshot = snapshots.get(id)!;
+      return {
+        ...snapshot,
+        view: {
+          ...snapshot.view,
+          executions: [
+            ...snapshot.view.executions,
+            ...snapshot.interactions
+              .filter(
+                (card) =>
+                  card.sessionId === id &&
+                  !snapshot.view.executions.some((execution) => execution.id === card.executionId),
+              )
+              .map((card) => ({
+                id: card.executionId!,
+                originStoreId: card.originStoreId,
+                sessionId: id,
+                runId: card.runId,
+                kind: 'tool' as const,
+                definitionId: card.definitionId ?? 'fixture.approval',
+                definitionVersion: card.definitionVersion ?? '1',
+                status: 'dispatching' as const,
+                result: null,
+                resultRevision: '0',
+                cancelRequestedAt: null,
+              })),
+          ],
+        },
+      };
+    },
     cancel: async (session, request) => {
       cancels.push(request.targetCommandId);
       return command(request.commandId, session, request.kind);

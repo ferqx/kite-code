@@ -12,6 +12,7 @@ import { createWorkspaceSerialLocks } from '@kite-ai/agent/resources';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import { privateDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { createDefaultProcessConfiguration } from '../../src/configuration';
+import { initializeLivePermissionFixture } from '../fixtures/live-permission-fixture';
 
 type Call = { name: string; input: Json } | null;
 async function until<T>(read: () => Promise<T | null>) {
@@ -174,6 +175,14 @@ async function fixture(
     workspaceId: 'w',
     title: 'planning',
   });
+  await initializeLivePermissionFixture({
+    runtime,
+    profile,
+    ...base,
+    workspaceId: 'w',
+    mode: policy?.mode ?? 'full',
+    trusted: policy?.trusted ?? true,
+  });
   const f = {
     root,
     workspace,
@@ -187,8 +196,11 @@ async function fixture(
       return currentCommand;
     },
     async runId() {
+      const command = await store.getCommand(currentCommand);
+      const receipt = command?.receipt as Record<string, Json> | null;
       return (await store.listExecutions('s')).find(
-        (x) => x.originCommandId === currentCommand && x.runId !== null,
+        (x) =>
+          x.originCommandId === (receipt?.businessCommandId ?? currentCommand) && x.runId !== null,
       )!.runId!;
     },
     async record(key: string) {
@@ -199,7 +211,7 @@ async function fixture(
       return runtime.submitCommand({
         ...base,
         commandId,
-        request: { kind: 'run.start', content: commandId },
+        request: { kind: 'run.start', content: `New task: ${commandId}` },
       });
     },
     async done(commandId = currentCommand) {

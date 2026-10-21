@@ -1,11 +1,12 @@
 import { expect, test } from 'bun:test';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { existsSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { ClientError, createServiceLifecycleClient } from '@kite-ai/client';
 import { retainProcessObservation, selectDaemonEndpoint } from '@kite-ai/service/daemon';
 import { privateDirectory } from '../../../../tests/fixtures/test-filesystem';
+import { callerCanonical } from '../../host/caller-intents';
 import { runSelectedDaemon } from '../../host/daemon';
 import { verifyTerminalBundle } from '../../host/terminal-artifact';
 import { recoveryProfile } from '../fixtures/recovery-profile';
@@ -614,7 +615,7 @@ test('actual paired main work JSON waits through original Tool approval and comp
       kind: 'run.start',
       expectedStoreId: f.storeId,
       commandId: 'cli-complete',
-      content: '完整原JSON Work🙂e\u0301\r\n',
+      content: 'New task: 完整原JSON Work🙂e\u0301\r\n',
     };
     writeFileSync(
       runner,
@@ -656,13 +657,89 @@ test('actual paired main work JSON waits through original Tool approval and comp
       .map((l) => JSON.parse(l));
     expect(lines[0].kind).toBe('caller.intent');
     expect(lines[0].intent.request).toEqual(request);
+    expect(request.content.slice('New task: '.length)).toBe('完整原JSON Work🙂e\u0301\r\n');
+    expect(lines[0].intent.bodyDigest).toBe(
+      createHash('sha256').update(callerCanonical(request)).digest('hex'),
+    );
     expect(lines.some((l) => l.kind === 'caller.receipt' && l.command.id === 'cli-complete')).toBe(
       true,
     );
     const result = lines.find((l) => l.kind === 'work.outcome');
     expect(result.status).toBe('succeeded');
     expect(result.run.status).toBe('completed');
-    expect(result.run.originCommandId).toBe('cli-complete');
+    const original = f.rows(
+      "SELECT status,request_json,request_digest,receipt_json FROM command WHERE id='cli-complete'",
+    )[0] as { status: string; request_json: string; request_digest: string; receipt_json: string };
+    expect(original.status).toBe('applied');
+    expect(JSON.parse(original.request_json)).toEqual({
+      kind: request.kind,
+      content: request.content,
+    });
+    expect(original.request_digest).toBe(lines[0].intent.requestDigest);
+    const application = JSON.parse(original.receipt_json);
+    expect(application).toMatchObject({ outcome: 'human_input_applied', runId: result.run.id });
+    expect(result.run.originCommandId).toBe(application.businessCommandId);
+    expect(result.run.rootWorkCommandId).toBe('cli-complete');
+    const raw = f.rows(
+      "SELECT i.request_json,i.request_digest FROM command p JOIN command i ON i.id=json_extract(p.receipt_json,'$.humanInputCommandId') WHERE p.id='cli-complete'",
+    )[0] as { request_json: string; request_digest: string };
+    expect(JSON.parse(raw.request_json)).toMatchObject({
+      kind: 'human.input',
+      publicCommandId: request.commandId,
+      content: request.content,
+      originalRequest: JSON.parse(original.request_json),
+    });
+    const decision = f.rows(
+      "SELECT d.request_json FROM command p JOIN command d ON d.id=json_extract(p.receipt_json,'$.decisionCommandId') WHERE p.id='cli-complete'",
+    )[0] as { request_json: string };
+    expect(JSON.parse(decision.request_json)).toMatchObject({
+      inputCommandId: application.humanInputCommandId,
+      inputDigest: raw.request_digest,
+      proposal: { relation: 'independent_work', purpose: 'work' },
+    });
+    const business = f.rows(
+      "SELECT b.id,b.status,b.origin_store_id,b.root_work_command_id,b.receipt_json FROM command p JOIN command b ON b.id=json_extract(p.receipt_json,'$.businessCommandId') WHERE p.id='cli-complete'",
+    )[0] as {
+      id: string;
+      status: string;
+      origin_store_id: string;
+      root_work_command_id: string;
+      receipt_json: string;
+    };
+    expect(business).toMatchObject({
+      id: application.businessCommandId,
+      status: 'applied',
+      origin_store_id: f.storeId,
+      root_work_command_id: 'cli-complete',
+    });
+    expect(JSON.parse(business.receipt_json)).toMatchObject({
+      runId: result.run.id,
+      humanInputCommandId: application.humanInputCommandId,
+      decisionCommandId: application.decisionCommandId,
+    });
+    const executions = f.rows(
+      "SELECT e.kind,e.origin_command_id,e.origin_store_id,e.root_work_command_id FROM command p JOIN execution e ON e.run_id=json_extract(p.receipt_json,'$.runId') WHERE p.id='cli-complete' ORDER BY e.rowid",
+    ) as {
+      kind: string;
+      origin_command_id: string;
+      origin_store_id: string;
+      root_work_command_id: string;
+    }[];
+    expect(executions.filter((execution) => execution.kind === 'model')).toHaveLength(2);
+    expect(executions.filter((execution) => execution.kind === 'tool')).toHaveLength(1);
+    for (const execution of executions)
+      expect(execution).toMatchObject({
+        origin_command_id: business.id,
+        origin_store_id: f.storeId,
+        root_work_command_id: 'cli-complete',
+      });
+    const user = f.rows(
+      "SELECT m.source_json FROM command p JOIN message m ON m.run_id=json_extract(p.receipt_json,'$.runId') WHERE p.id='cli-complete' AND m.role='user'",
+    )[0] as { source_json: string };
+    expect(JSON.parse(user.source_json)).toMatchObject({
+      content: request.content,
+      sourceIds: [business.id],
+    });
     expect(result.run.originStoreId).toBe(f.storeId);
     expect(result.run.sessionId).toBe('s');
     expect(out).toContain('RECOVERED_ORIGINAL_DONE');

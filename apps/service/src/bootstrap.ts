@@ -52,6 +52,8 @@ export interface ProcessHostConfiguration {
   maxConcurrentSubagents?: RuntimeOptions['maxConcurrentSubagents'];
   conditions?: RuntimeOptions['conditions'];
   initializeRunRequirements?: RuntimeOptions['initializeRunRequirements'];
+  /** Trusted same-Session input metadata only; absent from startup JSON and Model configuration. */
+  sessionInputMetadata?: RuntimeOptions['sessionInputMetadata'];
   extensions?: RuntimeOptions['extensions'];
   sources?: RuntimeOptions['sources'];
   workspaceSerialLocks?: RuntimeOptions['workspaceSerialLocks'];

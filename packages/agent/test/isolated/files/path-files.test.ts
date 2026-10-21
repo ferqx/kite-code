@@ -405,12 +405,13 @@ for (const decision of ['full', 'approve', 'deny'] as const) {
         title: 'actual',
       });
       for (const commandId of ['write', 'read']) {
+        const instruction = `New task: ${commandId}`;
         await runtime.submitCommand({
           expectedStoreId,
           commandId,
           sessionId: 's',
           subjectId: 'owner',
-          request: { kind: 'run.start', content: commandId },
+          request: { kind: 'run.start', content: instruction },
         });
         if (commandId === 'write' && decision !== 'full') {
           const deadline = Date.now() + 5000;
@@ -439,6 +440,58 @@ for (const decision of ['full', 'approve', 'deny'] as const) {
           });
         }
         await runtime.waitForCommand(commandId, { timeoutMs: 5000 });
+        if (commandId === 'read') {
+          const command = (await store.getCommand(commandId))!;
+          const receipt = command.receipt as {
+            businessCommandId: string;
+            humanInputCommandId: string;
+            runId: string;
+          };
+          expect(command).toMatchObject({
+            status: 'applied',
+            request: { kind: 'run.start', content: instruction },
+          });
+          expect(receipt.businessCommandId).toBeString();
+          expect(receipt.businessCommandId).not.toBe(commandId);
+          expect(await store.getCommand(receipt.humanInputCommandId)).toMatchObject({
+            request: {
+              publicCommandId: commandId,
+              content: instruction,
+              originalRequest: command.request,
+            },
+          });
+          const written = (await store.getCommand('write'))!.receipt as { runId: string };
+          const writeRun = (await store.getRun(written.runId))!;
+          expect(writeRun).toMatchObject({ status: 'completed', rootWorkCommandId: 'write' });
+          expect(receipt.runId).not.toBe(writeRun.id);
+          expect(await store.getCommand(receipt.businessCommandId)).toMatchObject({
+            status: 'applied',
+            request: {
+              kind: 'input.follow_up',
+              content: instruction,
+              afterRunId: writeRun.id,
+              contextSelectionId: writeRun.contextSelectionId,
+            },
+            receipt: { runId: receipt.runId },
+          });
+          expect(await store.getRun(receipt.runId)).toMatchObject({
+            originCommandId: receipt.businessCommandId,
+            rootWorkCommandId: commandId,
+            status: 'completed',
+          });
+          expect(await store.getExecution(model.requests[2]!.requestId)).toMatchObject({
+            kind: 'model',
+            runId: receipt.runId,
+            originCommandId: receipt.businessCommandId,
+            status: 'succeeded',
+          });
+          expect(
+            model.requests[2]!.messages.find((message) =>
+              message.sourceIds?.includes(receipt.businessCommandId),
+            ),
+          ).toMatchObject({ content: instruction, sourceIds: [receipt.businessCommandId] });
+          expect(model.requests).toHaveLength(4);
+        }
         if (decision === 'deny') {
           expect(existsSync(path)).toBe(false);
           const denied = (await store.listExecutions('s')).find(

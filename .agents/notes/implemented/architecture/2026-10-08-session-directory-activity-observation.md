@@ -12,6 +12,8 @@ Status: implemented
 
 公共 HTTP 响应保持 additive，宣告 `session_directory_activity` 的服务必须提供真实摘要。新的完整 SDK reader 固定 upper 与 snapshotCursor，冲突丢弃全部前缀，最多三次扫描后明确失败。旧身份集合 API 的兼容合同保留。目录成功只表示这一观察完整，不 ACK、恢复或授予执行权。
 
+持久 `isActive/running` 只证明原 Run 尚未结算，不能证明原执行者仍在。2026-10-21 补充活动 Run 的可选 `executionOwner`：SQL 页返回后只读观察原 root 的既有系统排他锁，held／unheld／unknown 与原状态分开。Native 在 unheld／unknown 时保留历史并提示待核实，停止正常转圈。观察不创建锁文件、不修改数据库；没有恢复或清理权限。原同事务 activity 和时间事实保持，新增锁观察不声称同一事务快照。
+
 正式 Native 复用原 Sidebar 的排序、时间格式与提示，不复制展示组件。Main 的全局目录读取与选中 view 分别持有生命周期，SSE ready/change 合并触发 GET；断线/reset/读取失败保上次事实并撤去当前活动标记，迟到读取按 attach／Store／epoch 拒绝。切换会话不停止原任务，detach 只停止所属读取。
 
 正式 Web 同样复用完整 Browser activity reader及公共UI的原Tooltip。只排序已封存事件时间、null置后、tie保分配顺序；完整已读集合按5／+10展示。目录与选择正文分别读取，显式刷新／可见性恢复重读已展开空间；失败标明原事实、隐藏／已核bfcache暂停释放所属GET，发布另核同步暂停与实际可见性。缺能力或摘要明确失败，不以旧身份reader、所选view或当前clock补齐。该消费者迁移不改变上面的Core／SDK／存储决定。
@@ -23,6 +25,9 @@ Status: implemented
 - 增加 Session 时间列或借扩展记录保存第二份 clock：需要格式准入／备份兼容变化，并重复已经持久的信息；本次不修改 baseline、Store major 或维护资产。
 - 固定分配 upper 后直接拼接活动页：并发变化会制造不存在的全局组合；同 cursor 验证，持续变化明确失败。
 - 目录和当前正文共用刷新等待：慢目录会挡住原阅读；分别持有读取，失败保事实。
+
+- 继续把旧 `isActive` 当作执行者存活：原进程退出而终态未保存时会无限转圈；追加独立、可未知的原锁观察，保留未结算事实。
+- 读取时自动结算／恢复原 Run：锁释放不能证明外部资源和副作用已收尾；不让展示观察取得写权限。
 
 ## Consequences
 

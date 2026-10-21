@@ -16,6 +16,7 @@ import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import type { InteractionRecord } from '@kite-ai/agent/storage';
 import { createDefaultProcessConfiguration } from '../../src/configuration';
 import { createMcpHttpTransportPort } from '../../src/mcp-http-port';
+import { initializeLivePermissionFixture } from '../fixtures/live-permission-fixture';
 
 function gate() {
   let release!: () => void, entered!: () => void;
@@ -121,8 +122,11 @@ async function fixture() {
       };
       providerRequests.push(body);
       const marker = body.messages
-        .filter((message) => message.role === 'user' && message.content.startsWith('broker-run-'))
-        .slice(-1)[0]!.content;
+        .filter(
+          (message) => message.role === 'user' && message.content.startsWith('新任务：broker-run-'),
+        )
+        .slice(-1)[0]!
+        .content.replace(/^新任务：/, '');
       const step = steps.get(marker) ?? 0;
       steps.set(marker, step + 1);
       const connecting = marker.includes('connect');
@@ -278,6 +282,21 @@ async function fixture() {
     permissions: host.permissions!,
     resolveRunConfiguration: host.resolveRunConfiguration,
   });
+  host.permissionManagement?.(runtime);
+  const prepareMode = async (ask: boolean) => {
+    for (const sessionId of ['a', 'b'])
+      await initializeLivePermissionFixture({
+        runtime,
+        profile,
+        expectedStoreId: metadata.storeId,
+        sessionId,
+        subjectId: 'owner',
+        workspaceId: 'w',
+        mode: ask ? 'accept_edits' : 'full',
+        trusted: true,
+      });
+  };
+  await prepareMode(false);
   const manager = host.configurationManagement!(runtime);
   expect(lookups).toBe(0);
   expect(requests).toBe(0);
@@ -322,7 +341,8 @@ async function fixture() {
     get lookups() {
       return lookups;
     },
-    set ask(value: boolean) {
+    async setAsk(value: boolean) {
+      await prepareMode(value);
       awaitingApproval = value;
     },
     expectedStoreId: metadata.storeId,
@@ -344,7 +364,7 @@ async function fixture() {
         sessionId,
         commandId,
         subjectId: 'owner',
-        request: { kind: 'run.start', content: `broker-run-${commandId}` },
+        request: { kind: 'run.start', content: `新任务：broker-run-${commandId}` },
       });
       return runtime.waitForCommand(commandId, { timeoutMs: 5000 });
     },
@@ -421,7 +441,7 @@ test('default trusted MCP factory shares management vault; compatible Model conn
 test('default Model can propose connection while durable approval retains zero secret/socket; management revoke during lookup prevents the late remote request', async () => {
   const f = await fixture();
   try {
-    f.ask = true;
+    await f.setAsk(true);
     const work = f.run('a', 'connect-a');
     void work.catch(() => {});
     const deadline = Date.now() + 5000;
@@ -449,7 +469,7 @@ test('default Model can propose connection while durable approval retains zero s
       targetCommandId: 'connect-a',
     });
     await work;
-    f.ask = false;
+    await f.setAsk(false);
     await f.run('b', 'connect-b');
     const before = f.requests,
       waiting = gate();

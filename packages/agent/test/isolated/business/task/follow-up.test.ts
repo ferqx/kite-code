@@ -5,9 +5,9 @@ import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import type { ModelAdapter, ModelEvent, ModelRequest } from '@kite-ai/ai';
 import { createRuntime } from '../../../../src';
-import { createTaskExtension } from '../../../../src/extensions/task';
 import { createProfileBackup } from '../../../../src/maintenance';
 import { openSqliteStore } from '../../../../src/sqlite';
+import { createLegacyTaskFixture as createTaskExtension } from '../../../fixtures/legacy-task-surface';
 
 const finish: Extract<ModelEvent, { type: 'finish' }> = {
   type: 'finish',
@@ -77,11 +77,33 @@ test.each([
   const store = await openSqliteStore(profile);
   const originalStoreClose = store.close.bind(store);
   const originalCancelWork = store.cancelWork.bind(store);
+  const originalFinishExecution = store.finishExecution.bind(store);
   let cancellationBoundary: Awaited<ReturnType<typeof store.listExecutions>> = [];
   let cancellationCursor = '0';
+  let heldCarrierId = '';
+  let releaseCarrierCommit!: () => void;
+  const carrierCommitGate = new Promise<void>((resolve) => {
+    releaseCarrierCommit = resolve;
+  });
+  let carrierCommitReady!: () => void;
+  const carrierCommitStarted = new Promise<void>((resolve) => {
+    carrierCommitReady = resolve;
+  });
+  store.finishExecution = async (input) => {
+    if (
+      mode === 'root-stop' &&
+      input.executionId === heldCarrierId &&
+      input.status === 'cancelled'
+    ) {
+      carrierCommitReady();
+      await carrierCommitGate;
+    }
+    return originalFinishExecution(input);
+  };
   store.cancelWork = async (input) => {
-    if (input.commandId === 'stop-before-activation')
+    if (input.commandId === 'stop-before-activation') {
       cancellationBoundary = (await store.listExecutions('root')).filter((e) => e.childSessionId);
+    }
     return originalCancelWork(input);
   };
   let storeCloses = 0,
@@ -193,6 +215,11 @@ test.each([
       else if (calls === 5) {
         if (active) expect(requests).toHaveLength(1);
         if (mode === 'root-stop') {
+          const running = (await store.listExecutions('root')).filter(
+            (e) => e.childSessionId === old.childSessionId && e.status === 'running',
+          );
+          expect(running).toHaveLength(1);
+          heldCarrierId = running[0]!.id;
           cancellationCursor = (await store.getMetadata()).lastChangeCursor;
           await runtime.cancelSession({
             expectedStoreId: (await store.getMetadata()).storeId,
@@ -320,8 +347,9 @@ test.each([
       commandId: 'work',
       request: { kind: 'run.start', content: 'delegate twice' },
     });
+    const completionDeadline = Date.now() + 8000;
     try {
-      await runtime.waitForCommand('work', { timeoutMs: 8000 });
+      await runtime.waitForCommand('work', { timeoutMs: completionDeadline - Date.now() });
     } catch (error) {
       try {
         console.error(
@@ -347,6 +375,37 @@ test.each([
         console.error('original_follow_up_snapshot_failed', diagnosticError);
       }
       throw error;
+    }
+    if (mode === 'root-stop') {
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      try {
+        await Promise.race([
+          carrierCommitStarted,
+          new Promise<never>((_, reject) => {
+            timer = setTimeout(
+              () => reject(Error('carrier_commit_not_started')),
+              Math.max(0, completionDeadline - Date.now()),
+            );
+          }),
+        ]);
+      } finally {
+        clearTimeout(timer);
+      }
+      const pendingCarriers = (await store.getView('root')).executions.filter(
+        (e) => e.childSessionId,
+      );
+      const held = pendingCarriers.find((e) => e.id === heldCarrierId)!;
+      expect(held.status).toBe('running');
+      expect(held.cancelRequestedAt).not.toBeNull();
+      const settled = Promise.all(
+        pendingCarriers.map((carrier) =>
+          runtime.waitForCommand(carrier.originCommandId, {
+            timeoutMs: Math.max(0, completionDeadline - Date.now()),
+          }),
+        ),
+      );
+      releaseCarrierCommit();
+      await settled;
     }
     const root = await store.getView('root');
     if (mode === 'root-delete') {
@@ -429,6 +488,7 @@ test.each([
     expect((await store.getMetadata()).lastChangeCursor).toBe(cursor);
     expect(requests).toHaveLength(2);
   } finally {
+    releaseCarrierCommit();
     release();
     releaseNext();
     const retained =

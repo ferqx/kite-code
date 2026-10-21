@@ -63,7 +63,11 @@ async function fixture(
           typeof item.content === 'string' ? item.content : JSON.stringify(item.content),
         ),
       );
-      const chosen = calls <= 2 ? 'alpha' : 'beta';
+      const chosen = input.messages.some(
+        (message) => message.role === 'user' && message.content === 'New task: load second',
+      )
+        ? 'beta'
+        : 'alpha';
       const load = calls % 2 === 1;
       const delta = load
         ? {
@@ -296,7 +300,7 @@ test('actual argv selects only discovered Skill names/IDs, loads full body throu
       '--thread',
       'original',
       '--task',
-      'load second',
+      'New task: load second',
       '--skill',
       'beta',
     ]);
@@ -307,8 +311,78 @@ test('actual argv selects only discovered Skill names/IDs, loads full body throu
     expect(f.observed[2]!.join('\n')).toContain('BetaSkill');
     expect(f.observed[3]!.join('\n')).toContain('BETA_FULL_BODY_');
     expect(existsSync(join(f.root, 'script-effect'))).toBe(false);
+    const secondIntent = JSON.parse(
+      two.stdout
+        .split('\n')
+        .find((line) => line.startsWith('work intent '))!
+        .slice(12),
+    ) as { commandId: string; sessionId: string };
+    expect(secondIntent.sessionId).toBe('original');
     const reopened = new Database(f.profile.databasePath, { readonly: true });
     try {
+      const publicCommand = reopened
+        .query('SELECT status,request_json,receipt_json FROM command WHERE id=?')
+        .get(secondIntent.commandId) as {
+        status: string;
+        request_json: string;
+        receipt_json: string;
+      };
+      expect(publicCommand.status).toBe('applied');
+      expect(JSON.parse(publicCommand.request_json)).toMatchObject({
+        kind: 'run.start',
+        content: 'New task: load second',
+        selectedSkills: ['beta'],
+      });
+      const receipt = JSON.parse(publicCommand.receipt_json);
+      expect(receipt).toMatchObject({ outcome: 'human_input_applied' });
+      const raw = reopened
+        .query('SELECT request_json FROM command WHERE id=?')
+        .get(receipt.humanInputCommandId) as { request_json: string };
+      expect(JSON.parse(raw.request_json)).toMatchObject({
+        kind: 'human.input',
+        publicCommandId: secondIntent.commandId,
+        content: 'New task: load second',
+      });
+      const decision = reopened
+        .query('SELECT request_json FROM command WHERE id=?')
+        .get(receipt.decisionCommandId) as { request_json: string };
+      expect(JSON.parse(decision.request_json)).toMatchObject({
+        inputCommandId: receipt.humanInputCommandId,
+        proposal: { relation: 'independent_work', purpose: 'work' },
+      });
+      expect(
+        reopened
+          .query('SELECT status,root_work_command_id FROM command WHERE id=?')
+          .get(receipt.businessCommandId),
+      ).toEqual({ status: 'applied', root_work_command_id: secondIntent.commandId });
+      expect(
+        reopened
+          .query('SELECT origin_command_id,root_work_command_id,status FROM run WHERE id=?')
+          .get(receipt.runId),
+      ).toEqual({
+        origin_command_id: receipt.businessCommandId,
+        root_work_command_id: secondIntent.commandId,
+        status: 'completed',
+      });
+      const user = reopened
+        .query("SELECT source_json FROM message WHERE run_id=? AND role='user'")
+        .get(receipt.runId) as { source_json: string };
+      expect(JSON.parse(user.source_json)).toMatchObject({
+        content: 'New task: load second',
+        sourceIds: [receipt.businessCommandId],
+      });
+      expect(
+        reopened
+          .query(
+            "SELECT origin_command_id,root_work_command_id FROM execution WHERE run_id=? AND kind='model'",
+          )
+          .all(receipt.runId),
+      ).toEqual(
+        Array.from({ length: 2 }, () => ({
+          origin_command_id: receipt.businessCommandId,
+          root_work_command_id: secondIntent.commandId,
+        })),
+      );
       expect(
         (
           reopened.query('SELECT config_json FROM run WHERE id=?').get(original.id) as {

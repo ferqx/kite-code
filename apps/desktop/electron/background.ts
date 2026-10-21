@@ -85,6 +85,9 @@ export class NativeBackground {
   private observed:
     | { id: number; scope: Scope; items: Map<string, BackgroundExecutionItem> }
     | undefined;
+  // Only an exact child read may reuse one prior complete directory during refresh
+  // and its renderer publication handoff. Controls require the current observation.
+  private previousChildObservation: NativeBackground['observed'];
   private observation = 0;
   private readonly outputs = new Map<string, Detail>();
   private readonly children = new Map<string, Detail>();
@@ -132,6 +135,7 @@ export class NativeBackground {
   }
   async open(readId: string): Promise<NativeBackgroundPage> {
     if (this.directory) throw new ClientError('background_read_busy');
+    this.previousChildObservation = this.observed?.scope.rootSessionId ? this.observed : undefined;
     this.observed = undefined;
     const lease: Directory = {
       readId,
@@ -173,6 +177,7 @@ export class NativeBackground {
       };
       return this.page(lease);
     } catch (error) {
+      this.previousChildObservation = undefined;
       this.close(readId);
       throw error;
     }
@@ -215,6 +220,8 @@ export class NativeBackground {
   }
   close(readId: string) {
     if (this.directory?.readId !== readId) return;
+    if (!this.directory.items || this.directory.offset !== this.directory.items.length)
+      this.previousChildObservation = undefined;
     this.directory.abort.abort();
     this.directory = undefined;
     // A completed directory's observation remains usable until refresh/reset.
@@ -232,9 +239,22 @@ export class NativeBackground {
       known.ids.has(sessionId)
     );
   }
-  private target(observationId: number, executionId: string): Detail {
-    const observed = this.observed,
-      scope = this.scope(),
+  private target(observationId: number, executionId: string, childRead = false): Detail {
+    const scope = this.scope();
+    if (
+      this.previousChildObservation &&
+      Object.keys(scope).some(
+        (key) =>
+          this.previousChildObservation!.scope[key as keyof Scope] !== scope[key as keyof Scope],
+      )
+    )
+      this.previousChildObservation = undefined;
+    const observed =
+        this.observed?.id === observationId
+          ? this.observed
+          : childRead && this.previousChildObservation?.id === observationId
+            ? this.previousChildObservation
+            : undefined,
       item = observed?.items.get(executionId);
     if (
       !observed ||
@@ -352,7 +372,7 @@ export class NativeBackground {
     cursor?: { afterSeq: string; contextSelectionId: string };
   }): Promise<NativeBackgroundChildOpen> {
     if (this.children.has(input.readId)) throw new ClientError('background_read_busy');
-    const lease = this.target(input.observationId, input.executionId);
+    const lease = this.target(input.observationId, input.executionId, true);
     lease.readId = input.readId;
     this.children.set(lease.readId, lease);
     try {
@@ -506,7 +526,72 @@ export class NativeBackground {
           throw new ClientError('background_child_binding_changed');
       }
       await this.fresh(lease);
+      const controlRuns = final.runs.filter(
+        (run) =>
+          run.carrierExecutionId === item.execution.id &&
+          run.originStoreId === item.execution.originStoreId &&
+          run.sessionId === childId &&
+          run.rootWorkCommandId === item.execution.rootWorkCommandId &&
+          run.rootWorkSeq === item.execution.rootWorkSeq,
+      );
+      const controlIds = new Set(controlRuns.map((run) => run.id));
       const body: NativeBackgroundChild = {
+        control: {
+          runs: controlRuns.map(
+            ({
+              id,
+              sessionId,
+              originStoreId,
+              originCommandId,
+              carrierExecutionId,
+              rootWorkCommandId,
+              rootWorkSeq,
+              isActive,
+            }) => ({
+              id,
+              sessionId,
+              originStoreId,
+              originCommandId,
+              carrierExecutionId,
+              rootWorkCommandId,
+              rootWorkSeq,
+              isActive,
+            }),
+          ),
+          executions: final.executions
+            .filter(
+              (execution) =>
+                execution.runId !== null &&
+                controlIds.has(execution.runId) &&
+                execution.originStoreId === item.execution.originStoreId &&
+                execution.sessionId === childId &&
+                execution.rootWorkCommandId === item.execution.rootWorkCommandId &&
+                execution.rootWorkSeq === item.execution.rootWorkSeq,
+            )
+            .map(
+              ({
+                id,
+                sessionId,
+                originStoreId,
+                runId,
+                rootWorkCommandId,
+                rootWorkSeq,
+                authorization,
+                status,
+                cancelRequestedAt,
+              }) => ({
+                id,
+                sessionId,
+                originStoreId,
+                runId,
+                rootWorkCommandId,
+                rootWorkSeq,
+                authorization,
+                status,
+                cancelRequestedAt,
+              }),
+            ),
+        },
         item,
         session: view.session,
         upperSeq,
@@ -569,6 +654,7 @@ export class NativeBackground {
   }
   release() {
     this.observed = undefined;
+    this.previousChildObservation = undefined;
     this.knownSessions = undefined;
     if (this.directory) this.close(this.directory.readId);
     for (const id of this.outputs.keys()) this.outputClose(id);

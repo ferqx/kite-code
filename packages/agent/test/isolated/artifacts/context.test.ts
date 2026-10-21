@@ -91,13 +91,13 @@ async function fixture(
     get publications() {
       return publications;
     },
-    async run(commandId = 'run', sessionId = 's') {
+    async run(commandId = 'run', sessionId = 's', content = commandId) {
       await runtime.submitCommand({
         expectedStoreId,
         sessionId,
         subjectId: 'owner',
         commandId,
-        request: { kind: 'run.start', content: commandId },
+        request: { kind: 'run.start', content },
       });
       await runtime.waitForCommand(commandId, { timeoutMs: 5000 });
     },
@@ -444,9 +444,29 @@ test('effects followed by nonexistent, foreign, wrong-scope or forged metadata r
       scope: foreignOriginal.scope,
     };
     for (const mode of modes) {
-      await f.run(mode);
+      await f.run(mode, 's', `New task: ${mode}`);
       const command = await f.store.getCommand(mode);
-      const runId = (command!.receipt as { runId: string }).runId;
+      const receipt = command!.receipt as {
+        runId: string;
+        businessCommandId?: string;
+        outcome?: string;
+      };
+      const runId = receipt.runId;
+      const sourceCommandId = receipt.businessCommandId ?? command!.id;
+      const business = (await f.store.getCommand(sourceCommandId))!;
+      expect(business).toMatchObject({
+        status: 'applied',
+        sessionId: 's',
+        subjectId: 'owner',
+        originStoreId: f.expectedStoreId,
+      });
+      expect(business.receipt).toMatchObject({ runId });
+      expect(await f.store.getRun(runId)).toMatchObject({
+        originCommandId: sourceCommandId,
+        sessionId: 's',
+        originStoreId: f.expectedStoreId,
+      });
+      if (receipt.businessCommandId) expect(receipt.outcome).toBe('human_input_applied');
       const tool = (await f.store.listExecutions('s')).find(
         (e) => e.runId === runId && e.kind === 'tool',
       );
@@ -456,7 +476,7 @@ test('effects followed by nonexistent, foreign, wrong-scope or forged metadata r
           mode === 'foreign' ? 'artifact_scope_denied' : 'artifact_reference_invalid',
         );
       const before = effects;
-      await f.run(mode);
+      await f.run(mode, 's', `New task: ${mode}`);
       expect(effects).toBe(before);
     }
     expect(effects).toBe(5);
@@ -640,3 +660,85 @@ test('child ordinary Tool publishes under original child subject and Session; pa
     await f.close();
   }
 }, 10000);
+
+test('Runtime scoped Artifact reads keep AbortSignal local and an already aborted read does not affect the active business or Store', async () => {
+  let enter!: () => void;
+  const entered = new Promise<void>((resolve) => {
+    enter = resolve;
+  });
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  let modelCalls = 0;
+  const model: NonNullable<RuntimeOptions['model']> = {
+    async *stream() {
+      modelCalls++;
+      enter();
+      await gate;
+      yield { type: 'text_delta', text: 'The original business completed once.' };
+      yield finish;
+    },
+  };
+  const f = await fixture({ id: 'fixture', version: '1', apiMajor: 1 }, createFixedModel([]), {
+    model,
+  });
+  const bytes = new Uint8Array([0, 255, 10, 13, 128, 65, 240, 159, 170, 129]);
+  let business: Promise<void> | undefined;
+  try {
+    const reference = await f.artifacts.publish({
+      expectedStoreId: f.expectedStoreId,
+      sessionId: 's',
+      subjectId: 'owner',
+      refId: 'runtime-signal-body',
+      scope: { kind: 'session', id: 's' },
+      mediaType: 'application/octet-stream',
+      content: bytes,
+    });
+    business = f.run('active-business');
+    await entered;
+    const before = await f.store.getView('s');
+    const cursor = (await f.store.getMetadata()).lastChangeCursor;
+    const request = {
+      expectedStoreId: f.expectedStoreId,
+      sessionId: 's',
+      subjectId: 'owner',
+      refId: reference.id,
+      scope: reference.scope,
+    };
+    expect(before.runs).toHaveLength(1);
+    expect(before.runs[0]!.isActive).toBe(true);
+    expect(modelCalls).toBe(1);
+    const controller = new AbortController();
+    const actual = await f.runtime.readArtifact({ ...request, signal: controller.signal });
+    expect(actual.reference).toEqual(reference);
+    expect(actual.content).toEqual(bytes);
+    expect(controller.signal.aborted).toBe(false);
+    expect((await f.store.getMetadata()).lastChangeCursor).toBe(cursor);
+    const cancelled = new AbortController();
+    const cancellation = new Error('owned_artifact_read_cancelled');
+    cancelled.abort(cancellation);
+    await expect(f.runtime.readArtifact({ ...request, signal: cancelled.signal })).rejects.toBe(
+      cancellation,
+    );
+    expect((await f.store.getMetadata()).lastChangeCursor).toBe(cursor);
+    expect(await f.store.getView('s')).toEqual(before);
+    expect((await f.store.getCommand('active-business'))?.cancelRequestedAt).toBeNull();
+    expect(modelCalls).toBe(1);
+    const again = await f.runtime.readArtifact({
+      ...request,
+      signal: new AbortController().signal,
+    });
+    expect(again.content).toEqual(bytes);
+    expect((await f.store.getMetadata()).lastChangeCursor).toBe(cursor);
+    release();
+    await business;
+    expect((await f.store.getView('s')).runs).toHaveLength(1);
+    expect((await f.store.getView('s')).runs[0]!.status).toBe('completed');
+    expect(modelCalls).toBe(1);
+  } finally {
+    release();
+    await business?.catch(() => {});
+    await f.close();
+  }
+});

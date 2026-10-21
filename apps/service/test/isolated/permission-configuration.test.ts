@@ -21,6 +21,7 @@ import { createClient } from '@kite-ai/client';
 import { privateDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { startService } from '../../src';
 import { createDefaultProcessConfiguration } from '../../src/configuration';
+import { createPermissionManagement } from '../../src/permission-management';
 
 async function until<T>(read: () => Promise<T | null>) {
   const deadline = Date.now() + 5000;
@@ -218,6 +219,31 @@ async function fixture(
     workspaceId: 'w',
     title: 'root',
   });
+  // Programmatic capabilities are ceilings; the actual root owns the live mode/trust.
+  if (mode !== null) {
+    const control = createPermissionManagement({ runtime, profile });
+    const identity = { expectedStoreId, subjectId: 'owner' };
+    const state = await control.readMode({ ...identity, sessionId: 's' });
+    await control.setMode({
+      ...identity,
+      sessionId: 's',
+      commandId: 'fixture-live-mode',
+      mode,
+      makeDefault: false,
+      ifRevision: state.revision,
+      ifDefaultRevision: state.defaultRevision,
+    });
+    const trust = await control.readTrust({ ...identity, workspaceId: 'w' });
+    await control.setTrust({
+      ...identity,
+      workspaceId: 'w',
+      commandId: 'fixture-live-trust',
+      trusted,
+      ifRevision: trust.revision,
+      canonicalIdentity: trust.canonicalIdentity,
+      externalReadScopeDigest: trust.externalReadScopeDigest,
+    });
+  }
   return {
     root,
     workspace,
@@ -237,12 +263,12 @@ async function fixture(
     set policy(value: PermissionPolicySnapshot) {
       policy = value;
     },
-    async run(commandId = 'work') {
+    async run(commandId = 'work', content = 'explicit file task') {
       return client.startRun('s', {
         expectedStoreId,
         commandId,
         kind: 'run.start',
-        content: 'explicit file task',
+        content,
       });
     },
     async pending() {
@@ -316,6 +342,45 @@ test('actual default-compatible Model file call uses actual Auto ask_user exact 
   }
 }, 15000);
 
+test('default and trusted injected policies follow a live root mode change in the original pending Run', async () => {
+  for (const injected of ['default', 'policy', 'permissions']) {
+    const f = await fixture(
+      injected === 'default' ? null : 'auto',
+      true,
+      injected === 'permissions',
+    );
+    try {
+      if (injected === 'default') await setManaged(f, 'auto');
+      await f.run();
+      const old = await f.pending();
+      const controller = createPermissionManagement({
+        runtime: f.runtime,
+        profile: selectProfile({ dataRoot: join(f.root, 'data'), profile: 'new' }),
+      });
+      const identity = { expectedStoreId: f.expectedStoreId, subjectId: 'owner' };
+      const mode = await controller.readMode({ ...identity, sessionId: 's' });
+      await controller.setMode({
+        ...identity,
+        sessionId: 's',
+        commandId: 'live-root-full',
+        mode: 'full',
+        makeDefault: false,
+        ifRevision: mode.revision,
+        ifDefaultRevision: mode.defaultRevision,
+      });
+      await f.runtime.waitForCommand('work', { timeoutMs: 5000 });
+      expect(readFileSync(join(f.workspace, 'output.txt'), 'utf8')).toBe('exact first');
+      const card = await f.client.getInteraction('s', old.id, { storeId: f.expectedStoreId });
+      expect(card.state).toBe('cancelled');
+      expect(card.answer).toBeNull();
+      expect(f.requests).toHaveLength(2);
+      expect(f.authReviews).toHaveLength(1);
+    } finally {
+      await f.close();
+    }
+  }
+}, 15000);
+
 test('old default Run keeps actual selected definitions across JSONC disable, while current programmatic policy narrowing blocks its old card', async () => {
   for (const revoke of [false, true]) {
     const f = await fixture('auto');
@@ -339,15 +404,28 @@ test('old default Run keeps actual selected definitions across JSONC disable, wh
           { id: 'files.write', version: '2', extensionId: 'builtin.files' },
         ],
       });
-      await f.run('new-work');
-      await f.runtime.waitForCommand('new-work', { timeoutMs: 5000 });
+      await f.run('new-work', 'New task: explicit file task');
+      const command = await f.runtime.waitForCommand('new-work', { timeoutMs: 5000 });
+      const receipt = command.receipt as { businessCommandId: string; runId: string };
+      expect(command.status).toBe('applied');
       const request = f.requests.at(-1)!;
       const tools = request.tools as { type: string; function: { name: string } }[];
       expect(tools.map((tool) => ({ type: tool.type, name: tool.function.name }))).toEqual([
         { type: 'function', name: 'ask_user' },
       ]);
       const view = await f.client.getView('s'),
-        newRun = view.runs.at(-1)!;
+        newRun = (await f.store.getRun(receipt.runId))!;
+      expect(newRun).toMatchObject({
+        originCommandId: receipt.businessCommandId,
+        rootWorkCommandId: command.id,
+      });
+      const model = (await f.store.listExecutions('s')).find(
+        (execution) => execution.kind === 'model' && execution.runId === newRun.id,
+      );
+      expect(model).toMatchObject({
+        originCommandId: receipt.businessCommandId,
+        rootWorkCommandId: command.id,
+      });
       expect(newRun.status).toBe('completed');
       expect(newRun.configuration).toMatchObject({
         tools: [{ id: 'ask_user', version: '1', extensionId: 'builtin.ask-user' }],
@@ -361,12 +439,12 @@ test('old default Run keeps actual selected definitions across JSONC disable, wh
   }
 }, 15000);
 
-test('explicit trusted Permissions remains prior to new policy; actual builtin versions reject bad new configuration before Provider IO', async () => {
+test('explicit trusted Permissions does not read the replaced policy or bypass current trust; actual builtin versions reject bad new configuration before Provider IO', async () => {
   const explicit = await fixture('accept_edits', false, true);
   try {
     await explicit.run();
     await explicit.runtime.waitForCommand('work', { timeoutMs: 5000 });
-    expect(readFileSync(join(explicit.workspace, 'output.txt'), 'utf8')).toBe('exact first');
+    expect(existsSync(join(explicit.workspace, 'output.txt'))).toBe(false);
     expect(
       (await explicit.client.listInteractions('s', { storeId: explicit.expectedStoreId }))
         .interactions,

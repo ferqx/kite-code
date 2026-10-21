@@ -167,7 +167,7 @@ try {
   await wait('Saved same_command grants: 2');
   await key('\x1b');
   await wait('New Run >');
-  await send('owned-2');
+  await send('New task: owned-2');
   await wait('DONE owned-2');
   await pump();
   await send('/permissions');
@@ -179,7 +179,7 @@ try {
   await wait('Saved same_command grants: 0');
   await key('\x1b');
   await wait('New Run >');
-  await send('owned-3');
+  await send('New task: owned-3');
   await wait('same command in original Session');
   await key('\x03');
   await pump();

@@ -35,6 +35,7 @@ import { startService } from '../../src/index';
 import { createMcpHttpTransportPort } from '../../src/mcp-http-port';
 import { createMcpManagement } from '../../src/mcp-management';
 import { createUserConfiguration } from '../../src/user-configuration';
+import { initializeLivePermissionFixture } from '../fixtures/live-permission-fixture';
 
 const obj = (value: unknown) => value as Record<string, Json>;
 async function until<T>(read: () => Promise<T | null>) {
@@ -369,6 +370,17 @@ async function fixture(transport: 'http' | 'stdio' = 'http', defaultMode?: 'regi
       subjectId: 'user',
       title: sessionId,
     });
+  for (const sessionId of ['a', 'b'])
+    await initializeLivePermissionFixture({
+      runtime,
+      profile,
+      expectedStoreId,
+      subjectId: 'user',
+      sessionId,
+      workspaceId: 'w',
+      mode: 'full',
+      trusted: true,
+    });
   const service = await startService({
       runtime,
       configurationManagement: createConfigurationManagement({
@@ -507,11 +519,15 @@ async function fixture(transport: 'http' | 'stdio' = 'http', defaultMode?: 'regi
         commandId,
         request: {
           kind: 'run.start',
-          content: 'Inspect the current schema; fixed local model only',
+          content: '新任务：Inspect the current schema; fixed local model only',
         },
       });
-      await runtime.waitForCommand(commandId, { timeoutMs: 5000 });
-      return commandId;
+      const applied = await runtime.waitForCommand(commandId, { timeoutMs: 5000 });
+      const receipt = applied.receipt as { businessCommandId?: string; runId: string };
+      const run = (await store.getRun(receipt.runId))!;
+      expect(run.originCommandId).toBe(receipt.businessCommandId ?? commandId);
+      expect(run.rootWorkCommandId).toBe(commandId);
+      return run.originCommandId;
     },
     async close() {
       await service.close();

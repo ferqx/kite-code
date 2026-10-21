@@ -48,7 +48,11 @@ test('six reviewed raw pairs retain actual predecessor/current hashes and explic
       expect(result).toBeDefined();
       expect(result.match).toBe('reviewed_locked_input_increment');
       expect(String(result.predecessorCommit)).toBe(commit);
-      expect(result.reviewScope).toBe('approved_input_increments_2026_10_18');
+      expect(result.reviewScope).toBe(
+        path === 'package.json'
+          ? 'approved_input_increments_2026_10_19'
+          : 'approved_input_increments_2026_10_18',
+      );
       expect(result.previousSha256).toBe(sha(previous));
       expect(result.currentSha256).toBe(sha(actual));
       expect(result.currentSha256).not.toBe(result.previousSha256);
@@ -58,6 +62,12 @@ test('six reviewed raw pairs retain actual predecessor/current hashes and explic
       if (path === 'packages/agent/package.json')
         expect(result.commits).toContain('bcf70ce843463194ab91ca3938b9fa1375cb22bc');
       expect(result.increments.length).toBeGreaterThan(0);
+      if (path === 'package.json') {
+        expect(result.increments).toContain('model_collaboration_live_script');
+        expect(result.collaborationLiveScript).toBe(
+          '    "test:model:collaboration:live": "bun run tests/e2e/live/model/collaboration.live.ts",\n',
+        );
+      }
     }
   }
 });
@@ -145,11 +155,17 @@ test('exact resolved additions and old closure reject version, URL, dependency, 
 test('exact live script and build/entry increments cannot be omitted, duplicated, renamed or extended', () => {
   const liveLine =
     '    "test:model:tools:live": "bun run tests/e2e/live/model/model-tools.live.ts",\n';
+  const collaborationLine =
+    '    "test:model:collaboration:live": "bun run tests/e2e/live/model/collaboration.live.ts",\n';
   const changes: Readonly<Record<string, readonly [string, string][]>> = {
     'package.json': [
       [liveLine, ''],
       [liveLine, liveLine + liveLine],
       ['model-tools.live.ts', 'other.live.ts'],
+      [collaborationLine, ''],
+      [collaborationLine, collaborationLine + collaborationLine],
+      ['collaboration.live.ts', 'other.live.ts'],
+      ['collaboration.live.ts"', 'collaboration.live.ts && echo injected"'],
       ['"postinstall": "bun run build:files-native"', '"postinstall": "echo skip"'],
     ],
     'packages/ai/package.json': [

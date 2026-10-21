@@ -428,7 +428,7 @@ test('actual QueueOnly parent/child exchange keeps twelve complete private bodie
       commandId: 'later-human',
       sessionId: 'root',
       subjectId: 'owner',
-      request: { kind: 'run.start', content: 'later human origin' },
+      request: { kind: 'run.start', content: 'New task: later human origin' },
     });
     await laterReady.promise;
     const queryCursor = (await store.getMetadata()).lastChangeCursor;
@@ -633,7 +633,7 @@ for (const mode of ['idle', 'failed_sender', 'commit_fault', 'cancelled_target']
           sessionId: 'root',
           subjectId: 'owner',
           commandId: 'later-human-work',
-          request: { kind: 'run.start', content: 'new explicit root work' },
+          request: { kind: 'run.start', content: 'New task: new explicit root work' },
         });
         await runtime.waitForCommand('later-human-work', { timeoutMs: 4000 });
         expect(childCalls).toBe(1);

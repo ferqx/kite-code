@@ -95,14 +95,15 @@ export async function openDefaultShellContinuousFixture(root: string, candidateR
         providerCalls++;
         const last = body.messages.reduce(
           (found, row, index) =>
-            row.role === 'user' && /(?:^load-parent:|load-child:)[a-f0-9-]{36}/.test(row.content)
+            row.role === 'user' &&
+            /(?:^(?:New task: )?load-parent:|load-child:)[a-f0-9-]{36}/.test(row.content)
               ? index
               : found,
           -1,
         );
         const content = body.messages[last]?.content ?? '';
         const childMatch = /load-child:([a-f0-9-]{36})/.exec(content);
-        const parentMatch = /^load-parent:([a-f0-9-]{36})$/.exec(content);
+        const parentMatch = /^(?:New task: )?load-parent:([a-f0-9-]{36})$/.exec(content);
         const child = childMatch !== null;
         const nonce = (childMatch ?? parentMatch)?.[1];
         if (!nonce) {
@@ -113,20 +114,14 @@ export async function openDefaultShellContinuousFixture(root: string, candidateR
         }
         if (child) childCalls++;
         const results = body.messages.slice(last + 1).filter((row) => row.role === 'tool');
-        const calls = [
+        const calls: { name: string; input: unknown }[] = [
           {
             name: 'write_file',
             input: { path: `effects/${nonce}.txt`, base: null, content: nonce },
           },
           {
             name: 'spawn_agent',
-            input: {
-              key: `child-${nonce}`,
-              role: 'worker',
-              input: { content: `load-child:${nonce}` },
-              cancellation: 'attached',
-              result_disposition: 'required',
-            },
+            input: { prompt: `load-child:${nonce}` },
           },
           {
             name: 'shell_launch',
@@ -141,15 +136,48 @@ export async function openDefaultShellContinuousFixture(root: string, candidateR
             input: { shell_id: `shell-${nonce}`, wait_timeout_ms: 4000 },
           },
         ];
-        const call = child ? undefined : calls[Math.min(results.length, 3)];
-        const waiting =
-          results.length > 3 &&
-          !results
-            .slice(3)
-            .some((row) =>
-              /"status":"(?:succeeded|failed|cancelled|outcome_unknown)"/.test(row.content),
-            );
-        const selected = results.length > 3 && !waiting ? undefined : call;
+        // Ordinary six-tool spawn does not create a legacy required obligation.
+        // Wait for this exact child's durable completion before concluding the
+        // operation; finite observation timeouts never cancel or complete it.
+        let selected = child ? undefined : calls[results.length];
+        if (!child && results.length >= 3) {
+          const spawned = JSON.parse(results[1]!.content) as {
+            accepted?: boolean;
+            agent_id?: string;
+          };
+          if (spawned.accepted !== true || !spawned.agent_id)
+            throw Error('continuous_child_spawn_not_accepted');
+          let childSettled = false,
+            afterSeq = '0',
+            shellSettled = false;
+          for (const row of results.slice(3)) {
+            const observed = JSON.parse(row.content) as {
+              next_seq?: string;
+              events?: { agent_id: string; kind: string; outcome?: string }[];
+              execution?: { status?: string };
+              error?: unknown;
+            };
+            if (observed.error) throw Error('continuous_child_observation_failed');
+            if (observed.next_seq !== undefined) afterSeq = observed.next_seq;
+            if (
+              observed.events?.some(
+                (event) => event.agent_id === spawned.agent_id && event.kind === 'completed',
+              )
+            )
+              childSettled = true;
+            if (
+              ['succeeded', 'failed', 'cancelled', 'outcome_unknown'].includes(
+                observed.execution?.status ?? '',
+              )
+            )
+              shellSettled = true;
+          }
+          selected = !childSettled
+            ? { name: 'wait_agent_events', input: { after_seq: afterSeq, wait_ms: 4000 } }
+            : shellSettled
+              ? undefined
+              : calls[3];
+        }
         const delta = selected
           ? {
               tool_calls: [
@@ -185,7 +213,10 @@ export async function openDefaultShellContinuousFixture(root: string, candidateR
         ],
         tools: [
           { id: 'files.write', definitionVersion: '2' },
-          ...['task', 'shell.launch', 'shell.wait'].map((id) => ({ id, definitionVersion: '1' })),
+          ...['task.spawn', 'task.events', 'shell.launch', 'shell.wait'].map((id) => ({
+            id,
+            definitionVersion: '1',
+          })),
         ],
       }),
       { mode: 0o600 },
@@ -394,7 +425,7 @@ export async function openDefaultShellContinuousFixture(root: string, candidateR
                     expectedStoreId: storeId,
                     commandId: operation.commandId,
                     kind: 'run.start',
-                    content: `load-parent:${operation.commandId}`,
+                    content: `New task: load-parent:${operation.commandId}`,
                   });
                   operation.admissionMs = performance.now() - operation.began;
                   const command = await until(
@@ -429,8 +460,28 @@ export async function openDefaultShellContinuousFixture(root: string, candidateR
                       row.parentExecutionId &&
                       rows.some((parent) => parent.id === row.parentExecutionId),
                   );
+                  const childObserved = rows.some((row) => {
+                    if (row.definitionId !== 'task.events' || row.status !== 'succeeded')
+                      return false;
+                    const detail = (
+                      row.result as {
+                        details?: {
+                          events?: { agent_id: string; kind: string; outcome?: string }[];
+                        };
+                      } | null
+                    )?.details;
+                    return (
+                      detail?.events?.some(
+                        (event) =>
+                          event.agent_id === child?.childSessionId &&
+                          event.kind === 'completed' &&
+                          event.outcome === 'succeeded',
+                      ) === true
+                    );
+                  });
                   if (
                     run.status !== 'completed' ||
+                    !childObserved ||
                     writes.length !== 1 ||
                     child?.status !== 'succeeded' ||
                     job?.status !== 'succeeded' ||

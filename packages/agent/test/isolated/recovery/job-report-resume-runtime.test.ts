@@ -6,13 +6,13 @@ import { pathToFileURL } from 'node:url';
 import type { ModelAdapter, ModelEvent, ModelRequest } from '@kite-ai/ai';
 import { createArtifactStore } from '../../../src/artifacts';
 import type { Extension, JobEvent } from '../../../src/extensions';
-import { createTaskExtension } from '../../../src/extensions/task';
 import { canonicalJson } from '../../../src/json';
 import { acquireProfileMaintenanceAccess } from '../../../src/platform/profile';
 import { createRuntime, type RunConfiguration } from '../../../src/runtime';
 import { openSqliteStore } from '../../../src/sqlite';
 import type { Store } from '../../../src/storage/port';
 import { AgentError } from '../../../src/storage/types';
+import { createLegacyTaskFixture as createTaskExtension } from '../../fixtures/legacy-task-surface';
 
 const finish: ModelEvent = {
   type: 'finish',
@@ -226,7 +226,8 @@ for (const mode of [
         subjectId: mode === 'foreign_creator' ? 'creator' : 'owner',
         title: 'root',
       });
-      await runtime.submitCommand({
+      const beforeSubmission = (await store.getMetadata()).lastChangeCursor;
+      const submission = runtime.submitCommand({
         expectedStoreId: storeId,
         commandId: 'work',
         sessionId: 'root',
@@ -234,10 +235,11 @@ for (const mode of [
         request: { kind: 'run.start', content: 'delegate' },
       });
       if (mode === 'foreign_creator') {
-        await runtime.waitForCommand('work');
+        await rejects(submission, 'permission_denied');
         const view = await store.getView('root');
-        expect(view.runs).toHaveLength(1);
-        expect(view.runs[0]!).toMatchObject({ status: 'failed', reason: 'permission_denied' });
+        expect(view.runs).toHaveLength(0);
+        expect(await store.getCommand('work')).toBeNull();
+        expect((await store.getMetadata()).lastChangeCursor).toBe(beforeSubmission);
         expect(view.executions).toEqual([]);
         expect(requests).toEqual([]);
         expect(
@@ -284,6 +286,7 @@ for (const mode of [
         expect((await store.getMetadata()).lastChangeCursor).toBe(cursor);
         return;
       }
+      await submission;
       await childReady.promise;
       await runtime.waitForCommand('work');
       childRelease.release();

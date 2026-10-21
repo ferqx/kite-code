@@ -139,7 +139,7 @@ try {
   await send('Owned ordinary task');
   await wait('ORIGINAL_FULL_TAIL');
   await pump();
-  await send('Qualifying historical task');
+  await send('New task: Qualifying historical task');
   await wait('QUALIFYING_SETTLED_HISTORY');
   await pump();
   await send('/session rename Managed title');
@@ -158,7 +158,7 @@ try {
   );
   assert.ok(compressionOriginal, 'management_original_compression_identity_unavailable');
   await pump();
-  await send('Queued after maintenance');
+  await send('新任务Queued after maintenance');
   await wait('input.follow_up');
   writeFileSync(`${input.root}/release-summary`, 'explicit fixture release');
   await pump();

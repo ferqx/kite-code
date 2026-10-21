@@ -56,9 +56,28 @@ export function taskToolCapability(id: string): {
   effects: readonly CapabilityEffect[];
   safeRead: boolean;
 } {
-  if (['task_read', 'task_wait', 'list_agents', 'wait_agents', 'wait_agent'].includes(id))
+  if (
+    [
+      'task_read',
+      'task_wait',
+      'list_agents',
+      'wait_agents',
+      'wait_agent',
+      'task.events',
+      'task.list',
+    ].includes(id)
+  )
     return { effects: ['read'], safeRead: true };
-  if (id === 'task' || id === 'send_message' || id === 'followup_task')
+  if (
+    [
+      'task',
+      'send_message',
+      'followup_task',
+      'task.spawn',
+      'task.message',
+      'task.follow_up',
+    ].includes(id)
+  )
     return { effects: ['unknown', 'record_write'], safeRead: false };
   return { effects: ['unknown'], safeRead: false };
 }

@@ -1,6 +1,11 @@
 import { join } from 'node:path';
 import { canonicalJson } from './json';
-import { acquireFileLock, type FileLock, LockBusyError } from './platform/locks';
+import {
+  acquireExistingSharedFileLock,
+  acquireFileLock,
+  type FileLock,
+  LockBusyError,
+} from './platform/locks';
 import { createOwnedWorker, ownedWorkerAssets } from './platform/process/owned-worker';
 import { acquireProfileAccess, acquireSessionLock, type ProfileOptions } from './platform/profile';
 import { initializeDefaultSqliteEngine } from './sqlite-engine';
@@ -522,6 +527,32 @@ export async function openSqliteStore(options: OpenSqliteStoreOptions): Promise<
       }
       releaseLocalLock(lock, input.sessionId);
       return result;
+    },
+    async listSessionDirectory(input: Parameters<Store['listSessionDirectory']>[0]) {
+      const page = (await request('listSessionDirectory', [input])) as Awaited<
+        ReturnType<Store['listSessionDirectory']>
+      >;
+      for (const item of page.items) {
+        if (!item.activity.run?.isActive) continue;
+        const rootId = item.session.rootSessionId;
+        item.activity.executionOwner = 'unknown';
+        if (!/^[A-Za-z0-9_-]{1,128}$/.test(rootId)) continue;
+        let lock: FileLock;
+        try {
+          lock = acquireExistingSharedFileLock(
+            join(access.coordinationPath, `session-${rootId}.lock`),
+            options.windowsPathSecurity,
+          );
+        } catch (error) {
+          if (error instanceof LockBusyError) item.activity.executionOwner = 'held';
+          continue;
+        }
+        // Release synchronously before any further request. The shared probe cannot
+        // advance a generation, settle old work, or become a recovery capability.
+        releaseLocalLock(lock, rootId);
+        item.activity.executionOwner = 'unheld';
+      }
+      return page;
     },
     async acquireSessionOwner(sessionId: string, instanceId: string): Promise<OwnerRef | null> {
       if (options.mode === 'readonly') throw new AgentError('read_only');

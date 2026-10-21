@@ -19,6 +19,7 @@ import { pathToFileURL } from 'node:url';
 import { acquireArtifactAccess } from '@kite-ai/agent/artifact-access';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
+import type { CommandRecord } from '@kite-ai/agent/storage';
 import type { Command, Execution, ModelOutputSnapshot } from '@kite-ai/client';
 import { inspectProcess } from '@kite-ai/service/daemon';
 import { verifyNativeRuntimeBundle } from '@kite-ai/service/native-runtime-assets';
@@ -42,7 +43,7 @@ import {
 
 const repositoryRoot = resolve(import.meta.dir, '../../..');
 const sessionId = 'native-version-session';
-const tasks = ['native-A-original', 'native-B-full-original', 'native-A-after-rollback'];
+const tasks = ['native-A-original', 'New task: native-B-full-original', 'native-A-after-rollback'];
 const bodies = [
   'ORIGINAL NATIVE A BODY',
   `B CURRENT FULL BODY\n${'二代🙂\n'.repeat(32000)}B EXACT ORIGINAL TAIL`,
@@ -55,7 +56,19 @@ type StoredFacts = {
   engine: { version: string; sourceId: string };
   runs: { id: string; status: string; originCommandId: string }[];
   commands: { id: string; status: string; originStoreId: string }[];
-  messages: { id: string }[];
+  humanInputs: {
+    publicCommand: CommandRecord | null;
+    input: CommandRecord | null;
+    decision: CommandRecord | null;
+    business: CommandRecord | null;
+  }[];
+  messages: {
+    id: string;
+    role: string;
+    runId: string | null;
+    content: string;
+    sourceIds?: string[];
+  }[];
   persistedExecutions: { id: string; rowJson: string; rowBytes: number; rowSha256: string }[];
   persistedMessages: {
     id: string;
@@ -336,6 +349,92 @@ test.skipIf(!['darwin', 'linux'].includes(process.platform))(
                 candidates[activeIndex]!.terminal.manifest.sqlite.sourceId,
               );
               expect(result.runs).toHaveLength(requests.length);
+              if (
+                requests.length >= 2 &&
+                result.runs.filter((run) => run.status === 'completed').length >= 2
+              ) {
+                const proof = result.humanInputs.find(
+                  (entry) =>
+                    (entry.publicCommand?.request as { content?: string } | undefined)?.content ===
+                    tasks[1],
+                );
+                expect(proof).toBeDefined();
+                const original = proof!.publicCommand!;
+                const receipt = original.receipt as {
+                  runId: string;
+                  humanInputCommandId: string;
+                  decisionCommandId: string;
+                  businessCommandId: string;
+                };
+                expect(original).toMatchObject({
+                  status: 'applied',
+                  originStoreId: originalStoreId,
+                  sessionId,
+                });
+                expect(receipt).toMatchObject({ outcome: 'human_input_applied' });
+                expect(proof!.input).toMatchObject({
+                  id: receipt.humanInputCommandId,
+                  kind: 'human.input',
+                  request: {
+                    publicCommandId: original.id,
+                    content: tasks[1],
+                    originalRequest: original.request,
+                  },
+                  receipt: {
+                    state: 'decided',
+                    decisionCommandId: receipt.decisionCommandId,
+                    businessCommandId: receipt.businessCommandId,
+                  },
+                });
+                expect(proof!.decision).toMatchObject({
+                  id: receipt.decisionCommandId,
+                  kind: 'human.input.decision',
+                  status: 'applied',
+                  request: {
+                    inputCommandId: proof!.input!.id,
+                    inputDigest: proof!.input!.requestDigest,
+                    proposal: { relation: 'independent_work', purpose: 'work' },
+                  },
+                  receipt: { businessCommandId: receipt.businessCommandId },
+                });
+                expect(proof!.business).toMatchObject({
+                  id: receipt.businessCommandId,
+                  status: 'applied',
+                  rootWorkCommandId: original.id,
+                  receipt: { runId: receipt.runId },
+                });
+                expect(result.runs.find((run) => run.id === receipt.runId)).toMatchObject({
+                  originCommandId: receipt.businessCommandId,
+                  status: 'completed',
+                });
+                const models = result.executions.filter(
+                  (execution) => execution.kind === 'model' && execution.runId === receipt.runId,
+                );
+                expect(models).toHaveLength(1);
+                const model = JSON.parse(
+                  result.persistedExecutions.find((row) => row.id === models[0]!.id)!.rowJson,
+                );
+                expect(model).toMatchObject({
+                  origin_command_id: receipt.businessCommandId,
+                  root_work_command_id: original.id,
+                  state: 'succeeded',
+                });
+                const user = result.messages.find(
+                  (message) =>
+                    message.role === 'user' &&
+                    message.runId === receipt.runId &&
+                    message.sourceIds?.includes(receipt.businessCommandId),
+                );
+                expect(user).toMatchObject({
+                  content: tasks[1],
+                  sourceIds: [receipt.businessCommandId],
+                });
+                expect(
+                  JSON.parse(
+                    result.persistedMessages.find((row) => row.id === user!.id)!.sourceJson,
+                  ),
+                ).toMatchObject({ content: tasks[1], sourceIds: [receipt.businessCommandId] });
+              }
               expect(
                 result.commands.every(
                   (value) => value.status === 'applied' && value.originStoreId === originalStoreId,

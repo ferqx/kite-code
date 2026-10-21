@@ -167,15 +167,22 @@ for (const mode of ['inline', 'sealed'] as const)
         commandId: 'next',
         sessionId: 's',
         subjectId: 'owner',
-        request: { kind: 'run.start', content: 'New explicit input' },
+        request: { kind: 'run.start', content: 'New task: New explicit input' },
       });
-      await until(
-        async () =>
-          (await runtime!.getCommand('next'))?.status === 'applied' &&
-          (await runtime!.getView('s')).runs.some(
-            (run) => run.originCommandId === 'next' && run.status === 'completed',
-          ),
-      );
+      await until(async () => {
+        const saved = await runtime!.getCommand('next');
+        if (saved?.status !== 'applied') return false;
+        const runId = (saved.receipt as { runId: string }).runId;
+        return (await store!.getRun(runId))?.status === 'completed';
+      });
+      const next = (await runtime.getCommand('next'))!;
+      const receipt = next.receipt as { runId: string; businessCommandId: string };
+      const business = await runtime.getCommand(receipt.businessCommandId);
+      expect(business?.receipt).toMatchObject({ runId: receipt.runId });
+      expect(await store.getRun(receipt.runId)).toMatchObject({
+        originCommandId: business!.id,
+        rootWorkCommandId: 'next',
+      });
       expect(bodies).toHaveLength(3);
       const oldCall = bodies[1]!.messages.find((message) => message.role === 'assistant')!;
       expect(JSON.parse(oldCall.tool_calls![0]!.function.arguments)).toEqual({ value: original });

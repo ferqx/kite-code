@@ -27,6 +27,7 @@ const [
   helperSha256,
   requestJson,
   wire,
+  sessionId = 's',
 ] = process.argv.slice(2) as string[];
 const profileInput = JSON.parse(profileJson!),
   connection = JSON.parse(connectionJson!),
@@ -49,7 +50,7 @@ globalThis.fetch = Object.assign(
     );
     if (
       drop &&
-      ((mode === 'post' && method === 'POST' && path === '/v1/sessions/s/commands') ||
+      ((mode === 'post' && method === 'POST' && path === `/v1/sessions/${sessionId}/commands`) ||
         (mode === 'get' && method === 'GET' && path === `/v1/commands/${input.commandId}`))
     ) {
       drop = false;
@@ -140,7 +141,7 @@ try {
     }
   } else {
     if (mode === 'post' || mode === 'prepared' || mode === 'prepare' || mode === 'hot-drift') {
-      await journal.prepare('s', input);
+      await journal.prepare(sessionId, input);
       if (mode === 'prepared') process.kill(process.pid, 'SIGKILL');
     }
     const db =

@@ -7,9 +7,9 @@ import { pathToFileURL } from 'node:url';
 import { AgentError, createRuntime } from '@kite-ai/agent';
 import { createArtifactStore } from '@kite-ai/agent/artifacts';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
-import { createTaskExtension } from '@kite-ai/agent/task';
 import { createFixedModel, type ModelAdapter, type ModelEvent } from '@kite-ai/ai';
 import { createClient } from '@kite-ai/client';
+import { createLegacyTaskFixture as createTaskExtension } from '../../../../packages/agent/test/fixtures/legacy-task-surface';
 import { temporaryDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { startService } from '../../src';
 

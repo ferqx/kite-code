@@ -12,6 +12,7 @@ import { createClient } from '@kite-ai/client';
 import { privateDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { startService } from '../../src';
 import { createDefaultProcessConfiguration } from '../../src/configuration';
+import { createPermissionManagement } from '../../src/permission-management';
 
 const fullBody = `complete-default-web-BEGIN\n${'actual public Tool body. '.repeat(5000)}\ncomplete-default-web-END`;
 async function fixture(off = false) {
@@ -24,6 +25,7 @@ async function fixture(off = false) {
   const expectedStoreId = (await store.getMetadata()).storeId;
   const webRequests: string[] = [];
   const wireAudits: boolean[] = [];
+  const admissions: { allowed: boolean; revision: string }[] = [];
   let dns = 0,
     admitted = true;
   const web = createServer(async (request, response) => {
@@ -58,6 +60,7 @@ async function fixture(off = false) {
   const webPort = (web.address() as { port: number }).port;
   const url = `http://fixture.test:${webPort}`;
   let target = `${url}/redirect`;
+  let currentInput = 'work-1';
   const requests: {
     messages: { role: string; content: string }[];
     tools?: { function: { name: string } }[];
@@ -70,7 +73,7 @@ async function fixture(off = false) {
       requests.push(body);
       const last = body.messages.reduce(
         (index, message, i) =>
-          message.role === 'user' && message.content.startsWith('work-') ? i : index,
+          message.role === 'user' && message.content === currentInput ? i : index,
         -1,
       );
       const hasResult = body.messages.slice(last + 1).some((message) => message.role === 'tool');
@@ -117,7 +120,7 @@ async function fixture(off = false) {
     ? { mode: 'off' as const }
     : { mode: 'allowlist' as const, hosts: ['fixture.test'] };
   const host = createDefaultProcessConfiguration({
-    userConfigurationPath: profile.profilePath + '/config.jsonc',
+    userConfigurationPath: `${profile.profilePath}/config.jsonc`,
     profile,
     webFetch: {
       network: {
@@ -127,10 +130,14 @@ async function fixture(off = false) {
           dns++;
           return [{ address: '127.0.0.1', family: 4 }];
         },
-        admitHop: async () => ({
-          allowed: admitted,
-          revision: admitted ? 'resources-current-1' : 'resources-revoked-2',
-        }),
+        admitHop: async () => {
+          const decision = {
+            allowed: admitted,
+            revision: admitted ? 'resources-current-1' : 'resources-revoked-2',
+          };
+          admissions.push(decision);
+          return decision;
+        },
       },
     },
     permissions: {
@@ -147,6 +154,7 @@ async function fixture(off = false) {
     extensions: host.extensions,
     resolveRunConfiguration: host.resolveRunConfiguration,
   });
+  host.permissionManagement?.(runtime);
   const serverProfile = {
     dataRoot: profile.dataRoot,
     name: profile.profile,
@@ -182,6 +190,42 @@ async function fixture(off = false) {
     workspaceId: 'w',
     title: 'default Web',
   });
+  const controls = createPermissionManagement({ runtime, profile });
+  const scope = { expectedStoreId, subjectId: 'owner' };
+  const mode = await controls.readMode({ ...scope, sessionId: 's' });
+  expect(
+    (
+      await controls.setMode({
+        ...scope,
+        sessionId: 's',
+        commandId: 'fixture-mode',
+        mode: 'full',
+        ifRevision: mode.revision,
+        ifDefaultRevision: mode.defaultRevision,
+        makeDefault: false,
+      })
+    ).state,
+  ).toBe('applied');
+  const trust = await controls.readTrust({ ...scope, workspaceId: 'w' });
+  expect(
+    (
+      await controls.setTrust({
+        ...scope,
+        workspaceId: 'w',
+        commandId: 'fixture-trust',
+        trusted: true,
+        ifRevision: trust.revision,
+        canonicalIdentity: trust.canonicalIdentity,
+        externalReadScopeDigest: trust.externalReadScopeDigest,
+      })
+    ).state,
+  ).toBe('applied');
+  const currentMode = await controls.readMode({ ...scope, sessionId: 's' });
+  const currentTrust = await controls.readTrust({ ...scope, workspaceId: 'w' });
+  expect(currentMode).toMatchObject({ mode: 'full', scopeSessionId: 's' });
+  expect(currentMode.revision).not.toBe(mode.revision);
+  expect(currentTrust.trusted).toBe(true);
+  expect(currentTrust.revision).not.toBe(trust.revision);
   let id = 0;
   return {
     root,
@@ -194,6 +238,7 @@ async function fixture(off = false) {
     requests,
     webRequests,
     wireAudits,
+    admissions,
     expectedStoreId,
     counts: () => ({ dns, network: webRequests.length, provider: requests.length }),
     setAdmitted: (value: boolean) => {
@@ -202,18 +247,59 @@ async function fixture(off = false) {
     async run(path = '/redirect') {
       target = url + path;
       const commandId = `work-${++id}`;
+      currentInput = id === 1 ? commandId : `New task: ${commandId}`;
       await client.startRun('s', {
         expectedStoreId,
         commandId,
         kind: 'run.start',
-        content: commandId,
+        content: currentInput,
       });
       const command = await runtime.waitForCommand(commandId, { timeoutMs: 8000 });
       const publicCommand = await client.getCommand(commandId);
+      const receipt = command.receipt as {
+        runId?: string;
+        businessCommandId?: string;
+        humanInputCommandId?: string;
+      } | null;
+      const businessId = receipt?.businessCommandId ?? commandId;
       const execution = (await store.listExecutions('s', 200)).find(
-        (row) => row.kind === 'tool' && row.originCommandId === commandId,
+        (row) => row.kind === 'tool' && row.originCommandId === businessId,
       );
-      const receipt = command.receipt as { runId?: string } | null;
+      if (receipt?.runId) {
+        const run = await store.getRun(receipt.runId);
+        expect(run).toMatchObject({ originCommandId: businessId, rootWorkCommandId: commandId });
+        const models = (await store.listExecutions('s', 200)).filter(
+          (row) => row.kind === 'model' && row.runId === receipt.runId,
+        );
+        expect(models).toHaveLength(2);
+        const input = await runtime.readModelInput({
+          expectedStoreId,
+          sessionId: 's',
+          subjectId: 'owner',
+          executionId: models[0]!.id,
+        });
+        expect(input.confirmation).toBe('succeeded');
+        expect(
+          input.request.messages.find((message) => message.sourceIds?.includes(businessId)),
+        ).toMatchObject({ content: currentInput, sourceIds: [businessId] });
+        if (id > 1) {
+          expect(command.status).toBe('applied');
+          expect(receipt.businessCommandId).toBeString();
+          expect(businessId).not.toBe(commandId);
+          expect(await store.getCommand(receipt.humanInputCommandId!)).toMatchObject({
+            request: {
+              publicCommandId: commandId,
+              content: currentInput,
+              originalRequest: command.request,
+            },
+          });
+          expect(await store.getCommand(businessId)).toMatchObject({
+            status: 'applied',
+            request: { content: currentInput },
+            receipt: { runId: run!.id },
+          });
+        }
+      }
       return {
         command,
         publicCommand,
@@ -284,6 +370,15 @@ test('default Service Web selection uses ordinary Tool, complete scoped Artifact
       'web_network_denied',
     );
     expect(f.webRequests.some((value) => value.startsWith('added-after-capture.test'))).toBe(false);
+    expect(f.requests).toHaveLength(4);
+    const tools = (await f.store.listExecutions('s')).filter(
+      (execution) => execution.kind === 'tool',
+    );
+    expect(tools).toHaveLength(2);
+    expect(tools.map((execution) => execution.id)).toEqual([
+      result.execution!.id,
+      deniedRedirect.execution!.id,
+    ]);
   } finally {
     await f.close();
   }
@@ -294,9 +389,29 @@ test('default Web off and current host admission withdrawal fail without any pag
     try {
       if (!off) f.setAdmitted(false);
       const result = await f.run();
-      expect((result.execution?.result as { content?: string })?.content).toBe(
-        'web_network_denied',
-      );
+      expect(result.execution?.status).toBe('failed');
+      if (off) {
+        expect(result.execution?.result).toMatchObject({
+          outcome: 'failed',
+          content: 'permission_denied',
+          details: {
+            reason: 'capability_unavailable',
+            adapterAttempted: false,
+            dispatchCommitted: false,
+          },
+        });
+        expect(result.execution?.authorization?.dispatched).toBe(false);
+        expect(f.admissions).toEqual([]);
+      } else {
+        expect((result.execution?.result as { content?: string })?.content).toBe(
+          'web_network_denied',
+        );
+        expect(result.execution?.authorization?.dispatched).toBe(true);
+        expect(f.admissions).toEqual([
+          { allowed: false, revision: 'resources-revoked-2' },
+          { allowed: false, revision: 'resources-revoked-2' },
+        ]);
+      }
       expect(f.counts().network).toBe(0);
       expect(f.counts().dns).toBe(0);
       expect(f.counts().provider).toBeGreaterThan(0);

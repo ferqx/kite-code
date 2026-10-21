@@ -218,14 +218,73 @@ test('an actual same-Loop child seals its seventeen MiB final output in its orig
         ).verified,
       ).toBe(true);
       expect(restoredModel.requests).toHaveLength(0);
+      const selectionId = (await restoredStore.getSession('s'))!.contextSelectionId;
+      const beforeInclude = await restoredStore.listExecutions('s');
+      const beforeChildInclude = await restoredStore.listExecutions(ref!.childSessionId!);
+      const included = await restoredRuntime.includeResult({
+        expectedStoreId: restored.storeId,
+        sessionId: 's',
+        subjectId: 'owner',
+        commandId: 'include-restored-carrier',
+        expectedContextSelectionId: selectionId,
+        executionId: source!.executionId,
+        resultRevision: source!.resultRevision,
+      });
+      expect(included.command.status).toBe('applied');
+      expect(included.command.request).toMatchObject({
+        kind: 'result.include',
+        expectedContextSelectionId: selectionId,
+        executionId: source!.executionId,
+        resultRevision: source!.resultRevision,
+      });
+      expect(included.command.receipt).toMatchObject({
+        outcome: 'result_included',
+        sourceId: source!.id,
+        executionId: ref!.executionId,
+        resultRevision: source!.resultRevision,
+      });
+      expect(included.source).toMatchObject({
+        id: source!.id,
+        executionId: ref!.executionId,
+        resultRevision: source!.resultRevision,
+        originStoreId: source!.originStoreId,
+        sessionId: 's',
+      });
+      expect((await restoredStore.getSession('s'))!.contextSelectionId).toBe(selectionId);
+      expect(await restoredStore.listExecutions('s')).toEqual(beforeInclude);
+      expect(await restoredStore.listExecutions(ref!.childSessionId!)).toEqual(beforeChildInclude);
+      expect(restoredModel.requests).toHaveLength(0);
+      expect(parent.requests).toHaveLength(2);
+      expect(child.requests).toHaveLength(1);
       const receipt = await restoredRuntime.submitCommand({
         expectedStoreId: restored.storeId,
         sessionId: 's',
         subjectId: 'owner',
         commandId: 'restored-parent',
-        request: { kind: 'run.start', content: 'explicit new parent work' },
+        request: { kind: 'run.start', content: 'New task: explicit new parent work' },
       });
       const settled = await restoredRuntime.waitForCommand(receipt.id, { timeoutMs: 20000 });
+      expect(settled.status).toBe('applied');
+      const application = settled.receipt as { runId: string; businessCommandId?: string };
+      const businessId = application.businessCommandId ?? settled.id;
+      expect(await restoredStore.getCommand(businessId)).toMatchObject({
+        status: 'applied',
+        request: { content: 'New task: explicit new parent work' },
+      });
+      expect(await restoredStore.getRun(application.runId)).toMatchObject({
+        originCommandId: businessId,
+        rootWorkCommandId: settled.id,
+      });
+      const currentModels = (await restoredStore.listExecutions('s')).filter(
+        (execution) => execution.runId === application.runId && execution.kind === 'model',
+      );
+      expect(currentModels).toHaveLength(1);
+      expect(currentModels[0]).toMatchObject({ status: 'succeeded', originCommandId: businessId });
+      expect(
+        restoredModel.requests[0]!.messages.find((message) =>
+          message.sourceIds?.includes(businessId),
+        ),
+      ).toMatchObject({ content: 'New task: explicit new parent work', sourceIds: [businessId] });
       expect(
         (await restoredRuntime.getRun((settled.receipt as { runId: string }).runId))?.status,
       ).toBe('completed');

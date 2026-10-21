@@ -5,6 +5,7 @@ import {
   type Command,
   canonicalCallerCommandRequest,
   canonicalModelBody,
+  readOrdinaryCommandApplication,
   validateRequest,
 } from '@kite-ai/client';
 import type {
@@ -366,15 +367,15 @@ export class NativeCallerJournal {
       )
         throw Error('caller_receipt_unavailable');
       if (r.kind === 'run.start' || r.kind === 'input.follow_up' || r.kind === 'input.steer') {
-        if (typeof receipt.runId !== 'string') throw Error('caller_receipt_unavailable');
-        const run = await this.client.getRun(receipt.runId);
+        const applied = await readOrdinaryCommandApplication(this.client, command, {
+          ...(r.kind === 'input.steer' ? { targetRunId: r.targetRunId } : {}),
+        });
+        if (!applied) throw Error('caller_receipt_unavailable');
         if (
-          run.id !== receipt.runId ||
-          run.originStoreId !== i.scope.storeId ||
-          run.sessionId !== i.scope.sessionId ||
-          (r.kind === 'input.steer'
-            ? run.id !== r.targetRunId || receipt.contextSelectionId !== r.contextSelectionId
-            : run.originCommandId !== r.commandId)
+          r.kind === 'input.steer' &&
+          receipt.outcome !== 'human_input_applied' &&
+          receipt.outcome !== 'human_input_observed' &&
+          receipt.contextSelectionId !== r.contextSelectionId
         )
           throw Error('caller_receipt_unavailable');
       }

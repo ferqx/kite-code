@@ -23,6 +23,7 @@ import type {
   TuiMcpSnapshot,
 } from '@kite-ai/ui/tui';
 import { privateDirectory, temporaryDirectory } from '../../../../tests/fixtures/test-filesystem';
+import { createPermissionManagement } from '../../../service/src/permission-management';
 import { openMcpConnectionJournal } from '../../host/mcp-connection-journal';
 import { createTuiMcpPort } from '../../host/tui-mcp';
 import { createTuiMcpConnectionPort } from '../../host/tui-mcp-connection';
@@ -259,6 +260,63 @@ async function fixture(ask = false) {
       commandId: 'create-s',
       workspaceId: 'w',
       title: 'owned',
+    });
+    // The injected policy is a ceiling; seed this fixture's actual current root controls.
+    const controls = createPermissionManagement({ runtime: runtime!, profile });
+    const identity = { expectedStoreId: storeId, subjectId: 'owned-subject' };
+    const mode = await controls.readMode({ ...identity, sessionId: 's' });
+    expect(
+      (
+        await controls.setMode({
+          ...identity,
+          sessionId: 's',
+          commandId: 'fixture-current-mode',
+          mode: ask ? 'accept_edits' : 'full',
+          makeDefault: false,
+          ifRevision: mode.revision,
+          ifDefaultRevision: mode.defaultRevision,
+        })
+      ).state,
+    ).toBe('applied');
+    const trust = await controls.readTrust({ ...identity, workspaceId: 'w' });
+    expect(
+      (
+        await controls.setTrust({
+          ...identity,
+          workspaceId: 'w',
+          commandId: 'fixture-current-trust',
+          trusted: true,
+          ifRevision: trust.revision,
+          canonicalIdentity: trust.canonicalIdentity,
+          externalReadScopeDigest: trust.externalReadScopeDigest,
+        })
+      ).state,
+    ).toBe('applied');
+    const currentMode = await controls.readMode({ ...identity, sessionId: 's' });
+    const currentTrust = await controls.readTrust({ ...identity, workspaceId: 'w' });
+    const [modeControl, trustControl] = await Promise.all([
+      store!.readHostControl({ ...identity, kind: 'permission.mode', scope: 'session:s' }),
+      store!.readHostControl({ ...identity, kind: 'workspace.trust', scope: 'workspace:w' }),
+    ]);
+    expect(modeControl.record).toMatchObject({ id: 'fixture-current-mode', state: 'applied' });
+    expect(trustControl.record).toMatchObject({ id: 'fixture-current-trust', state: 'applied' });
+    expect(BigInt(modeControl.revision)).toBeGreaterThan(BigInt(mode.revision));
+    expect(BigInt(trustControl.revision)).toBeGreaterThan(BigInt(trust.revision));
+    expect(currentMode).toMatchObject({
+      storeId,
+      sessionId: 's',
+      scopeSessionId: 's',
+      mode: ask ? 'accept_edits' : 'full',
+      revision: modeControl.revision,
+      defaultRevision: mode.defaultRevision,
+    });
+    expect(currentTrust).toMatchObject({
+      storeId,
+      workspaceId: 'w',
+      trusted: true,
+      revision: trustControl.revision,
+      canonicalIdentity: trust.canonicalIdentity,
+      externalReadScopeDigest: trust.externalReadScopeDigest,
     });
     const directory = await createTuiMcpPort(tracked, storeId).read(
       's',

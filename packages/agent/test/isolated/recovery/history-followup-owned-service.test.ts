@@ -46,7 +46,7 @@ def key(value):
  global buffer
  buffer=b'';os.write(master,value);pump()
 try:
- wait('New Run');key(b'Follow after explicit recovery');wait('Follow after explicit recovery');key(b'\\r');wait('approval [');wait('❯ Allow once');key(b'\\r');wait('RECOVERED_ORIGINAL_DONE');key(b'\\x11');deadline=time.monotonic()+6
+ wait('New Run');key(b'New task: Follow after explicit recovery');wait('New task: Follow after explicit recovery');key(b'\\r');wait('approval [');wait('❯ Allow once');key(b'\\r');wait('RECOVERED_ORIGINAL_DONE');key(b'\\x11');deadline=time.monotonic()+6
  while p.poll() is None and time.monotonic()<deadline:pump()
  p.wait(timeout=3);assert p.returncode==0;print('ORIGINAL_SESSION_HISTORY_PTY_OK')
 finally:

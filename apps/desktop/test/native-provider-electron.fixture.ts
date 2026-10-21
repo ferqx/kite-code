@@ -18,7 +18,13 @@ type ProviderFixtureGlobal = typeof globalThis & {
   ownedTransport?: OwnedTransport;
   cleanupTransport: () => OwnedTransport | undefined;
 };
-type ProviderRun = { id: string; sessionId: string; marker: string; modelId: string };
+type ProviderRun = {
+  id: string;
+  sessionId: string;
+  marker: string;
+  content: string;
+  modelId: string;
+};
 export type ProviderReport = {
   pids: number[];
   originals: NativeProviderSubmission[];
@@ -289,9 +295,10 @@ try {
     await closeSettings(page);
     const preparing =
       (await page.getByRole('textbox', { name: '新对话草稿', exact: true }).count()) > 0;
+    const content = preparing ? marker : `New task: ${marker}`;
     await page
       .getByRole('textbox', { name: preparing ? '新对话草稿' : '当前会话私有草稿', exact: true })
-      .fill(marker);
+      .fill(content);
     const button = page.getByRole('button', {
       name: preparing ? '发送首条消息' : '发送明确的新轮次',
       exact: true,
@@ -312,6 +319,7 @@ try {
       id: run.id,
       sessionId: v.selection!.session.id,
       marker,
+      content,
       modelId: id(marker.split('_')[1]!),
     });
     stage('run_complete', { marker, runId: run.id });
@@ -333,7 +341,7 @@ try {
   await closeSettings(page);
   await page
     .getByRole('textbox', { name: '当前会话私有草稿', exact: true })
-    .fill('NATIVE_compatible_held');
+    .fill('New task: NATIVE_compatible_held');
   await page.getByRole('button', { name: '发送明确的新轮次', exact: true }).click();
   const held = await until(
     state,
@@ -360,7 +368,7 @@ try {
   await closeSettings(page);
   await page
     .getByRole('textbox', { name: '当前会话私有草稿', exact: true })
-    .fill('NATIVE_plain_steer');
+    .fill('Follow up: NATIVE_plain_steer');
   await page.getByRole('button', { name: '引导当前轮次', exact: true }).click();
   const steered = await until(
     state,
@@ -378,6 +386,7 @@ try {
     id: heldRun.id,
     sessionId: 'a',
     marker: 'NATIVE_compatible_held',
+    content: 'New task: NATIVE_compatible_held',
     modelId: id('compatible'),
   });
   await send('NATIVE_openai_next');

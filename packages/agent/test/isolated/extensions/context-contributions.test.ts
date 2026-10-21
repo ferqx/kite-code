@@ -78,13 +78,13 @@ async function fixture(
       subjectId: 'owner',
     });
   await session('s');
-  const submit = (commandId: string, sessionId = 's') =>
+  const submit = (commandId: string, sessionId = 's', content = commandId) =>
     runtime.submitCommand({
       expectedStoreId,
       sessionId,
       commandId,
       subjectId: 'owner',
-      request: { kind: 'run.start', content: commandId },
+      request: { kind: 'run.start', content },
     });
   const done = async (commandId: string) => {
     const command = await runtime.waitForCommand(commandId, { timeoutMs: 5000 });
@@ -421,10 +421,46 @@ test('each trusted Run selects its own extension context hook without substituti
   });
   try {
     for (const id of ['first', 'second']) {
-      await f.submit(id);
+      await f.submit(id, 's', id === 'second' ? 'New task: second' : id);
       expect((await f.done(id))!.status).toBe('completed');
     }
+    const second = (await f.store.getCommand('second'))!;
+    expect(second).toMatchObject({
+      status: 'applied',
+      request: { kind: 'run.start', content: 'New task: second' },
+    });
+    const receipt = second.receipt as {
+      runId: string;
+      businessCommandId: string;
+      humanInputCommandId: string;
+    };
+    expect(receipt.businessCommandId).toBeString();
+    expect(receipt.businessCommandId).not.toBe(second.id);
+    expect(await f.store.getCommand(receipt.humanInputCommandId)).toMatchObject({
+      request: {
+        publicCommandId: second.id,
+        content: 'New task: second',
+        originalRequest: second.request,
+      },
+    });
+    expect(await f.store.getCommand(receipt.businessCommandId)).toMatchObject({
+      status: 'applied',
+      request: { content: 'New task: second' },
+      receipt: { runId: receipt.runId },
+    });
+    expect(await f.store.getRun(receipt.runId)).toMatchObject({
+      originCommandId: receipt.businessCommandId,
+      rootWorkCommandId: second.id,
+    });
     expect(f.model.requests).toHaveLength(2);
+    expect(await f.store.getExecution(f.model.requests[1]!.requestId)).toMatchObject({
+      runId: receipt.runId,
+      originCommandId: receipt.businessCommandId,
+      status: 'succeeded',
+    });
+    expect(
+      f.model.requests[1]!.messages.find((m) => m.content === 'New task: second')?.sourceIds,
+    ).toEqual([receipt.businessCommandId]);
     for (const [index, request] of f.model.requests.entries()) {
       const message = request.messages.find((m) => m.sourceIds?.includes('perrun:business'))!;
       expect(message.role).toBe('user');

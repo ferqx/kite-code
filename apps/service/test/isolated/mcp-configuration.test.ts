@@ -10,6 +10,7 @@ import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { privateDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { createDefaultProcessConfiguration } from '../../src/configuration';
+import { initializeLivePermissionFixture } from '../fixtures/live-permission-fixture';
 
 async function until<T>(read: () => Promise<T | null>) {
   const deadline = Date.now() + 5000;
@@ -186,6 +187,7 @@ async function fixture(ask = false, withPort = true, connectServer = 'local') {
     permissions: host.permissions!,
     resolveRunConfiguration: host.resolveRunConfiguration,
   });
+  host.permissionManagement?.(runtime);
   await runtime.createWorkspace({
     expectedStoreId,
     id: 'w',
@@ -200,6 +202,17 @@ async function fixture(ask = false, withPort = true, connectServer = 'local') {
       subjectId: 'user',
       workspaceId: 'w',
       title: sessionId,
+    });
+  for (const sessionId of ['a', 'b'])
+    await initializeLivePermissionFixture({
+      runtime,
+      profile,
+      expectedStoreId,
+      sessionId,
+      subjectId: 'user',
+      workspaceId: 'w',
+      mode: ask ? 'accept_edits' : 'full',
+      trusted: true,
     });
   return {
     runtime,
@@ -224,7 +237,7 @@ async function fixture(ask = false, withPort = true, connectServer = 'local') {
         sessionId,
         subjectId: 'user',
         commandId,
-        request: { kind: 'run.start', content: commandId },
+        request: { kind: 'run.start', content: `新任务：${commandId}` },
       });
     },
     async pending() {

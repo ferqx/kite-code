@@ -1,3 +1,4 @@
+import { Database } from 'bun:sqlite';
 import { afterAll, beforeAll, expect, test } from 'bun:test';
 import { createHash, randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
@@ -66,6 +67,124 @@ async function limit<T>(value: Promise<T>) {
     if (timer) clearTimeout(timer);
   }
 }
+async function proveBusiness(
+  client: ReturnType<typeof createClient>,
+  databasePath: string,
+  commandId: string,
+  content: string,
+  rootWorkCommandId = commandId,
+) {
+  const db = new Database(databasePath, { readonly: true });
+  try {
+    const row = (id: string) =>
+      db
+        .query(
+          'SELECT id,kind,status,session_id,origin_store_id,subject_id,request_json,receipt_json FROM command WHERE id=?',
+        )
+        .get(id) as {
+        id: string;
+        kind: string;
+        status: string;
+        session_id: string;
+        origin_store_id: string;
+        subject_id: string;
+        request_json: string;
+        receipt_json: string;
+      };
+    const original = row(commandId);
+    expect(original.status).toBe('applied');
+    expect(JSON.parse(original.request_json)).toMatchObject({ content });
+    const receipt = JSON.parse(original.receipt_json) as {
+      runId: string;
+      businessCommandId?: string;
+      humanInputCommandId?: string;
+      decisionCommandId?: string;
+    };
+    const businessId = receipt.businessCommandId ?? original.id;
+    const publicCommand = await client.getCommand(commandId);
+    expect(publicCommand.receipt).toMatchObject({ runId: receipt.runId });
+    if (receipt.businessCommandId) {
+      expect(businessId).not.toBe(original.id);
+      const raw = row(receipt.humanInputCommandId!);
+      expect(raw).toMatchObject({
+        kind: 'human.input',
+        status: 'applied',
+        session_id: original.session_id,
+        origin_store_id: original.origin_store_id,
+        subject_id: original.subject_id,
+      });
+      expect(JSON.parse(raw.request_json)).toMatchObject({
+        publicCommandId: original.id,
+        content,
+        originalRequest: JSON.parse(original.request_json),
+      });
+      expect(JSON.parse(raw.receipt_json)).toMatchObject({
+        businessCommandId: businessId,
+        decisionCommandId: receipt.decisionCommandId,
+        state: 'decided',
+      });
+      const decision = row(receipt.decisionCommandId!);
+      expect(decision).toMatchObject({
+        kind: 'human.input.decision',
+        status: 'applied',
+        session_id: original.session_id,
+        subject_id: original.subject_id,
+      });
+      expect(JSON.parse(decision.receipt_json)).toMatchObject({ businessCommandId: businessId });
+      expect(row(businessId)).toMatchObject({ status: 'applied', session_id: original.session_id });
+      expect(JSON.parse(row(businessId).receipt_json)).toMatchObject({ runId: receipt.runId });
+    }
+    const run = await client.getRun(receipt.runId);
+    expect(run).toMatchObject({ originCommandId: businessId, rootWorkCommandId });
+    const view = await client.getView(original.session_id);
+    const model = view.executions.find(
+      (execution) => execution.kind === 'model' && execution.runId === run.id,
+    )!;
+    expect(model).toMatchObject({
+      status: 'succeeded',
+      rootWorkCommandId,
+    });
+    expect(
+      db
+        .query(
+          'SELECT origin_command_id,run_id,root_work_command_id,state FROM execution WHERE id=?',
+        )
+        .get(model.id),
+    ).toEqual({
+      origin_command_id: businessId,
+      run_id: run.id,
+      root_work_command_id: rootWorkCommandId,
+      state: 'succeeded',
+    });
+    const snapshot = await client.getModelInput(original.session_id, model.id);
+    expect(snapshot.confirmation).toBe('succeeded');
+    expect(
+      snapshot.request.messages.find((message) => message.sourceIds?.includes(businessId)),
+    ).toMatchObject({ content, sourceIds: [businessId] });
+    const tools = db
+      .query(
+        "SELECT id,adapter_id AS definitionId,run_id AS runId,origin_command_id AS originCommandId FROM execution WHERE kind='tool' AND run_id=?",
+      )
+      .all(run.id) as {
+      id: string;
+      definitionId: string;
+      runId: string;
+      originCommandId: string;
+    }[];
+    return {
+      command: publicCommand,
+      run,
+      view,
+      tools,
+      decisionRequest: receipt.decisionCommandId
+        ? JSON.parse(row(receipt.decisionCommandId).request_json)
+        : undefined,
+    };
+  } finally {
+    db.close();
+  }
+}
+
 async function fixture() {
   const base = join(root, randomUUID());
   privateDirectory(base);
@@ -191,6 +310,22 @@ async function fixture() {
     lines,
     run,
     alive,
+    async proof(sessionId: string, content: string, rootWorkCommandId?: string) {
+      const db = new Database(profile.databasePath, { readonly: true });
+      let commandId: string;
+      try {
+        const originals = db
+          .query(
+            "SELECT id FROM command WHERE session_id=? AND kind='run.start' AND root_work_command_id=id AND json_extract(request_json,'$.content')=?",
+          )
+          .all(sessionId, content) as { id: string }[];
+        expect(originals).toHaveLength(1);
+        commandId = originals[0]!.id;
+      } finally {
+        db.close();
+      }
+      return proveBusiness(client, profile.databasePath, commandId, content, rootWorkCommandId);
+    },
     reads: () => assetReads,
     async close() {
       client.disposeNetwork();
@@ -209,28 +344,73 @@ nativeTest(
         expectedStoreId: f.storeId,
         commandId: 'other-held',
         kind: 'run.start',
-        content: 'hold external',
+        content: 'New task: hold external',
       });
       await until(() => existsSync(join(f.base, 'entered-other')));
+      const proof_other = await f.proof('other', 'New task: hold external');
+      expect(proof_other.run.isActive).toBe(true);
+      expect(
+        proof_other.tools.find(
+          (execution) => execution.id === readFileSync(join(f.base, 'entered-other'), 'utf8'),
+        ),
+      ).toMatchObject({
+        definitionId: 'fixture.held',
+        runId: proof_other.run.id,
+        originCommandId: proof_other.run.originCommandId,
+      });
       expect(await limit(f.run(f.args('ordinary complete answer', 'cli')))).toBe(0);
+      const first = await f.proof('cli', 'ordinary complete answer');
+      expect(first.run.status).toBe('completed');
       expect(
         f.lines.some((line) => line.includes('complete-owned-answer:') && line.includes(':TAIL')),
       ).toBe(true);
       expect(f.lines.join('\n').length).toBeGreaterThan(84 * 1024);
       expect(
         await limit(
-          f.run({ ...f.args('resume complete answer', 'cli'), kind: 'resume' } as RunCLIArguments, {
-            artifact: {
-              entrypoint: '/missing-installed/main.js',
-              entrypointSha256: '0'.repeat(64),
-              executable: '/missing-installed/bun',
-              executableSha256: '0'.repeat(64),
-              buildId: 'different-newer-installed-build',
-              apiMajor: 1,
+          f.run(
+            {
+              ...f.args('Follow up: resume complete answer', 'cli'),
+              kind: 'resume',
+            } as RunCLIArguments,
+            {
+              artifact: {
+                entrypoint: '/missing-installed/main.js',
+                entrypointSha256: '0'.repeat(64),
+                executable: '/missing-installed/bun',
+                executableSha256: '0'.repeat(64),
+                buildId: 'different-newer-installed-build',
+                apiMajor: 1,
+              },
             },
-          }),
+          ),
         ),
       ).toBe(0);
+      const resumed = await f.proof('cli', 'Follow up: resume complete answer', first.command.id);
+      expect(resumed.run.status).toBe('completed');
+      const resumeApplication = resumed.command.receipt as {
+        decisionCommandId: string;
+        businessCommandId: string;
+      };
+      expect(await f.client.getCommand(resumeApplication.decisionCommandId)).toMatchObject({
+        kind: 'human.input.decision',
+        status: 'applied',
+        originStoreId: f.storeId,
+        sessionId: 'cli',
+        receipt: { businessCommandId: resumeApplication.businessCommandId },
+      });
+      expect(resumed.decisionRequest).toMatchObject({
+        proposal: {
+          relation: 'same_work',
+          purpose: 'work',
+          targetRootWorkCommandId: first.command.id,
+          selectionEffect: 'keep',
+          basis: {
+            kind: 'explicit_text',
+            instruction: 'Follow up: resume complete answer',
+          },
+        },
+      });
+
       await f.alive();
       expect((await f.client.getView('other')).runs.some((run) => run.isActive)).toBe(true);
       expect(existsSync(join(f.base, 'cancelled-other'))).toBe(false);
@@ -305,15 +485,46 @@ nativeTest(
         expectedStoreId: f.storeId,
         commandId: 'other-held',
         kind: 'run.start',
-        content: 'hold external',
+        content: 'New task: hold external',
       });
       await until(() => existsSync(join(f.base, 'entered-other')));
+      const proof_other = await f.proof('other', 'New task: hold external');
+      expect(proof_other.run.isActive).toBe(true);
+      expect(
+        proof_other.tools.find(
+          (execution) => execution.id === readFileSync(join(f.base, 'entered-other'), 'utf8'),
+        ),
+      ).toMatchObject({
+        definitionId: 'fixture.held',
+        runId: proof_other.run.id,
+        originCommandId: proof_other.run.originCommandId,
+      });
       const cancel = new AbortController();
-      const running = f.run(f.args('hold external', 'cancel-own'), { signal: cancel.signal });
+      const running = f.run(f.args('New task: hold external', 'cancel-own'), {
+        signal: cancel.signal,
+      });
       await until(() => existsSync(join(f.base, 'entered-cancel-own')));
+      const proof_cancel_own = await f.proof('cancel-own', 'New task: hold external');
+      expect(proof_cancel_own.run.isActive).toBe(true);
+      expect(
+        proof_cancel_own.tools.find(
+          (execution) => execution.id === readFileSync(join(f.base, 'entered-cancel-own'), 'utf8'),
+        ),
+      ).toMatchObject({
+        definitionId: 'fixture.held',
+        runId: proof_cancel_own.run.id,
+        originCommandId: proof_cancel_own.run.originCommandId,
+      });
       cancel.abort();
       expect(await limit(running)).toBe(130);
       expect(existsSync(join(f.base, 'cancelled-cancel-own'))).toBe(true);
+      expect(await f.client.getRun(proof_cancel_own.run.id)).toMatchObject({
+        status: 'cancelled',
+        originCommandId: proof_cancel_own.run.originCommandId,
+      });
+      expect(readFileSync(join(f.base, 'cancelled-cancel-own'), 'utf8')).toBe(
+        readFileSync(join(f.base, 'entered-cancel-own'), 'utf8'),
+      );
       expect(existsSync(join(f.base, 'cancelled-other'))).toBe(false);
       expect((await f.client.getView('other')).runs.some((run) => run.isActive)).toBe(true);
       await f.alive();
@@ -326,7 +537,7 @@ nativeTest(
 function spawnDriver(
   dataRoot: string,
   socket: string,
-  task = 'hold external',
+  task = 'New task: hold external',
   thread = 'terminated',
 ) {
   return Bun.spawn(
@@ -351,6 +562,17 @@ nativeTest(
       const errors = new Response(child.stderr).text();
       child.stdin.end();
       await until(() => existsSync(join(f.base, 'entered-terminated')));
+      const proof_terminated = await f.proof('terminated', 'New task: hold external');
+      expect(proof_terminated.run.isActive).toBe(true);
+      expect(
+        proof_terminated.tools.find(
+          (execution) => execution.id === readFileSync(join(f.base, 'entered-terminated'), 'utf8'),
+        ),
+      ).toMatchObject({
+        definitionId: 'fixture.held',
+        runId: proof_terminated.run.id,
+        originCommandId: proof_terminated.run.originCommandId,
+      });
       child.kill('SIGTERM');
       expect(await limit(child.exited)).toBe(2);
       expect(await output).toContain('work intent');
@@ -358,8 +580,20 @@ nativeTest(
       expect(existsSync(join(f.base, 'cancelled-terminated'))).toBe(false);
       expect((await f.client.getView('terminated')).runs.some((run) => run.isActive)).toBe(true);
       await f.alive();
-      const running = f.run(f.args('hold external', 'network-lost'));
+      const running = f.run(f.args('New task: hold external', 'network-lost'));
       await until(() => existsSync(join(f.base, 'entered-network-lost')));
+      const proof_network_lost = await f.proof('network-lost', 'New task: hold external');
+      expect(proof_network_lost.run.isActive).toBe(true);
+      expect(
+        proof_network_lost.tools.find(
+          (execution) =>
+            execution.id === readFileSync(join(f.base, 'entered-network-lost'), 'utf8'),
+        ),
+      ).toMatchObject({
+        definitionId: 'fixture.held',
+        runId: proof_network_lost.run.id,
+        originCommandId: proof_network_lost.run.originCommandId,
+      });
       const calls = readFileSync(join(f.base, 'models'), 'utf8');
       process.kill(f.bootstrap.pid, 'SIGKILL');
       expect(await limit(running)).toBe(2);

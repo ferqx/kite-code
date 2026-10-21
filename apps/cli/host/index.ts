@@ -11,6 +11,7 @@ import type {
   StartCommandRequest,
   Workspace,
 } from '@kite-ai/client';
+import { readOrdinaryCommandApplication } from '@kite-ai/client';
 import { launchPairedService } from '@kite-ai/service/paired';
 import {
   parseRuntimeProtection,
@@ -351,6 +352,27 @@ async function printOriginalAnswer(
   write: (line: string) => void,
   signal?: AbortSignal,
 ) {
+  const command = await client.getCommand(commandId, { signal });
+  if (command.originStoreId !== storeId || command.sessionId !== sessionId)
+    throw new CLIHostError('command_identity_mismatch');
+  const application = await readOrdinaryCommandApplication(client, command, { signal });
+  if (!application) throw new CLIHostError('command_receipt_unavailable');
+  if (!application.run) return;
+  const runId = application.run.id;
+  const originCommandId = application.run.originCommandId;
+  if (application.observation) {
+    write(
+      `answer ${JSON.stringify({
+        storeId,
+        sessionId,
+        commandId,
+        ...application.observation,
+        complete: true,
+        content: application.observation.answer,
+      })}`,
+    );
+    return;
+  }
   if (
     !client.serverInfo?.capabilities.includes('model_inputs') ||
     !client.serverInfo.capabilities.includes('model_outputs')
@@ -358,16 +380,6 @@ async function printOriginalAnswer(
     write('Model output reader unavailable');
     return;
   }
-  const command = await client.getCommand(commandId, { signal });
-  const receipt = command.receipt;
-  const runId =
-    receipt && typeof receipt === 'object' && !Array.isArray(receipt) ? receipt.runId : undefined;
-  if (
-    command.originStoreId !== storeId ||
-    command.sessionId !== sessionId ||
-    typeof runId !== 'string'
-  )
-    throw new CLIHostError('command_identity_mismatch');
   let afterSeq = '0',
     upperSeq: string | undefined,
     executionId: string | undefined;
@@ -381,7 +393,7 @@ async function printOriginalAnswer(
     });
     upperSeq ??= page.upperSeq;
     for (const item of page.items)
-      if (item.runId === runId && item.originCommandId === commandId)
+      if (item.runId === runId && item.originCommandId === originCommandId)
         executionId = item.executionId;
     if (page.nextAfterSeq === null) break;
     afterSeq = page.nextAfterSeq;
@@ -391,7 +403,7 @@ async function printOriginalAnswer(
     expectedStoreId: storeId,
     signal,
   });
-  if (snapshot.runId !== runId || snapshot.originCommandId !== commandId)
+  if (snapshot.runId !== runId || snapshot.originCommandId !== originCommandId)
     throw new CLIHostError('model_output_identity_mismatch');
   // JSON escaping preserves the complete content and prevents terminal control execution.
   write(
@@ -506,22 +518,8 @@ export async function runSelectedCLI(input: {
         let actualRun: Awaited<ReturnType<AgentClient['getRun']>> | undefined;
         try {
           const command = await caller.lookup(sessionId, intent);
-          const receipt = command.receipt;
-          if (
-            receipt &&
-            typeof receipt === 'object' &&
-            !Array.isArray(receipt) &&
-            typeof receipt.runId === 'string'
-          ) {
-            const observed = await client.getRun(receipt.runId);
-            if (
-              observed.id === receipt.runId &&
-              observed.originStoreId === storeId &&
-              observed.sessionId === sessionId &&
-              observed.originCommandId === commandId
-            )
-              actualRun = observed;
-          }
+          const application = await readOrdinaryCommandApplication(client, command);
+          if (application?.run && !application.observation) actualRun = application.run;
         } catch {}
         input.write(
           JSON.stringify({
@@ -623,7 +621,11 @@ export async function runSelectedCLI(input: {
       savedAnswer = outcome.answerIntent ? structuredClone(outcome.answerIntent) : savedAnswer;
       cancellationObserved ||= outcome.cancellationAttempted === true;
     }
-    if (outcome.status !== 'outcome_unknown' && outcome.status !== 'waiting_interaction') {
+    if (
+      outcome.status !== 'outcome_unknown' &&
+      outcome.status !== 'waiting_interaction' &&
+      outcome.status !== 'needs_clarification'
+    ) {
       try {
         await printOriginalAnswer(client, storeId, sessionId, commandId, write);
       } catch {

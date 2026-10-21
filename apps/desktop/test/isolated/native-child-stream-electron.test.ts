@@ -66,7 +66,13 @@ test.skipIf(process.platform !== 'darwin')(
           children.clear();
           return new Response('ok');
         }
-        const body = (await request.json()) as { messages: { role: string; content: unknown }[] };
+        const body = (await request.json()) as {
+          messages: {
+            role: string;
+            content: unknown;
+            tool_calls?: { function: { name: string } }[];
+          }[];
+        };
         const message = [...body.messages]
           .reverse()
           .find(
@@ -99,8 +105,26 @@ test.skipIf(process.platform !== 'darwin')(
             { headers: { 'content-type': 'text/event-stream' } },
           );
         const tools = body.messages.filter((row) => row.role === 'tool').length;
+        const hasWait = body.messages.some((row) =>
+          row.tool_calls?.some((call) => call.function.name === 'wait_agent_events'),
+        );
         const delta = tools
-          ? { content: 'PARENT_DONE' }
+          ? hasWait
+            ? { content: 'PARENT_DONE' }
+            : {
+                content: 'PARENT_WAITING',
+                tool_calls: [
+                  {
+                    index: 0,
+                    id: 'wait-for-children',
+                    type: 'function',
+                    function: {
+                      name: 'wait_agent_events',
+                      arguments: JSON.stringify({ after_seq: '0', wait_ms: 180000 }),
+                    },
+                  },
+                ],
+              }
           : {
               tool_calls: ['CHILD_A', 'CHILD_B'].map((content, index) => ({
                 index,
@@ -109,17 +133,14 @@ test.skipIf(process.platform !== 'darwin')(
                 function: {
                   name: 'spawn_agent',
                   arguments: JSON.stringify({
-                    key: `child-${index}`,
-                    role: 'worker',
-                    input: { content },
-                    cancellation: 'detached',
-                    result_disposition: 'required',
+                    prompt: content,
+                    task_name: `child-${index}`,
                   }),
                 },
               })),
             };
         return new Response(
-          `${frame(delta) + frame({}, tools ? 'stop' : 'tool_calls')}data: [DONE]\n\n`,
+          `${frame(delta) + frame({}, 'tool_calls' in delta ? 'tool_calls' : 'stop')}data: [DONE]\n\n`,
           { headers: { 'content-type': 'text/event-stream' } },
         );
       },
@@ -140,7 +161,7 @@ test.skipIf(process.platform !== 'darwin')(
               baseURL: `${provider.url.href}v1`,
             },
           ],
-          tools: [{ id: 'task', definitionVersion: '1' }],
+          tools: [{ id: 'task.spawn', definitionVersion: '1' }],
         }),
       );
       const serviceOutdir = join(root, 'apps/service/dist');

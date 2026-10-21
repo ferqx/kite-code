@@ -5,6 +5,7 @@ import { JSDOM } from 'jsdom';
 import { act, useLayoutEffect } from 'react';
 import type {
   NativeBridge,
+  NativeDirectory,
   NativeEvent,
   NativeRequest,
   NativeResult,
@@ -30,7 +31,7 @@ const { NativeDesktop } = await import('../../src/native');
 Object.assign(globalThis, initialGlobals);
 bootstrap.window.close();
 
-function fixture(activeParent = false) {
+function fixture(activeParent = false, pendingToolMetadata = false) {
   const dom = new JSDOM('<div id="root"></div>', {
     url: 'http://localhost',
     pretendToBeVisual: true,
@@ -48,7 +49,7 @@ function fixture(activeParent = false) {
     IS_REACT_ACT_ENVIRONMENT: true,
   });
   const item = backgroundItem(1, true);
-  item.rootSession.nextSeq = '1';
+  item.rootSession.nextSeq = pendingToolMetadata ? '3' : '1';
   item.childSession!.title = 'Live child';
   item.childSession!.nextSeq = '1';
   const parentMessage: Message = {
@@ -60,6 +61,24 @@ function fixture(activeParent = false) {
     runId: null,
     content: 'Parent transcript',
   };
+  const parentHistory: Message[] = pendingToolMetadata
+    ? [
+        { ...parentMessage, role: 'user', content: 'Original parent delegation request' },
+        { ...parentMessage, id: 'parent-explanation', seq: '2' },
+        {
+          id: 'parent-spawn-receipt',
+          sessionId: 'root',
+          runId: item.run!.id,
+          seq: '3',
+          role: 'tool',
+          status: 'complete',
+          sourceIds: ['parent-spawn-tool'],
+          content: 'Original accepted child receipt',
+        },
+      ]
+    : [parentMessage];
+  const metadataReleases = new Set<() => void>();
+  let metadataPending = pendingToolMetadata;
   let childText = 'Child prefix',
     revision = 1,
     holdNext = false,
@@ -67,6 +86,10 @@ function fixture(activeParent = false) {
     failParent = false,
     viewLoading = false,
     permissionUnavailable = false;
+  let directoryObservation: NativeDirectory | undefined;
+  let requiredParent = false;
+  let holdDirectory = false;
+  let releaseDirectory: (() => void) | undefined;
   let releaseHeld: (() => void) | undefined;
   let selectedEnvironmentRevision: number | undefined;
   let environmentReadUnavailable: boolean | undefined;
@@ -80,6 +103,7 @@ function fixture(activeParent = false) {
     environmentRevision: revision,
     selectedEnvironmentRevision,
     environmentReadUnavailable,
+    ...(directoryObservation ? { directory: directoryObservation } : {}),
     creationSubmissions: [],
     inputSubmissions: [],
     permissionSubmissions: [],
@@ -119,7 +143,7 @@ function fixture(activeParent = false) {
           }
         : {}),
       runs: activeParent ? [item.run!] : [],
-      executions: [],
+      executions: requiredParent ? [{ ...item.execution, result: null }] : [],
       interactions: [],
       interactionsAfterId: null,
     },
@@ -137,19 +161,21 @@ function fixture(activeParent = false) {
         case 'select':
           return state();
         case 'directory':
-          return {
-            storeId: 'store',
-            sessions: [item.rootSession],
-            workspaces: [{ id: 'w', name: 'Workspace', rootUri: 'file:///workspace' }],
-          };
+          return (
+            directoryObservation ?? {
+              storeId: 'store',
+              sessions: [item.rootSession],
+              workspaces: [{ id: 'w', name: 'Workspace', rootUri: 'file:///workspace' }],
+            }
+          );
         case 'messages': {
           if (failParent) {
             throw Error('history_read_failed');
           }
           const result = {
-            messages: [{ ...parentMessage }],
+            messages: parentHistory.map((message) => ({ ...message })),
             nextAfterSeq: null,
-            highWaterSeq: '1',
+            highWaterSeq: item.rootSession.nextSeq,
           };
           if (holdParent) {
             holdParent = false;
@@ -158,6 +184,32 @@ function fixture(activeParent = false) {
             });
           }
           return result;
+        }
+        case 'toolMessages.list': {
+          const result = {
+            kind: 'toolMessages.page' as const,
+            readId: request.readId,
+            scope: {
+              generation: request.generation,
+              viewSelection: request.viewSelection,
+              historyEpoch: request.historyEpoch,
+              storeId: 'store',
+              sessionId: 'root',
+              workspaceId: 'w',
+            },
+            entries: request.messageIds.map((messageId) => ({
+              messageId,
+              executionId: 'parent-spawn-tool',
+              definitionId: 'task.spawn',
+              definitionVersion: '1',
+              status: 'succeeded' as const,
+              resultRevision: '1',
+            })),
+          };
+          if (!metadataPending) return result;
+          return new Promise<NativeResult>((resolve) => {
+            metadataReleases.add(() => resolve(result));
+          });
         }
         case 'draft.read':
           return {
@@ -199,9 +251,9 @@ function fixture(activeParent = false) {
               },
             ],
           };
-        case 'background.open':
-          return {
-            kind: 'background.page',
+        case 'background.open': {
+          const page = {
+            kind: 'background.page' as const,
             viewGeneration: 1,
             viewSelection: 1,
             rootSessionId: 'root',
@@ -214,6 +266,14 @@ function fixture(activeParent = false) {
             complete: true,
             entries: [structuredClone(item)],
           };
+          if (holdDirectory) {
+            holdDirectory = false;
+            return new Promise<NativeResult>((resolve) => {
+              releaseDirectory = () => resolve(page);
+            });
+          }
+          return page;
+        }
         case 'background.child.open': {
           const body = Buffer.from(
             JSON.stringify({
@@ -302,6 +362,41 @@ function fixture(activeParent = false) {
     requests,
     listeners,
     click,
+    observedRun: () => structuredClone(item.run),
+    observeExecutionOwner: async (
+      executionOwner: 'held' | 'unheld' | 'unknown',
+      unavailable = false,
+    ) => {
+      directoryObservation = {
+        storeId: 'store',
+        unavailable,
+        sessions: [
+          {
+            ...item.rootSession,
+            activity: {
+              executionOwner,
+              queued: false,
+              pendingInteractions: 0,
+              updatedAt: null,
+              run: {
+                id: item.run!.id,
+                status: item.run!.status,
+                isActive: item.run!.isActive,
+                waitingForResults: !!item.run!.waitingForResults?.length,
+              },
+            },
+          },
+        ],
+        workspaces: [{ id: 'w', name: 'Workspace', rootUri: 'file:///workspace' }],
+      };
+      await act(async () => {
+        for (const listener of listeners) listener({ kind: 'changed', generation: 1 });
+      });
+    },
+    waitingParent: () => {
+      requiredParent = true;
+      item.run!.status = 'waiting_execution';
+    },
     runningParent: () => {
       item.run!.status = 'running';
       item.run!.createdAt = Date.now() - 10000;
@@ -321,10 +416,20 @@ function fixture(activeParent = false) {
     holdParent: () => {
       holdParent = true;
     },
+    holdDirectory: () => {
+      holdDirectory = true;
+    },
+    releaseDirectory: () => act(async () => releaseDirectory?.()),
     failParent: (value = true) => {
       failParent = value;
     },
     releaseParent: () => act(async () => releaseParent?.()),
+    releaseMetadata: () =>
+      act(async () => {
+        metadataPending = false;
+        for (const release of metadataReleases) release();
+        metadataReleases.clear();
+      }),
     edit: (text: string) =>
       act(async () => {
         const input = host.querySelector('textarea')!;
@@ -367,6 +472,8 @@ function fixture(activeParent = false) {
     release: () => act(async () => releaseHeld?.()),
     async close() {
       await act(async () => root.unmount());
+      for (const release of metadataReleases) release();
+      releaseDirectory?.();
       await new Promise<void>((resolve) => setTimeout(resolve, 0));
       dom.window.close();
       restoreLayout();
@@ -374,6 +481,89 @@ function fixture(activeParent = false) {
     },
   };
 }
+
+test('first exact child visit uses its verified carrier before a pending directory refresh completes', async () => {
+  const f = fixture(true);
+  try {
+    await f.render();
+    await f.click('Original');
+    const before = f.requests.filter((request) => request.method === 'background.open').length;
+    f.holdDirectory();
+    await f.update('First child record');
+    expect(f.requests.filter((request) => request.method === 'background.open')).toHaveLength(
+      before + 1,
+    );
+    f.hold();
+    await f.open();
+    expect(f.requests.filter((request) => request.method === 'background.child.open')).toHaveLength(
+      1,
+    );
+    expect(f.host.querySelector('.session-header')!.textContent).toContain('Live child');
+    await f.release();
+    await f.waitForText('First child record');
+    expect(f.host.textContent).toContain('First child record');
+    expect(f.host.querySelector('.conversation-loading')).toBeNull();
+    await f.click('返回主会话');
+    expect(f.host.textContent).toContain('Parent transcript');
+    await f.releaseDirectory();
+    expect(f.host.textContent).not.toContain('First child record');
+    expect(f.requests.some((request) => request.method === 'background.stop')).toBe(false);
+  } finally {
+    await f.close();
+  }
+});
+
+test('returning from a running child renders saved parent messages before pending Tool metadata completes', async () => {
+  for (const target of ['返回主会话', 'Original']) {
+    const f = fixture(true, true);
+    f.runningParent();
+    try {
+      await f.render();
+      await f.click('Original');
+      expect(f.requests.some((request) => request.method === 'toolMessages.list')).toBe(true);
+      await f.open();
+      await f.waitForText('Child prefix');
+      expect(f.host.textContent).toContain('Child prefix');
+      f.holdParent();
+      await f.click(target);
+      await f.waitForText('Original parent delegation request');
+      // Neither the metadata response nor the running child has been released.
+      expect(f.host.textContent).toContain('Original parent delegation request');
+      expect(f.host.textContent).toContain('Parent transcript');
+      expect(f.host.textContent).not.toContain('Child prefix');
+      expect(f.host.textContent).not.toContain('Original accepted child receipt');
+      expect(f.host.querySelector('.conversation-loading')).toBeNull();
+      expect(f.host.querySelector<HTMLButtonElement>('[data-permission-trigger]')!.disabled).toBe(
+        true,
+      );
+      expect(f.host.querySelector('textarea')!.value).toBe('Original private draft');
+      await f.edit('Draft while child and metadata remain pending');
+      expect(f.host.querySelector('textarea')!.value).toBe(
+        'Draft while child and metadata remain pending',
+      );
+      await f.releaseParent();
+      expect(f.host.querySelector<HTMLButtonElement>('[data-permission-trigger]')!.disabled).toBe(
+        false,
+      );
+      await f.open();
+      await f.waitForText('Child prefix');
+      expect(f.host.textContent).toContain('Child prefix');
+      await f.click('返回主会话');
+      await f.releaseMetadata();
+      expect(f.host.textContent).toContain('Original parent delegation request');
+      expect(f.host.querySelector('.conversation-loading')).toBeNull();
+      expect(
+        f.requests.some((request) =>
+          ['submit', 'caller.prepare', 'caller.submit', 'background.cancel'].includes(
+            request.method,
+          ),
+        ),
+      ).toBe(false);
+    } finally {
+      await f.close();
+    }
+  }
+});
 
 test('live child navigation pauses parent history, updates the active child and restores the original draft', async () => {
   const f = fixture();
@@ -741,6 +931,120 @@ test('100 retired child waits release before their shared directory and only the
   }
 });
 
+for (const initial of ['unique', 'ambiguous', 'missing'] as const)
+  test(`child navigation pins its first bounded carrier and refuses later retargeting: ${initial}`, async () => {
+    const ambiguous = initial !== 'unique';
+    const dom = new JSDOM('<div id="root"></div>');
+    const prior = { window: globalThis.window, document: globalThis.document };
+    Object.assign(globalThis, {
+      window: dom.window,
+      document: dom.window.document,
+      IS_REACT_ACT_ENVIRONMENT: true,
+    });
+    const root = createRoot(dom.window.document.getElementById('root')!);
+    const first = backgroundItem(1, true),
+      second = backgroundItem(2, true);
+    let entries = initial === 'missing' ? [] : ambiguous ? [first, second] : [first];
+    let release!: (value: NativeResult) => void;
+    let open!: (id: string, executionId?: string) => void;
+    const calls: NativeRequest[] = [];
+    let observation = 0;
+    const page = (
+      request: Extract<NativeRequest, { method: 'background.open' }>,
+    ): NativeResult => ({
+      kind: 'background.page',
+      viewGeneration: 1,
+      viewSelection: 1,
+      rootSessionId: 'root',
+      storeId: 'store',
+      readId: request.readId,
+      observationId: ++observation,
+      startIndex: 0,
+      nextIndex: entries.length,
+      total: entries.length,
+      complete: true,
+      entries,
+    });
+    const bridge: NativeBridge = {
+      watch: () => () => {},
+      async request(request) {
+        calls.push(request);
+        if (request.method === 'background.open') {
+          if (!observation)
+            return new Promise<NativeResult>((resolve) => {
+              release = resolve;
+            });
+          return page(request);
+        }
+        if (request.method === 'background.child.open') throw Error('fixture_child_read');
+        return null;
+      },
+    };
+    function Harness({ revision }: { revision: number }) {
+      const environment = useNativeEnvironment({
+        bridge,
+        generation: 1,
+        selection: {
+          viewGeneration: 1,
+          viewSelection: 1,
+          storeId: 'store',
+          session: first.rootSession,
+          runs: [],
+          executions: [],
+          interactions: [],
+          interactionsAfterId: null,
+          canReadModelOutput: false,
+        },
+        revision,
+        unavailable: false,
+        onChanged: async () => {},
+      });
+      open = environment.openChild;
+      return <p>{environment.child?.error ?? environment.child?.executionId ?? 'waiting'}</p>;
+    }
+    const childOpens = () => calls.filter((request) => request.method === 'background.child.open');
+    try {
+      await act(async () => root.render(<Harness revision={0} />));
+      await act(async () => open('child'));
+      expect(childOpens()).toHaveLength(0);
+      await act(async () =>
+        release(
+          page(
+            calls.find((request) => request.method === 'background.open') as Extract<
+              NativeRequest,
+              { method: 'background.open' }
+            >,
+          ),
+        ),
+      );
+      expect(childOpens()).toHaveLength(ambiguous ? 0 : 1);
+      if (ambiguous)
+        expect(dom.window.document.body.textContent).toContain(
+          'background_child_target_unavailable',
+        );
+      else expect(childOpens()[0]!.executionId).toBe(first.execution.id);
+      entries = [second];
+      await act(async () => root.render(<Harness revision={1} />));
+      expect(childOpens()).toHaveLength(ambiguous ? 0 : 1);
+      expect(dom.window.document.body.textContent).toContain(
+        ambiguous ? 'background_child_target_unavailable' : 'background_child_unavailable',
+      );
+      entries = [first, second];
+      await act(async () => root.render(<Harness revision={2} />));
+      expect(childOpens().every((request) => request.executionId === first.execution.id)).toBe(
+        true,
+      );
+      const beforeExplicit = childOpens().length;
+      await act(async () => open('child', second.execution.id));
+      expect(childOpens()).toHaveLength(beforeExplicit + 1);
+      expect(childOpens().at(-1)!.executionId).toBe(second.execution.id);
+    } finally {
+      await act(async () => root.unmount());
+      dom.window.close();
+      Object.assign(globalThis, prior);
+    }
+  });
+
 test('Main readonly qualification keeps child EOF alive during ordinary metadata refresh while parent writes stay gated', async () => {
   const f = fixture();
   f.scopedEnvironment();
@@ -864,5 +1168,77 @@ test('explicit child close wins over a directory publication with a queued autom
     await act(async () => root.unmount());
     dom.window.close();
     Object.assign(globalThis, prior);
+  }
+});
+
+test('NativeDesktop marks an unowned active Run unverified without changing durable Run facts or issuing mutations', async () => {
+  for (const waiting of [false, true]) {
+    const f = fixture(true);
+    f.runningParent();
+    if (waiting) f.waitingParent();
+    const originalRun = f.observedRun();
+    const warning = () => f.host.querySelector('[aria-label="会话执行状态待核实"]');
+    const sidebarSpinner = () =>
+      f.host.querySelector(
+        'button.session-row [aria-label="会话运行中"], button.session-row [aria-label="任务进行中"]',
+      );
+    try {
+      await f.observeExecutionOwner('unheld');
+      await f.render();
+      await f.click('Original');
+      expect(warning()?.textContent).toContain('原执行者已释放');
+      expect(sidebarSpinner()).toBeNull();
+      expect(f.host.querySelector('.agent-turn-status-label')?.textContent).toBe('上次确认状态');
+      expect(f.host.textContent).not.toContain('正在等待子 Agent 结果');
+      expect(f.observedRun()).toEqual(originalRun);
+      expect(f.observedRun()?.isActive).toBe(true);
+
+      await f.observeExecutionOwner('held');
+      expect(warning()).toBeNull();
+      expect(sidebarSpinner()).not.toBeNull();
+      expect(f.host.querySelector('.agent-turn-status-label')?.textContent).toMatch(
+        waiting ? /^正在等待/ : /^已处理 .*秒/,
+      );
+      expect(f.host.textContent?.includes('正在等待子 Agent 结果')).toBe(waiting);
+
+      await f.observeExecutionOwner('unknown');
+      expect(warning()?.textContent).toContain('无法核实原执行者');
+      expect(sidebarSpinner()).toBeNull();
+      expect(f.host.querySelector('.agent-turn-status-label')?.textContent).toBe('上次确认状态');
+
+      await f.observeExecutionOwner('unheld', true);
+      expect(warning()).toBeNull();
+      expect(sidebarSpinner()).toBeNull();
+      expect(f.host.querySelector('button.session-row')?.getAttribute('aria-description')).toBe(
+        '上次确认状态',
+      );
+      expect(f.observedRun()).toEqual(originalRun);
+      const permittedReads = new Set([
+        'attach',
+        'state',
+        'select',
+        'directory',
+        'messages',
+        'messages.close',
+        'draft.read',
+        'input.models.read',
+        'context.open',
+        'context.chunk',
+        'context.close',
+        'runs.list',
+        'toolMessages.list',
+        'background.open',
+        'background.close',
+        'background.children.list',
+        'modelSettings',
+        'modelSettings.read',
+        'modelInput.open',
+        'modelInput.chunk',
+        'modelInput.close',
+      ]);
+      expect(f.requests.filter((request) => !permittedReads.has(request.method))).toEqual([]);
+    } finally {
+      await f.close();
+    }
   }
 });

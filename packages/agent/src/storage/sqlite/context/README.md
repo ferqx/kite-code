@@ -8,7 +8,9 @@ The same transaction changes the Session pointer, suppresses old pending Job del
 
 `includeResult` 是原主体对 root Session 的显式 result.include 命令，保留准确 execution/revision/origin，包括显式 restore 后原 Store 的历史结果。idle 时不带 targetRunId，仅登记后续来源，不创建 Run 或派发；同一选择下已有来源复用原 source ID。活动时必须给准确 targetRunId，原 Run、selection 与 rootWork 在受理及应用时复核；回执先为 accepted/result_queued，来源尚未 selected/resultAcceptance。Core 在同一 steer checkpoint 按服务端顺序应用为低信任结果 source；只收束未派发决定及其审批，已派发请求保持原事实。派发与完成事务的 input_pending 关闭受理竞态。显式选入不把 suppressed 改回 pending，也不重放原 Tool/Job。
 
-活动来源在应用事务中分配新的 Session 发布序号；受理时取得的旧 upperSeq 不会在后续分页突然包含该来源。原 source ID 和命令意图保持不变，重复应用不再分配序号或事件。
+新活动来源在应用事务中分配新的 Session 发布序号；受理时取得的旧 upperSeq 不会在后续分页突然包含该来源。原 source ID 和命令意图保持不变，重复应用不再分配序号或事件。
+
+显式选入也可复用当前所选范围内已有的 automatic 来源，包括 Rewind 保留的旧来源；它不更改原来源行的 inclusion、seq、出处或原 `Execution.resultAcceptance`。`getSelectedContext` 仅凭当前所选范围和冻结 upperSeq 内准确已应用的 Include 投影有效 explicit 读取资格：idle 以原 Include 命令序号为界，active 以检查点实际发布的意图消息序号为界。活动受理仍先排队，不能用早已存在的来源或 accepted 命令提前取得资格；应用后的取消保留已发生的选入事实，尚未应用的取消不产生资格。新工作可读取该显式数据，但不取得旧自动报告的接纳、批准或执行授权。原 Include 回执与实际 Model Source 证明此次读取，原自动接纳不改投新 Run。
 
 Selection metadata and immutable result references reuse context_snapshot. References point to the original terminal execution fact rather than duplicating large result bodies or creating standalone Provider tool-result messages. Core formats result sources with their actual source IDs. Context selection lookup uses the real Drizzle schema/query path; transactions and bounded selection queries use explicit prepared SQLite statements.
 
@@ -39,3 +41,12 @@ An exact registered operation-result completion ref may consume known terminal s
 初始 root selection 没有 snapshot；只有原 session.create、原 Run/Command pin 与该 Session 首次 context.select 的实际前序关系能证明 implicit tail0/ranges[]。Fork 初始 selection 必须有实际 Fork receipt 和同 Session snapshot。递归原 selection 证明最多 64 层、1 MiB snapshot metadata、每个 ranges 最多 256；按精确 producer 查询，不设置累计 Session 历史数量额度。方法不写事件、不取得 owner、不启动 Model 或执行工作。
 
 [original-run-selection.test.ts](../../../../test/isolated/storage/original-run-selection.test.ts) 使用实际 SQLite/Worker，验证初始与全保留 select 的历史 pin、Fork 初始 snapshot 缺失、破坏 producer/未来数据/foreign scope，以及真实离线 A→B restore 后 readonly 原身份和零读取游标变化；它不替代默认 Files 恢复端到端资格。
+
+
+## 普通协作结果的工作范围
+
+普通 `agent_completion` 的 `applyJobReport` 复用同一 consume 事务，按准确 Run/rootWork 保存独立 `result_ref` 与 ack；一个后续父 Run 可采用多份同工作结果，Source 不要求 receiver Run.origin 等于各自 report。Runtime 组装普通 Model 时只自动展开该工作结果，其他本 Session 工作的自动 Source 保留原历史，不作为本轮交付。显式 Include 与已验证 Fork 继承历史保持原读取合同，原始 selected/expanded 查询不因此删除记录。
+
+[热冷 A/B 继续](../../../../test/isolated/business/task/collaboration-config-continuation.test.ts)核原 A 配置/当前权限、唯一准确结果及 B 自动 Source 不进入 A Model；[多结果通知](../../../../test/isolated/business/task/collaboration-notifications.test.ts)核 C1/C2 同 R 的独立 Source 和 actual prepared 输入。邮件携带问题只关联该 Source，不宣称邮件 received/prepared；范围由[父子闭环](../../../../test/isolated/business/task/question-loop.test.ts)核实。
+
+Model 投影只调整配对呈现：同一 assistant call batch 的准确 Tool results 按原调用顺序紧接 assistant，后来的用户/结果 Source 保持彼此原顺序排在其后。SQL 原始 seq 与完整历史不改写；[Service 单槽计划回归](../../../../../../apps/service/test/isolated/default-after-turn.test.ts)验证实际SDK在更新计划期间接纳child结果后，下一Model的精确call/result配对及完整低信任Source。

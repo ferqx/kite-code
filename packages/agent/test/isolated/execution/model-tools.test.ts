@@ -9,9 +9,9 @@ import { createArtifactStore } from '../../../src/artifacts';
 import type { CompressionInput } from '../../../src/context';
 import { projectModelContext } from '../../../src/context-estimate';
 import type { AuthorizationRequest, Json, ToolDefinition } from '../../../src/extensions';
-import { createTaskExtension } from '../../../src/extensions/task';
 import { createModelToolSurface, modelToolCall } from '../../../src/model-tools';
 import { openSqliteStore } from '../../../src/sqlite';
+import { createLegacyTaskFixture as createTaskExtension } from '../../fixtures/legacy-task-surface';
 
 const finish: ModelEvent = {
   type: 'finish',

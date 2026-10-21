@@ -12,6 +12,7 @@ import { createClient } from '@kite-ai/client';
 import { privateDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { startService } from '../../src';
 import { createDefaultProcessConfiguration } from '../../src/configuration';
+import { initializeLivePermissionFixture } from '../fixtures/live-permission-fixture';
 
 const reviewReason = 'Exact requested destination rejected by the safety reviewer';
 async function fixture(mode: PermissionMode, decision = 'approve_once', guard?: 'off' | 'ssrf') {
@@ -168,6 +169,16 @@ async function fixture(mode: PermissionMode, decision = 'approve_once', guard?: 
     sessionId: 's',
     workspaceId: 'w',
     title: 'web permission',
+  });
+  await initializeLivePermissionFixture({
+    runtime,
+    profile,
+    expectedStoreId,
+    sessionId: 's',
+    subjectId: 'owner',
+    workspaceId: 'w',
+    mode,
+    trusted: true,
   });
   return {
     runtime,

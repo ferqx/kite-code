@@ -226,6 +226,12 @@ function ChildPermissionsFixture() {
   return (
     <Box flexDirection="column">
       <TuiSession testDiagnostics controller={controller} />
+      {state.snapshot?.interactions.some(
+        (card) => card.kind === 'approval' && card.state === 'pending',
+      ) && <Text>Original child approval pending</Text>}
+      {state.snapshot?.interactions.some(
+        (card) => card.kind === 'question' && card.state === 'pending',
+      ) && <Text>Original child choice pending</Text>}
       {completePreview(state.snapshot) && (
         <Text>Original completed Run / complete output preview ready</Text>
       )}

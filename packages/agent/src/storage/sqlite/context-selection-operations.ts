@@ -5,6 +5,7 @@ import { canonicalJson } from '../../json';
 import type { Store } from '../port';
 import { AgentError, type ContextSelection, type Json, type ResultContextSource } from '../types';
 import { activeCompression, historyOnlyCompression } from './compression-operations';
+import { continuationReportProof } from './job-report-continuation';
 import type { SqliteOperations } from './operations';
 import { contextSnapshots } from './schema';
 
@@ -114,6 +115,70 @@ function source(db: SqliteOperations, row: Row): ResultContextSource {
         }
       : parse(execution.result_json),
   };
+}
+function explicitInSelection(
+  db: SqliteOperations,
+  row: Row,
+  selection: ContextSelection,
+  upper: string,
+): boolean {
+  if (
+    row.selection_id !== selection.id &&
+    !db.row(
+      "SELECT id FROM context_snapshot WHERE id=? AND session_id=? AND kind='selection'",
+      selection.id,
+      row.session_id!,
+    )
+  )
+    return false;
+  const scope = filter(selection, 'seq');
+  // Later cancellation stops work; it does not revoke an already published
+  // historical Include. A cancelled queued command has no applied proof.
+  const includes = db.rows(
+    `SELECT * FROM command WHERE session_id=? AND kind='result.include' AND status='applied' AND seq<=? AND json_extract(receipt_json,'$.sourceId')=? AND ${scope.sql} ORDER BY seq`,
+    row.session_id!,
+    upper,
+    row.id!,
+    ...scope.args,
+  );
+  for (const include of includes) {
+    const request = parse<Record<string, Json>>(include.request_json);
+    const receipt = parse<Record<string, Json>>(include.receipt_json);
+    if (
+      include.subject_id !== subject(db, String(row.session_id)) ||
+      include.request_digest !== hash(request) ||
+      request.kind !== 'result.include' ||
+      request.expectedContextSelectionId !== include.input_context_selection_id ||
+      request.executionId !== row.execution_id ||
+      request.resultRevision !== String(row.result_revision) ||
+      receipt.executionId !== row.execution_id ||
+      receipt.resultRevision !== String(row.result_revision) ||
+      receipt.outcome !== 'result_included'
+    )
+      continue;
+    if (request.targetRunId === null) return true;
+    if (typeof request.targetRunId !== 'string' || receipt.runId !== request.targetRunId) continue;
+    const publication = db.row(
+      "SELECT * FROM message WHERE id=? AND session_id=? AND run_id=? AND role='user' AND status='complete'",
+      String(receipt.messageId),
+      row.session_id!,
+      request.targetRunId,
+    );
+    if (!publication) continue;
+    const binding = parse<Record<string, Json>>(publication.source_json);
+    // The accepted command already existed before application. Only its actual
+    // checkpoint publication can give a later frozen snapshot explicit access.
+    if (
+      BigInt(publication.seq!) <= BigInt(upper) &&
+      has(selection, String(publication.seq)) &&
+      binding.originCommandId === include.id &&
+      binding.inputKind === 'result.include' &&
+      binding.contextSelectionId === include.input_context_selection_id &&
+      canonicalJson(binding.sourceIds!) === canonicalJson([String(include.id)])
+    )
+      return true;
+  }
+  return false;
 }
 function prior(
   db: SqliteOperations,
@@ -579,8 +644,10 @@ export function callContextSelection(
         bytes += size;
       }
       for (const row of sourceRows.slice(0, sourceLimit)) {
-        const value = source(db, row),
-          size = Buffer.byteLength(JSON.stringify(value));
+        const value = source(db, row);
+        if (value.inclusion === 'automatic' && explicitInSelection(db, row, selection, upper))
+          value.inclusion = 'explicit';
+        const size = Buffer.byteLength(JSON.stringify(value));
         if (size > byteLimit) throw new AgentError('context_item_too_large');
         if (bytes + size > byteLimit) break;
         resultSources.push(value);
@@ -755,20 +822,27 @@ export function callContextSelection(
     if (reportConsumption) {
       const reportRun =
         input.targetRunId &&
-        db.row(
-          'SELECT origin_command_id FROM run WHERE id=? AND session_id=?',
-          input.targetRunId,
-          input.sessionId,
-        );
+        db.row('SELECT * FROM run WHERE id=? AND session_id=?', input.targetRunId, input.sessionId);
       const report =
         reportRun &&
         db.row(
-          "SELECT request_json FROM command WHERE id=? AND kind='job.report'",
-          reportRun.origin_command_id!,
+          "SELECT * FROM command WHERE session_id=? AND kind IN('job.report','job.report.continue') AND status='applied' AND json_extract(request_json,'$.executionId')=? AND json_extract(request_json,'$.resultRevision')=? AND json_extract(receipt_json,'$.runId')=?",
+          input.sessionId,
+          input.executionId,
+          input.resultRevision,
+          input.targetRunId!,
         );
+      if (report && report.kind === 'job.report.continue')
+        continuationReportProof(db, report, execution);
       if (
         !report ||
-        parse<{ executionId: string }>(report.request_json).executionId !== input.executionId
+        !reportRun ||
+        report.subject_id !== user ||
+        report.origin_store_id !== input.expectedStoreId ||
+        report.root_work_command_id !== execution.root_work_command_id ||
+        String(report.root_work_seq) !== String(execution.root_work_seq) ||
+        reportRun.root_work_command_id !== execution.root_work_command_id ||
+        String(reportRun.root_work_seq) !== String(execution.root_work_seq)
       )
         throw new AgentError('result_not_pending');
     }
@@ -921,15 +995,9 @@ export function callContextSelection(
         outcome: method === 'includeResult' ? 'result_included' : 'result_consumed',
       },
       method === 'consumeJobResult' ? execution : (active ?? undefined),
-      method === 'includeResult' &&
-        Boolean(active) &&
-        Boolean(parse<{ pendingInput?: boolean }>(existingSource.request_json).pendingInput),
+      method === 'includeResult' && Boolean(active),
     );
-    if (
-      method === 'includeResult' &&
-      active &&
-      parse<{ pendingInput?: boolean }>(existingSource.request_json).pendingInput
-    ) {
+    if (method === 'includeResult' && active) {
       db.run(
         "UPDATE command SET status='accepted',input_target_run_id=?,receipt_json=? WHERE id=?",
         active.id!,

@@ -6,10 +6,16 @@ import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import type { ModelAdapter, ModelEvent, ModelRequest } from '@kite-ai/ai';
 import { createArtifactStore } from '../../../../src/artifacts';
-import { createTaskExtension } from '../../../../src/extensions/task';
 import { semanticDigest } from '../../../../src/json';
 import { type AfterTurnPolicy, createRuntime } from '../../../../src/runtime';
 import { openSqliteStore } from '../../../../src/sqlite';
+import {
+  applyJobReport as applySnapshotJobReport,
+  childReportCarrier,
+} from '../../../../src/storage/sqlite/job-report-operations';
+import { SqliteOperations } from '../../../../src/storage/sqlite/operations';
+import { AgentError } from '../../../../src/storage/types';
+import { createLegacyTaskFixture as createTaskExtension } from '../../../fixtures/legacy-task-surface';
 
 const finish: ModelEvent = {
   type: 'finish',
@@ -23,6 +29,56 @@ const gate = () => {
   });
   return { promise, release };
 };
+async function expectHumanBusiness(
+  runtime: ReturnType<typeof createRuntime>,
+  store: Awaited<ReturnType<typeof openSqliteStore>>,
+  storeId: string,
+  commandId: string,
+  content: string,
+) {
+  const command = (await store.getCommand(commandId))!;
+  expect(command).toMatchObject({
+    status: 'applied',
+    request: { kind: 'run.start', content },
+  });
+  const receipt = command.receipt as {
+    businessCommandId: string;
+    humanInputCommandId: string;
+    runId: string;
+  };
+  expect(receipt.businessCommandId).toBeString();
+  expect(receipt.businessCommandId).not.toBe(commandId);
+  expect(await store.getCommand(receipt.humanInputCommandId)).toMatchObject({
+    kind: 'human.input',
+    request: { publicCommandId: commandId, content, originalRequest: command.request },
+  });
+  expect(await store.getCommand(receipt.businessCommandId)).toMatchObject({
+    status: 'applied',
+    request: { content },
+    receipt: { runId: receipt.runId },
+  });
+  expect(await store.getRun(receipt.runId)).toMatchObject({
+    status: 'completed',
+    rootWorkCommandId: commandId,
+    originCommandId: receipt.businessCommandId,
+  });
+  const models = (await store.listExecutions('root')).filter(
+    (execution) => execution.runId === receipt.runId && execution.kind === 'model',
+  );
+  expect(models.length).toBeGreaterThan(0);
+  expect(models[0]!.status).toBe('succeeded');
+  const inspected = await runtime.readModelInput({
+    expectedStoreId: storeId,
+    sessionId: 'root',
+    subjectId: 'owner',
+    executionId: models[0]!.id,
+  });
+  expect(inspected.confirmation).toBe('succeeded');
+  expect(
+    inspected.request.messages.find((message) => message.content === content)?.sourceIds,
+  ).toEqual([receipt.businessCommandId]);
+}
+
 for (const mode of ['report', 'apply_fault', 'early_result', 'followup_before'] as const) {
   test(`nested after_turn ${mode} in the original child Session retains exact deadline, source and binding without reviving its carrier`, async () => {
     const directory = realpathSync(mkdtempSync(join(tmpdir(), 'kite-nested-report-')));
@@ -33,13 +89,238 @@ for (const mode of ['report', 'apply_fault', 'early_result', 'followup_before'] 
       parentReady = gate(),
       parentGate = gate(),
       applyReady = gate(),
-      applyGate = gate();
+      applyGate = gate(),
+      carrierSettlementReady = gate(),
+      carrierSettlementGate = gate();
     const rootRequests: ModelRequest[] = [],
       childRequests: ModelRequest[] = [],
       grandchildRequests: ModelRequest[] = [];
     let childDisposals = 0,
       followupRun = '',
-      followupSelection = '';
+      followupSelection = '',
+      outerCarrierId = '',
+      carrierSettlementWaiting = false,
+      reportObservedCompletedRunBeforeCarrier = false,
+      carrierDeferredHits = 0;
+    let carrierProofFailure: unknown;
+    if (mode === 'early_result') {
+      const finishExecution = store.finishExecution.bind(store);
+      const applyJobReport = store.applyJobReport.bind(store);
+      store.finishExecution = async (input) => {
+        if (input.executionId === outerCarrierId && input.status === 'succeeded') {
+          // Hold only the genuine carrier commit, after its child Run has completed.
+          // A report attempted here must defer and retain its original binding.
+          carrierSettlementWaiting = true;
+          carrierSettlementReady.release();
+          await carrierSettlementGate.promise;
+          carrierSettlementWaiting = false;
+        }
+        return finishExecution(input);
+      };
+      store.applyJobReport = async (input) => {
+        await carrierSettlementReady.promise;
+        const beforeCarrierCommit = carrierSettlementWaiting;
+        if (beforeCarrierCommit) {
+          const carrier = (await store.getExecution(outerCarrierId))!;
+          const childRun = (await store.getView(carrier.childSessionId!)).runs[0]!;
+          const report = (await store.getCommand(input.commandId))!;
+          reportObservedCompletedRunBeforeCarrier =
+            report.kind === 'job.report' &&
+            report.sessionId === carrier.childSessionId &&
+            (report.request as { parentRunId: string }).parentRunId === childRun.id &&
+            childRun.status === 'completed' &&
+            !childRun.isActive &&
+            carrier.status === 'running';
+        }
+        try {
+          const applied = await applyJobReport(input);
+          if (beforeCarrierCommit) {
+            expect(applied).toMatchObject({
+              started: false,
+              run: null,
+              command: {
+                status: 'accepted',
+                receipt: { outcome: 'report_deferred', reason: 'report_carrier_active' },
+              },
+            });
+            const report = (await store.getCommand(input.commandId))!;
+            expect(report).toMatchObject({
+              status: 'accepted',
+              receipt: { outcome: 'report_deferred', reason: 'report_carrier_active' },
+            });
+            const carrier = (await store.getExecution(outerCarrierId))!;
+            const childView = await store.getView(carrier.childSessionId!);
+            expect(childView.runs).toHaveLength(1);
+            const childModels = childView.executions.filter(
+              (execution) => execution.kind === 'model',
+            );
+            expect(childModels).toHaveLength(2);
+            expect(childModels.every((execution) => execution.status === 'succeeded')).toBe(true);
+            expect(childRequests).toHaveLength(2);
+            const nested = (await store.getExecution(
+              (report.request as { executionId: string }).executionId,
+            ))!;
+            expect(nested.resultAcceptance).toBeNull();
+            expect(nested.delivery).toBe('pending');
+            expect(
+              (
+                await store.getSelectedContext({
+                  expectedStoreId: storeId,
+                  sessionId: carrier.childSessionId!,
+                })
+              ).resultSources,
+            ).toHaveLength(0);
+            const reader = new Database(join(directory, 'data', 'test', 'core.db'), {
+              readonly: true,
+            });
+            let snapshot: Buffer;
+            try {
+              snapshot = reader.serialize();
+            } finally {
+              reader.close();
+            }
+            // deserialize owns a private in-memory database; its header cannot retain
+            // the live file's WAL journal mode, which requires filesystem sidecars.
+            snapshot[18] = 1;
+            snapshot[19] = 1;
+            const mutations = [
+              null,
+              (db: SqliteOperations) =>
+                db.run('UPDATE execution SET cancel_requested=1 WHERE id=?', outerCarrierId),
+              (db: SqliteOperations) =>
+                db.run("UPDATE execution SET state='outcome_unknown' WHERE id=?", outerCarrierId),
+              (db: SqliteOperations) =>
+                db.run('UPDATE execution SET child_session_id=NULL WHERE id=?', outerCarrierId),
+              (db: SqliteOperations) =>
+                db.run(
+                  'UPDATE command SET subject_id=? WHERE id=?',
+                  'other-owner',
+                  childView.runs[0]!.originCommandId,
+                ),
+              (db: SqliteOperations) =>
+                db.run(
+                  'UPDATE execution SET root_work_seq=root_work_seq+1 WHERE id=?',
+                  outerCarrierId,
+                ),
+              (db: SqliteOperations) =>
+                db.run(
+                  "UPDATE command SET request_json=json_set(request_json,'$.parentExecutionId',?) WHERE id=?",
+                  nested.id,
+                  childView.runs[0]!.originCommandId,
+                ),
+              (db: SqliteOperations) =>
+                db.run(
+                  "UPDATE command SET request_json=json_set(request_json,'$.resultRevision','invalid-revision') WHERE id=?",
+                  input.commandId,
+                ),
+            ];
+            for (const mutate of mutations) {
+              const clone = Database.deserialize(snapshot);
+              try {
+                const db = new SqliteOperations(clone, false);
+                const watermarks = () => ({
+                  runs: db.row('SELECT COUNT(*) AS count FROM run')!.count,
+                  sources: db.row(
+                    "SELECT COUNT(*) AS count FROM context_snapshot WHERE kind='result_ref'",
+                  )!.count,
+                });
+                const before = watermarks();
+                mutate?.(db);
+                const clonedReport = db.row('SELECT * FROM command WHERE id=?', input.commandId)!;
+                if (!mutate) {
+                  expect(() => childReportCarrier(db, clonedReport)).toThrow('report_unverifiable');
+                  expect(applySnapshotJobReport(db, input)).toMatchObject({
+                    started: false,
+                    run: null,
+                    command: {
+                      status: 'accepted',
+                      receipt: { outcome: 'report_deferred', reason: 'report_carrier_active' },
+                    },
+                  });
+                } else {
+                  try {
+                    const rejected = applySnapshotJobReport(db, input);
+                    expect(rejected).toMatchObject({
+                      started: false,
+                      run: null,
+                      command: {
+                        status: 'rejected',
+                        receipt: { outcome: 'suppressed', reason: 'source_unverifiable' },
+                      },
+                    });
+                  } catch (error) {
+                    expect(error).toBeInstanceOf(AgentError);
+                    expect((error as AgentError).code).toBe('report_unverifiable');
+                  }
+                }
+                expect(watermarks()).toEqual(before);
+                const clonedNested = db.execution(
+                  db.row('SELECT * FROM execution WHERE id=?', nested.id)!,
+                );
+                expect(clonedNested.resultAcceptance).toBeNull();
+                expect(
+                  clonedNested.delivery === 'pending' || clonedNested.delivery === 'suppressed',
+                ).toBe(true);
+              } finally {
+                clone.close();
+              }
+            }
+            for (const originKind of ['child.start', 'job.report', 'job.report.continue']) {
+              const clone = Database.deserialize(snapshot);
+              try {
+                const db = new SqliteOperations(clone, false);
+                if (originKind !== 'child.start')
+                  db.run(
+                    "UPDATE command SET kind=?,request_json=json_set(request_json,'$.kind',?,'$.parentExecutionId',?),receipt_json=json_set(receipt_json,'$.runId','mismatched-parent-run') WHERE id=?",
+                    originKind,
+                    originKind,
+                    outerCarrierId,
+                    childView.runs[0]!.originCommandId,
+                  );
+                const clonedReport = db.row('SELECT * FROM command WHERE id=?', input.commandId)!;
+                const watermarks = () => ({
+                  runs: db.row('SELECT COUNT(*) AS count FROM run')!.count,
+                  sources: db.row(
+                    "SELECT COUNT(*) AS count FROM context_snapshot WHERE kind='result_ref'",
+                  )!.count,
+                });
+                const before = watermarks();
+                expect(() => childReportCarrier(db, clonedReport)).toThrow('report_unverifiable');
+                if (originKind === 'child.start')
+                  expect(applySnapshotJobReport(db, input)).toMatchObject({
+                    started: false,
+                    run: null,
+                    command: {
+                      status: 'accepted',
+                      receipt: { outcome: 'report_deferred', reason: 'report_carrier_active' },
+                    },
+                  });
+                else expect(() => applySnapshotJobReport(db, input)).toThrow('report_unverifiable');
+                expect(watermarks()).toEqual(before);
+                expect(
+                  db.execution(db.row('SELECT * FROM execution WHERE id=?', nested.id)!)
+                    .resultAcceptance,
+                ).toBeNull();
+                db.run("UPDATE execution SET state='succeeded' WHERE id=?", outerCarrierId);
+                if (originKind === 'child.start')
+                  expect(childReportCarrier(db, clonedReport).id).toBe(outerCarrierId);
+                else
+                  expect(() => childReportCarrier(db, clonedReport)).toThrow('report_unverifiable');
+              } finally {
+                clone.close();
+              }
+            }
+            carrierDeferredHits++;
+          }
+          return applied;
+        } catch (error) {
+          carrierProofFailure = error;
+          throw error;
+        } finally {
+          if (beforeCarrierCommit) carrierSettlementGate.release();
+        }
+      };
+    }
     const task = createTaskExtension({
       roles: [
         { id: 'child', configurationId: 'child', description: 'trusted child' },
@@ -197,6 +478,7 @@ for (const mode of ['report', 'apply_fault', 'early_result', 'followup_before'] 
       });
       await runtime.waitForCommand('work', { timeoutMs: 6000 });
       const outer = (await store.getView('root')).executions.find((e) => e.childSessionId)!;
+      outerCarrierId = outer.id;
       if (mode === 'early_result') await parentReady.promise;
       else await runtime.waitForCommand(outer.originCommandId, { timeoutMs: 6000 });
       const childBefore = await store.getView(outer.childSessionId!);
@@ -230,6 +512,9 @@ for (const mode of ['report', 'apply_fault', 'early_result', 'followup_before'] 
         expect(childRequests).toHaveLength(2);
         parentGate.release();
         await runtime.waitForCommand(outer.originCommandId, { timeoutMs: 6000 });
+        if (carrierProofFailure) throw carrierProofFailure;
+        expect(reportObservedCompletedRunBeforeCarrier).toBe(true);
+        expect(carrierDeferredHits).toBeGreaterThan(0);
       }
       if (mode === 'followup_before') {
         await applyReady.promise;
@@ -240,10 +525,17 @@ for (const mode of ['report', 'apply_fault', 'early_result', 'followup_before'] 
           commandId: 'preferred',
           request: {
             kind: 'run.start',
-            content: 'explicit new child work before report admission',
+            content: 'New task: explicit new child work before report admission',
           },
         });
         await runtime.waitForCommand('preferred', { timeoutMs: 6000 });
+        await expectHumanBusiness(
+          runtime,
+          store,
+          storeId,
+          'preferred',
+          'New task: explicit new child work before report admission',
+        );
         const nextCarrier = (await store.getView('root')).executions.find(
           (e) => e.childSessionId === outer.childSessionId && e.id !== outer.id,
         )!;
@@ -289,6 +581,20 @@ for (const mode of ['report', 'apply_fault', 'early_result', 'followup_before'] 
       );
       expect(sources).toHaveLength(1);
       expect(JSON.stringify(sources)).toContain('grandchild original result');
+      if (mode === 'early_result') {
+        const resultSources = (
+          await store.getSelectedContext({
+            expectedStoreId: storeId,
+            sessionId: outer.childSessionId!,
+          })
+        ).resultSources;
+        expect(resultSources).toHaveLength(1);
+        expect(resultSources[0]!.executionId).toBe(nested.id);
+        expect((await store.getCommand(reportId))!.receipt).toMatchObject({
+          sourceId: resultSources[0]!.id,
+        });
+        expect(sources[0]!.sourceIds).toContain(resultSources[0]!.id);
+      }
       expect((await store.getExecution(outer.id))!.status).toBe('succeeded');
       expect(rootRequests).toHaveLength(2);
       expect(grandchildRequests).toHaveLength(1);
@@ -298,6 +604,8 @@ for (const mode of ['report', 'apply_fault', 'early_result', 'followup_before'] 
       grandchildGate.release();
       parentGate.release();
       applyGate.release();
+      carrierSettlementReady.release();
+      carrierSettlementGate.release();
       await runtime.close();
       await store.close();
       rmSync(directory, { recursive: true, force: true });
@@ -385,7 +693,7 @@ test('explicit followup_task after_turn binds the new carrier and sender Run, re
       async authorize(input) {
         policyCalls++;
         expect(input.execution.definitionId).toBe('followup_task');
-        expect(input.command.id).toBe('followup-work');
+        expect(input.command.rootWorkCommandId).toBe('followup-work');
         return { allowed: true, revision: 'followup-policy-1' };
       },
     },
@@ -428,10 +736,17 @@ test('explicit followup_task after_turn binds the new carrier and sender Run, re
       commandId: 'followup-work',
       request: {
         kind: 'run.start',
-        content: 'explicit new followup with independent report authorization',
+        content: 'New task: explicit new followup with independent report authorization',
       },
     });
     await runtime.waitForCommand('followup-work', { timeoutMs: 6000 });
+    await expectHumanBusiness(
+      runtime,
+      store,
+      storeId,
+      'followup-work',
+      'New task: explicit new followup with independent report authorization',
+    );
     const second = (await store.getView('root')).executions.find(
       (e) => e.childSessionId && e.id !== first.id,
     )!;

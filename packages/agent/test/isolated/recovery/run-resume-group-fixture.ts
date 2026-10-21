@@ -1,8 +1,8 @@
 import { appendFileSync, existsSync, readFileSync } from 'node:fs';
 import type { ModelAdapter, ModelEvent } from '@kite-ai/ai';
 import type { AuthorizationRequest, Extension } from '../../../src/extensions';
-import { createTaskExtension } from '../../../src/extensions/task';
 import type { RuntimeOptions } from '../../../src/runtime';
+import { createLegacyTaskFixture as createTaskExtension } from '../../fixtures/legacy-task-surface';
 
 const finish: ModelEvent = {
   type: 'finish',

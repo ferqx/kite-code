@@ -82,10 +82,13 @@ const choose = async (id: string, title: string) => {
     await Bun.sleep(50);
   }
 };
-const planningTask = 'original single plan 中文🙂';
+const planningTask =
+  input.entrance === 'active-queued'
+    ? 'New task: original single plan 中文🙂'
+    : 'original single plan 中文🙂';
 const slash = async () => {
   await key(`/plan ${planningTask}`);
-  await wait('/plan original single plan');
+  await wait(`/plan ${planningTask}`);
   await key('\r');
 };
 const readDatabase = <T>(work: (database: Database) => T): T => {

@@ -12,6 +12,7 @@ const input = JSON.parse(process.argv[2]!) as {
   original: string;
   alignmentParagraph: string;
   responseMarker: string;
+  expectedTitle: string;
   databasePath: string;
 };
 const abort = new AbortController();
@@ -104,18 +105,35 @@ try {
     const db = new Database(input.databasePath, { readonly: true });
     let done: boolean;
     try {
+      // The title child can finish before the parent's title Action applies its CAS.
+      // Only the original root Run and its durable rename establish safe normal exit.
+      const root = db
+        .query(
+          'SELECT s.id,s.title,r.status,r.is_active FROM session s JOIN run r ON r.session_id=s.id WHERE s.parent_id IS NULL ORDER BY r.started_at DESC LIMIT 1',
+        )
+        .get() as { id: string; title: string; status: string; is_active: number } | null;
+      const rename = root
+        ? (db
+            .query(
+              "SELECT c.request_json,c.receipt_json FROM command c JOIN execution e ON c.id='title-generated-'||e.id AND c.session_id=e.session_id AND c.origin_store_id=e.origin_store_id WHERE e.session_id=? AND e.adapter_id='builtin.session-title/generate' AND e.kind='job' AND e.state='succeeded' AND c.kind='session.rename' AND c.status='applied'",
+            )
+            .get(root.id) as { request_json: string; receipt_json: string } | null)
+        : null;
+      const request = rename ? JSON.parse(rename.request_json) : null;
+      const receipt = rename ? JSON.parse(rename.receipt_json) : null;
       done =
-        (
-          db.query('SELECT status,is_active FROM run ORDER BY started_at DESC LIMIT 1').get() as {
-            status: string;
-            is_active: number;
-          } | null
-        )?.status === 'completed';
+        root?.status === 'completed' &&
+        root.is_active === 0 &&
+        root.title === input.expectedTitle &&
+        request?.title === input.expectedTitle &&
+        receipt?.outcome === 'renamed' &&
+        receipt.session?.id === root.id &&
+        receipt.session.title === input.expectedTitle;
     } finally {
       db.close();
     }
     if (done) break;
-    if (Date.now() > completedUntil) throw Error('ordinary_actual_run_not_completed');
+    if (Date.now() > completedUntil) throw Error('ordinary_actual_root_title_not_completed');
     await Bun.sleep(25);
   }
   await key('\u0011');

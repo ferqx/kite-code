@@ -545,6 +545,8 @@ test('live child tail reuses only stable verified rows and resets on context rep
     ({
       storeId: 'store',
       session: { ...item.childSession!, contextSelectionId: context, nextSeq: '2' },
+      runs: [{ ...item.childRun!, carrierExecutionId: item.execution.id }],
+      executions: [],
     }) as never;
   f.port.listMessages = async (_id, options) => {
     after.push(options!.afterSeq!);
@@ -606,7 +608,12 @@ test('selected live child accepts a newer verified active Model prefix without d
     output,
   };
   f.port.getView = async () =>
-    ({ storeId: 'store', session: { ...item.childSession!, nextSeq: '1' } }) as never;
+    ({
+      storeId: 'store',
+      session: { ...item.childSession!, nextSeq: '1' },
+      runs: [{ ...item.childRun!, carrierExecutionId: item.execution.id }],
+      executions: [],
+    }) as never;
   f.port.listMessages = async () => [
     {
       id: 'active',
@@ -688,3 +695,228 @@ test('incremental child IPC cursor is environment-only, exact and bounded', () =
     'invalid_native_request',
   );
 });
+
+function pendingChildDirectoryFixture() {
+  const item = backgroundItem(1, true),
+    f = fixture([item]);
+  const rows = [
+    {
+      id: 'child-original',
+      sessionId: 'child',
+      runId: 'original-child-run',
+      seq: '1',
+      role: 'user' as const,
+      status: 'complete' as const,
+      content: 'original bounded assignment',
+    },
+    {
+      id: 'child-active',
+      sessionId: 'child',
+      runId: 'original-child-run',
+      seq: '2',
+      role: 'assistant' as const,
+      status: 'incomplete' as const,
+      content: 'current verified child prefix 雪🙂',
+    },
+  ];
+  f.port.getView = async (sessionId) => {
+    f.calls.push(`GET child-view ${sessionId}`);
+    return {
+      storeId: 'store',
+      session: { ...item.childSession!, nextSeq: '2' },
+      runs: [{ ...item.childRun!, carrierExecutionId: item.execution.id }],
+      executions: [],
+    } as never;
+  };
+  f.port.listMessages = async (sessionId, options) => {
+    f.calls.push(`GET child-messages ${sessionId}/${options!.afterSeq}/${options!.upperSeq}`);
+    return structuredClone(rows.filter((row) => BigInt(row.seq) > BigInt(options!.afterSeq!)));
+  };
+  let release!: () => void,
+    reject!: (cause: Error) => void,
+    entered = false;
+  const gate = new Promise<BackgroundExecutionItem[]>((resolve, fail) => {
+    release = () => resolve(structuredClone([item]));
+    reject = fail;
+  });
+  return {
+    ...f,
+    item,
+    rows,
+    release: () => release(),
+    reject: () => reject(Error('owned_directory_failed')),
+    async start() {
+      const original = await f.environment.open('original-directory');
+      expect(original.complete).toBe(true);
+      f.environment.close(original.readId);
+      f.port.listAllBackgroundExecutions = async () => {
+        entered = true;
+        return gate;
+      };
+      const pending = f.environment.open('pending-directory').catch((cause: unknown) => cause);
+      await Bun.sleep(0);
+      expect(entered).toBe(true);
+      return { original, pending };
+    },
+    async oldChild(observationId: number) {
+      return readNativeBackgroundChild({
+        bridge: f.bridge,
+        generation: 1,
+        storeId: 'store',
+        observationId,
+        item,
+        signal: new AbortController().signal,
+        isCurrent: () => true,
+        environment: { rootSessionId: 'root', viewSelection: 1 },
+      });
+    },
+  };
+}
+
+test('pending same-scope directory permits only fresh exact child readonly from its prior complete observation', async () => {
+  const f = pendingChildDirectoryFixture();
+  const { original, pending } = await f.start();
+  try {
+    await expect(
+      f.environment.stop(original.observationId, f.item.execution.id, 'stale-stop'),
+    ).rejects.toMatchObject({ code: 'background_observation_changed' });
+    await expect(
+      f.environment.outputOpen({
+        observationId: original.observationId,
+        executionId: f.item.execution.id,
+        readId: 'stale-output',
+      }),
+    ).rejects.toMatchObject({ code: 'background_observation_changed' });
+    const child = await f.oldChild(original.observationId);
+    expect(child.messages).toEqual(f.rows);
+    expect(child.upperSeq).toBe('2');
+    expect(child.item.execution.id).toBe(f.item.execution.id);
+    expect(child.item.childRun!.id).toBe('original-child-run');
+    expect(f.calls).toContain(`GET exact ${f.item.execution.id}`);
+    expect(f.calls).toContain('GET execution parent-tool');
+    expect(f.calls).toContain('GET child-view child');
+    expect(f.calls).toContain('GET child-messages child/0/2');
+    expect(f.calls.every((call) => call.startsWith('GET'))).toBe(true);
+  } finally {
+    f.release();
+    await pending;
+    f.environment.release();
+    f.main.release();
+  }
+});
+
+for (const boundary of ['failed', 'closed', 'new-scope'] as const) {
+  test(`prior child readonly candidate is revoked when pending directory is ${boundary}`, async () => {
+    const f = pendingChildDirectoryFixture();
+    const { original, pending } = await f.start();
+    try {
+      if (boundary === 'failed') f.reject();
+      else {
+        if (boundary === 'closed') f.environment.close('pending-directory');
+        if (boundary === 'new-scope') f.selected.viewSelection++;
+        f.release();
+      }
+      const result = await pending;
+      if (boundary === 'failed') expect(result).toBeInstanceOf(Error);
+      await expect(f.oldChild(original.observationId)).rejects.toMatchObject({
+        code: 'background_observation_changed',
+      });
+      await expect(
+        f.environment.stop(original.observationId, f.item.execution.id, 'stale-stop'),
+      ).rejects.toMatchObject({ code: 'background_observation_changed' });
+      expect(f.calls.some((call) => call.startsWith('PREPARE') || call.startsWith('POST'))).toBe(
+        false,
+      );
+    } finally {
+      f.release();
+      await pending;
+      f.environment.release();
+      f.main.release();
+    }
+  });
+}
+
+for (const handoff of ['published', 'closed'] as const) {
+  test(`exact child readonly survives completed directory ${handoff} before renderer commits its new observation`, async () => {
+    const f = pendingChildDirectoryFixture();
+    const { original, pending } = await f.start();
+    try {
+      f.release();
+      const replacement = (await pending) as Awaited<ReturnType<typeof f.environment.open>>;
+      expect(replacement.complete).toBe(true);
+      expect(replacement.observationId).not.toBe(original.observationId);
+      if (handoff === 'closed') f.environment.close(replacement.readId);
+      const before = f.calls.filter((call) => call === `GET exact ${f.item.execution.id}`).length;
+      const child = await f.oldChild(original.observationId);
+      expect(child.messages).toEqual(f.rows);
+      expect(child.upperSeq).toBe('2');
+      expect(child.item.execution.id).toBe(f.item.execution.id);
+      expect(child.item.childRun!.id).toBe('original-child-run');
+      expect(f.calls.filter((call) => call === `GET exact ${f.item.execution.id}`)).toHaveLength(
+        before + 2,
+      );
+      await expect(
+        f.environment.stop(original.observationId, f.item.execution.id, 'handoff-stop'),
+      ).rejects.toMatchObject({ code: 'background_observation_changed' });
+      await expect(
+        f.environment.outputOpen({
+          observationId: original.observationId,
+          executionId: f.item.execution.id,
+          readId: 'handoff-output',
+        }),
+      ).rejects.toMatchObject({ code: 'background_observation_changed' });
+      expect(f.calls.every((call) => call.startsWith('GET'))).toBe(true);
+      f.environment.close(replacement.readId);
+      const next = await f.environment.open('next-directory');
+      f.environment.close(next.readId);
+      await expect(f.oldChild(original.observationId)).rejects.toMatchObject({
+        code: 'background_observation_changed',
+      });
+      expect((await f.oldChild(replacement.observationId)).messages).toEqual(f.rows);
+      f.environment.release();
+      await expect(f.oldChild(replacement.observationId)).rejects.toMatchObject({
+        code: 'background_observation_changed',
+      });
+    } finally {
+      f.release();
+      await pending;
+      f.environment.release();
+      f.main.release();
+    }
+  });
+}
+
+for (const boundary of ['identity', 'scope'] as const) {
+  test(`completed previous child observation cannot bypass fresh ${boundary}`, async () => {
+    const f = pendingChildDirectoryFixture();
+    const { original, pending } = await f.start();
+    try {
+      f.release();
+      const replacement = (await pending) as Awaited<ReturnType<typeof f.environment.open>>;
+      f.environment.close(replacement.readId);
+      if (boundary === 'scope') f.selected.viewSelection++;
+      else
+        f.port.listBackgroundExecutions = async () =>
+          ({
+            items: [
+              { ...f.item, execution: { ...f.item.execution, childSessionId: 'different-child' } },
+            ],
+          }) as never;
+      await expect(f.oldChild(original.observationId)).rejects.toMatchObject({
+        code:
+          boundary === 'identity'
+            ? 'background_identity_mismatch'
+            : 'background_observation_changed',
+      });
+      expect(f.calls.some((call) => call.startsWith('GET child-messages'))).toBe(false);
+      expect(f.calls.some((call) => call.startsWith('PREPARE') || call.startsWith('POST'))).toBe(
+        false,
+      );
+    } finally {
+      f.release();
+      await pending;
+      f.environment.release();
+      f.main.release();
+    }
+  });
+}

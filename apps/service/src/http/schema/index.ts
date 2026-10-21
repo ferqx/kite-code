@@ -929,6 +929,9 @@ export const schemas = {
     sessionId: id,
     originCommandId: id,
     originStoreId: id,
+    carrierExecutionId: id.optional(),
+    rootWorkCommandId: id.optional(),
+    rootWorkSeq: sequence.optional(),
     status: runStatus,
     isActive: z.boolean(),
     waitingForResults: z.array(id).optional(),
@@ -1426,6 +1429,7 @@ export const WorkspaceDirectoryPageSchema = z.object({
 });
 export const SessionDirectoryActivitySchema = z.object({
   updatedAt: z.number().int().min(0).max(8640000000000000).nullable(),
+  executionOwner: z.enum(['held', 'unheld', 'unknown']).optional(),
   run: z
     .object({ id, status: runStatus, isActive: z.boolean(), waitingForResults: z.boolean() })
     .nullable(),
@@ -1451,6 +1455,7 @@ export const BackgroundExecutionQuerySchema = SessionDirectoryQuerySchema.extend
 });
 const backgroundRun = z.strictObject({
   id,
+  carrierExecutionId: id.optional(),
   sessionId: id,
   originCommandId: id,
   originStoreId: id,

@@ -103,19 +103,58 @@ async function setup(
     ]);
     // The registered model is stable; response sequence is supplied through its public adapter below.
     queue.push(fixed);
+    const content = command === 1 ? 'fetch' : 'New task: fetch';
     await runtime.submitCommand({
       expectedStoreId,
       commandId: `work${command}`,
       sessionId: 's',
       subjectId: 'owner',
-      request: { kind: 'run.start', content: 'fetch' },
+      request: { kind: 'run.start', content },
     });
     const result = await runtime.waitForCommand(`work${command}`, { timeoutMs: 8000 });
+    const receipt = result.receipt as {
+      runId: string;
+      businessCommandId?: string;
+      humanInputCommandId?: string;
+    };
+    const businessId = receipt.businessCommandId ?? result.id;
+    expect(result.status).toBe('applied');
+    const run = (await store.getRun(receipt.runId))!;
+    expect(run).toMatchObject({ originCommandId: businessId, rootWorkCommandId: result.id });
+    const models = (await store.listExecutions('s')).filter(
+      (execution) => execution.kind === 'model' && execution.runId === run.id,
+    );
+    expect(models.map((execution) => execution.id)).toEqual(
+      fixed.requests.map((request) => request.requestId),
+    );
+    const snapshot = await runtime.readModelInput({
+      expectedStoreId,
+      sessionId: 's',
+      subjectId: 'owner',
+      executionId: models[0]!.id,
+    });
+    expect(snapshot.confirmation).toBe('succeeded');
+    expect(
+      snapshot.request.messages.find((message) => message.sourceIds?.includes(businessId)),
+    ).toMatchObject({ content, sourceIds: [businessId] });
+    if (command > 1) {
+      expect(receipt.businessCommandId).toBeString();
+      expect(businessId).not.toBe(result.id);
+      expect(await store.getCommand(receipt.humanInputCommandId!)).toMatchObject({
+        request: { publicCommandId: result.id, content, originalRequest: result.request },
+        receipt: { state: 'decided', businessCommandId: businessId },
+      });
+      expect(await store.getCommand(businessId)).toMatchObject({
+        status: 'applied',
+        request: { content },
+        receipt: { runId: run.id },
+      });
+    }
     return {
       result,
       model: fixed,
       execution: (await store.listExecutions('s', 100)).find(
-        (e) => e.kind === 'tool' && e.originCommandId === `work${command}`,
+        (e) => e.kind === 'tool' && e.originCommandId === businessId,
       ),
     };
   };

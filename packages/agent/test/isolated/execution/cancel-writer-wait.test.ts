@@ -134,7 +134,7 @@ async function fixture(mode: 'model' | 'tool') {
     get commandId() {
       return commandId;
     },
-    async start(id: string) {
+    async start(id: string, content = 'wait for cancellation') {
       commandId = id;
       runModelCalls = 0;
       started = gate();
@@ -144,7 +144,7 @@ async function fixture(mode: 'model' | 'tool') {
         commandId: id,
         sessionId: 's',
         subjectId: 'owner',
-        request: { kind: 'run.start', content: 'wait for cancellation' },
+        request: { kind: 'run.start', content },
       });
       await started.promise;
       const command = await store.getCommand(id);
@@ -305,7 +305,33 @@ test('replaying a committed session.cancel command while a writer is held cannot
     await f.start('first-run');
     const first = await f.cancel('session', 'old-session-cancel');
     await f.runtime.waitForCommand('first-run', { timeoutMs: 5000 });
-    await f.start('second-run');
+    await f.start('second-run', 'New task: wait for cancellation');
+    const second = (await f.store.getCommand('second-run'))!;
+    expect(second).toMatchObject({
+      status: 'applied',
+      request: { kind: 'run.start', content: 'New task: wait for cancellation' },
+    });
+    const receipt = second.receipt as { businessCommandId: string; humanInputCommandId: string };
+    expect(receipt.businessCommandId).toBeString();
+    expect(receipt.businessCommandId).not.toBe(second.id);
+    expect(await f.store.getCommand(receipt.humanInputCommandId)).toMatchObject({
+      request: { publicCommandId: second.id, content: 'New task: wait for cancellation' },
+    });
+    expect(await f.store.getRun(f.runId)).toMatchObject({
+      originCommandId: receipt.businessCommandId,
+      rootWorkCommandId: second.id,
+    });
+    const input = await f.runtime.readModelInput({
+      expectedStoreId: f.expectedStoreId,
+      sessionId: 's',
+      subjectId: 'owner',
+      executionId: f.executionId,
+    });
+    expect(
+      input.request.messages.find(
+        (message) => message.content === 'New task: wait for cancellation',
+      )?.sourceIds,
+    ).toEqual([receipt.businessCommandId]);
     f.lock();
     replay = f.cancel('session', 'old-session-cancel');
     expect(await f.waitAbort(250)).toBe(false);

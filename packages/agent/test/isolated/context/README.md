@@ -6,7 +6,7 @@
 
 ## Selected context pagination
 
-`selection-runtime.test.ts` drives the actual single Loop through 201 paired Tools and 101 counted Jobs. The next Model request exhausts both selected-message and result-source cursors. A rewind retaining consumed sources preserves their exact IDs; an earlier rewind excludes them while raw history and original immutable executions remain readable. The external ledger stays at 101 starts throughout.
+`selection-runtime.test.ts` drives the actual single Loop through 201 paired Tools and 101 counted Jobs. The next Model request exhausts both selected-message and result-source cursors. After a rewind retaining consumed sources, 101 exact public Includes reuse their original IDs without Model or Job work; an explicit new task reads all of them. The original-work continuation fence remains intact. An earlier rewind excludes both the sources and their Include qualification while raw history and original immutable executions remain readable. The external ledger stays at 101 starts throughout, with exactly four Model requests and the original immutable body/hash checks.
 
 [active-include.test.ts](active-include.test.ts) 使用真实 Core/SQLite 的已派发 Model 与 approval 屏障：活动选入受理但未应用时来源不出现在 selected context/resultAcceptance；旧 Model 原请求不变，下一 Model 使用准确唯一低信任 source。原 Tool 只执行一次，精确取消选入零后续 source，审批中的旧未派发 Tool 收束为 superseded 且零效果。store.test.ts 另外覆盖真实应用事务触发器 rollback、同 ID 重试零新事件、旧 Run 不投向后来前台；原 idle/restore/Rewind 证据仍保留。
 
@@ -17,3 +17,5 @@
 [compression.test.ts](compression.test.ts) 使用真实 Core/SQLite/Artifact 和固定 Model，证明手动/自动共用原 Loop、独立 Model usage、贡献→压缩→必要完成策略顺序、冲突/权限零调用、原始历史与摘要范围、完整 ≥17MiB Fork/原正文 cold readonly、损坏正文零下一 Provider。真实 Provider 故障、取消 partial、新输入、压缩/最终 Run SQL rollback 都不能发布摘要；无新历史不再次收费，reset 安全预检/unsafe 保点/零 Provider/noop 有实际断言。默认算法与上层客户端装配不由这些 Core fixture 证明。
 
 同一 fixture 还验证完整大 focus/算法说明、可信摘要拒绝保旧点、自动 Provider 失败后旧上下文继续、未变化输入不重复压缩、新输入和手动重试。持久 SQL 失败不会降级成安全继续；未知 Part 可读历史但不进入下一 Model。reset 使用实际 Step capability 快照，目录变化仍保旧点，不能跳过 freshness。
+
+压缩 fixture 的后来独立业务输入明确表达新任务，同工作追加则引用原工作，Run 从原公开回执准确追踪派生业务命令；不把公开输入 ID 当成技术 Run origin。`append` 安全反例用可信 Store 的 accept/apply 向准确维护 Run 真实提交新 Message 后再验证零生效摘要；公开人类输入在维护期间排队并不等于压缩输入已新增 Message。原 6 秒 barrier、测试预算与 finally 释放保持。

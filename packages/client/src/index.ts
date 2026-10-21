@@ -103,6 +103,8 @@ import {
 } from './sse';
 
 export { type CallerCommandRequest, canonicalCallerCommandRequest } from './command-request';
+export type { OrdinaryCommandApplication, OrdinaryCommandObservation } from './ordinary-command';
+export { readOrdinaryCommandApplication } from './ordinary-command';
 /** Closed, non-secret configuration intent for a Native original-operation journal. */
 export function canonicalConfigurationRequest(
   kind: 'model' | 'provider',

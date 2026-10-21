@@ -979,7 +979,7 @@ test('actual ordinary Model Tool refresh seals its own scope and both original g
       sessionId: 's',
       subjectId: 'owner',
       commandId: 'model-refresh',
-      request: { kind: 'run.start', content: 'ordinary Tool refresh' },
+      request: { kind: 'run.start', content: 'New task: ordinary Tool refresh' },
     });
     await f.runtime.waitForCommand('model-refresh', { timeoutMs: 5000 });
     const executions = await f.store.listExecutions('s');

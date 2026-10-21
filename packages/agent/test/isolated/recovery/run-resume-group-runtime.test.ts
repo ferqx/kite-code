@@ -183,7 +183,32 @@ for (const mode of [
                   return typeof value === 'function' ? value.bind(target) : value;
                 },
               })
-            : store;
+            : mode === 'group_new_descendant'
+              ? new Proxy(store, {
+                  get(target, key) {
+                    if (key === 'registerHumanCommand')
+                      return async (input: Parameters<Store['registerHumanCommand']>[0]) => {
+                        const command = await target.registerHumanCommand(input);
+                        if (input.commandId === 'human-with-live-descendant') {
+                          const receipt = command.receipt as { humanInputCommandId: string };
+                          const raw = (await target.getCommand(receipt.humanInputCommandId))!;
+                          // Fix the real SQL ordering: idle preparation wins before
+                          // intake seals the explicit business decision.
+                          await target.beginHumanInputProcessing({
+                            expectedStoreId: raw.originStoreId,
+                            sessionId: raw.sessionId,
+                            subjectId: raw.subjectId,
+                            inputCommandId: raw.id,
+                            inputDigest: raw.requestDigest,
+                          });
+                        }
+                        return command;
+                      };
+                    const value = Reflect.get(target, key);
+                    return typeof value === 'function' ? value.bind(target) : value;
+                  },
+                })
+              : store;
         runtime = createRuntime({
           store: runtimeStore,
           artifacts: createArtifactStore({ profile, store }),
@@ -281,14 +306,42 @@ for (const mode of [
               sessionId: 's',
               subjectId: 'owner',
               commandId: 'human-with-live-descendant',
-              request: { kind: 'run.start', content: 'human during descendant' },
+              request: { kind: 'run.start', content: 'New task: human during descendant' },
             });
             expect(command.status).toBe('accepted');
-            await until(async () =>
-              (await store!.getView('s')).runs.some(
-                (run) => run.originCommandId === command.id && run.status === 'completed',
-              ),
+            await until(async () => (await store!.getCommand(command.id))?.status === 'applied');
+            const applied = (await store.getCommand(command.id))!;
+            const application = applied.receipt as { runId: string; businessCommandId: string };
+            const business = (await store.getCommand(application.businessCommandId))!;
+            expect(business).toMatchObject({
+              status: 'applied',
+              request: { content: 'New task: human during descendant' },
+              rootWorkCommandId: command.id,
+              receipt: { runId: application.runId },
+            });
+            await until(
+              async () => (await store!.getRun(application.runId))?.status === 'completed',
             );
+            expect(await store.getRun(application.runId)).toMatchObject({
+              originCommandId: business.id,
+              rootWorkCommandId: command.id,
+            });
+            const model = (await store.listExecutions('s')).filter(
+              (execution) => execution.runId === application.runId && execution.kind === 'model',
+            );
+            expect(model).toHaveLength(1);
+            expect(model[0]).toMatchObject({ status: 'succeeded', originCommandId: business.id });
+            const source = await runtime.readModelInput({
+              expectedStoreId: ready.expectedStoreId,
+              sessionId: 's',
+              subjectId: 'owner',
+              executionId: model[0]!.id,
+            });
+            expect(source.request.messages).toContainEqual({
+              role: 'user',
+              content: 'New task: human during descendant',
+              sourceIds: [business.id],
+            });
             expect((await store.getExecution(grand.id))!.status).toBe('running');
             expect((await store.getSession('s'))!.ownerGeneration).toBe(
               supervisionOwner!.ownerGeneration,
@@ -326,7 +379,183 @@ for (const mode of [
         }
         expect(await runtime.resumeRun(input)).toEqual(receipt);
         const rootAfter = await store.getView('s');
-        expect(rootAfter.runs).toHaveLength(mode === 'group_new_descendant' ? 2 : 1);
+        if (mode === 'group_new_descendant') {
+          const publicInput = (await store.getCommand('human-with-live-descendant'))!;
+          const application = publicInput.receipt as {
+            humanInputCommandId: string;
+            decisionCommandId: string;
+            businessCommandId: string;
+            runId: string;
+          };
+          expect(publicInput).toMatchObject({
+            status: 'applied',
+            originStoreId: ready.expectedStoreId,
+            sessionId: 's',
+            subjectId: 'owner',
+            receipt: { outcome: 'human_input_applied' },
+          });
+          const raw = (await store.getCommand(application.humanInputCommandId))!;
+          const rawFact = raw.receipt as { processingCommandId: string };
+          expect(raw).toMatchObject({
+            kind: 'human.input',
+            status: 'applied',
+            originStoreId: ready.expectedStoreId,
+            sessionId: 's',
+            subjectId: 'owner',
+            request: {
+              publicCommandId: publicInput.id,
+              content: 'New task: human during descendant',
+              originalRequest: publicInput.request,
+            },
+            receipt: {
+              state: 'decided',
+              applicationState: 'applied',
+              decisionCommandId: application.decisionCommandId,
+              businessCommandId: application.businessCommandId,
+              processingReadOnlyTools: [],
+              originalSelection: { rootWorkCommandId: 'work' },
+            },
+          });
+          const decision = (await store.getCommand(application.decisionCommandId))!;
+          expect(decision).toMatchObject({
+            kind: 'human.input.decision',
+            status: 'applied',
+            originStoreId: ready.expectedStoreId,
+            sessionId: 's',
+            subjectId: 'owner',
+            rootWorkCommandId: publicInput.id,
+            request: {
+              inputCommandId: raw.id,
+              inputDigest: raw.requestDigest,
+              proposal: {
+                relation: 'independent_work',
+                purpose: 'work',
+                basis: { kind: 'explicit_text', instruction: 'New task: human during descendant' },
+              },
+            },
+            receipt: {
+              businessCommandId: application.businessCommandId,
+              requiresReadOnlyProcessing: false,
+            },
+          });
+          const business = (await store.getCommand(application.businessCommandId))!;
+          expect(business).toMatchObject({
+            status: 'applied',
+            originStoreId: ready.expectedStoreId,
+            sessionId: 's',
+            subjectId: 'owner',
+            rootWorkCommandId: publicInput.id,
+            receipt: {
+              humanInputCommandId: raw.id,
+              decisionCommandId: decision.id,
+              runId: application.runId,
+            },
+          });
+          const processing = (await store.getCommand(rawFact.processingCommandId))!;
+          expect(processing).toMatchObject({
+            kind: 'run.start',
+            status: 'applied',
+            originStoreId: ready.expectedStoreId,
+            sessionId: 's',
+            subjectId: 'owner',
+            rootWorkCommandId: rawFact.processingCommandId,
+            request: { kind: 'run.start', content: 'New task: human during descendant' },
+          });
+          const processingRunId = (processing.receipt as { runId: string }).runId;
+          expect(new Set([ready.runId, application.runId, processingRunId]).size).toBe(3);
+          expect(rootAfter.runs.map((run) => run.id).sort()).toEqual(
+            [ready.runId, application.runId, processingRunId].sort(),
+          );
+          expect(rootAfter.runs.find((run) => run.id === ready.runId)).toMatchObject({
+            originCommandId: 'work',
+            rootWorkCommandId: 'work',
+            status: 'completed',
+          });
+          expect(rootAfter.runs.find((run) => run.id === application.runId)).toMatchObject({
+            originCommandId: business.id,
+            rootWorkCommandId: publicInput.id,
+            status: 'completed',
+          });
+          expect(rootAfter.runs.find((run) => run.id === processingRunId)).toMatchObject({
+            originCommandId: processing.id,
+            rootWorkCommandId: processing.id,
+            status: 'completed',
+            reason: null,
+            configuration: {
+              tools: [],
+              extensions: [],
+              snapshot: {
+                kind: 'human_input_processing',
+                inputCommandId: raw.id,
+                inputDigest: raw.requestDigest,
+                processingContext: {
+                  inputCommandId: raw.id,
+                  inputDigest: raw.requestDigest,
+                  content: 'New task: human during descendant',
+                },
+              },
+            },
+          });
+          const processingExecutions = rootAfter.executions.filter(
+            (execution) => execution.runId === processingRunId,
+          );
+          // The exact sealed input decision ends this obsolete no-tool round
+          // normally. Its sole Model intent records Core's known pre-dispatch
+          // refusal; no response or second business input is manufactured.
+          expect(processingExecutions).toHaveLength(1);
+          for (const execution of processingExecutions) {
+            expect(execution).toMatchObject({
+              kind: 'model',
+              status: 'failed',
+              originCommandId: processing.id,
+              originStoreId: ready.expectedStoreId,
+              rootWorkCommandId: processing.id,
+              sessionId: 's',
+              result: {
+                code: 'input_processing_decided',
+                dispatchCommitted: false,
+                incomplete: true,
+              },
+              input: { tools: [] },
+              decisionSource: {
+                continuation: {
+                  runId: processingRunId,
+                  humanInputProcessingContext: {
+                    inputCommandId: raw.id,
+                    inputDigest: raw.requestDigest,
+                    content: 'New task: human during descendant',
+                  },
+                },
+                humanInputInterpretation: {
+                  inputCommandId: raw.id,
+                  inputDigest: raw.requestDigest,
+                },
+                toolBindings: [],
+              },
+            });
+            const dispatch = sql
+              .query('SELECT dispatched,dispatch_authorization_json FROM execution WHERE id=?')
+              .get(execution.id);
+            expect(dispatch).toEqual({ dispatched: 0, dispatch_authorization_json: null });
+          }
+          const beforeReplayLedger = readFileSync(join(directory, 'ledger'), 'utf8');
+          const beforeReplay = await store.getView('s');
+          expect(
+            await runtime.submitCommand({
+              expectedStoreId: ready.expectedStoreId,
+              sessionId: 's',
+              subjectId: 'owner',
+              commandId: publicInput.id,
+              request: { kind: 'run.start', content: 'New task: human during descendant' },
+            }),
+          ).toEqual(publicInput);
+          expect(await runtime.resumeRun(input)).toEqual(receipt);
+          expect(await store.getCommand(raw.id)).toEqual(raw);
+          expect(await store.getCommand(decision.id)).toEqual(decision);
+          expect(await store.getCommand(business.id)).toEqual(business);
+          expect(await store.getView('s')).toEqual(beforeReplay);
+          expect(readFileSync(join(directory, 'ledger'), 'utf8')).toBe(beforeReplayLedger);
+        } else expect(rootAfter.runs).toHaveLength(1);
         for (const carrier of carriers) {
           const current = await store.getExecution(carrier.id);
           expect(current).toMatchObject({
@@ -368,6 +597,8 @@ for (const mode of [
           );
         }
         const ledger = readFileSync(join(directory, 'ledger'), 'utf8').trim().split('\n');
+        if (mode === 'group_new_descendant')
+          expect(ledger.filter((line) => line === 'dispose-config:one')).toHaveLength(1);
         if (mode === 'group_approval')
           expect(ledger.filter((line) => line.startsWith('effect:'))).toHaveLength(3);
         expect(ledger.filter((line) => line === 'parent-model')).toHaveLength(

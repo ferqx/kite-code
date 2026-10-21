@@ -15,6 +15,11 @@ interface Page {
   getByText(text: string, options: { exact: boolean }): Locator;
   reload(): Promise<void>;
   evaluate<T>(fn: () => Promise<T>): Promise<T>;
+  waitForFunction<T>(
+    fn: (input: T) => unknown,
+    input: T,
+    options?: { timeout?: number },
+  ): Promise<unknown>;
 }
 interface ElectronApp {
   process(): import('node:child_process').ChildProcess;
@@ -118,6 +123,21 @@ try {
   assert.deepEqual(rolledBack.lockIdentity, rollbackHeld.lockIdentity);
   await page.reload();
   await page.getByRole('button', { name: 'Later current session', exact: true }).click();
+  await page.waitForFunction(
+    async ({ storeId, title }) => {
+      const current = (await window.kiteNative!.request({
+        method: 'state',
+        generation: 1,
+      })) as NativeState;
+      return (
+        current.selection?.storeId === storeId &&
+        current.selection.session.id === 's' &&
+        current.selection.session.title === title
+      );
+    },
+    { storeId: originalStoreId, title: 'Later current session' },
+    { timeout: 10000 },
+  );
   const rollbackState = (await page.evaluate(
     async () => await window.kiteNative!.request({ method: 'state', generation: 1 }),
   )) as NativeState;
@@ -194,6 +214,21 @@ try {
   assert.deepEqual(restored.lockIdentity, held.lockIdentity);
   await page.reload();
   await page.getByRole('button', { name: 'Original backup session', exact: true }).click();
+  await page.waitForFunction(
+    async ({ storeId, title }) => {
+      const current = (await window.kiteNative!.request({
+        method: 'state',
+        generation: 1,
+      })) as NativeState;
+      return (
+        current.selection?.storeId === storeId &&
+        current.selection.session.id === 's' &&
+        current.selection.session.title === title
+      );
+    },
+    { storeId: restored.storeId as string, title: 'Original backup session' },
+    { timeout: 10000 },
+  );
   const state = (await page.evaluate(
     async () => await window.kiteNative!.request({ method: 'state', generation: 1 }),
   )) as NativeState;

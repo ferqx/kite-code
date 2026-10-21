@@ -12,6 +12,14 @@
 
 父子权限交集沿 [Runtime.childPermissions](../runtime.ts) 保留每一方的实际策略。自动审核策略同时提供 review 和审核不可用时的人工 fallback；fallback 不表示每次审核成功后还必须人工批准。只有某一方明确 `approval` 且没有 review，或 review 明确 `requireApproval=true`，才形成强制人工 ceiling，与原 [constraints](constraints.ts) 的组合规则一致。真实 reviewer 的 `approve_once` 仍不能覆盖硬拒绝、父人工要求或 Workflow minimum；审阅失败继续走原人工／拒绝合同，不制造自动成功。
 
+审核返回 `ask_user` 后，真实人工接纳只提供原 Interaction 的决定证明，不产生 review grant。[Execution](../execution/index.ts) 保留同一 policy revision 下准确审核引用供最终请求复核；缺少人工证明仍拒绝派发，revision 改变仍丢弃旧引用。这样最终资源内核验不会因丢失引用而重复启动审核，也不会把审核建议当成人工批准。[child 整文件](../../test/isolated/child/bindings.test.ts)核真实人工前零效果、去除人工证明后的 Store CAS 拒绝与原 cursor 不变，以及完整证明下仅一次派发；审批、动态模式和真实崩溃回归继续保留各自最终核验。
+
+子孙的审批模式沿真实根 Session 当前 applied 控制动态读取，`accept_edits/auto/full` 在同一 Run 内双向生效；Service 的 `permissionPolicy` 注入保留能力／信任上限，`permissions` 注入保留额外硬拒绝与明确人工要求，均不能取代根当前模式及派发 read set。局部模式不传播到其他根，单次和同命令批准仍绑定原 Session／Execution。已派发效果保留原真实授权，不因切换模式重放或声称 OS 范围已热修改。
+
+[InteractionGate](../execution/interactions.ts) 和 [Execution](../execution/index.ts) 通过已有持久 change cursor 等待模式变更，人工／审核／资源等待都在原未派发 Execution 重核；通知丢失或 cursor 压缩只触发事实重读。旧卡保留原 request、source 和 answer，准确 `interaction.invalidate` 回执记录 `permission_policy_changed`，旧按钮以 cancelled 失效，不伪造批准。原审核由 `authorization.invalidate` 记录准确 target／review／当前策略；SQL 仅在当前策略回执匹配时忽略该旧要求。资源先释放再重新审核／请求人工，不持有执行资源等待答案。只有可证实的持久模式变化允许这条重判路径；任意业务 revision／审核正文变化、信任撤销、取消、fence、拒绝及 unknown 保留原失败关闭合同。
+
+[动态模式测试](../../test/isolated/execution/live-permission-mode.test.ts)使用真实 Runtime／SQLite，覆盖原卡自动关闭、最终派发竞争、未消费批准、迟到审核、资源等待、三层可信子权限、另一根隔离及只读拒绝；[Service 权限装配](../../../../apps/service/test/isolated/permission-configuration.test.ts)另核默认和注入策略的实际 SDK 请求、同 Run 模式切换及文件效果。测试不替代完整客户端卡片显示或所有平台恢复资格。
+
 [files-request.ts](files-request.ts) 只为准确绝对路径 Files Tool 版本1建立当前物理父目录和目标身份摘要，并校验最终实际 `dispatchAuthorization` 的全部父子叶证明。身份由 Files 引擎的可信 `inspectIdentity` 提供，Windows 不把 Node stat 身份与原生 volume／128-bit FileID 混比；派发重核使用实际已锚定的父对象。请求批准模式对外部写入要求人工；自动审核交实际模型决定；完全访问只移除普通审批，仍保 protected/private、危险目标及未合格平台拒绝。读与 mutation 的完整路径、CAS、checkpoint 和实际 Windows 验证范围归 [Files owner](../tools/files/README.md#绝对用户文件)。
 
 本次 macOS 当前工作树复用 [policy](../../test/isolated/permissions/policy.test.ts)、[Task 分类](../../test/isolated/permissions/task-request.test.ts) 和 [只读审阅上下文](../../test/isolated/permissions/review-context.test.ts) 的实际叶证据；另运行 [Task 整文件](../../test/isolated/business/task/task.test.ts)，11 项、74 断言通过，其中真实父人工／子自动组合证明审核后零效果、实际批准后效果一次且不重放 reviewer。原 [subagent 终端整文件](../../../../tests/tui-system/scenarios/subagent-approval.test.ts) 9 项、120 断言通过，证明自动审核实际外部写入与人类拒绝／取消。局部证据不代替全体客户端或发布门禁。
@@ -37,3 +45,5 @@ Shell 与绝对路径 Files 的最终证明共用内部 [dispatch-scope](dispatc
 [原策略测试](../../test/isolated/permissions/policy.test.ts)、[独立解析与资产篡改测试](../../test/isolated/permissions/shell-command-policy.test.ts)、[独立范围测试](../../test/isolated/permissions/shell-scoped-permissions.test.ts)从原 Service owner 迁入，原用例及断言保持；策略测试另通过真实 Core 核同名扩展不能借只读权限、Workflow Job 不降格。实际 macOS [Service Shell](../../../../apps/service/test/isolated/shell-configuration.test.ts)和[网络审批](../../../../apps/service/test/isolated/web-permissions.test.ts)继续验证正式调用链。边界检查沿公开导出和 barrel 拒绝本模块反向依赖 Service、Service 直接解析依赖或重新实现原工厂。
 
 Linux/Windows 真实执行依用户安排后置，Windows 正式 Shell 后端仍缺失；发布 RSS 稳定性、完整 Runtime 观测资格及 V1.3 阶段退出门禁保留。当前开发阶段的正常运行和内存稳定证据不等同于取得这些正式资格，源码迁移和本机通过也不解除它们。
+
+[真实 pending approval SIGKILL 回归](../../test/isolated/recovery/live-approval-crash.test.ts)在审批卡和原 planned Tool 已耐久后杀死自有进程（核 SIGKILL/137），只读重开保持原卡/Run/执行和 cursor、模型 ledger 不增长。随后持久根模式由请求批准改为 Full，冷 Runtime 观察仍不准备 Provider；错误主体显式恢复被拒，准确原 Run 显式恢复才读取当前 applied control revision、同事务失效旧卡并派发原 Tool。外置 ledger 核原效果一次、已成功原 Model 不重放、重复同一恢复不增效果；原 request/source 不变、answer 仍 null，唯一失效回执保准确原revision/当前controls。该 fixture只验证这一实际进程丢失与模式变化边界，不替代其他平台或所有自动审核崩溃场景。

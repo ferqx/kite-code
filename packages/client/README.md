@@ -1,5 +1,13 @@
 # Client
 
+## 普通输入的业务回执
+
+[readOrdinaryCommandApplication](src/ordinary-command.ts)只读解析原公开 Command。`human_input_applied` 沿相等的 `businessCommandId/sourceCommandId` 读取同 Store／Session／subject 的已应用业务 Command，并核其真实 Run；活动补充沿业务 steer 回执保留原 Run，新业务 Run 核实际 origin。公开 ID 不必等于 Run.originCommandId。`human_input_observed` 可在顶层 runId=null 时沿 observation 核真实 succeeded Model／Run，并返回已保存 answer／clarification；明确控制没有 Model 观察时不补造 Run 或答案。解析不提交意图、不授权派发。[纯边界测试](test/ordinary-command.test.ts)覆盖业务身份、活动补充、外来作用域、伪造关联和进度观察；实际 HTTP／SQLite 证据归 [CLI 测试](../../apps/cli/test/ordinary-command-http.test.ts)。
+
+公开输入仍为 `accepted`、但已封存 `human_input_unresolved` 观察时，同一 helper 可返回准确澄清；它要求原输入和决定 ID、空业务 Command/Run，以及可核实的成功 Model/所属 Run。这里返回的 Run 只证明解释出处，不表示业务已准入。尚未解释的 accepted 仍返回 null，缺失或外来观察拒绝；读取不把原命令改为 applied，也不创建 Interaction、取消或替代提交。
+
+真实人类输入即使由技术 `input.steer` 提交，也可能经决定成为独立工作。此时原 targetRunId 仍作为原始观察保留，实际新 Run 由已封存业务 Command 的应用回执核对；不要求它等于旧技术目标。没有这条人类决定链的旧直接 steer 仍必须核原 targetRunId，业务主体、Store、Session 和实际 origin 校验保持。
+
 ## 模型尝试与原工作身份
 
 公共 Execution 可保留原 `rootWorkCommandId`／`rootWorkSeq`，以及 Model 的 `modelRetry`：准确失败前驱、从 2 开始的实际 attempt、三类已定义原因和可空 `maxAttempts`。新执行的 null 表示没有本地次数上限，历史有限数字仍可读。字段沿同一 Service schema 生成并验证；缺字段不补重试事实，不公开私有 `decisionSource`、请求正文或凭据。TUI 在同 Store／Session／Run／原工作内关联前驱，null 时不显示虚构分母；Client 不执行模型重试，也不因观察到失败重发 Command。[真实 HTTP／生成 validator 回归](../../apps/service/test/isolated/long-running-compression.test.ts)核同一 Run 的第六次尝试与 null。实际尝试与资格归 [Agent](../agent/README.md)和[模型适配器](../ai/README.md)。
@@ -117,7 +125,7 @@ Native `listWorkspaceDirectory({storeId,afterSeq?,upperSeq?,limit?},{signal?})` 
 
 `listAllWorkspaces({signal?})`、`listAllSessions({workspaceId?,signal?})` 明确穷尽固定 upper 的所有页，没有任意总项目截断。只有完整成功才返回集合；重复 ID、范围/身份改变、游标冲突或 dispose/迟到页均失败，不发布前缀、不重绑定旧读取。原 `listWorkspaces/listSessions` 保留当前页兼容入口，不能用于完整目录或退出检查。Web 完整目录与 Native 完整退出检查应使用 listAll 方法。目录读取不执行模型、工具、恢复或 mutation，不推进 SSE 游标。
 
-`session_directory_activity` 提供 `listAllSessionDirectory({workspaceId?,signal?})`，返回全部 `{seq,session,activity}` 项。activity 仅含原事件时间、准确 active／latest Run 的有限状态、排队与待输入数量，不是控制权。生成响应 schema 为旧 producer 保留 activity 可省略；已宣告能力却缺失则拒绝。完整 reader 固定首 upper 和 snapshotCursor，`directory_changed` 时丢弃整个前缀从0重读，最多三次完整扫描；持续变化明确失败，消费者保上次事实。错误水位、缺事实、取消和迟到结果均不发布前缀。旧 listAllSessions 的身份集合合同与旧服务兼容保持，不能从它的返回值推测目录活动。
+`session_directory_activity` 提供 `listAllSessionDirectory({workspaceId?,signal?})`，返回全部 `{seq,session,activity}` 项。activity 提供原事件时间、准确 active／latest Run 的有限状态、排队与待输入数量，不是控制权。活动 Run 还可含 `executionOwner: held/unheld/unknown`：这是 SQL 页读取后原 root 系统锁的独立观察，不属于数据库同 cursor 的快照承诺，也不证明业务终态或资源清理完成；旧 producer 可省略该字段。生成响应 schema 为旧 producer 保留 activity 可省略；已宣告能力却缺失则拒绝。完整 reader 固定首 upper 和 snapshotCursor，`directory_changed` 时丢弃整个前缀从0重读，最多三次完整扫描；持续变化明确失败，消费者保上次事实。错误水位、缺事实、取消和迟到结果均不发布前缀。旧 listAllSessions 的身份集合合同与旧服务兼容保持，不能从它的返回值推测目录活动。
 
 [SDK 目录反例](test/directory.test.ts) 核对高于 Number 精度的固定上界、闭合输入、未来字段、错误身份/重复项、dispose 后迟到页，另核快照漂移／缺事实／坏时间和持续变化；[真实目录链路](../../tests/isolated/unified-agent/directory.test.ts) 另用实际创建的超过 200 项验证 Native/Browser 的完整身份、workspace SQL 过滤、真实事件时间与冷 readonly 读取。
 

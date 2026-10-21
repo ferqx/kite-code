@@ -107,9 +107,9 @@ test.skipIf(process.platform !== 'darwin')(
               message.role === 'user' &&
               [
                 'Original actual user source',
-                'Qualifying second settled user turn',
-                'Explicit follow-up during original compression',
-                'Next explicit user',
+                'New task: Qualifying second settled user turn',
+                'New task: Explicit follow-up during original compression',
+                'New task: Next explicit user',
               ].includes(message.content),
           )?.content;
         if (!compression && !task) throw Error('native_compression_original_task_unavailable');
@@ -151,7 +151,7 @@ test.skipIf(process.platform !== 'darwin')(
                               ? 'Factual recorded summary of original user and answer'
                               : task === 'Original actual user source'
                                 ? 'Original actual answer with preserved source'
-                                : task === 'Qualifying second settled user turn'
+                                : task === 'New task: Qualifying second settled user turn'
                                   ? 'Second actual answer completing the settled history'
                                   : 'Next actual answer',
                           },

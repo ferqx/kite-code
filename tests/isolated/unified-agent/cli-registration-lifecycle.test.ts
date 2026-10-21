@@ -75,10 +75,18 @@ test.skipIf(process.platform !== 'darwin')(
           .find(
             (message) =>
               message.role === 'user' &&
-              ['完整 Native CLI 申请\r\n中🪁', 'Registered TUI task'].includes(message.content),
+              [
+                '完整 Native CLI 申请\r\n中🪁',
+                'New task: 完整 Native CLI 申请\r\n中🪁',
+                'New task: Registered TUI task',
+              ].includes(message.content),
           )?.content;
         if (content === undefined) return new Response('unexpected original work', { status: 500 });
-        expect(['完整 Native CLI 申请\r\n中🪁', 'Registered TUI task']).toContain(content);
+        expect([
+          '完整 Native CLI 申请\r\n中🪁',
+          'New task: 完整 Native CLI 申请\r\n中🪁',
+          'New task: Registered TUI task',
+        ]).toContain(content);
         calls++;
         const registrationBefore = readCLIRegistration(
           readCLIRegistration(nativePrefix, true)!.terminalPrefix,
@@ -109,7 +117,7 @@ test.skipIf(process.platform !== 'darwin')(
           frame(
             {
               content:
-                content === 'Registered TUI task'
+                content === 'New task: Registered TUI task'
                   ? 'Registered TUI complete'
                   : 'Registered Native complete',
             },
@@ -260,7 +268,11 @@ test.skipIf(process.platform !== 'darwin')(
           'work',
           's',
           '--input',
-          JSON.stringify({ ...body, commandId: 'native-direct-work' }),
+          JSON.stringify({
+            ...body,
+            commandId: 'native-direct-work',
+            content: `New task: ${body.content}`,
+          }),
         ],
         `${installed.root}/bin:${standalone.root}/bin:/usr/bin:/bin`,
       );
@@ -287,8 +299,8 @@ try:
  startup_wait('› 信任此工作区并继续')
  os.write(master,b'\\r')
  startup_wait('Registered Native complete')
- os.write(master,b'Registered TUI task')
- read_until('Registered TUI task',10)
+ os.write(master,b'New task: Registered TUI task')
+ read_until('New task: Registered TUI task',10)
  os.write(master,b'\\r')
  read_until('Registered TUI complete',10)
  os.write(master,b'\\x11');end=time.monotonic()+5
@@ -327,7 +339,7 @@ finally:
           command: { originStoreId: string; status: string; requestDigest: string };
           metadata: { storeId: string; lastChangeCursor: string };
           session: { workspaceId: string };
-          commands: { id: string; receipt: { runId: string } }[];
+          commands: { id: string; receipt: { runId: string; businessCommandId?: string } }[];
           runs: {
             id: string;
             originCommandId: string;
@@ -346,11 +358,16 @@ finally:
         value.runs.forEach((run, index) => {
           expect(run).toMatchObject({
             id: value.commands[index]!.receipt.runId,
-            originCommandId: commandIds[index],
+            originCommandId: value.commands[index]!.receipt.businessCommandId ?? commandIds[index],
             originStoreId: storeId,
             sessionId: 's',
             status: 'completed',
           });
+          if (index === 0) expect(run.originCommandId).toBe(commandIds[index]!);
+          else {
+            expect(value.commands[index]!.receipt.businessCommandId).toBeString();
+            expect(run.originCommandId).not.toBe(commandIds[index]!);
+          }
         });
       };
       assertRuns(original);

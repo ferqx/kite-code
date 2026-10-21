@@ -150,7 +150,7 @@ test('Cookie Browser reads actual default checkpoints, keyset preview and origin
     ).toBe('applied');
     for (const [commandId, content] of [
       ['first', 'FIRST_ACTUAL_RUN: read then update original and create first file'],
-      ['second', 'SECOND_ACTUAL_RUN: read then update original and create second file'],
+      ['second', 'New task: SECOND_ACTUAL_RUN: read then update original and create second file'],
     ] as const) {
       await client.startRun('s', {
         expectedStoreId: storeId,
@@ -162,7 +162,8 @@ test('Cookie Browser reads actual default checkpoints, keyset preview and origin
         () => client.getCommand(commandId),
         (value) => value.status === 'applied',
       );
-      const runId = (command.receipt as { runId: string }).runId;
+      const application = command.receipt as { runId: string; businessCommandId?: string };
+      const runId = application.runId;
       const run = await until(
         () => client.getRun(runId),
         (value) => ['completed', 'failed', 'cancelled', 'interrupted'].includes(value.status),
@@ -172,6 +173,8 @@ test('Cookie Browser reads actual default checkpoints, keyset preview and origin
           'actual_default_files_run_failure',
           JSON.stringify({ command, run, view: await client.getView('s') }),
         );
+      expect(run.originCommandId).toBe(application.businessCommandId ?? commandId);
+      expect(run.rootWorkCommandId).toBe(commandId);
       expect(run.status).toBe('completed');
     }
     const actualView = await client.getView('s');
@@ -341,13 +344,14 @@ test('Cookie Browser reads actual default checkpoints, keyset preview and origin
     expect(immutablePoint.value as unknown as FileCheckpoint).toEqual(point);
     expect(
       model.request.messages.some(
-        (message) => message.role === 'user' && message.content.startsWith('SECOND_ACTUAL_RUN'),
+        (message) =>
+          message.role === 'user' && message.content.startsWith('New task: SECOND_ACTUAL_RUN'),
       ),
     ).toBe(false);
     const currentUsers = (await reader.getView('s')).messages.filter(
       (message) => message.role === 'user',
     );
-    expect(currentUsers.at(-1)!.content.startsWith('SECOND_ACTUAL_RUN')).toBe(true);
+    expect(currentUsers.at(-1)!.content.startsWith('New task: SECOND_ACTUAL_RUN')).toBe(true);
     expect(
       currentUsers
         .find((message) => message.id === point.boundary.triggerMessageId)!

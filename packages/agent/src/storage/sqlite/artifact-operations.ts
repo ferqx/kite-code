@@ -1,7 +1,13 @@
+import { lstatSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { and, eq, sql } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/bun-sqlite';
-import { verifyPublishedArtifact } from '../../artifacts-files';
+import {
+  artifactPath,
+  verifyPublishedArtifact,
+  verifyPublishedArtifactSteps,
+} from '../../artifacts-files';
+import { assertNoSymlinkPath } from '../../platform/profile-identity';
 import type { Store } from '../port';
 import { AgentError, type ArtifactReference, type ArtifactScope } from '../types';
 import { isHumanBoundReviewRequest } from './authorization-review';
@@ -10,6 +16,74 @@ import { blobReferences, blobs } from './schema';
 
 type Register = Parameters<Store['registerArtifact']>[0];
 type Get = Parameters<Store['getArtifactReference']>[0];
+/** Private pre-transaction continuation. Never decoded from a Store argument. */
+export class ArtifactVerificationPending extends Error {}
+type Verification = {
+  input: Register;
+  chunks: Generator<unknown, void, void>;
+  identity: string;
+  complete: boolean;
+};
+const verifications = new WeakMap<SqliteOperations, Map<number, Verification>>();
+function artifactIdentity(profile: string, input: Register): string {
+  const path = artifactPath(profile, input.hash);
+  assertNoSymlinkPath(path);
+  const stat = lstatSync(path, { bigint: true });
+  if (!stat.isFile() || stat.size !== BigInt(input.size))
+    throw new AgentError('artifact_content_mismatch');
+  return [stat.dev, stat.ino, stat.size, stat.ctimeNs, stat.mtimeNs, stat.mode].join(':');
+}
+/** Called only when the original request is finally ACKed, successfully or otherwise. */
+export function disposeArtifactVerification(ops: SqliteOperations, requestId: number): void {
+  const pending = verifications.get(ops);
+  const state = pending?.get(requestId);
+  pending?.delete(requestId);
+  if (pending?.size === 0) verifications.delete(ops);
+  state?.chunks.return();
+}
+function verifyArtifact(ops: SqliteOperations, input: Register, requestId?: number): string {
+  const profile = dirname(ops.db.filename);
+  // Direct synchronous Operations callers retain the same complete validation.
+  if (requestId === undefined) {
+    const identity = artifactIdentity(profile, input);
+    verifyPublishedArtifact(profile, input.hash, input.size);
+    if (artifactIdentity(profile, input) !== identity)
+      throw new AgentError('artifact_content_mismatch');
+    return identity;
+  }
+  let pending = verifications.get(ops);
+  if (!pending) {
+    pending = new Map();
+    verifications.set(ops, pending);
+  }
+  let state = pending.get(requestId);
+  if (!state) {
+    state = {
+      input,
+      identity: artifactIdentity(profile, input),
+      chunks: verifyPublishedArtifactSteps(profile, input.hash, input.size),
+      complete: false,
+    };
+    pending.set(requestId, state);
+  }
+  if (state.input !== input) throw new AgentError('artifact_scope_invalid');
+  if (!state.complete) {
+    const until = performance.now() + 8;
+    for (let remaining = 64; remaining > 0; remaining--) {
+      if (state.chunks.next().done) {
+        state.complete = true;
+        break;
+      }
+      if (performance.now() >= until) break;
+    }
+    if (!state.complete) throw new ArtifactVerificationPending();
+  }
+  // Keep a completed full proof across an unstarted BEGIN wait, but never reuse it
+  // after the immutable object/path identity changed while other queries ran.
+  if (artifactIdentity(profile, input) !== state.identity)
+    throw new AgentError('artifact_content_mismatch');
+  return state.identity;
+}
 function validate(input: Get): void {
   if (
     !/^[A-Za-z0-9_-]{1,128}$/.test(input.refId) ||
@@ -124,7 +198,12 @@ function get(ops: SqliteOperations, input: Get, publishing = false): ArtifactRef
       }
     : null;
 }
-export function callArtifact(ops: SqliteOperations, method: string, args: unknown[]): unknown {
+export function callArtifact(
+  ops: SqliteOperations,
+  method: string,
+  args: unknown[],
+  requestId?: number,
+): unknown {
   const input = args[0] as Register;
   if (method === 'getArtifactReference' || method === 'getLegacyReviewArtifactReference') {
     ops.db.run('BEGIN');
@@ -157,8 +236,12 @@ export function callArtifact(ops: SqliteOperations, method: string, args: unknow
     [...input.mediaType].some((character) => character.charCodeAt(0) < 32)
   )
     throw new AgentError('artifact_metadata_invalid');
-  verifyPublishedArtifact(dirname(ops.db.filename), input.hash, input.size);
+  const verifiedIdentity = verifyArtifact(ops, input, requestId);
   return ops.tx(() => {
+    // BEGIN may itself wait for a writer. Recheck the private complete proof
+    // after that wait, before any registration effect, without whole-body IO.
+    if (artifactIdentity(dirname(ops.db.filename), input) !== verifiedIdentity)
+      throw new AgentError('artifact_content_mismatch');
     ops.identity(input.expectedStoreId);
     scope(ops, input, true);
 

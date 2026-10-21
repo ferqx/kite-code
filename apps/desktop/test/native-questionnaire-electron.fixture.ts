@@ -317,7 +317,7 @@ try {
   assert.equal(await (await fetch(`${control}/count`)).text(), '2');
   const cancelDraft = '  取消问卷前的主草稿\n雪🙂  ';
   const second = await start(
-    'Cancel only this Native questionnaire and continue its task',
+    '新任务：Cancel only this Native questionnaire and continue its task',
     cancelDraft,
     3,
   );

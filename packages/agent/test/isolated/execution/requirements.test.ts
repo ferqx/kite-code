@@ -146,17 +146,50 @@ async function fixture(
     runtime,
     model,
     base,
-    async submit(commandId = 'work') {
+    async submit(commandId = 'work', content = commandId) {
       await runtime.submitCommand({
         ...base,
         commandId,
-        request: { kind: 'run.start', content: commandId },
+        request: { kind: 'run.start', content },
       });
     },
     async done(commandId = 'work') {
       const command = await runtime.waitForCommand(commandId, { timeoutMs: 4000 });
       const runId = (command.receipt as { runId?: string })?.runId;
       return { command, run: runId ? await store.getRun(runId) : null };
+    },
+    async assertBusinessModel(commandId: string) {
+      const command = (await store.getCommand(commandId))!;
+      const receipt = command.receipt as {
+        businessCommandId: string;
+        humanInputCommandId: string;
+        runId: string;
+      };
+      const content = (command.request as { content: string }).content;
+      expect(command.status).toBe('applied');
+      expect(receipt.businessCommandId).toBeString();
+      expect(receipt.businessCommandId).not.toBe(commandId);
+      expect(await store.getCommand(receipt.humanInputCommandId)).toMatchObject({
+        request: { publicCommandId: commandId, content, originalRequest: command.request },
+      });
+      expect(await store.getCommand(receipt.businessCommandId)).toMatchObject({
+        status: 'applied',
+        request: { content },
+        receipt: { runId: receipt.runId },
+      });
+      expect(await store.getRun(receipt.runId)).toMatchObject({
+        originCommandId: receipt.businessCommandId,
+        rootWorkCommandId: commandId,
+      });
+      const execution = (await store.listExecutions('s')).find(
+        (item) => item.runId === receipt.runId && item.kind === 'model',
+      )!;
+      expect(execution.originCommandId).toBe(receipt.businessCommandId);
+      const input = await runtime.readModelInput({ ...base, executionId: execution.id });
+      expect(input.confirmation).toBe('succeeded');
+      expect(
+        input.request.messages.find((message) => message.content === content)?.sourceIds,
+      ).toEqual([receipt.businessCommandId]);
     },
     async close() {
       await runtime.close();
@@ -362,8 +395,9 @@ test('same Model decision cannot bypass new dispatch obligations; exact business
       expect(execution.status).toBe(waived ? 'succeeded' : 'failed');
       expect(execution.decisionSource).toMatchObject({ kind: 'model_decision' });
       if (waived) {
-        await f.submit('new-run');
+        await f.submit('new-run', 'New task: new-run');
         const next = await f.done('new-run');
+        await f.assertBusinessModel('new-run');
         expect(next.run!.requirements).toEqual([]);
         expect(next.run!.status).toBe('completed');
         await rejected(held!.requirements!.register([declaration('required')]), 'owner_changed');
@@ -629,8 +663,9 @@ test('background ordinary Job freezes original refs and retains per-Run evaluato
     expect(frozen.requirements.map((item) => item.requirementId)).toEqual(['first']);
     expect(frozen.requirements[0]!.runId).toBe(original.run!.id);
     expect(disposals[0]).toBe(0);
-    await f.submit('second');
+    await f.submit('second', 'New task: second');
     const newer = await f.done('second');
+    await f.assertBusinessModel('second');
     await bounded(disposed[1]!.promise);
     expect(newer.run!.status).toBe('completed');
     expect(newer.run!.id).not.toBe(original.run!.id);

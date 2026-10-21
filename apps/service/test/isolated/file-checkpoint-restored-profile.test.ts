@@ -167,7 +167,8 @@ test('default Files original capture survives public offline restore to a new pr
         () => client.getCommand(commandId),
         (value) => value.status === 'applied',
       );
-      const runId = (command.receipt as { runId: string }).runId;
+      const application = command.receipt as { runId: string; businessCommandId?: string };
+      const runId = application.runId;
       const run = await until(
         () => client.getRun(runId),
         (value) => ['completed', 'failed', 'cancelled', 'interrupted'].includes(value.status),
@@ -177,6 +178,8 @@ test('default Files original capture survives public offline restore to a new pr
           'actual_default_files_run_failure',
           JSON.stringify({ command, run, view: await client.getView('s') }),
         );
+      expect(run.originCommandId).toBe(application.businessCommandId ?? commandId);
+      expect(run.rootWorkCommandId).toBe(commandId);
       expect(run.status).toBe('completed');
     }
     const mutations = (await client.getView('s')).executions.filter(
@@ -436,21 +439,25 @@ test('default Files original capture survives public offline restore to a new pr
       expectedStoreId: storeB,
       commandId: 'second-in-b',
       kind: 'run.start',
-      content: 'SECOND_ACTUAL_RUN: read actual A postimage then update and create in B',
+      content: 'New task: SECOND_ACTUAL_RUN: read actual A postimage then update and create in B',
     });
     const newCommand = await until(
       () => current.getCommand('second-in-b'),
       (value) => value.status === 'applied',
     );
-    const runBId = (newCommand.receipt as { runId: string }).runId;
+    const applicationB = newCommand.receipt as { runId: string; businessCommandId?: string };
+    const businessB = applicationB.businessCommandId ?? newCommand.id;
+    const runBId = applicationB.runId;
     const newRun = await until(
       () => current.getRun(runBId),
       (value) => ['completed', 'failed', 'cancelled', 'interrupted'].includes(value.status),
     );
+    expect(newRun.originCommandId).toBe(businessB);
+    expect(newRun.rootWorkCommandId).toBe('second-in-b');
     expect(newRun.status).toBe('completed');
     const actualBMutations = (await reader.listExecutions('s')).filter(
       (execution) =>
-        execution.originCommandId === 'second-in-b' && execution.definitionId === 'files.write',
+        execution.originCommandId === businessB && execution.definitionId === 'files.write',
     );
     if (actualBMutations.some((execution) => execution.status !== 'succeeded'))
       console.error(

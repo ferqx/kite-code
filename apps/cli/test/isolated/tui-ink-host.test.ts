@@ -27,7 +27,7 @@ test('ordinary Ink TUI opens the untrusted gate, renders original Markdown and m
     mode: 0o600,
   });
   const original =
-    '**literal user**\n\n`original inline`\n\n```ts\nconsole.log("user literal");\n```';
+    '新任务：\n\n**literal user**\n\n`original inline`\n\n```ts\nconsole.log("user literal");\n```';
   const alignmentParagraph =
     'ALIGN_BEGIN 如果是明确的实施类任务，我会直接交付实现、必要验证和受影响文档的同步说明，不额外建计划；只有会实质改变产品行为、范围或授权边界且现有证据无法裁决的问题，我才会请你决定。 ALIGN_END';
   const response = `**Original assistant heading**\n\n| Column | Value |\n| --- | --- |\n| Original table cell | Exact value |\n\n\`\`\`ts\nconsole.log("original assistant");\n\`\`\`\n\n${alignmentParagraph}\n\nEND_ORIGINAL_ASSISTANT_COMPLETE`;
@@ -112,6 +112,7 @@ test('ordinary Ink TUI opens the untrusted gate, renders original Markdown and m
           original,
           alignmentParagraph,
           responseMarker: 'END_ORIGINAL_ASSISTANT_COMPLETE',
+          expectedTitle: 'Ink task',
           databasePath: profile.databasePath,
         }),
       ],

@@ -1,9 +1,17 @@
-import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { isAbsolute, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { isDeepStrictEqual } from 'node:util';
-import { createRuntime } from '@kite-ai/agent';
+import { AgentError, createRuntime } from '@kite-ai/agent';
 import { createArtifactStore } from '@kite-ai/agent/artifacts';
 import { createCredentialVault, createOsCredentialBackend } from '@kite-ai/agent/config';
 import type { AuthorizationRequest, Extension } from '@kite-ai/agent/extensions';
@@ -13,18 +21,36 @@ import { createTaskExtension } from '@kite-ai/agent/task';
 import type { ModelAdapter, ModelRequest, ModelToolCall, ModelUsage } from '@kite-ai/ai';
 import { createCompatibleModelBinding, createSdkModelAdapter } from '@kite-ai/ai/sdk';
 import { createUserConfiguration, parseModelPreset } from '@kite-ai/service/configuration';
+import { liveCodeEvidence } from './live-code-evidence';
+import { summarizeLiveToolCalls } from './live-model-fixture';
 
 // This runner is deliberately excluded from default test discovery. Only synthetic
 // fixture content reaches the selected Provider; request bodies and keys stay in memory.
 const enabled = process.env.KITE_RUN_LIVE_MODEL_TOOLS === '1';
 const args = process.argv.slice(2);
-const output = args[0]?.startsWith('--output=') ? args[0].slice(9) : undefined;
-if (args.length > 1 || (args.length && (!output || !isAbsolute(output))))
+const outputArgs = args.filter((arg) => arg.startsWith('--output='));
+const scenarioArgs = args.filter((arg) => arg.startsWith('--scenario='));
+const output = outputArgs[0]?.slice(9);
+const selectedScenario = scenarioArgs[0]?.slice(11);
+if (
+  outputArgs.length > 1 ||
+  scenarioArgs.length > 1 ||
+  args.length !== outputArgs.length + scenarioArgs.length ||
+  (output !== undefined &&
+    (!isAbsolute(output) || existsSync(output) || existsSync(`${output}.workspace`))) ||
+  (selectedScenario !== undefined && !['files', 'agents'].includes(selectedScenario))
+)
   throw Error('live_tools_arguments_invalid');
 if (!enabled) throw Error('live_tools_requires_KITE_RUN_LIVE_MODEL_TOOLS_1');
 
 function check(condition: unknown, code: string): asserts condition {
   if (!condition) throw Error(`live_tools_${code}`);
+}
+function toolDetails(value: unknown): Record<string, unknown> {
+  check(value !== null && typeof value === 'object' && !Array.isArray(value), 'result_invalid');
+  const result = value as Record<string, unknown>;
+  check(result.outcome === 'succeeded' && typeof result.content === 'string', 'result_failed');
+  return JSON.parse(result.content) as Record<string, unknown>;
 }
 function visibleRequest(request: ModelRequest): ModelRequest {
   const visible = structuredClone(request);
@@ -33,6 +59,7 @@ function visibleRequest(request: ModelRequest): ModelRequest {
   return visible;
 }
 const started = Date.now();
+const monotonicStarted = performance.now();
 const deadline = AbortSignal.timeout(240_000);
 const requests: ModelRequest[] = [];
 const calls: ModelToolCall[] = [];
@@ -48,7 +75,9 @@ const report: Record<string, unknown> = {
   command: 'KITE_RUN_LIVE_MODEL_TOOLS=1 bun run test:model:tools:live',
   requestLimit: 20,
   timeoutMs: 240_000,
+  selectedScenario: selectedScenario ?? 'all',
   scenarios: [],
+  code: liveCodeEvidence(),
 };
 
 async function main() {
@@ -159,11 +188,19 @@ async function main() {
     },
   };
 
-  for (const scenario of ['files', 'agents'] as const) {
+  for (const scenario of (['files', 'agents'] as const).filter(
+    (name) => selectedScenario === undefined || name === selectedScenario,
+  )) {
     const begin = Date.now();
     const firstRequest = requests.length;
     const firstCall = calls.length;
-    const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-model-tools-live-')));
+    const root = output
+      ? (() => {
+          const path = `${output}.workspace`;
+          mkdirSync(path, { mode: 0o700 });
+          return realpathSync(path);
+        })()
+      : realpathSync(mkdtempSync(join(tmpdir(), 'kite-model-tools-live-')));
     const workspace = join(root, 'workspace');
     mkdirSync(join(workspace, 'docs'), { recursive: true, mode: 0o700 });
     writeFileSync(join(workspace, 'source.txt'), 'message=before\nmode=test\n');
@@ -202,8 +239,14 @@ async function main() {
         scenario === 'agents'
           ? [{ id: 'worker', version: '1', model, modelId: 'live', toolIds: [], snapshot: {} }]
           : [],
+      afterTurn: {
+        async authorize() {
+          return { allowed: true, revision: 'explicit-owned-live-completion' };
+        },
+      },
     });
     let closed = false;
+    let passed = false;
     let cold: ReturnType<typeof createRuntime> | undefined;
     try {
       const storeId = (await store.getMetadata()).storeId;
@@ -227,7 +270,7 @@ async function main() {
               'Read source.txt and result.txt again using the tools and confirm their actual contents. Keep the final response short.',
             ]
           : [
-              'Create exactly one background worker sub-agent to calculate 17 * 19 and return 323. Use key arithmetic and input {"content":"Calculate 17 * 19; reply with exactly 323."}, with background result delivery. Then wait for that specific task using the dedicated task wait tool, read the completed child result, and confirm 323. Do not use polling or an event/mailbox wait. Do not create another task.',
+              'Use the six collaborator tools to perform this bounded synthetic test. First spawn exactly one collaborator with only prompt: "Calculate 17 * 19; reply with exactly 323." Retain its returned agent_id. Wait for its completion using wait_agent_events with a finite wait_ms, then list_agents filtered to that agent_id and read its complete result, which must be 323. Once it is truly idle, send_agent_message to it with "For your next turn, preserve the first answer in your history"; this message alone must not start a turn. Use interrupt_agent on that idle collaborator and observe the idle outcome. Then follow_up_agent on the SAME agent_id with "Calculate 23 * 29; reply with exactly 667." Wait for the second completion using wait_agent_events with the previous next_seq, then list_agents for the same ID and read the new complete result. Do not create a second collaborator, use a preset, use old tool names or invent IDs. Finally briefly report both verified answers.',
             ];
       for (const [index, content] of prompts.entries()) {
         const commandId = `run-${index}`;
@@ -236,15 +279,57 @@ async function main() {
           commandId,
           request: { kind: 'run.start', content },
         });
-        const command = await runtime.waitForCommand(commandId, {
-          timeoutMs: Math.max(1, 240_000 - (Date.now() - started)),
-        });
+        let command: Awaited<ReturnType<typeof runtime.waitForCommand>> | undefined;
+        while (!command) {
+          deadline.throwIfAborted();
+          const current = await store.getCommand(commandId);
+          check(
+            (current?.receipt as { outcome?: string } | null)?.outcome !== 'human_input_unresolved',
+            'human_input_unresolved',
+          );
+          try {
+            command = await runtime.waitForCommand(commandId, {
+              timeoutMs: Math.min(100, Math.max(1, 240_000 - (Date.now() - started))),
+              signal: deadline,
+            });
+          } catch (error) {
+            if (!(error instanceof AgentError) || error.code !== 'wait_timeout') throw error;
+          }
+        }
         check(command.status === 'applied', 'command_not_applied');
         const run = await store.getRun((command.receipt as { runId: string }).runId);
         check(run?.status === 'completed', 'run_not_completed');
       }
       const executions = await store.listExecutions('session');
       const tools = executions.filter((row) => row.kind === 'tool');
+      const spawnResult = tools.find((row) => row.definitionId === 'task.spawn')?.result;
+      const spawnedAgentId = spawnResult ? toolDetails(spawnResult).agent_id : null;
+      report.toolExecutions = tools.map((row) => {
+        const result =
+          row.result && typeof row.result === 'object' && !Array.isArray(row.result)
+            ? row.result
+            : {};
+        let details: Record<string, unknown> = {};
+        try {
+          if (typeof result.content === 'string')
+            details = JSON.parse(result.content) as Record<string, unknown>;
+        } catch {}
+        const failure =
+          details.error && typeof details.error === 'object' && !Array.isArray(details.error)
+            ? (details.error as Record<string, unknown>).code
+            : result.code;
+        const input =
+          row.input && typeof row.input === 'object' && !Array.isArray(row.input) ? row.input : {};
+        return {
+          definitionId: row.definitionId,
+          status: row.status,
+          outcome: result.outcome,
+          errorCode:
+            typeof failure === 'string' && /^[a-z][a-z0-9_]{0,79}$/.test(failure) ? failure : null,
+          targetMatchesSpawn:
+            typeof input.agentId === 'string' ? input.agentId === spawnedAgentId : null,
+        };
+      });
       check(
         tools.every((row) => row.status === 'succeeded'),
         'tool_failed',
@@ -260,7 +345,14 @@ async function main() {
               'edit_file',
               'write_file',
             ]
-          : ['spawn_agent', 'wait_agents', 'read_agent'];
+          : [
+              'spawn_agent',
+              'wait_agent_events',
+              'list_agents',
+              'send_agent_message',
+              'interrupt_agent',
+              'follow_up_agent',
+            ];
       check(
         expected.every((name) => observedCalls.some((call) => call.name === name)),
         'required_tool_missing',
@@ -290,49 +382,163 @@ async function main() {
         const editCall = observedCalls.find((call) => call.name === 'edit_file')!;
         check(JSON.parse(editCall.arguments).old_text === 'message=before', 'public_edit_mismatch');
       } else {
-        const waits = observedCalls.filter((call) => call.name === 'wait_agents');
         check(
           observedCalls.filter((call) => call.name === 'spawn_agent').length === 1,
           'extra_child',
         );
-        check(waits.length === 1, 'repeated_wait');
+        const spawn = tools.find((row) => row.definitionId === 'task.spawn');
+        check(spawn, 'spawn_record_missing');
+        const agentId = toolDetails(spawn.result).agent_id;
+        check(typeof agentId === 'string', 'agent_id_missing');
+        const agentPage = await store.listStableAgents({
+          ...scope,
+          extensionId: 'builtin.task',
+          agentIds: [agentId],
+          limit: 1,
+        });
+        const agent = agentPage.items[0];
+        check(agentPage.items.length === 1 && agentPage.nextAfterSeq === null, 'directory_invalid');
+        check(agent?.agentId === agentId && agent.state === 'idle', 'child_not_idle');
         check(
-          isDeepStrictEqual(JSON.parse(waits[0]!.arguments).task_ids, ['arithmetic']),
-          'wait_targets_mismatch',
+          agent.lastOutcome === 'succeeded' &&
+            agent.configurationId === 'worker' &&
+            agent.lastResultSource !== null,
+          'child_configuration_mismatch',
         );
-        check(
-          !requests
-            .slice(firstRequest)
-            .some((request) => request.tools.some((tool) => tool.id === 'task_wait')),
-          'hidden_wait_exposed',
-        );
-        const read = tools.find((row) => row.definitionId === 'task_read');
-        const readCall = observedCalls.find((call) => call.name === 'read_agent')!;
-        check(JSON.parse(readCall.arguments).task_id === 'arithmetic', 'read_target_mismatch');
-        const details = read?.result as unknown as {
-          details?: {
-            agent?: {
-              execution: { status: string; result: { outcome: string; content: string } | null };
-              run: { status: string } | null;
-            };
-          };
+        const result = JSON.parse(agent.lastResultSource.content) as {
+          outcome: string;
+          content: string;
         };
-        const agent = details?.details?.agent;
         check(
-          agent?.execution.status === 'succeeded' && agent.run?.status === 'completed',
-          'child_not_completed',
-        );
-        check(
-          agent.execution.result?.outcome === 'succeeded' &&
-            agent.execution.result.content.trim() === '323',
+          result.outcome === 'succeeded' && result.content.trim() === '667',
           'child_result_mismatch',
         );
+        const carriers = executions.filter((row) => row.childSessionId === agentId);
+        check(carriers.length === 2, 'carrier_count_mismatch');
+        check(
+          carriers.every((row) => row.status === 'succeeded'),
+          'carrier_not_succeeded',
+        );
+        check(
+          (carriers[0]!.result as { content: string }).content.trim() === '323' &&
+            (carriers[1]!.result as { content: string }).content.trim() === '667',
+          'carrier_result_mismatch',
+        );
+        check(
+          carriers.every((row) => row.childConfiguration?.id === 'worker'),
+          'carrier_configuration_mismatch',
+        );
+        const childExecutions = await store.listExecutions(agentId);
+        const childModels = childExecutions.filter((row) => row.kind === 'model');
+        check(
+          childModels.length === 2 && childModels.every((row) => row.status === 'succeeded'),
+          'child_model_count_mismatch',
+        );
+        check(new Set(childModels.map((row) => row.runId)).size === 2, 'child_run_not_reused');
+        for (const row of childModels)
+          check((await store.getRun(row.runId!))?.status === 'completed', 'child_not_completed');
+        const mails = await store.listAgentMessages({ ...scope, sessionId: agentId });
+        check(mails.items.length === 1 && mails.nextAfterSeq === null, 'idle_mail_count_mismatch');
+        const mail = mails.items[0]!;
+        const childRequests = requests
+          .slice(firstRequest)
+          .filter((request) => childModels.some((row) => row.id === request.requestId));
+        const receivingRequest = childRequests.find((request) =>
+          request.messages.some((message) => message.sourceIds?.includes(mail.id)),
+        );
+        check(
+          mail.state === 'received' &&
+            mail.targetRunId === null &&
+            receivingRequest &&
+            childModels.find((row) => row.id === receivingRequest.requestId)?.runId ===
+              mail.receivedRunId &&
+            receivingRequest.messages.filter((message) => message.sourceIds?.includes(mail.id))
+              .length === 1 &&
+            childRequests.filter((request) =>
+              request.messages.some((message) => message.sourceIds?.includes(mail.id)),
+            ).length === 1 &&
+            (await store.listMessages(agentId)).filter((message) =>
+              message.sourceIds?.includes(mail.id),
+            ).length === 1,
+          'idle_mail_adoption_mismatch',
+        );
+        report.idleMailAdoptedOnce = true;
+        const followUps = tools.filter((row) => row.definitionId === 'task.follow_up');
+        check(followUps.length === 1, 'follow_up_count_mismatch');
+        check(
+          toolDetails(followUps[0]!.result).mode === 'new_turn' &&
+            toolDetails(followUps[0]!.result).agent_id === agentId,
+          'follow_up_target_mismatch',
+        );
+        const interrupt = tools.find((row) => row.definitionId === 'task.interrupt');
+        check(
+          interrupt && toolDetails(interrupt.result).outcome === 'idle',
+          'idle_interrupt_mismatch',
+        );
+        const names = [
+          'follow_up_agent',
+          'interrupt_agent',
+          'list_agents',
+          'send_agent_message',
+          'spawn_agent',
+          'wait_agent_events',
+        ];
+        const processingIds = new Set<string>();
+        for (const row of executions.filter((row) => row.kind === 'model')) {
+          check(row.runId, 'model_run_missing');
+          const savedRun = await store.getRun(row.runId);
+          const configuration = savedRun?.configuration as {
+            snapshot?: { kind?: string };
+          };
+          if (configuration?.snapshot?.kind === 'human_input_processing') processingIds.add(row.id);
+        }
+        const parentRequests = requests
+          .slice(firstRequest)
+          .filter((request) => executions.some((row) => row.id === request.requestId));
+        check(
+          parentRequests
+            .filter((request) => !processingIds.has(request.requestId))
+            .every((request) =>
+              isDeepStrictEqual(request.tools.map((tool) => tool.id).sort(), names),
+            ),
+          'collaboration_schema_mismatch',
+        );
+        check(
+          parentRequests
+            .filter((request) => processingIds.has(request.requestId))
+            .every((request) => request.tools.length === 0),
+          'input_processing_exposed_tools',
+        );
+        report.inputProcessingRequests = processingIds.size;
+        for (const carrier of carriers) {
+          const acceptance = carrier.resultAcceptance;
+          check(
+            acceptance && acceptance.resultRevision === carrier.resultRevision,
+            'result_acceptance_missing',
+          );
+          check(
+            requests
+              .slice(firstRequest)
+              .some((request) =>
+                request.messages.some((message) =>
+                  message.sourceIds?.includes(acceptance.sourceId),
+                ),
+              ),
+            'accepted_source_not_prepared',
+          );
+        }
+        executions.push(...childExecutions);
       }
       const snapshots = requests
         .slice(firstRequest)
         .filter((request) => executions.some((row) => row.id === request.requestId));
       for (const request of snapshots) {
-        const saved = await runtime.readModelInput({ ...scope, executionId: request.requestId });
+        const execution = executions.find((row) => row.id === request.requestId)!;
+        const saved = await runtime.readModelInput({
+          ...scope,
+          sessionId: execution.sessionId,
+          executionId: request.requestId,
+        });
         const visible = visibleRequest(request);
         if (!isDeepStrictEqual(saved.request, visible)) {
           report.snapshotComparison = {
@@ -358,10 +564,16 @@ async function main() {
       });
       const beforeColdRead = wire.length;
       for (const request of snapshots) {
-        const saved = await cold.readModelInput({ ...scope, executionId: request.requestId });
+        const execution = executions.find((row) => row.id === request.requestId)!;
+        const saved = await cold.readModelInput({
+          ...scope,
+          sessionId: execution.sessionId,
+          executionId: request.requestId,
+        });
         check(isDeepStrictEqual(saved.request, visibleRequest(request)), 'cold_snapshot_mismatch');
       }
       check(wire.length === beforeColdRead, 'cold_read_called_provider');
+      passed = true;
       (report.scenarios as unknown[]).push({
         name: scenario,
         status: 'passed',
@@ -382,7 +594,8 @@ async function main() {
       if (!closed) await runtime.close();
       await cold?.close();
       await files.close();
-      rmSync(root, { recursive: true, force: true });
+      if (passed || !output) rmSync(root, { recursive: true, force: true });
+      else report.failedCanonicalStoreRetained = true;
     }
   }
 }
@@ -399,18 +612,11 @@ try {
   process.exitCode = 1;
 } finally {
   report.durationMs = Date.now() - started;
+  report.monotonicDurationMs = performance.now() - monotonicStarted;
+  report.finishedAt = new Date().toISOString();
   report.providerRequests = wire.length;
   report.httpStatuses = wire.map((attempt) => attempt.status);
-  report.toolCalls = calls.map((call) => ({
-    name: call.name,
-    fields: (() => {
-      try {
-        return Object.keys(JSON.parse(call.arguments));
-      } catch {
-        return [];
-      }
-    })(),
-  }));
+  report.toolCalls = summarizeLiveToolCalls(requests, calls);
   report.usage = {
     inputTokens: usage.reduce((total, item) => total + (item.inputTokens ?? 0), 0),
     outputTokens: usage.reduce((total, item) => total + (item.outputTokens ?? 0), 0),

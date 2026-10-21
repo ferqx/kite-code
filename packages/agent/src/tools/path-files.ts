@@ -93,7 +93,10 @@ export function createPathFileTools(boundaryInput: PathFileBoundary) {
           get(source, key) {
             if (key === 'read')
               return async (_path: string, options: Parameters<WorkspaceFiles['read']>[1]) => {
-                const read = await selected.read(target.name, options);
+                const read = await selected.read(target.name, {
+                  ...options,
+                  signal: context.signal,
+                });
                 if (
                   !target.identity ||
                   read.baseline.device !== target.identity.device ||

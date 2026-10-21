@@ -58,7 +58,7 @@ const provider = Bun.serve({
         (message) =>
           message.role === 'user' &&
           (message.content === 'Selected default Shell.' ||
-            message.content === 'Ordinary Files and protected runtime assets.'),
+            message.content === 'New task: Ordinary Files and protected runtime assets.'),
       )?.content;
     if (!task) throw Error('fixed_provider_actual_task_unavailable');
     const shell = task === 'Selected default Shell.';
@@ -273,7 +273,7 @@ try {
     kind: 'run.start',
     expectedStoreId: storeId,
     commandId: 'actual-files',
-    content: 'Ordinary Files and protected runtime assets.',
+    content: 'New task: Ordinary Files and protected runtime assets.',
   });
   const command = await until(
     () => client.getCommand('actual-files'),

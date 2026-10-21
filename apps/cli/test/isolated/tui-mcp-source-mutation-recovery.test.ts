@@ -17,6 +17,7 @@ import { startService } from '@kite-ai/service';
 import { createDefaultProcessConfiguration } from '@kite-ai/service/configuration';
 import type { TuiMcpSourceMutationIntent } from '@kite-ai/ui/tui';
 import { privateDirectory } from '../../../../tests/fixtures/test-filesystem';
+import { createPermissionManagement } from '../../../service/src/permission-management';
 import { openMcpSourceApprovalJournal } from '../../host/mcp-source-approval-journal';
 import { openMcpSourceMutationJournal } from '../../host/mcp-source-mutation-journal';
 import { createTuiMcpSourceApprovalPort } from '../../host/tui-mcp-source-approval';
@@ -145,6 +146,29 @@ async function fixture(many: boolean) {
     subjectId: 'owner',
     workspaceId,
     title: 'owned',
+  });
+  // Bind the intended fixture policy to current durable root controls.
+  const permissionControl = createPermissionManagement({ runtime: runtime, profile });
+  const identity = { expectedStoreId: storeId, subjectId: 'owner' };
+  const trust = await permissionControl.readTrust({ ...identity, workspaceId: workspaceId });
+  await permissionControl.setTrust({
+    ...identity,
+    workspaceId: workspaceId,
+    commandId: 'fixture-workspace-trust',
+    canonicalIdentity: trust.canonicalIdentity,
+    externalReadScopeDigest: trust.externalReadScopeDigest,
+    trusted: true,
+    ifRevision: trust.revision,
+  });
+  const mode = await permissionControl.readMode({ ...identity, sessionId: 's' });
+  await permissionControl.setMode({
+    ...identity,
+    sessionId: 's',
+    commandId: 'fixture-current-mode',
+    mode: 'auto',
+    makeDefault: false,
+    ifRevision: mode.revision,
+    ifDefaultRevision: mode.defaultRevision,
   });
   const service = await startService({
     runtime,

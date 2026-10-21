@@ -1,6 +1,11 @@
 import type { ProfileAccess } from '../../platform/profile';
 import { assertSelectedSqliteEngine, type SqliteEngineSelection } from '../../sqlite-engine';
+import {
+  ArtifactVerificationPending,
+  disposeArtifactVerification,
+} from '../sqlite/artifact-operations';
 import { openDatabase } from '../sqlite/connection';
+import { runnableCommandPredicate } from '../sqlite/job-report-operations';
 import { SqliteOperations } from '../sqlite/operations';
 import { hasUnsettledOwnerGroup } from '../sqlite/owner-dispatch';
 import { readRecoveryToolHistory } from '../sqlite/recovery-history';
@@ -60,6 +65,22 @@ function execute(request: WorkerRequest): void {
     },
     finalized = closeFinalizationAttempted,
   ): void => {
+    try {
+      if (tracked) disposeArtifactVerification(tracked, id);
+    } catch (error) {
+      message = {
+        id,
+        error: failure(
+          message.error
+            ? new AggregateError(
+                [deserializeStorageError(message.error), error],
+                'Artifact verification and reader cleanup failed.',
+                { cause: deserializeStorageError(message.error) },
+              )
+            : error,
+        ),
+      };
+    }
     if (!finalized) {
       try {
         (operations ?? tracked)?.releaseStatements();
@@ -102,7 +123,7 @@ function execute(request: WorkerRequest): void {
   };
   try {
     if (method === 'close') tracked?.resetTiming();
-    else tracked?.beginRequest();
+    else tracked?.beginRequest(id);
     if (method === 'open') {
       const input = args[0] as {
         access: ProfileAccess;
@@ -164,7 +185,7 @@ function execute(request: WorkerRequest): void {
         const root = input.owner.sessionId;
         const hasUnsettledWork = hasUnsettledOwnerGroup(operations!, root, input.expectedStoreId);
         const hasPendingCommands = !!operations!.row(
-          "SELECT id FROM command WHERE session_id=? AND status='accepted' AND kind NOT IN('job.reconcile','run.resume') LIMIT 1",
+          `SELECT id FROM command WHERE session_id=? AND status='accepted' AND kind NOT IN('job.reconcile','run.resume') AND ${runnableCommandPredicate()} LIMIT 1`,
           input.sessionId,
         );
         // A detached Job is not the ordinary Action's primary receipt Execution.
@@ -195,7 +216,7 @@ function execute(request: WorkerRequest): void {
         if (
           hasUnsettledOwnerGroup(operations!, owner.sessionId, operations!.metadata().storeId) ||
           operations!.row(
-            "SELECT id FROM command WHERE session_id IN(SELECT id FROM session WHERE root_id=?) AND status='accepted' AND kind NOT IN('job.reconcile','run.resume')",
+            `SELECT id FROM command WHERE session_id IN(SELECT id FROM session WHERE root_id=?) AND status='accepted' AND kind NOT IN('job.reconcile','run.resume') AND ${runnableCommandPredicate()}`,
             owner.sessionId,
           )
         )
@@ -207,6 +228,17 @@ function execute(request: WorkerRequest): void {
     if (method !== 'close') operations?.assertRequestSettled();
     post({ id, result });
   } catch (error) {
+    if (error instanceof ArtifactVerificationPending) {
+      try {
+        operations!.releaseStatements();
+        operations!.assertRequestSettled();
+      } catch (cleanup) {
+        post({ id, error: failure(cleanup) }, true);
+        return;
+      }
+      queue.deferArtifactVerification(request);
+      return;
+    }
     if (error instanceof UnstartedSqliteWrite) {
       // No callback, SQL commit, adapter or external effect has run. Keep the exact
       // request ID and admission slot; other queue categories may continue observing.

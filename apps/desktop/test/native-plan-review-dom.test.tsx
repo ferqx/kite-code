@@ -86,8 +86,35 @@ test('Native page keeps exact plan drafts across sessions, missing pages and rea
       canReadModelOutput: false,
       storeId: 'store',
       session: sessions.find((session) => session.id === selected)!,
-      runs: observedRuns,
+      runs: observedRuns.some((run) => run.sessionId === selected)
+        ? observedRuns
+        : [
+            {
+              id: `run-${selected}`,
+              sessionId: selected,
+              originCommandId: `work-${selected}`,
+              originStoreId: 'store',
+              status: 'waiting_interaction',
+              isActive: true,
+              createdAt: 1,
+              finishedAt: null,
+              reason: null,
+            },
+          ],
       executions: [
+        {
+          id: `execution-${selected}`,
+          sessionId: selected,
+          runId: `run-${selected}`,
+          originStoreId: 'store',
+          kind: 'tool',
+          definitionId: 'planning.review',
+          definitionVersion: '1',
+          status: 'dispatching',
+          result: null,
+          resultRevision: '0',
+          cancelRequestedAt: null,
+        },
         {
           id: 'parallel-job',
           sessionId: selected,
@@ -279,7 +306,17 @@ test('Native page keeps exact plan drafts across sessions, missing pages and rea
     await edit('original cancelled B feedback');
     omitted = true;
     observedRuns = [
-      { id: cards.b!.runId, originStoreId: 'store', status: 'cancelled', isActive: false },
+      {
+        id: cards.b!.runId,
+        sessionId: 'b',
+        originCommandId: 'work-b',
+        originStoreId: 'store',
+        status: 'cancelled',
+        isActive: false,
+        createdAt: 1,
+        finishedAt: 2,
+        reason: 'cancelled',
+      },
     ] as unknown as typeof observedRuns;
     await refresh();
     expect(mainInput()?.value).toBe('  main b\n雪🙂  ');

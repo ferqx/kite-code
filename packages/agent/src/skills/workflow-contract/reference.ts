@@ -85,3 +85,80 @@ function sameReferenceIdentity(left: Stats, right: Stats): boolean {
     left.ctimeMs === right.ctimeMs
   );
 }
+
+/** Async original-FD read: the supplied scope continues to own all close evidence. */
+export async function readBoundWorkflowFileAsync(
+  root: string,
+  target: string,
+  expected: Stats,
+  files: KnowledgeFileAccess,
+  signal?: AbortSignal,
+): Promise<Buffer> {
+  const fs = await import('node:fs/promises');
+  signal?.throwIfAborted();
+  const scope = relative(root, target);
+  if (scope === '' || isAbsolute(scope) || scope === '..' || scope.startsWith(`..${sep}`))
+    throw Error('Workflow file escapes source root.');
+  const directories: Array<{ path: string; stat: Stats }> = [];
+  let directory = dirname(target);
+  for (;;) {
+    const stat = await fs.lstat(directory);
+    if (!stat.isDirectory() || stat.isSymbolicLink())
+      throw Error('Skill reference directories must be non-symlink directories.');
+    directories.push({ path: directory, stat });
+    if (directory === root) break;
+    directory = dirname(directory);
+  }
+  const canonicalRoot = await fs.realpath(root);
+  const assertBindings = async () => {
+    signal?.throwIfAborted();
+    for (const binding of directories) {
+      const current = await fs.lstat(binding.path);
+      if (
+        !current.isDirectory() ||
+        current.isSymbolicLink() ||
+        current.dev !== binding.stat.dev ||
+        current.ino !== binding.stat.ino
+      )
+        throw Error('Skill reference directory changed while reading.');
+    }
+    const canonical = await fs.realpath(target),
+      rel = relative(canonicalRoot, canonical);
+    if (rel === '..' || rel.startsWith(`..${sep}`) || isAbsolute(rel))
+      throw Error('Skill reference path escapes its Skill directory.');
+  };
+  return files.read(
+    target,
+    constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0) | (constants.O_NONBLOCK ?? 0),
+    async (handle) => {
+      const opened = await handle.stat();
+      if (!opened.isFile() || !sameReferenceIdentity(expected, opened))
+        throw Error('Skill reference file changed while opening.');
+      await assertBindings();
+      if (!sameReferenceIdentity(opened, await fs.lstat(target)))
+        throw Error('Skill reference path changed while opening.');
+      const content = Buffer.allocUnsafeSlow(opened.size);
+      let position = 0;
+      while (position < content.byteLength) {
+        signal?.throwIfAborted();
+        const { bytesRead } = await handle.read(
+          content,
+          position,
+          Math.min(65536, content.byteLength - position),
+          position,
+        );
+        if (!bytesRead) break;
+        position += bytesRead;
+      }
+      const after = await handle.stat();
+      if (
+        !sameReferenceIdentity(opened, after) ||
+        position !== after.size ||
+        !sameReferenceIdentity(after, await fs.lstat(target))
+      )
+        throw Error('Skill reference file changed while reading.');
+      await assertBindings();
+      return content;
+    },
+  );
+}

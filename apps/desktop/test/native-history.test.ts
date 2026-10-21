@@ -545,3 +545,79 @@ test('Native context selection changes recalibrate the complete session timeline
   expect(reads).toBe(2);
   reader.dispose();
 });
+
+test('Native fixed-high-water EOF publishes saved messages while queued same-scope revisions remain unqualified', async () => {
+  const requests: Extract<Parameters<NativeBridge['request']>[0], { method: 'messages' }>[] = [];
+  const releases: (() => void)[] = [];
+  const publications: HistoryState[] = [];
+  const bridge = {
+    request(request) {
+      if (request.method === 'messages.close') return Promise.resolve(null);
+      if (request.method !== 'messages') throw Error('unexpected');
+      requests.push(request);
+      const revision = requests.length;
+      return new Promise((resolve) => {
+        releases.push(() =>
+          resolve({
+            messages: [
+              {
+                id: 'streaming-message',
+                sessionId: 's',
+                seq: '1',
+                role: 'assistant',
+                status: 'incomplete',
+                runId: 'active-run',
+                content: `same-seq body revision ${revision}`,
+              },
+            ],
+            highWaterSeq: request.upperSeq!,
+            nextAfterSeq: null,
+          }),
+        );
+      });
+    },
+  } as NativeBridge;
+  const reader = new NativeHistory(bridge, (value) => publications.push(value));
+  try {
+    reader.select(1, selection('s', '1'));
+    await until(() => requests.length === 1);
+    // Three newer metadata views arrive before their predecessor's sealed H=1
+    // scan reaches EOF. Neither scope identity nor message seq changes.
+    for (let revision = 1; revision <= 3; revision++) {
+      reader.select(1, { ...selection('s', '1'), viewGeneration: revision + 1 });
+      releases[revision - 1]!();
+      await until(() => requests.length === revision + 1);
+      expect(reader.state.phase).toBe('loading');
+      expect(reader.state.messages[0]?.content).toBe(`same-seq body revision ${revision}`);
+    }
+    releases[3]!();
+    await until(() => reader.state.phase === 'complete');
+    expect(reader.state.messages[0]?.content).toBe('same-seq body revision 4');
+    // Even after a usable completion, a new same-H view must revoke reading
+    // qualification until its own EOF; nextSeq is not a content revision key.
+    reader.select(1, { ...selection('s', '1'), viewGeneration: 5 });
+    await until(() => requests.length === 5);
+    expect(reader.state.phase).toBe('loading');
+    expect(reader.state.messages[0]?.content).toBe('same-seq body revision 4');
+    releases[4]!();
+    await until(() => reader.state.phase === 'complete');
+    expect(reader.state.messages[0]?.content).toBe('same-seq body revision 5');
+    expect(requests.map((request) => [request.afterSeq, request.upperSeq])).toEqual(
+      Array.from({ length: 5 }, () => ['0', '1']),
+    );
+    expect(new Set(requests.map((request) => request.readId)).size).toBe(5);
+    expect(
+      new Set(publications.map((value) => value.messages[0]?.content).filter(Boolean)),
+    ).toEqual(
+      new Set(Array.from({ length: 5 }, (_, index) => `same-seq body revision ${index + 1}`)),
+    );
+    expect(
+      publications
+        .filter((value) => value.phase === 'complete')
+        .map((value) => value.messages[0]?.content),
+    ).toEqual(['same-seq body revision 4', 'same-seq body revision 5']);
+  } finally {
+    reader.close();
+    for (const release of releases) release();
+  }
+});

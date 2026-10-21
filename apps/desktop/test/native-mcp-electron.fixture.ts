@@ -2,6 +2,7 @@ import { strict as assert } from 'node:assert';
 import { execFileSync } from 'node:child_process';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import type { Command, Interaction } from '@kite-ai/client';
 import { _electron } from 'playwright';
 import type {
   NativeMcpSubmission,
@@ -155,6 +156,14 @@ try {
   if ((await defaultChoice.getAttribute('aria-checked')) === 'true')
     await page.keyboard.press('Escape');
   else await defaultChoice.click();
+  await page.waitForFunction(() => {
+    const panel = document.querySelector('section[aria-label="模型设置"]');
+    const refresh = [...(panel?.querySelectorAll('button') ?? [])].find(
+      (button) => button.textContent === '刷新配置',
+    );
+    const choice = panel?.querySelector<HTMLButtonElement>('button[aria-label="默认模型"]');
+    return refresh && choice && !refresh.disabled && !choice.disabled;
+  });
   const configured = (await page.evaluate(
     async () =>
       await window.kiteNative!.request({
@@ -392,15 +401,36 @@ try {
   await page.getByRole('button', { name: '发送明确的新轮次', exact: true }).click();
   const toolDeadline = Date.now() + 25000;
   let ordinaryToolApproval = false;
+  const remoteApprovals = new Map<string, { card: Interaction; commandId?: string }>();
+  const approvalKey = (card: Interaction) =>
+    JSON.stringify([card.originStoreId, card.presentationSessionId, card.id, card.revision]);
+  let completedToolRun: string | undefined;
   for (;;) {
     const observed = await state();
     for (const card of observed.selection?.interactions ?? []) {
       if (card.state !== 'pending' || card.kind !== 'approval') continue;
       assert.notEqual(card.definitionId, 'builtin.mcp.sources/mcp.source.approve');
+      const key = approvalKey(card);
+      // Pending View snapshots can outlive the exact answer's accepted receipt.
+      // A new revision has a new key and still requires its own real approval.
+      if (remoteApprovals.has(key)) continue;
+      const saved = observed.answerSubmissions?.find(
+        (answer) =>
+          answer.scope.storeId === card.originStoreId &&
+          answer.scope.sessionId === card.presentationSessionId &&
+          answer.interaction.id === card.id &&
+          answer.interaction.revision === card.revision,
+      );
+      if (saved) {
+        assert.notEqual(saved.phase, 'failed');
+        remoteApprovals.set(key, { card, commandId: saved.request.commandId });
+        continue;
+      }
       const approval = page.getByRole('article', { name: `approval ${card.id}`, exact: true });
       if (await approval.count()) {
         ordinaryToolApproval = true;
         await approval.getByRole('button', { name: '仅批准这一次', exact: true }).click();
+        remoteApprovals.set(key, { card });
         stage('independent_remote_tool_approval', {
           definitionId: card.definitionId,
           revision: card.revision,
@@ -410,13 +440,68 @@ try {
     const run = observed.selection?.runs.find((value) => value.status === 'completed');
     if (run) {
       assert.ok(ordinaryToolApproval, 'remote Tool must retain independent Ask');
+      completedToolRun = run.id;
       break;
     }
     assert.ok(Date.now() < toolDeadline, 'Model remote Tool effect incomplete');
     await page.waitForTimeout(80);
   }
+  assert.ok(completedToolRun);
+  assert.ok(remoteApprovals.size > 0);
+  const remoteAnswers: { card: Interaction; command: Command }[] = [];
+  const afterTool = await state();
+  const runExecutions = afterTool.selection!.executions.filter(
+    (execution) => execution.runId === completedToolRun,
+  );
+  assert.equal(
+    runExecutions.filter(
+      (execution) => execution.kind === 'model' && execution.status === 'succeeded',
+    ).length,
+    2,
+  );
+  const tools = runExecutions.filter((execution) => execution.kind === 'tool');
+  assert.equal(tools.length, 1);
+  assert.equal(tools[0]!.status, 'succeeded');
+  for (const { card, commandId } of remoteApprovals.values()) {
+    assert.equal(card.originStoreId, storeId);
+    assert.equal(card.runId, completedToolRun);
+    assert.equal(card.executionId, tools[0]!.id);
+    const saved = afterTool.answerSubmissions!.filter(
+      (answer) =>
+        answer.scope.storeId === card.originStoreId &&
+        answer.scope.sessionId === card.presentationSessionId &&
+        answer.interaction.id === card.id &&
+        answer.interaction.revision === card.revision,
+    );
+    assert.equal(saved.length, 1);
+    const originalCommandId = commandId ?? saved[0]!.request.commandId;
+    assert.equal(saved[0]!.request.commandId, originalCommandId);
+    // Query only the original answer when its first response is not yet settled.
+    const command = (await page.evaluate(
+      async (commandId) =>
+        await window.kiteNative!.request({ method: 'lookupInteraction', generation: 1, commandId }),
+      originalCommandId,
+    )) as Command;
+    assert.equal(command.id, originalCommandId);
+    assert.equal(command.kind, 'interaction.answer');
+    assert.equal(command.status, 'applied');
+    assert.equal(command.originStoreId, card.originStoreId);
+    assert.equal(command.sessionId, card.presentationSessionId);
+    assert.ok(
+      command.receipt && typeof command.receipt === 'object' && !Array.isArray(command.receipt),
+    );
+    assert.equal(command.receipt.interactionId, card.id);
+    assert.equal(command.receipt.outcome, 'answer_saved');
+    assert.equal(command.receipt.decisionRevision, String(BigInt(card.revision) + 1n));
+    remoteAnswers.push({ card, command });
+  }
   assert.equal(readFileSync(join(home!, 'stdio-effects'), 'utf8').trim().split('\n').length, 1);
-  stage('one_remote_effect');
+  stage('one_remote_effect', {
+    runId: completedToolRun,
+    models: 2,
+    tools: 1,
+    answers: remoteAnswers.length,
+  });
   const projectId = await add('window-project', 'workspace', 'http', `${control}/mcp`);
   await refresh();
   await manageSource(projectId, 'workspace');
@@ -494,7 +579,16 @@ try {
   await close();
   writeFileSync(
     join(home!, 'mcp-report.json'),
-    JSON.stringify({ pids, submissions, physical, persisted, before, after }),
+    JSON.stringify({
+      pids,
+      submissions,
+      physical,
+      persisted,
+      before,
+      after,
+      remoteAnswers,
+      completedToolRun,
+    }),
   );
   stage('complete', { originals: submissions.length, coldGets: 1 });
 } catch (error) {

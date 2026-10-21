@@ -183,6 +183,11 @@ test('Native notification backlog coalesces fast directory and view reads, retai
     });
     expect(reads).toBe(2);
     release();
+    const settledDeadline = Date.now() + 1000;
+    while (caller.state().selection?.viewLoading) {
+      if (Date.now() >= settledDeadline) throw Error('native_refresh_fixture_timeout');
+      await Bun.sleep(1);
+    }
     const value = await caller.invoke({ method: 'state', generation: 1 });
     expect(value).toMatchObject({
       selection: { session: { id: 's' }, permissionUnavailable: false, viewLoading: false },

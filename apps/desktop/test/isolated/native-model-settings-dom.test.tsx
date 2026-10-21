@@ -200,11 +200,15 @@ test('opening model settings loads the retained list once, groups all models and
 test('switches and the default dropdown save one exact intent, retain rows and refresh the saved configuration', async () => {
   let current = structuredClone(facts);
   const enable = deferred<NativeModelSettingsSubmission>();
+  const savedRefresh = deferred<NativeModelSettingsFacts>();
+  let refreshingDefault = false;
   const f = fixture(async (input) => {
-    if (input.method === 'settings.models.read') return structuredClone(current);
+    if (input.method === 'settings.models.read')
+      return refreshingDefault ? savedRefresh.promise : structuredClone(current);
     if (input.method === 'settings.models.enabled') return enable.promise;
     if (input.method === 'settings.models.default') {
       current = { ...current, defaultModelId: input.modelId };
+      refreshingDefault = true;
       return {
         kind: 'settings.models.submission',
         commandId: 'default',
@@ -256,11 +260,18 @@ test('switches and the default dropdown save one exact intent, retain rows and r
       { method: 'settings.models.default', generation: 1, observationId: 7, modelId: 'c' },
     ]);
     expect(f.button('默认模型').textContent).toContain('deepseek · disabled-c');
+    expect(f.button('默认模型').disabled).toBe(true);
+    expect(f.button('刷新配置').disabled).toBe(true);
+    expect(f.toggle('a').disabled).toBe(true);
+    await act(async () => savedRefresh.resolve(structuredClone(current)));
+    expect(f.button('默认模型').disabled).toBe(false);
+    expect(f.button('刷新配置').disabled).toBe(false);
     expect(f.toggle('c').disabled).toBe(true);
     expect(f.toggle('a').disabled).toBe(false);
     expect(f.saved).toBe(2);
     expect(f.calls.filter((input) => input.method === 'settings.models.read')).toHaveLength(3);
   } finally {
+    await act(async () => savedRefresh.resolve(structuredClone(current)));
     await f.close();
   }
 });

@@ -1,3 +1,4 @@
+import { strict as assert } from 'node:assert';
 import { appendFileSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { selectProfile } from '@kite-ai/agent/profile';
@@ -19,8 +20,111 @@ const settings = JSON.parse(readFileSync(join(import.meta.dir, 'settings.json'),
   token: string;
   intent: TuiMcpIntent;
   mode: 'prepared' | 'post' | 'lookup' | 'paired';
+  seed?: { storeId: string; subjectId: string };
 };
-if (process.argv[2] !== 'caller') {
+if (process.argv[2] === 'seed-controls') {
+  // This isolated artifact prepares current controls while the tested Service is stopped.
+  const { createRuntime } = await import('@kite-ai/agent');
+  const { openSqliteStore } = await import('@kite-ai/agent/sqlite');
+  const { createDefaultProcessConfiguration } = await import('@kite-ai/service/configuration');
+  const profile = selectProfile({ dataRoot: settings.dataRoot, profile: 'owned' });
+  assert.ok(settings.seed);
+  const store = await openSqliteStore(profile);
+  const runtime = createRuntime({
+    store,
+    permissions: {
+      async authorize() {
+        throw Error('seed_must_not_execute');
+      },
+    },
+  });
+  try {
+    assert.equal((await store.getMetadata()).storeId, settings.seed.storeId);
+    const executions = await store.listExecutions('s');
+    assert.equal(executions.length, 0);
+    const configuration = createDefaultProcessConfiguration({
+      profile,
+      userConfigurationPath: join(profile.profilePath, 'config.jsonc'),
+      credentialBackend: {
+        kind: 'temporary',
+        async put() {
+          throw Error('seed_credential_forbidden');
+        },
+        async resolve() {
+          throw Error('seed_credential_forbidden');
+        },
+        async remove() {
+          throw Error('seed_credential_forbidden');
+        },
+      },
+    });
+    const controls = configuration.permissionManagement!(runtime);
+    const identity = { expectedStoreId: settings.seed.storeId, subjectId: settings.seed.subjectId };
+    const mode = await controls.readMode({ ...identity, sessionId: 's' });
+    assert.equal(
+      (
+        await controls.setMode({
+          ...identity,
+          sessionId: 's',
+          commandId: 'fixture-current-mode',
+          mode: 'full',
+          makeDefault: false,
+          ifRevision: mode.revision,
+          ifDefaultRevision: mode.defaultRevision,
+        })
+      ).state,
+      'applied',
+    );
+    const trust = await controls.readTrust({ ...identity, workspaceId: 'w' });
+    assert.equal(
+      (
+        await controls.setTrust({
+          ...identity,
+          workspaceId: 'w',
+          commandId: 'fixture-current-trust',
+          trusted: true,
+          ifRevision: trust.revision,
+          canonicalIdentity: trust.canonicalIdentity,
+          externalReadScopeDigest: trust.externalReadScopeDigest,
+        })
+      ).state,
+      'applied',
+    );
+    const [modeControl, trustControl] = await Promise.all([
+      store.readHostControl({ ...identity, kind: 'permission.mode', scope: 'session:s' }),
+      store.readHostControl({ ...identity, kind: 'workspace.trust', scope: 'workspace:w' }),
+    ]);
+    const currentMode = await controls.readMode({ ...identity, sessionId: 's' });
+    const currentTrust = await controls.readTrust({ ...identity, workspaceId: 'w' });
+    assert.equal(modeControl.record?.id, 'fixture-current-mode');
+    assert.equal(modeControl.record?.state, 'applied');
+    assert.equal(trustControl.record?.id, 'fixture-current-trust');
+    assert.equal(trustControl.record?.state, 'applied');
+    assert.ok(BigInt(modeControl.revision) > BigInt(mode.revision));
+    assert.ok(BigInt(trustControl.revision) > BigInt(trust.revision));
+    assert.equal(currentMode.mode, 'full');
+    assert.equal(currentMode.scopeSessionId, 's');
+    assert.equal(currentMode.revision, modeControl.revision);
+    assert.equal(currentMode.defaultRevision, mode.defaultRevision);
+    assert.equal(currentTrust.trusted, true);
+    assert.equal(currentTrust.revision, trustControl.revision);
+    assert.equal(currentTrust.canonicalIdentity, trust.canonicalIdentity);
+    assert.equal(currentTrust.externalReadScopeDigest, trust.externalReadScopeDigest);
+    assert.deepEqual(await store.listExecutions('s'), executions);
+    console.log(
+      JSON.stringify({
+        storeId: settings.seed.storeId,
+        subjectId: settings.seed.subjectId,
+        mode: currentMode,
+        trust: currentTrust,
+        executions: executions.length,
+      }),
+    );
+  } finally {
+    await runtime.close();
+    await store.close();
+  }
+} else if (process.argv[2] !== 'caller') {
   const { runServiceProcess } = await import('@kite-ai/service/main');
   const { createDefaultProcessConfiguration } = await import('@kite-ai/service/configuration');
   const { createMcpHttpTransportPort } = await import('@kite-ai/service/mcp-http-port');

@@ -118,7 +118,7 @@ test('Native original compression lookup reads its complete terminal Run beyond 
       kind: 'run.start',
       expectedStoreId: storeId,
       commandId: 'original',
-      content: 'Original user content',
+      content: '新任务：Original user content',
     });
     await runtime.waitForCommand('original', { timeoutMs: 5000 });
     const scope = {
@@ -153,7 +153,7 @@ test('Native original compression lookup reads its complete terminal Run beyond 
         kind: 'run.start',
         expectedStoreId: storeId,
         commandId,
-        content: `Later actual user ${index}`,
+        content: `新任务：Later actual user ${index}`,
       });
       await runtime.waitForCommand(commandId, { timeoutMs: 5000 });
     }

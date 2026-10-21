@@ -207,11 +207,11 @@ async function fixture() {
     get jobRef() {
       return jobRef!;
     },
-    async submit(commandId = 'first') {
+    async submit(commandId = 'first', content = commandId) {
       await runtime.submitCommand({
         ...base,
         commandId,
-        request: { kind: 'run.start', content: commandId },
+        request: { kind: 'run.start', content },
       });
     },
     async done(commandId = 'first') {
@@ -295,8 +295,47 @@ test('child ordinary Job is consumed by the shared Loop with exact low-trust sou
     }
     expect((await f.store.getMetadata()).lastChangeCursor).toBe(cursor);
     expect(f.ledger).toEqual({ starts: 1, ends: 1, cancels: 0, launches: 1 });
-    await f.submit('explicit-next');
-    await f.done('explicit-next');
+    const continuation = 'Continue first: explicit-next';
+    await f.submit('explicit-next', continuation);
+    const next = await f.done('explicit-next');
+    const receipt = next.receipt as {
+      businessCommandId: string;
+      humanInputCommandId: string;
+      runId: string;
+    };
+    expect(next.status).toBe('applied');
+    expect(receipt.businessCommandId).toBeString();
+    expect(receipt.businessCommandId).not.toBe(next.id);
+    expect(await f.store.getCommand(receipt.humanInputCommandId)).toMatchObject({
+      request: { publicCommandId: next.id, content: continuation, originalRequest: next.request },
+      receipt: { businessCommandId: receipt.businessCommandId, state: 'decided' },
+    });
+    expect(await f.store.getCommand(receipt.businessCommandId)).toMatchObject({
+      status: 'applied',
+      request: { content: continuation },
+      receipt: { runId: receipt.runId },
+    });
+    expect(await f.store.getRun(receipt.runId)).toMatchObject({
+      status: 'completed',
+      originCommandId: receipt.businessCommandId,
+      rootWorkCommandId: 'first',
+    });
+    expect(f.parent.requests).toHaveLength(3);
+    const model = (await f.store.listExecutions('s')).find(
+      (execution) => execution.kind === 'model' && execution.runId === receipt.runId,
+    )!;
+    expect(model).toMatchObject({
+      originCommandId: receipt.businessCommandId,
+      rootWorkCommandId: 'first',
+      status: 'succeeded',
+    });
+    const input = await f.runtime.readModelInput({ ...f.base, executionId: model.id });
+    expect(input.confirmation).toBe('succeeded');
+    expect(
+      input.request.messages.find((message) =>
+        message.sourceIds?.includes(receipt.businessCommandId),
+      ),
+    ).toMatchObject({ content: continuation, sourceIds: [receipt.businessCommandId] });
     const rootSources = (await f.context()).resultSources;
     expect(rootSources).toHaveLength(1);
     expect(rootSources[0]!.executionId).toBe(carrier.id);

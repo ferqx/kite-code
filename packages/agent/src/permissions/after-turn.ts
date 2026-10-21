@@ -41,9 +41,17 @@ export function createDefaultAfterTurnPolicy(options: {
           : undefined;
       if (
         !['request', 'apply'].includes(phase) ||
-        !['run.start', 'input.follow_up', 'child.start'].includes(command.kind) ||
+        ![
+          'run.start',
+          'input.follow_up',
+          'child.start',
+          'job.report',
+          'job.report.continue',
+        ].includes(command.kind) ||
         execution.kind !== 'tool' ||
-        !['task', 'followup_task'].includes(execution.definitionId) ||
+        !['task', 'followup_task', 'task.spawn', 'task.follow_up'].includes(
+          execution.definitionId,
+        ) ||
         execution.definitionVersion !== '1' ||
         command.sessionId !== session.id ||
         run.sessionId !== session.id ||

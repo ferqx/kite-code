@@ -28,7 +28,7 @@ import {
   type SessionRecord,
 } from '../types';
 import { markStorageTransactionUnconfirmed } from '../worker/error';
-import { acceptAgentInput, interruptAgent } from './agent-input-operations';
+import { acceptAgentInput, applyAgentCommand, interruptAgent } from './agent-input-operations';
 import {
   getAgentMessage,
   listAgentMessages,
@@ -47,7 +47,12 @@ import {
 import { readBackgroundExecutions } from './background-directory';
 import { cancel } from './cancel-operations';
 import { activateChildRun, ensureAgent, inspectChildSettlement } from './child-operations';
-import { getAgentSummary, listAgentSummaries } from './child-query-operations';
+import {
+  getAgentSummary,
+  listAgentEvents,
+  listAgentSummaries,
+  listStableAgents,
+} from './child-query-operations';
 import { compressionDisplay } from './compression-display';
 import {
   beginCompression,
@@ -75,6 +80,17 @@ import { readForkRecordSources } from './fork-record-sources';
 import { verifyHostControlDispatch } from './host-control-dispatch';
 import { callHostMutation } from './host-mutation-operations';
 import {
+  beginHumanInputProcessing,
+  decideHumanInput,
+  humanInputInterpretation,
+  readHumanWorkEligibility,
+  readHumanWorkState,
+  recordHumanCommandRejection,
+  registerHumanCommand,
+  registerHumanInput,
+} from './human-work-control';
+import { assertHumanRunHandoff, handoffHumanRun } from './human-work-handoff';
+import {
   applyInput,
   assertInputBoundary,
   listPendingInputs,
@@ -88,6 +104,7 @@ import {
   childReportCarrier,
   listPendingJobReports,
   registerJobReport,
+  runnableCommandPredicate,
   verifyJobReportRecovery,
 } from './job-report-operations';
 import { verifyModelBody } from './model-body';
@@ -150,6 +167,7 @@ type Input = {
   };
 type Row = Record<string, string | number | bigint | null>;
 export class SqliteOperations {
+  private requestId: number | undefined;
   readonly db: Database;
   readonly readonly: boolean;
   private readonly statements = new Set<Statement>();
@@ -210,8 +228,9 @@ export class SqliteOperations {
     this.assertRequestSettled(error);
     throw error;
   }
-  beginRequest(): void {
+  beginRequest(requestId?: number): void {
     this.assertAvailable();
+    this.requestId = requestId;
     this.resetTiming();
     this.mayWaitForWriter = true;
   }
@@ -409,7 +428,8 @@ export class SqliteOperations {
       }
     }
     if (!start) return null;
-    if (start.kind === 'job.report') return childReportCarrier(this, start);
+    if (start.kind === 'job.report' || start.kind === 'job.report.continue')
+      return childReportCarrier(this, start);
     if (start.agent_carrier_execution_id !== null && start.agent_carrier_execution_id !== undefined)
       return this.row(
         'SELECT * FROM execution WHERE id=? AND child_session_id=?',
@@ -631,7 +651,128 @@ export class SqliteOperations {
     return isActive && cancelRequested ? 'cancelling' : status;
   }
   runRecord(row: Row): RunRecord {
+    const visited = new Set<string>();
+    const carrierFor = (run: Row, subject?: string): string | undefined => {
+      const runId = String(run.id);
+      if (visited.size >= 64 || visited.has(runId)) return;
+      visited.add(runId);
+      const command = this.row('SELECT * FROM command WHERE id=?', run.origin_command_id!);
+      if (
+        !command ||
+        command.session_id !== run.session_id ||
+        command.origin_store_id !== run.origin_store_id ||
+        command.root_work_command_id !== run.root_work_command_id ||
+        String(command.root_work_seq) !== String(run.root_work_seq) ||
+        (subject !== undefined && command.subject_id !== subject)
+      )
+        return;
+      let request: Record<string, Json>;
+      try {
+        const body = parse(command.request_json);
+        // Offline GC clears request bodies while retaining the Run ledger.
+        // Missing lineage removes this optional projection, never the Run itself.
+        if (body === null || typeof body !== 'object' || Array.isArray(body)) return;
+        request = body;
+      } catch {
+        return;
+      }
+      if (command.kind === 'job.report') {
+        const result =
+          typeof request.executionId === 'string'
+            ? this.row('SELECT * FROM execution WHERE id=?', request.executionId)
+            : null;
+        let binding: Record<string, Json> | undefined;
+        try {
+          binding = result?.after_turn_json
+            ? (parse(result.after_turn_json) as Record<string, Json>)
+            : undefined;
+        } catch {
+          return;
+        }
+        if (
+          !result ||
+          !binding ||
+          command.id !==
+            `report-${hash([String(result.origin_store_id), String(result.id), String(result.result_revision)])}` ||
+          !['accepted', 'applied'].includes(String(command.status)) ||
+          result.session_id !== run.session_id ||
+          result.origin_store_id !== run.origin_store_id ||
+          result.root_work_command_id !== run.root_work_command_id ||
+          String(result.root_work_seq) !== String(run.root_work_seq) ||
+          String(request.resultRevision) !== String(result.result_revision) ||
+          request.parentRunId !== binding.parentRunId ||
+          typeof request.parentRunId !== 'string'
+        )
+          return;
+        const parent = this.row('SELECT * FROM run WHERE id=?', request.parentRunId);
+        if (
+          !parent ||
+          parent.session_id !== run.session_id ||
+          parent.origin_store_id !== run.origin_store_id ||
+          parent.root_work_command_id !== run.root_work_command_id ||
+          String(parent.root_work_seq) !== String(run.root_work_seq)
+        )
+          return;
+        return carrierFor(parent, String(command.subject_id));
+      }
+      const carrierId =
+        command.kind === 'child.start'
+          ? request.parentExecutionId
+          : command.kind === 'input.follow_up'
+            ? command.agent_carrier_execution_id
+            : undefined;
+      if (typeof carrierId !== 'string' || command.id !== `child-start-${carrierId}`) return;
+      const carrier = this.row('SELECT * FROM execution WHERE id=?', carrierId);
+      const session = this.row('SELECT * FROM session WHERE id=?', run.session_id!);
+      const source = carrier
+        ? this.row('SELECT * FROM command WHERE id=?', carrier.origin_command_id!)
+        : null;
+      if (
+        !carrier ||
+        !session ||
+        !source ||
+        carrier.kind !== 'job' ||
+        carrier.child_session_id !== run.session_id ||
+        carrier.session_id !== session.parent_id ||
+        carrier.root_session_id !== session.root_id ||
+        carrier.origin_store_id !== run.origin_store_id ||
+        carrier.root_work_command_id !== run.root_work_command_id ||
+        String(carrier.root_work_seq) !== String(run.root_work_seq) ||
+        source.subject_id !== command.subject_id ||
+        source.session_id !== carrier.session_id ||
+        source.origin_store_id !== carrier.origin_store_id ||
+        source.root_work_command_id !== carrier.root_work_command_id ||
+        String(source.root_work_seq) !== String(carrier.root_work_seq) ||
+        (command.kind === 'input.follow_up' &&
+          command.agent_source_execution_id !== carrier.parent_execution_id)
+      )
+        return;
+      if (command.kind === 'input.follow_up') {
+        const predecessor = this.row(
+          `SELECT r.* FROM run r JOIN execution p ON p.id=? AND p.child_session_id=r.session_id
+           WHERE r.id=? AND r.session_id=? AND r.origin_command_id='child-start-'||p.id
+           AND r.origin_store_id=? AND p.origin_store_id=r.origin_store_id
+           AND p.session_id=? AND p.root_session_id=?`,
+          carrier.predecessor_execution_id!,
+          command.after_run_id!,
+          run.session_id!,
+          run.origin_store_id!,
+          carrier.session_id!,
+          carrier.root_session_id!,
+        );
+        if (
+          !predecessor ||
+          request.afterRunId !== predecessor.id ||
+          request.contextSelectionId !== predecessor.context_selection_id ||
+          command.input_context_selection_id !== predecessor.context_selection_id
+        )
+          return;
+      }
+      return carrierId;
+    };
+    const carrierExecutionId = carrierFor(row);
     return {
+      ...(carrierExecutionId ? { carrierExecutionId } : {}),
       contextSelectionId: String(row.context_selection_id),
       waitingForResults: parse(row.waiting_results_json) as string[],
       id: String(row.id),
@@ -886,7 +1027,7 @@ export class SqliteOperations {
       case 'registerArtifact':
       case 'getArtifactReference':
       case 'getLegacyReviewArtifactReference':
-        return callArtifact(this, method, args);
+        return callArtifact(this, method, args, this.requestId);
       case 'getExtensionRecord':
       case 'listExtensionRecords':
       case 'writeExtensionRecord':
@@ -1033,6 +1174,12 @@ export class SqliteOperations {
         return interruptAgent(this, args[0] as Parameters<Store['interruptAgent']>[0]);
       case 'acceptAgentInput':
         return acceptAgentInput(this, args[0] as Parameters<Store['acceptAgentInput']>[0]);
+      case 'applyAgentCommand':
+        return applyAgentCommand(this, args[0] as Parameters<Store['applyAgentCommand']>[0]);
+      case 'listStableAgents':
+        return listStableAgents(this, args[0] as Parameters<Store['listStableAgents']>[0]);
+      case 'listAgentEvents':
+        return listAgentEvents(this, args[0] as Parameters<Store['listAgentEvents']>[0]);
       case 'queueAgentMessage':
         return queueAgentMessage(this, args[0] as Parameters<Store['queueAgentMessage']>[0]);
       case 'readAgentMessageTarget':
@@ -1110,13 +1257,33 @@ export class SqliteOperations {
           this.event(input.sessionId, input.commandId, 'command.accepted');
           return this.command(this.row('SELECT * FROM command WHERE id=?', input.commandId)!);
         });
+      case 'registerHumanInput':
+        return registerHumanInput(this, args[0] as Parameters<Store['registerHumanInput']>[0]);
+      case 'registerHumanCommand':
+        return registerHumanCommand(this, args[0] as Parameters<Store['registerHumanCommand']>[0]);
+      case 'beginHumanInputProcessing':
+        return beginHumanInputProcessing(
+          this,
+          args[0] as Parameters<Store['beginHumanInputProcessing']>[0],
+        );
+      case 'handoffHumanRun':
+        return handoffHumanRun(this, args[0] as Parameters<Store['handoffHumanRun']>[0]);
+      case 'decideHumanInput':
+        return decideHumanInput(this, args[0] as Parameters<Store['decideHumanInput']>[0]);
+      case 'readHumanWorkState':
+        return readHumanWorkState(this, args[0] as Parameters<Store['readHumanWorkState']>[0]);
+      case 'readHumanWorkEligibility':
+        return readHumanWorkEligibility(
+          this,
+          args[0] as Parameters<Store['readHumanWorkEligibility']>[0],
+        );
       case 'getCommand': {
         const row = this.row('SELECT * FROM command WHERE id=?', String(args[0]));
         return row ? this.command(row) : null;
       }
       case 'listAcceptedCommands':
         return this.rows(
-          "SELECT * FROM command WHERE session_id=? AND status='accepted' AND kind NOT IN('job.reconcile','run.resume') ORDER BY seq LIMIT ?",
+          `SELECT * FROM command WHERE session_id=? AND status='accepted' AND kind NOT IN('job.reconcile','run.resume') AND ${runnableCommandPredicate()} ORDER BY seq LIMIT ?`,
           String(args[0]),
           limit(args[1]),
         ).map((row) => this.command(row));
@@ -1133,6 +1300,7 @@ export class SqliteOperations {
             input.commandId,
             String(command.session_id),
           );
+          recordHumanCommandRejection(this, command, input.reason, input.needsReview === true);
           this.event(
             String(command.session_id),
             input.commandId,
@@ -1144,6 +1312,12 @@ export class SqliteOperations {
         return this.tx(() => {
           this.identity(input.expectedStoreId);
           const command = this.active(input.owner, input.commandId);
+          if (
+            ['human_input_pending', 'human_input_queued', 'human_input_unresolved'].includes(
+              String((parse(command.receipt_json) as Record<string, Json> | null)?.outcome),
+            )
+          )
+            throw new AgentError('input_pending');
           if (command.status === 'applied') {
             const row = this.row('SELECT * FROM run WHERE origin_command_id=?', input.commandId);
             if (!row) throw new AgentError('command_already_applied');
@@ -1175,7 +1349,7 @@ export class SqliteOperations {
             throw new AgentError('session_busy');
           if (
             this.row(
-              "SELECT id FROM command WHERE session_id=? AND kind='input.follow_up' AND status='accepted' AND cancelled=0 AND seq<? LIMIT 1",
+              "SELECT id FROM command WHERE session_id=? AND kind='input.follow_up' AND status='accepted' AND cancelled=0 AND COALESCE(json_extract(receipt_json,'$.outcome'),'') NOT IN('human_input_pending','human_input_queued','human_input_unresolved') AND seq<? LIMIT 1",
               String(command.session_id),
               command.seq!,
             )
@@ -1405,6 +1579,8 @@ export class SqliteOperations {
       case 'listPendingInputs':
         return listPendingInputs(this, args[0] as Parameters<Store['listPendingInputs']>[0]);
       case 'requestInteraction':
+      case 'refreshApproval':
+      case 'invalidateAuthorizationReview':
       case 'answerInteraction':
       case 'acceptInteractionDecision':
       case 'getInteraction':
@@ -1460,7 +1636,12 @@ export class SqliteOperations {
             'dispatch',
             String(execution.id),
           );
-          if (execution.run_id !== null) assertInputBoundary(this, String(execution.run_id));
+          if (execution.run_id !== null)
+            assertInputBoundary(
+              this,
+              String(execution.run_id),
+              humanInputInterpretation(this, execution) ?? undefined,
+            );
           assertMutationIntent(this, execution);
           verifyPermissionGrantDispatch(this, input);
           verifyInteractionDispatch(this, execution, input);
@@ -2025,7 +2206,15 @@ export class SqliteOperations {
       return this.runRecord(run);
     }
     if (input.status === 'completed') {
-      assertInputBoundary(this, String(input.runId));
+      const handoffInputId = input.inputHandoffCommandId
+        ? assertHumanRunHandoff(this, {
+            expectedStoreId: input.expectedStoreId,
+            owner: input.owner,
+            runId: input.runId,
+            inputHandoffCommandId: input.inputHandoffCommandId,
+          })
+        : undefined;
+      assertInputBoundary(this, String(input.runId), handoffInputId);
       this.active(input.owner, String(run.origin_command_id), input.runId);
       if (
         this.row(

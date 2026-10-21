@@ -93,7 +93,21 @@ function fixture(saved: TuiMcpSourceApprovalOutcome[] = []) {
         storeId: 'store',
         session: { id, workspaceId },
         runs: [],
-        executions: [],
+        executions: cards
+          .filter((card) => card.sessionId === id)
+          .map((card) => ({
+            id: card.executionId,
+            originStoreId: card.originStoreId,
+            sessionId: id,
+            runId: card.runId,
+            kind: 'tool',
+            definitionId: card.definitionId,
+            definitionVersion: card.definitionVersion,
+            status: 'dispatching',
+            result: null,
+            resultRevision: '0',
+            cancelRequestedAt: null,
+          })),
         messages: [],
       } as unknown as SessionView,
       messages: [],
@@ -508,6 +522,10 @@ test('Source Question choice cannot cross revision or source/presentation identi
     f.cards([child]);
     await f.controller.select('a');
     await tick();
+    ui.stdin.write('\x02');
+    await tick();
+    ui.stdin.write('\r');
+    await tick();
     expect(ui.lastFrame()).toContain(
       'Up/Down explicit source decision: none (Enter has no answer)',
     );
@@ -519,6 +537,10 @@ test('Source Question choice cannot cross revision or source/presentation identi
     const presented = { ...question('2'), presentationSessionId: 'b' };
     f.cards([presented]);
     await f.controller.select('b');
+    await tick();
+    ui.stdin.write('\x02');
+    await tick();
+    ui.stdin.write('\r');
     await tick();
     expect(ui.lastFrame()).toContain(
       'Up/Down explicit source decision: none (Enter has no answer)',
@@ -674,3 +696,103 @@ for (const phase of ['saved', 'failed', 'cancelled'] as const)
       f.controller.dispose();
     }
   }, 5000);
+
+const managementFacts = (
+  sessionId = 'a',
+): Awaited<ReturnType<NonNullable<TuiPort['mcp']>['read']>> => ({
+  storeId: 'store',
+  sessionId,
+  workspaceId: 'w',
+  workspaceIdentity: 'physical-w',
+  workspacePath: '/owned',
+  registryRevision: 'r',
+  readSet: {
+    userEtag: 'u',
+    workspaceEtag: 'w',
+    explicitDigest: 'e',
+    registryDigest: 'r',
+    registryRevision: 'r',
+    scopeDigest: 's',
+  },
+  items: [],
+});
+const directoryAuth = (f: ReturnType<typeof fixture>) => {
+  // This control reaches only the directory's optional read-only enrichment.
+  f.port.mcpAuth = { readDirectory: async () => null } as unknown as NonNullable<
+    TuiPort['mcpAuth']
+  >;
+};
+test('late management enrichment preserves independent Source Review and exact observed read-set', async () => {
+  const f = fixture();
+  directoryAuth(f);
+  const pending = deferred<ReturnType<typeof managementFacts>>();
+  f.port.mcp!.read = () => pending.promise;
+  await f.controller.select('a');
+  const management = f.controller.openMcp();
+  await f.controller.openMcpSources();
+  const observed = f.controller.state.mcpSource!.facts!;
+  const ui = render(<TuiSession testDiagnostics controller={f.controller} />);
+  try {
+    await tick();
+    ui.stdin.write('\r');
+    await tick();
+    expect(ui.lastFrame()).toContain('❯ Review project source');
+    pending.resolve(managementFacts());
+    await management;
+    await tick();
+    expect(f.controller.state.mcpSource!.facts).toBe(observed);
+    expect(ui.lastFrame()).toContain('❯ Review project source');
+    expect(f.sent).toHaveLength(0);
+    ui.stdin.write('\r');
+    await tick();
+    expect(ui.lastFrame()).toContain('Confirm project source review:');
+    expect(f.sent).toHaveLength(0);
+    ui.stdin.write('\r');
+    await tick();
+    expect(f.sent).toHaveLength(1);
+    expect(f.sent[0]!.observed).toBe(observed);
+    expect(f.sent[0]!.intent.request.input.expectedReadSet).toEqual(observed.readSet!);
+  } finally {
+    ui.unmount();
+    f.controller.dispose();
+  }
+});
+test('management enrichment still publishes its complete Source observation when Source panel is closed', async () => {
+  const f = fixture();
+  directoryAuth(f);
+  f.port.mcp!.read = async () => managementFacts();
+  await f.controller.select('a');
+  await f.controller.openMcp();
+  expect(f.controller.state.mcpSourceOpen).toBe(false);
+  expect(f.controller.state.mcpSource?.facts).toEqual(sourceSnapshot());
+  expect(f.controller.state.mcpSource?.read).toBe('ready');
+  expect(f.sent).toHaveLength(0);
+  f.controller.dispose();
+});
+test('Source independent refresh and Session or Store changes still invalidate old approval observations', async () => {
+  const f = fixture();
+  await open(f);
+  const old = f.controller.state.mcpSource!.facts!;
+  f.port.mcp!.source!.read = async (sessionId) => ({
+    ...sourceSnapshot(sessionId),
+    registryRevision: 'changed',
+    readSet: { ...sourceSnapshot().readSet!, approvalEtag: 'changed' },
+  });
+  await f.controller.openMcpSources();
+  expect(f.controller.state.mcpSource!.facts).not.toBe(old);
+  expect(f.controller.state.mcpSource!.facts!.readSet!.approvalEtag).toBe('changed');
+  await f.controller.requestMcpSourceApproval(serverId, old);
+  expect(f.sent).toHaveLength(0);
+  const oldA = f.controller.state.mcpSource!.facts!;
+  await f.controller.select('b');
+  await f.controller.openMcpSources();
+  expect(f.controller.state.mcpSource!.facts!.sessionId).toBe('b');
+  await f.controller.requestMcpSourceApproval(serverId, oldA);
+  expect(f.sent).toHaveLength(0);
+  const oldStore = f.controller.state.mcpSource!.facts!;
+  Object.assign(f.port, { storeId: 'foreign' });
+  await f.controller.requestMcpSourceApproval(serverId, oldStore);
+  expect(f.sent).toHaveLength(0);
+  expect(f.counts().minted).toBe(0);
+  f.controller.dispose();
+});

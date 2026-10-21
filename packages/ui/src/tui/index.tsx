@@ -1505,7 +1505,31 @@ function TuiSessionView({
     cards.find(
       (i) => JSON.stringify(JSON.parse(interactionKey(i)).slice(0, 4)) === selectedTarget,
     ) ??
-    cards[0];
+    cards.find((item) => {
+      const snapshot = state.snapshot;
+      return (
+        !!snapshot &&
+        item.originStoreId === snapshot.storeId &&
+        item.sessionId === snapshot.view.session.id &&
+        item.presentationSessionId === snapshot.view.session.id &&
+        snapshot.view.executions.some(
+          (execution) =>
+            execution.id === item.executionId &&
+            execution.originStoreId === snapshot.storeId &&
+            execution.sessionId === item.sessionId &&
+            execution.runId === item.runId &&
+            ['planned', 'dispatching', 'running'].includes(execution.status),
+        ) &&
+        (item.runId === null ||
+          snapshot.view.runs.some(
+            (run) =>
+              run.id === item.runId &&
+              run.originStoreId === snapshot.storeId &&
+              run.sessionId === item.sessionId &&
+              run.isActive,
+          ))
+      );
+    });
   // An explicitly opened management page owns focus until its own close/back
   // gesture. Pending cards remain unchanged and become actionable on the main
   // screen; they cannot silently hide a still-mounted navigation stack.
@@ -1844,8 +1868,10 @@ function TuiSessionView({
         return;
       }
       if (cardChooser) {
-        if (key.escape) setCardChooser(false);
-        else if (key.upArrow) setCardIndex((n) => Math.max(0, n - 1));
+        if (key.escape) {
+          setCardChooser(false);
+          setSelectedCard(undefined);
+        } else if (key.upArrow) setCardIndex((n) => Math.max(0, n - 1));
         else if (key.downArrow)
           setCardIndex((n) => Math.min(Math.max(0, cardOptions.length - 1), n + 1));
         else if (key.return && cardOptions[cardIndex]) {
@@ -2023,7 +2049,7 @@ function TuiSessionView({
         }
 
         if (key.escape && card.kind === 'approval') {
-          void controller.cancel();
+          void controller.answer(card, 'deny');
           return;
         }
         if (key.return && (!jsonQuestion || (!key.shift && !key.meta))) {

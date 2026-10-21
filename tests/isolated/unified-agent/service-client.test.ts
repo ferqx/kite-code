@@ -176,7 +176,7 @@ test('network disposal during model I/O does not cancel execution; reconnect rea
       expectedStoreId,
       commandId: 'detached-intent',
       kind: 'run.start',
-      content: 'hold',
+      content: 'New task: hold',
     });
     await dispatch;
     f.client.disposeNetwork();

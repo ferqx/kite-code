@@ -9,6 +9,7 @@ import { selectProfile } from '@kite-ai/agent/profile';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import { privateDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { createDefaultProcessConfiguration } from '../../src/configuration';
+import { initializeLivePermissionFixture } from '../fixtures/live-permission-fixture';
 
 function gate() {
   let release!: () => void;
@@ -65,11 +66,7 @@ async function fixture(mode: 'allow' | 'deny' | 'json_only') {
                 function: {
                   name: 'spawn_agent',
                   arguments: JSON.stringify({
-                    key: 'original-child',
-                    role: 'worker',
-                    input: { content: 'read' },
-                    cancellation: 'detached',
-                    result_disposition: 'after_turn',
+                    prompt: 'read',
                   }),
                 },
               },
@@ -87,7 +84,7 @@ async function fixture(mode: 'allow' | 'deny' | 'json_only') {
   const configurationPath = join(profile.profilePath, 'config.jsonc');
   const configuration = {
     modelId: 'parent',
-    tools: [{ id: 'task', definitionVersion: '1' }],
+    tools: [{ id: 'task.spawn', definitionVersion: '1' }],
     models: [
       { id: 'parent', provider: 'compatible', model: 'parent', baseURL: `${provider.url.href}v1` },
       { id: 'child', provider: 'compatible', model: 'child', baseURL: `${provider.url.href}v1` },
@@ -103,7 +100,7 @@ async function fixture(mode: 'allow' | 'deny' | 'json_only') {
       expect(Object.isFrozen(input.command)).toBe(true);
       expect(Object.isFrozen(input.execution)).toBe(true);
       expect(input.command.id).toBe('work');
-      expect(input.execution.definitionId).toBe('task');
+      expect(input.execution.definitionId).toBe('task.spawn');
       expect(input.configuration.id).toBe('worker');
       expect(input.configuration.version).toBe('7');
       return { allowed: mode === 'allow', revision: 'trusted-explicit-after-turn-1' };
@@ -141,6 +138,15 @@ async function fixture(mode: 'allow' | 'deny' | 'json_only') {
     commandId: 'create',
     workspaceId: 'workspace',
     title: 'actual after turn',
+  });
+  host.permissionManagement?.(runtime);
+  await initializeLivePermissionFixture({
+    runtime,
+    profile,
+    ...identity,
+    workspaceId: 'workspace',
+    mode: 'full',
+    trusted: true,
   });
   return {
     runtime,
@@ -235,7 +241,7 @@ test('default assembly explicitly binds trusted after_turn to its original immut
   }
 }, 15000);
 
-test('a trusted deny or JSONC-only after_turn intent starts no child or report and never bypasses ordinary Tool authority', async () => {
+test('a trusted deny or JSONC-only completion intent allows ordinary child work but cannot authorize an idle parent report', async () => {
   for (const mode of ['deny', 'json_only'] as const) {
     const f = await fixture(mode);
     try {
@@ -245,12 +251,39 @@ test('a trusted deny or JSONC-only after_turn intent starts no child or report a
         request: { kind: 'run.start', content: 'work' },
       });
       expect((await f.runtime.waitForCommand('work', { timeoutMs: 7000 })).status).toBe('applied');
+      await until(async () => f.requests.find((request) => request.model === 'child'));
+      f.childGate.release();
+      await until(async () =>
+        (await f.store.listExecutions('root')).find(
+          (execution) => execution.childSessionId && execution.status === 'succeeded',
+        ),
+      );
       const view = await f.runtime.getView('root');
       expect(view.runs.length).toBe(1);
-      expect(view.executions.some((execution) => execution.kind === 'job')).toBe(false);
-      expect(f.requests.some((request) => request.model === 'child')).toBe(false);
-      expect(f.requests.length).toBe(2);
-      expect(f.phases).toEqual(mode === 'deny' ? ['request'] : []);
+      expect(view.executions.filter((execution) => execution.kind === 'job')).toHaveLength(1);
+      expect(f.requests.filter((request) => request.model === 'child')).toHaveLength(1);
+      expect(f.requests.filter((request) => request.model === 'parent')).toHaveLength(2);
+      await until(async () => {
+        const deferred = (
+          await f.store.listPendingJobReports({
+            expectedStoreId: f.identity.expectedStoreId,
+            sessionId: 'root',
+          })
+        ).commands.find(
+          (command) => (command.receipt as { outcome?: string })?.outcome === 'report_deferred',
+        );
+        // The active-only preflight may publish deferred before the original
+        // idle policy finishes. Observe its denial before measuring read-only queries.
+        if (mode === 'deny' && !f.phases.includes('apply')) return undefined;
+        return deferred;
+      });
+      expect(f.phases.filter((phase) => phase === 'request')).toHaveLength(mode === 'deny' ? 1 : 0);
+      expect(f.phases.filter((phase) => phase === 'apply')).toHaveLength(mode === 'deny' ? 1 : 0);
+      const calls = f.requests.length;
+      const phases = [...f.phases];
+      for (let repeat = 0; repeat < 3; repeat++) await f.runtime.getView('root');
+      expect(f.requests.length).toBe(calls);
+      expect(f.phases).toEqual(phases);
       expect(f.unexpected()).toBe(0);
     } finally {
       await f.close();

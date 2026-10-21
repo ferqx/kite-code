@@ -119,6 +119,8 @@ Native 自带 `bin/kite maintenance` 和登记后的独立 Terminal 前门均先
 
 原文件另有独立300秒legacy安全拒绝整例，实际构建a2b Native，两个独立owned Profile分别核当前公共Store生成的0002拒绝，以及原a2b Core0001配当前production PrivateData合法生成DB9后的私有拒绝。前者观察旧Main诊断缺能力，后者实际触达 `draft.read` 的 `draft_storage_unavailable`／callerUnavailable；两者均Provider零、普通退出、准确PID死亡／双EX，并在退出与卸载后核Core／private／Profile和user配置的完整bytes／inode。前者不冒称已执行私有拒绝，后者不复制、恢复或降级Core。当前source owner生成数据的负例不替代首个test的完整当前Native安装资格。
 
+2026-10-19当前macOS主升级场景定向1项/1435条Bun断言/156.58s通过。B输入明确独立工作，保完整352041字节，并以真实public/raw/decision/business/Run/成功Model Source替代按Run数组位置推断；正式lookupInput查回原公开ID，完整ModelInput仍由原Native reader读取。Native journal同步采用共享业务绑定校验，不再要求业务Run.origin等于原public ID；旧技术steer和scope/digest、取消、extension与冷零POST保持。原A/回退A、3次Provider、原历史/bytes/hash/inode、四暖窗口及两DB9冷窗口、备份/安装/回退/卸载/退出双lease及原420/120/60/15秒预算保持。本次定向未运行另一个legacy拒绝case，完整默认的整文件证据归[测试owner](../../../tests/README.md#子-agent-协作-v11-验证)，不由定向主场景推导跨平台或发布资格。
+
 ## Linux 真代码升级与冷回退
 
 同一完整跨代码文件对macOS/Linux执行；历史Linux组合使用首次接受准确builtin SQLite3.53.2来源的原提交 `1b796e30ab0f3638767095d86d4afd374eae662a`，由该源码自己的Terminal和Native builder生成候选。历史3140前驱在Linux的原来源拒绝保留；不修改旧源码、白名单、版本文字或数据库。相同依赖/基线、源码前后干净及成功删除原源码的守卫继续适用，取舍归[平台前驱决定](../../../.agents/notes/implemented/testing/2026-10-07-platform-real-code-predecessors.md)。所有平台都核实际Agent字节与inner/outer候选不同；Mac两个前端差异断言原样保留。该历史Linux组合实际变化为包内Agent worker，Main制品hash不同、renderer字节相同，不能据此认定renderer逻辑演进已验收。

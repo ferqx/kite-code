@@ -119,12 +119,13 @@ function fixture() {
   };
 }
 
-test('ordinary host defaults select Shell only with a supplied backend and preserve minimal embedding defaults', () => {
+test('ordinary host defaults select only available Shell and Task capabilities and preserve minimal embedding defaults', () => {
   expect(defaultConfiguration.tools).toEqual([{ id: 'ask_user' }]);
-  const unavailable = ordinaryHostConfigurationDefaults(false).tools.map((tool) => tool.id);
+  const unavailable = ordinaryHostConfigurationDefaults(false, false).tools.map((tool) => tool.id);
   expect(unavailable).toContain('files.read');
   expect(unavailable.some((id) => id.startsWith('shell.'))).toBe(false);
-  const available = ordinaryHostConfigurationDefaults(true).tools.map((tool) => tool.id);
+  expect(unavailable.some((id) => id.startsWith('task.'))).toBe(false);
+  const available = ordinaryHostConfigurationDefaults(true, true).tools.map((tool) => tool.id);
   expect(available.filter((id) => id.startsWith('shell.'))).toEqual([
     'shell.execute',
     'shell.launch',
@@ -132,6 +133,20 @@ test('ordinary host defaults select Shell only with a supplied backend and prese
     'shell.wait',
     'shell.stop',
   ]);
+  expect(available.filter((id) => id.startsWith('task.'))).toEqual([
+    'task.spawn',
+    'task.message',
+    'task.follow_up',
+    'task.events',
+    'task.list',
+    'task.interrupt',
+  ]);
+  const taskOnly = ordinaryHostConfigurationDefaults(false, true).tools.map((tool) => tool.id);
+  expect(taskOnly.some((id) => id.startsWith('shell.'))).toBe(false);
+  expect(taskOnly.filter((id) => id.startsWith('task.'))).toHaveLength(6);
+  const shellOnly = ordinaryHostConfigurationDefaults(true, false).tools.map((tool) => tool.id);
+  expect(shellOnly.some((id) => id.startsWith('task.'))).toBe(false);
+  expect(shellOnly.filter((id) => id.startsWith('shell.'))).toHaveLength(5);
 });
 
 test('ordinary paired host exposes public file schemas, edits with an exact baseline, preserves internal execution inputs, and respects explicit disable', async () => {
@@ -253,9 +268,7 @@ test('ordinary paired host exposes public file schemas, edits with an exact base
       answer: { kind: 'approval', decision: 'approve' },
     });
     const view = await child.finished('read-project');
-    expect(view.runs.find((run) => run.originCommandId === 'read-project')?.status).toBe(
-      'completed',
-    );
+    expect(view.commandRun.status).toBe('completed');
     expect(requests).toHaveLength(3);
     reader = await openSqliteStore({
       dataRoot: f.profile.dataRoot,
@@ -299,10 +312,21 @@ test('ordinary paired host exposes public file schemas, edits with an exact base
     const names = (requests[0]!.tools as { function: { name: string } }[]).map(
       (tool) => tool.function.name,
     );
-    expect(names).toHaveLength(8);
-    expect(names).toEqual(expect.arrayContaining(['ask_user', 'web_fetch']));
+    expect(names).toHaveLength(14);
+    expect(names).toEqual(
+      expect.arrayContaining([
+        'ask_user',
+        'web_fetch',
+        'spawn_agent',
+        'send_agent_message',
+        'follow_up_agent',
+        'wait_agent_events',
+        'list_agents',
+        'interrupt_agent',
+      ]),
+    );
     expect(names.every((name) => /^[a-zA-Z0-9_-]{1,64}$/.test(name))).toBe(true);
-    expect(new Set(names).size).toBe(8);
+    expect(new Set(names).size).toBe(14);
     expect(JSON.stringify(requests[1]!.messages)).toContain(marker);
     expect(
       (
@@ -321,6 +345,8 @@ test('ordinary paired host exposes public file schemas, edits with an exact base
         tools: [
           { id: 'files.read', enabled: false },
           { id: 'web_fetch', remove: true },
+          { id: 'task.spawn', enabled: false },
+          { id: 'task.message', remove: true },
         ],
       }),
     );
@@ -334,6 +360,16 @@ test('ordinary paired host exposes public file schemas, edits with an exact base
     }[];
     expect(nextTools.some((tool) => tool.function.parameters.properties.start_line)).toBe(false);
     expect(nextNames).not.toContain('web_fetch');
+    expect(nextNames).not.toContain('spawn_agent');
+    expect(nextNames).not.toContain('send_agent_message');
+    expect(nextNames).toEqual(
+      expect.arrayContaining([
+        'follow_up_agent',
+        'wait_agent_events',
+        'list_agents',
+        'interrupt_agent',
+      ]),
+    );
     expect(nextTools.some((tool) => tool.function.parameters.properties.text)).toBe(true);
   } finally {
     await reader?.close();
@@ -394,7 +430,8 @@ async function launch(
         expectedStoreId: storeId,
         commandId,
         kind: 'run.start',
-        content: 'Harmless test',
+        // Each configuration probe deliberately starts independent work.
+        content: 'New task: Harmless test',
         ...(modelId ? { modelId } : {}),
       });
       return until(
@@ -403,10 +440,24 @@ async function launch(
       );
     },
     async finished(commandId: string) {
-      return until(
-        () => handle.client.getView('session'),
-        (view) => view.runs.some((run) => run.originCommandId === commandId && !run.isActive),
+      const completed = await until(
+        async () => ({
+          command: await handle.client.getCommand(commandId),
+          view: await handle.client.getView('session'),
+        }),
+        ({ command, view }) => {
+          const receipt = command.receipt as { runId?: string } | null;
+          return (
+            command.status === 'applied' &&
+            typeof receipt?.runId === 'string' &&
+            view.runs.some((run) => run.id === receipt.runId && !run.isActive)
+          );
+        },
       );
+      const receipt = completed.command.receipt as { runId: string; businessCommandId?: string };
+      const commandRun = completed.view.runs.find((run) => run.id === receipt.runId)!;
+      expect(commandRun.originCommandId).toBe(receipt.businessCommandId ?? commandId);
+      return { ...completed.view, commandRun };
     },
   };
 }
@@ -465,7 +516,7 @@ test('actual paired production Service binds per-Run route/options and immutable
       expectedStoreId: child.storeId,
       commandId: 'new',
       kind: 'run.start',
-      content: 'New configured request',
+      content: 'New task: New configured request',
     });
     expect(endpoint.requests).toHaveLength(1);
     endpoint.release.resolve();
@@ -965,9 +1016,7 @@ test('user provider Responses protocol reaches the real runtime endpoint and nev
     });
     expect(await child.run('responses-success')).toMatchObject({ status: 'applied' });
     const view = await child.finished('responses-success');
-    expect(view.runs.find((run) => run.originCommandId === 'responses-success')?.status).toBe(
-      'completed',
-    );
+    expect(view.commandRun.status).toBe('completed');
     expect(requests.map((request) => request.path)).toEqual(['/v1/responses', '/v1/responses']);
     expect(requests[1]!.body.input).toEqual(
       expect.arrayContaining([
@@ -1003,9 +1052,7 @@ test('user provider Responses protocol reaches the real runtime endpoint and nev
     fail = true;
     expect(await child.run('responses-failure')).toMatchObject({ status: 'applied' });
     const failed = await child.finished('responses-failure');
-    expect(failed.runs.find((run) => run.originCommandId === 'responses-failure')?.status).toBe(
-      'failed',
-    );
+    expect(failed.commandRun.status).toBe('failed');
     expect(requests.map((request) => request.path)).toEqual([
       '/v1/responses',
       '/v1/responses',

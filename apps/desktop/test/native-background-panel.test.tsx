@@ -7,7 +7,11 @@ import { createRoot } from 'react-dom/client';
 import { NativeBackgroundPanel } from '../src/native-background-panel';
 import type { NativeBridge, NativeRequest, NativeSelection } from '../src/native-bridge';
 import { NativeDiagnosticsProvider } from '../src/native-diagnostics';
-import { environmentDisplay, useNativeEnvironment } from '../src/native-environment';
+import {
+  environmentDisplay,
+  nativeChildActivity,
+  useNativeEnvironment,
+} from '../src/native-environment';
 import { backgroundItem } from './background-item.fixture';
 
 async function fixture(
@@ -270,6 +274,148 @@ test('environment adapter keeps unknown and restored child facts distinct and ne
     cleanupConfirmed: false,
     canStop: false,
   });
+});
+
+test('two carriers in one stable child keep clicked and refreshed details pinned to the original execution', async () => {
+  const first = backgroundItem(1, true),
+    second = backgroundItem(2, true);
+  second.childRun!.id = 'second-child-run';
+  second.execution.rootWorkCommandId = 'second-work';
+  second.execution.rootWorkSeq = '2';
+  second.childRun!.rootWorkCommandId = 'second-work';
+  second.childRun!.rootWorkSeq = '2';
+  second.run = null;
+  const items = [first, second],
+    opens: string[] = [],
+    reads = new Map<string, Buffer>();
+  let completed = Promise.resolve(),
+    finishRead = () => {};
+  const selection: NativeSelection = {
+    viewGeneration: 1,
+    viewSelection: 1,
+    storeId: 'store',
+    session: first.rootSession,
+    runs: [],
+    executions: [],
+    interactions: [],
+    interactionsAfterId: null,
+    canReadModelOutput: false,
+    permissions: undefined,
+  };
+  const bridge: NativeBridge = {
+    watch: () => () => undefined,
+    async request(request) {
+      if (request.method === 'background.open')
+        return {
+          kind: 'background.page',
+          viewGeneration: 1,
+          viewSelection: 1,
+          rootSessionId: 'root',
+          storeId: 'store',
+          readId: request.readId,
+          observationId: 1,
+          startIndex: 0,
+          nextIndex: items.length,
+          total: items.length,
+          complete: true,
+          entries: structuredClone(items),
+        };
+      if (request.method === 'background.child.open') {
+        completed = new Promise<void>((resolve) => {
+          finishRead = resolve;
+        });
+        const item = items.find((item) => item.execution.id === request.executionId)!;
+        opens.push(request.executionId);
+        const bytes = Buffer.from(
+          JSON.stringify({
+            item,
+            session: item.childSession,
+            upperSeq: '0',
+            messages: [],
+            modelOutputs: [],
+          }),
+        );
+        reads.set(request.readId, bytes);
+        return {
+          kind: 'background.child.opened',
+          viewGeneration: 1,
+          viewSelection: 1,
+          rootSessionId: 'root',
+          storeId: 'store',
+          readId: request.readId,
+          observationId: 1,
+          executionId: item.execution.id,
+          childSessionId: item.childSession!.id,
+          childRunId: item.childRun!.id,
+          wireBytes: String(bytes.length),
+          wireHash: createHash('sha256').update(bytes).digest('hex'),
+        };
+      }
+      if (request.method === 'background.child.read') {
+        const bytes = reads.get(request.readId)!;
+        return {
+          kind: 'background.child.chunk',
+          readId: request.readId,
+          offset: 0,
+          nextOffset: bytes.length,
+          eof: true,
+          data: bytes.toString('base64'),
+        };
+      }
+      if (request.method === 'background.child.close') {
+        finishRead();
+        return null;
+      }
+      if (request.method === 'background.close') return null;
+      throw Error('unexpected_operation');
+    },
+  };
+  function Surface() {
+    const environment = useNativeEnvironment({
+      bridge,
+      generation: 1,
+      selection,
+      revision: 0,
+      unavailable: false,
+      onChanged: async () => undefined,
+    });
+    return environment.child ? (
+      <>
+        <p>{environment.child.facts?.item.execution.id}</p>
+        <p>{environment.child.error}</p>
+        <button type="button" onClick={environment.refreshChild}>
+          刷新准确详情
+        </button>
+        <button type="button" onClick={environment.closeChild}>
+          返回列表
+        </button>
+      </>
+    ) : (
+      environment.card
+    );
+  }
+  await fixture(
+    async (host, render) => {
+      await render(bridge);
+      await act(async () =>
+        (host.querySelector('[data-execution-id="job-2"] button') as HTMLButtonElement).click(),
+      );
+      await act(async () => completed);
+      expect(opens).toEqual(['job-2']);
+      expect(host.textContent).toContain('job-2');
+      await click(host, '刷新准确详情');
+      await act(async () => completed);
+      expect(opens).toEqual(['job-2', 'job-2']);
+      await click(host, '返回列表');
+      await act(async () =>
+        (host.querySelector('[data-execution-id="job-1"] button') as HTMLButtonElement).click(),
+      );
+      await act(async () => completed);
+      expect(opens).toEqual(['job-2', 'job-2', 'job-1']);
+      expect(host.textContent).toContain('job-1');
+    },
+    () => <Surface />,
+  );
 });
 test('Native background DOM publishes only complete pages, shows original parent/child lifecycle, reads nonselected output and submits one exact stop', async () =>
   fixture(async (host, render) => {
@@ -878,4 +1024,89 @@ test('live environment child coalesces revisions, closes held reads and immediat
     },
     () => <Surface />,
   );
+});
+
+test('child activity requires exact saved carrier Run and human authorization precedes review progress', () => {
+  const item = backgroundItem();
+  item.execution.childSessionId = 'child';
+  item.execution.cancelRequested = false;
+  item.execution.cancelRequestedAt = null;
+  item.execution.status = 'running';
+  const run = {
+    id: 'child-run',
+    sessionId: 'child',
+    originStoreId: item.execution.originStoreId,
+    originCommandId: `child-start-${item.execution.id}`,
+    carrierExecutionId: item.execution.id,
+    rootWorkCommandId: item.execution.rootWorkCommandId,
+    rootWorkSeq: item.execution.rootWorkSeq,
+    isActive: true,
+  };
+  const effect = {
+    id: 'effect',
+    runId: run.id,
+    sessionId: 'child',
+    originStoreId: run.originStoreId,
+    rootWorkCommandId: run.rootWorkCommandId,
+    rootWorkSeq: run.rootWorkSeq,
+    status: 'planned' as const,
+    cancelRequestedAt: null,
+    authorization: {
+      dispatched: false,
+      human: {
+        interactionId: 'exact',
+        state: 'pending' as const,
+        revision: '1',
+        acceptedDecisionRevision: null,
+        accepted: false,
+        decision: null,
+      },
+      review: {
+        executionId: 'review',
+        status: 'running' as const,
+        decision: 'ask_user' as const,
+        reason: 'review complete',
+        requireApproval: true,
+      },
+    },
+  };
+  const facts = {
+    item,
+    session: item.session,
+    upperSeq: '1',
+    messages: [],
+    modelOutputs: [],
+    control: { runs: [run], executions: [effect] },
+  };
+  expect(nativeChildActivity(facts)).toBe('等待你的批准');
+  expect(
+    nativeChildActivity({
+      ...facts,
+      control: { ...facts.control, runs: [{ ...run, carrierExecutionId: 'old-carrier' }] },
+    }),
+  ).toBeUndefined();
+  expect(
+    nativeChildActivity({
+      ...facts,
+      control: { ...facts.control, executions: [{ ...effect, runId: 'old-run' }] },
+    }),
+  ).toBeUndefined();
+  expect(
+    nativeChildActivity({
+      ...facts,
+      control: { ...facts.control, executions: [{ ...effect, rootWorkCommandId: 'other-work' }] },
+    }),
+  ).toBeUndefined();
+  expect(
+    nativeChildActivity({
+      ...facts,
+      control: { ...facts.control, runs: [{ ...run, isActive: false }] },
+    }),
+  ).toBeUndefined();
+  expect(
+    nativeChildActivity({
+      ...facts,
+      item: { ...item, execution: { ...item.execution, cancelRequestedAt: 1 } },
+    }),
+  ).toBeUndefined();
 });

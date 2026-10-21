@@ -15,6 +15,10 @@
 
 准确同 Store 原 Run 显式接续中，可核实的已结算私有审核 fencing 与零派发目标在同一事务交接；原回执、请求、输出凭据和独立人工审批保持，不生成新授权或重复审核。目标、carrier、唯一 child Model 的代次相等和当前权限仍是派发门禁，身份失真整项回滚；边界归[Store owner](../../packages/agent/src/storage/README.md#原-active-run-的显式恢复)。
 
+同一根会话下，child/grandchild 的工具审批模式动态读取根当前 applied `permission.mode` 与 revision，不冻结为创建时父模式。默认和可信注入的 child policy 都与当前根策略及原 capability ceiling 相交；局部根变更不修改其他根或用户默认。真实 `accept_edits/auto/full` 双向变化会唤醒原人工审批、自动 review、资源等待和未派发队列，准确原动作按新策略重新判断。Full 不能解除只读预设、工具交集、信任、明确拒绝/取消、工作控制和 unknown fence。
+
+最终 `markDispatching` 重读原根 applied revision，已获但未消费的一次性/同命令批准及 review proof 仍须按当前策略重判；旧 revision 不能直通，也不能借兄弟或新轮批准。旧人工卡以独立准确失效事实收束，原 request/answer 保留，不伪造用户答复；迟到旧答案或 review 不改变新轮，已派发效果保留原事实。模式写入响应丢失查原控制回执，当前策略无法读取时阻挡新效果，冷只读不执行。运行中双向竞争、三层可信注入、旧 grant/review 与资源等待由[真实模式测试](../../packages/agent/test/isolated/execution/live-permission-mode.test.ts)覆盖；[物理强杀](../../packages/agent/test/isolated/recovery/live-approval-crash.test.ts)核待批崩溃、冷读零 Provider、当前 revision 显式接续及一次效果。合成 effect、真实策略、原生工具和实际客户端范围分别由 owner 记录，不将一种证据推广为全部平台资格。
+
 下面保留旧 Kernel/SAQ 实现及仍适用理由，不据旧模式/State 推导新正式执行范围。RSS、完整观测、Windows Shell 及平台资格未因本次迁移退出。
 
 ## 概述

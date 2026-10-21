@@ -1,9 +1,10 @@
 import { expect, test } from 'bun:test';
-import { mkdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { createRuntime, type RunConfiguration } from '@kite-ai/agent';
-import { deriveMcpSourceReadSet, readMcpSources } from '@kite-ai/agent/config';
+import { deriveMcpSourceReadSet, mcpCanonical, readMcpSources } from '@kite-ai/agent/config';
 import type { Extension, Json, OperationRef } from '@kite-ai/agent/extensions';
 import { createMcpLifecycle } from '@kite-ai/agent/mcp';
 import { selectProfile } from '@kite-ai/agent/profile';
@@ -271,6 +272,7 @@ async function fixture(
     sources,
     expectedStoreId,
     sourceFailures,
+    sourcePath,
     get effects() {
       return effects;
     },
@@ -509,7 +511,51 @@ test('explicit zero child selection remains an ordinary child with no inherited 
       snapshot: { mcp: { sources: McpSelectedSourceSnapshot } };
     };
     expect(saved.snapshot.mcp.sources.readSet).toBeNull();
-    expect(saved.snapshot.mcp.sources.inheritance).toBeUndefined();
+    const root = await f.store.getView('parent');
+    const execution = root.executions.find((value) => value.definitionId === 'owned.delegate')!;
+    expect(saved.snapshot.mcp.sources.inheritance).toMatchObject({
+      version: 1,
+      parentExecutionId: execution.id,
+      parentExecutionDigest: createHash('sha256')
+        .update(mcpCanonical(execution.input))
+        .digest('hex'),
+      parentRunId: root.runs[0]!.id,
+      parentSessionId: 'parent',
+      rootSessionId: root.session.rootSessionId,
+      rootWorkCommandId: execution.rootWorkCommandId,
+      rootWorkSeq: execution.rootWorkSeq,
+      parentSnapshot: f.original!,
+      parentSnapshotDigest: createHash('sha256').update(mcpCanonical(f.original!)).digest('hex'),
+    });
+    const originalBytes = readFileSync(f.sourcePath);
+    const wire = [...f.wire];
+    try {
+      writeFileSync(f.sourcePath, '{ changed optional source');
+      const model = view.executions.find((value) => value.kind === 'model')!;
+      const next = await f.sources.deriveChildSelection(
+        {
+          parentExecution: (await f.store.getExecution(model.id))!,
+          parentRun: (await f.store.getRun(view.runs[0]!.id))!,
+          parentSession: view.session,
+          workspace: (await f.store.getWorkspace(view.session.workspaceId))!,
+          command: (await f.store.getCommand(model.originCommandId))!,
+        },
+        { present: false, configurations: [] },
+      );
+      expect(next.snapshot.readSet).toBeNull();
+      expect(next.servers).toEqual([]);
+      expect(next.snapshot.inheritance?.parentSnapshot).toEqual(saved.snapshot.mcp.sources);
+      expect(
+        (await f.store.listExecutions(view.session.id)).filter(
+          (execution) => execution.kind === 'model',
+        ),
+      ).toHaveLength(1);
+      expect(f.opens).toBe(1);
+      expect(f.effects).toBe(0);
+      expect(f.wire).toEqual(wire);
+    } finally {
+      writeFileSync(f.sourcePath, originalBytes);
+    }
   } finally {
     await f.close();
   }

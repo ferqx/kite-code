@@ -17,6 +17,8 @@ import { createClient } from '@kite-ai/client';
 import { privateDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { startService } from '../../src';
 import { createDefaultProcessConfiguration } from '../../src/configuration';
+import { readContinuedReportOrigin } from '../../src/planning-configuration';
+import { initializeLivePermissionFixture } from '../fixtures/live-permission-fixture';
 
 function original(phase: 'request' | 'apply' = 'request'): DefaultAfterTurnInput {
   // Minimal owner facts for the pure policy; real records are exercised below through SQLite.
@@ -144,7 +146,7 @@ test('finite default policy binds original scope, freezes roles and rechecks cur
   expect((await policy.authorize(original('apply'))).allowed).toBe(false);
   expect(reads).toBe(5);
 });
-test('finite default policy rejects wrong original Tool, report recursion, role, source and cancelled facts before current reads', async () => {
+test('finite default policy rejects wrong original Tool, role, source and cancelled facts before current reads', async () => {
   let reads = 0;
   const policy = createDefaultAfterTurnPolicy({
     roles: [{ id: 'worker', version: '1' }],
@@ -154,9 +156,6 @@ test('finite default policy rejects wrong original Tool, report recursion, role,
     },
   });
   const mutations: ((input: DefaultAfterTurnInput) => void)[] = [
-    (i) => {
-      (i.command as { kind: string }).kind = 'job.report';
-    },
     (i) => {
       (i.execution as { kind: string }).kind = 'job';
     },
@@ -344,11 +343,7 @@ async function fixture(
             ? {
                 name: 'spawn_agent',
                 input: {
-                  key: report ? 'recursive' : 'original',
-                  role: 'worker',
-                  input: { content: 'ORIGINAL_CHILD_INPUT' },
-                  cancellation: 'detached',
-                  result_disposition: report ? 'after_turn' : disposition,
+                  prompt: 'ORIGINAL_CHILD_INPUT',
                 },
               }
             : null;
@@ -386,7 +381,7 @@ async function fixture(
     JSON.stringify({
       modelId: 'parent',
       tools: [
-        'task',
+        'task.spawn',
         ...(planning ? ['planning.write', 'planning.review', 'planning.update'] : []),
       ].map((id) => ({ id, definitionVersion: '1' })),
       models: [
@@ -413,6 +408,15 @@ async function fixture(
         return 'owned-local-fixture-secret';
       },
     },
+    ...(disposition !== 'after_turn'
+      ? {
+          afterTurn: {
+            async authorize() {
+              return { allowed: false, revision: 'fixture-no-idle-authority' };
+            },
+          },
+        }
+      : {}),
     permissionPolicy: managed
       ? undefined
       : {
@@ -423,7 +427,7 @@ async function fixture(
               revision: currentRevision,
               allowed: [
                 { kind: 'model', definitionId: 'parent', definitionVersion: '1' },
-                { kind: 'tool', definitionId: 'task', definitionVersion: '1' },
+                { kind: 'tool', definitionId: 'task.spawn', definitionVersion: '1' },
                 { kind: 'job', definitionId: 'agent/worker', definitionVersion: '1' },
                 ...(planning
                   ? ['planning.write', 'planning.review', 'planning.update'].map(
@@ -439,6 +443,22 @@ async function fixture(
           },
         },
   });
+  const spawn = host.extensions
+    ?.find((extension) => extension.id === 'builtin.task')
+    ?.tools?.find((tool) => tool.id === 'task.spawn');
+  if (!spawn) throw Error('missing fixture spawn');
+  const execute = spawn.execute;
+  const trustedExecute: typeof execute = (input, context) =>
+    execute(input, {
+      ...context,
+      operations: {
+        ...context.operations,
+        ensure(options) {
+          return context.operations.ensure({ ...options, cancellation: 'detached' });
+        },
+      },
+    });
+  Object.assign(spawn, { execute: trustedExecute, resume: trustedExecute });
   const store = await openSqliteStore({ dataRoot: profile.dataRoot, profile: profile.profile });
   currentReport = async () =>
     (await store.getView('s')).runs.some(
@@ -470,17 +490,13 @@ async function fixture(
       return {
         name: 'spawn_agent',
         input: {
-          key: 'original',
-          role: 'worker',
-          input: { content: 'ORIGINAL_CHILD_INPUT' },
-          cancellation: 'detached',
-          result_disposition: 'after_turn',
+          prompt: 'ORIGINAL_CHILD_INPUT',
         },
       };
     if (index === 3) {
       const run = (await store.getView('s')).runs.find((run) => run.originCommandId === 'work')!;
       const task = (await store.listExecutions('s')).find(
-        (e) => e.definitionId === 'task' && e.status === 'succeeded',
+        (e) => e.definitionId === 'task.spawn' && e.status === 'succeeded',
       )!;
       return {
         name: 'update_plan_progress',
@@ -528,7 +544,7 @@ async function fixture(
       const decision = await base.authorize(request);
       const original =
         request.definitionVersion === '1' &&
-        ((request.kind === 'tool' && request.definitionId === 'task') ||
+        ((request.kind === 'tool' && request.definitionId === 'task.spawn') ||
           (request.kind === 'job' && request.definitionId === 'agent/worker'));
       if (!decision.allowed || !original) return decision;
       return {
@@ -597,6 +613,16 @@ async function fixture(
     workspaceId: 'w',
     title: 'original',
   });
+  if (!managed)
+    await initializeLivePermissionFixture({
+      runtime,
+      profile,
+      expectedStoreId,
+      subjectId: 'user',
+      sessionId: 's',
+      workspaceId: 'w',
+      mode: planning ? 'full' : 'accept_edits',
+    });
   if (managed) {
     const mode = await client.getPermissionMode('s', { storeId: expectedStoreId });
     await client.setPermissionMode('s', {
@@ -708,11 +734,11 @@ async function fixture(
     },
   };
 }
-test('default factory honors an explicit human ceiling independently for original Task/carrier and reports exactly once without recursive after_turn', async () => {
-  const f = await fixture('after_turn', true, true);
+test('default factory honors an explicit human ceiling independently for original Task/carrier and reports exactly once', async () => {
+  const f = await fixture('after_turn', false, true);
   try {
     await f.start();
-    const tool = await f.approve('task');
+    const tool = await f.approve('task.spawn');
     expect(f.childCalls).toBe(0);
     const carrier = await f.approve('agent/worker');
     expect(carrier.executionId).not.toBe(tool.executionId);
@@ -723,7 +749,6 @@ test('default factory honors an explicit human ceiling independently for origina
     const report = await until(async () =>
       (await f.store.getView('s')).runs.find((run) => run.originCommandId.startsWith('report-')),
     );
-    await f.approve('task');
     await f.runtime.waitForCommand(report.originCommandId, { timeoutMs: 8000 });
     expect(f.childCalls).toBe(1);
     expect((await f.store.getView('s')).runs).toHaveLength(2);
@@ -745,10 +770,8 @@ test('default factory honors an explicit human ceiling independently for origina
     ).toBe(true);
     expect((await f.store.listExecutions('s')).filter((e) => e.childSessionId)).toHaveLength(1);
     expect(
-      (await f.store.listExecutions('s')).find(
-        (e) => e.runId === report.id && e.definitionId === 'task',
-      )!.status,
-    ).toBe('failed');
+      (await f.store.listExecutions('s')).filter((e) => e.runId === report.id && e.kind === 'tool'),
+    ).toHaveLength(0);
     const before = f.calls.length;
     await f.client.getCommand(report.originCommandId);
     await f.client.getView('s');
@@ -757,12 +780,12 @@ test('default factory honors an explicit human ceiling independently for origina
     await f.close();
   }
 }, 25000);
-test('default required/background remain ordinary and do not register report Runs', async () => {
+test('trusted denied idle completion authority preserves ordinary child work without report Runs', async () => {
   for (const disposition of ['required', 'background'] as const) {
     const f = await fixture(disposition);
     try {
       await f.start();
-      await f.approve('task');
+      await f.approve('task.spawn');
       await f.approve('agent/worker');
       await until(async () => (f.childCalls === 1 ? true : undefined));
       f.release();
@@ -779,23 +802,42 @@ test('default required/background remain ordinary and do not register report Run
     }
   }
 }, 30000);
-test('default current policy/trust drift after parent completion suppresses original report without child replay', async () => {
+test('default current policy/trust drift after parent completion defers original report without child replay', async () => {
   for (const trusted of [true, false]) {
     const f = await fixture('after_turn');
     try {
       await f.start();
-      await f.approve('task');
+      await f.approve('task.spawn');
       await f.approve('agent/worker');
       await until(async () => (f.childCalls === 1 ? true : undefined));
       await f.runtime.waitForCommand('work', { timeoutMs: 8000 });
       f.drift(trusted);
       f.release();
-      const carrier = await until(async () =>
-        (await f.store.listExecutions('s')).find(
-          (e) => e.childSessionId && e.delivery === 'suppressed',
-        ),
-      );
+      if (trusted) {
+        const report = await until(async () =>
+          (await f.store.getView('s')).runs.find((run) =>
+            run.originCommandId.startsWith('report-'),
+          ),
+        );
+        await f.runtime.waitForCommand(report.originCommandId, { timeoutMs: 8000 });
+        expect((await f.store.getView('s')).runs).toHaveLength(2);
+        expect(f.childCalls).toBe(1);
+        expect(f.reports).toBe(1);
+        continue;
+      }
+      const deferred = await until(async () => {
+        const page = await f.store.listPendingJobReports({
+          expectedStoreId: f.expectedStoreId,
+          sessionId: 's',
+        });
+        return page.commands.find(
+          (command) => (command.receipt as { outcome?: string }).outcome === 'report_deferred',
+        );
+      });
+      expect(deferred.status).toBe('accepted');
+      const carrier = (await f.store.listExecutions('s')).find((e) => e.childSessionId)!;
       expect(carrier.status).toBe('succeeded');
+      expect(carrier.delivery).toBe('pending');
       expect((await f.store.getView('s')).runs).toHaveLength(1);
       expect(f.childCalls).toBe(1);
       expect(f.reports).toBe(0);
@@ -809,7 +851,7 @@ test('default report final source digest rejects changed original Tool intent wh
   const f = await fixture('after_turn');
   try {
     await f.start();
-    const tool = await f.approve('task');
+    const tool = await f.approve('task.spawn');
     await f.approve('agent/worker');
     await until(async () => (f.childCalls === 1 ? true : undefined));
     await f.runtime.waitForCommand('work', { timeoutMs: 8000 });
@@ -843,8 +885,9 @@ test('default report final source digest rejects changed original Tool intent wh
   }
 }, 20000);
 
-async function plannedReport(singleSlot: boolean, driftPlan = false) {
+async function plannedReport(singleSlot: boolean, driftPlan = false, continued = false) {
   const f = await fixture('after_turn', false, false, true, singleSlot);
+  let phase = 'initial_plan_and_original_approvals';
   try {
     await f.start();
     const review = await until(async () =>
@@ -860,7 +903,7 @@ async function plannedReport(singleSlot: boolean, driftPlan = false) {
       expectedRevision: review.revision,
       answer: { kind: 'plan_review', decision: 'approve', mode: 'accept_edits' },
     });
-    const task = await f.approve('task');
+    const task = await f.approve('task.spawn');
     const carrier = await f.approve('agent/worker');
     expect(carrier.executionId).not.toBe(task.executionId);
     await until(async () => (f.childCalls === 1 ? true : undefined));
@@ -889,37 +932,8 @@ async function plannedReport(singleSlot: boolean, driftPlan = false) {
       ).toHaveLength(0);
       f.releaseParent();
     }
-    await f.runtime.waitForCommand('work', { timeoutMs: 8000 }).catch(async (error) => {
-      console.error(
-        'planned-parent-boundary-facts',
-        JSON.stringify({
-          runs: (await f.store.getView('s')).runs.map((run) => ({
-            id: run.id,
-            status: run.status,
-            active: run.isActive,
-            reason: run.reason,
-            originCommandId: run.originCommandId,
-          })),
-          executions: (await f.store.listExecutions('s')).map((e) => ({
-            id: e.id,
-            kind: e.kind,
-            definitionId: e.definitionId,
-            status: e.status,
-            result: e.result,
-          })),
-          cards: (
-            await f.client.listInteractions('s', { storeId: f.expectedStoreId, state: 'pending' })
-          ).interactions.map((card) => ({
-            id: card.id,
-            kind: card.kind,
-            definitionId: card.definitionId,
-          })),
-          childCalls: f.childCalls,
-          reports: f.reports,
-        }),
-      );
-      throw error;
-    });
+    phase = 'original_work_wait';
+    await f.runtime.waitForCommand('work', { timeoutMs: 8000 });
     const parent = (await f.store.getView('s')).runs.find((run) => run.originCommandId === 'work')!;
     expect(parent.status).toBe('completed');
     expect(
@@ -947,11 +961,138 @@ async function plannedReport(singleSlot: boolean, driftPlan = false) {
         db.close();
       }
     }
+    if (continued) {
+      phase = 'pause_original_work';
+      await f.runtime.submitCommand({
+        expectedStoreId: f.expectedStoreId,
+        sessionId: 's',
+        subjectId: 'user',
+        commandId: 'pause-planned',
+        request: { kind: 'run.start', content: '暂停当前任务 work' },
+      });
+      await f.runtime.waitForCommand('pause-planned', { timeoutMs: 8000 });
+    }
     f.release();
-    const report = await until(async () =>
-      (await f.store.getView('s')).runs.find((run) => run.originCommandId.startsWith('report-')),
-    );
+    if (continued) {
+      phase = 'paused_report_suppression';
+      await until(async () =>
+        (await f.store.getExecution(carrier.executionId))?.delivery === 'suppressed'
+          ? true
+          : undefined,
+      );
+      phase = 'continue_original_work_wait';
+      await f.runtime.submitCommand({
+        expectedStoreId: f.expectedStoreId,
+        sessionId: 's',
+        subjectId: 'user',
+        commandId: 'continue-planned',
+        request: { kind: 'run.start', content: '继续当前任务 work' },
+      });
+      await f.runtime.waitForCommand('continue-planned', { timeoutMs: 8000 });
+    }
+    if (singleSlot) {
+      const consumed = (await f.store.getExecution(carrier.executionId))!;
+      expect(consumed.delivery).toBe('consumed');
+      expect(consumed.resultAcceptance?.runId).toBe(parent.id);
+      expect((await f.store.getView('s')).runs).toHaveLength(1);
+      expect(f.reports).toBe(0);
+      const acceptedModel = (await f.store.listExecutions('s'))
+        .filter((execution) => execution.runId === parent.id && execution.kind === 'model')
+        .at(-1)!;
+      const acceptedInput = await f.runtime.readModelInput({
+        expectedStoreId: f.expectedStoreId,
+        subjectId: 'user',
+        sessionId: 's',
+        executionId: acceptedModel.id,
+      });
+      // A child result can commit while the parent's progress Tool is running.
+      // Model projection must close that exact call before inserting a user Source.
+      const progressCall = acceptedInput.request.messages.findIndex((message) =>
+        message.toolCalls?.some(
+          (call) => call.name === 'update_plan_progress' || call.name === 'planning.update',
+        ),
+      );
+      expect(progressCall).toBeGreaterThanOrEqual(0);
+      const progress = acceptedInput.request.messages[progressCall]!;
+      expect(acceptedInput.request.messages[progressCall + 1]).toMatchObject({
+        role: 'tool',
+        toolCallId: progress.toolCalls![0]!.id,
+      });
+      expect(
+        acceptedInput.request.messages.some(
+          (message) =>
+            message.sourceIds?.includes(consumed.resultAcceptance!.sourceId) &&
+            message.content.includes('ORIGINAL_CHILD_RESULT'),
+        ),
+      ).toBe(true);
+      return;
+    }
+    let continuedCommand: Awaited<ReturnType<typeof f.store.getCommand>> = null;
+    if (continued) {
+      phase = 'continued_report_proof';
+      continuedCommand = await until(async () => {
+        const database = new Database(join(f.profile.profilePath, 'core.db'), { readonly: true });
+        try {
+          const row = database
+            .query(
+              "SELECT id FROM command WHERE kind='job.report.continue' AND status='applied' AND json_extract(request_json,'$.executionId')=?",
+            )
+            .get(carrier.executionId) as { id: string } | null;
+          return row ? (await f.store.getCommand(row.id))! : undefined;
+        } finally {
+          database.close();
+        }
+      });
+    }
+    const report = continuedCommand
+      ? (await f.store.getRun((continuedCommand.receipt as { runId: string }).runId))!
+      : await until(async () =>
+          (await f.store.getView('s')).runs.find((run) =>
+            run.originCommandId.startsWith('report-'),
+          ),
+        );
+    phase = 'exact_report_command_wait';
     await f.runtime.waitForCommand(report.originCommandId, { timeoutMs: 8000 });
+    phase = 'historical_receipt_and_plan_assertions';
+    if (continuedCommand) {
+      const originalId = (continuedCommand.request as { originalReportCommandId: string })
+        .originalReportCommandId;
+      expect((await f.store.getCommand(originalId))!).toMatchObject({
+        kind: 'job.report',
+        status: 'rejected',
+        receipt: { reason: 'work_paused' },
+      });
+      const result = (await f.store.getExecution(carrier.executionId))!;
+      expect(await readContinuedReportOrigin(f.runtime, continuedCommand, result)).toBe(originalId);
+      const qualificationId = (continuedCommand.request as { continuationCommandId: string })
+        .continuationCommandId;
+      const qualification = (await f.store.getCommand(qualificationId))!;
+      const damagedRuntime = new Proxy(f.runtime, {
+        get(target, key) {
+          if (key === 'getCommand')
+            return async (id: string) =>
+              id === qualification.id
+                ? {
+                    ...qualification,
+                    request: {
+                      ...(qualification.request as Record<string, Json>),
+                      subscriptionDigest: 'wrong-subscription',
+                    },
+                  }
+                : target.getCommand(id);
+          const value = Reflect.get(target, key);
+          return typeof value === 'function' ? value.bind(target) : value;
+        },
+      });
+      let rejected = false;
+      try {
+        await readContinuedReportOrigin(damagedRuntime, continuedCommand, result);
+      } catch (error) {
+        expect((error as { code: string }).code).toBe('planning_run_scope_unavailable');
+        rejected = true;
+      }
+      expect(rejected).toBe(true);
+    }
     if (driftPlan) {
       const failed = (await f.store.getRun(report.id))!;
       if (failed.status !== 'failed' || f.reports !== 0)
@@ -1054,8 +1195,136 @@ async function plannedReport(singleSlot: boolean, driftPlan = false) {
         (card) => card.kind === 'plan_review',
       ),
     ).toHaveLength(1);
-    expect(f.reports).toBe(1);
+    expect(f.reports).toBe(report.originCommandId.startsWith('report-') ? 1 : 0);
     expect(f.childCalls).toBe(1);
+  } catch (error) {
+    // Failure-only isolated fixture evidence; never expose request bodies or configuration.
+    try {
+      const database = new Database(join(f.profile.profilePath, 'core.db'), { readonly: true });
+      try {
+        const aliases = new Map<string, string>();
+        const alias = (value: unknown) => {
+          if (value === null || value === undefined) return null;
+          const key = String(value);
+          if (!aliases.has(key)) aliases.set(key, `id${aliases.size + 1}`);
+          return aliases.get(key)!;
+        };
+        const record = (value: unknown): Record<string, unknown> =>
+          value !== null && typeof value === 'object' && !Array.isArray(value)
+            ? (value as Record<string, unknown>)
+            : {};
+        const parse = (value: unknown) => record(JSON.parse(String(value ?? '{}')));
+        const code = (value: unknown) =>
+          typeof value === 'string' && /^[A-Za-z0-9_.:-]{1,96}$/.test(value) ? value : null;
+        const runs = database
+          .query(
+            'SELECT id,session_id,origin_command_id,root_work_command_id,root_work_seq,status,is_active,reason,config_json FROM run ORDER BY rowid',
+          )
+          .all()
+          .map((value) => {
+            const row = record(value);
+            return {
+              id: alias(row.id),
+              session: alias(row.session_id),
+              origin: alias(row.origin_command_id),
+              work: alias(row.root_work_command_id),
+              workSeq: String(row.root_work_seq),
+              status: code(row.status),
+              active: Boolean(row.is_active),
+              reason: code(row.reason),
+              configurationKind: code(record(parse(row.config_json).snapshot).kind),
+            };
+          });
+        const executions = database
+          .query(
+            'SELECT id,session_id,run_id,kind,adapter_id,state,dispatched,result_json,decision_source_json FROM execution ORDER BY rowid',
+          )
+          .all()
+          .map((value) => {
+            const row = record(value),
+              result = parse(row.result_json),
+              source = parse(row.decision_source_json);
+            const interpreting = record(source.humanInputInterpretation);
+            return {
+              id: alias(row.id),
+              session: alias(row.session_id),
+              run: alias(row.run_id),
+              kind: code(row.kind),
+              definition: code(row.adapter_id),
+              state: code(row.state),
+              dispatched: Boolean(row.dispatched),
+              resultCode: code(result.code ?? record(result.details).code),
+              interpretedInput: alias(interpreting.inputCommandId),
+            };
+          });
+        const commands = database
+          .query(
+            "SELECT id,kind,status,request_json,receipt_json FROM command WHERE kind IN('human.input','human.input.decision','input.follow_up','input.steer','job.report','job.report.continue','run.start') ORDER BY rowid",
+          )
+          .all()
+          .map((value) => {
+            const row = record(value),
+              request = parse(row.request_json),
+              receipt = parse(row.receipt_json),
+              proposal = record(request.proposal);
+            return {
+              id: alias(row.id),
+              kind: code(row.kind),
+              status: code(row.status),
+              raw: alias(request.inputCommandId ?? receipt.humanInputCommandId),
+              observedRun: alias(request.observedRunId),
+              decision: alias(receipt.decisionCommandId),
+              business: alias(receipt.businessCommandId),
+              processing: alias(receipt.processingCommandId),
+              run: alias(receipt.runId),
+              continuationRun: alias(receipt.continuationRunId),
+              state: code(receipt.state),
+              applicationState: code(receipt.applicationState),
+              outcome: code(receipt.outcome),
+              reason: code(receipt.reason),
+              relation: code(proposal.relation),
+              purpose: code(proposal.purpose),
+              targetWork: alias(proposal.targetRootWorkCommandId),
+              selectionEffect: code(proposal.selectionEffect),
+            };
+          });
+        const events = database
+          .query('SELECT cursor,object_id,type FROM change_event ORDER BY cursor DESC LIMIT 96')
+          .all()
+          .reverse()
+          .map((value) => {
+            const row = record(value);
+            return {
+              cursor: String(row.cursor),
+              object: alias(row.object_id),
+              type: code(row.type),
+            };
+          });
+        console.error(
+          'planned-report-failure-state',
+          JSON.stringify({
+            phase,
+            errorCode: code(record(error).code),
+            singleSlot,
+            driftPlan,
+            continued,
+            cursor: (await f.store.getMetadata()).lastChangeCursor,
+            runs,
+            executions,
+            commands,
+            events,
+          }),
+        );
+      } finally {
+        database.close();
+      }
+    } catch {
+      console.error(
+        'planned-report-failure-state',
+        JSON.stringify({ phase, diagnosticUnavailable: true }),
+      );
+    }
+    throw error;
   } finally {
     await f.close();
   }
@@ -1066,7 +1335,7 @@ test(
   25000,
 );
 test(
-  'single-slot planned parent remains active after child completion and reports once only after parent finishes',
+  'single-slot planned parent consumes the completed child result in its active Run before finishing',
   () => plannedReport(true),
   25000,
 );
@@ -1076,3 +1345,7 @@ test(
   () => plannedReport(false, true),
   25000,
 );
+
+test('paused planned work continues through a fresh proved report admission while preserving the historical suppressed receipt', async () => {
+  await plannedReport(false, false, true);
+}, 25000);

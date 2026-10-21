@@ -653,12 +653,57 @@ test('Rewind retains original verified history without replaying it into a fresh
       commandId: 'new',
       sessionId: 's',
       subjectId: 'u',
-      request: { kind: 'run.start', content: 'new explicit work' },
+      request: { kind: 'run.start', content: 'New task: new explicit work' },
     });
     const next = await f.runtime.waitForCommand('new', { timeoutMs: 5000 });
-    const run = await f.store.getRun((next.receipt as { runId: string }).runId);
+    expect(next).toMatchObject({
+      status: 'applied',
+      request: { kind: 'run.start', content: 'New task: new explicit work' },
+    });
+    const receipt = next.receipt as {
+      runId: string;
+      businessCommandId: string;
+      humanInputCommandId: string;
+    };
+    expect(receipt.businessCommandId).toBeString();
+    expect(receipt.businessCommandId).not.toBe('new');
+    expect(await f.store.getCommand(receipt.humanInputCommandId)).toMatchObject({
+      kind: 'human.input',
+      request: {
+        content: 'New task: new explicit work',
+        publicCommandId: 'new',
+        originalRequest: next.request,
+      },
+    });
+    expect(await f.store.getCommand(receipt.businessCommandId)).toMatchObject({
+      kind: 'input.follow_up',
+      status: 'applied',
+      request: { content: 'New task: new explicit work', afterRunId: old.id },
+      receipt: { runId: receipt.runId },
+    });
+    const run = await f.store.getRun(receipt.runId);
+    expect(run).toMatchObject({
+      originCommandId: receipt.businessCommandId,
+      rootWorkCommandId: 'new',
+    });
     expect(run!.status).toBe('completed');
     expect(run!.id).not.toBe(old.id);
+    expect(f.modelCalls).toBe(3);
+    const models = (await f.store.listExecutions('s')).filter(
+      (execution) => execution.runId === run!.id && execution.kind === 'model',
+    );
+    expect(models).toHaveLength(1);
+    const input = await f.runtime.readModelInput({
+      expectedStoreId: f.metadata.storeId,
+      sessionId: 's',
+      subjectId: 'u',
+      executionId: models[0]!.id,
+    });
+    expect(input.confirmation).toBe('succeeded');
+    expect(
+      input.request.messages.find((message) => message.content === 'New task: new explicit work')
+        ?.sourceIds,
+    ).toEqual([receipt.businessCommandId]);
     expect(f.reads).toBe(beforeReads);
     const history = await f.store.listMutationFacts({
       expectedStoreId: f.metadata.storeId,

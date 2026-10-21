@@ -239,20 +239,40 @@ async function fixture(
     },
   };
 }
-async function start(f: Awaited<ReturnType<typeof fixture>>, commandId = 'work', sessionId = 's') {
+async function start(
+  f: Awaited<ReturnType<typeof fixture>>,
+  commandId = 'work',
+  sessionId = 's',
+  content = `Execute local fixture ${commandId}`,
+) {
   return f.client.startRun(sessionId, {
     expectedStoreId: f.storeId,
     commandId,
     kind: 'run.start',
-    content: `Execute local fixture ${commandId}`,
+    content,
   });
 }
 async function finished(client: AgentClient, commandId = 'work', sessionId = 's') {
-  return until(
-    () => client.getView(sessionId),
-    (view) => view.runs.some((run) => run.originCommandId === commandId && !run.isActive),
+  const completed = await until(
+    async () => ({
+      command: await client.getCommand(commandId),
+      view: await client.getView(sessionId),
+    }),
+    ({ command, view }) => {
+      const receipt = command.receipt as { runId?: string } | null;
+      return (
+        command.status === 'applied' &&
+        typeof receipt?.runId === 'string' &&
+        view.runs.some((run) => run.id === receipt.runId && !run.isActive)
+      );
+    },
   );
+  const receipt = completed.command.receipt as { runId: string; businessCommandId?: string };
+  const commandRun = completed.view.runs.find((run) => run.id === receipt.runId)!;
+  expect(commandRun.originCommandId).toBe(receipt.businessCommandId ?? commandId);
+  return { ...completed.view, commandRun };
 }
+
 function call(id: string, name = 'fixture.record', args: Item = { label: id, value: 1 }) {
   return { id, name: name.replaceAll('.', '_'), arguments: JSON.stringify(args) };
 }
@@ -523,10 +543,8 @@ test('Responses real Client-Service loop: 3 tool rounds, parallel fragmented cal
     f = await fixture(provider.baseURL, { root: originalRoot, tools });
     expect(provider.records).toHaveLength(4);
     expect(counter.effects).toBe(3);
-    await start(f, 'cold');
-    expect(
-      (await finished(f.client, 'cold')).runs.find((r) => r.originCommandId === 'cold')?.status,
-    ).toBe('completed');
+    await start(f, 'cold', 's', 'New task: Execute local fixture cold');
+    expect((await finished(f.client, 'cold')).commandRun.status).toBe('completed');
     await f.client.createSession({
       expectedStoreId: f.storeId,
       commandId: 'create-other',
@@ -539,12 +557,8 @@ test('Responses real Client-Service loop: 3 tool rounds, parallel fragmented cal
     await f.close(false);
     f = undefined;
     f = await fixture(provider.baseURL, { root: originalRoot, modelId: 'gpt-5-mini', tools });
-    await start(f, 'model-switch');
-    expect(
-      (await finished(f.client, 'model-switch')).runs.find(
-        (r) => r.originCommandId === 'model-switch',
-      )?.status,
-    ).toBe('completed');
+    await start(f, 'model-switch', 's', 'New task: Execute local fixture model-switch');
+    expect((await finished(f.client, 'model-switch')).commandRun.status).toBe('completed');
     await f.close(false);
     f = undefined;
     other = endpoint(
@@ -555,12 +569,8 @@ test('Responses real Client-Service loop: 3 tool rounds, parallel fragmented cal
       () => counter.effects,
     );
     f = await fixture(other.baseURL, { root: originalRoot, tools });
-    await start(f, 'endpoint-switch');
-    expect(
-      (await finished(f.client, 'endpoint-switch')).runs.find(
-        (r) => r.originCommandId === 'endpoint-switch',
-      )?.status,
-    ).toBe('completed');
+    await start(f, 'endpoint-switch', 's', 'New task: Execute local fixture endpoint-switch');
+    expect((await finished(f.client, 'endpoint-switch')).commandRun.status).toBe('completed');
     expect(provider.errors).toEqual([]);
     expect(other.errors).toEqual([]);
     expect(provider.records).toHaveLength(7);
@@ -635,11 +645,9 @@ test('Responses cold SQLite history re-encodes colliding tool names without chan
       ],
     });
     expect(provider.records).toHaveLength(2);
-    await start(f, 'cold-collision');
+    await start(f, 'cold-collision', 's', 'New task: Execute local fixture cold-collision');
     const view = await finished(f.client, 'cold-collision');
-    expect(view.runs.find((run) => run.originCommandId === 'cold-collision')?.status).toBe(
-      'completed',
-    );
+    expect(view.commandRun.status).toBe('completed');
     expect(provider.errors).toEqual([]);
     expect(counter.effects).toBe(2);
     expect(collisionEffects).toBe(0);

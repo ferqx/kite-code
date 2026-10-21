@@ -12,6 +12,8 @@ import {
   type IncludeResultRequest,
   type Interaction,
   type Json,
+  type OrdinaryCommandObservation,
+  readOrdinaryCommandApplication,
   requiresInteractionAttachment,
   type SelectContextRequest,
   type SetPermissionModeRequest,
@@ -37,7 +39,14 @@ export { lookupRecovery, submitRecovery } from './recovery';
 export const EXIT = { success: 0, failed: 1, unknown: 2, waiting: 3, userCancelled: 130 } as const;
 export interface CommandOutcome {
   readonly commandId: string;
-  readonly status: 'succeeded' | 'failed' | 'outcome_unknown' | 'cancelled' | 'waiting_interaction';
+  readonly status:
+    | 'succeeded'
+    | 'failed'
+    | 'outcome_unknown'
+    | 'cancelled'
+    | 'waiting_interaction'
+    | 'needs_clarification';
+  readonly clarification?: OrdinaryCommandObservation;
   readonly interactions?: readonly Interaction[];
   readonly answerIntent?: {
     workCommandId: string;
@@ -200,7 +209,10 @@ async function execute(
   options.signal?.addEventListener('abort', interrupt);
   let cancellationSent = false;
   let answerIntent = options.answerIntent ? structuredClone(options.answerIntent) : undefined;
-  const finish = (status: CommandOutcome['status']): CommandOutcome => {
+  const finish = (
+    status: CommandOutcome['status'],
+    clarification?: OrdinaryCommandObservation,
+  ): CommandOutcome => {
     const exitCode =
       status === 'succeeded'
         ? EXIT.success
@@ -208,12 +220,17 @@ async function execute(
           ? EXIT.failed
           : status === 'cancelled'
             ? EXIT.userCancelled
-            : EXIT.unknown;
+            : status === 'needs_clarification'
+              ? EXIT.waiting
+              : EXIT.unknown;
+    if (clarification)
+      options.write(`clarification ${input.commandId} ${JSON.stringify(clarification)}`);
     options.write(`terminal ${input.commandId} ${status}`);
     return {
       commandId: input.commandId,
       status,
       exitCode,
+      ...(clarification ? { clarification: structuredClone(clarification) } : {}),
       ...(answerIntent ? { answerIntent: structuredClone(answerIntent) } : {}),
       ...(cancellationSent ? { cancellationAttempted: true as const } : {}),
     };
@@ -400,12 +417,20 @@ async function execute(
         options.write(`dispatch blocked ${input.commandId} ${command.dispatchFailure.code}`);
         return finish('outcome_unknown');
       }
+      const ordinary =
+        !recoveryRun && ['run.start', 'input.follow_up', 'input.steer'].includes(command.kind)
+          ? await readOrdinaryCommandApplication(options.client, command, network)
+          : null;
+      if (ordinary?.observation && receipt(command).outcome === 'human_input_unresolved')
+        return finish('needs_clarification', ordinary.observation);
+      if (ordinary && receipt(command).outcome === 'human_input_observed')
+        return finish('succeeded');
       const result = recoveryRun ? { runId: recoveryRun.runId } : receipt(command);
       if (typeof result.runId === 'string') {
-        const run = await options.client.getRun(result.runId, network);
+        const run = ordinary?.run ?? (await options.client.getRun(result.runId, network));
         if (
           run.id !== result.runId ||
-          run.originCommandId !== input.commandId ||
+          (!ordinary && run.originCommandId !== input.commandId) ||
           run.originStoreId !== input.expectedStoreId ||
           run.sessionId !== sessionId
         )
@@ -413,7 +438,9 @@ async function execute(
         if (!run.isActive)
           return finish(
             run.status === 'completed'
-              ? 'succeeded'
+              ? run.reason === 'human_work_deferred'
+                ? 'outcome_unknown'
+                : 'succeeded'
               : run.status === 'cancelled'
                 ? 'cancelled'
                 : run.status === 'interrupted'

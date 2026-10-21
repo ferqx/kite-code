@@ -2,7 +2,9 @@
 
 状态：active
 
-[模型工具投影](../../packages/agent/src/model-tools.README.md)在 Agent 的实际 `ModelAdapter` 边界完成：内部 ModelRequest／ToolCall 保留原定义 ID/version 和规范参数，leaf 的纯 `ToolDefinition.model` 仅描述公开名、声明字段映射与隐藏资格。完整模型调用先按本轮准确目录校验、转回内部参数，再进入原来源、权限、资源、计划、派发与终态链路；未知工具、坏参数和碰撞不得形成效果。声明字段可转 snake_case，任意业务 JSON 与动态 MCP 原 schema/arguments 不改写；baseline、操作 key 和去重身份保留。持久 `ToolCall.model` 只存原公开名称、精简字段路径及必要错误，后继模型历史不借当前定义重解释原调用；`metadata.context.toolSurface` 封存当时公开工具，公开 Inspector 使用该原快照并保持既有完整正文与 scope 核验。本次不提供旧会话工具消息兼容，不增加旧名 alias；原 Store/Runtime authority 不随命名变化。任务等待的模型入口统一为必填 `task_ids` 数组，事件等待 `wait_agent_event` 只接 `after_seq/timeout_ms`；隐藏的 `task_wait` 仍是内部注册定义，不获得新的模型入口。跨层实现归 [Execution](../../packages/agent/src/execution/index.ts)、[Model metadata](../../packages/agent/src/model-snapshot.ts)和上述 owner，具体验证以本轮实际测试范围为准。
+[模型工具投影](../../packages/agent/src/model-tools.README.md)在 Agent 的实际 `ModelAdapter` 边界完成：内部 ModelRequest／ToolCall 保留原定义 ID/version 和规范参数，leaf 的纯 `ToolDefinition.model` 仅描述公开名、声明字段映射与隐藏资格。完整模型调用先按本轮准确目录校验、转回内部参数，再进入原来源、权限、资源、计划、派发与终态链路；未知工具、坏参数和碰撞不得形成效果。声明字段可转 snake_case，任意业务 JSON 与动态 MCP 原 schema/arguments 不改写；baseline、操作 key 和去重身份保留。持久 `ToolCall.model` 只存原公开名称、精简字段路径及必要错误，后继模型历史不借当前定义重解释原调用；`metadata.context.toolSurface` 封存当时公开工具，公开 Inspector 使用该原快照并保持既有完整正文与 scope 核验。本次不提供旧会话工具消息兼容，不增加旧名 alias；原 Store/Runtime authority 不随命名变化。普通协作目录恰好为 `spawn_agent/send_agent_message/follow_up_agent/wait_agent_events/list_agents/interrupt_agent`。等待属于自身邮箱，使用 `after_seq/wait_ms`；有限分段等待不复用旧 task-ID wait-any 协议，旧名无模型 alias。隐藏旧定义只为实际内部调用及准确历史恢复保留，不从当前目录重解释旧记录。跨层实现归 [Execution](../../packages/agent/src/execution/index.ts)、[Model metadata](../../packages/agent/src/model-snapshot.ts)和上述 owner，具体验证以本轮实际测试范围为准。
+
+普通结果自动展开只属于准确当前工作；另一工作可以显式 Include 原结果为低信任数据。复用既有 automatic Source 时，Agent 按当前所选范围和冻结水位核已应用的 Include；active 资格以真实检查点发布为界，不把 queued 当作采用，也不改写旧 Source 或旧自动报告接纳。Rewind fence、原配置、批准和执行权限独立保持，Service/Client 不从历史 Source 或展示状态推导新授权。完整读取、取消与快照合同归 [Context owner](../../packages/agent/src/storage/sqlite/context/README.md)，业务输入与选择归 [输入 owner](../../packages/agent/src/storage/sqlite/inputs/README.md)。
 
 Extension 通过 `lifecycle.onRunStart/onRunEnd/onModelStart/onModelEnd` 观察原 Run/Model 事实；Model start 在派发准入 ACK 和取消复核后发布，Run start 在激活 ACK 后发布，end 以已提交终态为准。Model 使用实际冻结 Step 的注册，Run 使用原 Run 绑定。通知是有限冻结投影，不提供 SQL、owner、正文、Provider raw、operations 或资源句柄；权限、必要条件和完成 CAS 继续独立执行。有限观察队列可以丢通知，异常局部停用，不持 Run lease/permit、不参与执行成功或关闭判定。Run 终态与 Job 实际停止/资源释放保持分离；普通读取和重复原 Command 不重放，恢复只观察本次推进到的 Model 边界和新到达的 Run 终态，不补发原 Run start。需要可靠后续业务仍须登记原受控意图。当前接口、执行图、压力与真实 SQLite/恢复证据归[Agent 生命周期 owner](../../packages/agent/README.md#生命周期扩展)及[生命周期观察决定](../../.agents/notes/implemented/architecture/2026-10-18-settled-lifecycle-observers.md)。
 
@@ -70,6 +72,8 @@ Store 在原条数与完整 frame 字节上限内投递，容量不足时调用�
 
 根与 child 使用同一个 Loop 与执行器，根执行组拥有一个 OS owner/generation；child 配置只能选择固定宿主绑定及父允许的工具。每 Run 的定义与来源封存，后台 operation 保留该绑定 lease 直到真实监督终止。Skills/MCP 内容不授予权限；默认 MCP 连接须在普通持久派发之后，不能在配置解析时提前启动。
 
+可信 runless Action/Tool 的 child 仍核宿主精确角色、模型与实际父工具上限。MCP 空目录只有在真实无 Run 祖先、原 Command/准备摘要和 child carrier/manifest 闭合时，才保存 `parentRunId:null` 血缘供后代验证；它不生成 source read-set、连接或凭据许可。省略真实父 Run 不能制造这种血缘，非空来源与篡改证明继续拒绝。装配与准确拒绝证据归[Service owner](../../apps/service/README.md)。
+
 长期执行不设主 Run 总期限、累计用量、来源数量、隐式 Shell 总超时或暂时性模型失败的次数额度。子 Run 仍在实际激活后 30 分钟取消；普通 Task 的并发位满只排队，期限不在排队时开始。公共重试上界以 `maxAttempts:null` 表达，Client schema 与 TUI 保实际 attempt 和原失败前驱。完整纯文本的 Provider 长度分段继续同一 Run，截断工具批次不派发，截断摘要不发布。默认 Service 在原 Loop 安全边界进行可重复自动压缩，已知失败不永久关闭后续压缩；存储／来源／取消／unknown 不由重试机制放宽。
 
 原 Run 的冷恢复将持久意图、可替换 Model 尝试、已确认结果与进程监督分开。纯 Model 无派生效果时可关闭旧 running/failed 尝试并重试；压缩 pending 重建摘要、已发布点保持。所选父子树在同一 root lease 下准备全部绑定并原子交接，只有提前封存的可信 Tool continuation 可接回原操作；普通外部未知效果仍需核实。原 ID、结果、审批、子期限和五次失败 streak 保持。正常 Store 事务以闭合增量迁移维护恢复证明，首次冷读只核前沿/增量和必要来源；旧库一次升级及失效协议完整审计回退。全部迁移资产进入包内构建和 Service 文件保护，公开 HTTP 与 format major 1 保持；协议、真实强杀与成本边界归[恢复 owner](../../packages/agent/src/storage/sqlite/run-resume.README.md)。
@@ -82,7 +86,13 @@ Store 在原条数与完整 frame 字节上限内投递，容量不足时调用�
 
 [Task](../../packages/agent/src/extensions/task/README.md) 的目录按真实 carrier/Operation Command 查询有界摘要，固定 Decimal64 上界与每页最多 200 项，不拉取正文、不重新 ensure。精确 interrupt 在最终事务核原 Store、主体、直接 child、carrier 和当前 targetRunId，不能因旧 Run 结束就转向后来新 Run。wait-any 使用持久变化唤醒与真实目标事实，已存在审批或准确 child ancestry 下的卡片也可早醒；普通 operation wait 继续等待终态。
 
-QueueOnly 邮件以原 `agent.message` Command 和 sender Execution scope 的完整私有 Artifact 保存，sender 的实际成功结算与接收资格同事务提交；失败、取消、未知或未确认不形成成功邮件。idle send 零 Run/Model，普通后来人类工作不自动采用。显式 child follow-up 的原 ensure 事务封存邮件 seq 与成功 sender completed cursor 双上界，原 key 重试不能扩大集合；每页 50 封的实际接收最终核目标 Run/selection、carrier、主体、原 Store 和 stop/delete。邮件原未绑定 intent 不改写为新 targetRunId，保存准确 receivedRunId/selection；下一 Model 只按真实 receivedMessage/source proof 完整展开。Rewind 资格属于准确目标 Session selection，根选择变化不伪称 child 选择也改变。after_turn 只使用真实激活时封存的可信 authorizer/lease/route；nested 与 follow-up 汇报保原 funding child deadline，report 不递归授权，冷缺实现明确 needs_review/零 Provider。人类新工作优先与 report/source/receipt 同事务，默认 SDK 与完整 retry/delivery 的适用资格仍按进度验证。
+QueueOnly 邮件以原 `agent.message` Command 和 sender Execution scope 的完整私有 Artifact 保存，sender 的实际成功结算与接收资格同事务提交；失败、取消、未知或未确认不形成成功邮件。idle send 零 Run/Model，普通后来人类工作不自动采用。显式 child follow-up 的原 ensure 事务封存邮件 seq 与成功 sender completed cursor 双上界，原 key 重试不能扩大集合；每页 50 封的实际接收最终核目标 Run/selection、carrier、主体、原 Store 和 stop/delete。邮件原未绑定 intent 不改写为新 targetRunId，保存准确 receivedRunId/selection；下一 Model 只按真实 receivedMessage/source proof 完整展开。Rewind 资格属于准确目标 Session selection，根选择变化不伪称 child 选择也改变。普通 child completion 将有限订阅与 idle 自动授权分开保存；同工作 active 接纳沿原活动 Run 权限，idle 续轮另核可信当前 afterTurn policy。nested 与 follow-up 保原 child deadline，report 不递归授权；冷缺绑定 needs_review/零 Provider。报告按准确结果键在同一事务选最终 Run、创建独立 Source、consume receipt 和 ack，多个完成可进入同一 R，不要求每个 report 都是 R.origin。提交后返回丢失只查回原 Run/Source。原 after_turn 旧历史与明确内部调用仍核其实际封存授权。
+
+人类输入先保留真实公共请求，再由私有 raw、关联/选择决定及业务准入分别保存身份。原输入登记、决定、报告接纳和最终效果派发核同一 control revision；引用、Agent 邮件及模型自报批准不能成为控制。只读解释仍用唯一普通 Loop，无业务 extensions/Tool/Job 权限，Run 保留自身因果。同工作继续须核准确原工作配置；独立 B 先 queued，A 安全交接后才能启动，取消 B 不自动回 A。明确暂停/替换/停止只作用准确工作；暂停继续追加有限资格，不修改旧 suppressed 历史。unknown、root stop、Rewind 和 fence 保持。实现与验证归[输入 owner](../../packages/agent/src/storage/sqlite/inputs/README.md)、[Run 交接](../../packages/agent/src/storage/sqlite/human-work-handoff.ts)及[继续资格](../../packages/agent/src/storage/sqlite/job-report-continuation-README.md)。
+
+首输入的本地标题兜底独立于业务准入。可信宿主在 public/raw 耐久保存后、解释修订捕获前，通过受限 metadata 接点复用标题模块的 rename CAS；它不成为新的业务生命周期、事件总线或执行许可，解释轮仍零业务 Action。原输入、初始控制、空历史、保留的注册锚点和手动改名均须可核。后续标题 AI 只沿准确 public/raw/decision/business 链，在实际业务正常完成前执行；元数据失败不改变原输入的业务结果。当前负责入口归[Agent](../../packages/agent/README.md)与[Service](../../apps/service/README.md)。
+
+所属根当前 applied 权限模式通过持久 `permission.mode` revision 交给子孙策略、待审批/审核与资源等待、最终 SQL 派发；收紧和放宽均在原准确动作上重新判断，不共享兄弟/新轮批准，不因 Full 解除可信只读与工具硬上限。旧卡片追加失效事实而停用，原请求/答案保留；on* 通知不是可靠唤醒依据。当前权限读取失败阻挡新效果。协议与实际强杀/模式竞争证据归[授权契约](authorization.md#当前-v13-正式授权)及[权限 owner](../../packages/agent/src/permissions/README.md)。
 
 可信 `readStepCapabilities` 在安全 Step 只选择缓存定义，Model 的实际工具版本与非秘密目录事实独立保存。旧未派发调用在目录变化后失效，下一模型请求同时更新 schema；已派发任务保留原 scope 和 lease。新版本 Tool 的自有 namespace 从准确成功 Model 的实际请求/绑定与原工作身份核实，不能靠调用者声明或替换旧 Run manifest 获得；真正执行仍走独立权限和最终派发事务。
 
@@ -104,11 +114,13 @@ Native Skills 目录只经 [Main 的有限 reader](../../apps/desktop/electron/s
 
 独立 Native `/v1/lifecycle` 与 `/v1/lifecycle/shutdown` 用 lifecycleVersion 和原 profile/instance 核对目标，业务 API 不兼容或 Store 不可用不阻断有限诊断。无 Origin 的 bearer 请求才可进入，Browser gateway 不暴露；202 仅为受理，成功资源关闭及所属进程退出另行确认。公共 Lifecycle Client 丢回复后只查询原实例，不自动重发或改绑。成功 HTTP 关闭明确结束 runner 自己的父管道读取；普通网络退出仍不等于父死亡。理由见[原子关闭决定](../../.agents/notes/implemented/architecture/2026-10-02-atomic-service-shutdown.md)；正式 daemon 目标发现与 CLI 切换尚未由此完成。
 
+耗时的纯校验不能占住Service事件循环：[MCP](../../packages/agent/src/mcp/README.md)按原scope／catalogue拥有完整schema编译和参数／结果校验Worker，[Workflow](../../packages/agent/src/business/skill-workflow/README.md)由显式Run binding拥有编译session，来源与能力事实仍每次完整重读。固定built Worker、校验和及原观察资产进入普通／外部Files与恢复保护，缺失或摘要不符拒绝，不回退TS源码或由配置替换。取消、目录失效与关闭须等原Worker实际退出，未知保原资源；计算缓存不缓存授权，不授效果重放。Files只读与Artifact全文校验按预算让出真实事件循环，原文件／目录句柄和活动票据持有到EOF或实际关闭；Runtime的二次正文摘要同样完整分片。短事务、原size/hash/scope与发布CAS保持，单次系统调用、连续分配和JSON展开不因此取得实时延迟保证。
+
 [`client`](../../packages/client/README.md)只依赖生成 schema 和网络能力；[`ui`](../../packages/ui/README.md)消费公开投影、React 与便携展示控件，不知道参考扩展业务。SSE 的 ready/heartbeat 不推进 cursor；变化应用成功后确认，过滤范围的 checkpoint 只来自一致页。快照页不代表全局事件应用成功，切换 scope 需要相应水位。reset 后先冻结原 Store 的全局集合基线，再完整重读所需事实；SDK `startAfter` 仅设置重开 scan 起点，保留原 ACK，不将单对象 snapshotCursor 冒充全局应用。validated `onReady` 可确认流准入并等待应用准备，仍不 ACK；正常 EOF 且 ACK 尚未到达重读基线时沿原起点重开。原 Store 改变、读取失败或未完成时不解除对应写门禁，也不重发业务意图。
 
 正式 Native 已复用 [UI 的原桌面展示层](../../packages/ui/README.md#原桌面展示层)，SessionPage、侧栏、消息区、输入框、右侧栏与样式由纯展示 owner 维护；[Desktop adapter](../../apps/desktop/src/native-presentation.ts)只映射实际公共事实。有限宿主 slot 接原完整正文与写入回调，打开右侧工具不卸载消息区。旧 Host/Runtime/私有存储没有迁入此层。声明的 CSS export 必须解析到实际仓库资产，缺失、越界与旧目标仍拒绝；CSS 不作为 TypeScript 执行模块，实际编译资产闭包另由候选 manifest 和窗口验收证明。显式 UI 构建脚本属于 I/O 宿主，UI source 经 export/import 到达该脚本时仍按便携依赖检查；不存在整个 UI workspace 的 I/O 豁免。
 
-原 PC 环境信息卡与只读 child 详情复用已有后台 reader／durable caller。全局总览与当前根环境各持独立 Main 观察；环境范围来自实际 controller snapshot，renderer 的有限 surface 不提供根／Session／路径。选中根变化释放环境 GET 和旧停止资格，全局观察保持；目录刷新不扩大已固定 child 日志读取范围。展示缓存不持 observation 或原提交意图，子详情不改变 Main 阅读根、不恢复写权，准确 stop 与完整正文核验仍沿[Native owner](../../apps/desktop/README.md#native-当前会话环境信息与子详情)。observer reset 取消旧全局目录 GET 时，所有共同等待者得到明确观察失效，页面等待新状态；真实 GET 失败不被吞掉。
+原 PC 环境信息卡与只读 child 详情复用已有后台 reader／durable caller。全局总览与当前根环境各持独立 Main 观察；环境范围来自实际 controller snapshot，renderer 的有限 surface 不提供根／Session／路径。选中根变化释放环境 GET 和旧停止资格，全局观察保持；目录刷新不扩大已固定 child 日志读取范围。最近一份完整同根观察仅定位准确 child 的只读接纳候选，覆盖目录替换在途及 Main 发布／正常关闭后 Renderer 尚未提交的交接窗口；仍须两次重新核实际后端血缘。停止和输出仅用当前观察；失败、未完成取消、reset、scope 变化或超过上一代则撤销旧候选。展示缓存不持 observation 或原提交意图，子详情不改变 Main 阅读根、不恢复写权，准确 stop 与完整正文核验仍沿[Native owner](../../apps/desktop/README.md#native-当前会话环境信息与子详情)。observer reset 取消旧全局目录 GET 时，所有共同等待者得到明确观察失效，页面等待新状态；真实 GET 失败不被吞掉。
 
 活动 Native child 阅读复用全局 change 失效信号，不建立第二条执行流。有限私有游标只描述同 context selection 中已验证的完整消息前缀；Main 重核当前父范围和子绑定，变化时全量回退，每次尾部仍有固定上界和完整 EOF／hash 核验。重进与显式刷新完整校准，缓存不能替代当前父目录对子成员的确认。主子切换只取消所属 GET／IPC lease并拒迟到发布，暂停隐藏父阅读，不提交取消任务；有界缓存只持展示数据，不保留活跃订阅、隐藏DOM或操作资格。公开 Service／Core API 与持久格式保持。
 
@@ -363,3 +375,9 @@ Desktop Main在应用存续期内触发本地定时任务，调度元数据属de
 默认宿主的 OpenAI/compatible 连接可显式选择 Responses；旧配置缺省仍为 Chat Completions。协议冻结在实际 Run 绑定与公开非秘密 metadata 中；定时任务继续复用同一选择和 Agent Loop，不另建模型执行器。Responses 由官方 SDK 传输，单次零内部重试、`store:false`，错误不回退其他协议。
 
 加密推理状态与 SDK assistant parts 只作为不透明 continuation，沿已有私有 ModelOutput Artifact 链保存、恢复并传回匹配的 endpoint/provider/model/账户/header/路由绑定；它不授予工具执行权限，也不作为用户可见消息或 Inspector 正文。取消、流异常、截断工具批次及未完成压缩不提交可重放状态；非空纯文本 length 仍按长任务续接保存原文本段与其私有 continuation，由下一 Model Execution 继续。技术契约与测试见 [AI owner](../../packages/ai/README.md) 和 [ModelOutput owner](../../packages/agent/src/model-output/README.md)。
+
+纯文本 length 后的可重试失败重新准备当前来源时，不得丢失原 Loop 续写指令或复用过期全量请求。临时尾项只在同原 Store/Run/工作/Command 的成功 length 输出与新历史唯一原正文核对后恢复，不增加权限。若当前已发布摘要准确覆盖原正文，则核同 selection 覆盖上界与原输出证明后退役尾项，只用新摘要，不回灌旧历史；错属或无法核对时拒绝继续。具体实现和回归归 [Agent owner](../../packages/agent/README.md)。
+
+活动 Run 的 Session 目录可额外返回原 root 系统锁的 `executionOwner: held/unheld/unknown` 只读观察；SQL 快照与锁观察分别有自己的时点。确定原锁已释放或观察未知时，Native 停止正常运行转圈并保留执行状态待核实，不把进程或锁消失改写为业务终态。该字段不授接管、恢复、派发或清理证明；只读零写入、兼容字段缺席与实际回归归[目录 owner](../../packages/agent/src/storage/README.md#目录分页)和[Native owner](../../apps/desktop/README.md#native-项目会话目录)。
+
+配套 Service 的普通 launcher close 等待原 child 的真实 drain／退出；取消、原 Run／Execution／Job 终态与 owned 资源关闭先于成功退出，不再默认5秒强杀。SIGINT／SIGTERM 与父 EOF 汇入相同收尾；启动读取可取消，已开始的装配仍保到其真实关闭。明确 hard timeout／强退及准入失败回收只触及本次 child，不能提供终态或清理证明。Native Main 的信号／父通道事件与菜单异步决定按同一停止意图串行，不允许迟到“保留服务”撤销已开始的 drain。实际边界与回归归[Service owner](../../apps/service/README.md)、[Native owner](../../apps/desktop/README.md#原窗口关闭与退出收尾)和[正常退出决定](../../.agents/notes/implemented/bug-fix/2026-10-21-paired-graceful-exit.md)。

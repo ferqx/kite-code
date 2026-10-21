@@ -37,6 +37,13 @@ int main(int argc,char **argv) {
     for(int i=0;i<16;i++) if(output(1,a,sizeof(a))||output(2,b,sizeof(b)))return 92;
     return 23;
   }
+  if(!strcmp(argv[1],"gapped-output")) {
+    for(int i=0;i<8;i++) {
+      if(output(1,"stdout-gap\\n",11)||output(2,"stderr-gap\\n",11))return 92;
+      usleep(20000);
+    }
+    return 23;
+  }
   if(!strcmp(argv[1],"tree")) {
     int channel[2];if(pipe(channel))return 93;
     pid_t child=fork();if(child<0)return 94;
@@ -198,6 +205,73 @@ darwinTest(
     }
   },
   10000,
+);
+
+darwinTest(
+  'temporary pipe read errors retain their native cause across unrelated errno changes',
+  async () => {
+    const script = join(root, 'read-error-capture.ts');
+    writeFileSync(
+      script,
+      `import {dlopen as nativeDlopen,ptr,toArrayBuffer} from 'bun:ffi';
+import {mock,expect} from 'bun:test';
+import * as fs from 'node:fs';
+const actualDlopen=nativeDlopen,actualReadSync=fs.readSync;
+const library=actualDlopen('/usr/lib/libSystem.B.dylib',{__error:{args:[],returns:'ptr'}});
+const errno=new DataView(toArrayBuffer(library.symbols.__error(),0,4));
+let transientReads=0;
+const interfere=()=>{errno.setInt32(0,1,true);if(errno.getInt32(0,true)!==1)throw Error('errno_interference_missing');};
+mock.module('bun:ffi',()=>({ptr,toArrayBuffer,dlopen(path,options){
+ const library=actualDlopen(path,options),symbols={...library.symbols};
+ if(symbols.read){const read=symbols.read;symbols.read=(...args)=>{
+  const result=read(...args);
+  if(Number(result)===-1){transientReads++;interfere();}
+  return result;
+ };}
+ return {...library,symbols,close:()=>library.close()};
+}}));
+mock.module('node:fs',()=>({...fs,readSync(...args){
+ try{return actualReadSync(...args);}
+ catch(error){if(error.code==='EAGAIN'||error.code==='EINTR')transientReads++;interfere();throw error;}
+}}));
+const {startDarwinOwnedChild}=await import(${JSON.stringify(join(import.meta.dir, '../../../src/platform/process/darwin-owned-child.ts'))});
+const child=startDarwinOwnedChild({executable:${JSON.stringify(executable)},argv:['gapped-output'],cwd:${JSON.stringify(root)},env:{}});
+const drain=async(stream)=>{const chunks=[];for await(const chunk of stream)chunks.push(Buffer.from(chunk));return Buffer.concat(chunks).toString();};
+const output=Promise.all([drain(child.stdout),drain(child.stderr)]);
+try {
+ const [stdout,stderr]=await output;
+ expect(stdout).toBe('stdout-gap\\n'.repeat(8));expect(stderr).toBe('stderr-gap\\n'.repeat(8));
+ expect(await child.exited).toBe(23);expect(transientReads).toBeGreaterThan(0);
+ const stopped=await child.terminateGroup(0);expect(stopped.confirmed).toBe(true);
+ child.reapAfterConfirmedStop();
+ expect(child.readProcessEvidence()).toMatchObject({observation:{kind:1,status:23},waitpid:{pid:child.pid,status:23<<8,statusMatched:true},reaped:true});
+ console.log(JSON.stringify({transientReads,stdoutBytes:stdout.length,stderrBytes:stderr.length,reaped:true}));
+} finally {
+ const stopped=await child.terminateGroup(0);
+ if(stopped.confirmed)child.reapAfterConfirmedStop();
+ await output.catch(()=>{});library.close();
+}
+`,
+    );
+    const probe = Bun.spawn([process.execPath, script], { stdout: 'pipe', stderr: 'pipe' });
+    const timer = setTimeout(() => probe.kill('SIGKILL'), 3000);
+    try {
+      const [stdout, stderr] = await Promise.all([
+        new Response(probe.stdout).text(),
+        new Response(probe.stderr).text(),
+      ]);
+      expect(await probe.exited, stderr).toBe(0);
+      expect(JSON.parse(stdout)).toMatchObject({ stdoutBytes: 88, stderrBytes: 88, reaped: true });
+      expect(JSON.parse(stdout).transientReads).toBeGreaterThan(0);
+    } finally {
+      clearTimeout(timer);
+      if (probe.exitCode === null) {
+        probe.kill('SIGKILL');
+        await probe.exited;
+      }
+    }
+  },
+  5000,
 );
 
 darwinTest(
