@@ -21,6 +21,8 @@ export interface ModelOutputMessageProps {
   }) => Promise<ModelOutputSnapshot>;
   /** Current rendered full content only; undefined means the original explicitly labeled preview. */
   readonly onContent?: (content: string | undefined) => void;
+  /** Explicit reader dismissal, including while reading is temporarily paused. */
+  readonly onClose?: () => void;
   /** Host presentation of the same preview or verified body; reading semantics stay here. */
   readonly renderText?: (content: string, verifiedSnapshot?: ModelOutputSnapshot) => ReactNode;
 }
@@ -64,6 +66,7 @@ export function ModelOutputMessage({
   verifiedSnapshot,
   onRead,
   onContent,
+  onClose,
   renderText,
 }: ModelOutputMessageProps) {
   const body = message.outputBody;
@@ -92,8 +95,8 @@ export function ModelOutputMessage({
   );
   const current = useRef(identity);
   current.current = identity;
-  const callbacks = useRef({ onRead, onContent });
-  callbacks.current = { onRead, onContent };
+  const callbacks = useRef({ onRead, onContent, onClose });
+  callbacks.current = { onRead, onContent, onClose };
   const request = useRef<AbortController | undefined>(undefined),
     generation = useRef(0);
   const [loaded, setLoaded] = useState<{ identity: string; snapshot: ModelOutputSnapshot }>();
@@ -150,6 +153,7 @@ export function ModelOutputMessage({
     callbacks.current.onContent?.(readActive ? full?.output.content : undefined);
   }, [full, identity, readActive]);
   function close() {
+    callbacks.current.onClose?.();
     if (admittedSnapshot) setDismissed({ identity, snapshot: admittedSnapshot });
     callbacks.current.onContent?.(undefined);
     generation.current++;
