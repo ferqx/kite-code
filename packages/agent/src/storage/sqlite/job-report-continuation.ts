@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { canonicalJson } from '../../json';
 import type { ContinueHumanWorkInput } from '../job-report-continuation';
 import { AgentError, type Json } from '../types';
+import { verifyFirstActivation } from './child-first-activation';
 import { assertNoExecutionGroupFence } from './execution-group-safety';
 import { readWorkEligibility } from './human-work-control';
 import type { SqliteOperations } from './operations';
@@ -60,7 +61,10 @@ function exactCarrierStart(db: SqliteOperations, start: Row, carrier: Row): bool
     String(start.root_work_seq) !== String(carrier.root_work_seq)
   )
     return false;
-  if (start.kind === 'child.start') return request.parentExecutionId === carrier.id;
+  if (start.kind === 'child.start') {
+    verifyFirstActivation(db, carrier, start);
+    return request.parentExecutionId === carrier.id;
+  }
   if (
     start.kind !== 'input.follow_up' ||
     start.agent_carrier_execution_id !== carrier.id ||

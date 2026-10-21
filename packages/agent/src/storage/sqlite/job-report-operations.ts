@@ -3,6 +3,7 @@ import { canonicalJson } from '../../json';
 import type { DispatchInput, Store } from '../port';
 import { type AfterTurnAuthorization, AgentError, type Json } from '../types';
 import { associateAgentMailWithResult, sealParentAgentMailAdoption } from './agent-mail-operations';
+import { verifyFirstActivation } from './child-first-activation';
 import { callContextSelection } from './context-selection-operations';
 import { assertNoExecutionGroupFence } from './execution-group-safety';
 import { verifyHostControlDispatch } from './host-control-dispatch';
@@ -129,6 +130,7 @@ function childReportCarrierProof(db: SqliteOperations, report: Row, seen = new S
           report.session_id!,
         )
       : null);
+  if (carrier && start?.kind === 'child.start') verifyFirstActivation(db, carrier, start);
   if (
     !result ||
     !binding ||

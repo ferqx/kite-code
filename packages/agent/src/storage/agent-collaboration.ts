@@ -44,6 +44,8 @@ export interface ApplyAgentCommandInput extends EnsureOperationInput {
   agentId: string;
   kind: 'follow_up' | 'interrupt';
   content?: string;
+  /** Host preparation only: false forbids admitting a turn without its executable binding. */
+  newTurnPrepared?: boolean;
 }
 export interface AgentCommandReceipt {
   accepted: true;

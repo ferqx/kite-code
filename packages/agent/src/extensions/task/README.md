@@ -10,7 +10,9 @@
 
 稳定目标邮件在原入队事务重新核准确 carrier、selection、工作关系和真实 Run.isActive；目录保留的已完成历史 Run 不成为活动投递目标。idle 邮件持久保存 targetRunId:null，只排队且不创建 child Run/Model；显式同工作 follow-up 再按原 predecessor 与双水位接纳。六工具回归另核这条 idle 正例的原 carrier、零激活及唯一邮件 Source，真实模型结果归测试 owner。
 
-`agent_id` 即原 child Session ID。`applyAgentCommand` 在一个 Store 写事务内先查原 invocation 回执，再选择其当前唯一 carrier，核准确直接父子、工作、Store、主体、来源、控制与取消关系。运行中/queued 的同工作 follow-up 返回 `mode:steer`；queued 引导绑定原 carrier 并在其实际 activation 后接入，不改写原委派。idle 时在同事务通过原 `ensureAgent` 建唯一 successor，复用 Session 与原配置；跨工作活动引导拒绝。interrupt 取消首次准入选定的 carrier，包含尚无 Run 的 queued carrier，后续新轮不被迟到重试改投。跨工作普通消息/中断不取得接管资格。受理响应丢失时 Host 查回原持久证明；受理时 `state` 保留原快照，不用后来状态改写历史。
+`agent_id` 即原 child Session ID。`applyAgentCommand` 在一个 Store 写事务内先查原 invocation 回执，再选择其当前唯一 carrier，核准确直接父子、工作、Store、主体、来源、控制与取消关系。运行中/queued 的同工作 follow-up 返回 `mode:steer`；queued 引导绑定原 carrier 并在其实际 activation 后接入，不改写原委派。idle 时在同事务通过原 `ensureAgent` 建唯一 successor，复用 Session 与原配置；跨工作活动引导拒绝。interrupt 取消首次准入选定的 carrier，包含尚无 Run 的 queued carrier，后续新轮不被迟到重试改投。跨工作普通消息/中断不取得接管资格。受理响应丢失时 Host 查回原持久证明；受理时 `state` 保留原快照，不用后来状态改写历史。Host 只准备了 queued 引导，而最终事务发现目标已结束时，在新 carrier 写入前返回 `target_changed`，重新观察后的新调用才准备并启动新轮；不会留下无执行绑定的已受理 carrier。首次激活前取消且可证明从未派发的 child 可复用同一 Session：新 carrier 通过真实 `child.start` 建立首次 Run，不伪造前驱 Run，也不修改原取消事实。仅接纳准确 cancelled carrier、未派发证明及原 rejected start 的 `cancelled_before_apply`／`not_activated` 回执；已派发、unknown 或缺少证明仍拒绝。私有证明由 [首次激活 owner](../../storage/sqlite/child-first-activation.ts)封存并核验。
+
+首次激活的同工作复用只把该工作最初原委派作为 `cancelled_agent_assignment_background` 背景消息，再保存本次新指令，明确新指令优先；跨工作不携带旧委派或采用旧工作邮件。被取消 carrier 的 queued 引导不转移到新 carrier。普通已有 Run 的 `input.follow_up` 前驱合同及邮件双水位不变。[首次激活回归](../../../test/isolated/business/task/collaboration-first-activation.test.ts)核实际模型输入、稳定身份与取消历史；[证明回归](../../../test/isolated/child/first-activation-proof.test.ts)核原持久绑定与拒绝边界。
 
 `list_agents` 按首次 `operation.agent` Command 的不可变 seq 每个 child Session 只列一次；当前状态取准确最近 carrier，follow-up 不移动锚点。ID 过滤先整体核直接归属，固定 Decimal64 上界与 limit+1 判断真正后页；恰好 limit 且无后项返回 null。职责、最近引导与结果的完整原文通过本次 Tool 的受验证正文交付，大目录使用当前 Tool scope 的完整 Artifact，模型不必使用私有 OperationRef。目录查询和来源展开不接纳结果、不推进模型已读、不调用 Provider。
 
@@ -97,7 +99,7 @@ Model 完成候选只剩准确 pending required carrier 时，同一 Run 复用 
 
 已经接纳的新人类 start/follow-up 意图优先抑制尚未应用的汇报；先应用的报告占用普通前台，新人类工作按既有 admission 排队。Rewind、根停止或控制撤销抑制旧汇报，不向后来人类 Run 偷渡结果。完整正文沿原 carrier Artifact/低信任具名 source 读取，不复制 child 历史。普通 Model 权限与来源检查仍独立执行。
 
-原父 binding lease 从后台 child 转移到 pending report/实际报告 Run，终态或抑制后释放；不重装当前配置。查询和冷只读不会推进报告。冷重开缺少原 binding 时不能自动调用 Provider，执行入口收束为 needs_review，保留原事实。待报告目录以 Command seq 固定上界分页，不依赖可裁剪通知。嵌套报告沿原 root owner 执行，不重新激活已终态的原 carrier；准确持久 job.report 及其封存来源是有限历史祖先例外，普通 child admission 不获得该例外。报告 Run 继承资金 child Run 的原 deadline，不重新获得三十分钟。当前目标的已受理 child.start/follow-up 优先抑制旧报告，活动父 Run 只延后申请，不调用新 Model。完整 retry/delivery 仍待后续切片。
+原父 binding lease 从后台 child 转移到 pending report/实际报告 Run，终态或抑制后释放；不重装当前配置。已暂缓报告被取消或 Rewind 直接结算时，观察者也释放该准确报告持有的 lease，不等待下一次报告调度或 Runtime 关闭；`continuation_admission` 不释放，仍由报告 pump 或活动父 Run 接纳路径转移给准确 successor，再按该报告终态释放。查询和冷只读不会推进报告。冷重开缺少原 binding 时不能自动调用 Provider，执行入口收束为 needs_review，保留原事实。待报告目录以 Command seq 固定上界分页，不依赖可裁剪通知。嵌套报告沿原 root owner 执行，不重新激活已终态的原 carrier；准确持久 job.report 及其封存来源是有限历史祖先例外，普通 child admission 不获得该例外。报告 Run 继承资金 child Run 的原 deadline，不重新获得三十分钟。当前目标的已受理 child.start/follow-up 优先抑制旧报告，活动父 Run 只延后申请，不调用新 Model。完整 retry/delivery 仍待后续切片。
 
 [nested-after-turn.test.ts](../../../test/isolated/business/task/nested-after-turn.test.ts) 验证三层同 Loop 的来源、原 carrier 终态、期限和 lease；结果先到只保留申请，明确追问优先，真实 Run INSERT 故障整体回滚，以及 followup_task 的新 carrier/发送者 Run 汇报。报告与人类新工作仍分别经过普通 Model 权限和最终 Store 事务，不通过 Model 参数自授权。
 

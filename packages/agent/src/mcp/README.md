@@ -92,6 +92,8 @@ root 原字节 SHA 即 indexDigest，节点不含自身 digest。Entry 的 label
 
 显式生命周期 owner 调用 `invalidateCatalogue()` 立即提升代次并清缓存，同时封存原 schema Worker 并异步确认退出，不连接或发送 RPC；随后只能通过显式 `scope.snapshotTools()` 连接/刷新。完整 descriptor 内容变化发布新代次；未变化的同连接刷新保留代次。刷新期间发生失效/断连会拒绝该旧刷新，不能恢复已失效目录。低层 adapter 本身不订阅通知自动连接；下文的显式 lifecycle 将其已发现目录投影给 Runtime 的下一安全 Step。
 
+目录替换只先收束原已发布目录的 schema Worker，不关闭另一份尚未发布的候选。候选从定义绑定、完整 schema 准备到最终 publication 都有准确清理归属，准备失败或迟到的败者在返回前关闭自身 Worker。清理完成后的新鲜度复核与 publication 在同一同步边界完成，Tool 与 required-task Job 的原 ticket closure 成对发布，不被候选覆盖；若取消或来源变化已使原 validators 退休却无法发布，则立即清空仍属于本次原代的缓存，等待候选实际清理，不再展示可用的失效工具。显式重新发现可以恢复同内容的目录；旧工具仍不能重放。并发候选的败者只收束自身，不废弃胜者；退出未确认继续保留失败和原资源。[发布边界回归](../../test/isolated/mcp/schema-publication.test.ts)使用实际 schema Worker 与内存 SDK peer，覆盖取消、来源漂移、并发胜负、迟到准备、同内容恢复、required-task 成对绑定和未确认清理；本机结果不代证其他平台的原生退出证明。
+
 每次 Tool 调用先克隆并冻结准确参数。输入 schema、字节检查与实际 RPC 使用同一个快照；调用者在 wire 准入等待期间修改原对象，不改变已绑定调用。新调用的非法 schema 或超界输入在发送前局部失败。
 
 可选 `admitToolCall(binding,{signal})` 是可信宿主最后准入回调，收到冻结的 server/scope/configDigest/catalogueGeneration/definitionId/definitionVersion。leaf 在等待回调之前与之后复核 lease、连接和目录，最终检查与实际 `tools/call` 之间没有额外 await；旧等待调用拒绝时保存 `adapterAttempted:false`。宿主拒绝的任意错误正文不会透传。该回调不替代 UnifiedExecution 的持久批准，也不使当前直接 child stdio 或默认 fetch 取得合格 process/network/DNS/proxy 边界资格。配置摘要固定于 factory；配置改变应由宿主失效/释放旧 adapter 并新建，不能原地改 transport。

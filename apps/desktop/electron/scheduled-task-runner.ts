@@ -449,9 +449,12 @@ export class ScheduledTaskRunner {
       !controlledWorkId
     )
       throw Error('scheduled_identity_mismatch');
+    // A human handoff finishes the technical Run, not the scheduled business work.
     let status: ScheduledTaskRunUpdate['status'] =
       actual.status === 'completed'
-        ? 'completed'
+        ? actual.reason === 'human_work_deferred'
+          ? 'unknown'
+          : 'completed'
         : actual.status === 'cancelled'
           ? 'cancelled'
           : actual.status === 'failed' || actual.status === 'interrupted'

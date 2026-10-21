@@ -5297,7 +5297,18 @@ export class AgentRuntime {
         // these reads remains visible to the next bounded wait.
         const cursor = (await this.options.store.getMetadata()).lastChangeCursor;
         const current = await this.options.store.getCommand(command.id);
-        if (current?.status !== 'accepted') return;
+        if (current?.status !== 'accepted') {
+          const receipt = current?.receipt as { outcome?: string; reason?: string } | undefined;
+          // Cancellation or Rewind can settle the command without another report pump.
+          // A continuation_admission still transfers this lease to its exact successor.
+          if (
+            receipt?.outcome === 'cancelled_before_apply' ||
+            receipt?.reason === 'context_rewound' ||
+            receipt?.outcome === 'context_rewound'
+          )
+            await this.releaseReportBinding(command.id);
+          return;
+        }
         const runnable = await this.options.store.listAcceptedCommands(command.sessionId, 200);
         if (runnable.some((item) => item.id === command.id)) {
           this.pendingSessions.add(command.sessionId);
@@ -5318,6 +5329,19 @@ export class AgentRuntime {
           this.deferredReports.delete(command.id);
       });
     this.deferredReports.set(command.id, { controller, task });
+  }
+  private transferContinuedReportBinding(command: CommandRecord) {
+    let retained = this.reportBindings.get(command.id);
+    const originalReportCommandId = (command.request as { originalReportCommandId?: string })
+      .originalReportCommandId;
+    if (!retained && command.kind === 'job.report.continue' && originalReportCommandId) {
+      retained = this.reportBindings.get(originalReportCommandId);
+      if (retained) {
+        this.reportBindings.delete(originalReportCommandId);
+        this.reportBindings.set(command.id, retained);
+      }
+    }
+    return retained;
   }
   private async releaseReportBinding(commandId: string) {
     const retained = this.reportBindings.get(commandId);
@@ -5477,6 +5501,9 @@ export class AgentRuntime {
           activeOnly: true,
           carriedMessageIds,
         });
+        // Active consumption can precede the report pump. Move the same exact
+        // continuation lease before settling or deferring this subscription.
+        this.transferContinuedReportBinding(applied.command);
         if (applied.command.status === 'applied') {
           received++;
           await this.releaseReportBinding(command.id);
@@ -5488,16 +5515,7 @@ export class AgentRuntime {
     }
   }
   private async runJobReport(command: CommandRecord, owner: OwnerRef) {
-    let retained = this.reportBindings.get(command.id);
-    const originalReportCommandId = (command.request as { originalReportCommandId?: string })
-      .originalReportCommandId;
-    if (!retained && command.kind === 'job.report.continue' && originalReportCommandId) {
-      retained = this.reportBindings.get(originalReportCommandId);
-      if (retained) {
-        this.reportBindings.delete(originalReportCommandId);
-        this.reportBindings.set(command.id, retained);
-      }
-    }
+    let retained = this.transferContinuedReportBinding(command);
     if (!retained) {
       const parentRunId = (command.request as { parentRunId?: string }).parentRunId;
       const parent = parentRunId && this.runBindingLeases.get(parentRunId);

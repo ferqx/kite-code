@@ -5,15 +5,23 @@ export interface HumanWorkCandidate extends HumanWorkIdentity {
 }
 /** Material supplied for analysis never becomes a current control instruction. */
 export function currentHumanInstruction(content: string): string {
-  return content
-    .replace(/```.*?(?:```|$)/gs, '')
-    .replace(/~~~.*?(?:~~~|$)/gs, '')
-    .split('\n')
-    .filter((line) => !/^\s*>/.test(line))
-    .join('\n')
-    .replace(/[“「『][^”」』]*[”」』]/g, '')
-    .replace(/"[^"\n]*"|'[^'\n]*'|`[^`\n]*`/g, '')
-    .trim();
+  return (
+    content
+      .replace(/```.*?(?:```|$)/gs, '')
+      .replace(/~~~.*?(?:~~~|$)/gs, '')
+      .split('\n')
+      .filter((line) => !/^\s*>/.test(line))
+      .join('\n')
+      .replace(/[“「『][^”」』]*[”」』]/g, '')
+      .replace(/"[^"\n]*"|`[^`\n]*`/g, '')
+      // Apostrophes inside words are not quote delimiters: removing a span from
+      // "don't" through "it's" could erase an explicit withdrawal of a control.
+      .replace(
+        /(?<![\p{L}\p{N}_])'(?:[^'\n]|(?<=[\p{L}\p{N}_])'(?=[\p{L}\p{N}_]))*'(?![\p{L}\p{N}_])/gu,
+        '',
+      )
+      .trim()
+  );
 }
 const control = {
   pause: /^(?:请|先|麻烦|please\s+)?(?:暂停|暂缓|pause\b|hold\b)/i,
@@ -70,6 +78,12 @@ function strippedBareControl(content: string, instruction: string): boolean {
     .find((clause) => Object.values(control).some((pattern) => pattern.test(clause)));
   return original !== undefined && currentHumanInstruction(original) !== original;
 }
+/** Only supported immediate syntax can follow an exact control target. */
+function immediateControlSuffix(suffix: string): boolean {
+  return /^(?:[。.!！]?\s*$|(?:now|immediately|现在|立刻|马上)\s*[。.!！]?\s*$|and\s+(?:use|summari[sz]e|report|keep|preserve|read|write|review|finish|collect|check|verify)\b|[,，]?\s*并(?:且)?\s*(?:汇总|整理|处理|报告|读取|写入|核对|保留|使用|复核|完成)|[,，]\s*把(?:已有|现有|已经保存的|已保存的)结果(?:汇总|整理))/i.test(
+    suffix,
+  );
+}
 /** A current alias may restate only the exact identity of its proved scope. */
 function currentWorkOperand(operand: string, expectedWorkCommandId?: string): boolean {
   const alias =
@@ -83,9 +97,7 @@ function currentWorkOperand(operand: string, expectedWorkCommandId?: string): bo
     const identity = new RegExp(`^${escaped}(?=$|[^A-Za-z0-9_.-]|\\.(?:\\s|$))`).exec(suffix);
     if (identity) suffix = suffix.slice(identity[0].length).trim();
   }
-  return /^(?:[。.!！]?\s*$|and\s+(?:use|summari[sz]e|report|keep|preserve|read|write|review|finish|collect|check|verify)\b|[,，]?\s*并(?:且)?\s*(?:汇总|整理|处理|报告|读取|写入|核对|保留|使用|复核|完成))/i.test(
-    suffix,
-  );
+  return immediateControlSuffix(suffix);
 }
 
 function controlInstruction(
@@ -205,6 +217,13 @@ function controlTarget(
     currentWorkOperand(operand, selectedWork?.rootWorkCommandId) ||
     /^(?:继续|resume|continue)\s*[。.!！]?$/i.test(instruction);
   if (immediateTarget) {
+    // Proving the ID prefix is not proof of immediate control. Keep conditional,
+    // deferred and explanatory tails unresolved, just like current-work aliases.
+    const suffix = operand
+      .replace(/^(?:the\s+)?(?:original|same|current)\s+/i, '')
+      .slice(immediateTarget.rootWorkCommandId.length)
+      .trim();
+    if (!immediateControlSuffix(suffix)) return null;
     if (
       /^(?:the\s+)?current\s+/i.test(operand) &&
       selectedWork?.rootWorkCommandId !== immediateTarget.rootWorkCommandId

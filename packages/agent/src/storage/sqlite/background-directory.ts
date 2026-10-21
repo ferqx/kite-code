@@ -5,6 +5,7 @@ import {
   type BackgroundExecutionPage,
   type BackgroundRun,
 } from '../types';
+import { verifyFirstActivation } from './child-first-activation';
 import type { SqliteOperations } from './operations';
 
 function decimal(value: string | undefined, fallback: string) {
@@ -248,6 +249,12 @@ export function readBackgroundExecutions(
           !exactChildBinding)
       )
         throw new AgentError('directory_identity_conflict');
+      if (childStart)
+        verifyFirstActivation(
+          db,
+          db.row('SELECT * FROM execution WHERE id=?', execution.id)!,
+          childStart,
+        );
       const childRow = childSession
         ? db.row(
             'SELECT id FROM run WHERE session_id=? AND origin_command_id=?',
