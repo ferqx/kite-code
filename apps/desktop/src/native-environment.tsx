@@ -153,6 +153,7 @@ export function useNativeEnvironment({
   paused = false,
   submissions,
   onChanged,
+  onOpenChild,
 }: {
   bridge?: NativeBridge;
   generation: number;
@@ -165,6 +166,8 @@ export function useNativeEnvironment({
   paused?: boolean;
   submissions?: readonly NativeCallerMetadata[];
   onChanged: () => Promise<void>;
+  /** A tab host may route navigation before activating this hook's one visible child reader. */
+  onOpenChild?: (sessionId: string, executionId: string, title: string) => void;
 }) {
   const root = selection?.session.parentSessionId === null ? selection : undefined,
     storeId = root?.storeId,
@@ -683,6 +686,8 @@ export function useNativeEnvironment({
   const visibleChild = child?.scope === scope ? child : undefined;
   return {
     child: visibleChild,
+    childScope: scope,
+    childReadAvailable: !!bridge && !!scope && !unavailable && !paused,
     openChild,
     closeChild: () => {
       childNavigation.current = undefined;
@@ -721,7 +726,14 @@ export function useNativeEnvironment({
             sessionIdsByExecutionId: display?.children ?? new Map(),
             loading: !display && (current?.busy ?? true),
             error: current?.error,
-            onOpen: (sessionId, executionId) => void openChild(sessionId, executionId),
+            onOpen: (sessionId, executionId) => {
+              if (!onOpenChild) return void openChild(sessionId, executionId);
+              if (!bridge || !scope || unavailable || paused || !executionId) return;
+              const title = display?.rows.find(
+                (row) => row.executionId === executionId,
+              )?.displayName;
+              onOpenChild(sessionId, executionId, title ?? '子 Agent');
+            },
             onRefresh: () => setRefresh((value) => value + 1),
           }}
         />

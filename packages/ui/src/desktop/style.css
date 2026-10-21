@@ -4488,6 +4488,34 @@ body {
   min-height: 0;
   overflow: auto;
 }
+.kite-client .session-tab-child {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  flex-direction: column;
+}
+.kite-client .session-tab-child .native-child-detail {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  flex-direction: column;
+}
+.kite-client .native-child-detail-heading {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 16px;
+}
+.kite-client .session-tab-child .conversation {
+  flex: 1;
+  min-height: 0;
+}
+.kite-client .session-tab-child .conversation-viewport {
+  padding: 16px;
+}
 .kite-client .session-browser-start {
   flex: 1;
   min-height: 0;

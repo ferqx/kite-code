@@ -1,4 +1,5 @@
 export {
+  ConversationActivityContext,
   useConversationReadActive,
   useConversationResourceRetention,
 } from '../conversation-activity';
@@ -14,6 +15,7 @@ export {
   BackgroundExecutions,
   type BackgroundExecutionsProps,
 } from './BackgroundExecutions';
+export { Conversation } from './Conversation';
 export {
   AlertDialog,
   AlertDialogAction,
@@ -83,6 +85,7 @@ export {
 } from './markdown-parse-cache';
 export { PromptEditor, type PromptEditorHandle, type PromptEditorProps } from './PromptEditor';
 export { RightSidebar, type RightSidebarProps, type RightSidebarTab } from './RightSidebar';
+export { ReadingStateCache } from './reading-state';
 export {
   type ScheduledTaskDraft,
   ScheduledTaskEditor,
@@ -96,6 +99,9 @@ export {
   type SessionBrowserPageProps,
   SessionBrowserToolbar,
   type SessionBrowserToolbarProps,
+  type SessionChildPageProps,
+  type SessionChildTabRequest,
+  type SessionChildTarget,
   SessionTabs,
   type SessionTabsModel,
   useSessionTabs,

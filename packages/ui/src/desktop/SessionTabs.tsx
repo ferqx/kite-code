@@ -7,6 +7,7 @@ import {
   PanelRightCloseIcon,
   RefreshIcon,
   SourceCodeIcon,
+  UserGroupIcon,
 } from '@hugeicons/core-free-icons';
 import { HugeiconsIcon } from '@hugeicons/react';
 import type { ReactNode } from 'react';
@@ -21,16 +22,34 @@ export interface SessionBrowserPageProps {
   readonly onTitleChange: (title: string) => void;
 }
 
+export interface SessionChildTarget {
+  readonly sessionId: string;
+  readonly executionId?: string;
+}
+
+export interface SessionChildTabRequest extends SessionChildTarget {
+  readonly requestId: number;
+  readonly title: string;
+}
+
+export interface SessionChildPageProps extends SessionChildTarget {
+  readonly onTitleChange: (title: string) => void;
+}
+
 export interface SessionTabsProps {
   readonly model: SessionTabsModel;
   readonly visible: boolean;
   readonly present?: boolean;
   readonly changes: ReactNode;
   readonly renderBrowser?: (props: SessionBrowserPageProps) => ReactNode;
+  readonly renderChildSession?: (props: SessionChildPageProps) => ReactNode;
+  readonly onChildSessionChange?: (target: SessionChildTarget | undefined) => void;
   readonly onClose: () => void;
 }
 
-type SessionTab = { id: string; kind: 'browser' | 'changes'; title: string };
+type SessionTab =
+  | { id: string; kind: 'browser' | 'changes'; title: string }
+  | ({ id: string; kind: 'child'; title: string } & SessionChildTarget);
 export interface SessionTabsModel {
   readonly tabs: readonly SessionTab[];
   readonly active: string;
@@ -38,6 +57,7 @@ export interface SessionTabsModel {
   readonly title: (id: string, title: string) => void;
   readonly addBrowser: () => void;
   readonly openChanges: () => void;
+  readonly openChild: (target: SessionChildTarget, title: string) => boolean;
   readonly closeTab: (id: string) => void;
 }
 const maxTabs = 8;
@@ -190,6 +210,24 @@ export function useSessionTabs(
     const tab: SessionTab = { id: 'changes', kind: 'changes', title: '变更' };
     setState((value) => ({ ...value, tabs: [...value.tabs, tab], selected: tab.id }));
   };
+  const openChild = (target: SessionChildTarget, title: string) => {
+    const id = `child-${JSON.stringify([target.sessionId, target.executionId ?? null])}`;
+    if (!tabs.some((tab) => tab.id === id) && tabs.length >= maxTabs) return false;
+    const tab: SessionTab = {
+      ...target,
+      id,
+      kind: 'child',
+      title: title.trim().slice(0, 80) || '子 Agent',
+    };
+    setState((value) => ({
+      ...value,
+      tabs: value.tabs.some((entry) => entry.id === id)
+        ? value.tabs.map((entry) => (entry.id === id ? tab : entry))
+        : [...value.tabs, tab],
+      selected: id,
+    }));
+    return true;
+  };
   const closeTab = (id: string) => {
     const index = tabs.findIndex((tab) => tab.id === id);
     let remaining = tabs.filter((tab) => tab.id !== id);
@@ -206,21 +244,35 @@ export function useSessionTabs(
     title,
     addBrowser,
     openChanges,
+    openChild,
     closeTab,
     select: (id) => setState((value) => ({ ...value, selected: id })),
   };
 }
 
-/** Only the active, visible changes tool mounts its host reader. Browser lifetime belongs to the model. */
+/** Tool and child readers belong only to the active, visible tab. Browser lifetime belongs to the model. */
 export function SessionTabs({
   model,
   visible,
   present = true,
   changes,
   renderBrowser,
+  renderChildSession,
+  onChildSessionChange,
   onClose,
 }: SessionTabsProps) {
   const { tabs, active, title, addBrowser, openChanges, closeTab } = model;
+  const child = visible ? tabs.find((tab) => tab.id === active && tab.kind === 'child') : undefined;
+  const childSessionId = child?.kind === 'child' ? child.sessionId : undefined;
+  const childExecutionId = child?.kind === 'child' ? child.executionId : undefined;
+  const childChange = useRef(onChildSessionChange);
+  childChange.current = onChildSessionChange;
+  useEffect(() => {
+    childChange.current?.(
+      childSessionId ? { sessionId: childSessionId, executionId: childExecutionId } : undefined,
+    );
+    return () => childChange.current?.(undefined);
+  }, [childSessionId, childExecutionId]);
   const tools = (
     <section className="session-browser-tools" aria-label="工具">
       <h2>工具</h2>
@@ -249,7 +301,15 @@ export function SessionTabs({
             {tabs.map((tab) => (
               <div className="session-tab" data-active={tab.id === active} key={tab.id}>
                 <TabsTrigger value={tab.id} title={tab.title}>
-                  <HugeiconsIcon icon={tab.kind === 'browser' ? Globe02Icon : SourceCodeIcon} />
+                  <HugeiconsIcon
+                    icon={
+                      tab.kind === 'browser'
+                        ? Globe02Icon
+                        : tab.kind === 'child'
+                          ? UserGroupIcon
+                          : SourceCodeIcon
+                    }
+                  />
                   <span>{tab.title}</span>
                 </TabsTrigger>
                 <Button
@@ -289,6 +349,16 @@ export function SessionTabs({
             {tab.kind === 'changes' ? (
               visible && active === tab.id ? (
                 <div className="session-tab-changes">{changes}</div>
+              ) : null
+            ) : tab.kind === 'child' ? (
+              visible && active === tab.id ? (
+                <div className="session-tab-child">
+                  {renderChildSession?.({
+                    sessionId: tab.sessionId,
+                    executionId: tab.executionId,
+                    onTitleChange: (value) => title(tab.id, value),
+                  })}
+                </div>
               ) : null
             ) : renderBrowser ? (
               renderBrowser({

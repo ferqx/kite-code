@@ -246,14 +246,26 @@ try {
   const environment = page.getByRole('region', { name: '环境信息', exact: true });
   if (!(await environment.isVisible()))
     await page.getByRole('button', { name: '显示环境信息', exact: true }).click();
-  const content = () => page.locator('.conversation').innerText();
+  const parentContent = () => page.locator('.history-panel .conversation').innerText();
+  const content = async () =>
+    (await page.locator('.session-tab-child .conversation').count())
+      ? page.locator('.session-tab-child .conversation').innerText()
+      : parentContent();
   const appended = new Map<string, string[]>();
   const open = async (index: number) => {
     await environment
       .locator(`[data-execution-id="${tasks[index]!.id}"]`)
       .getByRole('button', { name: /^查看子 Agent 详情/ })
       .click();
-    await page.getByRole('button', { name: '返回主会话', exact: true }).waitFor();
+    await page
+      .locator('.session-tab-child')
+      .getByRole('button', { name: '刷新子日志', exact: true })
+      .waitFor();
+    assert.equal(
+      await page.locator('.conversation').count(),
+      2,
+      'parent and active child are the only connected conversations',
+    );
     const expected = tasks[index]!.prompt;
     const body = await until(
       content,
@@ -266,9 +278,18 @@ try {
       assert.ok(body.includes(marker), `retained actual appended tail ${marker}`);
   };
   const close = async (viaSidebar = false) => {
-    await page
-      .getByRole('button', { name: viaSidebar ? 'Stream Parent' : '返回主会话', exact: true })
-      .click();
+    if (viaSidebar) await page.getByRole('button', { name: 'Stream Parent', exact: true }).click();
+    await page.getByRole('button', { name: '收起标签栏', exact: true }).click();
+    await until(
+      () => page.locator('.session-tab-child').count(),
+      (value) => value === 0,
+      'child tab reader unmounted',
+    );
+    assert.equal(
+      await page.locator('.conversation').count(),
+      1,
+      'collapsing the child retains only parent conversation',
+    );
     await page.locator('.session-header').getByTitle('Stream Parent', { exact: true }).waitFor();
     await until(
       async () => ({ facts: await state(), body: await content() }),
@@ -282,7 +303,7 @@ try {
       'return restores parent body qualified by its actual original wait and Run state',
     );
     await until(
-      () => page.locator('.conversation-loading').count(),
+      () => page.locator('.history-panel .conversation-loading').count(),
       (value) => value === 0,
       'parent history loading ends',
     );
@@ -389,7 +410,7 @@ try {
     );
     const firstOpenedAt = Date.now();
     await open(0);
-    await page.locator('.session-header').getByTitle(firstTitle, { exact: true }).waitFor();
+    await page.getByRole('tab', { name: firstTitle, exact: true }).waitFor();
     const firstOpenMs = Date.now() - firstOpenedAt;
     const active = await state();
     assert.ok(active.selection!.runs.some((run) => run.id === parentWait.runId && run.isActive));
@@ -993,7 +1014,11 @@ try {
     console.error(
       'failure_hooks',
       await page.evaluate(() => {
-        const node = document.querySelector('.conversation') as unknown as Record<string, unknown>;
+        const node = (document.querySelector('.session-tab-child .conversation') ??
+          document.querySelector('.history-panel .conversation')) as unknown as Record<
+          string,
+          unknown
+        >;
         const key = Object.keys(node).find((name) => name.startsWith('__reactFiber'))!;
         let fiber = node[key] as { return?: unknown; memoizedState?: unknown } | undefined;
         const states: unknown[] = [];

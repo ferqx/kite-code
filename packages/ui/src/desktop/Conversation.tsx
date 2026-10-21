@@ -403,6 +403,7 @@ export function Conversation({
     const document = element.ownerDocument;
     const selectMessages = (event: KeyboardEvent) => {
       if (
+        event.defaultPrevented ||
         !(event.ctrlKey || event.metaKey) ||
         event.altKey ||
         event.shiftKey ||
@@ -412,11 +413,27 @@ export function Conversation({
       const target = event.target instanceof document.defaultView!.Element ? event.target : null;
       if (target?.closest('input, textarea, [contenteditable]:not([contenteditable="false"])'))
         return;
-      if (element.closest('[hidden]') || document.querySelector('dialog[open]')) return;
-      event.preventDefault();
-      const column = element.querySelector('.reading-column');
+      const hidden = '[hidden], [inert], [aria-hidden="true"]';
+      if (element.closest(hidden) || document.querySelector('dialog[open]')) return;
+      // Parent history and a child tab can both be visible. Resolve one owner before
+      // changing the selection, including when the key event originates on document.
+      const visibleConversation = (node: Node | null | undefined) => {
+        const parent = node?.nodeType === 1 ? (node as Element) : node?.parentElement;
+        const conversation = parent?.closest('.conversation-viewport');
+        return conversation && !conversation.closest(hidden) ? conversation : undefined;
+      };
       const selection = document.getSelection();
+      const owner =
+        visibleConversation(target) ??
+        visibleConversation(document.activeElement) ??
+        visibleConversation(selection?.anchorNode) ??
+        [...document.querySelectorAll('.conversation-viewport')].find(
+          (conversation) => !conversation.closest(hidden),
+        );
+      if (owner !== element) return;
+      const column = element.querySelector('.reading-column');
       if (!column || !selection) return;
+      event.preventDefault();
       const walker = document.createTreeWalker(column, 4 /* SHOW_TEXT */);
       let first: Text | undefined;
       let last: Text | undefined;

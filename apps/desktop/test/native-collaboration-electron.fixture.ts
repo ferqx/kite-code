@@ -153,8 +153,12 @@ try {
     .locator(`li[data-execution-id="${a.id}"]`)
     .getByRole('button', { name: /^查看子 Agent 详情：/ })
     .click();
-  await page.getByText('等待你的批准', { exact: false }).first().waitFor();
-  await page.getByRole('button', { name: '返回主会话', exact: true }).click();
+  await page
+    .locator('.session-tab-child')
+    .getByText('等待你的批准', { exact: false })
+    .first()
+    .waitFor();
+  await page.getByRole('button', { name: '收起标签栏', exact: true }).click();
   await page.getByRole('button', { name: '隐藏环境信息', exact: true }).click();
   await page
     .getByRole('article', { name: `approval ${oldA.id}`, exact: true })

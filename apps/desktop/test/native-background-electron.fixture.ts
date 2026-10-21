@@ -272,23 +272,32 @@ try {
     'child navigation retains original control target',
   );
   assert.equal(
-    await page.getByRole('textbox', { name: '当前会话私有草稿', exact: true }).count(),
+    await page
+      .locator('.session-tab-child')
+      .getByRole('textbox', { name: '当前会话私有草稿', exact: true })
+      .count(),
     0,
   );
+  assert.equal(
+    await page.getByRole('textbox', { name: '当前会话私有草稿', exact: true }).count(),
+    1,
+    'parent composer remains available beside readonly child',
+  );
+  const childDetail = page.locator('.session-tab-child');
   // The complete child snapshot is already displayed; close and reopen its verified body.
-  await page.getByText('Complete Model output', { exact: true }).waitFor();
-  await page.getByRole('button', { name: 'Close full Model output', exact: true }).click();
-  await page
+  await childDetail.getByText('Complete Model output', { exact: true }).waitFor();
+  await childDetail.getByRole('button', { name: 'Close full Model output', exact: true }).click();
+  await childDetail
     .getByRole('button', { name: 'Read complete recorded Model output', exact: true })
     .click();
-  await page.getByText('Complete Model output', { exact: true }).waitFor();
+  await childDetail.getByText('Complete Model output', { exact: true }).waitFor();
   assert.ok(
-    (await page.locator('.model-output-message').allTextContents()).some((text) =>
+    (await childDetail.locator('.model-output-message').allTextContents()).some((text) =>
       text.includes(unicode.trimEnd()),
     ),
     'retained child conversation renders the complete original Unicode body',
   );
-  await page.getByRole('button', { name: '返回主会话', exact: true }).click();
+  await page.getByRole('button', { name: '收起标签栏', exact: true }).click();
   await page.getByText('ORIGINAL_PARENT_DONE', { exact: true }).first().waitFor();
   assert.equal(
     (await count()).count,

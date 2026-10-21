@@ -7,6 +7,98 @@ import { ConversationCache } from '../../src/desktop/ConversationCache';
 import { MessageCopyButton } from '../../src/desktop/MessageCopyButton';
 import type { Message } from '../../src/desktop/types';
 
+test('select all belongs to one visible conversation and preserves editor shortcuts', async () => {
+  const dom = new JSDOM('<div id="root"></div><input /><div contenteditable>Editor text</div>', {
+    pretendToBeVisual: true,
+  });
+  const keys = [
+    'window',
+    'document',
+    'IS_REACT_ACT_ENVIRONMENT',
+    'requestAnimationFrame',
+    'cancelAnimationFrame',
+  ] as const;
+  const previous = keys.map(
+    (key) => [key, Object.getOwnPropertyDescriptor(globalThis, key)] as const,
+  );
+  Object.assign(globalThis, {
+    window: dom.window,
+    document: dom.window.document,
+    IS_REACT_ACT_ENVIRONMENT: true,
+    requestAnimationFrame: dom.window.requestAnimationFrame.bind(dom.window),
+    cancelAnimationFrame: dom.window.cancelAnimationFrame.bind(dom.window),
+  });
+  const root = createRoot(dom.window.document.getElementById('root')!);
+  const view = (name: string) => (
+    <Conversation
+      messages={[{ id: name, role: 'assistant', text: `${name} text`, settled: true }]}
+      loading={false}
+      selected
+      connected
+      saveReading={() => {}}
+    />
+  );
+  const shortcut = (target: EventTarget, metaKey = false) => {
+    const event = new dom.window.KeyboardEvent('keydown', {
+      key: 'a',
+      ctrlKey: !metaKey,
+      metaKey,
+      bubbles: true,
+      cancelable: true,
+    });
+    target.dispatchEvent(event);
+    return event.defaultPrevented;
+  };
+  const selection = dom.window.document.getSelection()!;
+  try {
+    await act(async () =>
+      root.render(
+        <>
+          <section hidden>{view('hidden')}</section>
+          {view('parent')}
+          {view('child')}
+        </>,
+      ),
+    );
+    const [hidden, parent, child] = [
+      ...dom.window.document.querySelectorAll<HTMLElement>('.conversation-viewport'),
+    ];
+    expect(shortcut(dom.window.document)).toBe(true);
+    expect(selection.toString()).toBe('parent text');
+    expect(shortcut(child!.querySelector('.message p')!, true)).toBe(true);
+    expect(selection.toString()).toBe('child text');
+    expect(shortcut(dom.window.document)).toBe(true);
+    expect(selection.toString()).toBe('child text');
+    parent!.tabIndex = 0;
+    parent!.focus();
+    expect(shortcut(dom.window.document)).toBe(true);
+    expect(selection.toString()).toBe('parent text');
+    // An event inside the child wins over focus retained in the parent.
+    expect(shortcut(child!.querySelector('.message p')!)).toBe(true);
+    expect(selection.toString()).toBe('child text');
+    for (const editor of dom.window.document.querySelectorAll('input, [contenteditable]')) {
+      expect(shortcut(editor)).toBe(false);
+      expect(selection.toString()).toBe('child text');
+    }
+    // A hidden retained conversation cannot claim ownership through an old selection.
+    selection.selectAllChildren(hidden!.querySelector('.message p')!);
+    parent!.blur();
+    expect(shortcut(dom.window.document)).toBe(true);
+    expect(selection.toString()).toBe('parent text');
+    await act(async () => root.render(view('only')));
+    selection.removeAllRanges();
+    expect(shortcut(dom.window.document, true)).toBe(true);
+    expect(selection.toString()).toBe('only text');
+  } finally {
+    await act(async () => root.unmount());
+    dom.window.close();
+    for (const [key, descriptor] of previous) {
+      if (descriptor) Object.defineProperty(globalThis, key, descriptor);
+      else Reflect.deleteProperty(globalThis, key);
+    }
+  }
+});
+
 test('actual Conversation copies only original settled user and host-confirmed final turn text, with explicit failure retry', async () => {
   const dom = new JSDOM('<div id="root"></div>', {
     url: 'http://localhost',

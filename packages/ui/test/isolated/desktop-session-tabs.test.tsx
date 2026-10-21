@@ -1,6 +1,7 @@
 import { afterAll, afterEach, expect, test } from 'bun:test';
 import { JSDOM } from 'jsdom';
 import { act, useEffect, useState } from 'react';
+import type { SessionChildTabRequest, SessionChildTarget } from '../../src/desktop/SessionTabs';
 
 const dom = new JSDOM('<!doctype html><html><body></body></html>', {
   url: 'http://localhost',
@@ -61,6 +62,7 @@ for (const [key, value] of Object.entries(globals)) {
   Object.defineProperty(globalThis, key, { configurable: true, writable: true, value });
 }
 const { SessionPage } = await import('../../src/desktop/SessionPage');
+
 const { createRoot } = await import('react-dom/client');
 let root: ReturnType<typeof createRoot> | undefined;
 afterEach(async () => {
@@ -80,6 +82,18 @@ afterAll(() => {
 let mounted = 0,
   closed = 0;
 const released: string[] = [];
+const childChanges: (SessionChildTarget | undefined)[] = [];
+let childMounted = 0,
+  childClosed = 0;
+function Child({ sessionId, executionId }: SessionChildTarget) {
+  useEffect(() => {
+    childMounted++;
+    return () => {
+      childClosed++;
+    };
+  }, []);
+  return <p>{`Child ${sessionId} / ${executionId}`}</p>;
+}
 function Changes() {
   useEffect(() => {
     mounted++;
@@ -89,7 +103,12 @@ function Changes() {
   }, []);
   return <section aria-label="变更内容">Saved changes</section>;
 }
-async function render(scope = 's', hostDetails = false, covered = false) {
+async function render(
+  scope = 's',
+  hostDetails = false,
+  covered = false,
+  childTabRequest?: SessionChildTabRequest,
+) {
   root ??= createRoot(document.body);
   await act(() =>
     root!.render(
@@ -110,6 +129,9 @@ async function render(scope = 's', hostDetails = false, covered = false) {
             : undefined
         }
         closeBrowser={(id) => released.push(id)}
+        childTabRequest={childTabRequest}
+        renderChildSession={(target) => <Child {...target} />}
+        onChildSessionChange={(target) => childChanges.push(target)}
         fileChangesContent={<Changes />}
         renderBrowser={({ id, visible, tools }) => (
           <section data-browser-id={id} data-visible={visible}>
@@ -134,6 +156,16 @@ function browserIds() {
   return [...document.querySelectorAll<HTMLElement>('[data-browser-id]')].map(
     (node) => node.dataset.browserId!,
   );
+}
+async function selectTab(title: string) {
+  const tab = [...document.querySelectorAll<HTMLButtonElement>('[role="tab"]')].find(
+    (tab) => tab.title === title,
+  );
+  expect(tab).toBeDefined();
+  await act(() => {
+    tab!.dispatchEvent(new dom.window.MouseEvent('mousedown', { bubbles: true, button: 0 }));
+    tab!.click();
+  });
 }
 test('tabs replace the direct file changes action; only the visible selected tool owns a reader', async () => {
   mounted = closed = 0;
@@ -265,4 +297,75 @@ test('opening tabs replaces the host details panel without losing the open inten
     document.querySelector('[aria-controls="session-tabs"]')!.getAttribute('aria-expanded'),
   ).toBe('true');
   expect(document.querySelector('#session-tabs')!.getAttribute('aria-hidden')).toBe('false');
+});
+
+test('child requests reuse exact carrier tabs and only the visible selected child owns a reader', async () => {
+  childMounted = childClosed = 0;
+  childChanges.length = 0;
+  released.length = 0;
+  const first = { requestId: 1, sessionId: 'child', executionId: 'original', title: 'First task' };
+  await render('s', false, false, first);
+  expect(document.querySelector('#session-tabs')!.getAttribute('aria-hidden')).toBe('false');
+  expect(document.querySelectorAll('[role="tab"]')).toHaveLength(2);
+  expect(document.querySelector('.session-tab-child')!.textContent).toBe('Child child / original');
+  expect(childMounted - childClosed).toBe(1);
+  expect(childChanges.at(-1)).toEqual({ sessionId: 'child', executionId: 'original' });
+  await render('s', false, false, { ...first, requestId: 2, title: 'Updated task' });
+  expect(document.querySelectorAll('[role="tab"]')).toHaveLength(2);
+  expect(childMounted).toBe(1);
+
+  await render('s', false, false, {
+    ...first,
+    requestId: 3,
+    executionId: 'later',
+    title: 'Later task',
+  });
+  expect(document.querySelectorAll('[role="tab"]')).toHaveLength(3);
+  expect(childMounted - childClosed).toBe(1);
+  expect(childChanges.at(-1)).toEqual({ sessionId: 'child', executionId: 'later' });
+  await selectTab('新标签页');
+  expect(childMounted - childClosed).toBe(0);
+  expect(childChanges.at(-1)).toBeUndefined();
+  await selectTab('Updated task');
+  expect(childChanges.at(-1)).toEqual({ sessionId: 'child', executionId: 'original' });
+  expect(document.querySelector('.session-tab-child')!.textContent).toBe('Child child / original');
+  await render('s', false, true);
+  expect(childMounted - childClosed).toBe(0);
+  expect(childChanges.at(-1)).toBeUndefined();
+  await render();
+  expect(childMounted - childClosed).toBe(1);
+  await click('收起标签栏');
+  expect(childMounted - childClosed).toBe(0);
+  await click('标签页');
+  expect(childMounted - childClosed).toBe(1);
+  await click('关闭标签页：Updated task');
+  expect(document.querySelectorAll('[role="tab"]')).toHaveLength(2);
+  expect(childChanges.at(-1)).toEqual({ sessionId: 'child', executionId: 'later' });
+  await render('other');
+  expect(childMounted - childClosed).toBe(0);
+  expect(childChanges.at(-1)).toBeUndefined();
+  expect(released).toHaveLength(1);
+  expect(document.querySelectorAll('[role="tab"]')).toHaveLength(1);
+});
+
+test('full tabs reject a new child with feedback while an existing child can still be selected', async () => {
+  childMounted = childClosed = 0;
+  const first = { requestId: 10, sessionId: 'child', executionId: 'original', title: 'First task' };
+  await render('s', false, false, first);
+  for (let i = 0; i < 6; i++) await click('新建标签页');
+  expect(document.querySelectorAll('[role="tab"]')).toHaveLength(8);
+  expect(childMounted - childClosed).toBe(0);
+  await render('s', false, false, {
+    requestId: 11,
+    sessionId: 'other-child',
+    executionId: 'other-task',
+    title: 'Other task',
+  });
+  expect(document.querySelectorAll('[role="tab"]')).toHaveLength(8);
+  expect(document.body.textContent).toContain('标签页已满，请关闭一个标签页后重试。');
+  expect(childMounted - childClosed).toBe(0);
+  await render('s', false, false, { ...first, requestId: 12 });
+  expect(document.querySelectorAll('[role="tab"]')).toHaveLength(8);
+  expect(childMounted - childClosed).toBe(1);
+  expect(document.body.textContent).not.toContain('标签页已满');
 });

@@ -86,6 +86,7 @@ function fixture(activeParent = false, pendingToolMetadata = false) {
   const copied: string[] = [];
   let childText = 'Child prefix',
     revision = 1,
+    historyEpoch = 0,
     holdNext = false,
     holdParent = false,
     failParent = false,
@@ -107,6 +108,7 @@ function fixture(activeParent = false, pendingToolMetadata = false) {
   const listeners = new Set<(event: NativeEvent) => void>();
   const state = (): NativeState => ({
     generation: 1,
+    historyEpoch,
     backgroundUnavailable,
     environmentRevision: revision,
     selectedEnvironmentRevision,
@@ -370,6 +372,8 @@ function fixture(activeParent = false, pendingToolMetadata = false) {
         (button) => button.textContent === label || button.getAttribute('aria-label') === label,
       );
       expect(button).toBeDefined();
+      if (button!.getAttribute('role') === 'tab')
+        button!.dispatchEvent(new dom.window.MouseEvent('mousedown', { bubbles: true, button: 0 }));
       button!.click();
     });
   return {
@@ -489,6 +493,13 @@ function fixture(activeParent = false, pendingToolMetadata = false) {
         for (const listener of listeners) listener({ kind: 'changed', generation: 1 });
       });
     },
+    resetHistory: async () => {
+      historyEpoch++;
+      revision++;
+      await act(async () => {
+        for (const listener of listeners) listener({ kind: 'changed', generation: 1 });
+      });
+    },
     updateParent: async (text: string) => {
       parentMessage.content = text;
       revision++;
@@ -525,12 +536,15 @@ test('first exact child visit uses its verified carrier before a pending directo
     expect(f.requests.filter((request) => request.method === 'background.child.open')).toHaveLength(
       1,
     );
-    expect(f.host.querySelector('.session-header')!.textContent).toContain('Live child');
+    expect(f.host.querySelector('.session-header')!.textContent).toContain('Original');
+    expect(f.host.querySelector('[role="tab"][aria-selected="true"]')!.textContent).toContain(
+      'Live child',
+    );
     await f.release();
     await f.waitForText('First child record');
     expect(f.host.textContent).toContain('First child record');
     expect(f.host.querySelector('.conversation-loading')).toBeNull();
-    await f.click('返回主会话');
+    await f.click('关闭标签页：Live child');
     expect(f.host.textContent).toContain('Parent transcript');
     await f.releaseDirectory();
     expect(f.host.textContent).not.toContain('First child record');
@@ -566,8 +580,8 @@ test('ordinary sessions hide background aggregates for live, unknown and unavail
   }
 });
 
-test('returning from a running child renders saved parent messages before pending Tool metadata completes', async () => {
-  for (const target of ['返回主会话', 'Original']) {
+test('closing or collapsing a running child preserves saved parent messages before pending Tool metadata completes', async () => {
+  for (const target of ['关闭标签页：Live child', '收起标签栏']) {
     const f = fixture(true, true);
     f.runningParent();
     try {
@@ -578,6 +592,7 @@ test('returning from a running child renders saved parent messages before pendin
       await f.waitForText('Child prefix');
       expect(f.host.textContent).toContain('Child prefix');
       f.holdParent();
+      await f.updateParent('Parent transcript');
       await f.click(target);
       await f.waitForText('Original parent delegation request');
       // Neither the metadata response nor the running child has been released.
@@ -603,7 +618,7 @@ test('returning from a running child renders saved parent messages before pendin
       await f.open();
       await f.waitForText('Child prefix');
       expect(f.host.textContent).toContain('Child prefix');
-      await f.click('返回主会话');
+      await f.click('关闭标签页：Live child');
       await f.releaseMetadata();
       expect(f.host.textContent).toContain('Original parent delegation request');
       expect(f.host.querySelector('.conversation-loading')).toBeNull();
@@ -675,7 +690,7 @@ test('a renderer compiled without diagnostics cannot expose aggregates or child 
   }
 });
 
-test('live child navigation pauses parent history, updates the active child and restores the original draft', async () => {
+test('live child tabs retain the parent title, transcript, draft and active history reader', async () => {
   const f = fixture();
   try {
     await f.render();
@@ -685,23 +700,50 @@ test('live child navigation pauses parent history, updates the active child and 
     expect(promptValue(f.host.querySelector('[role="textbox"][contenteditable]'))).toBe(
       'Original private draft',
     );
+    const parentHeader = f.host.querySelector('.session-header')!,
+      parentViewport = f.host.querySelector('.conversation-viewport')!,
+      parentInput = f.host.querySelector('[role="textbox"][contenteditable]')!;
+    await f.edit('Parent draft while child streams 雪🙂');
+    const beforeOpening = f.requests.length;
     await f.open();
     await f.waitForText('Child prefix');
     expect(f.host.textContent).toContain('Child prefix');
     expect(f.host.textContent).not.toContain('已完整读取子日志至固定序号');
     expect(f.host.textContent).not.toContain('original-child-run');
-    expect(f.host.textContent).not.toContain('Parent transcript');
+    expect(f.host.textContent).toContain('Parent transcript');
+    expect(f.host.querySelector('.session-header')).toBe(parentHeader);
+    expect(parentHeader.textContent).toContain('Original');
+    expect(f.host.querySelector('.conversation-viewport')).toBe(parentViewport);
+    expect(f.host.querySelector('[role="textbox"][contenteditable]')).toBe(parentInput);
+    expect(promptValue(parentInput)).toBe('Parent draft while child streams 雪🙂');
+    expect(
+      f.requests.slice(beforeOpening).some((request) => request.method === 'messages.close'),
+    ).toBe(false);
+    expect(
+      [...f.host.querySelectorAll('button')].some((button) => button.textContent === '返回主会话'),
+    ).toBe(false);
     const parentReads = f.requests.filter((request) => request.method === 'messages').length;
     await f.update('Child prefix with live tail 雪🙂');
     await f.waitForText('Child prefix with live tail 雪🙂');
     expect(f.host.textContent).toContain('Child prefix with live tail 雪🙂');
-    expect(f.requests.filter((request) => request.method === 'messages')).toHaveLength(parentReads);
+    expect(f.requests.filter((request) => request.method === 'messages').length).toBeGreaterThan(
+      parentReads,
+    );
     expect(f.requests.filter((request) => request.method === 'state').length).toBeGreaterThan(0);
-    await f.click('返回主会话');
-    expect(f.host.textContent).toContain('Parent transcript');
+    f.holdParent();
+    await f.updateParent('Parent updated while child stays open');
+    expect(f.host.querySelector('.session-tab-child')!.textContent).toContain(
+      'Child prefix with live tail 雪🙂',
+    );
+    expect(f.host.querySelector('.conversation-viewport')).toBe(parentViewport);
+    expect(parentViewport.textContent).toContain('Parent transcript');
+    await f.releaseParent();
+    expect(parentViewport.textContent).toContain('Parent updated while child stays open');
+    await f.click('关闭标签页：Live child');
+    expect(f.host.textContent).toContain('Parent updated while child stays open');
     expect(f.host.textContent).not.toContain('Child prefix with live tail');
     expect(promptValue(f.host.querySelector('[role="textbox"][contenteditable]'))).toBe(
-      'Original private draft',
+      'Parent draft while child streams 雪🙂',
     );
     expect(f.requests.filter((request) => request.method === 'messages').length).toBeGreaterThan(
       parentReads,
@@ -711,7 +753,103 @@ test('live child navigation pauses parent history, updates the active child and 
   }
 });
 
-test('opening the selected parent from child details returns without selecting again', async () => {
+test('the same child reuses its sidebar tab and switching to the browser retires a pending child read', async () => {
+  const f = fixture();
+  try {
+    await f.render();
+    await f.click('Original');
+    await f.open();
+    await f.waitForText('Child prefix');
+    await f.open();
+    expect(
+      [...f.host.querySelectorAll('[role="tab"]')].filter(
+        (tab) => tab.textContent === 'Live child',
+      ),
+    ).toHaveLength(1);
+    f.hold();
+    await f.update('Late tail after switching to browser');
+    for (let attempt = 0; attempt < 50 && !f.heldId(); attempt++)
+      await act(async () => {
+        await new Promise<void>((resolve) => setTimeout(resolve, 0));
+      });
+    const readId = f.heldId();
+    expect(readId).toBeDefined();
+    await f.click('新标签页');
+    expect(f.host.querySelector('.session-tab-child') === null).toBe(true);
+    expect(
+      f.requests.some(
+        (request) => request.method === 'background.child.close' && request.readId === readId,
+      ),
+    ).toBe(true);
+    await f.release();
+    expect(f.host.textContent).not.toContain('Late tail after switching to browser');
+    expect(f.host.textContent).toContain('Parent transcript');
+    const opens = f.requests.filter((request) => request.method === 'background.child.open').length;
+    await f.click('Live child');
+    await f.waitForText('Late tail after switching to browser');
+    expect(f.host.querySelector('.session-tab-child')!.textContent).toContain(
+      'Late tail after switching to browser',
+    );
+    expect(
+      f.requests.filter((request) => request.method === 'background.child.open').length,
+    ).toBeGreaterThan(opens);
+    await f.click('收起标签栏');
+    expect(f.host.querySelector('.session-tab-child') === null).toBe(true);
+    await f.click('标签页');
+    await f.waitForText('Late tail after switching to browser');
+    expect(f.host.querySelector('.session-tab-child')!.textContent).toContain(
+      'Late tail after switching to browser',
+    );
+    await f.click('关闭标签页：Live child');
+    expect(
+      [...f.host.querySelectorAll('[role="tab"]')].some((tab) => tab.textContent === 'Live child'),
+    ).toBe(false);
+  } finally {
+    await f.close();
+  }
+});
+
+test('an active child tab reacquires its exact carrier automatically after a history epoch reset', async () => {
+  const f = fixture();
+  try {
+    await f.render();
+    await f.click('Original');
+    await f.open();
+    await f.waitForText('Child prefix');
+    const selectedTab = f.host.querySelector('[role="tab"][aria-selected="true"]');
+    const opensBefore = f.requests.filter((request) => request.method === 'background.child.open');
+    expect(opensBefore).toHaveLength(1);
+    const first = opensBefore[0]!;
+    await f.resetHistory();
+    for (
+      let attempt = 0;
+      attempt < 50 &&
+      f.requests.filter((request) => request.method === 'background.child.open').length ===
+        opensBefore.length;
+      attempt++
+    )
+      await act(async () => {
+        await new Promise<void>((resolve) => setTimeout(resolve, 0));
+      });
+    await f.waitForText('Child prefix');
+    const opensAfter = f.requests.filter((request) => request.method === 'background.child.open');
+    expect(opensAfter.length).toBeGreaterThan(opensBefore.length);
+    const resumed = opensAfter.at(-1)!;
+    expect(resumed.executionId).toBe(first.executionId);
+    expect(resumed.cursor).toBeUndefined();
+    expect(f.host.querySelector('[role="tab"][aria-selected="true"]') === selectedTab).toBe(true);
+    expect(f.host.querySelector('.session-tab-child')!.textContent).toContain('Child prefix');
+    await f.update('Child tail after epoch reset');
+    await f.waitForText('Child tail after epoch reset');
+    expect(f.host.querySelector('.session-tab-child')!.textContent).toContain(
+      'Child tail after epoch reset',
+    );
+  } finally {
+    await f.close();
+  }
+});
+
+test('opening the selected parent preserves its child tab without selecting again', async () => {
   const f = fixture();
   try {
     await f.render();
@@ -723,7 +861,7 @@ test('opening the selected parent from child details returns without selecting a
     await f.click('Original');
     await f.waitForText('Parent transcript');
     expect(f.host.textContent).toContain('Parent transcript');
-    expect(f.host.textContent).not.toContain('Child prefix');
+    expect(f.host.querySelector('.session-tab-child')!.textContent).toContain('Child prefix');
     expect(promptValue(f.host.querySelector('[role="textbox"][contenteditable]'))).toBe(
       'Original private draft',
     );
@@ -836,7 +974,7 @@ test('ordinary history and View refreshes retain the processed status and timer;
   }
 });
 
-test('returning during a held child read closes its own reader and ignores late EOF; remounts release the single observer', async () => {
+test('closing a held child tab closes its own reader and ignores late EOF; remounts release the single observer', async () => {
   const f = fixture();
   try {
     for (let cycle = 0; cycle < 3; cycle++) {
@@ -847,7 +985,7 @@ test('returning during a held child read closes its own reader and ignores late 
       await f.open();
       const readId = f.heldId();
       expect(readId).toBeDefined();
-      await f.click('返回主会话');
+      await f.click('关闭标签页：Live child');
       expect(
         f.requests.some(
           (request) => request.method === 'background.child.close' && request.readId === readId,
@@ -867,7 +1005,7 @@ test('returning during a held child read closes its own reader and ignores late 
   }
 });
 
-test('returning keeps the cached parent readable but gates send, stop and permission until fresh history EOF', async () => {
+test('parent history refresh stays active during a child tab and gates writes until fresh EOF', async () => {
   const f = fixture(true);
   const action = (label: string) =>
     f.host.querySelector<HTMLButtonElement>(`button[aria-label="${label}"]`)!;
@@ -881,7 +1019,8 @@ test('returning keeps the cached parent readable but gates send, stop and permis
     await f.open();
     await f.waitForText('Child prefix');
     f.holdParent();
-    await f.click('返回主会话');
+    await f.updateParent('Parent transcript refreshed while child is open');
+    expect(f.host.querySelector('.session-tab-child')!.textContent).toContain('Child prefix');
     expect(f.host.textContent).toContain('Parent transcript');
     expect(promptValue(f.host.querySelector('[role="textbox"][contenteditable]'))).toBe(
       'Original private draft',
@@ -1198,7 +1337,7 @@ test('Main readonly qualification keeps child EOF alive during ordinary metadata
     await f.release();
     await f.waitForText('Read qualified tail');
     expect(f.host.textContent).toContain('Read qualified tail');
-    await f.click('返回主会话');
+    await f.click('关闭标签页：Live child');
     expect(
       f.host.querySelector<HTMLButtonElement>('button[aria-label="发送明确的新轮次"]')!.disabled,
     ).toBe(true);
@@ -1432,7 +1571,7 @@ test('a completed child uses the shared collapsed process, concise exploration a
     seq: String(index + 1),
     status: 'complete',
   })) as Message[];
-  f.childBody({
+  const completedBody: Parameters<typeof f.childBody>[0] = {
     upperSeq: '5',
     messages: rows,
     modelOutputs: [{ messageId: 'child-final', snapshot }],
@@ -1460,7 +1599,8 @@ test('a completed child uses the shared collapsed process, concise exploration a
       })),
       executions: [],
     },
-  });
+  };
+  f.childBody(completedBody);
   try {
     await f.render();
     await f.click('Original');
@@ -1472,34 +1612,35 @@ test('a completed child uses the shared collapsed process, concise exploration a
     const beforeChild = f.requests.length;
     await f.open();
     await f.waitForText('Child final answer');
-    const final = f.host.querySelector('.agent-turn-final');
+    const child = f.host.querySelector('.session-tab-child')!;
+    const final = child.querySelector('.agent-turn-final');
     expect(final).not.toBeNull();
     expect(final!.querySelector('h1')!.textContent).toBe('Child final answer');
     expect(final!.querySelector('strong')!.textContent).toBe('Verified');
     expect(final!.textContent).not.toContain('Child process explanation');
     expect(f.host.textContent).not.toContain('CHILD_REPLY_PREVIEW');
-    expect(f.host.textContent).not.toContain('Parent transcript');
-    expect(f.host.querySelector('[role="textbox"][contenteditable]')).toBeNull();
-    const process = f.host.querySelector<HTMLButtonElement>('.agent-turn-summary')!;
+    expect(f.host.textContent).toContain('Parent transcript');
+    expect(f.host.querySelector('[role="textbox"][contenteditable]')).not.toBeNull();
+    const process = child.querySelector<HTMLButtonElement>('.agent-turn-summary')!;
     expect(process.getAttribute('aria-expanded')).toBe('false');
     expect(f.host.querySelector('[aria-label="复制本轮Agent回复"]')).not.toBeNull();
     await f.click('复制本轮Agent回复');
     expect(f.copied).toEqual([reply]);
     await act(async () => process.click());
     expect(f.host.textContent).toContain('Child process explanation');
-    const exploration = f.host.querySelector<HTMLButtonElement>('button.tool-activity-summary')!;
+    const exploration = child.querySelector<HTMLButtonElement>('button.tool-activity-summary')!;
     expect(exploration).not.toBeNull();
     expect(exploration.textContent).toContain('2');
     await act(async () => exploration.click());
-    expect(f.host.querySelectorAll('.tool-activity-steps .tool-activity-step')).toHaveLength(2);
+    expect(child.querySelectorAll('.tool-activity-steps .tool-activity-step')).toHaveLength(2);
     expect(f.host.textContent).toContain('child-a.txt');
     expect(f.host.textContent).toContain('child-b.txt');
     expect(f.host.textContent).toContain('读取');
     expect(f.host.textContent).not.toContain('状态待核对');
     expect(f.host.textContent).not.toContain('RAW_CHILD_RECEIPT_A');
     expect(f.host.textContent).not.toContain('RAW_CHILD_RECEIPT_B');
-    expect(f.host.querySelectorAll('button.file-link')).toHaveLength(0);
-    expect(f.host.querySelectorAll('.composer-attachments')).toHaveLength(0);
+    expect(child.querySelectorAll('button.file-link')).toHaveLength(0);
+    expect(child.querySelectorAll('.composer-attachments')).toHaveLength(0);
     const childRequests = f.requests.slice(beforeChild);
     expect(
       childRequests.filter(
@@ -1516,7 +1657,47 @@ test('a completed child uses the shared collapsed process, concise exploration a
           !request.method.endsWith('.read'),
       ),
     ).toHaveLength(0);
-    await f.click('返回主会话');
+    f.childBody({
+      ...completedBody,
+      presentation: { ...completedBody.presentation!, unavailable: true },
+    });
+    await f.click('刷新子日志');
+    await f.waitForText('无法核对子会话轮次或工具状态');
+    expect(
+      child.querySelector('.agent-turn-final .message-copy')!.getAttribute('aria-disabled'),
+    ).not.toBe('true');
+    await act(async () =>
+      child.querySelector<HTMLButtonElement>('.agent-turn-final .message-copy')!.click(),
+    );
+    expect(f.copied).toEqual([reply, reply]);
+    await f.unavailable(true);
+    expect(child.querySelector('.agent-turn-final')!.textContent).toContain('Verified child reply');
+    expect(
+      child.querySelector('.agent-turn-final .message-copy')!.getAttribute('aria-disabled'),
+    ).toBe('true');
+    await act(async () =>
+      child.querySelector<HTMLButtonElement>('.agent-turn-final .message-copy')!.click(),
+    );
+    expect(f.copied).toEqual([reply, reply]);
+    await f.unavailable(false);
+    for (
+      let attempt = 0;
+      attempt < 50 &&
+      child.querySelector('.agent-turn-final .message-copy')?.getAttribute('aria-disabled') ===
+        'true';
+      attempt++
+    )
+      await act(async () => {
+        await new Promise<void>((resolve) => setTimeout(resolve, 0));
+      });
+    expect(
+      child.querySelector('.agent-turn-final .message-copy')!.getAttribute('aria-disabled'),
+    ).not.toBe('true');
+    await act(async () =>
+      child.querySelector<HTMLButtonElement>('.agent-turn-final .message-copy')!.click(),
+    );
+    expect(f.copied).toEqual([reply, reply, reply]);
+    await f.click('关闭标签页：Live child');
     await f.waitForText('Parent transcript');
     expect(f.host.contains(parentNode!)).toBe(true);
     expect(promptValue(f.host.querySelector('[role="textbox"][contenteditable]'))).toBe(
@@ -1552,17 +1733,21 @@ test('child metadata failure keeps its verified transcript readable and an expli
     await f.open();
     await f.waitForText(body.messages[0]!.content);
     expect(f.host.textContent).toContain(body.messages[0]!.content);
-    expect(f.host.querySelector('[role="alert"]')?.textContent).toContain(
+    expect(f.host.querySelector('.session-tab-child [role="alert"]')?.textContent).toContain(
       '无法核对子会话轮次或工具状态',
     );
     expect(f.host.textContent).not.toContain('子日志读取失败');
     f.childBody(body);
     await f.click('刷新子日志');
-    for (let attempt = 0; attempt < 50 && f.host.querySelector('[role="alert"]'); attempt++)
+    for (
+      let attempt = 0;
+      attempt < 50 && f.host.querySelector('.session-tab-child [role="alert"]');
+      attempt++
+    )
       await act(async () => {
         await new Promise<void>((resolve) => setTimeout(resolve, 0));
       });
-    expect(f.host.querySelector('[role="alert"]')).toBeNull();
+    expect(f.host.querySelector('.session-tab-child [role="alert"]')).toBeNull();
     expect(f.host.textContent).toContain(body.messages[0]!.content);
     expect(
       f.requests.some(

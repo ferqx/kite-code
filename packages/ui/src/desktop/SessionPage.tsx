@@ -29,7 +29,14 @@ import {
   ScheduledTasks,
   type ScheduledTasksProps,
 } from './ScheduledTasks';
-import { type SessionBrowserPageProps, SessionTabs, useSessionTabs } from './SessionTabs';
+import {
+  type SessionBrowserPageProps,
+  type SessionChildPageProps,
+  type SessionChildTabRequest,
+  type SessionChildTarget,
+  SessionTabs,
+  useSessionTabs,
+} from './SessionTabs';
 import { type PageActions, Sidebar } from './Sidebar';
 import type { Message, TurnActivity, WorkspaceSummary } from './types';
 import { Button } from './ui';
@@ -111,6 +118,9 @@ export interface SessionPageProps {
   fileChangesContent?: ReactNode;
   renderBrowser?: (props: SessionBrowserPageProps) => ReactNode;
   closeBrowser?: (id: string) => void;
+  childTabRequest?: SessionChildTabRequest;
+  renderChildSession?: (props: SessionChildPageProps) => ReactNode;
+  onChildSessionChange?: (target: SessionChildTarget | undefined) => void;
   newConversation?: NewConversationProps;
   workbench?: boolean;
   scheduledTasks?: ScheduledTasksProps;
@@ -158,8 +168,12 @@ export function SessionPage({ messages, fileChanges, ...props }: SessionPageProp
     !props.scheduledTasks &&
     (props.renderBrowser !== undefined ||
       fileChanges !== undefined ||
-      props.fileChangesContent !== undefined);
+      props.fileChangesContent !== undefined ||
+      props.renderChildSession !== undefined);
   const tabModel = useSessionTabs(hasTabs ? props.readingKey : 'inactive', props.closeBrowser);
+  const childTabOpener = useRef(tabModel.openChild);
+  childTabOpener.current = tabModel.openChild;
+  const [tabLimitKey, setTabLimitKey] = useState<string>();
   const tabsOpen = tabsKey === props.readingKey && hasTabs;
   const scheduledEditorGeneration = useRef(0);
   const [scheduledEditor, setScheduledEditor] = useState<{
@@ -297,6 +311,21 @@ export function SessionPage({ messages, fileChanges, ...props }: SessionPageProp
     },
     [schedulePanelChange, props.readingKey],
   );
+  const handledChildRequest = useRef<string | undefined>(undefined);
+  useLayoutEffect(() => {
+    const request = props.childTabRequest;
+    if (!hasTabs || !request) return;
+    const key = JSON.stringify([props.readingKey, request.requestId]);
+    if (handledChildRequest.current === key) return;
+    handledChildRequest.current = key;
+    const opened = childTabOpener.current(
+      { sessionId: request.sessionId, executionId: request.executionId },
+      request.title,
+    );
+    setTabLimitKey(opened ? undefined : props.readingKey);
+    detailClose.current?.();
+    changeTabsOpen(true);
+  }, [props.childTabRequest, hasTabs, props.readingKey, changeTabsOpen]);
   const closeScheduledEditor = useCallback(
     (generation: number) => {
       if (scheduledEditorGeneration.current !== generation) return;
@@ -811,6 +840,9 @@ export function SessionPage({ messages, fileChanges, ...props }: SessionPageProp
                     }
                   >
                     {props.notices}
+                    {tabLimitKey === props.readingKey && tabModel.tabs.length >= 8 && (
+                      <p role="status">标签页已满，请关闭一个标签页后重试。</p>
+                    )}
                     <div className="session-body">
                       <div
                         className={`session-view environment-information-${environmentMode}${animateEnvironment ? ' environment-information-animated' : ''}`}
@@ -957,6 +989,8 @@ export function SessionPage({ messages, fileChanges, ...props }: SessionPageProp
                       visible={tabsVisible && !props.covered && !props.detailPanel}
                       present={tabsPresent && !props.covered && !props.detailPanel}
                       renderBrowser={props.renderBrowser}
+                      renderChildSession={props.renderChildSession}
+                      onChildSessionChange={props.onChildSessionChange}
                       changes={
                         props.fileChangesContent ?? (
                           <FileChanges

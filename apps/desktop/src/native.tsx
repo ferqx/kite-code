@@ -24,6 +24,9 @@ import {
   DialogDescription,
   DialogHeader,
   DialogTitle,
+  ReadingStateCache,
+  type SessionChildTabRequest,
+  type SessionChildTarget,
   SessionPage,
   type SessionPageProps,
   ToolActivity,
@@ -49,6 +52,7 @@ import type {
 import { closeNativeBrowserTab, renderNativeBrowser } from './native-browser-pane';
 import { useNativeCacheMetrics } from './native-cache-metrics';
 import { NativeCallerView } from './native-caller';
+import { NativeChildDetail } from './native-child-detail';
 import { NativeContextView } from './native-context';
 import { useNativeContextUsage } from './native-context-usage';
 import {
@@ -57,7 +61,7 @@ import {
   useNativeDiagnostics,
 } from './native-diagnostics';
 import { NativeDisplayCache } from './native-display-cache';
-import { nativeChildActivity, useNativeEnvironment } from './native-environment';
+import { useNativeEnvironment } from './native-environment';
 import { NativeExtensions } from './native-extensions';
 import { NativeFileChanges } from './native-file-changes';
 import { NativeFileRecoveryPanel } from './native-file-recovery';
@@ -231,6 +235,12 @@ function NativeDesktopContent({
     JSON.stringify([storeId, sessionId]);
   const newImageScope = imageScope(directory?.storeId, 'new-conversation');
   const [messages, setMessages] = useState<Message[]>([]);
+  const childTabSequence = useRef(0);
+  const [childTabRequest, setChildTabRequest] = useState<
+    SessionChildTabRequest & { parent: string }
+  >();
+  const [activeChildTab, setActiveChildTab] = useState<SessionChildTarget & { parent: string }>();
+  const childReadings = useRef(new ReadingStateCache());
   const [historyState, setHistoryState] = useState<HistoryState>({
     messages: [],
     phase: 'loading',
@@ -923,6 +933,7 @@ function NativeDesktopContent({
         selected.current === inputSession,
     });
   }, [bridge, inputStore, inputSession, inputEnabled, inputGeneration, inputView]);
+  const childParent = JSON.stringify([selection?.storeId, selection?.session.id]);
   const environment = useNativeEnvironment({
     bridge,
     generation: state?.generation ?? generation.current,
@@ -946,18 +957,39 @@ function NativeDesktopContent({
     onChanged: async () => {
       await report(refresh, false);
     },
+    onOpenChild: (sessionId, executionId, title) => {
+      setChildTabRequest({
+        parent: childParent,
+        requestId: ++childTabSequence.current,
+        sessionId,
+        executionId,
+        title,
+      });
+    },
   });
-  const childDetail = environment.child,
-    childFacts = childDetail?.facts;
-  const displayMessages = useMemo(
-    () => (childDetail ? (childFacts?.messages ?? []) : messages),
-    [childDetail, childFacts, messages],
-  );
-  const childOutputsById = useMemo(
-    () => new Map(childFacts?.modelOutputs.map((output) => [output.messageId, output.snapshot])),
-    [childFacts],
-  );
-  const readingParent = !preparing && !scheduledTasksView && !childDetail;
+  const visibleChildTab = activeChildTab?.parent === childParent ? activeChildTab : undefined;
+  const childReader = useRef(environment);
+  childReader.current = environment;
+  const childScope = environment.childScope;
+  const childReadAvailable = environment.childReadAvailable;
+  const childSessionId = visibleChildTab?.sessionId;
+  const childExecutionId = visibleChildTab?.executionId;
+  const childViewIdentity = childSessionId
+    ? JSON.stringify([childScope, childSessionId, childExecutionId])
+    : undefined;
+  useEffect(() => {
+    if (!childViewIdentity) return;
+    return () => childReader.current.closeChild();
+  }, [childViewIdentity]);
+  useEffect(() => {
+    const reader = childReader.current;
+    if (!childScope || !childSessionId || !childReadAvailable) return;
+    const child = reader.child;
+    if (child?.sessionId !== childSessionId || child.executionId !== childExecutionId)
+      reader.openChild(childSessionId, childExecutionId);
+  }, [childScope, childReadAvailable, childSessionId, childExecutionId]);
+  const displayMessages = messages;
+  const readingParent = !preparing && !scheduledTasksView;
   parentHistoryVisible.current = readingParent;
   useLayoutEffect(() => {
     if (!readingParent || selectionRead.current?.holdPresentation) {
@@ -971,7 +1003,6 @@ function NativeDesktopContent({
     bridge,
     generation: state?.generation ?? generation.current,
     selection: !preparing && !scheduledTasksView ? selection : undefined,
-    suspended: !!childDetail,
     historyEpoch: state?.historyEpoch ?? 0,
     messages,
     includeRead: true,
@@ -980,34 +1011,18 @@ function NativeDesktopContent({
     bridge,
     generation: state?.generation ?? generation.current,
     selection: !preparing && !scheduledTasksView ? selection : undefined,
-    suspended: !!childDetail,
     historyEpoch: state?.historyEpoch ?? 0,
     messages,
     observationRevision: selection?.viewGeneration ?? 0,
   });
   const liveTools = useMemo(
-    () =>
-      liveToolMessages(
-        childDetail
-          ? childFacts?.presentation && selection
-            ? {
-                storeId: selection.storeId,
-                session: childFacts.session,
-                ...childFacts.presentation,
-              }
-            : undefined
-          : readingParent
-            ? state?.selection
-            : undefined,
-        displayMessages,
-      ),
-    [childDetail, childFacts, selection, readingParent, state?.selection, displayMessages],
+    () => liveToolMessages(readingParent ? state?.selection : undefined, displayMessages),
+    [readingParent, state?.selection, displayMessages],
   );
   const runMessages = useNativeRuns({
     bridge,
     generation: state?.generation ?? generation.current,
     selection: !preparing && !scheduledTasksView ? selection : undefined,
-    suspended: !!childDetail,
     historyEpoch: state?.historyEpoch ?? 0,
     messages,
     observationRevision: selection?.viewGeneration ?? 0,
@@ -1016,7 +1031,6 @@ function NativeDesktopContent({
     bridge,
     generation: state?.generation ?? generation.current,
     selection: !preparing && !scheduledTasksView ? selection : undefined,
-    suspended: !!childDetail,
     historyEpoch: state?.historyEpoch ?? 0,
     messages,
     historyComplete: historyState.phase === 'complete',
@@ -1026,7 +1040,6 @@ function NativeDesktopContent({
     bridge,
     generation: state?.generation ?? generation.current,
     selection: !preparing && !scheduledTasksView ? selection : undefined,
-    suspended: !!childDetail,
     historyEpoch: state?.historyEpoch ?? 0,
     messages,
     historyComplete: historyState.phase === 'complete',
@@ -1650,21 +1663,20 @@ function NativeDesktopContent({
     );
   // biome-ignore lint/correctness/useExhaustiveDependencies: The revision invalidates the current-view body map after verified reads and reader disposal.
   const freshTranscript = useMemo(() => {
-    if (!readingParent && !childDetail) return { messages: [] };
+    if (!readingParent) return { messages: [] };
     if (!selection) return { messages: desktopMessages(displayMessages) };
     return desktopTranscript({
       messages: displayMessages,
-      runs: childDetail ? (childFacts?.presentation?.runs ?? []) : runMessages.runs,
-      tools: childDetail ? (childFacts?.presentation?.tools ?? []) : toolMessages.entries,
-      executions: childDetail ? childFacts?.presentation?.executions : selection.executions,
+      runs: runMessages.runs,
+      tools: toolMessages.entries,
+      executions: selection.executions,
       compressionProgress:
-        !childDetail && !selection.viewLoading && !selection.permissionUnavailable
+        !selection.viewLoading && !selection.permissionUnavailable
           ? selection.compressionProgress
           : undefined,
       storeId: selection.storeId,
-      sessionId: childDetail ? childDetail.sessionId : selection.session.id,
+      sessionId: selection.session.id,
       fullReply: (message) => {
-        if (childDetail) return childOutputsById.get(message.id)?.output.content;
         const body = verifiedReplyBodies.current.get(
           JSON.stringify([replyDisplayScope, message.id]),
         );
@@ -1675,9 +1687,6 @@ function NativeDesktopContent({
     });
   }, [
     readingParent,
-    childDetail,
-    childFacts,
-    childOutputsById,
     displayMessages,
     runMessages.runs,
     toolMessages.entries,
@@ -1719,7 +1728,7 @@ function NativeDesktopContent({
   const messageModels = useMemo(() => {
     const models = preparing ? [] : [...transcript.messages];
     models.push(...liveTools.map((entry) => entry.message));
-    if (!childDetail && firstVisible && !firstSaved)
+    if (firstVisible && !firstSaved)
       models.unshift({
         id: firstSubmission.commandId,
         role: 'user',
@@ -1736,15 +1745,7 @@ function NativeDesktopContent({
                 : 'sending',
       });
     return groupNativeToolMessages(models);
-  }, [
-    preparing,
-    childDetail,
-    transcript.messages,
-    liveTools,
-    firstVisible,
-    firstSaved,
-    firstSubmission,
-  ]);
+  }, [preparing, transcript.messages, liveTools, firstVisible, firstSaved, firstSubmission]);
   const messagesById = useMemo(
     () => new Map(displayMessages.map((message) => [message.id, message])),
     [displayMessages],
@@ -1849,7 +1850,7 @@ function NativeDesktopContent({
       <header>
         <h2>会话与任务</h2>
       </header>
-      {selection && state && !childDetail && (
+      {selection && state && (
         <details
           data-interaction-history
           onToggle={(event) => setInteractionHistoryOpen(event.currentTarget.open)}
@@ -2519,7 +2520,7 @@ function NativeDesktopContent({
     },
   });
   const renderNativeMessage: NonNullable<SessionPageProps['renderMessageContent']> = (model) => {
-    if (!childDetail && firstVisible && !firstSaved && model.id === firstSubmission.commandId)
+    if (firstVisible && !firstSaved && model.id === firstSubmission.commandId)
       return (
         <>
           {!!firstSubmission.files?.length && (
@@ -2546,15 +2547,11 @@ function NativeDesktopContent({
       );
     const message = messagesById.get(model.id);
     if (!message || !selection || !state) return null;
-    const snapshot = childDetail ? childOutputsById.get(model.id) : undefined;
     const openable =
-      !childDetail &&
-      !selection.viewLoading &&
-      historyState.phase === 'complete' &&
-      !directory?.unavailable;
+      !selection.viewLoading && historyState.phase === 'complete' && !directory?.unavailable;
     return (
       <>
-        {!childDetail && (!!message.images?.length || !!message.files?.length) && (
+        {(!!message.images?.length || !!message.files?.length) && (
           <NativeUserImages
             bridge={bridge}
             previews={imageDrafts.previews}
@@ -2569,72 +2566,56 @@ function NativeDesktopContent({
           key={JSON.stringify([
             state.generation,
             selection.storeId,
-            childDetail?.sessionId ?? selection.session.id,
+            selection.session.id,
             message.id,
           ])}
           message={message}
           storeId={selection.storeId}
           canReadRestoredOrigin
-          verifiedSnapshot={snapshot}
-          openFile={
-            childDetail
-              ? undefined
-              : (path) => {
-                  if (!openable || selected.current !== selection.session.id) return;
-                  void report(() =>
-                    bridge.request({
-                      method: 'messageFile.open',
-                      generation: state.generation,
-                      viewSelection: selection.viewSelection ?? selection.viewGeneration,
-                      historyEpoch: state.historyEpoch ?? 0,
-                      messageId: message.id,
-                      path,
-                      editor,
-                    }),
-                  );
-                }
-          }
-          onContent={
-            childDetail
-              ? undefined
-              : (text) => {
-                  const key = JSON.stringify([replyDisplayScope, message.id]);
-                  const before = verifiedReplyBodies.current.get(key),
-                    identity = nativeReplyKey(replyDisplayScope, message);
-                  if (text === undefined) verifiedReplyBodies.current.delete(key);
-                  else verifiedReplyBodies.current.set(key, { identity, text });
-                  if (before?.text !== text || (before && before.identity !== identity))
-                    renderVerifiedReply((value) => value + 1);
-                }
-          }
+          openFile={(path) => {
+            if (!openable || selected.current !== selection.session.id) return;
+            void report(() =>
+              bridge.request({
+                method: 'messageFile.open',
+                generation: state.generation,
+                viewSelection: selection.viewSelection ?? selection.viewGeneration,
+                historyEpoch: state.historyEpoch ?? 0,
+                messageId: message.id,
+                path,
+                editor,
+              }),
+            );
+          }}
+          onContent={(text) => {
+            const key = JSON.stringify([replyDisplayScope, message.id]);
+            const before = verifiedReplyBodies.current.get(key),
+              identity = nativeReplyKey(replyDisplayScope, message);
+            if (text === undefined) verifiedReplyBodies.current.delete(key);
+            else verifiedReplyBodies.current.set(key, { identity, text });
+            if (before?.text !== text || (before && before.identity !== identity))
+              renderVerifiedReply((value) => value + 1);
+          }}
           onRead={
-            childDetail
-              ? snapshot
-                ? async ({ signal }) => {
-                    signal.throwIfAborted();
-                    return snapshot;
-                  }
-                : undefined
-              : selection.canReadModelOutput
-                ? async ({ sessionId, executionId, signal }) => {
-                    const current = state.generation,
-                      nonce = viewIntent.current;
-                    return readNativeModelOutput({
-                      bridge,
-                      generation: current,
-                      expectedStoreId: selection.storeId,
-                      sessionId,
-                      viewSessionId: selection.session.id,
-                      messageId: message.id,
-                      executionId,
-                      signal,
-                      isCurrent: () =>
-                        generation.current === current &&
-                        viewIntent.current === nonce &&
-                        selected.current === selection.session.id,
-                    });
-                  }
-                : undefined
+            selection.canReadModelOutput
+              ? async ({ sessionId, executionId, signal }) => {
+                  const current = state.generation,
+                    nonce = viewIntent.current;
+                  return readNativeModelOutput({
+                    bridge,
+                    generation: current,
+                    expectedStoreId: selection.storeId,
+                    sessionId,
+                    viewSessionId: selection.session.id,
+                    messageId: message.id,
+                    executionId,
+                    signal,
+                    isCurrent: () =>
+                      generation.current === current &&
+                      viewIntent.current === nonce &&
+                      selected.current === selection.session.id,
+                  });
+                }
+              : undefined
           }
         />
       </>
@@ -2644,10 +2625,8 @@ function NativeDesktopContent({
     group,
     controls,
   ) => {
-    const displayTools = childDetail
-      ? (childFacts?.presentation?.tools ?? [])
-      : toolMessages.entries;
-    const displayTargets = childDetail ? [] : fileTargets.entries;
+    const displayTools = toolMessages.entries;
+    const displayTargets = fileTargets.entries;
     const unverified = new Set(
       group
         .filter(
@@ -2662,11 +2641,7 @@ function NativeDesktopContent({
       const live = liveTools.find((entry) => entry.message.id === model.id);
       const status = !live
         ? undefined
-        : (
-              childDetail
-                ? !!childDetail.error
-                : selection?.viewLoading || selection?.permissionUnavailable
-            )
+        : selection?.viewLoading || selection?.permissionUnavailable
           ? '上次确认状态'
           : live.execution.cancelRequestedAt !== null
             ? '已请求停止，等待执行结果。'
@@ -2756,7 +2731,6 @@ function NativeDesktopContent({
           openFileForMessage={(model) => {
             const target = displayTargets.find((entry) => entry.messageId === model.id);
             if (
-              childDetail ||
               !selection ||
               !state ||
               selection.viewLoading ||
@@ -2864,24 +2838,16 @@ function NativeDesktopContent({
           ? selection?.session.id
           : undefined
       }
-      sessionLabel={
-        childDetail
-          ? (childFacts?.session.title ?? childDetail.title ?? childDetail.sessionId)
-          : preparing
-            ? '新对话'
-            : selection
-              ? selection.session.title || '新对话'
-              : 'Kite'
-      }
+      sessionLabel={preparing ? '新对话' : selection ? selection.session.title || '新对话' : 'Kite'}
       readingKey={
-        firstVisible && !firstSaved && !childDetail
+        firstVisible && !firstSaved
           ? JSON.stringify([
               firstSubmission.creation.expectedStoreId,
               firstSubmission.creation.sessionId,
             ])
           : preparing
             ? 'new-conversation'
-            : JSON.stringify([selection?.storeId, childDetail?.sessionId ?? selection?.session.id])
+            : JSON.stringify([selection?.storeId, selection?.session.id])
       }
       conversationCache={{
         interactive: !!selection && selected.current === selection.session.id,
@@ -2892,9 +2858,8 @@ function NativeDesktopContent({
           selected.current === selection.session.id &&
           !selection.viewLoading &&
           !directory?.unavailable &&
-          (childDetail
-            ? !!childFacts && !childDetail.loading
-            : historyState.phase === 'complete' && !historyMetadataLoading),
+          historyState.phase === 'complete' &&
+          !historyMetadataLoading,
       }}
       messages={messageModels}
       renderMessageContent={renderNativeMessage}
@@ -2905,11 +2870,10 @@ function NativeDesktopContent({
           : {
               ...transcript.turnActivity,
               // Read admission is revoked during scans; the last observed Run still owns its label.
-              unavailable: childDetail
-                ? !!childDetail.error || childFacts?.presentation?.unavailable
-                : executionUnconfirmed ||
-                  historyState.phase === 'unavailable' ||
-                  !!(state?.selection?.permissionUnavailable && !state.selection.viewLoading),
+              unavailable:
+                executionUnconfirmed ||
+                historyState.phase === 'unavailable' ||
+                !!(state?.selection?.permissionUnavailable && !state.selection.viewLoading),
             }
       }
       notices={
@@ -2974,18 +2938,44 @@ function NativeDesktopContent({
         </>
       }
       loading={
-        childDetail
-          ? childDetail.loading && !childFacts
-          : !preparing &&
-            !(firstVisible && !firstSaved) &&
-            !!selection &&
-            historyState.phase === 'loading' &&
-            !messages.length
+        !preparing &&
+        !(firstVisible && !firstSaved) &&
+        !!selection &&
+        historyState.phase === 'loading' &&
+        !messages.length
       }
       renderBrowser={renderNativeBrowser}
       closeBrowser={closeNativeBrowserTab}
+      childTabRequest={
+        !preparing && !scheduledTasksView && childTabRequest?.parent === childParent
+          ? childTabRequest
+          : undefined
+      }
+      onChildSessionChange={(target) =>
+        setActiveChildTab(target ? { ...target, parent: childParent } : undefined)
+      }
+      renderChildSession={({ sessionId, executionId, onTitleChange }) => (
+        <NativeChildDetail
+          child={environment.child}
+          generation={state?.generation ?? generation.current}
+          storeId={selection?.storeId ?? ''}
+          sessionId={sessionId}
+          executionId={executionId}
+          readActive={
+            childReadAvailable &&
+            !!selection &&
+            selected.current === selection.session.id &&
+            !selection.viewLoading &&
+            !directory?.unavailable
+          }
+          onRefresh={environment.refreshChild}
+          onTitleChange={onTitleChange}
+          readingCache={childReadings.current}
+          writeClipboardText={window.kiteNative?.writeClipboardText}
+        />
+      )}
       fileChangesContent={
-        !childDetail && !preparing && !scheduledTasksView && selection ? (
+        !preparing && !scheduledTasksView && selection ? (
           <NativeFileChanges
             bridge={bridge}
             generation={state?.generation ?? generation.current}
@@ -2997,10 +2987,9 @@ function NativeDesktopContent({
           />
         ) : undefined
       }
-      environmentInformation={!childDetail ? environment.card : undefined}
+      environmentInformation={environment.card}
       requiredSubagentWait={
         !executionUnconfirmed &&
-        !childDetail &&
         !preparing &&
         historyState.phase === 'complete' &&
         !selection?.viewLoading &&
@@ -3060,9 +3049,7 @@ function NativeDesktopContent({
         pageIntent.current++;
         setScheduledTasksView(false);
         setPreparing(false);
-        if (sameTarget) {
-          if (childDetail) environment.closeChild();
-        } else void report(() => select(sessionId));
+        if (!sameTarget) void report(() => select(sessionId));
       }}
       newConversation={
         preparing && !scheduledTasksView
@@ -3091,20 +3078,7 @@ function NativeDesktopContent({
       scheduledTasks={scheduledTasksView ? scheduledTaskProps : undefined}
       headerActions={
         <>
-          {childDetail ? (
-            <>
-              <DesktopButton variant="ghost" onClick={environment.closeChild}>
-                返回主会话
-              </DesktopButton>
-              <DesktopButton
-                variant="ghost"
-                onClick={environment.refreshChild}
-                disabled={childDetail.loading}
-              >
-                刷新子日志
-              </DesktopButton>
-            </>
-          ) : scheduledTasksView ? (
+          {scheduledTasksView ? (
             (selection || preparing) && (
               <DesktopButton
                 variant="ghost"
@@ -3146,7 +3120,6 @@ function NativeDesktopContent({
       beforeConversation={
         <>
           {!diagnostics &&
-            !childDetail &&
             !preparing &&
             !scheduledTasksView &&
             selection?.permissions &&
@@ -3184,7 +3157,6 @@ function NativeDesktopContent({
               />
             )}
           {!diagnostics &&
-            !childDetail &&
             !preparing &&
             !scheduledTasksView &&
             selection &&
@@ -3221,28 +3193,7 @@ function NativeDesktopContent({
                   )}
                 </section>
               ))}
-          {childDetail ? (
-            <>
-              {childFacts?.presentation?.unavailable && (
-                <p role="alert">
-                  无法核对子会话轮次或工具状态，已保留原消息；可刷新子日志重新核对。
-                </p>
-              )}
-              {childDetail.error && (
-                <p role="alert">
-                  子日志读取失败：{childDetail.error}。
-                  {childFacts ? '保留上次完整内容。' : '尚未取得完整内容。'}
-                </p>
-              )}
-              {diagnostics && childFacts && (
-                <p>
-                  已完整读取子日志至固定序号 {childFacts.upperSeq}，原子轮次{' '}
-                  {childFacts.item.childRun?.id ?? '尚未确认'}。
-                  {!childDetail.loading && !childDetail.error && nativeChildActivity(childFacts)}
-                </p>
-              )}
-            </>
-          ) : firstSubmission?.result?.phase === 'unknown' && firstVisible ? (
+          {firstSubmission?.result?.phase === 'unknown' && firstVisible ? (
             <DesktopButton
               onClick={() =>
                 void write(async () => {
@@ -3266,7 +3217,6 @@ function NativeDesktopContent({
         </>
       }
       statusNotice={
-        !childDetail &&
         !preparing &&
         selection && (
           <>
@@ -3313,60 +3263,177 @@ function NativeDesktopContent({
           </>
         )
       }
-      interaction={
-        !childDetail && !preparing && hasPendingInteraction ? interactionCards : undefined
-      }
+      interaction={!preparing && hasPendingInteraction ? interactionCards : undefined}
       interactionHidesPrompt={!!hasPendingRootInteraction}
       composer={
-        childDetail
-          ? undefined
-          : preparing && state && directory
+        preparing && state && directory
+          ? {
+              draft: newDraft,
+              scopeKey: newImageScope,
+              onFileReferences: imageDrafts.fileReferences,
+              imageLimit: inputImageCount,
+              files: imageDrafts.files(newImageScope),
+              onFilesSelected: (files) => imageDrafts.addFiles(newImageScope, files),
+              onRemoveFile: (id) => imageDrafts.removeIds([id]),
+              images: imageDrafts.get(newImageScope),
+              onImageFiles: (files) => {
+                return imageDrafts.add(newImageScope, files);
+              },
+              onRemoveImage: (id) => imageDrafts.removeIds([id]),
+              onChange: changeNewDraft,
+              onSend: sendFirst,
+              active: false,
+              stopping: false,
+              disabled: pending,
+              sending,
+              sendDisabled:
+                !newWorkspace ||
+                contextBusy ||
+                !newModelReady.ready ||
+                firstSubmission?.result?.phase === 'unknown',
+              inputLabel: '新对话草稿',
+              sendLabel: '发送首条消息',
+              permission: preparedPermission,
+              fullPermissionScope: JSON.stringify([directory.storeId, 'new-conversation']),
+              onPermissionChange: (mode) => setNewPermission(mode),
+              permissionDisabled: pending,
+              options: (
+                <>
+                  <NativeModelPicker
+                    snapshots={modelSnapshots.current}
+                    bridge={bridge}
+                    generation={state.generation}
+                    preparing={{ storeId: directory.storeId }}
+                    revision={String(settingsRevision)}
+                    value={newChoice}
+                    onChange={setNewChoice}
+                    onReady={(ready, choice) =>
+                      setNewModelReady((previous) =>
+                        JSON.stringify(previous) === JSON.stringify({ ready, choice })
+                          ? previous
+                          : { ready, choice },
+                      )
+                    }
+                  />
+                  <NativeDiagnostic>
+                    <label>
+                      <input
+                        type="checkbox"
+                        aria-label="先审核计划"
+                        checked={newPlanMode}
+                        onChange={(event) => setNewPlanMode(event.target.checked)}
+                        disabled={pending}
+                      />
+                      先审核计划
+                    </label>
+                  </NativeDiagnostic>
+                </>
+              ),
+            }
+          : canCompose && selection && state
             ? {
-                draft: newDraft,
-                scopeKey: newImageScope,
+                draft,
+                scopeKey: imageScope(selection.storeId, selection.session.id),
                 onFileReferences: imageDrafts.fileReferences,
                 imageLimit: inputImageCount,
-                files: imageDrafts.files(newImageScope),
-                onFilesSelected: (files) => imageDrafts.addFiles(newImageScope, files),
+                files: imageDrafts.files(imageScope(selection.storeId, selection.session.id)),
+                onFilesSelected: (files) =>
+                  imageDrafts.addFiles(imageScope(selection.storeId, selection.session.id), files),
                 onRemoveFile: (id) => imageDrafts.removeIds([id]),
-                images: imageDrafts.get(newImageScope),
+                images: imageDrafts.get(imageScope(selection.storeId, selection.session.id)),
                 onImageFiles: (files) => {
-                  return imageDrafts.add(newImageScope, files);
+                  return imageDrafts.add(
+                    imageScope(selection.storeId, selection.session.id),
+                    files,
+                  );
                 },
                 onRemoveImage: (id) => imageDrafts.removeIds([id]),
-                onChange: changeNewDraft,
-                onSend: sendFirst,
-                active: false,
-                stopping: false,
-                disabled: pending,
+                onChange: changeDraft,
+                onSend: sendInput,
+                onCancel: () => void write(stopCurrentRun),
+                active: !!activeInputRun,
+                cacheMetrics: cacheMetrics.metrics,
+                contextUsage: contextUsage.metrics,
+                stopping: activeInputRun?.status === 'cancelling',
+                cancelDisabled:
+                  pending ||
+                  !!selection.permissionUnavailable ||
+                  !!state.callerUnavailable ||
+                  historyState.phase !== 'complete' ||
+                  !!state.callerSubmissions?.some(
+                    (value) =>
+                      value.request.kind === 'command.cancel' &&
+                      value.scope.storeId === selection.storeId &&
+                      value.scope.sessionId === selection.session.id &&
+                      ['saved', 'submitting', 'unknown'].includes(value.phase),
+                  ),
+                disabled: pending || selected.current !== selection.session.id,
+                sessionLoading,
                 sending,
+                // A routine history scan gates actions without removing the observed label.
+                permission: composerPermission,
+                fullPermissionScope: JSON.stringify([
+                  state.generation,
+                  selection.storeId,
+                  selection.session.id,
+                  selection.viewSelection,
+                  state.historyEpoch ?? 0,
+                ]),
+                permissionDisabled:
+                  pending ||
+                  historyState.phase !== 'complete' ||
+                  !!selection.permissionUnavailable ||
+                  !selection.permissions ||
+                  !selection.permissions.trust.trusted ||
+                  state.permissionSubmissions.some((value) =>
+                    ['saved', 'submitting', 'unknown'].includes(value.phase),
+                  ),
+                permissionPending: state.permissionSubmissions.some(
+                  (value) =>
+                    value.sessionId === selection.session.id &&
+                    ['saved', 'submitting', 'unknown'].includes(value.phase),
+                ),
+                onPermissionChange: (mode) => void write(() => setPermissionMode(mode, false)),
                 sendDisabled:
-                  !newWorkspace ||
-                  contextBusy ||
-                  !newModelReady.ready ||
-                  firstSubmission?.result?.phase === 'unknown',
-                inputLabel: '新对话草稿',
-                sendLabel: '发送首条消息',
-                permission: preparedPermission,
-                fullPermissionScope: JSON.stringify([directory.storeId, 'new-conversation']),
-                onPermissionChange: (mode) => setNewPermission(mode),
-                permissionDisabled: pending,
+                  historyState.phase !== 'complete' ||
+                  selection.permissionUnavailable ||
+                  (firstSubmission?.creation.sessionId === selection.session.id &&
+                    firstSubmission.result?.phase === 'unknown') ||
+                  (needsNextModel && !nextModelReady),
+                inputLabel: '当前会话私有草稿',
+                sendLabel: activeInputRun
+                  ? planMode
+                    ? '排队新的计划任务'
+                    : ['context.compress', 'context.compression.reset'].includes(
+                          selection.activeCommand?.kind ?? '',
+                        )
+                      ? '排队压缩后的输入'
+                      : '引导当前轮次'
+                  : planMode
+                    ? '发送计划任务'
+                    : '发送明确的新轮次',
                 options: (
                   <>
                     <NativeModelPicker
                       snapshots={modelSnapshots.current}
+                      prepared={preparedModels}
                       bridge={bridge}
                       generation={state.generation}
-                      preparing={{ storeId: directory.storeId }}
+                      selection={selection}
+                      disabled={selected.current !== selection.session.id}
                       revision={String(settingsRevision)}
-                      value={newChoice}
-                      onChange={setNewChoice}
+                      value={modelChoices.current.get(choiceKey) ?? {}}
+                      onChange={(choice) => {
+                        modelChoices.current.set(choiceKey, choice);
+                        choiceChanged((value) => value + 1);
+                      }}
                       onReady={(ready, choice) =>
-                        setNewModelReady((previous) =>
-                          JSON.stringify(previous) === JSON.stringify({ ready, choice })
+                        setResolvedChoice((previous) => {
+                          const value = { identity: choiceIdentity, choice, ready };
+                          return JSON.stringify(previous) === JSON.stringify(value)
                             ? previous
-                            : { ready, choice },
-                        )
+                            : value;
+                        })
                       }
                     />
                     <NativeDiagnostic>
@@ -3374,247 +3441,113 @@ function NativeDesktopContent({
                         <input
                           type="checkbox"
                           aria-label="先审核计划"
-                          checked={newPlanMode}
-                          onChange={(event) => setNewPlanMode(event.target.checked)}
+                          checked={planMode}
                           disabled={pending}
+                          onChange={(event) => {
+                            setPlanMode(event.target.checked);
+                            planModes.current.set(
+                              JSON.stringify([
+                                selection.storeId,
+                                selection.session.workspaceId,
+                                selection.session.id,
+                              ]),
+                              event.target.checked,
+                            );
+                          }}
                         />
                         先审核计划
                       </label>
                     </NativeDiagnostic>
-                  </>
-                ),
-              }
-            : canCompose && selection && state
-              ? {
-                  draft,
-                  scopeKey: imageScope(selection.storeId, selection.session.id),
-                  onFileReferences: imageDrafts.fileReferences,
-                  imageLimit: inputImageCount,
-                  files: imageDrafts.files(imageScope(selection.storeId, selection.session.id)),
-                  onFilesSelected: (files) =>
-                    imageDrafts.addFiles(
-                      imageScope(selection.storeId, selection.session.id),
-                      files,
-                    ),
-                  onRemoveFile: (id) => imageDrafts.removeIds([id]),
-                  images: imageDrafts.get(imageScope(selection.storeId, selection.session.id)),
-                  onImageFiles: (files) => {
-                    return imageDrafts.add(
-                      imageScope(selection.storeId, selection.session.id),
-                      files,
-                    );
-                  },
-                  onRemoveImage: (id) => imageDrafts.removeIds([id]),
-                  onChange: changeDraft,
-                  onSend: sendInput,
-                  onCancel: () => void write(stopCurrentRun),
-                  active: !!activeInputRun,
-                  cacheMetrics: cacheMetrics.metrics,
-                  contextUsage: contextUsage.metrics,
-                  stopping: activeInputRun?.status === 'cancelling',
-                  cancelDisabled:
-                    pending ||
-                    !!selection.permissionUnavailable ||
-                    !!state.callerUnavailable ||
-                    historyState.phase !== 'complete' ||
-                    !!state.callerSubmissions?.some(
-                      (value) =>
-                        value.request.kind === 'command.cancel' &&
-                        value.scope.storeId === selection.storeId &&
-                        value.scope.sessionId === selection.session.id &&
-                        ['saved', 'submitting', 'unknown'].includes(value.phase),
-                    ),
-                  disabled: pending || selected.current !== selection.session.id,
-                  sessionLoading,
-                  sending,
-                  // A routine history scan gates actions without removing the observed label.
-                  permission: composerPermission,
-                  fullPermissionScope: JSON.stringify([
-                    state.generation,
-                    selection.storeId,
-                    selection.session.id,
-                    selection.viewSelection,
-                    state.historyEpoch ?? 0,
-                  ]),
-                  permissionDisabled:
-                    pending ||
-                    historyState.phase !== 'complete' ||
-                    !!selection.permissionUnavailable ||
-                    !selection.permissions ||
-                    !selection.permissions.trust.trusted ||
-                    state.permissionSubmissions.some((value) =>
-                      ['saved', 'submitting', 'unknown'].includes(value.phase),
-                    ),
-                  permissionPending: state.permissionSubmissions.some(
-                    (value) =>
-                      value.sessionId === selection.session.id &&
-                      ['saved', 'submitting', 'unknown'].includes(value.phase),
-                  ),
-                  onPermissionChange: (mode) => void write(() => setPermissionMode(mode, false)),
-                  sendDisabled:
-                    historyState.phase !== 'complete' ||
-                    selection.permissionUnavailable ||
-                    (firstSubmission?.creation.sessionId === selection.session.id &&
-                      firstSubmission.result?.phase === 'unknown') ||
-                    (needsNextModel && !nextModelReady),
-                  inputLabel: '当前会话私有草稿',
-                  sendLabel: activeInputRun
-                    ? planMode
-                      ? '排队新的计划任务'
-                      : ['context.compress', 'context.compression.reset'].includes(
-                            selection.activeCommand?.kind ?? '',
-                          )
-                        ? '排队压缩后的输入'
-                        : '引导当前轮次'
-                    : planMode
-                      ? '发送计划任务'
-                      : '发送明确的新轮次',
-                  options: (
-                    <>
-                      <NativeModelPicker
-                        snapshots={modelSnapshots.current}
-                        prepared={preparedModels}
-                        bridge={bridge}
-                        generation={state.generation}
-                        selection={selection}
-                        disabled={selected.current !== selection.session.id}
-                        revision={String(settingsRevision)}
-                        value={modelChoices.current.get(choiceKey) ?? {}}
-                        onChange={(choice) => {
-                          modelChoices.current.set(choiceKey, choice);
-                          choiceChanged((value) => value + 1);
-                        }}
-                        onReady={(ready, choice) =>
-                          setResolvedChoice((previous) => {
-                            const value = { identity: choiceIdentity, choice, ready };
-                            return JSON.stringify(previous) === JSON.stringify(value)
-                              ? previous
-                              : value;
-                          })
-                        }
-                      />
-                      <NativeDiagnostic>
-                        <label>
-                          <input
-                            type="checkbox"
-                            aria-label="先审核计划"
-                            checked={planMode}
-                            disabled={pending}
-                            onChange={(event) => {
-                              setPlanMode(event.target.checked);
-                              planModes.current.set(
-                                JSON.stringify([
-                                  selection.storeId,
-                                  selection.session.workspaceId,
-                                  selection.session.id,
-                                ]),
-                                event.target.checked,
-                              );
-                            }}
-                          />
-                          先审核计划
-                        </label>
-                      </NativeDiagnostic>
-                      <NativeDiagnostic>
-                        <button
-                          type="button"
-                          disabled={pending}
-                          onClick={() =>
-                            void write(async () => {
-                              const original = {
-                                generation: generation.current,
-                                epoch: readLifecycle.current.epoch,
-                                view: viewIntent.current,
-                                sessionId: selection.session.id,
-                                storeId: selection.storeId,
-                                workspaceId: selection.session.workspaceId,
-                                revision: draftRevision.current,
-                              };
-                              let revision = original.revision;
-                              const consumed = consumedDraft.current;
-                              if (
-                                consumed?.generation === original.generation &&
-                                consumed.view === original.view &&
-                                consumed.storeId === original.storeId &&
-                                consumed.workspaceId === original.workspaceId &&
-                                consumed.sessionId === original.sessionId &&
-                                consumed.proof.revision === String(revision)
-                              ) {
-                                const ownsRead = () =>
-                                  isCurrentRead(
-                                    original.generation,
-                                    original.epoch,
-                                    original.view,
-                                  ) &&
-                                  selected.current === original.sessionId &&
-                                  draftOwner.current ===
-                                    imageScope(original.storeId, original.sessionId) &&
-                                  draftRevision.current === original.revision;
-                                let saved: NativeResult;
-                                try {
-                                  saved = await bridge.request({
-                                    method: 'draft.read',
-                                    generation: original.generation,
-                                    sessionId: original.sessionId,
-                                  });
-                                } catch (cause) {
-                                  if (!ownsRead()) return;
-                                  throw cause;
-                                }
+                    <NativeDiagnostic>
+                      <button
+                        type="button"
+                        disabled={pending}
+                        onClick={() =>
+                          void write(async () => {
+                            const original = {
+                              generation: generation.current,
+                              epoch: readLifecycle.current.epoch,
+                              view: viewIntent.current,
+                              sessionId: selection.session.id,
+                              storeId: selection.storeId,
+                              workspaceId: selection.session.workspaceId,
+                              revision: draftRevision.current,
+                            };
+                            let revision = original.revision;
+                            const consumed = consumedDraft.current;
+                            if (
+                              consumed?.generation === original.generation &&
+                              consumed.view === original.view &&
+                              consumed.storeId === original.storeId &&
+                              consumed.workspaceId === original.workspaceId &&
+                              consumed.sessionId === original.sessionId &&
+                              consumed.proof.revision === String(revision)
+                            ) {
+                              const ownsRead = () =>
+                                isCurrentRead(original.generation, original.epoch, original.view) &&
+                                selected.current === original.sessionId &&
+                                draftOwner.current ===
+                                  imageScope(original.storeId, original.sessionId) &&
+                                draftRevision.current === original.revision;
+                              let saved: NativeResult;
+                              try {
+                                saved = await bridge.request({
+                                  method: 'draft.read',
+                                  generation: original.generation,
+                                  sessionId: original.sessionId,
+                                });
+                              } catch (cause) {
                                 if (!ownsRead()) return;
-                                if (
-                                  saved &&
-                                  'content' in saved &&
-                                  'revision' in saved &&
-                                  saved.id === consumed.proof.id &&
-                                  saved.storeId === original.storeId &&
-                                  saved.workspaceId === original.workspaceId &&
-                                  saved.rootSessionId === original.sessionId &&
-                                  saved.content === '' &&
-                                  saved.revision === revision + 1 &&
-                                  saved.consumedFrom?.commandId === consumed.commandId &&
-                                  saved.consumedFrom.revision === revision
-                                )
-                                  draftRevision.current = revision = saved.revision;
-                                if (consumedDraft.current === consumed)
-                                  consumedDraft.current = undefined;
+                                throw cause;
                               }
-                              const saved = await bridge.request({
-                                method: 'draft.write',
-                                generation: original.generation,
-                                sessionId: original.sessionId,
-                                revision,
-                                content: draft,
-                              });
+                              if (!ownsRead()) return;
                               if (
                                 saved &&
                                 'content' in saved &&
                                 'revision' in saved &&
-                                generation.current === original.generation &&
-                                viewIntent.current === original.view &&
-                                selected.current === original.sessionId
+                                saved.id === consumed.proof.id &&
+                                saved.storeId === original.storeId &&
+                                saved.workspaceId === original.workspaceId &&
+                                saved.rootSessionId === original.sessionId &&
+                                saved.content === '' &&
+                                saved.revision === revision + 1 &&
+                                saved.consumedFrom?.commandId === consumed.commandId &&
+                                saved.consumedFrom.revision === revision
                               )
-                                draftRevision.current = saved.revision;
-                            }, false)
-                          }
-                        >
-                          保留草稿
-                        </button>
-                      </NativeDiagnostic>
-                    </>
-                  ),
-                }
-              : undefined
-      }
-      readOnlyReason={
-        childDetail
-          ? '子 Agent 会话仅供查看。'
-          : selection?.session.parentSessionId
-            ? '子会话只读'
+                                draftRevision.current = revision = saved.revision;
+                              if (consumedDraft.current === consumed)
+                                consumedDraft.current = undefined;
+                            }
+                            const saved = await bridge.request({
+                              method: 'draft.write',
+                              generation: original.generation,
+                              sessionId: original.sessionId,
+                              revision,
+                              content: draft,
+                            });
+                            if (
+                              saved &&
+                              'content' in saved &&
+                              'revision' in saved &&
+                              generation.current === original.generation &&
+                              viewIntent.current === original.view &&
+                              selected.current === original.sessionId
+                            )
+                              draftRevision.current = saved.revision;
+                          }, false)
+                        }
+                      >
+                        保留草稿
+                      </button>
+                    </NativeDiagnostic>
+                  </>
+                ),
+              }
             : undefined
       }
+      readOnlyReason={selection?.session.parentSessionId ? '子会话只读' : undefined}
       detailPanel={
-        diagnostics && !childDetail && toolsOpen
+        diagnostics && toolsOpen
           ? {
               label: '会话与任务',
               content: (

@@ -232,7 +232,15 @@ try {
         .locator(`[data-execution-id="${target.id}"]`)
         .getByRole('button', { name: /^查看子 Agent 详情/ })
         .click();
-      await page.getByRole('button', { name: '返回主会话', exact: true }).waitFor();
+      await page
+        .locator('.session-tab-child')
+        .getByRole('button', { name: '刷新子日志', exact: true })
+        .waitFor();
+      assert.equal(
+        await page.locator('.conversation').count(),
+        2,
+        'one parent plus exactly one active child conversation',
+      );
       const immediateMarkers = [...new Set((await content()).match(/CHILD_\d_\d_INITIAL_TAIL/g))];
       assert.ok(
         immediateMarkers.every((marker) => marker === `${target.marker}_INITIAL_TAIL`),
@@ -240,9 +248,22 @@ try {
       );
       return target;
     }
-    const content = () => page.locator('.conversation').innerText();
+    const content = async () =>
+      (await page.locator('.session-tab-child .conversation').count())
+        ? page.locator('.session-tab-child .conversation').innerText()
+        : page.locator('.history-panel .conversation').innerText();
     async function close(index: number) {
-      await page.getByRole('button', { name: '返回主会话', exact: true }).click();
+      await page.getByRole('button', { name: '收起标签栏', exact: true }).click();
+      await until(
+        () => page.locator('.session-tab-child').count(),
+        (value) => value === 0,
+        'child tab unmounted',
+      );
+      assert.equal(
+        await page.locator('.conversation').count(),
+        1,
+        'memory checkpoints retain only the parent conversation',
+      );
       await page
         .locator('.session-header')
         .getByTitle(`Live Root ${index}`, { exact: true })
@@ -396,7 +417,7 @@ try {
         // Native's verified built-in adapter uses the product title, rather
         // than exposing the shell.launch implementation identifier.
         const activity = page
-          .locator('.conversation')
+          .locator('.history-panel .conversation')
           .getByRole('article', { name: '启动后台 Shell · 成功', exact: true });
         await activity.waitFor();
         await until(
@@ -644,7 +665,7 @@ try {
             'root-3',
             'equivalent main root is sampled at each checkpoint',
           );
-          await page.locator('.conversation-viewport').evaluate((element) => {
+          await page.locator('.history-panel .conversation-viewport').evaluate((element) => {
             element.scrollTop = 0;
           });
           await until(
@@ -864,8 +885,7 @@ try {
         samples.push(await sample(`checkpoint-${round + 1}`));
       }
     }
-    if (await page.getByRole('button', { name: '返回主会话', exact: true }).isVisible())
-      await close(3);
+    if (await page.locator('.session-tab-child').count()) await close(3);
     if (measurement === 'profile') {
       const { profile } = await cdp.send('Profiler.stop');
       writeFileSync(
@@ -1344,7 +1364,7 @@ try {
     console.error('alerts', await page.getByRole('alert').allTextContents());
     console.error(
       'tool_groups',
-      await page.locator('.conversation .tool-activity').evaluateAll((nodes) =>
+      await page.locator('.history-panel .conversation .tool-activity').evaluateAll((nodes) =>
         nodes.map((node) => ({
           label: node.getAttribute('aria-label'),
           text: node.textContent?.slice(0, 200),
