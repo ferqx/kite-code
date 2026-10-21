@@ -966,6 +966,108 @@ body {
     margin-top: auto;
     gap: 4px 16px;
   }
+  .composer-queue {
+    margin: -10px -12px 6px;
+    padding: 4px 8px 6px;
+    border-bottom: 1px solid var(--composer-border-color);
+  }
+  .composer-queue-heading.button {
+    display: flex;
+    justify-content: space-between;
+    width: 100%;
+    height: 28px;
+    min-height: 0;
+    margin: 0;
+    padding: 0 4px;
+    color: var(--muted-foreground);
+    font-size: 12px;
+  }
+  .composer-queue-heading[data-state="open"] > svg {
+    transform: rotate(180deg);
+  }
+  .composer-queue-list {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    max-height: 144px;
+    overflow-y: auto;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+  .composer-queue-row {
+    display: flex;
+    align-items: center;
+    min-width: 0;
+    height: 30px;
+    gap: 4px;
+  }
+  .composer-queue-row > .button {
+    flex: none;
+    margin: 0;
+    color: var(--muted-foreground);
+  }
+  .composer-queue-drag:not(:disabled) {
+    cursor: grab;
+  }
+  .composer-queue-drag:active:not(:disabled) {
+    cursor: grabbing;
+  }
+  .composer-queue-preview {
+    flex: 1;
+    padding: 0;
+    margin: 0;
+    border: 0;
+    min-width: 0;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    font-size: 12px;
+    line-height: 24px;
+  }
+  .composer-queue-preview .typeset,
+  .composer-queue-preview
+    .typeset
+    :where(
+      p,
+      h1,
+      h2,
+      h3,
+      h4,
+      h5,
+      h6,
+      blockquote,
+      ul,
+      ol,
+      li,
+      pre,
+      div,
+      table,
+      thead,
+      tbody,
+      tr,
+      td,
+      th
+    ) {
+    display: inline;
+    margin: 0;
+    padding: 0;
+    border: 0;
+    white-space: nowrap;
+    font-size: inherit;
+    line-height: inherit;
+  }
+  .composer-queue-preview .typeset :where(p, h1, h2, h3, h4, h5, h6, li, pre, td, th)::after {
+    content: " ";
+  }
+  .composer-queue-preview .typeset :where(button, br) {
+    display: none;
+  }
+  .composer-queue-preview .typeset :where(a, code) {
+    white-space: nowrap;
+    overflow-wrap: normal;
+    word-break: normal;
+  }
   .composer-options {
     display: flex;
     align-items: center;
@@ -3200,7 +3302,189 @@ body {
   color: var(--foreground);
 }
 .kite-client .approval-command {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: pre;
+  font-size: 12px;
+  line-height: 22px;
+}
+.kite-client .native-approval-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  box-sizing: border-box;
+  min-width: 0;
+  padding: 10px 12px;
+  margin: 0 0 8px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--card);
+  box-shadow: 0 4px 16px var(--composer-shadow-color);
+  font-size: 12px;
+  line-height: 20px;
+}
+.kite-client .approval-heading,
+.kite-client .approval-heading-label,
+.kite-client .approval-child,
+.kite-client .approval-pager,
+.kite-client .approval-tool-line,
+.kite-client .approval-tool-label {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+}
+.kite-client .approval-heading {
+  height: 20px;
+  justify-content: space-between;
+  gap: 12px;
+}
+.kite-client .approval-heading-label {
+  gap: 6px;
+}
+.kite-client .approval-heading-label > svg {
+  color: var(--muted-foreground);
+}
+.kite-client .approval-heading strong {
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.kite-client .approval-child {
+  gap: 5px;
+  margin-left: 4px;
+  color: var(--muted-foreground);
+}
+.kite-client .approval-child-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.kite-client .approval-child-icon {
+  display: inline-flex;
+  flex-shrink: 0;
+}
+.kite-client .approval-child-icon[data-child-color="0"] {
+  color: var(--color-blue-500);
+}
+.kite-client .approval-child-icon[data-child-color="1"] {
+  color: var(--color-violet-500);
+}
+.kite-client .approval-child-icon[data-child-color="2"] {
+  color: var(--color-teal-500);
+}
+.kite-client .approval-child-icon[data-child-color="3"] {
+  color: var(--color-amber-500);
+}
+.kite-client .approval-child-icon[data-child-color="4"] {
+  color: var(--color-rose-500);
+}
+.kite-client .approval-child-icon[data-child-color="5"] {
+  color: var(--color-sky-500);
+}
+.kite-client .approval-heading svg,
+.kite-client .approval-tool-label svg {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+}
+.kite-client .approval-pager {
+  gap: 3px;
+  flex-shrink: 0;
+  color: var(--muted-foreground);
+  font-variant-numeric: tabular-nums;
+}
+.kite-client .approval-pager .button {
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  margin: 0;
+  border: 0;
+}
+.kite-client .approval-pager span {
+  min-width: 28px;
+  text-align: center;
+  font-size: 11px;
+}
+.kite-client .native-approval-group article,
+.kite-client .native-approval-group article > section {
+  min-width: 0;
+}
+.kite-client .approval-tool-line {
+  height: 24px;
+  gap: 8px;
+}
+.kite-client .approval-tool-label {
+  flex-shrink: 0;
+  max-width: 35%;
+  gap: 5px;
+  color: var(--muted-foreground);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.kite-client .approval-tool-line > .approval-command {
+  flex: 1;
+}
+.kite-client .native-approval-group .approval-actions {
+  margin-top: 6px;
+  height: 28px;
+  gap: 12px;
+}
+.kite-client .native-approval-group .approval-actions .button {
+  height: 28px;
+  padding: 0 10px;
+  font-size: 12px;
+}
+.kite-client .native-approval-group .approval-split > .button:last-child {
+  width: 28px;
+  padding: 0;
+}
+.kite-client .approval-submission {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+  color: var(--muted-foreground);
+}
+.kite-client .approval-session-option {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.kite-client .approval-session-option small {
+  font-size: 11px;
+  color: var(--muted-foreground);
+}
+.kite-client.approval-command-tooltip {
+  max-width: min(680px, calc(100vw - 32px));
+  max-height: min(360px, var(--radix-tooltip-content-available-height));
+  overflow: auto;
+  text-align: left;
+  background: var(--card);
+  color: var(--foreground);
+  border: 1px solid var(--border);
+}
+.kite-client.approval-command-tooltip code {
   white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-size: 12px;
+}
+.kite-client.composer-queue-tooltip {
+  width: max-content;
+  max-width: min(600px, calc(100vw - 32px));
+  max-height: min(360px, var(--radix-tooltip-content-available-height));
+  overflow: auto;
+  background: var(--card);
+  color: var(--foreground);
+  border: 1px solid var(--border);
+  box-shadow: 0 4px 16px var(--composer-shadow-color);
+  text-align: start;
+  overflow-wrap: anywhere;
+}
+.kite-client.composer-queue-tooltip .typeset {
+  font-size: 12px;
 }
 .kite-client .settings-layout {
   display: grid;

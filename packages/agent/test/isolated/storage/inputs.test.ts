@@ -1,8 +1,10 @@
 import { Database } from 'bun:sqlite';
 import { expect, test } from 'bun:test';
-import { chmodSync, rmSync } from 'node:fs';
+import { chmodSync, readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { temporaryDirectory } from '../../../../../tests/fixtures/test-filesystem';
+import { createRuntime } from '../../../src';
+import { createArtifactStore } from '../../../src/artifacts';
 import { semanticDigest } from '../../../src/json';
 import { openSqliteStore } from '../../../src/sqlite';
 import type { CommandRequest } from '../../../src/storage/types';
@@ -650,5 +652,546 @@ test('large trusted follow-up configuration is saved whole and repeated applicat
   } finally {
     await readonly?.close();
     await f.cleanup();
+  }
+});
+
+test('pending queue reorder preserves command provenance, CAS pages and actual steer consumption; cold readers see persisted order', async () => {
+  const f = await fixture();
+  try {
+    await f.steer('qa');
+    await f.steer('qb');
+    await f.steer('qc');
+    const originals = await Promise.all(['qa', 'qb', 'qc'].map((id) => f.store.getCommand(id)));
+    const query = { expectedStoreId: f.expectedStoreId, sessionId: 's' };
+    const before = await f.store.getPendingInputQueue(query);
+    const operation = {
+      ...f.base,
+      kind: 'input.reorder' as const,
+      commandId: 'reorder',
+      expectedRevision: before.revision,
+      commandIds: ['qc', 'qa', 'qb'],
+    };
+    const changed = await f.store.reorderPendingInputs(operation);
+    expect(changed.status).toBe('applied');
+    expect((await f.store.reorderPendingInputs(operation)).id).toBe(changed.id);
+    const first = await f.store.getPendingInputQueue({ ...query, limit: 1 });
+    expect(first.commands.map((c) => c.id)).toEqual(['qc']);
+    const rest = await f.store.getPendingInputQueue({
+      ...query,
+      afterOrder: first.nextAfterOrder!,
+      expectedRevision: first.revision,
+    });
+    expect(rest.commands.map((c) => c.id)).toEqual(['qa', 'qb']);
+    await rejected(f.apply('qa'), 'input_order_conflict');
+    await f.apply('qc');
+    await rejected(
+      f.store.getPendingInputQueue({ ...query, expectedRevision: first.revision }),
+      'input_queue_changed',
+    );
+    const cold = await openSqliteStore({ ...f.profile, mode: 'readonly' });
+    try {
+      expect((await cold.getPendingInputQueue(query)).commands.map((c) => c.id)).toEqual([
+        'qa',
+        'qb',
+      ]);
+    } finally {
+      await cold.close();
+    }
+    await f.apply('qa');
+    await f.apply('qb');
+    for (let i = 0; i < originals.length; i++) {
+      const now = await f.store.getCommand(originals[i]!.id);
+      expect(now!.seq).toBe(originals[i]!.seq);
+      expect(now!.requestDigest).toBe(originals[i]!.requestDigest);
+      expect(now!.request).toEqual(originals[i]!.request);
+    }
+    expect(
+      (await f.store.listMessages('s'))
+        .filter((m) => m.inputKind === 'input.steer')
+        .map((m) => m.content),
+    ).toEqual(['qc', 'qa', 'qb']);
+  } finally {
+    await f.cleanup();
+  }
+});
+
+test('withdraw is an atomic pending-only operation and never cancels consumed work or its Run', async () => {
+  const f = await fixture();
+  try {
+    const query = { expectedStoreId: f.expectedStoreId, sessionId: 's' };
+    await f.steer('withdraw-me');
+    const operation = {
+      ...f.base,
+      kind: 'input.withdraw' as const,
+      commandId: 'withdraw',
+      targetCommandId: 'withdraw-me',
+      expectedRevision: (await f.store.getPendingInputQueue(query)).revision,
+    };
+    const receipt = await f.store.withdrawPendingInput(operation);
+    expect(receipt.receipt).toEqual({ outcome: 'input_withdrawn', targetCommandId: 'withdraw-me' });
+    expect((await f.store.withdrawPendingInput(operation)).id).toBe(receipt.id);
+    expect((await f.store.getPendingInputQueue(query)).commands).toHaveLength(0);
+    await rejected(f.apply('withdraw-me'), 'input_cancelled');
+    expect(
+      (await f.store.listMessages('s')).filter((m) => m.inputKind === 'input.steer'),
+    ).toHaveLength(0);
+    expect((await f.store.getRun(f.run.id))!.isActive).toBe(true);
+    await f.steer('consumed');
+    const before = await f.store.getPendingInputQueue(query);
+    await f.apply('consumed');
+    await rejected(
+      f.store.withdrawPendingInput({
+        ...operation,
+        commandId: 'late',
+        targetCommandId: 'consumed',
+        expectedRevision: before.revision,
+      }),
+      'input_already_consumed',
+    );
+    expect(
+      f.db
+        .query<{ cancel_requested: number }, [string]>(
+          'SELECT cancel_requested FROM run WHERE id=?',
+        )
+        .get(f.run.id)!.cancel_requested,
+    ).toBe(0);
+    expect((await f.store.getCommand('consumed'))!.cancelRequestedAt).toBeNull();
+    expect(await f.store.getCommand('late')).toBeNull();
+  } finally {
+    await f.cleanup();
+  }
+});
+
+test('follow-up uses the same persisted queue order and refuses a stale pre-reorder dispatch', async () => {
+  const f = await fixture();
+  try {
+    await f.follow('next-a');
+    await f.follow('next-b');
+    const query = { expectedStoreId: f.expectedStoreId, sessionId: 's' };
+    const queue = await f.store.getPendingInputQueue(query);
+    await f.store.reorderPendingInputs({
+      ...f.base,
+      kind: 'input.reorder',
+      commandId: 'move-next',
+      expectedRevision: queue.revision,
+      commandIds: ['next-b', 'next-a'],
+    });
+    await f.finish();
+    await rejected(
+      f.store.applyInput({ ...f.write, kind: 'follow_up', commandId: 'next-a', configuration: {} }),
+      'input_order_conflict',
+    );
+    const first = await f.store.applyInput({
+      ...f.write,
+      kind: 'follow_up',
+      commandId: 'next-b',
+      configuration: {},
+    });
+    expect(first.message.content).toBe('next-b');
+    const stale = (await f.store.getPendingInputQueue(query)).revision;
+    await rejected(
+      f.store.withdrawPendingInput({
+        ...f.base,
+        kind: 'input.withdraw',
+        commandId: 'late-follow-withdraw',
+        targetCommandId: 'next-b',
+        expectedRevision: stale,
+      }),
+      'input_already_consumed',
+    );
+    expect((await f.store.getRun(first.run.id))!.isActive).toBe(true);
+    expect(
+      f.db
+        .query<{ cancel_requested: number }, [string]>(
+          'SELECT cancel_requested FROM run WHERE id=?',
+        )
+        .get(first.run.id)!.cancel_requested,
+    ).toBe(0);
+    await f.store.finishRun({
+      ...f.write,
+      runId: first.run.id,
+      status: 'completed',
+      requirements: [],
+    });
+    expect(
+      (
+        await f.store.applyInput({
+          ...f.write,
+          kind: 'follow_up',
+          commandId: 'next-a',
+          configuration: {},
+        })
+      ).message.content,
+    ).toBe('next-a');
+  } finally {
+    await f.cleanup();
+  }
+});
+
+test('concurrent withdrawal and consumption serialize to one fact, with zero Run cancellation', async () => {
+  const f = await fixture();
+  try {
+    for (let index = 0; index < 8; index++) {
+      const id = `race-${index}`;
+      await f.steer(id);
+      const revision = (
+        await f.store.getPendingInputQueue({ expectedStoreId: f.expectedStoreId, sessionId: 's' })
+      ).revision;
+      const results = await Promise.allSettled([
+        f.store.withdrawPendingInput({
+          ...f.base,
+          kind: 'input.withdraw',
+          commandId: `withdraw-${index}`,
+          targetCommandId: id,
+          expectedRevision: revision,
+        }),
+        f.apply(id),
+      ]);
+      expect(results.filter((result) => result.status === 'fulfilled')).toHaveLength(1);
+      const command = await f.store.getCommand(id);
+      expect(['applied', 'rejected']).toContain(command!.status);
+      const messages = (await f.store.listMessages('s')).filter(
+        (message) => message.originCommandId === id,
+      );
+      expect(messages).toHaveLength(command!.status === 'applied' ? 1 : 0);
+      expect(
+        f.db
+          .query<{ cancel_requested: number }, [string]>(
+            'SELECT cancel_requested FROM run WHERE id=?',
+          )
+          .get(f.run.id)!.cancel_requested,
+      ).toBe(0);
+    }
+  } finally {
+    await f.cleanup();
+  }
+});
+
+test('queue revision cannot ABA and incorrect members, subjects, Store or child do not change pending work', async () => {
+  const f = await fixture();
+  try {
+    await f.steer('stable-a');
+    await f.steer('stable-b');
+    const query = { expectedStoreId: f.expectedStoreId, sessionId: 's' };
+    const original = await f.store.getPendingInputQueue(query);
+    await f.store.reorderPendingInputs({
+      ...f.base,
+      kind: 'input.reorder',
+      commandId: 'reverse',
+      expectedRevision: original.revision,
+      commandIds: ['stable-b', 'stable-a'],
+    });
+    const reverse = await f.store.getPendingInputQueue(query);
+    await f.store.reorderPendingInputs({
+      ...f.base,
+      kind: 'input.reorder',
+      commandId: 'restore-order',
+      expectedRevision: reverse.revision,
+      commandIds: ['stable-a', 'stable-b'],
+    });
+    const restored = await f.store.getPendingInputQueue(query);
+    expect(restored.commands.map((c) => c.id)).toEqual(original.commands.map((c) => c.id));
+    expect(restored.revision).not.toBe(original.revision);
+    await rejected(
+      f.store.reorderPendingInputs({
+        ...f.base,
+        kind: 'input.reorder',
+        commandId: 'stale-aba',
+        expectedRevision: original.revision,
+        commandIds: ['stable-b', 'stable-a'],
+      }),
+      'input_queue_changed',
+    );
+    await rejected(
+      f.store.reorderPendingInputs({
+        ...f.base,
+        kind: 'input.reorder',
+        commandId: 'duplicates',
+        expectedRevision: restored.revision,
+        commandIds: ['stable-a', 'stable-a'],
+      }),
+      'input_queue_members_changed',
+    );
+    const withdraw = {
+      ...f.base,
+      kind: 'input.withdraw' as const,
+      commandId: 'untrusted',
+      expectedRevision: restored.revision,
+      targetCommandId: 'stable-a',
+    };
+    await rejected(
+      f.store.withdrawPendingInput({ ...withdraw, subjectId: 'other' }),
+      'permission_denied',
+    );
+    await rejected(
+      f.store.withdrawPendingInput({ ...withdraw, expectedStoreId: 'other' }),
+      'store_identity_mismatch',
+    );
+    f.db.run("UPDATE session SET parent_id='s' WHERE id='s'");
+    await rejected(f.store.getPendingInputQueue(query), 'group_root_required');
+    await rejected(f.store.withdrawPendingInput(withdraw), 'group_root_required');
+    f.db.run("UPDATE session SET parent_id=NULL WHERE id='s'");
+    expect((await f.store.getPendingInputQueue(query)).revision).toBe(restored.revision);
+  } finally {
+    await f.cleanup();
+  }
+});
+
+test('concurrent reorder and consumption use one order and failed withdrawal publication rolls back', async () => {
+  const f = await fixture();
+  try {
+    const query = { expectedStoreId: f.expectedStoreId, sessionId: 's' };
+    for (let index = 0; index < 4; index++) {
+      const a = `order-race-a-${index}`,
+        b = `order-race-b-${index}`;
+      await f.steer(a);
+      await f.steer(b);
+      const revision = (await f.store.getPendingInputQueue(query)).revision;
+      const [reorder, apply] = await Promise.allSettled([
+        f.store.reorderPendingInputs({
+          ...f.base,
+          kind: 'input.reorder',
+          commandId: `order-race-${index}`,
+          expectedRevision: revision,
+          commandIds: [b, a],
+        }),
+        f.apply(a),
+      ]);
+      expect([reorder, apply].filter((item) => item.status === 'fulfilled')).toHaveLength(1);
+      if (reorder.status === 'fulfilled') {
+        expect(
+          (await f.store.getPendingInputQueue(query)).commands.map((command) => command.id),
+        ).toEqual([b, a]);
+        await f.apply(b);
+        await f.apply(a);
+      } else {
+        expect(
+          (await f.store.getPendingInputQueue(query)).commands.map((command) => command.id),
+        ).toEqual([b]);
+        await f.apply(b);
+      }
+    }
+    await f.steer('rollback');
+    const before = await f.store.getPendingInputQueue(query);
+    f.db.run('UPDATE session SET next_seq=9223372036854775807 WHERE id=?', ['s']);
+    await rejected(
+      f.store.withdrawPendingInput({
+        ...f.base,
+        kind: 'input.withdraw',
+        commandId: 'overflow-withdraw',
+        targetCommandId: 'rollback',
+        expectedRevision: before.revision,
+      }),
+      'sequence_exhausted',
+    );
+    expect((await f.store.getCommand('rollback'))!.status).toBe('accepted');
+    expect((await f.store.getPendingInputQueue(query)).revision).toBe(before.revision);
+    expect(await f.store.getCommand('overflow-withdraw')).toBeNull();
+  } finally {
+    await f.cleanup();
+  }
+});
+
+test('queue survives closing and reopening its original Store without applying any pending input', async () => {
+  const f = await fixture();
+  try {
+    await f.steer('cold-a');
+    await f.steer('cold-b');
+    const query = { expectedStoreId: f.expectedStoreId, sessionId: 's' };
+    const first = await f.store.getPendingInputQueue(query);
+    await f.store.reorderPendingInputs({
+      ...f.base,
+      kind: 'input.reorder',
+      commandId: 'cold-order',
+      commandIds: ['cold-b', 'cold-a'],
+      expectedRevision: first.revision,
+    });
+    const saved = await f.store.getPendingInputQueue(query);
+    await f.store.close();
+    const reopened = await openSqliteStore(f.profile);
+    try {
+      const cold = await reopened.getPendingInputQueue({
+        ...query,
+        expectedRevision: saved.revision,
+      });
+      expect(cold).toEqual(saved);
+      expect(cold.commands.map((command) => command.id)).toEqual(['cold-b', 'cold-a']);
+      expect(
+        (await reopened.listMessages('s')).filter((message) => message.inputKind === 'input.steer'),
+      ).toHaveLength(0);
+      expect((await reopened.getRun(f.run.id))!.isActive).toBe(true);
+    } finally {
+      await reopened.close();
+    }
+  } finally {
+    await f.cleanup();
+  }
+});
+
+test('file-only queued inputs keep exact attachment metadata while reordering and withdrawing safely', async () => {
+  const f = await fixture();
+  try {
+    await f.steer('text-slot');
+    const files = [{ name: 'report **original**.md', uri: 'file:///fixture/report%20original.md' }];
+    const attachment = await f.store.acceptCommand({
+      ...f.base,
+      commandId: 'file-only',
+      request: {
+        kind: 'input.steer',
+        content: '',
+        files,
+        targetRunId: f.run.id,
+        contextSelectionId: f.contextSelectionId,
+      },
+    });
+    const query = { expectedStoreId: f.expectedStoreId, sessionId: 's' };
+    const first = await f.store.getPendingInputQueue(query);
+    await f.store.reorderPendingInputs({
+      ...f.base,
+      kind: 'input.reorder',
+      commandId: 'file-first',
+      commandIds: ['file-only', 'text-slot'],
+      expectedRevision: first.revision,
+    });
+    const moved = await f.store.getPendingInputQueue(query);
+    expect(moved.commands.map((command) => command.id)).toEqual(['file-only', 'text-slot']);
+    expect(moved.commands[0]!.request).toEqual(attachment.request);
+    expect(moved.commands[0]!.requestDigest).toBe(attachment.requestDigest);
+    const result = await f.store.withdrawPendingInput({
+      ...f.base,
+      kind: 'input.withdraw',
+      commandId: 'remove-file',
+      targetCommandId: 'file-only',
+      expectedRevision: moved.revision,
+    });
+    expect(result.receipt).toEqual({ outcome: 'input_withdrawn', targetCommandId: 'file-only' });
+    expect((await f.store.getCommand('file-only'))!.request).toEqual(attachment.request);
+    expect(
+      (await f.store.getPendingInputQueue(query)).commands.map((command) => command.id),
+    ).toEqual(['text-slot']);
+    expect(
+      (await f.store.listMessages('s')).filter(
+        (message) => message.originCommandId === 'file-only',
+      ),
+    ).toHaveLength(0);
+  } finally {
+    await f.cleanup();
+  }
+});
+
+test('image-only queued input reorders and withdraws without losing its immutable original image reference', async () => {
+  const f = await fixture();
+  const runtime = createRuntime({
+    store: f.store,
+    modelId: 'fixed',
+    permissions: {
+      async authorize() {
+        return { allowed: true, revision: '1' };
+      },
+    },
+    artifacts: createArtifactStore({ profile: f.profile, store: f.store }),
+    model: {
+      stream() {
+        throw Error('No Model dispatch permitted');
+      },
+    },
+  });
+  try {
+    const image = await runtime.uploadInputImage({
+      ...f.base,
+      id: 'queue-image',
+      name: 'original.png',
+      mediaType: 'image/png',
+      data: 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a1eIAAAAASUVORK5CYII=',
+    });
+    await f.steer('plain-before-image');
+    const original = await f.store.acceptCommand({
+      ...f.base,
+      commandId: 'image-only',
+      request: {
+        kind: 'input.steer',
+        content: '',
+        images: [image],
+        targetRunId: f.run.id,
+        contextSelectionId: f.contextSelectionId,
+      },
+    });
+    const query = { expectedStoreId: f.expectedStoreId, sessionId: 's' };
+    const first = await f.store.getPendingInputQueue(query);
+    await f.store.reorderPendingInputs({
+      ...f.base,
+      kind: 'input.reorder',
+      commandId: 'image-first',
+      commandIds: ['image-only', 'plain-before-image'],
+      expectedRevision: first.revision,
+    });
+    const moved = await f.store.getPendingInputQueue(query);
+    expect(moved.commands.map((command) => command.id)).toEqual([
+      'image-only',
+      'plain-before-image',
+    ]);
+    expect(moved.commands[0]!.request).toEqual(original.request);
+    expect(moved.commands[0]!.requestDigest).toBe(original.requestDigest);
+    await f.store.withdrawPendingInput({
+      ...f.base,
+      kind: 'input.withdraw',
+      commandId: 'remove-image',
+      targetCommandId: 'image-only',
+      expectedRevision: moved.revision,
+    });
+    expect((await f.store.getCommand('image-only'))!.request).toEqual(original.request);
+    expect(
+      (await f.store.getPendingInputQueue(query)).commands.map((command) => command.id),
+    ).toEqual(['plain-before-image']);
+    expect(
+      (await f.store.listMessages('s')).filter(
+        (message) => message.originCommandId === 'image-only',
+      ),
+    ).toHaveLength(0);
+  } finally {
+    await runtime.close();
+    await f.cleanup();
+  }
+});
+
+test('queue deletion trigger advances a live queue and never resurrects a cascaded Session revision', () => {
+  const db = new Database(':memory:');
+  try {
+    db.exec(`PRAGMA foreign_keys=ON;
+      CREATE TABLE session(id TEXT PRIMARY KEY);
+      CREATE TABLE command(id TEXT PRIMARY KEY,session_id TEXT REFERENCES session(id) ON DELETE CASCADE,
+        seq INTEGER,status TEXT,kind TEXT,cancelled INTEGER,receipt_json TEXT);`);
+    db.exec(
+      readFileSync(
+        new URL('../../../src/storage/migrations/0004-pending-input-order.sql', import.meta.url),
+        'utf8',
+      ),
+    );
+    db.run('INSERT INTO session VALUES(?)', ['cascade-root']);
+    const insert = (id: string) =>
+      db.run('INSERT INTO command(id,session_id,seq,status,kind,cancelled) VALUES(?,?,?,?,?,?)', [
+        id,
+        'cascade-root',
+        1,
+        'accepted',
+        'input.steer',
+        0,
+      ]);
+    insert('delete-live');
+    const version = () =>
+      db.query<{ revision: number }, []>('SELECT revision FROM pending_input_queue_revision').get()!
+        .revision;
+    expect(version()).toBe(1);
+    db.run('DELETE FROM command WHERE id=?', ['delete-live']);
+    expect(version()).toBe(2);
+    insert('cascade-pending');
+    expect(version()).toBe(3);
+    db.run('DELETE FROM session WHERE id=?', ['cascade-root']);
+    expect(db.query('SELECT * FROM session').all()).toHaveLength(0);
+    expect(db.query('SELECT * FROM command').all()).toHaveLength(0);
+    expect(db.query('SELECT * FROM pending_input_queue_revision').all()).toHaveLength(0);
+    expect(db.query('PRAGMA foreign_key_check').all()).toHaveLength(0);
+  } finally {
+    db.close();
   }
 });

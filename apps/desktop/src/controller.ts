@@ -1,6 +1,7 @@
 import {
   type AgentClient,
   type AnswerInteractionRequest,
+  type Change,
   ClientError,
   type Command,
   type Execution,
@@ -22,6 +23,34 @@ import {
   type WorkspaceTrustState,
 } from '@kite-ai/client';
 import { serializePlanReviewAnswer } from '@kite-ai/ui';
+
+/** Permission facts belong to the observed root and Workspace, even in a child view. */
+export function permissionChangeAffectsView(
+  change: Change,
+  view: SessionView | undefined,
+  storeId: string | undefined,
+): boolean {
+  if (!view || view.storeId !== storeId || change.type !== 'host_control.changed') return false;
+  const payload = change.payload;
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return false;
+  const receipt = payload.receipt;
+  if (
+    !receipt ||
+    typeof receipt !== 'object' ||
+    Array.isArray(receipt) ||
+    receipt.status !== 'applied'
+  )
+    return false;
+  if (payload.kind === 'workspace.trust')
+    return change.sessionId === null && payload.scope === `workspace:${view.session.workspaceId}`;
+  if (
+    payload.kind !== 'permission.mode' ||
+    !change.sessionId ||
+    payload.scope !== `session:${change.sessionId}`
+  )
+    return false;
+  return change.sessionId === view.session.rootSessionId || receipt.makeDefault === true;
+}
 
 export interface QuerySelection {
   readonly extensionId: string;
@@ -132,6 +161,7 @@ export class DesktopController {
   private generation = 0;
   private selected: { sessionId: string; queries: readonly QuerySelection[] } | undefined;
   private current: DesktopSnapshot | undefined;
+  private permissionScope: SessionView | undefined;
   private stream: Promise<void> | undefined;
   private observing: AbortController | undefined;
   private disposed = false;
@@ -189,6 +219,15 @@ export class DesktopController {
   get snapshot(): DesktopSnapshot | undefined {
     return this.current;
   }
+  /** Scope only: a verified View may precede the rest of its metadata reads. */
+  get permissionView(): SessionView | undefined {
+    const view = this.current?.view ?? this.permissionScope;
+    return !this.disposed &&
+      view?.session.id === this.selected?.sessionId &&
+      view?.storeId === this.client.serverInfo?.storeId
+      ? view
+      : undefined;
+  }
   get cachedObjectCount(): number {
     return this.cache.size;
   }
@@ -206,6 +245,7 @@ export class DesktopController {
     const generation = ++this.generation;
     this.selected = { sessionId, queries: structuredClone(queries) };
     this.current = undefined;
+    this.permissionScope = undefined;
     this.selectionRead?.abort();
     const activation = new AbortController();
     this.selectionRead = activation;
@@ -270,6 +310,7 @@ export class DesktopController {
     try {
       const view = await this.client.getView(selection.sessionId, { signal });
       check();
+      this.permissionScope = view;
       const afterId =
         previous &&
         previous.scope.storeId === view.storeId &&
@@ -546,7 +587,15 @@ export class DesktopController {
     const stream = this.client.observe({
       signal: controller.signal,
       onChange: async (change) => {
-        if (change.sessionId && this.selected?.sessionId === change.sessionId)
+        if (
+          this.selected &&
+          ((change.sessionId && this.selected.sessionId === change.sessionId) ||
+            permissionChangeAffectsView(
+              change,
+              this.permissionView,
+              this.client.serverInfo?.storeId,
+            ))
+        )
           await this.refreshSession(this.selected.sessionId);
       },
       onReset: async () => {

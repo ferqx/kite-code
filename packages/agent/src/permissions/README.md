@@ -20,6 +20,8 @@
 
 [动态模式测试](../../test/isolated/execution/live-permission-mode.test.ts)使用真实 Runtime／SQLite，覆盖原卡自动关闭、最终派发竞争、未消费批准、迟到审核、资源等待、三层可信子权限、另一根隔离及只读拒绝；[Service 权限装配](../../../../apps/service/test/isolated/permission-configuration.test.ts)另核默认和注入策略的实际 SDK 请求、同 Run 模式切换及文件效果。测试不替代完整客户端卡片显示或所有平台恢复资格。
 
+同一整文件另在主 Agent 与第三层 child 的原 active Run 中先持有已经派发的首工具，再收紧模式并核下一工具仍 planned、零新效果，准确批准后仅派发一次；同时覆盖三层 child 的资源等待双向切换与 Auto 迟到批准。审核场景沿原 generator 关闭与 review Command 终态同步，不用固定等待代替旧审核结算。已派发工具不因模式变化被取消，下一工具必须绑定新根控制 revision。
+
 [files-request.ts](files-request.ts) 只为准确绝对路径 Files Tool 版本1建立当前物理父目录和目标身份摘要，并校验最终实际 `dispatchAuthorization` 的全部父子叶证明。身份由 Files 引擎的可信 `inspectIdentity` 提供，Windows 不把 Node stat 身份与原生 volume／128-bit FileID 混比；派发重核使用实际已锚定的父对象。请求批准模式对外部写入要求人工；自动审核交实际模型决定；完全访问只移除普通审批，仍保 protected/private、危险目标及未合格平台拒绝。读与 mutation 的完整路径、CAS、checkpoint 和实际 Windows 验证范围归 [Files owner](../tools/files/README.md#绝对用户文件)。
 
 本次 macOS 当前工作树复用 [policy](../../test/isolated/permissions/policy.test.ts)、[Task 分类](../../test/isolated/permissions/task-request.test.ts) 和 [只读审阅上下文](../../test/isolated/permissions/review-context.test.ts) 的实际叶证据；另运行 [Task 整文件](../../test/isolated/business/task/task.test.ts)，11 项、74 断言通过，其中真实父人工／子自动组合证明审核后零效果、实际批准后效果一次且不重放 reviewer。原 [subagent 终端整文件](../../../../tests/tui-system/scenarios/subagent-approval.test.ts) 9 项、120 断言通过，证明自动审核实际外部写入与人类拒绝／取消。局部证据不代替全体客户端或发布门禁。

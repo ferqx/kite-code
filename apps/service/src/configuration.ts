@@ -538,6 +538,7 @@ export function createDefaultProcessConfiguration(options: {
       runtime,
       profile: options.profile,
       writable: !externalPermissionAuthority,
+      allowModeChanges: true,
       nativeShellRead: shellOptions?.platform === 'darwin' && process.platform === 'darwin',
     });
     return managed;

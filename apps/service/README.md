@@ -1,5 +1,11 @@
 # 本机 Agent Service
 
+## 待消费输入队列协议
+
+[正式 HTTP owner](src/index.ts)仅在 Runtime 的三个队列方法齐备时提供 `pending_input_queue` capability。`GET /v1/sessions/{id}/input-queue` 接收 `storeId`、可选 `afterOrder`／`limit`／`expectedRevision`，返回完整原 request 联合、`orders`、`nextAfterOrder`、`revision` 与 `snapshotCursor`；后续页固定首 revision，成员或顺序变化拒绝。`POST /v1/sessions/{id}/input-queue/withdraw` 使用闭合 `input.withdraw`、Main／调用者保存的原 commandId、expected Store、targetCommandId 和 expectedRevision；`.../reorder` 使用 `input.reorder` 与完整可移动 commandIds 集合。subject 只来自已认证连接，不从正文接纳；这些公开队列入口核同一根会话、主体与 Store，子会话不取得该队列的读写资格。
+
+响应为原公共 Command，撤回和排序的 applied 回执分别是 `input_withdrawn`／`inputs_reordered`。已消费输入拒绝窄撤回，不调用通用取消。`GET /inputs` 的原 seq 分页接口保留；新增队列读与 Runtime 实际消费共用 [Store](../../packages/agent/src/storage/README.md#待消费输入的撤回与排序)的持久顺序，Service 不维护第二份数组或重排权威。生成 OpenAPI、Client 类型与 validator 同源，[SDK owner](../../packages/client/README.md#待消费输入队列)维护准入和原意图克隆；[真实 HTTP 测试](test/isolated/input-queue.test.ts)覆盖分页、撤回、重排和原 Command 回执。
+
 ## 后台目录的来源投影
 
 公开后台目录查询可显式带 `includeSourceTool:true`；HTTP 仅将严格的 true／false 字符串转为布尔值，其他值及重复参数仍拒绝。默认／false 保留原响应结构；true 可返回可选 `sourceTool:{id,definitionId,definitionVersion}`，字段来源和作用域归[Store owner](../../packages/agent/src/storage/README.md#跨会话原-job-目录)。同一[生成 schema](src/http/schema/index.ts)同步 OpenAPI、Client 类型与闭合 validator；来源不含工具正文，不增加路由、执行权限或恢复资格。Cookie Browser Gateway 接受同一 `includeSourceTool` 参数并沿用严格布尔解析、重复参数与自报 Store／主体拒绝；[实际 Gateway 回归](test/isolated/development-web.test.ts)核省略／false 的原响应、true 的真实父 Tool 投影及只读零执行。
@@ -13,7 +19,7 @@
 
 Windows daemon 在本进程首次完整准入后，把原 live artifact owner 交给 Service 装配；[同进程借用](src/windows-paired-artifact.ts)只接受 WeakMap 登记的原对象及准确 proof/entry/executable/build，关闭开始、伪造、复制或错根均拒绝，未归还借用时原 owner 不能关闭。每个新进程仍独立取得 SH、原文件 pin、完整库存与全字节 SHA，startup JSON 不传借用权。Runtime verifier 和归档可复用同一原 pin，但每次仍核全部内容与对象，关闭未知保原资源。普通 JS 依赖按[构建声明](bundled-dependencies.ts)内联；原跨进程和恢复合同保持，理由归[闭包成本决定](../../.agents/notes/implemented/bug-fix/2026-10-17-windows-bundle-admission-cost.md)。
 
-`GET /v1/sessions/{id}/inputs` 的有限 response request 联合包括 steer、follow-up 和 Core 已接受的 `result.include`；只读投影保原 selection／execution／result revision／target Run。原 Store reader 同时供 Runtime checkpoint消费，不能过滤掉 result include 来迁就客户端显示；接口 schema 负责正确投影，TUI 只把文本输入显示为队列并正常推进所有 cursor。原写路由、权限与 Core 应用顺序不变，[真实混合页回归](test/isolated/pending-inputs.test.ts)核完整原申请与零重执行。
+`GET /v1/sessions/{id}/inputs` 的有限 response request 联合包括 steer、follow-up 和 Core 已接受的 `result.include`；只读投影保原 selection／execution／result revision／target Run，继续按原 seq 分页供兼容读取。接口不能过滤掉 result include 来迁就客户端显示；TUI 只把文本输入显示为队列并正常推进所有 cursor。Runtime checkpoint 与可变更队列使用上面的独立顺序 reader，原普通输入写路由与权限保持；[真实混合页回归](test/isolated/pending-inputs.test.ts)核旧读取的完整原申请与零重执行。
 
 ## 默认装配与业务规则归属
 
@@ -331,6 +337,8 @@ Auto 分类只返回准确 invocation、effects 及可选只读 task/plan/拒绝
 
 
 `createDefaultProcessConfiguration({profile,permissions?,permissionPolicy?:{readPolicy},...})` 为每个新 Run 返回其实际 `permissions`，并通过 `permissionManagement(runtime)` 绑定真实 Runtime。可信 `permissions` 注入保留额外硬拒绝和明确人工要求，`permissionPolicy.readPolicy` 保留能力与信任上限；两者均不能替换所属根 Session 当前 applied 模式和最终派发的准确 `controlReads`。每次派发与审批接纳前重读当前事实，新用户/尚无模式记录的 Session 默认 Auto，Workspace 缺持久确认时未信任；仍允许本 Run 准确 kind/model ID/version 的实际 Model，Tool 不会通过单次审批越过 trust。直接测试宿主尚未绑定 Runtime 时保持 Auto/untrusted 的安全只读默认。权限模式、trust 或 allowlist 不能从 JSONC、MCP 描述或 Skill 元数据生成。
+
+默认工厂通过 `createPermissionManagement({allowModeChanges:true})` 保留运行中的根模式控制，即使注入策略使其余管理操作 `writable:false`，原 `permission.mode` HTTP 入口仍可写；trust 和清除 grants 继续由原宿主边界限制。`host-status` 显示真实持久 mode/default，不再因存在注入策略而清空；无法完整解释的注入 trust 上限继续显示 unavailable。原工厂自身管理器与真实 HTTP 的[配置回归](test/isolated/permission-configuration.test.ts)验证待批切 Full、最终派发前收紧及 Full 不绕过硬拒绝／强制人工；没有另建可写管理器代替被测入口。
 
 `describeCapability` 由当次真实 assembly 产生：选中的 builtin files read/list/glob/search 和 Skill load/resource 是 safe read；files write/edit 是 Workspace write；真实注册但未识别的其他能力是 unknown，缺实际注册则拒绝。实际 `files.read@3`、`files.write/edit/search/glob@2`、`files.list@1` 来自当次定义，配置不能改写它。Shell 仅在下文可信宿主显式选择的执行资格与真实 guardian 下注册；MCP 仅在上文明确 programmatic lifecycle/port 配置下注册。当前六个 files Tools 没有 mkdir，不因权限分类保留可能的未来 ID 就宣称已提供该工具。
 

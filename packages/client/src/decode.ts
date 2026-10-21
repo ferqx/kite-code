@@ -45,6 +45,7 @@ export interface Responses {
   SessionMutationResponse: API.SessionMutationResponse;
   IncludeResultResponse: API.IncludeResultResponse;
   PendingInputPage: API.PendingInputPage;
+  PendingInputQueue: API.PendingInputQueue;
   Interaction: API.Interaction;
   InteractionPage: API.InteractionPage;
   ServerInfo: API.ServerInfo;
@@ -142,6 +143,9 @@ export function validateRequest(
     | 'SteerCommandRequest'
     | 'FollowUpCommandRequest'
     | 'InputListQuery'
+    | 'PendingInputQueueQuery'
+    | 'WithdrawPendingInputRequest'
+    | 'ReorderPendingInputsRequest'
     | 'AnswerInteractionRequest'
     | 'InteractionListQuery'
     | 'CreateWorkspaceRequest'

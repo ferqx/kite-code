@@ -1,11 +1,13 @@
 import { expect, test } from 'bun:test';
-import type { SessionView } from '@kite-ai/client';
+import type { Change, SessionView } from '@kite-ai/client';
+import { render } from 'ink-testing-library';
 import {
   TuiController,
   type TuiPermissionIntent,
   type TuiPermissionOutcome,
   type TuiPermissionSnapshot,
   type TuiPort,
+  TuiSession,
   type TuiSnapshot,
 } from '../../src/tui';
 
@@ -92,6 +94,260 @@ function fixture(workspaces: Record<string, string> = {}) {
   };
   return { port, sent, looked, controller: new TuiController(port) };
 }
+
+const modeChange = (sessionId = 'a', makeDefault = false): Change => ({
+  cursor: '10',
+  objectId: 'permission-change',
+  revision: '1',
+  sessionId,
+  type: 'host_control.changed',
+  payload: {
+    kind: 'permission.mode',
+    scope: `session:${sessionId}`,
+    receipt: { status: 'applied', makeDefault },
+  },
+});
+
+test('root, default and Workspace control events refresh inherited facts without opening a panel or borrowing another scope', async () => {
+  const f = fixture();
+  const readSession = f.port.readSession;
+  f.port.readSession = async (id, signal) => {
+    const snapshot = await readSession(id, signal);
+    return {
+      ...snapshot,
+      view: {
+        ...snapshot.view,
+        session: { ...snapshot.view.session, rootSessionId: 'root', parentSessionId: 'root' },
+      },
+    };
+  };
+  let current = observed('child'),
+    reads = 0;
+  current.mode.scopeSessionId = 'root';
+  f.port.permissions!.read = async () => {
+    reads++;
+    return current;
+  };
+  try {
+    await f.controller.select('child');
+    await f.controller.openPermissions();
+    const initialReads = reads;
+    current = { ...current, mode: { ...current.mode, mode: 'full', revision: '6' } };
+    await f.controller.refreshPermissions(modeChange('root'));
+    expect(f.controller.state.panel).toBe('permissions');
+    expect(f.controller.state.permissions?.mode.mode).toBe('full');
+    expect(reads).toBe(initialReads + 1);
+    await f.controller.refreshPermissions(modeChange('foreign'));
+    await f.controller.refreshPermissions({ ...modeChange('root'), type: 'execution.dispatching' });
+    await f.controller.refreshPermissions({ ...modeChange('root'), payload: null });
+    expect(reads).toBe(initialReads + 1);
+    current = { ...current, mode: { ...current.mode, defaultMode: 'full', defaultRevision: '7' } };
+    await f.controller.refreshPermissions(modeChange('foreign', true));
+    expect(f.controller.state.permissions?.mode.defaultMode).toBe('full');
+    const trustChange: Change = {
+      ...modeChange(),
+      sessionId: null,
+      payload: {
+        kind: 'workspace.trust',
+        scope: 'workspace:other',
+        receipt: { status: 'applied' },
+      },
+    };
+    await f.controller.refreshPermissions(trustChange);
+    expect(reads).toBe(initialReads + 2);
+    current = {
+      ...current,
+      trust: { ...current.trust, trusted: true, status: 'trusted', revision: '8' },
+    };
+    f.controller.closePanel();
+    await f.controller.refreshPermissions({
+      ...trustChange,
+      payload: { kind: 'workspace.trust', scope: 'workspace:w', receipt: { status: 'applied' } },
+    });
+    expect(reads).toBe(initialReads + 3);
+    expect(f.controller.state.panel).toBeUndefined();
+    expect(f.controller.state.permissions?.trust.trusted).toBe(true);
+  } finally {
+    f.controller.dispose();
+  }
+});
+
+test('a root control event received while selecting a child is followed by current scoped facts', async () => {
+  const f = fixture();
+  const readSession = f.port.readSession;
+  let finish!: (snapshot: TuiSnapshot) => void;
+  f.port.readSession = () =>
+    new Promise((resolve) => {
+      finish = resolve;
+    });
+  const facts = observed('child');
+  facts.mode = { ...facts.mode, scopeSessionId: 'root', mode: 'full', revision: '6' };
+  const requests: string[] = [];
+  f.port.permissions!.read = async (sessionId) => {
+    requests.push(sessionId);
+    return facts;
+  };
+  try {
+    const selecting = f.controller.select('child');
+    await f.controller.refreshPermissions(modeChange('root'));
+    expect(requests).toHaveLength(0);
+    const snapshot = await readSession('child', new AbortController().signal);
+    finish({
+      ...snapshot,
+      view: {
+        ...snapshot.view,
+        session: { ...snapshot.view.session, rootSessionId: 'root', parentSessionId: 'root' },
+      },
+    });
+    await selecting;
+    expect(requests).toEqual(['child']);
+    expect(f.controller.state.permissions?.mode.mode).toBe('full');
+    expect(f.controller.state.permissions?.mode.scopeSessionId).toBe('root');
+    expect(f.controller.state.panel).toBeUndefined();
+  } finally {
+    f.controller.dispose();
+  }
+});
+
+test('permission review survives unchanged refreshes and is withdrawn when the current controls change', async () => {
+  const f = fixture();
+  let current = observed();
+  f.port.permissions!.read = async () => current;
+  const tick = () => new Promise<void>((resolve) => setTimeout(resolve, 30));
+  await f.controller.select('a');
+  await f.controller.openPermissions();
+  const app = render(<TuiSession controller={f.controller} />);
+  try {
+    await tick();
+    app.stdin.write('\r');
+    await tick();
+    expect(app.lastFrame()).toContain('Confirm original');
+    current = { ...current, grants: { ...current.grants, snapshotCursor: '20' } };
+    await f.controller.refreshPermissions();
+    await tick();
+    expect(app.lastFrame()).toContain('Confirm original');
+    expect(f.sent).toHaveLength(0);
+    current = { ...current, mode: { ...current.mode, mode: 'full', revision: '6' } };
+    await f.controller.refreshPermissions(modeChange());
+    await tick();
+    expect(app.lastFrame()).not.toContain('Confirm original');
+    expect(f.sent).toHaveLength(0);
+    app.stdin.write('\r');
+    await tick();
+    expect(f.sent).toHaveLength(0);
+    app.stdin.write('\r');
+    await tick();
+    expect(f.sent).toHaveLength(1);
+    expect(f.sent[0]).toMatchObject({
+      kind: 'permission.mode',
+      request: { mode: 'full', ifRevision: '6' },
+    });
+  } finally {
+    app.unmount();
+    f.controller.dispose();
+  }
+});
+
+test('an event refresh during a permission POST preserves its original result', async () => {
+  const f = fixture();
+  let finish!: (outcome: TuiPermissionOutcome) => void;
+  let current = observed();
+  f.port.permissions!.read = async () => current;
+  f.port.permissions!.submit = (intent) => {
+    f.sent.push(intent);
+    return new Promise((resolve) => {
+      finish = resolve;
+    });
+  };
+  try {
+    await f.controller.select('a');
+    await f.controller.openPermissions();
+    const writing = f.controller.choosePermission({
+      kind: 'mode',
+      mode: 'full',
+      makeDefault: false,
+    });
+    expect(f.sent).toHaveLength(1);
+    current = { ...current, mode: { ...current.mode, mode: 'full', revision: '6' } };
+    await f.controller.refreshPermissions(modeChange());
+    expect(f.controller.state.permissions?.mode.mode).toBe('full');
+    finish({ intent: f.sent[0]!, status: 'applied' });
+    await writing;
+    expect(f.controller.state.permissionOutcome?.status).toBe('applied');
+    expect(f.sent).toHaveLength(1);
+    expect(f.controller.state.permissions?.mode.revision).toBe('6');
+  } finally {
+    f.controller.dispose();
+  }
+});
+
+test('background permission replies preserve unrelated errors and recover only their own unavailable facts', async () => {
+  const f = fixture();
+  let finish!: (facts: TuiPermissionSnapshot) => void;
+  try {
+    await f.controller.select('a');
+    f.port.permissions!.read = () =>
+      new Promise((resolve) => {
+        finish = resolve;
+      });
+    const reading = f.controller.refreshPermissions(modeChange());
+    await f.controller.openModels();
+    expect(f.controller.state.error).toBe('model_settings_unavailable');
+    finish(observed());
+    await reading;
+    expect(f.controller.state.error).toBe('model_settings_unavailable');
+    expect(f.controller.state.permissions?.mode.mode).toBe('accept_edits');
+    f.port.permissions!.read = async () => {
+      throw Error('current_permission_read_failed');
+    };
+    await f.controller.refreshPermissions(modeChange());
+    expect(f.controller.state.permissions).toBeUndefined();
+    expect(f.controller.state.error).toBe('model_settings_unavailable');
+    await f.controller.openPermissions();
+    expect(f.controller.state.error).toBe('current_permission_read_failed');
+    f.port.permissions!.read = async () => observed();
+    await f.controller.refreshPermissions(modeChange());
+    expect(f.controller.state.permissions?.mode.mode).toBe('accept_edits');
+    expect(f.controller.state.error).toBeUndefined();
+  } finally {
+    f.controller.dispose();
+  }
+});
+
+test('late permission reads cannot replace a newer event, a new panel or another Session', async () => {
+  const f = fixture();
+  const pending: { signal: AbortSignal; finish: (facts: TuiPermissionSnapshot) => void }[] = [];
+  try {
+    await f.controller.select('a');
+    await f.controller.openPermissions();
+    f.port.permissions!.read = (_id, _workspace, signal) =>
+      new Promise((resolve) => {
+        pending.push({ signal, finish: resolve });
+      });
+    const older = f.controller.refreshPermissions(modeChange());
+    const newer = f.controller.refreshPermissions(modeChange());
+    expect(pending[0]!.signal.aborted).toBe(true);
+    const full = observed();
+    full.mode = { ...full.mode, mode: 'full', revision: '6' };
+    pending[1]!.finish(full);
+    await newer;
+    pending[0]!.finish(observed());
+    await older;
+    expect(f.controller.state.permissions?.mode.mode).toBe('full');
+    const late = f.controller.refreshPermissions(modeChange());
+    await f.controller.select('b');
+    f.port.permissions!.read = async (id, workspace) => observed(id, workspace);
+    await f.controller.openPermissions();
+    pending[2]!.finish(full);
+    await late;
+    expect(pending[2]!.signal.aborted).toBe(true);
+    expect(f.controller.state.sessionId).toBe('b');
+    expect(f.controller.state.permissions?.mode.sessionId).toBe('b');
+    expect(f.controller.state.permissions?.mode.mode).toBe('accept_edits');
+  } finally {
+    f.controller.dispose();
+  }
+});
 test('permissions reset rereads original facts while observation is lost; only verified ready restores mutation eligibility', async () => {
   const f = fixture();
   let reads = 0;
@@ -105,7 +361,7 @@ test('permissions reset rereads original facts while observation is lost; only v
   await f.controller.select('a');
   expect(f.controller.state.snapshotStale).toBe(false);
   await f.controller.openPermissions();
-  expect(reads).toBe(2);
+  expect(reads).toBe(3);
   expect(f.controller.state.permissions).toEqual(observed());
   expect(f.controller.state.stale).toBe(true);
   await f.controller.choosePermission({ kind: 'mode', mode: 'auto', makeDefault: false });

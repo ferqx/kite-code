@@ -59,6 +59,17 @@ const checks: Record<string, boolean | number> = {};
 let app: Awaited<ReturnType<typeof _electron.launch>> | undefined;
 let stage = 'launch';
 const read = async () => (await (await fetch(`${control}/state`)).json()) as Facts;
+async function showApproval(page: Page, id: string) {
+  const card = page.getByRole('article', { name: `approval ${id}`, exact: true });
+  const deadline = Date.now() + 10000;
+  while (!(await card.isVisible())) {
+    assert.ok(Date.now() < deadline, `exact approval ${id} is visible in pager`);
+    const next = page.getByRole('button', { name: '下一项审批', exact: true });
+    if (await next.count()) await next.click();
+    await page.waitForTimeout(20);
+  }
+  return card;
+}
 async function until<T>(load: () => Promise<T>, predicate: (value: T) => boolean) {
   const end = Date.now() + 180000;
   for (;;) {
@@ -164,14 +175,24 @@ try {
   );
   assert.ok(pending.effectsAbsent);
   for (const card of pending.approvals) {
-    const visible = page.getByRole('article', { name: `approval ${card.id}`, exact: true });
+    const visible = await showApproval(page, card.id);
     await visible.waitFor();
     await visible
       .getByText(new RegExp(`external-${card.label}\\.txt`))
       .first()
       .waitFor();
   }
-  assert.ok((await page.getByText('需要人工审批', { exact: true }).count()) >= 2);
+  assert.equal(await page.getByRole('region', { name: '需要人工审批', exact: true }).count(), 1);
+  assert.equal(await page.getByText('需要批准', { exact: true }).count(), 1);
+  assert.equal(
+    await page
+      .getByRole('region', { name: '需要人工审批', exact: true })
+      .getByRole('article')
+      .count(),
+    1,
+  );
+  assert.ok(await page.getByRole('navigation', { name: '切换审批', exact: true }).isVisible());
+  assert.ok(await page.getByText(/^[12]\/2$/, { exact: true }).isVisible());
   await screenshot(page, 'two-original-approvals');
   checks.twoExactChildCards = true;
   checks.exactTargetVisibleInEachCard = true;
@@ -181,9 +202,8 @@ try {
   const b = pending.approvals.find((entry) => entry.label === 'B')!;
   assert.ok(a && b && a.id !== b.id);
   stage = 'approve_A';
-  await page
-    .getByRole('article', { name: `approval ${a.id}`, exact: true })
-    .getByRole('button', { name: '仅批准这一次', exact: true })
+  await (await showApproval(page, a.id))
+    .getByRole('button', { name: '批准一次', exact: true })
     .click();
   await until(
     read,
@@ -194,10 +214,7 @@ try {
   );
   checks.onlyApprovedEffectWhileSiblingPending = true;
   stage = 'deny_B';
-  await page
-    .getByRole('article', { name: `approval ${b.id}`, exact: true })
-    .getByRole('button', { name: '拒绝', exact: true })
-    .click();
+  await (await showApproval(page, b.id)).getByRole('button', { name: '拒绝', exact: true }).click();
   stage = 'terminal';
   const terminal = await until(read, (value) => value.terminal);
   assert.ok(terminal.approvedEffect && terminal.deniedEffectAbsent);
@@ -249,13 +266,10 @@ try {
   });
   assert.ok(delegation.delegationApproval.exactLineage && delegation.followup.effectAbsent);
   assert.deepEqual(delegation.originalMetadata, originalMetadata);
-  const delegationCard = page.getByRole('article', {
-    name: `approval ${delegation.delegationApproval.id}`,
-    exact: true,
-  });
+  const delegationCard = await showApproval(page, delegation.delegationApproval.id!);
   await delegationCard.waitFor();
-  await delegationCard.getByText('完整审批请求', { exact: true }).click();
-  const completeRequest = delegationCard.locator('pre');
+  await delegationCard.locator('.approval-command').hover();
+  const completeRequest = page.locator('.approval-command-tooltip');
   await completeRequest.waitFor();
   const completeText = await completeRequest.innerText();
   assert.ok(completeText.includes('external-A-followup.txt'));
@@ -265,7 +279,7 @@ try {
   );
   await screenshot(page, 'followup-delegation-approval');
   stage = 'followup_delegation_approve';
-  await delegationCard.getByRole('button', { name: '仅批准这一次', exact: true }).click();
+  await delegationCard.getByRole('button', { name: '批准一次', exact: true }).click();
   const acceptedDelegation = await until(
     read,
     (value) => value.delegationApproval.answered && value.delegationApproval.dispatched,
@@ -280,10 +294,7 @@ try {
   assert.ok(nextPending.followup.exactLineage && nextPending.followup.effectAbsent);
   assert.ok(nextPending.delegationApproval.answered && nextPending.delegationApproval.dispatched);
   assert.deepEqual(nextPending.originalMetadata, originalMetadata);
-  const nextCard = page.getByRole('article', {
-    name: `approval ${nextPending.followup.id}`,
-    exact: true,
-  });
+  const nextCard = await showApproval(page, nextPending.followup.id!);
   await nextCard.waitFor();
   await nextCard
     .getByText(/external-A-followup\.txt/)
@@ -294,7 +305,7 @@ try {
   checks.oldApprovalControlsDetached = true;
   checks.sameChildTwoAccurateRounds = true;
   stage = 'followup_approve';
-  await nextCard.getByRole('button', { name: '仅批准这一次', exact: true }).click();
+  await nextCard.getByRole('button', { name: '批准一次', exact: true }).click();
   const final = await until(
     read,
     (value) =>

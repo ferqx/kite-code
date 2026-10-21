@@ -60,7 +60,7 @@ const card: Interaction = {
   ancestry: ['s'],
   attempt: 1,
   kind: 'approval',
-  definitionId: 'shell.launch',
+  definitionId: 'shell.execute',
   definitionVersion: '1',
   inputDigest: 'original-input',
   policyRevision: 'p1',
@@ -77,7 +77,7 @@ test('the original Approval form consumes the verified complete request and subm
   const f = fixture(),
     answers: { id: string; answer: unknown }[] = [];
   const request = {
-    definitionId: 'shell.launch',
+    definitionId: 'shell.execute',
     definitionVersion: '1',
     grants: ['approve_once', 'same_command'],
     policy: { reason: '原人工原因' },
@@ -117,7 +117,7 @@ test('the original Approval form consumes the verified complete request and subm
     await act(async () => render());
     const approve = () =>
       [...f.host.querySelectorAll<HTMLButtonElement>('button')].find(
-        (button) => button.textContent === '仅批准这一次',
+        (button) => button.textContent === '批准一次',
       )!;
     expect(approve().disabled).toBe(true);
     expect(f.host.querySelector('[aria-label="更多批准方式"]')).toBeNull();
@@ -142,7 +142,8 @@ test('the original Approval form consumes the verified complete request and subm
       ),
     );
     const same = f.dom.window.document.querySelector<HTMLElement>('[role="menuitem"]')!;
-    expect(same.textContent).toBe('批准本次及本会话相同命令');
+    expect(same.textContent).toContain('本次会话批准');
+    expect(same.textContent).toContain('本次及本会话内的相同命令');
     await act(async () => same.click());
     expect(answers).toEqual([
       { id: 'approval', answer: { kind: 'approval', decision: 'approve', grant: 'same_command' } },

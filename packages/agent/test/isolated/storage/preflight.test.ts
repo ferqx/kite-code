@@ -240,6 +240,12 @@ test('public bundled sqlite leaf outside source tree reads its packaged migratio
     ),
     join(dirname(migration), '0003-session-reconciliation.sql'),
   );
+  copyFileSync(
+    fileURLToPath(
+      new URL('../../../src/storage/migrations/0004-pending-input-order.sql', import.meta.url),
+    ),
+    join(dirname(migration), '0004-pending-input-order.sql'),
+  );
   writeFileSync(
     join(packageRoot, 'package.json'),
     JSON.stringify({

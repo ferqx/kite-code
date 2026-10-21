@@ -35,6 +35,7 @@ import { type ReactNode, useEffect, useLayoutEffect, useMemo, useRef, useState }
 import type { DesktopEditor } from './file-changes-bridge';
 import { inputImageCount } from './input-images-bridge';
 import { NativeApproval } from './native-approval';
+import { isOrdinaryNativeApproval, NativeApprovalGroup } from './native-approval-group';
 import { NativeBackgroundPanel } from './native-background-panel';
 import type {
   NativeBranchFacts,
@@ -70,6 +71,7 @@ import { NativeGeneralSettings } from './native-general-settings';
 import { type HistoryState, NativeHistory } from './native-history';
 import { nativeTextIntent } from './native-input';
 import { useNativeInputImages } from './native-input-images';
+import { useNativeInputQueue } from './native-input-queue';
 import { readNativeInteractionAttachment } from './native-interaction-attachment';
 import { NativeInteractionHistory } from './native-interaction-history';
 import { NativeJobOutputPanel } from './native-job-output-panel';
@@ -111,6 +113,7 @@ export function nativeRootInteractionBlocksComposer(selection: NativeState['sele
   return !!selection?.interactions.some(
     (card) =>
       ['approval', 'question', 'plan_review'].includes(card.kind) &&
+      !isOrdinaryNativeApproval(card) &&
       card.state === 'pending' &&
       card.originStoreId === selection.storeId &&
       card.sessionId === selection.session.id &&
@@ -258,6 +261,7 @@ function NativeDesktopContent({
   const [originalDraft, setOriginalDraft] = useState<NativeDraft>();
   const [grantFacts, setGrantFacts] = useState<NativeGrantFacts>();
   const [draft, setDraft] = useState('');
+  const [queueFocusKey, setQueueFocusKey] = useState(0);
   const [planMode, setPlanMode] = useState(false);
   const [settingsPage, setSettingsPage] = useState<
     'general' | 'models' | 'providers' | 'mcp' | 'skills'
@@ -998,6 +1002,32 @@ function NativeDesktopContent({
   }, [childScope, childReadAvailable, childSessionId, childExecutionId]);
   const displayMessages = messages;
   const readingParent = !preparing && !scheduledTasksView;
+  const inputQueue = useNativeInputQueue({
+    bridge,
+    generation: state?.generation ?? generation.current,
+    selection,
+    historyEpoch: state?.historyEpoch ?? 0,
+    available:
+      readingParent &&
+      !pending &&
+      historyState.phase === 'complete' &&
+      !selection?.viewLoading &&
+      !selection?.permissionUnavailable &&
+      !directory?.unavailable &&
+      selected.current === selection?.session.id &&
+      !selectionRead.current?.holdPresentation,
+    onEditText: (text) => {
+      if (
+        !selection ||
+        selected.current !== selection.session.id ||
+        draftOwner.current !== imageScope(selection.storeId, selection.session.id)
+      )
+        return false;
+      changeDraft(text);
+      setQueueFocusKey((value) => value + 1);
+      return true;
+    },
+  });
   parentHistoryVisible.current = readingParent;
   useLayoutEffect(() => {
     if (!readingParent || selectionRead.current?.holdPresentation) {
@@ -1764,8 +1794,16 @@ function NativeDesktopContent({
     [displayMessages],
   );
   const interactionCards =
-    selection && state
-      ? selection.interactions.map((interaction) => {
+    selection && state ? (
+      <NativeApprovalGroup
+        interactions={selection.interactions}
+        storeId={selection.storeId}
+        rootSessionId={
+          selection.session.rootSessionId ??
+          (!selection.session.parentSessionId ? selection.session.id : '')
+        }
+        owners={environment.approvalOwners}
+        renderInteraction={(interaction, embedded) => {
           const draftKey = questionDraftKey(interaction);
           const saved = state?.answerSubmissions?.find(
             (row) =>
@@ -1779,6 +1817,7 @@ function NativeDesktopContent({
           );
           return (
             <InteractionCard
+              compactApproval={embedded}
               key={JSON.stringify([
                 draftKey,
                 interaction.kind === 'plan_review' &&
@@ -1795,6 +1834,7 @@ function NativeDesktopContent({
               renderApproval={(props) => (
                 <NativeApproval
                   {...props}
+                  embedded={embedded}
                   disabled={
                     props.disabled ||
                     !!selection.viewLoading ||
@@ -1856,8 +1896,9 @@ function NativeDesktopContent({
               }}
             />
           );
-        })
-      : undefined;
+        }}
+      />
+    ) : undefined;
   const sessionTools = (
     <section id="native-session-tools" aria-label="会话与任务">
       <header>
@@ -3235,6 +3276,28 @@ function NativeDesktopContent({
         !preparing &&
         selection && (
           <>
+            {inputQueue.error && (
+              <div className="queue-operation-notice" role="status">
+                {inputQueue.error}
+                <DesktopButton variant="ghost" onClick={inputQueue.retry}>
+                  重新读取队列
+                </DesktopButton>
+              </div>
+            )}
+            {inputQueue.submissions.map((submission) => (
+              <div className="queue-operation-notice" key={submission.commandId} role="status">
+                {submission.phase === 'applied'
+                  ? '消息已从队列移除，原文尚未放入输入框。'
+                  : '队列操作结果尚未确认。'}
+                <DesktopButton
+                  variant="ghost"
+                  disabled={inputQueue.busy}
+                  onClick={() => void inputQueue.lookup(submission.commandId)}
+                >
+                  {submission.operation === 'edit' ? '核对并取回原文' : '核对原队列操作'}
+                </DesktopButton>
+              </div>
+            ))}
             {((diagnostics && historyState.phase !== 'loading') ||
               selection.session.historyPurgedAt !== undefined ||
               historyState.phase === 'unavailable') && (
@@ -3348,6 +3411,8 @@ function NativeDesktopContent({
           : canCompose && selection && state
             ? {
                 draft,
+                queue: inputQueue.queue,
+                queueFocusKey,
                 scopeKey: imageScope(selection.storeId, selection.session.id),
                 onFileReferences: imageDrafts.fileReferences,
                 imageLimit: inputImageCount,
@@ -3382,7 +3447,7 @@ function NativeDesktopContent({
                       value.scope.sessionId === selection.session.id &&
                       ['saved', 'submitting', 'unknown'].includes(value.phase),
                   ),
-                disabled: pending || selected.current !== selection.session.id,
+                disabled: pending || inputQueue.busy || selected.current !== selection.session.id,
                 sessionLoading,
                 sending,
                 // A routine history scan gates actions without removing the observed label.

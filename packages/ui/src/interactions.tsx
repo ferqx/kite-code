@@ -28,12 +28,15 @@ type InteractionCardProps = {
   initialPlanDraft?: PlanReviewDraft;
   onPlanDraftChange?: (draft: PlanReviewDraft) => void;
   completeContent?: string;
+  /** Compact tool approvals still verify the complete attachment before enabling answers. */
+  compactApproval?: boolean;
   renderApproval?: (props: {
     interaction: Interaction;
     disabled: boolean;
     onAnswer?: InteractionCardProps['onAnswer'];
     completeContent?: string;
     submission?: InteractionSubmission;
+    attachment?: { phase: 'idle' | 'loading' | 'failed' | 'loaded'; retry?: () => void };
   }) => ReactNode;
 };
 
@@ -48,10 +51,20 @@ function PlainInteractionCard({
   onPlanDraftChange,
   completeContent,
   renderApproval,
-}: InteractionCardProps) {
+  attachment,
+}: InteractionCardProps & {
+  attachment?: { phase: 'idle' | 'loading' | 'failed' | 'loaded'; retry?: () => void };
+}) {
   const disabled = !onAnswer || interaction.state !== 'pending' || submission !== undefined;
   if (interaction.kind === 'approval' && !isMcpSourceReview(interaction) && renderApproval)
-    return renderApproval({ interaction, disabled, onAnswer, completeContent, submission });
+    return renderApproval({
+      interaction,
+      disabled,
+      onAnswer,
+      completeContent,
+      submission,
+      attachment,
+    });
   const request = interaction.request;
   const structuredQuestion =
     interaction.kind === 'question' && !!onAnswer && !!questionForm(request);
@@ -329,25 +342,51 @@ function AttachmentInteractionCard(props: Parameters<typeof InteractionCard>[0])
       if (active.current === controller) active.current = undefined;
     }
   }
+  const compact =
+    props.compactApproval &&
+    props.interaction.kind === 'approval' &&
+    !isMcpSourceReview(props.interaction);
+  // The existing loader validates identity, length, digest and UTF-8 before proof is published.
+  // Only the compact approval presentation reads automatically; other forms keep their reader.
+  useEffect(() => {
+    if (compact && phase === 'idle' && props.onReadAttachment && identity !== 'invalid')
+      void load();
+  });
+  const card = PlainInteractionCard({
+    ...props,
+    completeContent: verified ? body.text : undefined,
+    attachment: compact
+      ? {
+          phase,
+          retry: props.onReadAttachment && identity !== 'invalid' ? () => void load() : undefined,
+        }
+      : undefined,
+    onAnswer:
+      verified && props.onAnswer
+        ? async (interaction, answer) => {
+            if (answered.current) return;
+            answered.current = true;
+            try {
+              await props.onAnswer!(interaction, answer);
+            } catch (error) {
+              answered.current = false;
+              throw error;
+            }
+          }
+        : undefined,
+  });
+  if (compact)
+    return (
+      <section
+        className="compact-approval-attachment"
+        data-complete-attachment={verified ? 'verified' : undefined}
+      >
+        {card}
+      </section>
+    );
   return (
     <section aria-label="Complete interaction attachment">
-      {PlainInteractionCard({
-        ...props,
-        completeContent: verified ? body.text : undefined,
-        onAnswer:
-          verified && props.onAnswer
-            ? async (interaction, answer) => {
-                if (answered.current) return;
-                answered.current = true;
-                try {
-                  await props.onAnswer!(interaction, answer);
-                } catch (error) {
-                  answered.current = false;
-                  throw error;
-                }
-              }
-            : undefined,
-      })}
+      {card}
       <p role="status">
         Attachment {phase}. Full verified content is required before an approval answer can be
         submitted.

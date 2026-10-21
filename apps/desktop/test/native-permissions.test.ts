@@ -1,11 +1,13 @@
 import { expect, test } from 'bun:test';
 import {
   type AgentClient,
+  type Change,
   ClientError,
   type PermissionMutation,
   type SetPermissionModeRequest,
 } from '@kite-ai/client';
 import { NativeCaller } from '../electron/native-caller';
+import { createDesktopController } from '../src/controller';
 import type { NativeState } from '../src/native-bridge';
 
 function port() {
@@ -98,6 +100,152 @@ async function code(work: Promise<unknown>) {
   } catch (error) {
     return (error as { code?: string }).code ?? (error as Error).message;
   }
+}
+
+function controlChange(
+  sessionId: string | null,
+  kind: string,
+  scope: string,
+  makeDefault = false,
+): Change {
+  return {
+    cursor: '1',
+    sessionId,
+    objectId: 'permission-command',
+    type: 'host_control.changed',
+    revision: '1',
+    payload: { kind, scope, receipt: { status: 'applied', makeDefault } },
+  };
+}
+async function until(predicate: () => boolean) {
+  const deadline = Date.now() + 2000;
+  while (!predicate()) {
+    if (Date.now() >= deadline) throw Error('permission_observation_deadline');
+    await Bun.sleep(1);
+  }
+}
+
+for (const native of [false, true]) {
+  test(`${native ? 'Native' : 'Desktop'} observation refreshes child root/default/trust facts and isolates foreign and late scopes`, async () => {
+    const source = port();
+    let notify!: Parameters<AgentClient['observe']>[0]['onChange'];
+    source.client.observe = async (options) => {
+      notify = options.onChange;
+      await new Promise<void>((resolve) =>
+        options.signal!.addEventListener('abort', () => resolve(), { once: true }),
+      );
+    };
+    const originalMode = source.client.getPermissionMode.bind(source.client),
+      originalTrust = source.client.getWorkspaceTrust.bind(source.client);
+    let mode: 'auto' | 'full' = 'auto',
+      reads = 0,
+      trustReads = 0;
+    let hold: { entered: () => void; promise: Promise<void> } | undefined;
+    source.client.getPermissionMode = async (...args) => {
+      reads++;
+      const result = { ...(await originalMode(...args)), mode };
+      const held = hold;
+      hold = undefined;
+      if (held) {
+        held.entered();
+        await held.promise;
+      }
+      return result;
+    };
+    source.client.getWorkspaceTrust = async (...args) => {
+      trustReads++;
+      return originalTrust(...args);
+    };
+    const caller = native ? new NativeCaller(source.client, () => {}) : undefined,
+      desktop = native
+        ? undefined
+        : createDesktopController({ admittedClient: source.client, onSnapshot() {} });
+    let generation = 0;
+    const select = async (sessionId: string) => {
+      if (caller) await caller.invoke({ method: 'select', generation, sessionId });
+      else await desktop!.selectSession(sessionId);
+    };
+    const facts = () =>
+      caller ? caller.state().selection?.permissions : desktop!.snapshot?.permissions;
+    const selected = () =>
+      caller ? caller.state().selection?.session.id : desktop!.snapshot?.sessionId;
+    try {
+      if (caller)
+        generation = ((await caller.invoke({ method: 'attach' })) as NativeState).generation;
+      else void desktop!.observe();
+      await select('child');
+      expect(facts()!.mode.scopeSessionId).toBe('a');
+      const initialReads = reads;
+      await notify(controlChange('foreign', 'permission.mode', 'session:foreign'));
+      await notify(controlChange(null, 'workspace.trust', 'workspace:foreign'));
+      await Bun.sleep(130);
+      expect(reads).toBe(initialReads);
+      mode = 'full';
+      await notify(controlChange('a', 'permission.mode', 'session:a'));
+      await until(() => facts()?.mode.mode === 'full');
+      expect(facts()!.mode.sessionId).toBe('child');
+      const defaultReads = reads;
+      mode = 'auto';
+      await notify(controlChange('foreign', 'permission.mode', 'session:foreign', true));
+      await until(() => reads > defaultReads && facts()?.mode.mode === 'auto');
+      const priorTrustReads = trustReads;
+      await notify(controlChange(null, 'workspace.trust', 'workspace:w'));
+      await until(() => trustReads > priorTrustReads && !!facts());
+
+      let entered!: () => void, release!: () => void;
+      const waiting = new Promise<void>((resolve) => {
+        entered = resolve;
+      });
+      hold = {
+        entered,
+        promise: new Promise<void>((resolve) => {
+          release = resolve;
+        }),
+      };
+      mode = 'full';
+      const oldRefresh = notify(controlChange('a', 'permission.mode', 'session:a'));
+      await waiting;
+      mode = 'auto';
+      await select('other');
+      release();
+      await oldRefresh;
+      await Bun.sleep(130);
+      expect(selected()).toBe('other');
+      expect(facts()!.mode).toMatchObject({
+        sessionId: 'other',
+        scopeSessionId: 'other',
+        mode: 'auto',
+      });
+
+      // The first View has arrived, but no complete child snapshot exists yet.
+      let enterFirst!: () => void, releaseFirst!: () => void;
+      const firstRead = new Promise<void>((resolve) => {
+        enterFirst = resolve;
+      });
+      hold = {
+        entered: enterFirst,
+        promise: new Promise<void>((resolve) => {
+          releaseFirst = resolve;
+        }),
+      };
+      const selecting = select('child').catch(() => undefined);
+      await firstRead;
+      mode = 'full';
+      const firstChange = notify(controlChange('a', 'permission.mode', 'session:a'));
+      releaseFirst();
+      await Promise.all([selecting, firstChange]);
+      await until(() => facts()?.mode.sessionId === 'child' && facts()?.mode.mode === 'full');
+      expect(facts()!.mode).toMatchObject({
+        sessionId: 'child',
+        scopeSessionId: 'a',
+        mode: 'full',
+      });
+      expect(source.writes).toBe(0);
+    } finally {
+      if (caller) await caller.close();
+      else desktop!.disposeNetwork();
+    }
+  });
 }
 test('main makes failed permission reads unavailable before any new write; re-read renews observation and children remain read-only', async () => {
   const source = port(),

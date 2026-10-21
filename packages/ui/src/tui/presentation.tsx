@@ -34,6 +34,7 @@ export const tuiChinese: Readonly<Record<string, string>> = {
   'Only this exact command in the original Session; other commands still require approval.':
     '只允许原会话中的这一准确命令；其他命令仍需审批。',
   'Question: original-schema JSON.': '问题：原 schema JSON。',
+  Permissions: '权限',
   'Alt+S: skip optional answer': 'Alt+S：跳过可选回答',
   'Saved MCP prompts': '已保存 MCP prompts',
   'Saved MCP resources': '已保存 MCP resources',

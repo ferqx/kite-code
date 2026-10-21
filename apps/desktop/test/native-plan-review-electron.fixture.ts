@@ -386,7 +386,7 @@ try {
       if (request.definitionId === 'planning.write')
         assert.equal(complete.input.body, metadata.bodyText);
     }
-    await page.getByRole('button', { name: '仅批准这一次', exact: true }).click();
+    await page.getByRole('button', { name: '批准一次', exact: true }).click();
     const accepted = await until(
       state,
       (value) =>
@@ -695,7 +695,7 @@ try {
     });
   }
   async function toolApproval(id: string, runId: string) {
-    await page.getByRole('button', { name: '仅批准这一次', exact: true }).waitFor();
+    await page.getByRole('button', { name: '批准一次', exact: true }).waitFor();
     await openSessionTools(page);
     const current = await state();
     const approval = current.selection!.interactions.find(
@@ -711,7 +711,7 @@ try {
       await page.getByRole('textbox', { name: '当前会话私有草稿', exact: true }).count(),
       0,
     );
-    await page.getByRole('button', { name: '仅批准这一次', exact: true }).click();
+    await page.getByRole('button', { name: '批准一次', exact: true }).click();
     const accepted = await until(
       state,
       (value) =>

@@ -1,5 +1,13 @@
 # Store 边界
 
+## 待消费输入的撤回与排序
+
+[pending-input-queue.ts](sqlite/pending-input-queue.ts)在原根 Session／Store／subject 内读取和变更尚未消费的输入。`getPendingInputQueue` 返回原完整 Command request、独立顺序游标 `orders`、`revision` 和快照水位；首 revision 固定后续分页，变化报 `input_queue_changed`。普通 steer／follow-up 包含空正文附件输入，均可撤回或重排；`result.include` 保留原固定槽。`input.withdraw` 原子标记准确目标 `withdrawn_before_apply` 并保存独立 applied／`input_withdrawn` 回执，已消费竞争返回 `input_already_consumed`，不进入 Run／Execution 取消链。`input.reorder` 必须提交完整当前可移动 ID 集合，保留原请求、附件、request digest 和不可变 Command.seq。
+
+[迁移0004](migrations/0004-pending-input-order.sql)为原 `command` 增加独立 `pending_order`，顺序读取使用 `COALESCE(pending_order,seq),seq`。事务内队列 revision 结合原成员／顺序／digest 与每 Session 单调变更计数；新增、消费、撤回、删除和重排都推进计数，A→B→A 不恢复旧观察资格。重排只置换普通输入占用的槽，固定 `result.include` 位置、事件和历史 seq 保持。重复原 operation ID 返回原回执，原 ID 换内容冲突，写入故障整项回滚。
+
+[operations](sqlite/operations.ts)、[输入事务](sqlite/inputs/README.md)和 Runtime checkpoint 共用实际 pending 顺序，最终应用／派发再核当前顺序，不能只改变 UI 后继续按旧 seq 消费。Worker 构建闭包纳入该迁移；历史、导出与 Fork 原 seq 语义保持。[真实 Store 回归](../../test/isolated/storage/inputs.test.ts)覆盖重排后的 steer 与 follow-up 实际消费、撤回／消费及重排／消费竞争、防 ABA、错误成员和作用域、故障回滚、冷重开，以及图片／文件 only 的原元数据保真。跨包接口归 [Service](../../../../apps/service/README.md#待消费输入队列协议)，原普通人类输入一旦进入工作解释／决定链就不再由该窄队列撤回。
+
 ## 用户图片引用
 
 普通文件的 `files` 名称／URI 同样在消息 source JSON 保存，start 与 steer/follow-up 共用原事务。它不是 Artifact 引用或来源读取收据，也不授予文件访问；`MessageRecord.content` 始终保留原文，模型端路径文本由 Runtime 单独组装。

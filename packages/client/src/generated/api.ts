@@ -1215,6 +1215,26 @@ export type InputListQuery = {
   afterSeq?: string;
   limit?: number;
 };
+export type PendingInputQueueQuery = {
+  storeId: string;
+  afterOrder?: string;
+  limit?: number;
+  expectedRevision?: string;
+};
+export type WithdrawPendingInputRequest = {
+  kind: 'input.withdraw';
+  expectedStoreId: string;
+  commandId: string;
+  targetCommandId: string;
+  expectedRevision: string;
+};
+export type ReorderPendingInputsRequest = {
+  kind: 'input.reorder';
+  expectedStoreId: string;
+  commandId: string;
+  expectedRevision: string;
+  commandIds: Array<string>;
+};
 type Interaction___schema0 =
   | string
   | number
@@ -3553,6 +3573,96 @@ export type PendingInputPage = {
         };
   }>;
   nextAfterSeq: string | null;
+  snapshotCursor: string;
+};
+type PendingInputQueue___schema0 =
+  | string
+  | number
+  | boolean
+  | null
+  | Array<PendingInputQueue___schema0>
+  | { [key: string]: PendingInputQueue___schema0 };
+export type PendingInputQueue = {
+  commands: Array<{
+    id: string;
+    sessionId: string;
+    kind: string;
+    status: 'accepted' | 'applied' | 'rejected' | 'needs_review';
+    receipt: PendingInputQueue___schema0;
+    dispatchFailure?: { code: string; instanceId: string };
+    originStoreId: string;
+    subjectId?: string;
+    requestDigest?: string;
+    cancelRequestedAt: number | null;
+    seq: string;
+    request:
+      | {
+          kind: 'input.steer';
+          content: string;
+          images?: Array<{
+            name: string;
+            reference: {
+              id: string;
+              storeId: string;
+              sessionId: string;
+              subjectId: string;
+              scope: { kind: 'session'; id: string };
+              hash: string;
+              size: string;
+              mediaType: 'image/png' | 'image/jpeg' | 'image/webp' | 'image/gif';
+            };
+          }>;
+          files?: Array<{ name: string; uri: string }>;
+          targetRunId: string;
+          contextSelectionId: string;
+        }
+      | {
+          kind: 'input.follow_up';
+          content: string;
+          images?: Array<{
+            name: string;
+            reference: {
+              id: string;
+              storeId: string;
+              sessionId: string;
+              subjectId: string;
+              scope: { kind: 'session'; id: string };
+              hash: string;
+              size: string;
+              mediaType: 'image/png' | 'image/jpeg' | 'image/webp' | 'image/gif';
+            };
+          }>;
+          files?: Array<{ name: string; uri: string }>;
+          afterRunId: string | null;
+          contextSelectionId: string;
+          modelId?: string;
+          reasoningEffort?:
+            | 'none'
+            | 'minimal'
+            | 'low'
+            | 'medium'
+            | 'high'
+            | 'xhigh'
+            | 'max'
+            | 'ultar';
+          selectedSkills?: Array<string>;
+          extensionInputs?: Array<{
+            extensionId: string;
+            definitionVersion: string;
+            input: PendingInputQueue___schema0;
+          }>;
+        }
+      | {
+          kind: 'result.include';
+          expectedContextSelectionId: string;
+          executionId: string;
+          resultRevision: string;
+          targetRunId: string | null;
+        };
+  }>;
+  orders: Array<string>;
+  nextAfterOrder: string | null;
+  revision: string;
   snapshotCursor: string;
 };
 export type BeginSessionExportQuery = { storeId: string };

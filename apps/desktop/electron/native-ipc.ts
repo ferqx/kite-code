@@ -31,6 +31,12 @@ import { saveStartupDiagnosticReport } from './startup-report';
 const requestBytes = 1048576,
   responseBytes = 4 * 1048576;
 const fields: Record<NativeRequest['method'], readonly string[]> = {
+  'input.queue.read': ['readId', 'viewSelection', 'historyEpoch'],
+  'input.queue.close': ['readId'],
+  'input.queue.withdraw': ['observationId', 'targetCommandId', 'purpose'],
+  'input.queue.reorder': ['observationId', 'commandIds'],
+  'input.queue.lookup': ['commandId'],
+  'input.queue.ack': ['commandId'],
   'input.images.begin': ['id', 'name', 'mediaType', 'size', 'hash'],
   'input.images.append': ['id', 'offset', 'data'],
   'input.images.finish': ['id'],
@@ -248,6 +254,24 @@ export function decodeNativeRequest(value: unknown): NativeRequest {
         typeof input.data !== 'string' ||
         input.data.length > 87384 ||
         !/^[A-Za-z0-9+/]*={0,2}$/.test(input.data))
+    )
+      throw Error('invalid_native_request');
+  }
+  if (method.startsWith('input.queue.')) {
+    const id = (v: unknown) => typeof v === 'string' && /^[A-Za-z0-9_-]{1,128}$/.test(v);
+    if (
+      (method === 'input.queue.read' &&
+        (!Number.isSafeInteger(input.viewSelection) ||
+          Number(input.viewSelection) < 0 ||
+          !Number.isSafeInteger(input.historyEpoch) ||
+          Number(input.historyEpoch) < 0)) ||
+      (method === 'input.queue.withdraw' &&
+        (!id(input.targetCommandId) || !['edit', 'delete'].includes(String(input.purpose)))) ||
+      (method === 'input.queue.reorder' &&
+        (!Array.isArray(input.commandIds) ||
+          input.commandIds.length > 4096 ||
+          !input.commandIds.every(id) ||
+          new Set(input.commandIds).size !== input.commandIds.length))
     )
       throw Error('invalid_native_request');
   }

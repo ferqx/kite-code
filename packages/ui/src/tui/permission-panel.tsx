@@ -28,6 +28,16 @@ export function TuiPermissionPanel({ controller }: { controller: TuiController }
   useEffect(() => {
     if (observedMode) setIndex(Math.max(0, modes.indexOf(observedMode)));
   }, [observedMode]);
+  useEffect(() => {
+    if (
+      pending &&
+      (!observed ||
+        JSON.stringify(pending.observed.mode) !== JSON.stringify(observed.mode) ||
+        JSON.stringify(pending.observed.trust) !== JSON.stringify(observed.trust) ||
+        pending.observed.grants.revision !== observed.grants.revision)
+    )
+      setPending(undefined);
+  }, [observed, pending]);
   const descriptions = {
     accept_edits: t(
       'Workspace writes are allowed. External writes and internet access require approval.',

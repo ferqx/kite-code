@@ -15,7 +15,7 @@ import { buildOwnedDaemon } from '../fixtures/daemon-host-build';
 import { ptyDeadline } from '../fixtures/tui-pty';
 
 const repo = resolve(import.meta.dir, '../../../..');
-test('built Service and actual PTY permission controls create exact Shell grants, clear only selected Session, no default approval', async () => {
+test('built Service and actual PTY permission controls preserve exact grants and change a pending Run to Full', async () => {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-tui-permissions-'))),
     workspace = join(root, 'workspace'),
     profile = selectProfile({ dataRoot: join(root, 'data'), profile: 'development' });
@@ -62,7 +62,7 @@ test('built Service and actual PTY permission controls create exact Shell grants
       calls++;
       const last = body.messages.reduce(
           (last, m, i) =>
-            m.role === 'user' && /^(?:New task: )?owned-[123]$/.test(m.content) ? i : last,
+            m.role === 'user' && /^(?:New task: )?owned-[1234]$/.test(m.content) ? i : last,
           -1,
         ),
         key = body.messages[last]!.content.replace(/^New task: /, ''),
@@ -216,6 +216,7 @@ test('built Service and actual PTY permission controls create exact Shell grants
         { content: 'owned-1', models: 3 },
         { content: 'New task: owned-2', models: 3 },
         { content: 'New task: owned-3', models: 1 },
+        { content: 'New task: owned-4', models: 3 },
       ]) {
         const originals = proofDb
           .query(
@@ -279,9 +280,9 @@ test('built Service and actual PTY permission controls create exact Shell grants
       await proofRuntime.close();
     }
 
-    expect(readFileSync(join(workspace, 'effects'), 'utf8')).toBe('owned\nowned\n');
-    expect(calls).toBe(7);
-    expect(reviewCalls).toBe(3);
+    expect(readFileSync(join(workspace, 'effects'), 'utf8')).toBe('owned\nowned\nowned\n');
+    expect(calls).toBe(10);
+    expect(reviewCalls).toBe(4);
     const db = new Database(profile.databasePath, { readonly: true });
     try {
       expect(

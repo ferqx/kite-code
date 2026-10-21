@@ -128,11 +128,13 @@ Ctrl+C 的整轮取消优先原活动 Run，而不是最近 pending steer/follow
 本管理切片的最终资格分组记录：CLI 参数/完整 Context 分页与 Ink/port 组合 21 项／398 个断言；实际公共 HTTP 与真实 argv 管理 2 项／146 个断言；原 active include/Context 意图回归 4 项／56 个断言；原开发宿主 5 项／56 个断言与 UI 实际 PTY 3 项／19 个断言保持。新增管理 PTY 1 项／11 个断言独立验证完整 focus/原正文到压缩请求、维护期间 follow-up、后续请求来源、原命令 GET 和有限 slash，结果以该实际测试日志为准，不累加成平台完整资格。
 
 
-开发 TUI 的 `/permissions` 接公共 Native permission_controls：独立读取当前模式/default、实际 Workspace 信任范围与完整 fixed-upper same_command 目录，不等待 Model 结束。上下选择模式、D 选择未来默认、T/U 信任/撤销、C 清除准确所选 Session；每次先核对原观察再显式 Enter 确认。R 只刷新、K 只核实原未知 mutation；child 模式只读继承，clear 不隐式跨 Session。实际 Store/revision/command/hash 冻结，重复、丢响应和 scope 切换均不第二次写入，128 个未知不淘汰。控制 applied 仅证明事务保存，不证明执行成功。
+开发 TUI 的 `/permissions` 与运行／审批／问卷中的 Ctrl+P 接公共 Native permission_controls：独立读取当前模式/default、实际 Workspace 信任范围与完整 fixed-upper same_command 目录，不等待 Model 结束。上下选择模式、D 选择未来默认、T/U 信任/撤销、C 清除准确所选 Session；每次先核对原观察再显式 Enter 确认。R 只刷新、K 只核实原未知 mutation；child 模式只读继承，clear 不隐式跨 Session。实际 Store/revision/command/hash 冻结，重复、丢响应和 scope 切换均不第二次写入，128 个未知不淘汰。控制 applied 仅证明事务保存，不证明执行成功。
 
 原 approval 上下键只选择原卡实际 offered 项，Enter 无选择时不回答；same_command 不从 nested policy、计划审阅、question 或 Model 授权推造。卡片身份和 decision revision 改变时旧选择不复用。[permission-intent.test.ts](test/permission-intent.test.ts) 覆盖 201 个 grants 完整分页、改变 epoch 拒绝、invalid_response 原查询与未知容量；[permissions.test.ts](test/permissions.test.ts) 7 项／56 个断言含真实 SQLite CAS/重启控制、零执行以及物理丢失已提交 clear 响应后的单 POST/原 GET。
 
-[实际权限 PTY](test/isolated/tui-permissions-host.test.ts) 和[共享驱动](test/fixtures/tui-permissions-driver.ts) 使用封闭 built 默认 Service、正式平台 Shell 资产、真实 Reviewer Model 与临时 SQLite/ledger，测试专用 macOS Shell 装配已退役。请求批准模式允许 Workspace 写入；为保原两张独立授权卡，完整用户流程明确选择自动审核，由实际审核返回 ask_user，再核空 Enter 零批准、准确 Tool/Job 同命令授权、不同 operation key 相同语义再次执行免卡、清除后再审批及原卡取消。这是旧 unknown Shell 审批场景的适用范围修正，不称原请求批准模式无条件语义等价。业务 Model 仍精确7次，审核独立3次，真实文件恰好两行；原8个 Bun expect 和4个 Python 检查保留，新增审核计数后本机整例1pass／9expects。原10秒读取、5秒 Job 卡、200／400ms 等待、6＋3秒正常退出及40秒整例保持；真实 TUI exit0／EOF 和所属 Service 退出同时核验。共享 PTY 支持三端，Windows 缺正式 Shell 后端继续真实失败，不能用替身或 skip 取得资格；准确当前证据归[本轮进度](../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-12权限授权和-workspace-文件候选的完整三端测试)。
+[实际权限 PTY](test/isolated/tui-permissions-host.test.ts) 和[共享驱动](test/fixtures/tui-permissions-driver.ts) 使用 built 默认 Service、正式平台 Shell、真实 Reviewer 与临时 SQLite/ledger，保原空 Enter 零批准、Tool/Job 独立 same_command、换 operation key 复用、准确清除后再审批及原卡取消。新增第四个原待批 Run 经 Ctrl+P 切 Full，原卡无答案失效，同 Run 原 Tool 与后续等待正常完成。业务 Model 精确10次、审核4次、文件恰好三行，批准答案仍仅原两条；本机整例1项／51断言通过。原10秒读取、5秒 Job 卡、200／400ms 等待、6＋3秒正常退出及40秒整例保持，实际 TUI exit0／EOF 和所属 Service 退出同时核验。该证据限本机 macOS；Windows 缺正式 Shell 后端继续失败关闭，不能由共享驱动推定其他平台资格。
+
+SSE ready、权限控制事件和首次／跨会话选择会重新读取当前权限，不要求打开面板；合法根模式事件更新 child 继承显示，明确用户 default 及实际 Workspace trust 变化按相应范围刷新。读取和在途保存身份分离，旧回包不覆盖新 scope 或吞掉原保存回执。
 
 SSE reset 仅重开一条观察：先读取原 Store 全局 snapshotCursor 基线，再完整读取目录及所选事实，使用 Client startAfter 作为读取起点；快照不推进 lastAppliedCursor。实际回调成功前 EOF 仍沿该起点，成功事件/checkpoint 才 ACK；Store 改变保失联，不重绑旧意图。[tui-observation.test.ts](test/tui-observation.test.ts) 核对顺序、无 ACK、wrong Store、失败与 abort。正式 CLI/TUI 现消费同一 host，前门选择和登记见[正式前门](#正式前门与-native-登记)；上述观察与 PTY 证据限本机 macOS 固定 SDK，不代表 Linux、Windows 或完整终端设置体验。
 

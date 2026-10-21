@@ -10,7 +10,7 @@ Status: implemented
 
 ## Decision
 
-模式/default 和 trust 复用唯一 Store 中的 HostMutation journal，保存准确原 Store、宿主主体、root Session 或 Workspace、稳定命令 ID 与观察 revision。控制记录和不可变回执在同一短事务提交；用户默认与当前 Session 模式分别保存，不写项目 JSONC。管理入口只读取有限 Session/control 元数据。child 继承根模式但不能修改根控制，显式宿主 policy 的 authority 不被用户管理端覆盖。
+模式/default 和 trust 复用唯一 Store 中的 HostMutation journal，保存准确原 Store、宿主主体、root Session 或 Workspace、稳定命令 ID 与观察 revision。控制记录和不可变回执在同一短事务提交；用户默认与当前 Session 模式分别保存，不写项目 JSONC。管理入口只读取有限 Session/control 元数据。child 继承根模式但不能独立修改根控制。显式宿主 policy 保留能力／信任、硬拒绝与明确人工要求上限；根审批模式仍由用户在运行中修改，不因注入策略成为只读。默认管理器以独立 allowModeChanges 开放 mode，保留注入宿主原 trust／grants 管理边界。
 
 Trust 将 canonical Workspace 文件身份与当前可信额外读取范围摘要分开封存。目录替换、Skill 根或实际额外范围漂移使旧决定不再有效；Git 元数据和普通文件修改不构成整个工作区身份变更。摘要只证明用户观察过准确范围，不接受客户端路径、scope 或 hash 作为新的读取许可。
 
@@ -19,6 +19,8 @@ Trust 将 canonical Workspace 文件身份与当前可信额外读取范围摘�
 Native HTTP、CLI 与便携 Desktop/UI 固定原 Store、目标、观察和命令 ID。保存、已接纳、已应用、失败和未知分别展示；未知只查询原 journal，局部视图取消不提交 Run 取消。Browser gateway 保持只读，不取得这些写入口。实际实现由 [Service 权限管理](../../../../apps/service/src/permission-management.ts)、[Store 控制](../../../../packages/agent/src/storage/sqlite/host-mutation-operations.ts)、[CLI](../../../../apps/cli/README.md)和[Desktop](../../../../apps/desktop/README.md)维护。
 
 正式 TUI 的当前进程原意图不能与单个显示槽合并：用户从 A 切到 B 后，A 的保存和 GET 仍可能返回；仅给晚回加 guard 会保住 B，却可能丢掉 A 的可查结果或漏掉同 Workspace 的 trust 未决阻塞。因此沿现有 map 保完整原意图，分别按 Session/Workspace 匹配，以准确读取身份撤销展示；不新建持久格式。查询由显示槽选择 ID，但基线必须是 map 中已核原事实，最新同 ID 请求独占更新标记；否则旧 unknown 显示加一次网络失败会覆盖已经核实的终态。产品范围由 [TUI 指南](../../../../docs/handbook/clients/tui/guides/approvals-and-questions.md)与 [TUI owner](../../../../packages/ui/src/tui/README.md)维护，[原 controller 用例](../../../../packages/ui/test/tui/permissions.test.tsx)保旧 CAS 并覆盖这条完整行为；不从这项修复推导客户端强杀后的原 ID 发现。
+
+界面只按准确 applied 控制事件重读真实权限，不用 event payload 或显示缓存签发授权。根事件需要使已观察 child 及首次 metadata 尚在读取的 child 重新校准，切 scope 与迟到结果仍服从原读取代次。背景刷新不能替换在途原保存的展示 ownership，否则一次合法控制事件会把已保存结果留成 unknown；相同事实重读也不应撤下未提交确认。TUI 以 Ctrl+P 在问卷中访问权限，保留原步骤及字面 slash 回答，避免把用户数据解释成控制命令。对应当前行为与回归归 [TUI owner](../../../../packages/ui/src/tui/README.md)和 [Desktop owner](../../../../apps/desktop/README.md)。
 
 ## same_command 与准确 Session 清除
 

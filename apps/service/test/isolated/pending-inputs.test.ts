@@ -224,6 +224,58 @@ test('HTTP pending inputs preserve mixed original result inclusion and follow-up
     });
     expect(BigInt(second.commands[0]!.seq)).toBeGreaterThan(BigInt(first.commands[0]!.seq));
     expect(second.nextAfterSeq).toBeNull();
+    // The mutable text queue cannot delete or move an explicit result inclusion.
+    await store.acceptCommand({
+      ...base,
+      commandId: 'spare-queued-text',
+      request: {
+        kind: 'input.steer',
+        targetRunId: run.id,
+        contextSelectionId: selection.selection.id,
+        content: 'queued spare',
+      },
+    });
+    const queue = await client.getPendingInputQueue('s', { storeId: expectedStoreId });
+    await expect(
+      client.withdrawPendingInput('s', {
+        kind: 'input.withdraw',
+        expectedStoreId,
+        commandId: 'reject-include-withdraw',
+        targetCommandId: 'include',
+        expectedRevision: queue.revision,
+      }),
+    ).rejects.toMatchObject({ code: 'input_not_editable' });
+    await expect(
+      client.reorderPendingInputs('s', {
+        kind: 'input.reorder',
+        expectedStoreId,
+        commandId: 'reject-include-move',
+        commandIds: ['include', 'spare-queued-text', followReceipt.businessCommandId],
+        expectedRevision: queue.revision,
+      }),
+    ).rejects.toMatchObject({ code: 'input_queue_members_changed' });
+    await client.reorderPendingInputs('s', {
+      kind: 'input.reorder',
+      expectedStoreId,
+      commandId: 'move-spare',
+      commandIds: ['spare-queued-text', followReceipt.businessCommandId],
+      expectedRevision: queue.revision,
+    });
+    const moved = await client.getPendingInputQueue('s', { storeId: expectedStoreId });
+    expect(moved.commands.map((command) => command.id)).toEqual([
+      'include',
+      'spare-queued-text',
+      followReceipt.businessCommandId,
+    ]);
+    expect(moved.orders[0]).toBe(queue.orders[0]);
+    await client.withdrawPendingInput('s', {
+      kind: 'input.withdraw',
+      expectedStoreId,
+      commandId: 'withdraw-spare',
+      targetCommandId: 'spare-queued-text',
+      expectedRevision: moved.revision,
+    });
+    expect((await store.getCommand('include'))!.status).toBe('accepted');
     expect(effects).toBe(1);
     expect(requests).toHaveLength(3);
     release.release();

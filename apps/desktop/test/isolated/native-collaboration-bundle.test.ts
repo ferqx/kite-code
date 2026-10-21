@@ -28,9 +28,11 @@ test.skipIf(process.platform !== 'darwin')(
   'source-free Native six-tool dual child approvals, same-Session follow-up, late answers, exact stop and cold zero replay',
   async () => {
     const root = realpathSync(temporaryDirectory('kite-native-collaboration-'));
+    // Isolated runner reuse only; normal product startup has no such switch.
+    const reuseCandidate = process.env.KITE_TEST_COLLABORATION_CANDIDATE;
     const home = join(root, 'home'),
       workspace = join(home, 'workspace'),
-      moved = join(root, 'relocated');
+      moved = reuseCandidate ? realpathSync(reuseCandidate) : join(root, 'relocated');
     mkdirSync(workspace, { recursive: true });
     const profile = selectProfile({
       dataRoot: join(home, '.kite-code/unified-agent'),
@@ -47,20 +49,23 @@ test.skipIf(process.platform !== 'darwin')(
       driver: Bun.Subprocess<'ignore', 'pipe', 'pipe'> | undefined;
     let completed = false;
     try {
-      const { buildTerminalBundle } = await import(
-        resolve(import.meta.dir, '../../../../scripts/release/terminal-bundle.ts')
-      );
-      const terminal = await buildTerminalBundle({ destination: join(root, 'terminal-build') });
-      const built = await buildNativeCandidate({
-        testDiagnostics: true,
-        terminalRoot: terminal.root,
-        electronDist: resolve(dirname(dirname(require('electron') as string)), '../..'),
-        outdir: join(root, 'source'),
-      });
-      renameSync(join(root, 'source'), moved);
-      rmSync(terminal.root, { recursive: true, force: true });
+      if (!reuseCandidate) {
+        const { buildTerminalBundle } = await import(
+          resolve(import.meta.dir, '../../../../scripts/release/terminal-bundle.ts')
+        );
+        const terminal = await buildTerminalBundle({ destination: join(root, 'terminal-build') });
+        const built = await buildNativeCandidate({
+          testDiagnostics: true,
+          terminalRoot: terminal.root,
+          electronDist: resolve(dirname(dirname(require('electron') as string)), '../..'),
+          outdir: join(root, 'source'),
+        });
+        renameSync(join(root, 'source'), moved);
+        rmSync(terminal.root, { recursive: true, force: true });
+        const bundle = verifyNativeRuntimeBundle(moved);
+        expect(bundle.digest).toBe(built.digest);
+      }
       const bundle = verifyNativeRuntimeBundle(moved);
-      expect(bundle.digest).toBe(built.digest);
       leases.push(
         acquireArtifactAccess({ root: moved, mode: 'shared' }),
         acquireArtifactAccess({ root: bundle.terminal.root, mode: 'shared' }),

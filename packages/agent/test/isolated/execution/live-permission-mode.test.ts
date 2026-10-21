@@ -48,6 +48,7 @@ async function fixture(
     reviewer?: ModelAdapter;
     readOnly?: boolean;
     holdEffect?: boolean;
+    sameRunNextTool?: boolean;
   } = {},
 ) {
   const root = temporaryDirectory('kite-live-mode-');
@@ -179,8 +180,9 @@ async function fixture(
     store: proxy,
     model: createFixedModel([
       options.childDepth ? delegate(1) : effect,
+      ...(options.sameRunNextTool && !options.childDepth ? [effect] : []),
       [finish],
-      ...(options.holdEffect ? [effect, [finish]] : []),
+      ...(options.holdEffect && !options.sameRunNextTool ? [effect, [finish]] : []),
     ]),
     modelId: 'fixed',
     permissions: policy,
@@ -213,6 +215,7 @@ async function fixture(
       modelId: `child${index + 1}`,
       model: createFixedModel([
         index + 1 < (options.childDepth ?? 0) ? delegate(index + 2) : effect,
+        ...(options.sameRunNextTool && index + 1 === options.childDepth ? [effect] : []),
         [finish],
       ]),
       toolIds: ['fixture.delegate', 'fixture.effect'],
@@ -623,6 +626,162 @@ test('three levels of trusted injected children follow one root mode in their or
       )?.state,
     ).toBe('cancelled');
   } finally {
+    await f.close();
+  }
+});
+
+for (const childDepth of [0, 3]) {
+  test(`tightening preserves the dispatched action and gates the next tool in the same active Run at child depth ${childDepth}`, async () => {
+    const f = await fixture({ childDepth, holdEffect: true, sameRunNextTool: true });
+    try {
+      await f.setMode('full');
+      await f.submit();
+      await f.effectRunning.entered;
+      const first = (await f.store.getExecution(f.effectStarts[0]!.executionId))!;
+      expect(f.effects()).toBe(1);
+      expect(first.status).toBe('dispatching');
+      expect(first.authorization?.dispatched).toBe(true);
+      await f.setMode('accept_edits');
+      const strict = await f.store.readHostControl({
+        ...f.base,
+        kind: 'permission.mode',
+        scope: 'session:s',
+      });
+      expect(f.effectStarts[0]!.signal.aborted).toBe(false);
+      expect((await f.store.getExecution(first.id))?.cancelRequestedAt).toBeNull();
+      f.effectRunning.release();
+      const next = await f.pending();
+      expect(next.runId).toBe(first.runId);
+      expect(next.sessionId).toBe(first.sessionId);
+      expect(next.executionId).not.toBe(first.id);
+      expect(next.ancestry).toHaveLength(childDepth + 1);
+      expect((await f.store.getSession(next.sessionId))?.rootSessionId).toBe('s');
+      expect((await f.store.getExecution(first.id))?.status).toBe('succeeded');
+      expect((await f.store.getExecution(next.executionId))?.status).toBe('planned');
+      expect(f.effects()).toBe(1);
+      expect(f.effectStarts).toHaveLength(1);
+      expect(f.dispatches.some((input) => input.executionId === next.executionId)).toBe(false);
+      await f.approve(next, `approve-same-run-${childDepth}`);
+      await f.runtime.waitForCommand('work', { timeoutMs: 5000 });
+      expect(f.effects()).toBe(2);
+      expect(f.effectStarts.map((start) => start.executionId)).toEqual([
+        first.id,
+        next.executionId,
+      ]);
+      expect(
+        f.dispatches.find((input) => input.executionId === next.executionId)?.authorization,
+      ).toMatchObject({
+        allowed: true,
+        controlReads: [{ kind: 'permission.mode', scope: 'session:s', revision: strict.revision }],
+      });
+      const tools = (await f.store.listExecutions(first.sessionId)).filter(
+        (execution) => execution.kind === 'tool',
+      );
+      expect(tools).toHaveLength(2);
+      expect(tools.every((execution) => execution.runId === first.runId)).toBe(true);
+    } finally {
+      await f.close();
+    }
+  });
+}
+
+test('third-level child releases its stale resource wait and invalidates the fresh card when root mode relaxes', async () => {
+  const f = await fixture({ childDepth: 3, holdResource: true });
+  try {
+    await f.setMode('full');
+    await f.submit();
+    await f.resource.entered;
+    await f.setMode('accept_edits');
+    const card = await f.pending();
+    expect(card.ancestry).toHaveLength(4);
+    expect((await f.store.getSession(card.sessionId))?.rootSessionId).toBe('s');
+    expect((await f.store.getExecution(card.executionId))?.status).toBe('planned');
+    expect(f.effects()).toBe(0);
+    expect(f.resourceAborts()).toBe(1);
+    expect(f.dispatches.some((input) => input.executionId === card.executionId)).toBe(false);
+    await f.setMode('full');
+    await until(async () =>
+      (
+        await f.store.getInteraction({
+          expectedStoreId: f.base.expectedStoreId,
+          sessionId: card.sessionId,
+          interactionId: card.id,
+        })
+      )?.state === 'cancelled'
+        ? true
+        : null,
+    );
+    await f.approve(card, 'late-child-resource-answer').catch(() => {});
+    expect(f.effects()).toBe(0);
+    f.resource.release();
+    await f.runtime.waitForCommand('work', { timeoutMs: 5000 });
+    expect(f.effects()).toBe(1);
+    expect(f.effectStarts.map((start) => start.executionId)).toEqual([card.executionId]);
+    expect(f.dispatches.filter((input) => input.executionId === card.executionId)).toHaveLength(1);
+  } finally {
+    await f.close();
+  }
+});
+
+test('third-level child discards a late Auto approval after tightening to a fresh manual request', async () => {
+  const held = barrier();
+  const reviewReturned = barrier();
+  let reviewCalls = 0;
+  const f = await fixture({
+    childDepth: 3,
+    reviewer: {
+      async *stream() {
+        reviewCalls++;
+        held.arrive();
+        try {
+          await held.waiting;
+          yield {
+            type: 'text_delta',
+            text: '{"decision":"approve_once","reason":"stale reviewer approval"}',
+          };
+          yield finish;
+        } finally {
+          reviewReturned.arrive();
+        }
+      },
+    },
+  });
+  try {
+    await f.setMode('auto');
+    await f.submit();
+    await held.entered;
+    expect(reviewCalls).toBe(1);
+    expect(f.effects()).toBe(0);
+    await f.setMode('accept_edits');
+    const fresh = await f.pending();
+    expect(fresh.ancestry).toHaveLength(4);
+    expect((await f.store.getSession(fresh.sessionId))?.rootSessionId).toBe('s');
+    const review = (await f.store.listExecutions(fresh.sessionId)).find(
+      (execution) => execution.parentExecutionId === fresh.executionId && execution.childSessionId,
+    )!;
+    expect(review).toBeDefined();
+    held.release();
+    await reviewReturned.entered;
+    await f.runtime.waitForCommand(review.originCommandId, { timeoutMs: 5000 });
+    expect(f.effects()).toBe(0);
+    expect((await f.store.getExecution(fresh.executionId))?.status).toBe('planned');
+    expect(f.dispatches.some((input) => input.executionId === fresh.executionId)).toBe(false);
+    expect(
+      (
+        await f.store.getInteraction({
+          expectedStoreId: f.base.expectedStoreId,
+          sessionId: fresh.sessionId,
+          interactionId: fresh.id,
+        })
+      )?.state,
+    ).toBe('pending');
+    await f.approve(fresh, 'approve-after-stale-auto');
+    await f.runtime.waitForCommand('work', { timeoutMs: 5000 });
+    expect(f.effects()).toBe(1);
+    expect(reviewCalls).toBe(1);
+    expect(f.effectStarts.map((start) => start.executionId)).toEqual([fresh.executionId]);
+  } finally {
+    held.release();
     await f.close();
   }
 });

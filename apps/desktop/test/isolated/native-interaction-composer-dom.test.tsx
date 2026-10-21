@@ -10,7 +10,7 @@ import type { NativeSelection } from '../../src/native-bridge';
 import { backgroundItem } from '../background-item.fixture';
 import { prepareDesktopDom } from '../native-page-dom.fixture';
 
-test('accurate root interaction retains its exclusive prompt while a child approval remains actionable beside parent input', async () => {
+test('ordinary root and child approvals retain prompt and permission access; questions, plans and MCP remain exclusive', async () => {
   const dom = new JSDOM('<div id="root"></div>', {
     url: 'http://localhost',
     pretendToBeVisual: true,
@@ -117,9 +117,20 @@ test('accurate root interaction retains its exclusive prompt while a child appro
       ),
     );
   try {
-    expect(nativeRootInteractionBlocksComposer(selection)).toBe(true);
+    expect(nativeRootInteractionBlocksComposer(selection)).toBe(false);
     await render(selection, card);
-    expect(host.querySelector('[aria-label="parent input"]')).toBeNull();
+    expect(host.querySelector('[aria-label="parent input"]')).not.toBeNull();
+    for (const other of [
+      { ...card, kind: 'question' as const },
+      { ...card, kind: 'plan_review' as const },
+      { ...card, request: { kind: 'mcp_source_approval' } },
+      { ...card, request: { kind: 'mcp_credential_binding' } },
+    ]) {
+      const exclusive = { ...selection, interactions: [other] };
+      expect(nativeRootInteractionBlocksComposer(exclusive)).toBe(true);
+      await render(exclusive, other);
+      expect(host.querySelector('[aria-label="parent input"]')).toBeNull();
+    }
     const childCard = {
       ...card,
       id: 'child-approval',
@@ -134,7 +145,7 @@ test('accurate root interaction retains its exclusive prompt while a child appro
     expect(host.querySelector('[aria-label="parent input"]')).not.toBeNull();
     await act(async () =>
       [...host.querySelectorAll<HTMLButtonElement>('button')]
-        .find((button) => button.textContent === '仅批准这一次')!
+        .find((button) => button.textContent === '批准一次')!
         .click(),
     );
     expect(answers).toEqual(['child-approval']);

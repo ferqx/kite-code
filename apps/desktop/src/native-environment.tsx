@@ -689,6 +689,27 @@ export function useNativeEnvironment({
   const visibleChild = child?.scope === scope ? child : undefined;
   return {
     child: visibleChild,
+    approvalOwners:
+      !busy && !stale
+        ? (current?.facts?.items.flatMap((item) => {
+            const child = item.childSession,
+              run = item.childRun;
+            if (
+              !child ||
+              !run ||
+              item.rootSession.id !== rootSessionId ||
+              item.execution.originStoreId !== storeId ||
+              child.rootSessionId !== rootSessionId ||
+              item.execution.childSessionId !== child.id ||
+              run.sessionId !== child.id ||
+              run.originStoreId !== storeId ||
+              run.rootWorkCommandId !== item.execution.rootWorkCommandId ||
+              run.rootWorkSeq !== item.execution.rootWorkSeq
+            )
+              return [];
+            return [{ storeId, sessionId: child.id, runId: run.id, title: child.title }];
+          }) ?? [])
+        : [],
     childScope: scope,
     childReadAvailable: !!bridge && !!scope && !unavailable && !paused,
     openChild,

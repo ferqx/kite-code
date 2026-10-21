@@ -115,7 +115,7 @@ async function fixture(seed = false, legacy = false) {
   if (legacy) {
     const previousSchema = new Database(selected.databasePath);
     previousSchema.exec(
-      "DROP TABLE session_reconciliation; DELETE FROM schema_migration WHERE id='0003-session-reconciliation'",
+      "DROP TRIGGER pending_input_queue_insert; DROP TRIGGER pending_input_queue_update; DROP TRIGGER pending_input_queue_delete; DROP TABLE pending_input_queue_revision; DROP INDEX command_pending_order; ALTER TABLE command DROP COLUMN pending_order; DROP TABLE session_reconciliation; DELETE FROM schema_migration WHERE id IN('0003-session-reconciliation','0004-pending-input-order')",
     );
     previousSchema.close(true);
   }

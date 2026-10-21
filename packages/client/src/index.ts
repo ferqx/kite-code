@@ -45,6 +45,7 @@ import type {
   InteractionListQuery,
   JobReconcileCommand,
   ModelSettingsRequest,
+  PendingInputQueueQuery,
   PermissionMutation,
   ProviderDiscoveryRequest,
   ProviderSettingsRequest,
@@ -54,6 +55,7 @@ import type {
   RecoverSessionResponse,
   RemoveWorkspaceRequest,
   RenameSessionRequest,
+  ReorderPendingInputsRequest,
   ResetCompressionRequest,
   ResumeJobReportRequest,
   ResumeJobReportResponse,
@@ -73,6 +75,7 @@ import type {
   StreamCheckpoint,
   StreamReady,
   VerifySessionExportQuery,
+  WithdrawPendingInputRequest,
   WorkspaceRemoval,
 } from './generated/api';
 import {
@@ -391,23 +394,26 @@ export class AgentClient {
         requestShape === 'CompressContextRequest' ||
         requestShape === 'ResetCompressionRequest'
         ? 'context'
-        : requestShape === 'AnswerInteractionRequest'
-          ? 'interactions'
-          : requestShape === 'SteerCommandRequest' || requestShape === 'FollowUpCommandRequest'
-            ? 'inputs'
-            : requestShape === 'ReconcileJobRequest' ||
-                requestShape === 'ResumeJobReportRequest' ||
-                requestShape === 'ResumeRunRequest' ||
-                requestShape === 'RecoverSessionRequest' ||
-                requestShape === 'ReconcileSessionRequest' ||
-                requestShape === 'StartCommandRequest' ||
-                requestShape === 'CancelCommandRequest' ||
-                requestShape === 'CancelRunRequest' ||
-                requestShape === 'CancelExecutionRequest' ||
-                requestShape === 'CancelSessionRequest' ||
-                requestShape === 'ExtensionCommandRequest'
-              ? 'commands'
-              : 'sessions',
+        : requestShape === 'WithdrawPendingInputRequest' ||
+            requestShape === 'ReorderPendingInputsRequest'
+          ? 'pending_input_queue'
+          : requestShape === 'AnswerInteractionRequest'
+            ? 'interactions'
+            : requestShape === 'SteerCommandRequest' || requestShape === 'FollowUpCommandRequest'
+              ? 'inputs'
+              : requestShape === 'ReconcileJobRequest' ||
+                  requestShape === 'ResumeJobReportRequest' ||
+                  requestShape === 'ResumeRunRequest' ||
+                  requestShape === 'RecoverSessionRequest' ||
+                  requestShape === 'ReconcileSessionRequest' ||
+                  requestShape === 'StartCommandRequest' ||
+                  requestShape === 'CancelCommandRequest' ||
+                  requestShape === 'CancelRunRequest' ||
+                  requestShape === 'CancelExecutionRequest' ||
+                  requestShape === 'CancelSessionRequest' ||
+                  requestShape === 'ExtensionCommandRequest'
+                ? 'commands'
+                : 'sessions',
     );
     const intent = structuredClone(input);
     validateRequest(requestShape, intent);
@@ -2148,6 +2154,103 @@ export class AgentClient {
       'PendingInputPage',
       options,
     );
+  }
+  getPendingInputQueue(
+    sessionId: string,
+    input: PendingInputQueueQuery,
+    options: { signal?: AbortSignal } = {},
+  ) {
+    this.requireCapability('pending_input_queue');
+    const query = structuredClone(input);
+    validateRequest('PendingInputQueueQuery', query);
+    if (query.afterOrder !== undefined) parseCursorSequence(query.afterOrder);
+    const params = new URLSearchParams(
+      Object.entries(query).map(([key, value]) => [key, String(value)]),
+    );
+    return this.fetchJSON(
+      `/v1/sessions/${encodeURIComponent(sessionId)}/input-queue?${params}`,
+      'PendingInputQueue',
+      options,
+    ).then((page) => {
+      parseCursorSequence(page.snapshotCursor);
+      let previous = query.afterOrder === undefined ? -1n : BigInt(query.afterOrder);
+      if (
+        page.commands.length !== page.orders.length ||
+        (query.expectedRevision !== undefined && page.revision !== query.expectedRevision)
+      )
+        throw new ClientError('invalid_response');
+      for (let i = 0; i < page.orders.length; i++) {
+        const order = page.orders[i]!;
+        parseCursorSequence(order);
+        if (
+          BigInt(order) <= previous ||
+          page.commands[i]!.sessionId !== sessionId ||
+          page.commands[i]!.originStoreId !== query.storeId
+        )
+          throw new ClientError('invalid_response');
+        previous = BigInt(order);
+      }
+      if (
+        page.nextAfterOrder !== null &&
+        (!page.orders.length || page.nextAfterOrder !== page.orders.at(-1))
+      )
+        throw new ClientError('invalid_response');
+      return page;
+    });
+  }
+  withdrawPendingInput(
+    sessionId: string,
+    input: WithdrawPendingInputRequest,
+    options: { signal?: AbortSignal } = {},
+  ) {
+    return this.mutatePendingInputQueue(sessionId, input, options.signal);
+  }
+  reorderPendingInputs(
+    sessionId: string,
+    input: ReorderPendingInputsRequest,
+    options: { signal?: AbortSignal } = {},
+  ) {
+    return this.mutatePendingInputQueue(sessionId, input, options.signal);
+  }
+  private mutatePendingInputQueue(
+    sessionId: string,
+    input: WithdrawPendingInputRequest | ReorderPendingInputsRequest,
+    signal?: AbortSignal,
+  ) {
+    const intent = structuredClone(input);
+    const operation = intent.kind === 'input.withdraw' ? 'withdraw' : 'reorder';
+    const { expectedStoreId, commandId, ...request } = intent;
+    return this.mutate(
+      `/v1/sessions/${encodeURIComponent(sessionId)}/input-queue/${operation}`,
+      operation === 'withdraw' ? 'WithdrawPendingInputRequest' : 'ReorderPendingInputsRequest',
+      'Command',
+      intent,
+      signal,
+    )
+      .catch((error: unknown) => {
+        if (error instanceof ClientError && error.code === 'invalid_response')
+          throw new ClientError(
+            'network_outcome_unknown',
+            'Query the original queue Command identity.',
+          );
+        throw error;
+      })
+      .then(async (command) => {
+        if (
+          command.id !== commandId ||
+          command.sessionId !== sessionId ||
+          command.originStoreId !== expectedStoreId ||
+          command.kind !== intent.kind ||
+          command.status !== 'applied' ||
+          command.requestDigest !==
+            (await digestModelBody(new TextEncoder().encode(canonicalModelBody(request))))
+        )
+          throw new ClientError(
+            'network_outcome_unknown',
+            'The original queue Command receipt did not verify.',
+          );
+        return command;
+      });
   }
   listInteractions(
     sessionId: string,

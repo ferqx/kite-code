@@ -1481,6 +1481,13 @@ function TuiSessionView({
   useEffect(() => {
     lastCancelKey.current = undefined;
   }, [state.sessionId]);
+  useInput((input, key) => {
+    if (key.ctrl && input === 'p' && controller.port.permissions) {
+      setChooser(false);
+      setCardChooser(false);
+      void controller.openPermissions();
+    }
+  });
   useEffect(() => {
     if (state.chooserRequested) {
       void controller.list();
@@ -2290,6 +2297,7 @@ function TuiSessionView({
               draft={question}
               submission={questionSubmission}
               providerAction={providerQuestion}
+              permissionsAvailable={!!controller.port.permissions}
               compactMaterial={
                 testDiagnostics ||
                 longQuestionMaterial(form, question.step, stdout.columns || 80, stdout.rows || 24)

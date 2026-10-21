@@ -25,6 +25,11 @@ import {
   nativeMcpIdentity,
   parseNativeMcpRecord,
 } from '../electron/mcp-journal';
+import {
+  assertQueueRecordTransition,
+  type NativeQueueRecord,
+  parseNativeQueueRecord,
+} from '../electron/native-input-queue-journal';
 import type { DraftScope, PrivateData } from '../electron/private-data';
 import { createScheduledTaskData } from '../electron/scheduled-tasks';
 import {
@@ -42,6 +47,7 @@ export function memoryPrivateData(): PrivateData {
   const schedules = new Database(':memory:');
   schedules.exec('PRAGMA user_version=7');
   const files = new Map<string, FileRecoveryIntent>();
+  const inputQueue = new Map<string, NativeQueueRecord>();
   const removals = new Map<string, WorkspaceRemovalIntent>();
   const mcps = new Map<string, NativeMcpRecord>();
   const configurations = new Map<string, NativeConfigurationRecord>();
@@ -59,6 +65,14 @@ export function memoryPrivateData(): PrivateData {
       revision: 0,
     };
   return {
+    inputQueueRecords: () => [...inputQueue.values()].map((row) => structuredClone(row)),
+    saveInputQueueRecord(raw) {
+      const row = parseNativeQueueRecord(raw),
+        old = inputQueue.get(row.request.commandId);
+      if (old) assertQueueRecordTransition(old, row);
+      else if (row.phase !== 'submitting') throw Error('input_queue_intent_conflict');
+      inputQueue.set(row.request.commandId, row);
+    },
     ...createScheduledTaskData(() => schedules as unknown as DatabaseSync),
     workspaceRemovals: () => [...removals.values()].map((r) => structuredClone(r)),
     saveWorkspaceRemoval(raw) {

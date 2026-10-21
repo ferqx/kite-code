@@ -816,6 +816,9 @@ export class AgentRuntime {
     this.getInteraction = this.accountEntry(this.getInteraction, 'observation');
     this.listInteractions = this.accountEntry(this.listInteractions, 'observation');
     this.listPendingInputs = this.accountEntry(this.listPendingInputs, 'observation');
+    this.getPendingInputQueue = this.accountEntry(this.getPendingInputQueue, 'observation');
+    this.withdrawPendingInput = this.accountEntry(this.withdrawPendingInput, 'control');
+    this.reorderPendingInputs = this.accountEntry(this.reorderPendingInputs, 'control');
     this.readOriginalRunSelection = this.accountEntry(this.readOriginalRunSelection, 'observation');
     this.getSelectedContext = this.accountEntry(this.getSelectedContext, 'observation');
     this.readContextEstimate = this.accountEntry(this.readContextEstimate, 'observation');
@@ -2421,6 +2424,22 @@ export class AgentRuntime {
     if (!session) throw new AgentError('session_not_found');
     if (session.parentSessionId !== null) throw new AgentError('group_root_required');
     return this.options.store.listPendingInputs(input);
+  }
+  async getPendingInputQueue(input: Parameters<Store['getPendingInputQueue']>[0]) {
+    if ((await this.options.store.getMetadata()).storeId !== input.expectedStoreId)
+      throw new AgentError('store_identity_mismatch');
+    const session = await this.options.store.getSession(input.sessionId);
+    if (!session) throw new AgentError('session_not_found');
+    if (session.parentSessionId !== null) throw new AgentError('group_root_required');
+    return this.options.store.getPendingInputQueue(input);
+  }
+  withdrawPendingInput(input: Parameters<Store['withdrawPendingInput']>[0]) {
+    if (this.closing) throw new AgentError('service_draining');
+    return this.options.store.withdrawPendingInput(input);
+  }
+  reorderPendingInputs(input: Parameters<Store['reorderPendingInputs']>[0]) {
+    if (this.closing) throw new AgentError('service_draining');
+    return this.options.store.reorderPendingInputs(input);
   }
   readOriginalRunSelection(input: Parameters<Store['readOriginalRunSelection']>[0]) {
     return this.options.store.readOriginalRunSelection(input);
@@ -5967,7 +5986,11 @@ export class AgentRuntime {
       } catch (cleanupError) {
         failure = this.preparationCleanupError(error, cleanupError, preparationResources!);
       }
-      if (failure instanceof AgentError && failure.code === 'command_cancelled') return;
+      if (
+        failure instanceof AgentError &&
+        ['command_cancelled', 'input_cancelled', 'input_order_conflict'].includes(failure.code)
+      )
+        return;
       await this.options.store.rejectCommand({
         expectedStoreId: command.originStoreId,
         owner,
@@ -6227,7 +6250,8 @@ export class AgentRuntime {
           let applied = 0;
           // One owner serializes safe checkpoints; the final dispatch/finish transaction closes races.
           for (let batch = 0; batch < 4; batch++) {
-            const page = await this.options.store.listPendingInputs({
+            const page = await this.options.store.getPendingInputQueue({
+              owner,
               expectedStoreId: run.originStoreId,
               sessionId: run.sessionId,
               kind: 'input.steer',
@@ -6250,11 +6274,13 @@ export class AgentRuntime {
                   !(error instanceof AgentError) ||
                   ![
                     'input_cancelled',
+                    'input_order_conflict',
                     'input_target_stopped',
                     'context_selection_changed',
                   ].includes(error.code)
                 )
                   throw error;
+                if (error.code === 'input_order_conflict') break;
                 if ((await this.options.store.getCommand(input.id))?.status === 'accepted')
                   await this.options.store.rejectCommand({
                     expectedStoreId: run.originStoreId,
@@ -6264,7 +6290,7 @@ export class AgentRuntime {
                   });
               }
             }
-            if (!page.nextAfterSeq) break;
+            if (!page.nextAfterOrder) break;
           }
           const reports = await this.receiveReports(run, owner, controller.signal);
           if (reports) inboxVersion++;

@@ -215,7 +215,7 @@ try {
             .first()
             .textContent())!.includes(reason),
         );
-        await page.getByRole('button', { name: '仅批准这一次', exact: true }).click();
+        await page.getByRole('button', { name: '批准一次', exact: true }).click();
       }
       await until(
         state,

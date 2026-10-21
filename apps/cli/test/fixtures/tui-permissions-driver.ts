@@ -183,6 +183,36 @@ try {
   await wait('same command in original Session');
   await key('\x03');
   await pump();
+  await wait('New Run >');
+  await send('New task: owned-4');
+  await wait('same command in original Session');
+  const pendingBeforeMode = rows(
+    "select id,run_id from interaction where definition_id='shell.launch' and state='pending'",
+  ) as { id: string; run_id: string }[];
+  assert.equal(pendingBeforeMode.length, 1);
+  const originalPending = pendingBeforeMode[0]!;
+  await key('\x10');
+  await wait('Permissions · original Session');
+  await wait('Mode 自动审核 (auto)');
+  await key('\x1b[B');
+  await key('\r');
+  await wait('Confirm original');
+  await key('\r');
+  await wait('Mode 完全访问 (full)');
+  await key('\x1b');
+  await wait('DONE owned-4');
+  assert.deepEqual(
+    rows(`select state,answer_json from interaction where id='${originalPending.id}'`),
+    [{ state: 'cancelled', answer_json: null }],
+  );
+  assert.equal(
+    (
+      rows(
+        `select count(*) as n from execution where run_id='${originalPending.run_id}' and kind='tool' and state='succeeded'`,
+      )[0] as { n: number }
+    ).n,
+    2,
+  );
   await key('\x11');
   const exitEnd = Date.now() + 6000;
   while (!owned.ended && Date.now() < exitEnd) await Bun.sleep(100);

@@ -101,6 +101,7 @@ export function QuestionPanel({
   draft,
   compactMaterial = false,
   providerAction = false,
+  permissionsAvailable = false,
   submission,
 }: {
   form: QuestionForm;
@@ -108,6 +109,7 @@ export function QuestionPanel({
   compactMaterial?: boolean;
   /** Root supplies this only for a qualified original MCP provider-action Question. */
   providerAction?: boolean;
+  permissionsAvailable?: boolean;
   submission?: TuiIntent['phase'];
 }) {
   const { t } = useTuiPresentation();
@@ -198,7 +200,16 @@ export function QuestionPanel({
       {!frozen && current.selected === undefined && field.choices.length > 0 && (
         <Text dimColor>{t('No selection (Enter has no answer)')}</Text>
       )}
-      {!frozen && form.alternative && <Text>Alt+A: {terminalText(form.alternative.title)}</Text>}
+      {!frozen && (form.alternative || permissionsAvailable) && (
+        <Text>
+          {form.alternative && <>Alt+A: {terminalText(form.alternative.title)}</>}
+          {permissionsAvailable && (
+            <>
+              {form.alternative && ' · '}Ctrl+P: {t('Permissions')}
+            </>
+          )}
+        </Text>
+      )}
       {!frozen && !field.required && (
         <Text dimColor>
           {current.skipped ? '› ' : '  '}

@@ -221,6 +221,8 @@ Runtime/Session 的 [串行资源 owner](src/execution/resources.ts)只保留仍
 
 ## 人类输入、工作选择与可靠结果
 
+尚未消费的普通输入由 `Runtime.getPendingInputQueue/withdrawPendingInput/reorderPendingInputs` 经原 Store 管理；[Runtime](src/runtime.ts)的安全 checkpoint 与普通 pump 消费实际持久顺序，重排后不继续按旧 seq 应用。原 `input.steer/input.follow_up` 可保完整图片／文件，`result.include` 保固定槽；撤回只移除准确 pending 输入，不停止当前 Run，不撤销已解释或已消费工作。顺序、revision 防 ABA、原 operation ID 幂等和竞争事务归 [Store 队列 owner](src/storage/README.md#待消费输入的撤回与排序)，用户交互归 [Desktop](../../docs/handbook/clients/desktop/README.md)。
+
 [真实输入 owner](src/storage/sqlite/inputs/README.md)把原公共 Command、耐久 `human.input`、关联/选择 `human.input.decision` 和实际业务 Command 分开。`human-input-intent.ts` 只直接识别当前未引用的明确控制；未知正文由 `human-input-processing.ts` 提供封存身份及候选原文，在同一普通 Loop 的无工具 Model 中提出关联。Host 独立校验提案、当前选择及原输入 digest；Store 以 control revision CAS 保存决定。引用、邮件、代码和自报批准不能产生控制。对外回执分别给出原输入、决定、业务 Command 与可空 Run，Client/CLI 沿实际业务 Run 观察，不把输入受理当完成。
 
 idle pump 读到 pending 后，输入入口可能已经提交准确业务决定。`preparePendingHumanInputs` 只在真实 SQL 返回 `input_processing_unavailable` 且 `hasCommittedHumanBusinessDecision` 查回同 scope、digest、selection 的已封存决定及 public/raw/business 完整归属时放弃过期准备，随后仍沿原业务派发门禁。取消、Rewind、未封存或缺失/伪造证明保持原失败，不能因一次过期读取污染合法业务，也不能把异常一概忽略。[确定性竞争回归](test/isolated/recovery/human-input-processing-race.test.ts)用真实 SQLite 与有限 Action 唤醒原 pump，核两次业务 Model、零额外处理 Run，以及五个失败反例。

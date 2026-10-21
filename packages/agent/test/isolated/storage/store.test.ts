@@ -225,7 +225,7 @@ describe('real unified SQLite Store', () => {
     await rejects(reader.acquireSessionOwner('s', 'reader'), 'read_only');
     const db = new Database(join(options.dataRoot, options.profile, 'core.db'), { readonly: true });
     try {
-      // Closed baseline: permission grants and the host mutation journal share this Store.
+      // Closed baseline: permission grants, pending queue versions and the host journal share this Store.
       // Check names, including SQLite's AUTOINCREMENT helper, rather than a stale table count.
       expect(
         db
@@ -247,6 +247,7 @@ describe('real unified SQLite Store', () => {
         'interaction',
         'message',
         'message_part',
+        'pending_input_queue_revision',
         'permission_grant',
         'permission_grant_change',
         'recovery_audit',

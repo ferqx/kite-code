@@ -308,7 +308,7 @@ Main 开始退出和取消退出时通过原固定 event channel 通知 renderer
 
 [NativeToolMessage](src/native-tool-messages.tsx)直接消费原 [ToolActivity / ToolRow](../../packages/ui/src/desktop/ToolActivity.tsx)，保轻量工具行、状态、箭头和结果展开。历史 Message 的 complete 只表示消息完整；[Main metadata reader](electron/tool-messages.ts)按已读 Message 的唯一 source Execution GET，核原 Store／Session／Run、tool kind、终态、result outcome 和完全相同的 content。每批最多32项，完整已读历史不限于 View 近200项；元数据核对前和无法核实的条目默认显示收起的工具记录，缺少执行状态时标为“状态待核对”，不推断成功或结果未知；只有用户展开才挂载原正文及其读取控件，不先将原结果 JSON 显示为消息正文再替换。读取失败仍保留原文和明确重试入口。[回执渲染回归](test/isolated/native-tool-receipt-render-dom.test.tsx)直接使用 NativeDesktop，核展示信息未到、失败、未知／未来版本及不支持格式的收起阅读和切会话清理。metadata close、切会话、detach 或 history epoch 变更只释放所属 GET，不停止、重做或恢复工具执行。同一阅读身份的普通事件刷新暂清 controller snapshot 时沿 Main 已验证 lastView 保留只读观察；明确选择、reset 或 Store 变化仍撤销旧范围。
 
-Native 将 Tool 的 `planned` 映射为 UI `queued`，显示“等待执行”；`dispatching` 与 `running` 映射为 UI `running`，显示“执行中”并使用运行标记。普通 Tool 的实际调用等待结果期间仍为 `dispatching`，不能将它视为排队；读取、修改与独立工具行均保留执行状态文字，聚合按实际运行项生成原活动摘要。审批优先级、停止请求和终态语义保持，适配不改后端 ledger、执行准入或并发。[原工具 DOM 回归](test/isolated/native-tool-messages-dom.test.tsx)沿实际适配与组件核待派发、已派发、终态和混合探索聚合。
+Native 将 Tool 的 `planned` 映射为 UI `queued`，显示“等待执行”；`dispatching` 与 `running` 映射为 UI `running`，显示“执行中”并使用运行标记。普通 Tool 的实际调用等待结果期间仍为 `dispatching`，不能将它视为排队；读取、修改与独立工具行均保留执行状态文字，聚合按实际运行项生成原活动摘要。执行状态待核实与审批提示的优先级、停止请求和终态语义保持，适配不改后端 ledger、执行准入或并发。[原工具 DOM 回归](test/isolated/native-tool-messages-dom.test.tsx)沿实际适配与组件核待派发、已派发、终态和混合探索聚合。
 
 Main 仅在原 Message／Execution 身份和结果完全匹配、原状态 failed、`authorization.dispatched=false`、Core `adapterAttempted/dispatchCommitted=false` 且准确刷新 code 与 content 一致时投影只读 `decisionRefresh`。Native 适配为中性的 `not_executed`，显示上下文／工具信息已更新、此次未执行；组汇总单列“重新评估”，不计入实际读取／执行或失败。持久 ledger 不被改写，冷历史复用相同核验；缺证明、实际派发失败及伪造 details 均保原事实。[Main](test/native-tool-messages.test.ts)及[DOM](test/isolated/native-tool-messages-dom.test.tsx)验证四项重新评估与一项真实失败混合时仅计失败一项。
 
@@ -378,11 +378,29 @@ Native 的侧栏打开入口对当前父会话及同一在途选择去重，重�
 
 ## 原审批面板与授权观察
 
-[NativeApproval](src/native-approval.tsx)复用原 [Approval](../../packages/ui/src/desktop/Approval.tsx)按钮与范围菜单，只提供原请求实际允许的 `approve_once`／`same_command`。已知 `shell.launch@1` 显示准确原命令；其他定义保原身份、目标、原因和可展开完整请求。`InteractionCard.renderApproval` 沿原附件 reader 的身份、hash、UTF-8 和 EOF 资格提供完整正文与回答回调；未读完、换卡、提交中或未知时禁用。回答仍走当前 Native／Main／公共 Client 原链，不建立第二个提交入口。
+[NativeApproval](src/native-approval.tsx)复用原 [Approval](../../packages/ui/src/desktop/Approval.tsx)按钮与范围菜单，只提供原请求实际允许的 `approve_once`／`same_command`。主按钮“批准一次”，分体菜单“本次会话批准”同时注明仅本次及本会话相同命令。已知 `shell.execute`、`shell.launch` 和 `shell.command` 的版本1显示准确原命令，其他定义显示原身份、目标和原因；工具标签与等宽目标分层，单行超出省略，沿原 Tooltip 悬停／聚焦查看完整内容，不再额外展示详情。`InteractionCard.renderApproval` 的紧凑模式自动沿原附件 reader 的身份、hash、UTF-8 和 EOF 资格核实完整正文，失败可重试；未读完、换卡、提交中或未知时禁用。回答仍走当前 Native／Main／公共 Client 原链，不建立第二个提交入口。
 
-公共 Execution 的可选 `authorization` 是 [Store 只读观察](../../packages/agent/src/storage/README.md#只读授权观察)，只表达原 reviewer、人工答案、accepted decision 与派发事实。Native 将它映射到原 ToolActivity 的审批标签，分别显示“已提交批准，待核对”“已人工批准”、自动批准／拒绝／等待或结果未知；停止后保留可核对的已有记录。批准不覆盖工具的真实失败、取消或未知状态，也不授予执行权限。当前唯一 pending 审批卡仍以实际 Interaction 为准；Auto 转人工时保留原审查原因。
+[NativeApprovalGroup](src/native-approval-group.tsx)将当前普通工具审批归入输入组件上方的一张独立浮卡，高度不超过默认 Composer；右上角“‹ 1/3 ›”一次只挂载一项原 `InteractionCard` 与准确 `approval ID` article，翻页不回答其他项，当前项消失后按原位置选择后继。主 Agent 不显示名称；子 Agent 名称按实际 Store／Session／Run 核实，未匹配时显示“子 Agent”，不将内部 UUID 当名称。[ApprovalHeader](../../packages/ui/src/desktop/ApprovalHeader.tsx)按准确 Store／Session 的随机身份确定固定池中的图标及语义色槽，翻页、重开或新 Run 不重新随机。附件读取、独立 grant、在途／未知禁用、原答案身份与迟到隔离均沿原链；MCP 来源／凭据授权、问题及计划不进入普通审批组。
 
-父 Session 的准确活动 Run 正在等待自己的审批／问答／计划时，仍隐藏主输入并保原交互。child 的待批卡保准确 Source Session／Run／Execution，与父输入同时可见，不再因为另一 child 待批而阻止父发起输入。`nativeRootInteractionBlocksComposer` 核原 Store、当前父 Session、准确 Execution 与活动 Run；runless 原交互核准确原执行，不以 rootSessionId 或 waiting 文案推断。共享 SessionPage 的 `interactionHidesPrompt` 默认保持原行为，Native 仅在准确 child 交互场景允许卡片与主输入并存。[DOM 回归](test/isolated/native-interaction-composer-dom.test.tsx)验证父交互仍独占、child批准仍操作原卡、父输入可见与旧Store／Run不误阻挡；实际新建／追问和单轮准入继续由原 Runtime 决定。
+[浮卡 DOM](test/isolated/native-approval-group-dom.test.tsx)连同[原审批](test/isolated/native-approval-dom.test.tsx)和[输入交互](test/isolated/native-interaction-composer-dom.test.tsx)核单卡翻页、主名称缺席、准确子名称与稳定图标、独立决定、紧凑附件门禁、单项 unknown、旧 Store／Run 名称隔离及其他交互类型保持；[环境信息停止回归](test/isolated/native-environment-stop-dom.test.tsx)继续核只读名称投影未放宽原停止资格。
+
+公共 Execution 的可选 `authorization` 是 [Store 只读观察](../../packages/agent/src/storage/README.md#只读授权观察)，只表达原 reviewer、人工答案、accepted decision 与派发事实。Native 将它映射到原 ToolActivity 的审批标签，分别显示“已提交批准，待核对”“已人工批准”、自动批准／拒绝／等待或结果未知；停止后保留可核对的已有记录。批准不覆盖工具的真实失败、取消或未知状态，也不授予执行权限。每项当前待批状态仍以实际 Interaction 为准；Auto 转人工时保留原审查原因。
+
+普通 root／child 工具审批都与父 Composer、权限选择器并存，待批时可切 Auto／Full 使原未派发工具重新判断。`nativeRootInteractionBlocksComposer` 只为准确当前根的 question、plan_review 与 MCP 特殊审批隐藏输入，仍核原 Store、父 Session、准确 Execution 与活动 Run；runless 原交互核准确原执行，不以 rootSessionId 或 waiting 文案推断。共享 SessionPage 的 `interactionHidesPrompt` 缺省保持，Native 对普通工具审批明确保留 Composer。实际输入、单轮准入及模式复核继续由原 Runtime 决定。
+
+## 原运行中消息队列
+
+[renderer hook](src/native-input-queue.ts)与 [Main owner](electron/native-input-queue.ts)通过封闭 [队列桥](src/input-queue-bridge.ts)读取当前根 Session 的真实 pending 输入，不将已提交命令伪装成本地数组。`pending_input_queue` capability 与当前 generation／viewSelection／history epoch／Store／Session／Workspace 核实后，Main 穷尽固定 revision 页并保留正文，给 renderer 仅提供当前 observation、可见条目及有限操作。每次完整观察最多4096成员、3MiB文本，超限拒绝而不截断；`result.include` 不作为提示词展示，仍参与后端固定槽与 revision。
+
+同一准确 scope 的普通 View／历史校准保留已观察队列的 DOM 和全文悬浮层，只暂停编辑、删除和调序；重新核实时不靠卸载组件重置展示。真实观察失败仍显示错误并禁写；切换 Store、会话或读取代次不复用旧队列。
+
+[Composer 队列](../../packages/ui/src/desktop/QueuedMessages.tsx)位于输入框同一外框顶部，单行 Markdown 与全文 Tooltip、常显拖柄／编辑／删除、拖拽与 Alt+↑／↓均受宿主控制。编辑先对已观察原 ID 精确 `input.withdraw`，只有核原 Command 的 applied／`input_withdrawn`、target、subject、request digest 和当前 scope 后才返回 Main 保留的原文，填入普通草稿并聚焦；用户自行重新发送，没有特殊编辑态、取消或自动放回。删除同样只撤回 pending 输入；已消费竞争刷新，不取消活动 Run。图片／文件或 extensionInputs／selectedSkills 不能无损转为普通 draft 时禁编辑，附件 only 行用展示占位，保删除和完整集合调序。
+
+[queue journal](electron/native-input-queue-journal.ts)沿 [private-data](electron/private-data.ts)懒迁移 DB11 `input_queue_intents`，保存 Main 分配的原操作 ID、闭合 request、scope、subject、digest 与编辑原文。首次 POST 前持久提交；未知／冷记录只 GET 原 ID，不重发。read 恢复未决元数据和已 applied 未交付编辑，但不自动回填；显式 lookup 核实后返回原文，renderer 成功填入普通输入框后以 `input.queue.ack` 标记交付，之后不再提示或返回旧文。草稿沿原普通编辑／显式保存合同，不将交付 ack 当作草稿已落盘。128行／16MiB局部容量不裁未决或未交付编辑，已交付终态记录有界剪裁。切会话、Store、代次或关闭撤销原读取，晚到结果只记账，不向替换视图回填。
+
+[Main／IPC 回归](test/native-input-queue.test.ts)、[实际 Node journal](test/isolated/native-input-queue-journal.test.ts)与[renderer DOM](test/isolated/native-input-queue-dom.test.tsx)分别覆盖封闭输入、分页 revision、完整原文、未知只查原 ID、ack、附件、防迟到及受控交互；后端消费与持久顺序的实现和测试归 [Store owner](../../packages/agent/src/storage/README.md#待消费输入的撤回与排序)。真实窗口通过[原运行中权限夹具](test/isolated/native-live-permissions-bundle.test.ts)核验，不据 DOM／Node 结果推导窗口或其他平台资格。
+
+取舍和未采用方案见[紧凑审批与队列决定](../../.agents/notes/implemented/feature/2026-10-22-native-approval-input-queue.md)。
 
 直接历史只沿当前已观察 Message 的准确原 Execution 读取；Fork／Include 的封存 `originMessage` 不取得来源 Execution 后来的审批。原外部 Store／恢复边界继续适用。观察是现有响应的可选字段，不改持久格式，不公开私有审查正文或上下文；审批事实也不让未知工具版本进入旧结果分类。具体取舍见[审批观察决定](../../.agents/notes/implemented/architecture/2026-10-09-native-approval-observations.md)。
 
@@ -780,6 +798,26 @@ plan_review 复用原 Interaction 的封存回答意图；controller 在保存�
 [test/large-attachments.test.ts](test/large-attachments.test.ts) 用实际大 Auto 附件、SQLite/loopback HTTP 验证迟到加载跨 Session 切换不能批准、重新完整读取后原回答只派发一次。共享 UI 另有实际 DOM/键盘测试；本便携控制器不建立正式 Electron sender/preload、窗口或 P5 资格。
 
 便携权限入口由 `DesktopPermissions` 与 controller 提供。capability `permission_controls` 缺失时局部只读；子会话只显示根权限。新模式仅提供请求批准（`accept_edits`）、自动审核（`auto`）、完全访问（`full`）及 `makeDefault` 的明确用户选择；类型、HTTP/IPC 和持久控制仅接受这三种策略，旧 `ask` 明确拒绝，不作兼容映射；信任确认展示实际读取范围、工作区与范围摘要；信任不批准任意操作。读取结果固定观察身份，保存时封存原 Store、Session/root、Workspace、CAS 版本与摘要。同观察只允许一个选择；同在途选择返回同一 Promise，切换后的旧 callback 不会改绑。最多保留 128 个 intent，冲突保留原选择，显式重新读取后才可再次选择；未知结果只用 `lookupPermissionMutation` 查原 command，不重发。网络释放仅停止客户端网络，不停止 Service 或 Run。
+
+Desktop／Native 的控制事件匹配同时使用真实 Store、所选 View 的 rootSessionId／workspaceId 和 applied receipt。根模式变更刷新当前 child 的继承事实，明确 makeDefault 更新其他根的默认显示；foreign root／Workspace 不触发无关读取。首次 child View 已返回但 mode/trust 尚未完成时，也保留同 generation 的已核 scope 识别根事件并安排重读，切会话即撤销该 scope。[权限观察回归](test/native-permissions.test.ts)通过两种 caller 的真实观察回调核这些事件、首次读取竞态及旧 child 回包晚于切换的隔离；不将其计作 Electron 原生窗口或其他平台资格。
+
+### 2026-10-22 紧凑审批与队列窗口验证
+
+`540e5db008` 加本轮未提交差量，macOS／Bun1.4.2／Electron44.3.0，执行 `bun test ./apps/desktop/test/isolated/native-live-permissions-bundle.test.ts`：最终新构建1项／20条 Bun 断言及 driver 原断言通过，34.85秒。源码外搬迁候选固定 `testDiagnostics:false`，使用隔离 HOME／Profile／Workspace 与受控 loopback 模型；12次模型请求含2次 Auto 审核，原权限场景0人工答案。主及已运行 child 保原 Run／准确目标，已派发 Shell 不被收回，待批及下一原工具按最新根 revision7 复核后各执行一次；普通待批可直接切 Auto，独立 HTTP 同步本次约72ms，仅为单次观察。
+
+同一候选核单卡分页、主名称隐藏、稳定子图标、卡片不高于112px、普通审批与输入共存、Shell 单行省略与原生 hover 全文。独立队列阶段仅对原 Shell 工具批准一次，之后按 Full 复核后续 Job；3条真实 pending Markdown 经拖拽实际改变服务顺序，删除和编辑精确撤回原 ID，完整原文回填且没有取消／恢复或自动提交，手动提交生成新 ID 并逐字核原 Markdown。队列编辑期间原 Shell id／attempt／cancel 事实不变。同 scope 观察刷新后原 preview DOM 的 pointermove 监听仍在，鼠标 hover 展示完整 Markdown；不以 focus 替代 hover 通过。
+
+Electron exit0、所属 Service／后代消失、冷只读事实与两层独占制品 lease 重新取得均通过，成功收尾未发信号。本机证据目录 `dist/acceptance/live-permissions-electron-0a02f1de-a2d6-443a-bc98-faaed9760738` 保留 report、provider、日志和截图；早期依赖／夹具失败与修复前队列 DOM 重挂失败保留在各自证据目录，不以最终通过抹去。该受控本机结果不取得付费 Provider、其他平台或签名安装资格。
+
+另执行受单卡分页影响的[既有双 child 整窗口](test/isolated/native-collaboration-bundle.test.ts)：同一本机新构建并核 digest 的候选复用后1项／12条 Bun 断言通过，17.18秒。保留双 child 的独立批准／准确停止、同子 Session 新 Run、旧答案与旧 carrier 停止拒绝、停止后迟到答复拒绝，冷启动仍15次模型调用且零重放，清理 observed／forced／remaining 均为空。driver 只增加精确审批翻页及停止前按实际展开状态重开既有“会话工具”；候选复用仅属隔离测试 runner，不向普通客户端开放。
+
+### 2026-10-21 运行中权限窗口基线
+
+以下是本轮审批浮卡／保留输入区／真实队列实施前的历史窗口证据；当时的隐藏输入和审批列表布局已由上面的当前实现替代，不能作为新界面验收。
+
+[真实运行中权限窗口](test/isolated/native-live-permissions-bundle.test.ts)与[Electron driver](test/native-live-permissions-electron.fixture.ts)构建 `testDiagnostics:false` 的源码外搬迁候选，使用自有 HOME／Profile／Workspace、受控 loopback 模型、正式 Shell 与显式配置启用的外部文件工具。主、child 的两个真实 Shell Job 保持运行时，普通 UI 切请求批准，再由独立公共 HTTP caller 切 Auto，窗口无需刷新或重选即同步标签；切回请求批准后，两个原 Run 的下一外部写入均保持未派发且文件不存在。当时根待批隐藏 Composer，主／child 两项只显示一个审批面板；独立 HTTP 改 Auto 后两目标分别真实审核、旧卡 cancelled 且无答案，改 Full 后原目标各派发一次，dispatch read-set 使用最新根 revision，输入恢复即显示 Full。子详情经生产导航展示准确待批与终态，实际 selection 仍为根，不以此冒称选中 child 的 IPC 路径也已验。
+
+2026-10-21 macOS 26.7.1／Bun 1.4.2／Electron 44.3.0，`2a5cd0cca` 加本任务工作区改动：上述整窗口最终1项／17条 Bun 断言及独立 Node／DOM 断言通过，25.14秒，实际10次模型请求中含2次 Auto 审核。两项原 Tool 的同 Session／Run／attempt1、最终根 revision7、准确外部文件各一次与零人工答案共同核实；独立 Auto 回执确认到可见且 busy 撤销本次约64ms，只作为单次观察。原 Electron exit0、所属 Service／后代消失、冷只读事实与两层制品独占租约重新取得均通过，成功路径清理未发信号。合并面板及原审批／输入／环境信息四个 DOM 文件10项／111断言、根八 workspace typecheck、定向 Biome 与文档检查通过。首轮子详情错误等待环境卡文案的失败保留，driver 改等实际详情“等待人工审批”；没有改变产品文案、审批期限或隐藏输入行为。此证据使用受控模型端点，不代表付费远端、签名安装或其他平台资格。
 
 [test/permissions.test.ts](test/permissions.test.ts) 使用真实默认宿主、SQLite 与 loopback HTTP，验证三种正式 API 模式/default及旧 raw ask 明确拒绝、信任/撤销、竞争 CAS、未知回执及跨会话重复抑制，业务执行数量保持零。另有局部 capability/child 投影测试；共享 UI 的 [实际 DOM 测试](../../packages/ui/test/permissions-dom.test.tsx) 覆盖键盘与迟到卡片切换。这些证据属于便携调用者，不代表正式 Electron 或 TUI 制品已完成。
 

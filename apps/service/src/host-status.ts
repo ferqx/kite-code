@@ -142,12 +142,7 @@ export function createDefaultHostStatusSource(options: {
         permissions.reason = 'data_unavailable';
         return facts;
       }
-      if (
-        !context.permissions ||
-        externalPermissionAuthority ||
-        !context.permissions.readDefaultMode
-      )
-        return facts;
+      if (!context.permissions?.readDefaultMode) return facts;
       const identity = { expectedStoreId: context.storeId, subjectId: context.subjectId };
       const defaults = await context.permissions.readDefaultMode(identity);
       permissions.state = 'unbound';
@@ -173,6 +168,11 @@ export function createDefaultHostStatusSource(options: {
         });
         permissions.workspaceTrust = trust.status;
         permissions.state = 'available';
+      }
+      if (externalPermissionAuthority) {
+        // Persisted mode remains authoritative; an injected trust ceiling is opaque here.
+        permissions.workspaceTrust = 'unavailable';
+        permissions.reason = 'permission_source_unavailable';
       }
       return facts;
     },

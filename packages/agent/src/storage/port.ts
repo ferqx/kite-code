@@ -32,6 +32,7 @@ import type {
   OperationRequest,
   OwnerRef,
   PendingInputPage,
+  PendingInputQueuePage,
   PendingJobResultPage,
   RecoveryReport,
   RequirementEvaluation,
@@ -887,6 +888,37 @@ export interface Store {
       limit?: number;
     },
   ): Promise<PendingInputPage>;
+  getPendingInputQueue(
+    input: WriteContext & {
+      sessionId: string;
+      owner?: OwnerRef;
+      afterOrder?: string;
+      limit?: number;
+      expectedRevision?: string;
+      kind?: 'input.steer' | 'input.follow_up';
+      targetRunId?: string;
+    },
+  ): Promise<PendingInputQueuePage>;
+  withdrawPendingInput(
+    input: WriteContext & {
+      sessionId: string;
+      subjectId: string;
+      commandId: string;
+      kind: 'input.withdraw';
+      targetCommandId: string;
+      expectedRevision: string;
+    },
+  ): Promise<CommandRecord>;
+  reorderPendingInputs(
+    input: WriteContext & {
+      sessionId: string;
+      subjectId: string;
+      commandId: string;
+      kind: 'input.reorder';
+      commandIds: string[];
+      expectedRevision: string;
+    },
+  ): Promise<CommandRecord>;
   selectContext(
     input: WriteContext & {
       commandId: string;

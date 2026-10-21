@@ -41,6 +41,7 @@ import type {
 } from './file-changes-bridge';
 import type { InputMetadata, InputRequest } from './input';
 import type { NativeInputFileResult, NativeInputImageRequest } from './input-images-bridge';
+import type { NativeInputQueueRequest, NativeInputQueueResult } from './input-queue-bridge';
 import type {
   NativeInteractionHistoryPage,
   NativeInteractionHistoryRequest,
@@ -61,6 +62,7 @@ import type {
 
 export type * from './background-bridge';
 export type * from './file-changes-bridge';
+export type * from './input-queue-bridge';
 export type * from './interaction-history-bridge';
 export type * from './job-output-bridge';
 export type * from './mcp-bridge';
@@ -141,6 +143,7 @@ export type NativeCallerBody = {
   bodyBytes: number;
 };
 export type NativeSelection = {
+  readonly canReadInputQueue?: boolean;
   readonly canReadExtensions?: boolean;
   readonly canInvokeExtensions?: boolean;
   readonly canReadSkills?: boolean;
@@ -496,6 +499,7 @@ export type NativeAttachmentChunk = {
 export type NativeModelInputOpen = NativeModelBodyOpen<'modelInput'>;
 export type NativeModelInputChunk = NativeModelBodyChunk<'modelInput'>;
 export type NativeRequest =
+  | NativeInputQueueRequest
   | NativeInputImageRequest
   | NativeScheduledRequest
   | NativeExtensionsRequest
@@ -768,6 +772,7 @@ export type NativeRequest =
       answer: import('@kite-ai/client').AnswerInteractionRequest['answer'];
     };
 export type NativeResult =
+  | NativeInputQueueResult
   | NativeInputFileResult
   | NativeScheduledResult
   | NativeExtensionsResult

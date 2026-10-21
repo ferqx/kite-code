@@ -966,6 +966,7 @@ export async function runTUIHost(input: TUIHostOptions): Promise<number> {
               ? { startAfter }
               : {}),
             onChange: async (change) => {
+              await controller!.refreshPermissions(change);
               if (
                 change.sessionId === controller!.state.sessionId ||
                 controller!.state.snapshot?.childViews?.some(
@@ -977,6 +978,7 @@ export async function runTUIHost(input: TUIHostOptions): Promise<number> {
             onReady: async (ready) => {
               if (!ended && !observer.signal.aborted) {
                 controller!.observationReady(ready.storeId);
+                await controller!.refreshPermissions();
                 const target = controller!.state.sessionId;
                 if (target) await controller!.select(target, { preserveReconnectionReview: true });
               }

@@ -119,6 +119,7 @@ import {
   registerMutationIntent,
   settleMutation,
 } from './mutation-operations';
+import { getPendingInputQueue, mutatePendingInputQueue } from './pending-input-queue';
 import { callPermissionGrant, verifyPermissionGrantDispatch } from './permission-grants';
 import { closeReconciledHistory } from './reconciliation-admission';
 import { RecoveryAudit } from './recovery-audit';
@@ -1296,7 +1297,7 @@ export class SqliteOperations {
       }
       case 'listAcceptedCommands':
         return this.rows(
-          `SELECT * FROM command WHERE session_id=? AND status='accepted' AND kind NOT IN('job.reconcile','run.resume') AND ${runnableCommandPredicate()} ORDER BY seq LIMIT ?`,
+          `SELECT * FROM command WHERE session_id=? AND status='accepted' AND kind NOT IN('job.reconcile','run.resume') AND ${runnableCommandPredicate()} ORDER BY COALESCE(pending_order,seq),seq LIMIT ?`,
           String(args[0]),
           limit(args[1]),
         ).map((row) => this.command(row));
@@ -1362,9 +1363,9 @@ export class SqliteOperations {
             throw new AgentError('session_busy');
           if (
             this.row(
-              "SELECT id FROM command WHERE session_id=? AND kind='input.follow_up' AND status='accepted' AND cancelled=0 AND COALESCE(json_extract(receipt_json,'$.outcome'),'') NOT IN('human_input_pending','human_input_queued','human_input_unresolved') AND seq<? LIMIT 1",
+              "SELECT id FROM command WHERE session_id=? AND kind='input.follow_up' AND status='accepted' AND cancelled=0 AND COALESCE(json_extract(receipt_json,'$.outcome'),'') NOT IN('human_input_pending','human_input_queued','human_input_unresolved') AND COALESCE(pending_order,seq)<? LIMIT 1",
               String(command.session_id),
-              command.seq!,
+              command.pending_order ?? command.seq!,
             )
           )
             throw new AgentError('input_order_conflict');
@@ -1594,6 +1595,16 @@ export class SqliteOperations {
         return getMessageOrigin(this, args[0] as Parameters<Store['getMessageOrigin']>[0]);
       case 'applyInput':
         return applyInput(this, args[0] as Parameters<Store['applyInput']>[0]);
+      case 'getPendingInputQueue':
+        return getPendingInputQueue(this, args[0] as Parameters<Store['getPendingInputQueue']>[0]);
+      case 'withdrawPendingInput':
+      case 'reorderPendingInputs':
+        return mutatePendingInputQueue(
+          this,
+          args[0] as
+            | Parameters<Store['withdrawPendingInput']>[0]
+            | Parameters<Store['reorderPendingInputs']>[0],
+        );
       case 'listPendingInputs':
         return listPendingInputs(this, args[0] as Parameters<Store['listPendingInputs']>[0]);
       case 'requestInteraction':

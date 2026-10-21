@@ -4,6 +4,7 @@ export {
   useConversationResourceRetention,
 } from '../conversation-activity';
 export { Approval } from './Approval';
+export { ApprovalHeader, childAgentAppearance } from './ApprovalHeader';
 export {
   AskQuestionnaire,
   type AskQuestionnaireOption,
@@ -84,6 +85,7 @@ export {
   rememberDesktopMarkdownParse,
 } from './markdown-parse-cache';
 export { PromptEditor, type PromptEditorHandle, type PromptEditorProps } from './PromptEditor';
+export { QueuedMessages, type QueuedMessagesProps, type QueuedPrompt } from './QueuedMessages';
 export { RightSidebar, type RightSidebarProps, type RightSidebarTab } from './RightSidebar';
 export { ReadingStateCache } from './reading-state';
 export {

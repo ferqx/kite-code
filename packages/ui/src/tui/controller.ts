@@ -2,6 +2,7 @@ import type { ModelSettingsRequest, ModelSettingsView } from '@kite-ai/client';
 import {
   type AnswerInteractionRequest,
   type CancelCommandRequest,
+  type Change,
   ClientError,
   type Command,
   decodeJobReportResumeCommand,
@@ -80,11 +81,12 @@ import type {
 import { reviewableMcpSource } from './mcp-source-question';
 import { sameMcpToolsOrigin, type TuiMcpToolsState } from './mcp-tools';
 import type { TuiModelIntent, TuiModelOutcome, TuiModelPort } from './models';
-import type {
-  TuiPermissionIntent,
-  TuiPermissionOutcome,
-  TuiPermissionPort,
-  TuiPermissionSnapshot,
+import {
+  permissionChangeAffectsSession,
+  type TuiPermissionIntent,
+  type TuiPermissionOutcome,
+  type TuiPermissionPort,
+  type TuiPermissionSnapshot,
 } from './permissions';
 import {
   defaultTuiPreferences,
@@ -583,6 +585,9 @@ export class TuiController {
   private mcpSourceBusy = false;
   private mcpSourceIntents = new Map<string, TuiMcpSourceApprovalOutcome>();
   private permissionRead?: AbortController;
+  private permissionRefreshRead?: AbortController;
+  private permissionFactsGeneration = 0;
+  private permissionFactsError?: { sessionId: string; error: string };
   private statusRead?: AbortController;
   private skillsRead?: AbortController;
   private mcpPromptRead?: AbortController;
@@ -1088,6 +1093,7 @@ export class TuiController {
       same && options.preserveReconnectionReview && !this.value.stale;
     if (!preserveReconnectionReview) this.mcpReconnectionRead?.abort();
     if (!same) {
+      this.permissionFactsError = undefined;
       this.closeSessionDeletion();
       this.clearedDisplay = undefined;
       this.fileRecoveryRead?.abort();
@@ -1308,6 +1314,9 @@ export class TuiController {
             ? this.value.context
             : undefined,
       });
+      // A root control can change before this newly selected child's View arrives.
+      // Read its current controls once the actual root/Workspace scope is known.
+      if (!same) void this.refreshPermissions();
       // An explicit history selection may carry accepted requests from the old
       // process. Resolve their original public IDs once; never submit them again.
       if (selectingHistory && this.port.callers) {
@@ -4665,25 +4674,47 @@ export class TuiController {
       this.publish({ error: 'permission_controls_unavailable' });
       return;
     }
-    const session = snapshot.view.session,
-      generation = this.generation;
+    this.permissionRefreshRead?.abort();
     this.permissionRead?.abort();
     const read = this.reading();
     this.permissionRead = read;
     this.publish({
       panel: 'permissions',
-      permissions: undefined,
       permissionOutcome: this.permissionOutcome(),
     });
+    await this.readPermissionFacts(read, true);
+  }
+  /** Background facts do not replace the open panel's ownership of an in-flight save. */
+  async refreshPermissions(change?: Change) {
+    if (
+      change &&
+      !permissionChangeAffectsSession(change, this.value.snapshot?.view, this.port.storeId)
+    )
+      return;
+    if (!this.value.snapshot || !this.port.permissions || this.disposed || this.value.snapshotStale)
+      return;
+    this.permissionRefreshRead?.abort();
+    const read = this.reading();
+    this.permissionRefreshRead = read;
+    await this.readPermissionFacts(read, false);
+  }
+  private async readPermissionFacts(read: AbortController, panel: boolean) {
+    const session = this.value.snapshot!.view.session,
+      port = this.port.permissions!,
+      generation = this.generation,
+      factsGeneration = ++this.permissionFactsGeneration;
+    const current = () =>
+      !read.signal.aborted &&
+      !this.disposed &&
+      generation === this.generation &&
+      factsGeneration === this.permissionFactsGeneration &&
+      this.value.sessionId === session.id &&
+      this.value.snapshot?.view.session.workspaceId === session.workspaceId &&
+      (!panel || (this.permissionRead === read && this.value.panel === 'permissions'));
+    if (panel) this.publish({ permissions: undefined });
     try {
       const value = await port.read(session.id, session.workspaceId, read.signal);
-      if (
-        read.signal.aborted ||
-        generation !== this.generation ||
-        this.value.sessionId !== session.id ||
-        this.value.panel !== 'permissions'
-      )
-        return;
+      if (!current()) return;
       if (
         value.mode.storeId !== this.port.storeId ||
         value.mode.sessionId !== session.id ||
@@ -4700,16 +4731,33 @@ export class TuiController {
         )
       )
         throw new Error('permission_scope_mismatch');
+      const clearError =
+        panel ||
+        (this.permissionFactsError?.sessionId === session.id &&
+          this.permissionFactsError.error === this.value.error);
+      this.permissionFactsError = undefined;
       this.publish({
         permissions: freezeIntent(structuredClone(value)),
         permissionOutcome: this.permissionOutcome(),
-        error: undefined,
+        ...(clearError ? { error: undefined } : {}),
       });
     } catch (error) {
-      if (!read.signal.aborted && generation === this.generation)
-        this.publish({ error: error instanceof Error ? error.message : 'permission_read_failed' });
+      if (current()) {
+        const message = error instanceof Error ? error.message : 'permission_read_failed';
+        const ownsError =
+          panel ||
+          this.value.error === undefined ||
+          (this.permissionFactsError?.sessionId === session.id &&
+            this.permissionFactsError.error === this.value.error);
+        if (ownsError) this.permissionFactsError = { sessionId: session.id, error: message };
+        this.publish({
+          permissions: undefined,
+          ...(ownsError ? { error: message } : {}),
+        });
+      }
     } finally {
       this.reads.delete(read);
+      if (this.permissionRefreshRead === read) this.permissionRefreshRead = undefined;
     }
   }
   async choosePermission(

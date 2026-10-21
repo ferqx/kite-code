@@ -48,6 +48,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from './comp
 import { cn } from './lib/utils';
 import { ModelEffortSelector, type ModelOption, type ThinkingEffort } from './ModelEffortSelector';
 import { PromptEditor, type PromptEditorHandle } from './PromptEditor';
+import { QueuedMessages, type QueuedMessagesProps } from './QueuedMessages';
 import { Button } from './ui';
 
 const contextTokenFormat = new Intl.NumberFormat('en-US', {
@@ -128,6 +129,9 @@ const permissionCopy = {
 } as const;
 
 export interface ComposerProps {
+  queue?: QueuedMessagesProps;
+  /** Changed by the host after a queue withdrawal has filled the controlled draft. */
+  queueFocusKey?: string | number;
   inputRef?: Ref<PromptEditorHandle>;
   scopeKey?: string;
   /** A host can reject with code file_picker_restart_required when its picker is not loaded. */
@@ -189,6 +193,18 @@ export interface ComposerProps {
 }
 export function Composer(props: ComposerProps) {
   const editor = useRef<PromptEditorHandle>(null);
+  const queueFocus = useRef({ scope: props.scopeKey, key: props.queueFocusKey });
+  useLayoutEffect(() => {
+    const prior = queueFocus.current;
+    if (prior.scope !== props.scopeKey || props.queueFocusKey === undefined) {
+      queueFocus.current = { scope: props.scopeKey, key: props.queueFocusKey };
+      return;
+    }
+    if (prior.key === props.queueFocusKey || props.promptHidden || props.disabled) return;
+    queueFocus.current = { scope: props.scopeKey, key: props.queueFocusKey };
+    editor.current?.focus();
+    editor.current?.moveCaretToEnd();
+  }, [props.scopeKey, props.queueFocusKey, props.promptHidden, props.disabled]);
   const form = useRef<HTMLFormElement>(null);
   const attachmentTrigger = useRef<HTMLButtonElement>(null);
   const [attachmentMenuOpen, setAttachmentMenuOpen] = useState(false);
@@ -436,6 +452,13 @@ export function Composer(props: ComposerProps) {
           if (canSend) props.onSend?.();
         }}
       >
+        {props.queue && (
+          <QueuedMessages
+            key={props.scopeKey}
+            {...props.queue}
+            disabled={props.disabled || props.queue.disabled}
+          />
+        )}
         {filePickingEnabled && (
           <input
             ref={fileInput}

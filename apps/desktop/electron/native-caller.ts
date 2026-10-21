@@ -12,6 +12,7 @@ import {
   createDesktopController,
   type DesktopController,
   type DesktopSnapshot,
+  permissionChangeAffectsView,
 } from '../src/controller';
 import type { DesktopEditor } from '../src/file-changes-bridge';
 import { DesktopInput, inputMetadata } from '../src/input';
@@ -46,6 +47,7 @@ import { NativeJobOutputReads } from './job-output-reads';
 import { NativeMcpSettings } from './mcp-settings';
 import { verifyNativeMcpSourceAnswer } from './mcp-source-answer';
 import { NativeModelOutputReads } from './model-output-reads';
+import { NativeInputQueue } from './native-input-queue';
 import { NativeProcessOwner } from './native-processes';
 import { NativePermissionGrants } from './permission-grants';
 import type { PrivateData } from './private-data';
@@ -135,6 +137,7 @@ export class NativeCaller {
   private readonly creating = new Map<string, Promise<NativeCreation>>();
   private readonly controller: DesktopController;
   private readonly input: DesktopInput;
+  private readonly inputQueue: NativeInputQueue;
   private readonly callerJournal: NativeCallerJournal | undefined;
   private readonly answerJournal: NativeAnswerJournal | undefined;
   private readonly callerReads = new Map<
@@ -344,6 +347,18 @@ export class NativeCaller {
           }
         : undefined;
     };
+    this.inputQueue = new NativeInputQueue(
+      client,
+      () => {
+        const scope = messageScope();
+        const subjectId = this.client.serverInfo?.subjectId;
+        return scope && subjectId && !this.permissionUnavailable && this.privateData
+          ? { ...scope, subjectId }
+          : undefined;
+      },
+      () => this.requirePrivateData(),
+      () => this.changed(),
+    );
     this.toolMessages = new NativeToolMessages(client, messageScope, () => this.observedMessages);
     this.imageReads = new NativeInputImageReads(client, messageScope, () => this.observedMessages);
     this.interactionHistory = new NativeInteractionHistoryReads(client, messageScope);
@@ -577,6 +592,7 @@ export class NativeCaller {
     return snapshot;
   }
   private releaseReads() {
+    this.inputQueue.release();
     this.environment.release();
     this.controller.cancelInteractionRead();
     this.callerReads.clear();
@@ -846,8 +862,16 @@ export class NativeCaller {
               this.environmentRevision++;
               this.scheduleDirectoryRefresh();
               // The global cursor is still acknowledged for every change. Only
-              // facts owned by the selected Session invalidate its metadata/history.
-              if (!change.sessionId || change.sessionId === this.selected)
+              // selected facts and their observed root/Workspace controls invalidate metadata.
+              if (
+                (!change.sessionId && change.type !== 'host_control.changed') ||
+                change.sessionId === this.selected ||
+                permissionChangeAffectsView(
+                  change,
+                  this.controller.permissionView,
+                  this.client.serverInfo?.storeId,
+                )
+              )
                 this.scheduleSelectionRefresh(signal.signal);
               // Creation is conservative: the next exact root directory establishes
               // a new descendant's membership. Known descendants need no foreign View GET.
@@ -935,6 +959,9 @@ export class NativeCaller {
             canReadPermissionGrants:
               this.client.serverInfo!.capabilities.includes('permission_grants'),
             canReadContext: this.client.serverInfo!.capabilities.includes('context'),
+            canReadInputQueue:
+              !!this.privateData &&
+              this.client.serverInfo!.capabilities.includes('pending_input_queue'),
             viewGeneration: snapshot.generation,
             viewSelection: this.selection,
             storeId: snapshot.view.storeId,
@@ -1167,6 +1194,24 @@ export class NativeCaller {
         : this.background;
     let result: NativeResult;
     switch (request.method) {
+      case 'input.queue.read':
+        result = await this.inputQueue.read(request);
+        break;
+      case 'input.queue.close':
+        this.inputQueue.closeRead(request.readId);
+        result = null;
+        break;
+      case 'input.queue.withdraw':
+      case 'input.queue.reorder':
+        result = await this.inputQueue.mutate(request);
+        break;
+      case 'input.queue.lookup':
+        result = await this.inputQueue.lookup(request.commandId);
+        break;
+      case 'input.queue.ack':
+        this.inputQueue.ack(request.commandId);
+        result = null;
+        break;
       case 'input.images.begin':
         this.images.begin(request);
         result = null;
@@ -2199,6 +2244,7 @@ export class NativeCaller {
       await this.images.close();
       await this.imageReads.closeAll();
       await this.disposeNetwork();
+      await this.inputQueue.close();
       await this.settingsMutationTail;
       await Promise.allSettled(this.creating.values());
       await this.conversation.close();

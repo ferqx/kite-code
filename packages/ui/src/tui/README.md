@@ -40,6 +40,10 @@ Ctrl+A 只为当前原卡确实要求的附件发起重读；Controller 也在�
 
 模型、权限、会话、Files、MCP、Skills、语言、主题、帮助与交互面板使用原纯 frame／行布局，完整目录及描述保留。模型与 effort 使用原单 Enter 选择；权限、MCP 变更及恢复继续保留各自必要确认，CAS、来源绑定与原 ID 查询不变。Question Tab 在选项与自定义编辑间切换；可选的纯输入题仍用 Tab 跳过，混合题用 Alt+S；多步骤 Esc 返回，第一步 Esc 精确取消原 Question Execution。计划意图和权限仍独立，Shift+Tab 只切换下一草稿 planning，不改活动 Run。
 
+Ctrl+P 在运行、审批及 Question 草稿中直接打开权限面板，不解释或清空原答案的 slash 文本；Esc 返回原卡、步骤与缓冲。默认问卷的权限提示并入原 Alt+A 行，保留 80×24 的题号和选项高度。[权限回归](../../test/tui/permissions.test.tsx)核实际控制事件、主／子 scope、default／trust、选择中收到根变更、旧读晚回与原保存结果；[问卷回归](../../test/tui/questions.test.tsx)核实际按键切模式、原步骤／字面正文与准确答案身份。
+
+Host 在 SSE ready、合法 `host_control.changed` 及首次／跨 Session 选择后重新读取准确权限，关闭面板时也更新状态显示。背景读取和面板保存使用独立读取身份及共同事实代次，不能让事件抢走在途原 POST／GET 的结果；晚回包不覆盖新 Session 或更新的事实。相同 controls 的刷新保留未提交确认，mode/default/trust 或 grants revision 真正变化才撤下原确认；读取失败移除不可核实的权限事实，后台成功或失败不覆盖其他操作的当前错误。事件只触发只读查询，不生成控制写入、Answer 或 Run。
+
 混合选项题的自定义输入沿同一 `ComposerBuffer.row` 与实际宽度判断上下键：文本内部保留视觉行移动，首行向上／末行向下继续选项导航，空输入也能离开；切换不清空原草稿，不提交 Answer。纯输入题保持原上下编辑。Question footer 在自定义输入时仍提供方向键导航提示。[问答键盘回归](../../test/tui/questions.test.tsx)核空白／已输入自定义、Unicode 多行及窄行换行、Tab 往返和准确最终答案，实际 Host 问答旅程归 [CLI PTY](../../../../apps/cli/test/isolated/tui-question-pty.test.ts)。
 
 Question 的取消 caller 向 Host 提供当前卡的准确 ID／revision／presentation 范围，Host 重新核原 pending Question 与 Execution 后才准备同一持久 `execution.cancel`。普通 Job 停止仍保 Job 专属核验；错卡、错 Scope、已终结或无法核实不取得 POST 资格。纯 `ask_user` 的实际原执行取消结果允许同 Run 继续，不能将其他 Tool 的 abort 或未知副作用当成问答取消成功。

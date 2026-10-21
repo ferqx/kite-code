@@ -51,6 +51,20 @@ try {
       await page.waitForTimeout(20);
     }
   }
+  async function showApproval(id: string) {
+    const card = page.getByRole('article', { name: `approval ${id}`, exact: true });
+    await until(
+      async () => {
+        if (await card.isVisible()) return true;
+        const next = page.getByRole('button', { name: '下一项审批', exact: true });
+        if (await next.count()) await next.click();
+        return false;
+      },
+      Boolean,
+      `exact approval ${id} is visible in pager`,
+    );
+    return card;
+  }
   async function select() {
     await page
       .getByRole('button', { name: 'Collaboration', exact: true })
@@ -160,9 +174,8 @@ try {
     .waitFor();
   await page.getByRole('button', { name: '收起标签栏', exact: true }).click();
   await page.getByRole('button', { name: '隐藏环境信息', exact: true }).click();
-  await page
-    .getByRole('article', { name: `approval ${oldA.id}`, exact: true })
-    .getByRole('button', { name: '仅批准这一次', exact: true })
+  await (await showApproval(oldA.id))
+    .getByRole('button', { name: '批准一次', exact: true })
     .click();
   log('first_A_answer_clicked');
   await until(
@@ -268,9 +281,8 @@ try {
     lateA,
     oldStop,
   });
-  await page
-    .getByRole('article', { name: `approval ${newA.id}`, exact: true })
-    .getByRole('button', { name: '仅批准这一次', exact: true })
+  await (await showApproval(newA.id))
+    .getByRole('button', { name: '批准一次', exact: true })
     .click();
   await until(
     async () => existsSync(join(home, 'workspace', 'child-a-follow.txt')),
@@ -282,6 +294,7 @@ try {
     'A follow-up approved\n',
   );
   assert.equal(existsSync(join(home, 'workspace', 'child-b.txt')), false);
+  if ((await toggle.getAttribute('aria-expanded')) !== 'true') await toggle.click();
   const overview = page.getByRole('region', { name: '后台总览', exact: true });
   await overview.getByRole('button', { name: '打开后台总览', exact: true }).click();
   const bCard = overview.getByRole('article', { name: `后台执行 · ${b.id}`, exact: true });

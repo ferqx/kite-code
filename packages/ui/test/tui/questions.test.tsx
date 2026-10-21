@@ -1,7 +1,14 @@
 import { expect, test } from 'bun:test';
 import type { Interaction, SessionView } from '@kite-ai/client';
 import { render } from 'ink-testing-library';
-import { TuiController, type TuiPort, type TuiPreferences, TuiSession } from '../../src/tui';
+import {
+  TuiController,
+  type TuiPermissionIntent,
+  type TuiPermissionSnapshot,
+  type TuiPort,
+  type TuiPreferences,
+  TuiSession,
+} from '../../src/tui';
 import { questionForm } from '../../src/tui/question';
 
 const tick = () => new Promise<void>((resolve) => setTimeout(resolve, 30));
@@ -48,6 +55,7 @@ test('a closed questionnaire keeps Alt+Enter newline and offers its exact null a
 function fixture(schema: Record<string, unknown>) {
   let cards = [question(schema)];
   const answers: Parameters<TuiPort['answer']>[2][] = [];
+  const answerTargets: { sessionId: string; interactionId: string }[] = [];
   const reads: string[] = [];
   let unknown = false;
   let minted = 0;
@@ -104,6 +112,7 @@ function fixture(schema: Record<string, unknown>) {
       throw Error('unexpected cancel');
     },
     answer: async (sessionId, id, request) => {
+      answerTargets.push({ sessionId, interactionId: id });
       answers.push(request);
       if (unknown) throw Error('lost receipt');
       return saved(sessionId, request.commandId, id, request.expectedRevision);
@@ -117,6 +126,7 @@ function fixture(schema: Record<string, unknown>) {
     port,
     controller: new TuiController(port),
     answers,
+    answerTargets,
     reads,
     commandCount: () => minted,
     cards: (next: Interaction[]) => {
@@ -145,6 +155,112 @@ function question(schema: Record<string, unknown>, id = 'q', revision = '1'): In
     answer: null,
   } as unknown as Interaction;
 }
+
+test('Ctrl+P changes permissions during a questionnaire and preserves its exact step, draft and answer identity', async () => {
+  const f = fixture({
+    type: 'object',
+    additionalProperties: false,
+    required: ['route', 'detail'],
+    properties: {
+      route: { enum: ['original-route', 'other-route'] },
+      detail: { type: 'string' },
+    },
+  });
+  let facts: TuiPermissionSnapshot = {
+    mode: {
+      storeId: 'store',
+      sessionId: 'a',
+      scopeSessionId: 'a',
+      mode: 'accept_edits',
+      revision: '1',
+      defaultMode: 'auto',
+      defaultRevision: '0',
+    },
+    trust: {
+      storeId: 'store',
+      workspaceId: 'w',
+      status: 'trusted',
+      trusted: true,
+      revision: '2',
+      canonicalIdentity: 'a'.repeat(64),
+      externalReadScopeDigest: 'b'.repeat(64),
+      readScopes: [],
+    },
+    grants: {
+      storeId: 'store',
+      sessionId: 'a',
+      revision: '0',
+      items: [],
+      highWaterSeq: '0',
+      upperSeq: '0',
+      nextAfterSeq: null,
+      snapshotCursor: '0',
+    },
+  };
+  const permissions: TuiPermissionIntent[] = [];
+  f.port.permissions = {
+    read: async () => facts,
+    submit: async (intent) => {
+      permissions.push(intent);
+      if (intent.kind === 'permission.mode')
+        facts = { ...facts, mode: { ...facts.mode, mode: intent.request.mode, revision: '3' } };
+      return { intent, status: 'applied' };
+    },
+    lookup: async () => {
+      throw Error('unexpected permission lookup');
+    },
+  };
+  await f.controller.select('a');
+  const app = render(<TuiSession controller={f.controller} />);
+  try {
+    await tick();
+    expect(app.lastFrame()).toContain('Ctrl+P');
+    app.stdin.write('\u001b[B');
+    await tick();
+    app.stdin.write('\r');
+    await tick();
+    app.stdin.write('/permissions stays literal');
+    await tick();
+    app.stdin.write('\u0010');
+    await tick();
+    expect(f.controller.state.panel).toBe('permissions');
+    expect(f.answers).toHaveLength(0);
+    expect(f.commandCount()).toBe(0);
+    app.stdin.write('\u001b[A');
+    await tick();
+    app.stdin.write('\r');
+    await tick();
+    app.stdin.write('\r');
+    await tick();
+    expect(permissions).toHaveLength(1);
+    expect(permissions[0]).toMatchObject({
+      kind: 'permission.mode',
+      sessionId: 'a',
+      request: { mode: 'full', ifRevision: '1' },
+    });
+    expect(f.controller.state.permissions?.mode.mode).toBe('full');
+    app.stdin.write('\u001b');
+    await tick();
+    expect(f.controller.state.panel).toBeUndefined();
+    expect(app.lastFrame()).toContain('/permissions stays literal');
+    expect(f.answers).toHaveLength(0);
+    app.stdin.write('\r');
+    await tick();
+    expect(f.answers).toHaveLength(1);
+    expect(f.answerTargets).toEqual([{ sessionId: 'a', interactionId: 'q' }]);
+    expect(f.answers[0]).toMatchObject({
+      expectedRevision: '1',
+      answer: {
+        kind: 'question',
+        answers: { route: 'original-route', detail: '/permissions stays literal' },
+      },
+    });
+    expect(f.commandCount()).toBe(2);
+  } finally {
+    app.unmount();
+    f.controller.dispose();
+  }
+});
 test('ordinary questions ignore attachment shortcuts and direct reads without disturbing the original wizard draft', async () => {
   const f = fixture({
     type: 'object',

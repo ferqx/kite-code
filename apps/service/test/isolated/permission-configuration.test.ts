@@ -13,6 +13,7 @@ import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { createRuntime } from '@kite-ai/agent';
 import { createArtifactStore } from '@kite-ai/agent/artifacts';
+import type { PermissionDecision } from '@kite-ai/agent/extensions';
 import type { PermissionPolicySnapshot } from '@kite-ai/agent/permissions';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { createWorkspaceSerialLocks } from '@kite-ai/agent/resources';
@@ -37,6 +38,7 @@ async function fixture(
   trusted = true,
   explicit = false,
   afterFinalToolAuthorization?: () => Promise<void>,
+  injectedToolDecision?: PermissionDecision,
 ) {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-default-permission-')));
   const workspace = join(root, 'workspace');
@@ -149,7 +151,8 @@ async function fixture(
     ...(explicit
       ? {
           permissions: {
-            async authorize() {
+            async authorize(request) {
+              if (request.kind === 'tool' && injectedToolDecision) return injectedToolDecision;
               return { allowed: true, revision: 'trusted-explicit-1' };
             },
           },
@@ -194,6 +197,8 @@ async function fixture(
     profile: serverProfile,
     subjectId: 'owner',
     buildId: 'default-policy',
+    permissionManagement: management,
+    diagnosticSource: host.diagnosticSource,
   });
   const client = createClient({
     endpoint: service.endpoint,
@@ -223,8 +228,8 @@ async function fixture(
   if (mode !== null) {
     const control = createPermissionManagement({ runtime, profile });
     const identity = { expectedStoreId, subjectId: 'owner' };
-    const state = await control.readMode({ ...identity, sessionId: 's' });
-    await control.setMode({
+    const state = await management.readMode({ ...identity, sessionId: 's' });
+    await management.setMode({
       ...identity,
       sessionId: 's',
       commandId: 'fixture-live-mode',
@@ -394,20 +399,12 @@ test('default and trusted injected policies follow a live root mode change in th
       if (injected === 'default') await setManaged(f, 'auto');
       await f.run();
       const old = await f.pending();
-      const controller = createPermissionManagement({
-        runtime: f.runtime,
-        profile: selectProfile({ dataRoot: join(f.root, 'data'), profile: 'new' }),
-      });
-      const identity = { expectedStoreId: f.expectedStoreId, subjectId: 'owner' };
-      const mode = await controller.readMode({ ...identity, sessionId: 's' });
-      await controller.setMode({
-        ...identity,
-        sessionId: 's',
-        commandId: 'live-root-full',
+      await setModeViaHttp(f, 'full', 'live-root-full');
+      expect(
+        (await f.client.getHostStatus({ sessionId: 's', workspaceId: 'w' })).execution.permissions,
+      ).toMatchObject({
         mode: 'full',
-        makeDefault: false,
-        ifRevision: mode.revision,
-        ifDefaultRevision: mode.defaultRevision,
+        workspaceTrust: injected === 'default' ? 'trusted' : 'unavailable',
       });
       await f.runtime.waitForCommand('work', { timeoutMs: 5000 });
       expect(readFileSync(join(f.workspace, 'output.txt'), 'utf8')).toBe('exact first');
@@ -572,7 +569,7 @@ test('default Runtime freshly reads durable Accept Edits and actual trusted scop
   }
 }, 15000);
 
-test('durable trust revocation invalidates old Auto ask_user card and explicit host policy cannot be rewritten through management', async () => {
+test('durable trust revocation invalidates old Auto ask_user card while injected hosts retain user mode control', async () => {
   const f = await fixture(null);
   try {
     const identity = await setManaged(f, 'auto');
@@ -616,22 +613,53 @@ test('durable trust revocation invalidates old Auto ask_user card and explicit h
         subjectId: 'owner',
         sessionId: 's',
       });
-      let error: unknown;
-      try {
-        await external.management.setMode({
+      await external.management.setMode({
+        expectedStoreId: external.expectedStoreId,
+        subjectId: 'owner',
+        sessionId: 's',
+        commandId: 'external-write',
+        mode: 'accept_edits',
+        makeDefault: false,
+        ifRevision: state.revision,
+        ifDefaultRevision: state.defaultRevision,
+      });
+      expect(
+        (
+          await external.management.readMode({
+            expectedStoreId: external.expectedStoreId,
+            subjectId: 'owner',
+            sessionId: 's',
+          })
+        ).mode,
+      ).toBe('accept_edits');
+      const trust = await external.management.readTrust({
+        expectedStoreId: external.expectedStoreId,
+        subjectId: 'owner',
+        workspaceId: 'w',
+      });
+      await expectCode(
+        external.management.setTrust({
+          expectedStoreId: external.expectedStoreId,
+          subjectId: 'owner',
+          workspaceId: 'w',
+          commandId: 'external-trust',
+          trusted: false,
+          ifRevision: trust.revision,
+          canonicalIdentity: trust.canonicalIdentity,
+          externalReadScopeDigest: trust.externalReadScopeDigest,
+        }),
+        'permission_authority_external',
+      );
+      await expectCode(
+        external.management.clearGrants({
           expectedStoreId: external.expectedStoreId,
           subjectId: 'owner',
           sessionId: 's',
-          commandId: 'external-write',
-          mode: 'accept_edits',
-          makeDefault: false,
-          ifRevision: state.revision,
-          ifDefaultRevision: state.defaultRevision,
-        });
-      } catch (value) {
-        error = value;
-      }
-      expect((error as { code: string }).code).toBe('permission_authority_external');
+          commandId: 'external-clear',
+          ifRevision: '0',
+        }),
+        'permission_management_readonly',
+      );
     } finally {
       await external.close();
     }
@@ -680,3 +708,93 @@ test('trust CAS after final authorization but before dispatch SQL rejects the ex
     await f.close();
   }
 }, 15000);
+
+async function setModeViaHttp(
+  f: Awaited<ReturnType<typeof fixture>>,
+  mode: PermissionPolicySnapshot['mode'],
+  commandId: string,
+) {
+  const state = await f.management.readMode({
+    expectedStoreId: f.expectedStoreId,
+    subjectId: 'owner',
+    sessionId: 's',
+  });
+  return f.client.setPermissionMode('s', {
+    expectedStoreId: f.expectedStoreId,
+    commandId,
+    mode,
+    makeDefault: false,
+    ifRevision: state.revision,
+    ifDefaultRevision: state.defaultRevision,
+  });
+}
+
+test('injected policy hosts apply HTTP tightening before final dispatch in the original Run', async () => {
+  for (const explicit of [false, true]) {
+    let entered = false;
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const f = await fixture('full', true, explicit, async () => {
+      entered = true;
+      await gate;
+    });
+    try {
+      await f.run();
+      await until(async () => (entered ? true : null));
+      await setModeViaHttp(f, 'auto', 'tighten-root');
+      release();
+      const card = await f.pending();
+      expect(existsSync(join(f.workspace, 'output.txt'))).toBe(false);
+      const original = await f.store.getCommand('work');
+      const run = await f.store.getRun(card.runId!);
+      expect(run?.originCommandId).toBe(original?.id);
+      await f.approve(card);
+      await f.runtime.waitForCommand('work', { timeoutMs: 5000 });
+      expect(readFileSync(join(f.workspace, 'output.txt'), 'utf8')).toBe('exact first');
+      expect(
+        (await f.store.listExecutions('s')).filter((item) => item.kind === 'tool'),
+      ).toHaveLength(1);
+    } finally {
+      release();
+      await f.close();
+    }
+  }
+}, 15000);
+
+test('changing the root to Full preserves injected hard denial and mandatory human approval', async () => {
+  for (const challenge of ['deny', 'approval'] as const) {
+    const f = await fixture('auto', true, true, undefined, {
+      allowed: false,
+      revision: `injected-${challenge}`,
+      ...(challenge === 'approval'
+        ? { approval: { request: { reason: 'trusted human ceiling' } } }
+        : {}),
+    });
+    try {
+      await setModeViaHttp(f, 'full', `full-${challenge}`);
+      await f.run();
+      if (challenge === 'approval') {
+        const card = await f.pending();
+        expect(existsSync(join(f.workspace, 'output.txt'))).toBe(false);
+        await f.approve(card);
+      }
+      await f.runtime.waitForCommand('work', { timeoutMs: 5000 });
+      expect(existsSync(join(f.workspace, 'output.txt'))).toBe(challenge === 'approval');
+      expect(f.authReviews).toHaveLength(0);
+    } finally {
+      await f.close();
+    }
+  }
+}, 15000);
+
+async function expectCode(promise: Promise<unknown>, code: string) {
+  let caught: unknown;
+  try {
+    await promise;
+  } catch (error) {
+    caught = error;
+  }
+  expect((caught as { code?: string } | undefined)?.code).toBe(code);
+}

@@ -1,5 +1,11 @@
 # Client
 
+## 待消费输入队列
+
+[AgentClient](src/index.ts)提供 `getPendingInputQueue(sessionId,{storeId,afterOrder?,limit?,expectedRevision?})`、`withdrawPendingInput(sessionId,{kind:'input.withdraw',expectedStoreId,commandId,targetCommandId,expectedRevision})` 与 `reorderPendingInputs(sessionId,{kind:'input.reorder',expectedStoreId,commandId,expectedRevision,commandIds})`。三个方法要求当前 `pending_input_queue` capability，缺能力在本地拒绝；写入仍核原连接和 expected Store。请求沿生成闭合 schema 克隆，SDK 不生成或替换原 operation ID，不自动重试 POST。
+
+队列页保原完整 Command request 及附件，序号 `orders` 为64位十进制并严格递增，`nextAfterOrder` 必须匹配本页末项；原 Store／Session 与已指定 revision 分别核验。调用者固定首 revision 穷尽页面，排序只改变后端队列，不改变历史 `Command.seq`；`result.include` 仍在读联合中占原槽。未知写入通过 `getCommand` 查询同一个原 ID，accepted 不等于 applied。[SDK 回归](test/input-queue.test.ts)与[Service HTTP 回归](../../apps/service/test/isolated/input-queue.test.ts)核真实请求、能力、闭合字段、分页、原ID查回及作用域；事务和消费资格归 [Store owner](../agent/src/storage/README.md#待消费输入的撤回与排序)。
+
 ## 普通输入的业务回执
 
 [readOrdinaryCommandApplication](src/ordinary-command.ts)只读解析原公开 Command。`human_input_applied` 沿相等的 `businessCommandId/sourceCommandId` 读取同 Store／Session／subject 的已应用业务 Command，并核其真实 Run；活动补充沿业务 steer 回执保留原 Run，新业务 Run 核实际 origin。公开 ID 不必等于 Run.originCommandId。`human_input_observed` 可在顶层 runId=null 时沿 observation 核真实 succeeded Model／Run，并返回已保存 answer／clarification；明确控制没有 Model 观察时不补造 Run 或答案。解析不提交意图、不授权派发。[纯边界测试](test/ordinary-command.test.ts)覆盖业务身份、活动补充、外来作用域、伪造关联和进度观察；实际 HTTP／SQLite 证据归 [CLI 测试](../../apps/cli/test/ordinary-command-http.test.ts)。

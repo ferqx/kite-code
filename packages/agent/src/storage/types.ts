@@ -700,6 +700,13 @@ export interface InputApplication {
   message: MessageRecord;
   supersededExecutionIds: string[];
 }
+export interface PendingInputQueuePage {
+  commands: CommandRecord[];
+  orders: string[];
+  nextAfterOrder: string | null;
+  revision: string;
+  snapshotCursor: string;
+}
 export interface PendingInputPage {
   commands: CommandRecord[];
   nextAfterSeq: string | null;

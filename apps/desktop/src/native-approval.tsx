@@ -18,12 +18,16 @@ export function NativeApproval({
   onAnswer,
   completeContent,
   submission,
+  attachment,
+  embedded = false,
 }: {
+  embedded?: boolean;
   interaction: Interaction;
   disabled: boolean;
   onAnswer?: (interaction: Interaction, answer: InteractionAnswer) => void | Promise<void>;
   completeContent?: string;
   submission?: InteractionSubmission;
+  attachment?: { phase: 'idle' | 'loading' | 'failed' | 'loaded'; retry?: () => void };
 }) {
   let request = object(interaction.request);
   if (requiresInteractionAttachment(interaction)) {
@@ -46,21 +50,46 @@ export function NativeApproval({
       : [];
   const input = object(request?.input),
     policy = object(request?.policy);
+  const shell = ['shell.execute', 'shell.launch', 'shell.command'].includes(
+    interaction.definitionId,
+  );
   const command =
-    exact &&
-    interaction.definitionId === 'shell.launch' &&
-    interaction.definitionVersion === '1' &&
-    typeof input?.command === 'string'
+    exact && shell && interaction.definitionVersion === '1' && typeof input?.command === 'string'
       ? input.command
       : undefined;
   const summary = request
-    ? `${interaction.definitionId}${typeof input?.path === 'string' ? ` · ${input.path}` : typeof policy?.reason === 'string' ? ` · ${policy.reason}` : ''}`
-    : '请先读取并核对完整审批内容。';
+    ? typeof input?.path === 'string'
+      ? input.path
+      : typeof policy?.reason === 'string'
+        ? policy.reason
+        : JSON.stringify(input ?? request)
+    : attachment?.phase === 'failed'
+      ? '完整审批内容核对失败'
+      : attachment?.phase === 'loading'
+        ? '正在核对完整审批内容…'
+        : '完整审批内容尚不可用';
   return (
     <article aria-label={`approval ${interaction.id}`}>
       <Approval
+        embedded={embedded}
         command={command}
         summary={summary}
+        toolLabel={shell ? 'Shell' : interaction.definitionId}
+        fullText={
+          request && !command ? JSON.stringify(request.input ?? request, null, 2) : undefined
+        }
+        attachment={attachment}
+        status={
+          submission
+            ? submission.phase === 'unknown'
+              ? '审批提交结果未知，请核对原提交。'
+              : submission.phase === 'accepted'
+                ? '审批回答已保存，等待执行。'
+                : submission.phase === 'failed'
+                  ? '审批提交失败，请核对原提交。'
+                  : '正在提交审批回答。'
+            : undefined
+        }
         grants={grants}
         disabled={disabled || !onAnswer}
         onDecide={(decision) => {
@@ -74,23 +103,6 @@ export function NativeApproval({
           );
         }}
       />
-      {request && (
-        <details>
-          <summary>完整审批请求</summary>
-          <pre>{JSON.stringify(request, null, 2)}</pre>
-        </details>
-      )}
-      {submission && (
-        <p role="status">
-          {submission.phase === 'unknown'
-            ? '审批提交结果未知，请核对原提交。'
-            : submission.phase === 'accepted'
-              ? '审批回答已保存，执行状态由服务继续核对。'
-              : submission.phase === 'failed'
-                ? '审批提交失败，请核对原提交。'
-                : '正在提交审批回答。'}
-        </p>
-      )}
     </article>
   );
 }

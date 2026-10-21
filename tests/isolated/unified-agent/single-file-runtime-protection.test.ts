@@ -99,6 +99,8 @@ test('actual single-file default Service protects loader companions without prot
       'storage/worker/observer-preload.js',
       'storage/migrations/0001-baseline.sql',
       'storage/migrations/0002-recovery-audit.sql',
+      'storage/migrations/0003-session-reconciliation.sql',
+      'storage/migrations/0004-pending-input-order.sql',
     ]) {
       privateDirectory(join(root, path.substring(0, path.lastIndexOf('/'))));
       cpSync(join(agent, path), join(root, path));

@@ -624,7 +624,7 @@ try {
     deadline = Date.now() + 10000;
   while (Date.now() < deadline) {
     if (await page.getByText('轮次：completed', { exact: true }).isVisible()) break;
-    const approve = page.getByRole('button', { name: '仅批准这一次', exact: true });
+    const approve = page.getByRole('button', { name: '批准一次', exact: true });
     if (await approve.isVisible()) {
       const state = await page.evaluate(
           async () =>

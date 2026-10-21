@@ -10,6 +10,7 @@ import {
   IncludeResultResponseSchema,
   JobReconcileCommandSchema,
   PendingInputPageSchema,
+  PendingInputQueueSchema,
   RecoverSessionResponseSchema,
   ResumeJobReportResponseSchema,
   ResumeRunResponseSchema,
@@ -283,6 +284,7 @@ export async function startService(options: ServiceOptions) {
         'run_resume',
         'session_recovery',
         'session_reconciliation',
+        'pending_input_queue',
         'session_logs',
         'file_recovery',
       ].includes(capability),
@@ -297,6 +299,13 @@ export async function startService(options: ServiceOptions) {
     capabilities.push('session_recovery');
   if (options.runtime && typeof options.runtime.reconcileSession === 'function')
     capabilities.push('session_reconciliation');
+  if (
+    options.runtime &&
+    typeof options.runtime.getPendingInputQueue === 'function' &&
+    typeof options.runtime.withdrawPendingInput === 'function' &&
+    typeof options.runtime.reorderPendingInputs === 'function'
+  )
+    capabilities.push('pending_input_queue');
   if (options.runtime?.supportsSelectedSkills) capabilities.push('run_skill_selection');
   if (options.runtime?.supportsInputImages) capabilities.push('input_images');
   if (options.runtime?.supportsExtensionInputs) capabilities.push('run_extension_inputs');
@@ -459,6 +468,8 @@ export async function startService(options: ServiceOptions) {
                     'input_image_invalid',
                     'input_image_scope_mismatch',
                     'invalid_input_cursor',
+                    'invalid_input_revision',
+                    'invalid_input_operation',
                     'invalid_context_cursor',
                     'invalid_model_input_cursor',
                     'context_boundary_invalid',
@@ -533,6 +544,10 @@ export async function startService(options: ServiceOptions) {
                             'interaction_revision_conflict',
                             'interaction_not_active',
                             'interaction_binding_changed',
+                            'input_queue_changed',
+                            'input_queue_members_changed',
+                            'input_already_consumed',
+                            'input_not_editable',
                             'input_pending',
                             'input_not_ready',
                             'input_target_stopped',
@@ -1645,6 +1660,61 @@ export async function startService(options: ServiceOptions) {
       ),
     );
   });
+  app.get('/v1/sessions/:id/input-queue', async (context) => {
+    if (!capabilities.includes('pending_input_queue'))
+      throw new HttpFailure('capability_unavailable', 409);
+    const raw = context.req.queries();
+    if (
+      Object.values(raw).some((values) => values.length !== 1) ||
+      (raw.limit !== undefined && !/^[1-9][0-9]*$/.test(raw.limit[0]!))
+    )
+      throw new HttpFailure('invalid_request', 400);
+    const query = schemas.PendingInputQueueQuery.safeParse(
+      Object.fromEntries(
+        Object.entries(raw).map(([key, values]) => [
+          key,
+          key === 'limit' ? Number(values[0]) : values[0],
+        ]),
+      ),
+    );
+    if (!query.success) throw new HttpFailure('invalid_request', 400);
+    const { storeId, ...pagination } = query.data;
+    return context.json(
+      PendingInputQueueSchema.parse(
+        await runtime.getPendingInputQueue({
+          expectedStoreId: storeId,
+          sessionId: context.req.param('id'),
+          ...pagination,
+        }),
+      ),
+    );
+  });
+  for (const operation of ['withdraw', 'reorder'] as const)
+    app.post(`/v1/sessions/:id/input-queue/${operation}`, async (context) => {
+      if (!capabilities.includes('pending_input_queue'))
+        throw new HttpFailure('capability_unavailable', 409);
+      const result =
+        operation === 'withdraw'
+          ? await runtime.withdrawPendingInput({
+              ...(await readBusinessBody(
+                context.req.raw,
+                schemas.WithdrawPendingInputRequest,
+                4096,
+              )),
+              sessionId: context.req.param('id'),
+              subjectId,
+            })
+          : await runtime.reorderPendingInputs({
+              ...(await readBusinessBody(
+                context.req.raw,
+                schemas.ReorderPendingInputsRequest,
+                1048576,
+              )),
+              sessionId: context.req.param('id'),
+              subjectId,
+            });
+      return context.json(schemas.Command.parse(result));
+    });
   app.post('/v1/sessions/:id/job-reports/:reportCommandId/resume', async (context) => {
     const target = schemas.ResumeJobReportTarget.safeParse({
       sessionId: context.req.param('id'),

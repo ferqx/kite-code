@@ -17,6 +17,10 @@
 
 同一根会话下，child/grandchild 的工具审批模式动态读取根当前 applied `permission.mode` 与 revision，不冻结为创建时父模式。默认和可信注入的 child policy 都与当前根策略及原 capability ceiling 相交；局部根变更不修改其他根或用户默认。真实 `accept_edits/auto/full` 双向变化会唤醒原人工审批、自动 review、资源等待和未派发队列，准确原动作按新策略重新判断。Full 不能解除只读预设、工具交集、信任、明确拒绝/取消、工作控制和 unknown fence。
 
+Service 注入 `permissions`／`permissionPolicy` 时仍允许用户通过原 HTTP 控制修改根模式；注入只保留能力、信任、硬拒绝与明确人工要求上限，原宿主拥有的 trust／grants 管理边界不随模式入口开放。TUI／Desktop 仅将合法 applied 控制事件作为重读信号，按实际 Store、根 Session、Workspace 及明确 default 变更更新显示；首次子视图读取、在途保存和切会话的晚回包分别保留作用域与读取代次，事件正文或显示缓存不签发授权。TUI 的 Ctrl+P 可在问卷中打开权限面板，原答案和步骤保持，字面 slash 文本仍是回答。
+
+Native 普通工具审批采用输入组件上方的单卡分页，根和子待批均保留 Composer／模式入口；切 Auto／Full 仍通过原持久模式和最终 dispatch read-set 重判，不由移除卡片模拟执行。主名称隐藏、子名称与稳定彩色图标只作展示，不改变准确来源 Session／Run／Interaction。分体菜单“本次会话批准”只提交原卡实际提供的 `same_command`，不扩大为所有工具授权；紧凑附件仍须完整 EOF／hash／UTF-8 核对才有回答能力。问答、计划和 MCP 特殊授权保持独立门禁。排队消息的撤回／编辑／调序只影响尚未消费的输入，不授予工具权限、不取消已执行效果，准确跨层 authority 见[执行边界](unified-agent-boundary.md)与[Native owner](../../apps/desktop/README.md#原审批面板与授权观察)。
+
 最终 `markDispatching` 重读原根 applied revision，已获但未消费的一次性/同命令批准及 review proof 仍须按当前策略重判；旧 revision 不能直通，也不能借兄弟或新轮批准。旧人工卡以独立准确失效事实收束，原 request/answer 保留，不伪造用户答复；迟到旧答案或 review 不改变新轮，已派发效果保留原事实。模式写入响应丢失查原控制回执，当前策略无法读取时阻挡新效果，冷只读不执行。运行中双向竞争、三层可信注入、旧 grant/review 与资源等待由[真实模式测试](../../packages/agent/test/isolated/execution/live-permission-mode.test.ts)覆盖；[物理强杀](../../packages/agent/test/isolated/recovery/live-approval-crash.test.ts)核待批崩溃、冷读零 Provider、当前 revision 显式接续及一次效果。合成 effect、真实策略、原生工具和实际客户端范围分别由 owner 记录，不将一种证据推广为全部平台资格。
 
 下面保留旧 Kernel/SAQ 实现及仍适用理由，不据旧模式/State 推导新正式执行范围。RSS、完整观测、Windows Shell 及平台资格未因本次迁移退出。

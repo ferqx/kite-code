@@ -1,5 +1,7 @@
 # 通用 Agent 新执行边界
 
+待消费输入队列沿 [Store](../../packages/agent/src/storage/README.md#待消费输入的撤回与排序) → [Runtime](../../packages/agent/README.md#人类输入工作选择与可靠结果) → [Service](../../apps/service/README.md#待消费输入队列协议) → [Client](../../packages/client/README.md#待消费输入队列) → [Native](../../apps/desktop/README.md#原运行中消息队列)交接。持久 `pending_order` 与原不可变 `seq` 分开，真实消费使用前者；原 request、附件、digest 和历史出处不重写，`result.include` 保原槽。`pending_input_queue` 是单独能力，精确 `input.withdraw/input.reorder` 只变更原根、原主体尚未消费的合法集合，revision CAS 与单调变更计数阻止过期及 ABA；撤回不等于取消 Run／Execution。Main 只接受已观察 ID，不接 renderer 自报请求或 Store；首次写入前保存原意图，未知只查询同 ID。编辑已确认撤回后才交付普通 draft，交付 ack 前可显式查原操作取回原文，重开不重发、不恢复队列或自动覆盖草稿。事务、生成协议、私有DB11与实际验证分别由上述 owner 维护，UI 排序或持久 journal 都不签发新的执行或审批权。
+
 用户直接图片沿 [Native](../../apps/desktop/README.md#markdown-与附件输入) → [Service](../../apps/service/README.md#图片输入协议) → [Agent](../../packages/agent/README.md#用户图片输入) → [AI](../../packages/ai/README.md#图片消息)交接。Native 的单一“添加文件”入口以实际 File 自动分流；沙箱 preload 仅从磁盘 File 解析路径，不接受字符串路径读取或隐式获取正文。Native 只暂存用户交付的受限字节；每次新输入最多 10 张图片，由窗口、Native 提交、HTTP 与 Agent 受理独立核实，旧历史不裁剪；普通文件选择以独立 `files` 名称／URI 元数据进入原 Command 和 Message，不改写正文，Runtime 只在模型历史组装时追加低权限路径文本，不把路径授给新 I/O 接口。HTTP 上传先核真实身份／作用域，原 Artifact 发布后才返回稳定引用；输入事务核全部元数据，模型历史完整读回原图，SQL 基线保持。图片只映射为 Chat Completions／Responses 的内联 Base64，不隐式获取远程 URL、不上传到公网存储或引入 Anthropic Messages；读取不取得执行权限。已发布正文沿既有备份／Fork／保留边界，未知 Command 只查原结果。公开能力 `input_images`、可选引用字段和生成协议由 Service owner 维护，Web 不增加写入入口。
 
 状态：active

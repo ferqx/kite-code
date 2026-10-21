@@ -111,6 +111,8 @@ export function createPermissionManagement(options: {
   runtime?: AgentRuntime;
   profile: ProfileSelection;
   writable?: boolean;
+  /** Keep root mode user-controlled when a trusted host owns trust and grants. */
+  allowModeChanges?: boolean;
   /** Qualified explicit native Shell has the host's broad readable filesystem view. */
   nativeShellRead?: boolean;
 }): PermissionManagementPort {
@@ -198,7 +200,11 @@ export function createPermissionManagement(options: {
     check?: () => Promise<void>,
   ) {
     const host = await runtime(input);
-    if (options.writable === false) throw new AgentError('permission_authority_external');
+    if (
+      options.writable === false &&
+      !(kind === 'permission.mode' && options.allowModeChanges === true)
+    )
+      throw new AgentError('permission_authority_external');
     const requestDigest = sha(canonical({ kind, scope, safeRequest }));
     const accepted = await host.beginHostMutation({
       ...input,

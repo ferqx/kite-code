@@ -717,6 +717,29 @@ export const schemas = {
     afterSeq: sequence.optional(),
     limit: z.number().int().min(1).max(200).optional(),
   }),
+  PendingInputQueueQuery: z.strictObject({
+    storeId: id,
+    afterOrder: sequence.optional(),
+    limit: z.number().int().min(1).max(200).optional(),
+    expectedRevision: z
+      .string()
+      .regex(/^[a-f0-9]{64}$/)
+      .optional(),
+  }),
+  WithdrawPendingInputRequest: z.strictObject({
+    kind: z.literal('input.withdraw'),
+    expectedStoreId: id,
+    commandId: id,
+    targetCommandId: id,
+    expectedRevision: z.string().regex(/^[a-f0-9]{64}$/),
+  }),
+  ReorderPendingInputsRequest: z.strictObject({
+    kind: z.literal('input.reorder'),
+    expectedStoreId: id,
+    commandId: id,
+    expectedRevision: z.string().regex(/^[a-f0-9]{64}$/),
+    commandIds: z.array(id).max(4096),
+  }),
   Interaction: interaction,
   InteractionPage: z.object({
     interactions: z.array(interaction),
@@ -1377,6 +1400,13 @@ export const PendingInputPageSchema = z.object({
   nextAfterSeq: sequence.nullable(),
   snapshotCursor: sequence,
 });
+export const PendingInputQueueSchema = z.object({
+  commands: PendingInputPageSchema.shape.commands,
+  orders: z.array(sequence),
+  nextAfterOrder: sequence.nullable(),
+  revision: z.string().regex(/^[a-f0-9]{64}$/),
+  snapshotCursor: sequence,
+});
 export const SessionViewSchema = z.object({
   session: schemas.Session.extend({
     /** Read-only ownership facts from the same fixed Store view; never a recovery grant. */
@@ -1782,6 +1812,7 @@ export const apiSchemas = {
   SessionReconciliation: SessionReconciliationSchema,
   JobReconcileCommand: JobReconcileCommandSchema,
   PendingInputPage: PendingInputPageSchema,
+  PendingInputQueue: PendingInputQueueSchema,
   BeginSessionExportQuery: BeginSessionExportQuerySchema,
   SessionExportPageQuery: SessionExportPageQuerySchema,
   SessionExportTextQuery: SessionExportTextQuerySchema,
@@ -1979,6 +2010,19 @@ export const apiRoutes = [
     response: 'IncludeResultResponse',
   },
   { method: 'get', path: '/v1/sessions/{id}/inputs', response: 'PendingInputPage' },
+  { method: 'get', path: '/v1/sessions/{id}/input-queue', response: 'PendingInputQueue' },
+  {
+    method: 'post',
+    path: '/v1/sessions/{id}/input-queue/withdraw',
+    request: 'WithdrawPendingInputRequest',
+    response: 'Command',
+  },
+  {
+    method: 'post',
+    path: '/v1/sessions/{id}/input-queue/reorder',
+    request: 'ReorderPendingInputsRequest',
+    response: 'Command',
+  },
   { method: 'get', path: '/v1/events', response: 'Change', eventStream: true },
   { method: 'get', path: '/v1/sessions/{id}/interactions', response: 'InteractionPage' },
   {

@@ -41,6 +41,12 @@ import {
   parseNativeMcpRecord,
 } from './mcp-journal';
 import {
+  assertQueueRecordTransition,
+  type NativeQueueData,
+  type NativeQueueRecord,
+  parseNativeQueueRecord,
+} from './native-input-queue-journal';
+import {
   attachDesktopProfileAccess,
   type DesktopProfileAccess,
   prepareWindowsPrivateUi,
@@ -61,6 +67,7 @@ import {
 
 export type DraftScope = { storeId: string; workspaceId: string; rootSessionId: string };
 export type PrivateData = NativeScheduledTaskData &
+  NativeQueueData &
   WorkspaceRemovalData &
   NativeFileRecoveryJournal &
   NativeAnswerData & {
@@ -162,7 +169,8 @@ export function openPrivateData(profilePath: string, access: DesktopProfileAcces
       version !== 7 &&
       version !== 8 &&
       version !== 9 &&
-      version !== 10
+      version !== 10 &&
+      version !== 11
     )
       failure();
     if (
@@ -216,6 +224,7 @@ export function openPrivateData(profilePath: string, access: DesktopProfileAcces
         'creations',
         'drafts',
         'file_recovery_intents',
+        ...(version >= 11 ? ['input_queue_intents'] : []),
         'mcp_intents',
         'model_routes',
         'recovery_intents',
@@ -238,6 +247,14 @@ export function openPrivateData(profilePath: string, access: DesktopProfileAcces
     )
       failure();
     db.prepare('SELECT command_id,state FROM caller_intents LIMIT 0').all();
+    if (
+      version >= 11 &&
+      db
+        .prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='input_queue_intents'")
+        .get()?.sql !==
+        'CREATE TABLE input_queue_intents(command_id TEXT PRIMARY KEY,state TEXT NOT NULL)'
+    )
+      failure();
     if (
       db
         .prepare(
@@ -285,6 +302,34 @@ export function openPrivateData(profilePath: string, access: DesktopProfileAcces
     releaseAccess();
   }
   const database = () => db ?? failure();
+  function inputQueueRows(): NativeQueueRecord[] {
+    if (Number(database().prepare('PRAGMA user_version').get()!.user_version) < 11) return [];
+    const records: NativeQueueRecord[] = [];
+    let bytes = 0;
+    for (const row of database()
+      .prepare(
+        'SELECT command_id,state,hex(CAST(state AS BLOB)) AS state_hex FROM input_queue_intents ORDER BY command_id',
+      )
+      .iterate()) {
+      if (typeof row.state !== 'string' || typeof row.state_hex !== 'string')
+        throw Error('input_queue_storage_unavailable');
+      const original = Buffer.from(row.state_hex, 'hex');
+      const text = new TextDecoder('utf-8', { fatal: true }).decode(original);
+      bytes += original.byteLength;
+      if (
+        text !== row.state ||
+        Buffer.byteLength(text) !== original.byteLength ||
+        records.length >= 128 ||
+        bytes > 16777216
+      )
+        throw Error('input_queue_storage_unavailable');
+      const record = parseNativeQueueRecord(JSON.parse(text));
+      if (record.request.commandId !== row.command_id)
+        throw Error('input_queue_storage_unavailable');
+      records.push(record);
+    }
+    return records;
+  }
   function mcpRows(): NativeMcpRecord[] {
     const result: NativeMcpRecord[] = [];
     let bytes = 0;
@@ -704,6 +749,50 @@ export function openPrivateData(profilePath: string, access: DesktopProfileAcces
         .run(storeId, sessionId, modelId);
     },
     read,
+    inputQueueRecords: inputQueueRows,
+    saveInputQueueRecord(raw) {
+      const record = parseNativeQueueRecord(raw);
+      transaction(() => {
+        const rows = inputQueueRows();
+        const old = rows.find((row) => row.request.commandId === record.request.commandId);
+        if (old) assertQueueRecordTransition(old, record);
+        else if (record.phase !== 'submitting') throw Error('input_queue_intent_conflict');
+        const removable = rows.filter(
+          (row) =>
+            row.phase === 'rejected' ||
+            (row.phase === 'applied' && (row.operation !== 'edit' || row.delivered)),
+        );
+        const remove = old ? [] : removable.slice(0, Math.max(0, removable.length - 31));
+        const kept = rows.filter((row) => !remove.includes(row) && row !== old);
+        if (
+          kept.length >= 128 ||
+          kept.reduce((sum, row) => sum + Buffer.byteLength(JSON.stringify(row)), 0) +
+            Buffer.byteLength(JSON.stringify(record)) >
+            16777216
+        )
+          throw Error('input_queue_capacity_exceeded');
+        const version = Number(database().prepare('PRAGMA user_version').get()!.user_version);
+        if (version < 11) {
+          if (version < 8)
+            database().exec(
+              'CREATE TABLE workspace_removal_intents(command_id TEXT PRIMARY KEY,state TEXT NOT NULL)',
+            );
+          if (version < 10) for (const schema of scheduledTaskSchemas) database().exec(schema);
+          database().exec(
+            'CREATE TABLE input_queue_intents(command_id TEXT PRIMARY KEY,state TEXT NOT NULL); PRAGMA user_version=11;',
+          );
+        }
+        for (const row of remove)
+          database()
+            .prepare('DELETE FROM input_queue_intents WHERE command_id=?')
+            .run(row.request.commandId);
+        database()
+          .prepare(
+            'INSERT INTO input_queue_intents VALUES(?,?) ON CONFLICT(command_id) DO UPDATE SET state=excluded.state',
+          )
+          .run(record.request.commandId, JSON.stringify(record));
+      });
+    },
     save(scope, revision, content) {
       if (Buffer.byteLength(content) > 1048576) throw Error('draft_capacity_exceeded');
       const result = transaction(() => {
@@ -1167,6 +1256,9 @@ export function openPrivateData(profilePath: string, access: DesktopProfileAcces
     'caller_intent_conflict',
     'caller_intent_missing',
     'caller_clear_unconfirmed',
+    'input_queue_storage_unavailable',
+    'input_queue_capacity_exceeded',
+    'input_queue_intent_conflict',
     'draft_storage_unavailable',
     'draft_capacity_exceeded',
     'draft_revision_conflict',

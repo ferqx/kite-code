@@ -19,8 +19,9 @@ function legacy(path: string) {
       for (const row of extra.filter((row) => row.type === type))
         db.run(`DROP ${type.toUpperCase()} "${row.name}"`);
     db.run(
-      "DELETE FROM schema_migration WHERE id IN('0002-recovery-audit','0003-session-reconciliation')",
+      "DELETE FROM schema_migration WHERE id IN('0002-recovery-audit','0003-session-reconciliation','0004-pending-input-order')",
     );
+    db.run('ALTER TABLE command DROP COLUMN pending_order');
     db.run('COMMIT');
     expect(JSON.stringify(db.query(schemaQuery).all())).toBe(supportedSchemas()[0]!.schema);
   } finally {
@@ -62,6 +63,7 @@ test('legacy readonly is unchanged; one writer upgrade certifies all history the
           { id: '0001-baseline' },
           { id: '0002-recovery-audit' },
           { id: '0003-session-reconciliation' },
+          { id: '0004-pending-input-order' },
         ]);
         expect(
           db

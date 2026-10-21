@@ -170,7 +170,12 @@ test('real default HTTP status reads current controls and host facts without cre
           storeId: metadata.storeId,
         })
       ).execution.permissions,
-    ).toMatchObject({ state: 'unavailable', mode: null, reason: 'permission_source_unavailable' });
+    ).toMatchObject({
+      state: 'unbound',
+      mode: 'auto',
+      workspaceTrust: 'unavailable',
+      reason: 'permission_source_unavailable',
+    });
     const encoded = JSON.stringify(scoped);
     for (const hidden of [root, workspace, service.bootstrap.token, service.endpoint, 'secret'])
       expect(encoded).not.toContain(hidden);
@@ -216,6 +221,23 @@ test('real default HTTP status reads current controls and host facts without cre
       workspaceTrust: 'trusted',
     });
     expect((await client.getHostStatus()).execution.permissions.defaultMode).toBe('accept_edits');
+    expect(
+      (
+        await sealedSource.snapshot({
+          runtime,
+          permissions,
+          subjectId: 'owner',
+          storeId: metadata.storeId,
+          sessionId: 's',
+          workspaceId: 'w',
+        })
+      ).execution.permissions,
+    ).toMatchObject({
+      mode: 'accept_edits',
+      defaultMode: 'accept_edits',
+      scope: 'session',
+      workspaceTrust: 'unavailable',
+    });
     writeFileSync(join(profile.profilePath, 'userconfig.jsonc'), '{ broken config');
     expect((await client.getHostStatus({ sessionId: 's', workspaceId: 'w' })).release.reason).toBe(
       'release_manifest_not_bound',

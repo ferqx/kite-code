@@ -398,9 +398,9 @@ export function applyInputWork(db: SqliteOperations, input: ApplyInputInput): In
       throw new AgentError('operation_unverifiable');
     if (
       db.row(
-        "SELECT id FROM command WHERE kind IN ('input.steer','result.include') AND input_target_run_id=? AND status='accepted' AND cancelled=0 AND seq<? LIMIT 1",
+        "SELECT id FROM command WHERE kind IN ('input.steer','result.include') AND input_target_run_id=? AND status='accepted' AND cancelled=0 AND COALESCE(pending_order,seq)<? LIMIT 1",
         input.runId,
-        command.seq!,
+        command.pending_order ?? command.seq!,
       )
     )
       throw new AgentError('input_order_conflict');
@@ -475,9 +475,9 @@ export function applyInputWork(db: SqliteOperations, input: ApplyInputInput): In
       throw new AgentError('session_busy');
     if (
       db.row(
-        "SELECT id FROM command WHERE session_id=? AND kind='input.follow_up' AND status='accepted' AND cancelled=0 AND COALESCE(json_extract(receipt_json,'$.outcome'),'') NOT IN('human_input_pending','human_input_queued','human_input_unresolved') AND seq<? LIMIT 1",
+        "SELECT id FROM command WHERE session_id=? AND kind='input.follow_up' AND status='accepted' AND cancelled=0 AND COALESCE(json_extract(receipt_json,'$.outcome'),'') NOT IN('human_input_pending','human_input_queued','human_input_unresolved') AND COALESCE(pending_order,seq)<? LIMIT 1",
         String(command.session_id),
-        command.seq!,
+        command.pending_order ?? command.seq!,
       )
     )
       throw new AgentError('input_order_conflict');
