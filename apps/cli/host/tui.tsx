@@ -322,6 +322,8 @@ export async function runTUIHost(input: TUIHostOptions): Promise<number> {
       storeId,
       input.cwd ?? process.cwd(),
       () => {},
+      input.exitSignal,
+      { reconcile: false },
     );
     const workspaceId = initial.workspace.id;
     const workspaceObserver = createTuiWorkspaceObserver(
@@ -603,6 +605,13 @@ export async function runTUIHost(input: TUIHostOptions): Promise<number> {
                 : {}),
           }));
       },
+      async reconcileSession(sessionId, signal) {
+        if (
+          !workspaceObserver.active &&
+          originalClient.serverInfo?.capabilities.includes('session_reconciliation')
+        )
+          await originalClient.reconcileSessionState(sessionId, { signal });
+      },
       async readSession(sessionId, signal) {
         const view = await client.getView(sessionId, { signal });
         if (
@@ -882,7 +891,10 @@ export async function runTUIHost(input: TUIHostOptions): Promise<number> {
           refreshAgain = false;
           const target = controller!.state.sessionId;
           if (target && !ended)
-            await controller!.select(target, { preserveReconnectionReview: true });
+            await controller!.select(target, {
+              preserveReconnectionReview: true,
+              reconcile: false,
+            });
         } while (refreshAgain && !ended);
       } finally {
         refreshing = false;
@@ -962,8 +974,12 @@ export async function runTUIHost(input: TUIHostOptions): Promise<number> {
               )
                 await refresh();
             },
-            onReady: (ready) => {
-              if (!ended && !observer.signal.aborted) controller!.observationReady(ready.storeId);
+            onReady: async (ready) => {
+              if (!ended && !observer.signal.aborted) {
+                controller!.observationReady(ready.storeId);
+                const target = controller!.state.sessionId;
+                if (target) await controller!.select(target, { preserveReconnectionReview: true });
+              }
             },
             onReset: async (reason) => {
               resetReason = reason;

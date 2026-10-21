@@ -288,6 +288,7 @@ export async function ensureSession(
   cwd: string,
   write: (line: string) => void,
   signal?: AbortSignal,
+  options: { reconcile?: boolean } = {},
 ): Promise<{ session: Session; workspace: Workspace }> {
   // Starting a fresh conversation does not require any historical page.
   const sessions = args.thread ? await client.listAllSessions({ signal }) : [];
@@ -302,6 +303,11 @@ export async function ensureSession(
       canonicalWorkspace(args.workspace, cwd) !== workspace.rootUri
     )
       throw new CLIHostError('workspace_identity_mismatch');
+    if (
+      options.reconcile !== false &&
+      client.serverInfo?.capabilities.includes('session_reconciliation')
+    )
+      await client.reconcileSessionState(sessionId, { signal });
     return { session: original, workspace };
   }
   if (args.kind === 'resume') throw new CLIHostError('session_not_found');

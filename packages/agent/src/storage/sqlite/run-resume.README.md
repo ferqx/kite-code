@@ -1,6 +1,30 @@
 # 长任务的执行尝试与冷恢复
 
-[Runtime](../../runtime.ts) 与 [Store](run-resume-operations.ts) 将持久任务意图、可替换的 Model 尝试、已确认效果及进程监督分开。显式 `run.resume` 仍由真实 root 创建主体发起，接管同 Store 的原活动 Run 及其准确子任务闭包；恢复不创建替代任务树。公开 HTTP、format major 1 和原 baseline 保持；新增闭合的 0002-recovery-audit 增量迁移，备份按实际迁移链核 schema/checksum。
+[Runtime](../../runtime.ts) 与 [Store](run-resume-operations.ts) 将持久任务意图、可替换的 Model 尝试、已确认效果及进程监督分开。显式 `run.resume` 由真实 root 创建主体接管同 Store 原 Run 及其准确子任务闭包；状态核实后的原私有边界可参与该验证，不创建替代任务树。API major、format major 1 和原 baseline 保持；0002-recovery-audit 与 0003-session-reconciliation 是闭合增量迁移，备份按实际迁移链核 schema/checksum。
+
+## 会话恢复时的状态核实
+
+[session-reconciliation](session-reconciliation.ts) 与[公共 SQLite owner](../../sqlite.ts)提供独立 `reconcileSession`。调用者绑定原 Store、主体、root 和观察 generation；先核整个原 generation 执行组，无遗留活动／未派发边界直接 unchanged。有工作时必须真实观察并取得同一原 OS 排他锁，事务内再次 CAS 后才 fence。持有／冻结 owner 返回 owner_held；锁文件缺失／检查错误不当成死亡。核实不创建普通 owner，不调用 Provider、Tool、Job 或授权器。
+
+| 原执行组事实 | 核实后公开状态 |
+| --- | --- |
+| 活动主／子 Run | interrupted、inactive，原因 owner_lost |
+| 已尝试 Model | failed，保原片段与身份 |
+| 已尝试但结果不明的 Tool／Job／child carrier | outcome_unknown，保原效果边界 |
+| 原 owner 未派发的 Model／Tool／Job／排队子 carrier | cancelled，原因 owner_lost_before_dispatch，不保假队列 |
+| 相关 pending／answered、尚未 accepted 的 Interaction | cancelled，保答案、revision 和 accepted decision 事实 |
+| 准确关联原 child／Execution 的 accepted 启动命令 | needs_review，独立新输入不按同根关系误取消 |
+| 已完成结果与已结束 Run | 保持原状态和正文 |
+
+0003 私有 `session_reconciliation` 每个 root 最多保一个版本化 checkpoint，绑定原 Store、结算 Command、fence generation、组 Run、Session control／selection／stop、业务命令边界、准确原行与结算后完整摘要。闭合字段、版本、scope、唯一身份和 digest 均验证。普通 View 读取真实结算状态，不把 running 隐藏在公共投影。
+
+显式 `run.resume` 预检／准备页仅在 SQL savepoint 临时叠加原 frontier，读后 rollback；最终 commit 在同一外层事务核 lease、结算行摘要及全部原恢复条件，通过后才还原并交普通 owner。未声明安全 continuation 的 unknown 仍拒绝，已确认效果不重放。显式放弃、取消、相关新工作或选择漂移使边界失效；旧 generation 不能再写。恢复 lease 的准确 generation 变化同步 snapshot，普通读不写入；原 accepted decision 不清除。
+
+核实后明确发送新的独立任务时，[Runtime](../../runtime.ts)核完整原 Model 输出与准确 Tool call，提供私有历史证明；[新任务受理](reconciliation-admission.ts)在原 accept／human-register 事务中复核 checkpoint、generation、原 owner 已释放与没有真实 unknown，补齐已保存为未执行的原 Tool 结果消息，再删除旧边界。它不恢复或执行旧 Tool，不把未配对调用传给下一 Model。未知效果或漂移在新 Command 受理前拒绝，原历史／checkpoint 保持；公共请求不能提供这项证明。显式放弃恢复同样沿准确原 frontier 完成既有工具历史闭合。[真实协议回归](../../../test/isolated/recovery/history-followup-runtime.test.ts)核 inline／sealed 原输出、直接新任务、一次新效果、原消息配对、同 ID 幂等和旧 Run 不再接续。
+
+备份保存 checkpoint；恢复成新 Store 删除全部 checkpoint，旧来源不借它执行。GC 随准确 root 范围删除，安全导出白名单排除私有表。readonly 0001／0002 不强制升级，写迁移与 bundle 包含 0003。此机制证明原 owner 已释放和持久边界，不证明任意外部进程／副作用结束。
+
+[真实任务组 SIGKILL](../../../test/isolated/recovery/run-resume-group-runtime.test.ts)核多子、排队、原审批的结算与同身份接续；[Store 反例](../../../test/isolated/recovery/run-resume-store.test.ts)核 held／缺锁、漂移、unknown、回滚和安全边界。[Native 实际交接](../../../../../apps/desktop/test/isolated/native-session-reconciliation.test.ts)核 Service／Client／Controller、冷读与零重放。持久取舍见[Note](../../../../../.agents/notes/implemented/architecture/2026-10-22-session-state-reconciliation.md)。
 
 ## 恢复协议
 
@@ -46,7 +70,7 @@ SQL 的[事务证明](recovery-audit.ts)由普通 Store 写事务维护。持久
 
 [增量审计](../../../test/isolated/recovery/run-resume-audit.test.ts)在真实冷重开后比较 100 和 10000 条已认证 SQL 历史，另配同等数量的已结束子任务，两种规模在 planned 前沿均读取18行 SQL结果、running 前沿均22行，并核末次 Model/效果依赖/live 状态索引；这是受控 SQL 容量夹具，耗时只作本机测量，不冒充真实 Provider 工作或固定性能 SLA。它另用所属子进程实际 SIGKILL 卡在证明已写、COMMIT 前/后，核业务与证明共同回滚/提交；真实 SQL 证明失败回滚原 Run 激活与回执。历史坏正文、坏来源、删除/跨 Run、unknown、旧 failed Model 新效果、无通知变化和 CAS 均有反例。
 
-[升级回归](../../../test/isolated/recovery/run-resume-audit-migration.test.ts)核原 0001 schema 的 readonly 原字节、一次写入认证、后续冷读、迁移 checksum 与未知版本拒绝。[完整历史](../../../test/isolated/recovery/run-resume-history.test.ts)保全部原身份分页和未在 frontier 中的漂移；[Store](../../../test/isolated/recovery/run-resume-store.test.ts)保事务回滚、原审批及接管。Windows [实际维护与包内 leaf](../../../test/isolated/maintenance/windows.test.ts)核真实 Worker、两项包内迁移、备份/新 Store 恢复和 GC。当前证据不代表实际持续数周、任意外部效果恢复、物理存储损坏认证或全部平台资格。
+[升级回归](../../../test/isolated/recovery/run-resume-audit-migration.test.ts)核原 0001 schema 的 readonly 原字节、一次写入认证、后续冷读、迁移 checksum 与未知版本拒绝。[完整历史](../../../test/isolated/recovery/run-resume-history.test.ts)保全部原身份分页和未在 frontier 中的漂移；[Store](../../../test/isolated/recovery/run-resume-store.test.ts)保事务回滚、原审批及接管。Windows [实际维护与包内 leaf](../../../test/isolated/maintenance/windows.test.ts)核真实 Worker、三项包内迁移、备份/新 Store 恢复和 GC。当前证据不代表实际持续数周、任意外部效果恢复、物理存储损坏认证或全部平台资格。
 
 持久取舍见[执行尝试与监督恢复 Note](../../../../../.agents/notes/implemented/architecture/2026-10-16-durable-continuations-and-group-recovery.md)。
 

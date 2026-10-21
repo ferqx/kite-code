@@ -4,6 +4,7 @@ import type { Store } from '../port';
 import { AgentError, type Json, type RecoveryReport } from '../types';
 import type { SqliteOperations } from './operations';
 import { recoveryToolHistory } from './recovery-history';
+import { withReconciledFrontier } from './session-reconciliation';
 
 type Input = Parameters<Store['recoverSession']>[0];
 function request(input: Input): Json {
@@ -48,6 +49,9 @@ export function recoverSession(db: SqliteOperations, input: Input): RecoveryRepo
   return db.tx(() => {
     const existing = prior(db, input);
     if (existing) return existing;
+    // Explicit abandonment finalizes the authenticated original frontier, including
+    // Tool-call pairing, rather than leaving observed cancellations unpaired.
+    withReconciledFrontier(db, input, () => undefined, true);
     const session = db.row('SELECT * FROM session WHERE id=?', input.sessionId);
     if (!session || session.delete_requested) throw new AgentError('session_not_found');
     if (session.parent_id !== null) throw new AgentError('group_root_required');

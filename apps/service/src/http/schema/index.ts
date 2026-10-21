@@ -1137,6 +1137,12 @@ export const schemas = {
     decision: z.literal('interrupt'),
   }),
   RecoverSessionTarget: z.strictObject({ sessionId: id }),
+  ReconcileSessionRequest: z.strictObject({
+    expectedStoreId: id,
+    commandId: id,
+    expectedOwnerGeneration: sequence,
+  }),
+  ReconcileSessionTarget: z.strictObject({ sessionId: id }),
   ReconcileJobRequest: z.strictObject({
     kind: z.literal('job.reconcile'),
     expectedStoreId: id,
@@ -1327,6 +1333,30 @@ export const RecoverSessionResponseSchema = schemas.Command.extend({
     snapshotCursor: sequence,
   }),
 });
+const reconciliationReport = RecoverSessionResponseSchema.shape.receipt.omit({ kind: true });
+export const SessionReconciliationSchema = z.discriminatedUnion('outcome', [
+  z.strictObject({
+    storeId: id,
+    sessionId: id,
+    outcome: z.literal('reconciled'),
+    commandId: id,
+    report: reconciliationReport,
+  }),
+  z.strictObject({
+    storeId: id,
+    sessionId: id,
+    outcome: z.literal('owner_held'),
+    commandId: z.null(),
+    report: z.null(),
+  }),
+  z.strictObject({
+    storeId: id,
+    sessionId: id,
+    outcome: z.literal('unchanged'),
+    commandId: z.null(),
+    report: z.null(),
+  }),
+]);
 export const PendingInputPageSchema = z.object({
   commands: z.array(
     schemas.Command.extend({
@@ -1749,6 +1779,7 @@ export const apiSchemas = {
   ResumeJobReportResponse: ResumeJobReportResponseSchema,
   ResumeRunResponse: ResumeRunResponseSchema,
   RecoverSessionResponse: RecoverSessionResponseSchema,
+  SessionReconciliation: SessionReconciliationSchema,
   JobReconcileCommand: JobReconcileCommandSchema,
   PendingInputPage: PendingInputPageSchema,
   BeginSessionExportQuery: BeginSessionExportQuerySchema,
@@ -1765,6 +1796,12 @@ export const apiSchemas = {
   SessionExportCompletion: SessionExportCompletionSchema,
 };
 export const apiRoutes = [
+  {
+    method: 'post',
+    path: '/v1/sessions/{id}/reconcile',
+    request: 'ReconcileSessionRequest',
+    response: 'SessionReconciliation',
+  },
   {
     method: 'get',
     path: '/v1/config/user/providers',

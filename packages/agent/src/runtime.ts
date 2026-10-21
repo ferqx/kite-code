@@ -795,6 +795,7 @@ export class AgentRuntime {
     this.includeResult = this.accountEntry(this.includeResult, 'admission');
     this.answerInteraction = this.accountEntry(this.answerInteraction, 'admission');
     this.recoverSession = this.accountEntry(this.recoverSession, 'admission');
+    this.reconcileSession = this.accountEntry(this.reconcileSession, 'admission');
     this.resumeJobReport = this.accountEntry(this.resumeJobReport, 'admission');
     this.reconcileJob = this.accountEntry(this.reconcileJob, 'admission');
     this.resumeRun = this.accountEntry(this.resumeRun, 'admission');
@@ -2881,6 +2882,9 @@ export class AgentRuntime {
   queryExtension(input: Parameters<ExtensionHost['query']>[0]) {
     return this.extensionHost.query(input);
   }
+  reconcileSession(input: Parameters<Store['reconcileSession']>[0]) {
+    return this.options.store.reconcileSession(input);
+  }
   async recoverSession(input: Parameters<Store['recoverSession']>[0]) {
     // The public caller cannot supply the private full-output observations.
     const original = {
@@ -2893,15 +2897,25 @@ export class AgentRuntime {
     };
     if (await this.options.store.getCommand(original.commandId))
       return this.options.store.recoverSession(original);
-    const histories = await this.options.store.readRecoveryToolHistory(original);
+    const toolHistoryProofs = await this.validatedRecoveryToolProofs(original);
+    if (this.closing) throw new AgentError('runtime_draining');
+    return this.options.store.recoverSession({
+      ...original,
+      toolHistoryProofs,
+    });
+  }
+  private async validatedRecoveryToolProofs(
+    input: Parameters<Store['readRecoveryToolHistory']>[0],
+  ) {
+    const histories = await this.options.store.readRecoveryToolHistory(input);
     const outputs = new Map<string, ModelOutputSnapshot>();
     for (const history of histories) {
       let snapshot = outputs.get(history.modelExecutionId);
       if (!snapshot) {
         snapshot = await this.readModelOutput({
-          expectedStoreId: original.expectedStoreId,
+          expectedStoreId: input.expectedStoreId,
           sessionId: history.sessionId,
-          subjectId: original.subjectId,
+          subjectId: input.subjectId,
           executionId: history.modelExecutionId,
         });
         outputs.set(history.modelExecutionId, snapshot);
@@ -2916,14 +2930,7 @@ export class AgentRuntime {
       )
         throw new AgentError('recovery_tool_history_unverifiable');
     }
-    if (this.closing) throw new AgentError('runtime_draining');
-    return this.options.store.recoverSession({
-      ...original,
-      toolHistoryProofs: histories.map(({ executionId, bindingDigest }) => ({
-        executionId,
-        bindingDigest,
-      })),
-    });
+    return histories.map(({ executionId, bindingDigest }) => ({ executionId, bindingDigest }));
   }
   private async readResumeModelSource(
     execution: ExecutionRecord,
@@ -3015,6 +3022,16 @@ export class AgentRuntime {
     signal: AbortSignal,
   ): Promise<RunExecutionCheckpoint> {
     const checkpoint = state.checkpoint;
+    // The verified resume state may describe an owner-loss frontier whose public
+    // ledger has already been settled. Preparation must use that exact original
+    // frontier until commit atomically adopts it; ordinary readers keep seeing
+    // the durable interrupted/cancelled facts throughout preparation.
+    const originalExecutions = new Map(
+      state.executions.map((execution) => [execution.id, execution]),
+    );
+    const executionForResume = (id: string) =>
+      originalExecutions.get(id) ?? this.options.store.getExecution(id);
+
     if (!['run.start', 'input.follow_up', 'child.start'].includes(state.originalCommand.kind))
       throw new AgentError('resume_checkpoint_unavailable');
     if (!checkpoint || checkpoint.initializationState === 'started')
@@ -3120,7 +3137,7 @@ export class AgentRuntime {
         if (BigInt(item.cursor) <= BigInt(afterRowid))
           throw new AgentError('resume_checkpoint_unavailable');
         afterRowid = item.cursor;
-        const priorExecution = await this.options.store.getExecution(item.executionId);
+        const priorExecution = await executionForResume(item.executionId);
         if (
           (priorExecution?.decisionSource as Record<string, Json> | null)?.compressionId ||
           (priorExecution?.status === 'failed' &&
@@ -3151,7 +3168,7 @@ export class AgentRuntime {
               afterRowid: cursor,
             });
             for (const tool of tools.items) {
-              const execution = await this.options.store.getExecution(tool.executionId);
+              const execution = await executionForResume(tool.executionId);
               if (execution?.kind !== 'tool' || execution.runId !== state.run.id)
                 throw new AgentError('resume_checkpoint_unavailable');
               priorTools.set(execution.callId, execution);
@@ -3254,7 +3271,7 @@ export class AgentRuntime {
         if (BigInt(item.cursor) <= BigInt(afterRowid))
           throw new AgentError('resume_checkpoint_unavailable');
         afterRowid = item.cursor;
-        const execution = await this.options.store.getExecution(item.executionId);
+        const execution = await executionForResume(item.executionId);
         if (
           !execution ||
           execution.originStoreId !== state.run.originStoreId ||
@@ -4734,6 +4751,9 @@ export class AgentRuntime {
     );
   }
   async submitCommand(input: AcceptCommandInput): Promise<CommandRecord> {
+    // Public callers cannot supply the private evidence used to retire old work.
+    const { reconciliationAdmission: _ignoredAdmission, ...ordinaryInput } = input;
+    input = ordinaryInput;
     if (
       ![
         'run.start',
@@ -4753,6 +4773,23 @@ export class AgentRuntime {
     if (input.request.kind === 'extension.invoke' && !existing)
       this.extensionHost.validateAction(input.request);
     if (this.closing) throw new AgentError('runtime_draining');
+    if (!existing && input.request.kind === 'run.start') {
+      const session = await this.options.store.getSession(input.sessionId);
+      if (!session) throw new AgentError('session_not_found');
+      input = {
+        ...input,
+        reconciliationAdmission: {
+          expectedOwnerGeneration: session.ownerGeneration,
+          toolHistoryProofs: await this.validatedRecoveryToolProofs({
+            expectedStoreId: input.expectedStoreId,
+            sessionId: input.sessionId,
+            subjectId: input.subjectId,
+            expectedOwnerGeneration: session.ownerGeneration,
+            reconciledOnly: true,
+          }),
+        },
+      };
+    }
     const human = ['run.start', 'input.steer', 'input.follow_up'].includes(input.request.kind);
     const state = human
       ? await this.options.store.readHumanWorkState({

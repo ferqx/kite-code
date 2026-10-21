@@ -63,6 +63,7 @@ export function sqliteStorageAssets() {
     migrations: Object.freeze([
       new URL('./storage/migrations/0001-baseline.sql', import.meta.url),
       new URL('./storage/migrations/0002-recovery-audit.sql', import.meta.url),
+      new URL('./storage/migrations/0003-session-reconciliation.sql', import.meta.url),
     ]),
     preload: observer.preload,
     observerModules: observer.modules,
@@ -256,6 +257,7 @@ export async function openSqliteStore(options: OpenSqliteStoreOptions): Promise<
     if (
       method !== 'open' &&
       method !== 'getRecoveryReceipt' &&
+      method !== 'inspectSessionReconciliation' &&
       !storeMethods.includes(method as keyof Store)
     )
       throw new AgentError('unsupported_store_operation');
@@ -499,6 +501,59 @@ export async function openSqliteStore(options: OpenSqliteStoreOptions): Promise<
       return releaseRecoveryLease(lease, 'releaseJobRecoveryLease');
     },
 
+    async reconcileSession(input: Parameters<Store['reconcileSession']>[0]) {
+      if (options.mode === 'readonly') throw new AgentError('read_only');
+      // Exact receipt lookup precedes ownership observation, so a lost response
+      // remains queryable even after this root has acquired another live owner.
+      const prior = await request('inspectSessionReconciliation', [input]);
+      // These handles only retain exact cleanup authority after a failed local
+      // release. They do not represent a live execution owner or recovery lease.
+      for (const [lock, sessionId] of retainedLocalLocks)
+        if (sessionId === input.sessionId) releaseLocalLock(lock, sessionId);
+      if (prior) return prior as import('./storage/types').SessionReconciliation;
+      const held = {
+        storeId: input.expectedStoreId,
+        sessionId: input.sessionId,
+        outcome: 'owner_held' as const,
+        commandId: null,
+        report: null,
+      };
+      if (localLockHeld(input.sessionId) || recoveryLeases.has(input.sessionId)) return held;
+      const selected = (await request('getSession', [input.sessionId])) as
+        | import('./storage/types').SessionRecord
+        | null;
+      if (selected?.parentSessionId) throw new AgentError('group_root_required');
+      // The observation cannot create a missing lock and thereby manufacture
+      // proof that the original execution owner has exited.
+      let probe: FileLock;
+      try {
+        probe = acquireExistingSharedFileLock(
+          join(access.coordinationPath, `session-${input.sessionId}.lock`),
+          options.windowsPathSecurity,
+        );
+      } catch (error) {
+        if (error instanceof LockBusyError) return held;
+        throw error;
+      }
+      releaseLocalLock(probe, input.sessionId);
+      let lock: FileLock;
+      try {
+        lock = acquireSessionLock(access, input.sessionId, options.windowsPathSecurity);
+      } catch (error) {
+        if (error instanceof LockBusyError) return held;
+        throw error;
+      }
+      let result: import('./storage/types').SessionReconciliation;
+      try {
+        result = (await request('reconcileSession', [
+          input,
+        ])) as import('./storage/types').SessionReconciliation;
+      } catch (error) {
+        return failedLocalCleanup(lock, input.sessionId, error);
+      }
+      releaseLocalLock(lock, input.sessionId);
+      return result;
+    },
     async recoverSession(input: Parameters<Store['recoverSession']>[0]) {
       if (options.mode === 'readonly') throw new AgentError('read_only');
       const prior = await request('getRecoveryReceipt', [input]);

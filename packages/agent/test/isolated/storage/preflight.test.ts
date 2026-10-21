@@ -234,6 +234,12 @@ test('public bundled sqlite leaf outside source tree reads its packaged migratio
     ),
     join(dirname(migration), '0002-recovery-audit.sql'),
   );
+  copyFileSync(
+    fileURLToPath(
+      new URL('../../../src/storage/migrations/0003-session-reconciliation.sql', import.meta.url),
+    ),
+    join(dirname(migration), '0003-session-reconciliation.sql'),
+  );
   writeFileSync(
     join(packageRoot, 'package.json'),
     JSON.stringify({

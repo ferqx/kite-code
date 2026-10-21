@@ -5,6 +5,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { semanticDigest } from '../../../src/json';
+import { selectProfile } from '../../../src/profile';
+import { createRuntime } from '../../../src/runtime';
 import { openSqliteStore } from '../../../src/sqlite';
 import type { OwnerRef } from '../../../src/storage/types';
 
@@ -24,6 +26,7 @@ async function fixture(
     | 'completion'
     | 'length'
     | 'follow_up' = 'planned',
+  keepOwner = false,
 ) {
   const directory = mkdtempSync(join(tmpdir(), 'kite-run-resume-store-')),
     dataRoot = join(directory, 'data'),
@@ -171,8 +174,10 @@ async function fixture(
         })
       : null;
   const original = await store.getExecution('model');
-  await store.close();
-  store = await openSqliteStore(profile);
+  if (!keepOwner) {
+    await store.close();
+    store = await openSqliteStore(profile);
+  }
   const input = {
     expectedStoreId,
     sessionId: 's',
@@ -711,3 +716,317 @@ for (const phase of ['preflight', 'lease'] as const)
       await f.close();
     }
   });
+
+for (const mode of ['planned', 'approval', 'tool', 'completion'] as const)
+  test(`owner-loss reconciliation durably interrupts and safely resumes original ${mode} boundary`, async () => {
+    const f = await fixture(mode);
+    try {
+      const reconciled = await f.store.reconcileSession({ ...f.input, commandId: 'reconcile' });
+      expect(reconciled.outcome).toBe('reconciled');
+      expect(await f.store.getRun(f.run.id)).toMatchObject({
+        status: 'interrupted',
+        isActive: false,
+        reason: 'owner_lost',
+      });
+      const observed = await f.store.getView('s');
+      const cursor = (await f.store.getMetadata()).lastChangeCursor;
+      expect(await f.store.reconcileSession({ ...f.input, commandId: 'reconcile' })).toEqual(
+        reconciled,
+      );
+      expect((await f.store.getMetadata()).lastChangeCursor).toBe(cursor);
+      const input = { ...f.input, expectedOwnerGeneration: reconciled.report!.generation };
+      const state = await f.store.verifyRunResume(input);
+      expect(state.run.id).toBe(f.run.id);
+      expect(await f.store.getView('s')).toEqual(observed);
+      if (f.interaction)
+        expect(
+          await f.store.getInteraction({
+            expectedStoreId: f.input.expectedStoreId,
+            sessionId: 's',
+            interactionId: f.interaction.id,
+          }),
+        ).toEqual({ ...f.interaction, state: 'cancelled' });
+      expect(
+        observed.executions.every(
+          (row) => !['planned', 'dispatching', 'running'].includes(row.status),
+        ),
+      ).toBe(true);
+      const begun = await f.store.beginRunResume({
+        ...input,
+        checkpoint: state.checkpoint!,
+        instanceId: 'resumed',
+      });
+      expect(await f.store.getRun(f.run.id)).toMatchObject({
+        status: 'interrupted',
+        isActive: false,
+      });
+      expect((await f.store.verifyRunResume(input)).command?.id).toBe(input.commandId);
+      if (mode === 'tool') {
+        const page = await f.store.readRunResumeExecutionPage({
+          expectedStoreId: input.expectedStoreId,
+          sessionId: 's',
+          subjectId: 'owner',
+          runId: f.run.id,
+          modelExecutionId: 'model',
+          kind: 'model_tools',
+        });
+        expect(page.items.map((row) => row.executionId)).toEqual(['tool']);
+      }
+      const committed = await f.store.commitRunResume({
+        expectedStoreId: input.expectedStoreId,
+        lease: begun.lease!,
+        checkpoint: state.checkpoint!,
+        expectedConfiguration: f.configuration,
+      });
+      expect(committed.run.id).toBe(f.run.id);
+      expect(committed.run.isActive).toBe(true);
+      if (f.interaction)
+        expect(
+          await f.store.getInteraction({
+            expectedStoreId: input.expectedStoreId,
+            sessionId: 's',
+            interactionId: f.interaction.id,
+          }),
+        ).toEqual(f.interaction);
+
+      expect(f.db.query('SELECT count(*) AS n FROM session_reconciliation').get()).toEqual({
+        n: 0,
+      });
+    } finally {
+      await f.close();
+    }
+  });
+
+test('observed interruption never makes generic unknown or explicit abandonment resumable', async () => {
+  const unknown = await fixture('tool');
+  try {
+    unknown.db.run("UPDATE execution SET state='outcome_unknown' WHERE id='tool'");
+    const reconciled = await unknown.store.reconcileSession({
+      ...unknown.input,
+      commandId: 'reconcile',
+    });
+    await denied(
+      unknown.store.verifyRunResume({
+        ...unknown.input,
+        expectedOwnerGeneration: reconciled.report!.generation,
+      }),
+      'run_resume_checkpoint_unavailable',
+    );
+  } finally {
+    await unknown.close();
+  }
+  const abandoned = await fixture('dispatching');
+  try {
+    const reconciled = await abandoned.store.reconcileSession({
+      ...abandoned.input,
+      commandId: 'reconcile',
+    });
+    const report = await abandoned.store.recoverSession({
+      ...abandoned.input,
+      commandId: 'abandon',
+      expectedOwnerGeneration: reconciled.report!.generation,
+      decision: 'interrupt',
+    });
+    await denied(
+      abandoned.store.verifyRunResume({
+        ...abandoned.input,
+        expectedOwnerGeneration: report.generation,
+      }),
+      'run_not_active',
+    );
+  } finally {
+    await abandoned.close();
+  }
+});
+
+for (const damage of [
+  'invalid_json',
+  'missing',
+  'future',
+  'duplicate',
+  'digest',
+  'frontier_drift',
+] as const)
+  test(`reconciliation checkpoint ${damage} is rejected without changing interrupted facts`, async () => {
+    const f = await fixture('tool');
+    try {
+      const result = await f.store.reconcileSession({ ...f.input, commandId: 'reconcile' });
+      const raw = f.db
+        .query<{ checkpoint_json: string }, []>(
+          'SELECT checkpoint_json FROM session_reconciliation',
+        )
+        .get()!;
+      const checkpoint = JSON.parse(raw.checkpoint_json);
+      if (damage === 'missing') delete checkpoint.sessions;
+      if (damage === 'future') checkpoint.version = 2;
+      if (damage === 'duplicate') checkpoint.runs.push(checkpoint.runs[0]);
+      if (damage === 'digest') checkpoint.digest = '0'.repeat(64);
+      if (damage === 'frontier_drift')
+        f.db.run("UPDATE run SET reason='changed' WHERE id=?", [f.run.id]);
+      else
+        f.db.run('UPDATE session_reconciliation SET checkpoint_json=?', [
+          damage === 'invalid_json' ? 'broken' : JSON.stringify(checkpoint),
+        ]);
+      const before = await f.store.getView('s');
+      const error = await f.store
+        .verifyRunResume({ ...f.input, expectedOwnerGeneration: result.report!.generation })
+        .catch((error) => error);
+      expect(error.code).toBe(
+        damage === 'frontier_drift'
+          ? 'run_resume_checkpoint_changed'
+          : 'run_resume_checkpoint_unavailable',
+      );
+      expect(await f.store.getView('s')).toEqual(before);
+    } finally {
+      await f.close();
+    }
+  });
+
+test('session reconciliation checks actual same-process and peer locks, stale generations, cold readers and missing lock', async () => {
+  const f = await fixture('planned', true);
+  const peer = await openSqliteStore(f.profile);
+  try {
+    const input = { ...f.input, commandId: 'reconcile-lock' };
+    const before = await peer.getView('s');
+    expect((await f.store.reconcileSession(input)).outcome).toBe('owner_held');
+    expect((await peer.reconcileSession(input)).outcome).toBe('owner_held');
+    await denied(
+      peer.reconcileSession({ ...input, expectedOwnerGeneration: '0' }),
+      'owner_changed',
+    );
+    expect(await peer.getView('s')).toEqual(before);
+    await f.store.close();
+    const first = await peer.reconcileSession(input);
+    const cold = await openSqliteStore({ ...f.profile, mode: 'readonly' });
+    try {
+      expect(await cold.getRun(f.run.id)).toMatchObject({ status: 'interrupted', isActive: false });
+      expect((await cold.getView('s')).messages).toEqual(before.messages);
+    } finally {
+      await cold.close();
+    }
+    expect(await peer.reconcileSession(input)).toEqual(first);
+    const after = await peer.getView('s');
+    await denied(peer.reconcileSession({ ...input, commandId: 'stale' }), 'owner_changed');
+    expect(await peer.getView('s')).toEqual(after);
+    rmSync(join(selectProfile(f.profile).coordinationPath, 'session-s.lock'));
+    const noWork = await peer
+      .reconcileSession({
+        ...input,
+        commandId: 'missing',
+        expectedOwnerGeneration: first.report!.generation,
+      })
+      .catch((error) => error);
+    expect(noWork.outcome).toBe('unchanged');
+    expect(await peer.getView('s')).toEqual(after);
+    expect(await peer.getCommand('missing')).toBeNull();
+  } finally {
+    await peer.close();
+    await f.close();
+  }
+});
+
+test('missing original owner lock never proves an active execution has stopped', async () => {
+  const f = await fixture('planned');
+  try {
+    const before = await f.store.getView('s');
+    rmSync(join(selectProfile(f.profile).coordinationPath, 'session-s.lock'));
+    const error = await f.store
+      .reconcileSession({ ...f.input, commandId: 'missing' })
+      .catch((error) => error);
+    expect(error).toBeInstanceOf(Error);
+    expect(await f.store.getView('s')).toEqual(before);
+    expect(await f.store.getCommand('missing')).toBeNull();
+  } finally {
+    await f.close();
+  }
+});
+
+test('owner-loss settles original unanswered presentation but retains accepted decisions and independent new work', async () => {
+  const f = await fixture('approval');
+  try {
+    await f.store.acceptCommand({
+      expectedStoreId: f.input.expectedStoreId,
+      sessionId: 's',
+      subjectId: 'owner',
+      commandId: 'new-independent',
+      request: { kind: 'run.start', content: 'A separately accepted new task' },
+    });
+    f.db.run("UPDATE interaction SET state='answered',answer_json=? WHERE id=?", [
+      '{"kind":"approval","decision":"approve"}',
+      f.interaction!.id,
+    ]);
+    const original = f.db
+      .query('SELECT * FROM interaction WHERE id=?')
+      .get(f.interaction!.id) as Record<string, unknown>;
+    const result = await f.store.reconcileSession({ ...f.input, commandId: 'reconcile' });
+    expect(result.report!.cancelledExecutionIds).toContain('model');
+    expect(await f.store.getCommand('new-independent')).toMatchObject({
+      status: 'accepted',
+      cancelRequestedAt: null,
+    });
+    const current = f.db.query('SELECT * FROM interaction WHERE id=?').get(f.interaction!.id);
+    expect(current).toEqual({ ...original, state: 'cancelled' });
+  } finally {
+    await f.close();
+  }
+  const accepted = await fixture('approval');
+  try {
+    accepted.db.run(
+      "UPDATE interaction SET state='answered',accepted_decision_revision=revision,answer_json=? WHERE id=?",
+      ['{"kind":"approval","decision":"approve"}', accepted.interaction!.id],
+    );
+    const original = accepted.db
+      .query('SELECT * FROM interaction WHERE id=?')
+      .get(accepted.interaction!.id);
+    await accepted.store.reconcileSession({ ...accepted.input, commandId: 'reconcile' });
+    expect(
+      accepted.db.query('SELECT * FROM interaction WHERE id=?').get(accepted.interaction!.id),
+    ).toEqual(original);
+  } finally {
+    await accepted.close();
+  }
+});
+
+test('new ordinary work refuses true unknown before accepting its command or calling a Model', async () => {
+  const f = await fixture('tool');
+  let calls = 0;
+  const runtime = createRuntime({
+    store: f.store,
+    modelId: 'new',
+    permissions: {
+      async authorize() {
+        return { allowed: true, revision: 'test' };
+      },
+    },
+    model: {
+      async *stream() {
+        calls++;
+        yield { type: 'text_delta', text: 'new' };
+        yield { type: 'finish', reason: 'stop', usage: { inputTokens: 1, outputTokens: 1 } };
+      },
+    },
+  });
+  try {
+    f.db.run("UPDATE execution SET state='outcome_unknown' WHERE id='tool'");
+    await f.store.reconcileSession({ ...f.input, commandId: 'reconcile' });
+    const before = await f.store.getView('s');
+    const checkpoint = f.db.query('SELECT * FROM session_reconciliation').get();
+    await denied(
+      runtime.submitCommand({
+        expectedStoreId: f.input.expectedStoreId,
+        sessionId: 's',
+        subjectId: 'owner',
+        commandId: 'new',
+        request: { kind: 'run.start', content: 'New independent task' },
+      }),
+      'session_recovery_required',
+    );
+    expect(await f.store.getCommand('new')).toBeNull();
+    expect(await f.store.getView('s')).toEqual(before);
+    expect(f.db.query('SELECT * FROM session_reconciliation').get()).toEqual(checkpoint);
+    expect(calls).toBe(0);
+  } finally {
+    await runtime.close();
+    await f.close();
+  }
+});

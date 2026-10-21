@@ -25,6 +25,9 @@ async function until(check: () => Promise<boolean>) {
   }
 }
 for (const mode of [
+  'group_reconciled',
+  'group_reconciled_queued',
+  'group_reconciled_approval',
   'group_required',
   'group_foreground',
   'group_queued',
@@ -46,19 +49,25 @@ for (const mode of [
   test(`SIGKILL ${mode} resumes original carriers and Runs once`, async () => {
     const directory = realpathSync(mkdtempSync(join(tmpdir(), 'kite-group-resume-')));
     const seedMode =
-      mode === 'group_cleanup'
-        ? 'group_new_descendant'
-        : mode === 'group_dynamic_drift'
-          ? 'group_dynamic'
-          : [
-                'group_expired',
-                'group_unknown',
-                'group_drift',
-                'group_binding',
-                'group_handoff_cancel',
-              ].includes(mode)
+      mode === 'group_reconciled_queued'
+        ? 'group_queued'
+        : mode === 'group_reconciled_approval'
+          ? 'group_approval'
+          : mode === 'group_reconciled'
             ? 'group_required'
-            : mode;
+            : mode === 'group_cleanup'
+              ? 'group_new_descendant'
+              : mode === 'group_dynamic_drift'
+                ? 'group_dynamic'
+                : [
+                      'group_expired',
+                      'group_unknown',
+                      'group_drift',
+                      'group_binding',
+                      'group_handoff_cancel',
+                    ].includes(mode)
+                  ? 'group_required'
+                  : mode;
     const child = Bun.spawn(
       [
         process.execPath,
@@ -94,7 +103,7 @@ for (const mode of [
       expect(carriers).toHaveLength(
         seedMode === 'group_new_descendant'
           ? 1
-          : mode === 'group_queued'
+          : seedMode === 'group_queued'
             ? 4
             : ['group_nested', 'group_terminal_descendant'].includes(mode)
               ? 2
@@ -105,7 +114,7 @@ for (const mode of [
           ? 0
           : mode === 'group_terminal_descendant'
             ? 1
-            : ['group_queued', 'group_terminal'].includes(mode)
+            : ['group_queued', 'group_terminal'].includes(seedMode)
               ? 2
               : carriers.length,
       );
@@ -214,9 +223,8 @@ for (const mode of [
           artifacts: createArtifactStore({ profile, store }),
           ...options,
         });
-        const input = { ...ready, commandId: 'resume-group', sessionId: 's', subjectId: 'owner' };
-        const cards =
-          mode === 'group_approval'
+        const originalCards =
+          seedMode === 'group_approval'
             ? (
                 await store.listInteractions({
                   expectedStoreId: ready.expectedStoreId,
@@ -225,6 +233,59 @@ for (const mode of [
                 })
               ).interactions
             : [];
+        if (mode.startsWith('group_reconciled')) {
+          const reconciled = await store.reconcileSession({
+            ...ready,
+            sessionId: 's',
+            subjectId: 'owner',
+            commandId: 'reconcile',
+          });
+          ready.expectedOwnerGeneration = reconciled.report!.generation;
+          for (const original of [rootBefore, ...children]) {
+            const observed = await store.getView(original.session.id);
+            for (const run of original.runs.filter((run) => run.isActive))
+              expect(observed.runs.find((row) => row.id === run.id)).toMatchObject({
+                status: 'interrupted',
+                isActive: false,
+                reason: 'owner_lost',
+              });
+            expect(
+              observed.executions.every(
+                (row) => !['planned', 'running', 'dispatching'].includes(row.status),
+              ),
+            ).toBe(true);
+          }
+          expect(
+            sql
+              .query(
+                "SELECT count(*) AS n FROM interaction WHERE state IN('pending','answered') AND accepted_decision_revision IS NULL",
+              )
+              .get(),
+          ).toEqual({ n: 0 });
+          expect(
+            sql
+              .query(
+                "SELECT count(*) AS n FROM command WHERE kind='child.start' AND status='accepted'",
+              )
+              .get(),
+          ).toEqual({ n: 0 });
+          if (seedMode === 'group_queued')
+            expect(reconciled.report!.cancelledExecutionIds.length).toBeGreaterThan(0);
+          expect(readFileSync(join(directory, 'ledger'), 'utf8')).toBe(beforeLedger);
+        }
+        const input = { ...ready, commandId: 'resume-group', sessionId: 's', subjectId: 'owner' };
+        const cards =
+          mode === 'group_reconciled_approval'
+            ? originalCards
+            : seedMode === 'group_approval'
+              ? (
+                  await store.listInteractions({
+                    expectedStoreId: ready.expectedStoreId,
+                    sessionId: 's',
+                    state: 'pending',
+                  })
+                ).interactions
+              : [];
         if (
           ['group_unknown', 'group_drift', 'group_binding', 'group_dynamic_drift'].includes(mode)
         ) {
@@ -251,7 +312,7 @@ for (const mode of [
         }
         const receipt = await runtime.resumeRun(input);
         expect(receipt.receipt).toMatchObject({ outcome: 'run_resumed', runId: ready.runId });
-        if (mode === 'group_approval') {
+        if (seedMode === 'group_approval') {
           expect(cards).toHaveLength(3);
           expect(readFileSync(join(directory, 'ledger'), 'utf8').includes('effect:')).toBe(false);
           for (const card of cards) {
@@ -599,7 +660,7 @@ for (const mode of [
         const ledger = readFileSync(join(directory, 'ledger'), 'utf8').trim().split('\n');
         if (mode === 'group_new_descendant')
           expect(ledger.filter((line) => line === 'dispose-config:one')).toHaveLength(1);
-        if (mode === 'group_approval')
+        if (seedMode === 'group_approval')
           expect(ledger.filter((line) => line.startsWith('effect:'))).toHaveLength(3);
         expect(ledger.filter((line) => line === 'parent-model')).toHaveLength(
           mode === 'group_new_descendant'
@@ -614,7 +675,7 @@ for (const mode of [
           'group_new_descendant',
         ].includes(mode)
           ? ['one', 'grand']
-          : mode === 'group_queued'
+          : seedMode === 'group_queued'
             ? ['one', 'two', 'three', 'four']
             : ['one', 'two', 'three'])
           expect(ledger.filter((line) => line === `child-model:${key}`)).toHaveLength(
@@ -625,7 +686,7 @@ for (const mode of [
               : mode === 'group_dynamic'
                 ? 3
                 : ['group_expired', 'group_activation', 'group_handoff_cancel'].includes(mode) ||
-                    (mode === 'group_queued' && ['three', 'four'].includes(key)) ||
+                    (seedMode === 'group_queued' && ['three', 'four'].includes(key)) ||
                     (mode === 'group_terminal' && key === 'one')
                   ? 1
                   : 2,

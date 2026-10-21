@@ -817,12 +817,27 @@ export class NativeCaller {
           await this.client.observe({
             signal: signal.signal,
             ...(startAfter ? { startAfter } : acknowledged ? { cursor: acknowledged } : {}),
-            onReady: (ready) => {
+            onReady: async (ready) => {
               this.environmentRevision++;
               this.selectedEnvironmentRevision++;
               this.observationUnavailable = false;
               this.permissionUnavailable = false;
               this.changed();
+              if (
+                this.selected &&
+                this.client.serverInfo?.capabilities.includes('session_reconciliation')
+              ) {
+                const sessionId = this.selected,
+                  selection = this.selection;
+                try {
+                  await this.controller.selectSession(sessionId);
+                } catch {
+                  if (this.selected === sessionId && this.selection === selection) {
+                    this.permissionUnavailable = true;
+                    this.changed();
+                  }
+                }
+              }
               // A ready-only stream at the reloaded baseline adds no new facts.
               if (!startAfter || ready.highWaterCursor !== startAfter.sequence)
                 this.scheduleRefresh(signal.signal);

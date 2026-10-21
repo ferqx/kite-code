@@ -5,6 +5,7 @@ import type { RecoveryToolHistory } from '../recovery-history';
 import { AgentError, type Json, type ToolCall } from '../types';
 import { verifyModelOutput } from './model-output';
 import type { SqliteOperations } from './operations';
+import { withReconciledFrontier } from './session-reconciliation';
 
 type Row = Record<string, string | number | bigint | null>;
 const parse = (value: Row[string] | undefined) => JSON.parse(String(value)) as Record<string, Json>;
@@ -143,6 +144,16 @@ export function readRecoveryToolHistory(
   db.db.run('BEGIN');
   try {
     db.identity(input.expectedStoreId);
+    if (
+      input.reconciledOnly &&
+      !db.row(
+        'SELECT root_session_id FROM session_reconciliation WHERE root_session_id=?',
+        input.sessionId,
+      )
+    ) {
+      db.db.run('COMMIT');
+      return [];
+    }
     const root = db.row('SELECT * FROM session WHERE id=?', input.sessionId);
     if (!root || root.delete_requested) throw new AgentError('session_not_found');
     if (root.parent_id !== null) throw new AgentError('group_root_required');
@@ -155,15 +166,17 @@ export function readRecoveryToolHistory(
       throw new AgentError('permission_denied');
     if (String(root.owner_generation) !== input.expectedOwnerGeneration)
       throw new AgentError('owner_changed');
-    const tools = db.rows(
-      "SELECT * FROM execution WHERE root_session_id=? AND kind='tool' AND run_id IS NOT NULL AND state='planned' AND dispatched=0 AND origin_store_id=? ORDER BY id LIMIT 4097",
-      input.sessionId,
-      input.expectedStoreId,
-    );
-    if (tools.length > 4096) throw new AgentError('recovery_too_large');
-    const result = tools
-      .map((tool) => recoveryToolHistory(db, tool))
-      .filter((value): value is RecoveryToolHistory => value !== null);
+    const result = withReconciledFrontier(db, input, () => {
+      const tools = db.rows(
+        "SELECT * FROM execution WHERE root_session_id=? AND kind='tool' AND run_id IS NOT NULL AND state='planned' AND dispatched=0 AND origin_store_id=? ORDER BY id LIMIT 4097",
+        input.sessionId,
+        input.expectedStoreId,
+      );
+      if (tools.length > 4096) throw new AgentError('recovery_too_large');
+      return tools
+        .map((tool) => recoveryToolHistory(db, tool))
+        .filter((value): value is RecoveryToolHistory => value !== null);
+    });
     db.db.run('COMMIT');
     return result;
   } catch (error) {

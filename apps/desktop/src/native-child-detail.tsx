@@ -18,6 +18,7 @@ export interface NativeChildDetailProps {
   storeId: string;
   sessionId: string;
   executionId?: string;
+  executionUnconfirmed?: boolean;
   readActive: boolean;
   onRefresh: () => void;
   writeClipboardText?: (text: string) => Promise<void>;
@@ -33,6 +34,7 @@ export function NativeChildDetail({
   storeId,
   sessionId,
   executionId,
+  executionUnconfirmed = false,
   readActive,
   onRefresh,
   writeClipboardText,
@@ -79,8 +81,9 @@ export function NativeChildDetail({
           ? { storeId, session: facts.session, ...facts.presentation }
           : undefined,
         messages,
+        executionUnconfirmed,
       ),
-    [facts, storeId, messages],
+    [facts, storeId, messages, executionUnconfirmed],
   );
   const transcript = useMemo(
     () =>
@@ -179,13 +182,14 @@ export function NativeChildDetail({
         )}
         {group.map((model) => {
           const live = liveTools.find((entry) => entry.message.id === model.id);
-          const notice = !live
-            ? undefined
-            : detail?.error
-              ? '上次确认状态'
-              : live.execution.cancelRequestedAt !== null
-                ? '已请求停止，等待执行结果。'
-                : undefined;
+          const notice =
+            !live || executionUnconfirmed
+              ? undefined
+              : detail?.error
+                ? '上次确认状态'
+                : live.execution.cancelRequestedAt !== null
+                  ? '已请求停止，等待执行结果。'
+                  : undefined;
           return notice ? (
             <p key={model.id} role="status">
               {notice}
@@ -215,7 +219,10 @@ export function NativeChildDetail({
         <p>
           已完整读取子日志至固定序号 {facts.upperSeq}，原子轮次{' '}
           {facts.item.childRun?.id ?? '尚未确认'}。
-          {!detail?.loading && !detail?.error && nativeChildActivity(facts)}
+          {!executionUnconfirmed &&
+            !detail?.loading &&
+            !detail?.error &&
+            nativeChildActivity(facts)}
         </p>
       )}
       <ConversationActivityContext value={activity}>
@@ -226,6 +233,7 @@ export function NativeChildDetail({
             transcript.turnActivity
               ? {
                   ...transcript.turnActivity,
+                  executionUnconfirmed,
                   unavailable: !!detail?.error || facts?.presentation?.unavailable,
                 }
               : undefined

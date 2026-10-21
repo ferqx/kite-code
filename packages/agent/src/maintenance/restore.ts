@@ -321,6 +321,13 @@ async function runProfileRestoreOwned(
     try {
       candidate.run('PRAGMA synchronous=FULL');
       candidate.run('BEGIN IMMEDIATE');
+      // A restored Store cannot inherit the original Store's private resume authority.
+      if (
+        candidate
+          .query("SELECT 1 FROM sqlite_schema WHERE type='table' AND name='session_reconciliation'")
+          .get()
+      )
+        candidate.run('DELETE FROM session_reconciliation');
       candidate
         .query(
           'UPDATE storage_meta SET store_id=?,replay_floor=last_change_cursor WHERE singleton=1',

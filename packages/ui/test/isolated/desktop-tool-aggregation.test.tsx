@@ -2,6 +2,7 @@ import { expect, test } from 'bun:test';
 import { JSDOM } from 'jsdom';
 import { act } from 'react';
 import { createRoot } from 'react-dom/client';
+import { renderToStaticMarkup } from 'react-dom/server';
 import { Conversation } from '../../src/desktop/Conversation';
 import { ToolActivity } from '../../src/desktop/ToolActivity';
 import type { Message } from '../../src/desktop/types';
@@ -230,5 +231,109 @@ test('Trace aggregation preserves Shell disclosure, output following and real st
     expect(host.querySelector('.shell-result')?.textContent).toContain('已停止');
     expect(host.querySelector('.shell-activity [data-status="error"]')).toBeNull();
     expect(host.querySelector('button button')).toBeNull();
+  });
+});
+
+test('unconfirmed unfinished tools preserve facts and stop queued, running and review activity until held', () => {
+  for (const toolName of ['read_file', 'write_file', 'shell_execute', 'task'])
+    for (const status of ['queued', 'running', 'auto_reviewing'] as const) {
+      const original: Message = {
+        ...tool('pending', status),
+        toolName,
+        ...(status === 'auto_reviewing'
+          ? { approval: { state: 'reviewing', source: 'auto' } as const }
+          : {}),
+      };
+      const render = (messages: Message[]) =>
+        new JSDOM(
+          renderToStaticMarkup(
+            <ToolActivity messages={messages} onToggle={() => {}} renderChildren={() => null} />,
+          ),
+        );
+      const unknown = render([{ ...original, executionUnconfirmed: true }]);
+      try {
+        expect(unknown.window.document.body.textContent).toContain('执行状态待核实');
+        expect(unknown.window.document.body.textContent).not.toMatch(/等待执行|正在自动审批/);
+        expect(
+          unknown.window.document.querySelectorAll(
+            '.is-running, [data-status="running"], [data-status="pending"]',
+          ),
+        ).toHaveLength(0);
+      } finally {
+        unknown.window.close();
+      }
+      const held = render([original]);
+      try {
+        expect(held.window.document.body.textContent).not.toContain('执行状态待核实');
+        if (status === 'queued')
+          expect(held.window.document.body.textContent).toContain('等待执行');
+        if (status === 'auto_reviewing')
+          expect(held.window.document.body.textContent).toContain('正在自动审批');
+      } finally {
+        held.window.close();
+      }
+      const completed = render([
+        {
+          ...original,
+          status: 'completed',
+          settled: true,
+          approval: undefined,
+          executionUnconfirmed: true,
+        },
+      ]);
+      try {
+        expect(completed.window.document.body.textContent).not.toContain('执行状态待核实');
+      } finally {
+        completed.window.close();
+      }
+      expect(original.status).toBe(status);
+      expect(original.settled).toBe(false);
+    }
+});
+
+test('an unconfirmed exploration group retains successful items without advertising pending work', () => {
+  const messages = [
+    { ...tool('done', 'completed'), executionUnconfirmed: true },
+    { ...tool('waiting', 'queued'), executionUnconfirmed: true },
+    { ...tool('active', 'running'), executionUnconfirmed: true },
+  ];
+  const dom = new JSDOM(
+    renderToStaticMarkup(
+      <ToolActivity messages={messages} onToggle={() => {}} renderChildren={() => null} />,
+    ),
+  );
+  try {
+    expect(dom.window.document.body.textContent).toContain('执行状态待核实');
+    expect(dom.window.document.body.textContent).not.toMatch(/等待执行|正在执行|正在读取/);
+    expect(dom.window.document.querySelectorAll('.is-running')).toHaveLength(0);
+    expect(messages.map((message) => [message.status, message.settled])).toEqual([
+      ['completed', true],
+      ['queued', false],
+      ['running', false],
+    ]);
+  } finally {
+    dom.window.close();
+  }
+});
+
+test('an expanded unconfirmed Shell retains output and only resumes waiting after ownership is confirmed', async () => {
+  await withConversation(async ({ host, render, click }) => {
+    const shell = (executionUnconfirmed: boolean, text = ''): Message => ({
+      ...tool('shell', 'running'),
+      toolName: 'shell_execute',
+      presentation: 'standalone',
+      text,
+      executionUnconfirmed,
+    });
+    await render([shell(true)]);
+    await click(summary(host));
+    const output = () => host.querySelector('[aria-label="Shell 执行输出"]');
+    expect(output()?.textContent).toBe('执行状态待核实');
+    expect(host.textContent).not.toContain('等待输出…');
+    await render([shell(true, 'original output')]);
+    expect(output()?.textContent).toBe('original output');
+    await render([shell(false)]);
+    expect(output()?.textContent).toBe('等待输出…');
+    expect(host.querySelectorAll('.shell-activity.is-running')).toHaveLength(1);
   });
 });

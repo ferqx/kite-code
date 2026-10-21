@@ -16,6 +16,7 @@ import { assertNoExecutionGroupFence } from './execution-group-safety';
 import { identity as modelIdentity, sessionScope } from './model-input-operations';
 import type { SqliteOperations } from './operations';
 import { assertEffectFreeModel, assertHistoricalExecution } from './recovery-audit-validation';
+import { withReconciledFrontier } from './session-reconciliation';
 
 type Row = Record<string, string | number | bigint | null>;
 const parse = (value: Row[string] | undefined): Json =>
@@ -72,6 +73,22 @@ function canContinueTool(execution: Row, run: Row): boolean {
   );
 }
 function scope(
+  db: SqliteOperations,
+  input: RunResumeInput,
+  generation?: string,
+  ignorePrior = false,
+  member = false,
+) {
+  const read = () => originalScope(db, input, generation, ignorePrior, member);
+  return member || (!ignorePrior && db.row('SELECT id FROM command WHERE id=?', input.commandId))
+    ? read()
+    : withReconciledFrontier(
+        db,
+        { ...input, expectedOwnerGeneration: generation ?? input.expectedOwnerGeneration },
+        read,
+      );
+}
+function originalScope(
   db: SqliteOperations,
   input: RunResumeInput,
   generation?: string,
@@ -551,43 +568,49 @@ function readExecutionPage(
     throw new AgentError('invalid_run_resume_cursor');
   db.db.run('BEGIN');
   try {
-    const session = sessionScope(db, input);
-    const anchor = db.row(
-      'SELECT rowid AS resume_rowid,* FROM execution WHERE id=?',
-      input.modelExecutionId,
+    const result = withReconciledFrontier(db, input, () =>
+      readExecutionPageInTransaction(db, input),
     );
-    if (
-      !anchor ||
-      anchor.origin_store_id !== input.expectedStoreId ||
-      anchor.run_id !== input.runId
-    )
-      throw new AgentError('operation_unverifiable');
-    modelIdentity(db, input, session, anchor);
-    const page =
-      input.kind === 'prior_models'
-        ? db.rows(
-            "SELECT id,rowid AS resume_rowid FROM execution WHERE run_id=? AND session_id=? AND kind='model' AND rowid>? AND rowid<? ORDER BY rowid LIMIT 201",
-            input.runId,
-            input.sessionId,
-            BigInt(cursor),
-            anchor.resume_rowid!,
-          )
-        : db.rows(
-            "SELECT id,rowid AS resume_rowid FROM execution WHERE run_id=? AND session_id=? AND kind='tool' AND step_id=? AND rowid>? ORDER BY rowid LIMIT 201",
-            input.runId,
-            input.sessionId,
-            anchor.step_id!,
-            BigInt(cursor),
-          );
-    const items = page
-      .slice(0, 200)
-      .map((row) => ({ executionId: String(row.id), cursor: String(row.resume_rowid) }));
-    const result = { items, nextCursor: page.length > 200 ? items.at(-1)!.cursor : null };
     db.db.run('COMMIT');
     return result;
   } catch (error) {
     return db.rollback(error);
   }
+}
+function readExecutionPageInTransaction(
+  db: SqliteOperations,
+  input: Parameters<Store['readRunResumeExecutionPage']>[0],
+) {
+  const cursor = input.afterRowid ?? '0';
+  const session = sessionScope(db, input);
+  const anchor = db.row(
+    'SELECT rowid AS resume_rowid,* FROM execution WHERE id=?',
+    input.modelExecutionId,
+  );
+  if (!anchor || anchor.origin_store_id !== input.expectedStoreId || anchor.run_id !== input.runId)
+    throw new AgentError('operation_unverifiable');
+  modelIdentity(db, input, session, anchor);
+  const page =
+    input.kind === 'prior_models'
+      ? db.rows(
+          "SELECT id,rowid AS resume_rowid FROM execution WHERE run_id=? AND session_id=? AND kind='model' AND rowid>? AND rowid<? ORDER BY rowid LIMIT 201",
+          input.runId,
+          input.sessionId,
+          BigInt(cursor),
+          anchor.resume_rowid!,
+        )
+      : db.rows(
+          "SELECT id,rowid AS resume_rowid FROM execution WHERE run_id=? AND session_id=? AND kind='tool' AND step_id=? AND rowid>? ORDER BY rowid LIMIT 201",
+          input.runId,
+          input.sessionId,
+          anchor.step_id!,
+          BigInt(cursor),
+        );
+  const items = page
+    .slice(0, 200)
+    .map((row) => ({ executionId: String(row.id), cursor: String(row.resume_rowid) }));
+  const result = { items, nextCursor: page.length > 200 ? items.at(-1)!.cursor : null };
+  return result;
 }
 export function callRunResume(db: SqliteOperations, method: string, value: unknown): unknown {
   if (method === 'readRunResumeExecutionPage')
@@ -653,6 +676,11 @@ export function callRunResume(db: SqliteOperations, method: string, value: unkno
         lease.instanceId,
         lease.sessionId,
       );
+      db.run(
+        'UPDATE session_reconciliation SET generation=? WHERE root_session_id=?',
+        BigInt(lease.generation),
+        lease.sessionId,
+      );
       db.insertCommand(input, s.request, hash(s.request), 'accepted', null);
       db.run(
         'UPDATE command SET run_resume_lease_json=? WHERE id=?',
@@ -706,6 +734,17 @@ export function callRunResume(db: SqliteOperations, method: string, value: unkno
       throw new AgentError('recovery_lease_changed');
     if (command.cancelled) throw new AgentError('run_resume_cancelled');
     assertNoExecutionGroupFence(db, lease.sessionId);
+    withReconciledFrontier(
+      db,
+      {
+        expectedStoreId: input.expectedStoreId,
+        sessionId: lease.sessionId,
+        subjectId: String(command.subject_id),
+        expectedOwnerGeneration: lease.generation,
+      },
+      () => undefined,
+      true,
+    );
     const s = scope(
       db,
       {

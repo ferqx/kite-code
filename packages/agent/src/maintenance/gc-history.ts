@@ -289,6 +289,15 @@ export function collectHistory(db: Database, plan: HistoryCollectionPlan, now: n
         const members = `SELECT id FROM session WHERE ${group ? 'root_id' : 'workspace_id'}=?`;
         const executions = `SELECT id FROM execution WHERE session_id IN (${members})`;
         const messages = `SELECT id FROM message WHERE session_id IN (${members})`;
+        // Session tombstones survive collection, so their private frontier needs explicit erasure.
+        if (
+          db
+            .query(
+              "SELECT 1 FROM sqlite_schema WHERE type='table' AND name='session_reconciliation'",
+            )
+            .get()
+        )
+          db.run(`DELETE FROM session_reconciliation WHERE root_session_id IN (${members})`, [id]);
         for (const table of [
           'permission_grant',
           'permission_grant_change',

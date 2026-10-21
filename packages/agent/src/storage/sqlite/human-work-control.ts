@@ -17,6 +17,7 @@ import { cancelWorkBody } from './cancel-operations';
 import { validateInputAdmission } from './input-operations';
 import { assertHumanWorkContinuable, continueHumanWork } from './job-report-continuation';
 import type { SqliteOperations } from './operations';
+import { closeReconciledHistory } from './reconciliation-admission';
 
 type Row = Record<string, string | number | bigint | null>;
 
@@ -180,6 +181,7 @@ export function registerHumanCommand(
       return db.command(previous);
     }
     validateInputAdmission(db, input);
+    closeReconciledHistory(db, input);
     const inputId = `human-input-${hash([input.expectedStoreId, input.commandId])}`;
     const active = db.row('SELECT id FROM run WHERE session_id=? AND is_active=1', input.sessionId);
     const observedRunId =

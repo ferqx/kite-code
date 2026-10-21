@@ -853,10 +853,16 @@ function NativeDesktopContent({
     selection?.viewSelection,
   ]);
   const activeInputRun = selection?.runs.find((run) => run.isActive);
-  const executionOwner =
+  const directoryActivity =
     !directory?.unavailable && directory?.storeId === selection?.storeId
       ? directory?.sessions.find((session) => session.id === selection?.session.id)?.activity
-          ?.executionOwner
+      : undefined;
+  // 目录观察只属于其原活动 Run；已协调终态或后来的新轮次不继承旧 owner 提示。
+  const executionOwner =
+    activeInputRun &&
+    directoryActivity?.run?.isActive &&
+    directoryActivity.run.id === activeInputRun.id
+      ? directoryActivity.executionOwner
       : undefined;
   const executionUnconfirmed = executionOwner === 'unheld' || executionOwner === 'unknown';
   const jobs =
@@ -948,7 +954,9 @@ function NativeDesktopContent({
         state?.backgroundUnavailable
       ),
     paused: selectionHandoff,
+    executionUnconfirmed,
     controlUnavailable: !!(
+      executionUnconfirmed ||
       state?.callerUnavailable ||
       state?.selection?.viewLoading ||
       state?.selection?.permissionUnavailable
@@ -1016,8 +1024,13 @@ function NativeDesktopContent({
     observationRevision: selection?.viewGeneration ?? 0,
   });
   const liveTools = useMemo(
-    () => liveToolMessages(readingParent ? state?.selection : undefined, displayMessages),
-    [readingParent, state?.selection, displayMessages],
+    () =>
+      liveToolMessages(
+        readingParent ? state?.selection : undefined,
+        displayMessages,
+        executionUnconfirmed,
+      ),
+    [readingParent, state?.selection, displayMessages, executionUnconfirmed],
   );
   const runMessages = useNativeRuns({
     bridge,
@@ -2639,13 +2652,14 @@ function NativeDesktopContent({
     );
     const liveNotices = group.map((model) => {
       const live = liveTools.find((entry) => entry.message.id === model.id);
-      const status = !live
-        ? undefined
-        : selection?.viewLoading || selection?.permissionUnavailable
-          ? '上次确认状态'
-          : live.execution.cancelRequestedAt !== null
-            ? '已请求停止，等待执行结果。'
-            : undefined;
+      const status =
+        !live || executionUnconfirmed
+          ? undefined
+          : selection?.viewLoading || selection?.permissionUnavailable
+            ? '上次确认状态'
+            : live.execution.cancelRequestedAt !== null
+              ? '已请求停止，等待执行结果。'
+              : undefined;
       return status ? (
         <p key={model.id} role="status">
           {status}
@@ -2869,9 +2883,9 @@ function NativeDesktopContent({
           ? undefined
           : {
               ...transcript.turnActivity,
+              executionUnconfirmed,
               // Read admission is revoked during scans; the last observed Run still owns its label.
               unavailable:
-                executionUnconfirmed ||
                 historyState.phase === 'unavailable' ||
                 !!(state?.selection?.permissionUnavailable && !state.selection.viewLoading),
             }
@@ -2961,6 +2975,7 @@ function NativeDesktopContent({
           storeId={selection?.storeId ?? ''}
           sessionId={sessionId}
           executionId={executionId}
+          executionUnconfirmed={executionUnconfirmed}
           readActive={
             childReadAvailable &&
             !!selection &&
@@ -3351,7 +3366,7 @@ function NativeDesktopContent({
                 onChange: changeDraft,
                 onSend: sendInput,
                 onCancel: () => void write(stopCurrentRun),
-                active: !!activeInputRun,
+                active: !!activeInputRun && !executionUnconfirmed,
                 cacheMetrics: cacheMetrics.metrics,
                 contextUsage: contextUsage.metrics,
                 stopping: activeInputRun?.status === 'cancelling',

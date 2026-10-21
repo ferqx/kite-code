@@ -68,6 +68,11 @@ export interface AcceptCommandInput extends WriteContext {
   sessionId: string;
   subjectId: string;
   request: CommandRequest;
+  /** Private full-output observations; excluded from the public request digest. */
+  reconciliationAdmission?: {
+    expectedOwnerGeneration: string;
+    toolHistoryProofs: import('./recovery-history').RecoveryToolHistoryProof[];
+  };
 }
 export type ApplyInputInput = OwnedWrite & { commandId: string } & (
     | { kind: 'steer' | 'result_include'; runId: string }
@@ -720,8 +725,17 @@ export interface Store {
       sessionId: string;
       subjectId: string;
       expectedOwnerGeneration: string;
+      reconciledOnly?: boolean;
     },
   ): Promise<import('./recovery-history').RecoveryToolHistory[]>;
+  reconcileSession(
+    input: WriteContext & {
+      commandId: string;
+      sessionId: string;
+      subjectId: string;
+      expectedOwnerGeneration: string;
+    },
+  ): Promise<import('./types').SessionReconciliation>;
   recoverSession(
     input: WriteContext & {
       commandId: string;

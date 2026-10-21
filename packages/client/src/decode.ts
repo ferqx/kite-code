@@ -57,6 +57,7 @@ export interface Responses {
   JobReconcileCommand: API.JobReconcileCommand;
   ResumeRunResponse: API.ResumeRunResponse;
   RecoverSessionResponse: API.RecoverSessionResponse;
+  SessionReconciliation: API.SessionReconciliation;
   Run: API.Run;
   Execution: API.Execution;
   ExecutionOutputPage: API.ExecutionOutputPage;
@@ -150,6 +151,8 @@ export function validateRequest(
     | 'ResumeRunTarget'
     | 'RecoverSessionRequest'
     | 'RecoverSessionTarget'
+    | 'ReconcileSessionRequest'
+    | 'ReconcileSessionTarget'
     | 'ReconcileJobRequest'
     | 'ReconcileJobTarget'
     | 'ResumeJobReportRequest'

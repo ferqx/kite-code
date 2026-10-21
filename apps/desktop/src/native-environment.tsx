@@ -150,6 +150,7 @@ export function useNativeEnvironment({
   historyEpoch = 0,
   unavailable,
   controlUnavailable = false,
+  executionUnconfirmed = false,
   paused = false,
   submissions,
   onChanged,
@@ -162,6 +163,8 @@ export function useNativeEnvironment({
   historyEpoch?: number;
   unavailable: boolean;
   controlUnavailable?: boolean;
+  /** The root execution lock was observed released or could not be verified. Reads stay available. */
+  executionUnconfirmed?: boolean;
   /** A known selection handoff pauses IO while retaining the displayed card. */
   paused?: boolean;
   submissions?: readonly NativeCallerMetadata[];
@@ -709,12 +712,15 @@ export function useNativeEnvironment({
           executions={
             display?.rows.map((row) => ({
               ...row,
-              ...(visibleChild?.facts?.item.execution.id === row.executionId &&
-              !visibleChild.loading &&
-              !visibleChild.error
-                ? { activity: nativeChildActivity(visibleChild.facts) }
-                : {}),
-              canStop: row.canStop && !blocked.has(row.executionId),
+              ...(executionUnconfirmed &&
+              ['queued', 'starting', 'running', 'stopping'].includes(row.status)
+                ? { activity: '执行状态待核实' }
+                : visibleChild?.facts?.item.execution.id === row.executionId &&
+                    !visibleChild.loading &&
+                    !visibleChild.error
+                  ? { activity: nativeChildActivity(visibleChild.facts) }
+                  : {}),
+              canStop: row.canStop && !executionUnconfirmed && !blocked.has(row.executionId),
             })) ?? []
           }
           currentOnly

@@ -39,7 +39,7 @@ async function fails(work: Promise<unknown>, code: string) {
   }
   expect((error as { code?: string })?.code ?? (error as Error)?.message).toBe(code);
 }
-async function fixture(seed = false) {
+async function fixture(seed = false, legacy = false) {
   const directory = temporaryDirectory('kite-restore-'),
     profile = { dataRoot: join(directory, 'data'), profile: 'test' },
     store = await openSqliteStore(profile),
@@ -101,6 +101,24 @@ async function fixture(seed = false) {
   }
   await store.close();
   const selected = selectProfile(profile);
+  if (seed) {
+    const checkpoint = new Database(selected.databasePath);
+    checkpoint.run('INSERT INTO session_reconciliation VALUES(?,?,?,?,?)', [
+      's',
+      'old-work',
+      storeId,
+      1,
+      '{"privateFrontier":"original resume evidence"}',
+    ]);
+    checkpoint.close(true);
+  }
+  if (legacy) {
+    const previousSchema = new Database(selected.databasePath);
+    previousSchema.exec(
+      "DROP TABLE session_reconciliation; DELETE FROM schema_migration WHERE id='0003-session-reconciliation'",
+    );
+    previousSchema.close(true);
+  }
   await seedAssets(directory, profile, storeId);
   const backup = await createProfileBackup({
     profile,
@@ -138,6 +156,28 @@ async function fixture(seed = false) {
     },
   };
 }
+test('an original 0002 backup restores without adding or requiring a reconciliation checkpoint table', async () => {
+  const f = await fixture(false, true);
+  try {
+    const restored = await restoreProfileBackup(f.input);
+    expect(restored.storeId).not.toBe(f.storeId);
+    const database = new Database(f.selected.databasePath, { readonly: true });
+    try {
+      expect(
+        database.query("SELECT 1 FROM sqlite_schema WHERE name='session_reconciliation'").get(),
+      ).toBeNull();
+      expect(database.query('SELECT id FROM schema_migration ORDER BY id').all()).toEqual([
+        { id: '0001-baseline' },
+        { id: '0002-recovery-audit' },
+      ]);
+    } finally {
+      database.close(true);
+    }
+  } finally {
+    f.close();
+  }
+});
+
 test('restore publishes a new Store, preserves origins and fences pending facts without cold model work', async () => {
   const f = await fixture(true);
   try {
@@ -150,9 +190,17 @@ test('restore publishes a new Store, preserves origins and fences pending facts 
     } finally {
       await originalStore.close();
     }
+    const backedUp = new Database(join(f.backup.directory, 'core.db'), { readonly: true });
+    expect(backedUp.query('SELECT checkpoint_json FROM session_reconciliation').get()).toEqual({
+      checkpoint_json: '{"privateFrontier":"original resume evidence"}',
+    });
+    backedUp.close(true);
     const result = await restoreProfileBackup(f.input);
     expect(result.outcome).toBe('restored');
     expect(result.storeId).not.toBe(f.storeId);
+    const restored = new Database(f.selected.databasePath, { readonly: true });
+    expect(restored.query('SELECT * FROM session_reconciliation').all()).toEqual([]);
+    restored.close(true);
     expect(inspectProfileRestore({ profile: f.profile })).toBeNull();
     const old = new Database(join(result.preservedDirectory, 'core.db'), { readonly: true });
     try {

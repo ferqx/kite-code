@@ -260,6 +260,8 @@ export interface TuiPort {
   readonly storeId: string;
   nextCommandId(): string;
   listSessions(signal: AbortSignal): Promise<readonly TuiSessionEntry[]>;
+  /** Explicit activation only; ordinary snapshot reads and observers remain read-only. */
+  reconcileSession?(sessionId: string, signal: AbortSignal): Promise<void>;
   readSession(sessionId: string, signal: AbortSignal): Promise<TuiSnapshot>;
   /** Public EOF/hash reader must prove the saved Model scope under the current admitted Store. */
   readModelOutput?(
@@ -1073,7 +1075,10 @@ export class TuiController {
         this.draftUnavailable('tui_draft_storage_unavailable');
       }
   }
-  async select(sessionId: string, options: { preserveReconnectionReview?: boolean } = {}) {
+  async select(
+    sessionId: string,
+    options: { preserveReconnectionReview?: boolean; reconcile?: boolean } = {},
+  ) {
     if (this.disposed) return;
     this.fileRead?.abort();
     this.publish({ fileCandidates: undefined });
@@ -1158,6 +1163,21 @@ export class TuiController {
     const read = this.reading();
     this.historyRead = read;
     try {
+      let reconciliationError: string | undefined;
+      if (options.reconcile !== false && this.port.reconcileSession) {
+        try {
+          await this.port.reconcileSession(sessionId, read.signal);
+        } catch (error) {
+          reconciliationError =
+            error instanceof Error ? error.message : 'session_reconciliation_failed';
+        }
+        if (
+          read.signal.aborted ||
+          generation !== this.generation ||
+          historyGeneration !== this.historyGeneration
+        )
+          return;
+      }
       const snapshot = await this.port.readSession(sessionId, read.signal);
       if (
         read.signal.aborted ||
@@ -1246,6 +1266,9 @@ export class TuiController {
       );
       this.publish({
         snapshot,
+        ...(reconciliationError
+          ? { error: `会话执行状态核对失败：${reconciliationError}；已保留可读历史。` }
+          : {}),
         planning:
           this.planningDrafts.get(
             this.planningKey({

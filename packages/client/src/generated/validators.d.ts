@@ -53,6 +53,7 @@ export declare function response_ResumeJobReportResponse(value: unknown): boolea
 export declare function response_JobReconcileCommand(value: unknown): boolean;
 export declare function response_ResumeRunResponse(value: unknown): boolean;
 export declare function response_RecoverSessionResponse(value: unknown): boolean;
+export declare function response_SessionReconciliation(value: unknown): boolean;
 export declare function response_Run(value: unknown): boolean;
 export declare function response_Execution(value: unknown): boolean;
 export declare function response_ExecutionOutputPage(value: unknown): boolean;
@@ -77,6 +78,8 @@ export declare function request_ResumeRunRequest(value: unknown): boolean;
 export declare function request_ResumeRunTarget(value: unknown): boolean;
 export declare function request_RecoverSessionRequest(value: unknown): boolean;
 export declare function request_RecoverSessionTarget(value: unknown): boolean;
+export declare function request_ReconcileSessionRequest(value: unknown): boolean;
+export declare function request_ReconcileSessionTarget(value: unknown): boolean;
 export declare function request_ReconcileJobRequest(value: unknown): boolean;
 export declare function request_ReconcileJobTarget(value: unknown): boolean;
 export declare function request_ResumeJobReportRequest(value: unknown): boolean;
@@ -192,6 +195,7 @@ export declare const responseValidators: {
   JobReconcileCommand: (value: unknown) => boolean;
   ResumeRunResponse: (value: unknown) => boolean;
   RecoverSessionResponse: (value: unknown) => boolean;
+  SessionReconciliation: (value: unknown) => boolean;
   Run: (value: unknown) => boolean;
   Execution: (value: unknown) => boolean;
   ExecutionOutputPage: (value: unknown) => boolean;
@@ -218,6 +222,8 @@ export declare const requestValidators: {
   ResumeRunTarget: (value: unknown) => boolean;
   RecoverSessionRequest: (value: unknown) => boolean;
   RecoverSessionTarget: (value: unknown) => boolean;
+  ReconcileSessionRequest: (value: unknown) => boolean;
+  ReconcileSessionTarget: (value: unknown) => boolean;
   ReconcileJobRequest: (value: unknown) => boolean;
   ReconcileJobTarget: (value: unknown) => boolean;
   ResumeJobReportRequest: (value: unknown) => boolean;

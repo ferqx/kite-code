@@ -18,6 +18,11 @@ export type WorkerRequest =
       ];
     }
   | { id: number; method: 'getRecoveryReceipt'; args: Parameters<Store['recoverSession']> }
+  | {
+      id: number;
+      method: 'inspectSessionReconciliation';
+      args: Parameters<Store['reconcileSession']>;
+    }
   | { id: number; method: 'close'; args: [] };
 export const storeMethods: readonly (keyof Store)[] = [
   'getMetadata',
@@ -116,6 +121,7 @@ export const storeMethods: readonly (keyof Store)[] = [
   'applyExtensionAction',
   'stopActionPreparation',
   'recoverSession',
+  'reconcileSession',
   'readRecoveryToolHistory',
   'finishRun',
   'setRunResultWait',

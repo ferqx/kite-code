@@ -10,6 +10,7 @@ import { SqliteOperations } from '../sqlite/operations';
 import { hasUnsettledOwnerGroup } from '../sqlite/owner-dispatch';
 import { readRecoveryToolHistory } from '../sqlite/recovery-history';
 import { getRecoveryReceipt } from '../sqlite/recovery-operations';
+import { inspectSessionReconciliation } from '../sqlite/session-reconciliation';
 import { UnstartedSqliteWrite } from '../sqlite/write-lock';
 import { AgentError, type OwnerRef } from '../types';
 import { deserializeStorageError, type StorageWorkerError, serializeStorageError } from './error';
@@ -153,6 +154,8 @@ function execute(request: WorkerRequest): void {
       operations = undefined;
       result = null;
     } else if (method === 'getRecoveryReceipt') result = getRecoveryReceipt(operations, args[0]);
+    else if (method === 'inspectSessionReconciliation')
+      result = inspectSessionReconciliation(operations, args[0]);
     else if (method === 'readRecoveryToolHistory')
       result = readRecoveryToolHistory(operations, args[0]);
     else if (method === 'acquireSessionOwner')

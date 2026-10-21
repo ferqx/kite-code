@@ -68,7 +68,8 @@ class HttpFailure extends Error {
 
 /** Public history and POST receipts use the same projection; internal recovery fences stay private. */
 function publicCommand(command: NonNullable<Awaited<ReturnType<AgentRuntime['getCommand']>>>) {
-  if (command.kind !== 'session.recover') return schemas.Command.parse(command);
+  if (command.kind !== 'session.recover' && command.kind !== 'session.reconcile')
+    return schemas.Command.parse(command);
   const report = command.receipt;
   if (
     !report ||
@@ -78,6 +79,11 @@ function publicCommand(command: NonNullable<Awaited<ReturnType<AgentRuntime['get
     report.storeId !== command.originStoreId
   )
     throw new HttpFailure('recovery_receipt_invalid', 503);
+  if (command.kind === 'session.reconcile')
+    return schemas.Command.parse({
+      ...command,
+      receipt: { kind: 'session_reconciled', ...publicRecoveryReport(report) },
+    });
   return RecoverSessionResponseSchema.parse({
     ...command,
     receipt: {
@@ -91,6 +97,28 @@ function publicCommand(command: NonNullable<Awaited<ReturnType<AgentRuntime['get
       partialMessageIds: report.partialMessageIds,
       snapshotCursor: report.snapshotCursor,
     },
+  });
+}
+
+function publicRecoveryReport(report: {
+  sessionId?: unknown;
+  storeId?: unknown;
+  interruptedRunIds?: unknown;
+  settledExecutionIds?: unknown;
+  unknownExecutionIds?: unknown;
+  cancelledExecutionIds?: unknown;
+  partialMessageIds?: unknown;
+  snapshotCursor?: unknown;
+}) {
+  return RecoverSessionResponseSchema.shape.receipt.omit({ kind: true }).parse({
+    sessionId: report.sessionId,
+    storeId: report.storeId,
+    interruptedRunIds: report.interruptedRunIds,
+    settledExecutionIds: report.settledExecutionIds,
+    unknownExecutionIds: report.unknownExecutionIds,
+    cancelledExecutionIds: report.cancelledExecutionIds,
+    partialMessageIds: report.partialMessageIds,
+    snapshotCursor: report.snapshotCursor,
   });
 }
 
@@ -254,6 +282,7 @@ export async function startService(options: ServiceOptions) {
         'job_reconcile',
         'run_resume',
         'session_recovery',
+        'session_reconciliation',
         'session_logs',
         'file_recovery',
       ].includes(capability),
@@ -266,6 +295,8 @@ export async function startService(options: ServiceOptions) {
     capabilities.push('run_resume');
   if (options.runtime && typeof options.runtime.recoverSession === 'function')
     capabilities.push('session_recovery');
+  if (options.runtime && typeof options.runtime.reconcileSession === 'function')
+    capabilities.push('session_reconciliation');
   if (options.runtime?.supportsSelectedSkills) capabilities.push('run_skill_selection');
   if (options.runtime?.supportsInputImages) capabilities.push('input_images');
   if (options.runtime?.supportsExtensionInputs) capabilities.push('run_extension_inputs');
@@ -1624,6 +1655,25 @@ export async function startService(options: ServiceOptions) {
     if (closing) throw new HttpFailure('service_draining', 503);
     const command = await runtime.resumeJobReport({ ...request, ...target.data, subjectId });
     return context.json(ResumeJobReportResponseSchema.parse(command), 202);
+  });
+  app.post('/v1/sessions/:id/reconcile', async (context) => {
+    context.header('cache-control', 'no-store');
+    context.header('x-content-type-options', 'nosniff');
+    if (closing) throw new HttpFailure('service_draining', 503);
+    const target = schemas.ReconcileSessionTarget.safeParse({ sessionId: context.req.param('id') });
+    if (!target.success) throw new HttpFailure('invalid_request', 400);
+    const request = await readBusinessBody(context.req.raw, schemas.ReconcileSessionRequest, 4096);
+    const result = await runtime.reconcileSession({
+      ...request,
+      sessionId: target.data.sessionId,
+      subjectId,
+    });
+    return context.json(
+      apiSchemas.SessionReconciliation.parse({
+        ...result,
+        report: result.report ? publicRecoveryReport(result.report) : null,
+      }),
+    );
   });
   app.post('/v1/sessions/:id/commands', async (context): Promise<Response> => {
     const request = await readBusinessBody(

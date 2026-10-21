@@ -57,6 +57,10 @@ function isOngoingTurn(activity?: TurnActivity): boolean {
   );
 }
 
+function isLiveTurn(activity?: TurnActivity): boolean {
+  return isOngoingTurn(activity) && !activity?.executionUnconfirmed;
+}
+
 function isVisibleTool(message: Message): boolean {
   if (message.role !== 'tool') return false;
   if (message.presentationOwner) return false;
@@ -851,7 +855,7 @@ export function Conversation({
     const active =
       !terminalStatus &&
       (activity && !activity.unavailable
-        ? isOngoingTurn(activity)
+        ? isLiveTurn(activity)
         : !turnActivity && entry.groups.some((group) => group.some((message) => !message.settled)));
     const failed =
       activity?.status === 'failed' || terminalStatus === 'failed' || failureGroups.length > 0;
@@ -875,9 +879,7 @@ export function Conversation({
     const responding =
       entry === lastEntryByTurn.get(entry.turnId) &&
       !terminalStatus &&
-      (activity
-        ? isOngoingTurn(activity)
-        : active && !completed && !failed && !cancelled && !aborted);
+      (activity ? isLiveTurn(activity) : active && !completed && !failed && !cancelled && !aborted);
     const finishedDuration = completed
       ? turnElapsedMilliseconds(timing?.turnStartedAtMs, timing?.turnFinishedAtMs)
       : undefined;
@@ -885,27 +887,30 @@ export function Conversation({
       active && thinking && !runningTool && (!activity || activity.status === 'running')
         ? '正在思考…'
         : '正在回复…';
-    const label = activity?.unavailable
-      ? '上次确认状态'
-      : failed
-        ? '本轮失败'
-        : cancelled
-          ? '已停止'
-          : aborted
-            ? '已中断'
-            : completed
-              ? finishedDuration === undefined
-                ? '已完成'
-                : '用时'
-              : activity?.status === 'recovery_required'
-                ? '需要恢复'
-                : activity?.status === 'cancelling'
-                  ? '正在停止'
-                  : activity?.status === 'waiting'
-                    ? '正在等待'
-                    : activity?.status === 'queued'
-                      ? '等待处理'
-                      : '处理过程';
+    const label =
+      !terminalStatus && activity?.executionUnconfirmed && isOngoingTurn(activity)
+        ? '执行状态待核实'
+        : activity?.unavailable
+          ? '上次确认状态'
+          : failed
+            ? '本轮失败'
+            : cancelled
+              ? '已停止'
+              : aborted
+                ? '已中断'
+                : completed
+                  ? finishedDuration === undefined
+                    ? '已完成'
+                    : '用时'
+                  : activity?.status === 'recovery_required'
+                    ? '需要恢复'
+                    : activity?.status === 'cancelling'
+                      ? '正在停止'
+                      : activity?.status === 'waiting'
+                        ? '正在等待'
+                        : activity?.status === 'queued'
+                          ? '等待处理'
+                          : '处理过程';
     const showProcess = processGroups.length > 0;
     // A settled Turn starts a new reading state even when no final reply was
     // confirmed. Its process closes once, then the reader's choice persists.
@@ -1020,9 +1025,13 @@ export function Conversation({
               'aria-label': '会话消息',
               'aria-busy':
                 loading ||
-                isOngoingTurn(turnActivity) ||
+                isLiveTurn(turnActivity) ||
                 messages.some(
                   (message) =>
+                    !message.executionUnconfirmed &&
+                    !(
+                      message.turnId === turnActivity?.turnId && turnActivity?.executionUnconfirmed
+                    ) &&
                     message.systemKind !== 'turn_timing' &&
                     (!message.turnId || !terminalByTurn.get(message.turnId)) &&
                     (message.delivery === 'sending' ||

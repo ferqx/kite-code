@@ -21,6 +21,82 @@ function view(id: string): SessionView {
     executions: [],
   };
 }
+
+test('session activation reconciles before publishing history while ordinary refresh remains read-only', async () => {
+  const calls: string[] = [];
+  const client = {
+    serverInfo: { storeId: 'store', capabilities: ['session_reconciliation'] },
+    async reconcileSessionState(id: string) {
+      calls.push(`reconcile:${id}`);
+      return view(id);
+    },
+    async getView(id: string) {
+      calls.push(`read:${id}`);
+      return view(id);
+    },
+  } as unknown as AgentClient;
+  const controller = createDesktopController({
+    admittedClient: client,
+    onSnapshot(snapshot) {
+      calls.push(`publish:${snapshot.sessionId}`);
+    },
+  });
+  await controller.selectSession('root');
+  expect(calls).toEqual(['reconcile:root', 'read:root', 'publish:root']);
+  calls.length = 0;
+  await controller.refreshSession('root');
+  expect(calls).toEqual(['read:root', 'publish:root']);
+});
+
+test('failed reconciliation retains readable history and reports the failure', async () => {
+  const errors: unknown[] = [];
+  const failure = Error('session_reconciliation_unavailable');
+  const client = {
+    serverInfo: { storeId: 'store', capabilities: ['session_reconciliation'] },
+    async reconcileSessionState() {
+      throw failure;
+    },
+    async getView(id: string) {
+      return view(id);
+    },
+  } as unknown as AgentClient;
+  const controller = createDesktopController({
+    admittedClient: client,
+    onSnapshot() {},
+    onError(error) {
+      errors.push(error);
+    },
+  });
+  await expect(controller.selectSession('root')).rejects.toThrow(failure.message);
+  expect(controller.snapshot?.sessionId).toBe('root');
+  expect(errors).toEqual([failure]);
+});
+
+test('a retired activation cannot publish old history after its reconciliation returns late', async () => {
+  let release!: () => void;
+  const reads: string[] = [];
+  const client = {
+    serverInfo: { storeId: 'store', capabilities: ['session_reconciliation'] },
+    reconcileSessionState(id: string) {
+      return id === 'old'
+        ? new Promise<void>((resolve) => {
+            release = resolve;
+          })
+        : Promise.resolve();
+    },
+    async getView(id: string) {
+      reads.push(id);
+      return view(id);
+    },
+  } as unknown as AgentClient;
+  const controller = createDesktopController({ admittedClient: client, onSnapshot() {} });
+  const old = controller.selectSession('old');
+  await controller.selectSession('new');
+  release();
+  await old;
+  expect(reads).toEqual(['new']);
+  expect(controller.snapshot?.sessionId).toBe('new');
+});
 test('retired old view cannot enter cache or overwrite new selection; disposal never stops service', async () => {
   let release!: (value: SessionView) => void;
   let stopped = 0;

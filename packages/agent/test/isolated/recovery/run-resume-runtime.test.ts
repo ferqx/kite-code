@@ -19,6 +19,7 @@ async function until(check: () => Promise<boolean>) {
   }
 }
 for (const mode of [
+  'reconciled_model',
   'planned_model',
   'planned_large',
   'continuation_planned',
@@ -51,17 +52,20 @@ for (const mode of [
 ] as const)
   test(`genuine SIGKILL active Run resumes exact durable ${mode} boundary`, async () => {
     const directory = realpathSync(mkdtempSync(join(tmpdir(), 'kite-run-resume-')));
-    const seedMode = [
-      'version',
-      'cleanup',
-      'closing',
-      'steer',
-      'follow_up',
-      'cancel_preparation',
-      'concurrent_preparation',
-    ].includes(mode)
-      ? 'completion'
-      : mode;
+    const seedMode =
+      mode === 'reconciled_model'
+        ? 'running_model'
+        : [
+              'version',
+              'cleanup',
+              'closing',
+              'steer',
+              'follow_up',
+              'cancel_preparation',
+              'concurrent_preparation',
+            ].includes(mode)
+          ? 'completion'
+          : mode;
     const child = Bun.spawn(
       [
         process.execPath,
@@ -111,6 +115,21 @@ for (const mode of [
       child.kill('SIGKILL');
       await child.exited;
       store = await openSqliteStore(profile);
+      if (mode === 'reconciled_model') {
+        const result = await store.reconcileSession({
+          ...ready,
+          sessionId: 's',
+          subjectId: 'owner',
+          commandId: 'reconcile',
+        });
+        ready.expectedOwnerGeneration = result.report!.generation;
+        expect(await store.getRun(ready.runId)).toMatchObject({
+          status: 'interrupted',
+          isActive: false,
+          reason: 'owner_lost',
+        });
+        expect(await store.getExecution(ready.executionId)).toMatchObject({ status: 'failed' });
+      }
       let resolves = 0,
         disposals = 0;
       let releasePreflight!: () => void;

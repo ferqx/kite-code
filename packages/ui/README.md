@@ -18,7 +18,7 @@ Composer 在原停止按钮内使用 Hugeicons `StopIcon` 的实心方块，填�
 
 该提示由 [Conversation](src/desktop/Conversation.tsx) 按准确 `turnActivity` 与终态 marker 在轮次底部呈现，位于过程折叠区外。普通活动过程入口固定为“处理过程”；准确的当前未结束思考且没有活动工具时，底部同一节点显示“正在思考…”，出现正文或活动工具后恢复“正在回复…”。底部状态只显示思考／回复文字，不附运行时长；`TurnElapsed` 仅在原 summary 展示可靠起止时间对应的终态耗时，不再启动活动计时器。没有可展开过程的普通活动轮次不显示空 summary，首条状态行不额外增加顶部留白；等待、停止、恢复、失败与不可核实头部保留。
 
-模型或工具消息的 `settled` 不结束轮次提示；queued、running、waiting、cancelling 与 recovery_required 保持，真实 terminal 优先移除，同 Turn 分裂条目仅末条目显示一次。暂时 `unavailable` 保留上次确认的活动展示和原不可核实说明，不显示新的思考判断；不扩大当前读取或操作资格。无 Turn 身份的旧独立流式消息保留原局部提示。[生命周期回归](test/isolated/desktop-turn-response.test.tsx)核空正文、思考／回复节点切换、工具、观察失败、折叠及真实终态。
+模型或工具消息的 `settled` 不结束轮次提示；queued、running、waiting、cancelling 与 recovery_required 保持，真实 terminal 优先移除，同 Turn 分裂条目仅末条目显示一次。暂时 `unavailable` 保留上次确认的活动展示和原不可核实说明，不显示新的思考判断；不扩大当前读取或操作资格。宿主通过独立 `TurnActivity.executionUnconfirmed` 表明原执行权已释放或不能核实时，未结束轮次停止回复／思考及 busy 展示，标签改为“执行状态待核实”；原 status 和真实终态保持，撤除标记后重新按原事实展示。无 Turn 身份的旧独立流式消息保留原局部提示。[生命周期回归](test/isolated/desktop-turn-response.test.tsx)核空正文、思考／回复节点切换、工具、普通观察失败、执行权待核实、折叠及真实终态。
 
 Composer 的图片卡片保持固定预览区域，接受宿主交付的小尺寸URL并提示异步解码；等待URL时显示准备占位，可选 `previewError` 只显示预览失败，不改变原 `loading/error` 的发送门禁。图片转换、缓存与原字节校验归 [Desktop owner](../../apps/desktop/README.md#markdown-与附件输入)，UI不读取或转换原图。Native登记给ConversationCache的图片成本现包含缩略图编码字节与RGBA像素估算，继续使用原媒体／DOM预算、停用和释放协议；派生Blob的独立有界缓存由原窗口owner管理，不能恢复旧读取资格。
 
@@ -140,7 +140,7 @@ ToolActivity／ToolRow 用 TraceLine、Title、Icon、Description 和受控 Coll
 
 原工具组件允许宿主给 `Message.target` 传展示文本，不从文本取得文件或执行权限。Native 的已知工具行沿准确执行结果与当前视图适配；未来定义／版本不借旧同名分类解释，原文仍可展开。Shell 操作继续复用原工具图标，实际身份、目标、状态与限定证据归 [Desktop owner](../../apps/desktop/README.md#原工具过程与结果阅读)。
 
-SessionPage／Conversation 的 `renderMessageContent` 和 `renderToolActivity` 让宿主复用原消息外层、轮次折叠、最终回复复制和分组阅读状态，工具 slot 接完整分组与原展开控制；原 `renderMessage` 及未传新 slot 的缺省行为保持。`copyText=null` 表示当前正文仅可读预览，不能当全文复制；`TurnActivity.cancelling/unavailable` 只表达宿主确认的停止中／上次确认状态。ToolActivity 的 `unverified` 在未提供执行 status 时显示“状态待核对”，已提供的真实执行状态仍优先；该标记仅控制展示，不建立执行结果。`openFileForMessage` 保每项独立回调，`ask.cancelled` 表达取消信息回答，与工具／Run 终态分开。准确公共 Run、原问答结果和完整正文资格归 [Desktop owner](../../apps/desktop/README.md#原轮次阅读聚合与问答回执)，纯 UI 不建立来源或业务 authority。
+SessionPage／Conversation 的 `renderMessageContent` 和 `renderToolActivity` 让宿主复用原消息外层、轮次折叠、最终回复复制和分组阅读状态，工具 slot 接完整分组与原展开控制；原 `renderMessage` 及未传新 slot 的缺省行为保持。`copyText=null` 表示当前正文仅可读预览，不能当全文复制；`TurnActivity.cancelling/unavailable` 只表达宿主确认的停止中／上次确认状态。ToolActivity 的 `unverified` 在未提供执行 status 时显示“状态待核对”，已提供的真实执行状态仍优先；独立的 `Message.executionUnconfirmed` 只使未结算的活动工具转为静态“执行状态待核实”，停止执行／审批／等待提示，保留原 status、settled 和已保存输出。已结算成功、失败、取消及未知结果不被覆盖；混合聚合与空 Shell 输出由[工具回归](test/isolated/desktop-tool-aggregation.test.tsx)核对。这些标记仅控制展示，不建立执行结果。`openFileForMessage` 保每项独立回调，`ask.cancelled` 表达取消信息回答，与工具／Run 终态分开。准确公共 Run、原问答结果和完整正文资格归 [Desktop owner](../../apps/desktop/README.md#原轮次阅读聚合与问答回执)，纯 UI 不建立来源或业务 authority。
 
 [ModelEffortSelector](src/desktop/ModelEffortSelector.tsx)复用原双栏浮层与 [GemSlider](src/desktop/GemSlider.tsx)。思考面板采用12px外层留白，标题组内8px间隔、模型按钮至滑块操作区4px间隔，使模型文字上下两段可见间距一致。浮层内滑轨高24px且无边框，保留32px操作区域与22px白色按钮；按钮在悬停和拖动时通过变换放大25%，结束后恢复，不改变布局或档位映射。仅在允许动态效果时使用150ms过渡。选中模型且宿主提供变更回调时即可调整思考程度，不接收模型支持能力开关。六档「轻度、中、高、极高、Max、Ultar」分别回调 `low/medium/high/xhigh/max/ultar`，不提供配置默认或关闭思考按钮及回调。模型按钮和浮层当前值只显示宿主明确提供的档位；未配置时不补“默认”或空的档位节点，打开滑块也不自动发送选择。宿主可传准确 `ModelOption.id` 与 `reasoningEffortChoices`；选择、列表键和当前标记按 ID 区分，同一提供商内同名模型补显示 ID。滑块映射宿主提供的六档子集；一档用按钮，零档不造滑块。旧 none/minimal 可作为已配置值显示，不生成额外选项。[浮层回归](test/isolated/model-effort.test.tsx)核无能力元数据的模型可调整与缺失路由；[Native DOM](../../apps/desktop/test/isolated/native-model-picker-dom.test.tsx)核 Ultar 回调、稀疏档位、两按钮缺席、旧 none 配置及切换模型后清除临时值。
 
@@ -259,3 +259,7 @@ TUI Markdown 根布局约束实际正文列宽，普通及流式回复的长段�
 共享 [completeRunReplies](src/run-reply-copy.ts)仅对准确 completed 且非 active 的 Run 建立最终回复资格，排除带原压缩身份的 assistant 消息；Native 最终复制与 Web 整轮复制均不包含压缩摘要。完整模型消息仍可能是候选或维护输出，不能先于真实 Run 完成显示为最终结果。回归见[最终回复复制](test/run-reply-copy.test.ts)与[Native 实际链路](../../apps/desktop/test/isolated/native-transcript-dom.test.tsx)。
 
 桌面 [Conversation](src/desktop/Conversation.tsx)的压缩状态使用普通 `Marker`，按工具消息标题的字号、行高和上下留白左对齐显示，不绘制文字两侧的分隔线；进行中扫光、失败颜色和具体错误说明保留。
+
+## 选中与重连的后端状态核实
+
+[TuiController](src/tui/controller.ts) 的明确 `select` 默认先等待宿主可选 `reconcileSession` port，再读历史；普通刷新显式传 `reconcile:false`。失败仍读历史并发布错误，切换／取消后旧结果不发布。写入与 capability 核验归 [CLI Host](../../apps/cli/README.md)，纯 UI 不取得 authority。[选择器测试](test/tui/session-chooser.test.tsx)核顺序、跳过及失败阅读。桌面持久终态优先于 `executionUnconfirmed` 回退；后端与原恢复边界归[Core owner](../agent/src/storage/sqlite/run-resume.README.md#会话恢复时的状态核实)。

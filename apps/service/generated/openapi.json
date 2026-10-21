@@ -5,6 +5,42 @@
     "version": "1.0.0"
   },
   "paths": {
+    "/v1/sessions/{id}/reconcile": {
+      "post": {
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReconcileSessionRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Committed public facts",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionReconciliation"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/config/user/providers": {
       "get": {
         "parameters": [
@@ -13832,6 +13868,44 @@
         "required": ["sessionId"],
         "additionalProperties": false
       },
+      "ReconcileSessionRequest": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "expectedStoreId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "pattern": "^[A-Za-z0-9_-]+$"
+          },
+          "commandId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "pattern": "^[A-Za-z0-9_-]+$"
+          },
+          "expectedOwnerGeneration": {
+            "type": "string",
+            "pattern": "^(0|[1-9][0-9]*)$"
+          }
+        },
+        "required": ["expectedStoreId", "commandId", "expectedOwnerGeneration"],
+        "additionalProperties": false
+      },
+      "ReconcileSessionTarget": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "sessionId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "pattern": "^[A-Za-z0-9_-]+$"
+          }
+        },
+        "required": ["sessionId"],
+        "additionalProperties": false
+      },
       "ReconcileJobRequest": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
@@ -22401,6 +22475,180 @@
           "cancelRequestedAt"
         ],
         "additionalProperties": false
+      },
+      "SessionReconciliation": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "storeId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128,
+                "pattern": "^[A-Za-z0-9_-]+$"
+              },
+              "sessionId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128,
+                "pattern": "^[A-Za-z0-9_-]+$"
+              },
+              "outcome": {
+                "type": "string",
+                "const": "reconciled"
+              },
+              "commandId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128,
+                "pattern": "^[A-Za-z0-9_-]+$"
+              },
+              "report": {
+                "type": "object",
+                "properties": {
+                  "sessionId": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 128,
+                    "pattern": "^[A-Za-z0-9_-]+$"
+                  },
+                  "storeId": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 128,
+                    "pattern": "^[A-Za-z0-9_-]+$"
+                  },
+                  "interruptedRunIds": {
+                    "maxItems": 4096,
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 128,
+                      "pattern": "^[A-Za-z0-9_-]+$"
+                    }
+                  },
+                  "settledExecutionIds": {
+                    "maxItems": 4096,
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 128,
+                      "pattern": "^[A-Za-z0-9_-]+$"
+                    }
+                  },
+                  "unknownExecutionIds": {
+                    "maxItems": 8192,
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 128,
+                      "pattern": "^[A-Za-z0-9_-]+$"
+                    }
+                  },
+                  "cancelledExecutionIds": {
+                    "maxItems": 4096,
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 128,
+                      "pattern": "^[A-Za-z0-9_-]+$"
+                    }
+                  },
+                  "partialMessageIds": {
+                    "maxItems": 4096,
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 128,
+                      "pattern": "^[A-Za-z0-9_-]+$"
+                    }
+                  },
+                  "snapshotCursor": {
+                    "type": "string",
+                    "pattern": "^(0|[1-9][0-9]*)$"
+                  }
+                },
+                "required": [
+                  "sessionId",
+                  "storeId",
+                  "interruptedRunIds",
+                  "settledExecutionIds",
+                  "unknownExecutionIds",
+                  "cancelledExecutionIds",
+                  "partialMessageIds",
+                  "snapshotCursor"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "required": ["storeId", "sessionId", "outcome", "commandId", "report"],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "storeId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128,
+                "pattern": "^[A-Za-z0-9_-]+$"
+              },
+              "sessionId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128,
+                "pattern": "^[A-Za-z0-9_-]+$"
+              },
+              "outcome": {
+                "type": "string",
+                "const": "owner_held"
+              },
+              "commandId": {
+                "type": "null"
+              },
+              "report": {
+                "type": "null"
+              }
+            },
+            "required": ["storeId", "sessionId", "outcome", "commandId", "report"],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "storeId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128,
+                "pattern": "^[A-Za-z0-9_-]+$"
+              },
+              "sessionId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128,
+                "pattern": "^[A-Za-z0-9_-]+$"
+              },
+              "outcome": {
+                "type": "string",
+                "const": "unchanged"
+              },
+              "commandId": {
+                "type": "null"
+              },
+              "report": {
+                "type": "null"
+              }
+            },
+            "required": ["storeId", "sessionId", "outcome", "commandId", "report"],
+            "additionalProperties": false
+          }
+        ]
       },
       "JobReconcileCommand": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",

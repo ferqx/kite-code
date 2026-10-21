@@ -32,7 +32,11 @@ const { NativeDesktop } = await import('../../src/native');
 Object.assign(globalThis, initialGlobals);
 bootstrap.window.close();
 
-function fixture(activeParent = false, pendingToolMetadata = false) {
+function fixture(
+  activeParent = false,
+  pendingToolMetadata = false,
+  initialDraft = 'Original private draft',
+) {
   const dom = new JSDOM('<div id="root"></div>', {
     url: 'http://localhost',
     pretendToBeVisual: true,
@@ -228,7 +232,7 @@ function fixture(activeParent = false, pendingToolMetadata = false) {
             workspaceId: 'w',
             rootSessionId: 'root',
             revision: 1,
-            content: 'Original private draft',
+            content: initialDraft,
           };
         case 'conversation.branch':
           return {
@@ -388,6 +392,15 @@ function fixture(activeParent = false, pendingToolMetadata = false) {
     listeners,
     click,
     observedRun: () => structuredClone(item.run),
+    settleParent: (status: 'interrupted' | 'completed') => {
+      item.run!.status = status;
+      item.run!.isActive = false;
+      item.run!.finishedAt = Date.now();
+      item.execution.status = 'cancelled';
+    },
+    replaceParentRun: (id: string) => {
+      item.run!.id = id;
+    },
     observeExecutionOwner: async (
       executionOwner: 'held' | 'unheld' | 'unknown',
       unavailable = false,
@@ -1443,7 +1456,7 @@ test('explicit child close wins over a directory publication with a queued autom
 
 test('NativeDesktop marks an unowned active Run unverified without changing durable Run facts or issuing mutations', async () => {
   for (const waiting of [false, true]) {
-    const f = fixture(true);
+    const f = fixture(true, false, '');
     f.runningParent();
     if (waiting) f.waitingParent();
     const originalRun = f.observedRun();
@@ -1458,7 +1471,9 @@ test('NativeDesktop marks an unowned active Run unverified without changing dura
       await f.click('Original');
       expect(warning()?.textContent).toContain('原执行者已释放');
       expect(sidebarSpinner()).toBeNull();
-      expect(f.host.querySelector('.agent-turn-status-label')?.textContent).toBe('上次确认状态');
+      expect(f.host.querySelector('.response-status') === null).toBe(true);
+      expect(f.host.querySelector('button[aria-label="停止任务"]') === null).toBe(true);
+      expect(f.host.querySelector('.agent-turn-status-label')?.textContent).toBe('执行状态待核实');
       expect(f.host.textContent).not.toContain('正在等待子 Agent 结果');
       expect(f.observedRun()).toEqual(originalRun);
       expect(f.observedRun()?.isActive).toBe(true);
@@ -1467,6 +1482,7 @@ test('NativeDesktop marks an unowned active Run unverified without changing dura
       expect(warning()).toBeNull();
       expect(sidebarSpinner()).not.toBeNull();
       expect(f.host.querySelector('.response-status')?.textContent).toBe('正在回复…');
+      expect(f.host.querySelector('button[aria-label="停止任务"]')).not.toBeNull();
       if (waiting)
         expect(f.host.querySelector('.agent-turn-status-label')?.textContent).toBe('正在等待');
       else {
@@ -1480,7 +1496,9 @@ test('NativeDesktop marks an unowned active Run unverified without changing dura
       await f.observeExecutionOwner('unknown');
       expect(warning()?.textContent).toContain('无法核实原执行者');
       expect(sidebarSpinner()).toBeNull();
-      expect(f.host.querySelector('.agent-turn-status-label')?.textContent).toBe('上次确认状态');
+      expect(f.host.querySelector('.response-status') === null).toBe(true);
+      expect(f.host.querySelector('button[aria-label="停止任务"]') === null).toBe(true);
+      expect(f.host.querySelector('.agent-turn-status-label')?.textContent).toBe('执行状态待核实');
 
       await f.observeExecutionOwner('unheld', true);
       expect(warning()).toBeNull();
@@ -1516,6 +1534,90 @@ test('NativeDesktop marks an unowned active Run unverified without changing dura
     } finally {
       await f.close();
     }
+  }
+});
+
+test('Native reconciles an unowned parent and its child detail without hiding saved child content', async () => {
+  const f = fixture(true, false, '');
+  f.runningParent();
+  const body: Parameters<typeof f.childBody>[0] = {
+    upperSeq: '1',
+    messages: [
+      {
+        id: 'child-message',
+        sessionId: 'child',
+        seq: '1',
+        role: 'assistant',
+        status: 'incomplete',
+        runId: 'original-child-run',
+        content: 'Saved child progress',
+      },
+    ],
+    modelOutputs: [],
+    presentation: {
+      runs: [
+        {
+          id: 'original-child-run',
+          sessionId: 'child',
+          originStoreId: 'store',
+          status: 'running',
+          isActive: true,
+          createdAt: 1000,
+          finishedAt: null,
+          reason: null,
+        },
+      ],
+      tools: [],
+      executions: [
+        {
+          id: 'child-wait',
+          kind: 'tool',
+          originStoreId: 'store',
+          sessionId: 'child',
+          runId: 'original-child-run',
+          definitionId: 'task.events',
+          definitionVersion: '1',
+          status: 'planned',
+          resultRevision: '0',
+          cancelRequestedAt: null,
+        },
+      ],
+    },
+  };
+  f.childBody(body);
+  try {
+    await f.observeExecutionOwner('held');
+    await f.render();
+    await f.click('Original');
+    await f.open();
+    await f.waitForText('Saved child progress');
+    const child = () => f.host.querySelector('.session-tab-child')!;
+    expect(child().querySelectorAll('.response-status')).toHaveLength(1);
+    expect(child().textContent).toContain('等待执行');
+    expect(f.host.querySelector('.background-execution-status')?.textContent).toBe('运行中');
+    const originalRun = f.observedRun();
+    for (const owner of ['unheld', 'unknown'] as const) {
+      await f.observeExecutionOwner(owner);
+      expect(f.host.querySelectorAll('.response-status')).toHaveLength(0);
+      expect(child().querySelectorAll('.tool-activity .shimmer')).toHaveLength(0);
+      expect(child().textContent).toContain('Saved child progress');
+      expect(child().textContent).toContain('执行状态待核实');
+      expect(child().textContent).not.toContain('等待执行');
+      expect(f.host.querySelector('.background-execution-status')?.textContent).toBe(
+        '执行状态待核实',
+      );
+      expect(f.host.querySelectorAll('.background-execution-stop')).toHaveLength(0);
+      expect(f.observedRun()).toEqual(originalRun);
+    }
+    await f.observeExecutionOwner('held');
+    expect(child().querySelectorAll('.response-status')).toHaveLength(1);
+    expect(child().textContent).toContain('等待执行');
+    expect(f.host.querySelector('.background-execution-status')?.textContent).toBe('运行中');
+    expect(
+      f.requests.filter((request) => /submit|prepare|recover|cancel/.test(request.method)),
+    ).toEqual([]);
+  } finally {
+    await f.close();
   }
 });
 
@@ -1770,6 +1872,58 @@ test('child metadata failure keeps its verified transcript readable and an expli
         (request) => request.method === 'caller.submit' || request.method === 'submit',
       ),
     ).toBe(false);
+  } finally {
+    await f.close();
+  }
+});
+
+test('reconciled terminal facts retire cached owner warnings in the selected conversation and environment', async () => {
+  for (const status of ['interrupted', 'completed'] as const) {
+    const f = fixture(true, false, '');
+    f.runningParent();
+    try {
+      await f.observeExecutionOwner('unheld');
+      await f.render();
+      await f.click('Original');
+      expect(f.host.querySelectorAll('[aria-label="会话执行状态待核实"]')).toHaveLength(1);
+      expect(f.host.querySelector('.background-execution-status')?.textContent).toBe(
+        '执行状态待核实',
+      );
+      f.settleParent(status);
+      await f.updateParent('Saved parent content after reconciliation');
+      expect(f.host.querySelectorAll('[aria-label="会话执行状态待核实"]')).toHaveLength(0);
+      expect(f.host.querySelector('.agent-turn-status-label')?.textContent).not.toBe(
+        '执行状态待核实',
+      );
+      expect(f.host.querySelector('.background-execution-status')?.textContent).toBe('已取消');
+      expect(f.host.querySelectorAll('.response-status')).toHaveLength(0);
+      await act(async () =>
+        f.host.querySelector<HTMLButtonElement>('.agent-turn-summary')?.click(),
+      );
+      expect(f.host.textContent).toContain('Saved parent content after reconciliation');
+    } finally {
+      await f.close();
+    }
+  }
+});
+
+test('an owner observation for an earlier Run cannot mark a later active Run unconfirmed', async () => {
+  const f = fixture(true, false, '');
+  f.runningParent();
+  try {
+    await f.observeExecutionOwner('unknown');
+    await f.render();
+    await f.click('Original');
+    expect(f.host.querySelectorAll('[aria-label="会话执行状态待核实"]')).toHaveLength(1);
+    f.replaceParentRun('later-parent-run');
+    f.runningParent();
+    await f.updateParent('Later active parent content');
+    expect(f.host.querySelectorAll('[aria-label="会话执行状态待核实"]')).toHaveLength(0);
+    expect(f.host.querySelectorAll('.response-status')).toHaveLength(1);
+    expect(f.host.querySelector('.background-execution-status')?.textContent).toBe('运行中');
+    await f.observeExecutionOwner('unknown');
+    expect(f.host.querySelectorAll('[aria-label="会话执行状态待核实"]')).toHaveLength(1);
+    expect(f.host.querySelectorAll('.response-status')).toHaveLength(0);
   } finally {
     await f.close();
   }

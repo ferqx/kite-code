@@ -551,6 +551,13 @@ export interface RecoveryReport {
   partialMessageIds: string[];
   snapshotCursor: string;
 }
+export interface SessionReconciliation {
+  storeId: string;
+  sessionId: string;
+  outcome: 'owner_held' | 'unchanged' | 'reconciled';
+  commandId: string | null;
+  report: RecoveryReport | null;
+}
 export interface SessionView {
   session: SessionRecord;
   runs: RunRecord[];

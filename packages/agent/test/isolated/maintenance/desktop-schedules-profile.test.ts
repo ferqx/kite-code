@@ -171,6 +171,7 @@ console.log(JSON.stringify({tasks:data.scheduledTasks(),runs:data.scheduledTaskR
       expect(schema.migrations.map((migration) => migration.id)).toEqual([
         '0001-baseline',
         '0002-recovery-audit',
+        '0003-session-reconciliation',
       ]);
       coreChecksum = schema.checksum;
       originalAudits = sourceCore.query('SELECT * FROM recovery_audit ORDER BY run_id').all();

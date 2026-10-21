@@ -49,6 +49,7 @@ import type {
   ProviderDiscoveryRequest,
   ProviderSettingsRequest,
   ReconcileJobRequest,
+  ReconcileSessionRequest,
   RecoverSessionRequest,
   RecoverSessionResponse,
   RemoveWorkspaceRequest,
@@ -63,6 +64,7 @@ import type {
   SessionExportManifest,
   SessionExportPageQuery,
   SessionExportTextQuery,
+  SessionReconciliation,
   SetPermissionModeRequest,
   SetWorkspaceTrustRequest,
   SkillCataloguePage,
@@ -397,6 +399,7 @@ export class AgentClient {
                 requestShape === 'ResumeJobReportRequest' ||
                 requestShape === 'ResumeRunRequest' ||
                 requestShape === 'RecoverSessionRequest' ||
+                requestShape === 'ReconcileSessionRequest' ||
                 requestShape === 'StartCommandRequest' ||
                 requestShape === 'CancelCommandRequest' ||
                 requestShape === 'CancelRunRequest' ||
@@ -1271,6 +1274,113 @@ export class AgentClient {
         'The original Session recovery receipt did not verify.',
       );
     return result;
+  }
+  /** Reconcile only the observed root owner generation; this never resumes effects. */
+  async reconcileSession(
+    sessionId: string,
+    input: ReconcileSessionRequest,
+    options: { signal?: AbortSignal } = {},
+  ): Promise<SessionReconciliation> {
+    this.requireCapability('session_reconciliation');
+    const target = structuredClone({ sessionId }),
+      intent = structuredClone(input);
+    validateRequest('ReconcileSessionTarget', target);
+    validateRequest('ReconcileSessionRequest', intent);
+    if (intent.expectedStoreId !== this.serverInfo!.storeId)
+      throw new ClientError('store_identity_mismatch');
+    const generation = this.connectionGeneration;
+    const unknown = () => {
+      const error = new ClientError(
+        'network_outcome_unknown',
+        `Query original Session reconciliation command ${intent.commandId}.`,
+      );
+      return Object.assign(error, { commandId: intent.commandId });
+    };
+    let result: SessionReconciliation;
+    try {
+      result = await this.mutate(
+        `/v1/sessions/${encodeURIComponent(target.sessionId)}/reconcile`,
+        'ReconcileSessionRequest',
+        'SessionReconciliation',
+        intent,
+        options.signal,
+      );
+    } catch (error) {
+      if (
+        error instanceof ClientError &&
+        !error.problem &&
+        ['network_outcome_unknown', 'invalid_response', 'response_too_large'].includes(error.code)
+      )
+        throw unknown();
+      throw error;
+    }
+    if (
+      generation !== this.connectionGeneration ||
+      result.storeId !== intent.expectedStoreId ||
+      result.sessionId !== target.sessionId ||
+      (result.outcome === 'reconciled' &&
+        (result.commandId !== intent.commandId ||
+          result.report.storeId !== intent.expectedStoreId ||
+          result.report.sessionId !== target.sessionId))
+    )
+      throw unknown();
+    return result;
+  }
+
+  /** Explicit lifecycle handoff. Ordinary history reads never invoke reconciliation. */
+  async reconcileSessionState(
+    sessionId: string,
+    options: { signal?: AbortSignal } = {},
+  ): Promise<Responses['SessionView']> {
+    this.requireCapability('session_reconciliation');
+    const generation = this.connectionGeneration,
+      storeId = this.serverInfo!.storeId!;
+    const check = (view: Responses['SessionView'], id: string) => {
+      options.signal?.throwIfAborted();
+      if (
+        generation !== this.connectionGeneration ||
+        view.storeId !== storeId ||
+        view.session.id !== id
+      )
+        throw new ClientError('connection_superseded');
+    };
+    const original = await this.getView(sessionId, options);
+    check(original, sessionId);
+    const rootId =
+      original.session.rootSessionId ??
+      (original.session.parentSessionId === null ? original.session.id : undefined);
+    if (!rootId) throw new ClientError('session_identity_mismatch');
+    const root = rootId === sessionId ? original : await this.getView(rootId, options);
+    check(root, rootId);
+    if (
+      root.session.parentSessionId !== null ||
+      (root.session.rootSessionId !== undefined && root.session.rootSessionId !== rootId) ||
+      original.session.workspaceId !== root.session.workspaceId
+    )
+      throw new ClientError('session_identity_mismatch');
+    const expectedOwnerGeneration = root.session.ownerGeneration;
+    if (expectedOwnerGeneration === undefined) throw new ClientError('session_identity_mismatch');
+    const digest = await crypto.subtle.digest(
+      'SHA-256',
+      new TextEncoder().encode(JSON.stringify([storeId, rootId, expectedOwnerGeneration])),
+    );
+    options.signal?.throwIfAborted();
+    if (generation !== this.connectionGeneration) throw new ClientError('connection_superseded');
+    const commandId = `session-reconcile-${Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('')}`;
+    await this.reconcileSession(
+      rootId,
+      { expectedStoreId: storeId, commandId, expectedOwnerGeneration },
+      options,
+    );
+    const current = await this.getView(sessionId, options);
+    check(current, sessionId);
+    if (
+      (current.session.rootSessionId ??
+        (current.session.parentSessionId === null ? current.session.id : undefined)) !== rootId ||
+      current.session.workspaceId !== original.session.workspaceId
+    )
+      throw new ClientError('session_identity_mismatch');
+    return current;
   }
   async reconcileJob(
     sessionId: string,

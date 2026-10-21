@@ -419,11 +419,28 @@ test.skipIf(process.platform === 'win32')(
       expect(readFileSync(join(f.path, 'core.db'))).toEqual(guardedCore);
       sql = new Database(join(f.path, 'core.db'));
       sql.run("UPDATE command SET agent_source_execution_id=NULL WHERE id='other-create'");
+      for (const [rootId, commandId, frontier] of [
+        ['s', 'work', sentinel.repeat(100)],
+        ['other', 'other-create', 'retained private frontier'],
+      ])
+        sql.run('INSERT INTO session_reconciliation VALUES(?,?,?,?,?)', [
+          rootId!,
+          commandId!,
+          f.storeId,
+          1,
+          JSON.stringify({ frontier }),
+        ]);
       sql.close(true);
       sql = undefined;
       const gc = await collectProfileGarbage({ profile: f.profile, expectedStoreId: f.storeId });
       expect(gc).toMatchObject({ purgedWorkspaces: 1, purgedSessions: 2, retainedReferenced: 1 });
       expect(gc.removedFiles).toBeGreaterThan(1);
+      sql = new Database(join(f.path, 'core.db'), { readonly: true });
+      expect(sql.query('SELECT root_session_id FROM session_reconciliation').all()).toEqual([
+        { root_session_id: 'other' },
+      ]);
+      sql.close(true);
+      sql = undefined;
       expect(readFileSync(f.referenced.file)).toEqual(f.referenced.bytes);
       expect(readFileSync(privateFile, 'utf8')).toBe('unsent user data');
       expect(readFileSync(userFile, 'utf8')).toBe('project stays');
@@ -687,6 +704,19 @@ test.skipIf(process.platform === 'win32')(
         expectedStoreId: f.storeId,
       });
       expect(recent).toMatchObject({ purgedSessionGroups: 0, retainedRecentSessionGroups: 3 });
+      const checkpoint = new Database(join(f.path, 'core.db'));
+      for (const [rootId, commandId] of [
+        ['independent', 'create-independent'],
+        ['s', 'work'],
+      ])
+        checkpoint.run('INSERT INTO session_reconciliation VALUES(?,?,?,?,?)', [
+          rootId!,
+          commandId!,
+          f.storeId,
+          1,
+          JSON.stringify({ frontier: rootId }),
+        ]);
+      checkpoint.close(true);
       Date.now = () => originalNow() + 8 * 86400000;
       expect(
         await collectProfileGarbage({ profile: f.profile, expectedStoreId: f.storeId }),
@@ -698,6 +728,11 @@ test.skipIf(process.platform === 'win32')(
       });
       Date.now = originalNow;
       peer = await openSqliteStore(f.profile);
+      const retainedCheckpoint = new Database(join(f.path, 'core.db'), { readonly: true });
+      expect(
+        retainedCheckpoint.query('SELECT root_session_id FROM session_reconciliation').all(),
+      ).toEqual([{ root_session_id: 's' }]);
+      retainedCheckpoint.close(true);
       const collectedAt = (await peer.getSession('independent'))!.historyPurgedAt;
       expect(collectedAt).toBeGreaterThan(0);
       const retainedDelete = {

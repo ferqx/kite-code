@@ -120,6 +120,7 @@ import {
   settleMutation,
 } from './mutation-operations';
 import { callPermissionGrant, verifyPermissionGrantDispatch } from './permission-grants';
+import { closeReconciledHistory } from './reconciliation-admission';
 import { RecoveryAudit } from './recovery-audit';
 import { recoverSession } from './recovery-operations';
 import { initializeRunRecord } from './requirement-initialization';
@@ -131,6 +132,7 @@ import { storageMeta } from './schema';
 import { callSessionExport } from './session-export';
 import { getSessionLogs, sessionLogEnvelope, unwrapChangePayload } from './session-logs';
 import { manageSession } from './session-management-operations';
+import { reconcileSession } from './session-reconciliation';
 import {
   readWorkspaceRemoval,
   removeWorkspace,
@@ -1046,6 +1048,8 @@ export class SqliteOperations {
       case 'applyExtensionAction':
       case 'stopActionPreparation':
         return callExtension(this, method, args);
+      case 'reconcileSession':
+        return reconcileSession(this, args[0] as Parameters<Store['reconcileSession']>[0]);
       case 'recoverSession':
         return recoverSession(this, args[0] as Parameters<Store['recoverSession']>[0]);
       case 'markRunning':
@@ -1218,6 +1222,7 @@ export class SqliteOperations {
           const session = this.row('SELECT * FROM session WHERE id=?', input.sessionId);
           if (!session || session.delete_requested) throw new AgentError('session_not_found');
           const inputBinding = validateInputAdmission(this, input);
+          closeReconciledHistory(this, input);
           this.insertCommand(input, input.request as unknown as Json, digest, 'accepted', {
             commandId: input.commandId,
           });

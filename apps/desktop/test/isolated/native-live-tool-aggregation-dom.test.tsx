@@ -72,10 +72,37 @@ function fixture() {
   const listeners = new Set<(event: NativeEvent) => void>();
   const pending: (() => void)[] = [];
   const requests: NativeRequest[] = [];
+  let executionOwner: 'held' | 'unheld' | 'unknown' | undefined;
   const session = () => ({ ...backgroundItem().rootSession, nextSeq: String(messages.length + 1) });
+  const directory = () => ({
+    storeId: 'store',
+    sessions: [
+      {
+        ...session(),
+        ...(executionOwner
+          ? {
+              activity: {
+                executionOwner,
+                queued: false,
+                pendingInteractions: 0,
+                updatedAt: null,
+                run: {
+                  id: runs[0]!.id,
+                  status: runs[0]!.status,
+                  isActive: runs[0]!.isActive,
+                  waitingForResults: false,
+                },
+              },
+            }
+          : {}),
+      },
+    ],
+    workspaces: [{ id: 'w', name: 'Workspace', rootUri: 'file:///workspace' }],
+  });
   const state = (): NativeState => ({
     generation: 1,
     historyEpoch: 0,
+    directory: directory(),
     creationSubmissions: [],
     inputSubmissions: [],
     permissionSubmissions: [],
@@ -116,11 +143,7 @@ function fixture() {
         case 'select':
           return state();
         case 'directory':
-          return {
-            storeId: 'store',
-            sessions: [session()],
-            workspaces: [{ id: 'w', name: 'Workspace', rootUri: 'file:///workspace' }],
-          };
+          return directory();
         case 'messages':
           return { messages: [...messages], nextAfterSeq: null, highWaterSeq: request.upperSeq! };
         case 'draft.read':
@@ -223,6 +246,11 @@ function fixture() {
   return {
     host,
     requests,
+    facts: () => structuredClone({ runs, executions, messages }),
+    async observeExecutionOwner(owner: NonNullable<typeof executionOwner>) {
+      executionOwner = owner;
+      await publish();
+    },
     async render() {
       await act(async () => root.render(<NativeDesktop />));
       await act(async () => {
@@ -348,6 +376,52 @@ test('Native exploration starts as one collapsed activity and retains it across 
     expect(response.textContent).toBe('正在回复…');
     expect(response.closest('.agent-turn')?.lastElementChild).toBe(response);
     expect(f.host.querySelectorAll('.message.assistant')).toHaveLength(0);
+  } finally {
+    await f.close();
+  }
+});
+
+test('Native owner reconciliation stops live tool activity while retaining confirmed receipts and original execution facts', async () => {
+  const f = fixture();
+  try {
+    await f.render();
+    await f.start([
+      tool(1),
+      tool(2, { cancelRequestedAt: 1000 }),
+      tool(3),
+      tool(4, { definitionId: 'task.events', definitionVersion: '1' }),
+    ]);
+    await f.complete(3);
+    await f.flush();
+    await f.observeExecutionOwner('held');
+    await f.toggle();
+    expect(f.host.querySelectorAll('.response-status')).toHaveLength(1);
+    expect(f.host.textContent).toContain('等待执行');
+    expect(f.host.textContent).toContain('已请求停止，等待执行结果。');
+    const original = f.facts();
+    for (const owner of ['unheld', 'unknown'] as const) {
+      await f.observeExecutionOwner(owner);
+      expect(f.host.querySelectorAll('.response-status')).toHaveLength(0);
+      expect(f.host.querySelectorAll('button[aria-label="停止任务"]')).toHaveLength(0);
+      expect(f.host.querySelectorAll('.tool-activity .shimmer')).toHaveLength(0);
+      expect(f.host.querySelectorAll('.tool-activity [data-status="running"]')).toHaveLength(0);
+      expect(f.host.querySelectorAll('.tool-activity [data-status="pending"]')).toHaveLength(0);
+      expect(f.host.querySelectorAll('.tool-step-status')?.length).toBeGreaterThan(0);
+      expect(f.host.textContent).toContain('执行状态待核实');
+      expect(f.host.textContent).not.toContain('等待执行');
+      expect(f.host.textContent).not.toContain('已请求停止，等待执行结果。');
+      expect(f.host.querySelector('.tool-activity-step.completed') !== null).toBe(true);
+      expect(f.facts()).toEqual(original);
+    }
+    await f.observeExecutionOwner('held');
+    expect(f.host.querySelectorAll('.response-status')).toHaveLength(1);
+    expect(f.host.textContent).toContain('等待执行');
+    expect(f.host.textContent).toContain('已请求停止，等待执行结果。');
+    expect(f.host.textContent).not.toContain('执行状态待核实');
+    expect(f.facts()).toEqual(original);
+    expect(
+      f.requests.filter((request) => /submit|prepare|recover|cancel/.test(request.method)),
+    ).toEqual([]);
   } finally {
     await f.close();
   }

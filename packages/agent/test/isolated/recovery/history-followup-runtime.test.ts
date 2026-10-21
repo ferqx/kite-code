@@ -17,7 +17,7 @@ async function until(check: () => boolean | Promise<boolean>) {
     await Bun.sleep(5);
   }
 }
-for (const mode of ['inline', 'sealed'] as const)
+for (const mode of ['inline', 'sealed', 'reconciled', 'direct', 'direct_sealed'] as const)
   test(`actual SIGKILL ${mode} Model output interrupt preserves original call history for same Session SDK followup`, async () => {
     const directory = mkdtempSync(join(tmpdir(), 'kite-history-followup-'));
     const bodies: {
@@ -28,7 +28,7 @@ for (const mode of ['inline', 'sealed'] as const)
         tool_calls?: { id: string; function: { arguments: string } }[];
       }[];
     }[] = [];
-    const original = mode === 'sealed' ? '原始大正文'.repeat(16000) : 'original';
+    const original = mode.endsWith('sealed') ? '原始大正文'.repeat(16000) : 'original';
     const server = Bun.serve({
       hostname: '127.0.0.1',
       port: 0,
@@ -105,21 +105,88 @@ for (const mode of ['inline', 'sealed'] as const)
         decision: 'interrupt' as const,
       };
       delete input.executionId;
+      if (mode === 'reconciled' || mode.startsWith('direct')) {
+        const result = await store.reconcileSession({ ...input, commandId: 'observe' });
+        input.expectedOwnerGeneration = result.report!.generation;
+        expect(result.report!.cancelledExecutionIds).toEqual([ready.executionId]);
+        expect((await store.getExecution(ready.executionId))?.status).toBe('cancelled');
+        expect((await store.listMessages('s')).some((message) => message.role === 'tool')).toBe(
+          false,
+        );
+      }
       const histories = await store.readRecoveryToolHistory(input);
       expect(histories).toHaveLength(1);
-      expect(histories[0]!.modelOutput !== null).toBe(mode === 'sealed');
+      expect(histories[0]!.modelOutput !== null).toBe(mode.endsWith('sealed'));
       runtime = createRuntime({
         store,
         artifacts: createArtifactStore({ profile, store }),
         ...historyBinding(directory, baseURL),
       });
+      if (mode.startsWith('direct')) {
+        await runtime.submitCommand({
+          expectedStoreId: ready.expectedStoreId,
+          commandId: 'next',
+          sessionId: 's',
+          subjectId: 'owner',
+          request: { kind: 'run.start', content: 'New task: New explicit input' },
+        });
+        await until(async () => {
+          const saved = await runtime!.getCommand('next');
+          if (saved?.status !== 'applied') return false;
+          const runId = (saved.receipt as { runId: string }).runId;
+          const run = await store!.getRun(runId);
+          return !!run && !run.isActive;
+        });
+        const command = (await runtime.getCommand('next'))!;
+        const run = await store.getRun((command.receipt as { runId: string }).runId);
+
+        expect(run?.status).toBe('completed');
+        expect((await store.getExecution(ready.executionId))?.status).toBe('cancelled');
+        expect(readFileSync(join(directory, 'effects'), 'utf8')).toBe('followup\n');
+        expect(
+          (await store.listMessages('s')).filter(
+            (message) => message.role === 'tool' && message.sourceIds?.includes(ready.executionId),
+          ),
+        ).toHaveLength(1);
+        const cursor = (await store.getMetadata()).lastChangeCursor;
+        const providerCount = bodies.length;
+        expect(
+          await runtime.submitCommand({
+            expectedStoreId: ready.expectedStoreId,
+            commandId: 'next',
+            sessionId: 's',
+            subjectId: 'owner',
+            request: { kind: 'run.start', content: 'New task: New explicit input' },
+          }),
+        ).toEqual(command);
+        expect((await store.getMetadata()).lastChangeCursor).toBe(cursor);
+        expect(bodies).toHaveLength(providerCount);
+        const resumeError = await store
+          .verifyRunResume({
+            ...input,
+            commandId: 'too-late',
+            runId: histories[0]!.runId,
+            expectedOwnerGeneration: (await store.getSession('s'))!.ownerGeneration,
+          })
+          .catch((error) => error);
+        expect(resumeError.code).toBe('run_not_active');
+        for (const body of bodies.slice(1)) {
+          const returned = new Set(
+            body.messages.filter((m) => m.role === 'tool').map((m) => m.tool_call_id),
+          );
+          expect(
+            body.messages.flatMap((m) => m.tool_calls ?? []).every((call) => returned.has(call.id)),
+          ).toBe(true);
+        }
+        return;
+      }
       let fullReads = 0;
       const read = runtime.readModelOutput.bind(runtime);
       runtime.readModelOutput = async (...args) => {
         fullReads++;
         return read(...args);
       };
-      if (mode === 'sealed') {
+      if (mode.endsWith('sealed')) {
         const hash = histories[0]!.modelOutput!.head.hash;
         const path = artifactPath(join(profile.dataRoot, profile.profile), hash);
         const bytes = readFileSync(path);

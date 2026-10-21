@@ -26,7 +26,12 @@ async function injected(root: string) {
   let source = replaceOnce(
     readFileSync(original, 'utf8'),
     locksImport,
-    locksImport.replace('  acquireFileLock,', '  acquireFileLock as actualAcquireFileLock,'),
+    locksImport
+      .replace('  acquireFileLock,', '  acquireFileLock as actualAcquireFileLock,')
+      .replace(
+        '  acquireExistingSharedFileLock,',
+        '  acquireExistingSharedFileLock as actualAcquireExistingSharedFileLock,',
+      ),
   );
   source = replaceOnce(
     source,
@@ -55,6 +60,7 @@ export const faults = { remaining: 0, target: 'session', attempts: 0, terminatio
   async cleanup() { for(const worker of fixtureWorkers) { await worker.terminate(); fixtureWorkers.delete(worker); } for(const lock of fixtureLocks) { lock.release(); fixtureLocks.delete(lock); } }
 };
 function wrapLock(lock:FileLock, kind:string):FileLock { fixtureLocks.add(lock); return {path:lock.path,mode:lock.mode,release() { if(kind===faults.target) {faults.attempts++;if(faults.remaining>0){faults.remaining--;throw Error('fixture_'+kind+'_unlock_failed');}}lock.release();fixtureLocks.delete(lock); }}; }
+function acquireExistingSharedFileLock(...args:Parameters<typeof actualAcquireExistingSharedFileLock>) {return wrapLock(actualAcquireExistingSharedFileLock(...args),'probe');}
 function acquireFileLock(...args:Parameters<typeof actualAcquireFileLock>) {return wrapLock(actualAcquireFileLock(...args), args[0].endsWith('migration.lock')?'migration':'file');}
 function acquireSessionLock(...args:Parameters<typeof actualAcquireSessionLock>) {return wrapLock(actualAcquireSessionLock(...args),'session');}
 function acquireProfileAccess(...args:Parameters<typeof actualAcquireProfileAccess>) {const access=actualAcquireProfileAccess(...args);fixtureLocks.add(access.lock);return access;}
@@ -471,6 +477,98 @@ for (const boundary of ['begin', 'recover'] as const)
         expect((await observer.getSession('s'))!.ownerGeneration).toBe(generation);
       }
       expect(selected.faults.attempts).toBe(2);
+      const access = acquireProfileAccess(profile);
+      try {
+        const lock = acquireSessionLock(access, 's');
+        lock.release();
+      } finally {
+        access.lock.release();
+      }
+    } finally {
+      selected.faults.remaining = 0;
+      await store.close().catch(() => {});
+      await selected.faults.cleanup();
+      await observer.close();
+      rmSync(root, { recursive: true, force: true });
+    }
+  }, 10000);
+
+for (const target of ['probe', 'session'] as const)
+  test(`actual reconcile ${target} unlock failure retries only its retained cleanup before observing ownership`, async () => {
+    const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-reconcile-unlock-')));
+    const profile = { dataRoot: join(root, 'data'), profile: 'test' };
+    const seed = await openSqliteStore(profile);
+    const expectedStoreId = (await seed.getMetadata()).storeId;
+    await seed.createWorkspace({
+      expectedStoreId,
+      id: 'w',
+      name: 'w',
+      rootUri: pathToFileURL(root).href,
+    });
+    for (const sessionId of ['s', 'other'])
+      await seed.createSession({
+        expectedStoreId,
+        sessionId,
+        workspaceId: 'w',
+        commandId: `create-${sessionId}`,
+        subjectId: 'owner',
+        title: sessionId,
+      });
+    await seed.acceptCommand({
+      expectedStoreId,
+      sessionId: 's',
+      commandId: 'work',
+      subjectId: 'owner',
+      request: { kind: 'run.start', content: 'Original work' },
+    });
+    const owner = (await seed.acquireSessionOwner('s', 'original'))!;
+    const run = await seed.startRun({
+      expectedStoreId,
+      owner,
+      commandId: 'work',
+      configuration: {},
+    });
+    await seed.close();
+    const selected = await injected(root);
+    const store = await selected.openSqliteStore(profile);
+    const observer = await openSqliteStore(profile);
+    try {
+      const other = (await store.acquireSessionOwner('other', 'live-other'))!;
+      const input = {
+        expectedStoreId,
+        sessionId: 's',
+        subjectId: 'owner',
+        commandId: 'reconcile',
+        expectedOwnerGeneration: owner.generation,
+      };
+      selected.faults.target = target;
+      selected.faults.remaining = 1;
+      expect(await store.reconcileSession(input).catch((error) => error)).toMatchObject({
+        message: `fixture_${target}_unlock_failed`,
+      });
+      if (target === 'probe') {
+        expect(await observer.getCommand('reconcile')).toBeNull();
+        expect(await observer.getRun(run.id)).toMatchObject({ isActive: true, status: 'running' });
+      } else {
+        expect(await observer.getCommand('reconcile')).toMatchObject({ status: 'applied' });
+        expect(await observer.getRun(run.id)).toMatchObject({
+          isActive: false,
+          status: 'interrupted',
+        });
+      }
+      expect(await observer.acquireSessionOwner('s', 'peer')).toBeNull();
+      const result = await store.reconcileSession(input);
+      expect(result.outcome).toBe('reconciled');
+      expect(await observer.getRun(run.id)).toMatchObject({
+        isActive: false,
+        status: 'interrupted',
+      });
+      expect(selected.faults.attempts).toBe(target === 'probe' ? 3 : 2);
+      expect(await observer.acquireSessionOwner('other', 'unrelated-peer')).toBeNull();
+      const cursor = (await observer.getMetadata()).lastChangeCursor;
+      expect(await store.reconcileSession(input)).toEqual(result);
+      expect((await observer.getMetadata()).lastChangeCursor).toBe(cursor);
+      expect(await store.releaseSessionOwner(other)).toBe(true);
       const access = acquireProfileAccess(profile);
       try {
         const lock = acquireSessionLock(access, 's');

@@ -194,6 +194,9 @@ Core 只依赖中立 `ArtifactContentStore` 端口；Tool/Action 以当前 execu
 
 Run 的初始化三态与原 selection 保持。明确 root 接续可在同一 OS 锁/generation 下原子接管所选 Run 的活动 child 树，沿原配置、权限交集、carrier 与截止时间继续；queued、激活前、已结束子结果、原审批和前台 task.execute 共用普通监督与唯一 Loop。纯 Model 中断结束旧尝试并创建新请求；自动压缩 pending/未发布摘要重新尝试，已发布点保持。普通工具和外部 Job 的未知效果、半完成任意 initializer、无法重建的绑定继续拒绝；受限 continuation 合同不按工具名称放行。资源和证明边界归[协议 owner](src/storage/sqlite/run-resume.README.md)。
 
+恢复会话的 `reconcileSession` 在取得原 root 系统排他锁并复核整个执行组后，保存主／子 Run 中断、未派发工作取消及已尝试调用的失败／未知状态。准确结果和身份保持，不调用模型、工具或后台任务。私有 checkpoint 保安全边界，供之后明确 `run.resume` 完整核验并接续；公共 View 不保 running。活 owner 不抢占，检查失败不伪造中断；[恢复 owner](src/storage/sqlite/run-resume.README.md#会话恢复时的状态核实)完整维护状态、CAS、失效和维护规则。
+
+
 显式 `recoverSession(decision='interrupt')` 取得原 Session OS 锁并 fencing，原子中断遗留 Run、保留 partial 和原执行来源。可证明未派发的同 Store 计划取消；可能产生效果的工具/Job 保持 `outcome_unknown`，不会重做启动。该入口不返回普通执行 owner，未知仍限制该 Session；其他 Session 可继续。已有持久根报告的显式冷恢复由 `resumeJobReport` 和专门 `resolveRecoveryRunConfiguration` 负责，详细资格与生命周期见 [Task owner](src/extensions/task/README.md)。外部 adapter 的显式核实见下方“显式 Job 外部核实”；原适配器必须提供可靠查询能力。离线备份恢复由 maintenance owner 单独负责。
 
 Job 输出与终态分开保存：单 chunk 32 KiB，内容的 JSON 编码与固定行开销共用 1 MiB 保留预算；每 stream 至多一个合并丢失区间。生产方主动丢弃只关闭该 stream 的保留尾部，其他 stream 仍可使用剩余总预算；任何丢失与总预算耗尽分别记录。独立 64 位高水位不依赖输出行是否保留。每页先确定最多 200 条正常行的上界，再合入与该页相交的至多三条 gap；裁剪区间返回准确 `throughSeq` 和无法精确归属时的 null 字节量。跨 stream 的 gap 可以重叠并包含别的 stream 正常行，消费方保留各条事实并以本页最大 `throughSeq` 推进。纯读取不写回截断结果，终态不受输出预算限制。

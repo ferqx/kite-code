@@ -505,10 +505,16 @@ Windows x64 已接当前SID私有pipe/record和准确kernel process HANDLE到同
 
 ## 显式活动 Run 接续
 
-`POST /v1/sessions/:id/commands` 的 `kind:"run.resume"` 只接受 `expectedStoreId`、`commandId`、`runId`，根 Session 来自路径、主体来自认证。closed schema 拒绝客户端 owner/generation/origin；服务端读取真实 Session generation，同 ID 则取原内部申请的 generation 保持幂等，最终仍由 Core/Store 复核原 Store、主体、Session、Run 和摘要。`run_resume` 只由实际 Runtime 方法发布。它接续仍活动且安全检查点完整的原根 Run，不先中断原 Run，不重新开始一个任务。
+`POST /v1/sessions/:id/commands` 的 `kind:"run.resume"` 只接受 `expectedStoreId`、`commandId`、`runId`，根 Session 来自路径、主体来自认证。closed schema 拒绝客户端 owner/generation/origin；服务端读取真实 Session generation，同 ID 则取原内部申请的 generation 保持幂等，最终仍由 Core/Store 复核原 Store、主体、Session、Run 和摘要。`run_resume` 只由实际 Runtime 方法发布。它接续安全边界完整的原根 Run：包括仍活动的执行，或已由会话核实记为中断且原私有边界仍有效的执行组；不会创建替代任务。
 
 返回闭合 `ResumeRunResponse`：accepted/null 只表示申请已登记；applied/run_resumed 包含原 Run、原工作 Command 和实际接续边界，仍不表示 Run 完成。默认宿主复用准确 `resolveRecoveryRunConfiguration`，配置、初始化或检查点无法核实时明确拒绝，不改用当前默认绑定。Browser 没有此写权限。物理丢回应只查询原 Command；[真实 HTTP 测试](test/isolated/run-resume.test.ts)使用所属子进程 SIGKILL、固定 Model 和隔离 Store，核对原审批、一次 Tool 效果、同 ID 及其他主体拒绝。完整恢复限制归 [Runtime owner](../../packages/agent/README.md)。
 
+
+## 会话恢复时的后端状态核实
+
+`POST /v1/sessions/:sessionId/reconcile` 要求实际 `session_reconciliation` 能力，只接收 `expectedStoreId`、`commandId`、`expectedOwnerGeneration`；主体来自认证，目标必须是原根 Session。观察 generation 仅是 CAS 输入，不授 owner。Core 仍核原 Store／主体、整组状态和原 OS 锁；无遗留工作为 unchanged，原锁被持有为 owner_held，两者不写中断。
+
+reconciled 回执只投影原 Store／Session、Command 和公开 RecoveryReport，内部 fence／lease 不公开；`session.reconcile` 原 Command 可经既有 GET 查询。核实仅结算失去 owner 的状态，保安全接续边界，零 Provider／授权／Tool／Job 派发。GET／SSE 和只读 Web 保持零写入，原 `session.recover` 仍表示明确放弃原执行边界。完整合同归[Core owner](../../packages/agent/src/storage/sqlite/run-resume.README.md#会话恢复时的状态核实)，[真实 HTTP 回归](test/isolated/session-reconciliation.test.ts)核身份、活 owner、原锁丢失、幂等与公开回执。
 
 ## 显式遗留执行组中断
 

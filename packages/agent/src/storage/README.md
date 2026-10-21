@@ -238,3 +238,7 @@ Host 自动封存 prepare 中 session namespace 的 `records.get/list` 完整原
 [继续资格](sqlite/job-report-continuation-README.md)将暂停后的新资格与旧 suppressed report 分开。报告前继续绑定原 start/carrier/订阅，报告后继续引用原唯一结果；新 `job.report.continue` 仍核当前最终资格，停止/fence 不被抹去。QueueOnly 后继采用由[邮件 owner](sqlite/agent-mail-operations.ts)按准确 predecessor/selection/work 及 seq/completed_cursor 双水位保存；结果已含完整问题时只关联已接纳 Source，不制造第二份消息或 prepared 事实。
 
 [事务故障与丢响应](../../test/isolated/business/task/collaboration-report-transactions.test.ts)实际触发 Source/ack 插入故障，核 Run/Source/consume/receipt 整体回滚与准确重试；提交后返回丢失沿原 target 恢复、零重复 Model。输入优先、ack 后停止、观察队列溢出和永不结算 observer 均由同一原事实验证，可靠结果不依赖 on*。工作控制及交接的 SQL 触发器、revision 竞争与准确范围由各自测试维护；只读查询不取得接纳、执行或恢复权。
+
+## 会话状态核实与私有恢复边界
+
+[session-reconciliation](sqlite/session-reconciliation.ts)是 `reconcileSession` 的事务 owner，按准确 OS 锁、主体和 generation 结算整个主／子组。0003 只新增私有 `session_reconciliation`，原 checksum 不变，Worker protocol／包内资产同步迁移链。公开历史读保存的中断／未执行／未知事实，显式接续通过 savepoint 叠加与最终 CAS 还原原边界；详细合同和验证归[冷恢复 owner](sqlite/run-resume.README.md#会话恢复时的状态核实)。

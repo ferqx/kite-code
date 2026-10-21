@@ -201,6 +201,7 @@ export function liveToolMessages(
       }
     | undefined,
   messages: readonly Message[],
+  executionUnconfirmed = false,
 ): { message: DesktopMessage; execution: NativeToolExecution }[] {
   if (!selection) return [];
   const runIds = new Set(selection.runs.filter((run) => run.isActive).map((run) => run.id));
@@ -255,6 +256,7 @@ export function liveToolMessages(
         execution,
         message: {
           ...desktopToolMessage(execution, `native-execution:${execution.id}`, ''),
+          executionUnconfirmed,
           ...(run
             ? {
                 turnId: JSON.stringify([

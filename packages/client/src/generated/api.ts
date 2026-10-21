@@ -1953,6 +1953,12 @@ export type RecoverSessionRequest = {
   decision: 'interrupt';
 };
 export type RecoverSessionTarget = { sessionId: string };
+export type ReconcileSessionRequest = {
+  expectedStoreId: string;
+  commandId: string;
+  expectedOwnerGeneration: string;
+};
+export type ReconcileSessionTarget = { sessionId: string };
 export type ReconcileJobRequest = {
   kind: 'job.reconcile';
   expectedStoreId: string;
@@ -3368,6 +3374,25 @@ export type RecoverSessionResponse = {
   requestDigest?: string;
   cancelRequestedAt: number | null;
 };
+export type SessionReconciliation =
+  | {
+      storeId: string;
+      sessionId: string;
+      outcome: 'reconciled';
+      commandId: string;
+      report: {
+        sessionId: string;
+        storeId: string;
+        interruptedRunIds: Array<string>;
+        settledExecutionIds: Array<string>;
+        unknownExecutionIds: Array<string>;
+        cancelledExecutionIds: Array<string>;
+        partialMessageIds: Array<string>;
+        snapshotCursor: string;
+      };
+    }
+  | { storeId: string; sessionId: string; outcome: 'owner_held'; commandId: null; report: null }
+  | { storeId: string; sessionId: string; outcome: 'unchanged'; commandId: null; report: null };
 type JobReconcileCommand___schema0 =
   | string
   | number

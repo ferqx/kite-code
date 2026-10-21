@@ -276,7 +276,18 @@ function stoppedDuringAutoReview(message: Message): boolean {
   );
 }
 
+function executionUnconfirmed(message: Message): boolean {
+  return (
+    !!message.executionUnconfirmed &&
+    !message.settled &&
+    ['creating', 'queued', 'running', 'waiting', 'auto_reviewing', 'recovery_required'].includes(
+      message.status ?? '',
+    )
+  );
+}
+
 function approvalLabel(message: Message): string | undefined {
+  if (executionUnconfirmed(message)) return undefined;
   const approval = message.approval;
   if (!approval) return;
   switch (approval.state) {
@@ -320,6 +331,7 @@ function createdChildTask(message: Message): boolean {
 }
 
 function executionLabel(message: Message) {
+  if (executionUnconfirmed(message)) return '执行状态待核实';
   if (message.status === 'not_executed')
     return message.decisionRefresh === 'context_refresh_required'
       ? '上下文已更新，此次未执行'
@@ -346,6 +358,7 @@ function executionLabel(message: Message) {
 // Trace only decorates facts already present in the host projection. Inactive
 // streams, cancellation and unknown results never imply an execution failure.
 function traceStatus(message: Message): 'running' | 'error' | 'pending' | undefined {
+  if (executionUnconfirmed(message)) return undefined;
   if (!message.settled && (message.status === 'running' || message.approval?.state === 'reviewing'))
     return 'running';
   if (message.status === 'failed' || message.status === 'rejected') return 'error';
@@ -385,7 +398,10 @@ function ShellOutput({ message }: { message: Message }) {
       viewport.current.scrollTop = viewport.current.scrollHeight;
   }, [output]);
   return (
-    <CodeBlock className="shell-output" data-status={message.status}>
+    <CodeBlock
+      className="shell-output"
+      data-status={executionUnconfirmed(message) ? undefined : message.status}
+    >
       <CodeBlockContent
         role="region"
         ref={viewport}
@@ -397,7 +413,7 @@ function ShellOutput({ message }: { message: Message }) {
           setFollowing(follow.current);
         }}
       >
-        {output || '等待输出…'}
+        {output || (executionUnconfirmed(message) ? '执行状态待核实' : '等待输出…')}
         {streams &&
         ['cancelled', 'failed', 'rejected'].includes(message.status ?? '') &&
         message.text &&
@@ -446,7 +462,7 @@ export function ToolRow({
     <TraceLine
       asChild
       status={traceStatus(message)}
-      className={`tool-activity-step ${!message.settled && message.approval?.state === 'reviewing' ? 'running' : (message.status ?? '')}`}
+      className={`tool-activity-step ${executionUnconfirmed(message) ? '' : !message.settled && message.approval?.state === 'reviewing' ? 'running' : (message.status ?? '')}`}
     >
       <div>
         <TraceIcon className="tool-step-marker-icon">
@@ -472,7 +488,10 @@ export function ToolRow({
               </span>
             )}
             {status && status !== '成功' && status !== approval && (
-              <TraceDescription className="tool-step-status" data-status={message.status}>
+              <TraceDescription
+                className="tool-step-status"
+                data-status={executionUnconfirmed(message) ? undefined : message.status}
+              >
                 {status}
               </TraceDescription>
             )}
@@ -552,8 +571,12 @@ export function ToolActivity({
       message.toolName ?? '',
     );
   const edit = !grouped && ['edit_file', 'write_file'].includes(message.toolName ?? '');
-  const running = messages.some((item) => !item.settled && item.status === 'running');
-  const activeItems = grouped ? messages.filter((item) => !item.settled) : [];
+  const running = messages.some(
+    (item) => !executionUnconfirmed(item) && !item.settled && item.status === 'running',
+  );
+  const activeItems = grouped
+    ? messages.filter((item) => !item.settled && !executionUnconfirmed(item))
+    : [];
   const runningItems = activeItems.filter((item) => item.status === 'running');
   const runningCount = runningItems.length;
   const currentTool = runningItems.at(-1) ?? activeItems.at(-1);
@@ -564,7 +587,8 @@ export function ToolActivity({
   const open = expanded ?? false;
   const children = messages.map((item) => renderChildren(item.id.slice(5), true));
   const approval = approvalLabel(message);
-  const pendingReview = !message.settled && message.approval?.state === 'reviewing';
+  const pendingReview =
+    !executionUnconfirmed(message) && !message.settled && message.approval?.state === 'reviewing';
   const summaryTraceStatus =
     running || pendingReview
       ? 'running'
@@ -615,7 +639,9 @@ export function ToolActivity({
           ? '已取消回答'
           : '已取消'
       : grouped
-        ? undefined
+        ? messages.some(executionUnconfirmed)
+          ? '执行状态待核实'
+          : undefined
         : unverified && message.status === undefined
           ? '状态待核对'
           : executionLabel(message);
@@ -660,7 +686,7 @@ export function ToolActivity({
           {groupedIssues}
         </TraceDescription>
       )}
-      {managedShell && (
+      {managedShell && !executionUnconfirmed(message) && (
         <span className="managed-shell-summary" role="status">
           {shellSnapshotLabel(managedShell)}
           {managedShell.shellId && <code>{managedShell.shellId}</code>}
@@ -747,7 +773,10 @@ export function ToolActivity({
                 </span>
               )}
               {status && status !== '成功' && status !== approval && (
-                <TraceDescription className="tool-step-status" data-status={message.status}>
+                <TraceDescription
+                  className="tool-step-status"
+                  data-status={executionUnconfirmed(message) ? undefined : message.status}
+                >
                   {status}
                 </TraceDescription>
               )}

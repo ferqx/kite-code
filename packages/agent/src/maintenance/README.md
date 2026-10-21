@@ -30,7 +30,7 @@ backup、inspect、restore／reconcile 和 GC 在各自调用的资源 owner 内
 
 [backup.ts](backup.ts) 在原 profile-use 排他锁内，先由 [files.ts](files.ts) 将完整 Core DB 与实际存在的 WAL 配对复制到本次私有 scratch，只打开该副本，核原 schema/capture 后执行 `VACUUM INTO` 生成一致候选。原 DB/WAL 的完整字节、存在状态及 dev/ino/ctime/size/mode/uid/nlink 在配对采集、每次复制之后和 SQL 回调前后重新核对；缺失 WAL 不创建替代，原 SHM 不复制，任何变化均拒绝发布。SQL 不打开原库，因此关闭后没有副文件的原 Profile 不会因只读 SQLite 连接而新建 WAL/SHM。scratch 在后续候选验证和发布前删除，不进入备份树。
 
-候选的 `blob_ref` 与 `blob` 决定被引用媒体，以 64KiB 块复制并核对完整长度与 SHA-256。Store、来源 ID、业务序列和未知原始文本保持原值；VACUUM 可能重分配没有 INTEGER PRIMARY KEY 的物理 rowid，备份不把它当业务身份。数据库必须匹配原 0001 或加 0002-recovery-audit 的准确闭合 schema/checksum，通过 integrity/FK 检查；baseline 原 checksum 保持，新增迁移的 capture checksum 绑定完整已应用链，未知项拒绝。只读维护不升级旧库；恢复生成新 Store 后旧证明不能授予执行权，原来源/未知状态继续保留。清单和媒体清单使用 Decimal64 计数、摘要与准确引擎版本/source ID。DB/WAL 完整复制增加临时磁盘占用和读取成本；复制在异步分块检查点响应取消，同步 SQL 不能抢占。配对守卫不声称阻止不遵守应用锁的外部写入者。
+候选的 `blob_ref` 与 `blob` 决定被引用媒体，以 64KiB 块复制并核对完整长度与 SHA-256。Store、来源 ID、业务序列和未知原始文本保持原值；VACUUM 可能重分配没有 INTEGER PRIMARY KEY 的物理 rowid，备份不把它当业务身份。数据库必须匹配原 0001、增加 0002-recovery-audit 或再增加 0003-session-reconciliation 的准确闭合 schema/checksum，通过 integrity/FK 检查；baseline 原 checksum 保持，新增迁移的 capture checksum 绑定完整已应用链，未知项拒绝。只读维护不升级旧库；恢复生成新 Store 后旧证明不能授予执行权，原来源/未知状态继续保留。清单和媒体清单使用 Decimal64 计数、摘要与准确引擎版本/source ID。DB/WAL 完整复制增加临时磁盘占用和读取成本；复制在异步分块检查点响应取消，同步 SQL 不能抢占。配对守卫不声称阻止不遵守应用锁的外部写入者。
 
 仅本次创建的私有 staging 会在失败时删除。数据库、媒体、清单完成验证和 fsync 后才发布 `ready.json`，最后将 staging 改名到独立备份目录并同步父目录。检查备份重新核对数据库、媒体清单、每个媒体完整 hash 和目录内容，不能仅凭 ready 标记认定有效。文件要求私有、当前主体持有、非软链接、单一硬链接；媒体不可写。检查失败不会修改原 profile。
 
@@ -52,7 +52,7 @@ SQLite 的[只读 WAL 说明](https://www.sqlite.org/wal.html#read_only_database
 
 [隔离验证](../../test/isolated/maintenance/backup.test.ts) 在 macOS、Bun 1.4.2 使用真实 SQLite/WAL、17MiB 媒体、超过 2^53 的业务序列和未知原文；验证原文件未变、媒体完整性、第二进程占锁、其他 profile 可取得锁、缺媒体/硬链接/取消失败无 ready、restore journal 和 SQL journal 拒绝、数据库/清单/媒体篡改拒绝。测试不打开用户旧数据、凭据库或 Provider。执行：`bun test packages/agent/test/isolated/maintenance/backup.test.ts`。
 
-同一测试还按 `root=src` 构建独立 maintenance leaf，并复制现行 `storage/migrations/0001-baseline.sql`，从源码树外 consumer 通过包名导入实际创建和检查备份。这证明源码与 bundle 下的迁移资产相对位置；临时制品不替代完整发行包、安装和平台资格。关闭及失败预检回归加入后，2026-10-02 备份、恢复、同 Store 显式 recovery/强杀及取消组合实际通过 28 项测试、306 个断言。
+同一测试还按 `root=src` 构建独立 maintenance leaf，并复制现行 `storage/migrations` 的完整闭合迁移链，从源码树外 consumer 通过包名导入实际创建和检查备份。这证明源码与 bundle 下的迁移资产相对位置；临时制品不替代完整发行包、安装和平台资格。关闭及失败预检回归加入后，2026-10-02 备份、恢复、同 Store 显式 recovery/强杀及取消组合实际通过 28 项测试、306 个断言。
 
 ## Windows 维护文件端口与验收边界
 
@@ -267,6 +267,10 @@ macOS真实代码版本链另由未修改的包内 `bin/kite maintenance backup/
 
 [资产验证](assets.ts)在DB9十表上只接受准确的 scheduled_tasks 和 scheduled_task_runs schema；[独立行验证](desktop-schedules.ts)核闭合字段、UTF8原字节、SQL主键／task_id／occurrence_at、时区、状态、快照和同任务、同 Store 绑定的活动运行唯一性。频率和状态必须是原枚举字符串，数组等可转为同名文本的值仍拒绝。运行的可选 `settlementVersion: 1` 只记录可信 Main 已核原组的终态结算，不由恢复或终态字符串自动补造；旧缺标识历史保持原样。任务上限128条／1MiB，运行上限10000条／32MiB；坏行、未知字段和超限拒绝发表备份或恢复。manifest v19只接受实际DB10，v2–v18仍按原白名单，不可只修改版本标签升级。
 
-备份和恢复保留原任务 Store 与 Command／Session 身份，不改写为新授权；Native 在新Store拒绝自动和手动执行旧任务。恢复后用户可明确编辑保存任务到当前Store，旧运行结果仍留原身份、只供历史阅读，不阻止新绑定运行。维护仍以原字节容量检查备份；超容量旧历史需先由用户明确清理已结算任务，不能借只读展示兼容性发表超限备份。DB10不新增 Core schema，Core仍按实际0001／0002迁移链校验。[真实Node DB10备份恢复测试](../../test/isolated/maintenance/desktop-schedules-profile.test.ts)核原文件字节保持、manifest19 inspect、实际新Store恢复、冷读快照及零Service请求，并核0002链checksum、原恢复证书与执行来源不重绑、新Store拒绝旧Run接续；[闭合manifest测试](../../test/isolated/maintenance/desktop-schedules.test.ts)覆盖改标签拒绝及严格行格式。
+备份和恢复保留原任务 Store 与 Command／Session 身份，不改写为新授权；Native 在新Store拒绝自动和手动执行旧任务。恢复后用户可明确编辑保存任务到当前Store，旧运行结果仍留原身份、只供历史阅读，不阻止新绑定运行。维护仍以原字节容量检查备份；超容量旧历史需先由用户明确清理已结算任务，不能借只读展示兼容性发表超限备份。DB10不新增 Core schema，Core仍按实际0001／0002／0003迁移链校验。[真实Node DB10备份恢复测试](../../test/isolated/maintenance/desktop-schedules-profile.test.ts)核原文件字节保持、manifest19 inspect、实际新Store恢复、冷读快照及零Service请求，并核0002链checksum、原恢复证书与执行来源不重绑、新Store拒绝旧Run接续；[闭合manifest测试](../../test/isolated/maintenance/desktop-schedules.test.ts)覆盖改标签拒绝及严格行格式。
 
 Provider原配置意图新增有限可选kind（upsert/remove）与name；省略kind仍表示原保存语义。DB6及其后继格式的配置codec核命名和删除形状，删除要求准确连接ID、无新凭据、空模型数组；备份恢复仍只保留同一原GET身份，不重建连接、不重发删除、不接触Vault。该闭合扩展由[实际Node配置备份回归](../../test/isolated/maintenance/desktop-configurations.test.ts)覆盖，旧manifest/数据库版本接纳范围不扩大。
+
+## 会话核实 checkpoint 的维护
+
+0003 的 `session_reconciliation` 是同 Store 原执行组接续的私有边界，备份按实际链保留；恢复为新 Store 时若表存在便清除全部行，原 Session／Command／结果出处保留，旧 checkpoint 不成为新授权。旧 0001／0002 只读维护不强制升级。GC 随实际回收 root 删除其 checkpoint，不扩大其他组范围；原 secure_delete／VACUUM／WAL 清理继续覆盖私有内容。安全导出固定白名单不含该表。[恢复](../../test/isolated/maintenance/restore.test.ts)、[GC](../../test/isolated/maintenance/gc.test.ts)、[备份](../../test/isolated/maintenance/backup.test.ts)与[迁移链](../../test/isolated/recovery/run-resume-audit-migration.test.ts)核各自边界，完整语义归[状态 owner](../storage/sqlite/run-resume.README.md#会话恢复时的状态核实)。

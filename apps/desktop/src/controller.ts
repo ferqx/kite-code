@@ -121,7 +121,7 @@ export interface PermissionSubmission {
   readonly receipt?: PermissionMutation;
   readonly error?: string;
 }
-/** Portable main-adapter controller. Selecting a view never owns the Session execution. */
+/** Portable main-adapter controller. Session activation reconciles orphaned work without dispatching it. */
 export class DesktopController {
   readonly client: AgentClient;
   private readonly options: DesktopOptions;
@@ -206,7 +206,25 @@ export class DesktopController {
     const generation = ++this.generation;
     this.selected = { sessionId, queries: structuredClone(queries) };
     this.current = undefined;
-    return this.readSelection(this.selected, generation);
+    this.selectionRead?.abort();
+    const activation = new AbortController();
+    this.selectionRead = activation;
+    let reconciliationError: unknown;
+    if (this.client.serverInfo?.capabilities?.includes('session_reconciliation')) {
+      try {
+        await this.client.reconcileSessionState(sessionId, { signal: activation.signal });
+      } catch (error) {
+        if (activation.signal.aborted || generation !== this.generation || this.disposed) return;
+        reconciliationError = error;
+      }
+    }
+    if (activation.signal.aborted || generation !== this.generation || this.disposed) return;
+    const snapshot = await this.readSelection(this.selected, generation);
+    if (snapshot && reconciliationError) {
+      this.options.onError?.(reconciliationError);
+      throw reconciliationError;
+    }
+    return snapshot;
   }
 
   /** Event refresh re-reads the visible bounded window using fresh observation facts. */
@@ -534,7 +552,11 @@ export class DesktopController {
       onReset: async () => {
         this.cache.clear();
         this.cacheBytes = 0;
-        if (this.selected) await this.readSelection(this.selected, this.generation);
+        if (this.selected) await this.selectSession(this.selected.sessionId, this.selected.queries);
+      },
+      onReady: async () => {
+        if (this.selected)
+          await this.selectSession(this.selected.sessionId, this.selected.queries).catch(() => {});
       },
     });
     this.stream = stream.finally(() => {

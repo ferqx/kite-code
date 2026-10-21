@@ -118,6 +118,8 @@ export interface Message {
     | 'recovery_required'
     | 'unknown'
     | 'not_executed';
+  /** Presentation only: the host cannot confirm this unfinished execution is still owned. */
+  readonly executionUnconfirmed?: boolean;
   readonly parentToolCallId?: string;
   readonly steps?: readonly {
     readonly id: string;
@@ -134,6 +136,8 @@ export interface Message {
 export interface TurnActivity {
   readonly turnId: string;
   readonly unavailable?: boolean;
+  /** Suppresses live activity without changing the persisted Turn status. */
+  readonly executionUnconfirmed?: boolean;
   readonly status:
     | 'queued'
     | 'running'

@@ -88,6 +88,49 @@ function fixture() {
 }
 const settle = () => Bun.sleep(50);
 
+test('selection reconciles before history while ordinary refresh can skip reconciliation', async () => {
+  const f = fixture();
+  const calls: string[] = [];
+  const originalRead = f.port.readSession;
+  f.port.reconcileSession = async (id) => {
+    calls.push(`reconcile:${id}`);
+  };
+  f.port.readSession = async (id, signal) => {
+    calls.push(`read:${id}`);
+    return originalRead(id, signal);
+  };
+  try {
+    await f.controller.select('a');
+    expect(calls).toEqual(['reconcile:a', 'read:a']);
+    calls.length = 0;
+    await f.controller.select('a', { preserveReconnectionReview: true, reconcile: false });
+    expect(calls).toEqual(['read:a']);
+    calls.length = 0;
+    await f.controller.select('a', { preserveReconnectionReview: true });
+    expect(calls).toEqual(['reconcile:a', 'read:a']);
+    expect(f.counts).toEqual({ cancellations: 0, models: 0, created: 0 });
+  } finally {
+    f.controller.dispose();
+  }
+});
+
+test('failed session reconciliation keeps history readable with a visible error', async () => {
+  const f = fixture();
+  f.port.reconcileSession = async () => {
+    throw Error('owner_observation_unknown');
+  };
+  try {
+    await f.controller.select('a');
+    expect(f.controller.state.snapshot?.view.session.id).toBe('a');
+    expect(f.controller.state.loading).toBe(false);
+    expect(f.controller.state.error).toContain('会话执行状态核对失败');
+    expect(f.controller.state.error).toContain('owner_observation_unknown');
+    expect(f.counts).toEqual({ cancellations: 0, models: 0, created: 0 });
+  } finally {
+    f.controller.dispose();
+  }
+});
+
 test('resume deletes the confirmed original row; default Enter retains it without changing the active selection', async () => {
   const f = fixture();
   await f.controller.select('a');

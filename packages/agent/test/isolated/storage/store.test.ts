@@ -256,6 +256,7 @@ describe('real unified SQLite Store', () => {
         'run',
         'schema_migration',
         'session',
+        'session_reconciliation',
         'sqlite_sequence',
         'storage_meta',
         'workspace',

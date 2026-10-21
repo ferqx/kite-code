@@ -6,7 +6,7 @@
 
 原 TUI 的真实终端用例现在经[统一入口](../../scripts/run-unified-tui-system-tests.ts)完整运行在新 UI／Host／Client／Service／Agent 上。配套模式保每个 TUI 独立 Service 实例；显式 `--server` 才连接正式 Daemon，多个客户端可读取同一新 Store／Session，退出只断开共享连接。`/status` 的 stdio／unix／pipe 来自实际可信连接选择，成功配对提示还需核实原实例；不从平台名称猜连接，也不显示凭据、PID 或私有地址。
 
-原 `readSession` 在 Store／Session／Workspace 核验后，只把公开视图 owner 与当前已认证 ServerInfo 实例传给 UI 作活动观察。冷重开读到其他 owner 的持久运行态时保未核实提示，不自动提交恢复、中断或重放，也不声称另一个 Service 已死亡；配套与共享执行生命周期不由显示动画决定。
+原 `readSession` 继续只读。CLI 的 [ensureSession](host/index.ts) 在原 Session／Workspace 核验后、继续已有会话前调用 `reconcileSessionState`；TUI 由 [Host port](host/tui.tsx) 在明确选中与重连时调用，普通事件刷新跳过核实，只读 workspace observer 不获写入能力。失败不隐式继续任务，TUI 保历史及错误。活 owner 保持；后端结算与原 Run 接续归[恢复 owner](../../packages/agent/src/storage/sqlite/run-resume.README.md#会话恢复时的状态核实)。[CLI 准入回归](test/session-reconciliation.test.ts)核目标、工作区拒绝、只读跳过与失败停止，TUI 顺序由[选择器回归](../../packages/ui/test/tui/session-chooser.test.tsx)核对。
 
 [草稿文件](host/tui-drafts.ts)在原 Scope 的写锁内核 CAS；两个编辑器的完整正文相同且实际版本不早于请求时，只返回原记录，不追加写入。不同正文、以空覆盖他人正文、未来版本及不同 Store／Workspace／Session 仍拒绝。正式 `/exit` 先准确消费控制命令，再保存其余草稿；保存失败继续阻止退出，后来编辑不能被恢复的退出命令覆盖。
 

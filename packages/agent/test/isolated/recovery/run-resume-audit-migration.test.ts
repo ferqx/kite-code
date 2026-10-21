@@ -18,7 +18,9 @@ function legacy(path: string) {
     for (const type of ['trigger', 'index', 'table'])
       for (const row of extra.filter((row) => row.type === type))
         db.run(`DROP ${type.toUpperCase()} "${row.name}"`);
-    db.run("DELETE FROM schema_migration WHERE id='0002-recovery-audit'");
+    db.run(
+      "DELETE FROM schema_migration WHERE id IN('0002-recovery-audit','0003-session-reconciliation')",
+    );
     db.run('COMMIT');
     expect(JSON.stringify(db.query(schemaQuery).all())).toBe(supportedSchemas()[0]!.schema);
   } finally {
@@ -59,6 +61,7 @@ test('legacy readonly is unchanged; one writer upgrade certifies all history the
         expect(db.query('SELECT id FROM schema_migration ORDER BY id').all()).toEqual([
           { id: '0001-baseline' },
           { id: '0002-recovery-audit' },
+          { id: '0003-session-reconciliation' },
         ]);
         expect(
           db

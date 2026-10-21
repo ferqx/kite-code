@@ -160,6 +160,11 @@ Settings 模型操作使用 `getModelSettings(scope,{storeId,workspaceId?})` 与
 
 `resumeRun(sessionId,ResumeRunRequest,{signal?})` 要求实际 `run_resume` 能力。请求只含 `kind:"run.resume"/expectedStoreId/commandId/runId`，SDK 在异步准入前克隆原意图，使用 closed schema 验证并发送一次 POST；owner generation 是服务端内部边界，不属于公开请求。回执必须匹配原 Store、Session、Command 与 Run，accepted/null 不代表恢复完成。坏身份、坏回执或物理丢回复返回 `network_outcome_unknown`，只以原 ID `getCommand` 核实；`decodeRunResumeCommand` 提供纯闭合回执校验，调用者还须核自己的原身份，不自动重试或创建新 Run。[真实回环反例](test/isolated/run-resume.test.ts)核缺能力与错误身份零 POST、调用者修改 alias、closed authority、有限回执和物理断线。
 
+`reconcileSession(sessionId,{expectedStoreId,commandId,expectedOwnerGeneration},{signal?})` 要求 `session_reconciliation` 能力，向独立 POST 提交一次原根会话状态核实。generation 仅绑定观察版本，最终锁／主体与整组事实由 Core 验证。回执区分 owner_held、unchanged 和 reconciled，成功不派发工作。
+
+`reconcileSessionState(sessionId,{signal?})` 用于 Native／TUI 选中或重连及 CLI 继续已有会话：先读原 Session 与准确 root，以原 Store／root／generation 派生固定 commandId，提交一次后重新读原请求会话。即使 root 已结束也核其后代；空闲整组由 Core 返回 unchanged，不要求不存在的旧锁文件。失败保留原 commandId，不换 generation 自动重发；普通 GET／SSE 不调用此方法，Browser 无写入口。[SDK 回归](test/isolated/session-reconciliation.test.ts)核子目标／整组、空闲、一次 POST、错误和响应身份；状态规则归[恢复 owner](../agent/src/storage/sqlite/run-resume.README.md#会话恢复时的状态核实)。
+
+
 `recoverSession(sessionId,{kind:"session.recover",expectedStoreId,commandId,decision:"interrupt"},{signal?})` 要求实际 `session_recovery` 能力，显式中断原根执行组的遗留工作。SDK 私有复制原意图，闭合请求不接受 owner、generation 或主体。回执只公开原 Store/Session、准确中断/结算/未知/取消/partial ID 集与 Decimal64 观察水位，核原 Command 和连接代次；私有 owner fence 不属于公共回执。物理丢回复、坏回执或错误身份仍为 `network_outcome_unknown`，不自动重发或转向新 Session。
 
 `decodeSessionRecoveryCommand` 与 `decodeJobReportResumeCommand` 提供原 `getCommand` 的纯回执校验；调用者仍须核自己保存的原 ID/Store/Session 及报告目标。GET 不取得恢复所有权、不执行模型或工具。Session 中断不证明未知外部效果已经停止，也不解除它对新执行的阻挡。[SDK 协议反例](test/isolated/session-recovery.test.ts)核十类丢失/坏回执与原意图 alias；[真实 Service 强杀与物理丢回执](../../apps/service/test/isolated/session-recovery.test.ts)核原效果 ledger、partial、同 ID 幂等及零重放。

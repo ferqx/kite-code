@@ -237,3 +237,50 @@ test('manual process collapse, model completion, tools, approval wait and later 
     }
   }
 });
+
+test('unconfirmed execution hides live response and busy state while a held observation restores them', () => {
+  const messages = [user, assistant('unfinished')];
+  for (const status of activeStatuses) {
+    inspect(messages, { turnId: 'run', status, executionUnconfirmed: true }, (document) => {
+      expect(document.querySelectorAll('.response-status')).toHaveLength(0);
+      expect(document.querySelector('.agent-turn-status-label')?.textContent).toBe(
+        '执行状态待核实',
+      );
+      expect(document.querySelector('[aria-label="会话消息"]')?.getAttribute('aria-busy')).toBe(
+        'false',
+      );
+      expect(document.body.textContent).toContain('unfinished content');
+    });
+    inspect(messages, { turnId: 'run', status }, (document) => expectBottomResponse(document));
+  }
+  for (const status of ['completed', 'failed', 'cancelled'] as const)
+    inspect(
+      [assistant('finished', true), terminal(status)],
+      {
+        turnId: 'run',
+        status,
+        executionUnconfirmed: true,
+      },
+      (document) => {
+        expect(document.querySelectorAll('.response-status')).toHaveLength(0);
+        expect(document.body.textContent).not.toContain('执行状态待核实');
+      },
+    );
+  expect(messages[1]?.settled).toBe(false);
+});
+
+test('a committed terminal wins over a stale active unconfirmed Turn observation', () => {
+  for (const status of ['completed', 'failed', 'cancelled', 'aborted'] as const)
+    inspect(
+      [assistant('finished', true), terminal(status)],
+      {
+        turnId: 'run',
+        status: 'running',
+        executionUnconfirmed: true,
+      },
+      (document) => {
+        expect(document.body.textContent).not.toContain('执行状态待核实');
+        expect(document.querySelectorAll('.response-status')).toHaveLength(0);
+      },
+    );
+});
