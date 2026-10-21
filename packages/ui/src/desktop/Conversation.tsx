@@ -11,6 +11,7 @@ import {
   useState,
 } from 'react';
 import { useConversationActivity } from '../conversation-activity';
+import { ClipboardWriteContext, CodeCopyEligibilityContext } from './clipboard';
 import {
   AnimatedCollapsibleContent,
   Collapsible,
@@ -46,6 +47,13 @@ function isTurnFailure(message: Message): boolean {
     message.role === 'system' &&
     (message.systemKind === 'turn_failure' ||
       (message.status === 'failed' && message.id === `failure:${message.turnId}`))
+  );
+}
+
+function isOngoingTurn(activity?: TurnActivity): boolean {
+  return (
+    !!activity &&
+    ['queued', 'running', 'waiting', 'cancelling', 'recovery_required'].includes(activity.status)
   );
 }
 
@@ -88,27 +96,16 @@ function turnElapsedMilliseconds(startedAtMs?: number, endedAtMs?: number): numb
 function TurnElapsed({
   startedAtMs,
   finishedAtMs,
-  running,
   prefix,
 }: {
   startedAtMs?: number;
   finishedAtMs?: number;
-  running: boolean;
   prefix: string;
 }) {
-  const { readActive } = useConversationActivity();
-  const [now, setNow] = useState(Date.now);
-  useEffect(() => {
-    if (!readActive || !running || startedAtMs === undefined || finishedAtMs !== undefined) return;
-    setNow(Date.now());
-    const timer = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(timer);
-  }, [readActive, running, startedAtMs, finishedAtMs]);
-  const end = finishedAtMs ?? (running ? now : undefined);
-  const elapsed = turnElapsedMilliseconds(startedAtMs, end);
+  const elapsed = turnElapsedMilliseconds(startedAtMs, finishedAtMs);
   if (elapsed === undefined) return null;
   return (
-    <span aria-hidden={running || undefined}>
+    <span>
       {prefix}
       {formatTurnElapsed(elapsed)}
     </span>
@@ -130,6 +127,7 @@ const MessageItem = memo(function MessageItem({
   restoredExpanded,
   childDetail,
   renderContent,
+  showResponseStatus = true,
 }: {
   message: Message;
   expanded?: boolean;
@@ -145,6 +143,7 @@ const MessageItem = memo(function MessageItem({
   writeClipboardText?: (text: string) => Promise<void>;
   childDetail?: { readonly label: string; readonly onOpen: () => void };
   renderContent?: (message: Message) => ReactNode;
+  showResponseStatus?: boolean;
 }) {
   // Raw model reasoning is never part of the readable transcript.
   if (message.role === 'thinking') return null;
@@ -294,30 +293,34 @@ const MessageItem = memo(function MessageItem({
       data-final-reply={message.role === 'assistant' ? Boolean(message.finalReply) : undefined}
       aria-label={message.role === 'user' ? '用户消息' : '助手消息'}
     >
-      {renderContent ? (
-        renderContent(message)
-      ) : message.role === 'assistant' ? (
-        <>{message.text && <MessageContent text={message.text} openFile={openFile} />}</>
-      ) : (
-        <>
-          <p className="user-text">{message.text}</p>
-          {message.delivery && (
-            <small
-              className="delivery-status"
-              role={message.delivery === 'sending' ? 'status' : 'alert'}
-            >
-              {message.delivery === 'sending'
-                ? '正在发送…'
-                : message.delivery === 'failed'
-                  ? '发送失败，可在输入框中重试'
-                  : '发送结果待确认，请检查会话状态'}
-            </small>
-          )}
-        </>
-      )}
-      {message.role === 'assistant' && !message.settled && (
+      <CodeCopyEligibilityContext.Provider value={Boolean(copyText)}>
+        {renderContent ? (
+          renderContent(message)
+        ) : message.role === 'assistant' ? (
+          <>{message.text && <MessageContent text={message.text} openFile={openFile} />}</>
+        ) : (
+          <>
+            <p className="user-text">{message.text}</p>
+            {message.delivery && (
+              <small
+                className="delivery-status"
+                role={message.delivery === 'sending' ? 'status' : 'alert'}
+              >
+                {message.delivery === 'sending'
+                  ? '正在发送…'
+                  : message.delivery === 'failed'
+                    ? '发送失败，可在输入框中重试'
+                    : '发送结果待确认，请检查会话状态'}
+              </small>
+            )}
+          </>
+        )}
+      </CodeCopyEligibilityContext.Provider>
+      {showResponseStatus && message.role === 'assistant' && !message.settled && (
         <small className="response-status" role="status">
-          正在回复…
+          <span className="inline-block shimmer shimmer-color-foreground shimmer-spread-[16px] shimmer-duration-1500">
+            正在回复…
+          </span>
         </small>
       )}
       {copyText && (
@@ -731,7 +734,10 @@ export function Conversation({
       groups: [],
     });
   }
-  const renderGroup = (group: Message[]) => {
+  const lastEntryByTurn = new Map(
+    entries.filter((entry) => entry.turnId).map((entry) => [entry.turnId, entry]),
+  );
+  const renderGroup = (group: Message[], turnScoped = false) => {
     const message = group[0]!;
     if (structural(message)) return null;
     if (renderMessage)
@@ -816,6 +822,7 @@ export function Conversation({
           openFile={openFile}
           writeClipboardText={writeClipboardText}
           renderContent={renderMessageContent}
+          showResponseStatus={!turnScoped}
           copyText={
             message.role === 'user' && message.settled && !message.delivery && message.text
               ? message.copyText === null
@@ -829,7 +836,8 @@ export function Conversation({
     );
   };
   const renderEntry = (entry: (typeof entries)[number]) => {
-    if (!entry.turnId) return <Fragment key={entry.key}>{entry.groups.map(renderGroup)}</Fragment>;
+    if (!entry.turnId)
+      return <Fragment key={entry.key}>{entry.groups.map((group) => renderGroup(group))}</Fragment>;
     const finalGroup = entry.groups.find(
       ([message]) => message?.role === 'assistant' && message.settled && message.finalReply,
     );
@@ -843,9 +851,7 @@ export function Conversation({
     const active =
       !terminalStatus &&
       (activity && !activity.unavailable
-        ? ['queued', 'running', 'waiting', 'cancelling', 'recovery_required'].includes(
-            activity.status,
-          )
+        ? isOngoingTurn(activity)
         : !turnActivity && entry.groups.some((group) => group.some((message) => !message.settled)));
     const failed =
       activity?.status === 'failed' || terminalStatus === 'failed' || failureGroups.length > 0;
@@ -863,15 +869,22 @@ export function Conversation({
       !cancelled &&
       !aborted &&
       (!!finalGroup || terminalStatus === 'completed' || activity?.status === 'completed');
+    // The Run owns response activity across model/tool/approval phases. A
+    // temporary observation failure is not a terminal fact. Only the last
+    // entry for an exact Turn carries its indicator, outside process collapse.
+    const responding =
+      entry === lastEntryByTurn.get(entry.turnId) &&
+      !terminalStatus &&
+      (activity
+        ? isOngoingTurn(activity)
+        : active && !completed && !failed && !cancelled && !aborted);
     const finishedDuration = completed
       ? turnElapsedMilliseconds(timing?.turnStartedAtMs, timing?.turnFinishedAtMs)
       : undefined;
-    const runningTimer =
-      !completed &&
-      !activity?.unavailable &&
-      !terminalStatus &&
-      ['running', 'waiting'].includes(activity?.status ?? '') &&
-      turnElapsedMilliseconds(timing?.turnStartedAtMs, Date.now()) !== undefined;
+    const responseLabel =
+      active && thinking && !runningTool && (!activity || activity.status === 'running')
+        ? '正在思考…'
+        : '正在回复…';
     const label = activity?.unavailable
       ? '上次确认状态'
       : failed
@@ -892,13 +905,7 @@ export function Conversation({
                     ? '正在等待'
                     : activity?.status === 'queued'
                       ? '等待处理'
-                      : active && thinking && !runningTool
-                        ? '正在思考'
-                        : active
-                          ? runningTimer
-                            ? '已处理'
-                            : '正在处理'
-                          : '处理过程';
+                      : '处理过程';
     const showProcess = processGroups.length > 0;
     // A settled Turn starts a new reading state even when no final reply was
     // confirmed. Its process closes once, then the reader's choice persists.
@@ -915,20 +922,16 @@ export function Conversation({
     // the default-open process moves the transcript for the entire animation.
     // A later user toggle removes this marker and keeps the normal animation.
     if (restore.current && open) restoredExpanded.current.add(turnKey);
-    const elapsedPrefix =
-      finishedDuration !== undefined || (runningTimer && label === '已处理')
-        ? ' '
-        : runningTimer
-          ? ' · 已处理 '
-          : ' · 用时 ';
     const statusContent = (
-      <span className="agent-turn-status-label" role={active ? 'status' : undefined}>
+      <span
+        className="agent-turn-status-label"
+        role={active && label !== '处理过程' ? 'status' : undefined}
+      >
         {label}
         <TurnElapsed
           startedAtMs={timing?.turnStartedAtMs}
           finishedAtMs={timing?.turnFinishedAtMs}
-          running={runningTimer}
-          prefix={elapsedPrefix}
+          prefix={finishedDuration !== undefined ? ' ' : ' · 用时 '}
         />
       </span>
     );
@@ -976,111 +979,124 @@ export function Conversation({
               </div>
               <AnimatedCollapsibleContent className="agent-turn-content">
                 <section className="agent-turn-process-messages" aria-label="本轮处理过程">
-                  {processGroups.map(renderGroup)}
+                  {processGroups.map((group) => renderGroup(group, true))}
                 </section>
               </AnimatedCollapsibleContent>
             </div>
           </Collapsible>
         )}
-        {!showProcess && (finalGroup || failureGroups.length === 0) && (
-          <div className="agent-turn-summary agent-turn-summary-static" role="status">
-            {statusContent}
+        {!showProcess &&
+          (finalGroup || failureGroups.length === 0) &&
+          (!responding || label !== '处理过程') && (
+            <div className="agent-turn-summary agent-turn-summary-static" role="status">
+              {statusContent}
+            </div>
+          )}
+        {finalGroup && <div className="agent-turn-final">{renderGroup(finalGroup, true)}</div>}
+        {failureGroups.length > 0 && (
+          <div className="agent-turn-failure">
+            {failureGroups.map((group) => renderGroup(group, true))}
           </div>
         )}
-        {finalGroup && <div className="agent-turn-final">{renderGroup(finalGroup)}</div>}
-        {failureGroups.length > 0 && (
-          <div className="agent-turn-failure">{failureGroups.map(renderGroup)}</div>
+        {responding && (
+          <small className="response-status" role="status">
+            <span className="inline-block shimmer shimmer-color-foreground shimmer-spread-[16px] shimmer-duration-1500">
+              {responseLabel}
+            </span>
+          </small>
         )}
       </section>
     );
   };
   return (
-    <div className="conversation-container">
-      <div className="conversation">
-        <div
-          ref={viewport}
-          className="conversation-viewport"
-          {...{
-            role: 'region',
-            'aria-label': '会话消息',
-            'aria-busy':
-              loading ||
-              ['queued', 'running', 'waiting'].includes(turnActivity?.status ?? '') ||
-              messages.some(
-                (message) =>
-                  message.systemKind !== 'turn_timing' &&
-                  (!message.turnId || !terminalByTurn.get(message.turnId)) &&
-                  (message.delivery === 'sending' ||
-                    ((message.role === 'assistant' ||
-                      message.role === 'tool' ||
-                      message.role === 'subagent' ||
-                      message.role === 'thinking' ||
-                      message.role === 'system') &&
-                      !message.settled)),
-              ),
-            onScroll: () => {
-              const element = viewport.current;
-              if (!element || loading || restore.current) return;
-              if (
-                writtenScrollTop.current !== undefined &&
-                Math.abs(element.scrollTop - writtenScrollTop.current) < 1
-              )
-                return;
-              writtenScrollTop.current = undefined;
-              const follow = element.scrollHeight - element.clientHeight - element.scrollTop < 48;
-              reading.current = {
-                top: element.scrollTop,
-                follow,
-                expanded: reading.current.expanded,
-              };
-              setFollowing(follow);
-            },
-          }}
-        >
-          <div ref={content} className="reading-column">
-            {!loading &&
-              (!entries.length ? (
-                <div className="welcome">
-                  <h1>{emptyState?.title ?? (selected ? '从一个想法开始' : '继续你的工作')}</h1>
-                  <p>
-                    {emptyState?.detail ??
-                      (selected
-                        ? '描述你的目标，或写下需要一起解决的问题。'
-                        : connected
-                          ? '选择已有会话，或为新的工作创建一个会话。'
-                          : '选择本地项目，连接你的模型与工具。')}
-                  </p>
-                </div>
-              ) : (
-                entries.map(renderEntry)
-              ))}
-            {!loading && selected && requiredSubagentWait && (
-              <Marker className="mt-4" role="status">
-                <MarkerContent>正在等待子 Agent 结果</MarkerContent>
-              </Marker>
-            )}
+    <ClipboardWriteContext.Provider value={writeClipboardText}>
+      <div className="conversation-container">
+        <div className="conversation">
+          <div
+            ref={viewport}
+            className="conversation-viewport"
+            {...{
+              role: 'region',
+              'aria-label': '会话消息',
+              'aria-busy':
+                loading ||
+                isOngoingTurn(turnActivity) ||
+                messages.some(
+                  (message) =>
+                    message.systemKind !== 'turn_timing' &&
+                    (!message.turnId || !terminalByTurn.get(message.turnId)) &&
+                    (message.delivery === 'sending' ||
+                      ((message.role === 'assistant' ||
+                        message.role === 'tool' ||
+                        message.role === 'subagent' ||
+                        message.role === 'thinking' ||
+                        message.role === 'system') &&
+                        !message.settled)),
+                ),
+              onScroll: () => {
+                const element = viewport.current;
+                if (!element || loading || restore.current) return;
+                if (
+                  writtenScrollTop.current !== undefined &&
+                  Math.abs(element.scrollTop - writtenScrollTop.current) < 1
+                )
+                  return;
+                writtenScrollTop.current = undefined;
+                const follow = element.scrollHeight - element.clientHeight - element.scrollTop < 48;
+                reading.current = {
+                  top: element.scrollTop,
+                  follow,
+                  expanded: reading.current.expanded,
+                };
+                setFollowing(follow);
+              },
+            }}
+          >
+            <div ref={content} className="reading-column">
+              {!loading &&
+                (!entries.length ? (
+                  <div className="welcome">
+                    <h1>{emptyState?.title ?? (selected ? '从一个想法开始' : '继续你的工作')}</h1>
+                    <p>
+                      {emptyState?.detail ??
+                        (selected
+                          ? '描述你的目标，或写下需要一起解决的问题。'
+                          : connected
+                            ? '选择已有会话，或为新的工作创建一个会话。'
+                            : '选择本地项目，连接你的模型与工具。')}
+                    </p>
+                  </div>
+                ) : (
+                  entries.map(renderEntry)
+                ))}
+              {!loading && selected && requiredSubagentWait && (
+                <Marker className="mt-4" role="status">
+                  <MarkerContent>正在等待子 Agent 结果</MarkerContent>
+                </Marker>
+              )}
+            </div>
           </div>
         </div>
+        {loading && (
+          <div className="conversation-loading" role="status" aria-label="正在加载聊天">
+            <HugeiconsIcon aria-hidden="true" data-icon="kite-loading" icon={KiteIcon} />
+          </div>
+        )}
+        {!following && !loading && (
+          <Button
+            className="jump-latest"
+            onClick={() => {
+              const element = viewport.current;
+              if (!element) return;
+              writeScroll(element, element.scrollHeight);
+              reading.current = { ...reading.current, follow: true, top: element.scrollTop };
+              setFollowing(true);
+            }}
+          >
+            回到最新消息
+          </Button>
+        )}
       </div>
-      {loading && (
-        <div className="conversation-loading" role="status" aria-label="正在加载聊天">
-          <HugeiconsIcon aria-hidden="true" data-icon="kite-loading" icon={KiteIcon} />
-        </div>
-      )}
-      {!following && !loading && (
-        <Button
-          className="jump-latest"
-          onClick={() => {
-            const element = viewport.current;
-            if (!element) return;
-            writeScroll(element, element.scrollHeight);
-            reading.current = { ...reading.current, follow: true, top: element.scrollTop };
-            setFollowing(true);
-          }}
-        >
-          回到最新消息
-        </Button>
-      )}
-    </div>
+    </ClipboardWriteContext.Provider>
   );
 }

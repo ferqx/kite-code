@@ -140,7 +140,8 @@ test('desktop tight and loose lists keep separate paragraph, code and nested-lis
     try {
       const list = dom.window.document.querySelector('.typeset-chat > ol')!,
         [first, second, last] = [...list.children];
-      expect([...first!.children].map((element) => element.tagName)).toEqual(['P', 'PRE', 'P']);
+      expect([...first!.children].map((element) => element.tagName)).toEqual(['P', 'DIV', 'P']);
+      expect(first!.children[1]!.getAttribute('data-slot')).toBe('code-block');
       expect(first!.querySelector('strong')!.textContent).toBe('bold');
       expect(first!.querySelector('pre > code')!.textContent).toBe('original command\n');
       expect(first!.lastElementChild!.textContent).toBe('After the code.');
@@ -150,7 +151,8 @@ test('desktop tight and loose lists keep separate paragraph, code and nested-lis
         true,
         false,
       ]);
-      expect([...last!.children].map((element) => element.tagName)).toEqual(['P', 'PRE']);
+      expect([...last!.children].map((element) => element.tagName)).toEqual(['P', 'DIV']);
+      expect(last!.children[1]!.getAttribute('data-slot')).toBe('code-block');
       expect(last!.querySelector('pre > code')!.textContent).toBe('last command\n');
       expect(JSON.stringify(tree)).toBe(saved);
       return list.textContent;

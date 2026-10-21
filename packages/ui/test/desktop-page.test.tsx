@@ -1,4 +1,5 @@
 import { expect, test } from 'bun:test';
+import { JSDOM } from 'jsdom';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { SessionPage, type SessionPageProps } from '../src/desktop';
 
@@ -221,7 +222,11 @@ test('an unsettled assistant message exposes reply activity outside its content'
   );
   expect(streaming).toContain('aria-busy="true"');
   expect(streaming).toContain('class="message assistant responding"');
-  expect(streaming).toContain('class="response-status" role="status">正在回复…');
+  const dom = new JSDOM(streaming);
+  expect(dom.window.document.querySelector('.response-status[role="status"]')?.textContent).toBe(
+    '正在回复…',
+  );
+  dom.window.close();
   expect(streaming).toContain('已经生成的部分');
 
   const settled = renderToStaticMarkup(<SessionPage {...base} />);

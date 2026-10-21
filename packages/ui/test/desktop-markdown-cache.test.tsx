@@ -76,7 +76,9 @@ test('remounting the cached Desktop pipeline preserves safety, exact Unicode/cod
     expect(html).not.toContain('<img');
     expect(html).not.toContain('href="javascript:');
     expect(html).toContain('href="https://example.com"');
-    expect(html).toContain(`<code class="language-txt">${unicode}\n</code>`);
+    expect(html).toContain(
+      `<code data-slot="code-block-code" class="language-txt">${unicode}\n</code>`,
+    );
   }
   // Above the cache budget, the complete body remains readable on each mount.
   const overBudget = `\`\`\`txt\n${'全'.repeat(1100000)}\nUNTRUNCATED🙂\n\`\`\``;

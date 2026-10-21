@@ -12,7 +12,13 @@ Composer 在原停止按钮内使用 Hugeicons `StopIcon` 的实心方块，填�
 
 [Conversation](src/desktop/Conversation.tsx)首次呈现历史时，对默认展开的活动轮次同样登记 `data-restored-expanded`，直接进入完整高度，避免首次打开重播300ms展开动画而带动正文移动。缓存恢复与冷历史共用原恢复标记，后续手动开合由 `onToggle` 清除标记并继续动画；不改变展开选择、消息顺序或滚动跟随。[轮次回归](test/desktop-reasoning-turns.test.tsx)核冷／恢复两种入口；生产组件浏览器耗时、逐帧高度及连续流式证据归 [Desktop owner](../../apps/desktop/README.md#会话消息渲染验证)。
 
-同一组件的 `.response-status` 沿[共享 CSS](src/desktop/style.css)正常参与正文排版，为“正在回复…”保留实际行高；不再用绝对定位将其放到消息盒外，避免活动过程的折叠裁剪层截去状态末行。底部跟随继续由同一消息高度驱动；浏览器回归核状态文字完整位于viewport与各级裁剪容器内。
+同一组件的 `.response-status` 沿[共享 CSS](src/desktop/style.css)正常参与轮次底部排版，为“正在回复…”保留24px行高，位于处理过程折叠区外。轮次提示的上方留白使用正文块间距；上方为展开工具时使用原混合间距，抵消工具控件自身留白。显示提示时过程区不再叠加底部 padding，收起过程或尚无正文时仍保留完整块间距。底部跟随继续由阅读内容高度驱动；浏览器回归核状态文字完整位于viewport与各级裁剪容器内。
+
+“正在回复…”与工具消息共用字号、字体及文字颜色规则，使用 `--conversation-text-size`（默认14px）和 `--muted-foreground`。思考／回复标签直接使用宿主已引入的 [shadcn shimmer utility](https://ui.shadcn.com/docs/utils/shimmer)，以行内块将流光范围限制在标签文字，使用语义前景色作为高光以跟随应用主题；通过库内置 `shimmer-spread-[16px]` 和 `shimmer-duration-1500` 将高光收窄为16px、每1.5秒扫过一次，避免默认宽光带在短状态文字上仅呈现整句轻微变色；沿库内置的减少动态效果规则恢复静态文字，不新增动画实现或依赖。读取与业务交互门禁保持。
+
+该提示由 [Conversation](src/desktop/Conversation.tsx) 按准确 `turnActivity` 与终态 marker 在轮次底部呈现，位于过程折叠区外。普通活动过程入口固定为“处理过程”；准确的当前未结束思考且没有活动工具时，底部同一节点显示“正在思考…”，出现正文或活动工具后恢复“正在回复…”。底部状态只显示思考／回复文字，不附运行时长；`TurnElapsed` 仅在原 summary 展示可靠起止时间对应的终态耗时，不再启动活动计时器。没有可展开过程的普通活动轮次不显示空 summary，首条状态行不额外增加顶部留白；等待、停止、恢复、失败与不可核实头部保留。
+
+模型或工具消息的 `settled` 不结束轮次提示；queued、running、waiting、cancelling 与 recovery_required 保持，真实 terminal 优先移除，同 Turn 分裂条目仅末条目显示一次。暂时 `unavailable` 保留上次确认的活动展示和原不可核实说明，不显示新的思考判断；不扩大当前读取或操作资格。无 Turn 身份的旧独立流式消息保留原局部提示。[生命周期回归](test/isolated/desktop-turn-response.test.tsx)核空正文、思考／回复节点切换、工具、观察失败、折叠及真实终态。
 
 Composer 的图片卡片保持固定预览区域，接受宿主交付的小尺寸URL并提示异步解码；等待URL时显示准备占位，可选 `previewError` 只显示预览失败，不改变原 `loading/error` 的发送门禁。图片转换、缓存与原字节校验归 [Desktop owner](../../apps/desktop/README.md#markdown-与附件输入)，UI不读取或转换原图。Native登记给ConversationCache的图片成本现包含缩略图编码字节与RGBA像素估算，继续使用原媒体／DOM预算、停用和释放协议；派生Blob的独立有界缓存由原窗口owner管理，不能恢复旧读取资格。
 
@@ -109,6 +115,12 @@ Composer 的图片卡片保持固定预览区域，接受宿主交付的小尺�
 SessionPage 的可选 `covered` 保留主panel树、尺寸和阅读实例，以opacity0／inert／aria-hidden退出绘制与交互；`overlays` 仍在同级可见层。窄侧栏模态在covered期间暂时关闭，记住原开关，避免旧模态与宿主新视图竞争焦点。该属性不取消任务或重新选择会话；标签页隐藏网页并卸载当前工具reader，其余宿主reader保持原合同，默认不覆盖页面。原 [DialogContent](src/desktop/components/ui/dialog.tsx)新增可选 `showOverlay`，默认true保旧遮罩；Native全屏设置明确false，仍由原Radix内容保焦点、Escape与模态语义。具体玻璃层和状态恢复由 [Native owner](../../apps/desktop/README.md#windows-原生-mica)维护。
 
 原 [MessageContent](src/desktop/MessageContent.tsx)和 [ToolActivity / ToolRow](src/desktop/ToolActivity.tsx)公开给 Native 复用，文件操作仍只调用显式宿主回调。`ModelOutputMessage.renderText` 可为同一预览或已验证全文提供宿主展示；不改完整读取、身份／字节门禁、关闭与 onContent，未传时继续 SafeMessageMarkdown。当前 Native 的消息路径与默认模型摘要归 [Desktop owner](../../apps/desktop/README.md#原消息文件路径与常规摘要)，纯 UI 不取得文件、来源核验或编辑器权限。
+
+[Code Block](src/desktop/components/ui/code-block.tsx)与[Trace](src/desktop/components/ui/trace.tsx)使用官方 shadcn/ui 的 Radix 源码结构，分别适配现有 Button、Hugeicons 和语义 token。[MarkdownCodeBlock](src/desktop/MarkdownCodeBlock.tsx)只接块级代码，保留原 `pre > code`、语言类、缩进与换行；默认单段文本、不拆行或异步高亮，正文仍走原 Markdown parser 与安全规则。语言标题和复制操作由 Code Block parts 组合，行内代码与表格身份保持。[Markdown 回归](test/markdown.test.tsx)和[代码块回归](test/isolated/desktop-code-block.test.tsx)核语言、准确复制、原安全限制与复制资格。
+
+[Clipboard context 与 hook](src/desktop/clipboard.tsx)复用原消息复制生命周期；Conversation 提供宿主 port，正文内的代码复制同时消费原 `copyText` 资格，包含自定义正文 reader 子树。预览或未核实最终回复不提供代码复制，已核实正文关闭后撤销；停用、换文或换 port 的迟到结果失效，已完成反馈沿原两秒截止时间保留。复制不从 DOM 重建文本，不新开宿主或业务接口。
+
+ToolActivity／ToolRow 用 TraceLine、Title、Icon、Description 和受控 Collapsible 承载原工具过程；`asChild`保留原按钮／div、独立文件操作、展开身份和恢复动画层。状态只消费已有执行事实，取消或结果未知不转成 Trace error；Shell 以 CodeBlockContent 保留原具名 PRE、256px输出上限、24px跟随阈值、截断、退出码和回到最新。[聚合回归](test/isolated/desktop-tool-aggregation.test.tsx)验证真实 DOM 和输出追加；正式生产样式与浏览器验证归 [Desktop owner](../../apps/desktop/README.md#会话消息渲染验证)。
 
 `MessageContent` 的宿主文件回调在 layout effect 取得当前已提交值，稳定派发函数只调用这一值；正文解析组件只按原 text 保持 memo。私有 Context 将当前回调能力交给独立 Markdown 链接，能力撤销仍立即把文件按钮改为不可点击文本，重新提供及正文变化正常更新；普通回调更新与历史校准的撤销／恢复都不重新解析未变化正文。[原 Markdown 测试](test/markdown.test.tsx)通过实际 DOM 点击核最新回调、撤销／恢复、解码路径、外链和正文更新；不使用忽略回调的比较器保留旧宿主权限。实际 Native 完整历史与退出证据归[本轮进度](../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-11native-完整历史校准与正文解析)，不据解析复用提升读取或阶段资格。
 

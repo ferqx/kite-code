@@ -21,7 +21,8 @@ test('Native retains verified reply copy DOM through paused calibration and revo
   });
   const host = dom.window.document.getElementById('root')!,
     root = createRoot(host);
-  const content = '完整已核验回复🙂',
+  const code = 'const verified = "汉字🙂";\n';
+  const content = `完整已核验回复🙂\n\n\`\`\`ts\n${code}\`\`\``,
     contentBytes = String(new TextEncoder().encode(content).length);
   const message: Message = {
     id: 'model',
@@ -30,7 +31,7 @@ test('Native retains verified reply copy DOM through paused calibration and revo
     seq: '1',
     role: 'assistant',
     status: 'complete',
-    content: 'PREVIEW',
+    content: '```ts\nPREVIEW\n```',
     outputBody: {
       kind: 'model_output',
       executionId: 'model-execution',
@@ -113,6 +114,10 @@ test('Native retains verified reply copy DOM through paused calibration and revo
   try {
     await render();
     const button = host.querySelector<HTMLButtonElement>('.message-copy')!;
+    const codeButton = host.querySelector<HTMLButtonElement>(
+      '[data-slot="code-block-copy-button"]',
+    )!;
+    expect(codeButton).not.toBeNull();
     const body = host.querySelector('.message-markdown p')!;
     await act(async () => button.click());
     expect(writes).toEqual([content]);
@@ -123,6 +128,7 @@ test('Native retains verified reply copy DOM through paused calibration and revo
     );
     expect(published.at(-1)).toBe(content);
     expect(host.querySelector('.message-copy') === button).toBe(true);
+    expect(host.querySelector('[data-slot="code-block-copy-button"]') === codeButton).toBe(true);
     Object.defineProperty(dom.window.document, 'hidden', { configurable: true, value: false });
     await render('b');
     expect(published.at(-1)).toBe(content);
@@ -131,6 +137,7 @@ test('Native retains verified reply copy DOM through paused calibration and revo
     expect(host.querySelector('.message-markdown p') === body).toBe(true);
     expect(button.getAttribute('data-copy-state')).toBe('copied');
     await act(async () => button.click());
+    await act(async () => codeButton.click());
     expect(writes).toEqual([content]);
     await render();
     expect(host.querySelector('.message-copy') === button).toBe(true);
@@ -140,11 +147,18 @@ test('Native retains verified reply copy DOM through paused calibration and revo
     await act(async () => close.click());
     expect(published.at(-1)).toBeUndefined();
     expect(host.querySelector('.message-copy') === null).toBe(true);
+    expect(host.querySelector('[data-slot="code-block-copy-button"]')).toBeNull();
+    expect(host.querySelector('[data-slot="code-block-code"]')?.textContent).toBe('PREVIEW\n');
     const open = [...host.querySelectorAll('button')].find(
       (node) => node.textContent === 'Read complete recorded Model output',
     )!;
     await act(async () => open.click());
     expect(published.at(-1)).toBe(content);
+    const reopenedCode = host.querySelector<HTMLButtonElement>(
+      '[data-slot="code-block-copy-button"]',
+    )!;
+    await act(async () => reopenedCode.click());
+    expect(writes).toEqual([content, code]);
     await render('b');
     await render('b', true, 'other-store');
     expect(published.at(-1)).toBeUndefined();

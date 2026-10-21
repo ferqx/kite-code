@@ -10,6 +10,7 @@ import {
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { useConversationReadActive } from '../conversation-activity';
+import { MarkdownCodeBlock } from './MarkdownCodeBlock';
 import { type PreparedDesktopMarkdown, reuseDesktopMarkdownParse } from './markdown-parse-cache';
 
 type MarkdownNode = {
@@ -149,6 +150,7 @@ const MarkdownContent = memo(function MarkdownContent({
         skipHtml
         components={{
           a: MarkdownLink,
+          pre: MarkdownCodeBlock,
           table: MarkdownTable,
           // Message bodies must not fetch remote images or interpret local paths as web assets.
           img: ({ alt }) => (

@@ -46,7 +46,7 @@ const imageMessage = {
   content: '用户问题：阅读附件',
   images: [{ name: 'cached.png', reference }],
 };
-const metrics = { opens: 0, urls: 0, revoked: 0, copies: 0, fileOpens: 0 };
+const metrics = { opens: 0, urls: 0, revoked: 0, copies: 0, fileOpens: 0, lastCopied: '' };
 const previews = new NativeImagePreviews();
 const create = URL.createObjectURL.bind(URL),
   revoke = URL.revokeObjectURL.bind(URL);
@@ -91,8 +91,11 @@ const table =
   '|\n|' +
   Array.from({ length: 40 }, (_, i) => `value${i}`).join('|') +
   '|';
+const codeText = `const message = "中文 👩‍💻 ${'long_code_'.repeat(45)}";\nconsole.log(message);\n`;
 const fullText =
-  '## 原始回答\n\n这里保留正文、复制反馈、图片与宽表格。[打开文件](src/main.ts)' + table;
+  '## 原始回答\n\n这里保留正文、复制反馈、图片与宽表格。[打开文件](src/main.ts)' +
+  `\n\n\`\`\`typescript\n${codeText}\`\`\`` +
+  table;
 const contentBytes = String(new TextEncoder().encode(fullText).length);
 const modelMessage: Message = {
   id: 'answer',
@@ -167,6 +170,11 @@ export interface CacheSnapshot {
   revoked: number;
   copies: number;
   fileOpens: number;
+  lastCopied: string;
+  codeSame: boolean;
+  codeCopySame: boolean;
+  codeScrollLeft: number;
+  codeText: string | null;
   imgSame: boolean;
   copySame: boolean;
   replyCopySame: boolean;
@@ -194,6 +202,7 @@ let originalImage: HTMLImageElement | null,
   originalCopy: HTMLButtonElement | null,
   originalSummary: HTMLElement | null;
 let originalReplyCopy: Element | null, originalFile: Element | null;
+let originalCode: HTMLPreElement | null, originalCodeCopy: Element | null;
 function App() {
   const [verifiedCopy, setVerifiedCopy] = useState<string>();
   const messages = a.map((message) =>
@@ -208,13 +217,23 @@ function App() {
     originalSummary = document.querySelector('.agent-turn-summary');
     originalReplyCopy = document.querySelector('.message.assistant .message-copy');
     originalFile = document.querySelector('.file-link');
+    originalCode = document.querySelector('.markdown-code-block pre');
+    originalCodeCopy = document.querySelector('[data-slot="code-block-copy-button"]');
+    if (originalCode) originalCode.scrollLeft = 80;
   };
   window.snapshot = () => {
     const image = document.querySelector<HTMLImageElement>('.native-user-image img');
     const copy = document.querySelector<HTMLButtonElement>('.message.user .message-copy');
     const summary = document.querySelector<HTMLElement>('.agent-turn-summary');
+    const code = document.querySelector<HTMLPreElement>('.markdown-code-block pre');
     return {
       ...metrics,
+      codeSame: !!originalCode && code === originalCode,
+      codeCopySame:
+        !!originalCodeCopy &&
+        document.querySelector('[data-slot="code-block-copy-button"]') === originalCodeCopy,
+      codeScrollLeft: code?.scrollLeft ?? 0,
+      codeText: code?.textContent ?? null,
       imgSame: image === originalImage,
       copySame: copy === originalCopy,
       replyCopySame:
@@ -266,8 +285,9 @@ function App() {
               selected
               connected
               saveReading={() => {}}
-              writeClipboardText={async () => {
+              writeClipboardText={async (text) => {
                 metrics.copies++;
+                metrics.lastCopied = text;
               }}
               renderMessageContent={(message) =>
                 message.id === 'user' ? (

@@ -342,6 +342,12 @@ test('Native exploration starts as one collapsed activity and retains it across 
     await f.flush();
     collapsed(f.host);
     expect(f.host.textContent).toContain('读取 3 次');
+    // Each tool now has a complete receipt; the accurate parent Run is still active.
+    expect(f.host.querySelectorAll('.response-status')).toHaveLength(1);
+    const response = f.host.querySelector('.response-status')!;
+    expect(response.textContent).toBe('正在回复…');
+    expect(response.closest('.agent-turn')?.lastElementChild).toBe(response);
+    expect(f.host.querySelectorAll('.message.assistant')).toHaveLength(0);
   } finally {
     await f.close();
   }

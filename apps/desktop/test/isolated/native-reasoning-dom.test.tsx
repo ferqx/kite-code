@@ -128,7 +128,10 @@ for (const mode of ['inline', 'artifact', 'legacy-artifact'] as const)
       expect(host.textContent).toContain('正在思考');
       expect(host.querySelector('.message.assistant')).toBeNull();
       expect(host.querySelector('.model-output-message')).toBeNull();
-      expect(host.textContent).not.toContain('正在回复');
+      expect(host.querySelectorAll('.response-status')).toHaveLength(1);
+      expect(host.querySelector('.response-status')?.textContent).toBe('正在思考…');
+      expect(host.querySelector('.agent-turn-summary')).toBeNull();
+      const response = host.querySelector('.response-status');
       expect(host.textContent).not.toContain('Read complete recorded Model output');
       expect(reads).toBe(0);
 
@@ -146,9 +149,11 @@ for (const mode of ['inline', 'artifact', 'legacy-artifact'] as const)
       expect(host.querySelector('.message.assistant')?.textContent).toContain(
         'PUBLIC_ANSWER_PREFIX',
       );
-      expect(host.textContent).toContain('正在回复');
+      expect(host.querySelectorAll('.response-status')).toHaveLength(1);
+      expect(host.querySelector('.response-status')).toBe(response);
+      expect(response?.textContent).toBe('正在回复…');
       expect(host.querySelector('[data-final-reply="true"]')).toBeNull();
-      expect(host.querySelector('.agent-turn-status-label')?.textContent).not.toContain('正在思考');
+      expect(host.querySelector('.agent-turn-status-label')?.textContent).toBe('处理过程');
 
       // More reasoning does not change the original first channel or retract actual text.
       current = {
@@ -168,11 +173,13 @@ for (const mode of ['inline', 'artifact', 'legacy-artifact'] as const)
       };
       await render(current);
       expect(host.querySelector('[data-final-reply="true"]')).toBeNull();
+      expect(host.querySelector('.response-status')).toBe(response);
       await render(current, { ...run, status: 'completed', isActive: false, finishedAt: 3000 });
       expect(host.querySelectorAll('[data-final-reply="true"]')).toHaveLength(1);
       expect(host.querySelector('.agent-turn-final')?.textContent).toContain(
         'PUBLIC_ANSWER_PREFIX',
       );
+      expect(host.querySelector('.response-status')).toBeNull();
       expect(reads).toBe(0);
       expect(observed.some((text) => text.includes('正在思考'))).toBe(true);
     } finally {

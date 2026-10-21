@@ -164,3 +164,71 @@ test('opening an unverified single record does not open the exploration group it
     expect(host.querySelectorAll('.tool-activity-step')).toHaveLength(3);
   });
 });
+
+test('Trace aggregation preserves Shell disclosure, output following and real stopped status', async () => {
+  await withConversation(async ({ host, render, click }) => {
+    const shell = (stdout: string, status: Message['status'] = 'running'): Message => ({
+      ...tool('shell', status),
+      toolName: 'shell_execute',
+      target: 'bun test',
+      toolProgress: { stdout, stderr: '' },
+      settled: status === 'cancelled',
+    });
+    const messages = (stdout: string, status: Message['status'] = 'running') => [
+      tool('read', 'completed'),
+      shell(stdout, status),
+    ];
+    await render(messages('first line'));
+    await click(summary(host));
+    expect(host.querySelector('.tool-activity-steps')?.getAttribute('data-slot')).toBe('trace');
+    const shellSummary = () => host.querySelector('.shell-activity .tool-activity-summary')!;
+    expect(shellSummary().getAttribute('data-slot')).toBe('trace-collapsible-trigger');
+    expect(shellSummary().querySelector('[data-slot="trace-title"]')).not.toBeNull();
+    await click(shellSummary());
+    const output = () => host.querySelector<HTMLElement>('[aria-label="Shell 执行输出"]')!;
+    expect(output().tagName).toBe('PRE');
+    expect(output().getAttribute('role')).toBe('region');
+    expect(output().getAttribute('tabindex')).toBe('0');
+    expect(output().getAttribute('data-slot')).toBe('code-block-content');
+    expect(output().textContent).toBe('first line');
+    Object.defineProperties(output(), {
+      scrollHeight: { configurable: true, value: 1000 },
+      clientHeight: { configurable: true, value: 100 },
+    });
+    output().scrollTop = 500;
+    await act(async () => {
+      const scroll = output().ownerDocument.createEvent('Event');
+      scroll.initEvent('scroll', true, false);
+      output().dispatchEvent(scroll);
+    });
+    await render(messages('first line\nsecond line'));
+    expect(output().scrollTop).toBe(500);
+    expect(host.querySelector('.shell-latest')?.textContent).toBe('回到最新输出');
+    await click(host.querySelector('.shell-latest')!);
+    expect(output().scrollTop).toBe(1000);
+    expect(host.querySelector('.shell-latest')).toBeNull();
+
+    // Less than 24 px from the end resumes following; exactly 24 px pauses it.
+    for (const [top, paused] of [
+      [876, true],
+      [877, false],
+    ] as const) {
+      output().scrollTop = top;
+      await act(async () => {
+        const scroll = output().ownerDocument.createEvent('Event');
+        scroll.initEvent('scroll', true, false);
+        output().dispatchEvent(scroll);
+      });
+      expect(Boolean(host.querySelector('.shell-latest'))).toBe(paused);
+    }
+    await click(summary(host));
+    await click(summary(host));
+    expect(shellSummary().getAttribute('aria-expanded')).toBe('true');
+    expect(output().textContent).toContain('second line');
+    await render(messages('first line\nsecond line', 'cancelled'));
+    expect(output().textContent).toContain('second line');
+    expect(host.querySelector('.shell-result')?.textContent).toContain('已停止');
+    expect(host.querySelector('.shell-activity [data-status="error"]')).toBeNull();
+    expect(host.querySelector('button button')).toBeNull();
+  });
+});

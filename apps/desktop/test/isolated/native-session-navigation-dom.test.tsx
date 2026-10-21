@@ -926,49 +926,59 @@ test('repeated reply calibrations retain the footer controls and transcript DOM 
   }
 });
 
-test('ordinary history and View refreshes retain the processed status and timer; actual observation and history failures revoke them', async () => {
+test('ordinary history and View refreshes retain reply status without elapsed time; actual failures retain their warnings', async () => {
   const f = fixture(true);
   f.runningParent();
   try {
     await f.render();
     await f.click('Original');
-    const status = f.host.querySelector('.agent-turn-status-label')!,
-      timer = status.querySelector('span'),
+    const status = f.host.querySelector('.response-status')!,
+      label = status.querySelector('.shimmer'),
       permission = f.host.querySelector('[data-permission-trigger]')!,
       input = f.host.querySelector('.composer [role="textbox"][contenteditable]');
-    expect(status.textContent).toMatch(/^已处理 .*秒/);
-    expect(timer).not.toBeNull();
+    expect(status.textContent).toBe('正在回复…');
+    expect(label).not.toBeNull();
+    expect(f.host.querySelector('.agent-turn-summary-static')).toBeNull();
+    expect(f.host.querySelector('.agent-turn-summary')?.textContent ?? '').not.toMatch(
+      /正在进行中|正在处理|正在思考|已处理/,
+    );
     for (let index = 0; index < 8; index++) {
       f.holdParent();
       await f.updateParent(`running reply ${index}`);
-      expect(f.host.querySelector('.agent-turn-status-label') === status).toBe(true);
-      expect(status.textContent).toMatch(/^已处理 .*秒/);
-      expect(status.querySelector('span') === timer).toBe(true);
+      expect(f.host.querySelector('.response-status') === status).toBe(true);
+      expect(status.textContent).toBe('正在回复…');
+      expect(status.querySelector('.shimmer')).toBe(label);
       await f.releaseParent();
       await f.refreshing(true);
-      expect(status.textContent).toMatch(/^已处理 .*秒/);
-      expect(status.querySelector('span') === timer).toBe(true);
+      expect(status.textContent).toBe('正在回复…');
+      expect(status.querySelector('.shimmer')).toBe(label);
       expect(f.host.querySelector('[aria-label="当前会话后台状态"]') === null).toBe(true);
       expect(f.host.querySelector('[data-permission-trigger]')).toBe(permission);
       expect((permission as HTMLButtonElement).disabled).toBe(true);
       expect(f.host.querySelector('.composer [role="textbox"][contenteditable]')).toBe(input);
       await f.refreshing(false);
-      expect(status.textContent).toMatch(/^已处理 .*秒/);
+      expect(status.textContent).toBe('正在回复…');
       expect(f.host.querySelector('[data-permission-trigger]')).toBe(permission);
     }
     await f.unavailable(true);
-    expect(status.textContent).toBe('上次确认状态');
+    expect(f.host.querySelector('.response-status')).toBe(status);
+    expect(status.textContent).toBe('正在回复…');
+    expect(status.querySelector('.shimmer')).toBe(label);
+    expect(f.host.querySelector('.agent-turn-status-label')?.textContent).toBe('上次确认状态');
     expect(f.host.querySelector('[aria-label="当前会话后台状态"]') === null).toBe(true);
     expect(f.host.querySelector('[data-permission-trigger]')).toBeNull();
     await f.unavailable(false);
-    expect(status.textContent).toMatch(/^已处理 .*秒/);
+    expect(status.textContent).toBe('正在回复…');
     f.failParent();
     await f.updateParent('held after failure');
-    expect(status.textContent).toBe('上次确认状态');
+    expect(f.host.querySelector('.response-status')).toBe(status);
+    expect(status.textContent).toBe('正在回复…');
+    expect(status.querySelector('.shimmer')).toBe(label);
+    expect(f.host.querySelector('.agent-turn-status-label')?.textContent).toBe('上次确认状态');
     expect(f.host.textContent).toContain('历史尚未完整校准');
     f.failParent(false);
     await f.click('重新加载会话');
-    expect(status.textContent).toMatch(/^已处理 .*秒/);
+    expect(status.textContent).toBe('正在回复…');
   } finally {
     await f.close();
   }
@@ -1456,9 +1466,15 @@ test('NativeDesktop marks an unowned active Run unverified without changing dura
       await f.observeExecutionOwner('held');
       expect(warning()).toBeNull();
       expect(sidebarSpinner()).not.toBeNull();
-      expect(f.host.querySelector('.agent-turn-status-label')?.textContent).toMatch(
-        waiting ? /^正在等待/ : /^已处理 .*秒/,
-      );
+      expect(f.host.querySelector('.response-status')?.textContent).toBe('正在回复…');
+      if (waiting)
+        expect(f.host.querySelector('.agent-turn-status-label')?.textContent).toBe('正在等待');
+      else {
+        expect(f.host.querySelector('.agent-turn-summary-static')).toBeNull();
+        expect(f.host.querySelector('.agent-turn-summary')?.textContent ?? '').not.toMatch(
+          /正在进行中|正在处理|正在思考|已处理/,
+        );
+      }
       expect(f.host.textContent?.includes('正在等待子 Agent 结果')).toBe(waiting);
 
       await f.observeExecutionOwner('unknown');

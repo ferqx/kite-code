@@ -14,12 +14,17 @@ import {
 } from '@hugeicons/core-free-icons';
 import { HugeiconsIcon } from '@hugeicons/react';
 import { Fragment, type ReactNode, useLayoutEffect, useRef, useState } from 'react';
+import { CodeBlock, CodeBlockContent } from './components/ui/code-block';
 import {
-  AnimatedCollapsibleContent,
-  Collapsible,
-  CollapsibleTrigger,
-} from './components/ui/collapsible';
-import { Marker, MarkerContent, MarkerIcon } from './components/ui/marker';
+  Trace,
+  TraceCollapsible,
+  TraceCollapsibleContent,
+  TraceCollapsibleTrigger,
+  TraceDescription,
+  TraceIcon,
+  TraceLine,
+  TraceTitle,
+} from './components/ui/trace';
 import { FileDiff } from './FileChanges';
 import { statusLabel } from './status';
 import type { Message } from './types';
@@ -336,6 +341,16 @@ function executionLabel(message: Message) {
         : '结果未知';
 }
 
+// Trace only decorates facts already present in the host projection. Inactive
+// streams, cancellation and unknown results never imply an execution failure.
+function traceStatus(message: Message): 'running' | 'error' | 'pending' | undefined {
+  if (!message.settled && (message.status === 'running' || message.approval?.state === 'reviewing'))
+    return 'running';
+  if (message.status === 'failed' || message.status === 'rejected') return 'error';
+  if (!message.settled && message.status === 'queued') return 'pending';
+  return undefined;
+}
+
 function ShellOutput({ message }: { message: Message }) {
   const viewport = useRef<HTMLPreElement>(null);
   const follow = useRef(true);
@@ -368,12 +383,10 @@ function ShellOutput({ message }: { message: Message }) {
       viewport.current.scrollTop = viewport.current.scrollHeight;
   }, [output]);
   return (
-    <div className="shell-output" data-status={message.status}>
-      {/* biome-ignore lint/a11y/useSemanticElements: keep preformatted output as the named scroll region. */}
-      <pre
+    <CodeBlock className="shell-output" data-status={message.status}>
+      <CodeBlockContent
         role="region"
         ref={viewport}
-        // biome-ignore lint/a11y/noNoninteractiveTabindex: allow keyboard scrolling of output.
         tabIndex={0}
         aria-label="Shell 执行输出"
         onScroll={() => {
@@ -390,7 +403,7 @@ function ShellOutput({ message }: { message: Message }) {
         !streams.includes(message.text)
           ? `\n${message.text}`
           : ''}
-      </pre>
+      </CodeBlockContent>
       <span className="shell-result" role="status">
         {executionLabel(message)}
         {result?.exitCode !== undefined ? ` · 退出码 ${result.exitCode}` : ''}
@@ -410,7 +423,7 @@ function ShellOutput({ message }: { message: Message }) {
           回到最新输出
         </Button>
       )}
-    </div>
+    </CodeBlock>
   );
 }
 
@@ -428,46 +441,50 @@ export function ToolRow({
   const approval = approvalLabel(message);
   const status = executionLabel(message);
   return (
-    <Marker
+    <TraceLine
+      asChild
+      status={traceStatus(message)}
       className={`tool-activity-step ${!message.settled && message.approval?.state === 'reviewing' ? 'running' : (message.status ?? '')}`}
     >
-      <MarkerIcon className="tool-step-marker-icon">
-        <HugeiconsIcon className="tool-step-icon" icon={toolIcon(message)} />
-      </MarkerIcon>
-      <MarkerContent className="tool-step-content">
-        <span className="tool-step-heading">
-          <span className="tool-step-title tool-label">{toolTitle(message)}</span>
-          {target && (
-            <span className="tool-step-target">
-              {file && openFile ? (
-                <Button className="file-link" onClick={() => openFile(target)}>
-                  {target}
-                </Button>
-              ) : (
-                target
-              )}
-            </span>
-          )}
-          {approval && (
-            <span className="tool-approval" role="status">
-              {approval}
-            </span>
-          )}
-          {status && status !== '成功' && status !== approval && message.status !== 'running' && (
-            <span className="tool-step-status" data-status={message.status}>
-              {status}
-            </span>
-          )}
-        </span>
-        {(message.approval?.state === 'awaiting_user' ||
-          ['failed', 'rejected', 'cancelled', 'unknown'].includes(message.status ?? '')) &&
-          resultPreview(message, showReadFailure) && (
-            <span className="tool-step-preview" title={resultPreview(message, showReadFailure)}>
-              {resultPreview(message, showReadFailure)}
-            </span>
-          )}
-      </MarkerContent>
-    </Marker>
+      <div>
+        <TraceIcon className="tool-step-marker-icon">
+          <HugeiconsIcon className="tool-step-icon" icon={toolIcon(message)} />
+        </TraceIcon>
+        <TraceTitle className="tool-step-content">
+          <span className="tool-step-heading">
+            <span className="tool-step-title tool-label">{toolTitle(message)}</span>
+            {target && (
+              <span className="tool-step-target">
+                {file && openFile ? (
+                  <Button className="file-link" onClick={() => openFile(target)}>
+                    {target}
+                  </Button>
+                ) : (
+                  target
+                )}
+              </span>
+            )}
+            {approval && (
+              <span className="tool-approval" role="status">
+                {approval}
+              </span>
+            )}
+            {status && status !== '成功' && status !== approval && message.status !== 'running' && (
+              <TraceDescription className="tool-step-status" data-status={message.status}>
+                {status}
+              </TraceDescription>
+            )}
+          </span>
+          {(message.approval?.state === 'awaiting_user' ||
+            ['failed', 'rejected', 'cancelled', 'unknown'].includes(message.status ?? '')) &&
+            resultPreview(message, showReadFailure) && (
+              <span className="tool-step-preview" title={resultPreview(message, showReadFailure)}>
+                {resultPreview(message, showReadFailure)}
+              </span>
+            )}
+        </TraceTitle>
+      </div>
+    </TraceLine>
   );
 }
 
@@ -546,6 +563,14 @@ export function ToolActivity({
   const children = messages.map((item) => renderChildren(item.id.slice(5), true));
   const approval = approvalLabel(message);
   const pendingReview = !message.settled && message.approval?.state === 'reviewing';
+  const summaryTraceStatus =
+    running || pendingReview
+      ? 'running'
+      : messages.some((item) => traceStatus(item) === 'error')
+        ? 'error'
+        : messages.some((item) => traceStatus(item) === 'pending')
+          ? 'pending'
+          : undefined;
   const hasDiff = edit && message.changeConfirmed && !!message.toolResult;
   const canExpand =
     (grouped || message.status !== 'not_executed') &&
@@ -594,13 +619,13 @@ export function ToolActivity({
           : executionLabel(message);
   const heading = (
     <>
-      <MarkerIcon className="tool-activity-marker-icon">
+      <TraceIcon className="tool-activity-marker-icon">
         <HugeiconsIcon
           className="tool-activity-kind-icon"
           icon={grouped ? Search01Icon : toolIcon(message)}
         />
-      </MarkerIcon>
-      <MarkerContent
+      </TraceIcon>
+      <TraceTitle
         className="tool-activity-marker-content"
         aria-live={grouped ? 'polite' : undefined}
         aria-atomic={grouped ? 'true' : undefined}
@@ -612,7 +637,7 @@ export function ToolActivity({
           ) : (
             <span className="tool-step-target">{ask ? `· ${target}` : target}</span>
           ))}
-      </MarkerContent>
+      </TraceTitle>
       {canExpand && <HugeiconsIcon className="tool-activity-chevron" icon={ArrowDown01Icon} />}
       {approval && (
         <span className="tool-approval" role="status">
@@ -620,18 +645,18 @@ export function ToolActivity({
         </span>
       )}
       {status && (grouped || !shell || !open) && status !== '成功' && status !== approval && (
-        <span
+        <TraceDescription
           className="tool-activity-state"
           data-status={issues.length ? 'issue' : 'neutral'}
           role="status"
         >
           {status}
-        </span>
+        </TraceDescription>
       )}
       {groupedIssues && !open && (
-        <span className="tool-activity-state" data-status="issue" role="status">
+        <TraceDescription className="tool-activity-state" data-status="issue" role="status">
           {groupedIssues}
-        </span>
+        </TraceDescription>
       )}
       {managedShell && (
         <span className="managed-shell-summary" role="status">
@@ -657,7 +682,7 @@ export function ToolActivity({
     </>
   );
   return (
-    <Collapsible asChild open={Boolean(open && canExpand)} onOpenChange={onToggle}>
+    <TraceCollapsible asChild open={Boolean(open && canExpand)} onOpenChange={onToggle}>
       <article
         className={`message tool-activity${shell ? ' shell-activity' : ''}${running || pendingReview ? ' is-running' : ''}`}
         data-restored-expanded={restoredExpanded?.has(activityId ?? message.id) || undefined}
@@ -665,11 +690,11 @@ export function ToolActivity({
       >
         {childDetail ? (
           <div className="tool-activity-heading-row">
-            <CollapsibleTrigger asChild>
-              <Marker asChild className="tool-activity-summary">
+            <TraceCollapsibleTrigger asChild>
+              <TraceLine asChild status={summaryTraceStatus} className="tool-activity-summary">
                 <Button variant="ghost">{heading}</Button>
-              </Marker>
-            </CollapsibleTrigger>
+              </TraceLine>
+            </TraceCollapsibleTrigger>
             <Button
               className="tool-child-detail"
               variant="ghost"
@@ -683,62 +708,73 @@ export function ToolActivity({
         ) : read && !childIssue ? (
           <ToolRow message={message} openFile={messageOpenFile} />
         ) : edit && !childIssue ? (
-          <Marker className="tool-activity-summary tool-edit-heading">
-            <MarkerIcon className="tool-activity-marker-icon">
-              <HugeiconsIcon className="tool-activity-kind-icon" icon={toolIcon(message)} />
-            </MarkerIcon>
-            <MarkerContent className="tool-activity-marker-content">
-              <span className="tool-label">{label}</span>
-              {target &&
-                (messageOpenFile ? (
-                  <Button className="file-link" onClick={() => messageOpenFile(target)}>
-                    {target}
-                  </Button>
-                ) : (
-                  <span className="tool-step-target">{target}</span>
-                ))}
-            </MarkerContent>
-            {hasDiff && (
-              <Button
-                variant="ghost"
-                className="tool-diff-toggle"
-                aria-label={`${open ? '收起' : '展开'} ${target ?? '文件'} 的差异`}
-                aria-expanded={open}
-                onClick={() => onToggle(!open)}
-              >
-                <HugeiconsIcon icon={ArrowDown01Icon} />
-              </Button>
-            )}
-            {approval && (
-              <span className="tool-approval" role="status">
-                {approval}
-              </span>
-            )}
-            {status && status !== '成功' && status !== approval && message.status !== 'running' && (
-              <span className="tool-step-status" data-status={message.status}>
-                {status}
-              </span>
-            )}
-            {!hasDiff &&
-              (issues.length > 0 || message.approval?.state === 'awaiting_user') &&
-              resultPreview(message) && (
-                <span className="tool-step-preview" title={resultPreview(message)}>
-                  {resultPreview(message)}
+          <TraceLine
+            asChild
+            status={traceStatus(message)}
+            className="tool-activity-summary tool-edit-heading"
+          >
+            <div>
+              <TraceIcon className="tool-activity-marker-icon">
+                <HugeiconsIcon className="tool-activity-kind-icon" icon={toolIcon(message)} />
+              </TraceIcon>
+              <TraceTitle className="tool-activity-marker-content">
+                <span className="tool-label">{label}</span>
+                {target &&
+                  (messageOpenFile ? (
+                    <Button className="file-link" onClick={() => messageOpenFile(target)}>
+                      {target}
+                    </Button>
+                  ) : (
+                    <span className="tool-step-target">{target}</span>
+                  ))}
+              </TraceTitle>
+              {hasDiff && (
+                <Button
+                  variant="ghost"
+                  className="tool-diff-toggle"
+                  aria-label={`${open ? '收起' : '展开'} ${target ?? '文件'} 的差异`}
+                  aria-expanded={open}
+                  onClick={() => onToggle(!open)}
+                >
+                  <HugeiconsIcon icon={ArrowDown01Icon} />
+                </Button>
+              )}
+              {approval && (
+                <span className="tool-approval" role="status">
+                  {approval}
                 </span>
               )}
-          </Marker>
+              {status &&
+                status !== '成功' &&
+                status !== approval &&
+                message.status !== 'running' && (
+                  <TraceDescription className="tool-step-status" data-status={message.status}>
+                    {status}
+                  </TraceDescription>
+                )}
+              {!hasDiff &&
+                (issues.length > 0 || message.approval?.state === 'awaiting_user') &&
+                resultPreview(message) && (
+                  <span className="tool-step-preview" title={resultPreview(message)}>
+                    {resultPreview(message)}
+                  </span>
+                )}
+            </div>
+          </TraceLine>
         ) : canExpand ? (
-          <CollapsibleTrigger asChild>
-            <Marker asChild className="tool-activity-summary">
+          <TraceCollapsibleTrigger asChild>
+            <TraceLine asChild status={summaryTraceStatus} className="tool-activity-summary">
               <Button variant="ghost">{heading}</Button>
-            </Marker>
-          </CollapsibleTrigger>
+            </TraceLine>
+          </TraceCollapsibleTrigger>
         ) : (
-          <Marker className="tool-activity-summary">{heading}</Marker>
+          <TraceLine asChild status={summaryTraceStatus} className="tool-activity-summary">
+            <div>{heading}</div>
+          </TraceLine>
         )}
-        <AnimatedCollapsibleContent className="tool-activity-content">
+        <TraceCollapsibleContent className="tool-activity-content">
           {grouped && (
-            <div className="tool-activity-steps">
+            <Trace className="tool-activity-steps">
               {messages.map((item) => (
                 <Fragment key={item.id}>
                   {renderItem?.(item) ??
@@ -763,7 +799,7 @@ export function ToolActivity({
                     ))}
                 </Fragment>
               ))}
-            </div>
+            </Trace>
           )}
           {shell && <ShellOutput message={message} />}
           {hasDiff && <FileDiff message={message} />}
@@ -804,8 +840,8 @@ export function ToolActivity({
               </pre>
             )}
           <div className="tool-activity-children">{children}</div>
-        </AnimatedCollapsibleContent>
+        </TraceCollapsibleContent>
       </article>
-    </Collapsible>
+    </TraceCollapsible>
   );
 }

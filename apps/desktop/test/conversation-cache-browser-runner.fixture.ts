@@ -94,6 +94,7 @@ try {
       }
       document.querySelector<HTMLButtonElement>('.message.user .message-copy')!.click();
       document.querySelector<HTMLButtonElement>('.message.assistant .message-copy')!.click();
+      document.querySelector<HTMLButtonElement>('[data-slot="code-block-copy-button"]')!.click();
       document.querySelector<HTMLButtonElement>('.file-link')!.click();
       window.switchSession('a', false);
       for (let i = 0; i < 12; i++) {
@@ -155,6 +156,9 @@ try {
           value.imgSame &&
           value.copySame &&
           value.replyCopySame &&
+          value.codeSame &&
+          value.codeCopySame &&
+          value.codeScrollLeft === idle.codeScrollLeft &&
           value.fileSame &&
           value.summarySame &&
           value.decoded,
@@ -173,6 +177,11 @@ try {
     assert.equal(feedback.before.copyState, 'copied');
     assert.equal(feedback.preview.copyState, 'copied');
     assert.equal(feedback.ready.copyState, 'copied');
+    assert.ok(idle.codeScrollLeft > 0);
+    await page.locator('[data-slot="code-block-copy-button"]').click();
+    const codeCopy = await page.evaluate(() => window.snapshot());
+    assert.equal(codeCopy.lastCopied, codeCopy.codeText);
+    assert.ok(codeCopy.lastCopied.endsWith('\n'));
     assert.ok(
       highlight.values.every((value) => value.summaryColor === highlight.before.summaryColor),
     );
@@ -184,6 +193,9 @@ try {
       final.imgSame &&
         final.copySame &&
         final.replyCopySame &&
+        final.codeSame &&
+        final.codeCopySame &&
+        final.codeScrollLeft === idle.codeScrollLeft &&
         final.fileSame &&
         final.summarySame &&
         final.decoded,
@@ -199,6 +211,7 @@ try {
       copyOpacities: [...new Set(frames.map((v) => v.copyOpacity))],
       summaryOpacities: [...new Set(frames.map((v) => v.summaryOpacity))],
       feedback,
+      codeCopy,
       highlight: {
         before: highlight.before.summaryColor,
         colors: [...new Set(highlight.values.map((v) => v.summaryColor))],

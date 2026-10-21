@@ -140,6 +140,8 @@ Native [renderer 入口](src/native-main.tsx)明确开启 `NativeDesktop` 的 `n
 
 [正式 Native 页面](src/native.tsx)接回原 kite-desktop 的 `copyText`／`handleHeaderMouseDown` 行为，仍由原 SessionPage／Conversation 决定可复制正文及 header 交互。[preload](electron/preload.ts)固定提供 `NativeWindowBridge` 的文本复制、窗口缩放及只读材质查询，沿三个固定 IPC 到 [Main](electron/native-ipc.ts)；当前窗口、准确主 frame、renderer URL 与闭合 payload 验证先于宿主动作。文本按原宿主上限接受至 1 MiB UTF-8 字节，超限明确失败，不截断或替换正文；缩放不接受 payload，按实际 isMaximized 切换 maximize／unmaximize；材质查询同样无 payload，只返回 `mica/vibrancy/none`。窗口端口不打开 Service caller，不提交任务或写私有存储。
 
+Native 正文中的 Code Block 单独复制沿用上述原宿主 port 和 1MiB 上限，仍须取得原 Conversation 的准确 `copyText` 资格；预览、流式和未知最终身份不出现代码复制入口。共享 context 覆盖 `NativeModelOutputMessage` 的自定义正文子树，完整 reader 关闭即撤销；缓存校准只暂停操作，保留原代码 PRE、横向阅读位置和已完成反馈。[正文缓存 DOM 回归](test/isolated/native-model-output-cache-dom.test.tsx)核完整 reader 的代码复制、停用与关闭，[浏览器缓存夹具](test/conversation-cache-browser-runner.fixture.ts)核实际生产样式及 A→B→A 的节点、滚动与宿主复制。
+
 原 header 只接左键单击／双击，控件与链接不触发窗口操作；单击不缩放，双击切换。失败沿原 AlertDialog，草稿保留。原完整正文门禁保持：预览、不完整回复和未知最终身份不启用 Agent 复制，完整 reader 当前已显示并核实的原文才可复制，关闭撤销资格；成功／失败提示仍归原 Conversation。
 
 2026-10-14 独立顶栏初次验证（Mica 圆角内缩前）：Windows x64／Electron 44.3.0／Bun 1.4.2 的隔离实际窗口使用当时 Main／preload、普通模式 renderer 构建与真实配套 Service，顶栏与原生叠层均为 y=0、高32px，导航及侧栏 y=32px、高52px，导航恢复24px右侧间距。782px内容 viewport 下业务区与设置页均为750px、高度准确到窗口底部；500×720窄窗口的侧栏浮层从 y=32px 开始、高688px。实际主题菜单亮／暗、设置返回、侧栏展开／关闭、最大化／还原、零页面异常与 Main 正常退出0通过。原窗口 IPC／DOM 两个完整文件5项／53断言、Desktop typecheck与定向Biome通过；构建保原 CSS keyframes 优化与大chunk提示。此范围没有物理鼠标拖拽、Linux／macOS新窗口或正式安装制品资格，原平台门禁保持；当前 Mica 面板几何按下文验证。
@@ -324,6 +326,8 @@ Main 仅在原 Message／Execution 身份和结果完全匹配、原状态 faile
 
 [native-transcript](src/native-transcript.ts)把已核实的公共 Run 接入原 [Conversation](../../packages/ui/src/desktop/Conversation.tsx)，保原过程折叠、最终回复、失败行、工具聚合与会话阅读状态。SessionPage 的 `renderMessageContent` 只替换正文、`renderToolActivity` 接完整分组与原展开控制；外层布局和复制按钮仍归原组件。正文继续使用原 ModelOutputMessage，子详情沿原只读 reader，不以子日志重建轮次。
 
+轮次底部回复状态行消费同一已核实 Run 的 `turnActivity` 和 terminal marker，不按单条 Message 的 complete／模型正文是否已出现判断。思考阶段在同一底部节点显示“正在思考…”，出现正文或活动工具后显示“正在回复…”，底部行不附运行时长；普通活动过程入口固定为“处理过程”，无可展开内容时不显示空入口。主会话与子详情均沿此交接，工具或模型完成但 Run 仍活动时保留，观察暂不可用继续保留上次准确活动状态及原警示；准确 Run 完成、失败、取消或 interrupted 后移除。[思考 DOM 回归](test/isolated/native-reasoning-dom.test.tsx)核正文出现前及单段模型结束，[工具聚合 DOM](test/isolated/native-live-tool-aggregation-dom.test.tsx)核全部回执 complete 但 Run 仍活动的情况；[会话导航 DOM](test/isolated/native-session-navigation-dom.test.tsx)核有可靠 Run 起点时底部仍只显示状态文字、普通校准节点保持及未知状态提示。
+
 Native 的侧栏打开入口对当前父会话及同一在途选择去重，重复鼠标点击和 Enter 不重新发起 `select`、撤销历史读取或重建消息。子详情通过右侧栏标签打开，点击当前父会话不会关闭详情或重新选择父会话；准备页及安排任务页仍恢复原会话；选择其他目标和显式恢复读取保持原流程。[首次呈现回归](test/isolated/native-history-presentation-dom.test.tsx)核重复点击的请求数量、消息节点、滚动和展开保持，以及在途目标复用。
 
 进入会话时，准确阅读身份下已保存的正文先展示；轮次、工具或文件目标信息尚未核实只影响相应条目和操作资格，不遮住整段正文。查询成功但缺少对应事实和真实查询失败分别保留准确状态、原记录及必要重试。首次展示后，同一身份的流式更新和 history epoch 校准继续保留正文；切走再回会话命中有界DOM缓存时先恢复原节点、阅读位置和展开状态，再后台完整校准。发送、停止、审批和新读取继续等待当前完整scope资格，展示缓存不恢复操作权。[首次呈现回归](test/isolated/native-history-presentation-dom.test.tsx)维护正文与元数据的独立进展、失败、缓存返回及epoch校准；[活动回执回归](test/isolated/native-tool-receipt-render-dom.test.tsx)继续验证运行中延迟工具信息的折叠原文保护。
@@ -349,6 +353,10 @@ Native 的侧栏打开入口对当前父会话及同一在途选择去重，重�
 取舍见[轮次展示决定](../../.agents/notes/implemented/architecture/2026-10-08-native-run-transcript-presentation.md)。[Main／有限 IPC](test/native-tool-messages.test.ts)、[正式 caller](test/native-caller.test.ts)和[原 Conversation DOM](test/isolated/native-transcript-dom.test.tsx)核身份、所属读取、原展开／复制及问答；原[源码外 macOS 窗口](test/isolated/native-bundle.test.ts)核首次和冷读的折叠、展开与准确最终复制，保原预算和退出断言。实际执行输入与结果归[本轮进度](../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-08原轮次阅读聚合与问答回执)，有限展示证据不代替完整恢复、其他平台或整片独立审查。
 
 ## 会话消息渲染验证
+
+[Code Block／Trace 聚焦夹具](test/ai-elements-browser.fixture.tsx)使用实际 Conversation、ToolActivity、MessageContent 和生产 CSS，执行 `bun run apps/desktop/test/ai-elements-browser-runner.fixture.ts` 核亮／暗主题、1280／390px viewport、代码横向滚动、文件按钮、工具聚合与 Shell 追加／取消。同组思考／回复切换保留底部状态节点，收起过程仍可见；准确 Turn 结束后移除。输出 `.cache/ai-elements-browser-*/report.json` 及各组常规／思考状态截图，所有数据固定且诊断构建值关闭。
+
+2026-10-21，`c89911153` 加本次工作树，macOS arm64／Bun 1.4.2／Chrome 155.0.8059.86：上述四组均无页面横向溢出或脚本异常，Shell 输出保持256px上限，上翻后追加保持原位置，回到最新准确到达底部；手动开合、取消后的实际日志及独立文件回调保持。[缓存夹具](test/conversation-cache-browser-runner.fixture.ts)在亮／暗两组的各24个观测帧核代码 PRE 与复制节点身份、80px横向位置、暂停操作及宿主原文复制。[桌面代码块回归](../../packages/ui/test/isolated/desktop-code-block.test.tsx)、共享桌面／Markdown／缓存与 Native 正文缓存共13文件59项通过，Native 工具显示／回执／聚合另3文件17项通过；UI／Desktop typecheck、UI Desktop 生产构建和定向 Biome 通过。原 Native 渲染夹具六组继续通过流式更新、回复状态边界、减少动画和缓存返回检查；本次未运行安装版 Electron 窗口或其他平台。
 
 [隔离夹具](test/render-performance-browser.fixture.tsx)使用实际 `NativeDesktop`、SessionPage、Conversation、Markdown 和生产 CSS，只有 NativeBridge 的会话／历史读取为固定数据；测试诊断构建常量仍为正式关闭值。执行 `bun run apps/desktop/test/render-performance-browser-runner.fixture.ts` 会独立构建生产组件，在临时 Chrome profile 测量窗口首屏、首次选中、逐条更新、连续32次／32ms间隔更新、终态转换和 A→B→A。覆盖10／60／180轮含列表、表格、代码和Unicode的历史，以及亮／暗、1440×1000／960×1000、减少动态效果；输出 `.cache/render-performance-*/report.json` 与截图，不读取用户会话或调用 Provider。
 
