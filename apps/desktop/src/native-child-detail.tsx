@@ -1,3 +1,4 @@
+import type { ModelOutputSnapshot } from '@kite-ai/client';
 import {
   Button,
   Conversation,
@@ -5,12 +6,12 @@ import {
   ReadingStateCache,
   ToolActivity,
 } from '@kite-ai/ui/desktop';
-import { type ComponentProps, useEffect, useMemo, useRef } from 'react';
+import { type ComponentProps, useEffect, useMemo, useRef, useState } from 'react';
 import { useNativeDiagnostics } from './native-diagnostics';
 import { nativeChildActivity, type useNativeEnvironment } from './native-environment';
 import { NativeModelOutputMessage } from './native-model-output-message';
 import { groupNativeToolMessages, liveToolMessages } from './native-tool-messages';
-import { desktopTranscript } from './native-transcript';
+import { desktopTranscript, nativeReplyKey } from './native-transcript';
 
 export interface NativeChildDetailProps {
   child: ReturnType<typeof useNativeEnvironment>['child'];
@@ -74,6 +75,17 @@ export function NativeChildDetail({
     () => new Map(facts?.modelOutputs.map((output) => [output.messageId, output.snapshot])),
     [facts],
   );
+  // Snapshot availability is not display admission: a closed reader shows only its preview.
+  const [displayedReplies, setDisplayedReplies] = useState(
+    () => new Map<string, { identity: string; snapshot: ModelOutputSnapshot; text: string }>(),
+  );
+  const currentReplies = useRef({
+    readingKey,
+    originals,
+    outputs,
+    readActive: activity.readActive,
+  });
+  currentReplies.current = { readingKey, originals, outputs, readActive: activity.readActive };
   const liveTools = useMemo(
     () =>
       liveToolMessages(
@@ -94,9 +106,15 @@ export function NativeChildDetail({
         executions: facts?.presentation?.executions,
         storeId,
         sessionId,
-        fullReply: (message) => outputs.get(message.id)?.output.content,
+        fullReply: (message) => {
+          const displayed = displayedReplies.get(message.id);
+          return displayed?.identity === nativeReplyKey(readingKey, message) &&
+            displayed.snapshot === outputs.get(message.id)
+            ? displayed.text
+            : undefined;
+        },
       }),
-    [facts, messages, storeId, sessionId, outputs],
+    [facts, messages, storeId, sessionId, outputs, readingKey, displayedReplies],
   );
   const models = useMemo(
     () =>
@@ -109,6 +127,47 @@ export function NativeChildDetail({
     const message = originals.get(model.id);
     if (!message) return null;
     const snapshot = outputs.get(model.id);
+    const identity = nativeReplyKey(readingKey, message);
+    const publishDisplayed = (text: string | undefined, explicitClose = false) => {
+      setDisplayedReplies((previous) => {
+        const current = currentReplies.current;
+        const original = current.originals.get(message.id);
+        if (
+          current.readingKey !== readingKey ||
+          !original ||
+          nativeReplyKey(readingKey, original) !== identity ||
+          current.outputs.get(message.id) !== snapshot
+        )
+          return previous;
+        // Pausing retains the verified display; explicit dismissal must still revoke it.
+        if (text === undefined && !current.readActive && !explicitClose) return previous;
+        const next = new Map(
+          [...previous].filter(([id, entry]) => {
+            const owner = current.originals.get(id);
+            return (
+              owner &&
+              entry.identity === nativeReplyKey(readingKey, owner) &&
+              entry.snapshot === current.outputs.get(id)
+            );
+          }),
+        );
+        if (text === undefined || !snapshot) next.delete(message.id);
+        else next.set(message.id, { identity, snapshot, text });
+        if (
+          next.size === previous.size &&
+          [...next].every(([id, entry]) => {
+            const before = previous.get(id);
+            return (
+              before?.identity === entry.identity &&
+              before.snapshot === entry.snapshot &&
+              before.text === entry.text
+            );
+          })
+        )
+          return previous;
+        return next;
+      });
+    };
     return (
       <NativeModelOutputMessage
         key={JSON.stringify([generation, storeId, sessionId, message.id])}
@@ -116,6 +175,8 @@ export function NativeChildDetail({
         storeId={storeId}
         canReadRestoredOrigin
         verifiedSnapshot={snapshot}
+        onContent={publishDisplayed}
+        onClose={() => publishDisplayed(undefined, true)}
         onRead={
           snapshot
             ? async ({ signal }) => {
