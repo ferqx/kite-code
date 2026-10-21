@@ -1,6 +1,6 @@
 ---
 name: document-before-commit
-version: 2.2.0
+version: 2.3.0
 description: Check and synchronize documentation when a change affects documented behavior or boundaries, or when preparing a Git delivery action.
 invocation:
   allow_implicit: false
@@ -50,7 +50,7 @@ recovery:
 
 # 文档同步与 Git 交付核对
 
-触发时机和授权遵循[根 AGENTS](../../../AGENTS.md)；文档任务按[docs AGENTS](../../../docs/AGENTS.md)和[维护规则](../../../docs/development/documentation.md)定位。Skill 不扩大原任务授权；具体写入、Git 和外部动作由 Runtime policy 与原任务授权决定。
+触发时机、授权、任务收尾与重新打开遵循[根 AGENTS](../../../AGENTS.md)；文档任务按[docs AGENTS](../../../docs/AGENTS.md)和[维护规则](../../../docs/development/documentation.md)定位。Skill 不扩大原任务授权；具体写入、Git 和外部动作由 Runtime policy 与原任务授权决定。
 
 ## design_complete
 
@@ -58,7 +58,7 @@ recovery:
 
 ## iteration_complete
 
-分别核对产品与技术文档，归位已交付事实和必要证据。只更新实际变化；行为和边界不变时记录核对依据。需要选择验证或复用既有结果时，读 [references/validation.md](references/validation.md)。
+按本次已确认目标与验收范围，分别核对产品与技术文档，归位已交付事实和必要证据。只更新实际变化；行为和边界不变时记录核对依据。需要选择验证或复用既有结果时，读 [references/validation.md](references/validation.md)。不把范围外的完整产品或发布资格自动变成本次收尾条件。
 
 ## stage / commit / push / pull_request
 
@@ -68,12 +68,13 @@ recovery:
 
 | 情况 | 判定和后续工作 |
 | --- | --- |
+| 本次目标已达成，必要验证与同步完成，适用强制门禁通过，且无当前交付必修问题 | 返回 ready，结束本次 action；已授权目标的剩余工作继续按原范围推进 |
 | 本次引入的冲突、必要同步遗漏，或完成目标必须解决的问题 | 相关 action 返回 blocked，解决后复验 |
 | 强制门禁本身失败，或无法证明当前交付安全 | 返回 blocked，说明失败范围与原因 |
 | 与本次无关且不影响当前交付的既有问题 | 记录为 limitation，不自动扩大修复范围或阻断 action |
 | 当前需求、源码和测试可解决的疑问 | 自行核实，不转交常规工程判断 |
 | 证据无法解决且需用户决定的实质产品歧义 | 明确受阻部分并请求具体决定，其他独立工作继续 |
 
-返回 ready 或 blocked，以及 documents_checked / documents_updated。集中说明 action、实际变化、产品与技术核对依据、相关验证和剩余问题；无需逐页填写“不适用”。ready 只覆盖本次 action 或阶段，部分交付不代表整个目标完成，文档 diff 不证明语义准确。
+返回 ready 或 blocked，以及 documents_checked / documents_updated。交付回复集中说明本次结果、实际验证或证据复用依据、相关限制／阻断及确需用户决定的问题；无需逐页填写“不适用”或另写完成报告。证据与未取得资格沿用原负责位置。ready 只覆盖本次 action 或阶段，部分交付不代表整个目标完成，文档 diff 不证明语义准确。
 
 强制检查与授权不因证据复用或无关问题分类而削弱。不使用 --no-verify，不增加原任务以外的提交、推送或对外发送授权。

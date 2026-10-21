@@ -20,7 +20,7 @@
 
 | 位置 | 完整维护的内容 |
 | --- | --- |
-| [根 AGENTS](../../AGENTS.md) | 授权与自主推进边界、读取入口、核心工程约束、同步触发时机 |
+| [根 AGENTS](../../AGENTS.md) | 授权与自主推进边界、任务收尾与重新打开条件、读取入口、核心工程约束、同步触发时机 |
 | [docs AGENTS](../AGENTS.md) | 文档任务入口与局部格式约束 |
 | 本页 | 内容归属、当前与目标状态、历史资料生命周期 |
 | [文档同步 Skill](../../.agents/skills/document-before-commit/SKILL.md) | action 路由与 ready/blocked 判定；Git 范围和验证细则按需读取 Skill references |
@@ -42,7 +42,7 @@ Agent Note 记录一个影响代码库的提案或决策的动机、备选方案
 
 ## 生命周期
 
-普通小修复不新建计划。多阶段工作在 plans 中保存目标、步骤、验收与待决事项；完成后将知识和必要证据归位，删除计划，过程由 Git 保留。不另写 completed 副本，不建立空 generated 或重复索引。
+普通小修复不新建计划。多阶段工作在 plans 中保存目标、步骤、验收与待决事项；完成后将知识和必要证据归位，删除计划，过程由 Git 保留。不另写 completed 副本，不建立空 generated 或重复索引。任务收尾与重新打开按根 AGENTS 判断，证据复用按[验证细则](../../.agents/skills/document-before-commit/references/validation.md)执行；本页不另维护完成状态或重验清单。
 
 仍在设计或部分实施的 Note 保留在 `proposed`；交付后更新为 `implemented`，陈述实际交付的决定与后果。否决的提案仅在其理由能防止再次犯错时保留于 `rejected`。已实施的 Note 若仍有历史价值、但理由不再指导未来工作，可按规范移入只读 `archived`；仍适用的取舍保持可读。完全失效的记录只有在当前 owner 保存全部独特理由、备选、后果和验证边界，并修复所有入站链接后才能删除；部分替代不满足这一条件。当前行为始终由手册、active、owner 文档及运行证据核对，Note 不形成第二套实现权威。
 
