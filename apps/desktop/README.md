@@ -330,6 +330,8 @@ Main 仅在原 Message／Execution 身份和结果完全匹配、原状态 faile
 
 Native 的侧栏打开入口对当前父会话及同一在途选择去重，重复鼠标点击和 Enter 不重新发起 `select`、撤销历史读取或重建消息。子详情通过右侧栏标签打开，点击当前父会话不会关闭详情或重新选择父会话；准备页及安排任务页仍恢复原会话；选择其他目标和显式恢复读取保持原流程。[首次呈现回归](test/isolated/native-history-presentation-dom.test.tsx)核重复点击的请求数量、消息节点、滚动和展开保持，以及在途目标复用。
 
+初始没有已选会话时，`selectionHandoff` 同样参与聊天加载判断，覆盖目标 `select` 确认和模型准备，再由 `NativeHistory` 的加载阶段接续；不能因 `selection` 尚未到达而提前发布 Conversation 空状态。[新对话 DOM 回归](test/isolated/native-new-conversation-dom.test.tsx)分别核已有正文与真实空历史，延迟选择、模型及历史读取并穿插状态刷新；完整历史到达后才呈现正文或实际空状态，原首次发送的待定消息交接仍保持。
+
 进入会话时，准确阅读身份下已保存的正文先展示；轮次、工具或文件目标信息尚未核实只影响相应条目和操作资格，不遮住整段正文。查询成功但缺少对应事实和真实查询失败分别保留准确状态、原记录及必要重试。首次展示后，同一身份的流式更新和 history epoch 校准继续保留正文；切走再回会话命中有界DOM缓存时先恢复原节点、阅读位置和展开状态，再后台完整校准。发送、停止、审批和新读取继续等待当前完整scope资格，展示缓存不恢复操作权。[首次呈现回归](test/isolated/native-history-presentation-dom.test.tsx)维护正文与元数据的独立进展、失败、缓存返回及epoch校准；[活动回执回归](test/isolated/native-tool-receipt-render-dom.test.tsx)继续验证运行中延迟工具信息的折叠原文保护。
 
 [轮次分组展示缓存](src/native-transcript-display.ts)沿原NativeDisplayCache预算，仅在同一bridge对象、generation／Store边界及准确Session／Workspace／historyEpoch内保留已验证grouping。metadata加载期间，完整消息与已核全文回复的全部字段仍相等时才复用；正文、来源或附件变化不命中，真实历史／Run／Tool／文件读取错误或非加载期权限不可用撤销对应项。非加载且完整时才更新缓存，`turnActivity`始终取当前fresh transcript；缓存不保存读取lease或操作资格，当前viewSelection的读取门禁保持。

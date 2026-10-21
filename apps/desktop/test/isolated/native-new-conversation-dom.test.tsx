@@ -34,6 +34,7 @@ function fixture(
   initialMode: 'accept_edits' | 'auto' | 'full' = 'accept_edits',
   options: {
     withoutSelection?: boolean;
+    messages?: Message[];
     workspaceIds?: readonly ('w' | 'empty')[];
     holdDirectory?: boolean;
   } = {},
@@ -57,7 +58,7 @@ function fixture(
   const host = dom.window.document,
     root = createRoot(host.getElementById('root')!);
   const calls: NativeRequest[] = [],
-    messages: Message[] = [],
+    messages: Message[] = [...(options.messages ?? [])],
     runs: Run[] = [],
     drafts = new Map<string, string>([
       ['a', 'saved A'],
@@ -69,7 +70,7 @@ function fixture(
     rootSessionId: id,
     parentSessionId: null,
     title: id === 'a' ? 'Original A' : id === 'b' ? 'Other B' : '新对话',
-    nextSeq: '0',
+    nextSeq: messages.filter((message) => message.sessionId === id).at(-1)?.seq ?? '0',
     deletedAt: null,
     controlRevision: '0',
     contextSelectionId: 'context',
@@ -1279,6 +1280,75 @@ test('Session switches never revive the retired row highlight while the chosen c
     await f.close();
   }
 });
+
+for (const withHistory of [true, false]) {
+  test(`a first Session selection waits for confirmed ${withHistory ? 'history' : 'empty history'} before showing content or an empty state`, async () => {
+    const f = fixture(true, true, 'accept_edits', {
+      withoutSelection: true,
+      messages: withHistory
+        ? [
+            {
+              id: 'saved-user-message',
+              sessionId: 'a',
+              runId: 'saved-run',
+              seq: '1',
+              role: 'user',
+              status: 'complete',
+              content: 'The original saved conversation',
+            },
+          ]
+        : [],
+    });
+    const expectLoading = () => {
+      expect(f.host.querySelector('.new-conversation-welcome') === null).toBe(true);
+      expect(f.host.querySelector('.welcome') === null).toBe(true);
+      expect(f.host.querySelector('.conversation-loading') !== null).toBe(true);
+      expect(f.host.querySelector('.conversation-viewport')?.getAttribute('aria-busy')).toBe(
+        'true',
+      );
+      expect(f.host.querySelector('.message.user') === null).toBe(true);
+    };
+    try {
+      await act(async () => f.root.render(<NativeDesktop />));
+      expect(f.host.querySelector('.new-conversation-welcome')).not.toBeNull();
+      f.holdSelection();
+      f.holdModels();
+      f.holdHistory();
+      await f.click('Original A');
+      expectLoading();
+      await f.refreshWhileSelecting();
+      expectLoading();
+      await f.releaseSelection();
+      expect(f.modelsHeld()).toBe(true);
+      expectLoading();
+      await f.releaseModels();
+      expectLoading();
+      await f.releaseHistory();
+      expect(f.host.querySelector('.conversation-loading')).toBeNull();
+      expect(f.host.querySelector('.new-conversation-welcome')).toBeNull();
+      if (withHistory) {
+        expect(f.host.querySelector('.welcome')).toBeNull();
+        expect(f.host.querySelector('.message.user')?.textContent).toContain(
+          'The original saved conversation',
+        );
+      } else {
+        expect(f.host.querySelector('.message.user')).toBeNull();
+        expect(f.host.querySelector('.welcome')).not.toBeNull();
+      }
+      expect(f.calls.filter((call) => call.method === 'select')).toHaveLength(1);
+      expect(
+        f.calls.some((call) =>
+          ['submit', 'conversation.send', 'permission.mode'].includes(call.method),
+        ),
+      ).toBe(false);
+    } finally {
+      await f.releaseSelection();
+      await f.releaseModels();
+      await f.releaseHistory();
+      await f.close();
+    }
+  });
+}
 
 test('a held Session switch retains the current draft and controls until Main confirms the target, with writes gated', async () => {
   const f = fixture(true);

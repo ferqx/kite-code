@@ -2940,7 +2940,7 @@ function NativeDesktopContent({
       loading={
         !preparing &&
         !(firstVisible && !firstSaved) &&
-        !!selection &&
+        (!!selection || selectionHandoff) &&
         historyState.phase === 'loading' &&
         !messages.length
       }
