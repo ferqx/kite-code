@@ -217,6 +217,12 @@ Host 自动封存 prepare 中 session namespace 的 `records.get/list` 完整原
 暂停后的原完成订阅沿 [继续资格 owner](sqlite/job-report-continuation-README.md)处理：真实 continue 决定同事务保存有限 carrier/start/subscription 依据，旧 suppressed report 保留历史，新 `job.report.continue` 仍由既有 Source/ack 事务唯一接纳。原停止、unknown、Rewind 与 fence 不因继续而解除。
 
 
+## 子 Agent 的首次激活复用
+
+[首次激活证明](sqlite/child-first-activation.ts)的 `prepareFirstActivation` 在新 carrier 写入前核旧 carrier 已取消、从未派发、无 reference、准确 rejected `child.start` 回执及 child Session 尚无 Run，也拒绝未知执行。新 operation 与 `child.start` 封存相同私有 `firstActivation`，保原 Session 创建血缘和旧取消事实；`predecessor_execution_id` 指向旧 carrier，但 `after_run_id` 仍为空，不伪造前驱 Run。普通已有 Run 的后继合同不变。
+
+`verifyFirstActivation` 供 activation、邮件采用、冷 `attachGroup`、后台目录、Run 和报告读取共用，核原 Store／主体／父子／工作／配置／selection、请求摘要与准确命令链。同工作背景只引用该工作最初已取消委派，新工作不带旧背景；新输入独立保存，旧 queued 引导不复活。邮件仍按准确工作及 seq／completed cursor 双上界采用。缺失、篡改、已派发或未知事实不取得首次启动或恢复资格。真实用例入口见[Task owner](../extensions/task/README.md#稳定身份准确命令和观察)；冷只读检查不启动模型。
+
 ## 人类工作与完成报告事务
 
 [输入 owner](sqlite/inputs/README.md)负责公共请求、raw 人类输入、关联/选择/control revision 和唯一业务准入的分离；[安全交接](sqlite/human-work-handoff.ts)只在原准确 Run 的必要结果、计划条件、交互和未知效果都允许时技术收束。工作选择只门禁人类工作因果，不代替显式压缩或 runless Action 的原资格。等待与解释不持有 SQL 事务；原已派发效果与 unknown 始终按原执行域处理。

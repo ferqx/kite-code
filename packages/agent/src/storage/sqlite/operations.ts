@@ -46,6 +46,7 @@ import {
 } from './authorization-review';
 import { readBackgroundExecutions } from './background-directory';
 import { cancel } from './cancel-operations';
+import { verifyFirstActivation } from './child-first-activation';
 import { activateChildRun, ensureAgent, inspectChildSettlement } from './child-operations';
 import {
   getAgentSummary,
@@ -767,6 +768,11 @@ export class SqliteOperations {
           command.input_context_selection_id !== predecessor.context_selection_id
         )
           return;
+      }
+      try {
+        verifyFirstActivation(this, carrier, command);
+      } catch {
+        return;
       }
       return carrierId;
     };

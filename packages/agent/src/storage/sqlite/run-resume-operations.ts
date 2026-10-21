@@ -10,6 +10,7 @@ import {
   type RunResumeState,
 } from '../types';
 import { transferAuthorizationReviewOwnership } from './authorization-review';
+import { verifyFirstActivation } from './child-first-activation';
 import { assertConfigurationReads } from './child-operations';
 import { assertNoExecutionGroupFence } from './execution-group-safety';
 import { identity as modelIdentity, sessionScope } from './model-input-operations';
@@ -426,6 +427,12 @@ function attachGroup(
         (!run && carrier.state !== 'planned' && carrier.state !== 'dispatching')
       )
         throw new AgentError('run_resume_checkpoint_unavailable', 'child_relationship');
+      const firstActivation = verifyFirstActivation(db, carrier, command);
+      if (
+        firstActivation &&
+        session.context_selection_id !== firstActivation.proof.contextSelectionId
+      )
+        throw new AgentError('run_resume_checkpoint_unavailable', 'child_selection');
       if (
         carrier.reference_json !== null &&
         canonicalJson(parse(carrier.reference_json)) !==
@@ -468,6 +475,18 @@ function attachGroup(
         command: jsonRow(command),
         origin: jsonRow(origin),
         path: paths.get(String(carrier.id))!.map(jsonRow),
+        ...(firstActivation
+          ? {
+              firstActivation: {
+                previous: jsonRow(firstActivation.previous),
+                origin: jsonRow(firstActivation.previousOrigin),
+                start: jsonRow(firstActivation.previousStart),
+                background: firstActivation.backgroundStart
+                  ? jsonRow(firstActivation.backgroundStart)
+                  : null,
+              },
+            }
+          : {}),
       });
     }
   }

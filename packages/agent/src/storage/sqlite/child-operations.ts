@@ -9,6 +9,11 @@ import {
   type OperationRef,
   type RequirementRef,
 } from '../types';
+import {
+  type FirstActivationProof,
+  prepareFirstActivation,
+  verifyFirstActivation,
+} from './child-first-activation';
 import { assertNoExecutionGroupFence } from './execution-group-safety';
 import { record as extensionRecord, verifyNamespace } from './extension-operations';
 import { applyInputWork } from './input-operations';
@@ -131,7 +136,9 @@ export function ensureAgent(
   db: SqliteOperations,
   input: EnsureOperationInput,
   authorizationReview = false,
-  continuation?: EnsureAgentFollowUpInput,
+  continuation?:
+    | EnsureAgentFollowUpInput
+    | { previous: OperationRef; contextSelectionId: string; firstActivation: true },
   insideTransaction = false,
 ): OperationRef {
   assertOperationResultDelivery(input);
@@ -173,6 +180,7 @@ export function ensureAgent(
       verifyNamespace(db, input.extensionId, origin, input.parentExecutionId);
     let reusedChild: Record<string, string | number | bigint | null> | null = null;
     let previousCarrier: Record<string, string | number | bigint | null> | null = null;
+    let firstActivation: FirstActivationProof | undefined;
     if (continuation) {
       if (
         authorizationReview ||
@@ -216,28 +224,34 @@ export function ensureAgent(
         input.sessionId,
         input.owner.sessionId,
       );
-      const predecessor = db.row(
-        'SELECT * FROM run WHERE id=? AND session_id=? AND origin_command_id=?',
-        continuation.afterRunId,
-        previousCarrier.child_session_id!,
-        `child-start-${previousCarrier.id}`,
-      );
-      if (
-        !reusedChild ||
-        !predecessor ||
-        predecessor.origin_store_id !== input.expectedStoreId ||
-        reusedChild.context_selection_id !== continuation.contextSelectionId
-      )
-        throw new AgentError('input_target_changed');
-      if (
-        previousCarrier.state === 'outcome_unknown' ||
-        predecessor.status === 'interrupted' ||
-        db.row(
-          "SELECT id FROM execution WHERE session_id=? AND state='outcome_unknown' LIMIT 1",
-          reusedChild.id!,
+      if ('firstActivation' in continuation) {
+        if (!reusedChild || reusedChild.context_selection_id !== continuation.contextSelectionId)
+          throw new AgentError('input_target_changed');
+        firstActivation = prepareFirstActivation(db, previousCarrier, reusedChild, origin);
+      } else {
+        const predecessor = db.row(
+          'SELECT * FROM run WHERE id=? AND session_id=? AND origin_command_id=?',
+          continuation.afterRunId,
+          previousCarrier.child_session_id!,
+          `child-start-${previousCarrier.id}`,
+        );
+        if (
+          !reusedChild ||
+          !predecessor ||
+          predecessor.origin_store_id !== input.expectedStoreId ||
+          reusedChild.context_selection_id !== continuation.contextSelectionId
         )
-      )
-        throw new AgentError('operation_needs_review');
+          throw new AgentError('input_target_changed');
+        if (
+          previousCarrier.state === 'outcome_unknown' ||
+          predecessor.status === 'interrupted' ||
+          db.row(
+            "SELECT id FROM execution WHERE session_id=? AND state='outcome_unknown' LIMIT 1",
+            reusedChild.id!,
+          )
+        )
+          throw new AgentError('operation_needs_review');
+      }
     }
     let originStoreId = String(origin.origin_store_id);
     if (input.planRecordKey) {
@@ -268,17 +282,19 @@ export function ensureAgent(
       ...(input.resultDelivery ? { resultDelivery: input.resultDelivery } : {}),
       resultRequirement: (input.resultRequirement ?? null) as unknown as Json,
       resultRequirementSchema: input.resultRequirementSchema ?? null,
-      ...(continuation
-        ? {
-            followUp: {
-              previousCommandId: continuation.previous.commandId,
-              previousExecutionId: String(previousCarrier!.id),
-              childSessionId: String(reusedChild!.id),
-              afterRunId: continuation.afterRunId,
-              contextSelectionId: continuation.contextSelectionId,
-            },
-          }
-        : {}),
+      ...(firstActivation
+        ? { firstActivation: firstActivation as unknown as Json }
+        : continuation && 'afterRunId' in continuation
+          ? {
+              followUp: {
+                previousCommandId: continuation.previous.commandId,
+                previousExecutionId: String(previousCarrier!.id),
+                childSessionId: String(reusedChild!.id),
+                afterRunId: continuation.afterRunId,
+                contextSelectionId: continuation.contextSelectionId,
+              },
+            }
+          : {}),
     };
     const prior = db.row(
       "SELECT * FROM command WHERE origin_store_id=? AND extension_id=? AND scope_kind='session' AND scope_id=? AND operation_key=?",
@@ -383,20 +399,22 @@ export function ensureAgent(
         Buffer.byteLength(payload.content) > 1024 * 1024)
     )
       throw new AgentError('invalid_input_request');
-    const start: Json = continuation
-      ? {
-          kind: 'input.follow_up',
-          afterRunId: continuation.afterRunId,
-          contextSelectionId: continuation.contextSelectionId,
-          content: (payload as Record<string, Json>).content!,
-        }
-      : {
-          kind: 'child.start',
-          parentExecutionId: executionId,
-          configurationId: configuration.id,
-          configurationVersion: configuration.version,
-          input: payload,
-        };
+    const start: Json =
+      continuation && 'afterRunId' in continuation
+        ? {
+            kind: 'input.follow_up',
+            afterRunId: continuation.afterRunId,
+            contextSelectionId: continuation.contextSelectionId,
+            content: (payload as Record<string, Json>).content!,
+          }
+        : {
+            kind: 'child.start',
+            parentExecutionId: executionId,
+            configurationId: configuration.id,
+            configurationVersion: configuration.version,
+            input: payload,
+            ...(firstActivation ? { firstActivation: firstActivation as unknown as Json } : {}),
+          };
     if (reusedChild) db.allocateSessionSequence(childSessionId);
     const localStartSeq = reusedChild
       ? db.row('SELECT next_seq FROM session WHERE id=?', childSessionId)!.next_seq
@@ -453,7 +471,7 @@ export function ensureAgent(
     if (continuation) {
       db.run(
         'UPDATE command SET after_run_id=?,input_context_selection_id=?,agent_source_execution_id=?,agent_carrier_execution_id=? WHERE id=?',
-        continuation.afterRunId,
+        'afterRunId' in continuation ? continuation.afterRunId : null,
         continuation.contextSelectionId,
         input.parentExecutionId,
         executionId,
@@ -481,7 +499,7 @@ export function ensureAgent(
     }
     sealResultRequirement(db, input, executionId);
     db.event(input.sessionId, executionId, 'execution.planned');
-    if (!continuation) db.event(childSessionId, childSessionId, 'session.created');
+    if (!reusedChild) db.event(childSessionId, childSessionId, 'session.created');
     db.event(childSessionId, startId, 'command.accepted');
     db.event(input.sessionId, commandId, 'operation.accepted');
     return {
@@ -540,6 +558,19 @@ export function activateChildRun(
       `child-start-${job.id}`,
     )!;
     db.active(input.owner, String(command.id));
+    const firstActivation = verifyFirstActivation(db, job, command);
+    if (firstActivation) {
+      if (child.context_selection_id !== firstActivation.proof.contextSelectionId)
+        throw new AgentError('input_target_changed');
+      if (
+        db.row(
+          "SELECT id FROM execution WHERE (session_id=? OR child_session_id=?) AND state='outcome_unknown' LIMIT 1",
+          child.id!,
+          child.id!,
+        )
+      )
+        throw new AgentError('operation_needs_review');
+    }
     const inherited = JSON.parse(String(job.requirements_json)) as RequirementRef[];
     const refs = [...inherited];
     for (const ref of input.requirements ?? [])
@@ -631,6 +662,29 @@ export function activateChildRun(
     const review =
       db.row('SELECT kind FROM command WHERE id=?', job.origin_command_id!)?.kind ===
       'authorization.review';
+    if (firstActivation?.backgroundStart) {
+      const background = JSON.parse(String(firstActivation.backgroundStart.request_json)) as {
+        input: Json;
+      };
+      const content =
+        typeof background.input === 'string'
+          ? background.input
+          : (displayInput(background.input)?.content ?? canonicalJson(background.input));
+      db.appendMessage(
+        String(job.child_session_id),
+        runId,
+        {
+          content: canonicalJson({
+            kind: 'cancelled_agent_assignment_background',
+            instruction:
+              'Historical background only. This delegation was cancelled before execution. Follow the new instruction, not this cancelled assignment.',
+            content,
+          }),
+          sourceIds: [String(command.id), String(firstActivation.backgroundStart.id)],
+        },
+        'user',
+      );
+    }
     db.appendMessage(
       String(job.child_session_id),
       runId,

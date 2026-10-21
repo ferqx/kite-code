@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { canonicalJson } from '../../json';
 import type { Store } from '../port';
 import { AgentError, type AgentMessage, type ArtifactReference, type Json } from '../types';
+import { verifyFirstActivation } from './child-first-activation';
 import { getAgentSummary, stableAgentsBody } from './child-query-operations';
 import { verifyNamespace } from './extension-operations';
 import type { SqliteOperations } from './operations';
@@ -97,7 +98,8 @@ function adoption(db: SqliteOperations, runId: string, sessionId: string): Row |
     sessionId,
   );
   if (
-    row?.kind !== 'input.follow_up' ||
+    !row ||
+    !['input.follow_up', 'child.start'].includes(String(row.kind)) ||
     row.mail_adoption_upper_seq === null ||
     row.mail_adoption_cursor === null
   )
@@ -115,6 +117,15 @@ function adoption(db: SqliteOperations, runId: string, sessionId: string): Row |
     row.predecessor_execution_id === null
   )
     throw new AgentError('agent_message_unverifiable');
+  if (
+    row.kind === 'child.start' &&
+    !verifyFirstActivation(
+      db,
+      db.row('SELECT * FROM execution WHERE id=?', row.agent_carrier_execution_id!)!,
+      db.row('SELECT * FROM command WHERE id=?', row.id!)!,
+    )
+  )
+    throw new AgentError('agent_message_unverifiable');
   return row;
 }
 function eligibleAdoption(mail: Row, binding: Row | null): boolean {
@@ -124,7 +135,8 @@ function eligibleAdoption(mail: Row, binding: Row | null): boolean {
     mail.mail_selection_id !== binding.input_context_selection_id ||
     mail.subject_id !== binding.subject_id ||
     mail.origin_store_id !== binding.origin_store_id ||
-    ((binding.parent_mail_run_id ||
+    ((binding.kind === 'child.start' ||
+      binding.parent_mail_run_id ||
       (binding.carrier_notification &&
         parse(binding.carrier_notification).kind === 'agent_completion')) &&
       (mail.root_work_command_id !== binding.root_work_command_id ||
@@ -164,7 +176,8 @@ function runPredicate(db: SqliteOperations, runId: string, sessionId: string) {
   const carrier = binding && carrierPredicate(binding);
   const work =
     binding &&
-    (binding.parent_mail_run_id ||
+    (binding.kind === 'child.start' ||
+      binding.parent_mail_run_id ||
       (binding.carrier_notification &&
         parse(binding.carrier_notification).kind === 'agent_completion'));
   return binding

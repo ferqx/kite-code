@@ -2282,7 +2282,7 @@ export class ExtensionHost {
           // Only the immutable configuration identity is taken from this preliminary read.
           // The Store selects and pins the actual target after asynchronous resolution finishes.
           const agent =
-            input.kind === 'follow_up' && observed.runId !== null
+            input.kind === 'follow_up' && (observed.runId !== null || observed.state === 'idle')
               ? await this.options.resolveAgent?.(
                   observed.configurationId,
                   scope,

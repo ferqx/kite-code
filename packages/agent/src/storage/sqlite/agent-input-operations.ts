@@ -457,7 +457,6 @@ export function applyAgentCommand(
           ref: target.ref,
         };
       } else {
-        if (!target.runId) throw new AgentError('operation_needs_review');
         // A preliminary queued observation may become terminal before this transaction.
         // Do not durably create a new carrier when Host only prepared to steer the old one.
         if (input.newTurnPrepared === false) throw new AgentError('input_target_changed');
@@ -468,7 +467,7 @@ export function applyAgentCommand(
           {
             ...input,
             previous: target.ref,
-            afterRunId: target.runId,
+            ...(target.runId ? { afterRunId: target.runId } : { firstActivation: true as const }),
             contextSelectionId: target.contextSelectionId,
           },
           true,
