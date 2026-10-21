@@ -169,6 +169,8 @@ export type NativeDraft = {
   rootSessionId: string;
   revision: number;
   content: string;
+  /** Current-process proof of the committed receipt that cleared this exact revision. */
+  consumedFrom?: { commandId: string; revision: number };
   association?: 'current' | 'unavailable';
 };
 export type NativeCreation = {

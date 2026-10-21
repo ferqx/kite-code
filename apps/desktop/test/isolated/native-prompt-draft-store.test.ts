@@ -63,7 +63,7 @@ test('actual Node private drafts are consumed with receipts, survive cold reads 
       error = await stderr;
     if (exit !== 0) console.error(error);
     expect(exit).toBe(0);
-    expect(JSON.parse(output).checked).toHaveLength(8);
+    expect(JSON.parse(output).checked).toHaveLength(12);
     await Bun.write(join(root, 'result.json'), output);
   } finally {
     clearTimeout(timeout);

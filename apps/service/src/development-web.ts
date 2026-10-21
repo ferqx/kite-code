@@ -423,6 +423,7 @@ export function startDevelopmentWeb(options: DevelopmentWebOptions) {
         }
         if (url.pathname === '/browser/v1/background-executions') {
           query(url, [
+            'includeSourceTool',
             'workspaceId',
             'rootSessionId',
             'executionId',

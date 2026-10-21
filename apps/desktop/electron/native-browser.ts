@@ -25,6 +25,14 @@ function httpUrl(value: string): boolean {
     return false;
   }
 }
+function webSocketUrl(value: string): boolean {
+  try {
+    const url = new URL(value);
+    return ['ws:', 'wss:'].includes(url.protocol) && !url.username && !url.password;
+  } catch {
+    return false;
+  }
+}
 
 /** Isolated, memory-only browsing; no Service caller, app preload or external protocol handoff. */
 export function registerNativeBrowserIpc(options: {
@@ -41,7 +49,10 @@ export function registerNativeBrowserIpc(options: {
   browsing.setPermissionRequestHandler((_contents, _permission, complete) => complete(false));
   browsing.setPermissionCheckHandler(() => false);
   browsing.webRequest.onBeforeRequest((details, complete) => {
-    const allowed = httpUrl(details.url) || /^(?:data:|blob:|about:blank$)/i.test(details.url);
+    const allowed =
+      httpUrl(details.url) ||
+      (details.resourceType === 'webSocket' && webSocketUrl(details.url)) ||
+      /^(?:data:|blob:|about:blank$)/i.test(details.url);
     complete({ cancel: !allowed });
   });
   const publish = (tab: BrowserTab) => {

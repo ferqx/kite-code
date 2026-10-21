@@ -180,6 +180,7 @@ export function NativeBrowserPane({ id, visible, tools, onTitleChange }: Session
         onAddressChange={setAddress}
         onAddressFocus={(value) => {
           focused.current = value;
+          if (!value) setAddress(state.url);
         }}
         onNavigate={() => void request({ action: 'navigate', id, input: address })}
         onBack={() => void request({ action: 'back', id })}

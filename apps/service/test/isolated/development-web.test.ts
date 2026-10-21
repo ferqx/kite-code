@@ -14,7 +14,7 @@ import { WebController, type WebUpdate } from '../../../web/src';
 import { startDevelopmentWeb } from '../../src/development-web';
 import { startService } from '../../src/index';
 
-async function fixture(partialBytes = 32768) {
+async function fixture(partialBytes = 32768, toolOutput = false) {
   const root = mkdtempSync(join(tmpdir(), 'kite-development-web-'));
   const store = await openSqliteStore({ dataRoot: root, profile: 'development' });
   const storeId = (await store.getMetadata()).storeId;
@@ -28,6 +28,16 @@ async function fixture(partialBytes = 32768) {
   const model: ModelAdapter = {
     async *stream(_request, { signal }) {
       models++;
+      if (toolOutput && models === 1) {
+        yield {
+          type: 'tool_call',
+          id: 'launch-output-tool',
+          name: 'fixture.browser-launch',
+          arguments: '{}',
+        };
+        yield { type: 'finish', reason: 'tool_calls', usage: { inputTokens: 1, outputTokens: 1 } };
+        return;
+      }
       yield { type: 'text_delta', text: partial };
       await Promise.race([
         hold,
@@ -68,6 +78,29 @@ async function fixture(partialBytes = 32768) {
     version: '1',
     apiMajor: 1,
     jobs: [outputJob],
+    tools: toolOutput
+      ? [
+          {
+            id: 'fixture.browser-launch',
+            version: '1',
+            description: 'One output Job from an actual parent Tool',
+            inputSchema: { type: 'object', additionalProperties: false },
+            async execute(_input, context) {
+              const ref = await context.operations.ensure({
+                key: 'output',
+                request: {
+                  kind: 'job',
+                  definitionId: outputJob.id,
+                  definitionVersion: '1',
+                  input: {},
+                },
+              });
+              await context.operations.wait(ref, { timeoutMs: 4000, signal: context.signal });
+              return { outcome: 'succeeded', content: 'created' };
+            },
+          },
+        ]
+      : [],
     actions: [
       {
         id: 'launch',
@@ -660,6 +693,19 @@ test('Cookie background directory preserves exact Job metadata and scopes withou
     expect(item.execution.status).toBe('succeeded');
     expect(JSON.stringify(item)).not.toContain('actual-output-handle');
     expect((item.execution as Record<string, unknown>).result).toBeUndefined();
+    for (const includeSourceTool of [true, false]) {
+      const projected = await f.browser.listAllBackgroundExecutions({
+        workspaceId: 'w',
+        rootSessionId: 's',
+        includeSourceTool,
+      });
+      expect(projected).toEqual(items);
+      expect(
+        f.requests.some((request) =>
+          request.url.includes(`includeSourceTool=${includeSourceTool}`),
+        ),
+      ).toBe(true);
+    }
     expect(await f.browser.listAllBackgroundExecutions({ rootSessionId: 'other' })).toEqual([]);
     expect(
       (await f.browser.listExecutionOutput(item.session.id, job.id)).items.map(
@@ -671,6 +717,9 @@ test('Cookie background directory preserves exact Job metadata and scopes withou
       '/browser/v1/background-executions?subjectId=forged',
       '/browser/v1/background-executions?rootSessionId=s&rootSessionId=other',
       '/browser/v1/background-executions?limit=201',
+      '/browser/v1/background-executions?includeSourceTool=1',
+      '/browser/v1/background-executions?includeSourceTool=TRUE',
+      '/browser/v1/background-executions?includeSourceTool=true&includeSourceTool=false',
     ])
       expect((await f.raw(path)).status).toBe(400);
     expect((await f.raw('/browser/v1/background-executions', 'POST')).status).toBe(405);
@@ -681,6 +730,49 @@ test('Cookie background directory preserves exact Job metadata and scopes withou
     expect(
       f.requests.every((request) => request.method === 'GET' && request.authorization === null),
     ).toBe(true);
+  } finally {
+    await f.close();
+  }
+});
+
+test('Cookie Browser opts into actual parent Tool metadata without changing the default projection or executing work', async () => {
+  const f = await fixture(32768, true);
+  try {
+    f.release();
+    await f.client.startRun('s', {
+      kind: 'run.start',
+      expectedStoreId: f.storeId,
+      commandId: 'launch-via-tool',
+      content: 'Launch one output Job',
+    });
+    await f.runtime.waitForCommand('launch-via-tool', { timeoutMs: 4000 });
+    const before = await f.store.getMetadata(),
+      models = f.models,
+      jobs = f.jobs;
+    const query = { workspaceId: 'w', rootSessionId: 's' };
+    const omitted = await f.browser.listAllBackgroundExecutions(query);
+    const excluded = await f.browser.listAllBackgroundExecutions({
+      ...query,
+      includeSourceTool: false,
+    });
+    const included = await f.browser.listAllBackgroundExecutions({
+      ...query,
+      includeSourceTool: true,
+    });
+    expect(omitted).toHaveLength(1);
+    expect(excluded).toEqual(omitted);
+    expect(omitted[0]!.sourceTool).toBeUndefined();
+    expect(included[0]!.sourceTool).toEqual({
+      id: included[0]!.execution.parentExecutionId!,
+      definitionId: 'fixture.browser-launch',
+      definitionVersion: '1',
+    });
+    expect(included[0]!.sourceTool!.id).toBeTruthy();
+    expect(included[0]!.execution).toEqual(omitted[0]!.execution);
+    expect((await f.store.getMetadata()).lastChangeCursor).toBe(before.lastChangeCursor);
+    expect(f.models).toBe(models);
+    expect(f.jobs).toBe(jobs);
+    expect(f.jobs).toBe(1);
   } finally {
     await f.close();
   }

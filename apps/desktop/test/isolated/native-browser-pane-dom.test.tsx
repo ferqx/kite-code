@@ -1,10 +1,24 @@
 import { expect, test } from 'bun:test';
 import { JSDOM } from 'jsdom';
 import { act } from 'react';
-import { createRoot } from 'react-dom/client';
 import type { NativeBrowserRequest, NativeBrowserState } from '../../src/native-browser-bridge';
-import { NativeBrowserPane } from '../../src/native-browser-pane';
 import { prepareDesktopDom } from '../native-page-dom.fixture';
+
+const bootstrap = new JSDOM('<div></div>', { pretendToBeVisual: true });
+const initialGlobals = {
+  window: globalThis.window,
+  document: globalThis.document,
+  navigator: globalThis.navigator,
+};
+Object.assign(globalThis, {
+  window: bootstrap.window,
+  document: bootstrap.window.document,
+  navigator: bootstrap.window.navigator,
+});
+const { createRoot } = await import('react-dom/client');
+const { NativeBrowserPane } = await import('../../src/native-browser-pane');
+Object.assign(globalThis, initialGlobals);
+bootstrap.window.close();
 
 test('native page geometry follows the animated panel intersection and stops presenting at zero width or close', async () => {
   const dom = new JSDOM('<div id="root"></div>', {
@@ -109,6 +123,75 @@ test('native page geometry follows the animated panel intersection and stops pre
     expect(requests.some((request) => request.action === 'close')).toBe(false);
   } finally {
     await act(() => root.unmount());
+    restoreLayout();
+    Object.assign(globalThis, prior);
+    dom.window.close();
+  }
+});
+
+test('redirects preserve a focused address edit, then show the latest page URL on blur', async () => {
+  const dom = new JSDOM('<div id="root"></div>', {
+    url: 'http://localhost',
+    pretendToBeVisual: true,
+  });
+  const restoreLayout = prepareDesktopDom(dom);
+  const prior = {
+    window: globalThis.window,
+    document: globalThis.document,
+    navigator: globalThis.navigator,
+    IS_REACT_ACT_ENVIRONMENT: Reflect.get(globalThis, 'IS_REACT_ACT_ENVIRONMENT'),
+  };
+  Object.assign(globalThis, {
+    window: dom.window,
+    document: dom.window.document,
+    navigator: dom.window.navigator,
+    IS_REACT_ACT_ENVIRONMENT: true,
+  });
+  const state: NativeBrowserState = {
+    id: 'browser',
+    url: 'https://example.com/start',
+    title: 'Page',
+    loading: false,
+    canGoBack: false,
+    canGoForward: false,
+  };
+  let notify!: (state: NativeBrowserState) => void;
+  Object.assign(window, {
+    kiteNative: {
+      async browserRequest(request: NativeBrowserRequest) {
+        return request.action === 'state' ? state : null;
+      },
+      watchBrowser(listener: typeof notify) {
+        notify = listener;
+        return () => {};
+      },
+    },
+  });
+  const root = createRoot(document.getElementById('root')!);
+  try {
+    await act(async () =>
+      root.render(<NativeBrowserPane id="browser" visible tools={null} onTitleChange={() => {}} />),
+    );
+    const address = document.querySelector('input')!;
+    expect(address.value).toBe(state.url);
+    await act(async () => address.focus());
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(dom.window.HTMLInputElement.prototype, 'value')!.set!.call(
+        address,
+        'https://example.com/editing',
+      );
+      address.dispatchEvent(new dom.window.Event('input', { bubbles: true }));
+    });
+    await act(async () => notify({ ...state, url: 'https://example.com/redirect' }));
+    expect(address.value).toBe('https://example.com/editing');
+    await act(async () => notify({ ...state, url: 'https://example.com/final' }));
+    expect(address.value).toBe('https://example.com/editing');
+    await act(async () => address.blur());
+    expect(address.value).toBe('https://example.com/final');
+    await act(async () => notify({ ...state, url: 'https://example.com/next' }));
+    expect(address.value).toBe('https://example.com/next');
+  } finally {
+    await act(async () => root.unmount());
     restoreLayout();
     Object.assign(globalThis, prior);
     dom.window.close();

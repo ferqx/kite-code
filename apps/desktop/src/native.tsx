@@ -37,6 +37,7 @@ import { NativeBackgroundPanel } from './native-background-panel';
 import type {
   NativeBranchFacts,
   NativeBridge,
+  NativeCallerMetadata,
   NativeConversationResult,
   NativeCreation,
   NativeDirectory,
@@ -185,6 +186,18 @@ function NativeDesktopContent({
   const submittedDrafts = useRef(
     new Map<string, { storeId: string; sessionId: string; draft: { content: string } }>(),
   );
+  const consumedDraft = useRef<
+    | {
+        generation: number;
+        view: number;
+        storeId: string;
+        workspaceId: string;
+        sessionId: string;
+        commandId: string;
+        proof: NonNullable<NativeCallerMetadata['draft']>;
+      }
+    | undefined
+  >(undefined);
   const [state, setState] = useState<NativeState>();
   const [directory, setDirectory] = useState<NativeDirectory>();
   const imageDrafts = useNativeInputImages(bridge, state?.generation, directory?.storeId);
@@ -322,8 +335,10 @@ function NativeDesktopContent({
         if (['accepted', 'applied', 'terminal'].includes(input.phase))
           consumeInputDraft(input.intent.commandId, input.intent.expectedStoreId, input.sessionId);
       for (const caller of value.callerSubmissions ?? [])
-        if (['accepted', 'applied'].includes(caller.phase))
+        if (['accepted', 'applied'].includes(caller.phase)) {
+          rememberConsumedDraft(caller.request.commandId, caller.scope, caller.draft);
           consumeInputDraft(caller.request.commandId, caller.scope.storeId, caller.scope.sessionId);
+        }
       if (value.directory) acceptDirectory(value.directory);
       historyEpoch.current = value.historyEpoch;
       // Main has verified the exact answer_saved receipt. Promise resolution and
@@ -1121,6 +1136,28 @@ function NativeDesktopContent({
     draftCache.current.set(key, { content: '' });
     if (draftOwner.current === key && selected.current === sessionId) setDraft('');
   }
+  function rememberConsumedDraft(
+    commandId: string,
+    scope: NativeCallerMetadata['scope'],
+    proof: NativeCallerMetadata['draft'],
+  ) {
+    if (
+      !proof ||
+      proof.revision !== String(draftRevision.current) ||
+      draftOwner.current !== imageScope(scope.storeId, scope.sessionId) ||
+      selected.current !== scope.sessionId
+    )
+      return;
+    // A receipt proves the submitted version, not that storage actually consumed it.
+    // Reconcile lazily on Save without changing newer editor content or Plan state.
+    consumedDraft.current = {
+      ...scope,
+      commandId,
+      generation: generation.current,
+      view: viewIntent.current,
+      proof,
+    };
+  }
   function changeDraft(content: string) {
     if (!selection || selected.current !== selection.session.id) return;
     const key = imageScope(selection.storeId, selection.session.id);
@@ -1546,8 +1583,15 @@ function NativeDesktopContent({
       const accepted =
         value && 'phase' in value && ['accepted', 'applied', 'terminal'].includes(value.phase);
       if (accepted) imageDrafts.removeIds([...imageIds, ...files.map((file) => file.id)]);
-      if (accepted && current === generation.current)
+      if (accepted && current === generation.current) {
+        if ('draft' in value)
+          rememberConsumedDraft(
+            commandId,
+            { storeId: selection.storeId, workspaceId: selection.session.workspaceId, sessionId },
+            value.draft,
+          );
         consumeInputDraft(commandId, selection.storeId, sessionId);
+      }
       if (
         nonce === viewIntent.current &&
         current === generation.current &&
@@ -3455,14 +3499,67 @@ function NativeDesktopContent({
                             void write(async () => {
                               const original = {
                                 generation: generation.current,
+                                epoch: readLifecycle.current.epoch,
                                 view: viewIntent.current,
                                 sessionId: selection.session.id,
+                                storeId: selection.storeId,
+                                workspaceId: selection.session.workspaceId,
+                                revision: draftRevision.current,
                               };
+                              let revision = original.revision;
+                              const consumed = consumedDraft.current;
+                              if (
+                                consumed?.generation === original.generation &&
+                                consumed.view === original.view &&
+                                consumed.storeId === original.storeId &&
+                                consumed.workspaceId === original.workspaceId &&
+                                consumed.sessionId === original.sessionId &&
+                                consumed.proof.revision === String(revision)
+                              ) {
+                                const ownsRead = () =>
+                                  isCurrentRead(
+                                    original.generation,
+                                    original.epoch,
+                                    original.view,
+                                  ) &&
+                                  selected.current === original.sessionId &&
+                                  draftOwner.current ===
+                                    imageScope(original.storeId, original.sessionId) &&
+                                  draftRevision.current === original.revision;
+                                let saved: NativeResult;
+                                try {
+                                  saved = await bridge.request({
+                                    method: 'draft.read',
+                                    generation: original.generation,
+                                    sessionId: original.sessionId,
+                                  });
+                                } catch (cause) {
+                                  if (!ownsRead()) return;
+                                  throw cause;
+                                }
+                                if (!ownsRead()) return;
+                                if (
+                                  saved &&
+                                  'content' in saved &&
+                                  'revision' in saved &&
+                                  saved.id === consumed.proof.id &&
+                                  saved.storeId === original.storeId &&
+                                  saved.workspaceId === original.workspaceId &&
+                                  saved.rootSessionId === original.sessionId &&
+                                  saved.content === '' &&
+                                  saved.revision === revision + 1 &&
+                                  saved.consumedFrom?.commandId === consumed.commandId &&
+                                  saved.consumedFrom.revision === revision
+                                )
+                                  draftRevision.current = revision = saved.revision;
+                                if (consumedDraft.current === consumed)
+                                  consumedDraft.current = undefined;
+                              }
                               const saved = await bridge.request({
                                 method: 'draft.write',
                                 generation: original.generation,
                                 sessionId: original.sessionId,
-                                revision: draftRevision.current,
+                                revision,
                                 content: draft,
                               });
                               if (

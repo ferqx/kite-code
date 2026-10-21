@@ -2,7 +2,7 @@
 
 ## 后台目录的来源投影
 
-公开后台目录查询可显式带 `includeSourceTool:true`；HTTP 仅将严格的 true／false 字符串转为布尔值，其他值及重复参数仍拒绝。默认／false 保留原响应结构；true 可返回可选 `sourceTool:{id,definitionId,definitionVersion}`，字段来源和作用域归[Store owner](../../packages/agent/src/storage/README.md#跨会话原-job-目录)。同一[生成 schema](src/http/schema/index.ts)同步 OpenAPI、Client 类型与闭合 validator；来源不含工具正文，不增加路由、执行权限或恢复资格。
+公开后台目录查询可显式带 `includeSourceTool:true`；HTTP 仅将严格的 true／false 字符串转为布尔值，其他值及重复参数仍拒绝。默认／false 保留原响应结构；true 可返回可选 `sourceTool:{id,definitionId,definitionVersion}`，字段来源和作用域归[Store owner](../../packages/agent/src/storage/README.md#跨会话原-job-目录)。同一[生成 schema](src/http/schema/index.ts)同步 OpenAPI、Client 类型与闭合 validator；来源不含工具正文，不增加路由、执行权限或恢复资格。Cookie Browser Gateway 接受同一 `includeSourceTool` 参数并沿用严格布尔解析、重复参数与自报 Store／主体拒绝；[实际 Gateway 回归](test/isolated/development-web.test.ts)核省略／false 的原响应、true 的真实父 Tool 投影及只读零执行。
 
 
 ## 图片输入协议

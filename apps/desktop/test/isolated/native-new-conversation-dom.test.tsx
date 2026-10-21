@@ -4,7 +4,9 @@ import { JSDOM } from 'jsdom';
 import { act } from 'react';
 import type {
   NativeBridge,
+  NativeCallerMetadata,
   NativeConversationResult,
+  NativeDraft,
   NativeRequest,
   NativeState,
 } from '../../src/native-bridge';
@@ -448,6 +450,8 @@ function fixture(
     refreshFacts: async () => {
       await act(async () => watcher?.({ kind: 'changed', generation: 1 }));
     },
+    lifecycle: (phase: 'active' | 'quitting') =>
+      act(async () => watcher?.({ kind: 'lifecycle', phase })),
     changeTrustScope: (description: string) => {
       trustDescription = description;
     },
@@ -506,6 +510,444 @@ function fixture(
     },
   };
 }
+
+function savedPromptFixture(
+  options: { unknown?: boolean; holdSubmit?: boolean; callerOnly?: boolean } = {},
+) {
+  const f = fixture(true);
+  const bridge = f.dom.window.kiteNative! as NativeBridge;
+  const request = bridge.request;
+  const saved = new Map<string, NativeDraft>(
+    ['a', 'b'].map((id) => [
+      id,
+      {
+        id,
+        storeId: 'store',
+        workspaceId: 'w',
+        rootSessionId: id,
+        revision: 1,
+        content: id === 'a' ? 'saved A' : 'saved B',
+      },
+    ]),
+  );
+  let submission: NativeState['inputSubmissions'][number] | undefined;
+  let caller: NativeCallerMetadata | undefined;
+  let readOverride: ((value: NativeDraft) => Promise<NativeDraft> | NativeDraft) | undefined;
+  let releaseSubmit: (() => void) | undefined;
+  const consume = () => {
+    if (!caller?.draft || !submission) return;
+    const previous = saved.get(submission.sessionId)!;
+    if (caller.draft.revision === String(previous.revision))
+      saved.set(submission.sessionId, {
+        ...previous,
+        content: '',
+        revision: previous.revision + 1,
+        consumedFrom: {
+          commandId: caller.request.commandId,
+          revision: previous.revision,
+        },
+      });
+  };
+  bridge.request = async (input) => {
+    if (input.method === 'draft.read') {
+      f.calls.push(input);
+      const value = { ...saved.get(input.sessionId)! };
+      return readOverride ? readOverride(value) : value;
+    }
+    if (input.method === 'draft.write') {
+      f.calls.push(input);
+      const previous = saved.get(input.sessionId)!;
+      if (input.revision !== previous.revision) throw Error('draft_revision_conflict');
+      const value = { ...previous, content: input.content, revision: previous.revision + 1 };
+      delete value.consumedFrom;
+      saved.set(input.sessionId, value);
+      return value;
+    }
+    if (input.method === 'submit') {
+      f.calls.push(input);
+      const previous = saved.get(input.sessionId)!;
+      const proof =
+        previous.content === input.intent.content
+          ? { id: previous.id, revision: String(previous.revision), textDigest: '0'.repeat(64) }
+          : undefined;
+      submission = {
+        sessionId: input.sessionId,
+        intent: {
+          kind: input.intent.kind,
+          expectedStoreId: input.intent.expectedStoreId,
+          commandId: input.intent.commandId,
+        },
+        phase: options.unknown ? 'unknown' : 'accepted',
+      };
+      caller = {
+        scope: { storeId: 'store', workspaceId: 'w', sessionId: input.sessionId },
+        subjectId: 'local-user',
+        target: { kind: 'session', id: input.sessionId },
+        bodyDigest: '0'.repeat(64),
+        requestDigest: '0'.repeat(64),
+        request: submission.intent,
+        phase: options.unknown ? 'unknown' : 'accepted',
+        draft: proof,
+      };
+      if (options.holdSubmit)
+        await new Promise<void>((resolve) => {
+          releaseSubmit = resolve;
+        });
+      if (!options.unknown) consume();
+      return { ...submission, draft: proof };
+    }
+    const result = await request(input);
+    if (!options.unknown || !result || !('generation' in result) || !submission || !caller)
+      return result;
+    return {
+      ...result,
+      inputSubmissions: options.callerOnly ? [] : [submission],
+      callerSubmissions: [caller],
+    };
+  };
+  return {
+    ...f,
+    saved,
+    setReadOverride: (override?: typeof readOverride) => {
+      readOverride = override;
+    },
+    releaseSubmit: () => act(async () => releaseSubmit?.()),
+    confirm: async () => {
+      submission = { ...submission!, phase: 'accepted' };
+      caller = { ...caller!, phase: 'applied' };
+      consume();
+      await f.refreshFacts();
+    },
+    writes: () => f.calls.filter((input) => input.method === 'draft.write'),
+  };
+}
+
+test('saving after accepted saved input uses the consumed draft revision in the same Session', async () => {
+  const f = savedPromptFixture();
+  try {
+    await act(async () => f.root.render(<NativeDesktop testDiagnostics />));
+    await f.click('Original A');
+    await f.edit('saved and submitted A', '当前会话私有草稿');
+    await f.click('保留草稿');
+    const plan = f.host.querySelector<HTMLInputElement>('[aria-label="先审核计划"]')!;
+    await act(async () => plan.click());
+    expect(plan.checked).toBe(true);
+    await f.click('发送计划任务');
+    expect(f.saved.get('a')?.revision).toBe(3);
+    expect(promptValue(f.input('当前会话私有草稿'))).toBe('');
+    expect(plan.checked).toBe(false);
+    await f.edit('new draft B', '当前会话私有草稿');
+    await f.click('保留草稿');
+    expect(f.writes().map((input) => input.revision)).toEqual([1, 3]);
+    expect(f.saved.get('a')?.content).toBe('new draft B');
+    expect(f.host.querySelector('[role="alertdialog"]')).toBeNull();
+  } finally {
+    await f.close();
+  }
+});
+
+test('saved draft reconciliation preserves edits queued during acceptance and during its awaited read', async () => {
+  const f = savedPromptFixture({ holdSubmit: true });
+  let releaseRead: (() => void) | undefined;
+  try {
+    await act(async () => f.root.render(<NativeDesktop testDiagnostics />));
+    await f.click('Original A');
+    await f.click('发送明确的新轮次');
+    await f.edit('B typed before acceptance', '当前会话私有草稿');
+    await f.releaseSubmit();
+    expect(promptValue(f.input('当前会话私有草稿'))).toBe('B typed before acceptance');
+    f.setReadOverride(
+      (value) =>
+        new Promise((resolve) => {
+          releaseRead = () => resolve(value);
+        }),
+    );
+    await f.click('保留草稿');
+    expect(releaseRead).toBeDefined();
+    expect(f.writes()).toHaveLength(0);
+    await f.edit('C typed while checking revision', '当前会话私有草稿');
+    f.setReadOverride();
+    await act(async () => releaseRead?.());
+    expect(f.writes().map((input) => [input.revision, input.content])).toEqual([
+      [2, 'B typed before acceptance'],
+    ]);
+    expect(promptValue(f.input('当前会话私有草稿'))).toBe('C typed while checking revision');
+    await f.click('保留草稿');
+    expect(f.saved.get('a')?.content).toBe('C typed while checking revision');
+    expect(f.writes().map((input) => input.revision)).toEqual([2, 3]);
+  } finally {
+    await f.releaseSubmit();
+    await act(async () => releaseRead?.());
+    await f.close();
+  }
+});
+
+for (const callerOnly of [false, true])
+  test(`an accepted-after-unknown saved draft reconciles without clearing later input (${callerOnly ? 'caller' : 'input then caller'})`, async () => {
+    const f = savedPromptFixture({ unknown: true, callerOnly });
+    try {
+      await act(async () => f.root.render(<NativeDesktop testDiagnostics />));
+      await f.click('Original A');
+      await f.click('发送明确的新轮次');
+      await f.edit('later input after unknown', '当前会话私有草稿');
+      await f.confirm();
+      expect(promptValue(f.input('当前会话私有草稿'))).toBe('later input after unknown');
+      await f.click('保留草稿');
+      expect(f.writes().map((input) => input.revision)).toEqual([2]);
+      expect(f.saved.get('a')?.content).toBe('later input after unknown');
+      const reads = f.calls.filter((input) => input.method === 'draft.read').length;
+      await f.refreshFacts();
+      await f.refreshFacts();
+      await f.edit('another edit', '当前会话私有草稿');
+      await f.click('保留草稿');
+      expect(f.writes().map((input) => input.revision)).toEqual([2, 3]);
+      expect(f.calls.filter((input) => input.method === 'draft.read')).toHaveLength(reads);
+      expect(f.calls.filter((input) => input.method === 'submit')).toHaveLength(1);
+    } finally {
+      await f.close();
+    }
+  });
+
+test('accepting unsaved input without saved-draft proof does not read or increment its CAS baseline', async () => {
+  const f = savedPromptFixture();
+  try {
+    await act(async () => f.root.render(<NativeDesktop testDiagnostics />));
+    await f.click('Original A');
+    await f.edit('not the saved input', '当前会话私有草稿');
+    await f.click('发送明确的新轮次');
+    const reads = f.calls.filter((input) => input.method === 'draft.read').length;
+    await f.edit('next unsent edit', '当前会话私有草稿');
+    await f.click('保留草稿');
+    expect(f.writes().map((input) => input.revision)).toEqual([1]);
+    expect(f.calls.filter((input) => input.method === 'draft.read')).toHaveLength(reads);
+    expect(f.saved.get('a')?.content).toBe('next unsent edit');
+  } finally {
+    await f.close();
+  }
+});
+
+test('an accepted original proof cannot silently rebase over newer nonempty persisted text', async () => {
+  const f = savedPromptFixture({ unknown: true });
+  try {
+    await act(async () => f.root.render(<NativeDesktop testDiagnostics />));
+    await f.click('Original A');
+    await f.click('发送明确的新轮次');
+    f.saved.set('a', { ...f.saved.get('a')!, revision: 2, content: 'another writer saved this' });
+    await f.confirm();
+    await f.edit('my later edit', '当前会话私有草稿');
+    await f.click('保留草稿');
+    expect(f.writes().map((input) => input.revision)).toEqual([1]);
+    expect(f.saved.get('a')?.content).toBe('another writer saved this');
+    expect(promptValue(f.input('当前会话私有草稿'))).toBe('my later edit');
+    expect(f.host.querySelector('[role="alertdialog"]')?.textContent).toContain(
+      'draft_revision_conflict',
+    );
+  } finally {
+    await f.close();
+  }
+});
+
+test('an independent empty saved draft is not mistaken for committed receipt consumption', async () => {
+  const f = savedPromptFixture({ unknown: true });
+  try {
+    await act(async () => f.root.render(<NativeDesktop testDiagnostics />));
+    await f.click('Original A');
+    await f.click('发送明确的新轮次');
+    f.saved.set('a', { ...f.saved.get('a')!, revision: 2, content: '' });
+    await f.confirm();
+    await f.edit('my later edit', '当前会话私有草稿');
+    await f.click('保留草稿');
+    expect(f.writes().map((input) => input.revision)).toEqual([1]);
+    expect(f.saved.get('a')?.content).toBe('');
+    expect(promptValue(f.input('当前会话私有草稿'))).toBe('my later edit');
+    expect(f.host.querySelector('[role="alertdialog"]')?.textContent).toContain(
+      'draft_revision_conflict',
+    );
+  } finally {
+    await f.close();
+  }
+});
+
+for (const mismatch of [
+  { id: 'different-draft' },
+  { storeId: 'different-store' },
+  { workspaceId: 'different-workspace' },
+  { rootSessionId: 'different-session' },
+  { revision: 3 },
+  { consumedFrom: { commandId: 'different-command', revision: 1 } },
+  { consumedFrom: undefined },
+])
+  test(`saved draft reconciliation rejects a nonmatching consumed read ${JSON.stringify(mismatch)}`, async () => {
+    const f = savedPromptFixture();
+    try {
+      await act(async () => f.root.render(<NativeDesktop testDiagnostics />));
+      await f.click('Original A');
+      await f.click('发送明确的新轮次');
+      f.setReadOverride((value) => ({ ...value, ...mismatch }));
+      await f.edit('newer editor text', '当前会话私有草稿');
+      await f.click('保留草稿');
+      expect(f.writes().map((input) => input.revision)).toEqual([1]);
+      expect(f.saved.get('a')?.revision).toBe(2);
+      expect(promptValue(f.input('当前会话私有草稿'))).toBe('newer editor text');
+      expect(f.host.querySelector('[role="alertdialog"]')?.textContent).toContain(
+        'draft_revision_conflict',
+      );
+    } finally {
+      await f.close();
+    }
+  });
+
+test('saved draft reconciliation requires the original consumed-from revision', async () => {
+  const f = savedPromptFixture();
+  try {
+    await act(async () => f.root.render(<NativeDesktop testDiagnostics />));
+    await f.click('Original A');
+    await f.click('发送明确的新轮次');
+    f.setReadOverride((value) => ({
+      ...value,
+      consumedFrom: { ...value.consumedFrom!, revision: 0 },
+    }));
+    await f.edit('newer editor text', '当前会话私有草稿');
+    await f.click('保留草稿');
+    expect(f.writes().map((input) => input.revision)).toEqual([1]);
+    expect(f.saved.get('a')?.revision).toBe(2);
+    expect(f.host.querySelector('[role="alertdialog"]')?.textContent).toContain(
+      'draft_revision_conflict',
+    );
+  } finally {
+    await f.close();
+  }
+});
+
+for (const returnToOriginal of [false, true])
+  test(`a late consumed-draft read cannot save into a newer ${returnToOriginal ? 'same-Session view' : 'Session'}`, async () => {
+    const f = savedPromptFixture();
+    let releaseRead: (() => void) | undefined;
+    try {
+      await act(async () => f.root.render(<NativeDesktop testDiagnostics />));
+      await f.click('Original A');
+      await f.click('发送明确的新轮次');
+      await f.edit('A stays unsaved', '当前会话私有草稿');
+      f.setReadOverride(
+        (value) =>
+          new Promise((resolve) => {
+            releaseRead = () => resolve(value);
+          }),
+      );
+      await f.click('保留草稿');
+      expect(releaseRead).toBeDefined();
+      f.setReadOverride();
+      await f.click('Other B');
+      if (returnToOriginal) await f.click('Original A');
+      await act(async () => releaseRead?.());
+      expect(f.writes()).toHaveLength(0);
+      expect(promptValue(f.input('当前会话私有草稿'))).toBe(
+        returnToOriginal ? 'A stays unsaved' : 'saved B',
+      );
+      await f.click('保留草稿');
+      expect(f.writes().map((input) => [input.sessionId, input.revision])).toEqual([
+        [returnToOriginal ? 'a' : 'b', returnToOriginal ? 2 : 1],
+      ]);
+      expect(f.host.querySelector('[role="alertdialog"]')).toBeNull();
+    } finally {
+      await act(async () => releaseRead?.());
+      await f.close();
+    }
+  });
+
+for (const next of ['other', 'return', 'quitting', 'cancelled-quit'] as const)
+  test(`a superseded consumed-draft read rejection stays out of the ${next} view`, async () => {
+    const f = savedPromptFixture();
+    let rejectRead: (() => void) | undefined;
+    try {
+      await act(async () => f.root.render(<NativeDesktop testDiagnostics />));
+      await f.click('Original A');
+      await f.click('发送明确的新轮次');
+      await f.edit('unsaved A survives the read', '当前会话私有草稿');
+      f.setReadOverride(
+        () =>
+          new Promise((_resolve, reject) => {
+            rejectRead = () => reject(Error('draft_storage_unavailable'));
+          }),
+      );
+      await f.click('保留草稿');
+      expect(rejectRead).toBeDefined();
+      f.setReadOverride();
+      if (next === 'other' || next === 'return') {
+        await f.click('Other B');
+        if (next === 'return') await f.click('Original A');
+      } else {
+        await f.lifecycle('quitting');
+        if (next === 'cancelled-quit') await f.lifecycle('active');
+      }
+      await act(async () => rejectRead?.());
+      expect(f.writes()).toHaveLength(0);
+      expect(f.host.querySelector('[role="alertdialog"]') === null).toBe(true);
+      expect(promptValue(f.input('当前会话私有草稿'))).toBe(
+        next === 'other' ? 'saved B' : 'unsaved A survives the read',
+      );
+    } finally {
+      await act(async () => rejectRead?.());
+      await f.close();
+    }
+  });
+
+test('a current consumed-draft read rejection reports its error and an explicit retry still reconciles', async () => {
+  const f = savedPromptFixture();
+  try {
+    await act(async () => f.root.render(<NativeDesktop testDiagnostics />));
+    await f.click('Original A');
+    await f.click('发送明确的新轮次');
+    await f.edit('unsaved draft after accepted input', '当前会话私有草稿');
+    f.setReadOverride(() => {
+      throw Error('draft_storage_unavailable');
+    });
+    await f.click('保留草稿');
+    expect(f.writes()).toHaveLength(0);
+    expect(f.host.querySelector('[role="alertdialog"]')?.textContent).toContain(
+      'draft_storage_unavailable',
+    );
+    expect(promptValue(f.input('当前会话私有草稿'))).toBe('unsaved draft after accepted input');
+    f.setReadOverride();
+    await f.click('确定');
+    await f.click('保留草稿');
+    expect(f.writes().map((input) => input.revision)).toEqual([2]);
+    expect(f.saved.get('a')?.content).toBe('unsaved draft after accepted input');
+  } finally {
+    await f.close();
+  }
+});
+
+test('a late draft write rejection remains a mutation error after reconciliation and navigation', async () => {
+  const f = savedPromptFixture();
+  const bridge = f.dom.window.kiteNative! as NativeBridge;
+  const request = bridge.request;
+  let rejectWrite: (() => void) | undefined;
+  bridge.request = async (input) => {
+    if (input.method !== 'draft.write') return request(input);
+    f.calls.push(input);
+    return new Promise((_resolve, reject) => {
+      rejectWrite = () => reject(Error('draft_storage_unavailable'));
+    });
+  };
+  try {
+    await act(async () => f.root.render(<NativeDesktop testDiagnostics />));
+    await f.click('Original A');
+    await f.click('发送明确的新轮次');
+    await f.edit('original explicit save', '当前会话私有草稿');
+    await f.click('保留草稿');
+    expect(f.writes().map((input) => input.revision)).toEqual([2]);
+    await f.click('Other B');
+    await act(async () => rejectWrite?.());
+    expect(f.host.querySelector('[role="alertdialog"]')?.textContent).toContain(
+      'draft_storage_unavailable',
+    );
+    expect(promptValue(f.input('当前会话私有草稿'))).toBe('saved B');
+  } finally {
+    await act(async () => rejectWrite?.());
+    await f.close();
+  }
+});
 
 test('late saved prompt reads preserve newer input, including an explicitly empty draft', async () => {
   for (const text of ['new prompt 雪🙂', '']) {
