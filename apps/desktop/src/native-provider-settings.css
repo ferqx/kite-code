@@ -48,7 +48,7 @@
   color: var(--foreground);
   background: var(--card);
   font: inherit;
-  font-size: 12px;
+  font-size: var(--ui-text-size);
   font-weight: 550;
   line-height: 1.3;
   white-space: nowrap;
@@ -288,7 +288,7 @@
   min-width: 0;
   gap: 7px;
   margin: 0;
-  font-size: 12px;
+  font-size: var(--ui-text-size);
   font-weight: 500;
 }
 .kite-client
@@ -350,7 +350,7 @@
   resize: vertical;
   min-height: 80px;
   font-family: var(--font-geist-mono), monospace;
-  font-size: 11px;
+  font-size: var(--ui-text-size);
 }
 .kite-client
   .desktop-settings
@@ -538,7 +538,7 @@
   :is(.provider-settings, .catalogue-settings)
   .provider-instance-info
   strong {
-  font-size: 13px;
+  font-size: var(--ui-text-size);
   font-weight: 600;
   overflow-wrap: anywhere;
 }
@@ -618,7 +618,7 @@
   :is(.provider-settings, .catalogue-settings)
   .provider-removal-impact {
   color: var(--foreground);
-  font-size: 12px;
+  font-size: var(--ui-text-size);
   line-height: 1.7;
   overflow-wrap: anywhere;
 }
@@ -626,9 +626,16 @@
   .desktop-settings
   :is(.provider-settings, .catalogue-settings)
   .provider-removal-impact
+  p {
+  font-size: inherit;
+}
+.kite-client
+  .desktop-settings
+  :is(.provider-settings, .catalogue-settings)
+  .provider-removal-impact
   h4 {
   margin: 0 0 12px;
-  font-size: 13px;
+  font-size: var(--ui-text-size);
 }
 .kite-client
   .desktop-settings
@@ -695,7 +702,7 @@
 }
 .kite-client .desktop-settings .catalogue-settings .provider-instance-info h4 {
   margin: 0;
-  font-size: 13px;
+  font-size: var(--ui-text-size);
   font-weight: 600;
   overflow-wrap: anywhere;
 }
@@ -768,7 +775,7 @@
   overflow: hidden;
 }
 .kite-client .desktop-settings .settings-catalogue-details {
-  font-size: 12px;
+  font-size: var(--ui-text-size);
   line-height: 1.7;
   overflow-wrap: anywhere;
 }

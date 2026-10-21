@@ -1,3 +1,6 @@
+/* Base form defaults must stay below utility typography. */
+@layer theme, base;
+
 @import "tailwindcss/theme.css" layer(theme);
 @import "tailwindcss/utilities.css" layer(utilities);
 @import "shadcn/tailwind.css";
@@ -37,7 +40,7 @@ body,
   --typeset-font-body: var(--font-geist);
   --typeset-font-heading: var(--font-geist);
   --typeset-font-mono: var(--font-geist-mono);
-  --typeset-size: 14px;
+  --typeset-size: var(--ui-text-size);
   --typeset-leading: 1.6;
   --typeset-flow: 1em;
 }
@@ -89,7 +92,7 @@ html[data-platform="macos"][data-theme="dark"] .kite-client.shell {
   background: transparent;
   color: var(--muted-foreground);
   font: inherit;
-  font-size: 13px;
+  font-size: var(--ui-text-size);
   line-height: 1;
   cursor: default;
   -webkit-app-region: no-drag;
@@ -290,7 +293,7 @@ html[data-platform="macos"] .kite-client .desktop-settings-dialog .settings-edit
   margin: 0 auto;
 }
 .kite-client .desktop-settings .settings-content p {
-  font-size: 13px;
+  font-size: var(--ui-text-size);
   line-height: 1.5;
 }
 .kite-client .desktop-settings .settings-content form label {
@@ -352,7 +355,7 @@ html[data-platform="macos"] .kite-client .desktop-settings-dialog .settings-edit
 }
 .kite-client .settings-value {
   color: var(--muted-foreground);
-  font-size: 13px;
+  font-size: var(--ui-text-size);
 }
 .kite-client .settings-hint {
   margin-top: 18px;
@@ -433,7 +436,7 @@ html[data-platform="macos"] .kite-client .desktop-settings-dialog .settings-edit
   padding: 6px 14px;
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  font-size: 12px;
+  font-size: var(--ui-text-size);
   font-weight: 500;
   flex-shrink: 0;
 }
@@ -465,7 +468,7 @@ html[data-platform="macos"] .kite-client .desktop-settings-dialog .settings-edit
   min-width: 0;
   max-width: 100%;
   min-height: 40px;
-  font-size: 13px;
+  font-size: var(--ui-text-size);
   justify-content: space-between;
   padding: 8px 12px;
   border-radius: var(--radius);
@@ -566,7 +569,7 @@ html[data-platform="macos"] .kite-client .desktop-settings-dialog .settings-edit
   margin: 0;
   padding: 12px 0;
   border-bottom: 1px solid var(--border);
-  font-size: 13px;
+  font-size: var(--ui-text-size);
   cursor: pointer;
 }
 .kite-client .desktop-settings .settings-model-option:last-child {
@@ -679,7 +682,7 @@ html[data-platform="macos"] .kite-client .desktop-settings-dialog .settings-edit
   flex-direction: column;
   gap: 7px;
   margin: 18px 0;
-  font-size: 13px;
+  font-size: var(--ui-text-size);
 }
 .kite-client .desktop-settings .settings-editor-panel .settings-provider-form input {
   width: 100%;
@@ -766,7 +769,6 @@ html[data-platform="macos"] .kite-client .desktop-settings-dialog .settings-edit
   .kite-client .settings-sidebar nav button {
     gap: 7px;
     padding-inline: 8px;
-    font-size: 14px;
   }
   .kite-client .settings-sidebar nav button svg {
     width: 17px;
@@ -1158,7 +1160,7 @@ html[data-native-window][data-platform="macos"]
   background: var(--control-hover);
   color: var(--foreground);
   font: inherit;
-  font-size: 12px;
+  font-size: var(--ui-text-size);
 }
 .kite-client .native-browser-toolbar .native-browser-address::placeholder {
   color: var(--muted-foreground);
@@ -1191,7 +1193,7 @@ html[data-platform="macos"] .native-browser-viewport {
   width: 100%;
   padding: 24px 20px;
   color: var(--muted-foreground);
-  font-size: 12px;
+  font-size: var(--ui-text-size);
 }
 .native-browser-error-message {
   margin: 0 0 12px;

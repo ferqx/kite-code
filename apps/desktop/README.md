@@ -68,7 +68,9 @@ Windows GUI stdin 的实际过早 EOF 已否定其控制通道方案。当前父
 
 ## 复用原桌面展示层
 
-Native 使用现有捆绑的 Geist Variable 与 Geist Mono Variable 字体资源；`--font-geist` 指向共享 `--font-ui`，让会话、工具、输入、设置及浮层消费同一界面字体栈，中文优先系统 UI 字体。界面标题和设置名称使用 500 字重，普通文字为 400；Markdown 强调与等宽代码沿原语义样式。字体加载不改变既有字号与阅读区排版变量。
+Native 使用现有捆绑的 Geist Variable 与 Geist Mono Variable 字体资源；`--font-geist` 指向共享 `--font-ui`，让会话、工具、输入、设置及浮层消费同一界面字体栈，中文优先系统 UI 字体。界面标题和设置名称使用 500 字重，普通文字为 400；Markdown 强调与等宽代码沿原语义样式。字体加载不改变阅读区排版变量。客户端默认字号由共享 `--ui-text-size: 14px` 管理；[Native样式](src/native-tailwind.css)与[设置样式](src/native-provider-settings.css)中的窗口菜单、设置普通段落、按钮、模型／连接主名称、表单标签和输入、完整详情正文，以及浏览器地址和失败正文统一消费该基准。模型名称多行输入保留等宽字体，字号与普通输入一致；页面标题、徽标、标识符与辅助说明保留各自层级。设置导航不再重复定义窄窗字号，窗口缩放只改变布局。样式入口先登记 `theme, base` 层，再引入 utilities，保持原生控件的字体继承低于组件明确字号；既有 utilities 与 components 的相对优先级保持。提供商删除确认的正文显式继承该区域字号，避免旧段落小字规则覆盖。
+
+2026-10-21，macOS arm64／Bun1.4.2，`a7f629960` 工作树加本次全客户端字号核对：17个相关UI／Native测试文件以 `bun test --parallel=1 --max-concurrency=1` 执行，167项／2701断言通过；UI与Desktop类型检查、四个变更源码文件的Biome、文档结构与影响检查通过。Chrome155.0.8059.86沿实际Native与共享组件、生产编译CSS及隔离只读bridge，在深浅主题、360／767／1000／1280px下完成292组计算字号检查，覆盖设置列表和表单、删除确认、工作台、任务表单、问卷、右栏、地址输入及容器外Portal；另核12px辅助容器内组件明确的14px字号仍生效，并检查宽窄截图。Markdown的8组深浅／宽窄编译样式检查保持14px正文及原相对层级。无脚本错误；保留既有嵌套 `@keyframes` 编译提示，未运行本轮完整安装版窗口。
 
 [Native样式](src/native-tailwind.css)的窗口留白、会话标题和设置右栏与[共享面板](../../packages/ui/src/desktop/SessionPage.tsx)统一消费UI的侧栏动画参数，默认180ms／ease-out。设置布局始终保留可插值的第三列，在0与420px之间开合；空编辑宿主不再直接 `display:none`，透明度与可见性随退出完成。窄窗改用相同曲线的右侧位移动画。提供商、MCP与Skills的原portal内容仍在关闭时立即卸载，原读取取消、秘密清理和焦点语义不等待动画。
 
