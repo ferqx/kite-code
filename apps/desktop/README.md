@@ -308,6 +308,8 @@ Main 开始退出和取消退出时通过原固定 event channel 通知 renderer
 
 [NativeToolMessage](src/native-tool-messages.tsx)直接消费原 [ToolActivity / ToolRow](../../packages/ui/src/desktop/ToolActivity.tsx)，保轻量工具行、状态、箭头和结果展开。历史 Message 的 complete 只表示消息完整；[Main metadata reader](electron/tool-messages.ts)按已读 Message 的唯一 source Execution GET，核原 Store／Session／Run、tool kind、终态、result outcome 和完全相同的 content。每批最多32项，完整已读历史不限于 View 近200项；元数据核对前和无法核实的条目默认显示收起的工具记录，缺少执行状态时标为“状态待核对”，不推断成功或结果未知；只有用户展开才挂载原正文及其读取控件，不先将原结果 JSON 显示为消息正文再替换。读取失败仍保留原文和明确重试入口。[回执渲染回归](test/isolated/native-tool-receipt-render-dom.test.tsx)直接使用 NativeDesktop，核展示信息未到、失败、未知／未来版本及不支持格式的收起阅读和切会话清理。metadata close、切会话、detach 或 history epoch 变更只释放所属 GET，不停止、重做或恢复工具执行。同一阅读身份的普通事件刷新暂清 controller snapshot 时沿 Main 已验证 lastView 保留只读观察；明确选择、reset 或 Store 变化仍撤销旧范围。
 
+Native 将 Tool 的 `planned` 映射为 UI `queued`，显示“等待执行”；`dispatching` 与 `running` 映射为 UI `running`，显示“执行中”并使用运行标记。普通 Tool 的实际调用等待结果期间仍为 `dispatching`，不能将它视为排队；读取、修改与独立工具行均保留执行状态文字，聚合按实际运行项生成原活动摘要。审批优先级、停止请求和终态语义保持，适配不改后端 ledger、执行准入或并发。[原工具 DOM 回归](test/isolated/native-tool-messages-dom.test.tsx)沿实际适配与组件核待派发、已派发、终态和混合探索聚合。
+
 Main 仅在原 Message／Execution 身份和结果完全匹配、原状态 failed、`authorization.dispatched=false`、Core `adapterAttempted/dispatchCommitted=false` 且准确刷新 code 与 content 一致时投影只读 `decisionRefresh`。Native 适配为中性的 `not_executed`，显示上下文／工具信息已更新、此次未执行；组汇总单列“重新评估”，不计入实际读取／执行或失败。持久 ledger 不被改写，冷历史复用相同核验；缺证明、实际派发失败及伪造 details 均保原事实。[Main](test/native-tool-messages.test.ts)及[DOM](test/isolated/native-tool-messages-dom.test.tsx)验证四项重新评估与一项真实失败混合时仅计失败一项。
 
 工具目标仅展示同一原来源／Run、结果之前且已读历史中唯一 Model call 的请求字段；重复 callId 不建立执行关联，有歧义不补目标。请求文本不证明实际文件变更，也不授予打开文件资格。成功 Files 路径按钮仍沿独立原 receipt／观察 ID；Files read 的当前版本4与保留版本3均核原 baseline，write/edit 仍限版本2。文件读取失败继续原单行状态，不附原始错误段落。

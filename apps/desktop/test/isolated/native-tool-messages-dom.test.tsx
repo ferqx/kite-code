@@ -379,6 +379,189 @@ test('live tool rows come only from current-Store active Run executions and rema
   }
 });
 
+const statusExecution = (definitionId: string, status: Execution['status']): Execution => ({
+  id: `status-${definitionId}`,
+  originStoreId: 'store',
+  sessionId: 's',
+  runId: 'run',
+  kind: 'tool',
+  definitionId,
+  definitionVersion:
+    definitionId === 'files.read' ? '4' : definitionId.startsWith('files.') ? '2' : '1',
+  status,
+  result: status === 'succeeded' ? { outcome: 'succeeded', content: 'done' } : null,
+  resultRevision: status === 'succeeded' ? '1' : '0',
+  cancelRequestedAt: null,
+});
+const statusSelection = (executions: Execution[]): NativeSelection => ({
+  ...selection(),
+  runs: [
+    {
+      id: 'run',
+      isActive: true,
+      originStoreId: 'store',
+      originCommandId: 'work',
+      sessionId: 's',
+      status: 'running',
+      createdAt: 1,
+      finishedAt: null,
+      reason: null,
+    },
+  ],
+  executions,
+});
+
+for (const definitionId of ['files.read', 'files.edit', 'files.write', 'task.list']) {
+  test(`actual Native ${definitionId} rows distinguish queued, executing and settled results`, async () => {
+    const f = fixture();
+    try {
+      for (const status of ['planned', 'dispatching', 'succeeded'] as const) {
+        const execution = statusExecution(definitionId, status);
+        const [live] = liveToolMessages(statusSelection([execution]), []);
+        expect(live).toBeDefined();
+        // Exercise the live transcript row and the retained ToolActivity branches.
+        await act(async () =>
+          f.root.render(
+            <>
+              <section data-case="live">
+                <NativeLiveToolMessage {...live!} unavailable={false} />
+              </section>
+              <section data-case="retained">
+                <NativeToolMessage
+                  message={desktopToolMessage(
+                    execution,
+                    execution.id,
+                    status === 'succeeded' ? 'done' : '',
+                  )}
+                />
+              </section>
+            </>,
+          ),
+        );
+        for (const section of f.host.querySelectorAll('[data-case]')) {
+          const active = section.querySelector('[data-slot="trace-line"][data-status="running"]');
+          if (status === 'planned') {
+            expect(section.textContent).toContain('等待执行');
+            expect(section.textContent).not.toContain('执行中');
+            expect(active).toBeNull();
+            expect(
+              section.querySelector('[data-slot="trace-line"][data-status="pending"]'),
+            ).not.toBeNull();
+          } else if (status === 'dispatching') {
+            expect(section.textContent).toContain('执行中');
+            expect(section.textContent).not.toContain('等待执行');
+            expect(active).not.toBeNull();
+          } else {
+            expect(section.textContent).not.toContain('等待执行');
+            expect(section.textContent).not.toContain('执行中');
+            expect(active).toBeNull();
+            expect(
+              section.querySelector('[data-slot="trace-line"][data-status="pending"]'),
+            ).toBeNull();
+          }
+        }
+        expect(f.host.querySelector('.tool-activity')?.classList.contains('is-running')).toBe(
+          status === 'dispatching',
+        );
+      }
+    } finally {
+      await f.close();
+    }
+  });
+}
+
+test('a mixed Native exploration batch shows the dispatched read as active while its sibling remains queued', async () => {
+  const f = fixture();
+  try {
+    const live = liveToolMessages(
+      statusSelection([
+        statusExecution('files.read', 'dispatching'),
+        { ...statusExecution('files.search', 'planned'), id: 'queued-search' },
+      ]),
+      [],
+    );
+    await act(async () =>
+      f.root.render(
+        <ToolActivity
+          messages={live.map((entry) => entry.message)}
+          expanded
+          onToggle={() => {}}
+          renderChildren={() => null}
+        />,
+      ),
+    );
+    expect(f.host.querySelector('.tool-activity-summary')?.textContent).toContain('正在读取');
+    expect(f.host.querySelector('.tool-activity-summary')?.textContent).not.toContain('等待执行');
+    expect(f.host.querySelector('.tool-activity.is-running')).not.toBeNull();
+    expect(f.host.querySelector('.tool-activity-step.running')?.textContent).toContain('执行中');
+    expect(f.host.querySelector('.tool-activity-step.queued')?.textContent).toContain('等待执行');
+  } finally {
+    await f.close();
+  }
+});
+
+test('Native execution labels preserve automatic review, human approval and refusal precedence', async () => {
+  const f = fixture();
+  const review: NonNullable<Execution['authorization']>['review'] = {
+    executionId: 'review',
+    status: 'running',
+    decision: 'unavailable',
+    reason: 'review',
+    requireApproval: false,
+  };
+  const human: NonNullable<Execution['authorization']>['human'] = {
+    interactionId: 'approval',
+    state: 'pending',
+    revision: '1',
+    acceptedDecisionRevision: null,
+    accepted: false,
+    decision: null,
+  };
+  try {
+    const cases = [
+      {
+        status: 'planned' as const,
+        authorization: { dispatched: false, review },
+        label: '正在自动审批',
+      },
+      {
+        status: 'planned' as const,
+        authorization: { dispatched: false, human },
+        label: '等待人工审批',
+      },
+      {
+        status: 'failed' as const,
+        authorization: {
+          dispatched: false,
+          human: { ...human, state: 'answered' as const, decision: 'deny' as const },
+        },
+        label: '人工审批已拒绝',
+      },
+    ];
+    for (const item of cases) {
+      const execution = {
+        ...statusExecution('files.edit', item.status),
+        authorization: item.authorization,
+      };
+      const [live] = liveToolMessages(statusSelection([execution]), []);
+      await act(async () =>
+        f.root.render(
+          <>
+            <NativeLiveToolMessage {...live!} unavailable={false} />
+            <NativeToolMessage message={desktopToolMessage(execution, execution.id, '')} />
+          </>,
+        ),
+      );
+      expect(f.host.textContent).toContain(item.label);
+      expect(f.host.textContent).not.toContain('等待执行');
+      expect(f.host.textContent).not.toContain('执行中');
+      if (item.status === 'failed') expect(f.host.textContent).toContain('未执行');
+    }
+  } finally {
+    await f.close();
+  }
+});
+
 test('verified freshness rejections stay neutral in the real Native grouped transcript while one dispatched failure remains visible', async () => {
   const f = fixture();
   const messages = new Map<string, Message>(),

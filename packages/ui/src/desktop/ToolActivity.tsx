@@ -336,9 +336,11 @@ function executionLabel(message: Message) {
     ? '成功'
     : message.status === 'queued'
       ? '等待执行'
-      : message.status
-        ? statusLabel(message.status)
-        : '结果未知';
+      : message.status === 'running'
+        ? '执行中'
+        : message.status
+          ? statusLabel(message.status)
+          : '结果未知';
 }
 
 // Trace only decorates facts already present in the host projection. Inactive
@@ -469,7 +471,7 @@ export function ToolRow({
                 {approval}
               </span>
             )}
-            {status && status !== '成功' && status !== approval && message.status !== 'running' && (
+            {status && status !== '成功' && status !== approval && (
               <TraceDescription className="tool-step-status" data-status={message.status}>
                 {status}
               </TraceDescription>
@@ -744,14 +746,11 @@ export function ToolActivity({
                   {approval}
                 </span>
               )}
-              {status &&
-                status !== '成功' &&
-                status !== approval &&
-                message.status !== 'running' && (
-                  <TraceDescription className="tool-step-status" data-status={message.status}>
-                    {status}
-                  </TraceDescription>
-                )}
+              {status && status !== '成功' && status !== approval && (
+                <TraceDescription className="tool-step-status" data-status={message.status}>
+                  {status}
+                </TraceDescription>
+              )}
               {!hasDiff &&
                 (issues.length > 0 || message.approval?.state === 'awaiting_user') &&
                 resultPreview(message) && (

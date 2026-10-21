@@ -172,9 +172,11 @@ export function desktopToolMessage(
           ? 'completed'
           : fact.status === 'outcome_unknown'
             ? 'unknown'
-            : fact.status === 'planned' || fact.status === 'dispatching'
+            : fact.status === 'planned'
               ? 'queued'
-              : fact.status,
+              : fact.status === 'dispatching'
+                ? 'running'
+                : fact.status,
   };
 }
 export function NativeToolMessage({ message }: { message: DesktopMessage }) {
