@@ -1,5 +1,6 @@
 import { expect, test } from 'bun:test';
 import {
+  currentHumanInstruction,
   directHumanInputProposal,
   validateHumanInputProposal,
 } from '../../../src/human-input-intent';
@@ -25,6 +26,88 @@ const direct = (
   kind: 'run.start' | 'input.steer' | 'input.follow_up' = 'run.start',
   selectedWork: (typeof candidates)[number] | null = candidates[0]!,
 ) => directHumanInputProposal({ content, kind, selectedWork, candidates });
+test('paired English contractions preserve an explicit withdrawal of a control', () => {
+  for (const [purpose, content] of [
+    ['stop', "Stop work_A. Don't stop work_A, it's still needed."],
+    ['stop', "Stop work_A. Don't stop work_A, the users' data is still needed."],
+    ['pause', "Pause work_A. Don't pause work_A, it's still needed."],
+    ['continue', "Continue work_A. Don't continue work_A, it's not ready."],
+  ] as const) {
+    expect(currentHumanInstruction(content)).toBe(content);
+    for (const kind of ['run.start', 'input.steer', 'input.follow_up'] as const)
+      expect(direct(content, kind)).toBeNull();
+    expect(
+      validateHumanInputProposal(
+        proposal(content, 'work_A', purpose),
+        content,
+        candidates,
+        candidates[0],
+      ),
+    ).toMatchObject({ relation: 'unresolved', targetRootWorkCommandId: null });
+  }
+});
+test('contractions do not suppress an affirmative different control', () => {
+  const content = "Continue work_A. Don't stop work_B, it's still needed.";
+  expect(currentHumanInstruction(content)).toBe(content);
+  expect(direct(content)).toMatchObject({ purpose: 'continue', targetRootWorkCommandId: 'work_A' });
+  expect(
+    validateHumanInputProposal(
+      proposal(content, 'work_A', 'continue'),
+      content,
+      candidates,
+      candidates[0],
+    ),
+  ).toMatchObject({ purpose: 'continue', targetRootWorkCommandId: 'work_A' });
+});
+test('genuine single-quoted instructions remain reference material, including contractions', () => {
+  for (const content of ["'Stop work_A'", "Continue 'work_A'."]) expect(direct(content)).toBeNull();
+  const content = "Continue work_A. 'Don't continue work_A, it's not ready.'";
+  expect(currentHumanInstruction(content)).toBe('Continue work_A.');
+  expect(direct(content)).toMatchObject({ purpose: 'continue', targetRootWorkCommandId: 'work_A' });
+});
+test('an exact work ID does not turn conditional, deferred or explanatory text into immediate control', () => {
+  for (const [purpose, content] of [
+    ['stop', 'Stop work_A only if it fails.'],
+    ['stop', 'Stop work_A tomorrow.'],
+    ['stop', 'Stop work_A is an example, not an instruction.'],
+    ['stop', '停止 work_A，只有它失败时。'],
+    ['pause', 'Pause work_A after its current write finishes.'],
+    ['pause', '暂停 work_A，明天再说。'],
+    ['continue', 'Continue work_A when the review finishes.'],
+    ['continue', 'Continue work_A tomorrow.'],
+    ['continue', '继续 work_A，等审核完成后。'],
+  ] as const) {
+    expect(direct(content)).toBeNull();
+    expect(
+      validateHumanInputProposal(
+        proposal(content, 'work_A', purpose),
+        content,
+        candidates,
+        candidates[0],
+      ),
+    ).toMatchObject({ relation: 'unresolved', targetRootWorkCommandId: null });
+  }
+});
+test('explicit immediate controls and supported business-detail suffixes remain admitted', () => {
+  for (const [purpose, content] of [
+    ['stop', 'Stop work_A now.'],
+    ['pause', 'Pause work_A immediately.'],
+    ['stop', '停止 work_A 立刻。'],
+    ['continue', 'Continue work_A and summarize available results.'],
+    ['continue', '继续 work_A，并汇总已有结果。'],
+    ['continue', '我指的是 work_A。现在继续 work_A，把已经保存的结果汇总，不要另开工作。'],
+  ] as const) {
+    expect(direct(content)).toMatchObject({ purpose, targetRootWorkCommandId: 'work_A' });
+    expect(
+      validateHumanInputProposal(
+        proposal(content, 'work_A', purpose),
+        content,
+        candidates,
+        candidates[0],
+      ),
+    ).toMatchObject({ purpose, targetRootWorkCommandId: 'work_A' });
+  }
+});
 test('existing selection never becomes independent work merely because transport uses run.start', () => {
   for (const kind of ['run.start', 'input.steer', 'input.follow_up'] as const) {
     expect(direct('先别做这个', kind)).toBeNull();

@@ -2327,6 +2327,7 @@ export class ExtensionHost {
                 operationKey: commandId,
                 agentId: input.agentId,
                 kind: input.kind,
+                newTurnPrepared: agent !== undefined,
                 ...(input.content === undefined ? {} : { content: input.content }),
                 request: {
                   kind: 'agent',

@@ -617,7 +617,7 @@ export function createDefaultProcessConfiguration(options: {
     return {
       ...injected,
       mode: current.mode,
-      workspaceTrust: injected.workspaceTrust,
+      workspaceTrust: current.workspaceTrust && injected.workspaceTrust,
       revision: createHash('sha256')
         .update(JSON.stringify([current.revision, injected.revision]))
         .digest('hex'),

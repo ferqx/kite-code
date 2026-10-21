@@ -342,6 +342,47 @@ test('actual default-compatible Model file call uses actual Auto ask_user exact 
   }
 }, 15000);
 
+test('current workspace trust and injected trust ceilings independently block tool dispatch', async () => {
+  for (const mode of ['current-policy', 'injected-policy', 'current-permissions'] as const) {
+    const f = await fixture('full', true, mode === 'current-permissions');
+    try {
+      const controller = createPermissionManagement({
+        runtime: f.runtime,
+        profile: selectProfile({ dataRoot: join(f.root, 'data'), profile: 'new' }),
+      });
+      const identity = { expectedStoreId: f.expectedStoreId, subjectId: 'owner', workspaceId: 'w' };
+      if (mode === 'injected-policy') {
+        f.policy = { ...f.policy, workspaceTrust: false, revision: 'host-trust-revoked' };
+      } else {
+        const trust = await controller.readTrust(identity);
+        await controller.setTrust({
+          ...identity,
+          commandId: 'revoke-current-trust',
+          trusted: false,
+          ifRevision: trust.revision,
+          canonicalIdentity: trust.canonicalIdentity,
+          externalReadScopeDigest: trust.externalReadScopeDigest,
+        });
+      }
+      expect((await controller.readTrust(identity)).trusted).toBe(mode === 'injected-policy');
+      await f.run();
+      await f.runtime.waitForCommand('work', { timeoutMs: 5000 });
+      const tool = (await f.store.listExecutions('s')).find(
+        (execution) => execution.kind === 'tool',
+      );
+      expect(tool?.status).toBe('failed');
+      expect(tool?.authorization?.dispatched ?? false).toBe(false);
+      expect(tool?.result).toMatchObject({
+        details: { adapterAttempted: false, dispatchCommitted: false },
+      });
+      expect(existsSync(join(f.workspace, 'output.txt'))).toBe(false);
+      expect(f.requests).toHaveLength(2);
+    } finally {
+      await f.close();
+    }
+  }
+}, 15000);
+
 test('default and trusted injected policies follow a live root mode change in the original pending Run', async () => {
   for (const injected of ['default', 'policy', 'permissions']) {
     const f = await fixture(

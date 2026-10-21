@@ -225,6 +225,52 @@ export function createMcpAdapter(options: McpAdapterOptions) {
     catalogueGeneration++;
     cache = undefined;
   }
+  async function publishCatalogue<Prepared, T>(
+    candidate: Cache,
+    prepare: () => Promise<Prepared>,
+    publish: (prepared: Prepared) => T,
+  ): Promise<T> {
+    const previous = cache;
+    let retiredPrevious = false;
+    try {
+      const prepared = await prepare();
+      // Other prepared candidates are not the old published catalogue. A concurrent
+      // attempt must not retire their validators before the publication fence runs.
+      retiredPrevious = true;
+      for (const [session, captured] of schemaCatalogues)
+        if (captured === previous) void closeSchema(session).catch(() => {});
+      await joinSchemas();
+      // Freshness and publication stay in one synchronous turn after actual cleanup.
+      return publish(prepared);
+    } catch (error) {
+      if (retiredPrevious && (cache === previous || cache === candidate)) {
+        // The old definitions now own retired validators. Never advertise them as
+        // available after cancellation or another failed publication fence.
+        invalidateCatalogue();
+      } else {
+        // Preparation failed or a different candidate won. Retire only this
+        // unpublished candidate, including a loser that finishes preparing late.
+        for (const [session, captured] of schemaCatalogues)
+          if (captured === candidate) void closeSchema(session).catch(() => {});
+      }
+      try {
+        await joinSchemas();
+      } catch (cleanupError) {
+        if (cleanupError === error) throw error;
+        const failures = [
+          ...new Set(
+            [error, cleanupError].flatMap((failure) =>
+              failure instanceof AggregateError ? failure.errors : [failure],
+            ),
+          ),
+        ];
+        throw new AggregateError(failures, 'MCP catalogue publication cleanup failed.', {
+          cause: error,
+        });
+      }
+      throw error;
+    }
+  }
   let inflight = 0;
   let closeTask: Promise<void> | undefined;
   const idle = new Set<() => void>();
@@ -391,7 +437,7 @@ export function createMcpAdapter(options: McpAdapterOptions) {
         }
         return binding;
       }
-      function bindTools(captured: Cache): readonly ToolDefinition[] {
+      function bindTools(captured: Cache) {
         const names = new Set<string>();
         const jobs: JobDefinition[] = [];
         const tools = Object.freeze(
@@ -655,14 +701,15 @@ export function createMcpAdapter(options: McpAdapterOptions) {
             return freeze(definition);
           }),
         );
-        boundJobs = Object.freeze(jobs);
-        return tools;
+        return Object.freeze({ tools, jobs: Object.freeze(jobs) });
       }
       function getCachedTools(): readonly ToolDefinition[] {
         check();
         if (!cache) return Object.freeze([]);
         if (boundCache !== cache) {
-          boundTools = bindTools(cache);
+          const definitions = bindTools(cache);
+          boundTools = definitions.tools;
+          boundJobs = definitions.jobs;
           boundCache = cache;
         }
         return boundTools;
@@ -710,31 +757,37 @@ export function createMcpAdapter(options: McpAdapterOptions) {
               catalogueGeneration: catalogueGeneration + 1,
               digest: catalogueDigest,
             };
-            const definitions = bindTools(candidate);
-            await schemas(candidate).prepare(); // Complete original schemas before publishing.
-            check();
-            if (
-              dead ||
-              current !== client ||
-              generation !== connectionGeneration ||
-              catalogueGeneration !== revision
-            )
-              throw new McpAdapterError('mcp_catalogue_stale');
-            for (const [session, previous] of schemaCatalogues)
-              if (previous !== candidate) void closeSchema(session).catch(() => {});
-            await joinSchemas();
-            check();
-            if (
-              dead ||
-              current !== client ||
-              generation !== connectionGeneration ||
-              catalogueGeneration !== revision
-            )
-              throw new McpAdapterError('mcp_catalogue_stale');
-            catalogueGeneration++;
-            cache = candidate;
-            boundCache = candidate;
-            boundTools = definitions;
+            await publishCatalogue(
+              candidate,
+              async () => {
+                const definitions = bindTools(candidate);
+                await schemas(candidate).prepare(); // Complete original schemas before publishing.
+                check();
+                if (
+                  dead ||
+                  current !== client ||
+                  generation !== connectionGeneration ||
+                  catalogueGeneration !== revision
+                )
+                  throw new McpAdapterError('mcp_catalogue_stale');
+                return definitions;
+              },
+              (definitions) => {
+                check();
+                if (
+                  dead ||
+                  current !== client ||
+                  generation !== connectionGeneration ||
+                  catalogueGeneration !== revision
+                )
+                  throw new McpAdapterError('mcp_catalogue_stale');
+                catalogueGeneration++;
+                cache = candidate;
+                boundCache = candidate;
+                boundTools = definitions.tools;
+                boundJobs = definitions.jobs;
+              },
+            );
           }
           const prepared = cache!;
           await schemas(prepared).prepare();
@@ -786,6 +839,18 @@ export function createMcpAdapter(options: McpAdapterOptions) {
                 fresh(options.signal);
                 bounded(tools);
                 const catalogueDigest = digest(tools);
+                const refreshed = (): ToolResult => {
+                  metadata = getToolsMetadata();
+                  return {
+                    outcome: 'succeeded',
+                    content: 'MCP live catalogue refreshed',
+                    details: {
+                      adapterAttempted: true,
+                      generation: catalogueGeneration,
+                      definitions: getCachedTools().map(({ id, version }) => ({ id, version })),
+                    },
+                  };
+                };
                 if (captured!.digest !== catalogueDigest) {
                   const candidate: Cache = {
                     tools: freeze(structuredClone(tools)),
@@ -794,28 +859,26 @@ export function createMcpAdapter(options: McpAdapterOptions) {
                     catalogueGeneration: catalogueGeneration + 1,
                     digest: catalogueDigest,
                   };
-                  const definitions = bindTools(candidate);
-                  await schemas(candidate).prepare(options.signal);
-                  fresh(options.signal);
-                  for (const [session, previous] of schemaCatalogues)
-                    if (previous !== candidate) void closeSchema(session).catch(() => {});
-                  await joinSchemas();
-                  fresh(options.signal);
-                  catalogueGeneration++;
-                  cache = candidate;
-                  boundCache = candidate;
-                  boundTools = definitions;
+                  return await publishCatalogue(
+                    candidate,
+                    async () => {
+                      const definitions = bindTools(candidate);
+                      await schemas(candidate).prepare(options.signal);
+                      fresh(options.signal);
+                      return definitions;
+                    },
+                    (definitions) => {
+                      fresh(options.signal);
+                      catalogueGeneration++;
+                      cache = candidate;
+                      boundCache = candidate;
+                      boundTools = definitions.tools;
+                      boundJobs = definitions.jobs;
+                      return refreshed();
+                    },
+                  );
                 }
-                metadata = getToolsMetadata();
-                return {
-                  outcome: 'succeeded',
-                  content: 'MCP live catalogue refreshed',
-                  details: {
-                    adapterAttempted: true,
-                    generation: catalogueGeneration,
-                    definitions: getCachedTools().map(({ id, version }) => ({ id, version })),
-                  },
-                };
+                return refreshed();
               } catch (error) {
                 if (isWorkerCleanupFailure(error)) throw error;
                 return {

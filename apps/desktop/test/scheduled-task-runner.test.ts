@@ -1718,3 +1718,111 @@ test('an identical create retry across its due time preserves persisted scheduli
     f.db.close();
   }
 });
+
+test('a real human handoff does not settle unfinished scheduled work or admit another occurrence', async () => {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-scheduled-human-handoff-')));
+  const dataRoot = join(root, 'data');
+  const store = await openSqliteStore({ dataRoot, profile: 'test' });
+  let release!: () => void;
+  const originalGate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  let calls = 0;
+  const finish = {
+    type: 'finish' as const,
+    reason: 'stop' as const,
+    usage: { inputTokens: 1, outputTokens: 1 },
+  };
+  const runtime = createRuntime({
+    store,
+    artifacts: createArtifactStore({ profile: { dataRoot, profile: 'test' }, store }),
+    modelId: 'fixed',
+    permissions: {
+      async authorize() {
+        return { allowed: true, revision: '1' };
+      },
+    },
+    model: {
+      async *stream() {
+        if (calls++ === 0) await originalGate;
+        yield { type: 'text_delta' as const, text: 'Partial response before handoff' };
+        yield finish;
+      },
+    },
+  });
+  const profile = {
+    dataRoot: realpathSync(dataRoot),
+    name: 'test',
+    accessKey: resolveProfile({ dataRoot, profile: 'test' }).profileAccessKey,
+  };
+  const service = await startService({
+    runtime,
+    profile,
+    buildId: 'scheduled-human-handoff',
+    subjectId: 'owner',
+  });
+  const client = createClient({
+    endpoint: service.endpoint,
+    token: service.bootstrap.token,
+    expected: { profile, apiMajor: 1, requiredCapabilities: ['sessions', 'commands'] },
+  });
+  await client.connect();
+  const storeId = client.serverInfo!.storeId!;
+  const f = fixture(storeId),
+    runner = new ScheduledTaskRunner(client, f.data, { clock: f.clock });
+  const until = async (read: () => Promise<boolean>) => {
+    const end = Date.now() + 6000;
+    while (!(await read())) {
+      if (Date.now() > end) throw Error('scheduled_handoff_timeout');
+      await Bun.sleep(5);
+    }
+  };
+  try {
+    await client.createWorkspace({
+      expectedStoreId: storeId,
+      id: 'workspace',
+      rootUri: pathToFileURL(root).href,
+      name: 'Disposable',
+    });
+    runner.start();
+    await runner.tick();
+    await runner.runNow('task');
+    const first = f.data.scheduledTaskRuns()[0]!;
+    await until(async () => calls === 1);
+    await runtime.submitCommand({
+      expectedStoreId: storeId,
+      sessionId: first.sessionId,
+      subjectId: 'owner',
+      commandId: 'independent-B',
+      request: { kind: 'run.start', content: 'New task: independent B' },
+    });
+    release();
+    await runtime.waitForCommand(first.startCommandId, { timeoutMs: 6000 });
+    await runtime.waitForCommand('independent-B', { timeoutMs: 6000 });
+    const original = (await store.getView(first.sessionId)).runs.find(
+      (run) => run.rootWorkCommandId === first.startCommandId,
+    )!;
+    expect(original).toMatchObject({
+      status: 'completed',
+      reason: 'human_work_deferred',
+      isActive: false,
+    });
+    await runner.tick();
+    const observed = f.data.scheduledTaskRuns()[0]!;
+    f.advance(60000);
+    await runner.tick();
+    expect(f.data.scheduledTaskRuns()).toHaveLength(1);
+    await runner.runNow('task');
+    expect(observed.status).toBe('unknown');
+    expect(observed.error).toBe('human_work_deferred');
+    expect(observed.settlementVersion).toBeUndefined();
+    expect(f.data.scheduledTaskRuns()).toHaveLength(1);
+  } finally {
+    release();
+    await runner.stop();
+    client.disposeNetwork();
+    await service.close();
+    f.db.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+}, 20000);
