@@ -1,4 +1,5 @@
-import { contextBridge, ipcRenderer } from 'electron';
+import { contextBridge, ipcRenderer, webUtils } from 'electron';
+import { inputFileReference } from '../src/input-file-reference';
 import {
   decodeNativeEvent,
   type NativeBridge,
@@ -19,6 +20,13 @@ import {
   nativeWindowMaximizeChannel,
 } from '../src/native-bridge';
 import {
+  isNativeBrowserState,
+  type NativeBrowserBridge,
+  type NativeBrowserReply,
+  nativeBrowserChannel,
+  nativeBrowserEventChannel,
+} from '../src/native-browser-bridge';
+import {
   isNativeWindowMenuAction,
   type NativeWindowMenuBridge,
   nativeWindowMenuActionChannel,
@@ -26,10 +34,29 @@ import {
 } from '../src/native-menu-bridge';
 
 const bridge: NativeBridge &
+  NativeBrowserBridge &
   NativeThemeBridge &
   NativeWindowBridge &
   NativeWindowMenuBridge &
   NativeStartupBridge = {
+  async browserRequest(input) {
+    const reply = (await ipcRenderer.invoke(nativeBrowserChannel, input)) as NativeBrowserReply;
+    if (!reply.ok) throw Object.assign(Error(reply.code), { code: reply.code });
+    if (reply.value !== null && !isNativeBrowserState(reply.value))
+      throw Error('invalid_browser_state');
+    return reply.value;
+  },
+  watchBrowser(listener) {
+    const receive = (_event: unknown, value: unknown) => {
+      if (isNativeBrowserState(value)) listener(value);
+    };
+    ipcRenderer.on(nativeBrowserEventChannel, receive);
+    return () => ipcRenderer.removeListener(nativeBrowserEventChannel, receive);
+  },
+  fileReferences(files) {
+    if (!Array.isArray(files) || files.length > 128) throw Error('file_reference_unavailable');
+    return files.map((file) => inputFileReference(file.name, webUtils.getPathForFile(file)));
+  },
   async showWindowMenu(request) {
     const reply = (await ipcRenderer.invoke(nativeWindowMenuChannel, request)) as NativeReply;
     if (!reply.ok) throw Object.assign(Error(reply.code), { code: reply.code });

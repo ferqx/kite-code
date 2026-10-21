@@ -317,7 +317,7 @@ test('Responses restored continuation re-encodes original call IDs when the wire
       }),
     ).rejects.toThrow('invalid_tool_history');
     expect(data.bodies).toHaveLength(before);
-    expect(restored.describeRequest?.(next).transformation.version).toBe('3');
+    expect(restored.describeRequest?.(next).transformation.version).toBe('5');
   } finally {
     data.close();
   }

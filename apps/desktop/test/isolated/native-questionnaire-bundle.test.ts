@@ -179,6 +179,10 @@ test.skipIf(process.platform !== 'darwin')(
           tools: [],
         }),
       );
+      writeFileSync(
+        join(root, 'prompt-editor-text.fixture.ts'),
+        readFileSync(resolve(import.meta.dir, '../prompt-editor-text.fixture.ts')),
+      );
       const fixture = join(root, 'driver.ts');
       writeFileSync(
         fixture,

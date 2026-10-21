@@ -378,7 +378,7 @@ test('Skill details live only in the far-right host and close controls restore t
     expect(editorControl.current).toBeNull();
   }));
 
-test('refresh keeps selected details marked stale while loading and removes missing entry metadata', async () =>
+test('refresh keeps selected details busy without loading text and removes missing entry metadata', async () =>
   fixture(async (host, _root, render, panelHost, editorControl) => {
     let pass = 0;
     let pending!: NativeSkillsRequest;
@@ -394,8 +394,12 @@ test('refresh keeps selected details marked stale while loading and removes miss
     await render(bridge);
     await openDetail(host, 'Skill 0');
     await refresh(host);
-    expect(host.textContent).toContain('当前显示上次完整目录');
-    expect(panelHost.textContent).toContain('当前详情为上次完整目录');
+    expect(host.querySelector('[aria-label="Skills 目录"]')?.getAttribute('aria-busy')).toBe(
+      'true',
+    );
+    expect(host.textContent).not.toContain('正在读取');
+    expect(panelHost.textContent).not.toContain('正在刷新');
+    expect(panelHost.querySelector('[aria-busy="true"]')).not.toBeNull();
     expect(panelHost.textContent).toContain('配置 ID：skill-000');
     expect(host.querySelector<HTMLButtonElement>('.provider-refresh')!.disabled).toBe(true);
     await act(async () => resolve(result(pending, [])));

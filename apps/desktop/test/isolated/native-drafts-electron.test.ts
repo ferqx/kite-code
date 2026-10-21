@@ -190,6 +190,10 @@ await store.createWorkspace({expectedStoreId:storeId,id:'w',name:'Native fixture
 await store.createSession({expectedStoreId:storeId,subjectId:'local-user',commandId:'create-new-s',sessionId:'s',workspaceId:'w',title:'Native A'});
 await store.close();console.log(storeId);`,
     );
+    writeFileSync(
+      join(root, 'prompt-editor-text.fixture.ts'),
+      readFileSync(resolve(import.meta.dir, '../prompt-editor-text.fixture.ts')),
+    );
     const fixture = join(root, 'driver.ts'),
       driverPath = join(root, 'driver.js');
     writeFileSync(

@@ -13,7 +13,7 @@ import type {
   NativeWindowMenuBridge,
   NativeWindowMenuRequest,
 } from '../../src/native-menu-bridge';
-import { prepareDesktopDom } from '../native-page-dom.fixture';
+import { prepareDesktopDom, promptValue, setPromptText } from '../native-page-dom.fixture';
 
 const bootstrap = new JSDOM('<div></div>', { pretendToBeVisual: true });
 const originals = {
@@ -114,21 +114,17 @@ test('actual Native page retains window actions and connects Windows menus to th
     await act(async () => root.render(<NativeDesktop nativeWindow />));
     const header = host.querySelector('.session-header')!,
       sidebar = host.querySelector('.sidebar-header')!,
-      draft = host.querySelector<HTMLTextAreaElement>('textarea[aria-label="新对话草稿"]')!;
+      draft = host.querySelector<HTMLElement>('[role="textbox"][aria-label="新对话草稿"]')!;
     expect(header).not.toBeNull();
     expect(sidebar).not.toBeNull();
     await act(async () => {
-      Object.getOwnPropertyDescriptor(dom.window.HTMLTextAreaElement.prototype, 'value')!.set!.call(
-        draft,
-        '原草稿\n雪🙂',
-      );
-      draft.dispatchEvent(new dom.window.Event('input', { bubbles: true }));
+      await setPromptText(draft, '原草稿\n雪🙂');
     });
     const before = calls.length;
     await down(header, 1);
     await down(header, 2, 2);
     await down(header, 3);
-    await down(sidebar.querySelector('button')!, 2);
+    await down(host.querySelector('button[aria-label="收起侧栏"]')!, 2);
     expect(zooms).toBe(0);
     await down(header, 2);
     await down(sidebar, 2);
@@ -139,7 +135,7 @@ test('actual Native page retains window actions and connects Windows menus to th
     expect(dom.window.document.querySelector('[role="alertdialog"]')?.textContent).toContain(
       'native_window_failed',
     );
-    expect(draft.value).toBe('原草稿\n雪🙂');
+    expect(promptValue(draft)).toBe('原草稿\n雪🙂');
     expect(calls.length).toBe(before);
     expect(
       calls.every((request) =>
@@ -154,7 +150,7 @@ test('actual Native page retains window actions and connects Windows menus to th
     expect(menuRequests).toEqual([{ menu: 'edit', x: 0, y: 0, applicationEnabled: true }]);
     expect(calls.length).toBe(before);
     await act(async () => menuAction!('new-conversation'));
-    expect(draft.value).toBe('原草稿\n雪🙂');
+    expect(promptValue(draft)).toBe('原草稿\n雪🙂');
     expect(calls.length).toBe(before);
     await act(async () => menuAction!('settings'));
     expect(dom.window.document.querySelector('.desktop-settings-dialog')).not.toBeNull();
@@ -172,7 +168,7 @@ test('actual Native page retains window actions and connects Windows menus to th
       ),
     ).toBe(false);
     expect(
-      host.querySelector<HTMLTextAreaElement>('textarea[aria-label="新对话草稿"]')!.value,
+      promptValue(host.querySelector<HTMLElement>('[role="textbox"][aria-label="新对话草稿"]')),
     ).toBe('原草稿\n雪🙂');
   } finally {
     await act(async () => root.unmount());

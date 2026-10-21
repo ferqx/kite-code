@@ -1361,6 +1361,20 @@ export class AgentClient {
       );
     return result;
   }
+  uploadInputImage(
+    sessionId: string,
+    input: import('./generated/api').InputImageUploadRequest,
+    options: { signal?: AbortSignal } = {},
+  ): Promise<import('./generated/api').InputImage> {
+    this.requireCapability('input_images');
+    return this.mutate(
+      `/v1/sessions/${encodeURIComponent(sessionId)}/input-images`,
+      'InputImageUploadRequest',
+      'InputImage',
+      input,
+      options.signal,
+    );
+  }
   startRun(
     sessionId: string,
     input: StartCommandRequest,
@@ -2272,6 +2286,8 @@ export class AgentClient {
       const { execution: e, session: s, rootSession: r, run, childRun, childSession: child } = item;
       if (
         seen.has(e.id) ||
+        (item.sourceTool &&
+          (item.sourceTool.id !== e.parentExecutionId || item.sourceTool.id === e.id)) ||
         e.sessionId !== s.id ||
         e.rootSessionId !== r.id ||
         s.rootSessionId !== r.id ||
@@ -2308,7 +2324,12 @@ export class AgentClient {
     return page;
   }
   async listAllBackgroundExecutions(
-    options: { workspaceId?: string; rootSessionId?: string; signal?: AbortSignal } = {},
+    options: {
+      workspaceId?: string;
+      rootSessionId?: string;
+      includeSourceTool?: boolean;
+      signal?: AbortSignal;
+    } = {},
   ) {
     this.requireCapability('sessions');
     const storeId = this.serverInfo!.storeId!,
@@ -2321,7 +2342,13 @@ export class AgentClient {
         if (generation !== this.connectionGeneration || this.serverInfo?.storeId !== storeId)
           throw new ClientError('connection_superseded');
         return this.listBackgroundExecutions(
-          { storeId, workspaceId, rootSessionId, ...page },
+          {
+            storeId,
+            workspaceId,
+            rootSessionId,
+            includeSourceTool: options.includeSourceTool,
+            ...page,
+          },
           { signal },
         );
       },

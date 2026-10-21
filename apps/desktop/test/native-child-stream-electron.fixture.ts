@@ -13,6 +13,22 @@ const app = await _electron.launch({
   env: { HOME: root!, PATH: '/usr/bin:/bin', LANG: 'C.UTF-8' },
   timeout: 15000,
 });
+// Read editor text without CSS paragraph margins adding visual blank lines.
+// Keep every actual line break and leading/trailing space in the original draft.
+const promptText = (input: import('playwright').Locator) =>
+  input.evaluate((element) => {
+    const text = (node: Node): string =>
+      node.nodeName === 'BR'
+        ? '\n'
+        : node.nodeType === 3
+          ? (node.textContent ?? '')
+          : [...node.childNodes].map(text).join('');
+    return [...element.children]
+      .map((child) => (child.textContent ? text(child) : ''))
+      .join('\n')
+      .replace(/\r\n?/g, '\n');
+  });
+
 let phase = 'launch';
 const diagnostics: string[] = [];
 app.process().stderr?.on('data', (value) => diagnostics.push(String(value).slice(0, 300)));
@@ -271,12 +287,24 @@ try {
       'parent history loading ends',
     );
     const draft = page.getByRole('textbox', { name: '当前会话私有草稿', exact: true });
-    const original = await draft.inputValue();
+    const original = await promptText(draft);
     const probe = `${original}NAVIGATION_DRAFT_PROBE`;
     await draft.fill(probe);
-    assert.equal(await draft.inputValue(), probe, 'parent composer responds after child return');
-    await draft.fill(original);
-    assert.equal(await draft.inputValue(), original, 'original parent private draft restored');
+    await until(
+      () => promptText(draft),
+      (value) => value === probe,
+      'parent composer responds after child return',
+    );
+    // Exercise the editor's actual delete command. Playwright fill('') emits
+    // a synthetic empty insertText which Lexical can restore from its state.
+    await draft.press('ControlOrMeta+A');
+    await draft.press('Backspace');
+    if (original) await draft.fill(original);
+    await until(
+      () => promptText(draft),
+      (value) => value === original,
+      'original parent private draft restored',
+    );
   };
   phase = 'cold-first-child-held-full-directory';
   const firstCard = environment
@@ -338,7 +366,14 @@ try {
     );
   });
   try {
-    await environment.getByRole('button', { name: '刷新子 Agent', exact: true }).click();
+    // Ordinary UI has no diagnostic refresh control. Publish a real streamed
+    // child update so its public notification starts the full directory read.
+    const refreshMarker = `${tasks[0]!.prompt}_COLD_DIRECTORY_REFRESH`;
+    const refreshed = await fetch(
+      `${control}/step?child=${tasks[0]!.prompt}&marker=${refreshMarker}`,
+    );
+    assert.equal(refreshed.status, 200);
+    appended.set(tasks[0]!.prompt, [refreshMarker]);
     await until(
       () =>
         app.evaluate(() => {

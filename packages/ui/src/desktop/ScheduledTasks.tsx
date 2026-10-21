@@ -158,7 +158,7 @@ export function ScheduledTaskEditor({
           value={prompt}
           disabled={pending}
           onChange={(event) => setPrompt(event.target.value)}
-          placeholder="描述 kite 应该做什么"
+          placeholder="描述 Kite 应该做什么"
         />
         <section className="scheduled-editor-section" aria-labelledby="scheduled-details-title">
           <h3 id="scheduled-details-title">详情</h3>
@@ -405,7 +405,7 @@ export function ScheduledTasks({
 }) {
   return (
     <ScrollArea className="scheduled-scroll">
-      <main className="scheduled-page" aria-label="安排任务">
+      <main className="scheduled-page" aria-label="安排任务" aria-busy={props.loading || undefined}>
         <header className="scheduled-page-heading">
           <div>
             <h1>安排任务</h1>
@@ -420,7 +420,6 @@ export function ScheduledTasks({
             当前桌面服务尚未接入任务保存与后台运行。
           </p>
         )}
-        {props.loading && <p role="status">正在读取安排任务…</p>}
         {props.error && (
           <p className="scheduled-error" role="alert">
             {props.error}
@@ -432,7 +431,7 @@ export function ScheduledTasks({
               <ScheduledTaskCard key={task.id} task={task} props={props} onEditTask={onEditTask} />
             ))}
           </section>
-        ) : (
+        ) : !props.loading && !props.error ? (
           <section className="scheduled-empty">
             <div className="scheduled-empty-icon" aria-hidden="true">
               ◷
@@ -441,7 +440,7 @@ export function ScheduledTasks({
             <p>把已经稳定的重复工作安排在固定时间运行，例如检查 CI、汇总提交或生成周报。</p>
             <Button onClick={(event) => onNewTask(event.currentTarget)}>创建第一个任务</Button>
           </section>
-        )}
+        ) : null}
       </main>
     </ScrollArea>
   );

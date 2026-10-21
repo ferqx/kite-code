@@ -420,10 +420,19 @@ export function desktopTranscript({
         turnId,
         role: 'system',
         systemKind: 'turn_failure',
-        text: run.reason ?? '',
+        text:
+          run.reason === 'context_source_unavailable'
+            ? '无法读取工作区的项目说明。请检查工作区路径及 AGENTS.md、CLAUDE.md 的访问权限后重试。'
+            : (run.reason ?? ''),
         settled: true,
         status: 'failed',
-        failure: { summary: run.reason ?? '本轮未完成。' },
+        failure: {
+          summary:
+            run.reason === 'context_source_unavailable'
+              ? '工作区上下文读取失败'
+              : (run.reason ?? '本轮未完成。'),
+          ...(run.reason ? { reasonCode: run.reason } : {}),
+        },
       });
     }
   }

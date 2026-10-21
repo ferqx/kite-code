@@ -12,7 +12,7 @@ Workflow 的现有模型工具名称保持 `activate_skill`、`read_skill_refere
 
 正式 Service、Workflow、Verifier 和 Compensator 通过异步链读取完整 Skill 树及引用。每次编译／复核仍重新读取原字节、目录身份和 capability 事实，并在编译前后核对，不以缓存或 metadata 相等代替完整来源检查。文件读取接原可信 `knowledgeScope`，由[Agent 读取 owner](../../platform/knowledge-reads.ts)保存实际 fd、原读取／关闭错误与一次关闭结果；实际 Tool／Job 的取消信号贯穿读取、编译和补偿资产准备。公开同步编译／复核 API 保留给显式同步调用者，正式 Service 不使用同步回退。
 
-YAML、完整 schema 编译和参数验证由[编译 Worker](../../skills/workflow-contract/async.ts)执行。Service 的一个 Run binding 显式拥有 compiler session，只复用 CPU Worker，不复用来源、依赖或编译结果；独立异步库调用逐次拥有并结算 Worker。取消或编译异常先确认原 Worker 退出，后续调用才能重建；退出未确认则封闭 session，不继续复用。binding dispose 先等待 compiler 排空并确认退出，再关闭原知识来源，Service 重绑定等待原 dispose。清理未知原样透传，不能变成 diagnostics、来源拒绝或取消成功。资源对象不进入持久业务快照，程序化宿主传入共享 session／scope 时负责自己的最终结算。
+YAML、完整 schema 编译和参数验证由[编译 Worker](../../skills/workflow-contract/async.ts)执行。Service 的一个 Run binding 显式拥有 compiler session，只复用 CPU Worker，不复用来源、依赖或编译结果；独立异步库调用逐次拥有并结算 Worker。取消或编译异常先确认原 Worker 退出，后续调用才能重建；退出未确认则封闭 session，不继续复用。binding dispose 先等待 compiler 排空并确认退出，再关闭原知识来源，Service 重绑定等待原 dispose。[默认Service Run绑定](../../../../../apps/service/src/configuration.ts)保留 `createWorkflowConfiguration` 返回的资源并明确调用该dispose，然后关闭assembly；web资源独立结算，准备清理失败仍保留workflow owner及原错误，不把漏关的compiler交给进程退出代收。清理未知原样透传，不能变成 diagnostics、来源拒绝或取消成功。资源对象不进入持久业务快照，程序化宿主传入共享 session／scope 时负责自己的最终结算。
 
 正式[Skill目录](../../../../../apps/service/src/skill-catalogue.ts)每次完整读取独占一个compiler session，来源编译与空对象输入验证复用这个Worker，finally确认退出；不同请求不共享资源或结果。依赖发现仅提取原声明ID，之后唯一正式编译仍完整执行Ajv与原契约检查，避免为预发现重复编译全部schema。取舍及与完整来源／资源合同的关系见[按预算完整校验决定](../../../../../.agents/notes/implemented/architecture/2026-10-21-nonblocking-complete-tool-verification.md)。
 

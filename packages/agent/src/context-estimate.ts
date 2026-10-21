@@ -42,6 +42,7 @@ export function projectModelContext(
   const same = (a: ModelMessage, b: ModelMessage) =>
     a.role === b.role &&
     a.content === b.content &&
+    JSON.stringify(a.images ?? []) === JSON.stringify(b.images ?? []) &&
     a.toolCallId === b.toolCallId &&
     (a.toolCalls?.length ?? 0) === (b.toolCalls?.length ?? 0) &&
     (a.toolCalls ?? []).every((call, index) => {

@@ -235,6 +235,7 @@ test.skipIf(process.platform !== 'darwin')(
         'glob_files',
         'list_directory',
         'read_file',
+        'read_user_file',
         'search_content',
         'write_file',
         'shell_execute',
@@ -242,6 +243,12 @@ test.skipIf(process.platform !== 'darwin')(
         'shell_read',
         'shell_stop',
         'shell_wait',
+        'wait_agent_events',
+        'follow_up_agent',
+        'interrupt_agent',
+        'list_agents',
+        'send_agent_message',
+        'spawn_agent',
         'web_fetch',
       ]);
       const originalUsers = requests[0]!.messages.filter(

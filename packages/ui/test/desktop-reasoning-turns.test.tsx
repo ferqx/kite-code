@@ -208,3 +208,44 @@ test('hidden reasoning does not split adjacent exploration calls and failure rec
   );
   expect(failed.html).toContain('Actual failure');
 });
+
+test('cold and restored active processes start fully expanded without replaying an opening animation', () => {
+  const messages: Message[] = [
+    {
+      id: 'reply',
+      role: 'assistant',
+      turnId: 'run',
+      text: 'Working',
+      settled: false,
+    },
+  ];
+  for (const restored of [false, true]) {
+    const html = renderToStaticMarkup(
+      <Conversation
+        messages={messages}
+        loading={false}
+        selected
+        connected
+        turnActivity={{ turnId: 'run', status: 'running' }}
+        initialReading={restored ? { top: 42, follow: false, expanded: {} } : undefined}
+        saveReading={() => {}}
+      />,
+    );
+    const dom = new JSDOM(html);
+    try {
+      expect(
+        dom.window.document.querySelector('.agent-turn-summary')?.getAttribute('aria-expanded'),
+      ).toBe('true');
+      expect(
+        dom.window.document
+          .querySelector('.agent-turn-process')
+          ?.getAttribute('data-restored-expanded'),
+      ).toBe('true');
+      expect(
+        dom.window.document.querySelector('.agent-turn-process-messages')?.textContent,
+      ).toContain('Working');
+    } finally {
+      dom.window.close();
+    }
+  }
+});

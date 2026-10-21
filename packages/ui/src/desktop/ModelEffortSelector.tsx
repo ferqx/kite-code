@@ -75,6 +75,7 @@ export function ModelEffortSelector(props: ModelEffortSelectorProps) {
     <Popover
       open={open}
       onOpenChange={(next) => {
+        if (next && props.disabled) return;
         setOpen(next);
         if (next) {
           setView('effort');
@@ -115,7 +116,7 @@ export function ModelEffortSelector(props: ModelEffortSelectorProps) {
       >
         {view === 'effort' ? (
           <div className="model-effort-panel">
-            <div className="flex min-w-0 flex-col items-center">
+            <div className="flex min-w-0 flex-col items-center gap-2">
               {canAdjustEffort && effortLabel && (
                 <output
                   className="effort-value"
@@ -142,7 +143,7 @@ export function ModelEffortSelector(props: ModelEffortSelectorProps) {
               </Button>
             </div>
             {canAdjustEffort && (
-              <div className="mt-3">
+              <div className="mt-1">
                 {choices.length > 1 ? (
                   <GemSlider
                     value={

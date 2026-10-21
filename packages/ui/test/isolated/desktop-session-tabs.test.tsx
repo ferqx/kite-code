@@ -1,0 +1,268 @@
+import { afterAll, afterEach, expect, test } from 'bun:test';
+import { JSDOM } from 'jsdom';
+import { act, useEffect, useState } from 'react';
+
+const dom = new JSDOM('<!doctype html><html><body></body></html>', {
+  url: 'http://localhost',
+});
+const viewport = Object.assign(new dom.window.EventTarget(), {
+  matches: false,
+  media: '(max-width: 600px)',
+});
+const matchMedia = (query: string) =>
+  (query === viewport.media
+    ? viewport
+    : Object.assign(new dom.window.EventTarget(), {
+        matches: false,
+        media: query,
+      })) as MediaQueryList;
+class TestResizeObserver {
+  observe() {}
+  unobserve() {}
+  disconnect() {}
+}
+Object.assign(dom.window, {
+  matchMedia,
+  ResizeObserver: TestResizeObserver,
+  requestAnimationFrame: (callback: FrameRequestCallback) =>
+    dom.window.setTimeout(() => callback(0), 0),
+  cancelAnimationFrame: (handle: number) => dom.window.clearTimeout(handle),
+});
+Object.defineProperty(dom.window.HTMLElement.prototype, 'scrollIntoView', {
+  configurable: true,
+  value: () => {},
+});
+const globals = {
+  window: dom.window,
+  document: dom.window.document,
+  navigator: dom.window.navigator,
+  HTMLElement: dom.window.HTMLElement,
+  HTMLFormElement: dom.window.HTMLFormElement,
+  HTMLInputElement: dom.window.HTMLInputElement,
+  Node: dom.window.Node,
+  NodeFilter: dom.window.NodeFilter,
+  Element: dom.window.Element,
+  Event: dom.window.Event,
+  CustomEvent: dom.window.CustomEvent,
+  MouseEvent: dom.window.MouseEvent,
+  KeyboardEvent: dom.window.KeyboardEvent,
+  MutationObserver: dom.window.MutationObserver,
+  DOMRect: dom.window.DOMRect,
+  getComputedStyle: dom.window.getComputedStyle,
+  matchMedia,
+  ResizeObserver: TestResizeObserver,
+  requestAnimationFrame: (callback: FrameRequestCallback) => setTimeout(() => callback(0), 0),
+  cancelAnimationFrame: (handle: number) => clearTimeout(handle),
+  IS_REACT_ACT_ENVIRONMENT: true,
+};
+const originals = new Map<string, PropertyDescriptor | undefined>();
+for (const [key, value] of Object.entries(globals)) {
+  originals.set(key, Object.getOwnPropertyDescriptor(globalThis, key));
+  Object.defineProperty(globalThis, key, { configurable: true, writable: true, value });
+}
+const { SessionPage } = await import('../../src/desktop/SessionPage');
+const { createRoot } = await import('react-dom/client');
+let root: ReturnType<typeof createRoot> | undefined;
+afterEach(async () => {
+  if (root) await act(() => root?.unmount());
+  root = undefined;
+  document.body.innerHTML = '';
+  viewport.matches = false;
+});
+afterAll(() => {
+  dom.window.close();
+  for (const [key, original] of originals) {
+    if (original) Object.defineProperty(globalThis, key, original);
+    else Reflect.deleteProperty(globalThis, key);
+  }
+});
+
+let mounted = 0,
+  closed = 0;
+const released: string[] = [];
+function Changes() {
+  useEffect(() => {
+    mounted++;
+    return () => {
+      closed++;
+    };
+  }, []);
+  return <section aria-label="变更内容">Saved changes</section>;
+}
+async function render(scope = 's', hostDetails = false, covered = false) {
+  root ??= createRoot(document.body);
+  await act(() =>
+    root!.render(
+      <SessionPage
+        workspaces={[]}
+        selected={scope}
+        readingKey={scope}
+        sessionLabel="Conversation"
+        messages={[]}
+        connected
+        connectionLabel=""
+        loading={false}
+        actions={{}}
+        covered={covered}
+        detailPanel={
+          hostDetails
+            ? { label: 'Host details', content: <p>Host details body</p>, onClose() {} }
+            : undefined
+        }
+        closeBrowser={(id) => released.push(id)}
+        fileChangesContent={<Changes />}
+        renderBrowser={({ id, visible, tools }) => (
+          <section data-browser-id={id} data-visible={visible}>
+            {tools}
+          </section>
+        )}
+      />,
+    ),
+  );
+}
+async function click(label: string) {
+  const button = document.querySelector<HTMLButtonElement>(`button[aria-label="${label}"]`);
+  expect(button).not.toBeNull();
+  await act(() => button!.click());
+}
+async function changes() {
+  const button = document.querySelector<HTMLButtonElement>('.session-browser-tool');
+  expect(button).not.toBeNull();
+  await act(() => button!.click());
+}
+function browserIds() {
+  return [...document.querySelectorAll<HTMLElement>('[data-browser-id]')].map(
+    (node) => node.dataset.browserId!,
+  );
+}
+test('tabs replace the direct file changes action; only the visible selected tool owns a reader', async () => {
+  mounted = closed = 0;
+  released.length = 0;
+  await render();
+  expect([...document.querySelectorAll('button')].some((b) => b.textContent === '文件变更')).toBe(
+    false,
+  );
+  expect(mounted).toBe(0);
+  await click('标签页');
+  expect(document.querySelector('#session-tabs')!.hasAttribute('hidden')).toBe(false);
+  expect(document.querySelectorAll('[role="tab"]')).toHaveLength(1);
+  await changes();
+  expect(mounted - closed).toBe(1);
+  await click('新建标签页');
+  expect(mounted - closed).toBe(0);
+  expect(browserIds()).toHaveLength(2);
+  await changes();
+  expect(document.querySelectorAll('[role="tab"]')).toHaveLength(3);
+  expect(mounted - closed).toBe(1);
+  await click('收起标签栏');
+  const shell = document.querySelector<HTMLElement>('#session-tabs')!;
+  expect(shell.hidden).toBe(true);
+  expect(shell.classList.contains('right-sidebar')).toBe(false);
+  expect(shell.getAttribute('aria-hidden')).toBe('true');
+  expect(shell.hasAttribute('inert')).toBe(true);
+  expect(mounted - closed).toBe(0);
+  expect(document.querySelector('.session-tab-changes')).toBeNull();
+  expect(document.querySelectorAll('[data-browser-id][data-visible="true"]')).toHaveLength(0);
+  await click('标签页');
+  expect(mounted - closed).toBe(1);
+  expect(document.querySelector('button button')).toBeNull();
+  expect(released).toHaveLength(0);
+});
+test('responsive remount retains tabs; switching session releases their native resources and reader', async () => {
+  mounted = closed = 0;
+  released.length = 0;
+  await render();
+  await click('标签页');
+  await click('新建标签页');
+  const ids = browserIds();
+  for (const narrow of [true, false])
+    await act(() => {
+      viewport.matches = narrow;
+      viewport.dispatchEvent(new dom.window.Event('change'));
+    });
+  expect(browserIds()).toEqual(ids);
+  expect(released).toHaveLength(0);
+  await changes();
+  expect(mounted - closed).toBe(1);
+  await render('other');
+  expect(released.sort()).toEqual(ids.sort());
+  expect(mounted - closed).toBe(0);
+  expect(browserIds()).toHaveLength(1);
+  expect(ids).not.toContain(browserIds()[0]);
+});
+test('tab cap and closing the final tab leave a usable new page', async () => {
+  released.length = 0;
+  await render();
+  await click('标签页');
+  const first = browserIds()[0]!;
+  await click('关闭标签页：新标签页');
+  expect(released).toContain(first);
+  expect(browserIds()).toHaveLength(1);
+  for (let i = 0; i < 7; i++) await click('新建标签页');
+  expect(document.querySelectorAll('[role="tab"]')).toHaveLength(8);
+  expect(
+    document.querySelector<HTMLButtonElement>('button[aria-label="新建标签页"]')!.disabled,
+  ).toBe(true);
+  expect(document.querySelector<HTMLButtonElement>('.session-browser-tool')!.disabled).toBe(true);
+});
+
+test('another host panel or covered page hides the tab shell without retaining its reader', async () => {
+  mounted = closed = 0;
+  await render();
+  await click('标签页');
+  await changes();
+  expect(mounted - closed).toBe(1);
+  await render('s', true);
+  const shell = document.querySelector<HTMLElement>('#session-tabs')!;
+  expect(shell.hidden).toBe(true);
+  expect(shell.classList.contains('right-sidebar')).toBe(false);
+  expect(mounted - closed).toBe(0);
+  expect(document.querySelectorAll('.right-sidebar')).toHaveLength(1);
+  expect(document.querySelector('.right-sidebar')!.textContent).toContain('Host details body');
+  await render();
+  await click('标签页');
+  await render('s', false, true);
+  expect(document.querySelector<HTMLElement>('#session-tabs')!.hidden).toBe(true);
+  expect(mounted - closed).toBe(0);
+});
+
+test('opening tabs replaces the host details panel without losing the open intent', async () => {
+  function Surface() {
+    const [hostOpen, setHostOpen] = useState(true);
+    return (
+      <SessionPage
+        workspaces={[]}
+        readingKey="s"
+        sessionLabel="Conversation"
+        messages={[]}
+        connected
+        connectionLabel=""
+        loading={false}
+        actions={{}}
+        fileChangesContent={<Changes />}
+        detailPanel={
+          hostOpen
+            ? {
+                label: 'Host details',
+                content: <p>Host details body</p>,
+                onClose: () => setHostOpen(false),
+              }
+            : undefined
+        }
+      />
+    );
+  }
+  root = createRoot(document.body);
+  await act(() => root!.render(<Surface />));
+  const group = document.querySelector<HTMLElement>('.client-content-panels')!;
+  Object.defineProperty(group, 'offsetWidth', { configurable: true, value: 1200 });
+  group.getBoundingClientRect = () => new dom.window.DOMRect(0, 0, 1200, 800);
+  expect(document.querySelector('.right-sidebar')!.textContent).toContain('Host details body');
+  await click('标签页');
+  await act(() => new Promise<void>((resolve) => setTimeout(resolve, 25)));
+  expect(document.body.textContent).not.toContain('Host details body');
+  expect(
+    document.querySelector('[aria-controls="session-tabs"]')!.getAttribute('aria-expanded'),
+  ).toBe('true');
+  expect(document.querySelector('#session-tabs')!.getAttribute('aria-hidden')).toBe('false');
+});

@@ -9,7 +9,7 @@ import type {
   NativeRequest,
   NativeState,
 } from '../../src/native-bridge';
-import { prepareDesktopDom } from '../native-page-dom.fixture';
+import { prepareDesktopDom, promptValue } from '../native-page-dom.fixture';
 
 const bootstrap = new JSDOM('<div></div>', { pretendToBeVisual: true });
 const previous = {
@@ -145,14 +145,18 @@ test('actual React DOM keeps the new selected view when an original creation rec
   try {
     await act(async () => root.render(<NativeDesktop testDiagnostics />));
     await click('Original A');
-    expect(dom.window.document.querySelector('textarea')!.value).toBe('original text');
+    expect(
+      promptValue(dom.window.document.querySelector('[role="textbox"][contenteditable]')),
+    ).toBe('original text');
     await click('在 Workspace 中新建对话');
     expect(posts).toBe(0);
     await click('研究与理解资料');
     await click('发送首条消息');
     expect(posts).toBe(1);
     await click('Other B');
-    expect(dom.window.document.querySelector('textarea')!.value).toBe('other text');
+    expect(
+      promptValue(dom.window.document.querySelector('[role="textbox"][contenteditable]')),
+    ).toBe('other text');
     await act(async () =>
       release({
         kind: 'conversation',
@@ -169,8 +173,10 @@ test('actual React DOM keeps the new selected view when an original creation rec
     ).toBe(true);
     expect(selected).toBe('b');
     expect(posts).toBe(1);
-    expect(dom.window.document.querySelector('textarea')!.value).toBe('other text');
-    const composer = dom.window.document.querySelector('textarea'),
+    expect(
+      promptValue(dom.window.document.querySelector('[role="textbox"][contenteditable]')),
+    ).toBe('other text');
+    const composer = dom.window.document.querySelector('[role="textbox"][contenteditable]'),
       conversation = dom.window.document.querySelector('[aria-label="会话消息"]');
     expect(composer).not.toBeNull();
     expect(conversation).not.toBeNull();
@@ -182,8 +188,10 @@ test('actual React DOM keeps the new selected view when an original creation rec
     );
     expect(dom.window.document.querySelector('#native-session-tools')).toBeNull();
     expect(dom.window.document.querySelector('[aria-label="会话消息"]')).toBe(conversation);
-    expect(dom.window.document.querySelector('textarea')).toBe(composer);
-    expect(dom.window.document.querySelector('textarea')!.value).toBe('other text');
+    expect(dom.window.document.querySelector('[role="textbox"][contenteditable]')).toBe(composer);
+    expect(
+      promptValue(dom.window.document.querySelector('[role="textbox"][contenteditable]')),
+    ).toBe('other text');
     expect(posts).toBe(1);
   } finally {
     if (submitted)

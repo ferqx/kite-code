@@ -2,7 +2,7 @@
 
 工具可以读取、执行命令、修改文件或访问外部系统。可发现、可请求、获准执行和执行成功是不同状态。
 
-普通 CLI、TUI 和 Desktop 的 Agent 宿主默认提供工作区文件读取、列目录、搜索和编辑，以及 `ask_user`、`web_fetch` 和子 Agent 的创建、消息、追问、事件等待、列表与中断六工具；宿主具备合格 Shell 后端时也提供命令执行与管理工具。配置好模型后即可使用这些日常能力，无需先手工添加工具列表。显式禁用或移除的工具仍不提供给后续运行；实际调用继续遵守工作区信任、三种权限策略与当前平台能力限制。
+普通 CLI、TUI 和 Desktop 的 Agent 宿主默认提供工作区文件读取、列目录、搜索和编辑，以及工作区外用户文件读取、`ask_user`、`web_fetch` 和子 Agent 的创建、消息、追问、事件等待、列表与中断六工具；宿主具备合格 Shell 后端时也提供命令执行与管理工具。配置好模型后即可使用这些日常能力，无需先手工添加工具列表。外部读取使用 `read_user_file`，外部写入和编辑不随此默认开启。显式禁用或移除的工具仍不提供给后续运行；实际调用继续遵守工作区信任、三种权限策略与当前平台能力限制。
 
 ## 模型工具名称
 
@@ -18,6 +18,8 @@
 | 子 Agent | `spawn_agent`、`follow_up_agent`、`send_agent_message`、`interrupt_agent` | 默认通用协作者；稳定 `agent_id`，每次受理仍绑定准确 carrier/轮次；消息只排队，显式追问才续轮 |
 | 子 Agent 等待与目录 | `wait_agent_events`、`list_agents` | 事件等待只读自身邮箱，使用 `after_seq/wait_ms`；列表按稳定身份分页，并提供原委派/最近工作/结果的可读来源 |
 | 计划与验证 | `read_plan`、`write_plan`、`request_plan_review`、`update_plan_progress`、`define_validation_checks`、`run_validation_checks`、`rebind_validation_checks`、`request_validation_waiver`、`check_file_changes` | 计划保存、批准、进度及真实验证仍分别核实 |
+
+工作区文件工具收到工作区外路径时拒绝访问，把失败结果交给模型继续解释，不因该路径把整轮任务终止；不会读取外部文件或外部目录的项目说明。工作区自身必需的项目说明无法安全读取时，仍会明确停止并要求处理来源问题。
 
 `shell_execute.execution_timeout_ms` 是执行截止时限；到期申请取消，并继续核实真实停止。`shell_wait.wait_timeout_ms` 与 `wait_agent_events.wait_ms` 只限制本次等待，不停止目标；Agent 等待省略或 null 时在内部持续有限分段，0 为当前只读快照。等待与取消回执不能冒充执行成功或停止确认。
 

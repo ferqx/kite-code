@@ -126,6 +126,16 @@ B仅修改manifest版本标签，TUI仅help/version；此工具即使通过也�
 
 2026-10-18用户确认增加[精确原始输入守卫](../../../tests/fixtures/unified-agent/predecessor-reviewed-input.ts)：`compatible`、`terminal_legacy`、`windows_legacy` 分别绑定各自固定前驱，仅为 `bun.lock`、根 package、Agent／AI／UI／Service 六项准确路径登记双方完整 SHA-256。它只承认 `eeea65f5f` 的 Responses OpenAI 声明及两个完整 resolved 包、`9ff6904a0` 的构建／UI 声明、`bcf70ce84` 的 session-title 入口，以及本轮 `test:model:tools:live` 准确脚本行。OpenAI `4.0.19` 与其嵌套 provider-utils `5.0.12` 是实际依赖新增，不能称为声明投影或依赖未变。其余五项原输入保持逐字比较；两 SQL 不进入此例外。2026-10-19（UTC）真实模型测试新增 `test:model:collaboration:live` 后，根 package 的完整当前 SHA 更新为 `4c7e7320475e5c030c4221e30f408bb21b290de5a4c73fcd830f5efb4f0e4a14`，仅该路径的审查 scope 更新为当日，并在 provenance 登记第二条准确 live 脚本及增量；其余五项配对、原前驱字节和 SQL 校验保持。缺失、重复、改名、追加命令及未知字节仍拒绝，不能普遍忽略 scripts。
 
+2026-10-21合并后的追加审查仅更新以下三份当前完整blob，scope为 `approved_input_increments_2026_10_21`；三个固定前驱、各自previous SHA／context、11项路径和两份SQL／固定checksum保持。Lexical是实际生产依赖增量：来自 `5dba8a6bd5fe348aef130f83694b0453e98833ea` 的7项0.52依赖和31个新增resolved条目，原resolved条目字节保持；Agent清单来自 `044df65ff6bffadc4ae4087a0a866b823d9a87e6`，仅追加Workflow Worker资产构建，Agent依赖未变。其余已审查增量及原选择理由继续适用，不把全部变化称为声明或依赖未变。
+
+| 当前输入 | 完整SHA-256 | 新增provenance增量 |
+| --- | --- | --- |
+| `bun.lock` | `86bb93efcf29c05bb8f9b2c2960a90dd67d4b9a879f321a1fe244d39e0f135cc` | `lexical_exact_resolved_closure` |
+| `packages/ui/package.json` | `777e18f2641afd02e2a7df4499b90a28d8eb6d6c7440699ee2f0d3b0b6bf43d6` | `lexical_editor_dependencies` |
+| `packages/agent/package.json` | `0afd9b278174c2bad61cd471981a5975b97635aa0eb939899fba165562cc13c0` | `workflow_contract_assets_build` |
+
+本轮精确配对pure guard为6项／360断言，Terminal输入守卫10项／318断言、Windows输入守卫7项／251断言；原Terminal跨代码整文件2项／406断言通过。这些局部结果不授Windows运行、Native完整链或合并后的默认全量资格。
+
 守卫不做 JSON 归一化、字段忽略或旧源码改写；任一未知字节、错路径或与固定 context 不对应的原始 blob 均拒绝；共享同字节 blob 按各自固定调用上下文核验。provenance 在全部11项原 raw SHA／当前 raw SHA 之外，独立记录 `reviewedInputIncrements` 的非 identical 标签、准确前驱、审查 scope、提交和增量；这里的提交列表只解释本轮追加审查，既有 legacy 映射理由仍归其原 matcher／refinement。旧源码继续使用自己的 manifest、lock 和 builder，当前锁不写回旧源码。原反例与[配对单元](../../../tests/isolated/unified-agent/predecessor-reviewed-input.test.ts)分别核历史映射和新例外；本地代码比较不授已发布前驱或其他平台资格。
 
 原冻结 `a2b6441f`／`837a2b8c` 的 legacy 输入继续保留[精确声明投影](../../../tests/fixtures/unified-agent/predecessor-workspace-declarations.ts)：既有审查快照的 POSIX 六项 raw byteequal、五项准确映射，Windows 七项 raw byteequal、四项映射；原历史 SHA、source-entry 路径隔离与全字节拒绝断言不变。当前兼容入口不借用这些 legacy 投影；除原字节相同外，只接受下述独立的完整 raw 配对例外，两迁移仍固定原字节。原映射理由与历史证据仍归[前驱决定](../../../.agents/notes/implemented/testing/2026-10-07-platform-real-code-predecessors.md)。夹具保留 Profile／user 两份模型输入及原字节保护。

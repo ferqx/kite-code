@@ -10,12 +10,14 @@ export type ReviewedPredecessorKind = keyof typeof REVIEWED_PREDECESSOR_COMMITS;
 const responsesCommit = 'eeea65f5f2cc14f7fab76218cb9e9506ebbbc58e';
 const nativeCommit = '9ff6904a0f49213f06c483a08615ff69f099720a';
 const titleCommit = 'bcf70ce843463194ab91ca3938b9fa1375cb22bc';
+const lexicalCommit = '5dba8a6bd5fe348aef130f83694b0453e98833ea';
+const workflowCommit = '044df65ff6bffadc4ae4087a0a866b823d9a87e6';
 export const REVIEWED_LIVE_TOOL_SCRIPT =
   '    "test:model:tools:live": "bun run tests/e2e/live/model/model-tools.live.ts",\n';
 const reviewedCollaborationLiveScript =
   '    "test:model:collaboration:live": "bun run tests/e2e/live/model/collaboration.live.ts",\n';
 
-// These six final raw inputs include only the named commits and the two exact live scripts.
+// These six final raw inputs include only the named reviewed increments and exact live scripts.
 // Both new resolved OpenAI blocks, all old resolved packages and every whitespace byte are pinned.
 const reviewedInputs: Readonly<
   Record<
@@ -27,7 +29,7 @@ const reviewedInputs: Readonly<
   >
 > = {
   'bun.lock': {
-    currentSha256: '88fc585823e3b1f8402a282d17ce8e7abb849db67488bb6a3465169a7ec8053a',
+    currentSha256: '86bb93efcf29c05bb8f9b2c2960a90dd67d4b9a879f321a1fe244d39e0f135cc',
     previousSha256: {
       compatible: 'cc1b2b43f874bca59043e4c2090675c2b0c4c4033d9d1cd19da95b5ffc67d6d1',
       terminal_legacy: 'abad6bbc5cad8a0b2ac5e7c53edb15c5ae2e4d1b5167e75be24de028ba1a4d8f',
@@ -51,7 +53,7 @@ const reviewedInputs: Readonly<
     },
   },
   'packages/agent/package.json': {
-    currentSha256: '6a70589f6d4add80433d44a4bc69305b7f78e7504cc4e0e6aea484566e8b7083',
+    currentSha256: '0afd9b278174c2bad61cd471981a5975b97635aa0eb939899fba165562cc13c0',
     previousSha256: {
       compatible: 'eeb75457d1fa24a49a6d806710c0de6eef76f8af4743e8086b20e2dfeea7a8be',
       terminal_legacy: 'c903f7fd9e8d8c6b4cb96f32c40842da46e24d412c71a017b1924892bafcfe43',
@@ -59,7 +61,7 @@ const reviewedInputs: Readonly<
     },
   },
   'packages/ui/package.json': {
-    currentSha256: 'fe81d519d0363dcf6fe1b1c34ad0193fa25786f6db298da3520facbd95fc1349',
+    currentSha256: '777e18f2641afd02e2a7df4499b90a28d8eb6d6c7440699ee2f0d3b0b6bf43d6',
     previousSha256: {
       compatible: 'f2ef2bdb1eca663e29c5f05b1fd595bab911287136a2a698956e3d2aa90b2411',
       terminal_legacy: '9ba1e4dbafb542ab2ff9644e90fbd2c2c63b5a5e306cf8b90b41344b07f2b81b',
@@ -98,6 +100,8 @@ export function matchReviewedPredecessorInput(
         : path === 'packages/agent/package.json'
           ? [nativeCommit, titleCommit]
           : [nativeCommit];
+  if (path === 'bun.lock' || path === 'packages/ui/package.json') commits.push(lexicalCommit);
+  if (path === 'packages/agent/package.json') commits.push(workflowCommit);
   const increments =
     path === 'package.json'
       ? ['native_build_scripts', 'model_tools_live_script', 'model_collaboration_live_script']
@@ -110,13 +114,20 @@ export function matchReviewedPredecessorInput(
             : path === 'packages/ui/package.json'
               ? ['ui_bundled_build', 'ui_ink_entry', 'ui_react_dom_peer']
               : ['service_bundled_build'];
+  if (path === 'bun.lock') increments.push('lexical_exact_resolved_closure');
+  if (path === 'packages/ui/package.json') increments.push('lexical_editor_dependencies');
+  if (path === 'packages/agent/package.json') increments.push('workflow_contract_assets_build');
   return {
     match: 'reviewed_locked_input_increment' as const,
     // These reasons cover this additional review, not the legacy guard's earlier increments.
     reviewScope:
-      path === 'package.json'
-        ? ('approved_input_increments_2026_10_19' as const)
-        : ('approved_input_increments_2026_10_18' as const),
+      path === 'bun.lock' ||
+      path === 'packages/ui/package.json' ||
+      path === 'packages/agent/package.json'
+        ? ('approved_input_increments_2026_10_21' as const)
+        : path === 'package.json'
+          ? ('approved_input_increments_2026_10_19' as const)
+          : ('approved_input_increments_2026_10_18' as const),
     predecessorCommit: REVIEWED_PREDECESSOR_COMMITS[predecessor],
     previousSha256,
     currentSha256,

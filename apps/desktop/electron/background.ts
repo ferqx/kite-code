@@ -151,6 +151,7 @@ export class NativeBackground {
       const items = await this.client.listAllBackgroundExecutions({
         signal: lease.abort.signal,
         rootSessionId: lease.scope.rootSessionId,
+        ...(lease.scope.rootSessionId ? { includeSourceTool: true } : {}),
       });
       this.check(lease);
       if (
@@ -279,7 +280,12 @@ export class NativeBackground {
     await this.client.verifyConnection({ signal: lease.abort.signal });
     this.check(lease);
     const page = await this.client.listBackgroundExecutions(
-      { storeId: lease.scope.storeId, executionId: lease.item.execution.id, limit: 1 },
+      {
+        storeId: lease.scope.storeId,
+        executionId: lease.item.execution.id,
+        limit: 1,
+        ...(lease.scope.rootSessionId ? { includeSourceTool: true } : {}),
+      },
       { signal: lease.abort.signal },
     );
     this.check(lease);

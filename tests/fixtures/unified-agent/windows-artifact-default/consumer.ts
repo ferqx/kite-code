@@ -185,6 +185,7 @@ try {
     ['files.glob', 'glob_files'],
     ['files.list', 'list_directory'],
     ['files.read', 'read_file'],
+    ['files.read_path', 'read_user_file'],
     ['files.search', 'search_content'],
     ['files.write', 'write_file'],
     ...(shellAvailable
@@ -196,6 +197,12 @@ try {
           ['shell.wait', 'shell_wait'],
         ] satisfies [string, string][])
       : []),
+    ['task.events', 'wait_agent_events'],
+    ['task.follow_up', 'follow_up_agent'],
+    ['task.interrupt', 'interrupt_agent'],
+    ['task.list', 'list_agents'],
+    ['task.message', 'send_agent_message'],
+    ['task.spawn', 'spawn_agent'],
     ['web_fetch', 'web_fetch'],
   ];
   assert.deepEqual(

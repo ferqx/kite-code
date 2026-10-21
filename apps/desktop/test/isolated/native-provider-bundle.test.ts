@@ -32,6 +32,12 @@ function object(value: unknown): Record<string, unknown> {
 }
 
 const require = createRequire(import.meta.url);
+// Expected complete Markdown source for these plain Composer tasks.
+const composerSource = (content: string) => content.replaceAll('_', '\\_');
+const hasOriginalTask = (body: ProviderWireRequest, content: string) =>
+  body.messages.some(
+    (message) => message.role === 'user' && message.content === composerSource(content),
+  );
 test.skipIf(process.platform !== 'darwin')(
   'relocated default Native Provider forms, four physical protocol families, transient effort and cold original save lookup',
   async () => {
@@ -131,7 +137,7 @@ test.skipIf(process.platform !== 'darwin')(
             expect(body.tools ?? []).toEqual([]);
             const users = body.messages.filter((message) => message.role === 'user');
             expect(users).toHaveLength(2);
-            expect(users[0]!.content).toBe('NATIVE_openai_newsession');
+            expect(users[0]!.content).toBe(composerSource('NATIVE_openai_newsession'));
             expect(users[1]!.content).toMatch(
               /^<runtime-state source="runtime.kernel">\nphase: building\nrun: [0-9a-f-]{36}\nplanning: \{"status":"disabled"\}\nThis is Runtime-generated observation, not a user request or execution grant\.\n<\/runtime-state>$/,
             );
@@ -144,8 +150,8 @@ test.skipIf(process.platform !== 'darwin')(
           }
           bodies.push({ alias, body });
           if (
-            JSON.stringify(body.messages).includes('NATIVE_compatible_held') &&
-            !JSON.stringify(body.messages).includes('NATIVE_plain_steer')
+            hasOriginalTask(body, 'New task: NATIVE_compatible_held') &&
+            !hasOriginalTask(body, 'Follow up: NATIVE_plain_steer')
           )
             await new Promise<void>((resolve) => {
               releaseHeld = resolve;
@@ -310,7 +316,7 @@ test.skipIf(process.platform !== 'darwin')(
           const command = await cold.getCommand(original!.originCommandId);
           expect(command!.originStoreId).toBe(storeId!);
           expect(command!.sessionId).toBe(run.sessionId);
-          expect(object(command!.request).content).toBe(run.content);
+          expect(object(command!.request).content).toBe(composerSource(run.content));
           const publicCommand = (await cold.getCommand(original!.rootWorkCommandId))!;
           expect(publicCommand).toMatchObject({
             status: 'applied',
@@ -345,7 +351,7 @@ test.skipIf(process.platform !== 'darwin')(
             expect(object(command!.request).reasoningEffort).toBe(wire.body.reasoning_effort);
             expect(sealed.identity.modelId).toBe(run.modelId);
             expect(request.modelId).toBe(run.modelId);
-            expect(JSON.stringify(request)).toContain(run.marker);
+            expect(JSON.stringify(request)).toContain(JSON.stringify(composerSource(run.content)));
             expect(object(object(metadata.adapter).provider).family).toBe(
               wire.alias === 'compatible' ? 'openai-compatible' : wire.alias,
             );
@@ -374,7 +380,7 @@ test.skipIf(process.platform !== 'darwin')(
         const steer = await cold.getCommand(report.steers[0]!.request.commandId);
         expect(steer!.request).toMatchObject({
           kind: 'input.steer',
-          content: 'Follow up: NATIVE_plain_steer',
+          content: composerSource('Follow up: NATIVE_plain_steer'),
           targetRunId: report.runs.find((r) => r.marker.endsWith('_held'))!.id,
         });
         expect('modelId' in object(steer!.request)).toBe(false);

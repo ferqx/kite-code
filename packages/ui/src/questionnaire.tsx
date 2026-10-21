@@ -29,8 +29,9 @@ function ChoiceInformation({ title, description }: { title: string; description:
   const [hovered, setHovered] = useState(false);
   const [focused, setFocused] = useState(false);
   return (
-    <span style={{ position: 'relative' }}>
+    <span className="questionnaire-information">
       <button
+        className="questionnaire-info-button"
         type="button"
         aria-label={`${title}的说明`}
         aria-describedby={hovered || focused ? id : undefined}
@@ -39,32 +40,32 @@ function ChoiceInformation({ title, description }: { title: string; description:
         onFocus={() => setFocused(true)}
         onBlur={() => setFocused(false)}
       >
-        ⓘ
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+          <circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="1.5" />
+          <path
+            d="M12 11v6m0-10v.01"
+            stroke="currentColor"
+            strokeWidth="1.5"
+            strokeLinecap="round"
+          />
+        </svg>
       </button>
       {(hovered || focused) && (
-        <span
-          id={id}
-          role="tooltip"
-          style={{
-            position: 'absolute',
-            top: '100%',
-            left: 0,
-            zIndex: 1,
-            width: 'max-content',
-            maxWidth: 'min(32rem, 80vw)',
-            padding: '0.5rem',
-            border: '1px solid currentColor',
-            background: 'Canvas',
-            color: 'CanvasText',
-            whiteSpace: 'pre-wrap',
-            overflowWrap: 'anywhere',
-          }}
-        >
-          {title}
-          {'\n'}
-          {description}
+        <span id={id} role="tooltip" className="questionnaire-tooltip">
+          <strong>{title}</strong>
+          <span>{description}</span>
         </span>
       )}
+    </span>
+  );
+}
+
+function ChoiceTitle({ title }: { title: string }) {
+  const recommended = title.endsWith(' (Recommended)');
+  return (
+    <span className="questionnaire-choice-title">
+      <span>{recommended ? title.slice(0, -14) : title}</span>
+      {recommended && <span className="questionnaire-recommended">推荐</span>}
     </span>
   );
 }
@@ -143,127 +144,153 @@ export function Questionnaire({
       setSubmitting(false);
     }
   }
+  const cancel = form.alternative?.title === 'Cancel answering';
   return (
-    <form aria-label="Questionnaire" onSubmit={submit}>
-      {form.title && <h3>{form.title}</h3>}
-      {form.description && <p style={{ whiteSpace: 'pre-wrap' }}>{form.description}</p>}
-      <p role="status">
-        问题 {draft.step + 1}/{form.fields.length}
-      </p>
-      <fieldset key={draft.step} disabled={disabled || submitting} style={{ minWidth: 0 }}>
+    <form className="questionnaire" aria-label="Questionnaire" onSubmit={submit}>
+      <header className="questionnaire-header">
+        <h3>{form.title ?? '需要你的回答'}</h3>
+        <p role="status">
+          问题 {draft.step + 1} / {form.fields.length}
+        </p>
+      </header>
+      {form.description && <p className="questionnaire-description">{form.description}</p>}
+      <fieldset key={draft.step} disabled={disabled || submitting}>
         <legend>{field.title ?? '回答问题'}</legend>
-        {field.description && <p style={{ whiteSpace: 'pre-wrap' }}>{field.description}</p>}
-        {field.choices.map((choice, index) => (
-          <div key={index}>
-            <label>
-              <input
-                type="radio"
-                name={`${formId}-${draft.step}`}
-                value={index}
-                aria-label={choice.title}
-                checked={input.selected === index}
-                onChange={() =>
-                  edit({ ...current.current.fields[current.current.step]!, selected: index })
-                }
-              />
-              {choice.title}
-            </label>
-            {choice.description && (
-              <ChoiceInformation title={choice.title} description={choice.description} />
-            )}
-          </div>
-        ))}
-        {field.text && (
-          <div>
-            {field.choices.length > 0 && (
+        {field.description && <p className="questionnaire-description">{field.description}</p>}
+        <div className="questionnaire-choices">
+          {field.choices.map((choice, index) => (
+            <div
+              className="questionnaire-choice"
+              data-selected={input.selected === index}
+              key={index}
+            >
               <label>
                 <input
                   type="radio"
                   name={`${formId}-${draft.step}`}
-                  aria-label="自由回答"
-                  checked={input.selected === field.choices.length}
+                  value={index}
+                  aria-label={choice.title}
+                  checked={input.selected === index}
                   onChange={() =>
-                    edit({
-                      ...current.current.fields[current.current.step]!,
-                      selected: field.choices.length,
-                    })
+                    edit({ ...current.current.fields[current.current.step]!, selected: index })
                   }
                 />
-                自由回答
+                <ChoiceTitle title={choice.title} />
               </label>
-            )}
-            {(!field.choices.length || input.selected === field.choices.length) && (
-              <label>
-                {!field.choices.length && '自由回答'}
-                <textarea
-                  aria-label="自由回答"
-                  value={input.text}
-                  onInput={(event) =>
-                    edit({
-                      ...current.current.fields[current.current.step]!,
-                      text: event.currentTarget.value,
-                    })
-                  }
-                />
-                {lengthError && (
-                  <span role="status">
-                    {lengthError.kind === 'minimum' ? '至少' : '最多'} {lengthError.bound}{' '}
-                    个字符；当前 {lengthError.length}
-                  </span>
-                )}
-              </label>
+              {choice.description && (
+                <ChoiceInformation title={choice.title} description={choice.description} />
+              )}
+            </div>
+          ))}
+          {field.text && (
+            <div className="questionnaire-free-answer">
+              {field.choices.length > 0 && (
+                <div
+                  className="questionnaire-choice"
+                  data-selected={input.selected === field.choices.length}
+                >
+                  <label>
+                    <input
+                      type="radio"
+                      name={`${formId}-${draft.step}`}
+                      aria-label="自由回答"
+                      checked={input.selected === field.choices.length}
+                      onChange={() =>
+                        edit({
+                          ...current.current.fields[current.current.step]!,
+                          selected: field.choices.length,
+                        })
+                      }
+                    />
+                    <span>自由回答</span>
+                  </label>
+                </div>
+              )}
+              {(!field.choices.length || input.selected === field.choices.length) && (
+                <label className="questionnaire-text-answer">
+                  {!field.choices.length && <span>自由回答</span>}
+                  <textarea
+                    aria-label="自由回答"
+                    placeholder="输入你的回答…"
+                    rows={3}
+                    value={input.text}
+                    onInput={(event) =>
+                      edit({
+                        ...current.current.fields[current.current.step]!,
+                        text: event.currentTarget.value,
+                      })
+                    }
+                  />
+                  {lengthError && (
+                    <span className="questionnaire-error" role="status">
+                      {lengthError.kind === 'minimum' ? '至少' : '最多'} {lengthError.bound}{' '}
+                      个字符；当前 {lengthError.length}
+                    </span>
+                  )}
+                </label>
+              )}
+            </div>
+          )}
+        </div>
+      </fieldset>
+      <footer className="questionnaire-actions">
+        {form.alternative && (
+          <div className="questionnaire-alternative">
+            <button
+              className="questionnaire-cancel"
+              type="button"
+              disabled={disabled || submitting}
+              title={cancel ? '跳过这些问题，继续当前任务' : form.alternative.description}
+              onClick={() => void send(form.alternative!.value as Json)}
+            >
+              {cancel ? '取消回答' : form.alternative.title}
+            </button>
+            {!cancel && form.alternative.description && (
+              <ChoiceInformation
+                title={form.alternative.title}
+                description={form.alternative.description}
+              />
             )}
           </div>
         )}
-      </fieldset>
-      <div>
-        {draft.step > 0 && (
-          <button
-            key="previous-question"
-            type="button"
-            disabled={submitting}
-            onClick={() => change({ ...current.current, step: current.current.step - 1 })}
-          >
-            上一题
-          </button>
-        )}
-        {draft.step < form.fields.length - 1 ? (
-          <button
-            key="next-question"
-            type="button"
-            disabled={submitting}
-            onClick={() => change({ ...current.current, step: current.current.step + 1 })}
-          >
-            下一题
-          </button>
-        ) : (
-          <button
-            key="submit-questionnaire"
-            type="submit"
-            disabled={disabled || submitting || !answers(draft)}
-          >
-            提交回答
-          </button>
-        )}
-      </div>
-      {form.alternative && (
-        <div>
-          <button
-            type="button"
-            disabled={disabled || submitting}
-            onClick={() => void send(form.alternative!.value as Json)}
-          >
-            {form.alternative.title}
-          </button>
-          {form.alternative.description && (
-            <ChoiceInformation
-              title={form.alternative.title}
-              description={form.alternative.description}
-            />
+        <div className="questionnaire-navigation">
+          {draft.step > 0 && (
+            <button
+              key="previous-question"
+              type="button"
+              disabled={submitting}
+              onClick={() => change({ ...current.current, step: current.current.step - 1 })}
+            >
+              上一题
+            </button>
+          )}
+          {draft.step < form.fields.length - 1 ? (
+            <button
+              className="questionnaire-primary"
+              key="next-question"
+              type="button"
+              disabled={submitting}
+              onClick={() => change({ ...current.current, step: current.current.step + 1 })}
+            >
+              下一题
+            </button>
+          ) : (
+            <button
+              className="questionnaire-primary"
+              key="submit-questionnaire"
+              type="submit"
+              disabled={disabled || submitting || !answers(draft)}
+            >
+              {submitting ? '正在提交…' : '提交回答'}
+            </button>
           )}
         </div>
+      </footer>
+      {error && (
+        <p className="questionnaire-error" role="alert">
+          {error}
+        </p>
       )}
-      {error && <p role="alert">{error}</p>}
     </form>
   );
 }

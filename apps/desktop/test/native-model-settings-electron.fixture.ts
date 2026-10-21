@@ -63,7 +63,7 @@ const count = async () => Number(await (await controlFetch('count')).text());
 async function inputDiagnostics(page: import('playwright').Page, phase: string) {
   const value = await state(page);
   const dom = await page.evaluate(() => {
-    const draft = document.querySelector('textarea');
+    const draft = document.querySelector('[role="textbox"][contenteditable]');
     const button = [...document.querySelectorAll('button')].find(
       (v) => v.getAttribute('aria-label') === '发送明确的新轮次',
     );
@@ -71,7 +71,7 @@ async function inputDiagnostics(page: import('playwright').Page, phase: string) 
       focused: document.hasFocus(),
       activeTag: document.activeElement?.tagName,
       activeText: document.activeElement?.textContent?.slice(0, 64),
-      draftLength: draft?.value.length,
+      draftLength: draft?.textContent?.length,
       disabled: button?.disabled,
       events: Reflect.get(window, '__settingsInputEvents'),
     };
@@ -246,7 +246,7 @@ try {
   const draft = page.getByRole('textbox', { name: '当前会话私有草稿' });
   await closeSettings(page);
   await draft.fill('Held original model A');
-  eq(await draft.inputValue(), 'Held original model A');
+  eq(await draft.innerText(), 'Held original model A');
   await inputDiagnostics(page, 'draft-filled');
   await page.getByRole('button', { name: '发送明确的新轮次' }).click();
   eq(
@@ -391,7 +391,7 @@ try {
   });
   await closeSettings(page);
   await draft.fill('Explicit next model B');
-  eq(await draft.inputValue(), 'Explicit next model B');
+  eq(await draft.innerText(), 'Explicit next model B');
   await inputDiagnostics(page, 'next-draft-filled');
   await page.getByRole('button', { name: '发送明确的新轮次' }).click();
   eq(

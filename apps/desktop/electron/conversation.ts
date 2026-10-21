@@ -52,6 +52,10 @@ export class NativeConversation {
   private readonly notify: () => void;
   private readonly protectedRoots: readonly string[];
   private readonly processes: NativeProcessOwner;
+  private readonly publishImages: (
+    sessionId: string,
+    ids: readonly string[],
+  ) => Promise<import('@kite-ai/client').InputImage[]>;
   constructor(
     client: AgentClient,
     current: () => Scope | undefined,
@@ -65,7 +69,17 @@ export class NativeConversation {
     notify: () => void,
     protectedRoots: readonly string[],
     processes: NativeProcessOwner,
+    publishImages?: (
+      sessionId: string,
+      ids: readonly string[],
+    ) => Promise<import('@kite-ai/client').InputImage[]>,
   ) {
+    this.publishImages =
+      publishImages ??
+      (async (_sessionId, ids) => {
+        if (ids.length) throw new ClientError('native_image_unavailable');
+        return [];
+      });
     this.processes = processes;
     this.client = client;
     this.current = current;
@@ -323,7 +337,12 @@ export class NativeConversation {
       }
       this.check(scope);
       entry.result = { ...entry.result, stage: 'input' };
-      const prepared = await this.journal().prepare(creation.input.sessionId, request.intent, {
+      const images = request.imageIds?.length
+        ? await this.publishImages(creation.input.sessionId, request.imageIds)
+        : undefined;
+      this.check(scope);
+      const intent = { ...request.intent, ...(images?.length ? { images } : {}) };
+      const prepared = await this.journal().prepare(creation.input.sessionId, intent, {
         id: draft.id,
         revision: String(draft.revision),
         textDigest: callerTextDigest(draft.content),
@@ -335,9 +354,7 @@ export class NativeConversation {
           creation.input.sessionId,
           request.intent.modelId,
         );
-      const result = inputMetadata(
-        await this.input.start(creation.input.sessionId, request.intent),
-      );
+      const result = inputMetadata(await this.input.start(creation.input.sessionId, intent));
       entry.result = {
         ...entry.result,
         input: { ...result, draft: prepared.intent.draft },

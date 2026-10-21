@@ -542,6 +542,7 @@ export interface Store {
     },
   ): Promise<WorkspaceRemoval | null>;
   listBackgroundExecutions(input: {
+    includeSourceTool?: boolean;
     expectedStoreId: string;
     subjectId: string;
     workspaceId?: string;

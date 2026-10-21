@@ -117,7 +117,8 @@ test('retained General card reads the accurate configuration default and never s
     expect(editors).toEqual(['zed']);
     phase = 'held';
     await render(selection('a', 'wa', 1));
-    expect(f.host.querySelector('.settings-value')!.textContent).toBe('正在读取');
+    expect(f.host.querySelector('.settings-value')!.textContent).toBe('');
+    expect(f.host.querySelector('[aria-label="常规设置"]')?.getAttribute('aria-busy')).toBe('true');
     phase = 'b';
     await render(selection('b', 'wb', 2));
     expect(f.host.querySelector('.settings-value')!.textContent).toBe('compatible · workspace-b');

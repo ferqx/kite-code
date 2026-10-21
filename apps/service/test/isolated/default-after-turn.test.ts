@@ -294,6 +294,7 @@ async function fixture(
   const parentGate = new Promise<void>((resolve) => {
     releaseParent = resolve;
   });
+  let heldParentModelId: string | undefined;
   let childStarted!: () => void;
   const childStartedGate = new Promise<void>((resolve) => {
     childStarted = resolve;
@@ -528,9 +529,16 @@ async function fixture(
         ) {
           // Hold the parent's next request before it acquires a Model slot.
           // Its original approved source must remain live until the child starts.
-          if (normalParent === 3) await childStartedGate;
-          // A Provider response holds the sole slot and cannot wait for the child.
-          if (singleSlot && normalParent === 4) await parentGate;
+          if (normalParent === 3) {
+            await childStartedGate;
+            if (singleSlot) {
+              // Hold this exact planned request before its slot acquisition and
+              // next checkpoint; the child can finish without losing the report's
+              // accepted state before the fixture observes it.
+              heldParentModelId = execution.id;
+              await parentGate;
+            }
+          }
         }
         return execution;
       };
@@ -652,6 +660,9 @@ async function fixture(
     profile,
     release,
     releaseParent,
+    get heldParentModelId() {
+      return heldParentModelId;
+    },
     get childCalls() {
       return childCalls;
     },
@@ -908,6 +919,15 @@ async function plannedReport(singleSlot: boolean, driftPlan = false, continued =
     expect(carrier.executionId).not.toBe(task.executionId);
     await until(async () => (f.childCalls === 1 ? true : undefined));
     if (singleSlot) {
+      const heldModelId = await until(async () => f.heldParentModelId);
+      const heldModel = (await f.store.getExecution(heldModelId))!;
+      expect(heldModel).toMatchObject({
+        kind: 'model',
+        definitionId: 'parent',
+        originCommandId: 'work',
+        sessionId: 's',
+        status: 'planned',
+      });
       f.release();
       await until(async () =>
         (await f.store.listExecutions('s')).find(
@@ -918,6 +938,7 @@ async function plannedReport(singleSlot: boolean, driftPlan = false, continued =
         (await f.store.getView('s')).runs.find((run) => run.originCommandId === 'work')!.isActive,
       ).toBe(true);
       expect(f.reports).toBe(0);
+      expect((await f.store.getExecution(heldModelId))!.status).toBe('planned');
       const pending = await until(async () => {
         const reports = await f.store.listPendingJobReports({
           expectedStoreId: f.expectedStoreId,

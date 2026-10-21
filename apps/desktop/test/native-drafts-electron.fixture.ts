@@ -2,6 +2,7 @@ import { strict as assert } from 'node:assert';
 import { execFileSync } from 'node:child_process';
 import { join } from 'node:path';
 import { _electron } from 'playwright';
+import { promptText } from './prompt-editor-text.fixture';
 
 async function openSessionTools(page: import('playwright').Page) {
   const toggle = page.getByRole('button', { name: '会话工具', exact: true });
@@ -75,12 +76,12 @@ try {
   await page.getByRole('button', { name: '保留草稿', exact: true }).click();
   await quit(app);
   ({ app, page } = await launch());
-  assert.equal(await page.getByRole('textbox').first().inputValue(), text);
+  assert.equal(await promptText(page.getByRole('textbox').first()), text);
   await page.reload();
   await page.getByRole('button', { name: 'Native A', exact: true }).click();
   await page.locator('.session-header').getByTitle('Native A', { exact: true }).waitFor();
   await openSessionTools(page);
-  assert.equal(await page.getByRole('textbox').first().inputValue(), text);
+  assert.equal(await promptText(page.getByRole('textbox').first()), text);
   assert.equal(await (await fetch(`${control}/count`)).text(), '0');
   const rejected = await page.evaluate(async (storeId) => {
     const bridge = window.kiteNative!;
@@ -100,7 +101,7 @@ try {
   await page.getByRole('button', { name: 'Native A', exact: true }).click();
   await page.locator('.session-header').getByTitle('Native A', { exact: true }).waitFor();
   await openSessionTools(page);
-  assert.equal(await page.getByRole('textbox').first().inputValue(), text);
+  assert.equal(await promptText(page.getByRole('textbox').first()), text);
   // Test-only Inspector instrumentation sends the real POST over Node's actual TCP socket.
   // After Service response headers (the transaction is committed), destroy that socket before
   // supplying JSON bytes. No fake Session/Command receipt or alternative authority is injected.
@@ -144,7 +145,7 @@ try {
     .innerText();
   await quit(app);
   ({ app, page } = await launch());
-  assert.equal(await page.getByRole('textbox').first().inputValue(), text);
+  assert.equal(await promptText(page.getByRole('textbox').first()), text);
   assert.equal(
     await page.getByRole('region', { name: '会话创建意图' }).innerText(),
     originalIntent,
@@ -156,7 +157,7 @@ try {
   await page.getByText(/创建已确认/).waitFor();
   assert.equal(await app.evaluate('globalThis.__creationPosts'), 0);
   assert.equal(await (await fetch(`${control}/count`)).text(), '0');
-  assert.equal(await page.getByRole('textbox').first().inputValue(), text);
+  assert.equal(await promptText(page.getByRole('textbox').first()), text);
   await quit(app);
   const newStore = execFileSync(bunExecutable!, [resetStore!], {
     encoding: 'utf8',
@@ -164,7 +165,7 @@ try {
   }).trim();
   assert.notEqual(newStore, _storeId);
   ({ app, page } = await launch());
-  assert.equal(await page.getByRole('textbox').first().inputValue(), '');
+  assert.equal(await promptText(page.getByRole('textbox').first()), '');
   await page.getByRole('button', { name: '读取已保存草稿', exact: true }).click();
   await page.getByRole('button', { name: '草稿 s · 修订 1', exact: true }).click();
   await page.getByText('原关联不可用，文本已保留，没有绑定当前会话。', { exact: true }).waitFor();
@@ -173,7 +174,7 @@ try {
     text,
   );
   assert.equal(
-    await page.getByRole('textbox', { name: '当前会话私有草稿', exact: true }).inputValue(),
+    await promptText(page.getByRole('textbox', { name: '当前会话私有草稿', exact: true })),
     '',
   );
   assert.equal(await (await fetch(`${control}/count`)).text(), '0');

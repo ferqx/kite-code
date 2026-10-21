@@ -6,6 +6,8 @@ Windows 构建预检和运行清单均要求 Chromium 的 `chrome_100_percent.pa
 
 当前 renderer 沿原桌面的 Vite/React/Tailwind 管线编译复用页面，CSS 与 Geist 字体是候选内的实际文件；Vite 输出保留 Main/preload/helper 的共同目录。新增 UI exports 在 workspace build 中产生实际 desktop/index.js 与 style.css，候选继续逐项核完整递归 manifest。macOS 源码外窗口范围与剩余迁移见[Desktop owner](../README.md#复用原桌面展示层)和[本片进度](../../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-08复用原-pc-桌面展示层)，不替代完整 installed 或三平台资格。
 
+[Native builder](../scripts/build-native.ts)的非development renderer固定使用生产React与JSX转换：`esbuild.jsxDev=false` 和 `process.env.NODE_ENV=production`，不随构建调用进程的 `NODE_ENV=test` 等环境切换。该规则同时适用于普通与显式测试诊断候选，诊断常量仍按独立构建输入封存，开发服务器不改。实际renderer字节的开发栈守卫及本机窗口范围归[Desktop owner](../README.md)和[构建模式决定](../../../.agents/notes/implemented/bug-fix/2026-10-21-native-renderer-production-build.md)；不以定向窗口通过替代完整manifest、安装或三平台门禁。
+
 inner Terminal 的共享 UI 构建内联已声明的普通 JS 依赖，保留原 exports、React/React DOM peer、CSS 与准确许可；其余动态资源与原生资产仍按原解析图复制，边界归[Terminal owner](../../cli/docs/terminal-release.md#制品闭包与身份)和[闭包成本决定](../../../.agents/notes/implemented/bug-fix/2026-10-17-windows-bundle-admission-cost.md)。outer、inner 和每次启动的全部文件验证保持；同一原 pin 只能在本进程复用完整核验，不跨进程授予准入。启动收益须由原正式窗口及完整默认结果核实，旧[图标收束证据](../../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-09普通制品图标依赖收束)只覆盖当时范围。
 
 Windows 显式安装 caller 使用原安装器的受保护复制接口准备未发布 A/B，保全部 verifier 和原 120 秒基本／180 秒维护期限。UIA snapshot 在原进程身份核对后允许“尚无窗口／Document”的空观察，只有期限内实际出现的完整文本才通过；异步输入只写一次并在同一原动作截止前核完整回读。原 45 秒驱动、10 秒动作、多窗口拒绝、自然退出和原 Job 回收保持，理由见[发布夹具决定](../../../.agents/notes/implemented/testing/2026-10-17-windows-release-contracts.md)。隔离 renderer／HWND 诊断只存在于私有诊断制品，普通 dev／prod 不含该入口。
@@ -108,6 +110,8 @@ Native 自带 `bin/kite maintenance` 和登记后的独立 Terminal 前门均先
 ## 真实代码升级与冷回退
 
 [跨代码窗口验收](../../../tests/isolated/unified-agent/native-cross-version.test.ts)补充原同源码版本标记的指针测试。当前固定真实兼容提交 `4a4c0e440b2098e5b4ec58c5831452773b39228f`，由其自己的 Terminal／Native builder 构建。11项锁输入核原字节相同或已审查的完整 raw 配对，Core format 1 的0001／0002两份迁移仍另核原字节和固定 checksum；不把仅同 format major 当成反向读写兼容。原源码前后干净、闭包、实际Agent／候选不同、Mac Main／renderer字节差异、源码删除、归档搬迁和原输出删除守卫保持。原a2b的DB7及旧Core schema不被修改，另供安全拒绝反例；3140／Linux1b796只保历史证据。取舍归[兼容前驱决定](../../../.agents/notes/implemented/testing/2026-10-16-schema-compatible-predecessors.md)。
+
+2026-10-21合并输入继续沿[Terminal精确原始输入守卫](../../cli/docs/terminal-release.md#验证边界)追加登记：仅 `bun.lock`、UI清单和Agent清单三个当前完整SHA更新至当日审查scope，分别记录Lexical完整resolved闭包、编辑器生产依赖和Workflow Worker资产构建。原三个固定前驱、previous字节、context、11项路径与两份SQL／checksum不变，旧源码仍用自己的lock与builder。Lexical实际依赖增加与Agent仅追加构建分别说明，不借本地短测或Terminal通过宣称Native新整链、Windows原生或完整默认资格。
 
 原a2b／837的legacy workspace投影、SHA和路径隔离按[Terminal owner](../../cli/docs/terminal-release.md#验证边界)保留；当前兼容入口不借用 legacy 投影；只接受原字节相同或同一固定前驱 context 下的准确 raw 配对，两 SQL 仍核原字节及固定 checksum。模型配置在所属Profile与user文件保存同值输入和原字节保护，不改变生产来源选择。
 

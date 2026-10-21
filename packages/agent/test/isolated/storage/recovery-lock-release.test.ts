@@ -13,19 +13,31 @@ import { createLedgerExtension } from '../recovery/job-reconcile-fixture';
 
 async function injected(root: string) {
   const original = fileURLToPath(new URL('../../../src/sqlite.ts', import.meta.url));
-  const source = readFileSync(original, 'utf8')
-    .replace(
-      'acquireFileLock, type FileLock,',
-      'acquireFileLock as actualAcquireFileLock, type FileLock,',
-    )
-    .replace(
-      'acquireProfileAccess, acquireSessionLock,',
-      'acquireProfileAccess as actualAcquireProfileAccess, acquireSessionLock as actualAcquireSessionLock,',
-    )
-    .replace(
-      'createOwnedWorker, ownedWorkerAssets',
-      'createOwnedWorker as actualCreateOwnedWorker, ownedWorkerAssets',
-    )
+  const replaceOnce = (source: string, before: string, after: string) => {
+    if (source.split(before).length !== 2) throw Error('fixture_sqlite_import_changed');
+    return source.replace(before, after);
+  };
+  const locksImport = `import {
+  acquireExistingSharedFileLock,
+  acquireFileLock,
+  type FileLock,
+  LockBusyError,
+} from './platform/locks';`;
+  let source = replaceOnce(
+    readFileSync(original, 'utf8'),
+    locksImport,
+    locksImport.replace('  acquireFileLock,', '  acquireFileLock as actualAcquireFileLock,'),
+  );
+  source = replaceOnce(
+    source,
+    'acquireProfileAccess, acquireSessionLock,',
+    'acquireProfileAccess as actualAcquireProfileAccess, acquireSessionLock as actualAcquireSessionLock,',
+  );
+  source = replaceOnce(
+    source,
+    'createOwnedWorker, ownedWorkerAssets',
+    'createOwnedWorker as actualCreateOwnedWorker, ownedWorkerAssets',
+  )
     .replace(
       /from (['"])(\.[^'"]+)\1/g,
       (_match, quote, specifier) => `from ${quote}${resolve(dirname(original), specifier)}${quote}`,

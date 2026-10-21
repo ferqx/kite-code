@@ -55,14 +55,11 @@ npm run desktop:dev
 
 帮助、严格参数拒绝和缺应用资产先于工具探测；准备失败不创建该次应用目录或进入 Profile。缺 C++ 工具或 SDK 返回 `windows_desktop_build_tools_unavailable` 并提示安装，初始化失败返回 `windows_desktop_build_environment_failed`；入口不自动安装系统工具。应用临时目录继续由 Windows 原生权限接口创建，满足 Native 构建器的私有 ACL 校验。此自动准备仅用于 `desktop:dev`，正式 Native 构建仍按其 owner 要求提供明确编译环境。
 
-若 Electron 的 GPU／renderer 在加载页面前以 `-2147483645`（`0x80000003`）退出，先检查实际 Electron `dist` 的 ACL；继承额外受限 SID 的目录可能触发[上游报告的 Windows 沙箱初始化问题](https://github.com/electron/electron/issues/51761)。本机 Electron 44.3.0 已验证：备份原 ACL 后，只向已安装 Electron 的公开 `dist` 目录及其发行文件授予 `ALL RESTRICTED APPLICATION PACKAGES`（`S-1-15-2-2`）读取／执行权限，即可恢复完整沙箱下的硬件渲染和开发窗口。确认同一故障与目录范围后，可在仓库根目录解析当前安装路径并修复：
+Windows 的 `desktop:dev` 在构建／创建应用目录前执行 [Electron 权限预检](../../scripts/development/windows-electron-permissions.ts)：解析当前安装包和实际 `electron.exe`，核对 `dist/version` 与包版本，逐项检查公开运行资源的 ACL。缺少 `ALL RESTRICTED APPLICATION PACKAGES`（`S-1-15-2-2`）读取／执行权限时，自动向该物理 `dist` 及其现有文件／子目录补齐非继承 RX，并输出修复项数；已具备权限时保持只读。重新安装或切换 Electron 版本后，下次启动自动检查新目录，无须重做手动授权。此项处理[上游报告的 Windows 沙箱初始化问题](https://github.com/electron/electron/issues/51761)，其典型表现为 GPU／renderer 在页面前以 `-2147483645`（`0x80000003`）退出。
 
-```powershell
-$electronDist = Split-Path -Path (& node -p "require('./apps/desktop/node_modules/electron')")
-icacls.exe $electronDist /grant '*S-1-15-2-2:(OI)(CI)(RX)' /T
-```
+预检固定目录与文件句柄，在任何 ACL 写入前拒绝目录联接、符号链接、硬链接及该 SID 的显式拒绝。仅追加缺少的 RX，不重置原 ACL、所有者或继承设置；包目录、项目源码、开发应用目录、Profile、数据库和正式候选的权限不变。该读取权限也允许其他受限应用包读取这份公开 Electron 发行资源，不授予写入权限。浏览器沙箱、上下文隔离和原生数据私有校验保持启用；非 Windows 平台跳过 ACL 准备。
 
-该权限让其他受限应用包也能读取这些公开运行资源，不授予写入权限。范围只包含这份 npm Electron 发行目录；开发应用目录、Profile、数据库和正式候选仍按原私有 ACL 契约校验，不应扩大授权或关闭浏览器沙箱。重新安装或切换 Electron 版本后，按实际新目录重新核对。
+范围异常返回 `development_electron_runtime_scope_invalid`，显式拒绝返回 `development_electron_permissions_denied`，无权修复或检查失败返回 `development_electron_permissions_failed`；入口停止启动，不自动提权、不覆盖拒绝规则。请确认 Electron 是当前依赖安装生成的独立物理目录及本用户有修改其 ACL 的权限，再重装依赖或修复安装策略后重试。帮助、无效参数和缺 built Service 仍先于这一步返回。
 
 `tui:dev`、`desktop:dev` 与正式客户端强制使用普通用户界面，测试专用调试功能不得在 dev／prod 出现。TUI 公开参数拒绝 `--test-ui-diagnostics`；自动化只能从测试目录的入口向可信 host 显式传 `testDiagnostics:true`。Desktop 开发和普通正式 renderer 的构建常量固定为 false，传入组件参数也不能开启；DOM fixture 或单独测试制品可以显式启用。共享 UI 不以 `NODE_ENV` 等环境名自动开启诊断。测试诊断只影响展示，原权限、scope、未知结果和制品校验不变。
 

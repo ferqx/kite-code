@@ -13,13 +13,22 @@ interface Locator {
 }
 interface Page {
   setDefaultTimeout(value: number): void;
-  waitForFunction<T>(
-    fn: (argument: T) => boolean | Promise<boolean>,
-    argument: T,
-  ): Promise<unknown>;
   getByRole(role: string, options: { name: string; exact?: boolean }): Locator;
   getByText(text: string, options: { exact: boolean }): Locator;
   evaluate<T>(fn: () => Promise<T>): Promise<T>;
+}
+// Poll the asynchronous IPC in the host: Playwright waitForFunction treats a
+// returned Promise as truthy before it resolves. Keep the original 10s boundary.
+async function selectedState(page: Page, matches: (state: NativeState) => boolean) {
+  const deadline = Date.now() + 10000;
+  for (;;) {
+    const state = (await page.evaluate(
+      async () => await window.kiteNative!.request({ method: 'state', generation: 1 }),
+    )) as NativeState;
+    if (matches(state)) return state;
+    if (Date.now() >= deadline) throw Error('native_original_selection_timeout');
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
 }
 interface ElectronApp {
   process(): import('node:child_process').ChildProcess;
@@ -148,19 +157,12 @@ try {
     .getByRole('navigation', { name: '当前项目会话', exact: true })
     .getByRole('button', { name: 'Native installed', exact: true })
     .click();
-  await page.waitForFunction(async (storeId) => {
-    const state = (await window.kiteNative!.request({
-      method: 'state',
-      generation: 1,
-    })) as NativeState;
-    return (
-      state.selection?.storeId === storeId &&
-      state.selection.session.id === 's' &&
-      !state.selection.viewLoading
-    );
-  }, storeId);
-  const state = await page.evaluate(
-    async () => await window.kiteNative!.request({ method: 'state', generation: 1 }),
+  const state = await selectedState(
+    page,
+    (current) =>
+      current.selection?.storeId === storeId &&
+      current.selection.session.id === 's' &&
+      !current.selection.viewLoading,
   );
   assert.equal((state as NativeState).selection?.storeId, storeId);
   const processColumn = process.platform === 'linux' ? 'args=' : 'comm=';

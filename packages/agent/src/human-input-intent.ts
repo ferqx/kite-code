@@ -229,9 +229,23 @@ export function directHumanInputProposal(input: {
   selectedWork: HumanWorkIdentity | null;
   candidates: readonly HumanWorkCandidate[];
   hasPendingClarifications?: boolean;
+  hasAttachments?: boolean;
 }): HumanInputProposal | null {
   const instruction = currentHumanInstruction(input.content);
   const basis = { kind: 'explicit_text' as const, instruction: input.content };
+  if (
+    !input.content.trim() &&
+    input.hasAttachments &&
+    !input.selectedWork &&
+    !input.hasPendingClarifications
+  )
+    return {
+      relation: 'independent_work',
+      purpose: 'work',
+      targetRootWorkCommandId: null,
+      selectionEffect: 'select_work',
+      basis,
+    };
   if (
     !instruction ||
     ambiguousInstruction.test(instruction) ||
@@ -321,6 +335,7 @@ export function validateHumanInputProposal(
   content: string,
   candidates: readonly HumanWorkCandidate[],
   selectedWork: HumanWorkIdentity | null = null,
+  hasAttachments = false,
 ): HumanInputProposal {
   const instruction = currentHumanInstruction(content);
   const unresolved = (): HumanInputProposal => ({
@@ -331,7 +346,7 @@ export function validateHumanInputProposal(
     basis: { kind: 'model_proposal', instruction: content },
   });
   if (
-    !instruction ||
+    (!instruction && !(hasAttachments && !content.trim() && proposal.purpose === 'work')) ||
     ambiguousInstruction.test(instruction) ||
     ambiguousControlInquiry(instruction, candidates) ||
     proposal.basis.instruction !== content

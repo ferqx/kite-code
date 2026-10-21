@@ -216,7 +216,7 @@ export function ModelInputs({
     }
   }
   return (
-    <section className="model-inputs" aria-label="Model calls">
+    <section className="model-inputs" aria-label="Model calls" aria-busy={loading || undefined}>
       <button type="button" disabled={!enabled || suspended} onClick={() => void directory()}>
         Model calls
       </button>
@@ -236,7 +236,6 @@ export function ModelInputs({
           >
             Close Model inspector
           </button>
-          {loading && <p role="status">Reading complete original snapshot</p>}
           {error && <p role="alert">Original input unavailable · {error}</p>}
           {calls?.map((call) => (
             <button

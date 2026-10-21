@@ -710,7 +710,9 @@ for (const close of ['review', 'panel', 'other panel', 'refresh'] as const) {
       await act(async () =>
         button(panelHost, `Remove exact workspace source ${source.id}`).click(),
       );
-      expect(panelHost.querySelector('[aria-label="MCP removal preview loading"]')).not.toBeNull();
+      expect(
+        panelHost.querySelector('[aria-label="Confirm exact MCP operation"][aria-busy="true"]'),
+      ).not.toBeNull();
       if (close === 'review')
         await act(async () => button(panelHost, 'Close operation review').click());
       else if (close === 'panel') await act(async () => button(panelHost, '关闭').click());
@@ -718,7 +720,9 @@ for (const close of ['review', 'panel', 'other panel', 'refresh'] as const) {
         await act(async () => button(host, '管理连接 server').click());
       else await act(async () => button(host, 'Refresh MCP settings').click());
       await act(async () => pending.resolve(removalPreview));
-      expect(panelHost.querySelector('[aria-label="MCP removal preview loading"]')).toBeNull();
+      expect(
+        panelHost.querySelector('[aria-label="Confirm exact MCP operation"][aria-busy="true"]'),
+      ).toBeNull();
       expect(panelHost.querySelector('[aria-label="Exact source removal preview"]')).toBeNull();
       expect(button(panelHost, 'Confirm exact MCP operation')).toBeUndefined();
       if (close === 'panel' || close === 'refresh') expect(panelHost.childElementCount).toBe(0);
@@ -921,7 +925,10 @@ for (const changed of ['generation', 'bridge'] as const) {
       await act(async () =>
         oldRead.resolve({ ...facts, servers: [{ ...facts.servers[0]!, id: 'obsolete-server' }] }),
       );
-      expect(host.textContent).toContain('正在读取 MCP 配置');
+      expect(host.textContent).not.toContain('正在读取');
+      expect(host.querySelector('[aria-label="MCP settings"]')?.getAttribute('aria-busy')).toBe(
+        'true',
+      );
       expect(button(host, 'Refresh MCP settings').disabled).toBe(true);
       expect(host.textContent).not.toContain('obsolete-server');
       await act(async () => newRead.resolve({ ...facts, observationId: 2 }));
@@ -1003,12 +1010,14 @@ test('A failed tool read stops loading and a closed late read cannot change the 
     expect(panelHost.textContent).toContain('暂未取得工具快照');
     await act(async () => button(panelHost, 'Close tool reader').click());
     await act(async () => button(host, 'Open tools record').click());
-    expect(panelHost.textContent).toContain('正在读取工具快照');
+    expect(panelHost.textContent).not.toContain('正在读取');
+    expect(panelHost.querySelector('[aria-busy="true"]')).not.toBeNull();
     await act(async () => button(panelHost, '关闭').click());
     expect(panelHost.childElementCount).toBe(0);
     await act(async () => button(host, 'Open tools record').click());
     await act(async () => oldRead.resolve(page(10)));
-    expect(panelHost.textContent).toContain('正在读取工具快照');
+    expect(panelHost.textContent).not.toContain('正在读取');
+    expect(panelHost.querySelector('[aria-busy="true"]')).not.toBeNull();
     expect(panelHost.textContent).not.toContain('Tool page index 10');
     await act(async () => newRead.resolve(page(20)));
     expect(panelHost.textContent).not.toContain('正在读取工具快照');
@@ -1046,14 +1055,18 @@ test('Cancelling a loading removal review restores its trigger and rejects the l
       remove.focus();
       remove.click();
     });
-    expect(panelHost.querySelector('[aria-label="MCP removal preview loading"]')).not.toBeNull();
+    expect(
+      panelHost.querySelector('[aria-label="Confirm exact MCP operation"][aria-busy="true"]'),
+    ).not.toBeNull();
     await act(async () => {
       const close = button(panelHost, 'Close operation review');
       close.focus();
       close.click();
     });
     expect(host.ownerDocument.activeElement === remove).toBe(true);
-    expect(panelHost.querySelector('[aria-label="MCP removal preview loading"]')).toBeNull();
+    expect(
+      panelHost.querySelector('[aria-label="Confirm exact MCP operation"][aria-busy="true"]'),
+    ).toBeNull();
     await act(async () => pending.resolve(removalPreview));
     expect(button(panelHost, 'Confirm exact MCP operation')).toBeUndefined();
     expect(host.ownerDocument.activeElement === remove).toBe(true);

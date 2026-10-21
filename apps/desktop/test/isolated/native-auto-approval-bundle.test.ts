@@ -15,6 +15,8 @@ import { buildNativeCandidate } from '../../scripts/build-native';
 
 const require = createRequire(import.meta.url);
 const cases = ['approved', 'rejected', 'manual', 'unavailable', 'stopped'] as const;
+const originalTask = (id: string) =>
+  `NATIVE_AUTO_${id.toUpperCase()} original task`.replaceAll('_', '\\_');
 
 test.skipIf(process.platform !== 'darwin')(
   'original current-Session controls drive actual Auto decisions, fallback and precise stop, with source-free cold history and no replay',
@@ -135,9 +137,7 @@ test.skipIf(process.platform !== 'darwin')(
             expect(original.target.definitionId).toBe('files.write');
             expect(original.target.definitionVersion).toBe('2');
             expect(original.target.input.path).toBe(`auto-${id}.txt`);
-            expect(original.originCommandRequest.content).toBe(
-              `NATIVE_AUTO_${id.toUpperCase()} original task`,
-            );
+            expect(original.originCommandRequest.content).toBe(originalTask(id));
             reviews.push(original);
             await new Promise<void>((release) => held.set(id, release));
             delta = {
@@ -155,8 +155,11 @@ test.skipIf(process.platform !== 'darwin')(
                     }),
             };
           } else {
-            const serialized = JSON.stringify(body.messages);
-            const id = cases.find((id) => serialized.includes(`NATIVE_AUTO_${id.toUpperCase()}`));
+            const id = cases.find((id) =>
+              body.messages.some(
+                (message) => message.role === 'user' && message.content === originalTask(id),
+              ),
+            );
             expect(id).toBeDefined();
             expect(body.tools?.map((tool) => tool.function.name).sort()).toEqual([
               'ask_user',

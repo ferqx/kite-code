@@ -79,14 +79,12 @@ test.skipIf(process.platform !== 'darwin')(
             (row) =>
               row.role === 'user' &&
               typeof row.content === 'string' &&
-              /^(STREAM_PARENT|CHILD_[AB])$/.test(row.content),
+              ['STREAM\\_PARENT', 'CHILD_A', 'CHILD_B'].includes(row.content),
           );
-        const marker = String(message?.content);
-        const child = marker.includes('CHILD_A')
-          ? 'CHILD_A'
-          : marker.includes('CHILD_B')
-            ? 'CHILD_B'
-            : undefined;
+        expect(message).toBeDefined(); // Complete original parent or child task, never a marker substring.
+        const marker = String(message!.content);
+        const child =
+          marker === 'CHILD_A' ? 'CHILD_A' : marker === 'CHILD_B' ? 'CHILD_B' : undefined;
         calls.push(child ?? 'PARENT');
         if (child)
           return new Response(
@@ -195,6 +193,9 @@ test.skipIf(process.platform !== 'darwin')(
         },
         outdir,
       );
+      const rendererBytes = readFileSync(join(outdir, 'renderer.js'), 'utf8');
+      expect(rendererBytes).not.toContain('runWithFiberInDEV');
+      expect(rendererBytes).not.toContain('react.dev/link/wrap-tests-with-act');
       const source = join(root, 'driver.ts'),
         driverPath = join(root, 'driver.js');
       writeFileSync(

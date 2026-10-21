@@ -317,6 +317,7 @@ async function mainFixture(barrier: Barrier, holdServiceClose = false, holdMenu 
       'serveDevelopmentReload',
     ]),
     './native-caller': exports(['NativeCaller']),
+    './native-browser': `${prefix}export const registerNativeBrowserIpc = () => f.register;`,
     './private-data': exports(['openPrivateData']),
     './profile-access': exports(['acquireDesktopProfileAccess']),
     './protected-path': exports(['canonicalProtectedPath']),

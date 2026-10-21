@@ -133,8 +133,13 @@ test('Native Main automatic change refresh re-reads the visible later page rathe
   let trigger!: () => void,
     revision = '0',
     tailReads = 0;
+  let releaseRefresh!: () => void;
+  const heldRefresh = new Promise<void>((resolve) => {
+    releaseRefresh = resolve;
+  });
   const f = fixture(async () => {
     tailReads++;
+    if (tailReads === 2) await heldRefresh;
     return { interactions: [{ ...card('b'), revision }], nextAfterId: null };
   });
   f.client.connect = async () => f.client.serverInfo!;
@@ -146,7 +151,8 @@ test('Native Main automatic change refresh re-reads the visible later page rathe
       options.signal!.addEventListener('abort', () => resolve(), { once: true }),
     );
   };
-  const caller = new NativeCaller(f.client, () => {});
+  let onPublished: (() => void) | undefined;
+  const caller = new NativeCaller(f.client, () => onPublished?.());
   try {
     await caller.invoke({ method: 'attach' });
     const first = (await caller.invoke({
@@ -161,7 +167,22 @@ test('Native Main automatic change refresh re-reads the visible later page rathe
       afterId: 'a',
     });
     revision = '1';
+    const published = new Promise<void>((resolve) => {
+      onPublished = () => {
+        const current = caller.state().selection;
+        if (current?.interactions[0]?.revision === revision && !current.permissionUnavailable)
+          resolve();
+      };
+    });
     trigger();
+    // State remains readable while the exact later page refresh is in flight.
+    // Only its publication notification proves that the new revision is available.
+    const pending = (await caller.invoke({ method: 'state', generation: 1 })) as NativeState;
+    expect(pending.selection!.interactions.map((card) => card.id)).toEqual(['b']);
+    expect(pending.selection!.interactions[0]!.revision).toBe('0');
+    expect(pending.selection!.permissionUnavailable).toBe(true);
+    releaseRefresh();
+    await published;
     const refreshed = (await caller.invoke({ method: 'state', generation: 1 })) as NativeState;
     expect(refreshed.selection!.interactions.map((card) => card.id)).toEqual(['b']);
     expect(refreshed.selection!.interactions[0]!.revision).toBe('1');
@@ -169,6 +190,7 @@ test('Native Main automatic change refresh re-reads the visible later page rathe
     expect(f.posts()).toBe(0);
     expect(f.cancels()).toBe(0);
   } finally {
+    releaseRefresh();
     await caller.close();
   }
 });

@@ -256,6 +256,10 @@ test.skipIf(process.platform !== 'darwin')(
       );
       privateDirectory(join(home, 'old-user-data'));
       writeFileSync(join(home, 'old-user-data/old-database'), 'must remain independent');
+      writeFileSync(
+        join(root, 'prompt-editor-text.fixture.ts'),
+        readFileSync(resolve(import.meta.dir, '../prompt-editor-text.fixture.ts')),
+      );
       const fixture = join(root, 'driver.ts');
       writeFileSync(
         fixture,

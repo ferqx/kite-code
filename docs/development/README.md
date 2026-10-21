@@ -41,6 +41,8 @@
 
 ## 文档与验证维护
 
+[Windows 工作树清理](worktree-safety.md)说明依赖联接风险、只读检查及归档前后文件保全。
+
 [文档同步](documentation.md) · [有效计划](../plans/README.md) · [Agent Notes](../../.agents/notes/README.md) · [测试体系](../../tests/README.md)。
 
 局部任务沿实际 producer/consumer 扩读；影响映射提供核对候选，不要求整批文档产生 diff。阶段交付按[文档同步 Skill](../../.agents/skills/document-before-commit/SKILL.md)核对实际变化、产品与技术文档、必要验证和剩余范围。

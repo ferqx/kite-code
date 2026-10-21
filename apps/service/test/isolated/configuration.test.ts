@@ -1,5 +1,13 @@
 import { expect, test } from 'bun:test';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -100,7 +108,7 @@ function fakeEndpoint(gated = false, emitToolCall = false) {
   };
 }
 function fixture() {
-  const root = mkdtempSync(join(tmpdir(), 'kite-default-config-'));
+  const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-default-config-')));
   const workspace = join(root, 'workspace');
   mkdirSync(workspace);
   const profile = selectProfile({ dataRoot: join(root, 'data'), profile: 'test' });
@@ -123,6 +131,9 @@ test('ordinary host defaults select only available Shell and Task capabilities a
   expect(defaultConfiguration.tools).toEqual([{ id: 'ask_user' }]);
   const unavailable = ordinaryHostConfigurationDefaults(false, false).tools.map((tool) => tool.id);
   expect(unavailable).toContain('files.read');
+  expect(unavailable).toContain('files.read_path');
+  expect(unavailable).not.toContain('files.write_path');
+  expect(unavailable).not.toContain('files.edit_path');
   expect(unavailable.some((id) => id.startsWith('shell.'))).toBe(false);
   expect(unavailable.some((id) => id.startsWith('task.'))).toBe(false);
   const available = ordinaryHostConfigurationDefaults(true, true).tools.map((tool) => tool.id);
@@ -312,11 +323,12 @@ test('ordinary paired host exposes public file schemas, edits with an exact base
     const names = (requests[0]!.tools as { function: { name: string } }[]).map(
       (tool) => tool.function.name,
     );
-    expect(names).toHaveLength(14);
+    expect(names).toHaveLength(15);
     expect(names).toEqual(
       expect.arrayContaining([
         'ask_user',
         'web_fetch',
+        'read_user_file',
         'spawn_agent',
         'send_agent_message',
         'follow_up_agent',
@@ -326,7 +338,7 @@ test('ordinary paired host exposes public file schemas, edits with an exact base
       ]),
     );
     expect(names.every((name) => /^[a-zA-Z0-9_-]{1,64}$/.test(name))).toBe(true);
-    expect(new Set(names).size).toBe(14);
+    expect(new Set(names).size).toBe(15);
     expect(JSON.stringify(requests[1]!.messages)).toContain(marker);
     expect(
       (
@@ -344,6 +356,7 @@ test('ordinary paired host exposes public file schemas, edits with an exact base
         ...config,
         tools: [
           { id: 'files.read', enabled: false },
+          { id: 'files.read_path', enabled: false },
           { id: 'web_fetch', remove: true },
           { id: 'task.spawn', enabled: false },
           { id: 'task.message', remove: true },
@@ -371,6 +384,104 @@ test('ordinary paired host exposes public file schemas, edits with an exact base
       ]),
     );
     expect(nextTools.some((tool) => tool.function.parameters.properties.text)).toBe(true);
+  } finally {
+    await reader?.close();
+    await child?.handle.close();
+    provider.stop(true);
+    f.close();
+  }
+}, 15000);
+test('ordinary paired host reads an external user-file reference through the exact read-only path tool without external project instructions', async () => {
+  const f = fixture();
+  const path = join(f.root, '外部 附件 [一].ini');
+  const marker = 'EXTERNAL_ATTACHMENT_READ_VERIFIED';
+  writeFileSync(path, `[fixture]\r\nmarker=${marker}\r\n`);
+  writeFileSync(join(f.root, 'AGENTS.md'), 'OUTSIDE_PROJECT_INSTRUCTIONS_MUST_NOT_BE_CAPTURED');
+  const requests: Record<string, unknown>[] = [];
+  const chunk = (delta: unknown, reason: string | null) =>
+    `data: ${JSON.stringify({ id: 'external-read', object: 'chat.completion.chunk', model: 'local', choices: [{ index: 0, delta, finish_reason: reason }] })}\n\n`;
+  const provider = Bun.serve({
+    hostname: '127.0.0.1',
+    port: 0,
+    async fetch(request) {
+      const body = (await request.json()) as Record<string, unknown>;
+      if (Array.isArray(body.tools)) requests.push(body);
+      const call = Array.isArray(body.tools) && requests.length === 1;
+      return new Response(
+        chunk(
+          call
+            ? {
+                tool_calls: [
+                  {
+                    index: 0,
+                    id: 'external',
+                    type: 'function',
+                    function: { name: 'read_user_file', arguments: JSON.stringify({ path }) },
+                  },
+                ],
+              }
+            : { content: 'External read finished' },
+          null,
+        ) +
+          chunk({}, call ? 'tool_calls' : 'stop') +
+          'data: [DONE]\n\n',
+        { headers: { 'content-type': 'text/event-stream' } },
+      );
+    },
+  });
+  let child: Awaited<ReturnType<typeof launch>> | undefined;
+  let reader: Awaited<ReturnType<typeof openSqliteStore>> | undefined;
+  try {
+    writeFileSync(
+      f.file,
+      JSON.stringify({ modelId: 'local', models: [model('local', provider.url.href)] }),
+    );
+    child = await launch(f);
+    const client = child.handle.client,
+      storeId = child.storeId;
+    const trust = await client.getWorkspaceTrust('workspace', { storeId });
+    await client.setWorkspaceTrust('workspace', {
+      expectedStoreId: storeId,
+      commandId: 'trust-external',
+      canonicalIdentity: trust.canonicalIdentity,
+      externalReadScopeDigest: trust.externalReadScopeDigest,
+      trusted: true,
+      ifRevision: trust.revision,
+    });
+    await child.run('read-external');
+    const view = await child.finished('read-external');
+    expect(view.runs.find((run) => run.originCommandId === 'read-external')?.status).toBe(
+      'completed',
+    );
+    expect(requests).toHaveLength(2);
+    const names = (requests[0]!.tools as { function: { name: string } }[]).map(
+      (tool) => tool.function.name,
+    );
+    expect(names).toContain('read_user_file');
+    expect(names).not.toContain('write_user_file');
+    expect(names).not.toContain('edit_user_file');
+    expect(JSON.stringify(requests[1]!.messages)).toContain(marker);
+    expect(JSON.stringify(requests)).not.toContain(
+      'OUTSIDE_PROJECT_INSTRUCTIONS_MUST_NOT_BE_CAPTURED',
+    );
+    expect(JSON.stringify(requests)).not.toContain('context_source_unavailable');
+    reader = await openSqliteStore({
+      dataRoot: f.profile.dataRoot,
+      profile: f.profile.profile,
+      mode: 'readonly',
+    });
+    const executions = await reader.listExecutions('session');
+    const read = executions.find((row) => row.definitionId === 'files.read_path')!;
+    expect(read.status).toBe('succeeded');
+    expect(read.input).toEqual({ path });
+    expect(read.result).toMatchObject({ outcome: 'succeeded' });
+    expect(JSON.parse(String((read.result as { content: string }).content))).toMatchObject({
+      path,
+      content: `[fixture]\r\nmarker=${marker}\r\n`,
+    });
+    expect(
+      (await client.listInteractions('session', { storeId, state: 'pending' })).interactions,
+    ).toHaveLength(0);
   } finally {
     await reader?.close();
     await child?.handle.close();

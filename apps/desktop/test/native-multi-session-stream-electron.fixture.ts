@@ -840,7 +840,7 @@ try {
         started = Date.now();
       await select(index);
       assert.equal(
-        await page.getByRole('textbox', { name: '当前会话私有草稿', exact: true }).inputValue(),
+        await page.getByRole('textbox', { name: '当前会话私有草稿', exact: true }).innerText(),
         `PRIVATE_DRAFT_ROOT_${index}`,
         'per-root private draft survives other live views',
       );

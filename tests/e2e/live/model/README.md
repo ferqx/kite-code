@@ -176,6 +176,29 @@ R08和R12在显式证据根中保存 `canonical-model-evidence.json`，逐项由
 
 公网 `test:mcp:live` 仍使用固定模型，只证明实际远端 MCP 链路。本目录旧 background、compaction 与旧 MCP 文件保留历史范围，不是当前 V1.1 或全平台验收入口。
 
+## 问答界面与越界读取
+
+[问答 runner](questionnaire.live.ts)使用同一用户默认模型与凭据，在独立临时 Workspace 中装配实际 Runtime、Workspace sources、Files 和 `ask_user`，并在 headless Chrome 中操作当前共享 SessionPage／InteractionCard：
+
+```powershell
+$env:KITE_RUN_LIVE_QUESTIONNAIRE='1'
+bun tests/e2e/live/model/questionnaire.live.ts --output=D:/owned-directory/questionnaire.json
+```
+
+未显式开启时，在读取配置与访问网络前拒绝。测试自行构建当前组件、Native CSS 和字体；Windows 默认使用本机 Chrome，其他安装位置可显式设置 `KITE_TEST_CHROME`。报告路径可省略，提供时必须为尚不存在的绝对路径，并在同位置附一张合成问卷截图。隔离 [浏览器入口](questionnaire-browser.fixture.tsx)不进入 dev/prod。
+
+最多 10 次 Provider 请求、总限时 180 秒、单次 60 秒，输出上限 4096，其余 preset 保持；Provider 失败直接失败，不降级或自动重试。验证未回答翻页零提交、选择值与完整自由原文、单次提交、取消后同 Run 继续，以及越界读取失败进入下一真实 Model 并正常结束，外部说明／正文不得进入模型。报告只保留模型／协议、用量、状态与计数，不保存凭据或请求／响应正文。2026-10-18 Windows／Bun1.4.3 使用 deepseek-v4-flash、chat-completions 实测三项通过，每项两次 HTTP 200。该证据覆盖真实模型、Runtime 与共享浏览器界面；Native Main／IPC、OS 窗口和完整权限模式仍由各自原测试证明。
+
+## Windows 原生附件路径实测
+
+2026-10-19，Windows x64／Bun1.4.3／Electron44.3.0，在单独构建的普通 Native 开发窗口、独立 Profile 和合成 Workspace 中，通过真实 Windows 文件选择器操作 `+ → 选择文件 → 发送`。使用现有用户配置的 `deepseek`／`deepseek-v4-flash`／`chat-completions`，自动审核模式；配置与凭据只读，不发送仓库正文或用户文件。此项由 `computer-use` 驱动系统窗口，不是上述浏览器 runner 的通过记录，也未给 dev/prod 添加测试开关。
+
+工作区内含中文、空格、方括号的 ini 实际读取成功，模型最终回复文件中的准确合成标记。工作区外文件的实际 `files.read` 返回 `file_path_invalid`，同一 Run 后续模型解释拒绝并正常结束；两场景各两次成功的主模型执行、一次 Files，Run 均为 `completed`，没有 `context_source_unavailable`。只读 Store 与完整 Artifact 输入快照另核真实 `file:` 引用受理、工具结果进入下一模型、外部说明及文件正文未进入输入；脱敏报告只保存模型／协议、终态、工具错误与计数，未保存凭据、请求或响应正文。现有[越界回归](../../../../apps/service/test/isolated/assembly-file-denial.test.ts)以 `bun test apps/service/test/isolated/assembly-file-denial.test.ts` 运行，1项／13断言通过。
+
+前述外部场景明确要求调用 `read_file`，只验证工作区工具误用时不终止整轮，不能作为“选中的外部附件可用”的验收。随后修复普通宿主默认缺选 `files.read_path`，同日同环境使用全新独立 Profile，通过原生 `+` 选择工作区外 ini，以普通提问要求根据实际内容说明。模型自行选用 `read_user_file`，准确目标读取成功，最终字段值与文件一致；原 Run `completed`、两次成功 Model、一次成功 `files.read_path`，完整输入核实实际正文进入下一轮、未选中外部项目说明未进入模型，无 `context_source_unavailable`。外部写入／编辑未随默认读取开启；报告只保存脱敏结果与计数。普通默认／显式禁用及真实原生读取由[Service 回归](../../../../apps/service/test/isolated/configuration.test.ts)另证。
+
+这是路径附件的本机原生流程证据；选择文件不改变现有执行权限和受保护文件规则。直接图片协议、PDF 正文解析、其他模型及正式 installed／其他平台仍需分别验证。当前产品与实现归 [Desktop owner](../../../../apps/desktop/README.md#markdown-与附件输入)。
+
 ## 历史模型套件
 
 以下 compaction 与 background 文件仍依赖旧运行时，根脚本中的旧 aliases 已退出，不能用于验证当前实现。保留原命令和记录供对应历史版本追溯。原 context compaction 命令为：
@@ -231,6 +254,7 @@ Runner 在权限为 `0700` 的临时根目录内创建隔离的 Kite 配置和 W
 
 2026-10-19（UTC）本轮已实际运行当前工具 smoke 和协作 CLI 的23个变体，使用配置默认的 `deepseek-v4-flash / chat-completions`，不是固定 Provider。逐变体结果、六处 Runtime/Store 修复、进度历史状态误报及夹具修正统一归[本轮执行记录](collaboration-v1.1-cases.md#2026-10-19utc真实执行结果)。I03 保留原 `inconclusive/semantic_review` 报告，独立语义结论另存；该矩阵列出的69个主用例、普通客户端窗口、其他平台和尚未运行的精确交错没有整体取得真实模型资格。早期 failed/inconclusive 与修复后 passed 同时保留。最终相同工作树摘要的23个CLI变体已完成整组复验：22项机械判定通过，I03由机械安全加独立语义复核通过；两项工具smoke也通过，共164次实际HTTP。准确模型、摘要、原始状态及未覆盖边界见上述记录；真实模型整组后的Shell错误快照、损坏report证明及测试等待修正另列代码摘要；最终第七轮默认945文件／748job（含7 exclusive）完整通过、代码输入零漂移，不冒称同一新版本的付费重跑。
 
+- 2026-10-19，Windows x64、Bun 1.4.3、Electron 44.3.0，本任务工作树；真实用户配置的 `deepseek`／`deepseek-v4-flash`／Chat Completions，正常公网网络。通过自有隔离 Profile、合成 Workspace 和普通 Native 开发窗口，经 `+` 两个原生选择器分别选外部 INI 与直接 PNG，再发送；两次 Model 和一次 `files.read_path` 成功，Run `completed`。读取准确 INI 字段、识别图片文字和两个红色方块；封存 Model 输入核原图 Base64 字节、后继实际文件内容、消息正文未改写且文件／图片元数据独立；未选的外部说明未进入输入，无 `context_source_unavailable`。启动／复核命令为 `bun .cache/attachment-cards-e68af6a7-8e05-4353-b253-1f7df0e2151c/native-live.ts` 和同目录 `verify.ts`；这是本次合成数据的临时夹具，原始 Store／配置不作为发布证据，保留脱敏 `report.json`。复现需重新建立独立夹具并明确真实模型授权，不从用户真实目录读取内容。结果限该模型／协议／平台，不覆盖 PDF 正文解析、其他提供商或 Responses 真实端点；实现与确定性回归入口见 [Native owner](../../../../apps/desktop/README.md#markdown-与附件输入)。
 
 - 2026-10-18，macOS arm64、Bun 1.4.2、HEAD `bcf70ce84` 上的工具表面工作树；使用现有默认 provider `deepseek`、model `deepseek-v4-flash`、`chat-completions`，配置的 `reasoningEffort:medium` 保持，测试输出上限为4096。直接网络实际11次HTTP均200；`files`（6次请求）和 `agents`（5次，包含真实child）通过，共11次工具调用、10份parent热/冷完整公开快照。准确终态、子结果 `323`、任务目标和磁盘效果均独立断言。命令为 `KITE_RUN_LIVE_MODEL_TOOLS=1 bun run test:model:tools:live --output=<自有绝对路径>`；最终runner耗时11.916秒，Provider实报输入34921/output1524 token。此前调试首次因测试使用字符串比较对象键顺序误报快照差异，修正后完整两场景通过；本轮三次runner实际合计29次请求，无换模型/协议或自动重试。只保留脱敏报告，不保留请求或响应正文。此证据不覆盖Native/Windows/Linux、其他模型、真实MCP远端或完整Service客户端。
 - 2026-07-22，provider `deepseek`，model `deepseek-v4-flash`，正常网络条件。

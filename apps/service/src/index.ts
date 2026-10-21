@@ -267,6 +267,7 @@ export async function startService(options: ServiceOptions) {
   if (options.runtime && typeof options.runtime.recoverSession === 'function')
     capabilities.push('session_recovery');
   if (options.runtime?.supportsSelectedSkills) capabilities.push('run_skill_selection');
+  if (options.runtime?.supportsInputImages) capabilities.push('input_images');
   if (options.runtime?.supportsExtensionInputs) capabilities.push('run_extension_inputs');
   if (options.diagnosticSource) capabilities.push('host_status');
   if (options.skillCatalogue) capabilities.push('skill_catalogue');
@@ -424,6 +425,8 @@ export async function startService(options: ServiceOptions) {
                     'interaction_filter_invalid',
                     'invalid_revision',
                     'invalid_input_request',
+                    'input_image_invalid',
+                    'input_image_scope_mismatch',
                     'invalid_input_cursor',
                     'invalid_context_cursor',
                     'invalid_model_input_cursor',
@@ -857,6 +860,19 @@ export async function startService(options: ServiceOptions) {
       subjectId,
     });
     return context.json(schemas.Command.parse(receipt), 202);
+  });
+  app.post('/v1/sessions/:id/input-images', async (context) => {
+    const input = await readBusinessBody(
+      context.req.raw,
+      schemas.InputImageUploadRequest,
+      Math.min(options.maxBodyBytes ?? 24 * 1024 * 1024, 24 * 1024 * 1024),
+    );
+    const image = await runtime.uploadInputImage({
+      ...input,
+      sessionId: context.req.param('id'),
+      subjectId,
+    });
+    return context.json(schemas.InputImage.parse(image), 201);
   });
   app.get('/v1/sessions/:id/artifacts/:refId', async (context) => {
     const query = context.req.queries();
@@ -1636,6 +1652,8 @@ export async function startService(options: ServiceOptions) {
             kind: request.kind,
             content: request.content,
             targetRunId: request.targetRunId,
+            ...(request.images === undefined ? {} : { images: request.images }),
+            ...(request.files === undefined ? {} : { files: request.files }),
             contextSelectionId: request.contextSelectionId,
           },
         });
@@ -1647,6 +1665,8 @@ export async function startService(options: ServiceOptions) {
             kind: request.kind,
             content: request.content,
             afterRunId: request.afterRunId,
+            ...(request.images === undefined ? {} : { images: request.images }),
+            ...(request.files === undefined ? {} : { files: request.files }),
             contextSelectionId: request.contextSelectionId,
             ...(request.modelId === undefined ? {} : { modelId: request.modelId }),
             ...(request.reasoningEffort === undefined
@@ -1763,6 +1783,8 @@ export async function startService(options: ServiceOptions) {
           request: {
             kind: request.kind,
             content: request.content,
+            ...(request.images === undefined ? {} : { images: request.images }),
+            ...(request.files === undefined ? {} : { files: request.files }),
             ...(request.modelId ? { modelId: request.modelId } : {}),
             ...(request.reasoningEffort === undefined
               ? {}

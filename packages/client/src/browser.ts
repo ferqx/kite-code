@@ -131,6 +131,8 @@ export class BrowserClient {
       const { execution: e, session: s, rootSession: r, run, childRun, childSession: child } = item;
       if (
         seen.has(e.id) ||
+        (item.sourceTool &&
+          (item.sourceTool.id !== e.parentExecutionId || item.sourceTool.id === e.id)) ||
         e.sessionId !== s.id ||
         e.rootSessionId !== r.id ||
         s.rootSessionId !== r.id ||
@@ -168,7 +170,12 @@ export class BrowserClient {
     return page;
   }
   async listAllBackgroundExecutions(
-    options: { workspaceId?: string; rootSessionId?: string; signal?: AbortSignal } = {},
+    options: {
+      workspaceId?: string;
+      rootSessionId?: string;
+      includeSourceTool?: boolean;
+      signal?: AbortSignal;
+    } = {},
   ) {
     this.require('sessions');
     const generation = this.networkGeneration,
@@ -178,7 +185,12 @@ export class BrowserClient {
         if (generation !== this.networkGeneration || this.info?.storeId !== storeId)
           throw new ClientError('browser_identity_mismatch');
         return this.listBackgroundExecutions(
-          { workspaceId: options.workspaceId, rootSessionId: options.rootSessionId, ...page },
+          {
+            workspaceId: options.workspaceId,
+            rootSessionId: options.rootSessionId,
+            includeSourceTool: options.includeSourceTool,
+            ...page,
+          },
           { signal: options.signal },
         );
       },

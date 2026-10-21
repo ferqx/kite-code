@@ -1,5 +1,6 @@
 import { createRoot } from 'react-dom/client';
 import { NativeDesktop } from './native';
+import { installNativeInputModality } from './native-input-modality';
 
 import { applyTheme, readThemePreference } from './native-theme';
 import './native-tailwind.css';
@@ -9,6 +10,7 @@ import '@kite-ai/ui/desktop/style.css';
 declare const __KITE_DESKTOP_TEST_DIAGNOSTICS__: boolean;
 
 document.documentElement.dataset.nativeWindow = 'true';
+installNativeInputModality(document);
 if (/Macintosh|Mac OS X/i.test(navigator.userAgent))
   document.documentElement.dataset.platform = 'macos';
 else if (/Windows/i.test(navigator.userAgent))

@@ -15,13 +15,9 @@ export function FileChanges({
 }) {
   const [expanded, setExpanded] = useState(new Set<string>());
   return (
-    <div className="results">
+    <div className="results" aria-busy={loading || undefined}>
       <p>{messages.length} 次文件操作</p>
-      {loading ? (
-        <p role="status">正在读取文件操作记录。</p>
-      ) : (
-        !messages.length && <p>当前会话还没有已确认的文件工具变更。</p>
-      )}
+      {!loading && !messages.length && <p>当前会话还没有已确认的文件工具变更。</p>}
       {messages.map((message) => (
         <details
           className="file-change"

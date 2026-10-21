@@ -1,5 +1,11 @@
 # Store 边界
 
+## 用户图片引用
+
+普通文件的 `files` 名称／URI 同样在消息 source JSON 保存，start 与 steer/follow-up 共用原事务。它不是 Artifact 引用或来源读取收据，也不授予文件访问；`MessageRecord.content` 始终保留原文，模型端路径文本由 Runtime 单独组装。
+
+用户输入的 `images` 在原消息 source JSON 保存名称和完整、不可变的 session Artifact 引用；[输入受理](sqlite/input-operations.ts)在原事务调用[引用核验](sqlite/artifact-operations.ts)比对 Store、Session、subject、scope 和全部原元数据。图片正文由既有 Artifact owner 保存，不新增 SQL 表或迁移。Fork 保留原来源链，离线 GC 继续依据原消息／会话关系保留被存活分支依赖的源会话；Runtime 按原出处完整读回图片，不能借当前会话重新声明原发布权。测试与语义见 [Agent](../../README.md#用户图片输入)。
+
 ## Session 标题写入
 
 [消息写入](sqlite/operations.ts)只保存原消息，不从首条正文推导标题，也不隐式增加 Session control revision 或产生 rename 事件。自动命名和原文兜底统一由[命名扩展](../business/session-title/index.ts)通过显式 `renameSession` 完成，Store 保留原主体、删除状态与 revision CAS 核实；未安装该扩展的宿主不自动命名。[真实 Store 测试](../../test/isolated/storage/session-titles.test.ts)核空标题保持、消息写入零 rename，以及跨 Worker 的显式名称保存。
@@ -195,6 +201,8 @@ Host 自动封存 prepare 中 session namespace 的 `records.get/list` 完整原
 私有 reviewer 的完整 ModelOutput 不能由 `response.content` 的 preview 代替。Core 验同一 captured descriptor 的完整 EOF，严格解析答案后将[有限凭据](../authorization-review-output.ts)登记到原 Model execution scope 的不可变 Artifact。`authorization-review.fact` 保留原 purpose、唯一 Run/Model、binding、终态和空 tools 条件，并核当前完整 descriptor 摘要、凭据登记的原 scope/MIME/hash/size、原始全文 hash/bytes，以及 inline 重解析或准确原 carrier Artifact metadata；普通 Extension 的同名 details 不取得这条资格。SQL 不读取 graph／正文文件，冷 proof 不生成凭据或新调用。[实际审阅测试](../../test/isolated/execution/authorization-review-complete-output.test.ts)验证大合法 JSON、独立 Ask、效果一次及 descriptor/答案/登记元数据漂移零目标派发；完整读取、冷 metadata proof 与恢复后的新授权保持各自边界，细节归[输出 owner](../model-output/README.md)。
 
 ## 跨会话原 Job 目录
+
+`listBackgroundExecutions` 的可选 `includeSourceTool:true` 在原目录事务中投影直接父 Tool 的 `sourceTool:{id,definitionId,definitionVersion}`；只连接同 Session、原 origin Store 和 root work 的 Tool，不读取／输出其 input、result、reference 或授权正文。默认或显式 false 时不增加该字段，既有闭合目录响应保持。父级不是 Tool、缺少可核实来源或旧响应无此字段时，不补造来源。来源是只读事实，不授予操作权；Shell 的前后台由准确 `shell.launch`／`shell.execute` 区分，`cancelWithParent` 只表示取消边。SQL 格式和原 Job 生命周期保持。
 
 `listBackgroundExecutions` 在短只读事务按原 Execution rowid 的 Decimal64 顺序读取全部 `kind=job`，包括普通 Job、child/task carrier 和后代 Session 内的 Job。先按真实 root `session.create` 主体、原 source／root-work Command 主体、出处与序号、实际 parent ancestry 全程未删除状态与可选 Workspace/root/Execution 过滤，再按固定 upper 和最多200项分页；后代还核原 child-start request 与 carrier、来源和根工作绑定。当前 Store 用于准入；旧来源只在 root creator 原出处已经不同于当前 Store 的准确恢复根内接纳，不为普通根放宽来源。重复恢复保留期间各 Store 的真实来源。`limit+1` 判定准确 EOF。只返回原身份、状态、attempt、result revision、delivery、取消事实和有限 Session/Run metadata，不读取大 input/result/config/reference 正文。runless Job 的 `run` 沿原 parent Execution 链找到原父 Run；`childRun` 只查 `child-start-{execution.id}`，原 child-start Command／request 必须准确绑定载体，已有 reference runId 必须一致，不选择最新 Run。
 

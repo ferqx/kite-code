@@ -18,6 +18,16 @@ import { buildNativeCandidate } from '../../scripts/build-native';
 import type { PlanReviewReport } from '../native-plan-review-electron.fixture';
 
 const require = createRequire(import.meta.url);
+// Lexical stores edited plain underscores as escaped Markdown. Compare the
+// complete source at every boundary; the visible task remains unchanged.
+const planTask = (id: string) =>
+  `${id === 'b' ? '新任务：' : ''}NATIVE_PLAN_${id.toUpperCase()} exact original task`.replaceAll(
+    '_',
+    '\\_',
+  );
+const parentTask = 'NATIVE\\_PARENT\\_B hold original active Run';
+const hasOriginalTask = (body: { messages: { role: string; content?: unknown }[] }, task: string) =>
+  body.messages.some((message) => message.role === 'user' && message.content === task);
 test.skipIf(process.platform !== 'darwin')(
   'relocated source-free Native Plan reviews preserve exact feedback, independent user approval, real Files progress and cold Store proofs',
   async () => {
@@ -108,7 +118,7 @@ test.skipIf(process.platform !== 'darwin')(
             const body = businessBodies.find(
               (body) =>
                 runId &&
-                JSON.stringify(body.messages).includes('NATIVE_PLAN_D') &&
+                hasOriginalTask(body, planTask('d')) &&
                 body.messages.some(
                   (message) =>
                     typeof message.content === 'string' &&
@@ -232,10 +242,7 @@ test.skipIf(process.platform !== 'darwin')(
           const serial = businessBodies.length;
           const frame = (delta: unknown, reason: string | null) =>
             `data: ${JSON.stringify({ id: `plan-${serial}`, object: 'chat.completion.chunk', model: 'fixed', choices: [{ index: 0, delta, finish_reason: reason }] })}\n\n`;
-          if (
-            JSON.stringify(body.messages).includes('NATIVE_PARENT_B') &&
-            !JSON.stringify(body.messages).includes('NATIVE_PLAN_B')
-          ) {
+          if (hasOriginalTask(body, parentTask) && !hasOriginalTask(body, planTask('b'))) {
             await new Promise<void>((release) => questionsReady.set(serial, release));
             return new Response(
               frame({ content: 'Original parent completed' }, null) +
@@ -244,14 +251,7 @@ test.skipIf(process.platform !== 'darwin')(
               { headers: { 'content-type': 'text/event-stream' } },
             );
           }
-          const sessionId = ['a', 'b', 'd', 'c'].find((id) =>
-            body.messages.some(
-              (message) =>
-                message.role === 'user' &&
-                message.content ===
-                  `${id === 'b' ? '新任务：' : ''}NATIVE_PLAN_${id.toUpperCase()} exact original task`,
-            ),
-          )!;
+          const sessionId = ['a', 'b', 'd', 'c'].find((id) => hasOriginalTask(body, planTask(id)))!;
           expect(sessionId).toBeDefined();
           const stage = stages.get(sessionId) ?? 0;
           stages.set(sessionId, stage + 1);
@@ -631,9 +631,7 @@ test.skipIf(process.platform !== 'darwin')(
           const review = reviews[0] as (typeof reviewRequests)[number];
           expect(review.reviewer.id).toBe('builtin.auto');
           expect(review.reviewer.modelId).toBe('fixed');
-          expect(review.originCommandRequest.content).toBe(
-            `${review.target.sessionId === 'b' ? '新任务：' : ''}NATIVE_PLAN_${review.target.sessionId.toUpperCase()} exact original task`,
-          );
+          expect(review.originCommandRequest.content).toBe(planTask(review.target.sessionId));
           expect(review.rootWorkRequest.content).toBe(review.originCommandRequest.content);
           expect(review.target.originStoreId).toBe(storeId);
           expect(['a', 'b', 'd', 'c']).toContain(review.target.sessionId);
@@ -650,10 +648,7 @@ test.skipIf(process.platform !== 'darwin')(
             'provider_actual_authorization_review',
             JSON.stringify({ purpose: review.purpose, target: review.target }),
           );
-        } else if (
-          !JSON.stringify(body.messages).includes('NATIVE_PARENT_B') ||
-          JSON.stringify(body.messages).includes('NATIVE_PLAN_B')
-        )
+        } else if (!hasOriginalTask(body, parentTask) || hasOriginalTask(body, planTask('b')))
           expect(body.tools?.some((tool) => tool.function.name === 'write_plan')).toBe(true);
       }
       expect(reviewRequests).toHaveLength(authorizationReviewCalls);
@@ -945,6 +940,7 @@ test.skipIf(process.platform !== 'darwin')(
           expect((await cold.getRun(run.id))?.status).toBe(run.status);
           const command = await cold.getCommand(run.commandId);
           expect(command?.request).toMatchObject({
+            content: planTask(run.sessionId),
             extensionInputs: [
               { extensionId: 'builtin.planning', definitionVersion: '1', input: { mode: 'plan' } },
             ],

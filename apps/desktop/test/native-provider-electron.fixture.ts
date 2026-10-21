@@ -502,12 +502,12 @@ try {
   await closeSettings(page);
   await page
     .getByRole('region', { name: '下一轮模型选择' })
-    .getByRole('button', { name: '模型：model-openai', exact: true })
+    .getByRole('button', { name: '模型：model-openai，思考程度：高', exact: true })
     .waitFor();
   assert.equal(
     await page
       .getByRole('region', { name: '下一轮模型选择' })
-      .getByRole('button', { name: '模型：model-openai', exact: true })
+      .getByRole('button', { name: '模型：model-openai，思考程度：高', exact: true })
       .count(),
     1,
   );

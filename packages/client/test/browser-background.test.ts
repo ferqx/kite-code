@@ -64,6 +64,16 @@ function fixture(mode: string) {
         (value.items[0]!.execution as unknown as Record<string, unknown>).input = {
           secret: 'body',
         };
+      if (mode.startsWith('source-')) {
+        const entry = value.items[0]!;
+        entry.execution.parentExecutionId = 'source-tool' as never;
+        (entry as unknown as Record<string, unknown>).sourceTool = {
+          id: mode === 'source-mismatch' ? 'another-tool' : 'source-tool',
+          definitionId: mode === 'source-foreground' ? 'shell.execute' : 'shell.launch',
+          definitionVersion: '1',
+          ...(mode === 'source-body' ? { input: { secret: 'private command' } } : {}),
+        };
+      }
       if (mode === 'order') value.items[0]!.seq = '0';
       return response(value);
     },
@@ -82,6 +92,28 @@ function fixture(mode: string) {
     },
   };
 }
+for (const mode of ['source-background', 'source-foreground'])
+  test(`background directory retains exact Tool origin: ${mode}`, async () => {
+    const f = fixture(mode);
+    await f.client.connect();
+    const rows = await f.client.listAllBackgroundExecutions({ includeSourceTool: true });
+    expect(f.queries.every((query) => query.includes('includeSourceTool=true'))).toBe(true);
+    expect(rows).toHaveLength(2);
+    expect(rows[0]!.sourceTool).toEqual({
+      id: 'source-tool',
+      definitionId: mode === 'source-foreground' ? 'shell.execute' : 'shell.launch',
+      definitionVersion: '1',
+    });
+  });
+
+test('an opted-in legacy directory without Tool metadata stays readable', async () => {
+  const f = fixture('valid');
+  await f.client.connect();
+  const rows = await f.client.listAllBackgroundExecutions({ includeSourceTool: true });
+  expect(rows).toHaveLength(2);
+  expect(rows.every((row) => row.sourceTool === undefined)).toBe(true);
+});
+
 test('whole background scan retries from zero at a changed snapshot and retains original Store provenance', async () => {
   const f = fixture('retry');
   await f.client.connect();
@@ -93,7 +125,16 @@ test('whole background scan retries from zero at a changed snapshot and retains 
   expect(f.queries[3]).toContain('upperSeq=9007199254740994');
   expect(result[0]!.execution.originStoreId).toBe('store');
 });
-for (const mode of ['duplicate', 'scope', 'store', 'child', 'order', 'body'])
+for (const mode of [
+  'duplicate',
+  'scope',
+  'store',
+  'child',
+  'order',
+  'body',
+  'source-mismatch',
+  'source-body',
+])
   test(`background scan rejects ${mode} without exposing a prefix`, async () => {
     const f = fixture(mode);
     await f.client.connect();

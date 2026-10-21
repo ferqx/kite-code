@@ -99,7 +99,11 @@ test.skipIf(process.platform !== 'darwin')(
       ];
       function marker(content: unknown): string | undefined {
         if (typeof content !== 'string') return undefined;
-        if (markers.includes(content)) return content;
+        // Human Composer input is serialized Markdown; tool-authored child
+        // prompts retain their exact original content without editor conversion.
+        const human = markers.slice(0, 2).find((task) => task.replaceAll('_', '\\_') === content);
+        if (human) return human;
+        if (markers.slice(2).includes(content)) return content;
         try {
           const value = JSON.parse(content);
           return typeof value?.content === 'string' && markers.includes(value.content)

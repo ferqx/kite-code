@@ -232,7 +232,7 @@ test.skipIf(process.platform !== 'darwin')(
             .find(
               (message) =>
                 message.role === 'user' &&
-                ['HOST_FIRST', 'New task: HOST_SERVICE'].includes(String(message.content)),
+                ['HOST\\_FIRST', 'New task: HOST\\_SERVICE'].includes(String(message.content)),
             ),
           content =
             typeof latest?.content === 'string' ? latest.content : JSON.stringify(latest?.content),
@@ -240,10 +240,10 @@ test.skipIf(process.platform !== 'darwin')(
           tools = body.messages
             .slice(start + 1)
             .filter((message) => message.role === 'tool').length;
-        if (!['HOST_FIRST', 'New task: HOST_SERVICE'].includes(content))
+        if (!['HOST\\_FIRST', 'New task: HOST\\_SERVICE'].includes(content))
           return new Response('unexpected_model_input', { status: 500 });
         // Preserve the complete human instruction while keeping protocol call IDs stable.
-        const marker = content === 'HOST_FIRST' ? 'HOST_FIRST' : 'HOST_SERVICE';
+        const marker = content === 'HOST\\_FIRST' ? 'HOST_FIRST' : 'HOST_SERVICE';
         calls.push({ marker, content, tools });
         const delta = tools
           ? { content: `${marker}_DONE` }
@@ -433,10 +433,10 @@ test.skipIf(process.platform !== 'darwin')(
       expect(readFileSync(effects, 'utf8').trim().split('\n').sort()).toEqual(labels.sort());
       expect(calls).toHaveLength(4);
       expect(calls.map(({ marker, content }) => ({ marker, content }))).toEqual([
-        { marker: 'HOST_FIRST', content: 'HOST_FIRST' },
-        { marker: 'HOST_FIRST', content: 'HOST_FIRST' },
-        { marker: 'HOST_SERVICE', content: 'New task: HOST_SERVICE' },
-        { marker: 'HOST_SERVICE', content: 'New task: HOST_SERVICE' },
+        { marker: 'HOST_FIRST', content: 'HOST\\_FIRST' },
+        { marker: 'HOST_FIRST', content: 'HOST\\_FIRST' },
+        { marker: 'HOST_SERVICE', content: 'New task: HOST\\_SERVICE' },
+        { marker: 'HOST_SERVICE', content: 'New task: HOST\\_SERVICE' },
       ]);
       expect(trees.size).toBe(3);
       expect(

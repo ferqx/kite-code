@@ -103,12 +103,26 @@ test('sealed default process discovers and executes owned stdio sources using pe
           expect(id).toBeDefined();
           call = { name: 'connect_mcp_server', input: { server_id: id, key: 'packaged-owned' } };
         } else if (n === 2) {
-          const tools = body.tools as { function: { name: string; parameters: unknown } }[];
-          const remote = tools.find((tool) =>
-            JSON.stringify(tool.function.parameters).includes('exact'),
+          const tools = body.tools as {
+            function: {
+              name: string;
+              parameters: Record<string, unknown> & {
+                properties?: Record<string, Record<string, unknown>>;
+              };
+            };
+          }[];
+          const remotes = tools.filter(
+            (tool) => tool.function.parameters.properties?.value?.const === 'exact',
           );
-          expect(remote).toBeDefined();
-          call = { name: remote!.function.name, input: { value: 'exact' } };
+          expect(remotes).toHaveLength(1);
+          const remote = remotes[0]!;
+          expect(remote.function.parameters).toEqual({
+            type: 'object',
+            properties: { value: { type: 'string', const: 'exact' } },
+            required: ['value'],
+            additionalProperties: false,
+          });
+          call = { name: remote.function.name, input: { value: 'exact' } };
         }
       }
       const frame = (delta: unknown, finish_reason: string | null) =>

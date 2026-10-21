@@ -32,6 +32,7 @@ export interface BackgroundExecutionsProps {
   readonly id?: string;
   readonly executions: readonly BackgroundExecutionSummary[];
   readonly stale?: boolean;
+  readonly busy?: boolean;
   readonly currentOnly?: boolean;
   readonly stoppingExecutionId?: string;
   readonly onStop?: (execution: BackgroundExecutionSummary) => void;
@@ -48,6 +49,7 @@ export function BackgroundExecutions({
   id,
   executions,
   stale,
+  busy = false,
   currentOnly,
   stoppingExecutionId,
   onStop,
@@ -65,26 +67,29 @@ export function BackgroundExecutions({
         className="background-executions environment-information"
         id={id}
         aria-label="环境信息"
+        aria-busy={busy || subagentDetails?.loading || undefined}
       >
         <header>
           <span>环境信息</span>
-          {stale && <span className="background-stale">上次状态 · 正在核对</span>}
+          {stale && <span className="background-stale">上次状态 · 待核实</span>}
         </header>
         <ExecutionGroup
           icon={TerminalIcon}
-          label="当前运行的 Shell"
-          emptyLabel="无运行中的 Shell"
+          label="Shell"
+          emptyLabel="空闲"
           executions={shells}
           stoppingExecutionId={stoppingExecutionId}
           onStop={stale ? undefined : onStop}
+          busy={busy}
         />
         <ExecutionGroup
           icon={BotIcon}
           label="子智能体"
-          emptyLabel="暂无子智能体记录"
+          emptyLabel="暂无"
           executions={subagents}
           stoppingExecutionId={stoppingExecutionId}
           onStop={stale ? undefined : onStop}
+          busy={busy}
           subagentDetails={subagentDetails}
         />
       </section>
@@ -92,7 +97,7 @@ export function BackgroundExecutions({
   }
   if (!executions.length && !stale) return null;
   return (
-    <section className="background-executions" aria-label="后台执行">
+    <section className="background-executions" aria-label="后台执行" aria-busy={busy || undefined}>
       <header>
         <strong>后台执行</strong>
         {stale && <span className="background-stale">上次已知状态 · 等待重连刷新</span>}
@@ -111,7 +116,7 @@ export function BackgroundExecutions({
               {onStop && !stale && execution.status === 'running' && (
                 <button
                   type="button"
-                  disabled={stoppingExecutionId === execution.executionId}
+                  disabled={busy || stoppingExecutionId === execution.executionId}
                   onClick={() => onStop(execution)}
                 >
                   {stoppingExecutionId === execution.executionId ? '停止请求已受理' : '停止'}
@@ -133,6 +138,7 @@ function ExecutionGroup({
   stoppingExecutionId,
   onStop,
   subagentDetails,
+  busy,
 }: {
   readonly icon: typeof TerminalIcon;
   readonly label: string;
@@ -141,28 +147,26 @@ function ExecutionGroup({
   readonly stoppingExecutionId?: string;
   readonly onStop?: (execution: BackgroundExecutionSummary) => void;
   readonly subagentDetails?: BackgroundExecutionsProps['subagentDetails'];
+  readonly busy: boolean;
 }) {
   return (
-    <section className="background-execution-group" aria-label={label}>
+    <section
+      className="background-execution-group"
+      aria-label={label}
+      aria-busy={busy || subagentDetails?.loading || undefined}
+    >
       <h3>
         <HugeiconsIcon icon={icon} />
         <span>{label}</span>
-        <span className="background-execution-count">{executions.length}</span>
-        {subagentDetails && (
-          <Button
-            className="ghost background-execution-refresh"
-            size="xs"
-            disabled={subagentDetails.loading}
-            aria-label="刷新子 Agent"
-            onClick={subagentDetails.onRefresh}
-          >
-            刷新
-          </Button>
+        {executions.length > 0 ? (
+          <span className="background-execution-count">{executions.length}</span>
+        ) : (
+          !subagentDetails?.loading && (
+            <span className="background-execution-empty">{emptyLabel}</span>
+          )
         )}
       </h3>
-      {executions.length === 0 ? (
-        <p className="background-execution-empty">{emptyLabel}</p>
-      ) : (
+      {executions.length > 0 && (
         <ul>
           {executions.map((execution) => {
             const childSessionId = subagentDetails?.sessionIdsByExecutionId.get(
@@ -195,7 +199,7 @@ function ExecutionGroup({
                   <Button
                     className="background-execution-stop"
                     size="xs"
-                    disabled={stoppingExecutionId === execution.executionId}
+                    disabled={busy || stoppingExecutionId === execution.executionId}
                     onClick={() => onStop(execution)}
                   >
                     {stoppingExecutionId === execution.executionId ? '停止中' : '停止'}
@@ -205,9 +209,6 @@ function ExecutionGroup({
             );
           })}
         </ul>
-      )}
-      {subagentDetails?.loading && executions.length === 0 && (
-        <p role="status">正在读取子 Agent…</p>
       )}
       {subagentDetails?.error && (
         <p role="alert" className="background-execution-error">

@@ -151,8 +151,8 @@ test.skipIf(process.platform !== 'darwin')(
               row.role === 'user' &&
               typeof row.content === 'string' &&
               [
-                'ORIGINAL_PARENT',
-                'NEWER_PARENT',
+                'ORIGINAL\\_PARENT',
+                'NEWER\\_PARENT',
                 'UNICODE_CHILD',
                 'STOP_CHILD',
                 'DETACHED_CHILD',
@@ -169,8 +169,8 @@ test.skipIf(process.platform !== 'darwin')(
         calls.push({ marker, tools });
         const frame = (delta: unknown, reason: string | null) =>
           `data: ${JSON.stringify({ id: 'fixed', object: 'chat.completion.chunk', model: 'fixed', choices: [{ index: 0, delta, finish_reason: reason }] })}\n\n`;
-        const isOriginal = marker === 'ORIGINAL_PARENT';
-        const isNewer = marker === 'NEWER_PARENT';
+        const isOriginal = marker === 'ORIGINAL\\_PARENT';
+        const isNewer = marker === 'NEWER\\_PARENT';
         let delta: unknown,
           reason = 'stop';
         if ((isOriginal || isNewer) && tools === 0) {
@@ -194,7 +194,7 @@ test.skipIf(process.platform !== 'darwin')(
           reason = 'tool_calls';
         } else if (!isOriginal && !isNewer) {
           const child = ['UNICODE_CHILD', 'STOP_CHILD', 'DETACHED_CHILD', 'NEWER_CHILD'].find(
-            (key) => marker.includes(key),
+            (key) => marker === key,
           );
           if (!child)
             return new Response(`unexpected_provider_input:${marker.slice(0, 200)}`, {

@@ -205,6 +205,7 @@ export function NativeExtensions({
   return (
     <details
       aria-label="扩展能力"
+      aria-busy={busy || undefined}
       open={open}
       onToggle={(event) => {
         const next = event.currentTarget.open;
@@ -227,7 +228,6 @@ export function NativeExtensions({
           <button type="button" disabled={busy} onClick={() => void load()}>
             刷新扩展目录
           </button>
-          {busy && <p role="status">正在核对扩展能力，上次完整结果仅供阅读。</p>}
           {error && <p role="alert">{error}</p>}
           {!busy && !error && catalogue.length === 0 && <p>此会话没有可用扩展能力。</p>}
           {catalogue.map((extension) => (

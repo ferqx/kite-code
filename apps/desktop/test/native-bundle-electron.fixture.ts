@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { _electron } from 'playwright';
 import type { NativeState } from '../src/native-bridge';
+import { promptText } from './prompt-editor-text.fixture';
 
 async function openSessionTools(page: import('playwright').Page) {
   const toggle = page.getByRole('button', { name: '会话工具', exact: true });
@@ -116,8 +117,14 @@ async function readOriginalFileChanges(page: import('playwright').Page) {
   );
   await page.getByRole('combobox', { name: '默认编辑器', exact: true }).selectOption('textedit');
   await page.getByRole('button', { name: '返回应用', exact: true }).click();
-  await page.getByRole('button', { name: '文件变更', exact: true }).click();
-  const pane = page.getByRole('complementary', { name: '文件变更', exact: true });
+  const tabsToggle = page.getByRole('button', { name: '标签页', exact: true });
+  const wasTabsOpen = await tabsToggle.getAttribute('aria-expanded');
+  if (wasTabsOpen !== 'true') await tabsToggle.click();
+  const pane = page.getByRole('complementary', { name: '标签页', exact: true });
+  await pane.waitFor();
+  const changesTab = pane.getByRole('tab', { name: '变更', exact: true });
+  if ((await changesTab.count()) > 0) await changesTab.click();
+  else await pane.getByRole('button', { name: '变更', exact: true }).click();
   await pane.getByText('1 次文件操作', { exact: true }).waitFor();
   assert.equal(await pane.locator('details.file-change').count(), 1);
   await pane.locator('details.file-change > summary').click();
@@ -309,7 +316,7 @@ async function readOriginalTheme(page: import('playwright').Page, cold: boolean)
       await page.evaluate(
         () => getComputedStyle(document.querySelector('.client-main-panel')!).backgroundColor,
       ),
-      appearance.dark ? 'rgb(25, 25, 25)' : 'rgb(255, 255, 255)',
+      appearance.dark ? 'rgb(25, 25, 25)' : 'rgb(250, 250, 250)',
     );
   }
   async function choose(preference: 'dark' | 'light' | 'system', label: string) {
@@ -476,7 +483,7 @@ try {
   assert.equal(await page.locator('.scheduled-card').count(), 0);
   await page.getByRole('button', { name: '返回会话', exact: true }).click();
   assert.equal(
-    await page.getByRole('textbox', { name: '当前会话私有草稿', exact: true }).inputValue(),
+    await promptText(page.getByRole('textbox', { name: '当前会话私有草稿', exact: true })),
     retainedDraft,
   );
   const afterSchedule = await page.evaluate(
@@ -572,7 +579,7 @@ try {
       (event) => {
         if (
           (event.target as HTMLFormElement).querySelector(
-            'textarea[aria-label="当前会话私有草稿"], textarea[aria-label="新对话草稿"]',
+            '[role="textbox"][aria-label="当前会话私有草稿"], [role="textbox"][aria-label="新对话草稿"]',
           )
         )
           events.push({ type: event.type, focused: document.hasFocus() });
@@ -588,12 +595,12 @@ try {
   await prepareButton.press('Enter');
   await page.getByRole('button', { name: '研究与理解资料', exact: true }).click();
   assert.equal(
-    await page.getByRole('textbox', { name: '新对话草稿' }).inputValue(),
+    await page.getByRole('textbox', { name: '新对话草稿' }).innerText(),
     '研究与理解资料：',
   );
   await page.getByRole('button', { name: '新对话', exact: true }).click();
   assert.equal(
-    await page.getByRole('textbox', { name: '新对话草稿' }).inputValue(),
+    await page.getByRole('textbox', { name: '新对话草稿' }).innerText(),
     '研究与理解资料：',
   );
   const beforeFirst = await page.evaluate(
@@ -604,7 +611,7 @@ try {
   assert.equal(beforeFirst.inputSubmissions.length, 0);
   await page.getByRole('textbox', { name: '新对话草稿' }).fill('write one real bundled file');
   assert.equal(
-    await page.getByRole('textbox', { name: '新对话草稿' }).inputValue(),
+    await page.getByRole('textbox', { name: '新对话草稿' }).innerText(),
     'write one real bundled file',
   );
   await page.getByRole('button', { name: '发送首条消息' }).click();

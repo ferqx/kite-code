@@ -13,7 +13,7 @@ import type {
 } from '../../src/native-bridge';
 import { useNativeEnvironment, waitForNativeDirectory } from '../../src/native-environment';
 import { backgroundItem } from '../background-item.fixture';
-import { prepareDesktopDom } from '../native-page-dom.fixture';
+import { prepareDesktopDom, promptValue, setPromptText } from '../native-page-dom.fixture';
 
 const bootstrap = new JSDOM('<div></div>', { pretendToBeVisual: true });
 const initialGlobals = {
@@ -84,12 +84,14 @@ function fixture(activeParent = false, pendingToolMetadata = false) {
     holdNext = false,
     holdParent = false,
     failParent = false,
+    backgroundUnavailable = false,
     viewLoading = false,
     permissionUnavailable = false;
   let directoryObservation: NativeDirectory | undefined;
   let requiredParent = false;
   let holdDirectory = false;
   let releaseDirectory: (() => void) | undefined;
+  let executions: NonNullable<NativeState['selection']>['executions'] = [];
   let releaseHeld: (() => void) | undefined;
   let selectedEnvironmentRevision: number | undefined;
   let environmentReadUnavailable: boolean | undefined;
@@ -100,6 +102,7 @@ function fixture(activeParent = false, pendingToolMetadata = false) {
   const listeners = new Set<(event: NativeEvent) => void>();
   const state = (): NativeState => ({
     generation: 1,
+    backgroundUnavailable,
     environmentRevision: revision,
     selectedEnvironmentRevision,
     environmentReadUnavailable,
@@ -143,7 +146,7 @@ function fixture(activeParent = false, pendingToolMetadata = false) {
           }
         : {}),
       runs: activeParent ? [item.run!] : [],
-      executions: requiredParent ? [{ ...item.execution, result: null }] : [],
+      executions: requiredParent ? [{ ...item.execution, result: null }] : executions,
       interactions: [],
       interactionsAfterId: null,
     },
@@ -402,7 +405,8 @@ function fixture(activeParent = false, pendingToolMetadata = false) {
       item.run!.createdAt = Date.now() - 10000;
       parentMessage.runId = item.run!.id;
     },
-    render: () => act(async () => root.render(<NativeDesktop />)),
+    render: (testDiagnostics = false) =>
+      act(async () => root.render(<NativeDesktop testDiagnostics={testDiagnostics} />)),
     unmount: () => act(async () => root.render(null)),
     open: () => click('查看子 Agent 详情：Live child'),
     hold: () => {
@@ -423,6 +427,15 @@ function fixture(activeParent = false, pendingToolMetadata = false) {
     failParent: (value = true) => {
       failParent = value;
     },
+    executions: (values: typeof executions) => {
+      executions = values;
+    },
+    backgroundUnavailable: async (value: boolean) => {
+      backgroundUnavailable = value;
+      await act(async () => {
+        for (const listener of listeners) listener({ kind: 'changed', generation: 1 });
+      });
+    },
     releaseParent: () => act(async () => releaseParent?.()),
     releaseMetadata: () =>
       act(async () => {
@@ -432,12 +445,8 @@ function fixture(activeParent = false, pendingToolMetadata = false) {
       }),
     edit: (text: string) =>
       act(async () => {
-        const input = host.querySelector('textarea')!;
-        Object.getOwnPropertyDescriptor(
-          dom.window.HTMLTextAreaElement.prototype,
-          'value',
-        )!.set!.call(input, text);
-        input.dispatchEvent(new dom.window.Event('input', { bubbles: true }));
+        const input = host.querySelector('[role="textbox"][contenteditable]')!;
+        await setPromptText(input, text);
       }),
     unavailable: async (value: boolean) => {
       viewLoading = false;
@@ -513,6 +522,32 @@ test('first exact child visit uses its verified carrier before a pending directo
   }
 });
 
+test('ordinary sessions hide background aggregates for live, unknown and unavailable observations', async () => {
+  const f = fixture();
+  try {
+    await f.render();
+    await f.click('Original');
+    for (const status of ['planned', 'dispatching', 'running', 'outcome_unknown'] as const) {
+      f.executions([{ ...backgroundItem(2).execution, result: null, status }]);
+      await f.update('Child prefix');
+      expect(f.host.querySelector('[aria-label="当前会话后台状态"]') === null).toBe(true);
+      expect(f.host.textContent).not.toContain('后台状态：');
+      expect(f.host.textContent).not.toContain('历史已完整读取至固定高水位');
+      expect(f.host.textContent).toContain('Parent transcript');
+      expect(f.host.querySelector('[aria-label="环境信息"]')).not.toBeNull();
+    }
+    await f.backgroundUnavailable(true);
+    expect(f.host.querySelector('[aria-label="当前会话后台状态"]') === null).toBe(true);
+    await f.backgroundUnavailable(false);
+    await f.unavailable(true);
+    expect(f.host.querySelector('[aria-label="当前会话后台状态"]') === null).toBe(true);
+    expect(f.host.textContent).toContain('Parent transcript');
+    expect(f.requests.some((request) => request.method === 'caller.submit')).toBe(false);
+  } finally {
+    await f.close();
+  }
+});
+
 test('returning from a running child renders saved parent messages before pending Tool metadata completes', async () => {
   for (const target of ['返回主会话', 'Original']) {
     const f = fixture(true, true);
@@ -536,9 +571,11 @@ test('returning from a running child renders saved parent messages before pendin
       expect(f.host.querySelector<HTMLButtonElement>('[data-permission-trigger]')!.disabled).toBe(
         true,
       );
-      expect(f.host.querySelector('textarea')!.value).toBe('Original private draft');
+      expect(promptValue(f.host.querySelector('[role="textbox"][contenteditable]'))).toBe(
+        'Original private draft',
+      );
       await f.edit('Draft while child and metadata remain pending');
-      expect(f.host.querySelector('textarea')!.value).toBe(
+      expect(promptValue(f.host.querySelector('[role="textbox"][contenteditable]'))).toBe(
         'Draft while child and metadata remain pending',
       );
       await f.releaseParent();
@@ -565,6 +602,61 @@ test('returning from a running child renders saved parent messages before pendin
   }
 });
 
+test('explicit test diagnostics retain scoped background counts and child read identities', async () => {
+  const f = fixture();
+  const job = { ...backgroundItem(2).execution, result: null };
+  f.executions([
+    job,
+    { ...job, id: 'stopping', status: 'dispatching', cancelRequestedAt: 1 },
+    { ...job, id: 'unknown', status: 'outcome_unknown' },
+    { ...job, id: 'ended', status: 'succeeded' },
+    { ...job, id: 'other-session', sessionId: 'other' },
+    { ...job, id: 'old-store', originStoreId: 'old' },
+    { ...job, id: 'tool', kind: 'tool' },
+  ]);
+  try {
+    await f.render(true);
+    await f.click('Original');
+    const aggregate = () => f.host.querySelector('[aria-label="当前会话后台状态"]');
+    expect(aggregate()?.textContent).toBe('后台状态：2 项未结束，1 项未知');
+    await f.backgroundUnavailable(true);
+    expect(aggregate()?.textContent).toBe('后台状态：2 项未结束，1 项未知 · 上次确认状态');
+    await f.backgroundUnavailable(false);
+    await f.open();
+    await f.waitForText('Child prefix');
+    expect(f.host.textContent).toContain('已完整读取子日志至固定序号');
+    expect(f.host.textContent).toContain('original-child-run');
+    expect(f.host.textContent).toContain('Child prefix');
+  } finally {
+    await f.close();
+  }
+});
+
+test('a renderer compiled without diagnostics cannot expose aggregates or child identities through component opt-in', async () => {
+  const previous = Object.getOwnPropertyDescriptor(globalThis, '__KITE_DESKTOP_TEST_DIAGNOSTICS__');
+  Object.defineProperty(globalThis, '__KITE_DESKTOP_TEST_DIAGNOSTICS__', {
+    configurable: true,
+    value: false,
+  });
+  const f = fixture();
+  f.executions([{ ...backgroundItem(2).execution, result: null }]);
+  try {
+    await f.render(true);
+    await f.click('Original');
+    expect(f.host.querySelector('[aria-label="当前会话后台状态"]') === null).toBe(true);
+    expect(f.host.textContent).not.toContain('会话工具');
+    await f.open();
+    await f.waitForText('Child prefix');
+    expect(f.host.textContent).toContain('Child prefix');
+    expect(f.host.textContent).not.toContain('已完整读取子日志至固定序号');
+    expect(f.host.textContent).not.toContain('original-child-run');
+  } finally {
+    await f.close();
+    if (previous) Object.defineProperty(globalThis, '__KITE_DESKTOP_TEST_DIAGNOSTICS__', previous);
+    else Reflect.deleteProperty(globalThis, '__KITE_DESKTOP_TEST_DIAGNOSTICS__');
+  }
+});
+
 test('live child navigation pauses parent history, updates the active child and restores the original draft', async () => {
   const f = fixture();
   try {
@@ -572,10 +664,14 @@ test('live child navigation pauses parent history, updates the active child and 
     await f.click('Original');
     expect(f.listeners.size).toBe(1);
     expect(f.host.textContent).toContain('Parent transcript');
-    expect(f.host.querySelector('textarea')!.value).toBe('Original private draft');
+    expect(promptValue(f.host.querySelector('[role="textbox"][contenteditable]'))).toBe(
+      'Original private draft',
+    );
     await f.open();
     await f.waitForText('Child prefix');
     expect(f.host.textContent).toContain('Child prefix');
+    expect(f.host.textContent).not.toContain('已完整读取子日志至固定序号');
+    expect(f.host.textContent).not.toContain('original-child-run');
     expect(f.host.textContent).not.toContain('Parent transcript');
     const parentReads = f.requests.filter((request) => request.method === 'messages').length;
     await f.update('Child prefix with live tail 雪🙂');
@@ -586,7 +682,9 @@ test('live child navigation pauses parent history, updates the active child and 
     await f.click('返回主会话');
     expect(f.host.textContent).toContain('Parent transcript');
     expect(f.host.textContent).not.toContain('Child prefix with live tail');
-    expect(f.host.querySelector('textarea')!.value).toBe('Original private draft');
+    expect(promptValue(f.host.querySelector('[role="textbox"][contenteditable]'))).toBe(
+      'Original private draft',
+    );
     expect(f.requests.filter((request) => request.method === 'messages').length).toBeGreaterThan(
       parentReads,
     );
@@ -608,7 +706,9 @@ test('opening the selected parent from child details returns without selecting a
     await f.waitForText('Parent transcript');
     expect(f.host.textContent).toContain('Parent transcript');
     expect(f.host.textContent).not.toContain('Child prefix');
-    expect(f.host.querySelector('textarea')!.value).toBe('Original private draft');
+    expect(promptValue(f.host.querySelector('[role="textbox"][contenteditable]'))).toBe(
+      'Original private draft',
+    );
     expect(f.requests.filter((request) => request.method === 'select')).toHaveLength(selections);
   } finally {
     await f.close();
@@ -622,7 +722,7 @@ test('repeated reply calibrations retain the footer controls and transcript DOM 
     await f.click('Original');
     const viewport = f.host.querySelector('.conversation-viewport'),
       message = f.host.querySelector('.message.assistant'),
-      input = f.host.querySelector('textarea'),
+      input = f.host.querySelector('[role="textbox"][contenteditable]'),
       permission = f.host.querySelector<HTMLButtonElement>('[data-permission-trigger]');
     expect(permission).not.toBeNull();
     expect(permission!.disabled).toBe(false);
@@ -633,7 +733,7 @@ test('repeated reply calibrations retain the footer controls and transcript DOM 
       await f.updateParent(text);
       expect(f.host.querySelector('.conversation-viewport') === viewport).toBe(true);
       expect(f.host.querySelector('.message.assistant') === message).toBe(true);
-      expect(f.host.querySelector('textarea') === input).toBe(true);
+      expect(f.host.querySelector('[role="textbox"][contenteditable]') === input).toBe(true);
       expect(f.host.querySelector('[data-permission-trigger]') === permission).toBe(true);
       expect(permission!.disabled).toBe(true);
       expect(message!.textContent).not.toContain(text);
@@ -659,9 +759,7 @@ test('repeated reply calibrations retain the footer controls and transcript DOM 
       false,
     );
     await f.unavailable(true);
-    expect(f.host.querySelector('[aria-label="当前会话后台状态"]')!.textContent).toContain(
-      '上次确认状态',
-    );
+    expect(f.host.querySelector('[aria-label="当前会话后台状态"]') === null).toBe(true);
     expect(
       f.requests.some((request) =>
         ['submit', 'caller.prepare', 'caller.submit', 'permission.mode'].includes(request.method),
@@ -681,7 +779,7 @@ test('ordinary history and View refreshes retain the processed status and timer;
     const status = f.host.querySelector('.agent-turn-status-label')!,
       timer = status.querySelector('span'),
       permission = f.host.querySelector('[data-permission-trigger]')!,
-      input = f.host.querySelector('.composer textarea');
+      input = f.host.querySelector('.composer [role="textbox"][contenteditable]');
     expect(status.textContent).toMatch(/^已处理 .*秒/);
     expect(timer).not.toBeNull();
     for (let index = 0; index < 8; index++) {
@@ -694,19 +792,17 @@ test('ordinary history and View refreshes retain the processed status and timer;
       await f.refreshing(true);
       expect(status.textContent).toMatch(/^已处理 .*秒/);
       expect(status.querySelector('span') === timer).toBe(true);
-      expect(f.host.querySelector('[aria-label="当前会话后台状态"]')).toBeNull();
+      expect(f.host.querySelector('[aria-label="当前会话后台状态"]') === null).toBe(true);
       expect(f.host.querySelector('[data-permission-trigger]')).toBe(permission);
       expect((permission as HTMLButtonElement).disabled).toBe(true);
-      expect(f.host.querySelector('.composer textarea')).toBe(input);
+      expect(f.host.querySelector('.composer [role="textbox"][contenteditable]')).toBe(input);
       await f.refreshing(false);
       expect(status.textContent).toMatch(/^已处理 .*秒/);
       expect(f.host.querySelector('[data-permission-trigger]')).toBe(permission);
     }
     await f.unavailable(true);
     expect(status.textContent).toBe('上次确认状态');
-    expect(f.host.querySelector('[aria-label="当前会话后台状态"]')?.textContent).toContain(
-      '上次确认状态',
-    );
+    expect(f.host.querySelector('[aria-label="当前会话后台状态"]') === null).toBe(true);
     expect(f.host.querySelector('[data-permission-trigger]')).toBeNull();
     await f.unavailable(false);
     expect(status.textContent).toMatch(/^已处理 .*秒/);
@@ -742,7 +838,9 @@ test('returning during a held child read closes its own reader and ignores late 
       await f.release();
       expect(f.host.textContent).toContain('Parent transcript');
       expect(f.host.textContent).not.toContain('Child prefix');
-      expect(f.host.querySelector('textarea')!.value).toBe('Original private draft');
+      expect(promptValue(f.host.querySelector('[role="textbox"][contenteditable]'))).toBe(
+        'Original private draft',
+      );
       await f.unmount();
       expect(f.listeners.size).toBe(0);
     }
@@ -767,8 +865,13 @@ test('returning keeps the cached parent readable but gates send, stop and permis
     f.holdParent();
     await f.click('返回主会话');
     expect(f.host.textContent).toContain('Parent transcript');
-    expect(f.host.querySelector('textarea')!.value).toBe('Original private draft');
-    expect(f.host.querySelector('textarea')!.disabled).toBe(false);
+    expect(promptValue(f.host.querySelector('[role="textbox"][contenteditable]'))).toBe(
+      'Original private draft',
+    );
+    expect(
+      f.host.querySelector('[role="textbox"][contenteditable]')!.getAttribute('contenteditable') !==
+        'true',
+    ).toBe(false);
     expect(action('引导当前轮次').disabled).toBe(true);
     await f.click('引导当前轮次');
     const permission = f.host.querySelector<HTMLButtonElement>('[data-permission-trigger]');

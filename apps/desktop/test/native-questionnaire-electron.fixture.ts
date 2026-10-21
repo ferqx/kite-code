@@ -4,6 +4,7 @@ import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { _electron } from 'playwright';
 import type { NativeDraft, NativeState } from '../src/native-bridge';
+import { promptText } from './prompt-editor-text.fixture';
 
 async function openSessionTools(page: import('playwright').Page) {
   const toggle = page.getByRole('button', { name: '会话工具', exact: true });
@@ -55,7 +56,11 @@ try {
         type,
         (event) => {
           const element = event.target as HTMLElement;
-          if (!element.closest('form')?.querySelector('textarea[aria-label="当前会话私有草稿"]'))
+          if (
+            !element
+              .closest('form')
+              ?.querySelector('[role="textbox"][aria-label="当前会话私有草稿"]')
+          )
             return;
           target.questionnaireEvents.push({
             type,
@@ -209,7 +214,7 @@ try {
     });
     const input = page.getByRole('textbox', { name: '当前会话私有草稿' });
     await input.fill(content);
-    assert.equal(await input.inputValue(), content);
+    assert.equal(await promptText(input), content);
     await page.getByRole('button', { name: '发送明确的新轮次', exact: true }).click();
     assert.equal(
       await page.evaluate(
@@ -226,7 +231,7 @@ try {
       await page.waitForTimeout(20);
     }
     await input.fill(originalDraft);
-    assert.equal(await input.inputValue(), originalDraft);
+    assert.equal(await promptText(input), originalDraft);
     // The existing explicit private draft save is the cross-session Main draft contract.
     await page
       .getByText('历史已完整读取至固定高水位；当前执行事实仍须核实。', { exact: true })
@@ -270,9 +275,9 @@ try {
     /Full original description\nUnicode 尾部/,
   );
   await page.getByRole('button', { name: '下一题', exact: true }).click();
-  await page.getByText('问题 2/3', { exact: true }).waitFor();
+  await page.getByText('问题 2 / 3', { exact: true }).waitFor();
   await page.getByRole('button', { name: '下一题', exact: true }).click();
-  await page.getByText('问题 3/3', { exact: true }).waitFor();
+  await page.getByText('问题 3 / 3', { exact: true }).waitFor();
   assert.equal(
     await page.getByRole('button', { name: '提交回答', exact: true }).isDisabled(),
     true,
@@ -300,9 +305,9 @@ try {
   await page.getByRole('button', { name: '上一题', exact: true }).click();
   await page.getByRole('radio', { name: 'Alpha (Recommended)', exact: true }).check();
   await page.getByRole('button', { name: '下一题', exact: true }).click();
-  await page.getByText('问题 2/3', { exact: true }).waitFor();
+  await page.getByText('问题 2 / 3', { exact: true }).waitFor();
   await page.getByRole('button', { name: '下一题', exact: true }).click();
-  await page.getByText('问题 3/3', { exact: true }).waitFor();
+  await page.getByText('问题 3 / 3', { exact: true }).waitFor();
   assert.equal(await posts(), 0);
   await page.getByRole('button', { name: '提交回答', exact: true }).click();
   await page.getByRole('form', { name: 'Questionnaire' }).waitFor({ state: 'detached' });
@@ -310,7 +315,7 @@ try {
   await completed(first.runId!);
   await page.getByRole('textbox', { name: '当前会话私有草稿' }).waitFor();
   assert.equal(
-    await page.getByRole('textbox', { name: '当前会话私有草稿' }).inputValue(),
+    await promptText(page.getByRole('textbox', { name: '当前会话私有草稿' })),
     mainDraft,
   );
   assert.equal(await posts(), 1);
@@ -322,12 +327,12 @@ try {
     3,
   );
   assert.notEqual(second.runId, first.runId);
-  await page.getByRole('button', { name: 'Cancel answering', exact: true }).click();
+  await page.getByRole('button', { name: '取消回答', exact: true }).click();
   await page.getByRole('form', { name: 'Questionnaire' }).waitFor({ state: 'detached' });
   await completed(second.runId!);
   await page.getByRole('textbox', { name: '当前会话私有草稿' }).waitFor();
   assert.equal(
-    await page.getByRole('textbox', { name: '当前会话私有草稿' }).inputValue(),
+    await promptText(page.getByRole('textbox', { name: '当前会话私有草稿' })),
     cancelDraft,
   );
   assert.equal(await posts(), 2);

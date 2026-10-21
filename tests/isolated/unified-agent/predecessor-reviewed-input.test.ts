@@ -49,9 +49,13 @@ test('six reviewed raw pairs retain actual predecessor/current hashes and explic
       expect(result.match).toBe('reviewed_locked_input_increment');
       expect(String(result.predecessorCommit)).toBe(commit);
       expect(result.reviewScope).toBe(
-        path === 'package.json'
-          ? 'approved_input_increments_2026_10_19'
-          : 'approved_input_increments_2026_10_18',
+        path === 'bun.lock' ||
+          path === 'packages/ui/package.json' ||
+          path === 'packages/agent/package.json'
+          ? 'approved_input_increments_2026_10_21'
+          : path === 'package.json'
+            ? 'approved_input_increments_2026_10_19'
+            : 'approved_input_increments_2026_10_18',
       );
       expect(result.previousSha256).toBe(sha(previous));
       expect(result.currentSha256).toBe(sha(actual));
@@ -61,6 +65,10 @@ test('six reviewed raw pairs retain actual predecessor/current hashes and explic
         expect(result.commits).toContain('eeea65f5f2cc14f7fab76218cb9e9506ebbbc58e');
       if (path === 'packages/agent/package.json')
         expect(result.commits).toContain('bcf70ce843463194ab91ca3938b9fa1375cb22bc');
+      if (path === 'bun.lock' || path === 'packages/ui/package.json')
+        expect(result.commits).toContain('5dba8a6bd5fe348aef130f83694b0453e98833ea');
+      if (path === 'packages/agent/package.json')
+        expect(result.commits).toContain('044df65ff6bffadc4ae4087a0a866b823d9a87e6');
       expect(result.increments.length).toBeGreaterThan(0);
       if (path === 'package.json') {
         expect(result.increments).toContain('model_collaboration_live_script');
@@ -143,6 +151,7 @@ test('exact resolved additions and old closure reject version, URL, dependency, 
     text.replace(openai, `${openai}\n${openai}`),
     text.replace(utils, `${utils}\n${utils}`),
     text.replace('provider-utils@5.0.7', 'provider-utils@5.0.8'),
+    text.replace('lexical@0.52.0', 'lexical@0.52.1'),
   ];
   for (const changed of changes) {
     expect(changed).not.toBe(text);
@@ -175,10 +184,17 @@ test('exact live script and build/entry increments cannot be omitted, duplicated
     'packages/agent/package.json': [
       ['    "./session-title": "./src/business/session-title/index.ts"\n', ''],
       ['--target=bun', '--target=browser'],
+      [' && bun src/skills/workflow-contract/build-assets.ts dist', ''],
+      [
+        'workflow-contract/build-assets.ts dist',
+        'workflow-contract/build-assets.ts dist && echo injected',
+      ],
     ],
     'packages/ui/package.json': [
       ['    "./tui/ink": "./src/tui/ink.ts"\n', ''],
       ['"react-dom": "^19"', '"react-dom": "^20"'],
+      ['    "@lexical/code-core": "0.52.0",\n', ''],
+      ['"lexical": "0.52.0"', '"lexical": "0.52.1"'],
     ],
     'apps/service/package.json': [
       ['--target=bun', '--target=browser'],

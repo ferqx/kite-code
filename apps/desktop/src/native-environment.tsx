@@ -103,7 +103,16 @@ export function environmentDisplay(
     children = new Map<string, string>();
   for (const item of items) {
     const e = item.execution;
-    if (!e.childSessionId && e.definitionId !== 'shell.command') continue;
+    // Automatic title generation stays in execution history, outside this task list.
+    if (
+      e.definitionId === 'agent/session-title' ||
+      (!e.childSessionId &&
+        (e.definitionId !== 'shell.command' ||
+          item.sourceTool?.id !== e.parentExecutionId ||
+          item.sourceTool?.definitionId !== 'shell.launch' ||
+          item.sourceTool?.definitionVersion !== '1'))
+    )
+      continue;
     const restored = e.originStoreId !== storeId;
     const status: BackgroundExecutionSummary['status'] = restored
       ? 'restored'
@@ -141,6 +150,7 @@ export function useNativeEnvironment({
   historyEpoch = 0,
   unavailable,
   controlUnavailable = false,
+  paused = false,
   submissions,
   onChanged,
 }: {
@@ -151,6 +161,8 @@ export function useNativeEnvironment({
   historyEpoch?: number;
   unavailable: boolean;
   controlUnavailable?: boolean;
+  /** A known selection handoff pauses IO while retaining the displayed card. */
+  paused?: boolean;
   submissions?: readonly NativeCallerMetadata[];
   onChanged: () => Promise<void>;
 }) {
@@ -209,10 +221,10 @@ export function useNativeEnvironment({
   >(undefined);
   const latest = useRef(view);
   latest.current = view;
-  const readable = useRef(!unavailable);
-  readable.current = !unavailable;
-  const control = useRef({ unavailable, controlUnavailable });
-  control.current = { unavailable, controlUnavailable };
+  const readable = useRef(!unavailable && !paused);
+  readable.current = !unavailable && !paused;
+  const control = useRef({ unavailable: unavailable || paused, controlUnavailable });
+  control.current = { unavailable: unavailable || paused, controlUnavailable };
   // biome-ignore lint/correctness/useExhaustiveDependencies: A new authority epoch releases retained old data.
   useEffect(() => {
     childCache.current.clear();
@@ -237,6 +249,16 @@ export function useNativeEnvironment({
   useEffect(() => {
     if (!bridge || !scope || !storeId || !rootSessionId || !viewSelection || !cacheKey) return;
     const display = cache.current.get(cacheKey);
+    if (paused) {
+      setView((previous) => ({
+        scope,
+        display,
+        facts: previous?.scope === scope ? previous.facts : undefined,
+        busy: true,
+        error: previous?.scope === scope ? previous.error : undefined,
+      }));
+      return;
+    }
     if (unavailable) {
       setView({ scope, display, busy: false, error: 'environment_unavailable' });
       return;
@@ -308,6 +330,7 @@ export function useNativeEnvironment({
     cacheKey,
     directoryTick,
     unavailable,
+    paused,
   ]);
   useEffect(() => {
     const before = lastDirectoryRevision.current;
@@ -315,13 +338,14 @@ export function useNativeEnvironment({
     if (
       before.scope !== scope ||
       (before.revision === revision && before.refresh === refresh) ||
-      unavailable
+      unavailable ||
+      paused
     )
       return;
     if (pendingRead.current?.scope === scope || stopBusy.current?.scope === scope)
       directoryQueued.current = true;
     else setDirectoryTick((value) => value + 1);
-  }, [scope, revision, refresh, unavailable]);
+  }, [scope, revision, refresh, unavailable, paused]);
 
   async function runChild(job: ChildJob) {
     if (job.running) return;
@@ -505,7 +529,8 @@ export function useNativeEnvironment({
     }
   }
   function openChild(sessionId: string, executionId?: string) {
-    if (!bridge || !scope || !storeId || !rootSessionId || !viewSelection || unavailable) return;
+    if (!bridge || !scope || !storeId || !rootSessionId || !viewSelection || unavailable || paused)
+      return;
     childNavigation.current = { scope, sessionId, executionId };
     childRead.current?.abort();
     const abort = new AbortController();
@@ -534,12 +559,16 @@ export function useNativeEnvironment({
   // A completed directory revision queues one tail read; changes during a read coalesce.
   // biome-ignore lint/correctness/useExhaustiveDependencies: The owned job captures its exact navigation scope.
   useEffect(() => {
-    if (unavailable) {
+    if (unavailable || paused) {
       childRead.current?.abort();
       childJob.current = undefined;
       setChild((previous) =>
         previous && previous.scope === scope
-          ? { ...previous, loading: false, error: 'environment_unavailable' }
+          ? {
+              ...previous,
+              loading: paused && !previous.error,
+              error: paused ? previous.error : 'environment_unavailable',
+            }
           : previous,
       );
       return;
@@ -555,11 +584,12 @@ export function useNativeEnvironment({
     job.queuedDirectoryFacts = view.facts;
     job.queued = true;
     void runChild(job);
-  }, [view?.facts, scope, unavailable]);
+  }, [view?.facts, scope, unavailable, paused]);
 
   const current = view?.scope === scope ? view : undefined,
     display = current?.display ?? (cacheKey ? cache.current.get(cacheKey) : undefined),
-    stale = !current?.facts || current.busy || !!current.error || unavailable;
+    stale = !!current?.error || (!paused && unavailable),
+    busy = !stale && (paused || !current?.facts || current.busy || controlUnavailable);
   const blocked = new Set(
     submissions
       ?.filter(
@@ -578,7 +608,7 @@ export function useNativeEnvironment({
       !bridge ||
       !scope ||
       stale ||
-      controlUnavailable ||
+      busy ||
       !facts ||
       !item ||
       !execution.canStop ||
@@ -684,11 +714,12 @@ export function useNativeEnvironment({
           }
           currentOnly
           stale={stale}
+          busy={busy}
           stoppingExecutionId={stopping}
-          onStop={!stale && !controlUnavailable ? (execution) => void stop(execution) : undefined}
+          onStop={!stale ? (execution) => void stop(execution) : undefined}
           subagentDetails={{
             sessionIdsByExecutionId: display?.children ?? new Map(),
-            loading: current?.busy ?? true,
+            loading: !display && (current?.busy ?? true),
             error: current?.error,
             onOpen: (sessionId, executionId) => void openChild(sessionId, executionId),
             onRefresh: () => setRefresh((value) => value + 1),

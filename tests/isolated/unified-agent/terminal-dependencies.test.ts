@@ -12,6 +12,7 @@ import {
   symlinkSync,
   writeFileSync,
 } from 'node:fs';
+import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve, sep } from 'node:path';
 import { copyTerminalDependencies } from '../../../scripts/release/terminal-dependencies';
@@ -222,7 +223,32 @@ test('real locked terminal workspace graph copies actual native assets and resol
         readFileSync(join(asset.source, binary!)),
       );
     }
-    expect(report.packages.some((p) => p.name === 'typescript')).toBe(false);
+    // Lexical declares an installed optional production peer. Root dev dependencies
+    // alone do not admit a package; this exact declared edge owns its inclusion.
+    const uiRequire = createRequire(join(repositoryRoot, 'packages/ui/package.json'));
+    const lexicalManifestPath = uiRequire.resolve('lexical/package.json');
+    const lexicalManifest = JSON.parse(readFileSync(lexicalManifestPath, 'utf8'));
+    expect(lexicalManifest.version).toBe('0.52.0');
+    expect(lexicalManifest.peerDependencies.typescript).toBe('>=5.2');
+    expect(lexicalManifest.peerDependenciesMeta.typescript).toEqual({ optional: true });
+    const lexicalRequire = createRequire(lexicalManifestPath);
+    const typescriptSource = realpathSync(
+      dirname(lexicalRequire.resolve('typescript/package.json')),
+    );
+    const typescriptManifest = JSON.parse(
+      readFileSync(join(typescriptSource, 'package.json'), 'utf8'),
+    );
+    const typescriptCopies = report.packages.filter((p) => p.name === 'typescript');
+    expect(typescriptCopies).toHaveLength(1);
+    expect(typescriptCopies[0]!.source).toBe(typescriptSource);
+    expect(typescriptCopies[0]!.version).toBe(typescriptManifest.version);
+    const lexicalCopy = report.packages.find(
+      (p) => p.source === realpathSync(dirname(lexicalManifestPath)),
+    )!;
+    expect(lexicalCopy).toBeDefined();
+    expect(
+      realpathSync(join(destination, lexicalCopy.destination, 'node_modules/typescript')),
+    ).toBe(realpathSync(join(destination, typescriptCopies[0]!.destination)));
     expect(report.packages.some((p) => p.name === 'ink')).toBe(true);
     expect(report.packages.some((p) => p.name === 'react')).toBe(true);
     expect(report.packages.some((p) => p.name === 'punycode')).toBe(true);

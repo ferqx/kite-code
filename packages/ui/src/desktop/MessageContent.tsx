@@ -9,14 +9,27 @@ import {
 } from 'react';
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import { useConversationReadActive } from '../conversation-activity';
 import { type PreparedDesktopMarkdown, reuseDesktopMarkdownParse } from './markdown-parse-cache';
 
 type MarkdownNode = {
   type: string;
   tagName?: string;
   value?: string;
+  spread?: boolean;
   children?: MarkdownNode[];
 };
+
+/** Preserve paragraph boxes in tight lists, including text after a code block. */
+function retainListParagraphs() {
+  return (tree: MarkdownNode) => {
+    const pending = [tree];
+    for (let node = pending.pop(); node; node = pending.pop()) {
+      if (node.type === 'list') node.spread = true;
+      if (node.children) pending.push(...node.children);
+    }
+  };
+}
 
 /** Keep long text nodes small without omitting text or changing its normal inline flow. */
 function segmentLongTextNodes() {
@@ -53,6 +66,7 @@ const FileLinkContext = createContext<((path: string) => void) | undefined>(unde
 
 function MarkdownLink({ href, children }: { href?: string; children?: ReactNode }) {
   const openFile = useContext(FileLinkContext);
+  const readActive = useConversationReadActive();
   if (!href) return <span>{children}</span>;
   if (/^https?:\/\//i.test(href))
     return (
@@ -66,7 +80,9 @@ function MarkdownLink({ href, children }: { href?: string; children?: ReactNode 
     <button
       type="button"
       className="file-link"
+      aria-disabled={!readActive || undefined}
       onClick={() => {
+        if (!readActive) return;
         let path = href;
         try {
           path = decodeURIComponent(href);
@@ -78,6 +94,19 @@ function MarkdownLink({ href, children }: { href?: string; children?: ReactNode 
     >
       {children}
     </button>
+  );
+}
+
+function MarkdownTable({ children }: { children?: ReactNode }) {
+  return (
+    <section
+      className="markdown-table-scroll"
+      aria-label="表格"
+      // biome-ignore lint/a11y/noNoninteractiveTabindex: Wide tables need a keyboard-scrollable reading region.
+      tabIndex={0}
+    >
+      <table>{children}</table>
+    </section>
   );
 }
 
@@ -115,11 +144,12 @@ const MarkdownContent = memo(function MarkdownContent({
   return (
     <div className="typeset typeset-chat">
       <Markdown
-        remarkPlugins={[remarkGfm, [reuseDesktopMarkdownParse, prepared]]}
+        remarkPlugins={[remarkGfm, [reuseDesktopMarkdownParse, prepared], retainListParagraphs]}
         rehypePlugins={[segmentLongTextNodes]}
         skipHtml
         components={{
           a: MarkdownLink,
+          table: MarkdownTable,
           // Message bodies must not fetch remote images or interpret local paths as web assets.
           img: ({ alt }) => (
             <span className="image-description">{alt ? `图片：${alt}` : '图片'}</span>

@@ -67,7 +67,10 @@ export function NativeGeneralSettings({
   const facts = state.identity === identity ? state.facts : undefined;
   const model = facts?.models.find((model) => model.id === facts.defaultModelId);
   return (
-    <section aria-label="常规设置">
+    <section
+      aria-label="常规设置"
+      aria-busy={(!facts && !(state.identity === identity && state.error)) || undefined}
+    >
       <h2>常规</h2>
       <h3>文件与模型</h3>
       <div className="settings-card">
@@ -100,7 +103,7 @@ export function NativeGeneralSettings({
                   : '尚未选择'
               : state.identity === identity && state.error
                 ? '读取失败'
-                : '正在读取'}
+                : ''}
           </span>
         </div>
       </div>

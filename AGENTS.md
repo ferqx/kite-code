@@ -27,6 +27,8 @@
 
 只有主 Agent 可以 stage、commit、push 或创建 PR。同一 current authority 的并发任务必须串行，先合并再 rebase 和复验。临时 worktree 验证后默认 fast-forward 合回原分支并清理；需要独立 PR、用户要求保留或无法安全合并时再确认方向。
 
+Windows 工作树禁止用 junction／symlink 共享主仓库或其他工作树的 `node_modules`、源码和缓存；依赖应独立安装。归档、删除工作树或其关联聊天前，必须按[工作树清理规则](docs/development/worktree-safety.md)运行只读检查；存在任何目录／文件联接或检查失败时停止清理。不得直接调用归档工具、`git worktree remove --force` 或递归删除绕过检查，也不得以归档快照成功代替路径安全。清理前后核主仓库文件及原未提交改动，异常立即停止。
+
 ## 阶段与提交门禁
 
 已确认且需留作后续实施依据的设计执行 `design_complete`。实施改变产品行为、实现边界或文档时，在迭代完成执行 `iteration_complete`；行为和边界不变时只需说明核对依据。工具调用和进度更新不单独构成阶段；普通小修复不强制新建计划或设计标记。

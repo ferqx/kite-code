@@ -28,7 +28,11 @@ Windows原对象pin现以实际读取/遍历权限建立共享保护，区域锁
 
 显式 `desktop:dev` 可由 builder 固定开发 loopback renderer／nonce 和独立认证父控制连接，用于 UI Fast Refresh 与 Service 新字节重载；只允许明确 development 资产，正式 candidate 拒绝开发配置。重载在原配套服务退出0后使用新 SHA／build 身份准入，保留原 Profile／Store／申请并保持零自动重放，未知关闭或回执不启动后续替代。Vite 不服务 Profile 或私有应用资源，父认证 token 不进入 renderer／argv／日志。当前实现及仅开发模式的 Windows 实际证据归[Desktop owner](../../apps/desktop/README.md#开发热更新与服务重载)，不扩展正式 Runtime protection、installed Main 加载政策或三平台资格。
 
+Windows `desktop:dev` 在构建前可向当前 npm Electron 的独立物理 `dist` 追加受限应用包读取／执行权限；完整预检拒绝链接、硬链接和适用的拒绝 ACE，权限已满足时不写入。该准备只属于显式开发入口，不覆盖项目、私有应用目录、Profile 或正式候选，也不关闭浏览器沙箱。范围、实现与重装后实际沙箱验证归 [Desktop owner](../../apps/desktop/README.md)；正式 Runtime protection、installed Main 和发布安装 ACL 契约保持。
+
 完整候选只物化生成 exports 真正需要的解析边。当前唯一内联的核心图标依赖归[UI build owner](../../packages/ui/README.md#原桌面展示层)：其他 external／peer、原 exports／CSS与准确许可保持，builder拒绝残留该包的外部引用。复制器不能以内联声明跳过 peer、optional或workspace；新闭包的全部文件仍纳入原manifest和每次独立完整校验。此构建收束不改变三次准入、双使用锁或平台完成约束。
+
+Native非development renderer的React／JSX模式由[builder](../../apps/desktop/scripts/build-native.ts)固定为production，不继承测试调用进程环境；显式测试诊断常量独立封存，普通dev／prod关闭要求保持，Vite开发服务器仍走原开发分支。原child-stream真实资产守卫与窗口门禁核开发栈不混入正式renderer，具体范围归[Native发行owner](../../apps/desktop/docs/native-release.md)。此修正不改变候选身份、完整库存或平台发布资格。
 
 `release:build` / `verify` / `smoke` / `install` 使用[新工具](../../scripts/release/unified.ts)。默认 product 为 terminal，Native 明确 `--product native`。两种制品分别有完整 manifest/文件哈希，Native 包含完整 Terminal 和实际 Electron。archive SHA 绑定压缩字节，candidate ID 绑定 manifest；未签名 checksum 不证明发布者身份、provenance、公证或 attestation。 可信Native MCP测试候选仅由builder固定`native-mcp-loopback`选项在构建前写入专用ProcessHost和可选公开证书，所有字节纳入同一inventory/digest；普通生产main/daemon未选择该选项。其loopback/TLS测试网络必须声明productionDefaultNetwork=false，不能将默认browser/backend/permissions装配或局部窗口通过冒称完整生产/平台资格。
 

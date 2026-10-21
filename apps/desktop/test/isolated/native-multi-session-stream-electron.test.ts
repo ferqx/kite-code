@@ -234,15 +234,27 @@ test.skipIf(process.platform !== 'darwin')(
         }
         const body = (await request.json()) as { messages: { role: string; content: unknown }[] };
         if (calls.length === 0) owner?.capture();
+        const rootTasks = Array.from({ length: 4 }, (_, index) => ({
+          source: `MULTI_ROOT_${index}`.replaceAll('_', '\\_'),
+          original: `ROOT_${index}`,
+        }));
+        const childTasks = Array.from({ length: 4 }, (_, index) =>
+          Array.from({ length: 3 }, (_, child) => ({
+            source: `MULTI_CHILD_${index}_${child}`,
+            original: `CHILD_${index}_${child}`,
+          })),
+        ).flat();
+        const originalTasks = [...rootTasks, ...childTasks];
         const input = [...body.messages]
           .reverse()
           .find(
             (row) =>
               row.role === 'user' &&
               typeof row.content === 'string' &&
-              /^MULTI_(ROOT_\d|CHILD_\d_\d)$/.test(row.content),
+              originalTasks.some((task) => task.source === row.content),
           );
-        const original = String(input?.content).replace('MULTI_', '');
+        const original =
+          originalTasks.find((task) => task.source === input?.content)?.original ?? '';
         if (!/^(ROOT_\d|CHILD_\d_\d)$/.test(original)) throw Error('provider_marker_missing');
         const tools = body.messages.filter((row) => row.role === 'tool').length;
         calls.push(`${original}:${tools ? 'after-tools' : 'initial'}`);

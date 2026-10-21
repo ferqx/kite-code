@@ -137,7 +137,10 @@ test('Job DOM waits for full coverage then keeps every ordinary Unicode chunk in
     await render(bridge, selected(), 0, true);
     expect(calls).toHaveLength(0);
     await click(host, '读取完整已保存输出');
-    expect(host.textContent).toContain('正在读取完整已保存输出');
+    expect(host.textContent).not.toContain('正在读取');
+    expect(host.querySelector('[aria-label^="Job 已保存输出"]')?.getAttribute('aria-busy')).toBe(
+      'true',
+    );
     expect(host.querySelector('pre')).toBeNull();
     expect(host.textContent).not.toContain('已完整读取截至');
     await act(async () =>

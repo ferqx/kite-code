@@ -358,7 +358,9 @@ async function run(page: Page, index: number) {
       'submit',
       (event) => {
         if (
-          (event.target as HTMLFormElement).querySelector('textarea[aria-label="当前会话私有草稿"]')
+          (event.target as HTMLFormElement).querySelector(
+            'textarea[aria-label="当前会话私有草稿"], [role="textbox"][aria-label="当前会话私有草稿"]',
+          )
         )
           events.push(event.type);
       },

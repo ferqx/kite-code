@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { inputFileReferences } from '../../input-files';
 import { canonicalJson } from '../../json';
 import type {
   BeginHumanInputProcessing,
@@ -11,6 +12,7 @@ import type {
   RegisterHumanInput,
 } from '../human-work-control';
 import { AgentError, type CommandRecord, type Json } from '../types';
+import { assertInputImages } from './artifact-operations';
 import { cancelWorkBody } from './cancel-operations';
 import { validateInputAdmission } from './input-operations';
 import { assertHumanWorkContinuable, continueHumanWork } from './job-report-continuation';
@@ -230,10 +232,14 @@ function registerHumanInputWork(
 ): CommandRecord {
   const session = root(db, input);
   id(input.commandId);
+  const hasAttachments =
+    input.originalRequest &&
+    (('images' in input.originalRequest && input.originalRequest.images?.length) ||
+      ('files' in input.originalRequest && input.originalRequest.files?.length));
   if (
     typeof input.content !== 'string' ||
     (!input.content.trim() && publicCommandId === null) ||
-    input.content.length === 0 ||
+    (input.content.length === 0 && !hasAttachments) ||
     Buffer.byteLength(input.content) > 1024 * 1024
   )
     throw new AgentError('invalid_input_request');
@@ -273,6 +279,8 @@ function registerHumanInputWork(
           ![
             'kind',
             'content',
+            'images',
+            'files',
             'targetRunId',
             'afterRunId',
             'contextSelectionId',
@@ -284,6 +292,9 @@ function registerHumanInputWork(
       )
     )
       throw new AgentError('invalid_input_request');
+    if ('images' in raw && raw.images !== undefined)
+      assertInputImages(db, { ...input, images: raw.images });
+    if ('files' in raw && raw.files !== undefined) inputFileReferences(raw.files);
   }
   const observed =
     input.observedRunId === null
@@ -776,6 +787,12 @@ export function decideHumanInput(
             afterRunId: predecessor ? String(predecessor.id) : null,
             contextSelectionId: String(session.context_selection_id),
           };
+      // Attachments belong to this exact human input, independently of whether
+      // its business work inherits A's configuration or selects a new work.
+      const originalRequest = parse(original.request_json).originalRequest;
+      if (originalRequest && typeof originalRequest === 'object' && !Array.isArray(originalRequest))
+        for (const key of ['images', 'files'])
+          if (Object.hasOwn(originalRequest, key)) businessRequest[key] = originalRequest[key]!;
       if (!sameActive && proposal.relation === 'independent_work') {
         const originalRequest = parse(original.request_json).originalRequest;
         if (

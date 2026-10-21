@@ -372,8 +372,10 @@ export function createDefaultSkillCatalogueSource(options: {
       disposal = Promise.allSettled([...pending]).then(async () => {
         const results = await Promise.allSettled([knowledgeScope.dispose()]);
         const failures = [
-          ...results.flatMap((result) => (result.status === 'rejected' ? [result.reason] : [])),
-          ...retainedPreparationFailures,
+          ...new Set([
+            ...results.flatMap((result) => (result.status === 'rejected' ? [result.reason] : [])),
+            ...retainedPreparationFailures,
+          ]),
         ];
         if (failures.length === 1) throw failures[0];
         if (failures.length > 1)

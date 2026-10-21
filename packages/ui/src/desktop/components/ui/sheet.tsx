@@ -13,6 +13,7 @@ const SheetOverlay = React.forwardRef<
   React.ComponentPropsWithoutRef<typeof DialogPrimitive.Overlay>
 >(({ className, ...props }, ref) => (
   <DialogPrimitive.Overlay
+    data-slot="sheet-overlay"
     ref={ref}
     className={cn('fixed inset-0 z-50 bg-black/50', className)}
     {...props}
@@ -35,6 +36,8 @@ const SheetContent = React.forwardRef<
       <>
         <SheetOverlay />
         <DialogPrimitive.Content
+          data-slot="sheet-content"
+          data-side={side}
           ref={ref}
           className={cn(
             'fixed z-50 flex flex-col bg-background shadow-lg',
@@ -49,7 +52,7 @@ const SheetContent = React.forwardRef<
         >
           {children}
           {showCloseButton && (
-            <DialogPrimitive.Close className="absolute right-4 top-4 rounded-sm opacity-70 transition-opacity hover:opacity-100 focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:pointer-events-none">
+            <DialogPrimitive.Close className="absolute right-4 top-4 rounded-sm opacity-70 transition-opacity hover:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none">
               <HugeiconsIcon icon={Cancel01Icon} />
               <span className="sr-only">关闭</span>
             </DialogPrimitive.Close>

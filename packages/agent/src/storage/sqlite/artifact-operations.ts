@@ -7,6 +7,8 @@ import {
   verifyPublishedArtifact,
   verifyPublishedArtifactSteps,
 } from '../../artifacts-files';
+import { inputImages } from '../../input-images';
+import { canonicalJson } from '../../json';
 import { assertNoSymlinkPath } from '../../platform/profile-identity';
 import type { Store } from '../port';
 import { AgentError, type ArtifactReference, type ArtifactScope } from '../types';
@@ -83,6 +85,31 @@ function verifyArtifact(ops: SqliteOperations, input: Register, requestId?: numb
   if (artifactIdentity(profile, input) !== state.identity)
     throw new AgentError('artifact_content_mismatch');
   return state.identity;
+}
+export function assertInputImages(
+  ops: SqliteOperations,
+  input: { expectedStoreId: string; sessionId: string; subjectId: string; images: unknown },
+): void {
+  if (!Array.isArray(input.images) || input.images.length > 10)
+    throw new AgentError('input_image_invalid');
+  for (const image of inputImages(input.images)) {
+    const ref = image.reference;
+    if (
+      ref.storeId !== input.expectedStoreId ||
+      ref.sessionId !== input.sessionId ||
+      ref.subjectId !== input.subjectId
+    )
+      throw new AgentError('input_image_scope_mismatch');
+    const lookup = { ...input, refId: ref.id, scope: ref.scope };
+    scope(ops, lookup, true);
+    const original = get(ops, lookup);
+    if (
+      !original ||
+      canonicalJson(original as unknown as import('../types').Json) !==
+        canonicalJson(ref as unknown as import('../types').Json)
+    )
+      throw new AgentError('input_image_scope_mismatch');
+  }
 }
 function validate(input: Get): void {
   if (

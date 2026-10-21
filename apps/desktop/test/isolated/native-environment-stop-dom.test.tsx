@@ -4,7 +4,7 @@ import { JSDOM } from 'jsdom';
 import { act } from 'react';
 import type { NativeBridge, NativeSelection } from '../../src/native-bridge';
 import { useNativeEnvironment } from '../../src/native-environment';
-import { backgroundItem } from '../background-item.fixture';
+import { backgroundShellItem } from '../background-item.fixture';
 
 const bootstrap = new JSDOM('<div/>');
 const prior = {
@@ -41,7 +41,7 @@ function fixture() {
     IS_REACT_ACT_ENVIRONMENT: true,
   });
   const root = createRoot(dom.window.document.getElementById('root')!);
-  const item = backgroundItem(1, true);
+  const item = backgroundShellItem(1);
   let observation = 0,
     opens = 0,
     stops = 0,
@@ -49,6 +49,10 @@ function fixture() {
     sessionId = 'root';
   let heldDirectory: ReturnType<typeof deferred> | undefined,
     heldStop: ReturnType<typeof deferred> | undefined;
+  let unavailable = false,
+    controlUnavailable = false,
+    directoryFailed = false,
+    empty = false;
   let stopObservation: number | undefined;
   let stopUnknown = false;
   let click!: () => void;
@@ -61,6 +65,7 @@ function fixture() {
           wait = heldDirectory;
         heldDirectory = undefined;
         if (wait) await wait.promise;
+        if (directoryFailed) throw Error('fixture_environment_unavailable');
         return {
           kind: 'background.page',
           viewGeneration: 1,
@@ -70,10 +75,10 @@ function fixture() {
           readId: request.readId,
           observationId: id,
           startIndex: 0,
-          nextIndex: 1,
-          total: 1,
+          nextIndex: empty ? 0 : 1,
+          total: empty ? 0 : 1,
           complete: true,
-          entries: [{ ...item, rootSession: { ...item.rootSession, id: sessionId } }],
+          entries: empty ? [] : [{ ...item, rootSession: { ...item.rootSession, id: sessionId } }],
         };
       }
       if (request.method === 'background.stop') {
@@ -102,21 +107,26 @@ function fixture() {
         canReadModelOutput: false,
       } as NativeSelection,
       revision,
-      unavailable: false,
+      unavailable,
+      controlUnavailable,
       onChanged: async () => {},
     });
     // Retain the previously actionable event handler, exercising an event accepted
     // before React commits the pending-directory disabled state.
     const card = environment.card as React.ReactElement<{
-      children: React.ReactElement<{ onStop?: (row: BackgroundExecutionSummary) => void }>[];
+      children: React.ReactElement<{
+        onStop?: (row: BackgroundExecutionSummary) => void;
+        busy?: boolean;
+      }>[];
     }>;
     const handler = card?.props.children[0]?.props.onStop;
-    if (handler)
+    if (handler && !card.props.children[0]?.props.busy)
       click = () =>
         handler({ executionId: item.execution.id, canStop: true } as BackgroundExecutionSummary);
     return environment.card;
   }
   return {
+    host: dom.window.document,
     get opens() {
       return opens;
     },
@@ -144,6 +154,18 @@ function fixture() {
       heldStop = deferred();
       return heldStop;
     },
+    unavailable(value: boolean) {
+      unavailable = value;
+    },
+    controlUnavailable(value: boolean) {
+      controlUnavailable = value;
+    },
+    failDirectory(value: boolean) {
+      directoryFailed = value;
+    },
+    emptyDirectory() {
+      empty = true;
+    },
     async render(nextRoot = sessionId) {
       sessionId = nextRoot;
       revision++;
@@ -156,6 +178,71 @@ function fixture() {
     },
   };
 }
+test('routine environment refresh retains card text and controls while blocking writes; actual failures stay visible', async () => {
+  const f = fixture();
+  let held: ReturnType<typeof deferred> | undefined;
+  try {
+    await f.render();
+    const card = f.host.querySelector('[aria-label="环境信息"]')!;
+    const text = card.textContent;
+    const stop = card.querySelector<HTMLButtonElement>('.background-execution-stop')!;
+    expect(stop).not.toBeNull();
+    expect(stop.disabled).toBe(false);
+    held = f.holdDirectory();
+    await f.render();
+    expect(f.host.querySelector('[aria-label="环境信息"]')).toBe(card);
+    expect(card.textContent).toBe(text);
+    expect(card.querySelector('.background-stale')).toBeNull();
+    expect(card.querySelector('.background-execution-stop')).toBe(stop);
+    expect(stop.disabled).toBe(true);
+    await act(async () => stop.click());
+    expect(f.stops).toBe(0);
+    await f.render();
+    expect(card.textContent).toBe(text);
+    await act(async () => held!.resolve());
+    expect(card.querySelector('.background-execution-stop')).toBe(stop);
+    expect(stop.disabled).toBe(false);
+    f.controlUnavailable(true);
+    await f.render();
+    expect(card.textContent).toBe(text);
+    expect(card.querySelector('.background-execution-stop')).toBe(stop);
+    expect(stop.disabled).toBe(true);
+    f.controlUnavailable(false);
+    f.failDirectory(true);
+    await f.render();
+    expect(card.textContent).toContain('上次状态 · 待核实');
+    expect(card.textContent).toContain('fixture_environment_unavailable');
+    expect(card.querySelector('.background-execution-stop')).toBeNull();
+    f.unavailable(true);
+    await f.render();
+    expect(card.textContent).toContain('environment_unavailable');
+    expect(f.stops).toBe(0);
+  } finally {
+    held?.resolve();
+    await f.close();
+  }
+});
+
+test('a verified empty environment does not insert loading text during a background refresh', async () => {
+  const f = fixture();
+  let held: ReturnType<typeof deferred> | undefined;
+  try {
+    f.emptyDirectory();
+    await f.render();
+    const card = f.host.querySelector('[aria-label="环境信息"]')!;
+    const text = card.textContent;
+    expect(card.querySelector('[aria-label="子智能体"]')?.textContent).toContain('暂无');
+    held = f.holdDirectory();
+    await f.render();
+    expect(card.textContent).toBe(text);
+    expect(card.textContent).not.toContain('正在读取');
+    expect(card.querySelector('.background-stale')).toBeNull();
+  } finally {
+    held?.resolve();
+    await f.close();
+  }
+});
+
 test('same-scope directory revisions wait for exactly one accepted stop and resume afterwards', async () => {
   const f = fixture();
   let hold: ReturnType<typeof deferred> | undefined;

@@ -77,3 +77,15 @@ export function backgroundItem(index = 1, child = false): BackgroundExecutionIte
     },
   };
 }
+
+/** A response requested with includeSourceTool, carrying an exact background launch origin. */
+export function backgroundShellItem(index = 1): BackgroundExecutionItem {
+  const item = backgroundItem(index);
+  item.execution.parentExecutionId = `shell-launch-${index}`;
+  item.sourceTool = {
+    id: item.execution.parentExecutionId,
+    definitionId: 'shell.launch',
+    definitionVersion: '1',
+  };
+  return item;
+}

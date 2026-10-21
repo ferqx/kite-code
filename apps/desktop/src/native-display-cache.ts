@@ -28,6 +28,12 @@ export class NativeDisplayCache<T> {
     }
   }
 
+  delete(key: string) {
+    const previous = this.entries.get(key);
+    if (previous) this.bytes -= previous.bytes;
+    this.entries.delete(key);
+  }
+
   clear() {
     this.entries.clear();
     this.bytes = 0;

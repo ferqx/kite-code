@@ -6,7 +6,7 @@ import { createRoot } from 'react-dom/client';
 import { verifyInteractionAnswerReceipt } from '../src/controller';
 import { NativeDesktop } from '../src/native';
 import type { NativeBridge, NativeDraft, NativeEvent, NativeState } from '../src/native-bridge';
-import { prepareDesktopDom } from './native-page-dom.fixture';
+import { prepareDesktopDom, promptValue } from './native-page-dom.fixture';
 
 test('Native page keeps exact plan drafts across sessions, missing pages and read failure; accepted answers or observed original Run cancellation clear only that draft', async () => {
   const dom = new JSDOM('<div id="root"></div>', {
@@ -200,7 +200,7 @@ test('Native page keeps exact plan drafts across sessions, missing pages and rea
   const text = () =>
     host.querySelector<HTMLTextAreaElement>('textarea[aria-label="Plan review feedback"]')!;
   const mainInput = () =>
-    host.querySelector<HTMLTextAreaElement>('textarea[aria-label="当前会话私有草稿"]');
+    host.querySelector<HTMLElement>('[role="textbox"][aria-label="当前会话私有草稿"]');
   const edit = async (value: string) =>
     act(async () => {
       text().value = value;
@@ -237,7 +237,7 @@ test('Native page keeps exact plan drafts across sessions, missing pages and rea
     omitted = true;
     await refresh();
     expect(text()).toBeNull();
-    expect(mainInput()?.value).toBe('  main a\n雪🙂  ');
+    expect(promptValue(mainInput())).toBe('  main a\n雪🙂  ');
     unavailable = true;
     await refresh();
     omitted = unavailable = false;
@@ -319,7 +319,7 @@ test('Native page keeps exact plan drafts across sessions, missing pages and rea
       },
     ] as unknown as typeof observedRuns;
     await refresh();
-    expect(mainInput()?.value).toBe('  main b\n雪🙂  ');
+    expect(promptValue(mainInput())).toBe('  main b\n雪🙂  ');
     omitted = false;
     await refresh();
     expect(text().value).toBe('');
@@ -332,7 +332,7 @@ test('Native page keeps exact plan drafts across sessions, missing pages and rea
       answer: original.intent.answer,
     };
     await click('Plan A');
-    expect(mainInput()?.value).toBe('  main a\n雪🙂  ');
+    expect(promptValue(mainInput())).toBe('  main a\n雪🙂  ');
     expect(posts).toBe(1);
     cards.a = {
       ...cards.a!,

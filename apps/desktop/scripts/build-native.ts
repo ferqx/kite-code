@@ -112,7 +112,13 @@ async function buildNativeApp(
       base: './',
       clearScreen: false,
       logLevel: 'warn',
-      define: { __KITE_DESKTOP_TEST_DIAGNOSTICS__: JSON.stringify(testDiagnostics) },
+      // Formal renderer bytes must not inherit the invoking process's test/dev
+      // environment. Development keeps its separate Vite server.
+      esbuild: { jsxDev: false },
+      define: {
+        'process.env.NODE_ENV': JSON.stringify('production'),
+        __KITE_DESKTOP_TEST_DIAGNOSTICS__: JSON.stringify(testDiagnostics),
+      },
       build: {
         target: 'es2022',
         outDir: outdir,

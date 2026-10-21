@@ -135,7 +135,7 @@ export function NativeInteractionHistory({
     [bridge, generation, viewSelection, readId, identity, revision],
   );
   return (
-    <section aria-label="交互记录">
+    <section aria-label="交互记录" aria-busy={facts?.loading || undefined}>
       <h2>交互记录</h2>
       <p>这里仅阅读原问题、计划和审批记录；任务状态由执行记录确认。</p>
       <button
@@ -145,7 +145,6 @@ export function NativeInteractionHistory({
       >
         重新读取交互记录
       </button>
-      {facts?.loading && <p role="status">正在读取交互记录。</p>}
       {facts?.error && <p role="alert">{facts.error}</p>}
       {facts?.cards && (
         <p role="status">

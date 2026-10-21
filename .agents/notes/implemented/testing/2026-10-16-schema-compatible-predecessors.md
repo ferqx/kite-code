@@ -14,6 +14,8 @@ Status: implemented
 
 准入只接受这六份已审查当前 blob 与各自固定前驱 blob，准确提交和增量归[Terminal owner](../../../../apps/cli/docs/terminal-release.md#验证边界)。真实新增的 OpenAI `4.0.19` 及嵌套 provider-utils `5.0.12` 明确记录为依赖增量；不同 raw 输入使用非 identical 标签，全部11项原 raw SHA／当前 raw SHA 及本次追加审查 provenance 分别保留。五项未变输入仍逐字比较，两份 SQL 仍必须原字节与固定 checksum，不能进入配对例外。未知字节、错路径或与固定 context 不对应的原始 blob 均拒绝；共享同字节 blob 按各自固定调用上下文核验；原 legacy 分支及理由不被这次追加审查取代。
 
+2026-10-21用户授权合并后，精确配对追加当日scope，仅更新当前 `bun.lock`、UI与Agent清单三个完整SHA。Lexical的7项0.52生产依赖和31个新增resolved条目来自真实提交 `5dba8a6bd5fe348aef130f83694b0453e98833ea`，旧resolved字节不变；Agent来自 `044df65ff6bffadc4ae4087a0a866b823d9a87e6`，仅追加Workflow Worker资产构建而未改变Agent依赖。三项分别登记 `lexical_exact_resolved_closure`、`lexical_editor_dependencies` 和 `workflow_contract_assets_build`，准确SHA及当前有限验证仍由Terminal owner维护。原固定前驱、previous SHA、context、11项输入及两份SQL／checksum保持；此追加不取代旧选择理由，不将实际Lexical依赖新增称为全无依赖变化，也不授完整默认或Windows运行资格。
+
 原a2b／837、历史SHA、准确映射及原拒绝反例继续保留。a2b实际Terminal另核0002安全拒绝和原数据不变；Native以两个独立Profile分别核Core0002拒绝和Core0001配DB9的私有拒绝，避免Core先拒绝却声称验证了private路径。数据由当前公共Store／生产PrivateData owner或原a2b Store产生，不直接造资格SQL、不复制／恢复／降级。正常进程退出、真实EX、完整bytes／inode、配置和零重放仍为成功条件。
 
 原兼容整例的三真实任务、完整正文／原身份／冷读／后续工作、真实双builder和Mac Main／renderer差异保留；原360／420秒整例、120秒driver、15秒窗口、60秒冷段及Windows1140000ms绝对期限不变。新增旧版拒绝整例独立有限预算，不延长原链。

@@ -19,7 +19,7 @@ import {
   type NativeAnswerRecord,
   validateAnswerRecord,
 } from './answer-journal';
-import { callerCanonical, validateCallerRecord } from './caller-journal';
+import { callerCanonical, callerTextDigest, validateCallerRecord } from './caller-journal';
 import {
   type NativeConfigurationData,
   type NativeConfigurationRecord,
@@ -510,10 +510,83 @@ export function openPrivateData(profilePath: string, access: DesktopProfileAcces
       ...(row.code ? { code: String(row.code) } : {}),
     };
   };
-  const read = (scope: DraftScope): NativeDraft => {
+  const readDraft = (scope: DraftScope): NativeDraft => {
     const id = identity(scope),
       row = database().prepare('SELECT * FROM drafts WHERE id=?').get(id);
     return row ? draft(row) : { id, ...scope, revision: 0, content: '' };
+  };
+  type DraftConsumption = {
+    id: string;
+    revision: number;
+    from: NonNullable<NativeDraft['consumedFrom']>;
+  };
+  const draftConsumptions = new Map<string, DraftConsumption>();
+  function rememberConsumption(consumed: DraftConsumption | undefined) {
+    if (!consumed) return;
+    // Publish only after COMMIT. This is a bounded hot-client CAS aid, not durable state.
+    draftConsumptions.delete(consumed.id);
+    draftConsumptions.set(consumed.id, consumed);
+    if (draftConsumptions.size > 128)
+      draftConsumptions.delete(draftConsumptions.keys().next().value!);
+  }
+  function withConsumption(saved: NativeDraft): NativeDraft {
+    const consumed = draftConsumptions.get(saved.id);
+    if (!consumed) return saved;
+    if (saved.revision !== consumed.revision || saved.content !== '') {
+      draftConsumptions.delete(saved.id);
+      return saved;
+    }
+    return { ...saved, consumedFrom: { ...consumed.from } };
+  }
+  function submittedDraft(record: NativeCallerRecord, saved: NativeDraft): boolean {
+    const { intent, phase } = record,
+      proof = intent.draft;
+    return (
+      (phase === 'accepted' || phase === 'applied') &&
+      !!proof &&
+      proof.id === saved.id &&
+      proof.revision === String(saved.revision) &&
+      intent.scope.storeId === saved.storeId &&
+      intent.scope.workspaceId === saved.workspaceId &&
+      intent.scope.sessionId === saved.rootSessionId &&
+      'content' in intent.request &&
+      intent.request.content === saved.content &&
+      callerTextDigest(saved.content) === proof.textDigest
+    );
+  }
+  // Caller receipt and consumption share one transaction. A later edit owns a new revision.
+  function consumeDraft(record: NativeCallerRecord): DraftConsumption | undefined {
+    const proof = record.intent.draft;
+    if (!proof || !['accepted', 'applied'].includes(record.phase)) return;
+    const row = database().prepare('SELECT * FROM drafts WHERE id=?').get(proof.id);
+    if (!row) return;
+    const saved = draft(row);
+    if (!saved.content || !submittedDraft(record, saved)) return;
+    if (!Number.isSafeInteger(saved.revision + 1)) throw Error('draft_revision_conflict');
+    const result = database()
+      .prepare('UPDATE drafts SET revision=?,content=? WHERE id=? AND revision=?')
+      .run(saved.revision + 1, JSON.stringify(''), saved.id, saved.revision);
+    if (Number(result.changes) !== 1) throw Error('draft_revision_conflict');
+    return {
+      id: saved.id,
+      revision: saved.revision + 1,
+      from: { commandId: record.intent.request.commandId, revision: saved.revision },
+    };
+  }
+  const read = (scope: DraftScope): NativeDraft => {
+    const saved = readDraft(scope);
+    if (!saved.content) return withConsumption(saved);
+    // Older clients kept accepted input as a saved draft. Reconcile only its exact proof;
+    // opening history performs no command lookup, retry or new submission.
+    const accepted = callerRows().find((record) => submittedDraft(record, saved));
+    if (!accepted) return withConsumption(saved);
+    let consumed: DraftConsumption | undefined;
+    const result = transaction(() => {
+      consumed = consumeDraft(accepted);
+      return readDraft(scope);
+    });
+    rememberConsumption(consumed);
+    return withConsumption(result);
   };
   const port: PrivateData = {
     ...createScheduledTaskData(database),
@@ -633,8 +706,8 @@ export function openPrivateData(profilePath: string, access: DesktopProfileAcces
     read,
     save(scope, revision, content) {
       if (Buffer.byteLength(content) > 1048576) throw Error('draft_capacity_exceeded');
-      return transaction(() => {
-        const previous = read(scope);
+      const result = transaction(() => {
+        const previous = readDraft(scope);
         if (previous.revision !== revision) throw Error('draft_revision_conflict');
         if (!Number.isSafeInteger(revision + 1)) throw Error('draft_revision_conflict');
         database()
@@ -651,6 +724,8 @@ export function openPrivateData(profilePath: string, access: DesktopProfileAcces
           );
         return { ...previous, content, revision: revision + 1 };
       });
+      draftConsumptions.delete(result.id);
+      return result;
     },
     list(after = '') {
       const rows = database()
@@ -939,11 +1014,15 @@ export function openPrivateData(profilePath: string, access: DesktopProfileAcces
       });
     },
     finishCaller(commandId, phase) {
-      return transaction(() => {
+      let consumed: DraftConsumption | undefined;
+      const result = transaction(() => {
         const rows = callerRows(),
           old = rows.find((r) => r.intent.request.commandId === commandId);
         if (!old) throw Error('caller_intent_missing');
-        if (['applied', 'rejected'].includes(old.phase)) return old;
+        if (['applied', 'rejected'].includes(old.phase)) {
+          consumed = consumeDraft(old);
+          return old;
+        }
         const value = validateCallerRecord({ ...old, phase });
         if (
           callerBytes() -
@@ -961,8 +1040,11 @@ export function openPrivateData(profilePath: string, access: DesktopProfileAcces
         database()
           .prepare('UPDATE caller_intents SET state=? WHERE command_id=?')
           .run(JSON.stringify(value), commandId);
+        consumed = consumeDraft(value);
         return value;
       });
+      rememberConsumption(consumed);
+      return result;
     },
     clearCaller(commandId) {
       transaction(() => {

@@ -182,7 +182,7 @@ function BackgroundPanel({
     };
   }, [bridge, generation, storeId, opened, refresh]);
   return (
-    <section aria-label="后台总览">
+    <section aria-label="后台总览" aria-busy={view.busy || undefined}>
       <h2>后台总览</h2>
       {!opened ? (
         <button type="button" onClick={() => setOpened(true)}>
@@ -203,19 +203,13 @@ function BackgroundPanel({
             关闭后台总览
           </button>
           <p>显示原会话的全部已保存后台执行，切换会话后继续观察。执行与子轮次的状态分别显示。</p>
-          {view.busy && <p role="status">正在核对完整后台目录…</p>}
           {(view.error || unavailable) && (
             <p role="alert">
               后台目录尚未更新：{view.error ?? '连接观察不可用'}
               。保留上次完整事实，停止入口暂不可用。
             </p>
           )}
-          {view.items && (
-            <p role="status">
-              后台目录已完整读取，共 {view.items.length} 项。
-              {view.busy ? '正在刷新，当前显示上次完整事实。' : ''}
-            </p>
-          )}
+          {view.items && <p role="status">后台目录已完整读取，共 {view.items.length} 项。</p>}
           {view.items?.length === 0 && <p>此主体尚无已保存后台执行。</p>}
           {stopError && <p role="alert">原停止请求：{stopError}。请在原申请面板核实原命令。</p>}
           {accepted && (
@@ -423,7 +417,10 @@ function BackgroundChildPanel({
     return () => abort.abort();
   }, [bridge, generation, storeId, executionId, opened, refresh]);
   return (
-    <section aria-label={diagnostics ? `子 Agent 完整日志 · ${executionId}` : '子 Agent 完整日志'}>
+    <section
+      aria-label={diagnostics ? `子 Agent 完整日志 · ${executionId}` : '子 Agent 完整日志'}
+      aria-busy={view.busy || undefined}
+    >
       {!opened ? (
         <button type="button" onClick={() => setOpened(true)}>
           读取完整子日志
@@ -442,7 +439,6 @@ function BackgroundChildPanel({
           >
             关闭子日志
           </button>
-          {view.busy && <p role="status">正在读取完整子会话日志…</p>}
           {view.error && (
             <p role="alert">
               子日志读取失败：{view.error}。

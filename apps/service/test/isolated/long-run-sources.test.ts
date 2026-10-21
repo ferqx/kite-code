@@ -293,8 +293,15 @@ test('one ordinary Run retains complete project sources across 257 distinct File
         'glob_files',
         'list_directory',
         'read_file',
+        'read_user_file',
         'search_content',
         'write_file',
+        'wait_agent_events',
+        'follow_up_agent',
+        'interrupt_agent',
+        'list_agents',
+        'send_agent_message',
+        'spawn_agent',
         'web_fetch',
       ]);
     }

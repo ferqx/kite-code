@@ -50,6 +50,7 @@ const options={platform:'linux',configurationId:'linux-fixture',env:{PATH:'/usr/
 const leaf=(mode,id='shell.command')=>({namespace:'builtin.permissions',version:'1',data:{workspaceTrust:true,mode,capability:{kind:'job',definitionId:id,definitionVersion:'1',hardAllowed:true}}});
 const intersection=(left,right)=>({namespace:'agent.permission-intersection',version:'1',data:{policies:[{scope:'parent',revision:'p',allowed:true,snapshot:left},{scope:'child',revision:'c',allowed:true,snapshot:right}]}});
 const context=(snapshot,id='execution')=>({sessionId:'s',executionId:id,signal:new AbortController().signal,dispatchAuthorization:{revision:'accepted',snapshot}});
+let configured;
 try {
  const original=await inspectShellAssets(options);
  assert.equal(original.length,4);
@@ -94,7 +95,7 @@ try {
  const flags={skillActivation:true,skillWorkflow:true,verification:true};
  const workflowOptions={profile,workspaceRoot:workspace,skills:[{id:'configured',path:'skill'}],toolIds:[],allowedCapabilities:[],flags,shell:options,
  userDecisions:{version:'1',allowWaiver:false,allowReplan:false,allowCompensation:true},request:{},capabilities:[],forkConfigurations:[]};
- const configured=await createWorkflowConfiguration(workflowOptions);
+ configured=await createWorkflowConfiguration(workflowOptions);
  assert.equal(configured.entries.length,1);
  assert.equal(configured.snapshot.compensator.backend,'linux-bubblewrap-pid-namespace');
  assert.deepEqual(configured.snapshot.verifier.assets,original);
@@ -133,7 +134,7 @@ try {
  await assert.rejects(createWorkflowConfiguration({...workflowOptions,request:{extensionInputs:[{extensionId:'foreign',definitionVersion:'1',input:{}}]}}),/workflow_extension_input_unavailable/);
  assert.equal(ffiCalls,0);
  console.log(JSON.stringify({factoryKinds:calls.map(c=>c.kind),starts:starts.length,ffiCalls,scope:'pure Service factory assembly, not Linux native qualification'}));
-} finally {rmSync(root,{recursive:true,force:true});}
+} finally {await configured?.dispose();rmSync(root,{recursive:true,force:true});}
 `;
   const child = spawnSync(process.execPath, ['--eval', code], {
     encoding: 'utf8',

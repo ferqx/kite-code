@@ -2,6 +2,7 @@ import type * as API from './generated/api';
 import { queryInput, requestValidators, responseValidators } from './generated/validators.js';
 
 export interface Responses {
+  InputImage: API.InputImage;
   WorkspaceRemoval: API.WorkspaceRemoval;
   FileCheckpointPage: API.FileCheckpointPage;
   FileCheckpointDetail: API.FileCheckpointDetail;
@@ -154,6 +155,7 @@ export function validateRequest(
     | 'ResumeJobReportRequest'
     | 'ResumeJobReportTarget'
     | 'StartCommandRequest'
+    | 'InputImageUploadRequest'
     | 'CancelCommandRequest'
     | 'CancelRunRequest'
     | 'CancelExecutionRequest'

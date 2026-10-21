@@ -1,11 +1,12 @@
 import { randomUUID } from 'node:crypto';
 import { lstatSync, mkdirSync, mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { createRequire } from 'node:module';
-import { join, resolve } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { privateDirectory } from '@kite-ai/agent/windows-path-security';
 import { releaseErrorCode } from '../release/release-arguments';
 import { selectDevelopmentServiceArtifact } from './unified-cli';
 import { initializeDesktopBuildEnvironment } from './windows-desktop-environment';
+import { ensureWindowsElectronPermissions } from './windows-electron-permissions';
 
 const repositoryRoot = resolve(import.meta.dir, '../..');
 const help = `Kite desktop development
@@ -46,15 +47,25 @@ export async function runDevelopmentDesktop(
   if (argv.length) throw Error('desktop_development_arguments_invalid');
   const root = input.root ?? repositoryRoot;
   const artifact = selectDevelopmentServiceArtifact(root, input.executable);
-  let electron: string;
+  let electron: string, electronPackageDirectory: string;
   try {
-    const installed: unknown = createRequire(join(root, 'apps/desktop/package.json'))('electron');
+    const require = createRequire(join(root, 'apps/desktop/package.json'));
+    const installed: unknown = require('electron');
     if (typeof installed !== 'string') throw Error('development_electron_asset_unavailable');
     electron = realpathSync(installed);
     if (!lstatSync(electron).isFile()) throw Error('development_electron_asset_unavailable');
+    electronPackageDirectory = dirname(realpathSync(require.resolve('electron/package.json')));
   } catch {
     throw Error('development_electron_asset_unavailable');
   }
+  const permissions = ensureWindowsElectronPermissions({
+    executable: electron,
+    packageDirectory: electronPackageDirectory,
+  });
+  if (permissions.repaired)
+    process.stdout.write(
+      `[desktop:dev] Electron sandbox permissions repaired (${permissions.repaired} entries).\n`,
+    );
   initializeDesktopBuildEnvironment();
   const { buildNativeDesktop } = await import('../../apps/desktop/scripts/build-native');
   const {
@@ -157,6 +168,17 @@ if (import.meta.main) {
     process.stderr.write(`${code}\n`);
     if (code === 'development_service_asset_unavailable')
       process.stderr.write('Build the local workspaces first: npm run build\n');
+    if (code === 'development_electron_runtime_scope_invalid')
+      process.stderr.write(
+        "Electron must use its installed package's physical dist directory without links or hard-linked files.\n",
+      );
+    if (
+      code === 'development_electron_permissions_failed' ||
+      code === 'development_electron_permissions_denied'
+    )
+      process.stderr.write(
+        'Could not prepare Electron sandbox read/execute permissions. Check access to the installed Electron dist directory.\n',
+      );
     if (
       code === 'windows_access_compiler_unavailable' ||
       code === 'windows_desktop_build_tools_unavailable'

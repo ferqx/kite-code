@@ -40,16 +40,19 @@ import type {
   NativeFileTargetPage,
 } from './file-changes-bridge';
 import type { InputMetadata, InputRequest } from './input';
+import type { NativeInputFileResult, NativeInputImageRequest } from './input-images-bridge';
 import type {
   NativeInteractionHistoryPage,
   NativeInteractionHistoryRequest,
 } from './interaction-history-bridge';
 import type { NativeJobOutputPage, NativeJobOutputRequest } from './job-output-bridge';
 import type { NativeMcpRequest, NativeMcpResult, NativeMcpSubmission } from './mcp-bridge';
+import type { NativeBrowserBridge } from './native-browser-bridge';
 import type { NativeWindowMenuBridge } from './native-menu-bridge';
 import type { NativeScheduledRequest, NativeScheduledResult } from './scheduled-bridge';
 import type { NativeSkillsPage, NativeSkillsRequest } from './skills-bridge';
 import type {
+  NativeContextUsagePage,
   NativeModelUsagePage,
   NativeToolMessagePage,
   NativeToolMessageRequest,
@@ -166,6 +169,8 @@ export type NativeDraft = {
   rootSessionId: string;
   revision: number;
   content: string;
+  /** Current-process proof of the committed receipt that cleared this exact revision. */
+  consumedFrom?: { commandId: string; revision: number };
   association?: 'current' | 'unavailable';
 };
 export type NativeCreation = {
@@ -491,6 +496,7 @@ export type NativeAttachmentChunk = {
 export type NativeModelInputOpen = NativeModelBodyOpen<'modelInput'>;
 export type NativeModelInputChunk = NativeModelBodyChunk<'modelInput'>;
 export type NativeRequest =
+  | NativeInputImageRequest
   | NativeScheduledRequest
   | NativeExtensionsRequest
   | NativeInteractionHistoryRequest
@@ -511,6 +517,7 @@ export type NativeRequest =
       creation: NativeCreation['input'];
       intent: StartCommandRequest;
       permissionMode?: 'accept_edits' | 'auto' | 'full';
+      imageIds?: readonly string[];
       targetBranch?: string;
     }
   | { method: 'conversation.lookup'; generation: number; commandId: string }
@@ -704,6 +711,7 @@ export type NativeRequest =
       sessionId: string;
       intent: InputRequest;
       draft?: NativeCallerIntent['draft'];
+      imageIds?: readonly string[];
     }
   | {
       method: 'caller.prepare';
@@ -760,12 +768,14 @@ export type NativeRequest =
       answer: import('@kite-ai/client').AnswerInteractionRequest['answer'];
     };
 export type NativeResult =
+  | NativeInputFileResult
   | NativeScheduledResult
   | NativeExtensionsResult
   | NativeInteractionHistoryPage
   | NativeToolMessagePage
   | NativeToolRunPage
   | NativeModelUsagePage
+  | NativeContextUsagePage
   | NativeFileTargetPage
   | NativeFileChangePage
   | NativeFileChangeDetail
@@ -817,6 +827,7 @@ export type NativeResult =
   | null;
 export type NativeReply = { ok: true; value: NativeResult } | { ok: false; code: string };
 export interface NativeBridge {
+  fileReferences?(files: readonly File[]): readonly { name: string; uri: string }[];
   request(input: NativeRequest): Promise<NativeResult>;
   watch(listener: (event: NativeEvent) => void): () => void;
 }
@@ -825,7 +836,11 @@ declare global {
     readonly kiteNative?: Readonly<
       NativeBridge &
         Partial<
-          NativeThemeBridge & NativeWindowBridge & NativeWindowMenuBridge & NativeStartupBridge
+          NativeThemeBridge &
+            NativeWindowBridge &
+            NativeWindowMenuBridge &
+            NativeStartupBridge &
+            NativeBrowserBridge
         >
     >;
   }

@@ -999,10 +999,14 @@ export function createDefaultProcessConfiguration(options: {
         allowedCapabilities: options.allowedToolCapabilities,
       });
       let webBinding: ReturnType<typeof web.bind> | undefined;
+      let workflowResource: Awaited<ReturnType<typeof createWorkflowConfiguration>> | undefined;
       let disposal: Promise<void> | undefined;
       const dispose = () =>
         (disposal ??= Promise.allSettled([
-          Promise.resolve().then(() => assembly.dispose()),
+          Promise.resolve().then(async () => {
+            await workflowResource?.dispose();
+            await assembly.dispose();
+          }),
           Promise.resolve().then(() => webBinding?.dispose()),
         ]).then((results) => {
           const failures = results.flatMap((result) =>
@@ -1039,6 +1043,7 @@ export function createDefaultProcessConfiguration(options: {
             definitionVersion: role.version,
           })),
         });
+        workflowResource = workflow;
         if (workflow.enabled) {
           assembly.extensions.push(workflow.extension);
           if (workflow.verifierExtension) assembly.extensions.push(workflow.verifierExtension);
@@ -1667,7 +1672,7 @@ export function createDefaultProcessConfiguration(options: {
           throw new ConfigurationPreparationCleanupError({
             originalError: error,
             cleanupError,
-            resources: { assembly, webBinding },
+            resources: { assembly, webBinding, workflow: workflowResource },
           });
         }
         throw error;

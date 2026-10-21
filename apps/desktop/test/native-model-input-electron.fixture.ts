@@ -219,7 +219,7 @@ try {
   await page.getByRole('button', { name: 'Native A', exact: true }).click();
   await page.locator('.session-header').getByTitle('Native A', { exact: true }).waitFor();
   await openSessionTools(page);
-  expect(await page.getByRole('textbox', { name: '当前会话私有草稿' }).inputValue()).toBe(
+  expect(await page.getByRole('textbox', { name: '当前会话私有草稿' }).innerText()).toBe(
     'PRIVATE NATIVE DRAFT',
   );
   // A second real BrowserWindow with the same preload/document is still not the admitted sender.

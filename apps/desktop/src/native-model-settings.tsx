@@ -170,7 +170,7 @@ export function NativeModelSettings({
       : name;
   }
   return (
-    <section aria-label="模型设置" className="settings-models">
+    <section aria-label="模型设置" className="settings-models" aria-busy={reading || undefined}>
       <div className="settings-models-title">
         <div>
           <h2>模型</h2>
@@ -197,7 +197,7 @@ export function NativeModelSettings({
                   {selectedModel
                     ? `${selectedModel.provider ?? '其他'} · ${modelName(selectedModel)}`
                     : reading
-                      ? '正在读取'
+                      ? '默认模型'
                       : facts?.defaultModelId
                         ? `${facts.defaultModelId} · 当前不可用`
                         : selectableModels.length
@@ -253,7 +253,6 @@ export function NativeModelSettings({
           </DropdownMenu>
         </div>
       </div>
-      {reading && <p role="status">正在读取原作用域配置。</p>}
       {writing && <p role="status">正在保存模型配置。</p>}
       {error && <p role="alert">模型配置不可用：{error}</p>}
       <div className="settings-model-section-heading">

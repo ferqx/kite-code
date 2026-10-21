@@ -18,15 +18,13 @@ export function NativeStartup({
   return (
     <main
       className="kite-client desktop-startup"
-      aria-label="kite 启动页"
+      aria-label="Kite 启动页"
       aria-busy={phase === 'loading'}
     >
       <div className="desktop-startup-content">
         <img src={appIcon} width="56" height="56" alt="" />
-        <h1>kite</h1>
-        {phase === 'loading' ? (
-          <p role="status">正在准备你的工作空间…</p>
-        ) : (
+        <h1>Kite</h1>
+        {phase === 'failed' && (
           <>
             <p role="alert">启动未完成：{error}</p>
             {onSaveDiagnostic && <Button onClick={onSaveDiagnostic}>保存诊断</Button>}

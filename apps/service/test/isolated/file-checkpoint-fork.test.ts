@@ -240,10 +240,17 @@ for (const scenario of ['fork', 'combined', 'selector'] as const) {
         expect(request.tools.map((tool) => tool.function.name).sort()).toEqual([
           'ask_user',
           'edit_file',
+          'follow_up_agent',
           'glob_files',
+          'interrupt_agent',
+          'list_agents',
           'list_directory',
           'read_file',
+          'read_user_file',
           'search_content',
+          'send_agent_message',
+          'spawn_agent',
+          'wait_agent_events',
           'web_fetch',
           'write_file',
         ]);

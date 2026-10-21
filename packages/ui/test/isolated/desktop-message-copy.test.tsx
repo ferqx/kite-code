@@ -1,8 +1,10 @@
-import { expect, test } from 'bun:test';
+import { expect, spyOn, test } from 'bun:test';
 import { JSDOM } from 'jsdom';
 import { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import { Conversation } from '../../src/desktop/Conversation';
+import { ConversationCache } from '../../src/desktop/ConversationCache';
+import { MessageCopyButton } from '../../src/desktop/MessageCopyButton';
 import type { Message } from '../../src/desktop/types';
 
 test('actual Conversation copies only original settled user and host-confirmed final turn text, with explicit failure retry', async () => {
@@ -176,6 +178,83 @@ test('actual Conversation copies only original settled user and host-confirmed f
     expect(buttons()[0]!.getAttribute('data-copy-state')).toBe('copied');
   } finally {
     await act(async () => root.unmount());
+    dom.window.close();
+    for (const [key, descriptor] of previous) {
+      if (descriptor) Object.defineProperty(globalThis, key, descriptor);
+      else Reflect.deleteProperty(globalThis, key);
+    }
+  }
+});
+
+test('cached copy feedback survives effect reactivation, expires at its original deadline and rejects paused or late copies', async () => {
+  const dom = new JSDOM('<div id="root"></div>', { pretendToBeVisual: true });
+  const keys = ['window', 'document', 'IS_REACT_ACT_ENVIRONMENT'] as const;
+  const previous = keys.map(
+    (key) => [key, Object.getOwnPropertyDescriptor(globalThis, key)] as const,
+  );
+  Object.assign(globalThis, {
+    window: dom.window,
+    document: dom.window.document,
+    IS_REACT_ACT_ENVIRONMENT: true,
+  });
+  const root = createRoot(dom.window.document.getElementById('root')!);
+  let now = 100000,
+    release: (() => void) | undefined;
+  const clock = spyOn(Date, 'now').mockImplementation(() => now);
+  const writes: string[] = [];
+  const write = async (text: string) => {
+    writes.push(text);
+    if (release)
+      await new Promise<void>((resolve) => {
+        release = resolve;
+      });
+  };
+  const render = (id: string, readable = true) =>
+    act(async () =>
+      root.render(
+        <ConversationCache
+          identity={id}
+          loading={!readable}
+          visible
+          cache={{ scope: 'window', revision: '0', readActive: readable }}
+        >
+          <div>
+            <MessageCopyButton text={id} writeClipboardText={write} />
+          </div>
+        </ConversationCache>,
+      ),
+    );
+  try {
+    await render('a');
+    const button = dom.window.document.querySelector<HTMLButtonElement>('button')!;
+    await act(async () => button.click());
+    expect(button.getAttribute('data-copy-state')).toBe('copied');
+    await render('b');
+    now += 500;
+    await render('a', false);
+    expect(dom.window.document.querySelector('button') === button).toBe(true);
+    expect(button.matches(':disabled')).toBe(false);
+    expect(button.getAttribute('data-copy-state')).toBe('copied');
+    await act(async () => button.click());
+    expect(writes).toEqual(['a']);
+    await render('a');
+    expect(button.getAttribute('data-copy-state')).toBe('copied');
+    await render('b');
+    now += 2000;
+    await render('a', false);
+    expect(button.getAttribute('data-copy-state')).toBe('idle');
+    await render('a');
+    release = () => {};
+    await act(async () => button.click());
+    await render('b');
+    await act(async () => {
+      release?.();
+    });
+    await render('a');
+    expect(button.getAttribute('data-copy-state')).toBe('idle');
+  } finally {
+    await act(async () => root.unmount());
+    clock.mockRestore();
     dom.window.close();
     for (const [key, descriptor] of previous) {
       if (descriptor) Object.defineProperty(globalThis, key, descriptor);

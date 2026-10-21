@@ -502,9 +502,11 @@ try {
     (rows) => rows.filter((row) => row.model?.runId === childProgress.runId).length >= 2,
     'second complete original child ModelOutput response',
   );
-  await log(completed.id)
-    .getByText('正在读取完整子会话日志…', { exact: true })
-    .waitFor({ state: 'hidden' });
+  await until(
+    () => log(completed.id).getAttribute('aria-busy'),
+    (busy) => busy !== 'true',
+    'complete original child log read',
+  );
   await log(completed.id)
     .getByText(/^已完整读取子会话日志。/)
     .waitFor();

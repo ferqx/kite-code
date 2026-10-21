@@ -1,10 +1,12 @@
 import { randomUUID } from 'node:crypto';
 import { reasoningEfforts } from '@kite-ai/ai';
+import { inputFileReferences } from '../../input-files';
 import { canonicalJson } from '../../json';
 import type { AcceptCommandInput, ApplyInputInput, Store } from '../port';
 import { AgentError, type InputApplication, type Json, type PendingInputPage } from '../types';
 import { validateAgentSource } from './agent-input-operations';
 import { hasPendingAgentMail, sealParentAgentMailAdoption } from './agent-mail-operations';
+import { assertInputImages } from './artifact-operations';
 import { filter, selected } from './context-selection-operations';
 import { assertNoExecutionGroupFence } from './execution-group-safety';
 import {
@@ -46,6 +48,18 @@ export function validateInputAdmission(
   trustedChild = false,
 ) {
   const value = input.request;
+  if (
+    ['run.start', 'input.steer', 'input.follow_up'].includes(value.kind) &&
+    'files' in value &&
+    value.files !== undefined
+  )
+    inputFileReferences(value.files);
+  if (
+    ['run.start', 'input.steer', 'input.follow_up'].includes(value.kind) &&
+    'images' in value &&
+    value.images !== undefined
+  )
+    assertInputImages(db, { ...input, images: value.images });
   if (
     ![
       'run.start',
@@ -99,6 +113,8 @@ export function validateInputAdmission(
         ![
           'kind',
           'content',
+          'images',
+          'files',
           'modelId',
           'reasoningEffort',
           'selectedSkills',
@@ -141,10 +157,12 @@ export function validateInputAdmission(
   if (value.kind !== 'input.steer' && value.kind !== 'input.follow_up') return null;
   const keys =
     value.kind === 'input.steer'
-      ? ['kind', 'content', 'targetRunId', 'contextSelectionId']
+      ? ['kind', 'content', 'images', 'files', 'targetRunId', 'contextSelectionId']
       : [
           'kind',
           'content',
+          'images',
+          'files',
           'afterRunId',
           'contextSelectionId',
           'modelId',
@@ -155,7 +173,7 @@ export function validateInputAdmission(
   if (
     Object.keys(value).some((key) => !keys.includes(key)) ||
     typeof value.content !== 'string' ||
-    !value.content.trim() ||
+    (!value.content.trim() && !value.images?.length && !value.files?.length) ||
     Buffer.byteLength(value.content) > 1024 * 1024
   )
     throw new AgentError('invalid_input_request');
@@ -497,6 +515,8 @@ export function applyInputWork(db: SqliteOperations, input: ApplyInputInput): In
           : value.content!,
       sourceIds: [input.commandId],
       originCommandId: input.commandId,
+      ...(value.images ? { images: value.images as unknown as Json } : {}),
+      ...(value.files ? { files: value.files as unknown as Json } : {}),
       contextSelectionId: String(command.input_context_selection_id),
       inputKind: String(command.kind),
     },

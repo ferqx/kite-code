@@ -15,11 +15,19 @@ interface Page {
   getByText(text: string, options: { exact: boolean }): Locator;
   reload(): Promise<void>;
   evaluate<T>(fn: () => Promise<T>): Promise<T>;
-  waitForFunction<T>(
-    fn: (input: T) => unknown,
-    input: T,
-    options?: { timeout?: number },
-  ): Promise<unknown>;
+}
+// Poll the asynchronous IPC in the host: Playwright waitForFunction treats a
+// returned Promise as truthy before it resolves. Keep the original 10s boundary.
+async function selectedState(page: Page, matches: (state: NativeState) => boolean) {
+  const deadline = Date.now() + 10000;
+  for (;;) {
+    const state = (await page.evaluate(
+      async () => await window.kiteNative!.request({ method: 'state', generation: 1 }),
+    )) as NativeState;
+    if (matches(state)) return state;
+    if (Date.now() >= deadline) throw Error('native_original_selection_timeout');
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
 }
 interface ElectronApp {
   process(): import('node:child_process').ChildProcess;
@@ -123,24 +131,13 @@ try {
   assert.deepEqual(rolledBack.lockIdentity, rollbackHeld.lockIdentity);
   await page.reload();
   await page.getByRole('button', { name: 'Later current session', exact: true }).click();
-  await page.waitForFunction(
-    async ({ storeId, title }) => {
-      const current = (await window.kiteNative!.request({
-        method: 'state',
-        generation: 1,
-      })) as NativeState;
-      return (
-        current.selection?.storeId === storeId &&
-        current.selection.session.id === 's' &&
-        current.selection.session.title === title
-      );
-    },
-    { storeId: originalStoreId, title: 'Later current session' },
-    { timeout: 10000 },
+  const rollbackState = await selectedState(
+    page,
+    (current) =>
+      current.selection?.storeId === originalStoreId &&
+      current.selection.session.id === 's' &&
+      current.selection.session.title === 'Later current session',
   );
-  const rollbackState = (await page.evaluate(
-    async () => await window.kiteNative!.request({ method: 'state', generation: 1 }),
-  )) as NativeState;
   assert.equal(rollbackState.selection?.storeId, originalStoreId);
   assert.equal(rollbackState.selection?.session.id, 's');
   assert.equal(rollbackState.selection?.session.title, 'Later current session');
@@ -214,24 +211,14 @@ try {
   assert.deepEqual(restored.lockIdentity, held.lockIdentity);
   await page.reload();
   await page.getByRole('button', { name: 'Original backup session', exact: true }).click();
-  await page.waitForFunction(
-    async ({ storeId, title }) => {
-      const current = (await window.kiteNative!.request({
-        method: 'state',
-        generation: 1,
-      })) as NativeState;
-      return (
-        current.selection?.storeId === storeId &&
-        current.selection.session.id === 's' &&
-        current.selection.session.title === title
-      );
-    },
-    { storeId: restored.storeId as string, title: 'Original backup session' },
-    { timeout: 10000 },
+  const state = await selectedState(
+    page,
+    (current) =>
+      current.selection !== undefined &&
+      current.selection.storeId === restored.storeId &&
+      current.selection.session.id === 's' &&
+      current.selection.session.title === 'Original backup session',
   );
-  const state = (await page.evaluate(
-    async () => await window.kiteNative!.request({ method: 'state', generation: 1 }),
-  )) as NativeState;
   assert.equal(state.selection?.storeId, restored.storeId);
   assert.equal(state.selection?.session.id, 's');
   assert.equal(state.selection?.session.title, 'Original backup session');

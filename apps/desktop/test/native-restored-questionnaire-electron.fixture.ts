@@ -125,10 +125,7 @@ async function receipt(page: import('playwright').Page, original: Message) {
   );
   assert.equal(await page.getByRole('form', { name: 'Questionnaire' }).count(), 0);
   assert.equal(await page.getByRole('button', { name: '提交回答', exact: true }).count(), 0);
-  assert.equal(
-    await page.getByRole('button', { name: 'Cancel answering', exact: true }).count(),
-    0,
-  );
+  assert.equal(await page.getByRole('button', { name: '取消回答', exact: true }).count(), 0);
   const audit = (await app!.evaluate('globalThis.__questionAudit')) as {
       requests: string[];
       executions: Execution[];
@@ -291,7 +288,7 @@ try {
   await page.getByRole('form', { name: 'Questionnaire' }).waitFor();
   await page.getByRole('radio', { name: `${facts.answers.q1} (Recommended)`, exact: true }).check();
   await page.getByRole('button', { name: '下一题', exact: true }).click();
-  await page.getByText('问题 2/2', { exact: true }).waitFor();
+  await page.getByText('问题 2 / 2', { exact: true }).waitFor();
   await page.getByRole('radio', { name: '自由回答', exact: true }).check();
   await page.getByRole('textbox', { name: '自由回答', exact: true }).fill(facts.answers.q2);
   assert.equal(

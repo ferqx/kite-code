@@ -1,15 +1,18 @@
 import { createHash } from 'node:crypto';
 import type { Permissions } from './extensions';
+import { inputFileContent } from './input-files';
 import { canonicalJson } from './json';
 import type { RunConfiguration } from './runtime';
 import type { HumanInputProposal } from './storage/human-work-control';
-import type { Json } from './storage/types';
+import type { InputFileReference, InputImage, Json } from './storage/types';
 import { AgentError } from './storage/types';
 
 export interface HumanInputProcessingContext {
   inputCommandId: string;
   inputDigest: string;
   content: string;
+  images?: readonly InputImage[];
+  files?: readonly InputFileReference[];
   candidateWorkCommandIds: readonly string[];
   candidateWorks?: readonly import('./human-input-intent').HumanWorkCandidate[];
   controlRevision?: string;
@@ -88,6 +91,22 @@ export function createHumanInputProcessingConfiguration(
     role: 'system' as const,
     content: instruction,
   };
+  const content = inputFileContent(context.content, context.files);
+  const inputSource = {
+    id: `human-input-${context.inputCommandId}`,
+    kind: 'human_input',
+    scope: context.inputCommandId,
+    digest: createHash('sha256')
+      .update(
+        context.images?.length
+          ? canonicalJson([content, context.images] as unknown as Json)
+          : content,
+      )
+      .digest('hex'),
+    role: 'user' as const,
+    placement: 'after_history' as const,
+    content,
+  };
   return {
     ...configuration,
     toolIds: [],
@@ -112,15 +131,7 @@ export function createHumanInputProcessingConfiguration(
         return [
           ...((await configuration.sources?.capture(request)) ?? []),
           instructionSource,
-          {
-            id: `human-input-${context.inputCommandId}`,
-            kind: 'human_input',
-            scope: context.inputCommandId,
-            digest: createHash('sha256').update(context.content).digest('hex'),
-            role: 'user' as const,
-            placement: 'after_history' as const,
-            content: context.content,
-          },
+          inputSource,
         ];
       },
       async captureBatch(requests) {
@@ -131,19 +142,7 @@ export function createHumanInputProcessingConfiguration(
                 requests.map((request) => configuration.sources?.capture(request) ?? []),
               )
             ).flat();
-        return [
-          ...sources,
-          instructionSource,
-          {
-            id: `human-input-${context.inputCommandId}`,
-            kind: 'human_input',
-            scope: context.inputCommandId,
-            digest: createHash('sha256').update(context.content).digest('hex'),
-            role: 'user' as const,
-            placement: 'after_history' as const,
-            content: context.content,
-          },
-        ];
+        return [...sources, instructionSource, inputSource];
       },
     },
     snapshot: {

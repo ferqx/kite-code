@@ -22,6 +22,7 @@
     "skipLibCheck": true
   },
   "include": [
+    "scripts/check-worktree-cleanup.ts",
     "scripts/check-unified-agent-boundary.ts",
     "scripts/check-unified-workspaces.ts",
     "scripts/ci/logged-shell.ts",
@@ -90,6 +91,7 @@
     "tests/integration/scripts/unified-default-plan.test.ts",
     "tests/integration/scripts/unified-ci.test.ts",
     "tests/isolated/scripts/agent-notes.test.ts",
+    "tests/isolated/scripts/worktree-cleanup.test.ts",
     "tests/isolated/scripts/check-pre-release-architecture-policy.test.ts",
     "tests/isolated/scripts/docs-impact-scopes.test.ts",
     "tests/isolated/scripts/docs-structure.test.ts",
