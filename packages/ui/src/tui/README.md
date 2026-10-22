@@ -52,7 +52,7 @@ Question 的可编辑状态取自 Controller 保存的准确原 Answer，匹配 
 
 Files 目录 Enter 只读预览并进入范围确认，默认 both，次序为 both／session／code；确认页 Enter 才申请，数字键只选范围。独立 diff reader 的 Enter 不提交或重读目录。继承的恢复点标题按唯一原 message 出处绑定，不猜当前位置。完整“代码和会话”成功后，Controller 仍需 Host 的只读完成证明、准确原 intent／Scope 和读取代次才切换新会话、关闭面板并显示实际恢复数量；preview 数量或历史成功不足以代替当前证明。关闭、切范围和迟到结果不污染后来会话，代码审批及第二步继续仍需各自明确操作，详见[恢复指南](../../../../docs/handbook/clients/tui/guides/cancellation-and-recovery.md)。
 
-仅测试 fixture 或可信 host 显式传入 `TuiSession({testDiagnostics:true})` 才显示 ID／协议 JSON／回执诊断；development 和正式启动均拒绝 `--test-ui-diagnostics`，环境变量不会启用诊断。诊断模式保留手动全文／附件读取，便于核原门禁；正常界面在所属消息／执行记录中保留真实失败、未知、部分内容与取消未确认；连接观察、队列读取和提交回执异常不再通过消息区外横幅、Error 行或 Ctrl+L 临时提示显示。观察与原申请只读核对自动退避重试，切范围或关闭时停止，不重放已尝试写入。两种模式使用同一新 Client／Service／Agent 业务链。
+仅测试 fixture 或可信 host 显式传入 `TuiSession({testDiagnostics:true})` 才显示 ID／协议 JSON／回执诊断；development 和正式启动均拒绝 `--test-ui-diagnostics`，环境变量不会启用诊断。诊断模式保留手动全文／附件读取，便于核原门禁；正常界面在所属消息／执行记录中保留真实失败、未知、部分内容与取消未确认；连接观察、队列读取和提交回执异常不再通过消息区外横幅、Error 行或 Ctrl+L 临时提示显示。身份拒绝及用户显式操作失败（例如导出失败、草稿保存失败阻止退出）仍显示必要错误；controller 独立标记快照读取错误，避免把它们与用户操作失败一并隐藏。观察与原申请只读核对自动退避重试，切范围或关闭时停止，不重放已尝试写入。两种模式使用同一新 Client／Service／Agent 业务链。
 
 原 renderer／panel 与必要来源测试见 [Ink renderer](../../test/tui/ink-renderers.test.tsx)、[主屏集成](../../test/tui/ink-main-integration.test.tsx)、[source projection](../../test/tui/execution-ink-projection.test.tsx)、[scrollback](../../test/tui/scrollback.test.tsx)。实际终端和跨平台资格归 [CLI owner](../../../../apps/cli/README.md)及[当前进度](../../../../docs/plans/unified-agent-refactor-v1-progress.md)，不从复制组件推导阶段退出。
 

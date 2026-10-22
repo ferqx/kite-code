@@ -712,9 +712,29 @@ export function useNativeEnvironment({
             live.current === scope &&
             readable.current &&
             !visibleChild.loading &&
-            childNavigation.current?.sessionId === visibleChild.sessionId
-          )
-            openChild(visibleChild.sessionId, visibleChild.executionId);
+            childNavigation.current?.scope === scope &&
+            childNavigation.current.sessionId === visibleChild.sessionId &&
+            childNavigation.current.executionId === visibleChild.executionId
+          ) {
+            const job = childJob.current;
+            if (
+              job &&
+              job.scope === scope &&
+              job.sessionId === visibleChild.sessionId &&
+              job.executionId === visibleChild.executionId &&
+              !job.abort.signal.aborted
+            ) {
+              // Retry this reader, not navigation. Its verified transcript must
+              // survive even when the directory fails before cache restoration.
+              // Fresh directory/child reads still own all observation authority.
+              job.full = true;
+              job.queued = true;
+              setChild((previous) =>
+                previous === visibleChild ? { ...previous, loading: true } : previous,
+              );
+              void runChild(job);
+            } else openChild(visibleChild.sessionId, visibleChild.executionId);
+          }
         });
     }
     recovery.current.reconcile(work);

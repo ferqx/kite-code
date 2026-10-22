@@ -170,3 +170,128 @@ test('ordinary Ink keeps the original conversation layout and complete result; d
     controller.dispose();
   }
 });
+
+for (const observationFailed of [false, true]) {
+  test(`ordinary Ink reports an explicit export failure with observation ${observationFailed ? 'unavailable' : 'ready'}`, async () => {
+    const controller = errorPresentationController();
+    await controller.select('a');
+    if (observationFailed) controller.observationUnavailable('network');
+    const ui = render(<TuiSession controller={controller} />);
+    try {
+      await controller.exportLoadedText();
+      await Bun.sleep(30);
+      expect(controller.state.error).toBe('Export failed');
+      expect(ui.lastFrame()).toContain('Export failed');
+      expect(ui.lastFrame()).not.toContain('observation_unavailable');
+    } finally {
+      ui.unmount();
+      controller.dispose();
+    }
+  });
+}
+
+for (const failure of ['tui_identity_mismatch', 'temporary_history_read_failure']) {
+  test(`ordinary Ink ${failure.includes('identity') ? 'reports identity refusal' : 'suppresses transient snapshot errors'}`, async () => {
+    const controller = errorPresentationController(failure);
+    await controller.select('a');
+    const ui = render(<TuiSession controller={controller} />);
+    try {
+      await Bun.sleep(30);
+      expect(controller.state.error).toBe(failure);
+      expect(controller.state.snapshotStale).toBe(true);
+      if (failure.includes('identity')) expect(ui.lastFrame()).toContain(failure);
+      else expect(ui.lastFrame()).not.toContain(failure);
+    } finally {
+      ui.unmount();
+      controller.dispose();
+    }
+  });
+}
+
+function errorPresentationController(readFailure?: string) {
+  return new TuiController({
+    storeId: 'store',
+    nextCommandId: () => 'unused',
+    listSessions: async () => [],
+    readSession: async (id) => {
+      if (readFailure) throw Error(readFailure);
+      return {
+        storeId: 'store',
+        view: {
+          storeId: 'store',
+          session: { id, workspaceId: 'w', contextSelectionId: 'selection', nextSeq: '0' },
+          runs: [],
+          executions: [],
+          messages: [],
+        } as unknown as SessionView,
+        messages: [],
+        interactions: [],
+      };
+    },
+    exportLoadedText: {
+      write: async () => {
+        throw Error('disk_full');
+      },
+    },
+    submit: async () => {
+      throw Error('unexpected_write');
+    },
+    answer: async () => {
+      throw Error('unexpected_answer');
+    },
+    cancel: async () => {
+      throw Error('unexpected_cancel');
+    },
+    getCommand: async () => {
+      throw Error('unexpected_lookup');
+    },
+  });
+}
+
+test('ordinary Ink reports observation identity refusal and clears successful snapshot error provenance', async () => {
+  const controller = errorPresentationController('temporary_history_read_failure');
+  await controller.select('a');
+  expect(controller.state.errorSource).toBe('snapshot');
+  const healthy = errorPresentationController();
+  controller.port.readSession = healthy.port.readSession;
+  healthy.dispose();
+  await controller.select('a');
+  expect(controller.state.errorSource).toBeUndefined();
+  controller.observationUnavailable('store_changed');
+  const ui = render(<TuiSession controller={controller} />);
+  try {
+    await Bun.sleep(30);
+    expect(ui.lastFrame()).toContain('observation_unavailable:store_changed');
+  } finally {
+    ui.unmount();
+    controller.dispose();
+  }
+});
+
+test('ordinary Ink hides reconciliation errors but shows a later action failure even with identical read-error text', async () => {
+  const controller = errorPresentationController();
+  controller.port.reconcileSession = async () => {
+    throw Error('temporary_reconciliation_failure');
+  };
+  await controller.select('a');
+  const ui = render(<TuiSession controller={controller} />);
+  try {
+    await Bun.sleep(30);
+    expect(controller.state.errorSource).toBe('snapshot');
+    expect(ui.lastFrame()).not.toContain('temporary_reconciliation_failure');
+    controller.port.readSession = async () => {
+      throw Error('Export failed');
+    };
+    await controller.select('a', { reconcile: false });
+    await Bun.sleep(30);
+    expect(controller.state.error).toBe('Export failed');
+    expect(ui.lastFrame()).not.toContain('Export failed');
+    await controller.exportLoadedText();
+    await Bun.sleep(30);
+    expect(controller.state.errorSource).toBeUndefined();
+    expect(ui.lastFrame()).toContain('Export failed');
+  } finally {
+    ui.unmount();
+    controller.dispose();
+  }
+});
