@@ -2,6 +2,7 @@ import type { BackgroundExecutionItem } from '@kite-ai/client';
 import { type BackgroundExecutionSummary, BackgroundExecutions } from '@kite-ai/ui/desktop';
 import { useEffect, useRef, useState } from 'react';
 import type { NativeBackgroundChild } from './background-bridge';
+import { type NativeAgentActivity, nativeAgentActivities } from './native-agent-activity';
 import { readNativeBackground, readNativeBackgroundChild } from './native-background';
 import type { NativeBridge, NativeCallerMetadata, NativeSelection } from './native-bridge';
 import { useNativeDiagnostics } from './native-diagnostics';
@@ -12,6 +13,7 @@ import { NativeSessionRecovery } from './native-session-recovery';
 type Display = {
   rows: BackgroundExecutionSummary[];
   children: Map<string, string>;
+  agents: NativeAgentActivity[];
 };
 type Facts = Awaited<ReturnType<typeof readNativeBackground>>;
 /** Cancel only this child's wait; the shared directory remains owned by its environment. */
@@ -147,7 +149,11 @@ export function environmentDisplay(
     });
     if (e.childSessionId && item.childSession) children.set(e.id, e.childSessionId);
   }
-  return { rows, children };
+  return {
+    rows,
+    children,
+    agents: nativeAgentActivities(items, storeId, items[0]?.rootSession.id, true),
+  };
 }
 
 /** Retained environment card and child navigation share the existing bounded background readers. */
@@ -266,7 +272,8 @@ export function useNativeEnvironment({
   // biome-ignore lint/correctness/useExhaustiveDependencies: Revisions queue behind the owned read rather than aborting it.
   useEffect(() => {
     if (!bridge || !scope || !storeId || !rootSessionId || !viewSelection || !cacheKey) return;
-    const display = cache.current.get(cacheKey);
+    const display =
+      latest.current?.scope === scope ? latest.current.display : cache.current.get(cacheKey);
     if (paused) {
       setView((previous) => ({
         scope,
@@ -309,11 +316,12 @@ export function useNativeEnvironment({
           if (abort.signal.aborted || live.current !== scope) return;
           const display = environmentDisplay(facts.items, storeId);
           // Presentation-only cache: no observation IDs, output, stop permission or submitted intent.
+          cache.current.delete(cacheKey);
           if (
-            new TextEncoder().encode(JSON.stringify([...display.rows, ...display.children]))
-              .byteLength <= 524288
+            new TextEncoder().encode(
+              JSON.stringify([display.rows, [...display.children], display.agents]),
+            ).byteLength <= 524288
           ) {
-            cache.current.delete(cacheKey);
             cache.current.set(cacheKey, display);
             while (cache.current.size > 8) cache.current.delete(cache.current.keys().next().value!);
           }
@@ -757,6 +765,13 @@ export function useNativeEnvironment({
 
   return {
     child: visibleChild,
+    agentActivities: (display?.agents ?? []).map((activity) => ({
+      ...activity,
+      childAgent: {
+        ...activity.childAgent,
+        fresh: !busy && !stale && !executionUnconfirmed,
+      },
+    })),
     approvalOwners:
       !busy && !stale
         ? (current?.facts?.items.flatMap((item) => {

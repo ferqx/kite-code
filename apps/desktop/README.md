@@ -559,6 +559,14 @@ Main 对目录与所选会话分别保留一个在途读取和一个后继通知
 
 ## Native 当前会话环境信息与子详情
 
+子 Agent 工作消息复用原 [ToolActivity](../../packages/ui/src/desktop/ToolActivity.tsx) 的 Trace 单行与工具回执展开。[nativeAgentActivities / nativeAgentActivityForTool](src/native-agent-activity.ts) 只从原环境目录投影已知版本 `task.spawn / task.follow_up` 的准确 carrier，核原 Store、父 Session／Run、`sourceTool` 与工具执行、子 Session 和原 child-start；已成功受理的原工具回执与目录吻合后，才在原消息行显示名称与任务状态。工具成功不表示子任务开始或完成；同一 child Session 的较新 carrier 不改写旧消息，活动中追加指导和单纯消息／列表读取保持原工具语义。子 Run 已终止但 carrier 尚未结算时显示等待结果；只有 carrier 成功才显示工作完成。详情沿原右侧标签交付准确 Session／Execution，不增加 mutation。
+
+[环境 hook](src/native-environment.tsx) 复用原完整目录和有界展示缓存，不增加网络读取；缓存成本包含子 Agent 展示事实，同 scope 校准先保留最新已读 display，即使完整展示超过缓存预算也不闪回旧行。普通刷新保留名称／状态／展开和详情目标，旧观察只作为已发生的展示事实，`fresh=false` 停止运行动画。图标按原 Store／child Session 稳定身份与审批卡共用。
+
+[关联回归](test/native-agent-activity.test.ts)核排队／激活／结算、同 Agent 多任务和活动指导、准确来源与恢复历史；[目录到消息 DOM 回归](test/isolated/native-agent-activity-dom.test.tsx)核真实环境 hook、精确投影、原共享组件、超缓存预算刷新与准确 child reader 请求。此范围不代替完整 NativeDesktop、真实模型或安装发行验收。
+
+2026-10-23，macOS arm64／Bun 1.4.2，`655fb9a97` 加本次 diff：上述关联、目录到消息 DOM、[共享消息 DOM](../../packages/ui/test/isolated/desktop-agent-activity.test.tsx)和[原工具聚合](../../packages/ui/test/isolated/desktop-tool-aggregation.test.tsx)四个完整文件15项／317断言通过，UI／Desktop typecheck、定向 Biome、统一边界、测试归属和文档检查通过。Chrome 以隔离夹具加载生产 SessionPage／ToolActivity、真实 Native 投影及原 Vite／Tailwind 编译样式，逐次观察受理、排队、开始、等待、结算和各终态：始终只有一行，展开选择与行位置保持；500px 窄窗长名称省略且状态保留，深浅主题保持14px正文，页面无横向溢出。该夹具不读取用户数据、不运行模型、不加入普通客户端。邻近 `native-background-panel.test.tsx` 的旧环境卡断言仍期待普通界面显示“上次状态 · 待核实”，在未含本次 diff 的 `655fb9a97` 主工作区也单独复现同一失败；其余本轮实际通过与这项既有失败分开记录。
+
 [目录适配](src/native-presentation.ts)在没有全局 activity 而消费当前会话观察时，将 `viewLoading` 与实际读取失败区分：同 Store／同 Session 的正常校准保留原运行展示；目录不可用或 `permissionUnavailable` 且不在校准中仍显示上次确认状态，foreign Store 不消费该观察。仅保留展示，不改变操作准入。[环境适配](src/native-environment.tsx)同样把校准 `busy` 与真实 `stale` 分开，普通刷新沿原展示缓存保持文字、行数和停止按钮，按钮在新 facts 完成前禁用；首次读取仅标记忙碌，真实错误仍明确提示。Main 尚未确认目标选择时，环境 hook 的 `paused` 立即停止旧范围读取并隔离 child／stop，保留当前卡片的文字与按钮为 busy；这类已知切换等待不转换成真实 stale 错误，切换前已存在的真实错误仍保留。旧 observation 不恢复写资格，已受理停止等待最新完整目录及原 Main 准入，scope 替换和未知零重放保持。
 
 2026-10-18 Windows x64／Bun 1.4.3，基于 `f734245a` 加本轮工作区改动：[目录](test/native-directory.test.tsx)新增同会话校准保运行标记及真实失败／foreign Store 反例，[停止竞态](test/isolated/native-environment-stop-dom.test.tsx)新增普通刷新保节点、空列表不插加载段、禁用零写及真实失败。原实现分别复现运行标记被撤下、环境卡加“上次状态”并移除停止按钮，以及空列表插加载段；修复后相关整文件通过。Chrome 155 隔离夹具使用实际目录适配、共享 SessionPage／Composer 与环境 hook，亮暗主题、1240／800／500px、空／非空目录下原环境卡高度变化为4／48px，修复后文字、按钮数、可见侧栏运行标记和所有受测几何／滚动保持；每次选择一次、后台读取继续、零停止写入。500px 原侧栏未挂载，不将该场景计作侧栏视觉证据。完整安装窗口、其他平台及全量默认测试未运行；原嵌套 `@keyframes` 编译提示保留。

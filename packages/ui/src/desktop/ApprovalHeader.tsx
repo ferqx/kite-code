@@ -21,6 +21,20 @@ export function childAgentAppearance(identity: string) {
   return { icon: (hash >>> 0) % childIcons.length, color: ((hash >>> 8) >>> 0) % 6 };
 }
 
+/** Shared stable child identity decoration; presentation only. */
+export function ChildAgentIcon({ identity }: { identity: string }) {
+  const appearance = childAgentAppearance(identity);
+  return (
+    <span
+      className="approval-child-icon"
+      data-child-icon={appearance.icon}
+      data-child-color={appearance.color}
+    >
+      <HugeiconsIcon icon={childIcons[appearance.icon]!} aria-hidden="true" />
+    </span>
+  );
+}
+
 export function ApprovalHeader({
   child,
   index,
@@ -34,21 +48,14 @@ export function ApprovalHeader({
   onPrevious: () => void;
   onNext: () => void;
 }) {
-  const appearance = child && childAgentAppearance(child.identity);
   return (
     <header className="approval-heading">
       <div className="approval-heading-label">
         <HugeiconsIcon icon={Shield01Icon} aria-hidden="true" />
         <strong>需要批准</strong>
-        {child && appearance && (
+        {child && (
           <span className="approval-child" title={child.name}>
-            <span
-              className="approval-child-icon"
-              data-child-icon={appearance.icon}
-              data-child-color={appearance.color}
-            >
-              <HugeiconsIcon icon={childIcons[appearance.icon]!} aria-hidden="true" />
-            </span>
+            <ChildAgentIcon identity={child.identity} />
             <span className="approval-child-name">{child.name}</span>
           </span>
         )}

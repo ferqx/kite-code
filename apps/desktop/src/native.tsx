@@ -34,6 +34,7 @@ import {
 import { type ReactNode, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { DesktopEditor } from './file-changes-bridge';
 import { inputImageCount } from './input-images-bridge';
+import { nativeAgentActivityForTool } from './native-agent-activity';
 import { NativeApproval } from './native-approval';
 import { isOrdinaryNativeApproval, NativeApprovalGroup } from './native-approval-group';
 import { NativeBackgroundPanel } from './native-background-panel';
@@ -3206,11 +3207,33 @@ function NativeDesktopContent({
           }
         : model;
     });
+    const agentModel = group.length === 1 ? group[0] : undefined;
+    const agentActivity = nativeAgentActivityForTool(
+      environment.agentActivities,
+      messages.find((message) => message.id === agentModel?.id),
+      displayTools.find((entry) => entry.messageId === agentModel?.id),
+    );
     return (
       <>
         <ToolActivity
           {...controls}
           messages={models}
+          childAgent={agentActivity?.childAgent}
+          childDetail={
+            agentActivity && childReadAvailable
+              ? {
+                  label: agentActivity.childAgent.name,
+                  onOpen: () =>
+                    setChildTabRequest({
+                      parent: childParent,
+                      requestId: ++childTabSequence.current,
+                      sessionId: agentActivity.sessionId,
+                      executionId: agentActivity.executionId,
+                      title: agentActivity.childAgent.name,
+                    }),
+                }
+              : undefined
+          }
           renderChildren={() => null}
           openFileForMessage={(model) => {
             const target = displayTargets.find((entry) => entry.messageId === model.id);

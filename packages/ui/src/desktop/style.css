@@ -4879,3 +4879,23 @@ body {
   border: 0;
   background: var(--control-hover);
 }
+
+/* Child activity shares the existing Trace disclosure and identity decoration. */
+.kite-client .child-agent-activity .tool-activity-summary {
+  min-width: 0;
+  font-size: var(--ui-text-size, 14px);
+  color: var(--muted-foreground);
+}
+.kite-client .child-agent-activity .tool-activity-heading-row > .tool-activity-summary {
+  flex: 0 1 auto;
+}
+.kite-client .tool-agent-name {
+  flex: 0 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.kite-client .tool-agent-state {
+  flex: none;
+  font-size: inherit;
+}
