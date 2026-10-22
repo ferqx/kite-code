@@ -1,6 +1,8 @@
 import { expect, test } from 'bun:test';
+import { rmdirSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
 import type { AgentClient, Session, Workspace } from '@kite-ai/client';
+import { temporaryDirectory } from '../../../tests/fixtures/test-filesystem';
 import { ensureSession } from '../host';
 
 const workspace = {
@@ -53,15 +55,26 @@ test('CLI continuing an admitted existing session reconciles before returning it
 
 test('workspace mismatch is rejected before reconciliation and readonly TUI admission skips it', async () => {
   const { client, calls } = fixture();
-  await expect(
-    ensureSession({ ...args, workspace: '/private/tmp' }, client, 'store', process.cwd(), () => {}),
-  ).rejects.toThrow('workspace_identity_mismatch');
-  expect(calls).toEqual(['sessions', 'workspaces']);
-  calls.length = 0;
-  await ensureSession(args, client, 'store', process.cwd(), () => {}, undefined, {
-    reconcile: false,
-  });
-  expect(calls).toEqual(['sessions', 'workspaces']);
+  const otherWorkspace = temporaryDirectory('kite-cli-reconciliation-workspace-');
+  try {
+    await expect(
+      ensureSession(
+        { ...args, workspace: otherWorkspace },
+        client,
+        'store',
+        process.cwd(),
+        () => {},
+      ),
+    ).rejects.toThrow('workspace_identity_mismatch');
+    expect(calls).toEqual(['sessions', 'workspaces']);
+    calls.length = 0;
+    await ensureSession(args, client, 'store', process.cwd(), () => {}, undefined, {
+      reconcile: false,
+    });
+    expect(calls).toEqual(['sessions', 'workspaces']);
+  } finally {
+    rmdirSync(otherWorkspace);
+  }
 });
 
 test('CLI does not continue after a failed state reconciliation', async () => {

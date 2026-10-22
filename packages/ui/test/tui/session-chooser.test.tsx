@@ -114,6 +114,98 @@ test('selection reconciles before history while ordinary refresh can skip reconc
   }
 });
 
+test('ordinary event refresh waits for the same Session activation without aborting reconciliation', async () => {
+  const f = fixture();
+  let release!: () => void;
+  let activationSignal!: AbortSignal;
+  const calls: string[] = [];
+  const originalRead = f.port.readSession;
+  f.port.reconcileSession = async (_id, signal) => {
+    activationSignal = signal;
+    calls.push('reconcile');
+    await new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    signal.throwIfAborted();
+    calls.push('reconciled');
+  };
+  f.port.readSession = async (id, signal) => {
+    calls.push('read');
+    return originalRead(id, signal);
+  };
+  try {
+    const activation = f.controller.select('a');
+    const refresh = f.controller.select('a', {
+      preserveReconnectionReview: true,
+      reconcile: false,
+    });
+    await Promise.resolve();
+    expect(activationSignal.aborted).toBe(false);
+    expect(calls).toEqual(['reconcile']);
+    release();
+    await Promise.all([activation, refresh]);
+    expect(calls).toEqual(['reconcile', 'reconciled', 'read', 'read']);
+    expect(f.controller.state.snapshot?.view.session.id).toBe('a');
+    expect(f.controller.state.loading).toBe(false);
+    expect(f.controller.state.error).toBeUndefined();
+  } finally {
+    f.controller.dispose();
+  }
+});
+
+test('new navigation still aborts activation and its waiting refresh cannot return to the old Session', async () => {
+  const f = fixture();
+  let release!: () => void;
+  let activationSignal!: AbortSignal;
+  const reads: string[] = [];
+  const originalRead = f.port.readSession;
+  f.port.reconcileSession = async (id, signal) => {
+    if (id !== 'a') return;
+    activationSignal = signal;
+    await new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    signal.throwIfAborted();
+  };
+  f.port.readSession = async (id, signal) => {
+    reads.push(id);
+    return originalRead(id, signal);
+  };
+  try {
+    const activation = f.controller.select('a');
+    const refresh = f.controller.select('a', { reconcile: false });
+    await f.controller.select('b');
+    expect(activationSignal.aborted).toBe(true);
+    release();
+    await Promise.all([activation, refresh]);
+    expect(reads).toEqual(['b']);
+    expect(f.controller.state.sessionId).toBe('b');
+    expect(f.controller.state.snapshot?.view.session.id).toBe('b');
+  } finally {
+    f.controller.dispose();
+  }
+});
+
+test('a waiting event refresh retains the activation failure and readable history', async () => {
+  const f = fixture();
+  let reject!: (error: Error) => void;
+  f.port.reconcileSession = () =>
+    new Promise<void>((_resolve, fail) => {
+      reject = fail;
+    });
+  try {
+    const activation = f.controller.select('a');
+    const refresh = f.controller.select('a', { reconcile: false });
+    reject(Error('owner_observation_unknown'));
+    await Promise.all([activation, refresh]);
+    expect(f.controller.state.snapshot?.view.session.id).toBe('a');
+    expect(f.controller.state.error).toContain('owner_observation_unknown');
+    expect(f.controller.state.loading).toBe(false);
+  } finally {
+    f.controller.dispose();
+  }
+});
+
 test('failed session reconciliation keeps history readable with a visible error', async () => {
   const f = fixture();
   f.port.reconcileSession = async () => {

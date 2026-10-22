@@ -172,7 +172,7 @@ for (const mode of [
                         kind: 'input.follow_up',
                         afterRunId: ready.runId,
                         contextSelectionId: session.contextSelectionId,
-                        content: 'Continue current work: next requested work',
+                        content: 'Continue current work and finish next requested work',
                       }
                     : {
                         kind: 'input.steer',
@@ -371,7 +371,7 @@ for (const mode of [
           (message) => message.runId === receipt.runId && message.role === 'user',
         );
         expect(user).toMatchObject({
-          content: 'Continue current work: next requested work',
+          content: 'Continue current work and finish next requested work',
           sourceIds: [business!.id],
         });
         await until(async () => disposals === 2);

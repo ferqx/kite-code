@@ -1501,7 +1501,11 @@ test('NativeDesktop marks an unowned active Run unverified without changing dura
       expect(f.host.querySelector('.agent-turn-status-label')?.textContent).toBe('执行状态待核实');
 
       await f.observeExecutionOwner('unheld', true);
-      expect(warning()).toBeNull();
+      expect(warning()?.textContent).toContain('无法核实原执行者');
+      expect(warning()?.textContent).not.toContain('原执行者已释放');
+      expect(f.host.querySelector('.response-status')).toBeNull();
+      expect(f.host.querySelector('button[aria-label="停止任务"]')).toBeNull();
+      expect(f.host.querySelector('.agent-turn-status-label')?.textContent).toBe('执行状态待核实');
       expect(sidebarSpinner()).toBeNull();
       expect(f.host.querySelector('button.session-row')?.getAttribute('aria-description')).toBe(
         '上次确认状态',

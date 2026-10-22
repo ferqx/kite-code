@@ -4792,7 +4792,7 @@ export class AgentRuntime {
     if (input.request.kind === 'extension.invoke' && !existing)
       this.extensionHost.validateAction(input.request);
     if (this.closing) throw new AgentError('runtime_draining');
-    if (!existing && input.request.kind === 'run.start') {
+    if ((!existing || existing.status === 'accepted') && input.request.kind === 'run.start') {
       const session = await this.options.store.getSession(input.sessionId);
       if (!session) throw new AgentError('session_not_found');
       input = {

@@ -17,7 +17,15 @@ async function until(check: () => boolean | Promise<boolean>) {
     await Bun.sleep(5);
   }
 }
-for (const mode of ['inline', 'sealed', 'reconciled', 'direct', 'direct_sealed'] as const)
+for (const mode of [
+  'inline',
+  'sealed',
+  'reconciled',
+  'direct',
+  'direct_sealed',
+  'direct_retry',
+  'direct_retry_sealed',
+] as const)
   test(`actual SIGKILL ${mode} Model output interrupt preserves original call history for same Session SDK followup`, async () => {
     const directory = mkdtempSync(join(tmpdir(), 'kite-history-followup-'));
     const bodies: {
@@ -105,6 +113,14 @@ for (const mode of ['inline', 'sealed', 'reconciled', 'direct', 'direct_sealed']
         decision: 'interrupt' as const,
       };
       delete input.executionId;
+      if (mode.startsWith('direct_retry'))
+        await store.acceptCommand({
+          expectedStoreId: ready.expectedStoreId,
+          commandId: 'next',
+          sessionId: 's',
+          subjectId: 'owner',
+          request: { kind: 'run.start', content: 'New task: New explicit input' },
+        });
       if (mode === 'reconciled' || mode.startsWith('direct')) {
         const result = await store.reconcileSession({ ...input, commandId: 'observe' });
         input.expectedOwnerGeneration = result.report!.generation;

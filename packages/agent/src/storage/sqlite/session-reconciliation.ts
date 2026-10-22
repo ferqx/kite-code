@@ -127,14 +127,42 @@ function readCheckpoint(db: SqliteOperations, text: string): Checkpoint {
   if (hash(body as unknown as Json) !== digest) throw invalid();
   return checkpoint;
 }
-function sessions(db: SqliteOperations, root: string) {
+function sessions(
+  db: SqliteOperations,
+  root: string,
+  renames?: { sequences: Record<string, string>; storeId: string; subjectId: string },
+) {
   return hash(
     db
       .rows(
         'SELECT id,context_selection_id,control_revision,stop_boundary,delete_requested FROM session WHERE root_id=? ORDER BY id',
         root,
       )
-      .map(jsonRow),
+      .map((row) => {
+        if (renames && renames.sequences[String(row.id)] !== undefined) {
+          // v1 checkpoints retain the original control revision. Account only for
+          // authenticated title changes, never human-work selection or deletion.
+          const titles = db.rows(
+            "SELECT request_json FROM command WHERE session_id=? AND seq>? AND kind='session.rename' AND status='applied' AND origin_store_id=? AND subject_id=? ORDER BY seq",
+            row.id!,
+            BigInt(renames.sequences[String(row.id)]!),
+            renames.storeId,
+            renames.subjectId,
+          );
+          const originalRevision = BigInt(row.control_revision!) - BigInt(titles.length);
+          if (
+            originalRevision < 0n ||
+            titles.some(
+              (title, index) =>
+                JSON.parse(String(title.request_json)).ifRevision !==
+                String(originalRevision + BigInt(index)),
+            )
+          )
+            throw new AgentError('run_resume_checkpoint_changed');
+          return jsonRow({ ...row, control_revision: originalRevision });
+        }
+        return jsonRow(row);
+      }),
   );
 }
 function runIds(db: SqliteOperations, root: string) {
@@ -466,13 +494,19 @@ export function withReconciledFrontier<T>(
     throw new AgentError('run_resume_checkpoint_changed');
   const checkpoint = readCheckpoint(db, String(saved.checkpoint_json));
   if (
-    sessions(db, rootId) !== checkpoint.sessions ||
+    sessions(db, rootId, {
+      sequences: checkpoint.commandSequences,
+      storeId: input.expectedStoreId,
+      subjectId: input.subjectId,
+    }) !== checkpoint.sessions ||
     runIds(db, rootId) !== checkpoint.runIds ||
     Object.entries(checkpoint.commandSequences).some(([sessionId, sequence]) =>
       db.row(
-        "SELECT id FROM command WHERE session_id=? AND seq>? AND kind NOT IN('session.reconcile','run.resume')",
+        "SELECT id FROM command WHERE session_id=? AND seq>? AND kind NOT IN('session.reconcile','run.resume') AND NOT(kind='session.rename' AND status='applied' AND origin_store_id=? AND subject_id=?)",
         sessionId,
         BigInt(sequence),
+        input.expectedStoreId,
+        input.subjectId,
       ),
     )
   )

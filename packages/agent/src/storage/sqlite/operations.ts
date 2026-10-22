@@ -1218,6 +1218,7 @@ export class SqliteOperations {
               prior.subject_id !== input.subjectId
             )
               throw new AgentError('command_conflict');
+            if (prior.status === 'accepted') closeReconciledHistory(this, input);
             return this.command(prior);
           }
           const session = this.row('SELECT * FROM session WHERE id=?', input.sessionId);

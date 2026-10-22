@@ -137,6 +137,16 @@ async function fixture(
         finishReason: mode === 'tool' ? 'tool_calls' : mode === 'length' ? 'length' : 'stop',
         toolCalls: mode === 'tool' ? [{ id: 'call', name: 'fixture.tool', arguments: '{}' }] : [],
       },
+      ...(mode === 'tool'
+        ? {
+            message: {
+              role: 'assistant' as const,
+              content: 'complete fixed result',
+              toolCalls: [{ id: 'call', name: 'fixture.tool', arguments: '{}' }],
+              sourceIds: ['model'],
+            },
+          }
+        : {}),
     });
     if (mode === 'tool')
       await store.planExecution({
@@ -1024,6 +1034,193 @@ test('new ordinary work refuses true unknown before accepting its command or cal
     expect(await f.store.getCommand('new')).toBeNull();
     expect(await f.store.getView('s')).toEqual(before);
     expect(f.db.query('SELECT * FROM session_reconciliation').get()).toEqual(checkpoint);
+    expect(calls).toBe(0);
+  } finally {
+    await runtime.close();
+    await f.close();
+  }
+});
+
+for (const action of ['resume', 'abandon', 'new_task'] as const)
+  test(`title-only renames preserve v1 reconciliation evidence for ${action}`, async () => {
+    const f = await fixture('tool');
+    let runtime: ReturnType<typeof createRuntime> | undefined;
+    try {
+      const reconciled = await f.store.reconcileSession({ ...f.input, commandId: 'reconcile' });
+      const saved = f.db.query('SELECT checkpoint_json FROM session_reconciliation').get();
+      expect(
+        JSON.parse(String((saved as { checkpoint_json: string }).checkpoint_json)).version,
+      ).toBe(1);
+      for (const commandId of ['rename-once', 'rename-twice']) {
+        const rename = {
+          expectedStoreId: f.input.expectedStoreId,
+          sessionId: 's',
+          subjectId: 'owner',
+          commandId,
+          ifRevision: (await f.store.getSession('s'))!.controlRevision,
+          title: commandId,
+        };
+        await f.store.renameSession(rename);
+        await f.store.renameSession(rename); // Receipt retries do not create another revision.
+      }
+      expect(f.db.query('SELECT checkpoint_json FROM session_reconciliation').get()).toEqual(saved);
+      const input = { ...f.input, expectedOwnerGeneration: reconciled.report!.generation };
+      if (action === 'resume') {
+        const state = await f.store.verifyRunResume(input);
+        const begun = await f.store.beginRunResume({
+          ...input,
+          checkpoint: state.checkpoint!,
+          instanceId: 'resumed',
+        });
+        await f.store.commitRunResume({
+          expectedStoreId: input.expectedStoreId,
+          lease: begun.lease!,
+          checkpoint: state.checkpoint!,
+          expectedConfiguration: f.configuration,
+        });
+        expect((await f.store.getExecution('tool'))!.status).toBe('planned');
+      } else {
+        runtime = createRuntime({
+          store: f.store,
+          modelId: 'new',
+          permissions: {
+            async authorize() {
+              return { allowed: true, revision: 'test' };
+            },
+          },
+          model: {
+            async *stream() {
+              yield { type: 'finish', reason: 'stop', usage: { inputTokens: 1, outputTokens: 1 } };
+            },
+          },
+        });
+        if (action === 'abandon')
+          await runtime.recoverSession({ ...input, commandId: 'abandon', decision: 'interrupt' });
+        else
+          await runtime.submitCommand({
+            expectedStoreId: input.expectedStoreId,
+            sessionId: 's',
+            subjectId: 'owner',
+            commandId: 'new',
+            request: { kind: 'run.start', content: 'A new independent task' },
+          });
+        expect(
+          (await f.store.listMessages('s')).filter((message) => message.toolCallId === 'call'),
+        ).toHaveLength(1);
+        expect((await f.store.getExecution('tool'))!.status).toBe('cancelled');
+      }
+      expect((await f.store.getSession('s'))!.title).toBe('rename-twice');
+      expect(f.db.query('SELECT count(*) AS n FROM session_reconciliation').get()).toEqual({
+        n: 0,
+      });
+    } finally {
+      await runtime?.close();
+      await f.close();
+    }
+  });
+
+for (const change of ['stop', 'selection', 'other_control', 'untrusted_rename'] as const)
+  test(`title reconciliation allowance cannot conceal ${change}`, async () => {
+    const f = await fixture();
+    try {
+      const reconciled = await f.store.reconcileSession({ ...f.input, commandId: 'reconcile' });
+      await f.store.renameSession({
+        expectedStoreId: f.input.expectedStoreId,
+        sessionId: 's',
+        subjectId: 'owner',
+        commandId: 'rename',
+        title: 'renamed',
+        ifRevision: (await f.store.getSession('s'))!.controlRevision,
+      });
+      if (change === 'stop')
+        await f.store.cancelWork({
+          expectedStoreId: f.input.expectedStoreId,
+          sessionId: 's',
+          subjectId: 'owner',
+          commandId: 'stop',
+          kind: 'run.cancel',
+          runId: f.run.id,
+        });
+      else if (change === 'selection')
+        await f.store.selectContext({
+          expectedStoreId: f.input.expectedStoreId,
+          sessionId: 's',
+          subjectId: 'owner',
+          commandId: 'rewind',
+          boundary: null,
+          expectedContextSelectionId: (await f.store.getSession('s'))!.contextSelectionId,
+        });
+      else if (change === 'other_control')
+        f.db.run("UPDATE session SET control_revision=control_revision+1 WHERE id='s'");
+      else f.db.run("UPDATE command SET subject_id='another' WHERE id='rename'");
+      const before = await f.store.getView('s');
+      await denied(
+        f.store.verifyRunResume({
+          ...f.input,
+          expectedOwnerGeneration: reconciled.report!.generation,
+        }),
+        'run_resume_checkpoint_changed',
+      );
+      expect(await f.store.getView('s')).toEqual(before);
+    } finally {
+      await f.close();
+    }
+  });
+
+test('ordinary owner acquisition cannot bypass a reconciled history boundary', async () => {
+  const f = await fixture('tool');
+  try {
+    await f.store.acceptCommand({
+      expectedStoreId: f.input.expectedStoreId,
+      sessionId: 's',
+      subjectId: 'owner',
+      commandId: 'queued',
+      request: { kind: 'run.start', content: 'New independent task' },
+    });
+    await f.store.reconcileSession({ ...f.input, commandId: 'reconcile' });
+    const before = await f.store.getView('s');
+    await denied(f.store.acquireSessionOwner('s', 'ordinary-dispatcher'), 'recovery_required');
+    expect(await f.store.getView('s')).toEqual(before);
+    expect((await f.store.getCommand('queued'))!.status).toBe('accepted');
+    expect(f.db.query('SELECT count(*) AS n FROM session_reconciliation').get()).toEqual({ n: 1 });
+  } finally {
+    await f.close();
+  }
+});
+
+test('retrying preaccepted work cannot retire a reconciled unknown outcome', async () => {
+  const f = await fixture('tool');
+  let calls = 0;
+  const runtime = createRuntime({
+    store: f.store,
+    modelId: 'new',
+    permissions: {
+      async authorize() {
+        return { allowed: true, revision: 'test' };
+      },
+    },
+    model: {
+      async *stream() {
+        calls++;
+        yield { type: 'finish', reason: 'stop', usage: { inputTokens: 1, outputTokens: 1 } };
+      },
+    },
+  });
+  try {
+    const input = {
+      expectedStoreId: f.input.expectedStoreId,
+      sessionId: 's',
+      subjectId: 'owner',
+      commandId: 'queued',
+      request: { kind: 'run.start' as const, content: 'New independent task' },
+    };
+    await f.store.acceptCommand(input);
+    f.db.run("UPDATE execution SET state='outcome_unknown' WHERE id='tool'");
+    await f.store.reconcileSession({ ...f.input, commandId: 'reconcile' });
+    const before = await f.store.getView('s');
+    await denied(runtime.submitCommand(input), 'session_recovery_required');
+    expect(await f.store.getView('s')).toEqual(before);
+    expect((await f.store.getCommand('queued'))!.status).toBe('accepted');
     expect(calls).toBe(0);
   } finally {
     await runtime.close();

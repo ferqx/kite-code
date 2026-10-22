@@ -73,8 +73,11 @@ function fixture() {
   const pending: (() => void)[] = [];
   const requests: NativeRequest[] = [];
   let executionOwner: 'held' | 'unheld' | 'unknown' | undefined;
+  let directoryUnavailable = false;
+  let cachedDirectoryRun: Pick<Run, 'id' | 'status' | 'isActive'> | undefined;
   const session = () => ({ ...backgroundItem().rootSession, nextSeq: String(messages.length + 1) });
   const directory = () => ({
+    unavailable: directoryUnavailable,
     storeId: 'store',
     sessions: [
       {
@@ -87,9 +90,9 @@ function fixture() {
                 pendingInteractions: 0,
                 updatedAt: null,
                 run: {
-                  id: runs[0]!.id,
-                  status: runs[0]!.status,
-                  isActive: runs[0]!.isActive,
+                  id: (cachedDirectoryRun ?? runs[0]!).id,
+                  status: (cachedDirectoryRun ?? runs[0]!).status,
+                  isActive: (cachedDirectoryRun ?? runs[0]!).isActive,
                   waitingForResults: false,
                 },
               },
@@ -247,6 +250,15 @@ function fixture() {
     host,
     requests,
     facts: () => structuredClone({ runs, executions, messages }),
+    async observeDirectoryUnavailable(unavailable: boolean) {
+      directoryUnavailable = unavailable;
+      cachedDirectoryRun = unavailable ? { ...runs[0]! } : undefined;
+      await publish();
+    },
+    async observeRun(run: Run) {
+      runs.splice(0, runs.length, run);
+      await publish();
+    },
     async observeExecutionOwner(owner: NonNullable<typeof executionOwner>) {
       executionOwner = owner;
       await publish();
@@ -419,6 +431,38 @@ test('Native owner reconciliation stops live tool activity while retaining confi
     expect(f.host.textContent).toContain('已请求停止，等待执行结果。');
     expect(f.host.textContent).not.toContain('执行状态待核实');
     expect(f.facts()).toEqual(original);
+    expect(
+      f.requests.filter((request) => /submit|prepare|recover|cancel/.test(request.method)),
+    ).toEqual([]);
+  } finally {
+    await f.close();
+  }
+});
+
+test('Native directory read failure cannot revive unconfirmed activity and stale ownership cannot cover a terminal or new Run', async () => {
+  const f = fixture();
+  try {
+    await f.render();
+    await f.start();
+    for (const owner of ['unheld', 'unknown', 'held'] as const) {
+      await f.observeExecutionOwner(owner);
+      await f.observeDirectoryUnavailable(true);
+      expect(f.host.querySelectorAll('.response-status')).toHaveLength(0);
+      expect(f.host.querySelectorAll('.tool-activity.is-running')).toHaveLength(0);
+      expect(f.host.querySelectorAll('button[aria-label="停止任务"]')).toHaveLength(0);
+      expect(f.host.textContent).toContain('执行状态待核实');
+      await f.observeDirectoryUnavailable(false);
+    }
+    expect(f.host.querySelectorAll('.response-status')).toHaveLength(1);
+    expect(f.host.textContent).not.toContain('执行状态待核实');
+    const original = f.facts().runs[0]!;
+    await f.observeExecutionOwner('unheld');
+    await f.observeDirectoryUnavailable(true);
+    await f.observeRun({ ...original, isActive: false, status: 'interrupted' });
+    expect(f.host.textContent).not.toContain('执行状态待核实');
+    expect(f.host.querySelectorAll('.response-status')).toHaveLength(0);
+    await f.observeRun({ ...original, id: 'new-run' });
+    expect(f.host.textContent).not.toContain('执行状态待核实');
     expect(
       f.requests.filter((request) => /submit|prepare|recover|cancel/.test(request.method)),
     ).toEqual([]);

@@ -264,4 +264,4 @@ TUI Markdown 根布局约束实际正文列宽，普通及流式回复的长段�
 
 ## 选中与重连的后端状态核实
 
-[TuiController](src/tui/controller.ts) 的明确 `select` 默认先等待宿主可选 `reconcileSession` port，再读历史；普通刷新显式传 `reconcile:false`。失败仍读历史并发布错误，切换／取消后旧结果不发布。写入与 capability 核验归 [CLI Host](../../apps/cli/README.md)，纯 UI 不取得 authority。[选择器测试](test/tui/session-chooser.test.tsx)核顺序、跳过及失败阅读。桌面持久终态优先于 `executionUnconfirmed` 回退；后端与原恢复边界归[Core owner](../agent/src/storage/sqlite/run-resume.README.md#会话恢复时的状态核实)。
+[TuiController](src/tui/controller.ts) 的明确 `select` 默认先等待宿主可选 `reconcileSession` port，再读历史；普通刷新显式传 `reconcile:false`；同会话激活尚未完成时等待其核实与历史读取，不中止核实或重复写入。失败仍读历史并发布错误，切换／取消后旧结果不发布，等待中的旧刷新也不能重新选中原会话。写入与 capability 核验归 [CLI Host](../../apps/cli/README.md)，纯 UI 不取得 authority。[选择器测试](test/tui/session-chooser.test.tsx)核顺序、跳过及失败阅读。桌面持久终态优先于 `executionUnconfirmed` 回退；后端与原恢复边界归[Core owner](../agent/src/storage/sqlite/run-resume.README.md#会话恢复时的状态核实)。

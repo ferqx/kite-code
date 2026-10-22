@@ -558,6 +558,7 @@ export class TuiController {
   private generation = 0;
   private historyGeneration = 0;
   private historyRead?: AbortController;
+  private sessionActivation?: { sessionId: string; done: Promise<boolean> };
   private contextRead?: AbortController;
   private sessionDeletionRead?: AbortController;
   private modelRead?: AbortController;
@@ -1085,6 +1086,19 @@ export class TuiController {
     options: { preserveReconnectionReview?: boolean; reconcile?: boolean } = {},
   ) {
     if (this.disposed) return;
+    // An event refresh must not cancel the activation that is still reconciling
+    // this Session. New explicit navigation keeps its normal cancellation path.
+    const activationGeneration = this.generation;
+    while (options.reconcile === false && this.sessionActivation?.sessionId === sessionId) {
+      const completed = await this.sessionActivation.done;
+      if (
+        !completed ||
+        this.disposed ||
+        this.generation !== activationGeneration ||
+        this.value.sessionId !== sessionId
+      )
+        return;
+    }
     this.fileRead?.abort();
     this.publish({ fileCandidates: undefined });
     const same = this.value.sessionId === sessionId;
@@ -1168,6 +1182,18 @@ export class TuiController {
     });
     const read = this.reading();
     this.historyRead = read;
+    let finishActivation: ((completed: boolean) => void) | undefined;
+    const activation =
+      options.reconcile !== false && this.port.reconcileSession
+        ? {
+            sessionId,
+            done: new Promise<boolean>((resolve) => {
+              finishActivation = resolve;
+            }),
+          }
+        : undefined;
+    if (activation) this.sessionActivation = activation;
+    let activationCompleted = false;
     try {
       let reconciliationError: string | undefined;
       if (options.reconcile !== false && this.port.reconcileSession) {
@@ -1317,6 +1343,7 @@ export class TuiController {
       // A root control can change before this newly selected child's View arrives.
       // Read its current controls once the actual root/Workspace scope is known.
       if (!same) void this.refreshPermissions();
+      activationCompleted = !reconciliationError;
       // An explicit history selection may carry accepted requests from the old
       // process. Resolve their original public IDs once; never submit them again.
       if (selectingHistory && this.port.callers) {
@@ -1348,6 +1375,8 @@ export class TuiController {
         });
       }
     } finally {
+      if (this.sessionActivation === activation) this.sessionActivation = undefined;
+      finishActivation?.(activationCompleted);
       this.reads.delete(read);
     }
   }

@@ -858,15 +858,18 @@ function NativeDesktopContent({
   ]);
   const activeInputRun = selection?.runs.find((run) => run.isActive);
   const directoryActivity =
-    !directory?.unavailable && directory?.storeId === selection?.storeId
+    directory?.storeId === selection?.storeId
       ? directory?.sessions.find((session) => session.id === selection?.session.id)?.activity
       : undefined;
   // 目录观察只属于其原活动 Run；已协调终态或后来的新轮次不继承旧 owner 提示。
+  // A failed directory refresh cannot confirm ownership or revive cached activity.
   const executionOwner =
     activeInputRun &&
     directoryActivity?.run?.isActive &&
     directoryActivity.run.id === activeInputRun.id
-      ? directoryActivity.executionOwner
+      ? directory?.unavailable
+        ? 'unknown'
+        : directoryActivity.executionOwner
       : undefined;
   const executionUnconfirmed = executionOwner === 'unheld' || executionOwner === 'unknown';
   const jobs =

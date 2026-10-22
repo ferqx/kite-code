@@ -165,7 +165,15 @@ function execute(request: WorkerRequest): void {
         const session = operations!.row('SELECT * FROM session WHERE id=?', sessionId);
         if (!session || session.delete_requested) throw new AgentError('session_not_found');
         if (session.parent_id !== null) throw new AgentError('group_root_required');
-        if (hasUnsettledOwnerGroup(operations!, sessionId, operations!.metadata().storeId))
+        // Settled public rows do not retire the private history-pairing boundary.
+        // Ordinary dispatch must wait for explicit resume or proven new-work closure.
+        if (
+          operations!.row(
+            'SELECT root_session_id FROM session_reconciliation WHERE root_session_id=?',
+            sessionId,
+          ) ||
+          hasUnsettledOwnerGroup(operations!, sessionId, operations!.metadata().storeId)
+        )
           throw new AgentError('recovery_required');
         if (BigInt(session.owner_generation!) >= 9223372036854775807n)
           throw new AgentError('sequence_exhausted');

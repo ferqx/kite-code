@@ -178,6 +178,7 @@ export function registerHumanCommand(
         previous.origin_store_id !== input.expectedStoreId
       )
         throw new AgentError('command_conflict');
+      if (previous.status === 'accepted') closeReconciledHistory(db, input);
       return db.command(previous);
     }
     validateInputAdmission(db, input);
