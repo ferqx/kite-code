@@ -332,7 +332,7 @@ function fixture(failTools = false, failRuns = false, withImage = false) {
   const host = dom.window.document.getElementById('root')!,
     root = createRoot(host);
   const until = async (ready: () => boolean) => {
-    for (let i = 0; i < 80 && !ready(); i++)
+    for (let i = 0; i < 1200 && !ready(); i++)
       await act(async () => {
         await new Promise((resolve) => setTimeout(resolve, 0));
       });
@@ -564,16 +564,16 @@ for (const first of ['runs', 'tools'] as const) {
   });
 }
 
-test('a failed historical tool check finishes initial loading and preserves explicit original receipt access and retry', async () => {
+test('a failed historical tool check keeps receipts readable and retries without extra session controls', async () => {
   const f = fixture(true);
   try {
     await f.render();
     await f.release('runs');
     await f.release('tools');
-    await f.until(() => !!f.host.textContent?.includes('重新核对工具状态'));
+    expect(f.host.textContent).not.toContain('重新核对工具状态');
     expect(f.host.querySelector('.conversation-loading')).toBeNull();
     expect(f.host.textContent).toContain(final);
-    expect(f.host.textContent).toContain('部分工具状态尚无法核实');
+    expect(f.host.textContent).not.toContain('部分工具状态尚无法核实');
     await act(async () => f.host.querySelector<HTMLButtonElement>('.agent-turn-summary')!.click());
     expect(f.host.querySelector('.context-compacted')?.textContent).toBe('上下文压缩完成');
     expect(f.host.textContent).not.toContain(raw);
@@ -581,14 +581,16 @@ test('a failed historical tool check finishes initial loading and preserves expl
       f.host.querySelector<HTMLButtonElement>('.tool-activity-summary')!.click(),
     );
     expect(f.host.textContent).toContain(raw);
-    const reads = f.requests.filter((request) => request.method === 'toolMessages.list').length;
-    await act(async () =>
-      [...f.host.querySelectorAll<HTMLButtonElement>('button')]
-        .find((button) => button.textContent === '重新核对工具状态')!
-        .click(),
-    );
-    await f.until(
-      () => f.requests.filter((request) => request.method === 'toolMessages.list').length > reads,
+    f.fail('tools', false);
+    await f.until(() => f.pending('tools') > 0);
+    const pendingReads = f.requests.filter(
+      (request) => request.method === 'toolMessages.list',
+    ).length;
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 1200));
+    });
+    expect(f.requests.filter((request) => request.method === 'toolMessages.list')).toHaveLength(
+      pendingReads,
     );
     expect(f.host.querySelector('.conversation-loading')).toBeNull();
     await f.release('tools');
@@ -597,29 +599,22 @@ test('a failed historical tool check finishes initial loading and preserves expl
   }
 });
 
-test('a failed historical Run check retains readable compression, original messages and retry', async () => {
+test('a failed historical Run check retains readable messages and reconciles automatically', async () => {
   const f = fixture(false, true);
   try {
     await f.render();
     await f.release('tools');
     expectReadableDuringMetadata(f.host);
     await f.release('runs');
-    await f.until(() => !!f.host.textContent?.includes('重新核对本轮状态'));
+    await f.until(() => f.pending('runs') > 0);
+    expect(f.host.textContent).not.toContain('重新核对本轮状态');
     expect(f.host.querySelector('.conversation-loading')).toBeNull();
     expect(f.host.textContent).toContain(final);
     expect(f.host.querySelector('.context-compacted')?.textContent).toBe('上下文压缩完成');
-    expect(f.host.textContent).toContain('无法核对本轮状态，已保留原消息');
+    expect(f.host.textContent).not.toContain('无法核对本轮状态，已保留原消息');
     expect(f.host.textContent).not.toContain(summary);
     expect(f.host.textContent).not.toContain(raw);
-    const reads = f.requests.filter((request) => request.method === 'toolMessages.runs').length;
-    await act(async () =>
-      [...f.host.querySelectorAll<HTMLButtonElement>('button')]
-        .find((button) => button.textContent === '重新核对本轮状态')!
-        .click(),
-    );
-    await f.until(
-      () => f.requests.filter((request) => request.method === 'toolMessages.runs').length > reads,
-    );
+    f.fail('runs', false);
     expect(f.host.querySelector('.conversation-loading')).toBeNull();
     expect(f.host.textContent).toContain(final);
     await f.release('runs');
@@ -738,7 +733,7 @@ test('cached ownership never delays changed complete messages while both metadat
   }
 });
 
-test('a fresh metadata failure discards retained verified grouping and exposes current unknown facts and retry', async () => {
+test('a fresh metadata failure discards stale grouping and reconciles automatically', async () => {
   const f = fixture();
   try {
     await f.render();
@@ -751,17 +746,12 @@ test('a fresh metadata failure discards retained verified grouping and exposes c
     await f.until(() => f.pending('runs') > 0 && f.pending('tools') > 0);
     f.fail('tools');
     await f.release('tools');
-    await f.until(() => !!f.host.textContent?.includes('重新核对工具状态'));
+    expect(f.host.textContent).not.toContain('重新核对工具状态');
     expectReadableDuringMetadata(f.host);
-    expect(f.host.textContent).toContain('部分工具状态尚无法核实');
+    expect(f.host.textContent).not.toContain('部分工具状态尚无法核实');
     expect(f.host.querySelector('.agent-turn-final')).toBeNull();
     await f.release('runs');
     f.fail('tools', false);
-    await act(async () =>
-      [...f.host.querySelectorAll<HTMLButtonElement>('button')]
-        .find((button) => button.textContent === '重新核对工具状态')!
-        .click(),
-    );
     await f.until(() => f.pending('tools') > 0);
     await f.release('tools');
     await f.until(() => !!f.host.querySelector('.agent-turn-final'));
@@ -890,6 +880,63 @@ test('repeatedly selecting an in-flight target reuses the original selection req
     await f.until(
       () => !!f.host.querySelector('.conversation-viewport')?.textContent?.includes('Other ready'),
     );
+  } finally {
+    await f.close();
+  }
+});
+
+test('metadata recovery pauses while hidden and stops on success without exposing retry controls', async () => {
+  const f = fixture(true);
+  try {
+    await f.render();
+    await f.release('runs');
+    await f.release('tools');
+    const reads = () =>
+      f.requests.filter((request) => request.method === 'toolMessages.list').length;
+    const before = reads();
+    await act(async () => {
+      Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'hidden' });
+      document.dispatchEvent(new Event('visibilitychange'));
+    });
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 350));
+    });
+    expect(reads()).toBe(before);
+    f.fail('tools', false);
+    await act(async () => {
+      Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'visible' });
+      document.dispatchEvent(new Event('visibilitychange'));
+    });
+    await f.until(() => f.pending('tools') > 0);
+    await f.release('tools');
+    const completed = reads();
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 350));
+    });
+    expect(reads()).toBe(completed);
+    expect(f.host.textContent).not.toContain('重新核对工具状态');
+    expect(f.host.textContent).toContain(final);
+  } finally {
+    await f.close();
+  }
+});
+
+test('leaving a failed metadata scope cancels its automatic recovery', async () => {
+  const f = fixture(true);
+  try {
+    await f.render();
+    await f.release('runs');
+    await f.release('tools');
+    await f.select('Other session');
+    await f.until(() => !!f.host.textContent?.includes('Other ready'));
+    const before = f.requests.filter((request) => request.method === 'toolMessages.list').length;
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 350));
+    });
+    expect(f.requests.filter((request) => request.method === 'toolMessages.list')).toHaveLength(
+      before,
+    );
+    expect(f.host.textContent).not.toContain('重新核对工具状态');
   } finally {
     await f.close();
   }

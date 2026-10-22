@@ -160,14 +160,6 @@ export function TuiSession({
           }}
           onExit={onQuit ?? (() => void controller.routeCommand('/exit'))}
         />
-      ) : state.snapshot?.environment?.observer === 'workspace_missing' ? (
-        <Box flexDirection="column">
-          <Text color="yellow">
-            Workspace is unavailable · read-only recovery. History and original requests remain
-            readable; new execution and management writes are disabled.
-          </Text>
-          <TuiSessionView controller={controller} onQuit={onQuit} />
-        </Box>
       ) : (
         <TuiSessionView controller={controller} onQuit={onQuit} />
       )}
@@ -498,7 +490,19 @@ function TuiHistory({
           version: JSON.stringify(local),
           node:
             local.role === 'user' ? (
-              <UserMessageBlock content={terminalText(local.content)} columns={columns} />
+              <UserMessageBlock
+                content={terminalText(
+                  local.submissionFailure
+                    ? `${local.content}\n${
+                        !testDiagnostics &&
+                        local.submissionFailure.reason === 'input_target_stopped'
+                          ? t('This input was not applied; the original Run has ended.')
+                          : `${t('Input rejected')}${local.submissionFailure.reason ? `: ${local.submissionFailure.reason}` : ''}`
+                      }`
+                    : local.content,
+                )}
+                columns={columns}
+              />
             ) : (
               <Text dimColor>{terminalText(local.content)}</Text>
             ),
@@ -2204,18 +2208,9 @@ function TuiSessionView({
           {state.stale ? t(' · Stale') : ''}
         </Text>
       ) : (
-        <>
-          {(state.stale ||
-            running === 'Unknown — verify original work' ||
-            running === 'Unavailable') && (
-            <Text color="yellow">
-              {t(state.stale ? 'Observation unknown: new writes disabled' : running)}
-            </Text>
-          )}
-          {state.loading && <Text dimColor>{t('Loading')}</Text>}
-        </>
+        state.loading && <Text dimColor>{t('Loading')}</Text>
       )}
-      {state.snapshot && !currentActivityVerified(state.snapshot) && (
+      {testDiagnostics && state.snapshot && !currentActivityVerified(state.snapshot) && (
         <Text color="yellow">
           {t(
             'This connection cannot verify activity; work may still be executing in another owner.',
@@ -2235,7 +2230,7 @@ function TuiSessionView({
             {t('Current task')} · {t('Cancelled')}
           </Text>
         )}
-      {(unfinishedJobs > 0 || unknownJobs > 0) && (
+      {testDiagnostics && (unfinishedJobs > 0 || unknownJobs > 0) && (
         <Text>
           {t('Background Jobs:')} {unfinishedJobs} {t('unfinished')} · {unknownJobs} {t('unknown')}
         </Text>
@@ -2597,7 +2592,8 @@ function TuiSessionView({
           )}
         </Text>
       )}
-      {state.management &&
+      {testDiagnostics &&
+        state.management &&
         (testDiagnostics ||
           !['applied', 'completed'].includes(state.management.status) ||
           state.management.intent.sessionId !== state.sessionId) && (
@@ -2620,7 +2616,8 @@ function TuiSessionView({
             {state.management.omittedExtensionState ? t(' · Fork omitted extension state') : ''}
           </Text>
         )}
-      {state.intent &&
+      {testDiagnostics &&
+        state.intent &&
         (testDiagnostics ||
           ['unknown', 'submitting', 'rejected'].includes(state.intent.phase) ||
           state.intent.sessionId !== state.sessionId) && (
@@ -2646,11 +2643,16 @@ function TuiSessionView({
             )}
           </Text>
         )}
-      {state.error && (
-        <Text color="red">
-          {t('Error:')} {terminalText(state.error)}
-        </Text>
-      )}
+      {(testDiagnostics ||
+        /(?:store_changed|identity_mismatch|connection_not_admitted)$/.test(
+          state.observationError ?? '',
+        )) &&
+        state.error && (
+          <Text color="red">
+            {t('Error:')}{' '}
+            {terminalText(testDiagnostics ? state.error : (state.observationError ?? state.error))}
+          </Text>
+        )}
       {testDiagnostics && (
         <Text>
           {t(
@@ -2675,12 +2677,12 @@ function TuiSessionView({
         activeTiming.finishedAt === undefined && (
           <TuiRecordedPhaseTime startedAt={activeTiming.startedAt} label="Thinking" />
         )}
-      {state.snapshot?.pendingInputsUnavailable && (
+      {testDiagnostics && state.snapshot?.pendingInputsUnavailable && (
         <Text color="yellow">{t('Pending input queue unavailable')}</Text>
       )}
       {state.snapshot?.pendingInputs && state.snapshot.pendingInputs.length > 0 && (
         <Box flexDirection="column">
-          {(testDiagnostics || state.stale) && (
+          {testDiagnostics && (
             <Text dimColor>
               {t(state.stale ? 'Last confirmed pending inputs' : 'Pending inputs')} ·{' '}
               {state.snapshot.pendingInputs.length}

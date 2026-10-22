@@ -358,7 +358,7 @@ test('directory failure retains complete facts and late paused or disposed respo
     f.state.fail = true;
     await f.click(f.button('Refresh directory'));
     expect(f.rows().map((row) => row.childNodes[0]?.textContent)).toEqual(original);
-    expect(f.section().textContent).toContain('directory_unavailable');
+    expect(f.section().textContent).not.toContain('directory_unavailable');
     f.state.fail = false;
     await f.click(f.button('Other'));
     const refreshStart = f.calls.length;
@@ -410,7 +410,7 @@ test('directory failure retains complete facts and late paused or disposed respo
   }
 });
 
-test('directory activity uses the original run, prioritizes waiting, and labels stale facts instead of showing a live spinner', async () => {
+test('directory activity uses the original run, prioritizes waiting, and removes live activity without adding stale labels', async () => {
   const f = await fixture();
   try {
     f.state.entries[0]!.activity = {
@@ -433,7 +433,7 @@ test('directory activity uses the original run, prioritizes waiting, and labels 
     f.state.fail = true;
     await f.click(f.button('Refresh directory'));
     expect(f.rows()[0]!.querySelector('[aria-label="正在运行"]')).toBeNull();
-    expect(f.rows()[0]!.textContent).toContain('上次读取');
+    expect(f.rows()[0]!.textContent).not.toContain('上次读取');
   } finally {
     await f.close();
   }

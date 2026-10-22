@@ -1,4 +1,9 @@
-import { type AgentClient, type Command, readOrdinaryCommandApplication } from '@kite-ai/client';
+import {
+  type AgentClient,
+  ClientError,
+  type Command,
+  readOrdinaryCommandApplication,
+} from '@kite-ai/client';
 import type {
   TuiCallerIntent,
   TuiCallerOutcome,
@@ -270,6 +275,7 @@ export function createTuiCallerPort(input: {
       const original = freezeCaller(parseCallerIntent(intent));
       if (!first.has(intent)) return lookup(original);
       first.delete(intent);
+      let responseReceived = false;
       try {
         admit(original);
         const r = original.request,
@@ -286,6 +292,7 @@ export function createTuiCallerPort(input: {
                   : r.kind === 'execution.cancel'
                     ? await input.client.cancelExecution(s, r, { signal: input.signal })
                     : await input.client.invokeExtension(s, r, { signal: input.signal });
+        responseReceived = true;
         const result = await checked(original, command, input.client, input.signal, () =>
           admit(original),
         );
@@ -293,7 +300,22 @@ export function createTuiCallerPort(input: {
         input.signal?.throwIfAborted();
         input.journal.record(original, result.phase);
         return result;
-      } catch {
+      } catch (error) {
+        if (
+          !responseReceived &&
+          original.request.kind === 'input.steer' &&
+          error instanceof ClientError &&
+          error.code === 'input_target_stopped' &&
+          error.status !== undefined &&
+          error.status >= 400 &&
+          error.status < 500
+        ) {
+          try {
+            admit(original);
+            input.journal.record(original, 'rejected');
+            return { intent: original, phase: 'rejected', error: error.code };
+          } catch {}
+        }
         try {
           input.journal.record(original, 'unknown');
         } catch {}

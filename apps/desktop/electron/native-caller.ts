@@ -62,6 +62,7 @@ import { NativeWorkspaceRemovalPort } from './workspace-removal';
 export class NativeCaller {
   private generation = 0;
   private selection = 0;
+  private activation: { id: number; sessionId: string; selection: number } | undefined;
   private selected: string | undefined;
   private lastView: { selection: number; snapshot: DesktopSnapshot } | undefined;
   private contextWorkspace:
@@ -1137,6 +1138,7 @@ export class NativeCaller {
       this.selection++;
       const generation = ++this.generation;
       this.selected = undefined;
+      this.activation = undefined;
       await this.startObservation();
       this.check(generation);
       return this.state();
@@ -1653,11 +1655,73 @@ export class NativeCaller {
         result = this.directoryState()!;
         break;
       case 'select': {
+        const previous = this.activation;
+        const retry = request.activationId !== undefined && previous?.id === request.activationId;
+        if (
+          request.activationId !== undefined &&
+          previous &&
+          (request.activationId < previous.id ||
+            (retry &&
+              (previous.sessionId !== request.sessionId ||
+                previous.selection !== this.selection ||
+                this.selected !== request.sessionId)))
+        )
+          throw new ClientError('native_selection_changed');
+        if (retry) {
+          // A lost IPC reply or failed read does not authorize replaying activation's POST.
+          const check = () => {
+            this.check(generation);
+            if (
+              this.activation !== previous ||
+              this.selected !== request.sessionId ||
+              this.selection !== previous!.selection
+            )
+              throw new ClientError('native_selection_changed');
+          };
+          check();
+          let refreshed = false;
+          while (this.refreshing) {
+            await this.refreshing.catch(() => {});
+            check();
+            if (
+              !this.permissionUnavailable &&
+              this.controller.snapshot?.sessionId === request.sessionId
+            ) {
+              refreshed = true;
+              break;
+            }
+          }
+          if (!refreshed) {
+            const reading = this.controller.refreshSession(request.sessionId);
+            this.refreshing = reading;
+            try {
+              await reading;
+            } finally {
+              if (this.refreshing === reading) this.refreshing = undefined;
+              if (this.refreshRequested && this.observer)
+                this.scheduleRefresh(this.observer.signal);
+            }
+          }
+          check();
+          this.permissionUnavailable = false;
+          const snapshot = this.selectScope(request.sessionId);
+          this.contextWorkspace = {
+            sessionId: request.sessionId,
+            selection: this.selection,
+            workspaceId: snapshot.view.session.workspaceId,
+          };
+          result = this.state();
+          break;
+        }
         this.releaseReads();
         this.lastView = undefined;
         this.contextWorkspace = undefined;
         this.selection++;
         this.selected = request.sessionId;
+        this.activation =
+          request.activationId === undefined
+            ? undefined
+            : { id: request.activationId, sessionId: request.sessionId, selection: this.selection };
         const view = this.selection;
         const reading = this.controller
           .selectSession(request.sessionId)

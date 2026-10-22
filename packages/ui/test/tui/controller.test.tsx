@@ -1850,3 +1850,123 @@ test('restored background Job remains readable without preparing a historical st
     c.dispose();
   }
 });
+
+for (const owner of ['current-owner', 'previous-owner', null]) {
+  test(`ordinary input with active owner ${owner ?? 'unconfirmed'} preserves the exact predecessor and uses the correct admission path`, async () => {
+    const f = fixture();
+    const source = {
+      ...snapshot('a', true),
+      connectionInstanceId: 'current-owner',
+      activityOwner: { instanceId: owner, generation: '1' },
+    };
+    f.port.readSession = async () => source;
+    const controller = new TuiController(f.port);
+    try {
+      await controller.select('a');
+      controller.setDraft('continue the original task');
+      await controller.send();
+      expect(f.writes).toEqual([
+        {
+          id: 'a',
+          intent: {
+            kind: owner === 'current-owner' ? 'input.steer' : 'input.follow_up',
+            expectedStoreId: 'store',
+            commandId: 'id1',
+            ...(owner === 'current-owner' ? { targetRunId: 'run' } : { afterRunId: 'run' }),
+            contextSelectionId: 'selection',
+            content: 'continue the original task',
+          },
+        },
+      ]);
+      expect(source.view.runs[0]?.status).toBe('waiting_execution');
+      expect(source.view.runs[0]?.isActive).toBe(true);
+      expect(f.cancels).toHaveLength(0);
+      expect(f.reads()).toBe(0);
+    } finally {
+      controller.dispose();
+    }
+  });
+}
+
+test('a proven stopped-target steer rejection keeps the original input and refreshes read-only before the next user send', async () => {
+  const f = fixture();
+  let active = true,
+    reconciliations = 0,
+    commandReads = 0;
+  const submitted: import('../../src/tui').TuiCallerIntent[] = [];
+  f.port.reconcileSession = async () => {
+    reconciliations++;
+  };
+  f.port.readSession = async () => snapshot('a', active);
+  f.port.callers = {
+    list: async () => [],
+    prepare: async (scope, request) => ({
+      scope,
+      request,
+      target: {
+        kind: request.kind === 'input.steer' ? 'run' : 'session',
+        id: request.kind === 'input.steer' ? request.targetRunId : scope.sessionId,
+      },
+      subjectId: 'local-user',
+      bodyDigest: 'a'.repeat(64),
+      requestDigest: 'b'.repeat(64),
+    }),
+    submit: async (intent) => {
+      submitted.push(intent);
+      if (intent.request.kind === 'input.steer') {
+        active = false;
+        return { intent, phase: 'rejected', error: 'input_target_stopped' };
+      }
+      return {
+        intent,
+        phase: 'accepted',
+        command: {
+          ...command(intent.request.commandId, intent.scope.sessionId),
+          kind: intent.request.kind,
+        },
+      };
+    },
+    lookup: async (intent) => {
+      commandReads++;
+      return { intent, phase: 'unknown' };
+    },
+    clear: async () => {},
+  };
+  const c = new TuiController(f.port);
+  let ui: ReturnType<typeof render> | undefined;
+  try {
+    await c.select('a');
+    c.setDraft('original rejected input');
+    await c.send();
+    expect(c.state.intent).toMatchObject({
+      commandId: 'id1',
+      kind: 'input.steer',
+      phase: 'rejected',
+    });
+    expect(c.state.draft).toBe('original rejected input');
+    expect(c.state.localMessages[0]).toMatchObject({
+      role: 'user',
+      content: 'original rejected input',
+      submissionFailure: { commandId: 'id1', reason: 'input_target_stopped' },
+    });
+    ui = render(<TuiSession controller={c} />);
+    await Bun.sleep(30);
+    expect(ui.lastFrame()).toContain('This input was not applied; the original Run has ended.');
+    expect(ui.lastFrame()).not.toContain('input_target_stopped');
+    expect(c.state.snapshot?.view.runs).toHaveLength(0);
+    expect(reconciliations).toBe(1);
+    expect(submitted).toHaveLength(1);
+    await Bun.sleep(550);
+    expect(commandReads).toBe(0);
+    c.setDraft('next explicit user input');
+    await c.send();
+    expect(submitted.map((intent) => [intent.request.commandId, intent.request.kind])).toEqual([
+      ['id1', 'input.steer'],
+      ['id2', 'run.start'],
+    ]);
+    expect(c.state.intent?.phase).toBe('accepted');
+  } finally {
+    ui?.unmount();
+    c.dispose();
+  }
+});

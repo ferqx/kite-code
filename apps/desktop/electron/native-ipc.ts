@@ -176,7 +176,7 @@ const fields: Record<NativeRequest['method'], readonly string[]> = {
   'workspace.pick': [],
   'workspace.remove': ['workspaceId'],
   'workspace.removal.lookup': ['commandId'],
-  select: ['sessionId'],
+  select: ['sessionId', 'activationId'],
   createSession: ['workspaceId', 'commandId', 'sessionId', 'title', 'expectedStoreId'],
   messages: ['sessionId', 'expectedStoreId', 'readId', 'afterSeq', 'upperSeq', 'limit'],
   'messages.close': ['readId'],
@@ -570,6 +570,12 @@ export function decodeNativeRequest(value: unknown): NativeRequest {
     )
       throw Error('invalid_native_request');
   }
+  if (
+    method === 'select' &&
+    input.activationId !== undefined &&
+    (!Number.isSafeInteger(input.activationId) || Number(input.activationId) < 1)
+  )
+    throw Error('invalid_native_request');
   for (const key of ['revision', 'observationId'])
     if (
       method !== 'interaction.answer' &&

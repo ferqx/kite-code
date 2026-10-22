@@ -275,3 +275,63 @@ test('dispose aborts only this controller read, publishes nothing late and never
   expect(p.counters).toMatchObject({ close: 0, dispose: 0, cancel: 0, pages: 0 });
   await expect(controller.refresh()).rejects.toThrow('controller_disposed');
 });
+
+test('a failed initial read retries without an active Run and stops on hide or dispose', async () => {
+  let failing = true;
+  const p = port({
+    getView: async (id) => {
+      if (failing) throw new ClientError('browser_read_unavailable');
+      return view(id, false);
+    },
+  });
+  const updates: WebUpdate[] = [];
+  const controller = new WebController({
+    admittedClient: p.client,
+    pollIntervalMs: 10,
+    onUpdate: (update) => updates.push(update),
+  });
+  try {
+    await expect(controller.selectSession('a')).rejects.toThrow();
+    await until(() => p.counters.views >= 2);
+    controller.setVisible(false);
+    const hidden = p.counters.views;
+    await Bun.sleep(45);
+    expect(p.counters.views).toBe(hidden);
+    failing = false;
+    controller.setVisible(true);
+    await until(() => updates.at(-1)?.phase === 'ready');
+    const recovered = p.counters.views;
+    await Bun.sleep(35);
+    expect(p.counters.views).toBe(recovered);
+    expect(controller.snapshot?.sessionId).toBe('a');
+    expect(p.counters.cancel).toBe(0);
+  } finally {
+    controller.disposeObserver();
+  }
+});
+
+test('failed idle history keeps recovering after more than three failed reads, then stops', async () => {
+  let remaining = 4;
+  const p = port({
+    getView: async (id) => {
+      if (remaining-- > 0) throw new ClientError('browser_read_unavailable');
+      return view(id, false);
+    },
+  });
+  const updates: WebUpdate[] = [];
+  const controller = new WebController({
+    admittedClient: p.client,
+    pollIntervalMs: 5,
+    onUpdate: (update) => updates.push(update),
+  });
+  try {
+    await expect(controller.selectSession('a')).rejects.toThrow();
+    await until(() => updates.at(-1)?.phase === 'ready');
+    expect(p.counters.views).toBe(6);
+    const settled = p.counters.views;
+    await Bun.sleep(50);
+    expect(p.counters.views).toBe(settled);
+  } finally {
+    controller.disposeObserver();
+  }
+});

@@ -49,6 +49,7 @@ export const storeMethods: readonly (keyof Store)[] = [
   'createSession',
   'getSession',
   'listSessions',
+  'validateCommandAdmission',
   'acceptCommand',
   'registerHumanInput',
   'registerHumanCommand',

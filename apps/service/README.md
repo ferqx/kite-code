@@ -522,6 +522,8 @@ Windows x64 已接当前SID私有pipe/record和准确kernel process HANDLE到同
 
 ## 会话恢复时的后端状态核实
 
+普通新任务和后续输入经 Runtime 准入时也自动调用同一 Core 核实链路，先校验原请求身份、前驱和上下文，再核原 OS owner。客户端不必先展示错误或要求手动恢复；已落定原 Command 重查不引发核实，历史 GET／SSE 保持只读。自动核实不重放旧效果，未知外部作用仍受原安全边界限制。
+
 `POST /v1/sessions/:sessionId/reconcile` 要求实际 `session_reconciliation` 能力，只接收 `expectedStoreId`、`commandId`、`expectedOwnerGeneration`；主体来自认证，目标必须是原根 Session。观察 generation 仅是 CAS 输入，不授 owner。Core 仍核原 Store／主体、整组状态和原 OS 锁；无遗留工作为 unchanged，原锁被持有为 owner_held，两者不写中断。
 
 reconciled 回执只投影原 Store／Session、Command 和公开 RecoveryReport，内部 fence／lease 不公开；`session.reconcile` 原 Command 可经既有 GET 查询。核实仅结算失去 owner 的状态，保安全接续边界，零 Provider／授权／Tool／Job 派发。GET／SSE 和只读 Web 保持零写入，原 `session.recover` 仍表示明确放弃原执行边界。完整合同归[Core owner](../../packages/agent/src/storage/sqlite/run-resume.README.md#会话恢复时的状态核实)，[真实 HTTP 回归](test/isolated/session-reconciliation.test.ts)核身份、活 owner、原锁丢失、幂等与公开回执。

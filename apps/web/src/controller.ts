@@ -26,6 +26,7 @@ export class WebController {
   private readonly options: WebOptions;
   private readonly interval: number;
   private generation = 0;
+  private failures = 0;
   private selected: string | undefined;
   private visible: boolean;
   private disposed = false;
@@ -51,6 +52,7 @@ export class WebController {
     if (this.disposed) throw new ClientError('controller_disposed');
     this.stopRead();
     this.generation++;
+    this.failures = 0;
     this.selected = sessionId;
     this.current = undefined;
     this.activity = undefined;
@@ -61,6 +63,7 @@ export class WebController {
     if (this.disposed) return;
     this.stopRead();
     this.generation++;
+    this.failures = 0;
     this.selected = undefined;
     this.current = undefined;
     this.activity = undefined;
@@ -145,6 +148,7 @@ export class WebController {
       )
         return undefined;
       this.current = { sessionId, generation, view: latest, messages };
+      this.failures = 0;
       this.publish('ready');
       return this.snapshot;
     } catch (error) {
@@ -155,6 +159,7 @@ export class WebController {
         signal.aborted
       )
         return undefined;
+      this.failures++;
       this.publish(
         this.current ? 'stale' : 'error',
         error instanceof ClientError ? error.code : 'browser_read_unavailable',
@@ -176,14 +181,21 @@ export class WebController {
     if (
       !this.visible ||
       this.disposed ||
-      !this.activity?.active ||
-      this.activity.sessionId !== this.selected ||
-      this.activity.generation !== this.generation
+      !this.selected ||
+      (!this.failures &&
+        (!this.activity?.active ||
+          this.activity.sessionId !== this.selected ||
+          this.activity.generation !== this.generation))
     )
       return;
-    this.timer = setTimeout(() => {
-      void this.refresh().catch(() => {});
-    }, this.interval);
+    this.timer = setTimeout(
+      () => {
+        void this.refresh().catch(() => {});
+      },
+      this.failures
+        ? Math.min(30000, this.interval * 2 ** Math.min(this.failures - 1, 4))
+        : this.interval,
+    );
   }
   setVisible(visible: boolean): void {
     if (this.disposed || visible === this.visible) return;

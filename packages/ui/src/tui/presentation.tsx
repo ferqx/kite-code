@@ -146,6 +146,8 @@ export const tuiChinese: Readonly<Record<string, string>> = {
   Context: '上下文',
   'Session operation': '会话操作',
   Submission: '提交状态',
+  'Input rejected': '输入被拒绝',
+  'This input was not applied; the original Run has ended.': '本次输入未应用，原轮次已结束。',
   'Ctrl+L: check the original request': 'Ctrl+L 查询原申请',
   'Add guidance to the current task': '补充当前任务',
   'Observation unknown: new writes disabled': '观察状态未知，暂不能提交新申请',

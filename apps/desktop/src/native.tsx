@@ -97,6 +97,7 @@ import { NativeProviderSettings } from './native-provider-settings';
 import { NativeRecoveryView } from './native-recovery';
 import { NativeExecutionResult } from './native-result';
 import { useNativeScheduledTasks } from './native-scheduled-tasks';
+import { NativeSessionRecovery } from './native-session-recovery';
 import { NativeSessionPanel } from './native-sessions';
 import { NativeSkillsSettings } from './native-skills-settings';
 import { NativeStartup } from './native-startup';
@@ -282,8 +283,28 @@ function NativeDesktopContent({
   }>();
   const planModes = useRef(new Map<string, boolean>());
   const [error, setError] = useState('');
+  const [businessError, setBusinessError] = useState(false);
+  const [failedReads, setFailedReads] = useState<{
+    state?: string;
+    directory?: string;
+    selection?: { key: string; sessionId: string };
+  }>({});
+  const sessionRecovery = useRef(new NativeSessionRecovery());
+  const [, recoveryVisibilityChanged] = useState(0);
   const [pending, setPending] = useState(false);
   const [sending, setSending] = useState(false);
+  const [inputDeliveries, setInputDeliveries] = useState(
+    new Map<
+      string,
+      {
+        storeId: string;
+        sessionId: string;
+        text: string;
+        phase: 'sending' | 'unknown' | 'failed' | 'accepted';
+      }
+    >(),
+  );
+
   const [removingWorkspace, setRemovingWorkspace] = useState<string>();
   const [expandedExecutions, setExpandedExecutions] = useState<{
     identity: string;
@@ -449,14 +470,18 @@ function NativeDesktopContent({
       });
     }
   }
-  async function report(action: () => Promise<unknown>, clearError = true) {
+  async function report(action: () => Promise<unknown>, clearError = true, business = false) {
     try {
-      if (clearError) setError('');
+      if (clearError) {
+        setError('');
+        setBusinessError(business);
+      }
       return await action();
     } catch (cause) {
       const code =
         (cause as { code?: string; message?: string }).code ??
         (cause as { message?: string }).message;
+      setBusinessError(business);
       setError(code && /^[a-z][a-z0-9_]{0,80}$/.test(code) ? code : '结果待核实；请查询原命令。');
       return undefined;
     }
@@ -503,9 +528,14 @@ function NativeDesktopContent({
         value = await bridge.request({ method: 'state', generation: current });
       } catch (cause) {
         if (!isCurrentRead(current, epoch, nonce)) return;
+        setFailedReads((previous) => ({
+          ...previous,
+          state: JSON.stringify([current, epoch, nonce]),
+        }));
         throw cause;
       }
       if (!isCurrentRead(current, epoch, nonce)) return;
+      setFailedReads((previous) => (previous.state ? { ...previous, state: undefined } : previous));
       apply(value);
       if (
         value &&
@@ -537,27 +567,27 @@ function NativeDesktopContent({
     if (!bridge || readLifecycle.current.quitting) return;
     const current = generation.current,
       epoch = readLifecycle.current.epoch;
-    let value: NativeResult;
     try {
-      value = await bridge.request({ method: 'directory', generation: current });
+      const value = await bridge.request({ method: 'directory', generation: current });
+      if (!isCurrentRead(current, epoch)) return;
+      if (!value || !('workspaces' in value)) throw Error('native_directory_unavailable');
+      acceptDirectory(value);
+      setFailedReads((previous) => ({
+        ...previous,
+        directory: value.unavailable ? JSON.stringify([current, epoch]) : undefined,
+      }));
+      return value;
     } catch (cause) {
       if (!isCurrentRead(current, epoch)) return;
       // Main's observer reset replaces this GET; the next directory state owns the display.
       const code = (cause as { code?: string; message?: string }).code ?? (cause as Error).message;
       if (code === 'directory_observation_changed') return;
+      setFailedReads((previous) => ({
+        ...previous,
+        directory: JSON.stringify([current, epoch]),
+      }));
       throw cause;
     }
-    if (
-      epoch !== readLifecycle.current.epoch ||
-      readLifecycle.current.quitting ||
-      current !== generation.current
-    )
-      return;
-    if (value && 'workspaces' in value) {
-      acceptDirectory(value);
-      return value;
-    }
-    throw Error('native_directory_unavailable');
   }
   async function readGrants(nextPage = false) {
     const scope = state?.selection;
@@ -592,8 +622,8 @@ function NativeDesktopContent({
     if (keepCurrentDraft) rememberDraft();
     const firstHandoff =
       preparing && !keepCurrentDraft && firstRef.current?.creation.sessionId === sessionId;
-    const page = pageIntent.current;
     // Keep the submitted preparation visible until its own selected facts arrive.
+    if (firstHandoff) firstOpenPage.current = pageIntent.current;
     if (!keepTaskPage) {
       if (!firstHandoff) setPreparing(false);
       setScheduledTasksView(false);
@@ -608,8 +638,6 @@ function NativeDesktopContent({
     setModelInputTarget(undefined);
     setGrantFacts(undefined);
     await readSelection(sessionId, current, nonce, epoch);
-    if (firstHandoff && page === pageIntent.current && isCurrentRead(current, epoch, nonce))
-      setPreparing(false);
   }
   async function readSelection(sessionId: string, current: number, nonce: number, epoch: number) {
     if (!isCurrentRead(current, epoch, nonce)) return;
@@ -619,7 +647,12 @@ function NativeDesktopContent({
     };
     selectionRead.current = original;
     try {
-      let value = await bridge.request({ method: 'select', generation: current, sessionId });
+      let value = await bridge.request({
+        method: 'select',
+        generation: current,
+        sessionId,
+        activationId: nonce,
+      });
       if (!isCurrentRead(current, epoch, nonce)) return;
       if (value && 'generation' in value && value.selection?.session.id === sessionId) {
         const targetSelection = value.selection;
@@ -686,8 +719,29 @@ function NativeDesktopContent({
           draftRevision.current = saved.revision;
         }
       }
+      if (isCurrentRead(current, epoch, nonce)) {
+        setFailedReads((previous) =>
+          previous.selection ? { ...previous, selection: undefined } : previous,
+        );
+        // A recovered first selection completes the same handoff as its initial
+        // read. Keep this here so an automatic retry cannot leave preparing set.
+        if (
+          !original.holdPresentation &&
+          selected.current === sessionId &&
+          firstOpenPage.current === pageIntent.current &&
+          firstRef.current?.creation.sessionId === sessionId &&
+          value &&
+          'generation' in value &&
+          value.selection?.storeId === firstRef.current.creation.expectedStoreId
+        )
+          setPreparing(false);
+      }
     } catch (cause) {
       if (!isCurrentRead(current, epoch, nonce)) return;
+      setFailedReads((previous) => ({
+        ...previous,
+        selection: { key: JSON.stringify([current, epoch, nonce]), sessionId },
+      }));
       throw cause;
     } finally {
       if (selectionRead.current === original && epoch === readLifecycle.current.epoch)
@@ -703,6 +757,7 @@ function NativeDesktopContent({
       if (event.kind === 'lifecycle') {
         const quitting = event.phase === 'quitting';
         if (quitting === readLifecycle.current.quitting) return;
+        if (quitting) sessionRecovery.current.close();
         if (quitting && !selectionRead.current) rememberLatestDraft.current();
         readLifecycle.current = { epoch: readLifecycle.current.epoch + 1, quitting };
         viewIntent.current++;
@@ -887,6 +942,7 @@ function NativeDesktopContent({
   ).length;
   const unknownJobs = jobs.filter((job) => job.status === 'outcome_unknown').length;
   const needsNextModel =
+    executionUnconfirmed ||
     !activeInputRun ||
     planMode ||
     ['context.compress', 'context.compression.reset'].includes(
@@ -1026,7 +1082,8 @@ function NativeDesktopContent({
       if (
         !selection ||
         selected.current !== selection.session.id ||
-        draftOwner.current !== imageScope(selection.storeId, selection.session.id)
+        draftOwner.current !== imageScope(selection.storeId, selection.session.id) ||
+        draftCache.current.get(imageScope(selection.storeId, selection.session.id))?.content
       )
         return false;
       changeDraft(text);
@@ -1076,6 +1133,147 @@ function NativeDesktopContent({
     messages,
     observationRevision: selection?.viewGeneration ?? 0,
   });
+  // Retry only observations and original-ID lookups; never replay a submitted mutation.
+  // Scope keys revoke pending callbacks on navigation, Store/generation change or shutdown.
+  useEffect(() => {
+    const work = new Map<string, () => unknown | Promise<unknown>>();
+    const current = generation.current,
+      epoch = readLifecycle.current.epoch,
+      nonce = viewIntent.current,
+      sessionId = selected.current;
+    const scope = JSON.stringify([current, selection?.storeId, sessionId, epoch, nonce]);
+    const active = () => isCurrentRead(current, epoch, nonce);
+    const retrying = (key: string) => sessionRecovery.current.has(`${scope}:${key}`);
+    const add = (key: string, action: () => unknown | Promise<unknown>) =>
+      work.set(`${scope}:${key}`, async () => {
+        if (active()) await action();
+      });
+    if (!readLifecycle.current.quitting && current > 0 && document.visibilityState !== 'hidden') {
+      const readKey = JSON.stringify([current, epoch, nonce]);
+      if (failedReads.state === readKey) add('state-read', refresh);
+      if (failedReads.directory === JSON.stringify([current, epoch]))
+        add('directory-read', readDirectory);
+      if (failedReads.selection?.key === readKey) {
+        const target = failedReads.selection.sessionId;
+        add(`selection-read:${target}`, () => readSelection(target, current, nonce, epoch));
+      }
+      if (readingParent && selection && selection.session.id === sessionId) {
+        if (
+          historyState.phase === 'unavailable' ||
+          selection.permissionUnavailable ||
+          state?.callerUnavailable ||
+          state?.backgroundUnavailable ||
+          executionUnconfirmed ||
+          (retrying('observation') && (historyState.phase === 'loading' || selection.viewLoading))
+        )
+          add('observation', refresh);
+        if (fileTargets.error || (retrying('files') && fileTargets.loading))
+          add('files', () => {
+            if (!fileTargets.loading) fileTargets.retry();
+          });
+        if (toolMessages.error || (retrying('tools') && toolMessages.loading))
+          add('tools', () => {
+            if (!toolMessages.loading) toolMessages.retry();
+          });
+        if (runMessages.error || (retrying('runs') && runMessages.loading))
+          add('runs', () => {
+            if (!runMessages.loading) runMessages.retry();
+          });
+        if (inputQueue.error || (retrying('queue') && inputQueue.loading))
+          add('queue', () => {
+            if (!inputQueue.loading) inputQueue.retry();
+          });
+        for (const row of inputQueue.submissions)
+          add(`queue:${row.commandId}`, () => inputQueue.lookup(row.commandId));
+      }
+      const lookup = (
+        method: 'lookupInput' | 'caller.lookup' | 'lookupPermission' | 'lookupInteraction',
+        commandId: string,
+      ) =>
+        add(`${method}:${commandId}`, async () => {
+          await bridge.request({ method, generation: current, commandId });
+          if (active()) await refresh();
+        });
+      for (const [id, input] of inputDeliveries)
+        if (
+          input.sessionId === sessionId &&
+          input.storeId === selection?.storeId &&
+          input.phase === 'unknown' &&
+          !state?.inputSubmissions.some(
+            (row) => row.intent.commandId === id && row.phase !== 'unknown',
+          )
+        )
+          lookup('lookupInput', id);
+      for (const row of state?.inputSubmissions ?? [])
+        if (
+          row.sessionId === sessionId &&
+          row.intent.expectedStoreId === selection?.storeId &&
+          row.phase === 'unknown'
+        )
+          lookup('lookupInput', row.intent.commandId);
+      for (const row of state?.callerSubmissions ?? [])
+        if (
+          row.scope.sessionId === sessionId &&
+          row.scope.storeId === selection?.storeId &&
+          row.phase === 'unknown'
+        )
+          lookup('caller.lookup', row.request.commandId);
+      for (const row of state?.permissionSubmissions ?? [])
+        if (
+          row.sessionId === sessionId &&
+          row.intent.expectedStoreId === selection?.storeId &&
+          row.phase === 'unknown'
+        )
+          lookup('lookupPermission', row.intent.commandId);
+      for (const row of state?.interactionSubmissions ?? [])
+        if (
+          row.interaction.sessionId === sessionId &&
+          row.intent.expectedStoreId === selection?.storeId &&
+          row.phase === 'unknown'
+        )
+          lookup('lookupInteraction', row.intent.commandId);
+      for (const row of state?.answerSubmissions ?? [])
+        if (
+          row.scope.sessionId === sessionId &&
+          row.scope.storeId === selection?.storeId &&
+          row.phase === 'unknown'
+        )
+          lookup('lookupInteraction', row.request.commandId);
+      const original = firstSubmission;
+      if (
+        original?.result?.phase === 'unknown' &&
+        !scheduledTasksView &&
+        original.creation.expectedStoreId === directory?.storeId &&
+        (preparing || sessionId === original.creation.sessionId)
+      ) {
+        const page = pageIntent.current;
+        add(`conversation:${original.commandId}`, async () => {
+          const result = await bridge.request({
+            method: 'conversation.lookup',
+            generation: current,
+            commandId: original.commandId,
+          });
+          if (
+            active() &&
+            result &&
+            'kind' in result &&
+            result.kind === 'conversation' &&
+            'stage' in result
+          )
+            await acceptFirstResult(result, original, current, page);
+        });
+      }
+    }
+    sessionRecovery.current.reconcile(work);
+  });
+  useEffect(() => {
+    const changed = () => recoveryVisibilityChanged((value) => value + 1);
+    document.addEventListener('visibilitychange', changed);
+    return () => {
+      document.removeEventListener('visibilitychange', changed);
+      sessionRecovery.current.close();
+    };
+  }, []);
   const cacheMetrics = useNativeCacheMetrics({
     bridge,
     generation: state?.generation ?? generation.current,
@@ -1126,7 +1324,7 @@ function NativeDesktopContent({
     selection?.storeId,
     selection?.session.id,
   ]);
-  async function write(action: () => Promise<unknown>, requiresHistory = true) {
+  async function write(action: () => Promise<unknown>, requiresHistory = true, business = false) {
     if (
       writing.current ||
       (requiresHistory && state?.selection && historyState.phase !== 'complete')
@@ -1135,7 +1333,7 @@ function NativeDesktopContent({
     writing.current = true;
     setPending(true);
     try {
-      await report(action);
+      await report(action, true, business);
     } finally {
       writing.current = false;
       setPending(false);
@@ -1287,7 +1485,7 @@ function NativeDesktopContent({
     setNewBranch(undefined);
     setTargetBranch(undefined);
     const target = workspaceId ?? directory?.workspaces[0]?.id;
-    if (target) void report(() => chooseWorkspace(target));
+    if (target) void report(() => chooseWorkspace(target), true, true);
     else {
       contextIntent.current++;
       setContextBusy(false);
@@ -1356,43 +1554,47 @@ function NativeDesktopContent({
   }
   async function addWorkspace() {
     if (!bridge) return;
-    await write(async () => {
-      const current = generation.current,
-        page = pageIntent.current;
-      const picked = await bridge.request({ method: 'workspace.pick', generation: current });
-      await readDirectory();
-      if (
-        current !== generation.current ||
-        page !== pageIntent.current ||
-        !picked ||
-        !('kind' in picked) ||
-        picked.kind !== 'workspace.picked' ||
-        !('workspaceId' in picked)
-      )
-        return;
-      rememberDraft();
-      setPreparing(true);
-      setScheduledTasksView(false);
-      setToolsOpen(false);
-      // The host returns the actual registered identity, never a guessed new directory item.
-      const value = await bridge.request({
-        method: 'conversation.branch',
-        generation: current,
-        workspaceId: picked.workspaceId,
-      });
-      if (
-        current === generation.current &&
-        page === pageIntent.current &&
-        value &&
-        'kind' in value &&
-        value.kind === 'conversation.branch' &&
-        'repository' in value
-      ) {
-        setNewWorkspace(value.workspaceId);
-        setNewBranch(value);
-        setTargetBranch(undefined);
-      }
-    }, false);
+    await write(
+      async () => {
+        const current = generation.current,
+          page = pageIntent.current;
+        const picked = await bridge.request({ method: 'workspace.pick', generation: current });
+        await readDirectory();
+        if (
+          current !== generation.current ||
+          page !== pageIntent.current ||
+          !picked ||
+          !('kind' in picked) ||
+          picked.kind !== 'workspace.picked' ||
+          !('workspaceId' in picked)
+        )
+          return;
+        rememberDraft();
+        setPreparing(true);
+        setScheduledTasksView(false);
+        setToolsOpen(false);
+        // The host returns the actual registered identity, never a guessed new directory item.
+        const value = await bridge.request({
+          method: 'conversation.branch',
+          generation: current,
+          workspaceId: picked.workspaceId,
+        });
+        if (
+          current === generation.current &&
+          page === pageIntent.current &&
+          value &&
+          'kind' in value &&
+          value.kind === 'conversation.branch' &&
+          'repository' in value
+        ) {
+          setNewWorkspace(value.workspaceId);
+          setNewBranch(value);
+          setTargetBranch(undefined);
+        }
+      },
+      false,
+      true,
+    );
   }
   function firstIntent(
     commandId: string,
@@ -1424,7 +1626,16 @@ function NativeDesktopContent({
     if (current !== generation.current || firstRef.current?.commandId !== original.commandId)
       return;
     setFirstSubmission({ ...original, result: value });
-    await readDirectory();
+    if (
+      value.phase === 'unknown' &&
+      original.result?.phase === 'unknown' &&
+      value.creation?.phase === original.result.creation?.phase &&
+      value.creation?.input.sessionId === original.result.creation?.input.sessionId
+    )
+      return;
+    // Directory observation is recoverable independently of the known receipt.
+    // Do not turn an acknowledged submission back into unknown or stop handoff.
+    void readDirectory().catch(() => {});
     if (value.creation?.phase === 'created') {
       if (value.phase === 'accepted') setNewPlanMode(false);
       const sessionId = value.creation.input.sessionId;
@@ -1457,15 +1668,23 @@ function NativeDesktopContent({
       const key = imageScope(value.creation.input.expectedStoreId, sessionId);
       if (draftCache.current.get(key) === original.draft)
         draftCache.current.set(key, value.phase === 'accepted' ? { content: '' } : original.draft);
-      if (page === pageIntent.current || firstOpenPage.current === pageIntent.current) {
-        await select(sessionId, false);
+      if (
+        (page === pageIntent.current || firstOpenPage.current === pageIntent.current) &&
+        (selected.current !== sessionId || preparing)
+      ) {
+        // The selection records its own read recovery. Its failure cannot
+        // invalidate the already acknowledged first-submission receipt.
+        await select(sessionId, false).catch(() => {});
       }
     } else if (
       value.phase !== 'accepted' &&
       newDraftRevision.current === original.preparationRevision
     )
       setNewDraft((draft) => draft || original.text);
-    if (value.code && value.code !== 'conversation_continue_explicit') setError(value.code);
+    if (value.code && value.code !== 'conversation_continue_explicit') {
+      setBusinessError(false);
+      setError(value.code);
+    }
   }
   function sendFirst() {
     if (
@@ -1572,6 +1791,7 @@ function NativeDesktopContent({
           submittedText,
           planMode,
           resolvedChoice?.identity === choiceIdentity ? resolvedChoice.choice : undefined,
+          executionUnconfirmed,
         ),
         ...(files.length ? { files: files.map(({ name, uri }) => ({ name, uri })) } : {}),
       };
@@ -1646,18 +1866,64 @@ function NativeDesktopContent({
         sessionId,
         draft: submittedDraft,
       });
-      const value = await bridge.request({
-        method: 'submit',
-        generation: current,
-        sessionId,
-        intent,
-        imageIds,
+      setInputDeliveries((previous) =>
+        new Map(previous).set(commandId, {
+          storeId: selection.storeId,
+          sessionId,
+          text: submittedText,
+          phase: 'sending',
+        }),
+      );
+      let value: NativeResult;
+      try {
+        value = await bridge.request({
+          method: 'submit',
+          generation: current,
+          sessionId,
+          intent,
+          imageIds,
+        });
+      } catch (cause) {
+        const code =
+          (cause as { code?: string; message?: string })?.code ?? (cause as Error)?.message;
+        setInputDeliveries((previous) => {
+          const next = new Map(previous),
+            original = next.get(commandId);
+          if (original)
+            next.set(commandId, {
+              ...original,
+              phase: [
+                'invalid_native_request',
+                'native_request_too_large',
+                'native_sender_denied',
+              ].includes(code)
+                ? 'failed'
+                : 'unknown',
+            });
+          return next;
+        });
+        throw cause;
+      }
+      setInputDeliveries((previous) => {
+        const next = new Map(previous),
+          original = next.get(commandId);
+        if (original)
+          next.set(commandId, {
+            ...original,
+            phase:
+              value && 'phase' in value && ['accepted', 'applied', 'terminal'].includes(value.phase)
+                ? 'accepted'
+                : value && 'phase' in value && ['failed', 'rejected'].includes(value.phase)
+                  ? 'failed'
+                  : 'unknown',
+          });
+        return next;
       });
       const accepted =
         value && 'phase' in value && ['accepted', 'applied', 'terminal'].includes(value.phase);
       if (accepted) imageDrafts.removeIds([...imageIds, ...files.map((file) => file.id)]);
       if (accepted && current === generation.current) {
-        if ('draft' in value)
+        if (value && 'draft' in value)
           rememberConsumedDraft(
             commandId,
             { storeId: selection.storeId, workspaceId: selection.session.workspaceId, sessionId },
@@ -1773,9 +2039,74 @@ function NativeDesktopContent({
       !selection.viewLoading &&
       !selection.permissionUnavailable,
   });
+  useEffect(() => {
+    const saved = new Set(
+      displayMessages
+        .filter((message) => message.role === 'user')
+        .flatMap((message) =>
+          [message.humanInput?.publicCommandId, message.originCommandId].filter(
+            (id): id is string => !!id,
+          ),
+        ),
+    );
+    if (!saved.size) return;
+    setInputDeliveries((previous) => {
+      const next = new Map(
+        [...previous].filter(
+          ([id, input]) =>
+            input.storeId !== selection?.storeId ||
+            input.sessionId !== selection.session.id ||
+            !saved.has(id),
+        ),
+      );
+      return next.size === previous.size ? previous : next;
+    });
+  }, [displayMessages, selection]);
+  const pendingInputModels = useMemo(
+    () =>
+      [...inputDeliveries].flatMap(([id, input]) => {
+        if (
+          preparing ||
+          input.storeId !== selection?.storeId ||
+          input.sessionId !== selection.session.id ||
+          displayMessages.some(
+            (message) =>
+              message.role === 'user' &&
+              (message.humanInput?.publicCommandId === id || message.originCommandId === id),
+          )
+        )
+          return [];
+        const metadata = state?.inputSubmissions.find(
+          (row) =>
+            row.intent.commandId === id &&
+            row.sessionId === input.sessionId &&
+            row.intent.expectedStoreId === input.storeId,
+        );
+        const phase = metadata
+          ? ['accepted', 'applied', 'terminal'].includes(metadata.phase)
+            ? 'accepted'
+            : ['failed', 'rejected'].includes(metadata.phase)
+              ? 'failed'
+              : metadata.phase === 'unknown'
+                ? 'unknown'
+                : 'sending'
+          : input.phase;
+        return [
+          {
+            id,
+            role: 'user' as const,
+            text: input.text,
+            settled: phase === 'accepted',
+            copyText: null,
+            delivery: phase === 'accepted' ? undefined : phase,
+          },
+        ];
+      }),
+    [inputDeliveries, preparing, selection, displayMessages, state?.inputSubmissions],
+  );
   const messageModels = useMemo(() => {
     const models = preparing ? [] : [...transcript.messages];
-    models.push(...liveTools.map((entry) => entry.message));
+    models.push(...liveTools.map((entry) => entry.message), ...pendingInputModels);
     if (firstVisible && !firstSaved)
       models.unshift({
         id: firstSubmission.commandId,
@@ -1793,7 +2124,15 @@ function NativeDesktopContent({
                 : 'sending',
       });
     return groupNativeToolMessages(models);
-  }, [preparing, transcript.messages, liveTools, firstVisible, firstSaved, firstSubmission]);
+  }, [
+    preparing,
+    transcript.messages,
+    liveTools,
+    pendingInputModels,
+    firstVisible,
+    firstSaved,
+    firstSubmission,
+  ]);
   const messagesById = useMemo(
     () => new Map(displayMessages.map((message) => [message.id, message])),
     [displayMessages],
@@ -2597,9 +2936,18 @@ function NativeDesktopContent({
           </p>
           {(model.delivery === 'unknown' || model.delivery === 'failed') && (
             <p className="delivery-status" role="alert">
-              {model.delivery === 'unknown'
-                ? '发送结果未知，请查询原提交。'
-                : '发送失败，原文已恢复供重试。'}
+              {model.delivery === 'unknown' ? '发送结果尚未确认。' : '发送失败，原文已恢复供重试。'}
+            </p>
+          )}
+        </>
+      );
+    if (inputDeliveries.has(model.id) && !messagesById.has(model.id))
+      return (
+        <>
+          <p>{model.text}</p>
+          {(model.delivery === 'unknown' || model.delivery === 'failed') && (
+            <p className="delivery-status" role="alert">
+              {model.delivery === 'unknown' ? '发送结果尚未确认。' : '发送失败，原文已保留。'}
             </p>
           )}
         </>
@@ -2938,13 +3286,13 @@ function NativeDesktopContent({
       }
       notices={
         <>
-          {fileTargets.error && (
+          {diagnostics && fileTargets.error && (
             <p role="alert">
               {fileTargets.error}{' '}
               <DesktopButton onClick={fileTargets.retry}>重新读取文件路径</DesktopButton>
             </p>
           )}
-          {runMessages.error && (
+          {diagnostics && runMessages.error && (
             <p role="alert">
               {runMessages.error}{' '}
               <DesktopButton onClick={runMessages.retry}>重新核对本轮状态</DesktopButton>
@@ -2956,7 +3304,7 @@ function NativeDesktopContent({
               <DesktopButton onClick={cacheMetrics.retry}>重新读取缓存指标</DesktopButton>
             </p>
           )}
-          {toolMessages.error && (
+          {diagnostics && toolMessages.error && (
             <p role="alert">
               {toolMessages.error}{' '}
               <DesktopButton onClick={toolMessages.retry}>重新核对工具状态</DesktopButton>
@@ -2988,7 +3336,9 @@ function NativeDesktopContent({
                     : '本地服务拒绝了此次移除。')}
                 {r.phase === 'unknown' && r.commandId && (
                   <DesktopButton
-                    onClick={() => void report(() => lookupWorkspaceRemoval(r.commandId!))}
+                    onClick={() =>
+                      void report(() => lookupWorkspaceRemoval(r.commandId!), true, true)
+                    }
                   >
                     查询原移除
                   </DesktopButton>
@@ -3088,7 +3438,7 @@ function NativeDesktopContent({
         addWorkspace: () => void addWorkspace(),
         removeWorkspace: directory?.unavailable
           ? undefined
-          : (id) => void report(() => removeWorkspace(id)),
+          : (id) => void report(() => removeWorkspace(id), true, true),
         settings: () => setSettingsOpen(true),
         scheduledTasks: () => {
           pageIntent.current++;
@@ -3129,10 +3479,10 @@ function NativeDesktopContent({
                   }
                 : undefined,
               busy: contextBusy || pending,
-              onProject: (id) => void report(() => chooseWorkspace(id)),
+              onProject: (id) => void report(() => chooseWorkspace(id), true, true),
               onAddProject: () => void addWorkspace(),
               onBranch: setTargetBranch,
-              onRefreshBranch: () => void report(() => chooseWorkspace(newWorkspace)),
+              onRefreshBranch: () => void report(() => chooseWorkspace(newWorkspace), true, true),
             }
           : undefined
       }
@@ -3178,69 +3528,8 @@ function NativeDesktopContent({
           </NativeDiagnostic>
         </>
       }
-      beforeConversation={
-        <>
-          {!diagnostics &&
-            !preparing &&
-            !scheduledTasksView &&
-            selection &&
-            state?.permissionSubmissions
-              .filter(
-                (row) =>
-                  row.sessionId === selection.session.id &&
-                  row.intent.expectedStoreId === selection.storeId &&
-                  (row.kind === 'permission.mode'
-                    ? ['unknown', 'failed']
-                    : ['saved', 'submitting', 'unknown', 'failed']
-                  ).includes(row.phase),
-              )
-              .map((row) => (
-                <section key={row.intent.commandId} aria-label="项目授权结果">
-                  <PermissionSubmissionStatus
-                    submission={{ commandId: '当前操作', phase: row.phase, error: row.error }}
-                  />
-                  {row.phase === 'unknown' && (
-                    <DesktopButton
-                      onClick={() =>
-                        void report(async () => {
-                          await bridge.request({
-                            method: 'lookupPermission',
-                            generation: generation.current,
-                            commandId: row.intent.commandId,
-                          });
-                          await refresh();
-                        })
-                      }
-                    >
-                      查询原权限选择
-                    </DesktopButton>
-                  )}
-                </section>
-              ))}
-          {firstSubmission?.result?.phase === 'unknown' && firstVisible ? (
-            <DesktopButton
-              onClick={() =>
-                void write(async () => {
-                  const original = firstSubmission,
-                    current = generation.current,
-                    page = pageIntent.current;
-                  const value = await bridge.request({
-                    method: 'conversation.lookup',
-                    generation: current,
-                    commandId: original.commandId,
-                  });
-                  if (value && 'kind' in value && value.kind === 'conversation' && 'stage' in value)
-                    await acceptFirstResult(value, original, current, page);
-                }, false)
-              }
-              disabled={pending}
-            >
-              查询原首次提交
-            </DesktopButton>
-          ) : undefined}
-        </>
-      }
       statusNotice={
+        diagnostics &&
         !preparing &&
         selection && (
           <>
@@ -3451,11 +3740,13 @@ function NativeDesktopContent({
                 sendLabel: activeInputRun
                   ? planMode
                     ? '排队新的计划任务'
-                    : ['context.compress', 'context.compression.reset'].includes(
-                          selection.activeCommand?.kind ?? '',
-                        )
-                      ? '排队压缩后的输入'
-                      : '引导当前轮次'
+                    : executionUnconfirmed
+                      ? '排队后续输入'
+                      : ['context.compress', 'context.compression.reset'].includes(
+                            selection.activeCommand?.kind ?? '',
+                          )
+                        ? '排队压缩后的输入'
+                        : '引导当前轮次'
                   : planMode
                     ? '发送计划任务'
                     : '发送明确的新轮次',
@@ -3634,7 +3925,7 @@ function NativeDesktopContent({
       overlays={
         <>
           <AlertDialog
-            open={!!error && !settingsOpen}
+            open={!!error && !settingsOpen && (diagnostics || businessError)}
             onOpenChange={(open) => {
               if (!open) setError('');
             }}

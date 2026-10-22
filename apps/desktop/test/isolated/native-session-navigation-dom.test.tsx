@@ -32,6 +32,15 @@ const { NativeDesktop } = await import('../../src/native');
 Object.assign(globalThis, initialGlobals);
 bootstrap.window.close();
 
+async function until(check: () => boolean, timeoutMs = 3000) {
+  const deadline = Date.now() + timeoutMs;
+  while (!check() && Date.now() < deadline)
+    await act(async () => {
+      await new Promise<void>((resolve) => setTimeout(resolve, 10));
+    });
+  expect(check()).toBe(true);
+}
+
 function fixture(
   activeParent = false,
   pendingToolMetadata = false,
@@ -156,6 +165,17 @@ function fixture(
             },
           }
         : {}),
+      activeCommand: activeParent
+        ? {
+            id: item.run!.originCommandId,
+            sessionId: item.rootSession.id,
+            originStoreId: 'store',
+            kind: 'run.start',
+            status: 'accepted',
+            receipt: null,
+            cancelRequestedAt: null,
+          }
+        : undefined,
       runs: activeParent ? [item.run!] : [],
       executions: requiredParent ? [{ ...item.execution, result: null }] : executions,
       interactions: [],
@@ -225,6 +245,16 @@ function fixture(
             metadataReleases.add(() => resolve(result));
           });
         }
+        case 'submit':
+          return {
+            sessionId: request.sessionId,
+            phase: 'accepted',
+            intent: {
+              kind: request.intent.kind,
+              expectedStoreId: request.intent.expectedStoreId,
+              commandId: request.intent.commandId,
+            },
+          };
         case 'draft.read':
           return {
             id: 'root',
@@ -583,6 +613,8 @@ test('ordinary sessions hide background aggregates for live, unknown and unavail
     }
     await f.backgroundUnavailable(true);
     expect(f.host.querySelector('[aria-label="当前会话后台状态"]') === null).toBe(true);
+    expect(f.host.querySelector('.background-stale')).toBeNull();
+    expect(f.host.textContent).not.toContain('上次状态 · 待核实');
     await f.backgroundUnavailable(false);
     await f.unavailable(true);
     expect(f.host.querySelector('[aria-label="当前会话后台状态"]') === null).toBe(true);
@@ -884,7 +916,7 @@ test('opening the selected parent preserves its child tab without selecting agai
   }
 });
 
-test('repeated reply calibrations retain the footer controls and transcript DOM while real history failures remain visible', async () => {
+test('repeated reply calibrations retain controls and transcript while history failures recover without external notices', async () => {
   const f = fixture(true);
   try {
     await f.render();
@@ -916,13 +948,17 @@ test('repeated reply calibrations retain the footer controls and transcript DOM 
     }
     f.failParent();
     await f.update('failed read');
-    expect(f.host.textContent).toContain('历史尚未完整校准');
+    expect(f.host.textContent).not.toContain('历史尚未完整校准');
+    expect(f.host.textContent).not.toContain('重新加载会话');
     expect(f.host.textContent).toContain('Parent transcript');
     expect(f.host.querySelector<HTMLButtonElement>('[data-permission-trigger]')!.disabled).toBe(
       true,
     );
     f.failParent(false);
-    await f.click('重新加载会话');
+    await until(
+      () =>
+        f.host.querySelector<HTMLButtonElement>('[data-permission-trigger]')?.disabled === false,
+    );
     expect(f.host.textContent).not.toContain('历史尚未完整校准');
     expect(f.host.querySelector<HTMLButtonElement>('[data-permission-trigger]')!.disabled).toBe(
       false,
@@ -939,7 +975,7 @@ test('repeated reply calibrations retain the footer controls and transcript DOM 
   }
 });
 
-test('ordinary history and View refreshes retain reply status without elapsed time; actual failures retain their warnings', async () => {
+test('ordinary history and View refreshes retain reply status while actual read failures retry in the background', async () => {
   const f = fixture(true);
   f.runningParent();
   try {
@@ -988,9 +1024,13 @@ test('ordinary history and View refreshes retain reply status without elapsed ti
     expect(status.textContent).toBe('正在回复…');
     expect(status.querySelector('.shimmer')).toBe(label);
     expect(f.host.querySelector('.agent-turn-status-label')?.textContent).toBe('上次确认状态');
-    expect(f.host.textContent).toContain('历史尚未完整校准');
+    expect(f.host.textContent).not.toContain('历史尚未完整校准');
+    expect(f.host.textContent).not.toContain('重新加载会话');
     f.failParent(false);
-    await f.click('重新加载会话');
+    await until(
+      () =>
+        f.host.querySelector<HTMLButtonElement>('[data-permission-trigger]')?.disabled === false,
+    );
     expect(status.textContent).toBe('正在回复…');
   } finally {
     await f.close();
@@ -1469,7 +1509,7 @@ test('NativeDesktop marks an unowned active Run unverified without changing dura
       await f.observeExecutionOwner('unheld');
       await f.render();
       await f.click('Original');
-      expect(warning()?.textContent).toContain('原执行者已释放');
+      expect(warning()).toBeNull();
       expect(sidebarSpinner()).toBeNull();
       expect(f.host.querySelector('.response-status') === null).toBe(true);
       expect(f.host.querySelector('button[aria-label="停止任务"]') === null).toBe(true);
@@ -1494,15 +1534,14 @@ test('NativeDesktop marks an unowned active Run unverified without changing dura
       expect(f.host.textContent?.includes('正在等待子 Agent 结果')).toBe(waiting);
 
       await f.observeExecutionOwner('unknown');
-      expect(warning()?.textContent).toContain('无法核实原执行者');
+      expect(warning()).toBeNull();
       expect(sidebarSpinner()).toBeNull();
       expect(f.host.querySelector('.response-status') === null).toBe(true);
       expect(f.host.querySelector('button[aria-label="停止任务"]') === null).toBe(true);
       expect(f.host.querySelector('.agent-turn-status-label')?.textContent).toBe('执行状态待核实');
 
       await f.observeExecutionOwner('unheld', true);
-      expect(warning()?.textContent).toContain('无法核实原执行者');
-      expect(warning()?.textContent).not.toContain('原执行者已释放');
+      expect(warning()).toBeNull();
       expect(f.host.querySelector('.response-status')).toBeNull();
       expect(f.host.querySelector('button[aria-label="停止任务"]')).toBeNull();
       expect(f.host.querySelector('.agent-turn-status-label')?.textContent).toBe('执行状态待核实');
@@ -1830,7 +1869,7 @@ test('a completed child uses the shared collapsed process, concise exploration a
   }
 });
 
-test('child metadata failure keeps its verified transcript readable and an explicit refresh restores presentation', async () => {
+test('child metadata failure keeps its verified transcript readable and restores presentation automatically', async () => {
   const f = fixture();
   const body = {
     upperSeq: '1',
@@ -1855,12 +1894,18 @@ test('child metadata failure keeps its verified transcript readable and an expli
     await f.open();
     await f.waitForText(body.messages[0]!.content);
     expect(f.host.textContent).toContain(body.messages[0]!.content);
-    expect(f.host.querySelector('.session-tab-child [role="alert"]')?.textContent).toContain(
-      '无法核对子会话轮次或工具状态',
-    );
+    expect(f.host.querySelector('.session-tab-child [role="alert"]')).toBeNull();
+    expect(f.host.textContent).not.toContain('无法核对子会话轮次或工具状态');
     expect(f.host.textContent).not.toContain('子日志读取失败');
+    const previousOpens = f.requests.filter(
+      (request) => request.method === 'background.child.open',
+    ).length;
     f.childBody(body);
-    await f.click('刷新子日志');
+    await until(
+      () =>
+        f.requests.filter((request) => request.method === 'background.child.open').length >
+        previousOpens,
+    );
     for (
       let attempt = 0;
       attempt < 50 && f.host.querySelector('.session-tab-child [role="alert"]');
@@ -1889,7 +1934,7 @@ test('reconciled terminal facts retire cached owner warnings in the selected con
       await f.observeExecutionOwner('unheld');
       await f.render();
       await f.click('Original');
-      expect(f.host.querySelectorAll('[aria-label="会话执行状态待核实"]')).toHaveLength(1);
+      expect(f.host.querySelectorAll('[aria-label="会话执行状态待核实"]')).toHaveLength(0);
       expect(f.host.querySelector('.background-execution-status')?.textContent).toBe(
         '执行状态待核实',
       );
@@ -1918,7 +1963,7 @@ test('an owner observation for an earlier Run cannot mark a later active Run unc
     await f.observeExecutionOwner('unknown');
     await f.render();
     await f.click('Original');
-    expect(f.host.querySelectorAll('[aria-label="会话执行状态待核实"]')).toHaveLength(1);
+    expect(f.host.querySelectorAll('[aria-label="会话执行状态待核实"]')).toHaveLength(0);
     f.replaceParentRun('later-parent-run');
     f.runningParent();
     await f.updateParent('Later active parent content');
@@ -1926,9 +1971,49 @@ test('an owner observation for an earlier Run cannot mark a later active Run unc
     expect(f.host.querySelectorAll('.response-status')).toHaveLength(1);
     expect(f.host.querySelector('.background-execution-status')?.textContent).toBe('运行中');
     await f.observeExecutionOwner('unknown');
-    expect(f.host.querySelectorAll('[aria-label="会话执行状态待核实"]')).toHaveLength(1);
+    expect(f.host.querySelectorAll('[aria-label="会话执行状态待核实"]')).toHaveLength(0);
     expect(f.host.querySelectorAll('.response-status')).toHaveLength(0);
   } finally {
     await f.close();
+  }
+});
+
+test('an unconfirmed Native execution queues the new input on its exact Run while held execution still steers', async () => {
+  for (const owner of ['unheld', 'unknown', 'held'] as const) {
+    const f = fixture(true, false, '');
+    f.runningParent();
+    const original = f.observedRun();
+    try {
+      await f.observeExecutionOwner(owner);
+      await f.render();
+      await f.click('Original');
+      await f.edit('continue exact input 雪🙂');
+      const label = owner === 'held' ? '引导当前轮次' : '排队后续输入';
+      const send = () => f.host.querySelector<HTMLButtonElement>(`[aria-label="${label}"]`);
+      await until(() => !!send() && !send()!.disabled);
+      await f.click(label);
+      const submissions = f.requests.filter(
+        (request): request is Extract<NativeRequest, { method: 'submit' }> =>
+          request.method === 'submit',
+      );
+      expect(submissions).toHaveLength(1);
+      expect(submissions[0]).toMatchObject({
+        generation: 1,
+        sessionId: 'root',
+        intent: {
+          kind: owner === 'held' ? 'input.steer' : 'input.follow_up',
+          expectedStoreId: 'store',
+          content: 'continue exact input 雪🙂',
+          contextSelectionId: 'context',
+          ...(owner === 'held'
+            ? { targetRunId: original!.id }
+            : { afterRunId: original!.id, modelId: 'model' }),
+        },
+      });
+      expect('extensionInputs' in submissions[0]!.intent).toBe(false);
+      expect(f.observedRun()).toEqual(original);
+    } finally {
+      await f.close();
+    }
   }
 });

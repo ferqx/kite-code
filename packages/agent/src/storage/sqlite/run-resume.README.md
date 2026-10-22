@@ -20,7 +20,7 @@
 
 显式 `run.resume` 预检／准备页仅在 SQL savepoint 临时叠加原 frontier，读后 rollback；最终 commit 在同一外层事务核 lease、结算行摘要及全部原恢复条件，通过后才还原并交普通 owner。未声明安全 continuation 的 unknown 仍拒绝，已确认效果不重放。显式放弃、取消、相关新工作或选择漂移使边界失效；旧 generation 不能再写。恢复 lease 的准确 generation 变化同步 snapshot，普通读不写入；原 accepted decision 不清除。
 
-核实后明确发送新的独立任务时，[Runtime](../../runtime.ts)核完整原 Model 输出与准确 Tool call，提供私有历史证明；[新任务受理](reconciliation-admission.ts)在原 accept／human-register 事务中复核 checkpoint、generation、原 owner 已释放与没有真实 unknown，补齐已保存为未执行的原 Tool 结果消息，再删除旧边界。它不恢复或执行旧 Tool，不把未配对调用传给下一 Model。未知效果或漂移在新 Command 受理前拒绝，原历史／checkpoint 保持；公共请求不能提供这项证明。崩溃前已受理但未开始的新任务，按原 ID 再提交也必须先闭合该历史；原已应用回执仍只读返回。私有 checkpoint 尚在时，普通 owner 准入拒绝，后台调度不能绕过闭合。显式放弃恢复同样沿准确原 frontier 完成既有工具历史闭合。[真实协议回归](../../../test/isolated/recovery/history-followup-runtime.test.ts)核 inline／sealed 原输出、直接新任务、一次新效果、原消息配对、同 ID 幂等和旧 Run 不再接续。
+明确发送新的独立任务或公开后续输入时，后端先通过只读准入核对原 Store、主体、root、前驱与上下文，再自动核实遗留 owner。活 owner 不被抢占，正常 owner 交接的 CAS 变化有限重读；已落定原回执直接返回。旧快照的 `input.steer` 也先校验原目标并核实 owner；核实使原目标终结时准确拒绝，不能改为新任务或闭合旧 frontier。核实后，[Runtime](../../runtime.ts)核完整原 Model 输出与准确 Tool call，提供私有历史证明；[新任务受理](reconciliation-admission.ts)在原 accept／human-register 事务中复核 checkpoint、generation、原 owner 已释放与没有真实 unknown，补齐已保存为未执行的原 Tool 结果消息，再删除旧边界。它不恢复或执行旧 Tool，不把未配对调用传给下一 Model。未知效果或漂移在新 Command 受理前拒绝，原历史／checkpoint 保持；公共请求不能提供这项证明。崩溃前已受理但未开始的新任务，按原 ID 再提交也必须先闭合该历史；原已应用回执仍只读返回。私有 checkpoint 尚在时，普通 owner 准入拒绝，后台调度不能绕过闭合。显式放弃恢复同样沿准确原 frontier 完成既有工具历史闭合。[真实协议回归](../../../test/isolated/recovery/history-followup-runtime.test.ts)核 inline／sealed 原输出、直接新任务、一次新效果、原消息配对、同 ID 幂等和旧 Run 不再接续。
 
 备份保存 checkpoint；恢复成新 Store 删除全部 checkpoint，旧来源不借它执行。GC 随准确 root 范围删除，安全导出白名单排除私有表。readonly 0001／0002 不强制升级，写迁移与 bundle 包含 0003。此机制证明原 owner 已释放和持久边界，不证明任意外部进程／副作用结束。
 

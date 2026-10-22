@@ -52,11 +52,11 @@ Question 的可编辑状态取自 Controller 保存的准确原 Answer，匹配 
 
 Files 目录 Enter 只读预览并进入范围确认，默认 both，次序为 both／session／code；确认页 Enter 才申请，数字键只选范围。独立 diff reader 的 Enter 不提交或重读目录。继承的恢复点标题按唯一原 message 出处绑定，不猜当前位置。完整“代码和会话”成功后，Controller 仍需 Host 的只读完成证明、准确原 intent／Scope 和读取代次才切换新会话、关闭面板并显示实际恢复数量；preview 数量或历史成功不足以代替当前证明。关闭、切范围和迟到结果不污染后来会话，代码审批及第二步继续仍需各自明确操作，详见[恢复指南](../../../../docs/handbook/clients/tui/guides/cancellation-and-recovery.md)。
 
-仅测试 fixture 或可信 host 显式传入 `TuiSession({testDiagnostics:true})` 才显示 ID／协议 JSON／回执诊断；development 和正式启动均拒绝 `--test-ui-diagnostics`，环境变量不会启用诊断。诊断模式保留手动全文／附件读取，便于核原门禁；正常界面保留真实失败、未知、部分内容与取消未确认。两种模式使用同一新 Client／Service／Agent 业务链。
+仅测试 fixture 或可信 host 显式传入 `TuiSession({testDiagnostics:true})` 才显示 ID／协议 JSON／回执诊断；development 和正式启动均拒绝 `--test-ui-diagnostics`，环境变量不会启用诊断。诊断模式保留手动全文／附件读取，便于核原门禁；正常界面在所属消息／执行记录中保留真实失败、未知、部分内容与取消未确认；连接观察、队列读取和提交回执异常不再通过消息区外横幅、Error 行或 Ctrl+L 临时提示显示。观察与原申请只读核对自动退避重试，切范围或关闭时停止，不重放已尝试写入。两种模式使用同一新 Client／Service／Agent 业务链。
 
 原 renderer／panel 与必要来源测试见 [Ink renderer](../../test/tui/ink-renderers.test.tsx)、[主屏集成](../../test/tui/ink-main-integration.test.tsx)、[source projection](../../test/tui/execution-ink-projection.test.tsx)、[scrollback](../../test/tui/scrollback.test.tsx)。实际终端和跨平台资格归 [CLI owner](../../../../apps/cli/README.md)及[当前进度](../../../../docs/plans/unified-agent-refactor-v1-progress.md)，不从复制组件推导阶段退出。
 
-缺失工作区的已保存会话可以由 Host 明确准入 `workspace_missing` observer；主屏显示只读恢复提示，首次配置不把它当 Trust 或 Model ready，新会话 readiness 保持 false。原主要选择器、模型、设置和 MCP 根面板的 Ctrl+C 先请求原整轮取消，不回答隐藏审批；Source Question 与新增原申请／执行／MCP 子 reader 的 Ctrl+C 只关闭所属读取，当前 Workflow 纯读取也保持局部取消。执行和配置权限继续由 Host／Agent 保持，界面标记不是授权。
+缺失工作区的已保存会话可以由 Host 明确准入 `workspace_missing` observer；主屏保留已读消息而不追加只读恢复横幅，首次配置不把它当 Trust 或 Model ready，新会话 readiness 保持 false。原主要选择器、模型、设置和 MCP 根面板的 Ctrl+C 先请求原整轮取消，不回答隐藏审批；Source Question 与新增原申请／执行／MCP 子 reader 的 Ctrl+C 只关闭所属读取，当前 Workflow 纯读取也保持局部取消。执行和配置权限继续由 Host／Agent 保持，界面标记不是授权。
 
 [subagent-layout](subagent-layout.ts)按当前动态尾部、真实 child 步数和终端行数分配原步骤／子项预算；实际单 child 与 concurrent group 都接入预算，先折叠并显示最新摘要再进行有限裁切。`child-session-panel` 的详情用原 Markdown renderer 和 ScrollList 保持长代码、表格与 resize 阅读；Files 卡片接核实后的真实逐行变更，原路径、版本、基线和 UTF-8 门禁保留。
 

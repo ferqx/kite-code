@@ -103,6 +103,7 @@ async function fixture(
   const { mountWebPage } = await import('../src/mount');
   const state = {
     fail: false,
+    readIdentityFailure: false,
     connections: 0,
     resumeIdentityFailure: false,
     resumeGate: undefined as Promise<void> | undefined,
@@ -153,6 +154,7 @@ async function fixture(
     async getView(id: string) {
       state.reads++;
       if (id === 'a' && state.held) await state.held;
+      if (state.readIdentityFailure) throw new ClientError('browser_identity_mismatch');
       if (state.fail) throw new ClientError('browser_read_unavailable');
       const result = view(id, state.active);
       if (options.restoredOutput) result.storeId = 'restored-store';
@@ -292,14 +294,18 @@ test('React browser page navigates directory, renders all 201 history messages a
         /^(Send|Cancel|Approve|Run)$/.test(button.textContent ?? ''),
       ),
     ).toBe(false);
+    const beforeFailure = f.state.reads;
     f.state.fail = true;
     await f.click(f.button('Refresh history'));
-    await settle(() => f.dom.window.document.body.textContent!.includes('Stale'));
+    await settle(() => f.state.reads > beforeFailure);
+    expect(f.dom.window.document.body.textContent).not.toContain('Stale');
     expect(f.dom.window.document.querySelectorAll('[data-message-id]')).toHaveLength(201);
-    expect(f.dom.window.document.body.textContent).toContain('Last known history');
+    expect(f.dom.window.document.body.textContent).not.toContain('Last known history');
+    expect(f.dom.window.document.body.textContent).not.toContain('Current read unavailable');
+    const beforeRecovery = f.state.reads;
     f.state.fail = false;
     await f.click(f.button('Refresh history'));
-    await settle(() => f.dom.window.document.body.textContent!.includes('History synchronized'));
+    await settle(() => f.state.reads >= beforeRecovery + 2);
     await f.choose('b');
     await settle(() => f.dom.window.document.querySelector('h1')?.textContent === 'Session b');
     f.dom.window.history.pushState(null, '', '/sessions/a');
@@ -609,6 +615,25 @@ test('Web restored Fork Model body uses admitted Store and original source; Copy
     await f.click(f.button('Copy conversation'));
     expect(f.state.copied).toContain('OUTPUT PREVIEW');
     expect(f.state.copied).not.toContain(f.state.outputBody);
+  } finally {
+    await f.close();
+  }
+});
+
+test('an identity refusal after admission remains blocking while ordinary read failures have no anomaly chrome', async () => {
+  const f = await fixture();
+  try {
+    await f.click(f.button('Workspace'));
+    await f.choose('a');
+    await settle(() => f.dom.window.document.querySelectorAll('[data-message-id]').length === 201);
+    f.state.readIdentityFailure = true;
+    await f.click(f.button('Refresh history'));
+    await settle(() =>
+      f.dom.window.document.body.textContent!.includes('Read-only identity unavailable'),
+    );
+    expect(f.dom.window.document.querySelector('.web-page')?.hasAttribute('inert')).toBe(true);
+    expect(f.dom.window.document.querySelectorAll('[data-message-id]')).toHaveLength(201);
+    expect(f.state.closed).toBe(0);
   } finally {
     await f.close();
   }

@@ -56,7 +56,7 @@ import { createTuiJobTailReader } from './tui-job-tails';
 import { readTuiLiveOutput } from './tui-live-output';
 import { createTuiMcpPort } from './tui-mcp';
 import { createTuiMcpAuthPort } from './tui-mcp-auth';
-import { prepareTuiObservationStart } from './tui-observation';
+import { prepareTuiObservationStart, refreshTuiObservation } from './tui-observation';
 import { createTuiOnboardingPort } from './tui-onboarding';
 import { openTuiPreferenceFile } from './tui-preferences';
 import { readTuiProgress } from './tui-progress';
@@ -954,9 +954,10 @@ export async function runTUIHost(input: TUIHostOptions): Promise<number> {
     };
     process.stdin.on('data', lookup);
     void (async () => {
-      try {
-        let startAfter: { storeId: string; sequence: string } | undefined;
-        while (!ended && !observer.signal.aborted) {
+      let startAfter: { storeId: string; sequence: string } | undefined;
+      let reconnectAttempt = 0;
+      while (!ended && !observer.signal.aborted) {
+        try {
           let resetReason: string | undefined;
           await client.observe({
             signal: observer.signal,
@@ -977,10 +978,8 @@ export async function runTUIHost(input: TUIHostOptions): Promise<number> {
             },
             onReady: async (ready) => {
               if (!ended && !observer.signal.aborted) {
-                controller!.observationReady(ready.storeId);
-                await controller!.refreshPermissions();
-                const target = controller!.state.sessionId;
-                if (target) await controller!.select(target, { preserveReconnectionReview: true });
+                reconnectAttempt = 0;
+                await refreshTuiObservation(controller!, ready.storeId);
               }
             },
             onReset: async (reason) => {
@@ -1013,25 +1012,25 @@ export async function runTUIHost(input: TUIHostOptions): Promise<number> {
           }
           // Reset closes the read stream. Reopen one observer using its read baseline until actual callbacks ACK it.
           // Snapshot reads do not advance lastAppliedCursor and no business intent is resubmitted.
-          if (input.server && !resetReason) {
+          if (!resetReason) {
             controller!.observationUnavailable('network');
             void refresh();
-            break;
           }
-          if (!ended && !observer.signal.aborted) await Bun.sleep(250);
+        } catch (error: unknown) {
+          if (!ended) {
+            controller!.observationUnavailable(
+              error !== null &&
+                typeof error === 'object' &&
+                'code' in error &&
+                typeof error.code === 'string'
+                ? error.code
+                : 'network',
+            );
+            void refresh();
+          }
         }
-      } catch (error: unknown) {
-        if (!ended) {
-          controller!.observationUnavailable(
-            error !== null &&
-              typeof error === 'object' &&
-              'code' in error &&
-              typeof error.code === 'string'
-              ? error.code
-              : 'network',
-          );
-          void refresh();
-        }
+        if (!ended && !observer.signal.aborted)
+          await Bun.sleep(Math.min(5000, 250 * 2 ** Math.min(reconnectAttempt++, 5)));
       }
     })();
     void paired?.exited.then(() => {

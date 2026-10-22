@@ -623,3 +623,43 @@ test('a pending catalogue cannot post after another original interaction write b
     f.controller.dispose();
   }
 });
+
+test('manual Workflow with an unverified active owner preserves its original activation in a follow-up', async () => {
+  const f = workflowFixture();
+  try {
+    await f.controller.select('a');
+    const source = f.controller.state.snapshot!;
+    Object.assign(source, {
+      connectionInstanceId: 'current-owner',
+      activityOwner: { instanceId: 'previous-owner', generation: '1' },
+    });
+    source.view.runs.push({ id: 'original-active', isActive: true, status: 'running' } as never);
+    source.view.session.contextSelectionId = 'original-selection';
+    f.controller.setDraft('/review inspect exact original intent');
+    await f.controller.send();
+    expect(f.sent).toEqual([
+      {
+        sessionId: 'a',
+        request: {
+          kind: 'input.follow_up',
+          expectedStoreId: 'store',
+          commandId: 'workflow-1',
+          afterRunId: 'original-active',
+          contextSelectionId: 'original-selection',
+          content: 'inspect exact original intent',
+          extensionInputs: [
+            {
+              extensionId: 'builtin.skill-workflow',
+              definitionVersion: '1',
+              input: { activations: [{ key: 'workflow-1', skillId: 'skill:review', input: {} }] },
+            },
+          ],
+        },
+      },
+    ]);
+    expect(source.view.runs[0]?.status).toBe('running');
+    expect(source.view.runs[0]?.isActive).toBe(true);
+  } finally {
+    f.controller.dispose();
+  }
+});

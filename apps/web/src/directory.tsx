@@ -126,12 +126,7 @@ export function DirectoryActivity({
   activity: SessionDirectoryActivity;
   stale: boolean;
 }) {
-  if (stale)
-    return (
-      <span className="directory-activity" role="status" aria-label="Last read activity">
-        上次读取
-      </span>
-    );
+  if (stale) return null;
   if (activity.pendingInteractions > 0)
     return <Badge className="directory-activity directory-waiting">待用户输入</Badge>;
   if (activity.run?.isActive)

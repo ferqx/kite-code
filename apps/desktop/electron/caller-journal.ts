@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import {
   type AgentClient,
   type BackgroundExecutionItem,
+  ClientError,
   type Command,
   canonicalCallerCommandRequest,
   canonicalModelBody,
@@ -410,6 +411,7 @@ export class NativeCallerJournal {
       throw Error('caller_intent_conflict');
     const r = row.intent.request;
     const pendingRequest = (async () => {
+      let responseReceived = false;
       try {
         if (r.kind === 'execution.cancel') {
           const execution = await this.client.getExecution(r.executionId);
@@ -434,9 +436,18 @@ export class NativeCallerJournal {
                   : r.kind === 'command.cancel'
                     ? await this.client.cancelCommand(row.intent.scope.sessionId, r)
                     : await this.client.cancelExecution(row.intent.scope.sessionId, r);
+        responseReceived = true;
         return await this.checked(row, command);
       } catch (error) {
-        this.data.finishCaller(commandId, 'unknown');
+        const stoppedTarget =
+          !responseReceived &&
+          r.kind === 'input.steer' &&
+          error instanceof ClientError &&
+          error.code === 'input_target_stopped' &&
+          error.status !== undefined &&
+          error.status >= 400 &&
+          error.status < 500;
+        this.data.finishCaller(commandId, stoppedTarget ? 'rejected' : 'unknown');
         throw error;
       } finally {
         this.inflight.delete(commandId);

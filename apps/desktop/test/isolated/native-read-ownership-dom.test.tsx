@@ -28,6 +28,15 @@ const { NativeDesktop } = await import('../../src/native');
 Object.assign(globalThis, initialGlobals);
 bootstrap.window.close();
 
+async function until(check: () => boolean, timeoutMs = 3000) {
+  const deadline = Date.now() + timeoutMs;
+  while (!check() && Date.now() < deadline)
+    await act(async () => {
+      await new Promise<void>((resolve) => setTimeout(resolve, 10));
+    });
+  expect(check()).toBe(true);
+}
+
 function deferred<T>() {
   let resolve!: (value: T) => void;
   let reject!: (reason: Error) => void;
@@ -277,7 +286,7 @@ test('100 changed notifications retain one in-flight state read and one latest s
   }
 });
 
-test('a current event state failure still opens the original failure dialog', async () => {
+test('a current event state failure recovers in the background without a dialog or another event', async () => {
   let fail = false;
   const f = fixture((request) => {
     if (request.method === 'state' && fail) throw Error('native_connection_unavailable');
@@ -286,31 +295,47 @@ test('a current event state failure still opens the original failure dialog', as
   try {
     await f.render();
     await f.click('Original A');
+    const priorStateReads = f.calls.filter((request) => request.method === 'state').length;
     fail = true;
     await f.notify();
-    expect(f.dom.window.document.querySelector('[role="alertdialog"]')?.textContent).toContain(
-      'native_connection_unavailable',
+    expect(f.dom.window.document.querySelector('[role="alertdialog"]')).toBeNull();
+    expect(f.dom.window.document.body.textContent).not.toContain('native_connection_unavailable');
+    fail = false;
+    await until(
+      () => f.calls.filter((request) => request.method === 'state').length >= priorStateReads + 2,
     );
+    expect(
+      promptValue(f.dom.window.document.querySelector('[role="textbox"][contenteditable]')),
+    ).toBe('original text');
+    expect(f.calls.filter((request) => request.method === 'conversation.send')).toHaveLength(0);
   } finally {
     await f.close();
   }
 });
 
-test('a current select rejection is still reported instead of being consumed as superseded', async () => {
+test('a current select rejection retries its exact target without an external error', async () => {
   const held = deferred<NativeResult>();
+  let failed = false;
   const f = fixture((request) =>
-    request.method === 'select' && request.sessionId === 'a' ? held.promise : undefined,
+    request.method === 'select' && request.sessionId === 'a' && !failed ? held.promise : undefined,
   );
   try {
     await f.render();
     await f.click('Original A');
     expect(f.calls.filter((request) => request.method === 'select')).toHaveLength(1);
     expect(f.dom.window.document.querySelector('[role="alertdialog"]')).toBeNull();
+    failed = true;
     await act(async () => held.reject(Error('native_connection_unavailable')));
-    expect(f.dom.window.document.querySelector('[role="alertdialog"]')?.textContent).toContain(
-      'native_connection_unavailable',
-    );
-    expect(f.calls.filter((request) => request.method === 'select')).toHaveLength(1);
+    expect(f.dom.window.document.querySelector('[role="alertdialog"]')).toBeNull();
+    await until(() => f.calls.filter((request) => request.method === 'select').length === 2);
+    expect(
+      promptValue(f.dom.window.document.querySelector('[role="textbox"][contenteditable]')),
+    ).toBe('original text');
+    expect(
+      f.calls
+        .filter((request) => request.method === 'select')
+        .every((request) => request.sessionId === 'a'),
+    ).toBe(true);
   } finally {
     await f.close();
   }
@@ -342,7 +367,7 @@ test('a global directory failure remains visible after a same-generation session
   }
 });
 
-test('a mutation transport failure retains the unknown original intent and explicit lookup without another POST', async () => {
+test('a mutation transport failure automatically checks the original intent without another POST', async () => {
   let submitted: Extract<NativeRequest, { method: 'conversation.send' }> | undefined;
   const f = fixture((request) => {
     if (request.method === 'conversation.send') {
@@ -365,11 +390,8 @@ test('a mutation transport failure retains the unknown original intent and expli
     await f.click('研究与理解资料');
     await f.click('发送首条消息');
     expect(submitted).toBeDefined();
-    expect(f.dom.window.document.querySelector('[role="alertdialog"]')?.textContent).toContain(
-      'network_outcome_unknown',
-    );
-    await f.click('确定');
-    await f.click('查询原首次提交');
+    expect(f.dom.window.document.querySelector('[role="alertdialog"]')).toBeNull();
+    await until(() => f.calls.some((request) => request.method === 'conversation.lookup'));
     const lookups = f.calls.filter((request) => request.method === 'conversation.lookup');
     expect(lookups).toHaveLength(1);
     expect(lookups[0]!.commandId).toBe(submitted!.intent.commandId);
@@ -378,7 +400,7 @@ test('a mutation transport failure retains the unknown original intent and expli
       [...f.dom.window.document.querySelectorAll('button')].some(
         (button) => button.textContent === '查询原首次提交',
       ),
-    ).toBe(true);
+    ).toBe(false);
   } finally {
     await f.close();
   }
@@ -443,7 +465,7 @@ for (const method of ['state', 'directory'] as const)
     }
   });
 
-test('native_draining without a Main quit lifecycle remains a current operation error', async () => {
+test('a temporary native_draining observation automatically retries without a failure dialog', async () => {
   let fail = false;
   const f = fixture((request) => {
     if (request.method === 'state' && fail) throw Error('native_draining');
@@ -452,11 +474,15 @@ test('native_draining without a Main quit lifecycle remains a current operation 
   try {
     await f.render();
     await f.click('Original A');
+    const priorStateReads = f.calls.filter((request) => request.method === 'state').length;
     fail = true;
     await f.notify();
-    expect(f.dom.window.document.querySelector('[role="alertdialog"]')?.textContent).toContain(
-      'native_draining',
+    expect(f.dom.window.document.querySelector('[role="alertdialog"]')).toBeNull();
+    fail = false;
+    await until(
+      () => f.calls.filter((request) => request.method === 'state').length >= priorStateReads + 2,
     );
+    expect(f.calls.filter((request) => request.method === 'attach')).toHaveLength(1);
   } finally {
     await f.close();
   }
@@ -521,12 +547,10 @@ test('an already submitted mutation keeps its unknown receipt through quit and c
     expect(submitted).toBeDefined();
     await f.notify({ kind: 'lifecycle', phase: 'quitting' });
     await act(async () => held.reject(Error('network_outcome_unknown')));
-    expect(f.dom.window.document.querySelector('[role="alertdialog"]')?.textContent).toContain(
-      'network_outcome_unknown',
-    );
+    expect(f.dom.window.document.querySelector('[role="alertdialog"]')).toBeNull();
+    expect(f.calls.filter((request) => request.method === 'conversation.lookup')).toHaveLength(0);
     await f.notify({ kind: 'lifecycle', phase: 'active' });
-    await f.click('确定');
-    await f.click('查询原首次提交');
+    await until(() => f.calls.some((request) => request.method === 'conversation.lookup'));
     const lookups = f.calls.filter((request) => request.method === 'conversation.lookup');
     expect(lookups).toHaveLength(1);
     expect(lookups[0]!.commandId).toBe(submitted!.intent.commandId);
@@ -535,7 +559,7 @@ test('an already submitted mutation keeps its unknown receipt through quit and c
       [...f.dom.window.document.querySelectorAll('button')].some(
         (button) => button.textContent === '查询原首次提交',
       ),
-    ).toBe(true);
+    ).toBe(false);
   } finally {
     await f.close();
   }

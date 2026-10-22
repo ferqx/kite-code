@@ -157,7 +157,7 @@ test('ordinary Ink keeps the original conversation layout and complete result; d
     await tick();
     expect(posts).toBe(1);
     expect(controller.state.intent?.phase).toBe('unknown');
-    expect(app.lastFrame()).toContain('check the original request');
+    expect(app.lastFrame()).not.toContain('check the original request');
     app.stdin.write('\u000c');
     await tick();
     expect(gets).toBe(1);

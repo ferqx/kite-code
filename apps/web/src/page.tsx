@@ -1,11 +1,6 @@
 import { type BrowserWorkspaceList, ClientError, type Message } from '@kite-ai/client';
 import type { BrowserClient } from '@kite-ai/client/browser';
-import {
-  ConnectionNotice,
-  completeRunReplies,
-  ModelOutputMessage,
-  SafeMessageMarkdown,
-} from '@kite-ai/ui';
+import { completeRunReplies, ModelOutputMessage, SafeMessageMarkdown } from '@kite-ai/ui';
 import { MessageCopyButton, TooltipProvider } from '@kite-ai/ui/desktop';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { BackgroundExecutions } from './background';
@@ -183,6 +178,38 @@ export function WebPage({
     for (const [workspaceId, open] of Object.entries(expandedDirectory.current))
       if (open) void loadSessions(workspaceId);
   }, [loadDirectory, loadSessions]);
+  const directoryRetry = useRef(0);
+  useEffect(() => {
+    if (
+      suspended ||
+      !pageVisible ||
+      directoryLoading ||
+      Object.values(loadingSessions).some(Boolean)
+    )
+      return;
+    const failed = Object.entries(sessionErrors).filter(([, error]) => error);
+    if (!directoryError && failed.length === 0) {
+      directoryRetry.current = 0;
+      return;
+    }
+    const timer = setTimeout(
+      () => {
+        if (directoryError) void loadDirectory();
+        for (const [workspaceId] of failed) void loadSessions(workspaceId);
+      },
+      Math.min(30000, 500 * 2 ** Math.min(directoryRetry.current++, 6)),
+    );
+    return () => clearTimeout(timer);
+  }, [
+    directoryError,
+    sessionErrors,
+    directoryLoading,
+    loadingSessions,
+    suspended,
+    pageVisible,
+    loadDirectory,
+    loadSessions,
+  ]);
   const abortDirectory = useCallback(() => {
     directoryRead.current?.abort();
     for (const read of sessionReads.current.values()) read.abort();
@@ -335,14 +362,22 @@ export function WebPage({
       setCopyStatus('Copy unavailable; select message text to copy.');
     }
   }
-  const readUnavailable =
-    !!directoryError ||
-    Object.values(sessionErrors).some(Boolean) ||
-    update?.phase === 'error' ||
-    update?.phase === 'stale';
+  const identityFailure = /(?:identity_mismatch|store_changed|connection_not_admitted)$/.test(
+    update?.error ?? '',
+  );
   return (
-    <div className="web-page" data-theme={dark ? 'dark' : 'light'} inert={suspended}>
+    <div
+      className="web-page"
+      data-theme={dark ? 'dark' : 'light'}
+      inert={suspended || identityFailure}
+    >
       <style>{navigationCSS + directoryCSS}</style>
+      {identityFailure && (
+        <p role="alert">
+          Read-only identity unavailable · {update?.error}. Reload this document to select its
+          current identity.
+        </p>
+      )}
       <header>
         <button
           type="button"
@@ -368,14 +403,6 @@ export function WebPage({
           {dark ? 'Light' : 'Dark'}
         </button>
       </header>
-      <ConnectionNotice
-        state={{
-          kind: readUnavailable ? 'error' : 'ready',
-          message: readUnavailable
-            ? 'Current read unavailable; saved page identity is unchanged.'
-            : 'Same-origin cookie session · page identity verified · read-only',
-        }}
-      />
       <div
         className="web-layout"
         data-navigation={navigation.narrow ? 'narrow' : 'wide'}
@@ -424,14 +451,6 @@ export function WebPage({
             Refresh directory
           </button>
           {directoryLoading && <p role="status">Loading directory</p>}
-          {directoryError && (
-            <ConnectionNotice
-              state={{
-                kind: 'error',
-                message: `Directory unavailable: ${directoryError}. Previously read entries remain visible.`,
-              }}
-            />
-          )}
           {workspaces?.length === 0 && <p>No workspaces</p>}
           <TooltipProvider delayDuration={500} skipDelayDuration={300}>
             {workspaces?.map((workspace) => (
@@ -447,12 +466,6 @@ export function WebPage({
                         <dd>{sessions[workspace.id]?.length ?? 'Not loaded'}</dd>
                       </dl>
                       {loadingSessions[workspace.id] && <p>Loading sessions</p>}
-                      {sessionErrors[workspace.id] && (
-                        <p>
-                          Sessions unavailable: {sessionErrors[workspace.id]}. Previously read
-                          entries remain visible.
-                        </p>
-                      )}
                     </>
                   }
                 >
@@ -473,9 +486,7 @@ export function WebPage({
                 {expanded[workspace.id] && (
                   <div>
                     {loadingSessions[workspace.id] && <p role="status">Loading sessions</p>}
-                    {sessionErrors[workspace.id] && (
-                      <p role="alert">Sessions unavailable: {sessionErrors[workspace.id]}</p>
-                    )}
+
                     {sessions[workspace.id]?.length === 0 && <p>No sessions</p>}
                     <ul>
                       {sessions[workspace.id]?.slice(0, shown[workspace.id] ?? 5).map((item) => {
@@ -572,15 +583,7 @@ export function WebPage({
                 </button>
               </div>
               {copyStatus && <p role="status">{copyStatus}</p>}
-              <p role={update.phase === 'error' || update.phase === 'stale' ? 'alert' : 'status'}>
-                {update.phase === 'loading'
-                  ? 'Loading history'
-                  : update.phase === 'stale'
-                    ? `Stale · Last known history · ${update.error}`
-                    : update.phase === 'error'
-                      ? `History unavailable · ${update.error}`
-                      : 'History synchronized'}
-              </p>
+              {update.phase === 'loading' && <p role="status">Loading history</p>}
               {snapshot && (
                 <>
                   <section aria-label="Run status">
@@ -592,12 +595,6 @@ export function WebPage({
                         {run.isActive ? ' · active' : ''}
                       </p>
                     ))}
-                    {runFacts.error && (
-                      <p role="alert">
-                        Original Run copy scope unavailable: {runFacts.error}. Refresh history to
-                        retry; original messages remain visible.
-                      </p>
-                    )}
                   </section>
                   <section aria-label="Execution status">
                     <h2>Executions</h2>

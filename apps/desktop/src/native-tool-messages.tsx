@@ -383,6 +383,9 @@ export function useNativeToolMessages({
         !sameReceipt(previous.message, message)
       );
     });
+    // Mark the new read as pending now; retaining the last error would report
+    // loading=false and let background recovery restart this in-flight request.
+    publish();
     void (async () => {
       for (let index = 0; index < pending.length; index += 32) {
         const batch = pending.slice(index, index + 32);

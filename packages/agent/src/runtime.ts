@@ -4271,27 +4271,85 @@ export class AgentRuntime {
     if ((await this.options.store.getMetadata()).storeId !== input.expectedStoreId)
       throw new AgentError('store_identity_mismatch');
     const existing = await this.options.store.getCommand(input.commandId);
+    // Retrying a lost response must verify the original intent before any
+    // lifecycle work. A conflicting identity cannot retire another frontier.
+    if (
+      existing &&
+      (existing.sessionId !== input.sessionId ||
+        existing.subjectId !== input.subjectId ||
+        existing.requestDigest !==
+          createHash('sha256')
+            .update(canonicalJson(input.request as unknown as Json))
+            .digest('hex'))
+    )
+      throw new AgentError('command_conflict');
     if (!existing && !this.pendingSessions.has(input.sessionId) && this.pendingSessions.size >= 256)
       throw new AgentError('runtime_queue_full', 'runtime_queue_full', true);
     if (input.request.kind === 'extension.invoke' && !existing)
       this.extensionHost.validateAction(input.request);
     if (this.closing) throw new AgentError('runtime_draining');
-    if ((!existing || existing.status === 'accepted') && input.request.kind === 'run.start') {
-      const session = await this.options.store.getSession(input.sessionId);
-      if (!session) throw new AgentError('session_not_found');
-      input = {
-        ...input,
-        reconciliationAdmission: {
-          expectedOwnerGeneration: session.ownerGeneration,
-          toolHistoryProofs: await this.validatedRecoveryToolProofs({
+    if (
+      (!existing || existing.status === 'accepted') &&
+      (input.request.kind === 'run.start' ||
+        input.request.kind === 'input.follow_up' ||
+        input.request.kind === 'input.steer')
+    ) {
+      for (let attempt = 0; ; attempt++) {
+        try {
+          await this.options.store.validateCommandAdmission(input);
+          let session = await this.options.store.getSession(input.sessionId);
+          if (!session) throw new AgentError('session_not_found');
+          // New human work automatically checks the original owner under the same
+          // OS lock and generation CAS as explicit reconciliation. A live owner is
+          // left alone; only proven abandoned work is settled, never replayed.
+          await this.options.store.reconcileSession({
             expectedStoreId: input.expectedStoreId,
             sessionId: input.sessionId,
             subjectId: input.subjectId,
             expectedOwnerGeneration: session.ownerGeneration,
-            reconciledOnly: true,
-          }),
-        },
-      };
+            commandId: `session-input-reconcile-${createHash('sha256')
+              .update(
+                canonicalJson([
+                  input.expectedStoreId,
+                  input.sessionId,
+                  input.subjectId,
+                  input.commandId,
+                  session.ownerGeneration,
+                ]),
+              )
+              .digest('hex')}`,
+          });
+          if (input.request.kind === 'input.steer') {
+            // A steer belongs only to its original live Run. Owner loss can
+            // settle that target between the client's snapshot and submission;
+            // never turn that intent into a new task or close its old frontier.
+            const target = await this.options.store.getRun(input.request.targetRunId);
+            if (!target?.isActive) throw new AgentError('input_target_stopped');
+            break;
+          }
+          session = await this.options.store.getSession(input.sessionId);
+          if (!session) throw new AgentError('session_not_found');
+          input = {
+            ...input,
+            reconciliationAdmission: {
+              expectedOwnerGeneration: session.ownerGeneration,
+              toolHistoryProofs: await this.validatedRecoveryToolProofs({
+                expectedStoreId: input.expectedStoreId,
+                sessionId: input.sessionId,
+                subjectId: input.subjectId,
+                expectedOwnerGeneration: session.ownerGeneration,
+                reconciledOnly: true,
+              }),
+            },
+          };
+          break;
+        } catch (error) {
+          // A normal owner handoff may race the observation. Re-read the exact
+          // input and generation; never relax checkpoint drift or effect fences.
+          if (!(error instanceof AgentError) || error.code !== 'owner_changed' || attempt >= 2)
+            throw error;
+        }
+      }
     }
     const command = await this.options.store.acceptCommand(input);
     // Acceptance may already be durable when sealing happens. It grants no local

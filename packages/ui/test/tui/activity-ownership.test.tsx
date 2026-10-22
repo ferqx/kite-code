@@ -55,7 +55,7 @@ test('older ports without a connection identity keep their existing observation 
   expect(currentActivityVerified(snapshot('owner-a', null))).toBe(false);
 });
 
-test('foreign owner renders an explicit uncertainty notice without issuing recovery or cancellation', async () => {
+test('foreign owner keeps history without anomaly chrome, recovery, or cancellation', async () => {
   let writes = 0;
   const foreign = snapshot('owner-b');
   const forbidden = async () => {
@@ -77,7 +77,7 @@ test('foreign owner renders an explicit uncertainty notice without issuing recov
   const app = render(<TuiSession controller={controller} />);
   try {
     await Bun.sleep(30);
-    expect(app.lastFrame()).toContain('work may still be executing in another owner.');
+    expect(app.lastFrame()).not.toContain('work may still be executing in another owner.');
     expect(app.lastFrame()).not.toContain('Working');
     expect(writes).toBe(0);
     expect(controller.state.snapshot?.view.runs[0]?.status).toBe('running');

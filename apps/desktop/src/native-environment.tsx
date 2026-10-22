@@ -4,8 +4,10 @@ import { useEffect, useRef, useState } from 'react';
 import type { NativeBackgroundChild } from './background-bridge';
 import { readNativeBackground, readNativeBackgroundChild } from './native-background';
 import type { NativeBridge, NativeCallerMetadata, NativeSelection } from './native-bridge';
+import { useNativeDiagnostics } from './native-diagnostics';
 import { estimateNativeSnapshotBytes } from './native-history-cache';
 import { NativeMarkdownOwner } from './native-markdown';
+import { NativeSessionRecovery } from './native-session-recovery';
 
 type Display = {
   rows: BackgroundExecutionSummary[];
@@ -172,6 +174,9 @@ export function useNativeEnvironment({
   /** A tab host may route navigation before activating this hook's one visible child reader. */
   onOpenChild?: (sessionId: string, executionId: string, title: string) => void;
 }) {
+  const diagnostics = useNativeDiagnostics();
+  const recovery = useRef(new NativeSessionRecovery());
+  const [, recoveryVisibilityChanged] = useState(0);
   const root = selection?.session.parentSessionId === null ? selection : undefined,
     storeId = root?.storeId,
     rootSessionId = root?.session.id,
@@ -687,6 +692,42 @@ export function useNativeEnvironment({
   }
 
   const visibleChild = child?.scope === scope ? child : undefined;
+  useEffect(() => {
+    const work = new Map<string, () => unknown | Promise<unknown>>();
+    if (scope && !paused && !unavailable && document.visibilityState !== 'hidden') {
+      const directoryKey = `${scope}:directory`;
+      if (current?.error || (recovery.current.has(directoryKey) && busy))
+        work.set(directoryKey, () => {
+          if (live.current === scope && readable.current && !busy) setRefresh((value) => value + 1);
+        });
+      const childKey = `${scope}:child:${visibleChild?.sessionId}:${visibleChild?.executionId}`;
+      if (
+        visibleChild &&
+        (visibleChild.error ||
+          visibleChild.facts?.presentation?.unavailable ||
+          (recovery.current.has(childKey) && visibleChild.loading))
+      )
+        work.set(childKey, () => {
+          if (
+            live.current === scope &&
+            readable.current &&
+            !visibleChild.loading &&
+            childNavigation.current?.sessionId === visibleChild.sessionId
+          )
+            openChild(visibleChild.sessionId, visibleChild.executionId);
+        });
+    }
+    recovery.current.reconcile(work);
+  });
+  useEffect(() => {
+    const changed = () => recoveryVisibilityChanged((value) => value + 1);
+    document.addEventListener('visibilitychange', changed);
+    return () => {
+      document.removeEventListener('visibilitychange', changed);
+      recovery.current.close();
+    };
+  }, []);
+
   return {
     child: visibleChild,
     approvalOwners:
@@ -752,7 +793,7 @@ export function useNativeEnvironment({
           subagentDetails={{
             sessionIdsByExecutionId: display?.children ?? new Map(),
             loading: !display && (current?.busy ?? true),
-            error: current?.error,
+            error: diagnostics ? current?.error : undefined,
             onOpen: (sessionId, executionId) => {
               if (!onOpenChild) return void openChild(sessionId, executionId);
               if (!bridge || !scope || unavailable || paused || !executionId) return;
@@ -764,7 +805,7 @@ export function useNativeEnvironment({
             onRefresh: () => setRefresh((value) => value + 1),
           }}
         />
-        {stopNotice && <p role="status">{stopNotice}</p>}
+        {diagnostics && stopNotice && <p role="status">{stopNotice}</p>}
       </>
     ) : undefined,
   };

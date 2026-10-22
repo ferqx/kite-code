@@ -586,6 +586,9 @@ export interface Store {
   ): Promise<SessionRecord>;
   getSession(id: string): Promise<SessionRecord | null>;
   listSessions(options?: { limit?: number; afterId?: string }): Promise<SessionRecord[]>;
+  /** Pure admission observation before automatic lifecycle reconciliation.
+   * Acceptance independently rechecks the same constraints in its write transaction. */
+  validateCommandAdmission(input: AcceptCommandInput): Promise<void>;
   acceptCommand(input: AcceptCommandInput): Promise<CommandRecord>;
   /** Private current-owner admission; a model or HTTP caller cannot supply a parent binding. */
   acceptNestedAction(

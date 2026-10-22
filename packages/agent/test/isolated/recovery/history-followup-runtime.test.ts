@@ -8,6 +8,8 @@ import { createArtifactStore } from '../../../src/artifacts';
 import { artifactPath } from '../../../src/artifacts-files';
 import { createRuntime } from '../../../src/runtime';
 import { openSqliteStore } from '../../../src/sqlite';
+import type { Store } from '../../../src/storage/port';
+import { AgentError } from '../../../src/storage/types';
 import { historyBinding } from './history-followup-fixture';
 
 async function until(check: () => boolean | Promise<boolean>) {
@@ -25,6 +27,18 @@ for (const mode of [
   'direct_sealed',
   'direct_retry',
   'direct_retry_sealed',
+  'direct_auto',
+  'direct_auto_sealed',
+  'direct_auto_followup',
+  'direct_auto_followup_sealed',
+  'direct_auto_retry',
+  'direct_auto_retry_sealed',
+  'direct_auto_hot',
+  'direct_auto_handoff',
+  'direct_auto_lost_receipt',
+  'direct_auto_steer',
+  'direct_auto_steer_sealed',
+  'direct_auto_steer_followup',
 ] as const)
   test(`actual SIGKILL ${mode} Model output interrupt preserves original call history for same Session SDK followup`, async () => {
     const directory = mkdtempSync(join(tmpdir(), 'kite-history-followup-'));
@@ -102,8 +116,46 @@ for (const mode of [
     try {
       await until(() => existsSync(join(directory, 'ready.json')));
       const ready = JSON.parse(readFileSync(join(directory, 'ready.json'), 'utf8'));
-      await forceOriginalChild();
       const profile = { dataRoot: join(directory, 'data'), profile: 'owned' };
+      if (mode === 'direct_auto_hot') {
+        const hotStore = await openSqliteStore(profile);
+        const hot = createRuntime({ store: hotStore, ...historyBinding(directory, baseURL) });
+        try {
+          const before = await hotStore.getSession('s');
+          const active = (await hot.getView('s')).runs.find((run) => run.isActive)!;
+          const steered = await hot.submitCommand({
+            expectedStoreId: ready.expectedStoreId,
+            commandId: 'hot-steer',
+            sessionId: 's',
+            subjectId: 'owner',
+            request: {
+              kind: 'input.steer',
+              content: 'Keep steering only the original live task',
+              targetRunId: active.id,
+              contextSelectionId: before!.contextSelectionId,
+            },
+          });
+          expect(steered.status).toBe('accepted');
+          expect((await hotStore.getRun(active.id))!.isActive).toBe(true);
+          await hot.submitCommand({
+            expectedStoreId: ready.expectedStoreId,
+            commandId: 'next',
+            sessionId: 's',
+            subjectId: 'owner',
+            request: { kind: 'run.start', content: 'New task: New explicit input' },
+          });
+          expect((await hotStore.getSession('s'))!.ownerGeneration).toBe(before!.ownerGeneration);
+          expect((await hotStore.getExecution(ready.executionId))!.status).toBe('planned');
+          const cursor = (await hotStore.getMetadata()).lastChangeCursor;
+          expect((await hot.getView('s')).runs.some((run) => run.isActive)).toBe(true);
+          await hot.getView('s');
+          expect((await hotStore.getMetadata()).lastChangeCursor).toBe(cursor);
+          expect(bodies).toHaveLength(1);
+        } finally {
+          await hot.close();
+        }
+      }
+      await forceOriginalChild();
       store = await openSqliteStore(profile);
       const input = {
         ...ready,
@@ -121,7 +173,7 @@ for (const mode of [
           subjectId: 'owner',
           request: { kind: 'run.start', content: 'New task: New explicit input' },
         });
-      if (mode === 'reconciled' || mode.startsWith('direct')) {
+      if (mode === 'reconciled' || (mode.startsWith('direct') && !mode.startsWith('direct_auto'))) {
         const result = await store.reconcileSession({ ...input, commandId: 'observe' });
         input.expectedOwnerGeneration = result.report!.generation;
         expect(result.report!.cancelledExecutionIds).toEqual([ready.executionId]);
@@ -133,19 +185,101 @@ for (const mode of [
       const histories = await store.readRecoveryToolHistory(input);
       expect(histories).toHaveLength(1);
       expect(histories[0]!.modelOutput !== null).toBe(mode.endsWith('sealed'));
+      let reconciliations = 0;
+      const observedStore = new Proxy(store, {
+        get(target, key) {
+          if (key === 'reconcileSession')
+            return async (input: Parameters<Store['reconcileSession']>[0]) => {
+              reconciliations++;
+              if (mode === 'direct_auto_handoff' && reconciliations === 1)
+                throw new AgentError('owner_changed');
+              const result = await target.reconcileSession(input);
+              if (mode === 'direct_auto_lost_receipt' && reconciliations === 1)
+                throw new Error('original_reconciliation_response_lost');
+              return result;
+            };
+          const value = Reflect.get(target, key);
+          return typeof value === 'function' ? value.bind(target) : value;
+        },
+      });
       runtime = createRuntime({
-        store,
+        store: observedStore,
         artifacts: createArtifactStore({ profile, store }),
         ...historyBinding(directory, baseURL),
       });
       if (mode.startsWith('direct')) {
-        await runtime.submitCommand({
+        const request = mode.includes('followup')
+          ? {
+              kind: 'input.follow_up' as const,
+              content: 'New task: New explicit input',
+              afterRunId: histories[0]!.runId,
+              contextSelectionId: (await store.getSession('s'))!.contextSelectionId,
+            }
+          : { kind: 'run.start' as const, content: 'New task: New explicit input' };
+        const nextInput = {
           expectedStoreId: ready.expectedStoreId,
           commandId: 'next',
           sessionId: 's',
           subjectId: 'owner',
-          request: { kind: 'run.start', content: 'New task: New explicit input' },
-        });
+          request,
+        };
+        // No explicit reconciliation, client lifecycle call or manual recovery is
+        // involved in the automatic cases, including an already durable input.
+        if (mode.startsWith('direct_auto_retry')) await store.acceptCommand(nextInput);
+        const beforeConflict = (await store.getMetadata()).lastChangeCursor;
+        const conflict = await runtime
+          .submitCommand({ ...nextInput, commandId: 'work' })
+          .catch((error) => error);
+        expect(conflict.code).toBe('command_conflict');
+        expect((await store.getMetadata()).lastChangeCursor).toBe(beforeConflict);
+        if (mode === 'direct_auto_followup') {
+          for (const invalid of [
+            { ...nextInput, request: { ...request, afterRunId: 'not-the-original-run' } },
+            { ...nextInput, request: { ...request, contextSelectionId: 'not-selected' } },
+            { ...nextInput, subjectId: 'not-the-creator' },
+          ]) {
+            const error = await runtime.submitCommand(invalid).catch((error) => error);
+            expect(error).toBeInstanceOf(AgentError);
+            expect((await store.getMetadata()).lastChangeCursor).toBe(beforeConflict);
+            expect((await store.getExecution(ready.executionId))!.status).toBe('planned');
+          }
+        }
+        if (mode === 'direct_auto_lost_receipt') {
+          const lost = await runtime.submitCommand(nextInput).catch((error) => error);
+          expect(lost.message).toBe('original_reconciliation_response_lost');
+          expect(await store.getCommand('next')).toBeNull();
+        }
+        if (mode.startsWith('direct_auto_steer')) {
+          const originalRun = histories[0]!.runId;
+          const stopped = await runtime
+            .submitCommand({
+              expectedStoreId: ready.expectedStoreId,
+              commandId: 'stale-steer',
+              sessionId: 's',
+              subjectId: 'owner',
+              request: {
+                kind: 'input.steer',
+                content: 'A steer made from the old client snapshot',
+                targetRunId: originalRun,
+                contextSelectionId: (await store.getSession('s'))!.contextSelectionId,
+              },
+            })
+            .catch((error) => error);
+          expect(stopped.code).toBe('input_target_stopped');
+          expect(await store.getCommand('stale-steer')).toBeNull();
+          expect(await store.getRun(originalRun)).toMatchObject({
+            isActive: false,
+            status: 'interrupted',
+          });
+          expect((await store.getExecution(ready.executionId))!.status).toBe('cancelled');
+          expect((await store.listMessages('s')).some((message) => message.role === 'tool')).toBe(
+            false,
+          );
+          expect(bodies).toHaveLength(1);
+        }
+        await runtime.submitCommand(nextInput);
+        if (mode === 'direct_auto_handoff' || mode === 'direct_auto_lost_receipt')
+          expect(reconciliations).toBe(2);
         await until(async () => {
           const saved = await runtime!.getCommand('next');
           if (saved?.status !== 'applied') return false;
@@ -166,15 +300,7 @@ for (const mode of [
         ).toHaveLength(1);
         const cursor = (await store.getMetadata()).lastChangeCursor;
         const providerCount = bodies.length;
-        expect(
-          await runtime.submitCommand({
-            expectedStoreId: ready.expectedStoreId,
-            commandId: 'next',
-            sessionId: 's',
-            subjectId: 'owner',
-            request: { kind: 'run.start', content: 'New task: New explicit input' },
-          }),
-        ).toEqual(command);
+        expect(await runtime.submitCommand(nextInput)).toEqual(command);
         expect((await store.getMetadata()).lastChangeCursor).toBe(cursor);
         expect(bodies).toHaveLength(providerCount);
         const resumeError = await store

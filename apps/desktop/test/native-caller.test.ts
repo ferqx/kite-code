@@ -12,7 +12,7 @@ import type {
   Run,
   ServerInfo,
 } from '@kite-ai/client';
-import { canonicalCallerCommandRequest, createClient } from '@kite-ai/client';
+import { ClientError, canonicalCallerCommandRequest, createClient } from '@kite-ai/client';
 import type { BrowserWindow, IpcMain, IpcMainInvokeEvent } from 'electron';
 import { callerTextDigest, NativeCallerJournal } from '../electron/caller-journal';
 import { NativeCaller } from '../electron/native-caller';
@@ -2417,4 +2417,305 @@ test('Native state forwards current compression progress from the public View an
   } finally {
     await caller.close();
   }
+});
+
+test('retrying an original Native activation after a lost reconciliation response reads without another POST', async () => {
+  expect(
+    decodeNativeRequest({ method: 'select', generation: 1, sessionId: 's', activationId: 1 }),
+  ).toMatchObject({ activationId: 1 });
+  expect(() =>
+    decodeNativeRequest({ method: 'select', generation: 1, sessionId: 's', activationId: -1 }),
+  ).toThrow('invalid_native_request');
+  const identity: ServerInfo = {
+    profile: { dataRoot: '/chosen/data', name: 'native', accessKey: 'native-profile' },
+    instanceId: 'native-instance',
+    buildId: 'native-build',
+    apiMajor: 1,
+    capabilities: ['events', 'sessions', 'commands', 'session_reconciliation'],
+    dataAvailability: 'available',
+    storeId: 'store',
+  };
+  let posts = 0;
+  const server = Bun.serve({
+    hostname: '127.0.0.1',
+    port: 0,
+    fetch(request) {
+      const path = new URL(request.url).pathname;
+      if (path === '/v1/server') return Response.json(identity);
+      if (request.method === 'POST' && path.endsWith('/reconcile')) {
+        posts++;
+        return Response.json(
+          { code: 'service_unavailable', message: 'lost original response' },
+          { status: 503 },
+        );
+      }
+      return new Response(null, { status: 404 });
+    },
+  });
+  const connection = createClient({
+    endpoint: server.url.href,
+    token: 'native-token',
+    bootstrap: identity,
+    expected: {
+      profile: identity.profile,
+      instanceId: identity.instanceId,
+      buildId: identity.buildId,
+      apiMajor: 1,
+      requiredCapabilities: ['sessions'],
+    },
+  });
+  const original = client();
+  connection.getView = async (id) => {
+    const view = await original.getView(id);
+    return { ...view, session: { ...view.session, ownerGeneration: '0' } };
+  };
+  connection.observe = original.observe;
+  await connection.connect();
+  const caller = new NativeCaller(connection, () => {});
+  try {
+    const { generation } = (await caller.invoke({ method: 'attach' })) as NativeState;
+    await expect(
+      caller.invoke({ method: 'select', generation, sessionId: 's', activationId: 1 }),
+    ).rejects.toThrow();
+    expect(posts).toBe(1);
+    const before = caller.state().selection?.viewSelection;
+    const refreshed = (await caller.invoke({
+      method: 'select',
+      generation,
+      sessionId: 's',
+      activationId: 1,
+    })) as NativeState;
+    expect(refreshed.selection?.session.id).toBe('s');
+    expect(refreshed.selection?.viewSelection).toBe(before);
+    expect(posts).toBe(1);
+    await expect(
+      caller.invoke({ method: 'select', generation, sessionId: 'other', activationId: 1 }),
+    ).rejects.toMatchObject({ code: 'native_selection_changed' });
+    expect(posts).toBe(1);
+  } finally {
+    await caller.close();
+    server.stop(true);
+  }
+});
+
+test('a held original activation read cannot clear a later Session permission failure', async () => {
+  const port = client();
+  port.serverInfo!.capabilities.push('session_reconciliation');
+  const getView = port.getView.bind(port);
+  let hold = false,
+    entered!: () => void,
+    release!: () => void;
+  const started = new Promise<void>((resolve) => {
+    entered = resolve;
+  });
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  port.reconcileSessionState = async (id) => {
+    if (id === 'later') throw Error('later_reconciliation_unavailable');
+    return getView(id);
+  };
+  port.getView = async (id) => {
+    if (id === 'original' && hold) {
+      entered();
+      await gate;
+    }
+    return getView(id);
+  };
+  const caller = new NativeCaller(port, () => {});
+  try {
+    const { generation } = (await caller.invoke({ method: 'attach' })) as NativeState;
+    await caller.invoke({ method: 'select', generation, sessionId: 'original', activationId: 1 });
+    hold = true;
+    const pending = caller.invoke({
+      method: 'select',
+      generation,
+      sessionId: 'original',
+      activationId: 1,
+    });
+    const rejected = pending.then(
+      () => undefined,
+      (cause) => cause,
+    );
+    await started;
+    await expect(
+      caller.invoke({ method: 'select', generation, sessionId: 'later', activationId: 2 }),
+    ).rejects.toThrow('later_reconciliation_unavailable');
+    expect(caller.state().selection?.permissionUnavailable).toBe(true);
+    release();
+    expect(await rejected).toMatchObject({ code: 'native_selection_changed' });
+    expect(caller.state().selection?.session.id).toBe('later');
+    expect(caller.state().selection?.permissionUnavailable).toBe(true);
+  } finally {
+    release();
+    await caller.close();
+  }
+});
+
+test('only a first steer POST explicitly refusing a stopped target rejects its durable caller identity', async () => {
+  const cases = [
+    {
+      kind: 'input.steer',
+      code: 'input_target_stopped',
+      status: 409,
+      cold: false,
+      expected: 'rejected',
+    },
+    {
+      kind: 'input.steer',
+      code: 'input_target_stopped',
+      status: 500,
+      cold: false,
+      expected: 'unknown',
+    },
+    {
+      kind: 'input.steer',
+      code: 'input_target_stopped',
+      status: undefined,
+      cold: false,
+      expected: 'unknown',
+    },
+    { kind: 'input.steer', code: 'another_failure', status: 409, cold: false, expected: 'unknown' },
+    {
+      kind: 'input.follow_up',
+      code: 'input_target_stopped',
+      status: 409,
+      cold: false,
+      expected: 'unknown',
+    },
+    {
+      kind: 'input.steer',
+      code: 'input_target_stopped',
+      status: 404,
+      cold: true,
+      expected: 'unknown',
+    },
+  ] as const;
+  for (const item of cases) {
+    const port = client(),
+      data = memoryPrivateData();
+    const failure = new ClientError(item.code, item.code, item.status);
+    port.getRun = async (id) => ({ id, sessionId: 's', originStoreId: 'store' }) as Run;
+    let writes = 0,
+      gets = 0;
+    port.steer = port.followUp = async () => {
+      writes++;
+      throw failure;
+    };
+    port.getCommand = async () => {
+      gets++;
+      throw failure;
+    };
+    const journal = new NativeCallerJournal(port, data);
+    const intent = {
+      kind: item.kind,
+      commandId: 'original',
+      expectedStoreId: 'store',
+      content: 'keep exact body',
+      contextSelectionId: 'selection',
+      ...(item.kind === 'input.steer' ? { targetRunId: 'run' } : { afterRunId: 'run' }),
+    } as CallerCommandRequest;
+    await journal.prepare('s', intent);
+    const owner = item.cold ? new NativeCallerJournal(port, data) : journal;
+    expect(await owner.submit('original').catch((error) => error)).toBe(failure);
+    expect(data.callers()[0]!.phase).toBe(item.expected);
+    expect(writes).toBe(item.cold ? 0 : 1);
+    expect(gets).toBe(item.cold ? 1 : 0);
+    expect(data.callers()[0]!.intent.request).toEqual(intent);
+  }
+});
+
+test('Native stopped-target refusal retains failed input and draft without an unknown caller or invented Command', async () => {
+  const port = client(),
+    data = memoryPrivateData();
+  const readDraft = data.read.bind(data);
+  data.read = (scope) => ({ ...readDraft(scope), id: callerTextDigest(JSON.stringify(scope)) });
+  const scope = { storeId: 'store', workspaceId: 'w', rootSessionId: 's' };
+  const readId = data.readId.bind(data);
+  data.readId = (id) =>
+    id === callerTextDigest(JSON.stringify(scope)) ? data.read(scope) : readId(id);
+  port.getRun = async (id) => ({ id, sessionId: 's', originStoreId: 'store' }) as Run;
+  let writes = 0,
+    gets = 0;
+  port.steer = async () => {
+    writes++;
+    throw new ClientError('input_target_stopped', 'input_target_stopped', 409);
+  };
+  port.getCommand = async () => {
+    gets++;
+    throw new ClientError('command_missing', 'command_missing', 404);
+  };
+  const caller = new NativeCaller(port, () => {}, data);
+  try {
+    const { generation } = (await caller.invoke({ method: 'attach' })) as NativeState;
+    await caller.invoke({ method: 'select', generation, sessionId: 's' });
+    await caller.invoke({
+      method: 'draft.write',
+      generation,
+      sessionId: 's',
+      revision: 0,
+      content: 'keep exact body 雪🙂',
+    });
+    const result = await caller.invoke({
+      method: 'submit',
+      generation,
+      sessionId: 's',
+      intent: {
+        kind: 'input.steer',
+        commandId: 'original',
+        expectedStoreId: 'store',
+        content: 'keep exact body 雪🙂',
+        targetRunId: 'run',
+        contextSelectionId: 'selection',
+      },
+    });
+    expect(result).toMatchObject({ phase: 'failed', error: 'input_target_stopped' });
+    expect(result && 'command' in result).toBe(false);
+    expect(caller.state().callerSubmissions).toEqual([
+      expect.objectContaining({
+        phase: 'rejected',
+        request: expect.objectContaining({ commandId: 'original' }),
+      }),
+    ]);
+    expect(await caller.invoke({ method: 'draft.read', generation, sessionId: 's' })).toMatchObject(
+      { content: 'keep exact body 雪🙂', revision: 1 },
+    );
+    expect(writes).toBe(1);
+    expect(gets).toBe(0);
+  } finally {
+    await caller.close();
+  }
+});
+
+test('a stopped-target code during receipt verification GET does not reject an already returned steer', async () => {
+  const port = client(),
+    data = memoryPrivateData();
+  port.getRun = async (id) => ({ id, sessionId: 's', originStoreId: 'store' }) as Run;
+  const journal = new NativeCallerJournal(port, data);
+  const intent = {
+    kind: 'input.steer' as const,
+    commandId: 'original',
+    expectedStoreId: 'store',
+    content: 'keep original',
+    targetRunId: 'run',
+    contextSelectionId: 'selection',
+  };
+  await journal.prepare('s', intent);
+  const failure = new ClientError('input_target_stopped', 'input_target_stopped', 409);
+  port.steer = async () => ({
+    id: 'original',
+    sessionId: 's',
+    originStoreId: 'store',
+    kind: 'input.steer',
+    subjectId: 'local-user',
+    requestDigest: callerTextDigest(canonicalCallerCommandRequest(intent)),
+    status: 'accepted',
+    cancelRequestedAt: null,
+    receipt: null,
+  });
+  port.getView = async () => {
+    throw failure;
+  };
+  expect(await journal.submit('original').catch((error) => error)).toBe(failure);
+  expect(data.callers()[0]!.phase).toBe('unknown');
 });

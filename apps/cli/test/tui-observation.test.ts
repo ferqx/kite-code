@@ -1,6 +1,7 @@
 import { expect, test } from 'bun:test';
 import type { AgentClient } from '@kite-ai/client';
-import { prepareTuiObservationStart } from '../host/tui-observation';
+import { TuiController, type TuiPort, type TuiSnapshot } from '@kite-ai/ui/tui';
+import { prepareTuiObservationStart, refreshTuiObservation } from '../host/tui-observation';
 
 test('reset freezes original global read baseline before selected reads without acknowledging events', async () => {
   const order: string[] = [];
@@ -63,4 +64,64 @@ test('wrong Store, failed full reread and disposed reads cannot supply a recover
       abort.signal,
     ),
   ).rejects.toThrow();
+});
+
+test('observation ready rereads the current Session without repeating its explicit activation reconciliation', async () => {
+  let reconciliations = 0,
+    reads = 0,
+    writes = 0;
+  const forbidden = async () => {
+    writes++;
+    throw Error('unexpected_business_write');
+  };
+  const controller = new TuiController({
+    storeId: 'store',
+    nextCommandId: () => {
+      throw Error('unexpected_new_identity');
+    },
+    listSessions: async () => [],
+    reconcileSession: async () => {
+      reconciliations++;
+    },
+    readSession: async (id) => {
+      reads++;
+      return {
+        storeId: 'store',
+        view: {
+          storeId: 'store',
+          session: {
+            id,
+            workspaceId: 'w',
+            title: id,
+            contextSelectionId: 'selection',
+            nextSeq: '0',
+            controlRevision: '1',
+          },
+          runs: [],
+          executions: [],
+          messages: [],
+        },
+        messages: [],
+        interactions: [],
+      } as unknown as TuiSnapshot;
+    },
+    submit: forbidden,
+    answer: forbidden,
+    cancel: forbidden,
+    getCommand: forbidden,
+  } as TuiPort);
+  try {
+    await controller.select('original');
+    expect(reconciliations).toBe(1);
+    controller.observationUnavailable('network');
+    await refreshTuiObservation(controller, 'store');
+    await refreshTuiObservation(controller, 'store');
+    expect(reconciliations).toBe(1);
+    expect(reads).toBe(3);
+    expect(writes).toBe(0);
+    expect(controller.state.sessionId).toBe('original');
+    expect(controller.state.stale).toBe(false);
+  } finally {
+    controller.dispose();
+  }
 });

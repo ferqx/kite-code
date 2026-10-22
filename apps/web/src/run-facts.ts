@@ -45,25 +45,34 @@ export function useRunFacts(
       return !observed.has(id) && (!previous || !settled(previous));
     });
     const read = new AbortController();
-    void (async () => {
-      for (const id of pending) {
-        const facts = await client.getRun(snapshot.sessionId, id, { signal: read.signal });
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let attempt = 0;
+    const load = async () => {
+      try {
+        for (const id of pending) {
+          const facts = await client.getRun(snapshot.sessionId, id, { signal: read.signal });
+          if (read.signal.aborted) return;
+          if (
+            facts.storeId !== snapshot.view.storeId ||
+            facts.run.id !== id ||
+            facts.run.sessionId !== snapshot.sessionId ||
+            !facts.run.originStoreId
+          )
+            throw new ClientError('browser_identity_mismatch');
+          current.runs.set(id, facts.run);
+          publish();
+        }
+      } catch (error) {
         if (read.signal.aborted) return;
-        if (
-          facts.storeId !== snapshot.view.storeId ||
-          facts.run.id !== id ||
-          facts.run.sessionId !== snapshot.sessionId ||
-          !facts.run.originStoreId
-        )
-          throw new ClientError('browser_identity_mismatch');
-        current.runs.set(id, facts.run);
-        publish();
-      }
-    })().catch((error) => {
-      if (!read.signal.aborted)
         publish(error instanceof ClientError ? error.code : 'browser_read_unavailable');
-    });
-    return () => read.abort();
+        timer = setTimeout(() => void load(), Math.min(30000, 500 * 2 ** Math.min(attempt++, 6)));
+      }
+    };
+    void load();
+    return () => {
+      read.abort();
+      if (timer) clearTimeout(timer);
+    };
   }, [client, snapshot, scope, available]);
   const runs = new Map<string, RunFact>();
   if (available && snapshot) {

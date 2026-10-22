@@ -178,7 +178,7 @@ function fixture() {
     },
   };
 }
-test('routine environment refresh retains card text and controls while blocking writes; actual failures stay visible', async () => {
+test('routine environment refresh retains card text and controls while blocking writes; read failures recover silently', async () => {
   const f = fixture();
   let held: ReturnType<typeof deferred> | undefined;
   try {
@@ -210,12 +210,12 @@ test('routine environment refresh retains card text and controls while blocking 
     f.controlUnavailable(false);
     f.failDirectory(true);
     await f.render();
-    expect(card.textContent).toContain('上次状态 · 待核实');
-    expect(card.textContent).toContain('fixture_environment_unavailable');
+    expect(card.textContent).not.toContain('上次状态 · 待核实');
+    expect(card.textContent).not.toContain('fixture_environment_unavailable');
     expect(card.querySelector('.background-execution-stop')).toBeNull();
     f.unavailable(true);
     await f.render();
-    expect(card.textContent).toContain('environment_unavailable');
+    expect(card.textContent).not.toContain('environment_unavailable');
     expect(f.stops).toBe(0);
   } finally {
     held?.resolve();
@@ -256,7 +256,7 @@ test('same-scope directory revisions wait for exactly one accepted stop and resu
     expect(f.opens).toBe(opened);
     expect(f.stops).toBe(1);
     await act(async () => hold!.resolve());
-    expect(f.text).toContain('停止请求已受理');
+    expect(f.text).not.toContain('停止请求已受理');
     expect(f.opens).toBe(opened + 1);
     expect(f.stops).toBe(1);
   } finally {
@@ -310,7 +310,7 @@ test('unknown or already submitted stops are never replayed and scope switching 
       }
       await act(async () => held!.resolve());
       expect(f.stops).toBe(1);
-      if (!switchScope) expect(f.text).toContain('停止结果待核实');
+      if (!switchScope) expect(f.text).not.toContain('停止结果待核实');
       else expect(f.text).not.toContain('原停止申请');
       await f.render();
       expect(f.stops).toBe(1);
@@ -319,5 +319,32 @@ test('unknown or already submitted stops are never replayed and scope switching 
       held?.resolve();
       await f.close();
     }
+  }
+});
+
+test('an unavailable environment silently rechecks and recovers without another event or stop replay', async () => {
+  const f = fixture();
+  try {
+    f.failDirectory(true);
+    await f.render();
+    expect(f.text).not.toContain('fixture_environment_unavailable');
+    const failed = f.opens;
+    f.failDirectory(false);
+    const deadline = Date.now() + 2000;
+    while (f.opens === failed && Date.now() < deadline)
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 5));
+      });
+    expect(f.opens).toBeGreaterThan(failed);
+    expect(f.stops).toBe(0);
+    expect(f.text).not.toContain('fixture_environment_unavailable');
+    expect(f.host.querySelector('.background-stale')).toBeNull();
+    const completed = f.opens;
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 400));
+    });
+    expect(f.opens).toBe(completed);
+  } finally {
+    await f.close();
   }
 });

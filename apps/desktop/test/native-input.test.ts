@@ -125,3 +125,58 @@ test('Native input freezes next model and temporary effort only for a new root R
     reasoningEffort: 'high',
   });
 });
+
+test('Native unconfirmed ownership freezes queued follow-up identity and next model without changing Plan or the old Run', () => {
+  const selection = {
+    storeId: 'store',
+    session: { id: 'session', contextSelectionId: 'context' },
+    runs: [
+      {
+        id: 'original-run',
+        isActive: true,
+        originCommandId: 'original-command',
+        status: 'running',
+      },
+    ],
+    activeCommand: {
+      id: 'original-command',
+      sessionId: 'session',
+      originStoreId: 'store',
+      kind: 'run.start',
+    },
+  } as unknown as NativeSelection;
+  const before = structuredClone(selection);
+  const intent = nativeTextIntent(
+    selection,
+    'new-command',
+    '  precise input 雪🙂 ',
+    false,
+    { modelId: 'next-model', reasoningEffort: 'high' },
+    true,
+  );
+  expect(intent).toEqual({
+    kind: 'input.follow_up',
+    commandId: 'new-command',
+    expectedStoreId: 'store',
+    content: '  precise input 雪🙂 ',
+    afterRunId: 'original-run',
+    contextSelectionId: 'context',
+    modelId: 'next-model',
+    reasoningEffort: 'high',
+  });
+  expect(selection).toEqual(before);
+  expect(nativeTextIntent(selection, 'held-command', 'held input').kind).toBe('input.steer');
+  expect(() =>
+    nativeTextIntent({ ...selection, activeCommand: undefined }, 'x', 'x', false, undefined, true),
+  ).toThrow('active_command_identity_unavailable');
+  expect(() =>
+    nativeTextIntent(
+      { ...selection, permissionUnavailable: true },
+      'x',
+      'x',
+      false,
+      undefined,
+      true,
+    ),
+  ).toThrow('session_view_unavailable');
+});

@@ -10,6 +10,7 @@ export function nativeTextIntent(
   content: string,
   plan = false,
   modelChoice?: NativeModelChoice,
+  forceFollowUp = false,
 ): InputRequest {
   if (selection.permissionUnavailable || selection.viewLoading)
     throw new ClientError('session_view_unavailable');
@@ -41,7 +42,9 @@ export function nativeTextIntent(
   )
     throw new ClientError('active_command_identity_unavailable');
   const contextSelectionId = selection.session.contextSelectionId;
-  return plan || ['context.compress', 'context.compression.reset'].includes(command.kind)
+  return forceFollowUp ||
+    plan ||
+    ['context.compress', 'context.compression.reset'].includes(command.kind)
     ? { ...next, kind: 'input.follow_up', afterRunId: run.id, contextSelectionId }
     : { ...base, kind: 'input.steer', targetRunId: run.id, contextSelectionId };
 }

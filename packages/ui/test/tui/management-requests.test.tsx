@@ -207,9 +207,12 @@ test('Context K owns only its query and Ctrl+C, Esc and Session switch retire la
     expect(held[1]!.signal?.aborted).toBe(true);
     await command(ui, '/context requests');
     await key(ui, 'k');
-    expect(held).toHaveLength(3);
+    // A background original GET may start during the brief return to the main
+    // conversation. Opening this panel retires it; only its own read stays live.
+    expect(held.filter((query) => !query.signal?.aborted)).toHaveLength(1);
+    expect(held.every((query) => query.intent.request.commandId === 'held-original')).toBe(true);
     await f.controller.select('b');
-    expect(held[2]!.signal?.aborted).toBe(true);
+    expect(held.every((query) => query.signal?.aborted)).toBe(true);
     f.controller.setDraft('new b draft');
     f.controller.observationUnavailable('new_b_observation_error');
     const before = f.controller.state;
@@ -280,3 +283,65 @@ test('actual original GET terminal survives a held same-ID POST unknown receipt'
     f.controller.dispose();
   }
 }, 10000);
+
+test('automatic original management receipt recovery refreshes only history without lifecycle reconciliation or writes', async () => {
+  const f = fixture();
+  let reconciliations = 0;
+  f.port.reconcileSession = async () => {
+    reconciliations++;
+  };
+  await f.controller.select('a');
+  await f.controller.manage(rename('a', 'automatic-original'));
+  const before = reconciliations;
+  try {
+    const deadline = Date.now() + 2000;
+    while (f.controller.state.management?.status !== 'applied') {
+      if (Date.now() > deadline) throw Error('automatic_management_deadline');
+      await Bun.sleep(10);
+    }
+    await Bun.sleep(30);
+    expect(reconciliations).toBe(before);
+    expect(f.queries.map((query) => query.intent.request.commandId)).toEqual([
+      'automatic-original',
+    ]);
+    expect(f.writes).toHaveLength(1);
+    expect(f.effects).toEqual({ models: 0, cancels: 0, creates: 0 });
+    expect(f.reads).toEqual(['a', 'a']);
+  } finally {
+    f.controller.dispose();
+  }
+});
+
+test('automatic management GET is aborted on scope change and an ignored abort cannot publish or reconcile', async () => {
+  const f = fixture();
+  let finish!: (value: TuiManagementOutcome) => void;
+  let signal: AbortSignal | undefined;
+  f.port.management!.lookup = (intent, readSignal) => {
+    signal = readSignal;
+    f.queries.push({ intent, signal });
+    return new Promise((resolve) => {
+      finish = resolve;
+    });
+  };
+  await f.controller.select('a');
+  await f.controller.manage(rename('a', 'automatic-held'));
+  try {
+    const deadline = Date.now() + 2000;
+    while (!finish) {
+      if (Date.now() > deadline) throw Error('automatic_management_deadline');
+      await Bun.sleep(10);
+    }
+    await f.controller.select('b');
+    expect(signal?.aborted).toBe(true);
+    const before = f.controller.state;
+    finish({ intent: f.writes[0]!, status: 'applied' });
+    await Bun.sleep(30);
+    expect(f.controller.state.management).toBe(before.management);
+    expect(f.controller.state.sessionId).toBe('b');
+    expect(f.reads).toEqual(['a', 'b']);
+    expect(f.effects).toEqual({ models: 0, cancels: 0, creates: 0 });
+  } finally {
+    finish?.({ intent: f.writes[0]!, status: 'outcome_unknown' });
+    f.controller.dispose();
+  }
+});

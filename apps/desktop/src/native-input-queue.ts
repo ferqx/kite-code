@@ -219,6 +219,7 @@ export function useNativeInputQueue({
     : undefined;
   return {
     queue,
+    loading: !!current?.loading,
     busy,
     error: enabled ? current?.error : undefined,
     submissions: enabled ? unresolved : [],

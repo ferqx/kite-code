@@ -1,4 +1,5 @@
 import { type AgentClient, ClientError } from '@kite-ai/client';
+import type { TuiController } from '@kite-ai/ui/tui';
 /** A new read baseline is not an applied-event ACK. Freeze it before rereading selected facts. */
 export async function prepareTuiObservationStart(
   client: AgentClient,
@@ -17,4 +18,16 @@ export async function prepareTuiObservationStart(
   await readSelectedFacts();
   signal.throwIfAborted();
   return { storeId, sequence: page.snapshotCursor };
+}
+
+/** Reconnection refreshes observations; only explicit selection owns reconciliation. */
+export async function refreshTuiObservation(
+  controller: Pick<TuiController, 'observationReady' | 'refreshPermissions' | 'state' | 'select'>,
+  storeId: string,
+) {
+  controller.observationReady(storeId);
+  await controller.refreshPermissions();
+  const target = controller.state.sessionId;
+  if (target)
+    await controller.select(target, { preserveReconnectionReview: true, reconcile: false });
 }

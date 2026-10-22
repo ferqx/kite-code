@@ -305,6 +305,7 @@ export interface TuiLocalMessage {
   readonly sessionId: string;
   readonly role: 'user' | 'assistant';
   readonly content: string;
+  readonly submissionFailure?: { readonly commandId: string; readonly reason?: string };
 }
 
 export interface TuiState {
@@ -911,8 +912,89 @@ export class TuiController {
       this.listeners.delete(listener);
     };
   };
+  private recoveryTimer?: ReturnType<typeof setTimeout>;
+  private recoveryAttempt = 0;
+  private recoveryRunning = false;
+  private needsAutomaticRead() {
+    return (
+      !!this.value.sessionId &&
+      !this.value.panel &&
+      (this.value.snapshotStale ||
+        this.value.snapshot?.pendingInputsUnavailable ||
+        (this.value.intent?.sessionId === this.value.sessionId &&
+          this.value.intent?.phase === 'unknown') ||
+        (this.answerIntent?.sessionId === this.value.sessionId &&
+          this.answerIntent?.phase === 'unknown') ||
+        this.pendingCaller()?.phase === 'unknown' ||
+        (this.value.management?.intent.sessionId === this.value.sessionId &&
+          ['outcome_unknown', 'accepted', 'queued'].includes(this.value.management.status)) ||
+        [...this.value.jobStops.values()].some(
+          (stop) => stop.phase === 'unknown' && stop.target.sessionId === this.value.sessionId,
+        ))
+    );
+  }
+  private scheduleAutomaticRead() {
+    if (this.disposed || this.recoveryRunning || this.recoveryTimer) return;
+    if (!this.needsAutomaticRead()) {
+      this.recoveryAttempt = 0;
+      return;
+    }
+    const sessionId = this.value.sessionId;
+    this.recoveryTimer = setTimeout(
+      async () => {
+        this.recoveryTimer = undefined;
+        if (this.disposed || sessionId !== this.value.sessionId) {
+          this.scheduleAutomaticRead();
+          return;
+        }
+        if (!this.needsAutomaticRead()) {
+          this.recoveryAttempt = 0;
+          return;
+        }
+        if (this.busy) {
+          this.scheduleAutomaticRead();
+          return;
+        }
+        this.recoveryRunning = true;
+        try {
+          // Read the frozen original receipt only. Never mint an ID or repeat a write.
+          if (
+            (this.value.intent?.sessionId === this.value.sessionId &&
+              this.value.intent?.phase === 'unknown') ||
+            (this.answerIntent?.sessionId === this.value.sessionId &&
+              this.answerIntent?.phase === 'unknown') ||
+            this.pendingCaller()?.phase === 'unknown'
+          )
+            await this.lookup();
+          if (
+            this.value.management &&
+            this.value.management.intent.sessionId === sessionId &&
+            ['outcome_unknown', 'accepted', 'queued'].includes(this.value.management.status)
+          )
+            await this.lookupManagement(undefined, true);
+          if (
+            [...this.value.jobStops.values()].some(
+              (stop) => stop.phase === 'unknown' && stop.target.sessionId === sessionId,
+            )
+          )
+            await this.lookupJobStop(sessionId);
+          if (!this.disposed && !this.value.panel && sessionId === this.value.sessionId)
+            await this.select(sessionId!, { preserveReconnectionReview: true, reconcile: false });
+        } catch {
+          // Preserve original identities and fences until a later read succeeds.
+        } finally {
+          this.recoveryRunning = false;
+          this.recoveryAttempt++;
+          this.scheduleAutomaticRead();
+        }
+      },
+      Math.min(10000, 500 * 2 ** Math.min(this.recoveryAttempt, 5)),
+    );
+    this.recoveryTimer.unref?.();
+  }
   private publish(patch: Partial<TuiState>) {
     if (this.disposed) return;
+    if (patch.panel && !this.value.panel) this.managementRead?.abort();
     const next = { ...this.value, ...patch };
     if ('notice' in patch && !('noticeFragments' in patch)) next.noticeFragments = undefined;
     this.value = {
@@ -921,6 +1003,7 @@ export class TuiController {
       error: next.error ?? next.observationError,
     };
     for (const listener of this.listeners) listener();
+    this.scheduleAutomaticRead();
   }
   private reading() {
     const read = new AbortController();
@@ -1826,7 +1909,22 @@ export class TuiController {
     if (JSON.stringify(result.intent) !== JSON.stringify(intent))
       throw Error('caller_submit_identity_mismatch');
     this.publish({ callers: new Map(this.value.callers).set(key, result) });
-    if (!result.command) throw Error('caller_outcome_unknown');
+    if (!result.command) {
+      if (
+        request.kind === 'input.steer' &&
+        result.phase === 'rejected' &&
+        result.error === 'input_target_stopped'
+      ) {
+        this.recordInputRejection(request.commandId, scope.sessionId, result.error);
+        if (!this.disposed && this.value.sessionId === scope.sessionId)
+          await this.select(scope.sessionId, {
+            preserveReconnectionReview: true,
+            reconcile: false,
+          });
+        throw Object.assign(Error(result.error), { notSubmitted: true });
+      }
+      throw Error('caller_outcome_unknown');
+    }
     return result.command;
   }
   async lookupCaller(key?: string): Promise<boolean> {
@@ -1844,6 +1942,7 @@ export class TuiController {
       this.publish({
         callers: new Map(this.value.callers).set(callerKey(original.intent), result),
       });
+      if (result.command) this.recordRejectedInput(result.command);
       const pending = this.unknownIntents.get(original.intent.request.commandId);
       if (pending && result.command && ['accepted', 'applied', 'rejected'].includes(result.phase)) {
         this.unknownIntents.delete(pending.commandId);
@@ -2360,20 +2459,34 @@ export class TuiController {
     }
     await this.list();
   }
-  async lookupManagement(commandId?: string) {
+  async lookupManagement(commandId?: string, automatic = false) {
     const saved = commandId ? this.managementIntents.get(commandId) : this.value.management;
     if (!saved || !this.port.management || this.disposed) return;
     const generation = this.generation;
+    const read = automatic ? this.reading() : undefined;
+    if (read) this.managementRead = read;
     let result: TuiManagementOutcome;
     try {
-      result = await this.port.management.lookup(structuredClone(saved.intent));
+      result = await this.port.management.lookup(structuredClone(saved.intent), read?.signal);
     } catch {
       return;
+    } finally {
+      if (read) this.reads.delete(read);
     }
+    if (
+      read?.signal.aborted ||
+      this.disposed ||
+      (automatic &&
+        (generation !== this.generation ||
+          this.value.sessionId !== saved.intent.sessionId ||
+          this.value.panel))
+    )
+      return;
     if (JSON.stringify(result.intent) !== JSON.stringify(saved.intent)) return;
     this.publishManagement(result);
-    await this.finishSessionDeletion(result, generation);
+    if (!automatic) await this.finishSessionDeletion(result, generation);
     if (
+      !automatic &&
       generation === this.generation &&
       this.value.sessionId === saved.intent.sessionId &&
       result.status === 'applied'
@@ -5419,6 +5532,41 @@ export class TuiController {
       this.reads.delete(read);
     }
   }
+  private recordRejectedInput(command: Command) {
+    if (command.status !== 'rejected') return;
+    const receipt = record(command.receipt) ? command.receipt : {};
+    const reason =
+      typeof receipt.reason === 'string'
+        ? receipt.reason
+        : typeof receipt.code === 'string'
+          ? receipt.code
+          : command.dispatchFailure?.code;
+    this.recordInputRejection(command.id, command.sessionId, reason);
+  }
+  private recordInputRejection(commandId: string, sessionId: string, reason?: string) {
+    const original = this.submittedDrafts.get(commandId);
+    if (
+      !original?.request ||
+      original.scope.sessionId !== sessionId ||
+      this.value.sessionId !== sessionId
+    )
+      return;
+    const id = `rejected-input:${commandId}`;
+    if (this.value.localMessages.some((message) => message.id === id)) return;
+    this.publish({
+      localMessages: [
+        ...this.value.localMessages,
+        {
+          id,
+          sessionId,
+          afterMessageId: this.visibleMessages.at(-1)?.id ?? null,
+          role: 'user',
+          content: original.request.content,
+          submissionFailure: { commandId, ...(reason ? { reason } : {}) },
+        },
+      ],
+    });
+  }
   private async write(
     sessionId: string,
     commandId: string,
@@ -5462,6 +5610,7 @@ export class TuiController {
             `${savedAnswer.sessionId}/${savedAnswer.interactionId}/${savedAnswer.request.expectedRevision}`,
           );
       }
+      this.recordRejectedInput(command);
       if (command.status === 'needs_review')
         this.unknownIntents.set(commandId, { sessionId, commandId, kind, phase: 'unknown' });
       else this.unknownIntents.delete(commandId);
@@ -5689,7 +5838,11 @@ export class TuiController {
       : {};
     const intent: StartCommandRequest | SteerCommandRequest | FollowUpCommandRequest = freezeIntent(
       run &&
-        (maintenance || cancelling || planning || this.port.activeInputKind === 'input.follow_up')
+        (maintenance ||
+          cancelling ||
+          planning ||
+          !currentActivityVerified(snapshot) ||
+          this.port.activeInputKind === 'input.follow_up')
         ? {
             kind: 'input.follow_up',
             expectedStoreId: this.port.storeId,
@@ -6101,9 +6254,12 @@ export class TuiController {
       this.reads.delete(read);
     }
   }
-  async lookupJobStop(): Promise<boolean> {
+  async lookupJobStop(sessionId?: string): Promise<boolean> {
     const port = this.port.executions,
-      intent = [...this.value.jobStops.values()].find((value) => value.phase === 'unknown');
+      intent = [...this.value.jobStops.values()].find(
+        (value) =>
+          value.phase === 'unknown' && (!sessionId || value.target.sessionId === sessionId),
+      );
     if (!port || !intent || this.jobStopBusy) return false;
     this.executionRead?.abort();
     const read = this.reading();
@@ -6123,6 +6279,7 @@ export class TuiController {
   }
   dispose() {
     this.disposed = true;
+    if (this.recoveryTimer) clearTimeout(this.recoveryTimer);
     ++this.generation;
     for (const read of this.reads) read.abort();
     this.reads.clear();

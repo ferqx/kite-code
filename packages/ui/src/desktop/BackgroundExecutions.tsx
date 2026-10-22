@@ -1,5 +1,6 @@
 import { ArrowRight01Icon, BotIcon, TerminalIcon } from '@hugeicons/core-free-icons';
 import { HugeiconsIcon } from '@hugeicons/react';
+import { useDesktopDiagnostics } from './diagnostics';
 import { Button } from './ui';
 
 export interface BackgroundExecutionSummary {
@@ -55,6 +56,7 @@ export function BackgroundExecutions({
   onStop,
   subagentDetails,
 }: BackgroundExecutionsProps) {
+  const diagnostics = useDesktopDiagnostics();
   if (currentOnly) {
     const shells = executions.filter(
       (execution) =>
@@ -66,12 +68,13 @@ export function BackgroundExecutions({
       <section
         className="background-executions environment-information"
         id={id}
+        data-stale={stale || undefined}
         aria-label="环境信息"
         aria-busy={busy || subagentDetails?.loading || undefined}
       >
         <header>
           <span>环境信息</span>
-          {stale && <span className="background-stale">上次状态 · 待核实</span>}
+          {diagnostics && stale && <span className="background-stale">上次状态 · 待核实</span>}
         </header>
         <ExecutionGroup
           icon={TerminalIcon}
@@ -95,12 +98,19 @@ export function BackgroundExecutions({
       </section>
     );
   }
-  if (!executions.length && !stale) return null;
+  if (!executions.length && (!stale || !diagnostics)) return null;
   return (
-    <section className="background-executions" aria-label="后台执行" aria-busy={busy || undefined}>
+    <section
+      className="background-executions"
+      aria-label="后台执行"
+      aria-busy={busy || undefined}
+      data-stale={stale || undefined}
+    >
       <header>
         <strong>后台执行</strong>
-        {stale && <span className="background-stale">上次已知状态 · 等待重连刷新</span>}
+        {diagnostics && stale && (
+          <span className="background-stale">上次已知状态 · 等待重连刷新</span>
+        )}
       </header>
       {executions.length === 0 ? (
         <p>后台状态当前不可用；没有可验证的实时执行数据。</p>

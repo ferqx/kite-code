@@ -268,10 +268,10 @@ export function NativeChildDetail({
         </Button>
         <span>子 Agent 会话仅供查看。</span>
       </div>
-      {facts?.presentation?.unavailable && (
+      {diagnostics && facts?.presentation?.unavailable && (
         <p role="alert">无法核对子会话轮次或工具状态，已保留原消息；可刷新子日志重新核对。</p>
       )}
-      {detail?.error && (
+      {diagnostics && detail?.error && (
         <p role="alert">
           子日志读取失败：{detail.error}。{facts ? '保留上次完整内容。' : '尚未取得完整内容。'}
         </p>

@@ -44,7 +44,9 @@
 
 ## 普通客户端与测试诊断
 
-Native 启动、目录与子 Agent、安排任务、分支、模型／提供商／MCP／Skills 设置、扩展能力、文件差异、上下文、交互记录和完整日志／输出读取均不插入临时加载文案，刷新同样不追加“正在核对”提示。已有正文、静态控件标签、图片文件名和预览占位保持，忙碌由原转圈、控件禁用及 `aria-busy` 表达；共享模型输入／输出遵循 [UI owner](../../packages/ui/README.md#原桌面展示层)。真实失败、结果未知、历史不完整和原申请恢复提示继续显示，敏感内容确认、完整读取和写入准入不变。测试等待使用实际区域的忙碌状态，不能以加载文案消失推断完整读取成功。
+Native 启动、目录与子 Agent、安排任务、分支、模型／提供商／MCP／Skills 设置、扩展能力、文件差异、上下文、交互记录和完整日志／输出读取均不插入临时加载文案，刷新同样不追加“正在核对”提示。已有正文、静态控件标签、图片文件名和预览占位保持，忙碌由原转圈、控件禁用及 `aria-busy` 表达；共享模型输入／输出遵循 [UI owner](../../packages/ui/README.md#原桌面展示层)。会话观察失败、历史不完整和原申请回执丢失由后台自动重读或查询原 ID，普通页面不再在消息区外追加异常文案、临时重试／核对按钮或通用错误弹窗。已读正文和草稿保留；真实执行失败和未知结果保留在原输入、轮次或工具消息中。设置、启动与空间管理等独立业务错误仍在所属界面处理，敏感内容确认、完整读取和写入准入不变。测试等待使用实际区域的忙碌状态，不能以加载文案消失推断完整读取成功。
+
+[会话后台核查](src/native-session-recovery.ts)按原 scope／请求身份持续退避，间隔最高15秒、当前恢复范围最多2项并发；隐藏、切范围或退出撤销待调度项，未结束的原 key 保留去重身份，同 key 重新显示时等待原读取；已撤销范围的在途读取不占用新范围预算。首次消息、后续输入、答案、权限和队列未知结果仅查询原申请，不重发原写入；队列编辑的原文不能覆盖后来草稿。会话选择以原激活序号区分首次明确激活与自动读取重试，Main 只保存当前一项；自动重读不重复生命周期 POST，也不重新分配 Main 的会话选择身份。真实输入投递失败附在原用户输入项中，准确持久消息接管后移除本地副本。首次提交查回后，目录观察独立恢复，不阻塞原会话接管；选中读取重试成功后按原页、Session 与 Store 结束准备态。首次引导 POST 的明确4xx `input_target_stopped` 拒绝保存为本地 rejected，不能继续作为 unknown 查询不存在的 Command；网络、5xx和结果核对失败继续保未知，不据此自动重发。[调度器](test/native-session-recovery.test.ts)、[Main／Controller](test/native-caller.test.ts)、[会话页面](test/isolated/native-read-ownership-dom.test.tsx)、[首次接管](test/isolated/native-new-conversation-dom.test.tsx)、[子日志恢复](test/isolated/native-environment-child-recovery-dom.test.tsx)及[历史展示](test/isolated/native-history-presentation-dom.test.tsx)分别验证并发、原 ID、迟到隔离、慢请求不自取消、后台恢复与普通界面无额外异常提示。
 
 2026-10-20，`5dba8a6b` 上的本次工作树，Windows x64／Bun1.4.3：逐文件独立运行 UI、Native 和共享 Web 输入阅读的25个完整文件，228项／3013断言通过；覆盖[慢配置读取与迟到隔离](test/native-mcp-settings.test.tsx)、[Skills 刷新保留详情](test/native-skills-settings.test.tsx)、[会话门禁](test/isolated/native-session-shell-dom.test.tsx)、[完整输出](test/native-job-output-panel.test.tsx)及启动、子日志、附件与文件差异。UI／Desktop typecheck、34个本轮 TypeScript 文件的 Biome、文档结构及影响核对通过。原 Electron driver 的等待同步改为区域忙碌状态，本轮未重新运行真实制品或安装窗口，不增加平台或发行资格。
 

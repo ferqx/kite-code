@@ -7,7 +7,7 @@ import { withReconciledFrontier } from './session-reconciliation';
 
 /** A newly accepted ordinary task retires only a proven, effect-free old frontier. */
 export function closeReconciledHistory(db: SqliteOperations, input: AcceptCommandInput): void {
-  if (input.request.kind !== 'run.start') return;
+  if (input.request.kind !== 'run.start' && input.request.kind !== 'input.follow_up') return;
   const saved = db.row(
     'SELECT * FROM session_reconciliation WHERE root_session_id=?',
     input.sessionId,

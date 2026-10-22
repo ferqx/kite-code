@@ -1209,6 +1209,25 @@ export class SqliteOperations {
         return getAgentMessage(this, args[0] as Parameters<Store['getAgentMessage']>[0]);
       case 'listAgentMessages':
         return listAgentMessages(this, args[0] as Parameters<Store['listAgentMessages']>[0]);
+      case 'validateCommandAdmission': {
+        this.db.run('BEGIN');
+        try {
+          this.identity(input.expectedStoreId);
+          const prior = this.row('SELECT * FROM command WHERE id=?', input.commandId);
+          if (prior) {
+            if (
+              prior.request_digest !== hash(input.request as unknown as Json) ||
+              prior.session_id !== input.sessionId ||
+              prior.subject_id !== input.subjectId
+            )
+              throw new AgentError('command_conflict');
+          } else validateInputAdmission(this, input);
+          this.db.run('COMMIT');
+          return null;
+        } catch (error) {
+          return this.rollback(error);
+        }
+      }
       case 'acceptCommand':
         return this.tx(() => {
           this.identity(input.expectedStoreId);

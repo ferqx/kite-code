@@ -688,7 +688,7 @@ export type NativeRequest =
   | { method: 'state' | 'directory' | 'detach' | 'workspace.pick'; generation: number }
   | { method: 'workspace.remove'; generation: number; workspaceId: string }
   | { method: 'workspace.removal.lookup'; generation: number; commandId: string }
-  | { method: 'select'; generation: number; sessionId: string }
+  | { method: 'select'; generation: number; sessionId: string; activationId?: number }
   | {
       method: 'createSession';
       generation: number;

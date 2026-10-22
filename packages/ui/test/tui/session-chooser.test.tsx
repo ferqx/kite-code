@@ -506,3 +506,146 @@ test('directory reorder preserves selected Session identity through default rete
     f.controller.dispose();
   }
 });
+
+test('normal conversation has no anomaly chrome and recovers a lost submission by original receipt only', async () => {
+  const f = fixture();
+  let posts = 0;
+  const reads: string[] = [];
+  f.controller.port.submit = async () => {
+    posts++;
+    throw Error('lost_response');
+  };
+  f.controller.port.getCommand = async (commandId) => {
+    reads.push(commandId);
+    return {
+      id: commandId,
+      sessionId: 'a',
+      kind: 'run.start',
+      status: 'applied',
+      originStoreId: 'store',
+      receipt: {},
+    } as never;
+  };
+  await f.controller.select('a');
+  const app = render(<TuiSession controller={f.controller} />);
+  try {
+    f.controller.setDraft('one task');
+    await f.controller.send();
+    expect(f.controller.state.intent?.phase).toBe('unknown');
+    const original = f.controller.state.intent!.commandId;
+    f.controller.observationUnavailable('network');
+    await Bun.sleep(30);
+    expect(app.lastFrame()).not.toContain('Observation unknown');
+    expect(app.lastFrame()).not.toContain('Outcome unknown');
+    expect(app.lastFrame()).not.toContain('Ctrl+L');
+    expect(app.lastFrame()).not.toContain('Error:');
+    const deadline = Date.now() + 2000;
+    while (f.controller.state.intent?.phase === 'unknown') {
+      if (Date.now() > deadline) throw Error('automatic_receipt_lookup_deadline');
+      await Bun.sleep(10);
+    }
+    expect(reads).toEqual([original]);
+    expect(posts).toBe(1);
+    // Receipt recovery does not grant health to a failed observation stream.
+    expect(f.controller.state.stale).toBe(true);
+  } finally {
+    app.unmount();
+    f.controller.dispose();
+  }
+});
+
+test('a rejected original input stays in its message item and keeps the draft editable', async () => {
+  const f = fixture();
+  f.controller.port.submit = async (_sessionId, request) =>
+    ({
+      id: request.commandId,
+      sessionId: 'a',
+      kind: request.kind,
+      originStoreId: 'store',
+      status: 'rejected',
+      receipt: { reason: 'original authorization denied' },
+    }) as never;
+  await f.controller.select('a');
+  f.controller.setDraft('original input');
+  const app = render(<TuiSession controller={f.controller} />);
+  try {
+    await f.controller.send();
+    await Bun.sleep(30);
+    expect(f.controller.state.localMessages).toHaveLength(1);
+    expect(f.controller.state.localMessages[0]?.content).toBe('original input');
+    expect(f.controller.state.localMessages[0]?.submissionFailure?.reason).toBe(
+      'original authorization denied',
+    );
+    expect(app.lastFrame()).toContain('Input rejected: original authorization denied');
+    expect(app.lastFrame()).not.toContain('Submission:');
+    expect(f.controller.state.draft).toBe('original input');
+  } finally {
+    app.unmount();
+    f.controller.dispose();
+  }
+});
+
+test('unknown original submission survives repeated GET failures and stops after the receipt is confirmed', async () => {
+  const f = fixture();
+  let posts = 0;
+  const reads: string[] = [];
+  f.controller.port.submit = async () => {
+    posts++;
+    throw Error('lost_response');
+  };
+  f.controller.port.getCommand = async (commandId) => {
+    reads.push(commandId);
+    if (reads.length <= 3) throw Error('temporary_read_failure');
+    return {
+      id: commandId,
+      sessionId: 'a',
+      kind: 'run.start',
+      status: 'applied',
+      originStoreId: 'store',
+      receipt: {},
+    } as never;
+  };
+  try {
+    await f.controller.select('a');
+    f.controller.setDraft('once only');
+    await f.controller.send();
+    const original = f.controller.state.intent!.commandId;
+    const deadline = Date.now() + 11000;
+    while (f.controller.state.intent?.phase === 'unknown') {
+      if (Date.now() > deadline) throw Error('automatic_receipt_lookup_deadline');
+      await Bun.sleep(20);
+    }
+    expect(reads).toEqual([original, original, original, original]);
+    expect(posts).toBe(1);
+    await Bun.sleep(550);
+    expect(reads).toHaveLength(4);
+  } finally {
+    f.controller.dispose();
+  }
+}, 12000);
+
+test('switching Session before the automatic receipt read retires the old scope without a new POST', async () => {
+  const f = fixture();
+  let posts = 0,
+    reads = 0;
+  f.controller.port.submit = async () => {
+    posts++;
+    throw Error('lost_response');
+  };
+  f.controller.port.getCommand = async () => {
+    reads++;
+    throw Error('old_scope_read');
+  };
+  try {
+    await f.controller.select('a');
+    f.controller.setDraft('original scope');
+    await f.controller.send();
+    await f.controller.select('b');
+    await Bun.sleep(600);
+    expect(reads).toBe(0);
+    expect(posts).toBe(1);
+    expect(f.controller.state.sessionId).toBe('b');
+  } finally {
+    f.controller.dispose();
+  }
+});

@@ -413,6 +413,13 @@ function fixture(
     root,
     host,
     calls,
+    until: async (ready: () => boolean) => {
+      for (let i = 0; i < 1500 && !ready(); i++)
+        await act(async () => {
+          await new Promise((resolve) => setTimeout(resolve, 1));
+        });
+      expect(ready()).toBe(true);
+    },
     click,
     edit,
     input,
@@ -1059,6 +1066,16 @@ test('an accepted prompt is removed from its own cache after leaving, while unkn
       expect(promptValue(f.input('当前会话私有草稿'))).toBe(
         ['accepted', 'applied', 'terminal'].includes(phase) ? '' : 'original submitted prompt 雪🙂',
       );
+      if (phase === 'unknown' || phase === 'failed' || phase === 'rejected') {
+        const delivery = f.host.querySelector('.message.user .delivery-status');
+        expect(delivery?.textContent).toBe(
+          phase === 'unknown' ? '发送结果尚未确认。' : '发送失败，原文已保留。',
+        );
+        expect(delivery?.closest('.message.user')?.textContent).toContain(
+          'original submitted prompt 雪🙂',
+        );
+        expect(f.host.querySelector('[role="alertdialog"]')).toBeNull();
+      }
       expect(f.calls.filter((call) => call.method === 'submit')).toHaveLength(1);
     } finally {
       await act(async () => release?.());
@@ -1158,13 +1175,130 @@ test('looking up an original first submission cannot overwrite a later prompt in
       await f.resolve('unknown');
       await f.edit('an intermediate later prompt', '当前会话私有草稿');
       await f.edit(text, '当前会话私有草稿');
-      await f.click('查询原首次提交');
+      await f.until(() => f.calls.some((call) => call.method === 'conversation.lookup'));
+      expect(f.host.body.textContent).not.toContain('查询原首次提交');
       expect(promptValue(f.input('当前会话私有草稿'))).toBe(text);
       expect(f.calls.filter((call) => call.method === 'conversation.send')).toHaveLength(1);
       expect(f.calls.filter((call) => call.method === 'conversation.lookup')).toHaveLength(1);
     } finally {
       await f.close();
     }
+  }
+});
+
+for (const receiptSource of ['lookup', 'submit'] as const)
+  for (const failedRead of ['directory', 'select'] as const)
+    test(`a first accepted ${receiptSource} receipt completes its handoff after a lost ${failedRead} read without another submission`, async () => {
+      const f = fixture(true);
+      const bridge = f.dom.window.kiteNative! as NativeBridge;
+      const request = bridge.request;
+      let lookedUp = false,
+        failNext = true,
+        recovered = false;
+      bridge.request = async (input) => {
+        const result = await request(input);
+        if (
+          input.method === 'conversation.lookup' &&
+          result &&
+          'kind' in result &&
+          result.kind === 'conversation'
+        ) {
+          lookedUp = true;
+          return { ...result, phase: 'accepted', code: undefined };
+        }
+        if (
+          input.method === 'conversation.send' &&
+          result &&
+          'kind' in result &&
+          result.kind === 'conversation' &&
+          'stage' in result &&
+          result.phase === 'accepted'
+        )
+          lookedUp = true;
+        if (lookedUp && input.method === failedRead) {
+          if (failNext) {
+            failNext = false;
+            throw Error('fixture_first_handoff_read_lost');
+          }
+          recovered = true;
+        }
+        return result;
+      };
+      try {
+        await act(async () => f.root.render(<NativeDesktop />));
+        await f.click('在 Workspace 中新建对话');
+        await f.edit('accepted original with a lost handoff read');
+        await f.click('发送首条消息');
+        const original = await f.resolve(
+          receiptSource === 'lookup' ? 'unknown' : 'accepted',
+          receiptSource === 'submit',
+        );
+        await f.until(() => recovered && !!f.input('当前会话私有草稿') && !f.input('新对话草稿'));
+        expect(f.selected()).toBe(original.creation.sessionId);
+        expect(promptValue(f.input('当前会话私有草稿'))).toBe('');
+        expect(f.host.querySelector('[role="alertdialog"]')).toBeNull();
+        expect(f.calls.filter((call) => call.method === 'conversation.send')).toHaveLength(1);
+        expect(f.calls.filter((call) => call.method === 'conversation.lookup')).toHaveLength(
+          receiptSource === 'lookup' ? 1 : 0,
+        );
+        if (failedRead === 'select') {
+          const reads = f.calls.filter((call) => call.method === 'select');
+          expect(reads).toHaveLength(2);
+          expect(reads[1]).toEqual(reads[0]);
+        }
+        await f.edit('a later editable prompt', '当前会话私有草稿');
+        await f.until(() => {
+          const send = f.host.querySelector<HTMLButtonElement>('[aria-label="发送明确的新轮次"]');
+          return !!send && !send.disabled;
+        });
+      } finally {
+        await f.close();
+      }
+    });
+
+test('a held directory observation cannot block the accepted first Session handoff', async () => {
+  const f = fixture(true);
+  const bridge = f.dom.window.kiteNative! as NativeBridge;
+  const request = bridge.request;
+  let lookedUp = false,
+    directoryHeld = false,
+    releaseDirectory!: () => void;
+  const held = new Promise<void>((resolve) => {
+    releaseDirectory = resolve;
+  });
+  bridge.request = async (input) => {
+    if (lookedUp && input.method === 'directory') {
+      directoryHeld = true;
+      await held;
+    }
+    const result = await request(input);
+    if (
+      input.method === 'conversation.lookup' &&
+      result &&
+      'kind' in result &&
+      result.kind === 'conversation'
+    ) {
+      lookedUp = true;
+      return { ...result, phase: 'accepted', code: undefined };
+    }
+    return result;
+  };
+  try {
+    await act(async () => f.root.render(<NativeDesktop />));
+    await f.click('在 Workspace 中新建对话');
+    await f.edit('original accepted message');
+    await f.click('发送首条消息');
+    const original = await f.resolve('unknown', false);
+    await f.until(() => directoryHeld && !!f.input('当前会话私有草稿') && !f.input('新对话草稿'));
+    expect(f.selected()).toBe(original.creation.sessionId);
+    expect(promptValue(f.input('当前会话私有草稿'))).toBe('');
+    expect(f.calls.filter((call) => call.method === 'conversation.send')).toHaveLength(1);
+    expect(f.calls.filter((call) => call.method === 'conversation.lookup')).toHaveLength(1);
+    await act(async () => releaseDirectory());
+    expect(f.selected()).toBe(original.creation.sessionId);
+  } finally {
+    releaseDirectory();
+    await f.close();
   }
 });
 
@@ -1191,7 +1325,8 @@ test('querying a still unknown first creation cannot restore a preparation draft
     await f.resolve('unknown', false);
     expect(promptValue(f.input())).toBe('unknown first creation prompt');
     await f.edit('');
-    await f.click('查询原首次提交');
+    await f.until(() => f.calls.some((call) => call.method === 'conversation.lookup'));
+    expect(f.host.body.textContent).not.toContain('查询原首次提交');
     expect(promptValue(f.input())).toBe('');
     expect(f.calls.filter((call) => call.method === 'conversation.send')).toHaveLength(1);
     expect(f.calls.filter((call) => call.method === 'conversation.lookup')).toHaveLength(1);
@@ -1787,10 +1922,7 @@ test('ordinary permission mode progress stays in its trigger while unknown and f
         { ...mode, phase, ...(phase === 'failed' ? { error: 'permission_fixture_failure' } : {}) },
       ];
       await f.refreshFacts();
-      if (phase === 'unknown' || phase === 'failed') {
-        expect(notice()).not.toBeNull();
-        expect(notice()!.textContent).not.toContain('original-mode');
-      } else expect(notice()).toBeNull();
+      expect(notice()).toBeNull();
       const pending = ['saved', 'submitting', 'unknown'].includes(phase);
       expect(trigger().disabled).toBe(pending);
       expect(trigger().getAttribute('aria-busy')).toBe(pending ? 'true' : null);
@@ -1798,15 +1930,13 @@ test('ordinary permission mode progress stays in its trigger while unknown and f
       expect(promptValue(input)).toBe('stable permission draft 雪🙂');
       expect(f.host.querySelector('.conversation-viewport')).toBe(conversation);
       if (phase === 'unknown') {
-        await f.click('查询原权限选择');
+        await f.until(() => f.calls.some((call) => call.method === 'lookupPermission'));
+        expect(f.host.body.textContent).not.toContain('查询原权限选择');
         expect(f.calls.filter((call) => call.method === 'lookupPermission')).toEqual([
           { method: 'lookupPermission', generation: 1, commandId: 'original-mode' },
         ]);
       }
-      if (phase === 'failed')
-        expect(notice()!.querySelector('[role="alert"]')?.textContent).toContain(
-          'permission_fixture_failure',
-        );
+      if (phase === 'failed') expect(notice()).toBeNull();
     }
     for (const phase of ['saved', 'submitting'] as const) {
       rows = [
@@ -1825,7 +1955,7 @@ test('ordinary permission mode progress stays in its trigger while unknown and f
         },
       ];
       await f.refreshFacts();
-      expect(notice()).not.toBeNull();
+      expect(notice()).toBeNull();
     }
     for (const foreign of [
       { sessionId: 'b' },
@@ -2050,7 +2180,7 @@ test('first send clears and renders original text; late failure cannot steal ano
     const send = await f.resolve('failed');
     expect(f.selected()).toBe('b');
     expect(promptValue(f.input('当前会话私有草稿'))).toBe('saved B');
-    await f.click('确定');
+    expect(f.host.querySelector('[role="alertdialog"]')).toBeNull();
     await act(async () => {
       const item = [...f.host.querySelectorAll<HTMLButtonElement>('.session-row')].find((item) =>
         item.textContent?.includes('新对话'),
@@ -2511,7 +2641,8 @@ test('unknown first creation blocks resend and only queries original before an e
     expect(
       (f.host.querySelector('[aria-label="发送首条消息"]') as HTMLButtonElement).disabled,
     ).toBe(true);
-    await f.click('查询原首次提交');
+    await f.until(() => f.calls.some((call) => call.method === 'conversation.lookup'));
+    expect(f.host.body.textContent).not.toContain('查询原首次提交');
     expect(f.calls.filter((call) => call.method === 'conversation.send')).toHaveLength(1);
     expect(f.calls.filter((call) => call.method === 'conversation.lookup')).toEqual([
       { method: 'conversation.lookup', generation: 1, commandId: send.intent.commandId },
@@ -2544,7 +2675,7 @@ test('a lost retry response restores original text and prevents a second input P
     await f.edit('retry original raw');
     await f.click('发送首条消息');
     const original = await f.resolve('failed');
-    await f.click('确定');
+    expect(f.host.querySelector('[role="alertdialog"]')).toBeNull();
     f.loseNextResponse();
     await f.click('发送明确的新轮次');
     expect(promptValue(f.input('当前会话私有草稿'))).toBe('retry original raw');
@@ -2552,8 +2683,9 @@ test('a lost retry response restores original text and prevents a second input P
       (f.host.querySelector('[aria-label="发送明确的新轮次"]') as HTMLButtonElement).disabled,
     ).toBe(true);
     expect(f.calls.filter((call) => call.method === 'conversation.send')).toHaveLength(2);
-    await f.click('确定');
-    await f.click('查询原首次提交');
+    expect(f.host.querySelector('[role="alertdialog"]')).toBeNull();
+    await f.until(() => f.calls.some((call) => call.method === 'conversation.lookup'));
+    expect(f.host.body.textContent).not.toContain('查询原首次提交');
     expect(f.calls.filter((call) => call.method === 'conversation.send')).toHaveLength(2);
     expect(f.selected()).toBe(original.creation.sessionId);
     await f.click('发送明确的新轮次');
@@ -2615,7 +2747,7 @@ test('first Session input stays in its created Session without a separate projec
     await f.edit('first input stays in its created Session');
     await f.click('发送首条消息');
     const original = await f.resolve('failed', true, 'workspace_trust_stale');
-    await f.click('确定');
+    expect(f.host.querySelector('[role="alertdialog"]')).toBeNull();
     expect(f.selected()).toBe(original.creation.sessionId);
     expect(promptValue(f.input('当前会话私有草稿'))).toBe(original.intent.content);
     expect(f.host.querySelector('[aria-label="项目读取授权"]')).toBeNull();
@@ -2736,20 +2868,19 @@ test('persisted unknown or failed project access retains the original permission
     await f.edit('unsent exact draft', '当前会话私有草稿');
     await f.refreshFacts();
     const notice = () => f.host.querySelector<HTMLElement>('[aria-label="项目授权结果"]');
-    expect(notice()?.textContent).toContain('结果待核实；只查询原选择');
+    expect(notice()).toBeNull();
     expect(f.host.querySelector<HTMLButtonElement>('[data-permission-trigger]')!.disabled).toBe(
       true,
     );
     expect(f.host.querySelector('[role="dialog"]')).toBeNull();
-    await f.click('查询原权限选择');
+    await f.until(() => f.calls.some((call) => call.method === 'lookupPermission'));
+    expect(f.host.body.textContent).not.toContain('查询原权限选择');
     expect(f.calls.filter((call) => call.method === 'lookupPermission')).toEqual([
       { method: 'lookupPermission', generation: 1, commandId: 'original-trust' },
     ]);
     phase = 'failed';
     await f.refreshFacts();
-    expect(notice()?.querySelector('[role="alert"]')?.textContent).toContain(
-      'workspace_trust_stale',
-    );
+    expect(notice()).toBeNull();
     expect(f.host.querySelector<HTMLButtonElement>('[data-permission-trigger]')!.disabled).toBe(
       false,
     );
