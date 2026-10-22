@@ -239,6 +239,8 @@ Runtime/Session 的 [串行资源 owner](src/execution/resources.ts)只保留仍
 
 2026-10-22，macOS arm64／Bun 1.4.2，历史终态投影的[真实 SQLite／SIGKILL 回归](test/isolated/context/interrupted-history.test.ts)4 项／70 断言通过，含 applied steer、内部 user 结果对照、文件附件、原文同值的新输入、完整 ModelInput 冷读与显式 resume；[历史继续](test/isolated/recovery/history-followup-runtime.test.ts)及[原 Run 接续](test/isolated/recovery/run-resume-runtime.test.ts)另 55 项／820 断言通过。全 context 为 77 项通过／8 项失败；八个旧回执 `businessCommandId` 或 automatic Source 预期失败均在隔离 HEAD `77f6d108` 的原 runtime／原测试中同断言复现，不记为通过。对照仅重定向相对 imports 并复用未变依赖，不是完整独立 HEAD checkout。准确 SHA、红绿、原失败与完整日志保存在 `dist/acceptance/session-anomalies-live-20261022-03.json.workspace/evidence/backend-context`。同次真实模型窗口的效果、顺序与冷开零重放证据归[Desktop owner](../../apps/desktop/README.md#普通客户端与测试诊断)，不由确定性模型测试代证。
 
+上述 context 八项旧预期已在当前直接输入契约下修正：本目录完整 85 项／2070 断言、普通输入与结果交付四文件 27 项／267 断言通过，未修改 Agent／Store 生产源码。准确分类、保留及新增的断言、原失败与本次日志见[context 测试 owner](test/isolated/context/README.md)。
+
 ## 同一 Step 的并行工具批次
 
 默认产品权限使用可信 `toolDispatchOrder: model`：同一 Model 批次按声明顺序完成准入，前项等待人工决定时后项不派发；实际准入后各 Tool 的执行仍并发，拒绝终止未准入兄弟而不伪造其效果。策略进入原冻结 Run 配置并参与恢复核对，Model 输入不能选择该标记。自定义 Permissions 未声明它时保持下述独立并行行为与已开始调用的清理约束；真实乱序、接续及 T048 能力不由 TUI 推造。

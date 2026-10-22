@@ -357,6 +357,7 @@ test('idle pending Jobs do not call Model; frozen completion cursor leaves later
     expect(f.requests).toHaveLength(2);
     expect((await f.store.getMetadata()).lastChangeCursor).toBe(cursor);
     expect((await f.context()).resultSources).toEqual([]);
+    const contextSelectionId = (await f.store.getSession('s'))!.contextSelectionId;
     await f.submit('explicit-next', 'Follow up: explicit-next');
     await bounded(frozenPage.waiting);
     f.gates.get(lower![0])!.release();
@@ -364,11 +365,16 @@ test('idle pending Jobs do not call Model; frozen completion cursor leaves later
     expect(low.id < high.id).toBe(true);
     releasePage.release();
     const next = await f.runtime.waitForCommand('explicit-next');
-    const receipt = next.receipt as { businessCommandId: string; runId: string };
+    const receipt = next.receipt as { runId: string };
+    expect(next.receipt).toEqual({ runId: receipt.runId });
     expect(next.status).toBe('applied');
     expect(await f.store.getRun(receipt.runId)).toMatchObject({
-      originCommandId: receipt.businessCommandId,
-      rootWorkCommandId: 'work',
+      originCommandId: next.id,
+      originStoreId: f.expectedStoreId,
+      sessionId: next.sessionId,
+      rootWorkCommandId: next.id,
+      rootWorkSeq: next.seq,
+      contextSelectionId,
       status: 'completed',
     });
     for (const request of f.requests.slice(2))
@@ -380,6 +386,32 @@ test('idle pending Jobs do not call Model; frozen completion cursor leaves later
     expect(sourceMessage(f.requests[2]!, lowSource.id)).toBeUndefined();
     expect(sourceMessage(f.requests[3]!, lowSource.id)?.sourceIds).toEqual([lowSource.id]);
     expect(sources).toHaveLength(2);
+    for (const original of [high, low]) {
+      const source = sources.find((value) => value.executionId === original.id)!;
+      expect(source).toMatchObject({
+        originStoreId: original.originStoreId,
+        resultRevision: original.resultRevision,
+        sessionId: next.sessionId,
+        createdSelectionId: contextSelectionId,
+        inclusion: 'automatic',
+        result: original.result,
+      });
+      expect(original.rootWorkCommandId).toBe('work');
+      expect(original.runId).not.toBe(receipt.runId);
+      expect(await f.store.getExecution(original.id)).toMatchObject({
+        runId: original.runId,
+        originCommandId: original.originCommandId,
+        rootWorkCommandId: original.rootWorkCommandId,
+        rootWorkSeq: original.rootWorkSeq,
+        result: original.result,
+        resultAcceptance: {
+          runId: receipt.runId,
+          selectionId: contextSelectionId,
+          sourceId: source.id,
+          resultRevision: original.resultRevision,
+        },
+      });
+    }
     expect((await f.store.getExecution(high.id))?.delivery).toBe('consumed');
     expect((await f.store.getExecution(low.id))?.delivery).toBe('consumed');
     const after = (await f.store.getMetadata()).lastChangeCursor;

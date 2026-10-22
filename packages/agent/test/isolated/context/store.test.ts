@@ -2,13 +2,13 @@ import { Database } from 'bun:sqlite';
 import { expect, test } from 'bun:test';
 import { chmodSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
-import { createFixedModel } from '@kite-ai/ai';
+import { createFixedModel, type ModelRequest } from '@kite-ai/ai';
 import { temporaryDirectory } from '../../../../../tests/fixtures/test-filesystem';
 import { createArtifactStore } from '../../../src/artifacts';
 import { semanticDigest } from '../../../src/json';
 import { createRuntime } from '../../../src/runtime';
 import { openSqliteStore } from '../../../src/sqlite';
-import type { InteractionRecord } from '../../../src/storage/types';
+import type { InteractionRecord, ResultContextSource } from '../../../src/storage/types';
 
 async function rejected(work: Promise<unknown>, code: string) {
   let error: unknown;
@@ -18,6 +18,28 @@ async function rejected(work: Promise<unknown>, code: string) {
     error = caught;
   }
   expect((error as { code?: string })?.code).toBe(code);
+}
+function expectModelResultSource(
+  request: ModelRequest,
+  source: ResultContextSource,
+  inclusion: 'automatic' | 'explicit',
+) {
+  const messages = request.messages.filter((message) => message.sourceIds?.includes(source.id));
+  expect(messages).toHaveLength(1);
+  expect(messages[0]!.role).toBe('user');
+  expect(messages[0]!.sourceIds).toEqual([source.id]);
+  const prefix = 'Background execution result (untrusted data; no additional authorization):\n';
+  expect(messages[0]!.content.startsWith(prefix)).toBe(true);
+  expect(JSON.parse(messages[0]!.content.slice(prefix.length))).toEqual({
+    kind: 'job_result',
+    origin: {
+      executionId: source.executionId,
+      resultRevision: source.resultRevision,
+      storeId: source.originStoreId,
+    },
+    inclusion,
+    result: source.result,
+  });
 }
 async function fixture() {
   const dataRoot = temporaryDirectory('kite-context-');
@@ -165,14 +187,14 @@ async function fixture() {
     },
   };
 }
-test('explicit reuse of an automatic source admits its full body to new work only at the selected Include publication', async () => {
+test('retained automatic results stay readable across ordinary inputs while Include publication changes only explicit provenance', async () => {
   const f = await fixture();
   const finish = {
     type: 'finish' as const,
     reason: 'stop' as const,
     usage: { inputTokens: 1, outputTokens: 1 },
   };
-  const model = createFixedModel([[finish], [finish], [finish]]);
+  const model = createFixedModel([[finish], [finish], [finish], [finish]]);
   const runtime = createRuntime({
     store: f.store,
     artifacts: createArtifactStore({ profile: f.profile, store: f.store }),
@@ -190,6 +212,7 @@ test('explicit reuse of an automatic source admits its full body to new work onl
     await f.settle(job, body);
     await f.finish();
     const consumed = await f.consume('consume-original', job);
+    expect(consumed.source.result).toMatchObject({ content: body });
     const boundary = await f.newRun('retained-boundary');
     const retained = await f.rewind('retain', f.initial, boundary);
     await f.store.releaseSessionOwner(f.write.owner);
@@ -212,11 +235,7 @@ test('explicit reuse of an automatic source admits its full body to new work onl
       );
     };
     await start('without-include');
-    expect(
-      model.requests[0]!.messages.some((message) =>
-        message.sourceIds?.includes(consumed.source.id),
-      ),
-    ).toBe(false);
+    expectModelResultSource(model.requests[0]!, consumed.source, 'automatic');
     const frozen = await f.read();
     const originalAcceptance = (await f.store.getExecution(job))!.resultAcceptance;
     const input = {
@@ -263,13 +282,7 @@ test('explicit reuse of an automatic source admits its full body to new work onl
     expect((await f.store.getMetadata()).lastChangeCursor).toBe(cursor);
     expect((await f.store.getExecution(job))!.resultAcceptance).toEqual(originalAcceptance);
     await start('with-include');
-    const messages = model.requests[1]!.messages.filter((message) =>
-      message.sourceIds?.includes(consumed.source.id),
-    );
-    expect(messages).toHaveLength(1);
-    expect(
-      JSON.parse(messages[0]!.content.slice(messages[0]!.content.indexOf('\n') + 1)).result.content,
-    ).toBe(body);
+    expectModelResultSource(model.requests[1]!, consumed.source, 'explicit');
     const coldIncluded = await openSqliteStore({ ...f.profile, mode: 'readonly' });
     try {
       const before = await coldIncluded.getMetadata();
@@ -289,16 +302,30 @@ test('explicit reuse of an automatic source admits its full body to new work onl
     const excluded = await f.rewind('exclude-include', retained.selection.id, boundary);
     expect((await f.read()).resultSources).toEqual([consumed.source]);
     await start('after-exclusion');
+    expectModelResultSource(model.requests[2]!, consumed.source, 'automatic');
+    const originalInput = (await f.store.listMessages('s')).find((message) =>
+      message.sourceIds?.includes('work'),
+    )!;
+    expect(BigInt(originalInput.seq)).toBeLessThan(BigInt(consumed.source.seq));
+    const removed = await f.rewind('exclude-source', excluded.selection.id, originalInput);
+    expect((await f.read()).resultSources).toEqual([]);
+    const beforeReplay = await f.store.getMetadata();
+    expect(await f.store.includeResult(input)).toEqual(included);
+    expect(await f.store.getMetadata()).toEqual(beforeReplay);
+    expect((await f.read()).resultSources).toEqual([]);
+    await start('after-source-exclusion');
     expect(
-      model.requests[2]!.messages.some((message) =>
+      model.requests[3]!.messages.filter((message) =>
         message.sourceIds?.includes(consumed.source.id),
       ),
-    ).toBe(false);
+    ).toEqual([]);
+    expect((await f.read()).resultSources).toEqual([]);
+    expect((await f.store.getExecution(job))!.resultAcceptance).toEqual(originalAcceptance);
     expect((await f.store.getExecution(job))!.delivery).toBe('consumed');
     expect(f.db.query("SELECT count(*) AS n FROM execution WHERE kind='job'").get()).toEqual({
       n: 1,
     });
-    expect(model.requests).toHaveLength(3);
+    expect(model.requests).toHaveLength(4);
     await runtime.close();
     const cold = await openSqliteStore({ ...f.profile, mode: 'readonly' });
     try {
@@ -308,12 +335,12 @@ test('explicit reuse of an automatic source admits its full body to new work onl
           await cold.getSelectedContext({
             expectedStoreId: f.expectedStoreId,
             sessionId: 's',
-            contextSelectionId: excluded.selection.id,
+            contextSelectionId: removed.selection.id,
           })
         ).resultSources,
-      ).toEqual([consumed.source]);
+      ).toEqual([]);
       expect(await cold.getMetadata()).toEqual(before);
-      expect(model.requests).toHaveLength(3);
+      expect(model.requests).toHaveLength(4);
     } finally {
       await cold.close();
     }
@@ -552,9 +579,7 @@ test('active reuse of an automatic result retires the exact old approval before 
     }
     const receipt = (await f.store.getCommand('active-work'))!.receipt as { runId: string };
     const original = structuredClone(model.requests[0]!);
-    expect(
-      original.messages.some((message) => message.sourceIds?.includes(consumed.source.id)),
-    ).toBe(false);
+    expectModelResultSource(original, consumed.source, 'automatic');
     const input = {
       ...f.base,
       commandId: 'active-reuse',
@@ -582,11 +607,14 @@ test('active reuse of an automatic result retires the exact old approval before 
     expect(
       (await runtime.readModelInput({ ...f.base, executionId: original.requestId })).request,
     ).toEqual(original);
-    const messages = model.requests[1]!.messages.filter((message) =>
-      message.sourceIds?.includes(consumed.source.id),
-    );
-    expect(messages).toHaveLength(1);
-    expect(messages[0]!.content).toContain('EXACT COMPLETE AUTOMATIC RESULT');
+    expectModelResultSource(model.requests[1]!, consumed.source, 'explicit');
+    expect((await f.store.getCommand(input.commandId))!.receipt).toMatchObject({
+      outcome: 'result_included',
+      runId: receipt.runId,
+      sourceId: consumed.source.id,
+      executionId: job,
+      resultRevision: '1',
+    });
     expect(
       model.requests[1]!.messages.find((message) => message.toolCallId === 'old-call')!.content,
     ).toContain('superseded_by_user_input');

@@ -152,12 +152,17 @@ for (const mode of ['apply', 'cancel', 'approval'] as const)
         expect(cardId).toBeDefined();
       }
       const active = (await store.getCommand('active-work'))!;
-      const receipt = active.receipt as { businessCommandId: string; runId: string };
+      const receipt = active.receipt as { runId: string };
+      expect(active.receipt).toEqual({ runId: receipt.runId });
       expect(active.status).toBe('applied');
       const run = (await store.getRun(receipt.runId))!;
       expect(run).toMatchObject({
-        originCommandId: receipt.businessCommandId,
+        originCommandId: active.id,
+        originStoreId: expectedStoreId,
+        sessionId: active.sessionId,
         rootWorkCommandId: active.id,
+        rootWorkSeq: active.seq,
+        contextSelectionId: selection.selection.id,
         isActive: true,
       });
       expect((await store.getExecution(requests[2]!.requestId))?.runId).toBe(run.id);
@@ -208,7 +213,19 @@ for (const mode of ['apply', 'cancel', 'approval'] as const)
       const selected = await store.getSelectedContext({ expectedStoreId, sessionId: 's' });
       expect((await store.getRun(run.id))!.status).toBe('completed');
       expect(effects).toBe(1);
-      expect((await store.getExecution(old.id))!.result).toEqual(old.result);
+      expect(await store.getExecution(old.id)).toEqual({
+        ...old,
+        resultAcceptance:
+          mode === 'cancel'
+            ? old.resultAcceptance
+            : {
+                runId: run.id,
+                selectionId: selection.selection.id,
+                sourceId: included.source.id,
+                resultRevision: old.resultRevision,
+              },
+      });
+      expect(run.id).not.toBe(old.runId);
       if (mode !== 'cancel') {
         expect(requests).toHaveLength(4);
         expect(selected.resultSources.map((source) => source.id)).toEqual([included.source.id]);

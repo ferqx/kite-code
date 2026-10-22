@@ -119,7 +119,8 @@ test('actual Model exhausts both selected-context cursors and rewind preserves o
       },
     },
   });
-  const submit = async (commandId: string, content = commandId, rootWorkCommandId = commandId) => {
+  const submit = async (commandId: string, content = commandId) => {
+    const contextSelectionId = (await store.getSession('s'))!.contextSelectionId;
     await runtime.submitCommand({
       expectedStoreId,
       commandId,
@@ -128,16 +129,19 @@ test('actual Model exhausts both selected-context cursors and rewind preserves o
       request: { kind: 'run.start', content },
     });
     const command = await runtime.waitForCommand(commandId, { timeoutMs: 12000 });
-    const receipt = command.receipt as { businessCommandId?: string; runId: string };
-    const businessCommandId = commandId === 'first-work' ? command.id : receipt.businessCommandId;
-    expect(businessCommandId).toBeString();
+    const receipt = command.receipt as { runId: string };
+    expect(command.receipt).toEqual({ runId: receipt.runId });
     expect(command.status).toBe('applied');
     expect(await store.getRun(receipt.runId)).toMatchObject({
-      originCommandId: businessCommandId,
-      rootWorkCommandId,
+      originCommandId: command.id,
+      originStoreId: expectedStoreId,
+      sessionId: command.sessionId,
+      rootWorkCommandId: command.id,
+      rootWorkSeq: command.seq,
+      contextSelectionId,
       status: 'completed',
     });
-    return { ...receipt, businessCommandId: businessCommandId! };
+    return { ...receipt, commandId: command.id };
   };
   const selected = async () => {
     const messages: MessageRecord[] = [];
@@ -232,6 +236,16 @@ test('actual Model exhausts both selected-context cursors and rewind preserves o
       boundary: { messageId: retainedBoundary.id, seq: retainedBoundary.seq },
     });
     expect((await selected()).sources.map((value) => value.id).sort()).toEqual(sourceIds);
+    const originalExecutions = await Promise.all(
+      first.sources.map((source) => store.getExecution(source.executionId)),
+    );
+    for (const execution of originalExecutions) {
+      expect(execution).not.toBeNull();
+      expect(execution!.delivery).toBe('consumed');
+      expect(execution!.rootWorkCommandId).toBe(firstReceipt.commandId);
+      expect(execution!.contextSelectionId).toBe(first.selectionId);
+      expect(execution!.resultAcceptance).toBeNull();
+    }
     for (const source of first.sources) {
       const included = await runtime.includeResult({
         expectedStoreId,
@@ -256,6 +270,10 @@ test('actual Model exhausts both selected-context cursors and rewind preserves o
       });
       expect(model.requests).toHaveLength(2);
     }
+    const includedSnapshot = await selected();
+    expect(
+      await Promise.all(first.sources.map((source) => store.getExecution(source.executionId))),
+    ).toEqual(originalExecutions);
     const retainedReceipt = await submit('retained-work', 'New task: retained-work');
     expect(model.requests).toHaveLength(3);
     expect((await store.getExecution(model.requests[2]!.requestId))?.runId).toBe(
@@ -267,6 +285,11 @@ test('actual Model exhausts both selected-context cursors and rewind preserves o
         .sort(),
     ).toEqual(sourceIds);
     expect(count()).toBe(101);
+    expect(retainedReceipt.runId).not.toBe(firstReceipt.runId);
+    expect((await selected()).sources).toEqual(includedSnapshot.sources);
+    expect(
+      await Promise.all(first.sources.map((source) => store.getExecution(source.executionId))),
+    ).toEqual(originalExecutions);
     const earlier = first.messages.find((value) => value.content === 'first-work')!;
     await runtime.selectContext({
       expectedStoreId,
@@ -286,8 +309,8 @@ test('actual Model exhausts both selected-context cursors and rewind preserves o
       'New task: new-work',
     ]);
     expect(model.requests[3]!.messages.flatMap((value) => value.sourceIds ?? [])).toEqual([
-      firstReceipt.businessCommandId,
-      newReceipt.businessCommandId,
+      firstReceipt.commandId,
+      newReceipt.commandId,
     ]);
     expect((await store.getExecution(first.sources[0]!.executionId))?.delivery).toBe('consumed');
     expect(count()).toBe(101);
