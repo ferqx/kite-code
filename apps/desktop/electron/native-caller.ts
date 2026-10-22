@@ -74,6 +74,8 @@ export class NativeCaller {
   private refreshing: Promise<unknown> | undefined;
   private refreshRequested = false;
   private refreshTimer: ReturnType<typeof setTimeout> | undefined;
+  private readonly workspaceAccessPreparations = new Set<string>();
+  private workspaceAccessRefreshRequested = false;
   private readonly outputReads: NativeModelOutputReads;
   private readonly inputReads: NativeModelOutputReads<'modelInput'>;
   private readonly attachmentReads: NativeInteractionAttachmentReads;
@@ -871,8 +873,16 @@ export class NativeCaller {
                   this.controller.permissionView,
                   this.client.serverInfo?.storeId,
                 )
-              )
-                this.scheduleSelectionRefresh(signal.signal);
+              ) {
+                // Preparation itself re-reads the applied grant. Its own durable event
+                // must not invalidate that read; foreign changes still refresh immediately.
+                if (
+                  change.type === 'host_control.changed' &&
+                  this.workspaceAccessPreparations.has(change.objectId)
+                )
+                  this.workspaceAccessRefreshRequested = true;
+                else this.scheduleSelectionRefresh(signal.signal);
+              }
               // Creation is conservative: the next exact root directory establishes
               // a new descendant's membership. Known descendants need no foreign View GET.
               if (
@@ -1985,7 +1995,21 @@ export class NativeCaller {
         if (request.intent.expectedStoreId !== snapshot.view.storeId)
           throw new ClientError('store_identity_mismatch');
         if (snapshot.permissions) {
-          await this.controller.prepareWorkspaceAccess(snapshot.permissions.observationId);
+          const before = this.controller.permissionSubmissions.length;
+          const preparation = this.controller.prepareWorkspaceAccess(
+            snapshot.permissions.observationId,
+          );
+          const grant = this.controller.permissionSubmissions[before];
+          if (grant) this.workspaceAccessPreparations.add(grant.intent.commandId);
+          try {
+            await preparation;
+          } finally {
+            if (grant) this.workspaceAccessPreparations.delete(grant.intent.commandId);
+            if (!this.workspaceAccessPreparations.size && this.workspaceAccessRefreshRequested) {
+              this.workspaceAccessRefreshRequested = false;
+              if (this.observer) this.scheduleSelectionRefresh(this.observer.signal);
+            }
+          }
           this.check(generation);
           if (originalSelection !== this.selection || this.selected !== request.sessionId)
             throw new ClientError('native_selection_changed');

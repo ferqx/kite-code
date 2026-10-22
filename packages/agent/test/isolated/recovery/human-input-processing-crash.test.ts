@@ -129,3 +129,95 @@ for (const boundary of ['queued', 'planned'] as const)
       rmSync(root, { recursive: true, force: true });
     }
   }, 10000);
+
+for (const boundary of ['running', 'succeeded', 'prior'] as const)
+  test(`SIGKILL in-band ${boundary} interpretation retires only the current checkpoint`, async () => {
+    const root = temporaryDirectory('kite-retired-inband-crash-');
+    const child = Bun.spawn(
+      [
+        process.execPath,
+        fileURLToPath(new URL('./human-input-inband-crash-fixture.ts', import.meta.url)),
+        root,
+        boundary,
+      ],
+      { stdout: 'pipe', stderr: 'pipe' },
+    );
+    let store: Awaited<ReturnType<typeof openSqliteStore>> | undefined;
+    let runtime: ReturnType<typeof createRuntime> | undefined;
+    try {
+      const facts = await ready(child.stdout);
+      child.kill('SIGKILL');
+      expect(await child.exited).toBe(137);
+      expect(await new Response(child.stderr).text()).toBe('');
+      store = await openSqliteStore({ dataRoot: join(root, 'data'), profile: 'test' });
+      const original = await store.getView('s');
+      const raw = await store.getCommand(facts.rawId);
+      const cursor = (await store.getMetadata()).lastChangeCursor;
+      let calls = 0,
+        recoveries = 0;
+      runtime = createRuntime({
+        store,
+        modelId: 'ordinary',
+        permissions: {
+          async authorize() {
+            return { allowed: true, revision: 'current' };
+          },
+        },
+        model: {
+          async *stream() {
+            calls++;
+            yield { type: 'text_delta', text: 'Ordinary recovery answer' };
+            yield { type: 'finish', reason: 'stop', usage: { inputTokens: 1, outputTokens: 1 } };
+          },
+        },
+        ...(boundary === 'prior'
+          ? {}
+          : {
+              resolveRecoveryRunConfiguration: async () => {
+                recoveries++;
+                throw Error('retired_configuration_must_not_load');
+              },
+            }),
+      });
+      const resume = {
+        expectedStoreId: facts.expectedStoreId,
+        sessionId: 's',
+        subjectId: 'owner',
+        commandId: 'resume',
+        runId: facts.runId!,
+        expectedOwnerGeneration: facts.generation,
+      };
+      if (boundary === 'prior') {
+        expect((await runtime.resumeRun(resume)).receipt).toMatchObject({
+          outcome: 'run_resumed',
+        });
+        await runtime.waitForCommand('work', { timeoutMs: 5000 });
+        expect((await store.getRun(facts.runId!))?.status).toBe('completed');
+        expect(calls).toBe(1);
+      } else {
+        expect(String(await runtime.resumeRun(resume).catch((error) => error))).toContain(
+          'input_processing_removed',
+        );
+        expect(String(await runtime.resumeRun(resume).catch((error) => error))).toContain(
+          'input_processing_removed',
+        );
+        expect(calls).toBe(0);
+        expect(recoveries).toBe(0);
+        expect(await store.getCommand('resume')).toBeNull();
+        expect(await store.getView('s')).toEqual(original);
+        expect((await store.getMetadata()).lastChangeCursor).toBe(cursor);
+      }
+      expect(await store.getCommand(facts.rawId)).toEqual(raw);
+      expect(await store.getExecution('legacy-model')).toEqual(
+        original.executions.find((execution) => execution.id === 'legacy-model')!,
+      );
+    } finally {
+      if (child.exitCode === null) {
+        child.kill('SIGKILL');
+        await child.exited;
+      }
+      await runtime?.close();
+      await store?.close();
+      rmSync(root, { recursive: true, force: true });
+    }
+  }, 10000);

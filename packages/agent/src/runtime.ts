@@ -3055,6 +3055,12 @@ export class AgentRuntime {
       subjectId,
     };
     const source = await this.readResumeModelSource(last, subjectId, signal);
+    // Before removal, an ordinary Run could pause at an in-band input
+    // interpreter without a processing Run configuration. Retire that exact
+    // verified checkpoint before a fresh-model retry discards its source.
+    // Earlier interpretation rows remain audit history, not a recovery barrier.
+    if (source.humanInputInterpretation !== undefined)
+      throw new AgentError('input_processing_removed');
     const freshModel =
       Boolean(source.compressionId) || ['failed', 'dispatching', 'running'].includes(last.status);
     const request = freshModel

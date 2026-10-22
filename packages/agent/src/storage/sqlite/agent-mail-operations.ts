@@ -93,7 +93,7 @@ function adoption(db: SqliteOperations, runId: string, sessionId: string): Row |
     };
   }
   const row = db.row(
-    `SELECT r.origin_store_id,r.root_work_command_id,r.root_work_seq,c.id,c.kind,c.session_id,c.subject_id,c.origin_store_id AS start_store,c.root_work_command_id AS start_work,c.root_work_seq AS start_seq,c.agent_carrier_execution_id,c.input_context_selection_id,c.mail_adoption_upper_seq,c.mail_adoption_cursor,e.child_session_id,e.origin_store_id AS carrier_store,e.root_work_command_id AS carrier_work,e.root_work_seq AS carrier_seq,e.predecessor_execution_id,e.after_turn_json AS carrier_notification FROM run r JOIN command c ON c.id=r.origin_command_id JOIN execution e ON e.id=c.agent_carrier_execution_id WHERE r.id=? AND r.session_id=?`,
+    `SELECT r.origin_store_id,r.root_work_command_id,r.root_work_seq,c.id,c.kind,c.session_id,c.subject_id,c.origin_store_id AS start_store,c.root_work_command_id AS start_work,c.root_work_seq AS start_seq,c.agent_carrier_execution_id,c.input_context_selection_id,c.mail_adoption_upper_seq,c.mail_adoption_cursor,e.child_session_id,e.origin_store_id AS carrier_store,e.root_work_command_id AS carrier_work,e.root_work_seq AS carrier_seq,e.predecessor_execution_id FROM run r JOIN command c ON c.id=r.origin_command_id JOIN execution e ON e.id=c.agent_carrier_execution_id WHERE r.id=? AND r.session_id=?`,
     runId,
     sessionId,
   );
@@ -135,10 +135,7 @@ function eligibleAdoption(mail: Row, binding: Row | null): boolean {
     mail.mail_selection_id !== binding.input_context_selection_id ||
     mail.subject_id !== binding.subject_id ||
     mail.origin_store_id !== binding.origin_store_id ||
-    ((binding.kind === 'child.start' ||
-      binding.parent_mail_run_id ||
-      (binding.carrier_notification &&
-        parse(binding.carrier_notification).kind === 'agent_completion')) &&
+    ((binding.kind === 'child.start' || binding.parent_mail_run_id) &&
       (mail.root_work_command_id !== binding.root_work_command_id ||
         String(mail.root_work_seq) !== String(binding.root_work_seq))) ||
     !mail.mail_confirmed ||
@@ -174,12 +171,10 @@ function carrierPredicate(binding: Row) {
 function runPredicate(db: SqliteOperations, runId: string, sessionId: string) {
   const binding = adoption(db, runId, sessionId);
   const carrier = binding && carrierPredicate(binding);
-  const work =
-    binding &&
-    (binding.kind === 'child.start' ||
-      binding.parent_mail_run_id ||
-      (binding.carrier_notification &&
-        parse(binding.carrier_notification).kind === 'agent_completion'));
+  // An explicit child follow-up adopts its exact predecessor's sealed mailbox,
+  // even when the parent sent that mail in a different ordinary conversation turn.
+  // Parent-report adoption and cancelled-before-first-activation keep their work scope.
+  const work = binding && (binding.kind === 'child.start' || binding.parent_mail_run_id);
   return binding
     ? {
         sql: `(c.mail_target_run_id=? OR (c.mail_target_run_id IS NULL AND c.rowid<=? AND e.completed_cursor IS NOT NULL AND e.completed_cursor<=? AND c.mail_selection_id=? AND c.origin_store_id=? ${work ? 'AND c.root_work_command_id=? AND c.root_work_seq=?' : ''} AND ${carrier!.sql}))`,

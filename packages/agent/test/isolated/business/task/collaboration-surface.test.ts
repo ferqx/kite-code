@@ -336,6 +336,144 @@ test('six public tools reuse one child Session, preserve responsibility and obse
   }
 }, 30000);
 
+test('idle child mail sent in one ordinary parent turn is adopted once by a later explicit follow-up', async () => {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-cross-turn-mail-')));
+  const profile = { dataRoot: join(root, 'data'), profile: 'test' };
+  const store = await openSqliteStore(profile);
+  const storeId = (await store.getMetadata()).storeId;
+  const identity = { expectedStoreId: storeId, subjectId: 'owner', sessionId: 'root' };
+  const mailContent = 'Use the complete instruction stored only in this queued mail';
+  const childRequests: import('@kite-ai/ai').ModelRequest[] = [];
+  const stages = { A: 0, B: 0, C: 0 };
+  let agentId = '';
+  const parent: ModelAdapter = {
+    async *stream(request) {
+      const hasInput = (content: string) =>
+        request.messages.some((message) => message.role === 'user' && message.content === content);
+      const turn = hasInput('C') ? 'C' : hasInput('B') ? 'B' : 'A';
+      const last = request.messages.filter((message) => message.role === 'tool').at(-1);
+      if (last) {
+        const body = JSON.parse(last.content);
+        if (body.agent_id) agentId = body.agent_id;
+      }
+      const events =
+        stages[turn]++ > 0
+          ? [finish]
+          : turn === 'A'
+            ? call('spawn_agent', { prompt: 'Original assignment' })
+            : turn === 'B'
+              ? call('send_agent_message', { agent_id: agentId, content: mailContent })
+              : call('follow_up_agent', {
+                  agent_id: agentId,
+                  content: 'Continue using your queued instruction',
+                });
+      for (const event of events) yield event;
+    },
+  };
+  const child: ModelAdapter = {
+    async *stream(request) {
+      childRequests.push(structuredClone(request));
+      yield { type: 'text_delta', text: 'Child turn completed' };
+      yield finish;
+    },
+  };
+  const runtime = createRuntime({
+    store,
+    artifacts: createArtifactStore({ profile, store }),
+    model: parent,
+    modelId: 'parent',
+    modelConcurrency: 3,
+    extensions: [
+      createTaskExtension({
+        roles: [{ id: 'worker', configurationId: 'worker', description: 'General child' }],
+      }),
+    ],
+    permissions: { authorize: async () => ({ allowed: true, revision: 'cross-turn-mail' }) },
+    childConfigurations: [
+      { id: 'worker', version: '1', model: child, modelId: 'child', toolIds: [], snapshot: {} },
+    ],
+  });
+  try {
+    await runtime.createWorkspace({
+      expectedStoreId: storeId,
+      id: 'w',
+      name: 'private',
+      rootUri: pathToFileURL(root).href,
+    });
+    await runtime.createSession({
+      ...identity,
+      commandId: 'create',
+      workspaceId: 'w',
+      title: 'cross-turn mail',
+    });
+    for (const turn of ['A', 'B', 'C'] as const) {
+      await runtime.submitCommand({
+        ...identity,
+        commandId: turn,
+        request: { kind: 'run.start', content: turn },
+      });
+      const command = await runtime.waitForCommand(turn, { timeoutMs: 10000 });
+      expect((await store.getRun((command.receipt as { runId: string }).runId))?.status).toBe(
+        'completed',
+      );
+      if (turn !== 'B') {
+        const deadline = Date.now() + 10000;
+        for (;;) {
+          const item = (
+            await store.listStableAgents({
+              ...identity,
+              extensionId: 'builtin.task',
+              agentIds: [agentId],
+            })
+          ).items[0];
+          if (item?.state === 'idle') break;
+          if (Date.now() >= deadline) throw Error('cross_turn_child_timeout');
+          await Bun.sleep(5);
+        }
+      } else {
+        const mails = await store.listAgentMessages({ ...identity, sessionId: agentId });
+        expect(mails.items).toHaveLength(1);
+        expect(mails.items[0]).toMatchObject({ state: 'accepted', targetRunId: null });
+        expect(childRequests).toHaveLength(1);
+      }
+    }
+    expect(childRequests).toHaveLength(2);
+    const mail = (await store.listAgentMessages({ ...identity, sessionId: agentId })).items[0]!;
+    const successor = (await store.getView(agentId)).runs[1]!;
+    expect((await store.getCommand(mail.id))?.rootWorkCommandId).toBe('B');
+    expect(successor.rootWorkCommandId).toBe('C');
+    expect(mail).toMatchObject({
+      state: 'received',
+      targetRunId: null,
+      receivedRunId: successor.id,
+      receivedContextSelectionId: successor.contextSelectionId,
+    });
+    const adopted = childRequests[1]!.messages.filter((message) =>
+      message.sourceIds?.includes(mail.id),
+    );
+    expect(adopted).toHaveLength(1);
+    expect(adopted[0]!.content).toContain(mailContent);
+    expect(
+      (await store.listMessages(agentId)).filter((message) => message.sourceIds?.includes(mail.id)),
+    ).toHaveLength(1);
+    const execution = (await store.listExecutions(agentId)).find(
+      (item) => item.kind === 'model' && item.runId === successor.id,
+    )!;
+    const saved = await runtime.readModelInput({
+      ...identity,
+      sessionId: agentId,
+      executionId: execution.id,
+    });
+    expect(
+      saved.request.messages.filter((message) => message.sourceIds?.includes(mail.id)),
+    ).toHaveLength(1);
+  } finally {
+    await runtime.close();
+    await store.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+}, 30000);
+
 test('queued guidance pins the original carrier; interrupt prevents late activation without destroying the stable Agent', async () => {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-collaboration-queued-')));
   const store = await openSqliteStore({ dataRoot: join(root, 'data'), profile: 'test' });
