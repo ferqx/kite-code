@@ -15,6 +15,7 @@ export type NativeAnomalyNetworkFacts = {
   lostReceipts: { commandId: string; responseStatus: number; receivedBytes: number }[];
   requests: NativeAnomalyNetworkEntry[];
 };
+type NativeAnomalyReceiptScope = { sessionId: string; firstLineMarker: string };
 
 /** External driver injection only; no renderer diagnostic surface or application switch. */
 export async function installNativeAnomalyNetwork(app: ElectronApplication) {
@@ -23,6 +24,7 @@ export async function installNativeAnomalyNetwork(app: ElectronApplication) {
       __nativeAnomalyNetwork?: {
         facts: NativeAnomalyNetworkFacts;
         loseMarker?: string;
+        loseScope?: NativeAnomalyReceiptScope;
       };
     };
     if (root.__nativeAnomalyNetwork) throw Error('anomaly_network_already_installed');
@@ -37,6 +39,7 @@ export async function installNativeAnomalyNetwork(app: ElectronApplication) {
         requests: [],
       } as NativeAnomalyNetworkFacts,
       loseMarker: undefined as string | undefined,
+      loseScope: undefined as NativeAnomalyReceiptScope | undefined,
     };
     root.__nativeAnomalyNetwork = state;
     const wrapped = async (
@@ -70,7 +73,13 @@ export async function installNativeAnomalyNetwork(app: ElectronApplication) {
       const lose =
         !state.facts.offline &&
         state.loseMarker !== undefined &&
-        entry.content?.replaceAll('\\_', '_') === state.loseMarker &&
+        (state.loseScope
+          ? entry.path ===
+              `/v1/sessions/${encodeURIComponent(state.loseScope.sessionId)}/commands` &&
+            entry.kind === 'run.start' &&
+            entry.content?.replaceAll('\\_', '_').split(/\r?\n/)[0]?.trim() ===
+              state.loseScope.firstLineMarker
+          : entry.content?.replaceAll('\\_', '_') === state.loseMarker) &&
         entry.method === 'POST' &&
         /^\/v1\/sessions\/[^/]+\/commands$/.test(entry.path);
       if (!state.facts.offline && !lose) return original(input, init);
@@ -78,6 +87,7 @@ export async function installNativeAnomalyNetwork(app: ElectronApplication) {
       if (lose) {
         if (!entry.commandId) throw Error('anomaly_lost_receipt_command_missing');
         state.loseMarker = undefined;
+        state.loseScope = undefined;
       } else state.facts.offlineAttempts++;
       const offline = !lose;
       return new Promise<Response>((resolve, reject) => {
@@ -178,17 +188,33 @@ export async function setNativeAnomalyOffline(app: ElectronApplication, offline:
   }, offline);
 }
 
-export async function loseNativeAnomalyReceipt(app: ElectronApplication, marker: string) {
-  await app.evaluate((_, marker) => {
-    const state = (
-      globalThis as typeof globalThis & {
-        __nativeAnomalyNetwork?: { loseMarker?: string };
-      }
-    ).__nativeAnomalyNetwork;
-    if (!state) throw Error('anomaly_network_not_installed');
-    if (state.loseMarker !== undefined) throw Error('anomaly_receipt_already_armed');
-    state.loseMarker = marker;
-  }, marker);
+export async function loseNativeAnomalyReceipt(
+  app: ElectronApplication,
+  marker: string,
+  scope?: NativeAnomalyReceiptScope,
+) {
+  if (scope) {
+    if (
+      !scope.sessionId ||
+      !/^ANOMALY_[A-Z_]+$/.test(scope.firstLineMarker) ||
+      marker.replaceAll('\\_', '_').split(/\r?\n/)[0]?.trim() !== scope.firstLineMarker
+    )
+      throw Error('anomaly_receipt_scope_invalid');
+  }
+  await app.evaluate(
+    (_, { marker, scope }) => {
+      const state = (
+        globalThis as typeof globalThis & {
+          __nativeAnomalyNetwork?: { loseMarker?: string; loseScope?: NativeAnomalyReceiptScope };
+        }
+      ).__nativeAnomalyNetwork;
+      if (!state) throw Error('anomaly_network_not_installed');
+      if (state.loseMarker !== undefined) throw Error('anomaly_receipt_already_armed');
+      state.loseMarker = marker;
+      state.loseScope = scope;
+    },
+    { marker, scope },
+  );
 }
 
 export async function readNativeAnomalyNetwork(

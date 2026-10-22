@@ -2,6 +2,18 @@
 
 子 Agent 协作 V1.1 按[69 个主用例](collaboration-v1.1-cases.md)区分自然输入、正常产品操作和精确交错。当前已迁移六工具 smoke，并新增独立 Service/Client live 驱动；实际执行结果、失败修复和未覆盖变体以用例文档的执行记录为准，局部通过不代表整张矩阵通过。
 
+## 普通桌面会话异常
+
+[整窗口 runner](session-anomalies-native-window.live.ts)在 macOS 从当前源码构建普通 Native Main／preload／renderer 和配套 Service，固定 `testDiagnostics:false`，读取已配置默认模型、协议与 preset，凭据仅在进程内解析。隔离 HOME／Profile／Workspace 与明确 `files.write@2` 权限不改变用户配置。真实 Provider 请求及响应原样转发，不替换工具调用或回复；每轮最多 20 次实际 HTTP、600 秒，单请求 60 秒，输出最多 4096 token，无外围重试或换模型。
+
+```bash
+bun tests/e2e/live/model/session-anomalies-native-window.live.ts --output=/absolute/owned-directory/report.json --checkpoint=/absolute/owned-directory/checkpoints
+```
+
+故障由外部 driver 注入 Main→Service 的实际 socket：断开并恢复连接；原 POST 收到 202 和正文数据后丢回执；原 Model 已派发且收到真实 200／首块响应、尚未向 Service 转发正文时，对所属 Main／Service 执行 SIGKILL。最后正常退出再冷开三个会话。响应 gate 证明真实响应交付边界，不证明远端仍在计算。逐段核原 Command／Run／Execution、请求 digest、原 ID 查询、五份实际文件、原中断任务零工具、后续输入与冷读零重放，以及每次 Main／Service 的出生身份和实际退出。
+
+`--checkpoint` 为可选的外部人工观察暂停：查看证据目录的 `checkpoint.json`、对应 PNG、DOM 顺序轨迹及阶段事实后，在指定目录创建 `<name>.continue`。01 和 08 阶段持有实际 HTTP 响应，观察须在原 60 秒请求期限内完成，不延长产品超时。driver 同时记录窗口连续帧和 DOM Mutation／动画帧观察，检查消息因果位置及会话外异常文案；最终通过不能覆盖过程中发现的异常。报告或 workspace 已存在会拒绝，失败证据保持；该制品不是普通客户端的调试开关。本机执行结果与此前真实失败归[Desktop owner](../../../../apps/desktop/README.md#普通客户端与测试诊断)，不赋其他模型、平台或安装版资格。
+
 ## 工具与稳定协作者 smoke
 
 [工具模型 runner](model-tools.live.ts)使用当前 Agent Runtime、实际 SQLite、Files 与 SDK，读取现有用户配置的默认模型与协议。凭据沿 Service 相同规则在内存解析，不修改用户配置。

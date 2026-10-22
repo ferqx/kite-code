@@ -8,6 +8,8 @@
 
 ## 当前 V1.3 owner 与资格边界
 
+当前 Store 内具备原输入证明的同会话历史，在新任务的模型上下文中须包含其他已中断、取消或失败轮次的准确生命周期事实，不能仅将旧用户输入原样排列后让新模型把它当作未完成授权。投影、显式接续及 Fork 封存边界归[Agent owner](../../packages/agent/README.md#人类输入工作选择与可靠结果)，原 Command／Execution 幂等与新模型重新提出旧任务分别核验。真实模型桌面断线、回执丢失及 SIGKILL 重开的过程证据归[Desktop owner](../../apps/desktop/README.md#普通客户端与测试诊断)；本机有界实测不授其他模型、平台或完整发布资格。
+
 用户最新确认按业务与清理正常、重复运行的内存趋势和没有已确认持续保留问题结束当前开发实施；原32MiB正式门禁保留为尚未取得的发布资格，不作为当前开发完成的唯一标准。按[当前Goal范围](../plans/unified-agent-refactor-v1-progress.md#当前-goal-收尾范围2026-10-13)停止root校准、性能负载与完整来源扩展。原断言、阈值、unknown和缺项拒绝保持，开发交付完成不授完整观测或正式阶段资格；Win/Linux发布前实测仍后置。
 
 用户要求避免过度验证和性能采集，正式功能证据按未变范围复用。已授权观测扩展的[耐久原生源码](../../native/runtime-observer/README.md)目前只接所有 Job／POSIX FilePoll、EventLoopTimer 实际准入与真实 partial 快照，未替换正式 Bun／安装资产；原 SDK27 编译失败保留，现已修复原生 SDK 选择并用本机 SDK26.5 取得完整构建和真实 Job／FilePoll 释放证据。其他资源类别与完整出生来源尚未接齐，独立 coalition task 前缀不代全 Runtime 出生证明。RSS 原红、全资源／身份与阶段门禁仍未闭合，源码审查不能证明“无内存泄漏”；准确已有失败归[原生观测记录](../plans/unified-agent-refactor-v1-progress.md#2026-10-13原生观测源码与性能诊断收束)。

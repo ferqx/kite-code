@@ -11,9 +11,30 @@ import {
   setNativeAnomalyOffline,
 } from './native-session-anomaly-network.fixture';
 
-const [outdir, home, executablePath, control, evidence, , bunExecutable, packagePath] =
+const [outdir, home, executablePath, control, evidence, , bunExecutable, packagePath, mode] =
   process.argv.slice(2) as string[];
 const { _electron } = createRequire(packagePath!)('playwright') as typeof import('playwright');
+const live = mode === 'live';
+const scenario = live
+  ? ((await (await fetch(`${control}/scenario`)).json()) as {
+      kind: 'live';
+      prompts: Record<string, string>;
+      responseTimeoutMs: number;
+    })
+  : undefined;
+if (live) {
+  assert.equal(scenario?.kind, 'live');
+  assert.ok(Number.isSafeInteger(scenario.responseTimeoutMs) && scenario.responseTimeoutMs > 0);
+  for (const marker of [
+    'ANOMALY_DISCONNECT',
+    'ANOMALY_DISCONNECT_CONTINUE',
+    'ANOMALY_RECEIPT',
+    'ANOMALY_RECEIPT_CONTINUE',
+    'ANOMALY_CRASH',
+    'ANOMALY_CRASH_CONTINUE',
+  ])
+    assert.equal(scenario.prompts[marker]?.split(/\r?\n/)[0], marker);
+}
 type CommandRow = {
   id: string;
   session_id: string;
@@ -35,6 +56,7 @@ type ExecutionRow = {
   kind: string;
   state: string;
   adapter_id: string;
+  dispatched?: number;
 };
 type MessageRow = { id: string; run_id: string; role: string; source_json: string };
 type Facts = {
@@ -43,7 +65,18 @@ type Facts = {
   executions: ExecutionRow[];
   messages: MessageRow[];
   provider: {
-    calls: { marker: string; phase: string; ordinal: number }[];
+    calls: {
+      marker: string;
+      phase: string;
+      ordinal: number;
+      runId?: string;
+      executionId?: string;
+      upstreamStatus?: number;
+      receivedBytes?: number;
+      forwardedBytes?: number;
+      cancelled?: boolean;
+      cancelRequested?: boolean;
+    }[];
     counts: Record<string, number>;
   };
   journal: { caller: { command_id: string; state: string }[] };
@@ -69,7 +102,62 @@ let screenFrames = 0;
 const screenTimeline: { boot: number; index: number; at: number; timestamp?: number }[] = [];
 const rendererErrors: string[] = [];
 const snapshots: unknown[] = [];
-const ownedServices = new Map<number, { pid: number; birth: string }>();
+type OwnedProcessIdentity = {
+  kind: 'main' | 'service';
+  boot: number;
+  pid: number;
+  birth: string;
+  executable: string;
+  events: { event: string; at: number }[];
+};
+const processEvidence: OwnedProcessIdentity[] = [];
+const mainIdentities = new Map<number, OwnedProcessIdentity>();
+const completedBaselines = new Map<
+  string,
+  {
+    command: CommandRow;
+    runId: string;
+    executionIds: string[];
+    providerCalls: Facts['provider']['calls'];
+  }
+>();
+const ownedServices = new Map<
+  number,
+  { pid: number; birth: string; identity: OwnedProcessIdentity }
+>();
+function writeProcessEvidence() {
+  writeFileSync(
+    join(evidence!, 'owned-processes.json'),
+    JSON.stringify({ processes: processEvidence }, null, 2),
+    { mode: 0o600 },
+  );
+}
+function observeOwnedProcess(kind: 'main' | 'service', pid: number, event: string) {
+  const birth = String(execFileSync('/bin/ps', ['-p', String(pid), '-o', 'lstart='])).trim();
+  const executable = String(execFileSync('/bin/ps', ['-p', String(pid), '-o', 'comm='])).trim();
+  const after = String(execFileSync('/bin/ps', ['-p', String(pid), '-o', 'lstart='])).trim();
+  assert.ok(birth && executable && birth === after, 'owned process identity remains exact');
+  let identity = processEvidence.find(
+    (entry) =>
+      entry.kind === kind &&
+      entry.boot === boot &&
+      entry.pid === pid &&
+      entry.birth === birth &&
+      entry.executable === executable,
+  );
+  if (!identity) {
+    identity = { kind, boot, pid, birth, executable, events: [] };
+    processEvidence.push(identity);
+  }
+  identity.events.push({ event, at: Date.now() });
+  writeProcessEvidence();
+  return identity;
+}
+function noteOwnedProcess(identity: OwnedProcessIdentity | undefined, event: string) {
+  if (!identity) return;
+  identity.events.push({ event, at: Date.now() });
+  writeProcessEvidence();
+}
 const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 let factReadRetries = 0;
 const readFacts = async (): Promise<Facts> => {
@@ -86,7 +174,20 @@ const readFacts = async (): Promise<Facts> => {
   throw Error('cold facts remained locked after bounded read-only retries');
 };
 const markerText = (text: string) => text.replaceAll('\\_', '_');
-async function until(check: () => Promise<boolean>, label: string, timeout = 30000) {
+const promptFor = (marker: string) => (live ? scenario!.prompts[marker]! : marker);
+const contentMarker = (text: string) =>
+  live ? markerText(text).split(/\r?\n/)[0]!.trim() : markerText(text);
+const visibleInputMarker = (text: string) => {
+  const marker = markerText(text)
+    .trim()
+    .match(/^ANOMALY_[A-Z_]+(?=\s|$)/)?.[0];
+  return marker && Object.hasOwn(scenario?.prompts ?? {}, marker) ? marker : undefined;
+};
+async function until(
+  check: () => Promise<boolean>,
+  label: string,
+  timeout = scenario?.responseTimeoutMs ?? 30000,
+) {
   const end = Date.now() + timeout;
   while (!(await check())) {
     assert.ok(Date.now() < end, `session_anomaly_deadline:${stage}:${label}`);
@@ -102,8 +203,10 @@ async function launch() {
     timeout: 20000,
   });
   boot++;
+  const mainIdentity = observeOwnedProcess('main', application.process().pid!, 'launch_observed');
+  mainIdentities.set(mainIdentity.pid, mainIdentity);
   const page = await application.firstWindow();
-  page.setDefaultTimeout(20000);
+  page.setDefaultTimeout(scenario?.responseTimeoutMs ?? 20000);
   page.on('pageerror', (error) => {
     rendererErrors.push(error.message);
     console.error('renderer error', error.message);
@@ -115,7 +218,7 @@ async function launch() {
   let frameIndex = 0;
   cdp.on('Page.screencastFrame', (frame) => {
     void cdp.send('Page.screencastFrameAck', { sessionId: frame.sessionId }).catch(() => {});
-    if (Date.now() - lastFrame < 100 || frameIndex >= 1000) return;
+    if (Date.now() - lastFrame < 100 || frameIndex >= (live ? 6000 : 1000)) return;
     lastFrame = Date.now();
     frameIndex++;
     screenFrames++;
@@ -139,96 +242,162 @@ async function launch() {
     everyNthFrame: 1,
   });
   await installNativeAnomalyNetwork(application);
-  await page.evaluate(() => {
-    const probe: Probe = { active: false, scans: 0, hits: [], frames: [], scan: () => {} };
-    let previousSequence = '';
-    const allowed = '.message.user,.message.assistant';
-    const forbidden =
-      /执行状态待核实|上次确认状态|状态待核对|历史尚未完整校准|历史已完整读取至固定高水位|历史暂不可用|操作未完成|操作提交结果未知|提交结果未知|权限事实暂不可核实|队列操作结果尚未确认|上次状态.*待核实|等待重连刷新|原执行者已释放|无法核实原执行者|重新加载会话|重新读取队列|核对并取回原文|核对原队列操作|查询原首次提交|查询原输入|查询原权限申请|会话工具/;
-    const inspect = (node: Node, context?: Node) => {
-      if (!probe.active || probe.hits.length >= 100) return;
-      const element = node instanceof Element ? node : node.parentElement;
-      if (element?.closest(allowed)) return;
-      if (context instanceof Element && context.closest(allowed)) return;
-      const text = node.textContent?.trim() ?? '';
-      if (text && forbidden.test(text))
-        probe.hits.push({ time: performance.now(), text: text.slice(0, 500) });
-    };
-    probe.scan = () => {
-      if (!probe.active) return;
-      probe.scans++;
-      const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
-      while (walker.nextNode()) inspect(walker.currentNode);
-      for (const dialog of document.querySelectorAll('[role="alertdialog"]'))
-        probe.hits.push({ time: performance.now(), unexpectedDialog: dialog.textContent });
-      for (const notice of document.querySelectorAll('[role="alert"],[role="status"]'))
-        if (
-          !notice.closest(
-            `${allowed},.tool-activity,[data-tool-call-id],.response-status,.agent-turn-summary,.agent-turn-status-label`,
-          ) &&
-          notice.textContent?.trim() &&
-          notice.getBoundingClientRect().height > 0
-        )
-          probe.hits.push({ time: performance.now(), unexpectedNotice: notice.textContent });
-      const sequence = [
-        ...document.querySelectorAll('.message.user,.agent-turn,.message.assistant'),
-      ]
-        .filter(
-          (element) =>
-            !(element.matches('.message.assistant') && element.closest('.agent-turn')) &&
-            element.getBoundingClientRect().height > 0,
-        )
-        .map((element) => ({
-          role: element.matches('.message.user') ? 'user' : 'agent',
-          text: (element.textContent ?? '').trim().slice(0, 250),
-          top: element.getBoundingClientRect().top,
-        }));
-      const signature = JSON.stringify(sequence.map(({ role, text }) => ({ role, text })));
-      if (signature !== previousSequence) {
-        previousSequence = signature;
-        const frame = { time: performance.now(), at: Date.now(), sequence };
-        if (probe.frames.length < 2000) probe.frames.push(frame);
-        else if (probe.hits.length < 100) probe.hits.push({ sequenceRecordingOverflow: true });
-        let inputs = 0;
-        let responses = 0;
-        for (const entry of sequence) {
-          if (entry.role === 'user') inputs++;
-          else responses++;
-          if (responses > inputs) {
-            probe.hits.push({ ...frame, responseBeforeOriginalInput: true });
-            break;
-          }
-        }
-        const inputsByMarker = new Set<string>();
-        for (let index = 0; index < sequence.length; index++) {
-          const entry = sequence[index]!;
-          if (entry.role === 'user') {
-            if (inputsByMarker.has(entry.text))
-              probe.hits.push({ ...frame, duplicateInput: entry.text });
-            inputsByMarker.add(entry.text);
+  await page.evaluate(
+    ({ live, markers }) => {
+      const probe: Probe = { active: false, scans: 0, hits: [], frames: [], scan: () => {} };
+      const hit = (entry: unknown) => {
+        if (probe.hits.length < 100) probe.hits.push(entry);
+      };
+      let previousSequence = '';
+      let lastSample = 0;
+      const allowed = '.message.user,.message.assistant';
+      const forbidden =
+        /执行状态待核实|上次确认状态|状态待核对|历史尚未完整校准|历史已完整读取至固定高水位|历史暂不可用|操作未完成|操作提交结果未知|提交结果未知|权限事实暂不可核实|队列操作结果尚未确认|上次状态.*待核实|等待重连刷新|原执行者已释放|无法核实原执行者|重新加载会话|重新读取队列|核对并取回原文|核对原队列操作|查询原首次提交|查询原输入|查询原权限申请|会话工具/;
+      const inspect = (node: Node, context?: Node) => {
+        if (!probe.active || probe.hits.length >= 100) return;
+        const element = node instanceof Element ? node : node.parentElement;
+        if (element?.closest(allowed)) return;
+        if (context instanceof Element && context.closest(allowed)) return;
+        const text = node.textContent?.trim() ?? '';
+        if (text && forbidden.test(text))
+          hit({ time: performance.now(), text: text.slice(0, 500) });
+      };
+      probe.scan = () => {
+        if (!probe.active) return;
+        probe.scans++;
+        const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+        while (walker.nextNode()) inspect(walker.currentNode);
+        for (const dialog of document.querySelectorAll('[role="alertdialog"]'))
+          hit({ time: performance.now(), unexpectedDialog: dialog.textContent });
+        for (const notice of document.querySelectorAll('[role="alert"],[role="status"]'))
+          if (
+            !notice.closest(
+              `${allowed},.tool-activity,[data-tool-call-id],.response-status,.agent-turn-summary,.agent-turn-status-label`,
+            ) &&
+            notice.textContent?.trim() &&
+            notice.getBoundingClientRect().height > 0
+          )
+            hit({ time: performance.now(), unexpectedNotice: notice.textContent });
+        const sequence = [
+          ...document.querySelectorAll('.message.user,.agent-turn,.message.assistant'),
+        ]
+          .filter(
+            (element) =>
+              !(element.matches('.message.assistant') && element.closest('.agent-turn')) &&
+              element.getBoundingClientRect().height > 0,
+          )
+          .map((element) => {
+            const text = (
+              live && element instanceof HTMLElement
+                ? element.innerText
+                : (element.textContent ?? '')
+            ).trim();
+            const user = element.matches('.message.user');
+            return {
+              role: user ? 'user' : 'agent',
+              kind: user ? 'user' : element.matches('.agent-turn') ? 'turn' : 'assistant',
+              marker: user
+                ? markers.find(
+                    (marker) =>
+                      text
+                        .replaceAll('\\_', '_')
+                        .trim()
+                        .match(/^ANOMALY_[A-Z_]+(?=\s|$)/)?.[0] === marker,
+                  )
+                : undefined,
+              text: text.slice(0, 250),
+              textLength: text.length,
+              top: element.getBoundingClientRect().top,
+            };
+          });
+        const signature = JSON.stringify(
+          sequence.map(({ role, kind, marker, text }) =>
+            live ? { role, kind, marker } : { role, text },
+          ),
+        );
+        // Geometry is checked on every scan, including painted streaming/reflow frames.
+        if (live)
+          for (let index = 1; index < sequence.length; index++)
+            if (sequence[index]!.top < sequence[index - 1]!.top - 1)
+              hit({ time: performance.now(), sequence, visualOrderDiffersFromDOM: true });
+        if (signature !== previousSequence || (live && performance.now() - lastSample >= 1000)) {
+          previousSequence = signature;
+          lastSample = performance.now();
+          const frame = { time: performance.now(), at: Date.now(), sequence };
+          if (probe.frames.length < 2000) probe.frames.push(frame);
+          else if (probe.hits.length < 100) hit({ sequenceRecordingOverflow: true });
+          if (live) {
+            // This driver issues one explicit new root Round at a time, with no steer.
+            // Count the owning Turn, not each streamed assistant segment inside it.
+            const inputSlots = sequence.flatMap((entry, index) =>
+              entry.kind === 'user' ? [{ marker: entry.marker, index }] : [],
+            );
+            let turn = 0;
+            for (let index = 0; index < sequence.length; index++) {
+              const entry = sequence[index]!;
+              if (entry.kind === 'turn') {
+                const owner = inputSlots[turn++];
+                if (!owner?.marker || owner.index >= index)
+                  hit({ ...frame, responseBeforeOriginalInput: true });
+              } else if (
+                entry.kind === 'assistant' &&
+                !inputSlots.some((slot) => slot.marker && slot.index < index)
+              )
+                hit({ ...frame, responseBeforeOriginalInput: true });
+            }
           } else {
-            for (const match of entry.text.matchAll(/DONE (ANOMALY_[A-Z_]+)/g))
-              if (!inputsByMarker.has(match[1]!))
-                probe.hits.push({ ...frame, replyBeforeMatchingInput: match[1] });
+            let inputs = 0;
+            let responses = 0;
+            for (const entry of sequence) {
+              if (entry.role === 'user') inputs++;
+              else responses++;
+              if (responses > inputs) {
+                hit({ ...frame, responseBeforeOriginalInput: true });
+                break;
+              }
+            }
           }
-          if (index && entry.top < sequence[index - 1]!.top - 1)
-            probe.hits.push({ ...frame, visualOrderDiffersFromDOM: true });
+          const inputsByMarker = new Set<string>();
+          for (let index = 0; index < sequence.length; index++) {
+            const entry = sequence[index]!;
+            if (entry.role === 'user') {
+              const identity = live ? entry.marker : entry.text;
+              if (live && !identity) hit({ ...frame, originalInputSlotUnidentified: entry.text });
+              if (identity && inputsByMarker.has(identity))
+                hit({ ...frame, duplicateInput: entry.text });
+              if (identity) inputsByMarker.add(identity);
+            } else if (!live) {
+              for (const match of entry.text.matchAll(/DONE (ANOMALY_[A-Z_]+)/g))
+                if (!inputsByMarker.has(match[1]!))
+                  hit({ ...frame, replyBeforeMatchingInput: match[1] });
+            }
+            if (index && entry.top < sequence[index - 1]!.top - 1)
+              hit({ ...frame, visualOrderDiffersFromDOM: true });
+          }
         }
+      };
+      new MutationObserver((records) => {
+        probe.scan();
+        for (const record of records)
+          for (const node of record.addedNodes) {
+            if (node.nodeType === Node.TEXT_NODE) inspect(node, record.target);
+            else if (node instanceof Element) {
+              const walker = document.createTreeWalker(node, NodeFilter.SHOW_TEXT);
+              while (walker.nextNode()) inspect(walker.currentNode, record.target);
+            }
+          }
+      }).observe(document.body, { childList: true, subtree: true, characterData: true });
+      if (live) {
+        const paint = () => {
+          probe.scan();
+          requestAnimationFrame(paint);
+        };
+        requestAnimationFrame(paint);
       }
-    };
-    new MutationObserver((records) => {
-      probe.scan();
-      for (const record of records)
-        for (const node of record.addedNodes) {
-          if (node.nodeType === Node.TEXT_NODE) inspect(node, record.target);
-          else if (node instanceof Element) {
-            const walker = document.createTreeWalker(node, NodeFilter.SHOW_TEXT);
-            while (walker.nextNode()) inspect(walker.currentNode, record.target);
-          }
-        }
-    }).observe(document.body, { childList: true, subtree: true, characterData: true });
-    window.__sessionAnomalyProbe = probe;
-  });
+      window.__sessionAnomalyProbe = probe;
+    },
+    { live, markers: Object.keys(scenario?.prompts ?? {}).sort((a, b) => b.length - a.length) },
+  );
   return page;
 }
 async function probe(page: Page) {
@@ -256,18 +425,44 @@ async function select(page: Page, title: string) {
   await probe(page);
 }
 async function send(page: Page, marker: string) {
-  await page.getByRole('textbox', { name: '当前会话私有草稿', exact: true }).fill(marker);
+  await page
+    .getByRole('textbox', { name: '当前会话私有草稿', exact: true })
+    .fill(promptFor(marker));
   await page.getByRole('button', { name: '发送明确的新轮次', exact: true }).click();
 }
 function original(facts: Facts, marker: string) {
   const commands = facts.commands.filter(
-    (row) => markerText(JSON.parse(row.request_json).content ?? '') === marker,
+    (row) => contentMarker(JSON.parse(row.request_json).content ?? '') === marker,
   );
   assert.equal(commands.length, 1, `${marker} has one original Command`);
   const command = commands[0]!;
   const runs = facts.runs.filter((row) => row.origin_command_id === command.id);
   assert.equal(runs.length, 1, `${marker} has one original Run`);
   return { command, run: runs[0]! };
+}
+function realHeld(facts: Facts, marker: string) {
+  const calls = facts.provider.calls.filter((call) => call.marker === marker);
+  const held = calls.find(
+    (call) =>
+      call.phase === 'held' &&
+      call.upstreamStatus === 200 &&
+      (call.receivedBytes ?? 0) > 0 &&
+      call.forwardedBytes === 0,
+  );
+  if (!held) return false;
+  const { run } = original(facts, marker);
+  return (
+    run.is_active === 1 &&
+    held.runId === run.id &&
+    facts.executions.some(
+      (execution) =>
+        execution.id === held.executionId &&
+        execution.run_id === run.id &&
+        execution.kind === 'model' &&
+        execution.dispatched === 1 &&
+        ['dispatching', 'running'].includes(execution.state),
+    )
+  );
 }
 function assertCompleted(facts: Facts, marker: string) {
   assert.deepEqual(facts.failures, []);
@@ -276,20 +471,66 @@ function assertCompleted(facts: Facts, marker: string) {
   assert.equal(run.status, 'completed');
   assert.equal(run.is_active, 0);
   const executions = facts.executions.filter((row) => row.run_id === run.id);
-  assert.equal(executions.filter((row) => row.kind === 'model').length, 2);
+  if (live) assert.ok(executions.some((row) => row.kind === 'model'));
+  else assert.equal(executions.filter((row) => row.kind === 'model').length, 2);
   const tools = executions.filter((row) => row.kind === 'tool');
   assert.equal(tools.length, 1, `${marker} tool execution is not duplicated`);
   assert.equal(tools[0]!.adapter_id, 'files.write');
   assert.equal(tools[0]!.state, 'succeeded');
-  assert.equal(facts.provider.counts[marker], 2, `${marker} Provider has two expected steps only`);
+  if (live) {
+    const physical = facts.provider.calls.filter((call) => call.marker === marker);
+    assert.ok(physical.length > 0, `${marker} made real upstream requests`);
+    assert.equal(facts.provider.counts[marker], physical.length);
+    for (const call of physical) {
+      assert.equal(call.runId, run.id, 'physical request retains its exact original Run');
+      assert.ok(
+        executions.some(
+          (execution) =>
+            execution.id === call.executionId &&
+            execution.kind === 'model' &&
+            execution.dispatched === 1,
+        ),
+        'physical request belongs to a dispatched Model Execution',
+      );
+    }
+    assert.equal(
+      new Set(physical.map((call) => call.executionId)).size,
+      physical.length,
+      'each dispatched Model Execution creates one physical upstream request',
+    );
+    const baseline = {
+      command,
+      runId: run.id,
+      executionIds: executions.map((execution) => execution.id).sort(),
+      providerCalls: physical,
+    };
+    const previous = completedBaselines.get(marker);
+    if (previous)
+      assert.deepEqual(
+        baseline,
+        previous,
+        'continuation and cold reading never replay completed work',
+      );
+    else completedBaselines.set(marker, baseline);
+  } else
+    assert.equal(
+      facts.provider.counts[marker],
+      2,
+      `${marker} Provider has two expected steps only`,
+    );
   assert.equal(facts.effects[`${marker}.txt`], marker);
   const user = facts.messages.filter(
     (row) =>
       row.run_id === run.id &&
       row.role === 'user' &&
-      markerText(JSON.parse(row.source_json).content ?? '') === marker,
+      contentMarker(JSON.parse(row.source_json).content ?? '') === marker,
   );
   assert.equal(user.length, 1, `${marker} has one persisted user message`);
+  if (live)
+    assert.ok(
+      JSON.parse(user[0]!.source_json).sourceIds?.includes(command.id),
+      'persisted original input retains the original Command source identity',
+    );
   return {
     commandId: command.id,
     runId: run.id,
@@ -302,7 +543,27 @@ function assertCrashUnreplayed(facts: Facts, before: Facts, crash: ReturnType<ty
   assert.equal(current.run.id, crash.run.id);
   assert.equal(current.run.status, 'interrupted');
   assert.equal(current.run.is_active, 0);
-  assert.equal(facts.provider.counts.ANOMALY_CRASH, 1, 'old Model never replayed');
+  assert.equal(
+    facts.provider.counts.ANOMALY_CRASH,
+    live ? before.provider.counts.ANOMALY_CRASH : 1,
+    'old Model never replayed',
+  );
+  if (live) {
+    const beforeCalls = before.provider.calls.filter((call) => call.marker === 'ANOMALY_CRASH');
+    const afterCalls = facts.provider.calls.filter((call) => call.marker === 'ANOMALY_CRASH');
+    assert.deepEqual(
+      afterCalls.map(({ runId, executionId, ordinal }) => ({ runId, executionId, ordinal })),
+      beforeCalls.map(({ runId, executionId, ordinal }) => ({ runId, executionId, ordinal })),
+      'old upstream request identities never change or grow',
+    );
+    assert.ok(
+      afterCalls.every(
+        (call) =>
+          (call.cancelled === true || call.cancelRequested === true) && call.forwardedBytes === 0,
+      ),
+      'the killed held response remains cancelled and never forwarded',
+    );
+  }
   assert.equal(facts.effects['ANOMALY_CRASH.txt'], undefined, 'old tool never started');
   assert.deepEqual(
     facts.executions
@@ -316,18 +577,56 @@ function assertCrashUnreplayed(facts: Facts, before: Facts, crash: ReturnType<ty
     'no new Execution added to the old Run',
   );
 }
-async function completed(page: Page, marker: string) {
+async function completed(page: Page, marker: string, expectedPosts = 1) {
   await until(async () => {
     const facts = await readFacts();
     const command = facts.commands.find(
-      (row) => markerText(JSON.parse(row.request_json).content ?? '') === marker,
+      (row) => contentMarker(JSON.parse(row.request_json).content ?? '') === marker,
     );
     return (
       !!command &&
       facts.runs.some((run) => run.origin_command_id === command.id && run.status === 'completed')
     );
   }, `${marker} durable completion`);
-  await page.getByText(`DONE ${marker}`, { exact: true }).waitFor();
+  if (live)
+    await until(async () => {
+      const facts = await readFacts();
+      const { run } = original(facts, marker);
+      const replies = facts.messages.filter((message) => {
+        if (message.run_id !== run.id || message.role !== 'assistant') return false;
+        return !!String(JSON.parse(message.source_json).content ?? '').trim();
+      });
+      return (
+        replies.length > 0 &&
+        (await page.evaluate((marker) => {
+          const sequence = [...document.querySelectorAll('.message.user,.agent-turn')];
+          const slots = sequence.filter(
+            (element) =>
+              element.matches('.message.user') &&
+              (element as HTMLElement).innerText
+                .replaceAll('\\_', '_')
+                .trim()
+                .match(/^ANOMALY_[A-Z_]+(?=\s|$)/)?.[0] === marker,
+          );
+          if (slots.length !== 1 || !slots[0]!.querySelector('.typeset')) return false;
+          // .typeset is the real persisted Message reader; the original local
+          // input slot uses plain text until verified history owns it.
+          const index = sequence.indexOf(slots[0]!);
+          for (const element of sequence.slice(index + 1)) {
+            if (element.matches('.message.user')) return false;
+            if (
+              element.matches('.agent-turn') &&
+              [...element.querySelectorAll<HTMLElement>('.message.assistant')].some((reply) =>
+                reply.innerText.trim(),
+              )
+            )
+              return true;
+          }
+          return false;
+        }, marker))
+      );
+    }, `${marker} real assistant body and original input slot visible`);
+  else await page.getByText(`DONE ${marker}`, { exact: true }).waitFor();
   await until(async () => (await page.locator('.response-status').count()) === 0, 'no active turn');
   const facts = await readFacts();
   const identity = assertCompleted(facts, marker);
@@ -335,18 +634,21 @@ async function completed(page: Page, marker: string) {
   assert.equal(
     network.requests.filter((row) => row.method === 'POST' && row.commandId === identity.commandId)
       .length,
-    1,
+    expectedPosts,
   );
   await probe(page);
   const users = await page.locator('.message.user').allInnerTexts();
   assert.equal(
-    users.filter((text) => markerText(text.trim()) === marker).length,
+    users.filter(
+      (text) => (live ? visibleInputMarker(text) : contentMarker(text.trim())) === marker,
+    ).length,
     1,
     `${marker} has one visible user bubble after durable history takes over`,
   );
   return { facts, identity, network };
 }
 async function capture(page: Page, name: string) {
+  if (live) console.log('native-session-anomaly-checkpoint', stage, name);
   const value = {
     stage,
     boot,
@@ -357,6 +659,10 @@ async function capture(page: Page, name: string) {
   snapshots.push(value);
   await page.screenshot({ path: join(evidence!, `${name}.png`) });
   writeFileSync(join(evidence!, 'snapshots.json'), JSON.stringify(snapshots, null, 2));
+  if (live) {
+    const response = await fetch(`${control}/checkpoint?name=${encodeURIComponent(name)}`);
+    assert.ok(response.ok, `live checkpoint ${name} acknowledged`);
+  }
 }
 function ownedService(app: ElectronApplication) {
   const rows = String(execFileSync('/bin/ps', ['-axo', 'pid=,ppid=,comm=']))
@@ -367,9 +673,11 @@ function ownedService(app: ElectronApplication) {
     );
   assert.equal(rows.length, 1, 'one exact owned paired Service executable');
   const pid = Number(rows[0]![0]);
+  const identity = observeOwnedProcess('service', pid, 'owned_service_observed');
   ownedServices.set(app.process().pid!, {
     pid,
-    birth: String(execFileSync('/bin/ps', ['-p', String(pid), '-o', 'lstart='])).trim(),
+    birth: identity.birth,
+    identity,
   });
   return pid;
 }
@@ -392,14 +700,19 @@ async function forceOwnedCleanup() {
       const executable = String(
         execFileSync('/bin/ps', ['-p', String(service.pid), '-o', 'comm=']),
       ).trim();
-      if (birth === service.birth && executable === bunExecutable)
+      if (birth === service.birth && executable === bunExecutable) {
         process.kill(service.pid, 'SIGKILL');
+        noteOwnedProcess(service.identity, 'sigkill_sent');
+      }
     } catch {}
   }
   if (main.exitCode === null && main.signalCode === null) {
     const exited = new Promise<void>((resolve) => main.once('exit', () => resolve()));
     main.kill('SIGKILL');
+    noteOwnedProcess(mainIdentities.get(main.pid!), 'sigkill_sent');
     await Promise.race([exited, wait(5000)]);
+    if (main.exitCode !== null || main.signalCode !== null)
+      noteOwnedProcess(mainIdentities.get(main.pid!), 'exit_observed');
   }
   application = undefined;
 }
@@ -425,20 +738,32 @@ async function close() {
     clearTimeout(timer);
   }
   assert.equal(child.exitCode, 0);
+  noteOwnedProcess(mainIdentities.get(child.pid!), 'normal_exit_observed');
   application = undefined;
   assert.throws(() => process.kill(service, 0), 'owned Service really exited');
+  noteOwnedProcess(ownedServices.get(child.pid!)?.identity, 'normal_exit_observed');
 }
 function businessIdentity(facts: Facts) {
   return {
     commands: facts.commands.filter(
       (row) =>
         typeof JSON.parse(row.request_json).content === 'string' &&
-        markerText(JSON.parse(row.request_json).content).startsWith('ANOMALY_'),
+        contentMarker(JSON.parse(row.request_json).content).startsWith('ANOMALY_'),
     ),
     runs: facts.runs,
     executions: facts.executions,
     messages: facts.messages,
-    provider: facts.provider,
+    provider: live
+      ? {
+          counts: facts.provider.counts,
+          calls: facts.provider.calls.map(({ marker, ordinal, runId, executionId }) => ({
+            marker,
+            ordinal,
+            runId,
+            executionId,
+          })),
+        }
+      : facts.provider,
     effects: facts.effects,
   };
 }
@@ -448,10 +773,12 @@ try {
   stage = 'disconnect';
   await select(page, '断线验证');
   await send(page, 'ANOMALY_DISCONNECT');
-  await until(
-    async () => (await readFacts()).provider.counts.ANOMALY_DISCONNECT === 1,
-    'original Model held',
-  );
+  await until(async () => {
+    const facts = await readFacts();
+    return live
+      ? realHeld(facts, 'ANOMALY_DISCONNECT')
+      : facts.provider.counts.ANOMALY_DISCONNECT === 1;
+  }, 'original Model held');
   const liveService = ownedService(application!);
   assert.ok(
     (await setNativeAnomalyOffline(application!, true)) > 0,
@@ -479,7 +806,11 @@ try {
 
   stage = 'receipt_loss';
   await select(page, '回执验证');
-  await loseNativeAnomalyReceipt(application!, 'ANOMALY_RECEIPT');
+  await loseNativeAnomalyReceipt(
+    application!,
+    promptFor('ANOMALY_RECEIPT'),
+    live ? { sessionId: 'receipt', firstLineMarker: 'ANOMALY_RECEIPT' } : undefined,
+  );
   await send(page, 'ANOMALY_RECEIPT');
   await until(
     async () => (await readNativeAnomalyNetwork(application!)).lostReceipts.length === 1,
@@ -519,10 +850,10 @@ try {
   stage = 'paired_SIGKILL';
   await select(page, '强杀验证');
   await send(page, 'ANOMALY_CRASH');
-  await until(
-    async () => (await readFacts()).provider.counts.ANOMALY_CRASH === 1,
-    'crash Model held',
-  );
+  await until(async () => {
+    const facts = await readFacts();
+    return live ? realHeld(facts, 'ANOMALY_CRASH') : facts.provider.counts.ANOMALY_CRASH === 1;
+  }, 'crash Model held');
   await capture(page, '08-before-SIGKILL');
   const before = await readFacts();
   const originalCrash = original(before, 'ANOMALY_CRASH');
@@ -534,8 +865,11 @@ try {
   const main = app.process();
   const exited = new Promise<void>((resolve) => main.once('exit', () => resolve()));
   process.kill(service, 'SIGKILL');
+  noteOwnedProcess(ownedServices.get(main.pid!)?.identity, 'sigkill_sent');
   main.kill('SIGKILL');
+  noteOwnedProcess(mainIdentities.get(main.pid!), 'sigkill_sent');
   await exited;
+  noteOwnedProcess(mainIdentities.get(main.pid!), 'exit_observed');
   application = undefined;
   await until(async () => {
     try {
@@ -545,8 +879,26 @@ try {
       return true;
     }
   }, 'killed paired Service exited');
-  const coldKilled = await readFacts();
-  assert.equal(coldKilled.provider.counts.ANOMALY_CRASH, 1);
+  noteOwnedProcess(ownedServices.get(main.pid!)?.identity, 'exit_observed');
+  let coldKilled = await readFacts();
+  assert.equal(
+    coldKilled.provider.counts.ANOMALY_CRASH,
+    live ? before.provider.counts.ANOMALY_CRASH : 1,
+  );
+  if (live)
+    await until(async () => {
+      const old = (await readFacts()).provider.calls.filter(
+        (call) => call.marker === 'ANOMALY_CRASH',
+      );
+      return (
+        old.length > 0 &&
+        old.every(
+          (call) =>
+            (call.cancelled === true || call.cancelRequested === true) && call.forwardedBytes === 0,
+        )
+      );
+    }, 'real held upstream request cancelled without forwarding');
+  if (live) coldKilled = await readFacts();
   writeFileSync(
     join(evidence!, 'killed-cold.json'),
     JSON.stringify(
@@ -598,7 +950,8 @@ try {
     await select(page, title);
     await probe(page);
   }
-  await page.getByText('DONE ANOMALY_RECEIPT_CONTINUE', { exact: true }).waitFor();
+  if (live) await completed(page, 'ANOMALY_RECEIPT_CONTINUE', 0);
+  else await page.getByText('DONE ANOMALY_RECEIPT_CONTINUE', { exact: true }).waitFor();
   const final = await readFacts();
   assertCrashUnreplayed(final, before, originalCrash);
   const originalCommandIds = new Set(businessIdentity(stable).commands.map((row) => row.id));
@@ -627,6 +980,9 @@ try {
     JSON.stringify(
       {
         status: 'passed',
+        ...(live
+          ? { providerMode: 'live', modelStepPolicy: 'observed dispatched Execution identities' }
+          : {}),
         sourceCommit: JSON.parse(readFileSync(join(evidence!, 'metadata.json'), 'utf8'))
           .sourceCommit,
         sourceFiles: JSON.parse(readFileSync(join(evidence!, 'metadata.json'), 'utf8')).sourceFiles,

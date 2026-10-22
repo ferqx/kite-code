@@ -223,6 +223,8 @@ Runtime/Session 的 [串行资源 owner](src/execution/resources.ts)只保留仍
 
 [Runtime](src/runtime.ts) 的 `submitCommand` 直接保存并派发原 `run.start/input.steer/input.follow_up`，不调用独立输入分类器、不生成 `human.input/decision` 或处理 Run。普通 Loop 理解当前用户要求并决定必要工具；没有额外的判定回复。`input.steer` 在安全检查点进入准确活动 Run，`input.follow_up` 等准确前驱结束；新轮次使用用户本次明确配置，旧 Run 不复活。原文、附件、公开 Command ID 和实际 Run 直接对应。[输入 owner](src/storage/sqlite/inputs/README.md)维护准入、配对与取消细节。
 
+`modelMessages` 在新 Model 输入中为当前 Store／Session 其他已中断、取消或失败轮次的人类输入追加准确生命周期说明：原输入是完整历史，本身不是待办或本轮授权；不能从终态推定副作用未发生或允许重试。说明由真实 Message／Command／Run 及主体、Session、原 Store 关系证明，不按正文判断任务。当前 Run（包括显式 `run.resume`）的输入保持普通指令；本次明确输入仍可授权新的工作。原 Message／Source、SQL 顺序、附件、tool call 配对及已封存 Model intent 不改写，不新增公开消息或分类模型。Fork 已封存历史及外 origin Store 的恢复历史不读取来源 Run 后来的可变状态重新解释；完整输入检查和回归边界见[上下文 owner](src/storage/sqlite/context/README.md)。
+
 尚未消费的输入由 `getPendingInputQueue/withdrawPendingInput/reorderPendingInputs` 经原 Store 管理，消费持久顺序而非重排前的 seq。`result.include` 保固定槽，撤回只移除准确 pending 输入，不停止 Run；编辑撤回成功后进入普通 draft，用户自行重交。[Store 队列 owner](src/storage/README.md#待消费输入的撤回与排序)维护 revision、防 ABA、原操作 ID 和竞争事务。
 
 工作编号仍表示真实执行因果，不再根据普通消息生成 selected-work 控制或阻止同会话下一轮联系自己的子 Agent。稳定 child 的 follow-up/message/interrupt 核当前已派发父 Tool、namespace、Store/主体、直接父子关系、准确 carrier 与取消边界；不能由文本或 `workRelation` 获取权限。旧暂停、停止、替换以及真实取消、Rewind、unknown 的原安全事实继续核验。
@@ -234,6 +236,8 @@ Runtime/Session 的 [串行资源 owner](src/execution/resources.ts)只保留仍
 旧 `human.input/decision`、呈现去重证明及已封存业务链仅供历史读取和准确回执兼容。旧 queued processing 在 pump 中拒绝为 `input_processing_removed`，旧活动 processing 的恢复在原 scope/恢复校验后、加载模型配置前拒绝；读取不调用模型。历史控制不自动重算，普通新输入不被旧 unresolved/selected-work 阻塞。取舍及旧决定的部分替代见[直接会话输入](../../.agents/notes/implemented/architecture/2026-10-22-direct-conversation-input.md)。
 
 验证由[普通输入与队列](test/isolated/business/task/human-work-runtime.test.ts)、[热冷模型配置](test/isolated/business/task/collaboration-config-continuation.test.ts)、[通知](test/isolated/business/task/collaboration-notifications.test.ts)、[报告事务与丢响应](test/isolated/business/task/collaboration-report-transactions.test.ts)、[稳定协作工具](test/isolated/business/task/collaboration-surface.test.ts)、[旧处理记录真实 SIGKILL](test/isolated/recovery/human-input-processing-crash.test.ts)、[历史 SQL](test/isolated/storage/human-work-control.test.ts)与[父子问答](test/isolated/business/task/question-loop.test.ts)核对应断言；真实 Electron 的首次、同文重交及冷重开归 [Desktop owner](../../apps/desktop/README.md#真实输入消息的唯一展示)。这些受控模型证据不替代付费 Provider 或其他平台资格。
+
+2026-10-22，macOS arm64／Bun 1.4.2，历史终态投影的[真实 SQLite／SIGKILL 回归](test/isolated/context/interrupted-history.test.ts)4 项／70 断言通过，含 applied steer、内部 user 结果对照、文件附件、原文同值的新输入、完整 ModelInput 冷读与显式 resume；[历史继续](test/isolated/recovery/history-followup-runtime.test.ts)及[原 Run 接续](test/isolated/recovery/run-resume-runtime.test.ts)另 55 项／820 断言通过。全 context 为 77 项通过／8 项失败；八个旧回执 `businessCommandId` 或 automatic Source 预期失败均在隔离 HEAD `77f6d108` 的原 runtime／原测试中同断言复现，不记为通过。对照仅重定向相对 imports 并复用未变依赖，不是完整独立 HEAD checkout。准确 SHA、红绿、原失败与完整日志保存在 `dist/acceptance/session-anomalies-live-20261022-03.json.workspace/evidence/backend-context`。同次真实模型窗口的效果、顺序与冷开零重放证据归[Desktop owner](../../apps/desktop/README.md#普通客户端与测试诊断)，不由确定性模型测试代证。
 
 ## 同一 Step 的并行工具批次
 

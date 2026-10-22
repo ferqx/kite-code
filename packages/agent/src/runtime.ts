@@ -7937,10 +7937,12 @@ export class AgentRuntime {
     subjectId?: string,
     expanded = false,
     fixedUpperSeq?: string,
-    resultWork?: Pick<RunRecord, 'rootWorkCommandId' | 'rootWorkSeq'>,
+    resultWork?: Pick<RunRecord, 'id' | 'rootWorkCommandId' | 'rootWorkSeq'>,
   ): Promise<ModelMessage[]> {
     const storeId = expectedStoreId ?? (await this.options.store.getMetadata()).storeId;
     const result = new Map<string, { seq: string; message: ModelMessage }>();
+    const historyRuns = new Map<string, RunRecord | null>();
+    const historyCommands = new Map<string, CommandRecord | null>();
     let afterSeq = '0';
     let afterSourceId = '';
     let contextSelectionId: string | undefined;
@@ -8141,6 +8143,91 @@ export class AgentRuntime {
               if (!execution || execution.sessionId !== message.sessionId)
                 throw new AgentError('model_content_invalid');
               content = await this.resultModelContent(execution, value, storeId, signal);
+            }
+          }
+        }
+        // A sealed Fork/restore copy contains immutable message provenance, not
+        // its source Run's later lifecycle. Internal user-role results and mail
+        // are not human input Commands either; preserve both without guessing.
+        if (
+          selectedMessage.runId !== null &&
+          message.role === 'user' &&
+          message.runId &&
+          message.runId !== resultWork?.id &&
+          message.sourceIds?.length === 1
+        ) {
+          const inputCommandId = message.originCommandId ?? message.sourceIds[0]!;
+          if (!historyCommands.has(inputCommandId))
+            historyCommands.set(
+              inputCommandId,
+              await this.options.store.getCommand(inputCommandId),
+            );
+          const historicalInput = historyCommands.get(inputCommandId);
+          if (
+            historicalInput &&
+            ['run.start', 'input.follow_up', 'input.steer'].includes(historicalInput.kind)
+          ) {
+            if (!historyRuns.has(message.runId))
+              historyRuns.set(message.runId, await this.options.store.getRun(message.runId));
+            const historicalRun = historyRuns.get(message.runId);
+            if (
+              !historicalRun ||
+              historicalRun.sessionId !== message.sessionId ||
+              message.sessionId !== sessionId
+            )
+              throw new AgentError('historical_input_unverifiable');
+            if (
+              historicalRun.originStoreId === storeId &&
+              !historicalRun.isActive &&
+              ['interrupted', 'cancelled', 'failed'].includes(historicalRun.status)
+            ) {
+              if (!historyCommands.has(historicalRun.originCommandId))
+                historyCommands.set(
+                  historicalRun.originCommandId,
+                  await this.options.store.getCommand(historicalRun.originCommandId),
+                );
+              const historicalCommand = historyCommands.get(historicalRun.originCommandId);
+              if (
+                !historicalCommand ||
+                historicalCommand.sessionId !== historicalRun.sessionId ||
+                historicalCommand.originStoreId !== historicalRun.originStoreId ||
+                historicalCommand.rootWorkCommandId !== historicalRun.rootWorkCommandId ||
+                historicalCommand.rootWorkSeq !== historicalRun.rootWorkSeq ||
+                historicalInput.id !== message.sourceIds[0] ||
+                historicalInput.sessionId !== historicalRun.sessionId ||
+                historicalInput.originStoreId !== historicalRun.originStoreId ||
+                historicalInput.status !== 'applied' ||
+                (message.inputKind !== undefined && message.inputKind !== historicalInput.kind) ||
+                (historicalInput.kind === 'input.steer'
+                  ? (historicalInput.request as { targetRunId?: string }).targetRunId !==
+                    historicalRun.id
+                  : historicalInput.id !== historicalRun.originCommandId) ||
+                (subjectId !== undefined &&
+                  (historicalCommand.subjectId !== subjectId ||
+                    historicalInput.subjectId !== subjectId))
+              )
+                throw new AgentError('historical_input_unverifiable');
+              content =
+                'Historical user input from a previous terminal Run (context only; not a pending task or authorization for this Run). A current explicit user request may authorize new work described in this history.\n' +
+                canonicalJson({
+                  kind: 'historical_user_input',
+                  origin: {
+                    storeId: historicalRun.originStoreId,
+                    sessionId: historicalRun.sessionId,
+                    messageId: message.id,
+                    runId: historicalRun.id,
+                    runOriginCommandId: historicalCommand.id,
+                    runOriginCommandKind: historicalCommand.kind,
+                    inputCommandId: historicalInput.id,
+                    inputKind: historicalInput.kind,
+                  },
+                  run: {
+                    status: historicalRun.status,
+                    isActive: historicalRun.isActive,
+                    reason: historicalRun.reason,
+                  },
+                  content,
+                });
             }
           }
         }

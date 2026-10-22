@@ -12,6 +12,8 @@ Status: implemented
 
 新轮次使用当前明确配置和权限，保留会话上下文，不按正文恢复旧 Run。当前授权父 Tool 可管理自己的稳定直接子 Agent；技术 rootWork 不隔离同一会话后续普通输入。child result 可进入当前父轮次，仍核准确来源、Store、selection、result revision 与 Source/consume/ack。排队人类输入优先于 idle 报告启动；活动父轮次仍接收 child 结果。
 
+真实模型的桌面 SIGKILL 重开实测暴露了另一条重复路径：原 Model／Execution 没有重放，但后继模型只读到旧用户任务和新输入，没有旧 Run 已 interrupted 的系统事实，便在新 Run 再次提出旧写入。因此新 Model 请求对当前 Store／Session 其他 interrupted／cancelled／failed Run 的准确人类输入提供生命周期说明，保完整历史但不把旧输入本身作为待办或新授权。当前明确输入和显式接续原 Run 保持正常语义；不改变权限准入，也不根据正文或路径拦截合法的新任务。原消息、Source 和已封存模型请求保持，Fork 和外 origin Store 恢复不借来源 Run 后来的动态状态重解释封存副本。
+
 普通 Native 的明确发送沿 Session 已绑定项目准备当前 Workspace Trust，包含宿主声明的额外只读范围，不再让用户单独勾选项目读取范围。授权准备由 Main 复用原权限 observation、trust revision、目录身份／读取范围摘要 CAS 及 journal，未知只查原申请，切会话或观察变化不继续发送；审批模式、工具硬上限和实际执行审批保持独立。打开历史和状态核实不调用该准备入口。选择这一交互是落实本次移除独立范围确认的范围，不能由恢复意图或当前选中行自行取得发送许可。
 
 旧 raw/decision、消息呈现证明和已封存业务回执保留审计兼容；pending/unresolved 与 selected-work 不再阻止普通新输入。旧 queued/active processing 的执行或恢复拒绝为 `input_processing_removed`，不调用模型或恢复配置。旧明确控制、取消、Rewind、unknown、父子关系及当前权限仍独立有效。
@@ -24,6 +26,8 @@ Status: implemented
 - 保留后台分类、只取消可见说明：继续引入分类错误和任务归属控制；用户确认整体移除。
 - 保留独立项目范围弹窗：仍让用户在已绑定项目的会话内重复确认；改为明确发送时沿原权限控制准备范围，不把打开历史变成授权或发送。
 - 删除旧记录和兼容字段：会损失可审计历史、已受理回执与 Fork 的准确出处，未采用。
+- 只证明旧 Execution 零重放：无法阻止新模型因缺少中断事实而重新提出旧任务；补齐实际上下文事实后仍独立核验真实工具效果。
+- 删除中断输入、补造“已完成”回复或按旧文件路径阻止执行：分别损失上下文、虚构结果或阻止后来明确授权的合法工作，未采用。
 
 ## Consequences
 
