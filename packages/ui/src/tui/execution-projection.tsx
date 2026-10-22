@@ -739,19 +739,19 @@ export function projectInkChild(
             item.cancelRequestedAt === null &&
             ['planned', 'dispatching', 'running'].includes(item.status) &&
             (item.authorization?.human?.state === 'pending' ||
-              item.authorization?.review?.status === 'planned' ||
-              item.authorization?.review?.status === 'dispatching' ||
-              item.authorization?.review?.status === 'running'),
+              (item.authorization?.check ?? item.authorization?.review)?.status === 'planned' ||
+              (item.authorization?.check ?? item.authorization?.review)?.status === 'dispatching' ||
+              (item.authorization?.check ?? item.authorization?.review)?.status === 'running'),
         )
       : undefined;
+  const pendingCheck = pendingChild?.authorization?.check ?? pendingChild?.authorization?.review;
   const approvalState =
     pendingChild?.authorization?.human?.state === 'pending'
       ? ('awaiting_user' as const)
-      : pendingChild?.authorization?.review?.status === 'running' ||
-          pendingChild?.authorization?.review?.status === 'dispatching'
-        ? ('auto_reviewing' as const)
-        : pendingChild?.authorization?.review?.status === 'planned'
-          ? ('queued_auto_review' as const)
+      : pendingCheck?.status === 'running' || pendingCheck?.status === 'dispatching'
+        ? ('auto_checking' as const)
+        : pendingCheck?.status === 'planned'
+          ? ('queued_auto_check' as const)
           : undefined;
   const input = record(args.input);
   const task =

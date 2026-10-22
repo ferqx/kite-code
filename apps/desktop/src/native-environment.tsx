@@ -53,7 +53,7 @@ const safeError = (cause: unknown) => {
     : 'environment_unavailable';
 };
 
-/** Saved human authorization wins over review progress only within this exact carrier Run. */
+/** Saved human authorization wins over check progress only within this exact carrier Run. */
 export function nativeChildActivity(facts: NativeBackgroundChild): string | undefined {
   const carrier = facts.item.execution;
   if (
@@ -87,11 +87,18 @@ export function nativeChildActivity(facts: NativeBackgroundChild): string | unde
     return '等待你的批准';
   if (
     executions.some((execution) =>
-      ['dispatching', 'running'].includes(execution.authorization?.review?.status ?? ''),
+      ['dispatching', 'running'].includes(
+        (execution.authorization?.check ?? execution.authorization?.review)?.status ?? '',
+      ),
     )
   )
     return '正在自动审核';
-  if (executions.some((execution) => execution.authorization?.review?.status === 'planned'))
+  if (
+    executions.some(
+      (execution) =>
+        (execution.authorization?.check ?? execution.authorization?.review)?.status === 'planned',
+    )
+  )
     return '等待自动审核';
   return undefined;
 }

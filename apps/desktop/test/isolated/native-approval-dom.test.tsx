@@ -96,7 +96,7 @@ test('the original Approval form consumes the verified complete request and subm
     request: {
       ...request,
       input: {},
-      policy: { review: { kind: 'artifact', complete: true, reference } },
+      policy: { check: { kind: 'artifact', complete: true, reference } },
     },
   };
   const render = (interaction = original) =>
@@ -202,8 +202,8 @@ test('original tool labels distinguish saved, accepted and automatic decisions w
     expect(f.host.textContent).toContain('审批已取消');
     await render({
       dispatched: true,
-      review: {
-        executionId: 'review',
+      check: {
+        executionId: 'check',
         status: 'succeeded',
         decision: 'approve_once',
         reason: '原自动批准原因',
@@ -211,10 +211,22 @@ test('original tool labels distinguish saved, accepted and automatic decisions w
       },
     });
     expect(f.host.textContent).toContain('已自动批准');
+    // Historical review observations remain readable; only new producers use check.
+    await render({
+      dispatched: true,
+      review: {
+        executionId: 'legacy-review',
+        status: 'succeeded',
+        decision: 'approve_once',
+        reason: '历史自动批准原因',
+        requireApproval: false,
+      },
+    });
+    expect(f.host.textContent).toContain('已自动批准');
     await render({
       dispatched: false,
-      review: {
-        executionId: 'review',
+      check: {
+        executionId: 'check',
         status: 'failed',
         decision: 'unavailable',
         reason: '原结果未知',
@@ -228,8 +240,8 @@ test('original tool labels distinguish saved, accepted and automatic decisions w
         {
           dispatched: false,
           human: { ...human, state: 'pending', decision: null, grant: undefined },
-          review: {
-            executionId: 'review',
+          check: {
+            executionId: 'check',
             status: decision === 'ask_user' ? 'succeeded' : 'failed',
             decision,
             reason,
@@ -245,11 +257,11 @@ test('original tool labels distinguish saved, accepted and automatic decisions w
     await render(
       {
         dispatched: false,
-        review: {
-          executionId: 'review',
+        check: {
+          executionId: 'check',
           status: 'running',
           decision: 'unavailable',
-          reason: 'review_not_succeeded',
+          reason: 'check_not_succeeded',
           requireApproval: false,
         },
       },
@@ -259,11 +271,11 @@ test('original tool labels distinguish saved, accepted and automatic decisions w
     await render(
       {
         dispatched: false,
-        review: {
-          executionId: 'review',
+        check: {
+          executionId: 'check',
           status: 'cancelled',
           decision: 'unavailable',
-          reason: 'review_not_succeeded',
+          reason: 'check_not_succeeded',
           requireApproval: false,
         },
       },

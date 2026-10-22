@@ -109,6 +109,7 @@ export interface DispatchInput extends OwnedWrite {
     grant?: { grantId: string; revision: string; commandDigest?: string };
     snapshot?: { namespace: string; version: string; data: Json };
     controlReads?: readonly PermissionControlRead[];
+    checkExecutionId?: string;
     reviewExecutionId?: string;
     interactionId?: string;
     decisionRevision?: string;
@@ -234,6 +235,45 @@ export interface AuthorizationReviewResult {
   reviewExecutionId: string;
 }
 
+export type AuthorizationCheckIdentity = AuthorizationReviewIdentity;
+export interface EnsureAuthorizationCheckInput
+  extends Omit<EnsureAuthorizationReviewInput, 'reviewer'> {
+  checker: AuthorizationCheckIdentity;
+}
+export interface AuthorizationCheckFact {
+  execution: ExecutionRecord;
+  commandId: string;
+  input: Json;
+  source: Json;
+  created: boolean;
+}
+export interface ReadAuthorizationCheckInput
+  extends Omit<ReadAuthorizationReviewInput, 'reviewExecutionId' | 'reviewer'> {
+  checkExecutionId: string;
+  checker: AuthorizationCheckIdentity;
+}
+export interface AuthorizationCheckResult {
+  decision: AuthorizationReviewResult['decision'];
+  reason: string;
+  checkExecutionId: string;
+}
+export interface PrepareAuthorizationCheckInput extends OwnedWrite {
+  executionId: string;
+  input: Json;
+  modelMetadata?: Json;
+}
+export interface DispatchAuthorizationCheckInput extends OwnedWrite {
+  executionId: string;
+  controlReads?: readonly PermissionControlRead[];
+}
+export interface PersistAuthorizationCheckPartialInput extends OwnedWrite {
+  executionId: string;
+  content: string;
+  reasoning?: string;
+  firstOutput?: 'reasoning' | 'content';
+  modelOutput?: import('../model-output').ModelOutputReference;
+}
+
 /** Host/adapter boundary. Ordinary extensions never receive this port. */
 export interface Store {
   registerHumanInput(
@@ -261,7 +301,13 @@ export interface Store {
     input: import('../execution/authorization-refresh').RefreshApprovalInput,
   ): Promise<InteractionRecord>;
   invalidateAuthorizationReview(
-    input: import('../execution/authorization-refresh').InvalidateAuthorizationReviewInput,
+    input: OwnedWrite & {
+      executionId: string;
+      reviewExecutionId?: string;
+      previousPolicyRevision: string;
+      policyRevision: string;
+      controlReads?: readonly PermissionControlRead[];
+    },
   ): Promise<void>;
   applyAgentCommand(
     input: import('./agent-collaboration').ApplyAgentCommandInput,
@@ -699,6 +745,23 @@ export interface Store {
         write: ExtensionRecordWrite;
       },
   ): Promise<ExtensionRecord>;
+  ensureInternalModel(
+    input: OwnedWrite & { parentExecutionId: string; request: Json; modelMetadata?: Json },
+  ): Promise<{ execution: ExecutionRecord; created: boolean }>;
+  dispatchInternalModel(
+    input: OwnedWrite & { executionId: string; authorization: DispatchInput['authorization'] },
+  ): Promise<ExecutionRecord>;
+  persistInternalModelPartial(input: PersistAuthorizationCheckPartialInput): Promise<void>;
+  finishInternalModel(input: Omit<FinishExecutionInput, 'message'>): Promise<ExecutionRecord>;
+  ensureAuthorizationCheck(input: EnsureAuthorizationCheckInput): Promise<AuthorizationCheckFact>;
+  prepareAuthorizationCheck(input: PrepareAuthorizationCheckInput): Promise<ExecutionRecord>;
+  dispatchAuthorizationCheck(input: DispatchAuthorizationCheckInput): Promise<ExecutionRecord>;
+  persistAuthorizationCheckPartial(input: PersistAuthorizationCheckPartialInput): Promise<void>;
+  finishAuthorizationCheck(input: Omit<FinishExecutionInput, 'message'>): Promise<ExecutionRecord>;
+  getAuthorizationCheck(input: ReadAuthorizationCheckInput): Promise<AuthorizationCheckResult>;
+  invalidateAuthorizationCheck(
+    input: import('../execution/authorization-refresh').InvalidateAuthorizationCheckInput,
+  ): Promise<void>;
   ensureAuthorizationReview(
     input: EnsureAuthorizationReviewInput,
   ): Promise<AuthorizationReviewFact>;

@@ -45,28 +45,28 @@ export function intersectPermissionPolicies(
                 },
               },
       };
-      if (!base.allowed && !base.approval && !base.review) return { ...base, ...proof };
-      if (!injected.allowed && !injected.approval && !injected.review)
+      if (!base.allowed && !base.approval && !base.check) return { ...base, ...proof };
+      if (!injected.allowed && !injected.approval && !injected.check)
         return { ...injected, ...proof };
       if (injected.allowed) return { ...base, ...proof };
       if (base.allowed) return { ...injected, ...proof };
       const decisions = [base, injected];
-      const reviews = decisions.filter((decision) => decision.review);
+      const checks = decisions.filter((decision) => decision.check);
       return {
         allowed: false,
         ...proof,
         approval: {
           request: { policies: decisions.map((decision) => decision.approval?.request ?? null) },
         },
-        ...(reviews.length
+        ...(checks.length
           ? {
-              review: {
+              check: {
                 request: {
-                  policies: decisions.map((decision) => decision.review?.request ?? null),
+                  policies: decisions.map((decision) => decision.check?.request ?? null),
                 },
                 requireApproval: decisions.some(
                   (decision) =>
-                    decision.review?.requireApproval || (!!decision.approval && !decision.review),
+                    decision.check?.requireApproval || (!!decision.approval && !decision.check),
                 ),
               },
             }

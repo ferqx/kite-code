@@ -532,13 +532,13 @@ test('a mixed Native exploration batch shows the dispatched read as active while
   }
 });
 
-test('Native execution labels preserve automatic review, human approval and refusal precedence', async () => {
+test('Native execution labels preserve automatic check, human approval and refusal precedence', async () => {
   const f = fixture();
-  const review: NonNullable<Execution['authorization']>['review'] = {
-    executionId: 'review',
+  const check: NonNullable<Execution['authorization']>['check'] = {
+    executionId: 'check',
     status: 'running',
     decision: 'unavailable',
-    reason: 'review',
+    reason: 'check',
     requireApproval: false,
   };
   const human: NonNullable<Execution['authorization']>['human'] = {
@@ -553,7 +553,7 @@ test('Native execution labels preserve automatic review, human approval and refu
     const cases = [
       {
         status: 'planned' as const,
-        authorization: { dispatched: false, review },
+        authorization: { dispatched: false, check },
         label: '正在自动审批',
       },
       {

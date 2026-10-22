@@ -1,5 +1,5 @@
 import { strict as assert } from 'node:assert';
-import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { _electron } from 'playwright';
 import type { NativeState } from '../src/native-bridge';
@@ -11,9 +11,23 @@ const [candidate, home, control, storeId] = process.argv.slice(2) as [
   string,
 ];
 let app: Awaited<ReturnType<typeof _electron.launch>> | undefined;
-const log = (stage: string, facts = {}) => console.log(JSON.stringify({ stage, ...facts }));
+let phase = 'launch',
+  frameNumber = 0;
+const frames: { file: string; phase: string; at: number }[] = [];
+let frameTimer: ReturnType<typeof setInterval> | undefined;
+let frameSaving: Promise<void> | undefined;
+const frameDirectory = join(home, 'process-frames');
+mkdirSync(frameDirectory, { recursive: true });
+const log = (stage: string, facts = {}) => {
+  phase = stage;
+  console.log(JSON.stringify({ stage, ...facts }));
+};
+
 async function close() {
   if (!app) return;
+  clearInterval(frameTimer);
+  await frameSaving;
+  writeFileSync(join(frameDirectory, 'manifest.json'), JSON.stringify(frames));
   const owned = app,
     exit = new Promise<void>((resolve) => owned.process().once('exit', () => resolve()));
   await owned.evaluate(({ dialog }) => {
@@ -34,6 +48,20 @@ try {
     });
     const page = await app.firstWindow();
     page.setDefaultTimeout(10000);
+    frameTimer = setInterval(() => {
+      if (frameSaving || frameNumber >= 500) return;
+      const samplePhase = phase;
+      const file = `${String(frameNumber++).padStart(4, '0')}-${samplePhase}.png`;
+      frameSaving = page
+        .screenshot({ path: join(frameDirectory, file) })
+        .then(() => {
+          frames.push({ file, phase: samplePhase, at: Date.now() });
+        })
+        .catch(() => {})
+        .finally(() => {
+          frameSaving = undefined;
+        });
+    }, 150);
     return page;
   }
   let page = await launch();
@@ -66,10 +94,7 @@ try {
     return card;
   }
   async function select() {
-    await page
-      .getByRole('button', { name: 'Collaboration', exact: true })
-      .and(page.locator('button.session-row'))
-      .click();
+    await page.locator('button.session-row').first().click();
     await page
       .getByText('历史已完整读取至固定高水位；当前执行事实仍须核实。', { exact: true })
       .waitFor();
@@ -140,6 +165,38 @@ try {
   // Tighten within the same accepted children; no child or Run is rebuilt.
   await mode(1, 'auto');
   await fetch(`${control}/release`);
+  await until(
+    async () =>
+      (await (await fetch(`${control}/state`)).json()) as {
+        heldChecks: string[];
+        titleCalls: number;
+      },
+    (value) => value.heldChecks.length === 2 && value.titleCalls === 1,
+    'both real automatic checks and title model observed',
+  );
+  await page.getByRole('button', { name: '显示环境信息', exact: true }).click();
+  // Native group sections are labelled through aria-label rather than an inferred role.
+  const group = page.locator('.background-execution-group[aria-label="子智能体"]');
+  await until(
+    () => group.locator('li[data-execution-id]').count(),
+    (count) => count === 2,
+    'exactly two ordinary children while checks run',
+  );
+  assert.equal(await group.locator('.background-execution-count').textContent(), '2');
+  assert.deepEqual(
+    (
+      await group
+        .locator('li[data-execution-id]')
+        .evaluateAll((rows) => rows.map((row) => row.getAttribute('data-execution-id')))
+    ).sort(),
+    [a.id, b.id].sort(),
+  );
+  assert.equal((await state()).directory!.sessions.length, 1);
+  assert.equal((await state()).selection!.session.title, '协作审批测试');
+  await page.screenshot({ path: join(home, '00-two-children-checks-title.png') });
+  log('two_children_with_checks_title', { childIds: [a.id, b.id], count: 2 });
+  await page.getByRole('button', { name: '隐藏环境信息', exact: true }).click();
+  await fetch(`${control}/release-checks`);
   const pending = await until(
     state,
     (value) =>
@@ -161,6 +218,7 @@ try {
   assert.equal(oldA.originStoreId, storeId);
   assert.equal(existsSync(join(home, 'workspace', 'child-a.txt')), false);
   assert.equal(existsSync(join(home, 'workspace', 'child-b.txt')), false);
+  await page.screenshot({ path: join(home, '01-dual-child-pending.png') });
   log('dual_child_pending', { a: a.id, b: b.id, aRun: oldA.runId, bRun: oldB.runId });
   await page.getByRole('button', { name: '显示环境信息', exact: true }).click();
   await page
@@ -362,6 +420,7 @@ try {
     ((await (await fetch(`${control}/state`)).json()) as { calls: number }).calls,
     beforeCold.calls,
   );
+  await page.screenshot({ path: join(home, '04-cold-reopened.png') });
   const report = {
     storeId,
     a: a.id,

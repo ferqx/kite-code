@@ -7,6 +7,8 @@ import {
 import type { Store } from '../port';
 import type { StoredModelOutput, ToolCall } from '../types';
 import { AgentError, type Json } from '../types';
+import { authorizationCheckCompletedResult } from './authorization-check';
+import { internalModelCompletedResult } from './internal-model';
 import { identity, sessionScope } from './model-input-operations';
 import type { SqliteOperations } from './operations';
 /** Finite metadata only in the transaction; immutable segment bytes are verified by Core. */
@@ -84,7 +86,14 @@ export function getModelOutputSnapshot(
     const descriptor = value?.modelOutput;
     const output = descriptor === undefined ? null : verifyModelOutput(db, descriptor, execution);
     if (output && output.complete !== complete) throw new AgentError('model_output_invalid');
-    if (complete) {
+    if (
+      complete &&
+      bound.runId === null &&
+      !authorizationCheckCompletedResult(db, execution) &&
+      !internalModelCompletedResult(db, execution)
+    )
+      throw new AgentError('model_output_invalid');
+    if (complete && bound.runId !== null) {
       const messages = db.rows(
         "SELECT source_json FROM message WHERE session_id=? AND run_id=? AND role='assistant' AND status='complete' AND json_array_length(json_extract(source_json,'$.sourceIds'))=1 AND json_extract(source_json,'$.sourceIds[0]')=?",
         input.sessionId,

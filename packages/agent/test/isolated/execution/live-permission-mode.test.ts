@@ -228,7 +228,7 @@ async function fixture(
     })),
     ...(options.reviewer
       ? {
-          authorizationReview: {
+          authorizationCheck: {
             id: 'reviewer',
             version: '1',
             modelId: 'reviewer',
@@ -757,7 +757,10 @@ test('third-level child discards a late Auto approval after tightening to a fres
     expect(fresh.ancestry).toHaveLength(4);
     expect((await f.store.getSession(fresh.sessionId))?.rootSessionId).toBe('s');
     const review = (await f.store.listExecutions(fresh.sessionId)).find(
-      (execution) => execution.parentExecutionId === fresh.executionId && execution.childSessionId,
+      (execution) =>
+        execution.parentExecutionId === fresh.executionId &&
+        execution.kind === 'model' &&
+        execution.runId === null,
     )!;
     expect(review).toBeDefined();
     held.release();

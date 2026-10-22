@@ -4,7 +4,7 @@
 
 读取时机：修改工具路由、Capability binding、Tool Controller、副作用分类、审批、authorization、sandbox、MCP/Skill/Subagent 执行或最终完成条件时。
 
-验证：当前正式链路使用 `bun test packages/agent/test/isolated/permissions/policy.test.ts packages/agent/test/isolated/permissions/shell-scoped-permissions.test.ts apps/service/test/isolated/web-permissions.test.ts packages/agent/test/isolated/execution/authorization-review.test.ts`、`bun run typecheck`；下面历史 Kernel/SAQ 使用 `bun test packages/agent-kernel/test packages/runtime-spi/test packages/runtime-host/test packages/builtin-runtime/test tests/runtime tests/sandbox`。
+验证：当前正式链路使用 `bun test packages/agent/test/isolated/permissions/policy.test.ts packages/agent/test/isolated/permissions/shell-scoped-permissions.test.ts apps/service/test/isolated/web-permissions.test.ts packages/agent/test/isolated/execution/authorization-check.test.ts`、`bun run typecheck`；下面历史 Kernel/SAQ 使用 `bun test packages/agent-kernel/test packages/runtime-spi/test packages/runtime-host/test packages/builtin-runtime/test tests/runtime tests/sandbox`。
 
 附加验证：`bun run check:core-boundary`、`bun run check:runtime-packages`。
 

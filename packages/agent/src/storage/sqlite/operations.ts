@@ -39,6 +39,16 @@ import {
 } from './agent-mail-operations';
 import { callArtifact } from './artifact-operations';
 import {
+  dispatchAuthorizationCheck,
+  ensureAuthorizationCheck,
+  finishAuthorizationCheck,
+  getAuthorizationCheck,
+  invalidateAuthorizationCheck,
+  persistAuthorizationCheckPartial,
+  prepareAuthorizationCheck,
+  verifyAuthorizationCheckDispatch,
+} from './authorization-check';
+import {
   ensureAuthorizationReview,
   executionAuthorizationObservation,
   getAuthorizationReview,
@@ -47,7 +57,13 @@ import {
 import { readBackgroundExecutions } from './background-directory';
 import { cancel } from './cancel-operations';
 import { verifyFirstActivation } from './child-first-activation';
-import { activateChildRun, ensureAgent, inspectChildSettlement } from './child-operations';
+import {
+  activateChildRun,
+  assertCurrentChildPurpose,
+  assertCurrentExecutionPurpose,
+  ensureAgent,
+  inspectChildSettlement,
+} from './child-operations';
 import {
   getAgentSummary,
   listAgentEvents,
@@ -99,6 +115,12 @@ import {
   validateInputAdmission,
 } from './input-operations';
 import { callInteraction, verifyInteractionDispatch } from './interaction-operations';
+import {
+  dispatchInternalModel,
+  ensureInternalModel,
+  finishInternalModel,
+  persistInternalModelPartial,
+} from './internal-model';
 import { callJob, finishJobDelivery } from './job-operations';
 import { callJobReconciliation } from './job-reconcile-operations';
 import {
@@ -1021,6 +1043,55 @@ export class SqliteOperations {
       case 'readHostControl':
       case 'getHostMutation':
         return callHostMutation(this, method, args);
+      case 'ensureInternalModel':
+        return ensureInternalModel(this, args[0] as Parameters<Store['ensureInternalModel']>[0]);
+      case 'dispatchInternalModel':
+        return dispatchInternalModel(
+          this,
+          args[0] as Parameters<Store['dispatchInternalModel']>[0],
+        );
+      case 'persistInternalModelPartial':
+        return persistInternalModelPartial(
+          this,
+          args[0] as Parameters<Store['persistInternalModelPartial']>[0],
+        );
+      case 'finishInternalModel':
+        return finishInternalModel(this, args[0] as Parameters<Store['finishInternalModel']>[0]);
+      case 'ensureAuthorizationCheck':
+        return ensureAuthorizationCheck(
+          this,
+          args[0] as Parameters<Store['ensureAuthorizationCheck']>[0],
+        );
+      case 'prepareAuthorizationCheck':
+        return prepareAuthorizationCheck(
+          this,
+          args[0] as Parameters<Store['prepareAuthorizationCheck']>[0],
+        );
+      case 'dispatchAuthorizationCheck':
+        return dispatchAuthorizationCheck(
+          this,
+          args[0] as Parameters<Store['dispatchAuthorizationCheck']>[0],
+        );
+      case 'persistAuthorizationCheckPartial':
+        return persistAuthorizationCheckPartial(
+          this,
+          args[0] as Parameters<Store['persistAuthorizationCheckPartial']>[0],
+        );
+      case 'finishAuthorizationCheck':
+        return finishAuthorizationCheck(
+          this,
+          args[0] as Parameters<Store['finishAuthorizationCheck']>[0],
+        );
+      case 'getAuthorizationCheck':
+        return getAuthorizationCheck(
+          this,
+          args[0] as Parameters<Store['getAuthorizationCheck']>[0],
+        );
+      case 'invalidateAuthorizationCheck':
+        return invalidateAuthorizationCheck(
+          this,
+          args[0] as Parameters<Store['invalidateAuthorizationCheck']>[0],
+        );
       case 'ensureAuthorizationReview':
         return ensureAuthorizationReview(
           this,
@@ -1179,7 +1250,6 @@ export class SqliteOperations {
         return ensureAgent(
           this,
           args[0] as Parameters<Store['ensureAgentFollowUp']>[0],
-          false,
           args[0] as Parameters<Store['ensureAgentFollowUp']>[0],
         );
       case 'getAgentSummary':
@@ -1377,6 +1447,7 @@ export class SqliteOperations {
           )
             throw new AgentError('command_not_startable');
           if (command.status !== 'accepted') throw new AgentError('command_not_accepted');
+          assertCurrentChildPurpose(this, String(command.session_id));
           if (
             this.row(
               'SELECT id FROM run WHERE session_id=? AND is_active=1',
@@ -1437,6 +1508,8 @@ export class SqliteOperations {
       case 'planExecution':
         return this.tx(() => {
           this.identity(input.expectedStoreId);
+          this.owner(input.owner, input.sessionId);
+          assertCurrentChildPurpose(this, input.sessionId);
           const command = this.active(input.owner, input.originCommandId, input.runId);
           assertNoExecutionGroupFence(this, String(command.session_id));
           if (input.sessionId !== command.session_id)
@@ -1446,7 +1519,7 @@ export class SqliteOperations {
               !['tool', 'job'].includes(input.kind) ||
               ![
                 `operation.${input.kind}`,
-                ...(input.kind === 'job' ? ['operation.agent', 'authorization.review'] : []),
+                ...(input.kind === 'job' ? ['operation.agent'] : []),
               ].includes(String(command.kind)) ||
               !input.parentExecutionId
             )
@@ -1647,6 +1720,9 @@ export class SqliteOperations {
           this.identity(input.expectedStoreId);
           const execution = this.row('SELECT * FROM execution WHERE id=?', input.executionId);
           if (!execution) throw new AgentError('execution_not_found');
+          if (execution.kind === 'model' && execution.run_id === null)
+            throw new AgentError('invalid_runless_execution');
+          assertCurrentExecutionPurpose(this, execution);
           assertNoExecutionGroupFence(this, String(execution.session_id), String(execution.id));
           this.active(
             input.owner,
@@ -1698,6 +1774,7 @@ export class SqliteOperations {
           verifyPermissionGrantDispatch(this, input);
           verifyInteractionDispatch(this, execution, input);
           verifyHostControlDispatch(this, execution, input);
+          verifyAuthorizationCheckDispatch(this, input);
           verifyAuthorizationReviewDispatch(this, input);
           assertDispatchReadSet(this, execution, input);
           this.run(
@@ -1746,6 +1823,16 @@ export class SqliteOperations {
             throw new AgentError('owner_changed');
           if (execution.origin_store_id !== input.expectedStoreId)
             throw new AgentError('operation_unverifiable');
+          if (
+            input.status === 'succeeded' &&
+            !['succeeded', 'failed', 'cancelled', 'outcome_unknown'].includes(
+              String(execution.state),
+            )
+          ) {
+            if (execution.kind === 'model' && execution.run_id === null)
+              throw new AgentError('invalid_runless_execution');
+            assertCurrentExecutionPurpose(this, execution);
+          }
           let status = input.status;
           let result = input.result;
           if (execution.child_session_id !== null && status !== 'outcome_unknown') {
@@ -1980,6 +2067,8 @@ export class SqliteOperations {
             input.executionId,
           );
           if (!execution) throw new AgentError('execution_not_active');
+          if (execution.run_id === null) throw new AgentError('invalid_runless_execution');
+          assertCurrentExecutionPurpose(this, execution);
           this.owner(input.owner, String(execution.session_id));
           if (String(execution.owner_generation) !== input.owner.generation)
             throw new AgentError('owner_changed');

@@ -30,7 +30,7 @@ test('pure chrome retains observed facts, original interaction content and compl
   );
   expect(footer.lastFrame()).toContain('Cancelling');
   expect(footer.lastFrame()).toContain('original draft');
-  expect(footer.lastFrame()).toContain('[Automatic review]');
+  expect(footer.lastFrame()).toContain('[Automatic check]');
   expect(footer.lastFrame()).not.toContain('seconds');
   footer.unmount();
   const overlay = render(

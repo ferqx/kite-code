@@ -1,5 +1,16 @@
 import { expect, test } from 'bun:test';
-import { mkdirSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { randomUUID } from 'node:crypto';
+import {
+  copyFileSync,
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  realpathSync,
+  renameSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { createRequire } from 'node:module';
 import { dirname, join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -22,8 +33,10 @@ test.skipIf(process.platform !== 'darwin')(
   'original current-Session controls drive actual Auto decisions, fallback and precise stop, with source-free cold history and no replay',
   async () => {
     const root = realpathSync(temporaryDirectory('kite-native-auto-approval-'));
+    const reuseCandidate = process.env.KITE_TEST_AUTO_CHECK_CANDIDATE;
+    const evidence = resolve('dist/acceptance', `automatic-check-${randomUUID()}`);
     const home = join(root, 'home'),
-      moved = join(root, 'relocated'),
+      moved = reuseCandidate ? realpathSync(reuseCandidate) : join(root, 'relocated'),
       workspace = join(home, 'workspace');
     mkdirSync(workspace, { recursive: true });
     const profile = selectProfile({
@@ -52,22 +65,24 @@ test.skipIf(process.platform !== 'darwin')(
     let provider: ReturnType<typeof Bun.serve> | undefined,
       driver: Bun.Subprocess<'ignore', 'pipe', 'pipe'> | undefined;
     try {
-      const releaseModule = resolve(
-        import.meta.dir,
-        '../../../../scripts/release/terminal-bundle.ts',
-      );
-      const { buildTerminalBundle } = await import(releaseModule);
-      const terminal = await buildTerminalBundle({ destination: join(root, 'terminal-build') });
-      const built = await buildNativeCandidate({
-        testDiagnostics: true,
-        terminalRoot: terminal.root,
-        electronDist: resolve(dirname(dirname(require('electron') as string)), '../..'),
-        outdir: join(root, 'source'),
-      });
-      renameSync(join(root, 'source'), moved);
-      rmSync(terminal.root, { recursive: true, force: true });
+      if (!reuseCandidate) {
+        const releaseModule = resolve(
+          import.meta.dir,
+          '../../../../scripts/release/terminal-bundle.ts',
+        );
+        const { buildTerminalBundle } = await import(releaseModule);
+        const terminal = await buildTerminalBundle({ destination: join(root, 'terminal-build') });
+        const built = await buildNativeCandidate({
+          testDiagnostics: true,
+          terminalRoot: terminal.root,
+          electronDist: resolve(dirname(dirname(require('electron') as string)), '../..'),
+          outdir: join(root, 'source'),
+        });
+        renameSync(join(root, 'source'), moved);
+        rmSync(terminal.root, { recursive: true, force: true });
+        expect(verifyNativeRuntimeBundle(moved).digest).toBe(built.digest);
+      }
       const bundle = verifyNativeRuntimeBundle(moved);
-      expect(bundle.digest).toBe(built.digest);
       leases.push(
         acquireArtifactAccess({ root: moved, mode: 'shared' }),
         acquireArtifactAccess({ root: bundle.terminal.root, mode: 'shared' }),
@@ -120,7 +135,7 @@ test.skipIf(process.platform !== 'darwin')(
             if (message.role !== 'user' || typeof message.content !== 'string') return [];
             try {
               const value = JSON.parse(message.content);
-              return value?.purpose === 'authorization_review' ? [value] : [];
+              return value?.purpose === 'authorization_check' ? [value] : [];
             } catch {
               return [];
             }
@@ -151,7 +166,7 @@ test.skipIf(process.platform !== 'darwin')(
                           : id === 'manual'
                             ? 'ask_user'
                             : 'approve_once',
-                      reason: `Original ${id} review 雪🙂`,
+                      reason: `Original ${id} check 雪🙂`,
                     }),
             };
           } else {
@@ -255,6 +270,8 @@ test.skipIf(process.platform !== 'darwin')(
         const code = await driver.exited,
           stdout = await out,
           stderr = await err;
+        writeFileSync(join(home, 'driver.stdout.log'), stdout);
+        writeFileSync(join(home, 'driver.stderr.log'), stderr);
         if (code) console.error({ stdout, stderr });
         else console.log(stdout);
         expect(code).toBe(0);
@@ -302,7 +319,7 @@ test.skipIf(process.platform !== 'darwin')(
       } finally {
         await cold.close();
       }
-      expect(verifyNativeRuntimeBundle(moved).digest).toBe(built.digest);
+      expect(verifyNativeRuntimeBundle(moved).digest).toBe(bundle.digest);
     } finally {
       for (const release of held.values()) release();
       if (driver && driver.exitCode === null) {
@@ -311,6 +328,16 @@ test.skipIf(process.platform !== 'darwin')(
       }
       provider?.stop(true);
       for (const lease of leases.reverse()) lease.release();
+      mkdirSync(evidence, { recursive: true, mode: 0o700 });
+      if (existsSync(home))
+        for (const name of readdirSync(home)) {
+          if (
+            name.endsWith('.png') ||
+            ['auto-report.json', 'driver.stdout.log', 'driver.stderr.log'].includes(name)
+          )
+            copyFileSync(join(home, name), join(evidence, name));
+        }
+      console.log('automatic_check_evidence_retained', evidence);
       rmSync(root, { recursive: true, force: true });
     }
   },

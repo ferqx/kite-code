@@ -178,7 +178,7 @@ async function setup(
           },
         }
       : {}),
-    authorizationReview: { id: 'review', version: '1', modelId: 'review-model', model: reviewer },
+    authorizationCheck: { id: 'review', version: '1', modelId: 'review-model', model: reviewer },
     permissions: {
       async authorize(request) {
         return request.kind === 'model' || request.definitionId === 'sample.body'
@@ -186,7 +186,7 @@ async function setup(
           : {
               allowed: false,
               revision: 'p1',
-              review: {
+              check: {
                 request:
                   mode === 'source' || mode === 'origin'
                     ? { task: 'actual complete source', plan: null }
@@ -336,41 +336,30 @@ test('17 MiB Tool body reaches actual Model and durable Auto reviewer completely
         status: 'applied',
         request: { kind: 'run.start', content: 'New task: read precise original history' },
       });
-      const receipt = command.receipt as {
-        businessCommandId: string;
-        humanInputCommandId: string;
-        runId: string;
-      };
-      expect(receipt.businessCommandId).toBeString();
-      expect(receipt.businessCommandId).not.toBe(command.id);
-      expect(await store.getCommand(receipt.humanInputCommandId)).toMatchObject({
-        request: {
-          publicCommandId: command.id,
-          content: 'New task: read precise original history',
-          originalRequest: command.request,
-        },
-      });
-      expect(await store.getCommand(receipt.businessCommandId)).toMatchObject({
+      const receipt = command.receipt as { runId: string };
+      expect(receipt).not.toHaveProperty('businessCommandId');
+      expect(receipt).not.toHaveProperty('humanInputCommandId');
+      expect(await store.getCommand(command.id)).toMatchObject({
         status: 'applied',
-        request: { content: 'New task: read precise original history' },
+        request: command.request,
         receipt: { runId: receipt.runId },
       });
       expect(await store.getRun(receipt.runId)).toMatchObject({
         status: 'completed',
-        originCommandId: receipt.businessCommandId,
+        originCommandId: command.id,
         rootWorkCommandId: command.id,
       });
       expect(model.requests).toHaveLength(1);
       expect(await store.getExecution(model.requests[0]!.requestId)).toMatchObject({
         runId: receipt.runId,
-        originCommandId: receipt.businessCommandId,
+        originCommandId: command.id,
         status: 'succeeded',
       });
       expect(
         model.requests[0]!.messages.find(
           (m) => m.content === 'New task: read precise original history',
         )?.sourceIds,
-      ).toEqual([receipt.businessCommandId]);
+      ).toEqual([command.id]);
       expect(model.requests[0]!.messages.some((message) => message.content.endsWith(body))).toBe(
         true,
       );
@@ -483,13 +472,13 @@ test('large Auto ask_user preserves a real bounded human card with the exact com
     expect(interaction).toBeDefined();
     expect(f.effects()).toBe(0);
     const request = interaction!.request as unknown as {
-      policy: { review: { reference: import('../../../src/extensions').ArtifactRef } };
+      policy: { check: { reference: import('../../../src/extensions').ArtifactRef } };
     };
     expect(JSON.stringify(request).length).toBeLessThan(32768);
     expect(JSON.stringify(request)).not.toContain('subjectId');
     expect(JSON.stringify(request)).not.toContain('owner');
-    const ref = request.policy.review.reference;
-    expect(ref.id).toStartWith('authorization-review-request-');
+    const ref = request.policy.check.reference;
+    expect(ref.id).toStartWith('authorization-check-request-');
     const complete = JSON.parse(
       Buffer.from(
         (

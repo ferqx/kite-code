@@ -607,10 +607,11 @@ export default function ToolCardBlock({ block, awaitingInput, columns = 80 }: To
             {renderShellLines(block.liveOutput, dt.dim, columns - 2, block.liveTotalLines)}
           </Box>
         )}
-        {block.reviewFailure ? (
+        {(block.checkFailure ?? block.reviewFailure) ? (
           <Box paddingLeft={2}>
             <Text color={dt.error}>
-              {block.liveOutput ? SHELL_ALIGN : SHELL_PREFIX}⚠ auto-review: {block.reviewFailure}
+              {block.liveOutput ? SHELL_ALIGN : SHELL_PREFIX}⚠ auto-check:{' '}
+              {block.checkFailure ?? block.reviewFailure}
             </Text>
           </Box>
         ) : null}
@@ -833,9 +834,10 @@ export default function ToolCardBlock({ block, awaitingInput, columns = 80 }: To
                             : 'timed out'
                           : `exit: ${block.status === 'error' ? 'error' : '0'}`}
               </Text>
-              {'reviewFailure' in block && block.reviewFailure ? (
+              {('checkFailure' in block || 'reviewFailure' in block) &&
+              (block.checkFailure ?? block.reviewFailure) ? (
                 <Text color={dt.error}>
-                  {SHELL_ALIGN}⚠ auto-review: {block.reviewFailure}
+                  {SHELL_ALIGN}⚠ auto-check: {block.checkFailure ?? block.reviewFailure}
                 </Text>
               ) : null}
             </>
@@ -852,8 +854,10 @@ export default function ToolCardBlock({ block, awaitingInput, columns = 80 }: To
           ) : (
             <Text color={dt.dim}>⎿ {pathLabel(block.args)} (no result)</Text>
           )}
-          {block.reviewFailure ? (
-            <Text color={dt.error}>⎿ ⚠ auto-review: {block.reviewFailure}</Text>
+          {(block.checkFailure ?? block.reviewFailure) ? (
+            <Text color={dt.error}>
+              ⎿ ⚠ auto-check: {block.checkFailure ?? block.reviewFailure}
+            </Text>
           ) : null}
         </Box>
       )}

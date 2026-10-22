@@ -196,7 +196,9 @@ const MessageItem = memo(function MessageItem({
         messages={[
           childEnded &&
           !tool.settled &&
-          ['creating', 'queued', 'running', 'waiting', 'auto_reviewing'].includes(tool.status ?? '')
+          ['creating', 'queued', 'running', 'waiting', 'auto_checking', 'auto_reviewing'].includes(
+            tool.status ?? '',
+          )
             ? { ...tool, settled: true, status: 'unknown' }
             : tool,
         ]}

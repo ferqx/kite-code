@@ -37,9 +37,10 @@ function childStatus(
 } {
   const approvalState =
     block.approvalState ?? (block.awaitingApproval ? 'awaiting_user' : undefined);
-  if (approvalState === 'auto_reviewing') return { text: '自动审查中', tone: 'dim' };
-  if (approvalState === 'queued_auto_review') {
-    return { text: '等待自动审查', tone: 'dim' };
+  if (approvalState === 'auto_checking' || approvalState === 'auto_reviewing')
+    return { text: '自动审核中', tone: 'dim' };
+  if (approvalState === 'queued_auto_check' || approvalState === 'queued_auto_review') {
+    return { text: '等待自动审核', tone: 'dim' };
   }
   if (approvalState === 'queued_user_approval' || approvalState === 'queued') {
     return { text: '人工审批排队中', tone: 'dim' };

@@ -6,6 +6,8 @@ import {
   type ModelInputPage,
   type StoredModelInput,
 } from '../types';
+import { authorizationCheckSourceTarget } from './authorization-check';
+import { internalModelSourceTarget } from './internal-model';
 import type { SqliteOperations } from './operations';
 
 type Row = Record<string, string | number | bigint | null>;
@@ -30,18 +32,28 @@ export function identity(
   input: Scope,
   session: Row,
   execution: Row,
+  allowUnsealed = false,
 ): ModelInputIdentity {
   const originStoreId = execution.origin_store_id;
   if (typeof originStoreId !== 'string' || !originStoreId)
     throw new AgentError('model_input_scope_denied');
   if (execution.session_id !== session.id) throw new AgentError('model_input_scope_denied');
-  if (execution.kind !== 'model' || execution.run_id === null)
+  if (execution.kind !== 'model') throw new AgentError('model_input_unavailable');
+  const authorizationCheck =
+    execution.run_id === null
+      ? (authorizationCheckSourceTarget(db, execution, allowUnsealed) ??
+        internalModelSourceTarget(db, execution))
+      : null;
+  if (execution.run_id === null && !authorizationCheck)
     throw new AgentError('model_input_unavailable');
-  const run = db.row(
-    'SELECT id,session_id,origin_command_id,origin_store_id,root_work_command_id,root_work_seq FROM run WHERE id=? AND session_id=?',
-    execution.run_id!,
-    session.id!,
-  );
+  const run =
+    execution.run_id === null
+      ? null
+      : db.row(
+          'SELECT id,session_id,origin_command_id,origin_store_id,root_work_command_id,root_work_seq FROM run WHERE id=? AND session_id=?',
+          execution.run_id!,
+          session.id!,
+        );
   const command = db.row(
     'SELECT id,session_id,subject_id,origin_store_id,root_work_command_id,root_work_seq FROM command WHERE id=? AND session_id=?',
     execution.origin_command_id!,
@@ -53,28 +65,28 @@ export function identity(
     session.root_id!,
   );
   if (
-    !run ||
+    (!run && !authorizationCheck) ||
     !command ||
     !rootWork ||
     !Number.isSafeInteger(Number(execution.attempt)) ||
     Number(execution.attempt) < 1 ||
     !/^[1-9][0-9]*$/.test(String(execution.root_work_seq)) ||
     BigInt(execution.root_work_seq!) > 9223372036854775807n ||
-    run.origin_store_id !== originStoreId ||
+    (run !== null && run.origin_store_id !== originStoreId) ||
     command.origin_store_id !== originStoreId ||
     rootWork.origin_store_id !== originStoreId ||
     command.subject_id !== input.subjectId ||
     rootWork.subject_id !== input.subjectId ||
-    run.origin_command_id !== execution.origin_command_id ||
+    (run !== null && run.origin_command_id !== execution.origin_command_id) ||
     execution.root_session_id !== session.root_id ||
-    run.root_work_command_id !== execution.root_work_command_id ||
+    (run !== null && run.root_work_command_id !== execution.root_work_command_id) ||
     command.root_work_command_id !== execution.root_work_command_id ||
-    String(run.root_work_seq) !== String(execution.root_work_seq) ||
+    (run !== null && String(run.root_work_seq) !== String(execution.root_work_seq)) ||
     String(command.root_work_seq) !== String(execution.root_work_seq) ||
     String(rootWork.seq) !== String(execution.root_work_seq)
   )
     throw new AgentError('model_input_scope_denied');
-  if (session.parent_id !== null) {
+  if (session.parent_id !== null && run !== null) {
     const carrier = db.childCarrier(command, String(run.id));
     const origin =
       carrier &&
@@ -100,7 +112,7 @@ export function identity(
     executionId: String(execution.id),
     sessionId: String(session.id),
     rootSessionId: String(session.root_id),
-    runId: String(run.id),
+    runId: run === null ? null : String(run.id),
     originCommandId: String(command.id),
     rootWorkCommandId: String(execution.root_work_command_id),
     rootWorkSeq: String(execution.root_work_seq),
@@ -134,17 +146,24 @@ export function getModelInputSnapshot(
       throw new AgentError('model_input_scope_denied');
     const session = sessionScope(db, input);
     const execution = db.row(
-      "SELECT id,session_id,run_id,kind,origin_command_id,origin_store_id,root_work_command_id,root_work_seq,root_session_id,attempt,state,adapter_id,intent_json,model_snapshot_json,dispatch_authorization_json,json_extract(result_json,'$.modelInputBodyHash') AS receipt_hash FROM execution WHERE id=?",
+      "SELECT *,json_extract(result_json,'$.modelInputBodyHash') AS receipt_hash FROM execution WHERE id=?",
       input.executionId,
     );
     if (!execution) throw new AgentError('execution_not_found');
     const bound = identity(db, input, session, execution);
     const origin = db.row('SELECT * FROM command WHERE id=?', bound.originCommandId);
     // identity() already verified this exact carrier and origin under the same read snapshot.
-    const carrier = session.parent_id === null ? null : db.childCarrier(origin!, bound.runId);
+    const carrier =
+      session.parent_id === null || bound.runId === null
+        ? null
+        : db.childCarrier(origin!, bound.runId);
     const carrierOrigin =
       carrier && db.row('SELECT kind FROM command WHERE id=?', carrier.origin_command_id!);
     const snapshot = {
+      authorizationCheck:
+        bound.runId === null && origin?.kind === 'authorization.check'
+          ? { sourceIds: [bound.originCommandId, bound.executionId] as [string, string] }
+          : null,
       authorizationReview:
         carrierOrigin?.kind === 'authorization.review'
           ? { sourceIds: [bound.originCommandId, String(carrier!.id)] as [string, string] }
@@ -202,7 +221,7 @@ export function listModelInputs(
     if (upper > sequence(highWater) || after > sequence(highWater))
       throw new AgentError('cursor_ahead');
     const rows = db.rows(
-      "SELECT rowid AS model_seq,id,session_id,run_id,origin_command_id,origin_store_id,root_work_command_id,root_work_seq,root_session_id,kind,attempt,state,adapter_id FROM execution WHERE session_id=? AND kind='model' AND rowid>? AND rowid<=? ORDER BY rowid LIMIT ?",
+      "SELECT *,rowid AS model_seq FROM execution WHERE session_id=? AND kind='model' AND rowid>? AND rowid<=? ORDER BY rowid LIMIT ?",
       session.id!,
       after,
       upper,
@@ -210,7 +229,7 @@ export function listModelInputs(
     );
     const items = rows
       .slice(0, limit)
-      .map((row) => ({ ...identity(db, input, session, row), seq: String(row.model_seq) }));
+      .map((row) => ({ ...identity(db, input, session, row, true), seq: String(row.model_seq) }));
     const page = {
       storeId: input.expectedStoreId,
       sessionId: input.sessionId,

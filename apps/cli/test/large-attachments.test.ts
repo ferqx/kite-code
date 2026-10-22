@@ -41,12 +41,12 @@ test('actual CLI handler receives complete verified attachment before an exact a
           (
             interaction.request as {
               policy: {
-                review: {
+                check: {
                   reference: { scope: { kind: 'session' | 'execution' | 'message'; id: string } };
                 };
               };
             }
-          ).policy.review.reference.scope,
+          ).policy.check.reference.scope,
         );
         return { kind: 'approval', decision: 'approve' };
       },

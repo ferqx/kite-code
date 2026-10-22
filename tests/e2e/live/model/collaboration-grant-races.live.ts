@@ -121,7 +121,7 @@ export async function runLiveGrantRaces(options: Options): Promise<{ cases: Resu
       const host = createDefaultProcessConfiguration({
         profile,
         userConfigurationPath: config,
-        authorizationReview: {
+        authorizationCheck: {
           id: 'live.review',
           version: '1',
           modelId: options.modelId,

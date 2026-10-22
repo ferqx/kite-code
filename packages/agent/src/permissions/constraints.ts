@@ -55,15 +55,15 @@ function intersect(
       },
     },
   };
-  if (!current.allowed && !current.approval && !current.review)
+  if (!current.allowed && !current.approval && !current.check)
     return { allowed: false, revision, reason: current.reason, ...proof };
-  if (!ceiling.allowed && !ceiling.approval && !ceiling.review)
+  if (!ceiling.allowed && !ceiling.approval && !ceiling.check)
     return { allowed: false, revision, reason: ceiling.reason, ...proof };
   if (ceiling.allowed) return { ...current, revision, ...proof };
   if (current.allowed) return { ...ceiling, revision, ...proof };
   const decisions = [current, ceiling];
   const approvals = decisions.filter((decision) => decision.approval);
-  const reviews = decisions.filter((decision) => decision.review);
+  const checks = decisions.filter((decision) => decision.check);
   const scopes = decisions.map((decision, index) => ({
     scope: index === 0 ? 'current' : 'plan',
     revision: decision.revision,
@@ -92,20 +92,20 @@ function intersect(
           },
         }
       : {}),
-    ...(reviews.length
+    ...(checks.length
       ? {
-          review: {
+          check: {
             request: {
               kind: 'planning_mode_ceiling',
               policies: decisions.map((decision, index) => ({
                 scope: index === 0 ? 'current' : 'plan',
                 revision: decision.revision,
-                request: decision.review?.request ?? null,
+                request: decision.check?.request ?? null,
               })),
             },
             requireApproval: decisions.some(
               (decision) =>
-                decision.review?.requireApproval || (!!decision.approval && !decision.review),
+                decision.check?.requireApproval || (!!decision.approval && !decision.check),
             ),
           },
         }
@@ -190,11 +190,11 @@ export function requireWorkflowApproval(
   decision: PermissionDecision,
   minimum: Json | undefined,
 ): PermissionDecision {
-  if (minimum && minimum !== 'none' && (decision.allowed || decision.approval || decision.review)) {
+  if (minimum && minimum !== 'none' && (decision.allowed || decision.approval || decision.check)) {
     return {
       ...decision,
       allowed: false,
-      review: decision.review ? { ...decision.review, requireApproval: true } : undefined,
+      check: decision.check ? { ...decision.check, requireApproval: true } : undefined,
       approval: decision.approval ?? {
         request: { reason: 'workflow_minimum_approval', minimum },
       },
@@ -214,7 +214,7 @@ export function requireFileRestoreApproval(
     request.kind === 'job' &&
     request.definitionId === 'builtin.files/files.checkpoint.restore' &&
     request.definitionVersion === '1' &&
-    (decision.allowed || decision.approval || decision.review)
+    (decision.allowed || decision.approval || decision.check)
   ) {
     return {
       allowed: false,

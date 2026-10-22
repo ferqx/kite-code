@@ -856,7 +856,7 @@ export type ModelInputPage = {
     seq: string;
     executionId: string;
     sessionId: string;
-    runId: string;
+    runId: string | null;
     originCommandId: string;
     rootWorkCommandId: string;
     rootWorkSeq: string;
@@ -888,7 +888,7 @@ export type ModelInputSnapshot = {
   storeId: string;
   sessionId: string;
   rootSessionId: string;
-  runId: string;
+  runId: string | null;
   executionId: string;
   originCommandId: string;
   rootWorkCommandId: string;
@@ -1019,7 +1019,7 @@ export type ModelOutputSnapshot = {
   storeId: string;
   sessionId: string;
   rootSessionId: string;
-  runId: string;
+  runId: string | null;
   executionId: string;
   originCommandId: string;
   rootWorkCommandId: string;
@@ -1786,6 +1786,20 @@ export type Execution = {
   id: string;
   authorization?: {
     dispatched: boolean;
+    check?: {
+      executionId: string;
+      status:
+        | 'planned'
+        | 'dispatching'
+        | 'running'
+        | 'succeeded'
+        | 'failed'
+        | 'cancelled'
+        | 'outcome_unknown';
+      decision: 'approve_once' | 'reject' | 'ask_user' | 'unavailable';
+      reason: string;
+      requireApproval: boolean;
+    };
     review?: {
       executionId: string;
       status:
@@ -2540,6 +2554,20 @@ export type BrowserView = {
     id: string;
     authorization?: {
       dispatched: boolean;
+      check?: {
+        executionId: string;
+        status:
+          | 'planned'
+          | 'dispatching'
+          | 'running'
+          | 'succeeded'
+          | 'failed'
+          | 'cancelled'
+          | 'outcome_unknown';
+        decision: 'approve_once' | 'reject' | 'ask_user' | 'unavailable';
+        reason: string;
+        requireApproval: boolean;
+      };
       review?: {
         executionId: string;
         status:
@@ -3108,6 +3136,20 @@ export type SessionView = {
     id: string;
     authorization?: {
       dispatched: boolean;
+      check?: {
+        executionId: string;
+        status:
+          | 'planned'
+          | 'dispatching'
+          | 'running'
+          | 'succeeded'
+          | 'failed'
+          | 'cancelled'
+          | 'outcome_unknown';
+        decision: 'approve_once' | 'reject' | 'ask_user' | 'unavailable';
+        reason: string;
+        requireApproval: boolean;
+      };
       review?: {
         executionId: string;
         status:

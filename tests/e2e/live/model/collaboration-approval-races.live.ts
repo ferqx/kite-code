@@ -123,7 +123,7 @@ export async function runLiveApprovalRaces(options: Options): Promise<{ cases: R
       const host = createDefaultProcessConfiguration({
         profile,
         userConfigurationPath: config,
-        authorizationReview: {
+        authorizationCheck: {
           id: 'live.review',
           version: '1',
           modelId: options.modelId,

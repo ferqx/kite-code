@@ -298,3 +298,44 @@ test('missing source timing never becomes a fabricated one-second tool or child 
     thought.unmount();
   }
 });
+
+for (const approvalState of [
+  'auto_checking',
+  'queued_auto_check',
+  'auto_reviewing',
+  'queued_auto_review',
+] as const)
+  test(`automatic check ${approvalState} remains visible in single and concurrent child renderers`, () => {
+    const block = {
+      ...child('1'),
+      status: 'running' as const,
+      awaitingApproval: true,
+      approvalState,
+    };
+    const expected =
+      approvalState === 'auto_checking' || approvalState === 'auto_reviewing'
+        ? '自动审核中'
+        : '等待自动审核';
+    const single = render(<SubAgentBlock block={block} columns={100} />);
+    const concurrent = render(<ConcurrentSubAgentBlock blocks={[block]} columns={100} />);
+    try {
+      expect(single.lastFrame()).toContain(expected);
+      expect(concurrent.lastFrame()).toContain(expected);
+    } finally {
+      single.unmount();
+      concurrent.unmount();
+    }
+  });
+
+for (const field of ['checkFailure', 'reviewFailure'] as const)
+  test(`tool ${field} preserves the automatic-check failure reason`, () => {
+    const view = render(
+      <ToolCardBlock block={tool({ [field]: 'exact checker failure' })} columns={100} />,
+    );
+    try {
+      expect(view.lastFrame()).toContain('auto-check: exact checker failure');
+      expect(view.lastFrame()).not.toContain('auto-review');
+    } finally {
+      view.unmount();
+    }
+  });

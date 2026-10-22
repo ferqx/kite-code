@@ -24,11 +24,11 @@
 
 ## 只读授权观察
 
-Execution 的可选 `authorization` 由 [原授权 owner](sqlite/authorization-review.ts)从现有记录推导，未增加持久字段或写操作。工具／Job 的原派发状态、准确 reviewer 状态／决定／原因和原人工 Interaction 的保存／accepted decision 分别保留；它不是派发 grant。reviewer 优先沿实际 dispatch binding 读取准确 carrier；没有该 binding 时仅接纳唯一原 purpose 候选，有歧义不猜最新。人工 accepted 还须原答案 revision 与原 Execution 的 decision binding 相符。
+Execution 的可选 `authorization.check` 由[权限检查 owner](sqlite/authorization-check.ts)从准确原记录推导；历史 `authorization.review` 仅按[旧 proof](sqlite/authorization-review.ts)只读解释。派发状态、原检查的有限状态／决定／原因，以及原人工答案的保存／accepted revision 分别保留，观察字段不是 grant。新检查优先沿实际 dispatch.checkExecutionId 读取，未派发只接受唯一准确候选，不猜最新。独立 prepared-input 与 completed-result digest 防止篡改单侧数据后降为仅人工放行。
 
 观察复核原 Store／Session／Run／attempt／定义／输入／purpose、完整模型结果与原 Artifact proof，不公开原请求、主体、owner、私有上下文或审查全文。历史展示仅跳过当前可变取消标记与重新计算的当前 decision context，以保停止或后续上下文改变后可核对的原决定；这项例外只由只读 observer 显式使用。原 `fact` 授权路径默认仍检查全部当前条件，`getAuthorizationReview`、受理和最终派发不消费观察字段作为资格。
 
-[原授权回归](../../test/isolated/execution/authorization-review.test.ts)核 live、待人工、accepted 与取消后的原决定，并确认同一已取消审查仍不能作为执行证明；[真实 HTTP／Client](../../../../tests/isolated/unified-agent/client-interactions.test.ts)核有限公开投影和未受理的迟到答案。展示与授权分离的理由见[审批观察决定](../../../../.agents/notes/implemented/architecture/2026-10-09-native-approval-observations.md)，当前执行证据范围归[进度](../../../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-09原审批面板与授权观察)。
+[原授权回归](../../test/isolated/execution/authorization-check.test.ts)核 live、待人工、accepted 与取消后的原决定，并确认同一已取消审查仍不能作为执行证明；[真实 HTTP／Client](../../../../tests/isolated/unified-agent/client-interactions.test.ts)核有限公开投影和未受理的迟到答案。展示与授权分离的理由见[审批观察决定](../../../../.agents/notes/implemented/architecture/2026-10-09-native-approval-observations.md)，当前执行证据范围归[进度](../../../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-09原审批面板与授权观察)。
 
 ## Store 关闭未确认时的锁归属
 
@@ -153,7 +153,7 @@ Session 完整原始记录的只读导出与分块文本范围见 [export owner]
 
 begin 取得真实 root OS 锁并登记受限 RunResumeLease。Runtime 按实际 carrier/父 Run 顺序准备全部可信绑定、权限 ceiling 和 record read-set；最终 commit 核完整组摘要和配置后原子交接 planned/continuation frontier、child carrier 与原监督祖先的 generation。已知终态只改变监督所属 epoch，不改变状态、结果 revision、身份或 attempt；未闭合纯 Model 另保存失败结果。Host 先登记原操作，唯一 Loop 再继续；实际 Job 观察、槽位、取消与 Run binding lease 共用正常路径，子超期先结算。
 
-零派发 Tool 已有结算的私有 Auto 审核时，同一 commit 先完整核原 purpose、封存请求、准确来源与 child 关系，再把原 reviewer carrier 和唯一终态 child Model 的 fencing generation 与目标一并交接。原审核 Command、配置、输入、结果、完整输出凭据、ID 和 attempt 不改，不重新调用模型或签发新 grant。active、unknown、取消或来源无法证明的审核不取得交接资格；child Model 身份/代次失真时整项事务回滚。原 `fact` 的目标/carrier/child Model 代次相等及当前授权校验继续执行；审核失败仍按原 unavailable 决定回退人工。真实 CLI/TUI 冷恢复保留原审批与零重放，Store 验证见[原审核交接回归](../../test/isolated/recovery/run-resume-review-ownership.test.ts)。
+零派发 Tool 已有结算的 Auto 检查时，同一恢复 commit 核实准确 `authorization.check` 来源、target、封存输入和终态结果，原检查 Model 与目标一并交接 fencing generation；active、unknown、取消或身份不实不取得接管资格，任一代次失真令整项事务回滚。旧 child 审核保留原 carrier/child/Model 三方核验，不能据命名继承新权限例外。原请求、输出凭据、ID/attempt 与人工决定保持，零新 Model/子会话/授权。[交接回归](../../test/isolated/recovery/run-resume-check-ownership.test.ts)验证真实冷接续。
 
 所有四处具名 Run 创建事务捕获 `context_selection_id`；当前 selection 漂移拒绝恢复。`initialization_state` 持久区分 unstarted／started／completed：任何初始化回调前先登记 started，注册 requirement 结果与 completed 同事务提交，空 refs 也必须完成封存。恢复 completed 复用原 refs，不重跑回调；started 拒绝重放半执行的闭包；unstarted 只有零 Execution 时可进入原初始化入口。
 
@@ -192,11 +192,11 @@ Windows x64／Bun 1.4.2 的真实强杀、原审批、并行结果与完整历�
 
 Host 自动封存 prepare 中 session namespace 的 `records.get/list` 完整原投影摘要和 revision，缺失与分页 absence 也属于最终依赖。getter 随 prepare 结束关闭。Ask、权限和普通 freshness 完成后，只刷新已注册的当前执行组静止谓词，原记录读集与原 `contextRevision` 不替换；`markDispatching` 在原 OwnedWrite 的短事务内重复检查记录与完整组事实。`contextRevision` 绑定全组真实 Session/selection、完整消息和 Part revision，不把本 Action 的 Command/Ask 分配水位当上下文变化。先拒绝非静止组，再拒绝原上下文漂移；重新读到“目前静止”不能批准未在原 prepare 中消费的新历史。原active/pending/unfinished安全域保持8192项有限闭合边界；累计已完成Session/Message/Part不以该数额拒绝。
 
-本 guarded Action 的准确私有 reviewer 可以提供中立审阅上下文，但须已完成真实纯用途闭包：原 sealed request、唯一 completed Run/成功 Model、原两 Command/两完整 Message 及 parts、原 selector、无额外工作或后代。重建审核消息时逐字保留正式 Model producer 已保存的合法 `firstOutput` 等字段，继续核完整 canonical JSON、原正文和消息 parts；缺失或陌生字段不取得资格。`authorizationReviewContextSession` 只在这些条件和原 target 绑定均有效时排除该 Session 的 context 摘要；原完整父子树、全部 group safety、unknown 与最终审批证明仍参与核验。额外 Run/Command/Message/part/selector/后代或正文漂移使排除失效，原 pin 拒绝派发，不重写原 prepare。真实 [reviewer 上下文回归](../../test/isolated/execution/guarded-review-context.test.ts)明确区分实际 Model/Ask 与 owned SQLite 故障注入。
+本 guarded Action 的准确私有 reviewer 可以提供中立审阅上下文，但须已完成真实纯用途闭包：原 sealed request、唯一 completed Run/成功 Model、原两 Command/两完整 Message 及 parts、原 selector、无额外工作或后代。重建审核消息时逐字保留正式 Model producer 已保存的合法 `firstOutput` 等字段，继续核完整 canonical JSON、原正文和消息 parts；缺失或陌生字段不取得资格。`authorizationReviewContextSession` 只在这些条件和原 target 绑定均有效时排除该 Session 的 context 摘要；原完整父子树、全部 group safety、unknown 与最终审批证明仍参与核验。额外 Run/Command/Message/part/selector/后代或正文漂移使排除失效，原 pin 拒绝派发，不重写原 prepare。真实 [reviewer 上下文回归](../../test/isolated/execution/guarded-check-context.test.ts)明确区分实际 Model/Ask 与 owned SQLite 故障注入。
 
 普通空读集不扩大 authority，子 operation 保留父 provenance，但不继承原 Action collector 或 guard 授权。Action 已通过最终原读集核验并进入 adapter 后，合法业务写入可以消费自己的 prepared missing-record；后继 Job 仍核原外部 source 和自身独立权限/read-set，不重新用父的旧 absence 否定父刚完成的合法写入。外部 source 在 Job Ask 后漂移仍在 adapter 前拒绝。普通 Query 缺省绑定实际当前 Store，显式 expectedStoreId 不被替换，缺 subject 的私有读取仍拒绝。
 
-`inheritsActionSource` 沿实际 parent Execution 与 Operation Command 证明同 Store/Session/rootWork/主体的 runless 来源，最多 64 个节点（含当前与原 Action），核每个真实请求、取消边、已派发祖先及原 prepared input。多跳 Tool→Job 仍只继承 provenance，不获得父 collector/guard。唯一未派发父节点例外是 `authorizationReviewSourceTarget` 完整封存的真实 reviewer 与准确 planned target；它不批准 target。链断裂、循环、漂移、65 节点或注入父读集均拒绝，原权限、Ask、freshness、requirements 与控制 revision 继续核验。实际 [来源链回归](../../test/isolated/storage/action-source-inheritance.test.ts)与 [Runtime 审阅回归](../../test/isolated/execution/authorization-review.test.ts)分别负责 Store 负例和真实 Model＋独立人类批准。
+`inheritsActionSource` 沿实际 parent Execution 与 Operation Command 证明同 Store/Session/rootWork/主体的 runless 来源，最多 64 个节点（含当前与原 Action），核每个真实请求、取消边、已派发祖先及原 prepared input。多跳 Tool→Job 仍只继承 provenance，不获得父 collector/guard。唯一未派发父节点例外是 `authorizationReviewSourceTarget` 完整封存的真实 reviewer 与准确 planned target；它不批准 target。链断裂、循环、漂移、65 节点或注入父读集均拒绝，原权限、Ask、freshness、requirements 与控制 revision 继续核验。实际 [来源链回归](../../test/isolated/storage/action-source-inheritance.test.ts)与 [Runtime 审阅回归](../../test/isolated/execution/authorization-check.test.ts)分别负责 Store 负例和真实 Model＋独立人类批准。
 
 原 Action `decision_source_json` 中闭合、宿主创建的 `execution_group_quiescence@1` guard 与原 Store/Command/definition/prepared input 绑定。已提交 dispatching/running carrier 是持久的同 root fence：新 Run、普通 Execution/operation、child 激活、压缩与恢复派发不得跨越；已接受申请仍可留在原队列。Job report 原结果仍可落定，只有实际后继 Run 创建被挡并保留 deferred 申请。取消请求不释放 fence；已知实际终态释放，crash/unknown 和冷读不自动解除。其他 root 独立继续。该边界防止受监督的新效果进入正在执行的 guarded Action 窗口；它不把 SQLite 与外部文件或不合作进程的 I/O 变成原子事务。
 
@@ -206,7 +206,7 @@ Host 自动封存 prepare 中 session namespace 的 `records.get/list` 完整原
 
 新增 immutable readonly source delegation 与上述 live records observer 各有范围：明确 `sourceReads:'declared'` 的可信 rebuild 通过有限准确源声明封存 Execution/Run/Model input/output 和 Artifact refs，读取只能从 current Session/extension 的实际 anchor 打开，不能指定 foreign scope。`openForkSourceProjection` 保留完整 ancestor aliases 与原来源身份；最终 Fork SQL 复核真实 Run/Cmd/Model/Tool、完整请求摘要、namespace/source stamps 和 source-root quiescence。immutable projection 不跟随 Fork 后的 mutable head；来源root的tombstone仍允许存活Fork按原证明读取未清理历史，当前namespace必须未删除，已清理来源拒绝。GC保留存活Fork的完整祖先依赖，ordinary Artifact/foreign readers 没有新授权。最终新文件 [20/313](../../test/isolated/storage/fork-readonly-sources.test.ts) 与此前相邻七文件62/601分别验证，最后深度/全文断言仅新文件重跑。当前合同与持久理由见 [Fork owner](../extensions/fork/README.md)及[封存只读来源 Note](../../../../.agents/notes/implemented/architecture/2026-10-03-sealed-readonly-fork-sources.md)。
 
-私有 reviewer 的完整 ModelOutput 不能由 `response.content` 的 preview 代替。Core 验同一 captured descriptor 的完整 EOF，严格解析答案后将[有限凭据](../authorization-review-output.ts)登记到原 Model execution scope 的不可变 Artifact。`authorization-review.fact` 保留原 purpose、唯一 Run/Model、binding、终态和空 tools 条件，并核当前完整 descriptor 摘要、凭据登记的原 scope/MIME/hash/size、原始全文 hash/bytes，以及 inline 重解析或准确原 carrier Artifact metadata；普通 Extension 的同名 details 不取得这条资格。SQL 不读取 graph／正文文件，冷 proof 不生成凭据或新调用。[实际审阅测试](../../test/isolated/execution/authorization-review-complete-output.test.ts)验证大合法 JSON、独立 Ask、效果一次及 descriptor/答案/登记元数据漂移零目标派发；完整读取、冷 metadata proof 与恢复后的新授权保持各自边界，细节归[输出 owner](../model-output/README.md)。
+私有 reviewer 的完整 ModelOutput 不能由 `response.content` 的 preview 代替。Core 验同一 captured descriptor 的完整 EOF，严格解析答案后将[有限凭据](../authorization-review-output.ts)登记到原 Model execution scope 的不可变 Artifact。`authorization-review.fact` 保留原 purpose、唯一 Run/Model、binding、终态和空 tools 条件，并核当前完整 descriptor 摘要、凭据登记的原 scope/MIME/hash/size、原始全文 hash/bytes，以及 inline 重解析或准确原 carrier Artifact metadata；普通 Extension 的同名 details 不取得这条资格。SQL 不读取 graph／正文文件，冷 proof 不生成凭据或新调用。[实际审阅测试](../../test/isolated/execution/authorization-check-complete-output.test.ts)验证大合法 JSON、独立 Ask、效果一次及 descriptor/答案/登记元数据漂移零目标派发；完整读取、冷 metadata proof 与恢复后的新授权保持各自边界，细节归[输出 owner](../model-output/README.md)。
 
 ## 跨会话原 Job 目录
 
@@ -250,3 +250,6 @@ Host 自动封存 prepare 中 session namespace 的 `records.get/list` 完整原
 ## 会话状态核实与私有恢复边界
 
 [session-reconciliation](sqlite/session-reconciliation.ts)是 `reconcileSession` 的事务 owner，按准确 OS 锁、主体和 generation 结算整个主／子组。0003 只新增私有 `session_reconciliation`，原 checksum 不变，Worker protocol／包内资产同步迁移链。公开历史读保存的中断／未执行／未知事实，显式接续通过 savepoint 叠加与最终 CAS 还原原边界；详细合同和验证归[冷恢复 owner](sqlite/run-resume.README.md#会话恢复时的状态核实)。
+
+
+内部 Model 与通用子 Agent 分开建模：`authorization.check` 和 `session.title` 仅保存原 Session 的准确 Command／无 Run Model，分别由[权限检查](sqlite/authorization-check.ts)与[标题内部模型](sqlite/internal-model.ts)封闭写入。通用 planExecution 仍拒绝任意 runless Model。DB5 的[增量迁移](migrations/0005-authorization-check.sql)事务重建原 execution 约束、复制原行及重建索引／触发器，提交前核外键，失败回滚；不删除或重标旧审核历史。

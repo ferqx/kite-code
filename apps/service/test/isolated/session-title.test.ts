@@ -158,7 +158,25 @@ for (const policy of ['default', 'custom', 'custom-deny-title'] as const)
           return;
         }
         expect(view.session).toMatchObject({ title, controlRevision: '2' });
-        expect(view.executions.filter((execution) => execution.kind === 'model')).toHaveLength(1);
+        expect(view.executions.filter((execution) => execution.kind === 'model')).toHaveLength(2);
+        expect(view.executions.every((execution) => execution.childSessionId === null)).toBe(true);
+        expect(view.runs).toHaveLength(1);
+        const namingExecution = view.executions.find(
+          (execution) => execution.kind === 'model' && execution.runId === null,
+        )!;
+        expect(
+          (await runtime.getCommand(
+            (await store.getExecution(namingExecution.id))!.originCommandId,
+          ))!.kind,
+        ).toBe('session.title');
+        const background = await client.listBackgroundExecutions({
+          storeId: expectedStoreId,
+          rootSessionId: 's',
+        });
+        expect(background.items.every((item) => item.execution.childSessionId === null)).toBe(true);
+        expect(background.items.some((item) => item.execution.id === namingExecution.id)).toBe(
+          false,
+        );
         const directory = await client.listSessionDirectory({
           storeId: expectedStoreId,
           workspaceId: 'w',

@@ -146,7 +146,7 @@ for (const change of ['none', 'policy', 'artifact_bytes'] as const) {
       expect(effects).toBe(0);
       const envelope = card.request as {
         policy: {
-          review: {
+          check: {
             kind: string;
             complete: boolean;
             reference: { id: string; size: string; scope: { kind: 'execution'; id: string } };
@@ -154,9 +154,9 @@ for (const change of ['none', 'policy', 'artifact_bytes'] as const) {
         };
         approvalRequestDigest: string;
       };
-      expect(envelope.policy.review.kind).toBe('artifact');
-      expect(envelope.policy.review.complete).toBe(true);
-      expect(envelope.policy.review.reference.scope).toEqual({
+      expect(envelope.policy.check.kind).toBe('artifact');
+      expect(envelope.policy.check.complete).toBe(true);
+      expect(envelope.policy.check.reference.scope).toEqual({
         kind: 'execution',
         id: card.executionId,
       });
@@ -165,8 +165,8 @@ for (const change of ['none', 'policy', 'artifact_bytes'] as const) {
         expectedStoreId,
         sessionId: 's',
         subjectId: 'owner',
-        refId: envelope.policy.review.reference.id,
-        scope: envelope.policy.review.reference.scope,
+        refId: envelope.policy.check.reference.id,
+        scope: envelope.policy.check.reference.scope,
       });
       const full = JSON.parse(new TextDecoder().decode(body.content)) as {
         input: Json;
@@ -191,10 +191,10 @@ for (const change of ['none', 'policy', 'artifact_bytes'] as const) {
         const secondEnvelope = second.request as typeof envelope;
         expect(second.executionId).not.toBe(card.executionId);
         expect(secondEnvelope.approvalRequestDigest).toBe(envelope.approvalRequestDigest);
-        expect(secondEnvelope.policy.review.reference.id).not.toBe(
-          envelope.policy.review.reference.id,
+        expect(secondEnvelope.policy.check.reference.id).not.toBe(
+          envelope.policy.check.reference.id,
         );
-        expect(secondEnvelope.policy.review.reference.scope.id).toBe(second.executionId);
+        expect(secondEnvelope.policy.check.reference.scope.id).toBe(second.executionId);
         await runtime.answerInteraction({
           expectedStoreId,
           commandId: 'answer-second',

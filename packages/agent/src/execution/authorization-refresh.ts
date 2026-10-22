@@ -11,12 +11,12 @@ export interface RefreshApprovalInput {
   controlReads?: readonly PermissionControlRead[];
 }
 
-export interface InvalidateAuthorizationReviewInput {
+export interface InvalidateAuthorizationCheckInput {
   expectedStoreId: string;
   owner: OwnerRef;
   executionId: string;
-  /** Exact review, or the exact original policy when its in-flight reference is not returned yet. */
-  reviewExecutionId?: string;
+  /** Exact check, or the exact original policy when its in-flight reference is not returned yet. */
+  checkExecutionId?: string;
   previousPolicyRevision: string;
   policyRevision: string;
   controlReads?: readonly PermissionControlRead[];

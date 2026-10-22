@@ -2,6 +2,8 @@
 
 Status: implemented
 
+2026-10-22：本文中自动审核／标题生成使用 child 的承载方式已由[内部模型调用边界](2026-10-22-internal-model-calls-without-child-agents.md)部分替代；原完整正文、准确授权与标题生命周期／CAS理由继续适用。下文相关 child 实现描述解释旧记录。
+
 ## Problem
 
 通用 Agent 的文件、来源和自动审核必须保留有效完整内容。直接把大正文放进有限 Worker 帧，会在真实 Model 调用前把合法输入拒绝；只传摘要或公开 Artifact 引用，又不能证明 Provider 实际读过原内容。自动审核若依赖 Model 自报的输入 hash 或 child 成功文本，还可能把错误来源、损坏附件或未完成的实际调用误当成许可。
@@ -44,7 +46,7 @@ child 的完整大结果以原父 carrier Execution scope 的不可变 Artifact 
 
 这项决定延续[累计额度移除](2026-09-30-run-cumulative-limits-removed.md)中完整内容不受任意本地门槛裁剪的目标，但不复用旧 Kernel/Host ledger、旧格式升级或临时 spool authority。旧 Note 的已实施路径仍仅描述旧执行线；本 Note 不宣称已将其全面替代或退役。
 
-验证入口为[完整正文回归](../../../../packages/agent/test/isolated/model-body/model-body.test.ts)、[Auto 审核回归](../../../../packages/agent/test/isolated/execution/authorization-review.test.ts)、[Files 大正文](../../../../packages/agent/test/isolated/files/large.test.ts)和[默认审核装配](../../../../apps/service/test/isolated/auto-configuration.test.ts)。本机 macOS 的 Body/Artifact/Auto/Files 组合 29 tests、209 assertions 与默认 Auto/permissions 11 tests、137 assertions 通过；完整机制由[正文 owner](../../../../packages/agent/src/model-body/README.md)维护。
+验证入口为[完整正文回归](../../../../packages/agent/test/isolated/model-body/model-body.test.ts)、[Auto 审核回归](../../../../packages/agent/test/isolated/execution/authorization-check.test.ts)、[Files 大正文](../../../../packages/agent/test/isolated/files/large.test.ts)和[默认审核装配](../../../../apps/service/test/isolated/auto-configuration.test.ts)。本机 macOS 的 Body/Artifact/Auto/Files 组合 29 tests、209 assertions 与默认 Auto/permissions 11 tests、137 assertions 通过；完整机制由[正文 owner](../../../../packages/agent/src/model-body/README.md)维护。
 
 完整 JSON/字符串便利 API 仍受真实内存和平台表示能力约束，外部 Provider 的真实窗口仍生效。Worker 登记的大文件调度延迟、其他平台和独立安装资格没有由上述本地固定 Provider 回归证明。后续 [输出 owner](../../../../packages/agent/src/model-output/README.md)的 Core/Body/Inspector/metadata 组合 24/218、实际 17MiB HTTP 1/39、Client 3/31、实际 child carrier/Runtime 9/110、UI/Web DOM 12/100，以及真实 macOS Electron 18MiB 末尾与单次 Provider 证明各自范围。完整附件的实际 DOM 与 paired 输入也已有独立证据，但它们不代替正式 TUI/所有 Native 管理页面或完整发行资格。当前 wire/IPC 有限分块，main、Core、Client 与 renderer 的便利 API 仍可能保留完整 bytes/字符串。
 

@@ -1504,7 +1504,7 @@ nativeTest(
             result: { details: { reason: 'scope rejected by reviewer' } },
             authorization: {
               dispatched: false,
-              review: { decision: 'reject', reason: 'scope rejected by reviewer' },
+              check: { decision: 'reject', reason: 'scope rejected by reviewer' },
             },
           });
           expect((await f.store.getView('s')).runs.at(-1)?.status).toBe('cancelled');

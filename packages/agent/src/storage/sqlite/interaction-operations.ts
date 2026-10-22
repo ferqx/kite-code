@@ -273,8 +273,7 @@ export function verifyInteractionDispatch(
 export function callInteraction(db: SqliteOperations, method: string, args: unknown[]): unknown {
   if (method === 'invalidateAuthorizationReview')
     return db.tx(() => {
-      const input =
-        args[0] as import('../../execution/authorization-refresh').InvalidateAuthorizationReviewInput;
+      const input = args[0] as Parameters<Store['invalidateAuthorizationReview']>[0];
       db.identity(input.expectedStoreId);
       const target = db.row('SELECT * FROM execution WHERE id=?', input.executionId);
       if (!target) throw new AgentError('execution_not_found');

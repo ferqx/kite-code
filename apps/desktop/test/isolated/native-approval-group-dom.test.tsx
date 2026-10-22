@@ -88,7 +88,7 @@ test('one paged card preserves exact decisions, attachment proof, stable child a
   child.request = {
     ...(child.request as object),
     input: {},
-    policy: { review: { kind: 'artifact', complete: true, reference } },
+    policy: { check: { kind: 'artifact', complete: true, reference } },
   };
   const question = { ...approval('question', 'root'), kind: 'question' as const };
   const mcp = { ...approval('mcp', 'root'), request: { kind: 'mcp_source_approval' } };

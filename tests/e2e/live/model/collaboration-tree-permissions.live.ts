@@ -68,7 +68,7 @@ export async function runLiveTreePermissions(
           'original_waiting_leaf',
           'current_root_mode',
           'no_idle_reuse_coverage',
-          'no_auto_review_coverage',
+          'no_auto_check_coverage',
         ]
       : id === 'tree-queued-mode-relax'
         ? ['real_two_children', 'queued_activation_current_mode', 'no_idle_reuse_coverage']
@@ -125,7 +125,7 @@ export async function runLiveTreePermissions(
       const host = createDefaultProcessConfiguration({
         profile,
         userConfigurationPath: configurationPath,
-        authorizationReview: {
+        authorizationCheck: {
           id: 'live.review',
           version: '1',
           modelId: options.modelId,

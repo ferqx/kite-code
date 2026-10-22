@@ -82,11 +82,31 @@ try {
   }
   async function label(text: string) {
     await expandRun();
-    await page.locator('.tool-edit-heading').filter({ hasText: text }).first().waitFor();
+    const heading = page.locator('.tool-edit-heading').filter({ hasText: text }).first();
+    await heading.waitFor();
+    await heading.scrollIntoViewIfNeeded();
+    // A nonzero child box can still be clipped by the expanding Turn. Observe
+    // the actual visible row before taking evidence or advancing its permission gate.
+    await until(
+      () =>
+        heading.evaluate((element) => {
+          const box = element.getBoundingClientRect();
+          let top = Math.max(0, box.top),
+            bottom = Math.min(window.innerHeight, box.bottom);
+          for (let parent = element.parentElement; parent; parent = parent.parentElement) {
+            if (getComputedStyle(parent).overflowY === 'visible') continue;
+            const clip = parent.getBoundingClientRect();
+            top = Math.max(top, clip.top);
+            bottom = Math.min(bottom, clip.bottom);
+          }
+          return box.height > 0 && bottom - top >= box.height - 1;
+        }),
+      Boolean,
+      `original ${text} row is visibly outside animation clipping`,
+    );
   }
   await select('approved');
   assert.equal((await state()).selection!.permissions!.trust.trusted, false);
-  assert.equal(await page.locator('[data-permission-trigger]').isDisabled(), true);
   const toggle = page.getByRole('button', { name: '会话工具', exact: true });
   if ((await toggle.getAttribute('aria-expanded')) !== 'true') await toggle.click();
   await page
@@ -154,20 +174,23 @@ try {
       (value) =>
         value.selection!.executions.some(
           (execution) =>
-            execution.kind === 'tool' && execution.authorization?.review?.status === 'running',
+            execution.kind === 'tool' &&
+            ['dispatching', 'running'].includes(execution.authorization?.check?.status ?? ''),
         ),
       'exact live authorization review',
     );
     const target = pending.selection!.executions.find(
       (execution) =>
-        execution.kind === 'tool' && execution.authorization?.review?.status === 'running',
+        execution.kind === 'tool' &&
+        ['dispatching', 'running'].includes(execution.authorization?.check?.status ?? ''),
     )!;
     assert.equal(target.originStoreId, storeId);
     assert.equal(target.sessionId, id);
     assert.equal(target.authorization!.dispatched, false);
     assert.equal(existsSync(join(home, 'workspace', `auto-${id}.txt`)), false);
-    console.log(JSON.stringify({ stage: 'original_review_observed', id }));
+    console.log(JSON.stringify({ stage: 'original_check_observed', id }));
     await label('正在自动审批');
+    await page.screenshot({ path: join(home, `auto-${id}-checking.png`) });
     if (id === 'stopped') {
       await page.getByRole('button', { name: '停止任务', exact: true }).click();
       await until(
@@ -204,9 +227,10 @@ try {
         assert.equal(card.originStoreId, storeId);
         assert.equal(existsSync(join(home, 'workspace', `auto-${id}.txt`)), false);
         await label('等待人工审批');
+        await page.screenshot({ path: join(home, `auto-${id}-fallback.png`) });
         const reason = waiting.selection!.executions.find(
           (execution) => execution.id === target.id,
-        )!.authorization!.review!.reason;
+        )!.authorization!.check!.reason;
         assert.ok(reason);
         assert.ok(
           (await page
@@ -249,6 +273,7 @@ try {
         readFileSync(join(home, 'workspace', `auto-${id}.txt`), 'utf8'),
         `Actual ${id} effect\r\n雪🙂`,
       );
+    await page.screenshot({ path: join(home, `auto-${id}-finished.png`) });
     records.push({
       id,
       executionId: target.id,

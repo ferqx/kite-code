@@ -499,8 +499,8 @@ export interface PermissionDecision {
     grants?: readonly ('approve_once' | 'same_command')[];
     commandDigest?: string;
   };
-  /** Trusted host classification asks the finite durable reviewer; never itself grants execution. */
-  review?: { request: Json; requireApproval?: boolean };
+  /** Trusted host classification asks the finite durable authorization check; never itself grants execution. */
+  check?: { request: Json; requireApproval?: boolean };
 }
 export interface Permissions {
   /** Trusted owner policy; model/configuration data cannot select this scheduling contract. */

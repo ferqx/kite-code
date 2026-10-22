@@ -237,12 +237,17 @@ test('Trace aggregation preserves Shell disclosure, output following and real st
 
 test('unconfirmed unfinished tools preserve facts and stop queued, running and review activity until held', () => {
   for (const toolName of ['read_file', 'write_file', 'shell_execute', 'task'])
-    for (const status of ['queued', 'running', 'auto_reviewing'] as const) {
+    for (const status of ['queued', 'running', 'auto_checking', 'auto_reviewing'] as const) {
       const original: Message = {
         ...tool('pending', status),
         toolName,
-        ...(status === 'auto_reviewing'
-          ? { approval: { state: 'reviewing', source: 'auto' } as const }
+        ...(status === 'auto_checking' || status === 'auto_reviewing'
+          ? {
+              approval: {
+                state: status === 'auto_checking' ? 'checking' : 'reviewing',
+                source: 'auto',
+              } as const,
+            }
           : {}),
       };
       const render = (messages: Message[]) =>
@@ -268,7 +273,7 @@ test('unconfirmed unfinished tools preserve facts and stop queued, running and r
         expect(held.window.document.body.textContent).not.toContain('执行状态待核实');
         if (status === 'queued')
           expect(held.window.document.body.textContent).toContain('等待执行');
-        if (status === 'auto_reviewing')
+        if (status === 'auto_checking' || status === 'auto_reviewing')
           expect(held.window.document.body.textContent).toContain('正在自动审批');
       } finally {
         held.window.close();

@@ -121,7 +121,7 @@ async function fixture(
           }
         : capability;
     },
-    readReviewContext() {
+    readCheckContext() {
       reviews++;
       return { task: 'explicit task', plan: null, rejectionReasons: [] };
     },
@@ -339,7 +339,7 @@ test('Full does not reuse namesake Model authority for a Tool; Auto without a Co
     await auto.submit();
     const card = await auto.pending();
     expect(card.request).toMatchObject({
-      policy: { mode: 'auto', reason: 'auto_review_unavailable' },
+      policy: { mode: 'auto', reason: 'auto_check_unavailable' },
     });
     expect(auto.effects).toBe(0);
     expect(auto.reviews).toBeGreaterThan(0);

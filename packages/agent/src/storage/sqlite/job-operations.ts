@@ -1,6 +1,7 @@
 import { canonicalJson } from '../../json';
 import type { Store } from '../port';
 import { AgentError, type ExecutionOutputRecord, type OwnerRef } from '../types';
+import { assertCurrentExecutionPurpose } from './child-operations';
 import type { SqliteOperations } from './operations';
 
 const max = 9223372036854775807n;
@@ -44,6 +45,7 @@ export function callJob(
     const input = args[0] as Parameters<Store['markRunning']>[0];
     return db.tx(() => {
       const execution = owned(db, input.expectedStoreId, input.owner, input.executionId);
+      assertCurrentExecutionPurpose(db, execution);
       if (execution.kind !== 'job' || input.reference === null)
         throw new AgentError('invalid_job_reference');
       if (execution.reference_json !== null) {

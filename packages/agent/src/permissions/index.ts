@@ -44,7 +44,7 @@ export interface CapabilityDescription extends CapabilityIdentity {
   /** Trusted builtin record-only operation; never applies to arbitrary/custom Task effects. */
   readonly internalRecordOnly?: true;
 }
-export interface AutoReviewContext {
+export interface AuthorizationCheckContext {
   readonly task: Json;
   readonly plan: Json | null;
   readonly rejectionReasons: readonly string[];
@@ -57,7 +57,9 @@ export interface PermissionPolicyOptions {
     request: AuthorizationRequest,
   ): CapabilityDescription | null | Promise<CapabilityDescription | null>;
   /** Read-only host context. Review execution and its authority stay in Core, never this callback. */
-  readReviewContext?(request: AuthorizationRequest): AutoReviewContext | Promise<AutoReviewContext>;
+  readCheckContext?(
+    request: AuthorizationRequest,
+  ): AuthorizationCheckContext | Promise<AuthorizationCheckContext>;
 }
 const effects = new Set<CapabilityEffect>([
   'read',
@@ -256,8 +258,8 @@ export function createPermissionPolicy(options: PermissionPolicyOptions): Permis
       )
         return { ...controlProof, allowed: true, revision: boundRevision };
       if (policy.mode === 'auto') {
-        const context = options.readReviewContext
-          ? structuredClone(await options.readReviewContext(request))
+        const context = options.readCheckContext
+          ? structuredClone(await options.readCheckContext(request))
           : undefined;
         request.signal.throwIfAborted();
         const { signal: _signal, ...invocation } = request;
@@ -265,8 +267,8 @@ export function createPermissionPolicy(options: PermissionPolicyOptions): Permis
           ...controlProof,
           allowed: false,
           revision: boundRevision,
-          reason: 'auto_review_required',
-          review: {
+          reason: 'auto_check_required',
+          check: {
             request: {
               mode: policy.mode,
               effects: [...description.effects],
@@ -284,7 +286,7 @@ export function createPermissionPolicy(options: PermissionPolicyOptions): Permis
                 }),
             request: {
               mode: policy.mode,
-              reason: 'auto_review_unavailable',
+              reason: 'auto_check_unavailable',
               effects: [...description.effects],
               ...(description.executionScope ? { executionScope: description.executionScope } : {}),
             },
@@ -330,10 +332,10 @@ export {
   taskToolCapability,
   workflowCapabilityDescription,
 } from './capabilities';
+export { createPermissionCheckContextReader } from './check-context';
 export {
   createPlanningPermissionPolicy,
   requireFileRestoreApproval,
   requireWorkflowApproval,
 } from './constraints';
 export { intersectPermissionPolicies } from './inheritance';
-export { createPermissionReviewContextReader } from './review-context';

@@ -92,7 +92,7 @@ function adapterSnapshot(value: ModelAdapterSnapshot): ModelAdapterSnapshot {
   return structuredClone(value);
 }
 export async function captureModelRequestMetadata(
-  scope: ExecutionScope,
+  scope: Pick<ExecutionScope, 'bindings' | 'decisionSources'>,
   model: ModelAdapter,
   request: ModelRequest,
   presented?: ModelRequest,
@@ -252,6 +252,7 @@ export function modelDispatchMetadata(value: Json | null): ModelInputMetadata['a
       'inputDigest',
       'snapshot',
       'controlReads',
+      'checkExecutionId',
       'reviewExecutionId',
       'interactionId',
       'decisionRevision',

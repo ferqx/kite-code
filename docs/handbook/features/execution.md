@@ -100,3 +100,6 @@ Desktop 展示当前及非选中会话的后台 Shell、service 与子 Agent，�
 当前开发版的独立子 Session 工具要求人工审批时，父会话会展示该子工具的待审批卡片；用户只在父会话回答，子工具在父决定持久化并由子 Session 接纳批准后才执行。父会话的订阅更新随真实 revision 推进，批准或拒绝后卡片会结算。子 Session ID 仍不能用于直接回答审批。真实进程重启的待答与父决定已持久化窗口均验证了原子 Session 续轮、子工具恰好一次派发和父结果一次接纳；审批请求、父决定或工具派发证据不完整时仍失败封闭。
 
 [TUI 对话](../clients/tui/guides/conversation.md) · [Web 对话](../clients/web/guides/conversation.md)
+
+
+通用子 Agent 共用同一创建、执行、取消与结果读取机制；code、explore、plan、review 等表示任务类别及可信能力范围，不是另一套 Agent 实现。自动审核与会话标题生成属于内部模型调用，不创建子会话，也不参加子 Agent 生命周期。

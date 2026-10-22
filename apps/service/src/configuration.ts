@@ -43,8 +43,8 @@ import {
   type CapabilityDescription,
   type CapabilityIdentity,
   createDefaultAfterTurnPolicy,
+  createPermissionCheckContextReader,
   createPermissionPolicy,
-  createPermissionReviewContextReader,
   createPlanningPermissionPolicy,
   hostReadOnlyTool,
   intersectPermissionPolicies,
@@ -217,8 +217,8 @@ export function createDefaultProcessConfiguration(options: {
   credentialBackend?: CredentialBackend;
   /** Trusted host policy; configuration files cannot supply permissions or capability grants. */
   permissions?: RuntimeOptions['permissions'];
-  /** Optional trusted reviewer override, also available to runless Actions. JSONC cannot supply it. */
-  authorizationReview?: RuntimeOptions['authorizationReview'];
+  /** Optional trusted authorization checker override, also available to runless Actions. JSONC cannot supply it. */
+  authorizationCheck?: RuntimeOptions['authorizationCheck'];
   /** Programmatic current host policy only; JSONC never grants execution authority. */
   permissionPolicy?: Pick<PermissionPolicyOptions, 'readPolicy'>;
   /** Trusted host business constraints; JSONC selects tools, never these permission/requirement options. */
@@ -1132,7 +1132,7 @@ export function createDefaultProcessConfiguration(options: {
         )
           throw new AgentError('recovery_configuration_changed');
         const model = await resolveModel(selected);
-        const authorizationReview = options.authorizationReview ?? {
+        const authorizationCheck = options.authorizationCheck ?? {
           id: 'builtin.auto',
           version: createHash('sha256')
             .update(
@@ -1250,7 +1250,7 @@ export function createDefaultProcessConfiguration(options: {
         }
         const classifiedPermissions = withInjectedCeiling(
           createPermissionPolicy({
-            readReviewContext: createPermissionReviewContextReader({
+            readCheckContext: createPermissionCheckContextReader({
               readRuntime: () => policyRuntime ?? null,
               subjectId: command.subjectId,
               originStoreId: command.originStoreId,
@@ -1483,7 +1483,7 @@ export function createDefaultProcessConfiguration(options: {
                 ),
               },
             }),
-          authorizationReview,
+          authorizationCheck,
           conditions: planning.conditions,
           initializeRequirements: !hasBusinessInitializer
             ? initializeBusinessRequirements
@@ -1880,11 +1880,8 @@ export function createDefaultProcessConfiguration(options: {
   return {
     ...child,
     sessionInputMetadata: { preserve: (command) => titles.preserveInputFallback(command) },
-    childConfigurations: [...(child.childConfigurations ?? []), titles.childConfiguration],
-    resolveChildRunConfiguration: (input) =>
-      titles.ownsChild(input.configurationId)
-        ? titles.resolveChild(input)
-        : child.resolveChildRunConfiguration!(input),
+    childConfigurations: child.childConfigurations ?? [],
+    resolveChildRunConfiguration: child.resolveChildRunConfiguration,
     skillCatalogue: createDefaultSkillCatalogueSource({
       defaults: configurationDefaults,
       userConfiguration,
@@ -1987,7 +1984,7 @@ export function createDefaultProcessConfiguration(options: {
         throw new AgentError('resource_host_already_bound');
       oauthSerialLocks = locks;
     },
-    ...(options.authorizationReview ? { authorizationReview: options.authorizationReview } : {}),
+    ...(options.authorizationCheck ? { authorizationCheck: options.authorizationCheck } : {}),
     resolveRunConfiguration,
     resolveRecoveryRunConfiguration,
     configurationManagement: (runtime) =>

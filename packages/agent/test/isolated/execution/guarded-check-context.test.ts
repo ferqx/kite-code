@@ -15,7 +15,7 @@ async function eventually<T>(read: () => Promise<T | null>): Promise<T> {
     if (value !== null) return value;
     await Bun.sleep(10);
   }
-  throw new Error('Timed out at original guarded review boundary');
+  throw new Error('Timed out at original guarded check boundary');
 }
 
 async function fixture() {
@@ -35,10 +35,10 @@ async function fixture() {
     ]),
     modelId: 'ordinary',
     modelConcurrency: 1,
-    authorizationReview: {
-      id: 'reviewer',
+    authorizationCheck: {
+      id: 'checker',
       version: '1',
-      modelId: 'review-model',
+      modelId: 'check-model',
       model: {
         async *stream(input) {
           expect(input.tools).toEqual([]);
@@ -59,7 +59,7 @@ async function fixture() {
           ? {
               allowed: false,
               revision: 'p1',
-              review: { request: { task: 'guarded' }, requireApproval: true },
+              check: { request: { task: 'guarded' }, requireApproval: true },
             }
           : { allowed: true, revision: 'trusted' };
       },
@@ -119,7 +119,9 @@ async function fixture() {
   const target = (await store.listExecutions('s')).find(
     (item) => item.definitionId === 'fixture/guarded',
   )!;
-  const carrier = (await store.listExecutions('s')).find((item) => item.childSessionId)!;
+  const carrier = (await store.listExecutions('s')).find(
+    (item) => item.kind === 'model' && item.runId === null,
+  )!;
   const clone = (
     table: 'session' | 'message' | 'run' | 'command',
     id: string,
@@ -198,7 +200,7 @@ for (const mutation of [
   'selector',
   'unrelated_child',
 ] as const)
-  test(`real reviewer does not wash away ${mutation} context drift (owned SQLite fault)`, async () => {
+  test(`real checker does not wash away ${mutation} context drift (owned SQLite fault)`, async () => {
     const f = await fixture();
     try {
       expect(f.effects()).toBe(0);
@@ -224,9 +226,10 @@ for (const mutation of [
       if (mutation === 'selector')
         f.db.run("UPDATE session SET context_selection_id='owned-drift' WHERE id='s'");
       if (mutation === 'unrelated_child')
-        f.clone('session', f.carrier.childSessionId!, {
+        f.clone('session', 's', {
           id: 'ordinary-child',
           title: 'Owned unrelated child fault',
+          parent_id: 's',
         });
       await f.answer(await f.ask());
       await f.rejected();
@@ -236,77 +239,61 @@ for (const mutation of [
   }, 10000);
 
 for (const mutation of [
-  'extra_review_run',
-  'extra_review_message',
-  'extra_review_command',
-  'review_selector',
-  'extra_review_part',
-  'review_part_content',
-  'review_descendant',
-  'unknown_reviewer',
+  'model_kind',
+  'model_run',
+  'model_child_session',
+  'model_child_configuration',
+  'check_command',
+  'check_command_status',
+  'check_command_scope',
+  'check_command_extension',
+  'check_input',
+  'unknown_checker',
   'cancel_target',
 ] as const)
-  test(`real review and Ask cannot dispatch after ${mutation} proof drift (owned SQLite fault)`, async () => {
+  test(`direct permission check and Ask cannot dispatch after ${mutation} proof drift`, async () => {
     const f = await fixture();
     try {
       const interaction = await f.ask();
-      expect((await f.store.getExecution(f.carrier.id))!.status).toBe('succeeded');
-      if (mutation === 'extra_review_run') {
-        const reference = {
-          expectedStoreId: f.base.expectedStoreId,
-          targetExecutionId: f.target.id,
-          reviewExecutionId: f.carrier.id,
-          policyRevision: 'p1',
-          request: { task: 'guarded' },
-          requireApproval: true,
-          reviewer: { id: 'reviewer', version: '1', modelId: 'review-model' },
-        };
-        expect((await f.store.getAuthorizationReview(reference)).decision).toBe('approve_once');
-        const run = (await f.store.getView(f.carrier.childSessionId!)).runs[0]!;
-        // Copying this row is an integrity fault, not a second actual completed Model.
-        f.clone('command', run.originCommandId, { id: 'extra-review-origin', seq: 999 });
-        f.clone('run', run.id, {
-          id: 'extra-review-run',
-          origin_command_id: 'extra-review-origin',
-        });
-        expect((await f.store.getAuthorizationReview(reference)).decision).toBe('unavailable');
-      }
-      if (mutation === 'extra_review_message') {
-        const message = f.db
-          .query('SELECT id FROM message WHERE session_id=? ORDER BY seq LIMIT 1')
-          .get(f.carrier.childSessionId!) as { id: string };
-        f.clone('message', message.id, { id: 'extra-review-message', seq: 999 });
-      }
-      if (mutation === 'extra_review_command') {
-        f.clone('command', `child-create-${f.carrier.id}`, {
-          id: 'extra-review-command',
-          seq: 999,
-        });
-      }
-      if (mutation === 'review_selector') {
-        f.db.run("UPDATE session SET context_selection_id='extra-review-selector' WHERE id=?", [
-          f.carrier.childSessionId!,
+      expect((await f.store.getExecution(f.carrier.id))!).toMatchObject({
+        kind: 'model',
+        status: 'succeeded',
+        runId: null,
+        childSessionId: null,
+        parentExecutionId: f.target.id,
+      });
+      expect(
+        (await f.store.listExecutions('s')).every((item) => item.childSessionId === null),
+      ).toBe(true);
+      if (mutation === 'model_kind')
+        f.db.run("UPDATE execution SET kind='job' WHERE id=?", [f.carrier.id]);
+      if (mutation === 'model_run')
+        f.db.run(
+          "UPDATE execution SET run_id=(SELECT id FROM run WHERE session_id='s' LIMIT 1) WHERE id=?",
+          [f.carrier.id],
+        );
+      if (mutation === 'model_child_session')
+        f.db.run("UPDATE execution SET child_session_id='s' WHERE id=?", [f.carrier.id]);
+      if (mutation === 'model_child_configuration')
+        f.db.run("UPDATE execution SET child_configuration_json='{}' WHERE id=?", [f.carrier.id]);
+      if (mutation === 'check_command')
+        f.db.run('UPDATE command SET request_digest=? WHERE id=?', [
+          '0'.repeat(64),
+          f.carrier.originCommandId,
         ]);
-      }
-      if (mutation === 'extra_review_part') {
-        f.db.run(
-          'INSERT INTO message_part(message_id,ordinal,kind,content_version,revision,json) SELECT message_id,1,kind,content_version,revision,json FROM message_part WHERE message_id=(SELECT id FROM message WHERE session_id=? ORDER BY seq LIMIT 1)',
-          [f.carrier.childSessionId!],
-        );
-      }
-      if (mutation === 'review_part_content') {
-        f.db.run(
-          "UPDATE message_part SET json='{}',revision=revision+1 WHERE message_id IN (SELECT id FROM message WHERE session_id=?)",
-          [f.carrier.childSessionId!],
-        );
-      }
-      if (mutation === 'review_descendant') {
-        f.clone('session', f.carrier.childSessionId!, {
-          id: 'extra-review-descendant',
-          parent_id: f.carrier.childSessionId!,
-        });
-      }
-      if (mutation === 'unknown_reviewer') {
+      if (mutation === 'check_command_status')
+        f.db.run("UPDATE command SET status='rejected' WHERE id=?", [f.carrier.originCommandId]);
+      if (mutation === 'check_command_scope')
+        f.db.run("UPDATE command SET scope_id='foreign-session' WHERE id=?", [
+          f.carrier.originCommandId,
+        ]);
+      if (mutation === 'check_command_extension')
+        f.db.run("UPDATE command SET extension_id='ordinary-extension' WHERE id=?", [
+          f.carrier.originCommandId,
+        ]);
+      if (mutation === 'check_input')
+        f.db.run("UPDATE execution SET intent_json='{}' WHERE id=?", [f.carrier.id]);
+      if (mutation === 'unknown_checker') {
         f.db.run("UPDATE execution SET state='outcome_unknown' WHERE id=?", [f.carrier.id]);
         const safety = await f.store.readExecutionGroupSafety({
           ...f.base,

@@ -10,7 +10,7 @@ export type SchemaVersion = {
   migrations: { id: string; checksum: string; sql: string }[];
 };
 const cache = new Map<string, SchemaVersion[]>();
-/** Closed, explicitly supported additive schema versions; no arbitrary migration discovery. */
+/** Closed, explicitly supported reviewed schema versions; no arbitrary migration discovery. */
 export function supportedSchemas(
   baseline = new URL('../migrations/0001-baseline.sql', import.meta.url),
 ): SchemaVersion[] {
@@ -25,6 +25,7 @@ export function supportedSchemas(
       '0002-recovery-audit',
       '0003-session-reconciliation',
       '0004-pending-input-order',
+      '0005-authorization-check',
     ]) {
       const sql = readFileSync(new URL(`./${id}.sql`, baseline), 'utf8');
       const checksum = createHash('sha256').update(sql).digest('hex');

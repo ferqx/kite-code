@@ -44,6 +44,8 @@ export interface Message {
   readonly turnTerminalStatus?: 'completed' | 'failed' | 'cancelled' | 'aborted';
   readonly approval?: {
     readonly state:
+      | 'checking'
+      /** Historical presentation only; current adapters emit checking. */
       | 'reviewing'
       | 'awaiting_user'
       | 'approved'
@@ -109,6 +111,8 @@ export interface Message {
     | 'queued'
     | 'running'
     | 'waiting'
+    | 'auto_checking'
+    /** Historical presentation only. */
     | 'auto_reviewing'
     | 'completed'
     | 'interrupted'

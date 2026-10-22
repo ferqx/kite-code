@@ -138,7 +138,7 @@ for (const change of [
   'revision',
   'deny_same_revision',
   'approval_same_revision',
-  'review_same_revision',
+  'check_same_revision',
   'none',
 ] as const) {
   test(`information acceptance rechecks bound permissions: ${change}`, async () => {
@@ -155,7 +155,7 @@ for (const change of [
           revision: 'policy-1',
           ...(change === 'approval_same_revision'
             ? { approval: { request: { title: 'new approval' } } }
-            : { review: { request: { title: 'new review' } } }),
+            : { check: { request: { title: 'new review' } } }),
         };
       },
     };

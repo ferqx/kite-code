@@ -945,6 +945,61 @@ test('MCP resource references require the exact source receipt while resource co
     ).resourceReferences,
   ).toBeUndefined();
 });
+for (const field of ['check', 'review'] as const)
+  for (const status of ['planned', 'dispatching', 'running'] as const)
+    test(`child projection reads ${field} ${status} as an automatic check without adding a child`, () => {
+      const parent = execution('task', {
+        definitionId: 'builtin.task/task.spawn',
+        toolInput: { preset: 'review', prompt: 'Inspect the actual change' },
+      });
+      const carrier = execution('carrier', {
+        kind: 'job',
+        runId: null,
+        definitionId: 'agent/worker',
+        parentExecutionId: parent.id,
+        childSessionId: 'child',
+        status: 'running',
+      });
+      const childTool = execution('child-tool', {
+        sessionId: 'child',
+        status: 'planned',
+        authorization: {
+          dispatched: false,
+          [field]: {
+            executionId: 'internal-check',
+            status,
+            decision: 'unavailable',
+            reason: 'exact operation',
+            requireApproval: false,
+          },
+        },
+      });
+      const internalCheck = execution('internal-check', {
+        sessionId: 'child',
+        runId: null,
+        kind: 'model',
+        definitionId: 'checker-model',
+        status,
+        parentExecutionId: childTool.id,
+      });
+      const child = view('child', {
+        executions: [childTool, internalCheck],
+        runs: [{ ...view().runs[0]!, sessionId: 'child', originCommandId: 'child-start-carrier' }],
+      });
+      const facts = {
+        ...snapshot([parent, carrier]),
+        childViews: [{ executionId: carrier.id, view: child }],
+      };
+      expect(projectInkChild(carrier, facts)).toMatchObject({
+        role: 'review',
+        awaitingApproval: true,
+        approvalState: status === 'planned' ? 'queued_auto_check' : 'auto_checking',
+        steps: [{ stepId: childTool.id }],
+      });
+      expect(projectInkChild(internalCheck, facts)).toBeUndefined();
+      expect(projectInkChild(carrier, facts)?.steps).toHaveLength(1);
+    });
+
 test('child display uses its actual input name and dispatch duration without fabricating missing timing', () => {
   const parent = execution('named-task', {
     definitionId: 'builtin.task/task',

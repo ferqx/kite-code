@@ -15,6 +15,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { createArtifactStore } from '../../../src/artifacts';
 import { createRuntime } from '../../../src/runtime';
 import { openSqliteStore } from '../../../src/sqlite';
+import type { Json } from '../../../src/storage';
 
 type ExecutionRow = {
   id: string;
@@ -25,7 +26,7 @@ type ExecutionRow = {
   dispatched: number;
 };
 
-// Executed in a separate process so the cold Store contains a real, settled reviewer,
+// Executed in a separate process so the cold Store contains a real, settled checker,
 // while the original business Run genuinely loses its owner without cancellation.
 async function seed(root: string, failed: boolean) {
   const profile = { dataRoot: join(root, 'data'), profile: 'test' };
@@ -51,10 +52,10 @@ async function seed(root: string, failed: boolean) {
         yield { ...finish, reason: 'tool_calls' as const };
       },
     },
-    authorizationReview: {
-      id: 'reviewer',
+    authorizationCheck: {
+      id: 'checker',
       version: '1',
-      modelId: 'review',
+      modelId: 'permission-check',
       model: {
         async *stream(input) {
           if (input.tools.length) throw Error('review_tools_present');
@@ -73,7 +74,7 @@ async function seed(root: string, failed: boolean) {
           ? {
               allowed: false,
               revision: 'p1',
-              review: { request: { definitionId: 'effect', input: { value: 'exact' } } },
+              check: { request: { definitionId: 'effect', input: { value: 'exact' } } },
             }
           : { allowed: true, revision: 'trusted' };
       },
@@ -112,7 +113,7 @@ async function seed(root: string, failed: boolean) {
     ...base,
     commandId: 'create',
     workspaceId: 'w',
-    title: 'review ownership',
+    title: 'check ownership',
   });
   await runtime.submitCommand({
     ...base,
@@ -124,7 +125,7 @@ async function seed(root: string, failed: boolean) {
     !(await runtime.listInteractions({ expectedStoreId, sessionId: 's', state: 'pending' }))
       .interactions.length
   ) {
-    if (Date.now() > end) throw Error('review_fixture_timeout');
+    if (Date.now() > end) throw Error('check_fixture_timeout');
     await Bun.sleep(5);
   }
   writeFileSync(join(root, 'ready.tmp'), expectedStoreId);
@@ -171,21 +172,31 @@ async function fixture(failed: boolean) {
       .query("SELECT * FROM execution WHERE adapter_id='effect'")
       .get() as ExecutionRow;
     const carrier = db
-      .query("SELECT * FROM execution WHERE parent_execution_id=? AND kind='job'")
+      .query(
+        "SELECT * FROM execution WHERE parent_execution_id=? AND kind='model' AND run_id IS NULL",
+      )
       .get(target.id) as ExecutionRow;
-    const model = db
-      .query("SELECT * FROM execution WHERE parent_execution_id=? AND kind='model'")
-      .get(carrier.id) as ExecutionRow;
-    const payload = JSON.parse(carrier.intent_json);
+    const model = carrier;
+    const payload = (
+      (await store.getCommand((await store.getExecution(carrier.id))!.originCommandId))!
+        .request as {
+        input: {
+          policyRevision: string;
+          request: Json;
+          requireApproval: boolean;
+          checker: { id: string; version: string; modelId: string };
+        };
+      }
+    ).input;
     const proof = () =>
-      ownedStore.getAuthorizationReview({
+      ownedStore.getAuthorizationCheck({
         expectedStoreId,
         targetExecutionId: target.id,
-        reviewExecutionId: carrier.id,
+        checkExecutionId: carrier.id,
         policyRevision: payload.policyRevision,
         request: payload.request,
         requireApproval: payload.requireApproval,
-        reviewer: payload.reviewer,
+        checker: payload.checker,
       });
     const original = {
       expectedStoreId,
@@ -262,7 +273,7 @@ async function fixture(failed: boolean) {
     } catch (receiptError) {
       cleanupErrors.push(receiptError);
     }
-    console.error('review_owner_fixture_failed', root);
+    console.error('check_owner_fixture_failed', root);
     if (cleanupErrors.length)
       throw new AggregateError(
         [error, ...cleanupErrors],
@@ -273,7 +284,7 @@ async function fixture(failed: boolean) {
 }
 
 for (const failed of [false, true])
-  test(`cold resume transfers only settled ${failed ? 'failed/unavailable' : 'ask_user'} reviewer ownership without rewriting proof`, async () => {
+  test(`cold resume transfers only settled ${failed ? 'failed/unavailable' : 'ask_user'} permission-check ownership without rewriting proof`, async () => {
     const f = await fixture(failed);
     try {
       expect(f.target.state).toBe('planned');
@@ -295,10 +306,10 @@ for (const failed of [false, true])
       expect(unchanged()).toEqual(before);
       expect(
         f.db
-          .query('SELECT id,owner_generation FROM execution WHERE id IN (?,?,?) ORDER BY id')
-          .all(f.target.id, f.carrier.id, f.model.id),
+          .query('SELECT id,owner_generation FROM execution WHERE id IN (?,?) ORDER BY id')
+          .all(f.target.id, f.carrier.id),
       ).toEqual(
-        [f.target.id, f.carrier.id, f.model.id]
+        [f.target.id, f.carrier.id]
           .sort()
           .map((id) => ({ id, owner_generation: Number(f.lease.generation) })),
       );
@@ -321,10 +332,10 @@ for (const failed of [false, true])
     }
   }, 10000);
 
-test('explicit stale reviewer Model generation rejects the entire commit without partial target/carrier adoption', async () => {
+test('explicit stale permission-check Model generation rejects the entire commit without partial target/carrier adoption', async () => {
   const f = await fixture(false);
   try {
-    // Fault injection is intentionally confined to the reviewer child identity.
+    // Fault injection is intentionally confined to the independent permission-check identity.
     f.db.query('UPDATE execution SET owner_generation=999 WHERE id=?').run(f.model.id);
     const snapshot = () => ({
       executions: f.db
@@ -338,7 +349,7 @@ test('explicit stale reviewer Model generation rejects the entire commit without
     });
     const before = snapshot();
     const error = await f.commit().catch((error: unknown) => error);
-    expect(error).toMatchObject({ code: 'authorization_review_unverifiable' });
+    expect(error).toMatchObject({ code: 'authorization_check_unverifiable' });
     expect(snapshot()).toEqual(before);
   } finally {
     await f.close();

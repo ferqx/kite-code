@@ -273,7 +273,7 @@ export async function runLiveTuiTwoRoundWindow(options: WindowOptions) {
     const host = createDefaultProcessConfiguration({
       profile,
       userConfigurationPath: configPath,
-      authorizationReview: {
+      authorizationCheck: {
         id: 'live.review',
         version: '1',
         modelId: options.modelId,

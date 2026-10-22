@@ -15,7 +15,7 @@ const finish: Extract<ModelEvent, { type: 'finish' }> = {
   reason: 'stop',
   usage: { inputTokens: 1, outputTokens: 1 },
 };
-test('more than a thousand sequential children and reviewers reuse one hot slot after failure and cancellation', async () => {
+test('more than a thousand sequential children and independent authorization checks reuse one hot slot after failure and cancellation', async () => {
   const root = mkdtempSync(join(tmpdir(), 'kite-child-history-'));
   const profile = { dataRoot: root, profile: 'test' };
   const store = await openSqliteStore(profile);
@@ -72,12 +72,12 @@ test('more than a thousand sequential children and reviewers reuse one hot slot 
           ? {
               allowed: false,
               revision: 'owned',
-              review: { request: { task: 'Exact child effect' } },
+              check: { request: { task: 'Exact child effect' } },
             }
           : { allowed: true, revision: 'owned' };
       },
     },
-    authorizationReview: {
+    authorizationCheck: {
       id: 'reviewer',
       version: '1',
       modelId: 'review-model',
@@ -220,7 +220,7 @@ test('more than a thousand sequential children and reviewers reuse one hot slot 
     db = new Database(join(root, 'test', 'core.db'));
     expect(
       (db.query("SELECT count(*) AS n FROM session WHERE root_id='s'").get() as { n: number }).n,
-    ).toBe(2005);
+    ).toBe(1004);
     expect(
       (
         db.query("SELECT count(*) AS n FROM run WHERE session_id<>'s' AND is_active=1").get() as {

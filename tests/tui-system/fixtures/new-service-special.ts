@@ -301,9 +301,9 @@ const options: ProcessServiceOptions = {
                       request.kind === 'tool' &&
                       target?.runId === request.runId &&
                       target.sessionId === request.sessionId &&
-                      (decision.approval || decision.review)
+                      (decision.approval || decision.check)
                     ) {
-                      const { approval: _approval, review: _review, ...original } = decision;
+                      const { approval: _approval, check: _check, ...original } = decision;
                       return {
                         ...original,
                         allowed: true,

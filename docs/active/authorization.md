@@ -2,7 +2,7 @@
 
 状态：active
 读取时机：修改授权逻辑、安全审计、CLI/TUI 授权入口变更时
-验证：`bun test packages/agent/test/isolated/permissions/policy.test.ts apps/service/test/isolated/shell-configuration.test.ts apps/service/test/isolated/web-permissions.test.ts packages/agent/test/isolated/execution/authorization-review.test.ts`；旧 Kernel/SAQ 对应验证继续保留 `bun test packages/agent-kernel/test packages/builtin-runtime/test packages/runtime-host/test tests/runtime tests/policies`
+验证：`bun test packages/agent/test/isolated/permissions/policy.test.ts apps/service/test/isolated/shell-configuration.test.ts apps/service/test/isolated/web-permissions.test.ts packages/agent/test/isolated/execution/authorization-check.test.ts`；旧 Kernel/SAQ 对应验证继续保留 `bun test packages/agent-kernel/test packages/builtin-runtime/test packages/runtime-host/test tests/runtime tests/policies`
 
 相关：[Agent Note 0118](../../.agents/notes/implemented/feature/2026-08-18-trusted-workspace-unrestricted-file-access.md)、[Agent Note 0119](../../.agents/notes/implemented/bug-fix/2026-08-18-acknowledged-host-shell-availability-fallback.md)、[Agent Note 0131](../../.agents/notes/implemented/simplification/2026-08-24-whole-workspace-sandbox-admission.md)、[Agent Note 0132](../../.agents/notes/implemented/feature/2026-08-24-sensitive-external-paths-use-exact-approval.md)、[Agent Note 0133](../../.agents/notes/implemented/feature/2026-08-24-mode-aware-sensitive-external-authorization.md)、[Agent Note 0137](../../.agents/notes/implemented/bug-fix/2026-08-25-shell-sandbox-durable-approval-queue.md)、[Agent Note 0138](../../.agents/notes/implemented/simplification/2026-08-25-silent-session-format-compatibility.md)、[Agent Note 0189](../../.agents/notes/implemented/bug-fix/2026-09-17-auto-review-uncertain-shell.md)、
 `tool-gated-autonomy.md`、`cancel-resume-cleanup.md`、`plan-mode-implementation.md`。
@@ -11,17 +11,17 @@
 
 三策略与 Shell 命令分析由 [Agent 独立权限模块](../../packages/agent/src/permissions/README.md)负责，正式宿主通过 `@kite-ai/agent/permissions` 与 `/permissions/shell` 装配。Service 保留接口、身份核对和当前宿主事实读取，不解释 Shell AST、签发命令摘要或实现模式分支；执行接纳、真实审核与最终控制 revision 复核仍归原 Core。模块与解析依赖 owner 的迁移不改变已有审批、恢复或系统沙箱合同。
 
-正式 Service/Client 经唯一 Agent 的原权限、人工/模型交互和最终 dispatch 事务执行。界面三策略为 `accept_edits` 请求批准、`auto` 自动审核、`full` 完全访问；正式类型、HTTP/IPC、持久控制和调用者均已退役 raw `ask`，旧输入/控制记录失败关闭，不映射为其他模式。正式 Shell 的范围请求与 `web_fetch` network 描述均经该链，固定危险拒绝先于所有模式；Scope 来自可信宿主描述与最终接纳快照，调用输入不能签发 grant。原审核拒绝原因由公共 Execution 的 authorization.review 与 Tool result.details.reason 保存，TUI 结果读取和 Native 原回执可展示，私有适配器错误正文不进入该 reason。实际产品、owner 与验证归[手册](../handbook/features/tools-and-approvals.md)、[Service](../../apps/service/README.md#默认-shell-装配)与[切片](../plans/shell-permission-scopes.md)。
+正式 Service/Client 经唯一 Agent 的原权限、人工/模型交互和最终 dispatch 事务执行。界面三策略为 `accept_edits` 请求批准、`auto` 自动审核、`full` 完全访问；正式类型、HTTP/IPC、持久控制和调用者均已退役 raw `ask`，旧输入/控制记录失败关闭，不映射为其他模式。正式 Shell 的范围请求与 `web_fetch` network 描述均经该链，固定危险拒绝先于所有模式；Scope 来自可信宿主描述与最终接纳快照，调用输入不能签发 grant。原审核拒绝原因由公共 Execution 的 `authorization.check`（旧记录为 `authorization.review`）与 Tool `result.details.reason` 保存，TUI 结果读取和 Native 原回执可展示，私有适配器错误正文不进入该 reason。实际产品、owner 与验证归[手册](../handbook/features/tools-and-approvals.md)、[Service](../../apps/service/README.md#默认-shell-装配)与[切片](../plans/shell-permission-scopes.md)。
 
-准确同 Store 原 Run 显式接续中，可核实的已结算私有审核 fencing 与零派发目标在同一事务交接；原回执、请求、输出凭据和独立人工审批保持，不生成新授权或重复审核。目标、carrier、唯一 child Model 的代次相等和当前权限仍是派发门禁，身份失真整项回滚；边界归[Store owner](../../packages/agent/src/storage/README.md#原-active-run-的显式恢复)。
+准确同 Store 原 Run 显式接续中，可核实的已结算私有审核 fencing 与零派发目标在同一事务交接；原回执、请求、输出凭据和独立人工审批保持，不生成新授权或重复审核。新检查的原目标、检查 Model 及当前权限仍须核对准确代次和封存绑定；旧审核历史另外核原 carrier／唯一 child Model 的相等代次与原闭包。身份失真整项回滚，冷记录不创建新检查；边界归[Store owner](../../packages/agent/src/storage/README.md#原-active-run-的显式恢复)。
 
-同一根会话下，child/grandchild 的工具审批模式动态读取根当前 applied `permission.mode` 与 revision，不冻结为创建时父模式。默认和可信注入的 child policy 都与当前根策略及原 capability ceiling 相交；局部根变更不修改其他根或用户默认。真实 `accept_edits/auto/full` 双向变化会唤醒原人工审批、自动 review、资源等待和未派发队列，准确原动作按新策略重新判断。Full 不能解除只读预设、工具交集、信任、明确拒绝/取消、工作控制和 unknown fence。
+同一根会话下，child/grandchild 的工具审批模式动态读取根当前 applied `permission.mode` 与 revision，不冻结为创建时父模式。默认和可信注入的 child policy 都与当前根策略及原 capability ceiling 相交；局部根变更不修改其他根或用户默认。真实 `accept_edits/auto/full` 双向变化会唤醒原人工审批、自动权限检查、资源等待和未派发队列，准确原动作按新策略重新判断。Full 不能解除只读预设、工具交集、信任、明确拒绝/取消、工作控制和 unknown fence。
 
 Service 注入 `permissions`／`permissionPolicy` 时仍允许用户通过原 HTTP 控制修改根模式；注入只保留能力、信任、硬拒绝与明确人工要求上限，原宿主拥有的 trust／grants 管理边界不随模式入口开放。TUI／Desktop 仅将合法 applied 控制事件作为重读信号，按实际 Store、根 Session、Workspace 及明确 default 变更更新显示；首次子视图读取、在途保存和切会话的晚回包分别保留作用域与读取代次，事件正文或显示缓存不签发授权。TUI 的 Ctrl+P 可在问卷中打开权限面板，原答案和步骤保持，字面 slash 文本仍是回答。
 
 Native 普通工具审批采用输入组件上方的单卡分页，根和子待批均保留 Composer／模式入口；切 Auto／Full 仍通过原持久模式和最终 dispatch read-set 重判，不由移除卡片模拟执行。主名称隐藏、子名称与稳定彩色图标只作展示，不改变准确来源 Session／Run／Interaction。分体菜单“本次会话批准”只提交原卡实际提供的 `same_command`，不扩大为所有工具授权；紧凑附件仍须完整 EOF／hash／UTF-8 核对才有回答能力。问答、计划和 MCP 特殊授权保持独立门禁。排队消息的撤回／编辑／调序只影响尚未消费的输入，不授予工具权限、不取消已执行效果，准确跨层 authority 见[执行边界](unified-agent-boundary.md)与[Native owner](../../apps/desktop/README.md#原审批面板与授权观察)。
 
-最终 `markDispatching` 重读原根 applied revision，已获但未消费的一次性/同命令批准及 review proof 仍须按当前策略重判；旧 revision 不能直通，也不能借兄弟或新轮批准。旧人工卡以独立准确失效事实收束，原 request/answer 保留，不伪造用户答复；迟到旧答案或 review 不改变新轮，已派发效果保留原事实。模式写入响应丢失查原控制回执，当前策略无法读取时阻挡新效果，冷只读不执行。运行中双向竞争、三层可信注入、旧 grant/review 与资源等待由[真实模式测试](../../packages/agent/test/isolated/execution/live-permission-mode.test.ts)覆盖；[物理强杀](../../packages/agent/test/isolated/recovery/live-approval-crash.test.ts)核待批崩溃、冷读零 Provider、当前 revision 显式接续及一次效果。合成 effect、真实策略、原生工具和实际客户端范围分别由 owner 记录，不将一种证据推广为全部平台资格。
+最终 `markDispatching` 重读原根 applied revision，已获但未消费的一次性/同命令批准及权限检查 proof 仍须按当前策略重判；旧 revision 不能直通，也不能借兄弟或新轮批准。旧人工卡以独立准确失效事实收束，原 request/answer 保留，不伪造用户答复；迟到旧答案或检查结果不改变新轮，已派发效果保留原事实。模式写入响应丢失查原控制回执，当前策略无法读取时阻挡新效果，冷只读不执行。运行中双向竞争、三层可信注入、旧 grant／检查 proof 与资源等待由[真实模式测试](../../packages/agent/test/isolated/execution/live-permission-mode.test.ts)覆盖；[物理强杀](../../packages/agent/test/isolated/recovery/live-approval-crash.test.ts)核待批崩溃、冷读零 Provider、当前 revision 显式接续及一次效果。合成 effect、真实策略、原生工具和实际客户端范围分别由 owner 记录，不将一种证据推广为全部平台资格。
 
 下面保留旧 Kernel/SAQ 实现及仍适用理由，不据旧模式/State 推导新正式执行范围。RSS、完整观测、Windows Shell 及平台资格未因本次迁移退出。
 
@@ -298,3 +298,8 @@ bun test packages/runtime-host/test/policies/authorization-elevation.test.ts pac
 - Session grant key 的 workspace/cwd/executor/env/scope/effects/revision 任一变化都会失配
 - 各 source 值正确传播到 state 和 grant 记录
 > 路径同步：Host state adapter 已使用无版本文件名，Runtime State 仅作为当前持久格式 metadata 名称。
+
+
+## 内部权限检查与子 Agent 边界
+
+自动审核统一命名 `authorization.check`／`authorizationCheck`，由权限系统保存原会话中的一次无 Run Model，不创建 child Session、Run 或子任务 carrier。最终派发核原 target／attempt／定义／input/source／policy/controlReads，以及准确请求与完整结果，强制人工要求继续保留双 proof。标题生成同属内部模型调用，记录为 `session.title`。 原标题 Model 的宿主与已解析 policy ceiling 仍须共同通过；准确用途不提供绕过权限的许可，资源等待后的当前控制和最终 SQL 证明继续独立核实。通用子 Agent 只以类别配置差异，`review` 只表示代码审查类别。旧 `authorization.review` 原记录与凭据只读保留，冷重开不重跑旧审核；[边界决定](../../.agents/notes/implemented/architecture/2026-10-22-internal-model-calls-without-child-agents.md)解释迁移理由。

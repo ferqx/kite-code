@@ -230,7 +230,7 @@ export function TuiFooter({
   const permission = facts.permissionMode
     ? (language === 'zh-CN'
         ? { accept_edits: '请求批准', auto: '自动审核', full: '完全访问' }
-        : { accept_edits: 'Request approval', auto: 'Automatic review', full: 'Full access' })[
+        : { accept_edits: 'Request approval', auto: 'Automatic check', full: 'Full access' })[
         facts.permissionMode
       ]
     : undefined;

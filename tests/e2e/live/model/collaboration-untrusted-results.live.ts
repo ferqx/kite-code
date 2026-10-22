@@ -208,7 +208,7 @@ export async function runLiveUntrustedResults(options: Options): Promise<{ cases
       const host = createDefaultProcessConfiguration({
         profile,
         userConfigurationPath: config,
-        authorizationReview: {
+        authorizationCheck: {
           id: 'live.review',
           version: '1',
           modelId: options.modelId,

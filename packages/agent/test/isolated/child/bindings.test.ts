@@ -242,40 +242,24 @@ test('additional-only child modules and sources persist their own namespace; sta
       status: 'applied',
       request: { kind: 'run.start', content: 'New task: second child' },
     });
-    const receipt = command.receipt as {
-      businessCommandId: string;
-      humanInputCommandId: string;
-      runId: string;
-    };
-    expect(receipt.businessCommandId).toBeString();
-    expect(receipt.businessCommandId).not.toBe(command.id);
-    expect(await f.store.getCommand(receipt.humanInputCommandId)).toMatchObject({
-      request: {
-        publicCommandId: command.id,
-        content: 'New task: second child',
-        originalRequest: command.request,
-      },
-    });
-    expect(await f.store.getCommand(receipt.businessCommandId)).toMatchObject({
-      status: 'applied',
-      request: { content: 'New task: second child' },
-      receipt: { runId: receipt.runId },
-    });
+    const receipt = command.receipt as { runId: string };
+    expect(command.receipt).toEqual({ runId: receipt.runId });
     expect(await f.store.getRun(receipt.runId)).toMatchObject({
       status: 'completed',
-      originCommandId: receipt.businessCommandId,
+      originCommandId: command.id,
       rootWorkCommandId: command.id,
+      rootWorkSeq: command.seq,
     });
     expect(f.parent.requests).toHaveLength(4);
     expect(child.requests).toHaveLength(4);
     expect(await f.store.getExecution(f.parent.requests[2]!.requestId)).toMatchObject({
       runId: receipt.runId,
-      originCommandId: receipt.businessCommandId,
+      originCommandId: command.id,
       status: 'succeeded',
     });
     expect(
       f.parent.requests[2]!.messages.find((m) => m.content === 'New task: second child')?.sourceIds,
-    ).toEqual([receipt.businessCommandId]);
+    ).toEqual([command.id]);
     expect(writes).toBe(2);
     expect(f.refs).toHaveLength(2);
     expect(disposals).toBe(0);
@@ -342,7 +326,7 @@ for (const mode of [
           return {
             allowed: false,
             revision: `${side}-review`,
-            review: { request: { requires: `${side} reviewer`, exact: request.input } },
+            check: { request: { requires: `${side} reviewer`, exact: request.input } },
           };
         return { allowed: true, revision: `${side}-full` };
       },
@@ -350,7 +334,7 @@ for (const mode of [
     const f = await fixture(
       configuration(child, extra, {
         permissions: decisions('child'),
-        authorizationReview: {
+        authorizationCheck: {
           id: 'child-reviewer',
           version: '1',
           modelId: 'review',
@@ -382,7 +366,7 @@ for (const mode of [
       f.store.markDispatching = async (input) => {
         const execution = await f.store.getExecution(input.executionId);
         if (execution?.definitionId === 'extra.effect') {
-          expect(input.authorization.reviewExecutionId).toBeUndefined();
+          expect(input.authorization.checkExecutionId).toBeUndefined();
           expect(input.authorization.interactionId).toBeString();
           fallbackDispatches.push(structuredClone(input));
           const before = (await f.store.getMetadata()).lastChangeCursor;
@@ -407,9 +391,9 @@ for (const mode of [
     if (mode === 'ask_review') {
       const dispatch = f.store.markDispatching.bind(f.store);
       f.store.markDispatching = async (input) => {
-        if (input.authorization.reviewExecutionId && input.authorization.interactionId) {
+        if (input.authorization.checkExecutionId && input.authorization.interactionId) {
           const before = (await f.store.getMetadata()).lastChangeCursor;
-          const { reviewExecutionId: _review, ...onlyHuman } = input.authorization;
+          const { checkExecutionId: _review, ...onlyHuman } = input.authorization;
           await dispatch({ ...input, authorization: onlyHuman }).then(
             () => {
               throw new Error('missing review grant admitted');
@@ -496,10 +480,10 @@ for (const mode of [
         expect(fallbackDispatches).toHaveLength(1);
         const authorization = fallbackDispatches[0]!.authorization;
         expect(authorization.interactionId).toBe(answeredCard!.id);
-        expect(authorization.reviewExecutionId).toBeUndefined();
+        expect(authorization.checkExecutionId).toBeUndefined();
         expect(effect.authorization).toMatchObject({
           dispatched: true,
-          review: { status: 'succeeded', decision: 'ask_user', requireApproval: true },
+          check: { status: 'succeeded', decision: 'ask_user', requireApproval: true },
           human: {
             interactionId: answeredCard!.id,
             accepted: true,
@@ -527,7 +511,7 @@ for (const mode of [
         expect(proofChecks).toBe(1);
         expect(effect.interactionBinding).not.toBeNull();
         const reviewers = (await f.store.listExecutions(childSession)).filter(
-          (e) => e.kind === 'job',
+          (e) => e.kind === 'model' && e.runId === null,
         );
         expect(reviewers).toHaveLength(1);
         expect(reviewers[0]!.status).toBe('succeeded');

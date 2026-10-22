@@ -226,7 +226,7 @@ test('three strategies classify external mutations and safe reads through the ex
     const input = { path: join(f.home, 'actual'), content: 'yes', base: null };
     for (const [mode, expected] of [
       ['accept_edits', 'approval_required'],
-      ['auto', 'auto_review_required'],
+      ['auto', 'auto_check_required'],
       ['full', undefined],
     ] as const) {
       const policy = createPermissionPolicy({
@@ -442,54 +442,38 @@ for (const decision of ['full', 'approve', 'deny'] as const) {
         await runtime.waitForCommand(commandId, { timeoutMs: 5000 });
         if (commandId === 'read') {
           const command = (await store.getCommand(commandId))!;
-          const receipt = command.receipt as {
-            businessCommandId: string;
-            humanInputCommandId: string;
-            runId: string;
-          };
+          const receipt = command.receipt as { runId: string };
           expect(command).toMatchObject({
             status: 'applied',
             request: { kind: 'run.start', content: instruction },
           });
-          expect(receipt.businessCommandId).toBeString();
-          expect(receipt.businessCommandId).not.toBe(commandId);
-          expect(await store.getCommand(receipt.humanInputCommandId)).toMatchObject({
-            request: {
-              publicCommandId: commandId,
-              content: instruction,
-              originalRequest: command.request,
-            },
-          });
+          expect(receipt.runId).toBeString();
+          expect(receipt).not.toHaveProperty('businessCommandId');
+          expect(receipt).not.toHaveProperty('humanInputCommandId');
           const written = (await store.getCommand('write'))!.receipt as { runId: string };
           const writeRun = (await store.getRun(written.runId))!;
           expect(writeRun).toMatchObject({ status: 'completed', rootWorkCommandId: 'write' });
           expect(receipt.runId).not.toBe(writeRun.id);
-          expect(await store.getCommand(receipt.businessCommandId)).toMatchObject({
+          expect(await store.getCommand(commandId)).toMatchObject({
+            id: commandId,
             status: 'applied',
-            request: {
-              kind: 'input.follow_up',
-              content: instruction,
-              afterRunId: writeRun.id,
-              contextSelectionId: writeRun.contextSelectionId,
-            },
+            request: { kind: 'run.start', content: instruction },
             receipt: { runId: receipt.runId },
           });
           expect(await store.getRun(receipt.runId)).toMatchObject({
-            originCommandId: receipt.businessCommandId,
+            originCommandId: commandId,
             rootWorkCommandId: commandId,
             status: 'completed',
           });
           expect(await store.getExecution(model.requests[2]!.requestId)).toMatchObject({
             kind: 'model',
             runId: receipt.runId,
-            originCommandId: receipt.businessCommandId,
+            originCommandId: commandId,
             status: 'succeeded',
           });
           expect(
-            model.requests[2]!.messages.find((message) =>
-              message.sourceIds?.includes(receipt.businessCommandId),
-            ),
-          ).toMatchObject({ content: instruction, sourceIds: [receipt.businessCommandId] });
+            model.requests[2]!.messages.find((message) => message.sourceIds?.includes(commandId)),
+          ).toMatchObject({ content: instruction, sourceIds: [commandId] });
           expect(model.requests).toHaveLength(4);
         }
         if (decision === 'deny') {

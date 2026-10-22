@@ -22,6 +22,7 @@ export async function buildStorageAssets(outdir: string): Promise<void> {
     '0002-recovery-audit.sql',
     '0003-session-reconciliation.sql',
     '0004-pending-input-order.sql',
+    '0005-authorization-check.sql',
   ])
     copyFileSync(new URL(`../migrations/${name}`, import.meta.url), join(migrations, name));
 }

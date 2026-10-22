@@ -223,8 +223,6 @@ async function runTitleCase(
       modelId: options.modelId,
       modelConcurrency: 2,
       extensions: [titles.extension],
-      childConfigurations: [titles.childConfiguration],
-      resolveChildRunConfiguration: titles.resolveChild,
       sessionInputMetadata: { preserve: (command) => titles.preserveInputFallback(command) },
       // Explicit metadata/model-only fixture, not a default authorization-policy claim.
       permissions: {

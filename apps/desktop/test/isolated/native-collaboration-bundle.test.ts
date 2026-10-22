@@ -1,6 +1,10 @@
+import { Database } from 'bun:sqlite';
 import { expect, test } from 'bun:test';
 import { strict as assert } from 'node:assert';
+import { randomUUID } from 'node:crypto';
 import {
+  copyFileSync,
+  cpSync,
   existsSync,
   mkdirSync,
   readFileSync,
@@ -28,6 +32,7 @@ test.skipIf(process.platform !== 'darwin')(
   'source-free Native six-tool dual child approvals, same-Session follow-up, late answers, exact stop and cold zero replay',
   async () => {
     const root = realpathSync(temporaryDirectory('kite-native-collaboration-'));
+    const evidence = resolve('dist/acceptance', `child-internal-model-boundary-${randomUUID()}`);
     // Isolated runner reuse only; normal product startup has no such switch.
     const reuseCandidate = process.env.KITE_TEST_COLLABORATION_CANDIDATE;
     const home = join(root, 'home'),
@@ -40,6 +45,10 @@ test.skipIf(process.platform !== 'darwin')(
     });
     const leases: ReturnType<typeof acquireArtifactAccess>[] = [];
     const held = new Map<string, () => void>();
+    const heldChecks = new Map<string, () => void>();
+    const completions = new Map<string, number>();
+    let gatedChecks = 0,
+      titleCalls = 0;
     const bodies: {
       messages: { role: string; content: unknown }[];
       tools?: { function: { name: string } }[];
@@ -90,7 +99,7 @@ test.skipIf(process.platform !== 'darwin')(
           commandId: 'create',
           sessionId: 'collaboration',
           workspaceId: 'w',
-          title: 'Collaboration',
+          title: '',
         });
       } finally {
         await seed.close();
@@ -124,11 +133,21 @@ test.skipIf(process.platform !== 'darwin')(
         async fetch(request) {
           const url = new URL(request.url);
           if (url.pathname === '/state')
-            return Response.json({ calls: bodies.length, held: [...held.keys()] });
+            return Response.json({
+              calls: bodies.length,
+              held: [...held.keys()],
+              heldChecks: [...heldChecks.keys()],
+              titleCalls,
+            });
           if (url.pathname === '/release') {
             for (const release of held.values()) release();
             held.clear();
             return new Response('released');
+          }
+          if (url.pathname === '/release-checks') {
+            for (const release of heldChecks.values()) release();
+            heldChecks.clear();
+            return new Response('checks released');
           }
           if (url.pathname === '/follow') {
             agentId = url.searchParams.get('agent')!;
@@ -140,17 +159,31 @@ test.skipIf(process.platform !== 'darwin')(
             if (message.role !== 'user' || typeof message.content !== 'string') return [];
             try {
               const value = JSON.parse(message.content);
-              return value?.purpose === 'authorization_review' ? [value] : [];
+              return value?.purpose === 'authorization_check' ? [value] : [];
             } catch {
               return [];
             }
           });
           let delta: unknown,
             reason = 'stop';
-          if (reviews.length) {
+          const naming = body.messages.some(
+            (message) =>
+              message.role === 'system' &&
+              typeof message.content === 'string' &&
+              message.content.includes('readable conversation title'),
+          );
+          if (naming) {
+            titleCalls++;
+            assert.deepEqual(body.tools ?? [], []);
+            delta = { content: '协作审批测试' };
+          } else if (reviews.length) {
             assert.equal(reviews.length, 1);
             assert.deepEqual(body.tools ?? [], []);
             assert.ok(['files.write', 'task.follow_up'].includes(reviews[0].target.definitionId));
+            if (reviews[0].target.definitionId === 'files.write' && gatedChecks++ < 2)
+              await new Promise<void>((release) =>
+                heldChecks.set(reviews[0].target.executionId, release),
+              );
             delta = {
               content: JSON.stringify({
                 decision:
@@ -222,7 +255,11 @@ test.skipIf(process.platform !== 'darwin')(
                 ],
               };
               reason = 'tool_calls';
-            } else delta = { content: `${task}_DONE` };
+            } else {
+              const ordinal = (completions.get(task!) ?? 0) + 1;
+              completions.set(task!, ordinal);
+              delta = { content: `${task}_DONE_${ordinal}` };
+            }
           }
           const frame = (value: unknown, finish: string | null) =>
             `data: ${JSON.stringify({ id: `collab-${bodies.length}`, object: 'chat.completion.chunk', model: 'fixed', choices: [{ index: 0, delta: value, finish_reason: finish }] })}\n\n`;
@@ -334,6 +371,7 @@ test.skipIf(process.platform !== 'darwin')(
       expect(report.a).not.toBe(report.next);
       expect(report.oldRun).not.toBe(report.nextRun);
       expect(report.coldZeroReplay).toBe(true);
+      expect(titleCalls).toBe(1);
       expect(readFileSync(join(workspace, 'child-a.txt'), 'utf8')).toBe('A original approved\n');
       expect(readFileSync(join(workspace, 'child-a-follow.txt'), 'utf8')).toBe(
         'A follow-up approved\n',
@@ -352,12 +390,54 @@ test.skipIf(process.platform !== 'darwin')(
         expect(stopped!.cancelRequestedAt).not.toBeNull();
         expect(first!.cancelRequestedAt).toBeNull();
         expect(second!.cancelRequestedAt).toBeNull();
+        const snapshotDB = new Database(profile.databasePath, { readonly: true });
+        try {
+          expect(snapshotDB.query('SELECT count(*) AS n FROM session').get()).toEqual({ n: 3 });
+        } finally {
+          snapshotDB.close();
+        }
+        expect(await cold.listSessions()).toHaveLength(1);
+        const scopes = ['collaboration', report.agentId, stopped!.childSessionId!];
+        const internalCalls: unknown[] = [];
+        let checks = 0,
+          titles = 0;
+        for (const sessionId of scopes) {
+          const view = await cold.getView(sessionId);
+          expect(view.executions.filter((execution) => execution.childSessionId).length).toBe(
+            sessionId === 'collaboration' ? 3 : 0,
+          );
+          for (const execution of view.executions) {
+            const command = await cold.getCommand(execution.originCommandId);
+            if (command?.kind !== 'authorization.check' && command?.kind !== 'session.title')
+              continue;
+            expect(execution).toMatchObject({ kind: 'model', runId: null, childSessionId: null });
+            expect(execution.input).not.toBeNull();
+            expect(execution.result).not.toBeNull();
+            internalCalls.push({ execution, command });
+            if (command.kind === 'authorization.check') checks++;
+            else titles++;
+          }
+        }
+        expect(checks).toBeGreaterThanOrEqual(4);
+        expect(titles).toBe(1);
+        writeFileSync(
+          join(home, 'cold-permission-evidence.json'),
+          JSON.stringify({
+            candidateDigest: bundle.digest,
+            sessionCount: 3,
+            checks,
+            titles,
+            scopes,
+            internalCalls,
+          }),
+        );
       } finally {
         await cold.close();
       }
       completed = true;
     } finally {
       for (const release of held.values()) release();
+      for (const release of heldChecks.values()) release();
       if (driver && driver.exitCode === null) {
         driver.kill('SIGTERM');
       }
@@ -370,6 +450,24 @@ test.skipIf(process.platform !== 'darwin')(
         const exclusive = acquireArtifactAccess({ root: path, mode: 'exclusive' });
         exclusive.release();
       }
+      mkdirSync(evidence, { recursive: true, mode: 0o700 });
+      for (const name of [
+        '00-two-children-checks-title.png',
+        '01-dual-child-pending.png',
+        '04-cold-reopened.png',
+        'collaboration-report.json',
+        'cold-permission-evidence.json',
+      ]) {
+        const source = join(home, name);
+        if (existsSync(source)) copyFileSync(source, join(evidence, name));
+      }
+      if (existsSync(join(home, 'process-frames')))
+        cpSync(join(home, 'process-frames'), join(evidence, 'process-frames'), { recursive: true });
+      for (const name of ['driver.stdout.log', 'driver.stderr.log']) {
+        const source = join(root, name);
+        if (existsSync(source)) copyFileSync(source, join(evidence, name));
+      }
+      console.log('collaboration_evidence_retained', evidence);
       if (completed) rmSync(root, { recursive: true, force: true });
       else console.error('collaboration_failed_candidate_retained', root);
     }

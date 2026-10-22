@@ -163,7 +163,7 @@ export async function runLivePermissionBoundaries(options: Options) {
       const host = createDefaultProcessConfiguration({
         profile,
         userConfigurationPath: configPath,
-        authorizationReview: {
+        authorizationCheck: {
           id: 'live.review',
           version: '1',
           modelId: options.modelId,

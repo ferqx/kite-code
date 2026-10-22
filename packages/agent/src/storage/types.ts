@@ -317,6 +317,14 @@ export interface RunRecord {
 /** Read-only saved authorization facts. These are never accepted by dispatch as a grant. */
 export interface ExecutionAuthorizationObservation {
   dispatched: boolean;
+  check?: {
+    executionId: string;
+    status: ExecutionStatus;
+    decision: 'approve_once' | 'reject' | 'ask_user' | 'unavailable';
+    reason: string;
+    requireApproval: boolean;
+  };
+  /** Historical child-backed authorization review only. */
   review?: {
     executionId: string;
     status: ExecutionStatus;
@@ -392,7 +400,7 @@ export interface ModelInputIdentity {
   executionId: string;
   sessionId: string;
   rootSessionId: string;
-  runId: string;
+  runId: string | null;
   originCommandId: string;
   rootWorkCommandId: string;
   rootWorkSeq: string;
@@ -425,7 +433,9 @@ export interface StoredModelOutput {
   complete: boolean;
 }
 export interface StoredModelInput {
-  /** Internal purpose sealed from the exact child carrier in the same read transaction. */
+  /** Permission-owned model call, authenticated under the same read snapshot. */
+  authorizationCheck: { sourceIds: [string, string] } | null;
+  /** Legacy purpose sealed from the exact child carrier in the same read transaction. */
   authorizationReview: { sourceIds: [string, string] } | null;
   storeId: string;
   originStoreId: string;

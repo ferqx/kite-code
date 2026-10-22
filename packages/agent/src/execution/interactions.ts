@@ -5,7 +5,7 @@ import type {
   Permissions,
 } from '../extensions';
 import { semanticDigest } from '../json';
-import type { ReadAuthorizationReviewInput, Store } from '../storage/port';
+import type { ReadAuthorizationCheckInput, Store } from '../storage/port';
 import {
   AgentError,
   type InformationPermissionStamp,
@@ -41,12 +41,12 @@ export class QuestionCancelledError extends AgentError {
 
 export interface InteractionScope {
   final?: boolean;
-  previousReview?: ReadAuthorizationReviewInput;
+  previousCheck?: ReadAuthorizationCheckInput;
   previousPolicy?: PermissionDecision;
-  review?: (
+  check?: (
     decision: PermissionDecision,
     signal: AbortSignal,
-  ) => Promise<ReadAuthorizationReviewInput | null>;
+  ) => Promise<ReadAuthorizationCheckInput | null>;
   expectedStoreId: string;
   owner: OwnerRef;
   executionId: string;
@@ -60,7 +60,7 @@ export interface InteractionScope {
 }
 export type AcceptedAuthorization = PermissionDecision & {
   grant?: { grantId: string; revision: string; commandDigest?: string };
-  reviewExecutionId?: string;
+  checkExecutionId?: string;
   interactionId?: string;
   decisionRevision?: string;
 };
@@ -124,7 +124,7 @@ export class InteractionGate {
     };
     if (!modeControlsChanged(original.approvalControlReads, decision.controlReads))
       throw new AgentError('interaction_binding_changed');
-    await this.store.invalidateAuthorizationReview({
+    await this.store.invalidateAuthorizationCheck({
       expectedStoreId: scope.expectedStoreId,
       owner: scope.owner,
       executionId: scope.executionId,
@@ -143,19 +143,19 @@ export class InteractionGate {
     throw new AuthorizationRefreshRequired();
   }
 
-  private async invalidateReview(
+  private async invalidateCheck(
     scope: InteractionScope,
     previous: PermissionDecision | undefined,
     current: PermissionDecision,
-    reviewExecutionId?: string,
+    checkExecutionId?: string,
   ): Promise<never> {
     if (!previous || !modeControlsChanged(previous.controlReads, current.controlReads))
-      throw new AgentError('authorization_review_binding_changed');
-    await this.store.invalidateAuthorizationReview({
+      throw new AgentError('authorization_check_binding_changed');
+    await this.store.invalidateAuthorizationCheck({
       expectedStoreId: scope.expectedStoreId,
       owner: scope.owner,
       executionId: scope.executionId,
-      reviewExecutionId,
+      checkExecutionId,
       previousPolicyRevision: previous.revision,
       policyRevision: current.revision,
       controlReads: current.controlReads,
@@ -242,7 +242,7 @@ export class InteractionGate {
         return await this.authorizeOnce(scope, request, source);
       } catch (error) {
         if (!(error instanceof AuthorizationRefreshRequired) || scope.final) throw error;
-        scope = { ...scope, previousReview: undefined, previousPolicy: undefined };
+        scope = { ...scope, previousCheck: undefined, previousPolicy: undefined };
       }
     }
   }
@@ -270,24 +270,24 @@ export class InteractionGate {
       if (original.policyRevision !== decision.revision)
         await this.refresh(scope, original, decision);
     }
-    let reference = scope.previousReview;
-    let reviewedGrant: string | undefined;
+    let reference = scope.previousCheck;
+    let checkedGrant: string | undefined;
     if (
       reference &&
       (reference.policyRevision !== decision.revision ||
-        !decision.review ||
-        (reference.requireApproval === true) !== (decision.review.requireApproval === true) ||
+        !decision.check ||
+        (reference.requireApproval === true) !== (decision.check.requireApproval === true) ||
         (reference.requestBody?.reference.hash ?? (await semanticDigest(reference.request))) !==
-          (await semanticDigest(decision.review.request)))
+          (await semanticDigest(decision.check.request)))
     ) {
       if (modeControlsChanged(scope.previousPolicy?.controlReads, decision.controlReads))
-        await this.invalidateReview(
+        await this.invalidateCheck(
           scope,
           scope.previousPolicy,
           decision,
-          reference.reviewExecutionId,
+          reference.checkExecutionId,
         );
-      throw new AgentError('authorization_review_binding_changed');
+      throw new AgentError('authorization_check_binding_changed');
     }
     if (!execution.interactionBinding && decision.allowed) return decision;
     if (!execution.interactionBinding && decision.approval?.grants?.includes('same_command')) {
@@ -309,8 +309,8 @@ export class InteractionGate {
       }
     }
     if (request.kind === 'model') throw new AgentError('permission_denied', decision.reason);
-    if (decision.review && (!execution.interactionBinding || decision.review.requireApproval)) {
-      if (!reference && scope.review && !scope.final) {
+    if (decision.check && (!execution.interactionBinding || decision.check.requireApproval)) {
+      if (!reference && scope.check && !scope.final) {
         const controller = new AbortController();
         const abort = () => controller.abort(scope.signal.reason);
         scope.signal.addEventListener('abort', abort, { once: true });
@@ -318,7 +318,7 @@ export class InteractionGate {
         try {
           reference =
             (await Promise.race([
-              scope.review(decision, controller.signal),
+              scope.check(decision, controller.signal),
               this.policyChanged(
                 { ...scope, signal: controller.signal },
                 { ...request, signal: controller.signal },
@@ -328,7 +328,7 @@ export class InteractionGate {
             ])) ?? undefined;
         } catch (error) {
           if (error instanceof AuthorizationRefreshRequired)
-            await this.invalidateReview(scope, decision, await this.permissions.authorize(request));
+            await this.invalidateCheck(scope, decision, await this.permissions.authorize(request));
           throw error;
         } finally {
           controller.abort();
@@ -338,59 +338,59 @@ export class InteractionGate {
       // Review/human waits are confined to the resource-free authorization phase.
       if (!reference && scope.final) throw new AgentError('authorization_refresh_required');
       if (reference) {
-        const reviewedDecision = decision;
+        const checkedDecision = decision;
         decision = await this.permissions.authorize(request);
         scope.signal.throwIfAborted();
         await scope.checkFreshness?.();
         if (
-          !decision.review ||
-          (reference.requireApproval === true) !== (decision.review.requireApproval === true) ||
+          !decision.check ||
+          (reference.requireApproval === true) !== (decision.check.requireApproval === true) ||
           decision.revision !== reference.policyRevision ||
-          (await semanticDigest(decision.review.request)) !==
+          (await semanticDigest(decision.check.request)) !==
             (reference.requestBody?.reference.hash ?? (await semanticDigest(reference.request)))
         ) {
-          if (modeControlsChanged(reviewedDecision.controlReads, decision.controlReads))
-            await this.invalidateReview(
+          if (modeControlsChanged(checkedDecision.controlReads, decision.controlReads))
+            await this.invalidateCheck(
               scope,
-              reviewedDecision,
+              checkedDecision,
               decision,
-              reference.reviewExecutionId,
+              reference.checkExecutionId,
             );
-          throw new AgentError('authorization_review_binding_changed');
+          throw new AgentError('authorization_check_binding_changed');
         }
-        const reviewed = await this.store.getAuthorizationReview(reference);
-        if (reviewed.decision === 'approve_once' && !decision.review.requireApproval)
+        const checked = await this.store.getAuthorizationCheck(reference);
+        if (checked.decision === 'approve_once' && !decision.check.requireApproval)
           return {
             allowed: true,
             revision: decision.revision,
-            reviewExecutionId: reviewed.reviewExecutionId,
+            checkExecutionId: checked.checkExecutionId,
             ...(decision.controlReads === undefined ? {} : { controlReads: decision.controlReads }),
             ...(decision.snapshot === undefined ? {} : { snapshot: decision.snapshot }),
           } satisfies AcceptedAuthorization;
-        if (reviewed.decision === 'approve_once') reviewedGrant = reviewed.reviewExecutionId;
-        if (reviewed.decision === 'reject') {
+        if (checked.decision === 'approve_once') checkedGrant = checked.checkExecutionId;
+        if (checked.decision === 'reject') {
           const command = await this.store.getCommand(execution.originCommandId);
           if (!command) throw new AgentError('command_not_found');
           await this.store.cancelCommand({
             expectedStoreId: scope.expectedStoreId,
-            commandId: `review-decline-${reviewed.reviewExecutionId}`,
+            commandId: `authorization-check-decline-${checked.checkExecutionId}`,
             sessionId: command.sessionId,
             targetCommandId: command.id,
             subjectId: command.subjectId,
           });
-          throw new AuthorizationDeniedError('approval_denied', reviewed.reason);
+          throw new AuthorizationDeniedError('approval_denied', checked.reason);
         }
-        if (scope.final && !reviewedGrant && !execution.interactionBinding)
+        if (scope.final && !checkedGrant && !execution.interactionBinding)
           throw new AgentError('authorization_refresh_required');
       }
       decision = {
         ...decision,
         approval: decision.approval ?? {
           request: {
-            reason: reviewedGrant
-              ? 'authorization_review_requires_user_approval'
-              : 'authorization_review_unavailable',
-            review: reference?.requestBody
+            reason: checkedGrant
+              ? 'authorization_check_requires_user_approval'
+              : 'authorization_check_unavailable',
+            check: reference?.requestBody
               ? {
                   kind: 'artifact',
                   complete: true,
@@ -401,7 +401,7 @@ export class InteractionGate {
                     scope: reference.requestBody.reference.scope,
                   },
                 }
-              : decision.review!.request,
+              : decision.check!.request,
           },
         },
       };
@@ -409,7 +409,7 @@ export class InteractionGate {
     if (
       !decision.allowed &&
       !decision.approval &&
-      !(decision.review && execution.interactionBinding)
+      !(decision.check && execution.interactionBinding)
     )
       throw new AuthorizationDeniedError(
         'permission_denied',
@@ -503,7 +503,7 @@ export class InteractionGate {
     }
     if (waited) decision = await this.permissions.authorize(request);
     scope.signal.throwIfAborted();
-    if (!decision.allowed && !decision.approval && !decision.review)
+    if (!decision.allowed && !decision.approval && !decision.check)
       throw new AgentError('permission_denied', decision.reason);
     if (decision.revision !== interaction.policyRevision)
       await this.refresh(scope, interaction, decision);
@@ -557,7 +557,7 @@ export class InteractionGate {
       decisionRevision: accepted.acceptedDecisionRevision!,
       ...(decision.controlReads === undefined ? {} : { controlReads: decision.controlReads }),
       ...(decision.snapshot === undefined ? {} : { snapshot: decision.snapshot }),
-      ...(reviewedGrant ? { reviewExecutionId: reviewedGrant } : {}),
+      ...(checkedGrant ? { checkExecutionId: checkedGrant } : {}),
     } satisfies AcceptedAuthorization;
   }
 
@@ -595,14 +595,14 @@ export class InteractionGate {
           signal: scope.signal,
         });
         scope.signal.throwIfAborted();
-        if (!decision.allowed && !decision.approval && !decision.review)
+        if (!decision.allowed && !decision.approval && !decision.check)
           throw new AgentError('information_permission_denied');
         return {
           revision: decision.revision,
           bindingDigest: await semanticDigest({
             allowed: decision.allowed,
             approval: decision.approval ?? null,
-            review: decision.review ?? null,
+            check: decision.check ?? null,
           } as Json),
           ...(decision.controlReads !== undefined
             ? { controlReads: structuredClone(decision.controlReads) }

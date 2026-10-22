@@ -103,7 +103,7 @@ async function fixture(
     },
     ...(reviewer
       ? {
-          authorizationReview: {
+          authorizationCheck: {
             id: 'reviewer',
             version: '1',
             modelId: 'reviewer',
@@ -764,8 +764,8 @@ test('foreground child keeps an actual parent human ceiling after its automatic 
         ? {
             allowed: false,
             revision: 'child-auto',
-            review: { request: { mode: 'auto', effects: ['external'] } },
-            approval: { request: { reason: 'auto_review_unavailable' } },
+            check: { request: { mode: 'auto', effects: ['external'] } },
+            approval: { request: { reason: 'auto_check_unavailable' } },
           }
         : { allowed: true, revision: 'child' };
     },
@@ -807,7 +807,7 @@ test('foreground child keeps an actual parent human ceiling after its automatic 
     const effect = (await f.store.getView(card!.sessionId)).executions.find(
       (execution) => execution.definitionId === tool.id,
     )!;
-    expect(effect.authorization?.review).toMatchObject({
+    expect(effect.authorization?.check).toMatchObject({
       decision: 'approve_once',
       status: 'succeeded',
       requireApproval: true,

@@ -24,7 +24,7 @@ export type { ModelInputMetadata, ModelRequestMetadata } from './model-snapshot'
 export {
   type AfterTurnPolicy,
   AgentRuntime,
-  type AuthorizationReviewBinding,
+  type AuthorizationCheckBinding,
   type ChildAgentConfiguration,
   ConfigurationPreparationCleanupError,
   createRuntime,

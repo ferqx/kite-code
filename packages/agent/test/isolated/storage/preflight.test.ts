@@ -246,6 +246,12 @@ test('public bundled sqlite leaf outside source tree reads its packaged migratio
     ),
     join(dirname(migration), '0004-pending-input-order.sql'),
   );
+  copyFileSync(
+    fileURLToPath(
+      new URL('../../../src/storage/migrations/0005-authorization-check.sql', import.meta.url),
+    ),
+    join(dirname(migration), '0005-authorization-check.sql'),
+  );
   writeFileSync(
     join(packageRoot, 'package.json'),
     JSON.stringify({

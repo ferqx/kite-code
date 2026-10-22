@@ -14,6 +14,7 @@ import { runProfileRestore } from '../../../src/maintenance/restore';
 import { acquireProfileAccess, selectProfile } from '../../../src/platform/profile';
 import { createRuntime } from '../../../src/runtime';
 import { openSqliteStore } from '../../../src/sqlite';
+import { restoreLegacyExecutionSchema } from '../storage/legacy-execution-schema-fixture';
 import {
   configBytes,
   nodeAssets,
@@ -114,6 +115,7 @@ async function fixture(seed = false, legacy = false) {
   }
   if (legacy) {
     const previousSchema = new Database(selected.databasePath);
+    restoreLegacyExecutionSchema(previousSchema, 1);
     previousSchema.exec(
       "DROP TRIGGER pending_input_queue_insert; DROP TRIGGER pending_input_queue_update; DROP TRIGGER pending_input_queue_delete; DROP TABLE pending_input_queue_revision; DROP INDEX command_pending_order; ALTER TABLE command DROP COLUMN pending_order; DROP TABLE session_reconciliation; DELETE FROM schema_migration WHERE id IN('0003-session-reconciliation','0004-pending-input-order')",
     );

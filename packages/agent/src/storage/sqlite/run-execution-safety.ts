@@ -2,6 +2,8 @@ import { createHash } from 'node:crypto';
 import { canonicalJson } from '../../json';
 import type { Store } from '../port';
 import { AgentError, type Json, type RunExecutionSafety } from '../types';
+import { authorizationCheckSourceTarget } from './authorization-check';
+import { internalModelSourceTarget } from './internal-model';
 import type { SqliteOperations } from './operations';
 
 /** A complete streamed original execution-group observation, not permission to finish a Run. */
@@ -88,7 +90,17 @@ export function readRunExecutionSafety(
       ),
     );
     if (
-      ['tool', 'job'].includes(String(row.kind)) &&
+      (['tool', 'job'].includes(String(row.kind)) ||
+        (row.kind === 'model' &&
+          (!!authorizationCheckSourceTarget(
+            db,
+            db.row('SELECT * FROM execution WHERE id=?', row.id!)!,
+            true,
+          ) ||
+            !!internalModelSourceTarget(
+              db,
+              db.row('SELECT * FROM execution WHERE id=?', row.id!)!,
+            )))) &&
       row.id !== input.excludeExecutionId &&
       ['planned', 'dispatching', 'running', 'outcome_unknown'].includes(String(row.state))
     ) {

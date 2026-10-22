@@ -177,6 +177,8 @@ function closeReadonly(database: Database): void {
 }
 
 function initialize(database: Database): void {
+  // The reviewed 0005 table rebuild preserves all references, checked before commit.
+  database.run('PRAGMA foreign_keys=OFF');
   database.run('BEGIN IMMEDIATE');
   try {
     const exists = database
@@ -209,14 +211,18 @@ function initialize(database: Database): void {
     if (!current)
       throw new StoreOpenError('store_incompatible', 'Store migration identity is invalid.');
     const target = supportedSchemas().at(-1)!;
+    let rebuiltExecution = false;
     for (const migration of target.migrations.slice(current.migrations.length)) {
       database.exec(migration.sql);
+      rebuiltExecution ||= migration.id === '0005-authorization-check';
       database.run('INSERT INTO schema_migration VALUES(?,?,?)', [
         migration.id,
         migration.checksum,
         new Date().toISOString(),
       ]);
     }
+    if (rebuiltExecution && database.query('PRAGMA foreign_key_check').get())
+      throw new StoreOpenError('store_incompatible', 'Store migration foreign keys are invalid.');
     database.run('COMMIT');
   } catch (error) {
     try {
@@ -227,6 +233,9 @@ function initialize(database: Database): void {
       });
     }
     throw error;
+  } finally {
+    database.run('PRAGMA legacy_alter_table=OFF');
+    database.run('PRAGMA foreign_keys=ON');
   }
 }
 

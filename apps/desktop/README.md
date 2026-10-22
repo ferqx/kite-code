@@ -424,7 +424,7 @@ Native 的侧栏打开入口对当前父会话及同一在途选择去重，重�
 
 直接历史只沿当前已观察 Message 的准确原 Execution 读取；Fork／Include 的封存 `originMessage` 不取得来源 Execution 后来的审批。原外部 Store／恢复边界继续适用。观察是现有响应的可选字段，不改持久格式，不公开私有审查正文或上下文；审批事实也不让未知工具版本进入旧结果分类。具体取舍见[审批观察决定](../../.agents/notes/implemented/architecture/2026-10-09-native-approval-observations.md)。
 
-[Core 授权测试](../../packages/agent/test/isolated/execution/authorization-review.test.ts)、[真实 HTTP／Client](../../tests/isolated/unified-agent/client-interactions.test.ts)、[Main](test/native-tool-messages.test.ts)和[原组件 DOM](test/isolated/native-approval-dom.test.tsx)分别核原授权门禁、公开字段、封存隔离及完整请求与标签；[源码外默认窗口](test/isolated/native-bundle.test.ts)核首次和冷读的原人工审批及已保存标签，[计划窗口](test/isolated/native-plan-review-bundle.test.ts)核独立审批与大请求。实际结果归[本轮进度](../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-09原审批面板与授权观察)。原记录阅读见[交互历史](#原交互记录只读历史)，当前 Store 的 Auto 窗口与原输入区控制见下一节；全部封存／恢复组合及整片独立审查仍待核对，本节不代表完整 PC 退出。
+[Core 授权测试](../../packages/agent/test/isolated/execution/authorization-check.test.ts)、[真实 HTTP／Client](../../tests/isolated/unified-agent/client-interactions.test.ts)、[Main](test/native-tool-messages.test.ts)和[原组件 DOM](test/isolated/native-approval-dom.test.tsx)分别核原授权门禁、公开字段、封存隔离及完整请求与标签；[源码外默认窗口](test/isolated/native-bundle.test.ts)核首次和冷读的原人工审批及已保存标签，[计划窗口](test/isolated/native-plan-review-bundle.test.ts)核独立审批与大请求。实际结果归[本轮进度](../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-09原审批面板与授权观察)。原记录阅读见[交互历史](#原交互记录只读历史)，当前 Store 的 Auto 窗口与原输入区控制见下一节；全部封存／恢复组合及整片独立审查仍待核对，本节不代表完整 PC 退出。
 
 ## 原会话输入区权限与停止
 
@@ -1165,3 +1165,10 @@ macOS owned stdio 停止结果的新增观察字段已迁入[正式连接／重�
 [人工浏览器资格](scripts/qualify-native-mcp-browser.ts)用独立临时Profile、自有HTTPS AS/MCP和构建前固定的公开证书，保持实际默认Chrome、默认OS backend与普通Ask。准备页到达后才启动原120秒OAuth callback期限；若出现浏览器证书提示，由用户处理，脚本不绕过提示或修改系统信任。这个显式人工入口不放入自动默认调度。
 
 2026-10-07 在 macOS26.7.1 arm64、Chrome154.0.8037.98 上，原入口 actual0/58.396秒，最终 `qualification.json` 为 passed：真实document/navigation三次、PKCE/code exchange两次、refresh一次、remote revoke一次；Clear只删本地材料，取消原Login没有交换code。三次独立Service启动核默认Vault持久复用、冷原GET零POST，以及清除后再次重开absence；准确测试材料fresh backend absence、三Service正常退出和所属进程无残留均成立。该候选网络固定为自有loopback与测试证书，`productionDefaultNetwork:false`，不证明外部AS或账号。原证据、制品摘要和4089regular/Git保持见[进度](../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-07native-mcp-chrome-与默认-vault-验收)。CUA仍未暴露Chrome控制，实际导航由正式默认opener发起并由原wire验证；没有用fetch callback替代浏览器，也未读取其他浏览器页面。
+
+
+### 内部模型调用与子 Agent
+
+自动审核 `authorization.check` 和标题生成 `session.title` 由 Agent 保存同会话内部 Model Execution，不创建子会话或子任务，后台目录自然不把它们投影为 child；没有为此增加 UI 隐藏规则。Native 继续共用主／子 Agent 的消息渲染，权限状态从 `execution.authorization.check` 读取，旧 `review` 观察仅兼容历史。实际检查与命名输入输出通过准确 Model Inspector 读取，不塞入父／子聊天。
+
+2026-10-22 在 macOS 的源码外固定 Provider 候选 `6769bc903db51b96330acd05663123d3b80cee2aa4f9a3f0e03f6393394e5113` 上，[通用协作窗口](test/isolated/native-collaboration-bundle.test.ts)通过 1 例／35 断言，[自动审核窗口](test/isolated/native-auto-approval-bundle.test.ts)通过 1 例／95 断言。协作过程中的两次真实检查与标题请求未增加两个普通 child；冷 SQLite 共 3 个 Session，4 次权限检查和 1 次标题 Model 均无 Run、无 child 身份。原人工卡、同 Session 接续、旧答案隔离、准确停止和重开零重放均保留。协作的 46 帧过程、原回执及冷事实保存在 `dist/acceptance/child-internal-model-boundary-defdc067-44d2-4b3f-bcfd-79b17d458cd2`；审核证据在 `dist/acceptance/automatic-check-5b15266a-d57d-4393-8992-8287027a0ba8`。本机受控 Provider 结果不代表真实外部模型、其他平台或完整发布资格。

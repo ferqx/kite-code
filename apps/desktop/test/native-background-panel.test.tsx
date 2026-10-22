@@ -1308,7 +1308,7 @@ test('live environment child coalesces revisions, closes held reads and immediat
   );
 });
 
-test('child activity requires exact saved carrier Run and human authorization precedes review progress', () => {
+test('child activity requires exact saved carrier Run and human authorization precedes check progress', () => {
   const item = backgroundItem();
   item.execution.childSessionId = 'child';
   item.execution.cancelRequested = false;
@@ -1360,6 +1360,60 @@ test('child activity requires exact saved carrier Run and human authorization pr
     modelOutputs: [],
     control: { runs: [run], executions: [effect] },
   };
+  for (const field of ['check', 'review'] as const) {
+    for (const status of ['planned', 'dispatching', 'running'] as const) {
+      const decision = { ...effect.authorization.review, status };
+      const authorization =
+        field === 'check'
+          ? { dispatched: false, check: decision }
+          : { dispatched: false, review: decision };
+      const checking = { ...effect, authorization };
+      const checkingFacts = {
+        ...facts,
+        control: { runs: [run], executions: [checking] },
+      };
+      expect(nativeChildActivity(checkingFacts)).toBe(
+        status === 'planned' ? '等待自动审核' : '正在自动审核',
+      );
+      expect(
+        nativeChildActivity({
+          ...checkingFacts,
+          control: {
+            runs: [run],
+            executions: [
+              {
+                ...checking,
+                authorization: { ...authorization, human: effect.authorization.human },
+              },
+            ],
+          },
+        }),
+      ).toBe('等待你的批准');
+      expect(
+        nativeChildActivity({
+          ...checkingFacts,
+          control: {
+            runs: [{ ...run, carrierExecutionId: 'old-carrier' }],
+            executions: [checking],
+          },
+        }),
+      ).toBeUndefined();
+      for (const mismatched of [
+        { ...checking, runId: 'old-run' },
+        { ...checking, sessionId: 'other-child' },
+        { ...checking, originStoreId: 'other-store' },
+        { ...checking, rootWorkCommandId: 'other-work' },
+        { ...checking, rootWorkSeq: '999' },
+      ]) {
+        expect(
+          nativeChildActivity({
+            ...checkingFacts,
+            control: { runs: [run], executions: [mismatched] },
+          }),
+        ).toBeUndefined();
+      }
+    }
+  }
   expect(nativeChildActivity(facts)).toBe('等待你的批准');
   expect(
     nativeChildActivity({

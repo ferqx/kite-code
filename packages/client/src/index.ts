@@ -3259,7 +3259,7 @@ const object = (value: unknown): Record<string, unknown> | undefined =>
 /** Detect only the actual public complete attachment envelope, never guesses from text. */
 export function interactionAttachment(interaction: Interaction): InteractionAttachment | null {
   const policy = object(object(interaction.request)?.policy);
-  const review = object(policy?.review);
+  const review = object(policy?.check ?? policy?.review);
   if (review?.kind !== 'artifact') return null;
   const ref = object(review.reference),
     scope = object(ref?.scope);

@@ -52,7 +52,7 @@ export async function largeInteractionFixture() {
     model,
     modelId: 'fixed',
     modelConcurrency: 1,
-    authorizationReview: { id: 'review', version: '1', modelId: 'review-model', model: reviewer },
+    authorizationCheck: { id: 'review', version: '1', modelId: 'review-model', model: reviewer },
     extensions: [
       {
         id: 'fixture',
@@ -79,7 +79,7 @@ export async function largeInteractionFixture() {
           : {
               allowed: false,
               revision: 'p1',
-              review: { request: { task: body, plan: { full: 'actual fixed plan' } } },
+              check: { request: { task: body, plan: { full: 'actual fixed plan' } } },
             };
       },
     },

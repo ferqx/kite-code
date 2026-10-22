@@ -1,5 +1,4 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { semanticReviewContent } from '../../authorization-review-context';
 import { canonicalJson } from '../../json';
 import type { EnsureAgentFollowUpInput, EnsureOperationInput, Store } from '../port';
 import {
@@ -132,10 +131,40 @@ export function assertOperationResultDelivery(input: EnsureOperationInput): void
   )
     throw new AgentError('invalid_operation_result_delivery');
 }
+/** Historical internal agents remain inspectable, but cannot start new business or Model work. */
+export function assertCurrentChildPurpose(db: SqliteOperations, sessionId: string): void {
+  let current: string | null = sessionId;
+  const seen = new Set<string>();
+  while (current) {
+    if (seen.has(current) || seen.size >= 64) throw new AgentError('invalid_operation_parent');
+    seen.add(current);
+    const session = db.row('SELECT parent_id FROM session WHERE id=?', current);
+    if (!session) throw new AgentError('session_not_found');
+    const historical = db.row(
+      `SELECT carrier.id FROM execution carrier JOIN command origin ON origin.id=carrier.origin_command_id
+       LEFT JOIN execution parent ON parent.id=carrier.parent_execution_id
+       WHERE carrier.child_session_id=? AND (origin.kind='authorization.review' OR
+         (carrier.adapter_id='agent/session-title' AND parent.adapter_id='builtin.session-title/generate' AND parent.definition_version='1')) LIMIT 1`,
+      current,
+    );
+    if (historical) throw new AgentError('historical_internal_agent_read_only');
+    current = session.parent_id === null ? null : String(session.parent_id);
+  }
+}
+export function assertCurrentExecutionPurpose(
+  db: SqliteOperations,
+  execution: Record<string, string | number | bigint | null>,
+): void {
+  const origin = db.row('SELECT kind FROM command WHERE id=?', execution.origin_command_id!);
+  if (origin?.kind === 'authorization.review')
+    throw new AgentError('historical_internal_agent_read_only');
+  assertCurrentChildPurpose(db, String(execution.session_id));
+  if (execution.child_session_id !== null)
+    assertCurrentChildPurpose(db, String(execution.child_session_id));
+}
 export function ensureAgent(
   db: SqliteOperations,
   input: EnsureOperationInput,
-  authorizationReview = false,
   continuation?:
     | EnsureAgentFollowUpInput
     | { previous: OperationRef; contextSelectionId: string; firstActivation: true },
@@ -148,6 +177,7 @@ export function ensureAgent(
   const work = (): OperationRef => {
     db.identity(input.expectedStoreId);
     db.owner(input.owner, input.sessionId);
+    assertCurrentChildPurpose(db, input.sessionId);
     assertNoExecutionGroupFence(db, input.sessionId);
     if (
       input.request.kind !== 'agent' ||
@@ -176,14 +206,14 @@ export function ensureAgent(
       String(parent.owner_generation) !== input.owner.generation
     )
       throw new AgentError('invalid_operation_parent');
-    if (!authorizationReview)
-      verifyNamespace(db, input.extensionId, origin, input.parentExecutionId);
+    if (parent.adapter_id === 'builtin.session-title/generate' && parent.definition_version === '1')
+      throw new AgentError('internal_model_parent_cannot_create_child');
+    verifyNamespace(db, input.extensionId, origin, input.parentExecutionId);
     let reusedChild: Record<string, string | number | bigint | null> | null = null;
     let previousCarrier: Record<string, string | number | bigint | null> | null = null;
     let firstActivation: FirstActivationProof | undefined;
     if (continuation) {
       if (
-        authorizationReview ||
         parent.kind !== 'tool' ||
         continuation.previous.extensionId !== input.extensionId ||
         continuation.previous.sessionId !== input.sessionId ||
@@ -264,12 +294,10 @@ export function ensureAgent(
       if (!plan || plan.origin_store_id === null) throw new AgentError('operation_unverifiable');
       originStoreId = String(plan.origin_store_id);
     }
-    const afterTurn = authorizationReview
-      ? null
-      : sealAfterTurn(db, parent, input, configuration as unknown as Json);
+    const afterTurn = sealAfterTurn(db, parent, input, configuration as unknown as Json);
     const request: Json = {
       afterTurn,
-      kind: authorizationReview ? 'authorization.review' : 'operation.agent',
+      kind: 'operation.agent',
       definitionId: `agent/${configuration.id}`,
       definitionVersion: configuration.version,
       configurationId: configuration.id,
@@ -331,11 +359,7 @@ export function ensureAgent(
     if (originStoreId !== input.expectedStoreId) throw new AgentError('operation_unverifiable');
     assertConfigurationReads(db, configuration, parent, input.expectedStoreId);
     db.ancestors(input.owner, input.parentExecutionId);
-    if (
-      !(authorizationReview
-        ? parent.state === 'planned' && !parent.dispatched
-        : ['dispatching', 'running'].includes(String(parent.state)))
-    )
+    if (!['dispatching', 'running'].includes(String(parent.state)))
       throw new AgentError('invalid_operation_parent');
     const commandId = randomUUID(),
       executionId = randomUUID(),
@@ -343,9 +367,8 @@ export function ensureAgent(
       createId = `child-create-${executionId}`,
       startId = `child-start-${executionId}`;
     const current = db.row('SELECT * FROM session WHERE id=?', input.sessionId)!;
-    const refs = authorizationReview
-      ? '[]'
-      : parent.run_id === null
+    const refs =
+      parent.run_id === null
         ? parent.requirements_json
         : db.row(
             'SELECT requirements_json FROM run WHERE id=? AND session_id=?',
@@ -359,7 +382,7 @@ export function ensureAgent(
       commandId,
       input.sessionId,
       seq,
-      authorizationReview ? 'authorization.review' : 'operation.agent',
+      'operation.agent',
       origin.subject_id,
       digest(request),
       canonicalJson(request),
@@ -512,7 +535,7 @@ export function ensureAgent(
       childSessionId,
     };
   };
-  return authorizationReview || insideTransaction ? work() : db.tx(work);
+  return insideTransaction ? work() : db.tx(work);
 }
 export function activateChildRun(
   db: SqliteOperations,
@@ -529,6 +552,7 @@ export function activateChildRun(
     )
       throw new AgentError('invalid_child_execution');
     db.owner(input.owner, String(job.session_id));
+    assertCurrentExecutionPurpose(db, job);
     assertNoExecutionGroupFence(db, String(job.session_id), String(job.id));
     db.active(input.owner, String(job.origin_command_id));
     db.ancestors(input.owner, input.executionId);
@@ -659,9 +683,6 @@ export function activateChildRun(
       typeof start.input === 'string'
         ? start.input
         : (displayInput(start.input)?.content ?? canonicalJson(start.input));
-    const review =
-      db.row('SELECT kind FROM command WHERE id=?', job.origin_command_id!)?.kind ===
-      'authorization.review';
     if (firstActivation?.backgroundStart) {
       const background = JSON.parse(String(firstActivation.backgroundStart.request_json)) as {
         input: Json;
@@ -689,7 +710,7 @@ export function activateChildRun(
       String(job.child_session_id),
       runId,
       {
-        content: review ? semanticReviewContent(originalContent) : originalContent,
+        content: originalContent,
         sourceIds: [String(command.id), input.executionId],
       },
       'user',

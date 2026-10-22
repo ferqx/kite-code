@@ -21,6 +21,7 @@ import { createClient } from '@kite-ai/client';
 import { privateDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { startService } from '../../src';
 import { createDefaultProcessConfiguration } from '../../src/configuration';
+import { createPermissionManagement } from '../../src/permission-management';
 
 async function until<T>(read: () => Promise<T | null>) {
   const deadline = Date.now() + 8000;
@@ -31,14 +32,14 @@ async function until<T>(read: () => Promise<T | null>) {
     await Bun.sleep(10);
   }
 }
-type ReviewResponse = 'approve_once' | 'reject' | 'ask_user' | 'invalid' | 'failure';
-async function fixture(decision: ReviewResponse = 'approve_once') {
+type CheckResponse = 'approve_once' | 'reject' | 'ask_user' | 'invalid' | 'failure';
+async function fixture(decision: CheckResponse = 'approve_once') {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-default-auto-')));
   const workspace = join(root, 'workspace');
   mkdirSync(workspace);
   const profile = selectProfile({ dataRoot: join(root, 'data'), profile: 'new' });
   privateDirectory(profile.profilePath);
-  const reviews: {
+  const checks: {
     route: string;
     body: Record<string, unknown>;
     payload: Record<string, unknown>;
@@ -46,8 +47,8 @@ async function fixture(decision: ReviewResponse = 'approve_once') {
   const normalRequests: { route: string; body: Record<string, unknown> }[] = [];
   let workId = 'work',
     step = 0;
-  let blockReview = false;
-  let releaseReview!: () => void;
+  let blockCheck = false;
+  let releaseCheck!: () => void;
   const providers = ['a', 'b'].map((route) =>
     Bun.serve({
       hostname: '127.0.0.1',
@@ -62,13 +63,13 @@ async function fixture(decision: ReviewResponse = 'approve_once') {
             .reverse()
             .find((message) => message.role === 'user')?.content;
           const parsed = JSON.parse(content ?? '') as Record<string, unknown>;
-          if (parsed.purpose === 'authorization_review') payload = parsed;
+          if (parsed.purpose === 'authorization_check') payload = parsed;
         } catch {}
         let call: { name: string; arguments: string } | undefined;
         let content = 'finished';
         if (payload) {
-          reviews.push({ route, body, payload });
-          if (blockReview) await new Promise<void>((resolve) => (releaseReview = resolve));
+          checks.push({ route, body, payload });
+          if (blockCheck) await new Promise<void>((resolve) => (releaseCheck = resolve));
           if (decision === 'failure') return new Response('fixture failure', { status: 503 });
           content = JSON.stringify({
             decision: decision === 'invalid' ? 'approve_once' : decision,
@@ -196,12 +197,34 @@ async function fixture(decision: ReviewResponse = 'approve_once') {
     workspaceId: 'w',
     title: 'auto',
   });
+  const control = createPermissionManagement({ runtime, profile });
+  const identity = { expectedStoreId, subjectId: 'owner' };
+  const mode = await control.readMode({ ...identity, sessionId: 's' });
+  await control.setMode({
+    ...identity,
+    sessionId: 's',
+    commandId: 'fixture-mode',
+    mode: 'auto',
+    makeDefault: false,
+    ifRevision: mode.revision,
+    ifDefaultRevision: mode.defaultRevision,
+  });
+  const trust = await control.readTrust({ ...identity, workspaceId: 'w' });
+  await control.setTrust({
+    ...identity,
+    workspaceId: 'w',
+    commandId: 'fixture-trust',
+    trusted: true,
+    ifRevision: trust.revision,
+    canonicalIdentity: trust.canonicalIdentity,
+    externalReadScopeDigest: trust.externalReadScopeDigest,
+  });
   const f = {
     runtime,
     store,
     client,
     expectedStoreId,
-    reviews,
+    checks,
     normalRequests,
     workspace,
     configuration,
@@ -211,11 +234,11 @@ async function fixture(decision: ReviewResponse = 'approve_once') {
     set policy(value: PermissionPolicySnapshot) {
       policy = value;
     },
-    set blockReview(value: boolean) {
-      blockReview = value;
+    set blockCheck(value: boolean) {
+      blockCheck = value;
     },
-    releaseReview() {
-      releaseReview?.();
+    releaseCheck() {
+      releaseCheck?.();
     },
     writeConfiguration() {
       writeFileSync(configurationPath, JSON.stringify(configuration));
@@ -277,7 +300,7 @@ async function fixture(decision: ReviewResponse = 'approve_once') {
             },
             facts,
             pendingCards: cards.interactions.map((card) => ({ id: card.id, kind: card.kind })),
-            reviews: reviews.length,
+            checks: checks.length,
             normalRequests: normalRequests.length,
           }),
         );
@@ -301,7 +324,7 @@ async function fixture(decision: ReviewResponse = 'approve_once') {
       });
     },
     async close() {
-      releaseReview?.();
+      releaseCheck?.();
       client.disposeNetwork();
       try {
         await service.close();
@@ -314,50 +337,63 @@ async function fixture(decision: ReviewResponse = 'approve_once') {
   return f;
 }
 
-test('default Auto uses the selected actual SDK route and one tool-free durable review, preserving full task and exact once intent', async () => {
+test('default Auto uses the selected actual SDK route and one tool-free durable permission check, preserving full task and exact once intent', async () => {
   const f = await fixture();
   try {
     const task = `Full task ${'完整授权上下文'.repeat(2048)}`;
     await f.run('work', task);
     await f.done();
     expect(readFileSync(join(f.workspace, 'work.txt'), 'utf8')).toBe('actual work');
-    expect(f.reviews).toHaveLength(1);
-    expect(f.reviews[0]!.route).toBe('a');
-    expect(f.reviews[0]!.body.model).toBe('remote-a');
-    expect(f.reviews[0]!.body.temperature).toBe(0.25);
-    expect(f.reviews[0]!.body.tools ?? []).toEqual([]);
-    expect(JSON.stringify(f.reviews[0]!.payload)).toContain(task);
-    expect(f.reviews[0]!.payload.target).toMatchObject({
+    expect(f.checks).toHaveLength(1);
+    expect(f.checks[0]!.route).toBe('a');
+    expect(f.checks[0]!.body.model).toBe('remote-a');
+    expect(f.checks[0]!.body.temperature).toBe(0.25);
+    expect(f.checks[0]!.body.tools ?? []).toEqual([]);
+    expect(JSON.stringify(f.checks[0]!.payload)).toContain(task);
+    expect(f.checks[0]!.payload.target).toMatchObject({
       definitionId: 'files.write',
       definitionVersion: '2',
       input: { path: 'work.txt', base: null },
     });
     const executions = await f.store.listExecutions('s');
-    const carrier = executions.find((execution) => execution.childSessionId !== null)!;
-    const reviewModels = await f.store.listExecutions(carrier.childSessionId!);
-    expect(reviewModels).toHaveLength(1);
-    expect(reviewModels[0]).toMatchObject({
-      kind: 'model',
+    expect(executions.every((execution) => execution.childSessionId === null)).toBe(true);
+    const check = executions.find(
+      (execution) => execution.kind === 'model' && execution.runId === null,
+    )!;
+    expect(check).toMatchObject({
       definitionId: 'a',
       status: 'succeeded',
+      parentExecutionId: expect.any(String),
     });
-    expect(carrier.status).toBe('succeeded');
+    expect((await f.store.getCommand(check.originCommandId))!.kind).toBe('authorization.check');
+    expect((await f.store.getView('s')).runs).toHaveLength(1);
+    const background = await f.client.listBackgroundExecutions({
+      storeId: f.expectedStoreId,
+      rootSessionId: 's',
+    });
+    expect(background.items.every((item) => item.execution.childSessionId === null)).toBe(true);
+    expect(background.items.some((item) => item.execution.id === check.id)).toBe(false);
+    expect(
+      (await f.runtime.listMessages('s')).every(
+        (message) => !message.content.includes('authorization_check'),
+      ),
+    ).toBe(true);
     expect(
       (await f.client.listInteractions('s', { storeId: f.expectedStoreId })).interactions,
     ).toHaveLength(0);
     const original = await f.runtime.getCommand('work');
     await f.run('work', task);
     expect(await f.runtime.getCommand('work')).toEqual(original);
-    expect(f.reviews).toHaveLength(1);
+    expect(f.checks).toHaveLength(1);
     expect(f.normalRequests).toHaveLength(2);
     f.configuration.modelId = 'b';
     f.writeConfiguration();
     await f.run('work-two', 'New task: exact harmless file task');
     const next = await f.done();
-    const receipt = next.receipt as { businessCommandId: string; runId: string };
+    const receipt = next.receipt as { runId: string };
     expect(next.status).toBe('applied');
     expect(await f.store.getRun(receipt.runId)).toMatchObject({
-      originCommandId: receipt.businessCommandId,
+      originCommandId: next.id,
       rootWorkCommandId: next.id,
       status: 'completed',
     });
@@ -367,21 +403,21 @@ test('default Auto uses the selected actual SDK route and one tool-free durable 
     expect(models).toHaveLength(2);
     for (const model of models)
       expect(model).toMatchObject({
-        originCommandId: receipt.businessCommandId,
+        originCommandId: next.id,
         rootWorkCommandId: next.id,
         definitionId: 'b',
       });
-    expect(f.reviews).toHaveLength(2);
-    expect(f.reviews[1]!.route).toBe('b');
-    expect(f.reviews[1]!.body.model).toBe('remote-b');
-    expect(f.reviews[0]!.payload.reviewer).not.toEqual(f.reviews[1]!.payload.reviewer);
+    expect(f.checks).toHaveLength(2);
+    expect(f.checks[1]!.route).toBe('b');
+    expect(f.checks[1]!.body.model).toBe('remote-b');
+    expect(f.checks[0]!.payload.checker).not.toEqual(f.checks[1]!.payload.checker);
     expect(readFileSync(join(f.workspace, 'work-two.txt'), 'utf8')).toBe('actual work-two');
   } finally {
     await f.close();
   }
 }, 20000);
 
-test('default Auto ask, invalid closed output and Provider failure require the actual original human card without rerunning review', async () => {
+test('default Auto ask, invalid closed output and Provider failure require the actual original human card without rerunning permission check', async () => {
   for (const decision of ['ask_user', 'invalid', 'failure'] as const) {
     const f = await fixture(decision);
     try {
@@ -392,15 +428,16 @@ test('default Auto ask, invalid closed output and Provider failure require the a
         definitionId: 'files.write',
         input: { path: 'work.txt', base: null },
       });
-      expect(f.reviews).toHaveLength(1);
-      const reviewer = (await f.store.listExecutions('s')).find(
-        (execution) => execution.childSessionId !== null,
-      )!;
-      expect(reviewer.childSessionId).not.toBeNull();
+      expect(f.checks).toHaveLength(1);
+      const executions = await f.store.listExecutions('s');
+      expect(executions.every((execution) => execution.childSessionId === null)).toBe(true);
+      expect(
+        executions.filter((execution) => execution.kind === 'model' && execution.runId === null),
+      ).toHaveLength(1);
       await f.approve(card);
       await f.done();
       expect(readFileSync(join(f.workspace, 'work.txt'), 'utf8')).toBe('actual work');
-      expect(f.reviews).toHaveLength(1);
+      expect(f.checks).toHaveLength(1);
       expect(
         (await f.runtime.getInteraction({
           expectedStoreId: f.expectedStoreId,
@@ -414,7 +451,7 @@ test('default Auto ask, invalid closed output and Provider failure require the a
   }
 }, 30000);
 
-test('default Auto cannot review past untrusted, missing allowlist, policy revocation or original cancellation', async () => {
+test('default Auto cannot check past untrusted, missing allowlist, policy revocation or original cancellation', async () => {
   for (const change of ['untrusted', 'allowlist', 'revoke', 'cancel'] as const) {
     const f = await fixture();
     try {
@@ -424,10 +461,10 @@ test('default Auto cannot review past untrusted, missing allowlist, policy revoc
           ...f.policy,
           allowed: f.policy.allowed.filter((entry) => entry.kind === 'model'),
         };
-      if (change === 'revoke' || change === 'cancel') f.blockReview = true;
+      if (change === 'revoke' || change === 'cancel') f.blockCheck = true;
       await f.run();
       if (change === 'revoke' || change === 'cancel') {
-        await until(async () => (f.reviews.length ? true : null));
+        await until(async () => (f.checks.length ? true : null));
         expect(existsSync(join(f.workspace, 'work.txt'))).toBe(false);
         if (change === 'revoke')
           f.policy = { ...f.policy, workspaceTrust: false, revision: 'revoked' };
@@ -439,11 +476,11 @@ test('default Auto cannot review past untrusted, missing allowlist, policy revoc
             subjectId: 'owner',
             targetCommandId: 'work',
           });
-        f.releaseReview();
+        f.releaseCheck();
       }
       await f.done();
       expect(existsSync(join(f.workspace, 'work.txt'))).toBe(false);
-      expect(f.reviews).toHaveLength(change === 'untrusted' || change === 'allowlist' ? 0 : 1);
+      expect(f.checks).toHaveLength(change === 'untrusted' || change === 'allowlist' ? 0 : 1);
       expect(
         (await f.client.listInteractions('s', { storeId: f.expectedStoreId, state: 'pending' }))
           .interactions,
@@ -458,13 +495,13 @@ test('default Auto cannot review past untrusted, missing allowlist, policy revoc
   }
 }, 30000);
 
-test('Auto rejection stops the original work, preserving a real review result and zero file effects', async () => {
+test('Auto rejection stops the original work, preserving a real check result and zero file effects', async () => {
   const f = await fixture('reject');
   try {
     await f.run();
     await f.done();
     expect(existsSync(join(f.workspace, 'work.txt'))).toBe(false);
-    expect(f.reviews).toHaveLength(1);
+    expect(f.checks).toHaveLength(1);
     expect(f.normalRequests).toHaveLength(1);
     expect((await f.runtime.getView('s')).runs[0]!.status).toBe('cancelled');
     expect(

@@ -19,7 +19,7 @@ async function eventually<T>(read: () => Promise<T | null>): Promise<T> {
     if (value !== null) return value;
     await Bun.sleep(10);
   }
-  throw new Error('Timed out at original complete-output review boundary');
+  throw new Error('Timed out at original complete-output check boundary');
 }
 const sha = (text: string) => createHash('sha256').update(text).digest('hex');
 
@@ -65,7 +65,7 @@ const cases: { shape: Shape; fault?: Fault }[] = [
   })),
 ];
 for (const { shape, fault } of cases)
-  test(`guarded complete ${shape} review ${fault ?? 'original'} retains original proof and independent Ask`, async () => {
+  test(`guarded complete ${shape} check ${fault ?? 'original'} retains original proof and independent Ask`, async () => {
     const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-review-complete-output-')));
     const evidenceRoot = realpathSync(
       mkdtempSync(join(tmpdir(), `kite-review-${shape}-evidence-`)),
@@ -103,10 +103,10 @@ for (const { shape, fault } of cases)
       model: ordinary,
       modelId: 'ordinary',
       modelConcurrency: 1,
-      authorizationReview: {
-        id: 'reviewer',
+      authorizationCheck: {
+        id: 'checker',
         version: '1',
-        modelId: 'review-model',
+        modelId: 'check-model',
         model: {
           async *stream(input) {
             reviews++;
@@ -127,7 +127,7 @@ for (const { shape, fault } of cases)
             ? {
                 allowed: false,
                 revision: 'p1',
-                review: { request: { task: 'exact guarded operation' }, requireApproval: true },
+                check: { request: { task: 'exact guarded operation' }, requireApproval: true },
               }
             : { allowed: true, revision: 'trusted' };
         },
@@ -141,7 +141,7 @@ for (const { shape, fault } of cases)
             {
               id: 'guarded',
               version: '1',
-              description: 'Owned complete review result',
+              description: 'Owned complete check result',
               inputSchema: { type: 'object', additionalProperties: false },
               async prepare(_input, context) {
                 await context.requireExecutionGroupQuiescent!();
@@ -188,24 +188,28 @@ for (const { shape, fault } of cases)
       const carrier = await eventually(
         async () =>
           (await store.listExecutions('s')).find(
-            (item) => item.childSessionId && ['succeeded', 'failed'].includes(item.status),
+            (item) =>
+              item.kind === 'model' &&
+              item.runId === null &&
+              ['succeeded', 'failed'].includes(item.status),
           ) ?? null,
       );
       const target = (await store.listExecutions('s')).find(
         (item) => item.definitionId === 'fixture/guarded',
       )!;
-      const models = await store.listExecutions(carrier.childSessionId!);
-      expect(models).toHaveLength(1);
-      const model = models[0]!;
+      const model = carrier;
       expect(model).toMatchObject({
         kind: 'model',
+        runId: null,
+        childSessionId: null,
         status: 'succeeded',
-        definitionId: 'review-model',
+        definitionId: 'check-model',
+        parentExecutionId: target.id,
       });
       const scope = {
         expectedStoreId,
         subjectId: 'owner',
-        sessionId: carrier.childSessionId!,
+        sessionId: 's',
         executionId: model.id,
       };
       const snapshot = await store.getModelOutputSnapshot(scope);
@@ -220,13 +224,13 @@ for (const { shape, fault } of cases)
       const proofInput = {
         expectedStoreId,
         targetExecutionId: target.id,
-        reviewExecutionId: carrier.id,
+        checkExecutionId: carrier.id,
         policyRevision: 'p1',
         request: { task: 'exact guarded operation' },
         requireApproval: true,
-        reviewer: { id: 'reviewer', version: '1', modelId: 'review-model' },
+        checker: { id: 'checker', version: '1', modelId: 'check-model' },
       };
-      const proof = await store.getAuthorizationReview(proofInput);
+      const proof = await store.getAuthorizationCheck(proofInput);
       writeFileSync(
         join(evidenceRoot, 'receipt.json'),
         JSON.stringify(
@@ -272,7 +276,7 @@ for (const { shape, fault } of cases)
         const before = (await store.getMetadata()).lastChangeCursor;
         const cold = await openSqliteStore({ ...profile, mode: 'readonly' });
         try {
-          expect(await cold.getAuthorizationReview(proofInput)).toEqual(proof);
+          expect(await cold.getAuthorizationCheck(proofInput)).toEqual(proof);
           expect((await cold.getMetadata()).lastChangeCursor).toBe(before);
           expect(reviews).toBe(1);
         } finally {
@@ -294,15 +298,15 @@ for (const { shape, fault } of cases)
           };
           const result = JSON.parse(row.result_json);
           if (fault.startsWith('receipt_') && !fault.startsWith('receipt_registration_')) {
-            const receipt = result.details.authorizationReviewOutput;
-            expect(receipt.kind).toBe('authorization_review_output');
+            const receipt = result.authorizationCheckOutput;
+            expect(receipt.kind).toBe('authorization_check_output');
             if (fault === 'receipt_digest') receipt.modelOutputDigest = '0'.repeat(64);
             if (fault === 'receipt_model_id') receipt.modelExecutionId = target.id;
             if (fault === 'receipt_hash') receipt.contentHash = '0'.repeat(64);
             if (fault === 'receipt_answer') receipt.answer.reason = 'Changed finite answer';
           }
           if (fault.startsWith('receipt_registration_')) {
-            const refId = `review-output-${result.details.authorizationReviewOutput.modelOutputDigest}`;
+            const refId = `check-output-${result.authorizationCheckOutput.modelOutputDigest}`;
             const ref = db.query('SELECT blob_hash FROM blob_ref WHERE id=?').get(refId) as {
               blob_hash: string;
             };
@@ -318,10 +322,10 @@ for (const { shape, fault } of cases)
               db.run('UPDATE blob SET size=1 WHERE hash=?', [ref.blob_hash]);
           }
           if (fault.startsWith('artifact_')) {
-            expect(result.modelContent.kind).toBe('artifact');
-            if (fault === 'artifact_scope') result.modelContent.reference.scope.id = target.id;
-            if (fault === 'artifact_hash') result.modelContent.reference.hash = '0'.repeat(64);
-            if (fault === 'artifact_size') result.modelContent.reference.size = '1';
+            expect(result.modelOutput).toBeDefined();
+            if (fault === 'artifact_scope') result.modelOutput.head.scope.id = target.id;
+            if (fault === 'artifact_hash') result.modelOutput.head.hash = '0'.repeat(64);
+            if (fault === 'artifact_size') result.modelOutput.head.size = '1';
           }
           if (fault === 'model_descriptor') {
             db.run(
@@ -335,7 +339,7 @@ for (const { shape, fault } of cases)
             ]);
           let refused = false;
           try {
-            refused = (await store.getAuthorizationReview(proofInput)).decision !== 'approve_once';
+            refused = (await store.getAuthorizationCheck(proofInput)).decision !== 'approve_once';
           } catch {
             refused = true;
           }
@@ -373,7 +377,7 @@ for (const { shape, fault } of cases)
       } else {
         expect((await store.getExecution(target.id))!.status).toBe('succeeded');
         expect(targetProof).toMatchObject({
-          reviewExecutionId: carrier.id,
+          checkExecutionId: carrier.id,
           interactionId: interaction.id,
         });
         expect(effects).toBe(1);

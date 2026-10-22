@@ -46,6 +46,8 @@ export interface ConsolidatedToolEntry {
   elapsedMs?: number;
   status: ToolDisplayStatus;
   totalLines?: number;
+  checkFailure?: string;
+  /** Read-only compatibility with historical tool presentation. */
   reviewFailure?: string;
 }
 export type ThoughtActivity = { kind: 'thinking'; text: string } | { kind: 'tool'; callId: string };
@@ -83,6 +85,8 @@ export type OutputBlock =
       liveOutput?: string;
       liveTotalLines?: number;
       timeoutMs?: number;
+      checkFailure?: string;
+      /** Read-only compatibility with historical tool presentation. */
       reviewFailure?: string;
       userInput?: UserInputResult;
     }
@@ -118,8 +122,12 @@ export type OutputBlock =
       failureDiagnostic?: SubAgentFailureDiagnostic;
       approvalState?:
         | 'queued'
+        | 'queued_auto_check'
+        /** Historical presentation only. */
         | 'queued_auto_review'
         | 'queued_user_approval'
+        | 'auto_checking'
+        /** Historical presentation only. */
         | 'auto_reviewing'
         | 'awaiting_user'
         | 'authorized_queued';

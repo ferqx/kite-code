@@ -303,7 +303,7 @@ test('actual Core fixed Adapter records 205 original requests; Native public SDK
     expect(last.request as unknown).toEqual(model.requests[204]!);
     const original = await client.getCommand('fixed-original-204');
     const applied = await readOrdinaryCommandApplication(client, original);
-    expect(applied?.run?.id).toBe(last.runId);
+    expect(applied?.run?.id ?? null).toBe(last.runId);
     expect(last.originCommandId).toBe(applied!.sourceCommandId);
     expect(last.confirmation).toBe('succeeded');
     expect(model.requests).toHaveLength(205);

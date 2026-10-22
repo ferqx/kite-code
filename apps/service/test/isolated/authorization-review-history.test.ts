@@ -19,16 +19,15 @@ const finish = {
   reason: 'stop',
   usage: { inputTokens: 1, outputTokens: 1 },
 } as const;
-const marker = 'PRIVATE_REVIEW_HTTP_CONTINUATION';
+const marker = 'PRIVATE_CHECK_HTTP_CONTINUATION';
 
-for (const shape of ['inline', 'artifact', 'artifact-ask', 'artifact-ask-legacy'] as const)
-  test(`Service projects ${shape} review history through messages, view, context and Inspector`, async () => {
-    const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-review-history-http-')));
+for (const shape of ['inline', 'artifact', 'artifact-ask'] as const)
+  test(`Service projects ${shape} permission check history through messages, view, context and Inspector`, async () => {
+    const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-check-history-http-')));
     const selected = selectProfile({ dataRoot: join(root, 'data'), profile: 'owned' });
     const profile = { dataRoot: selected.dataRoot, profile: selected.profile };
     const store = await openSqliteStore(profile);
     const asksUser = shape.startsWith('artifact-ask');
-    const legacy = shape === 'artifact-ask-legacy';
     const artifacts = createArtifactStore({ profile, store });
     const model = createFixedModel([
       [
@@ -45,11 +44,11 @@ for (const shape of ['inline', 'artifact', 'artifact-ask', 'artifact-ask-legacy'
       ],
       [finish],
     ]);
-    const reviewRequest = {
+    const checkRequest = {
       task: 'exact operation',
-      ...(asksUser ? { full: 'Human-visible review 雪🙂'.repeat(8000) } : {}),
+      ...(asksUser ? { full: 'Human-visible check 雪🙂'.repeat(8000) } : {}),
     };
-    const reviewer = createFixedModel([
+    const checker = createFixedModel([
       [
         {
           type: 'text_delta',
@@ -64,29 +63,19 @@ for (const shape of ['inline', 'artifact', 'artifact-ask', 'artifact-ask-legacy'
     let effects = 0;
     const runtime = createRuntime({
       store,
-      artifacts: {
-        ...artifacts,
-        // Reproduce the original producer without editing any persisted identity or binding.
-        publish: (input) =>
-          artifacts.publish({
-            ...input,
-            refId: legacy
-              ? input.refId.replace(/^authorization-review-request-/, 'model-body-')
-              : input.refId,
-          }),
-      },
+      artifacts,
       model,
       modelId: 'original',
-      authorizationReview: {
-        id: 'reviewer',
+      authorizationCheck: {
+        id: 'checker',
         version: '1',
-        modelId: 'separate-review',
-        model: reviewer,
+        modelId: 'separate-check',
+        model: checker,
       },
       permissions: {
         async authorize(request) {
           return request.definitionId === 'fixture.effect'
-            ? { allowed: false, revision: 'p1', review: { request: reviewRequest } }
+            ? { allowed: false, revision: 'p1', check: { request: checkRequest } }
             : { allowed: true, revision: 'p1' };
         },
       },
@@ -117,7 +106,7 @@ for (const shape of ['inline', 'artifact', 'artifact-ask', 'artifact-ask-legacy'
           name: selected.profile,
           accessKey: selected.profileAccessKey,
         },
-        buildId: 'review-history-test',
+        buildId: 'check-history-test',
         subjectId: 'owner',
       });
       const expectedStoreId = (await store.getMetadata()).storeId;
@@ -171,17 +160,15 @@ for (const shape of ['inline', 'artifact', 'artifact-ask', 'artifact-ask-legacy'
         expect(effects).toBe(0);
         publicAttachment = (
           card!.request as unknown as {
-            policy: { review: { reference: NonNullable<typeof publicAttachment> } };
+            policy: { check: { reference: NonNullable<typeof publicAttachment> } };
           }
-        ).policy.review.reference;
-        expect(publicAttachment.id).toStartWith(
-          legacy ? 'model-body-' : 'authorization-review-request-',
-        );
+        ).policy.check.reference;
+        expect(publicAttachment.id).toStartWith('authorization-check-request-');
         const beforeRead = (await store.getMetadata()).lastChangeCursor;
         const response = await download('s', publicAttachment);
         expect(response.status).toBe(200);
         const body = await response.text();
-        expect(JSON.parse(body)).toEqual(reviewRequest);
+        expect(JSON.parse(body)).toEqual(checkRequest);
         expect(body).not.toContain(marker);
         expect((await store.getMetadata()).lastChangeCursor).toBe(beforeRead);
         expect(effects).toBe(0);
@@ -191,8 +178,8 @@ for (const shape of ['inline', 'artifact', 'artifact-ask', 'artifact-ask-legacy'
           scope: { kind: 'session', id: 'missing' },
         });
         expect(wrongScope.status).not.toBe(200);
-        expect(await wrongScope.text()).not.toContain(reviewRequest.full!);
-        if (legacy) {
+        expect(await wrongScope.text()).not.toContain(checkRequest.full!);
+        {
           // Fresh readonly Worker/Runtime/HTTP instances must authorize a persisted pending
           // legacy card without consulting the live owner's caches or replaying any work.
           const coldStore = await openSqliteStore({ ...profile, mode: 'readonly' });
@@ -215,7 +202,7 @@ for (const shape of ['inline', 'artifact', 'artifact-ask', 'artifact-ask-legacy'
               name: selected.profile,
               accessKey: selected.profileAccessKey,
             },
-            buildId: 'legacy-review-cold-reader',
+            buildId: 'check-cold-reader',
             subjectId: 'owner',
           });
           try {
@@ -231,7 +218,7 @@ for (const shape of ['inline', 'artifact', 'artifact-ask', 'artifact-ask-legacy'
               { headers: { authorization: `Bearer ${coldService.bootstrap.token}` } },
             );
             expect(response.status).toBe(200);
-            expect(await response.json()).toEqual(reviewRequest);
+            expect(await response.json()).toEqual(checkRequest);
             const original = (await coldStore.listExecutions('s')).filter(
               (e) => e.kind === 'model',
             );
@@ -256,7 +243,7 @@ for (const shape of ['inline', 'artifact', 'artifact-ask', 'artifact-ask-legacy'
             expect(await coldStore.getMetadata()).toEqual(before);
             expect(coldModel.requests).toHaveLength(0);
             expect(effects).toBe(0);
-            expect(reviewer.requests).toHaveLength(1);
+            expect(checker.requests).toHaveLength(1);
           } finally {
             await coldService.close();
           }
@@ -281,39 +268,70 @@ for (const shape of ['inline', 'artifact', 'artifact-ask', 'artifact-ask-legacy'
       }
       await runtime.waitForCommand('work');
       expect(effects).toBe(1);
-      expect(reviewer.requests).toHaveLength(1);
-      expect(JSON.stringify(reviewer.requests)).not.toContain(marker);
-      const carrier = (await store.listExecutions('s')).find(
-        (execution) => execution.childSessionId,
-      )!;
-      const child = carrier.childSessionId!;
-      const modelId = reviewer.requests[0]!.requestId;
-      const childRun = (await store.getView(child)).runs[0]!;
+      expect(checker.requests).toHaveLength(1);
+      expect(JSON.stringify(checker.requests)).not.toContain(marker);
+      const modelId = checker.requests[0]!.requestId;
+      const checkExecution = (await store.getExecution(modelId))!;
+      expect(checkExecution).toMatchObject({
+        kind: 'model',
+        runId: null,
+        childSessionId: null,
+        status: 'succeeded',
+      });
+      expect((await store.listExecutions('s')).every((item) => item.childSessionId === null)).toBe(
+        true,
+      );
+      expect((await store.getView('s')).runs).toHaveLength(1);
+      await runtime.createSession({
+        ...scope,
+        sessionId: 'other',
+        commandId: 'create-other',
+        workspaceId: 'w',
+        title: 'other',
+      });
+      const payload = (await store.getCommand(checkExecution.originCommandId))!.request as {
+        input: Json;
+      };
+      const child = 'other';
       const get = async (path: string) => {
         const response = await fetch(service!.endpoint + path, {
           headers: { authorization: `Bearer ${service!.bootstrap.token}` },
         });
         const body = await response.text();
-        expect(response.status).toBe(200);
+        expect({
+          status: response.status,
+          path,
+          error: response.status === 200 ? null : body,
+        }).toMatchObject({ status: 200 });
         expect(body).not.toContain(marker);
         return JSON.parse(body);
       };
       const check = async () => {
-        const messages = await get(`/v1/sessions/${child}/messages`);
-        expect(messages.some((message: { role: string }) => message.role === 'user')).toBe(true);
-        await get(`/v1/sessions/${child}/view`);
-        await get(`/v1/runs/${childRun.id}`);
-        await get(`/v1/sessions/${child}/context?storeId=${expectedStoreId}`);
-        const inputs = await get(`/v1/sessions/${child}/model-inputs?storeId=${expectedStoreId}`);
-        expect(inputs.items).toHaveLength(1);
-        await get(
-          `/v1/sessions/${child}/executions/${modelId}/model-input?storeId=${expectedStoreId}`,
+        const background = await get(
+          `/v1/background-executions?storeId=${expectedStoreId}&rootSessionId=s`,
         );
+        expect(background.items).toHaveLength(0);
+        const messages = await get('/v1/sessions/s/messages');
+        expect(
+          messages.filter((message: { role: string }) => message.role === 'user'),
+        ).toHaveLength(1);
+        expect(JSON.stringify(messages)).not.toContain('authorization_check');
+        await get('/v1/sessions/s/view');
+        await get(`/v1/sessions/s/context?storeId=${expectedStoreId}`);
+        const inputs = await get(`/v1/sessions/s/model-inputs?storeId=${expectedStoreId}`);
+        expect(
+          inputs.items.filter((item: { runId: string | null }) => item.runId === null),
+        ).toHaveLength(1);
+        const inspected = await get(
+          `/v1/sessions/s/executions/${modelId}/model-input?storeId=${expectedStoreId}`,
+        );
+        expect(inspected.runId).toBeNull();
+        await get(`/v1/sessions/s/executions/${modelId}/model-output?storeId=${expectedStoreId}`);
       };
       await check();
       if (shape !== 'inline') {
         const context = (
-          carrier.input as {
+          payload.input as {
             decisionContext: {
               modelInput: {
                 body: {
@@ -331,20 +349,19 @@ for (const shape of ['inline', 'artifact', 'artifact-ask', 'artifact-ask-legacy'
           ...scope,
           executionId: model.requests[0]!.requestId,
         });
-        const reviewInput = await store.getModelInputSnapshot({
+        const checkInput = await store.getModelInputSnapshot({
           ...scope,
-          sessionId: child,
           executionId: modelId,
         });
-        const reviewBody = (
-          reviewInput.input as { body?: { reference: typeof context.modelInput.body.reference } }
+        const checkBody = (
+          checkInput.input as { body?: { reference: typeof context.modelInput.body.reference } }
         ).body;
         const privateReferences = [
           context.modelInput.body.reference,
           originalOutput.output!.head,
-          ...(reviewBody ? [reviewBody.reference] : []),
+          ...(checkBody ? [checkBody.reference] : []),
         ];
-        if (asksUser) expect(reviewBody).toBeDefined();
+        if (asksUser) expect(checkBody).toBeDefined();
         for (const ref of privateReferences) {
           for (const sessionId of new Set([ref.sessionId, 's', child])) {
             const response = await download(sessionId, ref);
@@ -357,38 +374,19 @@ for (const shape of ['inline', 'artifact', 'artifact-ask', 'artifact-ask-legacy'
         if (publicAttachment) {
           const wrongSession = await download(child, publicAttachment);
           expect(wrongSession.status).not.toBe(200);
-          expect(await wrongSession.text()).not.toContain(reviewRequest.full!);
+          expect(await wrongSession.text()).not.toContain(checkRequest.full!);
           const before = (await store.getMetadata()).lastChangeCursor;
           const reread = await download('s', publicAttachment);
           expect(reread.status).toBe(200);
-          expect(await reread.json()).toEqual(reviewRequest);
+          expect(await reread.json()).toEqual(checkRequest);
           expect((await store.getMetadata()).lastChangeCursor).toBe(before);
           expect(effects).toBe(1);
-          expect(reviewer.requests).toHaveLength(1);
+          expect(checker.requests).toHaveLength(1);
         }
-      }
-      // A pre-fix initial Message used the private carrier payload as plain user text.
-      const initial = (await runtime.listMessages(child)).find(
-        (message) => message.role === 'user',
-      )!;
-      const db = new Database(selected.databasePath);
-      try {
-        const row = db.query('SELECT source_json FROM message WHERE id=?').get(initial.id) as {
-          source_json: string;
-        };
-        const old = JSON.parse(row.source_json);
-        old.content = JSON.stringify(carrier.input);
-        db.run('UPDATE message SET source_json=? WHERE id=?', [JSON.stringify(old), initial.id]);
-        db.run('UPDATE message_part SET json=? WHERE message_id=?', [
-          JSON.stringify(old),
-          initial.id,
-        ]);
-      } finally {
-        db.close();
       }
       await check();
       expect(effects).toBe(1);
-      expect(reviewer.requests).toHaveLength(1);
+      expect(checker.requests).toHaveLength(1);
     } finally {
       if (service) await service.close();
       else await runtime.close();

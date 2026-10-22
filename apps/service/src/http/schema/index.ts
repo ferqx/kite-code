@@ -196,7 +196,7 @@ const modelInputItem = z.object({
   seq: sequence,
   executionId: id,
   sessionId: id,
-  runId: id,
+  runId: id.nullable(),
   originCommandId: id,
   rootWorkCommandId: id,
   rootWorkSeq: sequence,
@@ -559,7 +559,7 @@ export const schemas = {
     storeId: id,
     sessionId: id,
     rootSessionId: id,
-    runId: id,
+    runId: id.nullable(),
     executionId: id,
     originCommandId: id,
     rootWorkCommandId: id,
@@ -578,7 +578,7 @@ export const schemas = {
     storeId: id,
     sessionId: id,
     rootSessionId: id,
-    runId: id,
+    runId: id.nullable(),
     executionId: id,
     originCommandId: id,
     rootWorkCommandId: id,
@@ -1010,6 +1010,15 @@ export const schemas = {
     authorization: z
       .object({
         dispatched: z.boolean(),
+        check: z
+          .object({
+            executionId: id,
+            status: executionStatus,
+            decision: z.enum(['approve_once', 'reject', 'ask_user', 'unavailable']),
+            reason: z.string().max(8192),
+            requireApproval: z.boolean(),
+          })
+          .optional(),
         review: z
           .object({
             executionId: id,

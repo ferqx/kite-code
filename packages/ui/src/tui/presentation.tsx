@@ -132,6 +132,7 @@ export const tuiChinese: Readonly<Record<string, string>> = {
     '基于最近一次已核实的模型输入；后续输入可能不同。',
   'Model unavailable': '模型信息不可用',
   'Workspace unavailable': '工作区信息不可用',
+  'Automatic check': '自动审核',
   'Automatic review': '自动审核',
   'Full access': '完全访问',
   'Request approval': '请求批准',

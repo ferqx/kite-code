@@ -214,7 +214,7 @@ async function fixture(holdActivation = false, holdDispatch = false, reviewer?: 
     permissions: policy,
     ...(reviewer
       ? {
-          authorizationReview: {
+          authorizationCheck: {
             id: 'reviewer',
             version: '1',
             modelId: 'reviewer',

@@ -4587,10 +4587,17 @@
               "pattern": "^[A-Za-z0-9_-]+$"
             },
             "runId": {
-              "type": "string",
-              "minLength": 1,
-              "maxLength": 128,
-              "pattern": "^[A-Za-z0-9_-]+$"
+              "anyOf": [
+                {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128,
+                  "pattern": "^[A-Za-z0-9_-]+$"
+                },
+                {
+                  "type": "null"
+                }
+              ]
             },
             "originCommandId": {
               "type": "string",
@@ -4709,10 +4716,17 @@
         "pattern": "^[A-Za-z0-9_-]+$"
       },
       "runId": {
-        "type": "string",
-        "minLength": 1,
-        "maxLength": 128,
-        "pattern": "^[A-Za-z0-9_-]+$"
+        "anyOf": [
+          {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "pattern": "^[A-Za-z0-9_-]+$"
+          },
+          {
+            "type": "null"
+          }
+        ]
       },
       "executionId": {
         "type": "string",
@@ -5432,10 +5446,17 @@
         "pattern": "^[A-Za-z0-9_-]+$"
       },
       "runId": {
-        "type": "string",
-        "minLength": 1,
-        "maxLength": 128,
-        "pattern": "^[A-Za-z0-9_-]+$"
+        "anyOf": [
+          {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "pattern": "^[A-Za-z0-9_-]+$"
+          },
+          {
+            "type": "null"
+          }
+        ]
       },
       "executionId": {
         "type": "string",
@@ -9847,6 +9868,42 @@
           "dispatched": {
             "type": "boolean"
           },
+          "check": {
+            "type": "object",
+            "properties": {
+              "executionId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128,
+                "pattern": "^[A-Za-z0-9_-]+$"
+              },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "planned",
+                  "dispatching",
+                  "running",
+                  "succeeded",
+                  "failed",
+                  "cancelled",
+                  "outcome_unknown"
+                ]
+              },
+              "decision": {
+                "type": "string",
+                "enum": ["approve_once", "reject", "ask_user", "unavailable"]
+              },
+              "reason": {
+                "type": "string",
+                "maxLength": 8192
+              },
+              "requireApproval": {
+                "type": "boolean"
+              }
+            },
+            "required": ["executionId", "status", "decision", "reason", "requireApproval"],
+            "additionalProperties": false
+          },
           "review": {
             "type": "object",
             "properties": {
@@ -14193,6 +14250,42 @@
                 "dispatched": {
                   "type": "boolean"
                 },
+                "check": {
+                  "type": "object",
+                  "properties": {
+                    "executionId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 128,
+                      "pattern": "^[A-Za-z0-9_-]+$"
+                    },
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "planned",
+                        "dispatching",
+                        "running",
+                        "succeeded",
+                        "failed",
+                        "cancelled",
+                        "outcome_unknown"
+                      ]
+                    },
+                    "decision": {
+                      "type": "string",
+                      "enum": ["approve_once", "reject", "ask_user", "unavailable"]
+                    },
+                    "reason": {
+                      "type": "string",
+                      "maxLength": 8192
+                    },
+                    "requireApproval": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": ["executionId", "status", "decision", "reason", "requireApproval"],
+                  "additionalProperties": false
+                },
                 "review": {
                   "type": "object",
                   "properties": {
@@ -17571,6 +17664,42 @@
               "properties": {
                 "dispatched": {
                   "type": "boolean"
+                },
+                "check": {
+                  "type": "object",
+                  "properties": {
+                    "executionId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 128,
+                      "pattern": "^[A-Za-z0-9_-]+$"
+                    },
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "planned",
+                        "dispatching",
+                        "running",
+                        "succeeded",
+                        "failed",
+                        "cancelled",
+                        "outcome_unknown"
+                      ]
+                    },
+                    "decision": {
+                      "type": "string",
+                      "enum": ["approve_once", "reject", "ask_user", "unavailable"]
+                    },
+                    "reason": {
+                      "type": "string",
+                      "maxLength": 8192
+                    },
+                    "requireApproval": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": ["executionId", "status", "decision", "reason", "requireApproval"],
+                  "additionalProperties": false
                 },
                 "review": {
                   "type": "object",

@@ -461,7 +461,6 @@ export function applyAgentCommand(
         const ref = ensureAgent(
           db,
           input,
-          false,
           {
             ...input,
             previous: target.ref,

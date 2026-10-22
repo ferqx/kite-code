@@ -11,6 +11,8 @@ import {
 } from '@kite-ai/ai';
 import { createSessionTitleExtension } from '../../../src/business/session-title';
 import { sessionTitleInstructions } from '../../../src/business/session-title/title';
+import type { Permissions } from '../../../src/extensions';
+import { semanticDigest } from '../../../src/json';
 import { type AgentRuntime, createRuntime } from '../../../src/runtime';
 import { openSqliteStore } from '../../../src/sqlite';
 import type { Store } from '../../../src/storage/port';
@@ -34,6 +36,13 @@ async function fixture(
   title = '',
   completionGate?: { entered: ReturnType<typeof deferred>; release: ReturnType<typeof deferred> },
   mainMode: 'success' | 'failure' | 'unavailable' | 'retrying' = 'success',
+  options: {
+    titlePermissions?(store: Store): Permissions;
+    titleDispose?(): Promise<void>;
+    beforeResolveTitle?(): Promise<void>;
+    blocker?: { entered: ReturnType<typeof deferred>; release: ReturnType<typeof deferred> };
+    modelConcurrency?: number;
+  } = {},
 ) {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-title-generation-')));
   const profile = { dataRoot: join(root, 'data'), profile: 'test' };
@@ -55,6 +64,13 @@ async function fixture(
         titleStarted.resolve();
         yield* titleStream(signal);
       } else {
+        if (
+          options.blocker &&
+          request.messages.some((message) => message.content === 'BLOCK_TITLE_MODEL_SLOT')
+        ) {
+          options.blocker.entered.resolve();
+          await options.blocker.release.promise;
+        }
         if (mainMode === 'failure') throw new Error('fixture main model failed');
         if (mainMode === 'retrying') throw new ModelAttemptError('provider_unavailable');
         yield { type: 'text_delta', text: '已完成主要任务' };
@@ -86,15 +102,24 @@ async function fixture(
   let runtime!: AgentRuntime;
   const titles = createSessionTitleExtension({
     runtime: () => runtime,
-    resolveModel: async () => ({ model, modelId: 'fixture', toolIds: [], snapshot: null }),
+    resolveModel: async () => {
+      await options.beforeResolveTitle?.();
+      return {
+        model,
+        modelId: 'fixture',
+        toolIds: [],
+        snapshot: null,
+        ...(options.titleDispose ? { dispose: options.titleDispose } : {}),
+        ...(options.titlePermissions ? { permissions: options.titlePermissions(store) } : {}),
+      };
+    },
   });
   runtime = createRuntime({
     store: runtimeStore,
     ...(mainMode === 'unavailable' ? {} : { model }),
     modelId: 'fixture',
+    ...(options.modelConcurrency ? { modelConcurrency: options.modelConcurrency } : {}),
     extensions: [titles.extension],
-    childConfigurations: [titles.childConfiguration],
-    resolveChildRunConfiguration: titles.resolveChild,
     sessionInputMetadata: { preserve: (command) => titles.preserveInputFallback(command) },
     permissions: {
       async authorize() {
@@ -154,7 +179,7 @@ test('AI title is durable metadata, excluded from complete history and later mod
     expect(view.runs[0]?.status).toBe('completed');
     expect((await f.store.getSession('session'))?.title).toBe(generated);
     const titleExecution = view.executions.find(
-      (execution) => execution.definitionId === 'agent/session-title',
+      (execution) => execution.kind === 'model' && execution.runId === null,
     );
     expect(titleExecution?.status).toBe('succeeded');
     expect(view.messages).toHaveLength(2);
@@ -295,7 +320,7 @@ test('an unnamed Session with existing history is not named by a later Run', asy
   }
 });
 
-test('ordinary child isolation preserves the main recovery checkpoint before final Run completion', async () => {
+test('internal title Model isolation preserves the main recovery checkpoint before final Run completion', async () => {
   const completionGate = { entered: deferred(), release: deferred() };
   const f = await fixture(
     async function* () {
@@ -313,17 +338,19 @@ test('ordinary child isolation preserves the main recovery checkpoint before fin
     expect(run.isActive).toBe(true);
     expect(before.executions).toHaveLength(4);
     const titleExecution = before.executions.find(
-      (execution) => execution.definitionId === 'agent/session-title',
+      (execution) => execution.kind === 'model' && execution.runId === null,
     )!;
     const mainExecution = before.executions.find((execution) => execution.kind === 'model')!;
     expect(titleExecution.status).toBe('succeeded');
     expect(mainExecution.status).toBe('succeeded');
-    const child = await f.runtime.getView(titleExecution.childSessionId!);
-    expect(child.messages.at(-1)?.content).toBe(generated);
+    expect(titleExecution.childSessionId).toBeNull();
+    expect(before.executions.every((execution) => execution.childSessionId === null)).toBe(true);
+    expect((await f.runtime.getCommand(titleExecution.originCommandId))!.kind).toBe(
+      'session.title',
+    );
     const fullTitle = await f.runtime.readModelOutput({
       ...f.base,
-      sessionId: child.session.id,
-      executionId: child.executions.find((execution) => execution.kind === 'model')!.id,
+      executionId: titleExecution.id,
     });
     expect(fullTitle.output).toMatchObject({ content: generated, complete: true, toolCalls: [] });
     const session = (await f.store.getSession('session'))!;
@@ -492,7 +519,7 @@ test('cancellation reaches the actual metadata adapter signal and preserves fall
     expect((await f.store.getSession('session'))?.title).toBe(truncatedOriginal);
     for (let attempt = 0; attempt < 200; attempt++) {
       const carrier = (await f.runtime.getView('session')).executions.find(
-        (e) => e.definitionId === 'agent/session-title',
+        (e) => e.kind === 'model' && e.runId === null,
       );
       if (carrier?.status === 'cancelled') break;
       await new Promise((resolve) => setTimeout(resolve, 5));
@@ -500,14 +527,15 @@ test('cancellation reaches the actual metadata adapter signal and preserves fall
     const view = await f.runtime.getView('session');
     expect(view.messages).toHaveLength(2);
     expect(
-      view.executions.find((execution) => execution.definitionId === 'agent/session-title')?.status,
+      view.executions.find((execution) => execution.kind === 'model' && execution.runId === null)
+        ?.status,
     ).toBe('cancelled');
   } finally {
     await f.close();
   }
 });
 
-test('the title deadline cancels the actual child and waits for its recorded terminal result', async () => {
+test('the title deadline cancels the actual internal Model and waits for its recorded terminal result', async () => {
   let cancelled = false;
   const f = await fixture(async function* (signal) {
     await new Promise<void>((_resolve, reject) => {
@@ -531,7 +559,8 @@ test('the title deadline cancels the actual child and waits for its recorded ter
     expect(view.session.title).toBe(truncatedOriginal);
     expect(f.titleRequests()).toHaveLength(1);
     expect(
-      view.executions.find((execution) => execution.definitionId === 'agent/session-title')?.status,
+      view.executions.find((execution) => execution.kind === 'model' && execution.runId === null)
+        ?.status,
     ).toBe('cancelled');
     expect(
       view.executions.find(
@@ -754,7 +783,7 @@ test('a public first task directly binds metadata and one AI title to its origin
     const view = await f.runtime.getView('session');
     expect(JSON.stringify(view.messages)).not.toContain(generated);
     expect(
-      view.executions.filter((execution) => execution.definitionId === 'agent/session-title'),
+      view.executions.filter((execution) => execution.kind === 'model' && execution.runId === null),
     ).toHaveLength(1);
   } finally {
     await f.close();
@@ -848,3 +877,307 @@ test('ordinary clarification preserves the first input, its reply and the manual
     await f.close();
   }
 });
+
+test('a title adapter that ignores deadline cancellation remains unknown and its late output cannot rename the session', async () => {
+  const release = deferred();
+  const prefix = 'TITLE_PARTIAL_BEFORE_UNCONFIRMED_STOP';
+  let signal: AbortSignal | undefined;
+  let draining: Promise<void> | undefined;
+  let disposed = 0;
+  const f = await fixture(
+    async function* (current) {
+      signal = current;
+      yield { type: 'text_delta', text: prefix };
+      await release.promise;
+      yield { type: 'text_delta', text: generated };
+      yield finish;
+    },
+    '',
+    undefined,
+    'success',
+    {
+      titleDispose: async () => {
+        disposed++;
+      },
+    },
+  );
+  try {
+    await f.submit();
+    await f.titleStarted.promise;
+    await f.runtime.waitForCommand('work', { timeoutMs: 14000 });
+    const before = await f.runtime.getView('session');
+    const model = before.executions.find(
+      (execution) => execution.kind === 'model' && execution.runId === null,
+    )!;
+    expect(signal?.aborted).toBe(true);
+    expect(model.status).toBe('outcome_unknown');
+    expect(disposed).toBe(0);
+    expect(model.result).toMatchObject({ content: prefix });
+    expect(
+      before.executions.find(
+        (execution) => execution.definitionId === 'builtin.session-title/generate',
+      )?.result,
+    ).toMatchObject({ outcome: 'outcome_unknown', content: 'title_stop_unconfirmed' });
+    expect(before.session.title).toBe(truncatedOriginal);
+    expect(before.runs[0]?.status).toBe('completed');
+    expect(before.executions.every((execution) => execution.childSessionId === null)).toBe(true);
+    let storeClosed = false;
+    const closeStore = f.store.close.bind(f.store);
+    f.store.close = async () => {
+      storeClosed = true;
+      await closeStore();
+    };
+    let drained = false;
+    draining = f.runtime.close().then(() => {
+      drained = true;
+    });
+    void draining.catch(() => {});
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    expect(storeClosed).toBe(false);
+    expect(drained).toBe(false);
+    expect(disposed).toBe(0);
+    expect(f.runtime.getLifecycleState().state).toBe('draining');
+    expect((await f.store.getMetadata()).storeId).toBe(f.base.expectedStoreId);
+    release.resolve();
+    await draining;
+    expect(storeClosed).toBe(true);
+    expect(disposed).toBe(1);
+    const cold = await openSqliteStore({ ...f.profile, mode: 'readonly' });
+    try {
+      const late = await cold.getExecution(model.id);
+      expect(late?.status).toBe('outcome_unknown');
+      expect(late?.result).toMatchObject({ content: prefix });
+      expect((await cold.getSession('session'))?.title).toBe(truncatedOriginal);
+    } finally {
+      await cold.close();
+    }
+
+    expect(f.titleRequests()).toHaveLength(1);
+  } finally {
+    release.resolve();
+    await draining?.catch(() => {});
+    await f.close();
+  }
+}, 17000);
+
+test('the resolved title Model host ceiling can deny a tool-free metadata call', async () => {
+  let checked = 0;
+  const f = await fixture(
+    async function* () {
+      yield { type: 'text_delta', text: generated };
+      yield finish;
+    },
+    '',
+    undefined,
+    'success',
+    {
+      titlePermissions: () => ({
+        async authorize(request) {
+          checked++;
+          expect(request).toMatchObject({
+            kind: 'model',
+            runId: null,
+            sessionId: 'session',
+            definitionId: 'fixture',
+            definitionVersion: '1',
+          });
+          return {
+            allowed: false,
+            revision: 'title-host-denied',
+            reason: 'fixture_title_model_denied',
+          };
+        },
+      }),
+    },
+  );
+  try {
+    await f.submit();
+    await f.runtime.waitForCommand('work');
+    expect(checked).toBeGreaterThan(0);
+    expect(f.titleRequests()).toHaveLength(0);
+    const view = await f.runtime.getView('session');
+    expect(view.session.title).toBe(truncatedOriginal);
+    expect(view.runs[0]?.status).toBe('completed');
+    expect(
+      view.executions.find(
+        (execution) => execution.definitionId === 'builtin.session-title/generate',
+      ),
+    ).toMatchObject({ status: 'succeeded', result: { content: 'fallback_retained' } });
+    expect(
+      view.executions
+        .filter((execution) => execution.kind === 'model' && execution.runId === null)
+        .every((execution) => execution.status === 'failed'),
+    ).toBe(true);
+    expect(view.executions.every((execution) => execution.childSessionId === null)).toBe(true);
+  } finally {
+    await f.close();
+  }
+});
+
+test('a title Model rechecks host controls after waiting for the shared Model slot', async () => {
+  const resolving = { entered: deferred(), release: deferred() };
+  const blocker = { entered: deferred(), release: deferred() };
+  let checks = 0;
+  const f = await fixture(
+    async function* () {
+      yield { type: 'text_delta', text: generated };
+      yield finish;
+    },
+    '',
+    undefined,
+    'success',
+    {
+      modelConcurrency: 1,
+      blocker,
+      beforeResolveTitle: async () => {
+        resolving.entered.resolve();
+        await resolving.release.promise;
+      },
+      titlePermissions: (store) => ({
+        async authorize(request) {
+          checks++;
+          const control = await store.readHostControl({
+            expectedStoreId: (await store.getMetadata()).storeId,
+            subjectId: 'owner',
+            kind: 'permission.mode',
+            scope: 'session:session',
+          });
+          const mode = (control.record?.safeRequest as { mode?: string } | undefined)?.mode;
+          expect(request.kind).toBe('model');
+          return {
+            allowed: mode === 'full',
+            revision: control.revision,
+            reason: 'fixture_title_mode_tightened',
+            controlReads: [
+              { kind: 'permission.mode', scope: 'session:session', revision: control.revision },
+            ],
+          };
+        },
+      }),
+    },
+  );
+  const setMode = async (mode: 'auto' | 'full') => {
+    const identity = { expectedStoreId: f.base.expectedStoreId, subjectId: f.base.subjectId };
+    const current = await f.store.readHostControl({
+      ...identity,
+      kind: 'permission.mode',
+      scope: 'session:session',
+    });
+    const defaults = await f.store.readHostControl({
+      ...identity,
+      kind: 'permission.mode',
+      scope: 'user',
+    });
+    const safeRequest = {
+      scope: 'session',
+      sessionId: 'session',
+      mode,
+      ifRevision: current.revision,
+      makeDefault: false,
+      ifDefaultRevision: defaults.revision,
+    };
+    const request = {
+      ...identity,
+      commandId: `title-mode-${mode}`,
+      kind: 'permission.mode' as const,
+      scope: 'session:session',
+      safeRequest,
+      requestDigest: await semanticDigest(safeRequest),
+    };
+    await f.store.beginHostMutation(request);
+    await f.store.finishHostMutation({
+      ...identity,
+      commandId: request.commandId,
+      requestDigest: request.requestDigest,
+      state: 'applied',
+      receipt: { status: 'applied' },
+    });
+  };
+  try {
+    await setMode('full');
+    await f.submit();
+    await resolving.entered.promise;
+    await f.runtime.createSession({
+      ...f.base,
+      sessionId: 'blocker',
+      commandId: 'create-blocker',
+      workspaceId: 'workspace',
+      title: 'manual blocker',
+    });
+    await f.runtime.submitCommand({
+      ...f.base,
+      sessionId: 'blocker',
+      commandId: 'blocker-work',
+      request: { kind: 'run.start', content: 'BLOCK_TITLE_MODEL_SLOT' },
+    });
+    await blocker.entered.promise;
+    resolving.release.resolve();
+    const deadline = Date.now() + 2000;
+    let planned = false;
+    while (!planned && Date.now() < deadline) {
+      planned = (await f.store.listExecutions('session')).some(
+        (execution) =>
+          execution.kind === 'model' && execution.runId === null && execution.status === 'planned',
+      );
+      if (!planned) await new Promise((resolve) => setTimeout(resolve, 5));
+    }
+    expect(planned).toBe(true);
+    expect(f.titleRequests()).toHaveLength(0);
+    await setMode('auto');
+    blocker.release.resolve();
+    await f.runtime.waitForCommand('blocker-work');
+    await f.runtime.waitForCommand('work');
+    expect(checks).toBeGreaterThanOrEqual(2);
+    expect(f.titleRequests()).toHaveLength(0);
+    const view = await f.runtime.getView('session');
+    expect(view.session.title).toBe(truncatedOriginal);
+    expect(view.runs[0]?.status).toBe('completed');
+    expect(view.executions.every((execution) => execution.childSessionId === null)).toBe(true);
+  } finally {
+    resolving.release.resolve();
+    blocker.release.resolve();
+    await f.close();
+  }
+});
+
+for (const mode of ['success', 'provider-failure', 'permission-denied'] as const)
+  test(`a resolved title Model disposes its configuration exactly once after ${mode}`, async () => {
+    let disposed = 0;
+    const f = await fixture(
+      async function* () {
+        if (mode === 'provider-failure') throw Error('fixture title Provider failed');
+        yield { type: 'text_delta', text: generated };
+        yield finish;
+      },
+      '',
+      undefined,
+      'success',
+      {
+        titleDispose: async () => {
+          disposed++;
+        },
+        ...(mode === 'permission-denied'
+          ? {
+              titlePermissions: () => ({
+                async authorize() {
+                  return { allowed: false, revision: 'denied-title-model' };
+                },
+              }),
+            }
+          : {}),
+      },
+    );
+    try {
+      await f.submit();
+      await f.runtime.waitForCommand('work');
+      expect(disposed).toBe(1);
+      expect(f.titleRequests()).toHaveLength(mode === 'permission-denied' ? 0 : 1);
+      const view = await f.runtime.getView('session');
+      expect(view.session.title).toBe(mode === 'success' ? generated : truncatedOriginal);
+      expect(view.runs[0]?.status).toBe('completed');
+      await f.runtime.close();
+      expect(disposed).toBe(1);
+    } finally {
+      await f.close();
+    }
+  });

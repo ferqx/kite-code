@@ -267,12 +267,17 @@ function groupedIssueSummary(messages: readonly Message[]): string | undefined {
   return parts.length ? parts.join(' · ') : undefined;
 }
 
-function stoppedDuringAutoReview(message: Message): boolean {
+/** New adapters emit checking; saved UI snapshots may still carry reviewing. */
+function automaticChecking(message: Message): boolean {
+  return message.approval?.state === 'checking' || message.approval?.state === 'reviewing';
+}
+
+function stoppedDuringAutoCheck(message: Message): boolean {
   return (
     message.settled &&
     message.status === 'cancelled' &&
     message.approval?.source === 'auto' &&
-    message.approval.state === 'reviewing' &&
+    automaticChecking(message) &&
     (message.dispatchCommitted === false || (!message.toolProgress && !message.toolResult))
   );
 }
@@ -281,9 +286,15 @@ function executionUnconfirmed(message: Message): boolean {
   return (
     !!message.executionUnconfirmed &&
     !message.settled &&
-    ['creating', 'queued', 'running', 'waiting', 'auto_reviewing', 'recovery_required'].includes(
-      message.status ?? '',
-    )
+    [
+      'creating',
+      'queued',
+      'running',
+      'waiting',
+      'auto_checking',
+      'auto_reviewing',
+      'recovery_required',
+    ].includes(message.status ?? '')
   );
 }
 
@@ -298,6 +309,7 @@ function approvalLabel(message: Message): string | undefined {
       return '自动审批结果未知';
     case 'cancelled':
       return approval.source === 'auto' ? '自动审批已停止' : '审批已取消';
+    case 'checking':
     case 'reviewing':
       return message.settled ? '自动审批已停止' : '正在自动审批';
     case 'awaiting_user':
@@ -341,8 +353,8 @@ function executionLabel(message: Message, diagnostics: boolean) {
         ? '工具信息已更新，此次未执行'
         : '未执行';
   if (createdChildTask(message)) return '已创建';
-  if (stoppedDuringAutoReview(message)) return '未执行';
-  if (message.approval?.state === 'reviewing' && !message.settled) return '';
+  if (stoppedDuringAutoCheck(message)) return '未执行';
+  if (automaticChecking(message) && !message.settled) return '';
   if (message.approval?.state === 'awaiting_user' && !message.settled) return '等待人工审批';
   if (message.approval?.state === 'rejected') return '未执行';
   if (message.toolResult?.terminationReason === 'timed_out') return '执行超时';
@@ -361,7 +373,7 @@ function executionLabel(message: Message, diagnostics: boolean) {
 // streams, cancellation and unknown results never imply an execution failure.
 function traceStatus(message: Message): 'running' | 'error' | 'pending' | undefined {
   if (executionUnconfirmed(message)) return undefined;
-  if (!message.settled && (message.status === 'running' || message.approval?.state === 'reviewing'))
+  if (!message.settled && (message.status === 'running' || automaticChecking(message)))
     return 'running';
   if (message.status === 'failed' || message.status === 'rejected') return 'error';
   if (!message.settled && message.status === 'queued') return 'pending';
@@ -381,7 +393,7 @@ function ShellOutput({ message }: { message: Message }) {
     text ? text.replace(/\r?\n$/, '').split('\n').length : 0;
   const truncated =
     result?.totalLines !== undefined && result.totalLines > lineCount(stdout) + lineCount(stderr);
-  const stoppedBeforeExecution = stoppedDuringAutoReview(message);
+  const stoppedBeforeExecution = stoppedDuringAutoCheck(message);
   const reason =
     message.approval?.state === 'rejected' || message.approval?.state === 'awaiting_user'
       ? message.approval.reason
@@ -467,7 +479,7 @@ export function ToolRow({
     <TraceLine
       asChild
       status={traceStatus(message)}
-      className={`tool-activity-step ${executionUnconfirmed(message) ? '' : !message.settled && message.approval?.state === 'reviewing' ? 'running' : (message.status ?? '')}`}
+      className={`tool-activity-step ${executionUnconfirmed(message) ? '' : !message.settled && automaticChecking(message) ? 'running' : (message.status ?? '')}`}
     >
       <div>
         <TraceIcon className="tool-step-marker-icon">
@@ -594,7 +606,7 @@ export function ToolActivity({
   const children = messages.map((item) => renderChildren(item.id.slice(5), true));
   const approval = approvalLabel(message);
   const pendingReview =
-    !executionUnconfirmed(message) && !message.settled && message.approval?.state === 'reviewing';
+    !executionUnconfirmed(message) && !message.settled && automaticChecking(message);
   const summaryTraceStatus =
     running || pendingReview
       ? 'running'

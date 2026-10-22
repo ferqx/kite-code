@@ -37,12 +37,12 @@ function fixture(mode: PermissionPolicySnapshot['mode'] = 'accept_edits') {
     commandDigest: 'a'.repeat(64),
     executionScope: { ...baseline },
   };
-  let reviews = 0;
+  let checks = 0;
   const permissions = createPermissionPolicy({
     readPolicy: () => policy,
     describeCapability: () => description,
-    readReviewContext() {
-      reviews++;
+    readCheckContext() {
+      checks++;
       return { task: 'actual task', plan: null, rejectionReasons: [] };
     },
   });
@@ -61,8 +61,8 @@ function fixture(mode: PermissionPolicySnapshot['mode'] = 'accept_edits') {
     set policy(value: PermissionPolicySnapshot) {
       policy = value;
     },
-    get reviews() {
-      return reviews;
+    get checks() {
+      return checks;
     },
   };
 }
@@ -78,17 +78,17 @@ test('Request Approval allows unknown Shell only within workspace/nonetwork exec
     expect(result.controlReads).toEqual(f.policy.controlReads);
     expect(result.allowed).toBe(mode === 'accept_edits');
     if (mode === 'auto') {
-      expect(result.reason).toBe('auto_review_required');
-      expect(result.review!.request).toMatchObject({
+      expect(result.reason).toBe('auto_check_required');
+      expect(result.check!.request).toMatchObject({
         mode: 'auto',
         invocation: { input: f.request.input },
         context: { task: 'actual task' },
       });
-      expect(f.reviews).toBe(1);
+      expect(f.checks).toBe(1);
     }
     if (mode === 'accept_edits') {
       expect(result.approval).toBeUndefined();
-      expect(result.review).toBeUndefined();
+      expect(result.check).toBeUndefined();
     }
   }
 });
@@ -108,7 +108,7 @@ test('external write and internet scope require original per-command approval an
       commandDigest: 'a'.repeat(64),
     });
     expect(capability(result).executionScope).toEqual(executionScope);
-    expect(result.review).toBeUndefined();
+    expect(result.check).toBeUndefined();
   }
 });
 
@@ -132,8 +132,8 @@ test('Full transforms trusted Shell scope while extreme-danger denial remains fi
     expect(denied.allowed).toBe(false);
     expect(denied.reason).toBe('extreme_dangerous_command');
     expect(denied.approval).toBeUndefined();
-    expect(denied.review).toBeUndefined();
-    expect(f.reviews).toBe(0);
+    expect(denied.check).toBeUndefined();
+    expect(f.checks).toBe(0);
   }
 });
 
@@ -206,12 +206,12 @@ test('web_fetch known network capability follows Request Approval, Auto review a
     if (mode === 'accept_edits') {
       expect(result.reason).toBe('approval_required');
       expect(result.approval!.request).toMatchObject({ mode, effects: ['network', 'unknown'] });
-      expect(result.review).toBeUndefined();
+      expect(result.check).toBeUndefined();
     }
     if (mode === 'auto') {
-      expect(result.reason).toBe('auto_review_required');
-      expect(result.review!.request).toMatchObject({ mode, effects: ['network', 'unknown'] });
-      expect(f.reviews).toBe(1);
+      expect(result.reason).toBe('auto_check_required');
+      expect(result.check!.request).toMatchObject({ mode, effects: ['network', 'unknown'] });
+      expect(f.checks).toBe(1);
     }
     if (mode === 'full') expect(result.approval).toBeUndefined();
   }

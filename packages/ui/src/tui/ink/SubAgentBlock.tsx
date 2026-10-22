@@ -184,12 +184,12 @@ export default function SubAgentBlock({
     ? isWaiting
       ? {
           text:
-            approvalState === 'auto_reviewing'
-              ? '自动审查中'
+            approvalState === 'auto_checking' || approvalState === 'auto_reviewing'
+              ? '自动审核中'
               : approvalState === 'authorized_queued'
                 ? '已授权 · 等待执行'
-                : approvalState === 'queued_auto_review'
-                  ? '等待自动审查'
+                : approvalState === 'queued_auto_check' || approvalState === 'queued_auto_review'
+                  ? '等待自动审核'
                   : approvalState === 'queued_user_approval' || approvalState === 'queued'
                     ? '人工审批排队中'
                     : '等待你的批准',

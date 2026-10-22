@@ -22,8 +22,8 @@ import { bodyReference } from '../model-body';
 import { type ModelOutputReference, ModelOutputWriter } from '../model-output';
 import { captureModelRequestMetadata, modelMetadataJson } from '../model-snapshot';
 import { createModelToolSurface, modelToolMessages } from '../model-tools';
-import type { AuthorizationReviewBinding } from '../runtime';
-import type { ReadAuthorizationReviewInput, Store } from '../storage/port';
+import type { AuthorizationCheckBinding } from '../runtime';
+import type { ReadAuthorizationCheckInput, Store } from '../storage/port';
 import {
   AgentError,
   type CommandRecord,
@@ -36,6 +36,7 @@ import {
   type RunRecord,
   type ToolCall,
 } from '../storage/types';
+import { runInternalModelCall } from './authorization-check';
 import {
   type AuthorizationChangeWait,
   AuthorizationRefreshRequired,
@@ -104,7 +105,7 @@ export interface ExecutionScope {
   bindings?: ScopedBindings;
 }
 export interface ScopedBindings {
-  readonly authorizationReview?: AuthorizationReviewBinding;
+  readonly authorizationCheck?: AuthorizationCheckBinding;
   readonly extensions: readonly Extension[];
   readonly tools: ReadonlyMap<string, ToolDefinition>;
   readonly jobs: ReadonlyMap<string, JobDefinition>;
@@ -152,12 +153,12 @@ export interface ExecutionOptions {
   onModelStart?: (scope: ExecutionScope, execution: ExecutionRecord) => void;
   /** Internal post-commit observation; never a gate or an extension execution context. */
   onModelSettled?: (scope: ExecutionScope, execution: ExecutionRecord) => void;
-  reviewAuthorization?: (
+  checkAuthorization?: (
     scope: ToolScope,
     request: AuthorizationRequest,
     source: Json,
     decision: import('../extensions').PermissionDecision,
-  ) => Promise<ReadAuthorizationReviewInput | null>;
+  ) => Promise<ReadAuthorizationCheckInput | null>;
   openModelInput?: (scope: ExecutionScope, input: Json) => Promise<ModelRequest>;
   sealModelInput?: (scope: ExecutionScope, request: ModelRequest) => Promise<Json>;
   publishModelOutput?: (
@@ -207,7 +208,7 @@ export class UnifiedExecution {
   private readonly validator = new Ajv({ allErrors: true, strict: false });
   private readonly options: ExecutionOptions;
   private readonly interactions: InteractionGate;
-  private readonly authorizationReviews = new Map<string, ReadAuthorizationReviewInput>();
+  private readonly authorizationChecks = new Map<string, ReadAuthorizationCheckInput>();
   private readonly authorizationDecisions = new Map<string, AcceptedAuthorization>();
   private readonly unconfirmedJobs = new Map<
     string,
@@ -280,22 +281,22 @@ export class UnifiedExecution {
         {
           ...this.interactionScope(scope, request.executionId),
           final,
-          previousReview: this.authorizationReviews.get(request.executionId),
+          previousCheck: this.authorizationChecks.get(request.executionId),
           previousPolicy: this.authorizationDecisions.get(request.executionId),
-          ...(!final && this.options.reviewAuthorization
+          ...(!final && this.options.checkAuthorization
             ? {
-                review: async (
+                check: async (
                   decision: import('../extensions').PermissionDecision,
                   signal: AbortSignal,
                 ) => {
-                  const reference = await this.options.reviewAuthorization!(
+                  const reference = await this.options.checkAuthorization!(
                     { ...scope, signal },
                     { ...request, signal },
                     source,
                     decision,
                   );
                   if (reference && !signal.aborted)
-                    this.authorizationReviews.set(request.executionId, reference);
+                    this.authorizationChecks.set(request.executionId, reference);
                   return reference;
                 },
               }
@@ -306,15 +307,15 @@ export class UnifiedExecution {
       )
       .then((decision) => {
         this.authorizationDecisions.set(request.executionId, decision);
-        const review = this.authorizationReviews.get(request.executionId);
-        // An ask-user review is not a review grant. Keep its exact reference
-        // after human acceptance so final dispatch can still verify the review
-        // request and policy without starting another resource-bound review.
+        const check = this.authorizationChecks.get(request.executionId);
+        // An ask-user check is not an authorization grant. Keep its exact reference
+        // after human acceptance so final dispatch can still verify the check
+        // request and policy without starting another resource-bound check.
         if (
-          !decision.reviewExecutionId &&
-          (!decision.interactionId || review?.policyRevision !== decision.revision)
+          !decision.checkExecutionId &&
+          (!decision.interactionId || check?.policyRevision !== decision.revision)
         )
-          this.authorizationReviews.delete(request.executionId);
+          this.authorizationChecks.delete(request.executionId);
         return decision;
       });
   }
@@ -332,7 +333,7 @@ export class UnifiedExecution {
     try {
       return await work(bound);
     } finally {
-      this.authorizationReviews.delete(executionId);
+      this.authorizationChecks.delete(executionId);
       this.authorizationDecisions.delete(executionId);
       release?.();
       scope.signal.removeEventListener('abort', abort);
@@ -797,7 +798,7 @@ export class UnifiedExecution {
               }
               await this.options.waitForChange(state.cursor, scope.signal, 30000);
             }
-            this.authorizationReviews.delete(executionId);
+            this.authorizationChecks.delete(executionId);
             this.authorizationDecisions.delete(executionId);
             continue;
           }
@@ -826,7 +827,7 @@ export class UnifiedExecution {
           )
             throw error;
         }
-        this.authorizationReviews.delete(executionId);
+        this.authorizationChecks.delete(executionId);
         this.authorizationDecisions.delete(executionId);
         scope.signal.throwIfAborted();
       }
@@ -884,7 +885,7 @@ export class UnifiedExecution {
         revision: decision.revision,
         definitionVersion,
         inputDigest: await semanticDigest(input),
-        ...(decision.reviewExecutionId ? { reviewExecutionId: decision.reviewExecutionId } : {}),
+        ...(decision.checkExecutionId ? { checkExecutionId: decision.checkExecutionId } : {}),
         ...(decision.interactionId
           ? { interactionId: decision.interactionId, decisionRevision: decision.decisionRevision }
           : {}),
@@ -909,6 +910,54 @@ export class UnifiedExecution {
       revision: decision.revision,
       ...(decision.snapshot === undefined ? {} : { snapshot: structuredClone(decision.snapshot) }),
     };
+  }
+  async authorizationCheck(
+    scope: ToolScope,
+    input: Omit<
+      Parameters<typeof runInternalModelCall>[0],
+      'purpose' | 'store' | 'resources' | 'owner' | 'signal' | 'checkpoint'
+    >,
+  ): Promise<void> {
+    await this.liveScope(scope, input.execution.id, async (bound) =>
+      runInternalModelCall({
+        purpose: 'authorization_check',
+        ...input,
+        store: this.options.store,
+        resources: this.options.resources,
+        owner: bound.owner,
+        signal: bound.signal,
+        checkpoint: async () => {
+          bound.signal.throwIfAborted();
+          await bound.checkpoint?.();
+          await bound.checkFreshness?.();
+        },
+      }),
+    );
+  }
+  async internalModel(
+    scope: ToolScope,
+    input: Omit<
+      Parameters<typeof runInternalModelCall>[0],
+      'purpose' | 'store' | 'resources' | 'owner' | 'signal' | 'checkpoint' | 'publishReceipt'
+    >,
+  ): Promise<ModelResponse> {
+    const response = await this.liveScope(scope, input.execution.id, async (bound) =>
+      runInternalModelCall({
+        ...input,
+        purpose: 'session_title',
+        store: this.options.store,
+        resources: this.options.resources,
+        owner: bound.owner,
+        signal: bound.signal,
+        checkpoint: async () => {
+          bound.signal.throwIfAborted();
+          await bound.checkpoint?.();
+          await bound.checkFreshness?.();
+        },
+      }),
+    );
+    if (!response) throw new AgentError('internal_model_response_unavailable');
+    return response;
   }
   async model(
     scope: ExecutionScope,

@@ -255,7 +255,7 @@ async function fixture(options: { mode?: 'full' | 'auto' | 'deny'; observer?: st
     // the real Auto fallback challenge without introducing Model I/O.
     if (options.mode === 'auto')
       expect(interaction.request).toMatchObject({
-        policy: { mode: 'auto', reason: 'auto_review_unavailable' },
+        policy: { mode: 'auto', reason: 'auto_check_unavailable' },
       });
     return interaction;
   }

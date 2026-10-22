@@ -1,13 +1,12 @@
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import type { ModelAdapter, ModelMessage, ModelRequest } from '@kite-ai/ai';
 import type { ArtifactContentStore, ArtifactReadInput } from './artifact-port';
-import { semanticReviewContent, semanticReviewContext } from './authorization-review-context';
 import {
-  type AuthorizationReviewOutput,
-  authorizationReviewAnswer,
-  authorizationReviewOutputMediaType,
-  authorizationReviewOutputRefId,
-} from './authorization-review-output';
+  type AuthorizationCheckOutput,
+  authorizationCheckOutputMediaType,
+  authorizationCheckOutputRefId,
+} from './authorization-check-output';
+import { semanticReviewContent, semanticReviewContext } from './authorization-review-context';
 import {
   assertContextSource,
   type ContextCompressor,
@@ -69,16 +68,22 @@ import { bodyReference, jsonBody, persistedModelRequest, utf8Body } from './mode
 import { semanticDigestBytes } from './model-body/digest';
 import { assembleModelContext, modelHistory } from './model-context';
 import { modelOutputReference, readModelOutput } from './model-output';
-import { type ModelInputMetadata, modelInputMetadata } from './model-snapshot';
+import {
+  captureModelRequestMetadata,
+  type ModelInputMetadata,
+  modelInputMetadata,
+  modelMetadataJson,
+} from './model-snapshot';
 import { createModelToolSurface, modelToolMessages } from './model-tools';
+import { intersectPermissionPolicies } from './permissions/inheritance';
 import { readSourceRequestJournal, sourceRequestJournalNode } from './source-request-journal';
 import type {
   AcceptCommandInput,
-  AuthorizationReviewIdentity,
+  AuthorizationCheckIdentity,
   CancelCommandInput,
   CancelWorkBase,
   CancelWorkInput,
-  ReadAuthorizationReviewInput,
+  ReadAuthorizationCheckInput,
   Store,
 } from './storage/port';
 import { isStorageTransactionUnconfirmed } from './storage/transaction-state';
@@ -234,12 +239,12 @@ export type StepCapabilitiesReader = (input: {
   readonly signal: AbortSignal;
 }) => Promise<StepCapabilities>;
 
-export interface AuthorizationReviewBinding extends AuthorizationReviewIdentity {
+export interface AuthorizationCheckBinding extends AuthorizationCheckIdentity {
   readonly model: ModelAdapter;
 }
-function sealReview(
-  binding: AuthorizationReviewBinding | undefined,
-): AuthorizationReviewBinding | undefined {
+function sealAuthorizationCheck(
+  binding: AuthorizationCheckBinding | undefined,
+): AuthorizationCheckBinding | undefined {
   if (!binding) return undefined;
   if (
     !/^[A-Za-z0-9_.-]{1,64}$/.test(binding.id) ||
@@ -249,7 +254,7 @@ function sealReview(
     binding.modelId.length > 256 ||
     !binding.model?.stream
   )
-    throw new AgentError('authorization_review_binding_invalid');
+    throw new AgentError('authorization_check_binding_invalid');
   return Object.freeze({
     id: binding.id,
     version: binding.version,
@@ -275,7 +280,7 @@ export interface AfterTurnPolicy {
 export interface RunConfiguration {
   readonly compressor?: ContextCompressor;
   readonly afterTurn?: AfterTurnPolicy;
-  readonly authorizationReview?: AuthorizationReviewBinding;
+  readonly authorizationCheck?: AuthorizationCheckBinding;
   readonly model?: ModelAdapter;
   readonly modelId: string;
   readonly toolIds?: readonly string[];
@@ -312,7 +317,7 @@ function sealSources(sources: ContextSources | undefined): ContextSources | unde
 type RunBinding = {
   compressor?: ContextCompressor;
   afterTurn?: AfterTurnPolicy;
-  authorizationReview?: AuthorizationReviewBinding;
+  authorizationCheck?: AuthorizationCheckBinding;
   model: ModelAdapter;
   modelId: string;
   definitions: ReadonlyMap<string, ToolDefinition>;
@@ -346,7 +351,7 @@ export interface RuntimeOptions {
   };
   compressor?: ContextCompressor;
   afterTurn?: AfterTurnPolicy;
-  authorizationReview?: AuthorizationReviewBinding;
+  authorizationCheck?: AuthorizationCheckBinding;
   store: Store;
   model?: ModelAdapter;
   modelId?: string;
@@ -464,7 +469,8 @@ export class AgentRuntime {
   private readonly configurationReleases: (() => Promise<void>)[] = [];
   private preparationCleanupFailed = false;
   private readonly childRetainers = new Map<string, () => () => Promise<void>>();
-  private readonly authorizationReviewTasks = new Map<string, Promise<void>>();
+  private readonly authorizationCheckTasks = new Map<string, Promise<void>>();
+  private readonly internalModelTasks = new Set<Promise<unknown>>();
   private readonly runBindingLeases = new Map<
     string,
     { binding: RunBinding; retain: () => () => Promise<void>; release: () => Promise<void> }
@@ -477,7 +483,7 @@ export class AgentRuntime {
     string,
     { controller: AbortController; task: Promise<void> }
   >();
-  private readonly defaultReviewer: AuthorizationReviewBinding | undefined;
+  private readonly defaultChecker: AuthorizationCheckBinding | undefined;
   private readonly childSlots = new ChildSlots();
   private readonly childAdmissions = new WeakMap<
     JobDefinition,
@@ -547,7 +553,7 @@ export class AgentRuntime {
     this.supportsExtensionInputs =
       options.supportsExtensionInputs === true && !!options.resolveRunConfiguration;
     this.changeWaits = new ChangeWaits(options.store);
-    this.defaultReviewer = sealReview(options.authorizationReview);
+    this.defaultChecker = sealAuthorizationCheck(options.authorizationCheck);
     this.instanceId = options.instanceId ?? crypto.randomUUID();
     this.extensions = Object.freeze((options.extensions ?? []).map(sealExtension));
     const extensions = new Set<string>();
@@ -603,8 +609,8 @@ export class AgentRuntime {
           dispose: configuration.dispose,
           readStepCapabilities: configuration.readStepCapabilities,
           afterTurn: configuration.afterTurn ?? options.afterTurn,
-          authorizationReview: sealReview(
-            configuration.authorizationReview ?? this.defaultReviewer,
+          authorizationCheck: sealAuthorizationCheck(
+            configuration.authorizationCheck ?? this.defaultChecker,
           ),
           permissions: configuration.permissions,
           conditions: configuration.conditions,
@@ -649,8 +655,8 @@ export class AgentRuntime {
         this.sealApprovalRequest(scope, executionId, request),
       verifyApprovalRequest: (scope, executionId, saved, actual) =>
         this.verifyApprovalRequest(scope, executionId, saved, actual),
-      reviewAuthorization: (scope, request, source, decision) =>
-        this.reviewAuthorization(scope, request, source, decision),
+      checkAuthorization: (scope, request, source, decision) =>
+        this.checkAuthorization(scope, request, source, decision),
       waitForChange: (cursor, signal, timeoutMs) => {
         const waiting = this.changeWaits.wait(cursor, signal, timeoutMs);
         this.watchControls();
@@ -717,7 +723,7 @@ export class AgentRuntime {
       jobs: actionCatalogue.jobs,
       permissions: this.options.permissions,
       conditions: this.options.conditions,
-      authorizationReview: this.defaultReviewer,
+      authorizationCheck: this.defaultChecker,
       // Global trusted definitions live until Runtime resource cleanup. Descendant
       // operations retain that same lifecycle; per-Run resolver assets are absent.
       retain: () => {
@@ -857,6 +863,22 @@ export class AgentRuntime {
       }
     };
   }
+  private trackInternalModelTask<T>(task: Promise<T>, release?: () => Promise<void>): Promise<T> {
+    const retained = task.finally(async () => {
+      try {
+        await release?.();
+      } catch (error) {
+        this.preparationCleanupFailed = true;
+        throw error;
+      }
+    });
+    this.internalModelTasks.add(retained);
+    void retained.then(
+      () => this.internalModelTasks.delete(retained),
+      () => this.internalModelTasks.delete(retained),
+    );
+    return retained;
+  }
   private retainPreparationCleanupFailure(error: unknown): boolean {
     if (!(error instanceof ConfigurationPreparationCleanupError)) return false;
     this.preparationCleanupFailed = true;
@@ -898,7 +920,12 @@ export class AgentRuntime {
     );
     if (this.admissions) reasons.push('admission');
     if (this.tasks.size || this.pendingSessions.size || this.wakeups.size) reasons.push('dispatch');
-    if (this.active.size || this.activeExecutions.size || this.authorizationReviewTasks.size)
+    if (
+      this.active.size ||
+      this.activeExecutions.size ||
+      this.authorizationCheckTasks.size ||
+      this.internalModelTasks.size
+    )
       reasons.push('execution');
     if (this.extensionHost.operationCount || this.execution.unconfirmedJobCount)
       reasons.push('background');
@@ -1016,21 +1043,33 @@ export class AgentRuntime {
       })),
     };
   }
-  private async reviewAuthorization(
+  private async checkAuthorization(
     scope: ToolScope,
     request: AuthorizationRequest,
     source: Json,
     decision: PermissionDecision,
-  ): Promise<ReadAuthorizationReviewInput | null> {
-    const reviewer = scope.bindings?.authorizationReview ?? this.defaultReviewer;
-    if (!reviewer || !decision.review) return null;
+  ): Promise<ReadAuthorizationCheckInput | null> {
+    const release = scope.bindings?.retain();
+    return this.trackInternalModelTask(
+      this.performAuthorizationCheck(scope, request, source, decision),
+      release,
+    );
+  }
+  private async performAuthorizationCheck(
+    scope: ToolScope,
+    request: AuthorizationRequest,
+    source: Json,
+    decision: PermissionDecision,
+  ): Promise<ReadAuthorizationCheckInput | null> {
+    const checker = scope.bindings?.authorizationCheck ?? this.defaultChecker;
+    if (!checker || !decision.check) return null;
     const work = 'run' in scope ? scope.run : scope.command;
-    const identity = { id: reviewer.id, version: reviewer.version, modelId: reviewer.modelId };
+    const identity = { id: checker.id, version: checker.version, modelId: checker.modelId };
     const requestBody =
-      Buffer.byteLength(canonicalJson(decision.review.request)) > 64 * 1024
-        ? await this.publishBody(scope, decision.review.request, 'authorization-review-request')
+      Buffer.byteLength(canonicalJson(decision.check.request)) > 64 * 1024
+        ? await this.publishBody(scope, decision.check.request, 'authorization-check-request')
         : undefined;
-    const reviewRequest = requestBody ? null : decision.review.request;
+    const checkRequest = requestBody ? null : decision.check.request;
     const origin =
       'run' in scope
         ? await this.options.store.getCommand(scope.run.originCommandId)
@@ -1053,7 +1092,7 @@ export class AgentRuntime {
       Buffer.byteLength(canonicalJson(source)) > 64 * 1024
         ? await this.publishBody(scope, source)
         : undefined;
-    const fact = await this.options.store.ensureAuthorizationReview({
+    const fact = await this.options.store.ensureAuthorizationCheck({
       expectedStoreId: work.originStoreId,
       owner: scope.owner,
       targetExecutionId: request.executionId,
@@ -1062,119 +1101,145 @@ export class AgentRuntime {
       ...(targetInputBody ? { targetInputBody } : {}),
       ...(targetSourceBody ? { targetSourceBody } : {}),
       policyRevision: decision.revision,
-      request: reviewRequest,
+      request: checkRequest,
       ...(requestBody ? { requestBody } : {}),
-      requireApproval: decision.review.requireApproval === true,
-      reviewer: identity,
+      requireApproval: decision.check.requireApproval === true,
+      checker: identity,
     });
     if (canonicalJson(fact.source) !== canonicalJson(source))
       throw new AgentError('context_refresh_required');
-    const reference: ReadAuthorizationReviewInput = {
+    const reference: ReadAuthorizationCheckInput = {
       expectedStoreId: work.originStoreId,
       targetExecutionId: request.executionId,
-      reviewExecutionId: fact.operation.executionId!,
+      checkExecutionId: fact.execution.id,
       policyRevision: decision.revision,
-      request: structuredClone(reviewRequest),
+      request: structuredClone(checkRequest),
       ...(requestBody ? { requestBody } : {}),
-      requireApproval: decision.review.requireApproval === true,
-      reviewer: identity,
+      requireApproval: decision.check.requireApproval === true,
+      checker: identity,
     };
-    let task = this.authorizationReviewTasks.get(reference.reviewExecutionId);
-    // An existing cold carrier is observation only. It never restarts a provider call.
+    let task = this.authorizationCheckTasks.get(reference.checkExecutionId);
+    // A saved cold check is observation only; it cannot restart a Provider call.
     if (!task && fact.created) {
-      const command = await this.options.store.getCommand(fact.operation.commandId);
-      if (command?.kind !== 'authorization.review')
-        throw new AgentError('authorization_review_unverifiable');
-      const childStart = await this.options.store.getCommand(
-        `child-start-${reference.reviewExecutionId}`,
-      );
-      if (childStart?.kind !== 'child.start')
-        throw new AgentError('authorization_review_unverifiable');
-      const carrierId = `agent/${fact.configuration.id}`;
-      const permissions: Permissions = {
-        async authorize(candidate) {
-          return {
-            allowed:
-              (candidate.kind === 'model' &&
-                candidate.definitionId === identity.modelId &&
-                candidate.definitionVersion === '1') ||
-              (candidate.kind === 'job' &&
-                candidate.definitionId === carrierId &&
-                candidate.definitionVersion === identity.version),
-            revision: 'authorization-review-purpose-1',
-          };
-        },
-      };
-      let calls = 0;
-      const thisRuntime = this;
-      const model: ModelAdapter = {
-        async *stream(input, options) {
-          if (calls++ || input.tools?.length)
-            throw new AgentError('authorization_review_call_limit');
-          const expanded = await thisRuntime.expandReviewRequest(input, scope, [
-            childStart.id,
-            reference.reviewExecutionId,
-          ]);
-          for await (const event of reviewer.model.stream(expanded, options)) {
-            if (event.type === 'tool_call' || (event.type === 'finish' && event.reason !== 'stop'))
-              throw new AgentError('authorization_review_output_invalid');
-            yield event;
-          }
-        },
-      };
-      const configured = {
-        configuration: fact.configuration,
-        inputSchema: { type: 'object' } as JsonSchema,
-        binding: {
-          model,
-          modelId: identity.modelId,
-          definitions: new Map<string, ToolDefinition>(),
-          jobs: new Map<string, JobDefinition>(),
-          extensions: [],
-          sources: {
-            async capture() {
-              return [];
-            },
-          },
-          permissions,
-        },
-      };
-      const parent: StandaloneScope = {
+      const command = await this.options.store.getCommand(fact.commandId);
+      if (command?.kind !== 'authorization.check')
+        throw new AgentError('authorization_check_unverifiable');
+      const checkScope: StandaloneScope = {
         command,
         owner: scope.owner,
         workspaceId: scope.workspaceId,
         signal: scope.signal,
         parentExecutionId: request.executionId,
-        requirements: [],
-        bindings: {
-          extensions: [],
-          tools: new Map(),
-          jobs: new Map(),
-          permissions,
-          retain: () => async () => {},
-        },
+        checkpoint: scope.checkpoint,
+        checkFreshness: scope.checkFreshness,
       };
-      const child = this.childDefinition(
-        fact.configuration.id,
-        parent,
-        request.executionId,
-        fact.source,
-        configured,
-      );
-      task = this.execution.job(parent, {
-        executionId: reference.reviewExecutionId,
-        definition: child.definition,
-        request: fact.input,
-        source: fact.source,
-        cancelWithParent: true,
-      });
-      this.authorizationReviewTasks.set(reference.reviewExecutionId, task);
+      task = (async () => {
+        try {
+          const actual = await this.expandAuthorizationCheckRequest(
+            {
+              requestId: fact.execution.id,
+              modelId: checker.modelId,
+              tools: [],
+              messages: [
+                {
+                  role: 'user',
+                  content: canonicalJson(fact.input),
+                  sourceIds: [command.id, fact.execution.id],
+                },
+              ],
+            },
+            checkScope,
+            [command.id, fact.execution.id],
+          );
+          const value = JSON.parse(JSON.stringify(actual)) as Json;
+          const context = (fact.input as Record<string, Json>).decisionContext as Record<
+            string,
+            Json
+          > | null;
+          const body =
+            context?.modelInput || Buffer.byteLength(canonicalJson(value)) > 64 * 1024
+              ? await this.publishBody(checkScope, value)
+              : undefined;
+          const sealed: Json = body
+            ? {
+                modelId: actual.modelId,
+                requestId: actual.requestId,
+                tools: [],
+                body: body as unknown as Json,
+              }
+            : value;
+          const captured = modelMetadataJson(
+            await captureModelRequestMetadata({}, checker.model, structuredClone(actual)),
+          );
+          const metadata =
+            Buffer.byteLength(canonicalJson(captured)) > 64 * 1024
+              ? {
+                  version: 1,
+                  body: (await this.publishBody(checkScope, captured)) as unknown as Json,
+                }
+              : captured;
+          const publish = async (value: Json, signal: AbortSignal, receipt = false) => {
+            if (!this.options.artifacts) throw new AgentError('artifact_content_unavailable');
+            signal.throwIfAborted();
+            const bytes = Buffer.from(canonicalJson(value));
+            const digest = await semanticDigestBytes(bytes, signal);
+            return this.options.artifacts.publish({
+              expectedStoreId: command.originStoreId,
+              sessionId: command.sessionId,
+              subjectId: command.subjectId,
+              scope: { kind: 'execution', id: fact.execution.id },
+              refId: receipt
+                ? authorizationCheckOutputRefId(
+                    (value as unknown as AuthorizationCheckOutput).modelOutputDigest,
+                  )
+                : `model-output-${fact.execution.id}-${digest}`,
+              mediaType: receipt
+                ? authorizationCheckOutputMediaType
+                : 'application/vnd.kite.model-output+json',
+              content: bytes,
+              signal,
+            });
+          };
+          await this.execution.authorizationCheck(checkScope, {
+            execution: fact.execution,
+            workspaceId: scope.workspaceId,
+            model: checker.model,
+            request: actual,
+            input: sealed,
+            modelMetadata: metadata,
+            controlReads: decision.controlReads,
+            publish: (value, signal) => publish(value, signal),
+            publishReceipt: async (receipt, signal) => {
+              await publish(receipt as unknown as Json, signal, true);
+            },
+          });
+        } catch (error) {
+          // Preparation belongs to the saved check too; failure cannot leave a planned orphan.
+          const saved = await this.options.store.getExecution(fact.execution.id).catch(() => null);
+          if (saved?.status === 'planned')
+            await this.options.store
+              .finishAuthorizationCheck({
+                expectedStoreId: work.originStoreId,
+                owner: scope.owner,
+                executionId: fact.execution.id,
+                status: scope.signal.aborted ? 'cancelled' : 'failed',
+                result: {
+                  code: error instanceof AgentError ? error.code : 'model_preparation_failed',
+                  incomplete: true,
+                  dispatchCommitted: false,
+                },
+              })
+              .catch(() => {});
+          if (scope.signal.aborted) throw error;
+        }
+      })();
+      this.authorizationCheckTasks.set(reference.checkExecutionId, task);
     }
     try {
       await task;
     } finally {
-      if (task && this.authorizationReviewTasks.get(reference.reviewExecutionId) === task)
-        this.authorizationReviewTasks.delete(reference.reviewExecutionId);
+      if (task && this.authorizationCheckTasks.get(reference.checkExecutionId) === task)
+        this.authorizationCheckTasks.delete(reference.checkExecutionId);
     }
     scope.signal.throwIfAborted();
     await scope.checkpoint?.();
@@ -1267,17 +1332,17 @@ export class AgentRuntime {
           revision: decision.revision,
           allowed: decision.allowed,
           approval: decision.approval?.request ?? null,
-          review: decision.review
+          check: decision.check
             ? {
-                request: decision.review.request,
-                requireApproval: decision.review.requireApproval === true,
+                request: decision.check.request,
+                requireApproval: decision.check.requireApproval === true,
               }
             : null,
         }));
         const revision = `child-intersection/${await semanticDigest(bindings)}`;
         if (controlError) return { allowed: false, revision, reason: controlError };
         const denied = decisions.find(
-          (decision) => !decision.allowed && !decision.approval && !decision.review,
+          (decision) => !decision.allowed && !decision.approval && !decision.check,
         );
         if (denied)
           return {
@@ -1289,7 +1354,7 @@ export class AgentRuntime {
         const challenges = decisions.filter((decision) => !decision.allowed);
         if (!challenges.length) return { allowed: true, revision, ...proof };
         const approvals = challenges.filter((decision) => decision.approval);
-        const reviews = challenges.filter((decision) => decision.review);
+        const checks = challenges.filter((decision) => decision.check);
         const approval = approvals.length
           ? {
               request: {
@@ -1302,19 +1367,19 @@ export class AgentRuntime {
               } as Json,
             }
           : undefined;
-        const review = reviews.length
+        const check = checks.length
           ? {
               request: {
                 kind: 'parent_child_permission_intersection',
                 policies: decisions.map((decision, index) => ({
                   scope: index === 0 ? 'parent' : 'child',
                   revision: decision.revision,
-                  request: decision.review?.request ?? null,
+                  request: decision.check?.request ?? null,
                 })),
               } as Json,
               requireApproval:
-                decisions.some((decision) => !!decision.approval && !decision.review) ||
-                reviews.some((decision) => decision.review?.requireApproval),
+                decisions.some((decision) => !!decision.approval && !decision.check) ||
+                checks.some((decision) => decision.check?.requireApproval),
             }
           : undefined;
         return {
@@ -1322,7 +1387,7 @@ export class AgentRuntime {
           revision,
           ...proof,
           ...(approval ? { approval } : {}),
-          ...(review ? { review } : {}),
+          ...(check ? { check } : {}),
         };
       },
     };
@@ -1388,7 +1453,6 @@ export class AgentRuntime {
         parent,
         parentExecutionId,
         source,
-        undefined,
         undefined,
         continuation,
       );
@@ -1495,7 +1559,6 @@ export class AgentRuntime {
         { ...parent, checkFreshness: checkRecordFreshness },
         parentExecutionId,
         source,
-        undefined,
         {
           inputSchema: declared.inputSchema,
           configuration: {
@@ -1523,8 +1586,8 @@ export class AgentRuntime {
             definitions: captured.definitions,
             jobs: captured.jobs,
             extensions: captured.extensions,
-            authorizationReview: sealReview(
-              configuration.authorizationReview ?? this.defaultReviewer,
+            authorizationCheck: sealAuthorizationCheck(
+              configuration.authorizationCheck ?? this.defaultChecker,
             ),
           },
         },
@@ -1544,11 +1607,6 @@ export class AgentRuntime {
     parent: StandaloneScope,
     parentExecutionId: string,
     source: Json,
-    reviewConfiguration?: {
-      binding: RunBinding;
-      configuration: ChildConfiguration;
-      inputSchema: JsonSchema;
-    },
     freshConfiguration?: {
       binding: RunBinding;
       configuration: ChildConfiguration;
@@ -1567,12 +1625,10 @@ export class AgentRuntime {
       controller: AbortController,
     ) => JobHandle;
   } {
-    const template =
-      reviewConfiguration ?? freshConfiguration ?? this.childConfigurations.get(configurationId);
+    const template = freshConfiguration ?? this.childConfigurations.get(configurationId);
     if (!template) throw new AgentError('child_configuration_unavailable');
     const capturedParent = parent.bindings;
-    if (!reviewConfiguration && !capturedParent)
-      throw new AgentError('child_parent_binding_unavailable');
+    if (!capturedParent) throw new AgentError('child_parent_binding_unavailable');
     const toolIdentity = (tool: ToolDefinition, extensions: readonly Extension[]) => ({
       id: tool.id,
       version: tool.version,
@@ -1590,7 +1646,6 @@ export class AgentRuntime {
       tools: ReadonlyMap<string, ToolDefinition>,
       extensions: readonly Extension[],
     ) => {
-      if (reviewConfiguration) return;
       for (const tool of tools.values()) {
         const permitted = capturedParent!.tools.get(tool.id);
         if (
@@ -1605,7 +1660,6 @@ export class AgentRuntime {
       jobs: ReadonlyMap<string, JobDefinition>,
       extensions: readonly Extension[],
     ) => {
-      if (reviewConfiguration) return;
       const identity = (job: JobDefinition, modules: readonly Extension[]) => ({
         id: job.id,
         version: job.version,
@@ -1635,12 +1689,10 @@ export class AgentRuntime {
       ...template,
       binding: {
         ...template.binding,
-        permissions: reviewConfiguration
-          ? template.binding.permissions
-          : this.childPermissions(
-              capturedParent!.permissions ?? this.options.permissions,
-              template.binding.permissions,
-            ),
+        permissions: this.childPermissions(
+          capturedParent!.permissions ?? this.options.permissions,
+          template.binding.permissions,
+        ),
         definitions: new Map(template.binding.definitions),
         jobs: new Map(template.binding.jobs),
         extensions: template.binding.extensions ?? this.extensions,
@@ -1655,7 +1707,7 @@ export class AgentRuntime {
           : {}),
       },
     };
-    if (!reviewConfiguration && template.binding.readStepCapabilities) {
+    if (template.binding.readStepCapabilities) {
       const read = template.binding.readStepCapabilities;
       configured.binding.readStepCapabilities = async (input) => {
         const selected = await read(input);
@@ -1667,10 +1719,9 @@ export class AgentRuntime {
     }
     let released = false;
     let reservedRelease: (() => void) | undefined;
-    const staticRelease =
-      !reviewConfiguration && !freshConfiguration
-        ? this.childRetainers.get(configurationId)!()
-        : undefined;
+    const staticRelease = !freshConfiguration
+      ? this.childRetainers.get(configurationId)!()
+      : undefined;
     const releaseConfigured = async () => {
       if (released) return;
       released = true;
@@ -1741,62 +1792,6 @@ export class AgentRuntime {
           : settlementInterrupted
             ? 'child_settlement_unconfirmed'
             : 'child_result_unavailable');
-      let reviewOutput: AuthorizationReviewOutput | undefined;
-      if (reviewConfiguration && outcome === 'succeeded') {
-        const modelExecutionId = assistant?.sourceIds?.[0];
-        if (!modelExecutionId || assistant.sourceIds?.length !== 1)
-          throw new AgentError('authorization_review_unverifiable');
-        const snapshot = await this.options.store.getModelOutputSnapshot({
-          expectedStoreId: parent.command.originStoreId,
-          sessionId: activation.session.id,
-          subjectId: parent.command.subjectId,
-          executionId: modelExecutionId,
-        });
-        if (snapshot.output) {
-          if (!snapshot.complete || snapshot.identity.runId !== activation.run.id)
-            throw new AgentError('authorization_review_unverifiable');
-          const signal = jobSignal ?? parent.signal;
-          const full = await readModelOutput(
-            snapshot.output,
-            {
-              storeId: snapshot.originStoreId,
-              sessionId: snapshot.identity.sessionId,
-              subjectId: snapshot.subjectId,
-              executionId: snapshot.identity.executionId,
-            },
-            (reference) => this.readBody(reference, signal, snapshot.storeId),
-            signal,
-          );
-          if (!full.complete || full.toolCalls.length !== 0 || full.content !== content)
-            throw new AgentError('authorization_review_unverifiable');
-          let answer: ReturnType<typeof authorizationReviewAnswer> = null;
-          try {
-            answer = authorizationReviewAnswer(JSON.parse(full.content));
-          } catch {
-            // Invalid review output remains unavailable; it never authorizes the target.
-          }
-          if (answer) {
-            reviewOutput = {
-              kind: 'authorization_review_output',
-              version: 1,
-              modelExecutionId,
-              modelOutputDigest: await semanticDigest(snapshot.output as unknown as Json),
-              contentHash: await semanticDigestBytes(Buffer.from(full.content), signal),
-              answer,
-            };
-            if (!this.options.artifacts) throw new AgentError('artifact_content_unavailable');
-            await this.options.artifacts.publish({
-              expectedStoreId: snapshot.storeId,
-              sessionId: snapshot.identity.sessionId,
-              subjectId: snapshot.subjectId,
-              scope: { kind: 'execution', id: modelExecutionId },
-              refId: authorizationReviewOutputRefId(reviewOutput.modelOutputDigest),
-              mediaType: authorizationReviewOutputMediaType,
-              content: Buffer.from(canonicalJson(reviewOutput)),
-            });
-          }
-        }
-      }
       let modelContent: import('./extensions').ToolResult['modelContent'];
       if (Buffer.byteLength(content) > 64 * 1024) {
         if (!this.options.artifacts || !carrierExecutionId)
@@ -1852,7 +1847,6 @@ export class AgentRuntime {
           runId: activation.run.id,
           status: current?.status ?? 'unavailable',
           reason: current?.reason ?? null,
-          ...(reviewOutput ? { authorizationReviewOutput: reviewOutput } : {}),
         },
       };
     };
@@ -2009,12 +2003,6 @@ export class AgentRuntime {
           admitted = false;
         };
       }
-      if (reviewConfiguration) {
-        admitted = true;
-        return () => {
-          admitted = false;
-        };
-      }
       if (continuation) {
         for (;;) {
           scope.signal.throwIfAborted();
@@ -2080,16 +2068,14 @@ export class AgentRuntime {
         return handle;
       },
       definition,
-      reserveForCreation: reviewConfiguration
-        ? undefined
-        : async () => {
-            if (released) throw new AgentError('child_configuration_unavailable');
-            if (reservedRelease) return;
-            const target = await capacity();
-            const release = this.childSlots.tryAcquire(target.key, target.limit, parent.signal);
-            if (!release) throw new AgentError('child_capacity_full');
-            reservedRelease = release;
-          },
+      reserveForCreation: async () => {
+        if (released) throw new AgentError('child_configuration_unavailable');
+        if (reservedRelease) return;
+        const target = await capacity();
+        const release = this.childSlots.tryAcquire(target.key, target.limit, parent.signal);
+        if (!release) throw new AgentError('child_capacity_full');
+        reservedRelease = release;
+      },
       disposeUnused: async () => {
         if (!task) await releaseConfigured();
       },
@@ -2136,6 +2122,185 @@ export class AgentRuntime {
     this.watchControls();
     return () => this.activeExecutions.delete(id);
   }
+  /** Trusted title action only; this is not exposed to Model tools or child task creation. */
+  async runInternalModel(input: {
+    parentExecutionId: string;
+    model: ModelAdapter;
+    request: ModelRequest;
+    permissions?: Permissions;
+    dispose?: () => Promise<void>;
+    signal?: AbortSignal;
+  }): Promise<import('./execution').ModelResponse> {
+    const dispose = this.preparationDisposer(input);
+    let retained = false;
+    try {
+      const live = this.activeExecutions.get(input.parentExecutionId);
+      const parent = await this.options.store.getExecution(input.parentExecutionId);
+      if (
+        !live ||
+        !parent ||
+        parent.definitionId !== 'builtin.session-title/generate' ||
+        parent.definitionVersion !== '1' ||
+        parent.childSessionId !== null ||
+        !['running', 'dispatching'].includes(parent.status) ||
+        input.request.tools.length
+      )
+        throw new AgentError('internal_model_scope_denied');
+      const signal = input.signal
+        ? AbortSignal.any([live.controller.signal, input.signal])
+        : live.controller.signal;
+      const origin = await this.options.store.getCommand(parent.originCommandId);
+      if (!origin) throw new AgentError('command_not_found');
+      const scope: StandaloneScope = {
+        command: origin,
+        owner: live.owner,
+        workspaceId: live.scope.workspaceId,
+        signal,
+        parentExecutionId: parent.id,
+        cancelWithParent: true,
+        requirements: [],
+        checkpoint: async () => {
+          signal.throwIfAborted();
+          const current = await this.options.store.getExecution(parent.id);
+          if (
+            !current ||
+            !['running', 'dispatching'].includes(current.status) ||
+            current.ownerGeneration !== live.owner.generation ||
+            current.cancelRequestedAt !== null
+          )
+            throw new AgentError('internal_model_parent_inactive');
+        },
+      };
+      signal.throwIfAborted();
+      const actual = structuredClone({ ...input.request, requestId: randomUUID() });
+      const raw = JSON.parse(JSON.stringify(actual)) as Json;
+      const body =
+        Buffer.byteLength(canonicalJson(raw)) > 64 * 1024
+          ? await this.publishBody(scope, raw)
+          : undefined;
+      const sealed: Json = body
+        ? {
+            modelId: actual.modelId,
+            requestId: actual.requestId,
+            tools: [],
+            body: body as unknown as Json,
+          }
+        : raw;
+      const captured = modelMetadataJson(
+        await captureModelRequestMetadata({}, input.model, structuredClone(actual)),
+      );
+      const metadata =
+        Buffer.byteLength(canonicalJson(captured)) > 64 * 1024
+          ? { version: 1, body: (await this.publishBody(scope, captured)) as unknown as Json }
+          : captured;
+      const fact = await this.options.store.ensureInternalModel({
+        expectedStoreId: parent.originStoreId,
+        owner: live.owner,
+        parentExecutionId: parent.id,
+        request: sealed,
+        modelMetadata: metadata,
+      });
+      if (!fact.created) throw new AgentError('internal_model_already_recorded');
+      const command = await this.options.store.getCommand(fact.execution.originCommandId);
+      if (!command) throw new AgentError('command_not_found');
+      const policy = intersectPermissionPolicies(
+        live.scope.bindings?.permissions ?? this.options.permissions,
+        input.permissions,
+      );
+      const call = this.trackInternalModelTask(
+        this.execution.internalModel(scope, {
+          execution: fact.execution,
+          workspaceId: scope.workspaceId,
+          model: input.model,
+          request: actual,
+          input: sealed,
+          modelMetadata: metadata,
+          authorize: async () => {
+            signal.throwIfAborted();
+            const decision = structuredClone(
+              await policy.authorize({
+                kind: 'model',
+                sessionId: parent.sessionId,
+                runId: null,
+                executionId: fact.execution.id,
+                definitionId: fact.execution.definitionId,
+                definitionVersion: fact.execution.definitionVersion,
+                input: freeze(structuredClone(sealed)),
+                signal,
+              }),
+            );
+            signal.throwIfAborted();
+            if (!decision.allowed) throw new AgentError('permission_denied', decision.reason);
+            return {
+              allowed: true,
+              revision: decision.revision,
+              definitionVersion: fact.execution.definitionVersion,
+              inputDigest: await semanticDigest(sealed),
+              ...(decision.controlReads ? { controlReads: decision.controlReads } : {}),
+              ...(decision.snapshot ? { snapshot: decision.snapshot } : {}),
+            };
+          },
+          publish: async (value, signal) => {
+            if (!this.options.artifacts) throw new AgentError('artifact_content_unavailable');
+            const content = Buffer.from(canonicalJson(value));
+            const digest = await semanticDigestBytes(content, signal);
+            return this.options.artifacts.publish({
+              expectedStoreId: command.originStoreId,
+              sessionId: command.sessionId,
+              subjectId: command.subjectId,
+              scope: { kind: 'execution', id: fact.execution.id },
+              refId: `model-output-${fact.execution.id}-${digest}`,
+              mediaType: 'application/vnd.kite.model-output+json',
+              content,
+              signal,
+            });
+          },
+        }),
+        dispose,
+      );
+      retained = true;
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      let onAbort: (() => void) | undefined;
+      const unconfirmed = new Promise<never>((_resolve, reject) => {
+        onAbort = () => {
+          timer = setTimeout(() => {
+            void (async () => {
+              const saved = await this.options.store
+                .getExecution(fact.execution.id)
+                .catch(() => null);
+              const partial =
+                saved?.result && typeof saved.result === 'object' && !Array.isArray(saved.result)
+                  ? saved.result
+                  : {};
+              await this.options.store
+                .finishInternalModel({
+                  expectedStoreId: parent.originStoreId,
+                  owner: live.owner,
+                  executionId: fact.execution.id,
+                  status: 'outcome_unknown',
+                  result: { ...partial, code: 'internal_model_stop_unconfirmed', incomplete: true },
+                })
+                .catch(() => {});
+            })().finally(() => reject(new AgentError('internal_model_stop_unconfirmed')));
+          }, 1000);
+        };
+        signal.addEventListener('abort', onAbort, { once: true });
+        if (signal.aborted) onAbort();
+      });
+      try {
+        return await Promise.race([call, unconfirmed]);
+      } finally {
+        if (timer) clearTimeout(timer);
+        if (onAbort) signal.removeEventListener('abort', onAbort);
+      }
+    } finally {
+      if (!retained)
+        await dispose().catch((error) => {
+          this.preparationCleanupFailed = true;
+          throw error;
+        });
+    }
+  }
   createWorkspace(input: Parameters<Store['createWorkspace']>[0]) {
     return this.options.store.createWorkspace(input);
   }
@@ -2160,7 +2325,12 @@ export class AgentRuntime {
   async readModelInput(
     input: Parameters<Store['getModelInputSnapshot']>[0] & { signal?: AbortSignal },
   ): Promise<ModelInputSnapshot> {
-    const { authorizationReview: review, ...snapshot } = await this.readOriginalModelInput(input);
+    const {
+      authorizationCheck: check,
+      authorizationReview: legacyReview,
+      ...snapshot
+    } = await this.readOriginalModelInput(input);
+    const review = check ?? legacyReview;
     let changed = false;
     const request = {
       ...snapshot.request,
@@ -2169,14 +2339,21 @@ export class AgentRuntime {
         : {}),
       messages: modelToolMessages(snapshot.request.messages).map(({ continuation, ...message }) => {
         changed ||= continuation !== undefined;
-        // Older reviewer snapshots may contain private history serialized as user text.
+        // Older checker snapshots may contain private history serialized as user text.
         // Only the exact persisted review child can identify this envelope, never its text alone.
         if (
           review &&
           message.role === 'user' &&
           canonicalJson(message.sourceIds as unknown as Json) === canonicalJson(review.sourceIds)
         ) {
-          const content = semanticReviewContent(message.content);
+          let content = semanticReviewContent(message.content);
+          if (check) {
+            const payload = JSON.parse(content) as Record<string, Json>;
+            content = canonicalJson({
+              ...payload,
+              decisionContext: semanticReviewContext(payload.decisionContext!),
+            });
+          }
           changed ||= content !== message.content;
           message.content = content;
         }
@@ -2203,7 +2380,12 @@ export class AgentRuntime {
   /** Internal replay retains opaque transport state; the public Inspector omits it. */
   private async readOriginalModelInput(
     input: Parameters<Store['getModelInputSnapshot']>[0] & { signal?: AbortSignal },
-  ): Promise<ModelInputSnapshot & { authorizationReview: { sourceIds: [string, string] } | null }> {
+  ): Promise<
+    ModelInputSnapshot & {
+      authorizationCheck: { sourceIds: [string, string] } | null;
+      authorizationReview: { sourceIds: [string, string] } | null;
+    }
+  > {
     const { signal, ...scope } = input;
     signal?.throwIfAborted();
     const snapshot = await this.options.store.getModelInputSnapshot(scope);
@@ -2240,8 +2422,14 @@ export class AgentRuntime {
       if (snapshot.identity.confirmation === 'succeeded' && snapshot.receiptInputHash !== hash)
         throw new AgentError('model_body_receipt_invalid');
     } else {
-      request = persistedModelRequest(stored);
-      const bytes = Buffer.from(canonicalJson(stored));
+      const {
+        authorizationCheckBindingDigest: _binding,
+        internalModelBindingDigest: _internalBinding,
+        ...raw
+      } = stored;
+      const actual = snapshot.identity.runId === null ? raw : stored;
+      request = persistedModelRequest(actual);
+      const bytes = Buffer.from(canonicalJson(actual));
       hash = await semanticDigestBytes(bytes, signal);
       size = String(bytes.byteLength);
     }
@@ -2276,6 +2464,7 @@ export class AgentRuntime {
     const { modelId: _modelId, ...identity } = snapshot.identity;
     return {
       ...identity,
+      authorizationCheck: snapshot.authorizationCheck,
       authorizationReview: snapshot.authorizationReview,
       storeId: snapshot.storeId,
       bodyHash: hash,
@@ -3444,7 +3633,7 @@ export class AgentRuntime {
           this.options.modelId ??
           'fixed';
         const catalogue = this.runDefinitions(resolved?.extensions, resolved?.toolIds);
-        const reviewer = sealReview(resolved?.authorizationReview ?? this.defaultReviewer);
+        const checker = sealAuthorizationCheck(resolved?.authorizationCheck ?? this.defaultChecker);
         const snapshot = resolved?.snapshot ?? null;
         const configuration = this.configurationSnapshot(
           modelId,
@@ -3452,8 +3641,8 @@ export class AgentRuntime {
             ...(snapshot && typeof snapshot === 'object' && !Array.isArray(snapshot)
               ? snapshot
               : { value: snapshot }),
-            authorizationReview: reviewer
-              ? { id: reviewer.id, version: reviewer.version, modelId: reviewer.modelId }
+            authorizationCheck: checker
+              ? { id: checker.id, version: checker.version, modelId: checker.modelId }
               : null,
           },
           catalogue.definitions,
@@ -3475,7 +3664,7 @@ export class AgentRuntime {
           conditions: resolved?.conditions,
           initializeRequirements:
             resolved?.initializeRequirements ?? this.options.initializeRunRequirements,
-          authorizationReview: reviewer,
+          authorizationCheck: checker,
           readStepCapabilities: resolved?.readStepCapabilities,
           afterTurn: resolved?.afterTurn ?? this.options.afterTurn,
           compressor: sealCompressor(resolved?.compressor ?? this.options.compressor),
@@ -4059,7 +4248,7 @@ export class AgentRuntime {
         let binding: Partial<RunBinding> = {
           afterTurn: this.options.afterTurn,
           compressor: sealCompressor(this.options.compressor),
-          authorizationReview: this.defaultReviewer,
+          authorizationCheck: this.defaultChecker,
           initializeRequirements: this.options.initializeRunRequirements,
         };
         if (this.options.resolveRecoveryRunConfiguration) {
@@ -4090,21 +4279,23 @@ export class AgentRuntime {
             readStepCapabilities: resolved.readStepCapabilities,
             afterTurn: resolved.afterTurn ?? binding.afterTurn,
             compressor: sealCompressor(resolved.compressor ?? binding.compressor),
-            authorizationReview: sealReview(resolved.authorizationReview ?? this.defaultReviewer),
+            authorizationCheck: sealAuthorizationCheck(
+              resolved.authorizationCheck ?? this.defaultChecker,
+            ),
           };
         } else if (this.options.resolveRunConfiguration) {
           throw new AgentError('report_recovery_binding_unavailable');
         }
         if (!model) throw new AgentError('report_recovery_binding_unavailable');
-        const reviewer = binding.authorizationReview;
+        const checker = binding.authorizationCheck;
         const configuration = this.configurationSnapshot(
           modelId,
           {
             ...(snapshot && typeof snapshot === 'object' && !Array.isArray(snapshot)
               ? snapshot
               : { value: snapshot }),
-            authorizationReview: reviewer
-              ? { id: reviewer.id, version: reviewer.version, modelId: reviewer.modelId }
+            authorizationCheck: checker
+              ? { id: checker.id, version: checker.version, modelId: checker.modelId }
               : null,
           },
           catalogue.definitions,
@@ -5261,7 +5452,7 @@ export class AgentRuntime {
     let maxConcurrentSubagents: number | undefined;
     let bindings = this.runDefinitions();
     let sources: ContextSources | undefined;
-    let authorizationReview = this.defaultReviewer;
+    let authorizationCheck = this.defaultChecker;
     let permissions: Permissions | undefined;
     let conditions: NecessaryConditions | undefined;
     let initializeRequirements = this.options.initializeRunRequirements;
@@ -5362,7 +5553,7 @@ export class AgentRuntime {
               (extension) => !this.extensions.some((base) => base.id === extension.id),
             ),
             afterTurn,
-            authorizationReview,
+            authorizationCheck,
             permissions,
             sources,
             conditions,
@@ -5384,7 +5575,9 @@ export class AgentRuntime {
         maxConcurrentSubagents = resolved.maxConcurrentSubagents;
         sources = resolved.sources;
         permissions = resolved.permissions;
-        authorizationReview = sealReview(resolved.authorizationReview ?? this.defaultReviewer);
+        authorizationCheck = sealAuthorizationCheck(
+          resolved.authorizationCheck ?? this.defaultChecker,
+        );
         conditions = resolved.conditions;
         initializeRequirements = resolved.initializeRequirements ?? initializeRequirements;
         readStepCapabilities = resolved.readStepCapabilities;
@@ -5401,11 +5594,11 @@ export class AgentRuntime {
           ...(snapshot && typeof snapshot === 'object' && !Array.isArray(snapshot)
             ? snapshot
             : { value: snapshot }),
-          authorizationReview: authorizationReview
+          authorizationCheck: authorizationCheck
             ? {
-                id: authorizationReview.id,
-                version: authorizationReview.version,
-                modelId: authorizationReview.modelId,
+                id: authorizationCheck.id,
+                version: authorizationCheck.version,
+                modelId: authorizationCheck.modelId,
               }
             : null,
         },
@@ -5456,7 +5649,7 @@ export class AgentRuntime {
       permissions,
       conditions,
       initializeRequirements,
-      authorizationReview,
+      authorizationCheck,
       readStepCapabilities,
       afterTurn,
       compressor,
@@ -5566,7 +5759,7 @@ export class AgentRuntime {
       tools: binding.definitions,
       jobs: binding.jobs ?? this.runDefinitions().jobs,
       permissions: binding.permissions,
-      authorizationReview: binding.authorizationReview,
+      authorizationCheck: binding.authorizationCheck,
       conditions: binding.conditions,
       retain: this.retainRunBinding(runId, binding).retain,
     };
@@ -5817,7 +6010,7 @@ export class AgentRuntime {
           tools: current.selected.definitions,
           jobs: current.selected.jobs,
           permissions: binding.permissions,
-          authorizationReview: binding.authorizationReview,
+          authorizationCheck: binding.authorizationCheck,
           conditions: binding.conditions,
           capabilitySnapshot: current.snapshot,
           retain: this.retainRunBinding(run.id, binding).retain,
@@ -7373,6 +7566,9 @@ export class AgentRuntime {
     await Promise.allSettled(this.tasks.values());
     this.wakeups.clear();
     await this.extensionHost.drain();
+    // A purpose's bounded wait may finish before its actual Provider call stops.
+    // Keep its configuration, output stores, and Model slot alive until that call settles.
+    while (this.internalModelTasks.size) await Promise.allSettled([...this.internalModelTasks]);
     for (const retained of this.reportBindings.values()) await retained.release();
     this.reportBindings.clear();
     await this.execution.stopUnconfirmedJobs();
@@ -7581,7 +7777,7 @@ export class AgentRuntime {
     return {
       policy: {
         reason: 'complete_approval_request',
-        review: {
+        check: {
           kind: 'artifact',
           complete: true,
           reference: {
@@ -7619,7 +7815,15 @@ export class AgentRuntime {
     const envelope = saved as {
       approvalRequestDigest: string;
       policy: {
-        review: {
+        check?: {
+          reference: {
+            id: string;
+            mediaType: string;
+            size: string;
+            scope: { kind: 'execution'; id: string };
+          };
+        };
+        review?: {
           reference: {
             id: string;
             mediaType: string;
@@ -7629,7 +7833,7 @@ export class AgentRuntime {
         };
       };
     };
-    const ref = envelope.policy?.review?.reference;
+    const ref = (envelope.policy?.check ?? envelope.policy?.review)?.reference;
     if (
       ref?.scope?.kind !== 'execution' ||
       ref.scope.id !== executionId ||
@@ -7670,7 +7874,7 @@ export class AgentRuntime {
   private async publishBody(
     scope: ToolScope,
     value: Json,
-    purpose: 'model-body' | 'authorization-review-request' = 'model-body',
+    purpose: 'model-body' | 'authorization-check-request' = 'model-body',
   ): Promise<import('./model-body').ModelBodyReference> {
     if (!this.options.artifacts) throw new AgentError('artifact_content_unavailable');
     const command =
@@ -7741,27 +7945,10 @@ export class AgentRuntime {
     scope: import('./execution').ExecutionScope,
     request: ModelRequest,
   ): Promise<Json> {
-    const command = await this.options.store.getCommand(scope.run.originCommandId);
-    let authorizationReviewBindingDigest: string | undefined;
-    let reviewHasModelInputBody = false;
-    if (command?.kind === 'child.start') {
-      const carrier = await this.options.store.getExecution(
-        String((command.request as Record<string, Json>).parentExecutionId),
-      );
-      const parent = carrier ? await this.options.store.getCommand(carrier.originCommandId) : null;
-      if (parent?.kind === 'authorization.review') {
-        authorizationReviewBindingDigest = await semanticDigest(carrier!.input);
-        const payload = carrier!.input as Record<string, Json>;
-        const context = payload.decisionContext as Record<string, Json> | null;
-        reviewHasModelInputBody = !!context?.modelInput;
-        request = await this.expandReviewRequest(request, scope, [command.id, carrier!.id]);
-      }
-    }
     const input = JSON.parse(JSON.stringify(request)) as Json;
     // Projection may shrink an artifact-backed history below the transport threshold.
     // Keep its existing body proof: SQL cannot expand the original private modelInput.
-    if (!reviewHasModelInputBody && Buffer.byteLength(canonicalJson(input)) <= 64 * 1024)
-      return input;
+    if (Buffer.byteLength(canonicalJson(input)) <= 64 * 1024) return input;
     const body = await this.publishBody(scope, input);
     // Identity and actual tool manifest remain visible to durable authorization; body is immutable.
     return {
@@ -7772,7 +7959,6 @@ export class AgentRuntime {
         definitionVersion: tool.definitionVersion,
       })),
       body: body as unknown as Json,
-      ...(authorizationReviewBindingDigest ? { authorizationReviewBindingDigest } : {}),
     };
   }
   private async openModelInput(
@@ -7832,7 +8018,7 @@ export class AgentRuntime {
       sourceBody: body as unknown as Json,
     };
   }
-  private async expandReviewRequest(
+  private async expandAuthorizationCheckRequest(
     request: ModelRequest,
     scope: ToolScope,
     sourceIds: [string, string],
@@ -7853,7 +8039,7 @@ export class AgentRuntime {
         messages.push(message);
         continue;
       }
-      if (payload.purpose !== 'authorization_review') {
+      if (payload.purpose !== 'authorization_check') {
         messages.push(message);
         continue;
       }

@@ -106,7 +106,7 @@ export async function runLiveCollaborationPermissions(
       const host = createDefaultProcessConfiguration({
         profile,
         userConfigurationPath: configurationPath,
-        authorizationReview: {
+        authorizationCheck: {
           id: 'live.review',
           version: '1',
           modelId: options.modelId,

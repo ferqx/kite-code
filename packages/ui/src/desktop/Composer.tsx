@@ -106,7 +106,7 @@ const permissionCopy = {
     },
     auto: {
       label: 'Auto',
-      menuLabel: 'Automatic review',
+      menuLabel: 'Automatic check',
       detail: 'Review safety; rejected actions do not execute and include a reason',
     },
     full: {

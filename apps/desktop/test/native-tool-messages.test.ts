@@ -2,6 +2,7 @@ import { expect, test } from 'bun:test';
 import type { AgentClient, Execution, Message, Run } from '@kite-ai/client';
 import { decodeNativeRequest } from '../electron/native-ipc';
 import { NativeToolMessages } from '../electron/tool-messages';
+import { authorizationApproval } from '../src/native-tool-messages';
 import type { NativeToolMessageScope } from '../src/tool-messages-bridge';
 
 function fixture() {
@@ -1028,4 +1029,60 @@ test('context forecasts reject changed selections, departed reads, foreign recei
   release();
   await expect(pending).rejects.toMatchObject({ code: 'native_selection_changed' });
   expect(signal?.aborted).toBe(true);
+});
+
+for (const field of ['check', 'review'] as const)
+  test(`Native ${field} authorization produces checking state and preserves human precedence`, () => {
+    for (const status of ['planned', 'dispatching', 'running'] as const) {
+      const authorization = {
+        dispatched: false,
+        [field]: {
+          executionId: 'check',
+          status,
+          decision: 'unavailable' as const,
+          reason: 'exact check reason',
+          requireApproval: false,
+        },
+      };
+      expect(authorizationApproval(authorization)).toMatchObject({
+        source: 'auto',
+        state: 'checking',
+        reason: 'exact check reason',
+      });
+      expect(
+        authorizationApproval({
+          ...authorization,
+          human: {
+            interactionId: 'human',
+            state: 'pending',
+            revision: '1',
+            acceptedDecisionRevision: null,
+            accepted: false,
+            decision: null,
+          },
+        }),
+      ).toMatchObject({ source: 'user', state: 'awaiting_user', reason: 'exact check reason' });
+    }
+  });
+
+test('new check fact takes precedence over a conflicting legacy review observation', () => {
+  expect(
+    authorizationApproval({
+      dispatched: false,
+      check: {
+        executionId: 'current',
+        status: 'running',
+        decision: 'unavailable',
+        reason: 'current checker',
+        requireApproval: false,
+      },
+      review: {
+        executionId: 'old',
+        status: 'succeeded',
+        decision: 'approve_once',
+        reason: 'historical review',
+        requireApproval: false,
+      },
+    }),
+  ).toMatchObject({ state: 'checking', reason: 'current checker' });
 });

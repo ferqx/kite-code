@@ -1,10 +1,10 @@
 import { expect, test } from 'bun:test';
 import { pathToFileURL } from 'node:url';
 import type { AuthorizationRequest } from '../../../src/extensions';
-import { createPermissionReviewContextReader } from '../../../src/permissions/review-context';
+import { createPermissionCheckContextReader } from '../../../src/permissions/check-context';
 import type { AgentRuntime } from '../../../src/runtime';
 
-function fixture(child = false) {
+function fixture(child = false, legacy = false) {
   const sessionId = child ? 'child' : 'root';
   const origin = child ? 'child-start' : 'user-command';
   const binding = { originStoreId: 'store', rootWorkCommandId: 'user-command', rootWorkSeq: '2' };
@@ -75,7 +75,9 @@ function fixture(child = false) {
   const rejected = {
     ...execution,
     id: 'prior',
-    authorization: { review: { decision: 'reject', reason: 'Saved refusal' } },
+    authorization: {
+      [legacy ? 'review' : 'check']: { decision: 'reject', reason: 'Saved refusal' },
+    },
   };
   const runtime = {
     async getExecution() {
@@ -105,13 +107,13 @@ function fixture(child = false) {
           {
             ...rejected,
             originStoreId: 'foreign',
-            authorization: { review: { decision: 'reject', reason: 'Foreign secret' } },
+            authorization: { check: { decision: 'reject', reason: 'Foreign secret' } },
           },
         ],
       };
     },
   };
-  const read = createPermissionReviewContextReader({
+  const read = createPermissionCheckContextReader({
     readRuntime: () => runtime as unknown as AgentRuntime,
     subjectId: 'alice',
     originStoreId: 'store',
@@ -129,22 +131,23 @@ function fixture(child = false) {
   return { read, request, execution, command, root, run, records, runtime };
 }
 
-test('review material reads exact task, workspace, plan and saved scoped refusal without granting authority', async () => {
-  const f = fixture();
-  const result = await f.read(f.request);
-  expect(result.task).toMatchObject({
-    availability: 'available',
-    content: 'Fix the user problem',
-    workspaceRoot: process.cwd(),
-    isChild: false,
-    role: null,
-    trustedAsAuthority: false,
+for (const legacy of [false, true])
+  test(`check material reads exact task, workspace, plan and scoped ${legacy ? 'legacy' : 'current'} refusal without granting authority`, async () => {
+    const f = fixture(false, legacy);
+    const result = await f.read(f.request);
+    expect(result.task).toMatchObject({
+      availability: 'available',
+      content: 'Fix the user problem',
+      workspaceRoot: process.cwd(),
+      isChild: false,
+      role: null,
+      trustedAsAuthority: false,
+    });
+    expect(result.plan).toEqual({ body: 'Real saved plan\nwith details' });
+    expect(result.rejectionReasons).toEqual(['Saved refusal']);
   });
-  expect(result.plan).toEqual({ body: 'Real saved plan\nwith details' });
-  expect(result.rejectionReasons).toEqual(['Saved refusal']);
-});
 
-test('actual child role is sealed Run snapshot; input role cannot choose reviewer identity', async () => {
+test('actual child role is sealed Run snapshot; input role cannot choose checker identity', async () => {
   const f = fixture(true);
   expect((await f.read(f.request)).task).toMatchObject({
     isChild: true,
@@ -202,7 +205,7 @@ test('abort during readonly source wait stops before reading further context', a
   expect(reads).toBe(0);
 });
 
-test('the current review cannot feed its own saved refusal back into the frozen request, while other scoped refusals remain evidence', async () => {
+test('the current check cannot feed its own saved refusal back into the frozen request, while other scoped refusals remain evidence', async () => {
   const f = fixture();
   const before = await f.read(f.request);
   const originalView = f.runtime.getView.bind(f.runtime);
@@ -215,7 +218,7 @@ test('the current review cannot feed its own saved refusal back into the frozen 
         ...view.executions,
         {
           ...f.execution,
-          authorization: { review: { decision: 'reject', reason: 'Own newly saved refusal' } },
+          authorization: { check: { decision: 'reject', reason: 'Own newly saved refusal' } },
         },
         ...(other
           ? [
@@ -223,7 +226,7 @@ test('the current review cannot feed its own saved refusal back into the frozen 
                 ...f.execution,
                 id: 'other-prior',
                 authorization: {
-                  review: { decision: 'reject', reason: 'Another original refusal' },
+                  check: { decision: 'reject', reason: 'Another original refusal' },
                 },
               },
             ]

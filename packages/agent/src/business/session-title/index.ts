@@ -7,12 +7,7 @@ import {
   type RunBoundaryEvent,
 } from '../../extensions';
 import { canonicalJson } from '../../json';
-import type {
-  AgentRuntime,
-  ChildAgentConfiguration,
-  RunConfiguration,
-  RuntimeOptions,
-} from '../../runtime';
+import type { AgentRuntime, RunConfiguration } from '../../runtime';
 import { AgentError, type CommandRecord } from '../../storage/types';
 import {
   fallbackSessionTitle,
@@ -22,13 +17,12 @@ import {
 } from './title';
 
 const extensionId = 'builtin.session-title';
-const configurationId = 'session-title';
 const recordKey = 'automatic-title';
 const contentType = 'automatic-session-title';
-const instructionsDigest = createHash('sha256').update(sessionTitleInstructions).digest('hex');
-type ChildInput = Parameters<NonNullable<RuntimeOptions['resolveChildRunConfiguration']>>[0];
 type Runtime = Pick<
   AgentRuntime,
+  | 'getWorkspace'
+  | 'runInternalModel'
   | 'getCommand'
   | 'getRun'
   | 'getSession'
@@ -43,13 +37,13 @@ function fields(value: Json): Record<string, Json> {
   return value && typeof value === 'object' && !Array.isArray(value) ? value : {};
 }
 
-/** Business policy uses ordinary lifecycle Actions and an ordinary tool-free child. */
+/** Business policy uses lifecycle Actions and a trusted tool-free metadata Model call. */
 export function createSessionTitleExtension(options: {
   runtime(): Runtime;
   resolveModel(input: {
     command: Awaited<ReturnType<Runtime['getCommand']>> & {};
     session: Awaited<ReturnType<Runtime['getSession']>> & {};
-    workspace: ChildInput['workspace'];
+    workspace: NonNullable<Awaited<ReturnType<AgentRuntime['getWorkspace']>>>;
     modelId: string;
   }): Promise<RunConfiguration>;
 }) {
@@ -375,74 +369,116 @@ export function createSessionTitleExtension(options: {
           });
           const content = sessionTitleInput(selected.content);
           if (!content) return { outcome: 'succeeded', content: 'fallback_retained' };
-          const ref = await context.operations.ensure({
-            key: `title-${selected.command.id}`,
-            resultDelivery: 'caller',
-            request: {
-              kind: 'agent',
-              configurationId,
-              input: { content },
-            },
-          });
-          let cancellation: Promise<void> | undefined;
-          const cancel = () =>
-            (cancellation ??= context.operations.cancel!(ref, {
-              commandId: `title-stop-${context.executionId}`,
-            }));
-          const timer = setTimeout(() => {
-            void cancel().catch(() => {});
-          }, 10000);
-          timer.unref();
+          const runtime = options.runtime();
+          const runId = fields(input).runId;
+          const run = typeof runId === 'string' ? await runtime.getRun(runId) : null;
+          const modelId = fields(run?.configuration ?? null).modelId;
+          const workspace = await runtime.getWorkspace(selected.session.workspaceId);
+          if (
+            !workspace ||
+            typeof modelId !== 'string' ||
+            run?.originCommandId !== selected.command.id
+          )
+            throw new AgentError('session_title_scope_invalid');
+          const configuration = await options.resolveModel({ ...selected, workspace, modelId });
+          const dispose = async () => {
+            await configuration.dispose?.();
+          };
+          let transferred = false;
           try {
-            const result = await context.operations.wait(ref, {
-              signal: context.signal,
-              timeoutMs: 30000,
-            });
-            if (result.status === 'outcome_unknown')
-              return { outcome: 'outcome_unknown', content: 'title_stop_unconfirmed' };
-            const title =
-              result.status === 'succeeded'
-                ? readableSessionTitle(String(fields(result.result).content ?? ''))
-                : null;
-            context.signal.throwIfAborted();
-            if (title)
-              await options.runtime().renameSession({
-                expectedStoreId: selected.command.originStoreId,
-                commandId: `title-generated-${context.executionId}`,
-                sessionId: context.sessionId,
-                subjectId: selected.command.subjectId,
-                ifRevision: marker.revision as string,
-                title,
+            const originalModel = configuration.model;
+            if (!originalModel) throw new AgentError('session_title_model_unavailable');
+            const model: ModelAdapter = {
+              ...(originalModel.describeRequest
+                ? { describeRequest: originalModel.describeRequest.bind(originalModel) }
+                : {}),
+              async *stream(request, options) {
+                let bytes = 0;
+                try {
+                  for await (const event of originalModel.stream(request, options)) {
+                    if (
+                      event.type === 'tool_call' ||
+                      (event.type === 'finish' && event.reason !== 'stop')
+                    )
+                      throw new AgentError('session_title_response_invalid');
+                    if (event.type === 'text_delta' || event.type === 'reasoning_delta') {
+                      bytes += Buffer.byteLength(event.text);
+                      if (bytes > 32768) throw new AgentError('session_title_response_too_large');
+                    }
+                    yield event;
+                  }
+                } catch (error) {
+                  if (ModelAttemptError.isInstance(error))
+                    throw new AgentError('session_title_model_failed');
+                  throw error;
+                }
+              },
+            };
+            const controller = new AbortController();
+            const abort = () => controller.abort(context.signal.reason);
+            context.signal.addEventListener('abort', abort, { once: true });
+            if (context.signal.aborted) abort();
+            const timer = setTimeout(
+              () => controller.abort(new AgentError('session_title_deadline')),
+              10000,
+            );
+            timer.unref();
+            try {
+              const call = runtime.runInternalModel({
+                parentExecutionId: context.executionId,
+                model,
+                permissions: configuration.permissions,
+                dispose,
+                request: {
+                  requestId: `title-model-${context.executionId}`,
+                  modelId: configuration.modelId ?? modelId,
+                  messages: [
+                    { role: 'system', content: sessionTitleInstructions },
+                    { role: 'user', content },
+                  ],
+                  tools: [],
+                },
+                signal: controller.signal,
               });
-            return { outcome: 'succeeded', content: title ? 'title_saved' : 'fallback_retained' };
-          } catch (error) {
-            if (
-              error instanceof AgentError &&
-              ['session_revision_changed', 'session_deleted'].includes(error.code)
-            )
-              return { outcome: 'succeeded', content: 'superseded' };
-            if (
-              !context.signal.aborted &&
-              !(error instanceof AgentError && error.code === 'wait_timeout')
-            )
-              throw error;
-            await cancel().catch(() => {});
-            // Scoped reads remain available after cancellation; wait() correctly uses
-            // the aborted callback signal and cannot confirm its own cleanup.
-            const deadline = Date.now() + 1000;
-            for (;;) {
-              const actual = await context.operations.get(ref);
-              if (actual && ['succeeded', 'failed', 'cancelled'].includes(actual.status))
+              transferred = true;
+              const result = await call;
+              const title = readableSessionTitle(result.content);
+              context.signal.throwIfAborted();
+              if (title)
+                await options.runtime().renameSession({
+                  expectedStoreId: selected.command.originStoreId,
+                  commandId: `title-generated-${context.executionId}`,
+                  sessionId: context.sessionId,
+                  subjectId: selected.command.subjectId,
+                  ifRevision: marker.revision as string,
+                  title,
+                });
+              return { outcome: 'succeeded', content: title ? 'title_saved' : 'fallback_retained' };
+            } catch (error) {
+              if (
+                error instanceof AgentError &&
+                ['session_revision_changed', 'session_deleted'].includes(error.code)
+              )
+                return { outcome: 'succeeded', content: 'superseded' };
+              if (error instanceof AgentError && error.code === 'internal_model_stop_unconfirmed')
+                return { outcome: 'outcome_unknown', content: 'title_stop_unconfirmed' };
+              if (
+                error instanceof AgentError &&
+                ['permission_denied', 'permission_control_changed'].includes(error.code)
+              )
+                return { outcome: 'succeeded', content: 'fallback_retained' };
+              if (controller.signal.aborted)
                 return {
                   outcome: context.signal.aborted ? 'cancelled' : 'succeeded',
                   content: 'fallback_retained',
                 };
-              if (actual?.status === 'outcome_unknown' || Date.now() >= deadline)
-                return { outcome: 'outcome_unknown', content: 'title_stop_unconfirmed' };
-              await new Promise((resolve) => setTimeout(resolve, 10));
+              throw error;
+            } finally {
+              clearTimeout(timer);
+              context.signal.removeEventListener('abort', abort);
             }
           } finally {
-            clearTimeout(timer);
+            if (!transferred) await dispose();
           }
         },
       },
@@ -507,109 +543,43 @@ export function createSessionTitleExtension(options: {
         throw error;
       }
     },
-    childConfiguration: {
-      id: configurationId,
-      version: '1',
-      modelId: 'unresolved',
-      toolIds: [],
-      snapshot: {},
-      model: {
-        stream() {
-          throw new AgentError('child_configuration_unresolved');
-        },
-      },
-    } satisfies ChildAgentConfiguration,
-    async resolveChild(input: ChildInput): Promise<RunConfiguration> {
-      if (input.parentExecution.definitionId !== `${extensionId}/generate`)
-        throw new AgentError('session_title_scope_invalid');
-      const selected = await origin(
-        input.parentSession.id,
-        fields(input.command.request).input ?? null,
-      );
-      const runId = fields(fields(input.command.request).input ?? null).runId;
-      const run = typeof runId === 'string' ? await options.runtime().getRun(runId) : null;
-      const modelId = fields(run?.configuration ?? null).modelId;
-      if (
-        !selected ||
-        run?.originCommandId !== selected.command.id ||
-        run.sessionId !== selected.session.id ||
-        typeof modelId !== 'string'
-      )
-        throw new AgentError('session_title_scope_invalid');
-      const configuration = await options.resolveModel({
-        ...selected,
-        workspace: input.workspace,
-        modelId,
-      });
-      const originalModel = configuration.model!;
-      const model: ModelAdapter = {
-        ...(originalModel.describeRequest
-          ? { describeRequest: originalModel.describeRequest.bind(originalModel) }
-          : {}),
-        async *stream(request, options) {
-          let bytes = 0;
-          try {
-            for await (const event of originalModel.stream(request, options)) {
-              if (
-                event.type === 'tool_call' ||
-                (event.type === 'finish' && event.reason !== 'stop')
-              )
-                throw new AgentError('session_title_response_invalid');
-              if (event.type === 'text_delta' || event.type === 'reasoning_delta') {
-                bytes += Buffer.byteLength(event.text);
-                if (bytes > 32768) throw new AgentError('session_title_response_too_large');
-              }
-              yield event;
-            }
-          } catch (error) {
-            if (ModelAttemptError.isInstance(error))
-              throw new AgentError('session_title_model_failed');
-            throw error;
-          }
-        },
-      };
-      return {
-        ...configuration,
-        model,
-        toolIds: [],
-        extensions: [],
-        sources: {
-          async capture(request) {
-            return [
-              {
-                id: `${extensionId}:instructions`,
-                kind: 'instruction',
-                role: 'system',
-                scope: request.sessionId,
-                digest: instructionsDigest,
-                content: sessionTitleInstructions,
-              },
-            ];
-          },
-        },
-      };
-    },
-    ownsChild(id: string) {
-      return id === configurationId;
-    },
     async authorize(request: AuthorizationRequest) {
       if (request.definitionVersion !== '1') return null;
       if (
         request.kind === 'job' &&
-        [`${extensionId}/fallback`, `${extensionId}/generate`, `agent/${configurationId}`].includes(
-          request.definitionId,
-        )
+        [`${extensionId}/fallback`, `${extensionId}/generate`].includes(request.definitionId)
       )
         return { allowed: true, revision: 'session-title-1' };
-      if (request.kind !== 'model') return null;
+      if (request.kind !== 'model' || request.runId !== null) return null;
+      request.signal.throwIfAborted();
       const runtime = options.runtime();
       const execution = await runtime.getExecution(request.executionId);
-      const carrier = execution?.parentExecutionId
-        ? await runtime.getExecution(execution.parentExecutionId)
-        : null;
-      return carrier?.definitionId === `agent/${configurationId}` &&
-        carrier.childSessionId === request.sessionId
-        ? { allowed: true, revision: 'session-title-1' }
+      if (
+        !execution ||
+        execution.kind !== 'model' ||
+        execution.runId !== null ||
+        execution.childSessionId !== null ||
+        execution.sessionId !== request.sessionId ||
+        execution.definitionId !== request.definitionId ||
+        execution.definitionVersion !== request.definitionVersion ||
+        canonicalJson(execution.input) !== canonicalJson(request.input) ||
+        !execution.parentExecutionId
+      )
+        return null;
+      const command = await runtime.getCommand(execution.originCommandId);
+      const parent = await runtime.getExecution(execution.parentExecutionId);
+      request.signal.throwIfAborted();
+      return command?.kind === 'session.title' &&
+        command.sessionId === execution.sessionId &&
+        command.originStoreId === execution.originStoreId &&
+        parent?.definitionId === `${extensionId}/generate` &&
+        parent.definitionVersion === '1' &&
+        parent.sessionId === execution.sessionId &&
+        parent.originStoreId === execution.originStoreId &&
+        parent.rootWorkCommandId === execution.rootWorkCommandId &&
+        parent.rootWorkSeq === execution.rootWorkSeq &&
+        ['dispatching', 'running'].includes(parent.status)
+        ? { allowed: true, revision: 'session-title-model-1' }
         : null;
     },
   };

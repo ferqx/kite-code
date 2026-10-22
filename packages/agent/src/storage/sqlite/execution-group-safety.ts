@@ -7,10 +7,12 @@ import {
   type ExecutionGroupSafety,
   type Json,
 } from '../types';
+import { authorizationCheckSourceTarget } from './authorization-check';
 import {
   authorizationReviewContextSession,
   authorizationReviewSourceTarget,
 } from './authorization-review';
+import { internalModelSourceTarget } from './internal-model';
 import { verifiedJobProofPredicate } from './job-reconcile-operations';
 import type { SqliteOperations } from './operations';
 
@@ -106,6 +108,9 @@ export function inheritsActionSource(
   const { root } = actualRoot(db, String(execution.session_id));
   if (execution.root_session_id !== root.id) return false;
   // A sealed reviewer is the one purpose allowed to observe an undispatched parent.
+  // A direct permission check inherits provenance only, never the target's business guard.
+  if (authorizationCheckSourceTarget(db, execution) || internalModelSourceTarget(db, execution))
+    return true;
   const reviewTarget = authorizationReviewSourceTarget(db, execution);
   let node = execution;
   let subject: Row[string] | undefined;

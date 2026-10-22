@@ -21,7 +21,7 @@ import {
   type ExecutionStatus,
   type Json,
 } from '../types';
-import { ensureAgent } from './child-operations';
+import { authorizationCheckFact, transferAuthorizationCheckOwnership } from './authorization-check';
 import { verifyModelBody } from './model-body';
 import { verifyModelOutput } from './model-output';
 import type { SqliteOperations } from './operations';
@@ -197,7 +197,7 @@ export function authorizationReviewSourceTarget(db: SqliteOperations, carrier: R
     return null;
   }
 }
-function decisionContext(
+export function decisionContext(
   db: SqliteOperations,
   target: Record<string, string | number | bigint | null>,
 ): Json {
@@ -229,6 +229,7 @@ export function transferAuthorizationReviewOwnership(
   generation: string,
 ): void {
   if (target.kind !== 'tool') return;
+  transferAuthorizationCheckOwnership(db, target, originalGeneration, generation);
   if (
     target.state !== 'planned' ||
     target.dispatched ||
@@ -306,137 +307,12 @@ export function transferAuthorizationReviewOwnership(
     if (!changed) throw new AgentError('authorization_review_unverifiable');
   }
 }
+/** Legacy producer is closed. Existing records remain readable without restarting their child. */
 export function ensureAuthorizationReview(
-  db: SqliteOperations,
-  input: EnsureAuthorizationReviewInput,
-) {
-  return db.tx(() => {
-    db.identity(input.expectedStoreId);
-    const target = db.row('SELECT * FROM execution WHERE id=?', input.targetExecutionId);
-    if (
-      !target ||
-      !['tool', 'job'].includes(String(target.kind)) ||
-      target.state !== 'planned' ||
-      target.dispatched ||
-      String(target.owner_generation) !== input.owner.generation
-    )
-      throw new AgentError('authorization_review_target_unavailable');
-    db.owner(input.owner, String(target.session_id));
-    const origin = db.active(
-      input.owner,
-      String(target.origin_command_id),
-      target.run_id === null ? null : String(target.run_id),
-    );
-    db.ancestors(input.owner, input.targetExecutionId);
-    if (
-      target.origin_store_id !== input.expectedStoreId ||
-      !input.policyRevision ||
-      (input.requireApproval !== undefined && typeof input.requireApproval !== 'boolean') ||
-      Object.keys(input.reviewer).some((key) => !['id', 'version', 'modelId'].includes(key)) ||
-      !/^[A-Za-z0-9_.-]{1,64}$/.test(input.reviewer.id) ||
-      !input.reviewer.version ||
-      input.reviewer.version.length > 128 ||
-      !input.reviewer.modelId ||
-      input.reviewer.modelId.length > 256
-    )
-      throw new AgentError('authorization_review_binding_invalid');
-    if (input.requestBody)
-      verifyModelBody(db, { sourceBody: input.requestBody as unknown as Json }, target);
-    const rootWork = db.row('SELECT * FROM command WHERE id=?', target.root_work_command_id!);
-    if (
-      !rootWork ||
-      rootWork.origin_store_id !== target.origin_store_id ||
-      rootWork.subject_id !== origin.subject_id
-    )
-      throw new AgentError('authorization_review_binding_invalid');
-    for (const [body, request] of [
-      [input.originCommandRequestBody, origin.request_json],
-      [input.rootWorkRequestBody, rootWork.request_json],
-      [input.targetInputBody, target.intent_json],
-      [input.targetSourceBody, target.decision_source_json],
-    ] as const) {
-      if (body) {
-        verifyModelBody(db, { sourceBody: body as unknown as Json }, target);
-        if (body.reference.hash !== createHash('sha256').update(String(request)).digest('hex'))
-          throw new AgentError('authorization_review_binding_changed');
-      }
-    }
-    const payload: Json = {
-      purpose: 'authorization_review',
-      requireApproval: input.requireApproval === true,
-      reviewer: { ...input.reviewer },
-      policyRevision: input.policyRevision,
-      request: input.request,
-      ...(input.requestBody ? { requestBody: input.requestBody as unknown as Json } : {}),
-      originCommandRequest: input.originCommandRequestBody
-        ? (input.originCommandRequestBody as unknown as Json)
-        : JSON.parse(String(origin.request_json)),
-      rootWorkRequest: input.rootWorkRequestBody
-        ? (input.rootWorkRequestBody as unknown as Json)
-        : JSON.parse(String(rootWork.request_json)),
-      decisionContext: decisionContext(db, target),
-      instructions: reviewInstructions,
-      target: {
-        executionId: String(target.id),
-        sessionId: String(target.session_id),
-        runId: target.run_id === null ? null : String(target.run_id),
-        originCommandId: String(target.origin_command_id),
-        originStoreId: String(target.origin_store_id),
-        rootWorkCommandId: String(target.root_work_command_id),
-        rootWorkSeq: String(target.root_work_seq),
-        attempt: Number(target.attempt),
-        definitionId: String(target.adapter_id),
-        definitionVersion: String(target.definition_version),
-        input: input.targetInputBody
-          ? (input.targetInputBody as unknown as Json)
-          : JSON.parse(String(target.intent_json)),
-        source: input.targetSourceBody
-          ? (input.targetSourceBody as unknown as Json)
-          : JSON.parse(String(target.decision_source_json)),
-        subjectId: String(origin.subject_id),
-      },
-    };
-    const key = `review/${hash(payload)}`,
-      configuration = {
-        id: `review.${hash(payload).slice(0, 40)}`,
-        version: input.reviewer.version,
-        snapshot: {
-          modelId: input.reviewer.modelId,
-          tools: [],
-          extensions: [],
-          maxConcurrentSubagents: 1,
-          authorizationReview: payload,
-        } as Json,
-      };
-    const existing = db.row(
-      "SELECT id FROM command WHERE kind='authorization.review' AND session_id=? AND operation_key=?",
-      target.session_id!,
-      key,
-    );
-    const operation = ensureAgent(
-      db,
-      {
-        expectedStoreId: input.expectedStoreId,
-        owner: input.owner,
-        sessionId: String(target.session_id),
-        extensionId: '__authorization_review__',
-        originCommandId: String(target.origin_command_id),
-        parentExecutionId: input.targetExecutionId,
-        operationKey: key,
-        request: { kind: 'agent', configurationId: configuration.id, input: payload },
-        childConfiguration: configuration,
-        cancellation: 'attached',
-      },
-      true,
-    );
-    return {
-      operation,
-      configuration,
-      input: payload,
-      source: JSON.parse(String(target.decision_source_json)) as Json,
-      created: !existing,
-    };
-  });
+  _db: SqliteOperations,
+  _input: EnsureAuthorizationReviewInput,
+): never {
+  throw new AgentError('authorization_review_legacy_read_only');
 }
 
 /** The old producer used model-body IDs for public Auto fallback attachments too.
@@ -451,17 +327,19 @@ export function isHumanBoundReviewRequest(
   const candidates = db.rows(
     `SELECT i.* FROM interaction i
      WHERE i.session_id=? AND i.subject_id=? AND i.origin_store_id=? AND i.kind='approval'
-       AND json_extract(i.request_json,'$.policy.review.reference.id')=?`,
+       AND (json_extract(i.request_json,'$.policy.review.reference.id')=? OR json_extract(i.request_json,'$.policy.check.reference.id')=?)`,
     reference.sessionId,
     reference.subjectId,
     reference.storeId,
+    reference.id,
     reference.id,
   );
   for (const human of candidates) {
     try {
       const target = db.row('SELECT * FROM execution WHERE id=?', human.execution_id!);
       const request = object(JSON.parse(String(human.request_json)));
-      const review = object(object(request.policy!).review!);
+      const policy = object(request.policy!);
+      const review = object(policy.check ?? policy.review!);
       const binding = target?.interaction_binding_json
         ? object(JSON.parse(String(target.interaction_binding_json)))
         : undefined;
@@ -505,19 +383,17 @@ export function isHumanBoundReviewRequest(
       )
         continue;
       const reviews = db.rows(
-        `SELECT e.id FROM execution e JOIN command c ON c.id=e.origin_command_id
-         WHERE e.parent_execution_id=? AND c.kind='authorization.review'`,
+        `SELECT e.id,c.kind FROM execution e JOIN command c ON c.id=e.origin_command_id
+         WHERE e.parent_execution_id=? AND c.kind IN('authorization.review','authorization.check')`,
         target.id!,
       );
       for (const carrier of reviews) {
         try {
-          const verified = fact(
-            db,
-            String(target.id),
-            String(carrier.id),
-            String(human.policy_revision),
-            true,
-          );
+          const verified = (
+            carrier.kind === 'authorization.check'
+              ? authorizationCheckFact
+              : authorizationReviewFact
+          )(db, String(target.id), String(carrier.id), String(human.policy_revision), true);
           const body = bodyReference(verified.payload.requestBody);
           if (
             body &&
@@ -536,7 +412,7 @@ export function isHumanBoundReviewRequest(
   return false;
 }
 
-function fact(
+export function authorizationReviewFact(
   db: SqliteOperations,
   targetId: string,
   reviewId: string,
@@ -768,6 +644,44 @@ export function executionAuthorizationObservation(
     const dispatch = target.dispatch_authorization_json
       ? object(JSON.parse(String(target.dispatch_authorization_json)))
       : undefined;
+    const pointer = dispatch?.checkExecutionId;
+    const checks =
+      typeof pointer === 'string'
+        ? db.rows(
+            "SELECT e.* FROM execution e JOIN command c ON c.id=e.origin_command_id WHERE c.kind='authorization.check' AND e.parent_execution_id=? AND e.id=?",
+            target.id!,
+            pointer,
+          )
+        : db.rows(
+            "SELECT e.* FROM execution e JOIN command c ON c.id=e.origin_command_id WHERE c.kind='authorization.check' AND e.parent_execution_id=? LIMIT 2",
+            target.id!,
+          );
+    if (checks.length === 1) {
+      const check = checks[0]!,
+        command = db.row('SELECT request_json FROM command WHERE id=?', check.origin_command_id!)!;
+      const payload = object(object(JSON.parse(String(command.request_json))).input!);
+      const value = authorizationCheckFact(
+        db,
+        String(target.id),
+        String(check.id),
+        String(payload.policyRevision),
+        true,
+      );
+      observed.check = {
+        executionId: String(check.id),
+        status: check.state as ExecutionStatus,
+        decision: value.result.decision,
+        reason: value.result.reason,
+        requireApproval: payload.requireApproval === true,
+      };
+    }
+  } catch {
+    /* An ambiguous or corrupt check supplies no display proof. */
+  }
+  try {
+    const dispatch = target.dispatch_authorization_json
+      ? object(JSON.parse(String(target.dispatch_authorization_json)))
+      : undefined;
     const pointer = dispatch?.reviewExecutionId;
     const reviews =
       typeof pointer === 'string'
@@ -784,7 +698,7 @@ export function executionAuthorizationObservation(
     if (reviews.length === 1) {
       const review = reviews[0]!,
         payload = object(JSON.parse(String(review.intent_json)));
-      const verified = fact(
+      const verified = authorizationReviewFact(
         db,
         String(target.id),
         String(review.id),
@@ -860,7 +774,12 @@ export function getAuthorizationReview(
   db.identity(input.expectedStoreId);
   if (input.requireApproval !== undefined && typeof input.requireApproval !== 'boolean')
     throw new AgentError('authorization_review_binding_invalid');
-  const value = fact(db, input.targetExecutionId, input.reviewExecutionId, input.policyRevision);
+  const value = authorizationReviewFact(
+    db,
+    input.targetExecutionId,
+    input.reviewExecutionId,
+    input.policyRevision,
+  );
   if (
     object(value.payload.target!).originStoreId !== input.expectedStoreId ||
     canonicalJson(value.payload.request!) !== canonicalJson(input.request) ||
@@ -882,8 +801,12 @@ export function authorizationReviewContextSession(
     if (!target || carrier.state !== 'succeeded') return null;
     const payload = object(JSON.parse(String(carrier.intent_json)));
     if (
-      fact(db, String(target.id), String(carrier.id), String(payload.policyRevision)).result
-        .decision === 'unavailable'
+      authorizationReviewFact(
+        db,
+        String(target.id),
+        String(carrier.id),
+        String(payload.policyRevision),
+      ).result.decision === 'unavailable'
     )
       return null;
     const childId = String(carrier.child_session_id);
@@ -1021,7 +944,7 @@ export function verifyAuthorizationReviewDispatch(
       input.authorization.revision,
     );
   if (input.authorization.reviewExecutionId) {
-    const review = fact(
+    const review = authorizationReviewFact(
       db,
       input.executionId,
       input.authorization.reviewExecutionId,
@@ -1039,7 +962,12 @@ export function verifyAuthorizationReviewDispatch(
       input.executionId,
     )) {
       if (invalidated(String(carrier.id))) continue;
-      const review = fact(db, input.executionId, String(carrier.id), input.authorization.revision);
+      const review = authorizationReviewFact(
+        db,
+        input.executionId,
+        String(carrier.id),
+        input.authorization.revision,
+      );
       if (review.payload.requireApproval === true && review.result.decision === 'approve_once')
         throw new AgentError('authorization_review_required');
     }

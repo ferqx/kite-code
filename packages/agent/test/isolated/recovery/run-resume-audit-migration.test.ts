@@ -3,11 +3,13 @@ import { expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { openSqliteStore, preflightSqliteStore } from '../../../src/sqlite';
 import { schemaQuery, supportedSchemas } from '../../../src/storage/sqlite/migrations';
+import { restoreLegacyExecutionSchema } from '../storage/legacy-execution-schema-fixture';
 import { auditFixture, trackedAudit } from './run-resume-audit-fixture';
 
 function legacy(path: string) {
   const db = new Database(path);
   try {
+    restoreLegacyExecutionSchema(db, 0);
     const baseline = JSON.parse(supportedSchemas()[0]!.schema) as { type: string; name: string }[];
     const names = new Set(baseline.map((row) => row.name));
     const extra = db
@@ -64,6 +66,7 @@ test('legacy readonly is unchanged; one writer upgrade certifies all history the
           { id: '0002-recovery-audit' },
           { id: '0003-session-reconciliation' },
           { id: '0004-pending-input-order' },
+          { id: '0005-authorization-check' },
         ]);
         expect(
           db

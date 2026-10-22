@@ -15,7 +15,7 @@ const permissionSnapshot = {
   data: { mode: 'auto' },
 };
 for (const targetKind of ['action', 'tool', 'guarded_action'] as const)
-  test(`runless ${targetKind} retains its original source through one real reviewer and an independent human approval`, async () => {
+  test(`runless ${targetKind} retains its original source through one real checker and an independent human approval`, async () => {
     const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-runless-review-')));
     const store = await openSqliteStore({ dataRoot: join(root, 'data'), profile: 'new' });
     let effects = 0;
@@ -39,10 +39,10 @@ for (const targetKind of ['action', 'tool', 'guarded_action'] as const)
       model: ordinary,
       modelId: 'ordinary',
       modelConcurrency: 1,
-      authorizationReview: {
-        id: 'reviewer',
+      authorizationCheck: {
+        id: 'checker',
         version: '1',
-        modelId: 'review-model',
+        modelId: 'check-model',
         model: {
           async *stream(input) {
             reviews++;
@@ -71,7 +71,7 @@ for (const targetKind of ['action', 'tool', 'guarded_action'] as const)
                 allowed: false,
                 revision: 'p1',
                 snapshot: permissionSnapshot,
-                review: { request, requireApproval: true },
+                check: { request, requireApproval: true },
               }
             : { allowed: true, revision: 'trusted' };
         },
@@ -85,7 +85,7 @@ for (const targetKind of ['action', 'tool', 'guarded_action'] as const)
             {
               id: 'bridge',
               version: '1',
-              description: 'Owned runless review bridge',
+              description: 'Owned runless check bridge',
               inputSchema: { type: 'object', additionalProperties: false },
               async prepare(_input, context) {
                 if (targetKind === 'guarded_action')
@@ -159,7 +159,7 @@ for (const targetKind of ['action', 'tool', 'guarded_action'] as const)
       expect(target.status).toBe('planned');
       expect(target.authorization).toMatchObject({
         dispatched: false,
-        review: { status: 'running', decision: 'unavailable' },
+        check: { status: 'dispatching', decision: 'unavailable' },
       });
       expect(target.runId).toBeNull();
       expect(effects).toBe(0);
@@ -172,33 +172,37 @@ for (const targetKind of ['action', 'tool', 'guarded_action'] as const)
       expect(effects).toBe(0);
       expect(reviews).toBe(1);
       const carrier = (await store.listExecutions('s')).find(
-        (item) => item.childSessionId !== null,
+        (item) => item.kind === 'model' && item.runId === null,
       )!;
       expect(carrier.status).toBe('succeeded');
       expect((await store.getExecution(target.id))?.authorization).toMatchObject({
         dispatched: false,
-        review: { executionId: carrier.id, decision: 'approve_once', requireApproval: true },
+        check: { executionId: carrier.id, decision: 'approve_once', requireApproval: true },
         human: { interactionId: interaction.id, state: 'pending', accepted: false },
       });
-      expect((await store.getCommand(carrier.originCommandId))!.kind).toBe('authorization.review');
-      expect((await store.getView(carrier.childSessionId!)).runs).toHaveLength(1);
-      const childExecutions = await store.listExecutions(carrier.childSessionId!);
-      expect(childExecutions).toHaveLength(1);
-      expect(childExecutions[0]).toMatchObject({
+      expect((await store.getCommand(carrier.originCommandId))!.kind).toBe('authorization.check');
+      expect(carrier).toMatchObject({
         kind: 'model',
-        status: 'succeeded',
-        definitionId: 'review-model',
+        runId: null,
+        childSessionId: null,
+        parentExecutionId: target.id,
+        definitionId: 'check-model',
       });
+      expect((await store.listExecutions('s')).every((item) => item.childSessionId === null)).toBe(
+        true,
+      );
+      expect((await runtime.listMessages('s')).length).toBe(0);
+      expect(await store.listSessions()).toHaveLength(1);
       expect(
         (
-          await store.getAuthorizationReview({
+          await store.getAuthorizationCheck({
             expectedStoreId,
             targetExecutionId: target.id,
-            reviewExecutionId: carrier.id,
+            checkExecutionId: carrier.id,
             policyRevision: 'p1',
             request,
             requireApproval: true,
-            reviewer: { id: 'reviewer', version: '1', modelId: 'review-model' },
+            checker: { id: 'checker', version: '1', modelId: 'check-model' },
           })
         ).decision,
       ).toBe('approve_once');
@@ -219,7 +223,7 @@ for (const targetKind of ['action', 'tool', 'guarded_action'] as const)
         human: { state: 'answered', decision: 'approve', accepted: true },
       });
       expect(targetAuthorization).toMatchObject({
-        reviewExecutionId: carrier.id,
+        checkExecutionId: carrier.id,
         interactionId: interaction.id,
         snapshot: permissionSnapshot,
       });
@@ -246,10 +250,10 @@ async function eventually<T>(read: () => Promise<T | null>): Promise<T> {
     if (value !== null) return value;
     await Bun.sleep(10);
   }
-  throw new Error('Timed out waiting for actual review state');
+  throw new Error('Timed out waiting for actual check state');
 }
 async function fixture(
-  review: ModelAdapter,
+  check: ModelAdapter,
   permissions?: Permissions,
   options: Partial<RuntimeOptions> = {},
 ) {
@@ -274,7 +278,7 @@ async function fixture(
         return () => {};
       },
     },
-    authorizationReview: { id: 'reviewer', version: '1', modelId: 'review-model', model: review },
+    authorizationCheck: { id: 'checker', version: '1', modelId: 'check-model', model: check },
     permissions: permissions ?? {
       async authorize(request) {
         return request.kind === 'model'
@@ -283,7 +287,7 @@ async function fixture(
               allowed: false,
               revision: 'p1',
               snapshot: permissionSnapshot,
-              review: { request: { task: 'exact harmless effect', parameters: request.input } },
+              check: { request: { task: 'exact harmless effect', parameters: request.input } },
             };
       },
     },
@@ -343,7 +347,7 @@ async function fixture(
   };
 }
 
-test('durable reviewer uses one actual Model call with zero tools and grants only original target', async () => {
+test('durable checker uses one actual Model call with zero tools and grants only original target', async () => {
   let reviews = 0;
   let release!: () => void;
   const reviewing = new Promise<void>((resolve) => {
@@ -376,29 +380,36 @@ test('durable reviewer uses one actual Model call with zero tools and grants onl
     expect(f.effects()).toBe(1);
     expect(reviews).toBe(1);
     expect(inputs[0]).toMatchObject({ tools: [] });
+    expect(await f.store.listSessions()).toHaveLength(1);
+    expect((await f.store.getView('s')).runs).toHaveLength(1);
+    expect((await f.runtime.listMessages('s')).filter((item) => item.role === 'user')).toHaveLength(
+      1,
+    );
     const execution = (await f.store.listExecutions('s')).find((value) => value.kind === 'tool')!;
     expect(execution.status).toBe('succeeded');
     expect(acceptedSnapshot).toEqual(permissionSnapshot);
     expect((await f.runtime.getRun(execution.runId!))?.status).toBe('completed');
-    const carrier = (await f.store.listExecutions('s')).find((value) => value.kind === 'job')!;
+    const carrier = (await f.store.listExecutions('s')).find(
+      (value) => value.kind === 'model' && value.runId === null,
+    )!;
     expect(carrier.status).toBe('succeeded');
     const reviewInput = {
       expectedStoreId: f.expectedStoreId,
       targetExecutionId: execution.id,
-      reviewExecutionId: carrier.id,
+      checkExecutionId: carrier.id,
       policyRevision: 'p1',
       request: { task: 'exact harmless effect', parameters: { value: 'exact' } },
-      reviewer: { id: 'reviewer', version: '1', modelId: 'review-model' },
+      checker: { id: 'checker', version: '1', modelId: 'check-model' },
     };
-    expect((await f.store.getAuthorizationReview(reviewInput)).decision).toBe('approve_once');
-    expect((await f.store.getAuthorizationReview(reviewInput)).reviewExecutionId).toBe(carrier.id);
+    expect((await f.store.getAuthorizationCheck(reviewInput)).decision).toBe('approve_once');
+    expect((await f.store.getAuthorizationCheck(reviewInput)).checkExecutionId).toBe(carrier.id);
     for (const [input, code] of [
-      [{ ...reviewInput, request: { task: 'different' } }, 'authorization_review_binding_changed'],
+      [{ ...reviewInput, request: { task: 'different' } }, 'authorization_check_binding_changed'],
       [{ ...reviewInput, expectedStoreId: 'foreign' }, 'store_identity_mismatch'],
     ] as const) {
       let error: unknown;
       try {
-        await f.store.getAuthorizationReview(input);
+        await f.store.getAuthorizationCheck(input);
       } catch (caught) {
         error = caught;
       }
@@ -411,7 +422,7 @@ test('durable reviewer uses one actual Model call with zero tools and grants onl
   }
 });
 
-test('failed actual reviewer is never replayed by duplicate original command and falls back to a real card', async () => {
+test('failed actual checker is never replayed by duplicate original command and falls back to a real card', async () => {
   let reviews = 0;
   const f = await fixture({
     async *stream() {
@@ -443,7 +454,9 @@ test('failed actual reviewer is never replayed by duplicate original command and
     });
     expect(duplicate.id).toBe(original!.id);
     expect(
-      (await f.store.listExecutions('s')).filter((value) => value.kind === 'job'),
+      (await f.store.listExecutions('s')).filter(
+        (value) => value.kind === 'model' && value.runId === null,
+      ),
     ).toHaveLength(1);
     await f.runtime.answerInteraction({
       expectedStoreId: f.expectedStoreId,
@@ -462,7 +475,7 @@ test('failed actual reviewer is never replayed by duplicate original command and
   }
 });
 
-test('invalid reviewer output preserves zero effects until real human approval', async () => {
+test('invalid checker output preserves zero effects until real human approval', async () => {
   let reviews = 0;
   const f = await fixture({
     async *stream() {
@@ -504,7 +517,7 @@ test('invalid reviewer output preserves zero effects until real human approval',
   }
 });
 
-test('policy revision changes while the actual reviewer is running cannot grant the old target', async () => {
+test('policy revision changes while the actual checker is running cannot grant the old target', async () => {
   let release!: () => void;
   let entered = false;
   let revision = 'p1';
@@ -524,7 +537,7 @@ test('policy revision changes while the actual reviewer is running cannot grant 
       async authorize(request) {
         return request.kind === 'model'
           ? { allowed: true, revision }
-          : { allowed: false, revision, review: { request: { task: 'same target' } } };
+          : { allowed: false, revision, check: { request: { task: 'same target' } } };
       },
     },
   );
@@ -551,7 +564,7 @@ test('policy revision changes while the actual reviewer is running cannot grant 
 test('reject cancels the original work without target I/O or human fabrication', async () => {
   const f = await fixture({
     async *stream() {
-      yield { type: 'text_delta', text: '{"decision":"reject","reason":"bounded review rejects"}' };
+      yield { type: 'text_delta', text: '{"decision":"reject","reason":"bounded check rejects"}' };
       yield finish;
     },
   });
@@ -566,29 +579,31 @@ test('reject cancels the original work without target I/O or human fabrication',
     expect((await f.runtime.getRun(target.runId!))?.status).toBe('cancelled');
     expect(target.authorization).toMatchObject({
       dispatched: false,
-      review: { decision: 'reject', reason: 'bounded review rejects' },
+      check: { decision: 'reject', reason: 'bounded check rejects' },
     });
-    const carrier = (await f.store.listExecutions('s')).find((item) => item.kind === 'job')!;
+    const carrier = (await f.store.listExecutions('s')).find(
+      (item) => item.kind === 'model' && item.runId === null,
+    )!;
     let stoppedGrant: unknown;
     try {
-      await f.store.getAuthorizationReview({
+      await f.store.getAuthorizationCheck({
         expectedStoreId: f.expectedStoreId,
         targetExecutionId: target.id,
-        reviewExecutionId: carrier.id,
+        checkExecutionId: carrier.id,
         policyRevision: 'p1',
         request: { task: 'exact harmless effect', parameters: { value: 'exact' } },
-        reviewer: { id: 'reviewer', version: '1', modelId: 'review-model' },
+        checker: { id: 'checker', version: '1', modelId: 'check-model' },
       });
     } catch (error) {
       stoppedGrant = error;
     }
-    expect(stoppedGrant).toMatchObject({ code: 'authorization_review_unverifiable' });
+    expect(stoppedGrant).toMatchObject({ code: 'authorization_check_unverifiable' });
   } finally {
     await f.close();
   }
 });
 
-test('precise original Command cancellation propagates to running reviewer and never revives target', async () => {
+test('precise original Command cancellation propagates to running checker and never revives target', async () => {
   let entered = false;
   let release!: () => void;
   const gate = new Promise<void>((resolve) => {
@@ -616,7 +631,9 @@ test('precise original Command cancellation propagates to running reviewer and n
     expect(f.effects()).toBe(0);
     const executions = await f.store.listExecutions('s');
     expect(executions.find((value) => value.kind === 'tool')?.status).not.toBe('succeeded');
-    expect(executions.find((value) => value.kind === 'job')?.status).not.toBe('succeeded');
+    expect(
+      executions.find((value) => value.kind === 'model' && value.runId === null)?.status,
+    ).not.toBe('succeeded');
   } finally {
     release();
     await f.close();
@@ -641,7 +658,7 @@ test('resource-held final policy flip releases the permit without starting a hum
         if (request.kind === 'model') return { allowed: true, revision: 'p1' };
         return changed
           ? { allowed: false, revision: 'p2', approval: { request: { title: 'new policy' } } }
-          : { allowed: false, revision: 'p1', review: { request: { task: 'original' } } };
+          : { allowed: false, revision: 'p1', check: { request: { task: 'original' } } };
       },
     },
     {
@@ -670,7 +687,7 @@ test('resource-held final policy flip releases the permit without starting a hum
   }
 });
 
-test('changed review request at the same policy revision cannot borrow an earlier approval', async () => {
+test('changed check request at the same policy revision cannot borrow an earlier approval', async () => {
   let release!: () => void;
   let entered = false;
   let task = 'original exact task';
@@ -690,7 +707,7 @@ test('changed review request at the same policy revision cannot borrow an earlie
       async authorize(request) {
         return request.kind === 'model'
           ? { allowed: true, revision: 'p1' }
-          : { allowed: false, revision: 'p1', review: { request: { task } } };
+          : { allowed: false, revision: 'p1', check: { request: { task } } };
       },
     },
   );
@@ -709,7 +726,7 @@ test('changed review request at the same policy revision cannot borrow an earlie
   }
 });
 
-test('review inside a delegated child does not consume its already-held single user child slot', async () => {
+test('authorization check inside a delegated child does not consume its already-held single user child slot', async () => {
   let effects = 0;
   let reviews = 0;
   const toolCall = (name: string): ModelEvent[] => [
@@ -733,7 +750,7 @@ test('review inside a delegated child does not consume its already-held single u
     {
       async authorize(request) {
         return request.definitionId === 'fixture.effect'
-          ? { allowed: false, revision: 'p1', review: { request: { task: 'child effect' } } }
+          ? { allowed: false, revision: 'p1', check: { request: { task: 'child effect' } } }
           : { allowed: true, revision: 'p1' };
       },
     },
@@ -805,7 +822,7 @@ test('review inside a delegated child does not consume its already-held single u
   }
 });
 
-test('cold planned review is observation only and ordinary child snapshots cannot obtain its planned-parent exception', async () => {
+test('cold planned authorization check is observation only and ordinary children cannot borrow its target exception', async () => {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-cold-review-')));
   const profile = { dataRoot: join(root, 'data'), profile: 'new' };
   let store = await openSqliteStore(profile);
@@ -867,13 +884,13 @@ test('cold planned review is observation only and ordinary child snapshots canno
       targetExecutionId: 'target',
       policyRevision: 'p1',
       request: { task: 'actual task' },
-      reviewer: { id: 'reviewer', version: '1', modelId: 'review-model' },
+      checker: { id: 'checker', version: '1', modelId: 'check-model' },
     };
-    const first = await store.ensureAuthorizationReview(input);
-    const repeated = await store.ensureAuthorizationReview(input);
+    const first = await store.ensureAuthorizationCheck(input);
+    const repeated = await store.ensureAuthorizationCheck(input);
     expect(first.created).toBe(true);
     expect(repeated.created).toBe(false);
-    expect(repeated.operation).toEqual(first.operation);
+    expect(repeated.execution.id).toEqual(first.execution.id);
     expect(first.input).toMatchObject({
       originCommandRequest: { content: 'original actual task' },
       rootWorkRequest: { content: 'original actual task' },
@@ -893,7 +910,7 @@ test('cold planned review is observation only and ordinary child snapshots canno
         childConfiguration: {
           id: 'spoof',
           version: '1',
-          snapshot: { authorizationReview: first.input, tools: [], extensions: [] },
+          snapshot: { authorizationCheck: first.input, tools: [], extensions: [] },
         },
       });
     } catch (caught) {
@@ -917,20 +934,21 @@ test('cold planned review is observation only and ordinary child snapshots canno
     } catch (caught) {
       error = caught;
     }
-    expect((error as { code?: string })?.code).toBe('authorization_review_required');
+    expect((error as { code?: string })?.code).toBe('authorization_check_required');
     await store.close();
     store = await openSqliteStore(profile);
     const reference = {
       expectedStoreId,
       targetExecutionId: 'target',
-      reviewExecutionId: first.operation.executionId!,
+      checkExecutionId: first.execution.id,
       policyRevision: 'p1',
       request: input.request,
-      reviewer: input.reviewer,
+      checker: input.checker,
     };
-    expect((await store.getAuthorizationReview(reference)).decision).toBe('unavailable');
-    expect((await store.getExecution(first.operation.executionId!))?.status).toBe('planned');
-    expect(await store.listExecutions(first.operation.childSessionId!)).toHaveLength(0);
+    expect((await store.getAuthorizationCheck(reference)).decision).toBe('unavailable');
+    expect((await store.getExecution(first.execution.id))?.status).toBe('planned');
+    expect(first.execution).toMatchObject({ kind: 'model', runId: null, childSessionId: null });
+    expect((await store.getView('s')).runs).toHaveLength(1);
     expect(await store.listExecutions('s')).toHaveLength(2);
   } finally {
     await store.close();
@@ -938,7 +956,7 @@ test('cold planned review is observation only and ordinary child snapshots canno
   }
 });
 
-test('actual source changes during review invalidate the old target and reach the next ordinary Model body', async () => {
+test('actual source changes during check invalidate the old target and reach the next ordinary Model body', async () => {
   let release!: () => void;
   let entered = false;
   let digest = 'original plan';
@@ -1020,7 +1038,6 @@ test('actual source changes during review invalidate the old target and reach th
 test('review decisionContext is derived from the actual succeeded Model input after steer', async () => {
   let release!: () => void;
   let reviews = 0;
-  let steerBusinessCommandId: string | undefined;
   const gate = new Promise<void>((resolve) => {
     release = resolve;
   });
@@ -1043,12 +1060,17 @@ test('review decisionContext is derived from the actual succeeded Model input af
             'updated precise instruction',
           );
           const appliedSteer = await f.store.getCommand('steer');
-          const appliedReceipt = appliedSteer?.receipt as { businessCommandId?: string };
-          steerBusinessCommandId = appliedReceipt.businessCommandId;
-          expect(steerBusinessCommandId).toBeTruthy();
-          expect(JSON.stringify(payload.decisionContext.messages)).toContain(
-            steerBusinessCommandId!,
+          expect(appliedSteer).toMatchObject({
+            kind: 'input.steer',
+            status: 'applied',
+            request: { targetRunId: payload.target.runId },
+            receipt: { runId: payload.target.runId },
+          });
+          const instruction = payload.decisionContext.messages.find(
+            (message: { content?: string }) =>
+              message.content?.includes('updated precise instruction'),
           );
+          expect(instruction?.sourceIds).toEqual([appliedSteer!.id]);
         }
         yield {
           type: 'text_delta',

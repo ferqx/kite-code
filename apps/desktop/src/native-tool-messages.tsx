@@ -125,25 +125,25 @@ export function authorizationApproval(
         state,
         interactionId: human.interactionId,
         grant: human.grant,
-        ...(state === 'awaiting_user' && authorization?.review?.reason
-          ? { reason: authorization.review.reason }
+        ...(state === 'awaiting_user' && (authorization?.check ?? authorization?.review)?.reason
+          ? { reason: (authorization.check ?? authorization.review)!.reason }
           : {}),
       };
   }
-  const review = authorization?.review;
-  if (!review) return;
+  const check = authorization?.check ?? authorization?.review;
+  if (!check) return;
   return {
     source: 'auto',
-    state: ['planned', 'dispatching', 'running'].includes(review.status)
-      ? 'reviewing'
-      : review.status === 'cancelled' && !authorization?.dispatched
+    state: ['planned', 'dispatching', 'running'].includes(check.status)
+      ? 'checking'
+      : check.status === 'cancelled' && !authorization?.dispatched
         ? 'cancelled'
-        : review.decision === 'approve_once'
+        : check.decision === 'approve_once'
           ? 'approved'
-          : review.decision === 'reject'
+          : check.decision === 'reject'
             ? 'rejected'
             : 'unavailable',
-    reason: review.reason,
+    reason: check.reason,
   };
 }
 
@@ -278,7 +278,9 @@ export function liveToolMessages(
                   state: 'awaiting_user' as const,
                   source: 'user' as const,
                   interactionId: approvals[0]!.id,
-                  reason: execution.authorization?.review?.reason ?? undefined,
+                  reason:
+                    (execution.authorization?.check ?? execution.authorization?.review)?.reason ??
+                    undefined,
                 },
               }
             : {}),

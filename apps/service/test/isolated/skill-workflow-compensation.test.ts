@@ -243,7 +243,7 @@ test.each(
           approvals++;
           expect(interaction.request).toMatchObject({
             definitionId: 'skill.workflow.compensate',
-            policy: { review: { kind: 'artifact', complete: true } },
+            policy: { check: { kind: 'artifact', complete: true } },
           });
           const attachment = await client.readInteractionAttachment(interaction);
           expect(JSON.parse(attachment.text)).toMatchObject({
