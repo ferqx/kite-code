@@ -6,12 +6,15 @@ import { pathToFileURL } from 'node:url';
 import { createFixedModel, type ModelAdapter, type ModelEvent } from '@kite-ai/ai';
 import { type ChildAgentConfiguration, createRuntime, type RuntimeOptions } from '../../../src';
 import type {
+  AuthorizationRequest,
   Extension,
   JobEvent,
   OperationRef,
+  PermissionDecision,
   Permissions,
   ToolDefinition,
 } from '../../../src/extensions';
+import { createPermissionPolicy } from '../../../src/permissions';
 import { openSqliteStore } from '../../../src/sqlite';
 import { AgentError } from '../../../src/storage';
 import type { InteractionRecord } from '../../../src/storage/types';
@@ -167,6 +170,557 @@ function configuration(
   };
 }
 
+const commandDigest = 'a'.repeat(64);
+const commandApproval = (
+  grants: readonly ('approve_once' | 'same_command')[] = ['approve_once', 'same_command'],
+  digest: string | null = commandDigest,
+): PermissionDecision => ({
+  allowed: false,
+  revision: 'host-policy',
+  approval: {
+    request: { reason: 'exact command needs approval' },
+    grants,
+    ...(digest === null ? {} : { commandDigest: digest }),
+  },
+});
+const commandPolicy = (decision: PermissionDecision): Permissions => ({
+  async authorize(request) {
+    return request.definitionId === 'extra.effect'
+      ? decision
+      : { allowed: true, revision: 'allowed' };
+  },
+});
+
+const childApprovalScenarios: {
+  name: string;
+  parent: PermissionDecision;
+  child?: PermissionDecision;
+  sameCommand: boolean;
+  noDigest?: boolean;
+}[] = [
+  { name: 'inherited parent', parent: commandApproval(), sameCommand: true },
+  {
+    name: 'child only',
+    parent: { allowed: true, revision: 'allowed' },
+    child: commandApproval(),
+    sameCommand: true,
+  },
+  {
+    name: 'matching parent and child command digests',
+    parent: commandApproval(),
+    child: commandApproval(),
+    sameCommand: true,
+  },
+  {
+    name: 'complete input matching without a trusted digest',
+    parent: commandApproval(['approve_once', 'same_command'], null),
+    child: commandApproval(['approve_once', 'same_command'], null),
+    sameCommand: true,
+    noDigest: true,
+  },
+  {
+    name: 'parent only permits once',
+    parent: commandApproval(['approve_once']),
+    child: commandApproval(),
+    sameCommand: false,
+  },
+  {
+    name: 'child only permits once',
+    parent: commandApproval(),
+    child: commandApproval(['approve_once']),
+    sameCommand: false,
+  },
+  {
+    name: 'different command digests',
+    parent: commandApproval(),
+    child: commandApproval(['approve_once', 'same_command'], 'b'.repeat(64)),
+    sameCommand: false,
+  },
+  {
+    name: 'only one policy provides a command digest',
+    parent: commandApproval(),
+    child: commandApproval(['approve_once', 'same_command'], null),
+    sameCommand: false,
+  },
+];
+for (const scenario of childApprovalScenarios) {
+  test(`child command approval preserves the intersection: ${scenario.name}`, async () => {
+    let effects = 0;
+    const extra = module([
+      tool('extra.effect', async () => {
+        effects++;
+        return { outcome: 'succeeded', content: 'one harmless effect' };
+      }),
+    ]);
+    const f = await fixture(
+      configuration(createFixedModel([call('extra.effect'), [finish]]), extra, {
+        ...(scenario.child ? { permissions: commandPolicy(scenario.child) } : {}),
+      }),
+      extra,
+      { permissions: commandPolicy(scenario.parent) },
+    );
+    try {
+      await f.submit();
+      const card = await fact(
+        async () =>
+          (
+            await f.runtime.listInteractions({
+              expectedStoreId: f.expectedStoreId,
+              sessionId: 's',
+              state: 'pending',
+            })
+          ).interactions[0],
+      );
+      const request = card.request as { grants: string[]; commandDigest?: string };
+      expect(effects).toBe(0);
+      expect(card.sessionId).not.toBe('s');
+      expect(card.presentationSessionId).toBe('s');
+      expect(request.grants).toEqual(
+        scenario.sameCommand ? ['approve_once', 'same_command'] : ['approve_once'],
+      );
+      expect(request.commandDigest).toBe(
+        scenario.sameCommand && !scenario.noDigest ? commandDigest : undefined,
+      );
+      await f.runtime.answerInteraction({
+        expectedStoreId: f.expectedStoreId,
+        subjectId: 'owner',
+        commandId: 'answer',
+        presentationSessionId: 's',
+        interactionId: card.id,
+        expectedRevision: card.revision,
+        answer: {
+          kind: 'approval',
+          decision: 'approve',
+          grant: scenario.sameCommand ? 'same_command' : 'approve_once',
+        },
+      });
+      await f.done();
+      expect(effects).toBe(1);
+      const grants = await f.runtime.listPermissionGrants({
+        expectedStoreId: f.expectedStoreId,
+        subjectId: 'owner',
+        sessionId: card.sessionId,
+      });
+      expect(grants.items).toHaveLength(scenario.sameCommand ? 1 : 0);
+    } finally {
+      await f.close();
+    }
+  }, 10000);
+}
+
+test('a child same_command grant applies only to its own Session, never its parent or sibling', async () => {
+  const effects: string[] = [];
+  const extra = module([
+    tool('extra.effect', async (_input, context) => {
+      effects.push(context.sessionId);
+      return { outcome: 'succeeded', content: 'one harmless effect' };
+    }),
+  ]);
+  const parent = createFixedModel([
+    call('fixture.delegate'),
+    call('extra.effect'),
+    [finish],
+    call('fixture.delegate'),
+    [finish],
+  ]);
+  const child = createFixedModel([
+    call('extra.effect'),
+    call('extra.effect'),
+    [finish],
+    call('extra.effect'),
+    call('extra.effect'),
+    [finish],
+  ]);
+  const f = await fixture(
+    configuration(child, extra, { permissions: commandPolicy(commandApproval()) }),
+    extra,
+    {
+      permissions: commandPolicy(commandApproval()),
+      resolveRunConfiguration: async () => ({
+        model: parent,
+        modelId: 'parent',
+        extensions: [extra],
+        snapshot: { selected: extra.version },
+      }),
+    },
+  );
+  const pending = () =>
+    fact(
+      async () =>
+        (
+          await f.runtime.listInteractions({
+            expectedStoreId: f.expectedStoreId,
+            sessionId: 's',
+            state: 'pending',
+          })
+        ).interactions[0],
+    );
+  const grants = (sessionId: string) =>
+    f.runtime.listPermissionGrants({
+      expectedStoreId: f.expectedStoreId,
+      subjectId: 'owner',
+      sessionId,
+    });
+  const answer = (card: InteractionRecord, grant: 'same_command' | 'approve_once') =>
+    f.runtime.answerInteraction({
+      expectedStoreId: f.expectedStoreId,
+      subjectId: 'owner',
+      commandId: `answer-${card.id}`,
+      presentationSessionId: 's',
+      interactionId: card.id,
+      expectedRevision: card.revision,
+      answer: { kind: 'approval', decision: 'approve', grant },
+    });
+  try {
+    await f.submit();
+    const a = await pending();
+    expect(a.sessionId).not.toBe('s');
+    expect(effects).toEqual([]);
+    expect((a.request as { grants: string[] }).grants).toContain('same_command');
+    await answer(a, 'same_command');
+    const root = await pending();
+    expect(root.sessionId).toBe('s');
+    expect(effects).toEqual([a.sessionId, a.sessionId]);
+    expect((await grants(a.sessionId)).items).toHaveLength(1);
+    expect((await grants('s')).items).toHaveLength(0);
+    expect(
+      await f.store.getPermissionGrant({
+        expectedStoreId: f.expectedStoreId,
+        executionId: root.executionId,
+        commandDigest,
+      }),
+    ).toBeNull();
+    await answer(root, 'same_command');
+    await f.done();
+    expect(effects).toEqual([a.sessionId, a.sessionId, 's']);
+    expect((await grants('s')).items).toHaveLength(1);
+    await f.runtime.submitCommand({
+      expectedStoreId: f.expectedStoreId,
+      subjectId: 'owner',
+      commandId: 'second-child',
+      sessionId: 's',
+      request: { kind: 'run.start', content: 'delegate to a new sibling' },
+    });
+    const b = await pending();
+    expect(b.sessionId).not.toBe(a.sessionId);
+    expect(b.sessionId).not.toBe('s');
+    expect(effects).toEqual([a.sessionId, a.sessionId, 's']);
+    expect((await grants(b.sessionId)).items).toHaveLength(0);
+    expect(
+      await f.store.getPermissionGrant({
+        expectedStoreId: f.expectedStoreId,
+        executionId: b.executionId,
+        commandDigest,
+      }),
+    ).toBeNull();
+    await answer(b, 'approve_once');
+    const nextB = await pending();
+    expect(nextB.sessionId).toBe(b.sessionId);
+    expect(nextB.id).not.toBe(b.id);
+    expect(effects).toEqual([a.sessionId, a.sessionId, 's', b.sessionId]);
+    expect((await grants(b.sessionId)).items).toHaveLength(0);
+    await answer(nextB, 'approve_once');
+    await f.runtime.waitForCommand('second-child', { timeoutMs: 7000 });
+    expect(effects).toEqual([a.sessionId, a.sessionId, 's', b.sessionId, b.sessionId]);
+    expect((await grants(a.sessionId)).items).toHaveLength(1);
+    expect((await grants('s')).items).toHaveLength(1);
+    expect((await grants(b.sessionId)).items).toHaveLength(0);
+  } finally {
+    await f.close();
+  }
+}, 15000);
+
+for (const change of ['grants', 'commandDigest'] as const) {
+  test(`child policy revision binds changed ${change} before grant reuse`, async () => {
+    let effects = 0;
+    const extra = module([
+      tool('extra.effect', async () => {
+        effects++;
+        return { outcome: 'succeeded', content: 'one harmless effect' };
+      }),
+    ]);
+    const policy: Permissions = {
+      async authorize(request: AuthorizationRequest) {
+        if (request.definitionId !== 'extra.effect') return { allowed: true, revision: 'allowed' };
+        return commandApproval(
+          effects > 0 && change === 'grants' ? ['approve_once'] : ['approve_once', 'same_command'],
+          effects > 0 && change === 'commandDigest' ? 'b'.repeat(64) : commandDigest,
+        );
+      },
+    };
+    const f = await fixture(
+      configuration(
+        createFixedModel([call('extra.effect'), call('extra.effect'), [finish]]),
+        extra,
+        { permissions: { ...policy } },
+      ),
+      extra,
+      { permissions: policy },
+    );
+    const pending = () =>
+      fact(
+        async () =>
+          (
+            await f.runtime.listInteractions({
+              expectedStoreId: f.expectedStoreId,
+              sessionId: 's',
+              state: 'pending',
+            })
+          ).interactions[0],
+      );
+    try {
+      await f.submit();
+      const first = await pending();
+      await f.runtime.answerInteraction({
+        expectedStoreId: f.expectedStoreId,
+        subjectId: 'owner',
+        commandId: 'answer-first',
+        presentationSessionId: 's',
+        interactionId: first.id,
+        expectedRevision: first.revision,
+        answer: { kind: 'approval', decision: 'approve', grant: 'same_command' },
+      });
+      const second = await pending();
+      expect(effects).toBe(1);
+      expect(second.sessionId).toBe(first.sessionId);
+      expect(second.id).not.toBe(first.id);
+      expect(second.policyRevision).not.toBe(first.policyRevision);
+      expect(second.request).toMatchObject(
+        change === 'grants'
+          ? { grants: ['approve_once'] }
+          : { grants: ['approve_once', 'same_command'], commandDigest: 'b'.repeat(64) },
+      );
+      await f.runtime.answerInteraction({
+        expectedStoreId: f.expectedStoreId,
+        subjectId: 'owner',
+        commandId: 'answer-second',
+        presentationSessionId: 's',
+        interactionId: second.id,
+        expectedRevision: second.revision,
+        answer: { kind: 'approval', decision: 'approve', grant: 'approve_once' },
+      });
+      await f.done();
+      expect(effects).toBe(2);
+    } finally {
+      await f.close();
+    }
+  }, 10000);
+}
+
+test('a nested child needs its own Session grant and then reuses only that grant', async () => {
+  const effects: string[] = [];
+  let grandchildSession = '';
+  const extra = module([
+    tool('extra.effect', async (_input, context) => {
+      effects.push(context.sessionId);
+      return { outcome: 'succeeded', content: 'one harmless effect' };
+    }),
+    tool('extra.delegate', async (_input, context) => {
+      const ref = await context.operations.ensure({
+        key: 'grandchild',
+        request: { kind: 'agent', configurationId: 'grandchild', input: { content: 'nested' } },
+      });
+      grandchildSession = ref.childSessionId!;
+      await context.operations.wait(ref, { signal: context.signal, timeoutMs: 5000 });
+      return { outcome: 'succeeded', content: 'nested finished' };
+    }),
+  ]);
+  const child = configuration(
+    createFixedModel([call('extra.effect'), call('extra.delegate'), [finish]]),
+    extra,
+    { permissions: commandPolicy(commandApproval()) },
+  );
+  const grandchild = configuration(
+    createFixedModel([call('extra.effect'), call('extra.effect'), [finish]]),
+    extra,
+    { id: 'grandchild', permissions: commandPolicy(commandApproval()) },
+  );
+  const f = await fixture(child, extra, {
+    permissions: commandPolicy(commandApproval()),
+    childConfigurations: [child, grandchild],
+  });
+  const pending = () =>
+    fact(
+      async () =>
+        (
+          await f.runtime.listInteractions({
+            expectedStoreId: f.expectedStoreId,
+            sessionId: 's',
+            state: 'pending',
+          })
+        ).interactions[0],
+    );
+  const answer = (card: InteractionRecord) =>
+    f.runtime.answerInteraction({
+      expectedStoreId: f.expectedStoreId,
+      subjectId: 'owner',
+      commandId: `answer-${card.id}`,
+      presentationSessionId: 's',
+      interactionId: card.id,
+      expectedRevision: card.revision,
+      answer: { kind: 'approval', decision: 'approve', grant: 'same_command' },
+    });
+  try {
+    await f.submit();
+    const first = await pending();
+    await answer(first);
+    const nested = await pending();
+    expect(effects).toEqual([first.sessionId]);
+    expect(nested.sessionId).not.toBe(first.sessionId);
+    expect(nested.sessionId).not.toBe('s');
+    expect((nested.request as { grants: string[] }).grants).toContain('same_command');
+    await answer(nested);
+    await f.done();
+    expect(nested.sessionId).toBe(grandchildSession);
+    expect((await f.store.getSession(grandchildSession))!.parentSessionId).toBe(first.sessionId);
+    expect(effects).toEqual([first.sessionId, grandchildSession, grandchildSession]);
+    for (const sessionId of [first.sessionId, grandchildSession, 's']) {
+      const grants = await f.runtime.listPermissionGrants({
+        expectedStoreId: f.expectedStoreId,
+        subjectId: 'owner',
+        sessionId,
+      });
+      expect(grants.items).toHaveLength(sessionId === 's' ? 0 : 1);
+      expect(grants.items.every((item) => item.grant.sessionId === sessionId)).toBe(true);
+    }
+  } finally {
+    await f.close();
+  }
+}, 15000);
+
+for (const reviewSide of ['parent', 'child'] as const) {
+  for (const mandatory of [false, true]) {
+    test(`child session approval respects ${reviewSide} review, mandatory=${mandatory}`, async () => {
+      let effects = 0;
+      const extra = module([
+        tool('extra.effect', async () => {
+          effects++;
+          return { outcome: 'succeeded', content: 'one harmless effect' };
+        }),
+      ]);
+      const review = createFixedModel(
+        Array.from({ length: 2 }, () => [
+          {
+            type: 'text_delta' as const,
+            text: JSON.stringify({ decision: 'ask_user', reason: 'human decision needed' }),
+          },
+          finish,
+        ]),
+      );
+      const automatic = createPermissionPolicy({
+        readPolicy: (request) => ({
+          mode: 'auto',
+          workspaceTrust: true,
+          revision: 'review-policy',
+          allowed: [
+            {
+              kind: request.kind,
+              definitionId: request.definitionId,
+              definitionVersion: request.definitionVersion,
+            },
+          ],
+        }),
+        describeCapability: (request) => ({
+          kind: request.kind,
+          definitionId: request.definitionId,
+          definitionVersion: request.definitionVersion,
+          revision: 'effect-capability',
+          hardAllowed: true,
+          safeRead: false,
+          effects: ['external'],
+          commandDigest,
+        }),
+      });
+      const policy = (side: 'parent' | 'child'): Permissions => ({
+        async authorize(request) {
+          if (request.definitionId !== 'extra.effect')
+            return { allowed: true, revision: 'allowed' };
+          if (side === reviewSide && !mandatory) return automatic.authorize(request);
+          return {
+            ...commandApproval(),
+            ...(side === reviewSide
+              ? {
+                  check: {
+                    request: {
+                      requires: 'exact independent review',
+                      invocation: { executionId: request.executionId, input: request.input },
+                    },
+                    requireApproval: mandatory,
+                  },
+                }
+              : {}),
+          };
+        },
+      });
+      const f = await fixture(
+        configuration(
+          createFixedModel([call('extra.effect'), call('extra.effect'), [finish]]),
+          extra,
+          {
+            permissions: policy('child'),
+            authorizationCheck: {
+              id: 'child-reviewer',
+              version: '1',
+              modelId: 'review',
+              model: review,
+            },
+          },
+        ),
+        extra,
+        { permissions: policy('parent') },
+      );
+      const pending = () =>
+        fact(
+          async () =>
+            (
+              await f.runtime.listInteractions({
+                expectedStoreId: f.expectedStoreId,
+                sessionId: 's',
+                state: 'pending',
+              })
+            ).interactions[0],
+        );
+      const answer = (card: InteractionRecord) =>
+        f.runtime.answerInteraction({
+          expectedStoreId: f.expectedStoreId,
+          subjectId: 'owner',
+          commandId: `answer-${card.id}`,
+          presentationSessionId: 's',
+          interactionId: card.id,
+          expectedRevision: card.revision,
+          answer: {
+            kind: 'approval',
+            decision: 'approve',
+            grant: mandatory ? 'approve_once' : 'same_command',
+          },
+        });
+      try {
+        await f.submit();
+        const first = await pending();
+        expect(effects).toBe(0);
+        expect(review.requests).toHaveLength(1);
+        expect((first.request as { grants: string[] }).grants).toEqual(
+          mandatory ? ['approve_once'] : ['approve_once', 'same_command'],
+        );
+        await answer(first);
+        if (mandatory) {
+          const second = await pending();
+          expect(effects).toBe(1);
+          expect(second.id).not.toBe(first.id);
+          expect(review.requests).toHaveLength(2);
+          expect((second.request as { grants: string[] }).grants).toEqual(['approve_once']);
+          await answer(second);
+        }
+        await f.done();
+        expect(effects).toBe(2);
+        expect(review.requests).toHaveLength(mandatory ? 2 : 1);
+      } finally {
+        await f.close();
+      }
+    }, 10000);
+  }
+}
+
 test('additional-only child modules and sources persist their own namespace; static lease survives successive children until close', async () => {
   let writes = 0,
     disposals = 0,
@@ -317,7 +871,15 @@ for (const mode of [
           return {
             allowed: false,
             revision: 'parent-ask',
-            approval: { request: { requires: `${side} human`, exact: request.input } },
+            approval: {
+              ...(mode === 'ask_review' || mode === 'ask_review_fallback'
+                ? {
+                    grants: ['approve_once', 'same_command'] as const,
+                    commandDigest,
+                  }
+                : {}),
+              request: { requires: `${side} human`, exact: request.input },
+            },
           };
         if (
           mode === 'dual_review' ||
@@ -448,6 +1010,8 @@ for (const mode of [
           expect(JSON.stringify(card.request)).toContain('parent human');
           expect(JSON.stringify(card.request)).toContain('child human');
         }
+        if (mode === 'ask_review' || mode === 'ask_review_fallback')
+          expect((card.request as { grants: string[] }).grants).toEqual(['approve_once']);
         if (mode === 'ask_review_fallback') {
           expect(JSON.stringify(card.request)).toContain('parent human');
           expect(JSON.stringify(review.requests[0]!.messages)).toContain('child reviewer');

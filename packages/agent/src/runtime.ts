@@ -1324,6 +1324,19 @@ export class AgentRuntime {
               }
             : {}),
         };
+        const challenges = decisions.filter((decision) => !decision.allowed);
+        const approvals = challenges.filter((decision) => decision.approval);
+        const checks = challenges.filter((decision) => decision.check);
+        const commandDigest = approvals[0]?.approval?.commandDigest;
+        // Every challenged scope must permit reuse; an independent check remains per-call.
+        const sameCommand =
+          approvals.length > 0 &&
+          challenges.every(
+            (decision) =>
+              decision.approval?.grants?.includes('same_command') &&
+              decision.approval.commandDigest === commandDigest &&
+              !decision.check?.requireApproval,
+          );
         const bindings: Json = decisions.map((decision) => ({
           controlReads:
             controlError || decision.controlReads === undefined
@@ -1331,10 +1344,18 @@ export class AgentRuntime {
               : decision.controlReads.map((read) => ({ ...read })),
           revision: decision.revision,
           allowed: decision.allowed,
-          approval: decision.approval?.request ?? null,
+          approval: decision.approval
+            ? {
+                request: decision.approval.request,
+                grants: [...(decision.approval.grants ?? ['approve_once'])],
+                commandDigest: decision.approval.commandDigest ?? null,
+              }
+            : null,
           check: decision.check
             ? {
-                request: decision.check.request,
+                // Per-call check context does not revoke an explicitly reusable human grant.
+                // The InteractionGate still binds each actual check to its complete request.
+                request: sameCommand ? null : decision.check.request,
                 requireApproval: decision.check.requireApproval === true,
               }
             : null,
@@ -1351,12 +1372,15 @@ export class AgentRuntime {
             reason: denied.reason ?? 'parent_child_permission_denied',
             ...proof,
           };
-        const challenges = decisions.filter((decision) => !decision.allowed);
         if (!challenges.length) return { allowed: true, revision, ...proof };
-        const approvals = challenges.filter((decision) => decision.approval);
-        const checks = challenges.filter((decision) => decision.check);
         const approval = approvals.length
           ? {
+              ...(sameCommand
+                ? {
+                    grants: ['approve_once', 'same_command'] as const,
+                    ...(commandDigest === undefined ? {} : { commandDigest }),
+                  }
+                : {}),
               request: {
                 kind: 'parent_child_permission_intersection',
                 policies: decisions.map((decision, index) => ({

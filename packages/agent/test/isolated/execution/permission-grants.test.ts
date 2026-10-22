@@ -39,48 +39,28 @@ async function exactBusinessTool(
 ) {
   const original = (await store.getCommand(publicCommandId))!;
   expect(original.status).toBe('applied');
-  const receipt = original.receipt as {
-    humanInputCommandId: string;
-    decisionCommandId: string;
-    businessCommandId: string;
-    runId: string;
-  };
-  expect(receipt.humanInputCommandId).toBeString();
-  const raw = (await store.getCommand(receipt.humanInputCommandId))!;
-  expect(raw.kind).toBe('human.input');
-  expect(raw.request).toMatchObject({
-    publicCommandId,
-    content: (original.request as { content: string }).content,
-  });
-  const decision = (await store.getCommand(receipt.decisionCommandId))!;
-  expect(decision.request).toMatchObject({
-    inputCommandId: raw.id,
-    inputDigest: raw.requestDigest,
-  });
-  expect(decision.receipt).toMatchObject({ businessCommandId: receipt.businessCommandId });
-  expect(raw.receipt).toMatchObject({
-    decisionCommandId: decision.id,
-    businessCommandId: receipt.businessCommandId,
-    applicationState: 'applied',
-    runId: receipt.runId,
-  });
-  const business = (await store.getCommand(receipt.businessCommandId))!,
-    run = (await store.getRun(receipt.runId))!;
-  for (const command of [raw, decision, business]) {
-    expect(command.originStoreId).toBe(original.originStoreId);
-    expect(command.subjectId).toBe(original.subjectId);
-    expect(command.sessionId).toBe(original.sessionId);
-  }
-  expect(business.rootWorkCommandId).toBe(original.id);
+  const receipt = original.receipt as { runId: string };
+  expect(receipt.runId).toBeString();
+  expect(original.receipt).toEqual({ runId: receipt.runId });
+  const run = (await store.getRun(receipt.runId))!;
+  expect(original.rootWorkCommandId).toBe(original.id);
   expect(run).toMatchObject({
-    originCommandId: business.id,
+    originStoreId: original.originStoreId,
+    sessionId: original.sessionId,
+    originCommandId: original.id,
     rootWorkCommandId: original.id,
     rootWorkSeq: original.rootWorkSeq,
   });
   const model = (await store.listExecutions(original.sessionId)).find(
     (execution) => execution.kind === 'model' && execution.runId === run.id,
   )!;
-  expect(model.originCommandId).toBe(business.id);
+  expect(model).toMatchObject({
+    originStoreId: original.originStoreId,
+    sessionId: original.sessionId,
+    originCommandId: original.id,
+    rootWorkCommandId: original.id,
+    rootWorkSeq: original.rootWorkSeq,
+  });
   const input = await runtime.readModelInput({
     expectedStoreId: original.originStoreId,
     sessionId: original.sessionId,
@@ -92,15 +72,20 @@ async function exactBusinessTool(
     input.request.messages.find(
       (message) => message.content === (original.request as { content: string }).content,
     )?.sourceIds,
-  ).toEqual([business.id]);
+  ).toEqual([original.id]);
   const tool = (await store.listExecutions(original.sessionId)).find(
     (execution) =>
       execution.kind === 'tool' &&
       execution.runId === run.id &&
-      execution.originCommandId === business.id,
+      execution.originCommandId === original.id,
   );
   expect(tool).toBeDefined();
-  expect(tool?.rootWorkCommandId).toBe(original.id);
+  expect(tool).toMatchObject({
+    originStoreId: original.originStoreId,
+    sessionId: original.sessionId,
+    rootWorkCommandId: original.id,
+    rootWorkSeq: original.rootWorkSeq,
+  });
   return tool!;
 }
 async function fixture(responses: ModelEvent[][], trustedDigest?: (input: unknown) => string) {

@@ -233,9 +233,35 @@ try {
   await page.getByRole('button', { name: '收起标签栏', exact: true }).click();
   await page.getByRole('button', { name: '隐藏环境信息', exact: true }).click();
   await (await showApproval(oldA.id))
-    .getByRole('button', { name: '批准一次', exact: true })
+    .getByRole('button', { name: '更多批准方式', exact: true })
     .click();
+  const sessionOption = page.getByRole('menuitem', { name: '本次会话批准', exact: false });
+  await sessionOption.waitFor();
+  await page.screenshot({ path: join(home, '02-child-session-approval-menu.png') });
+  await sessionOption.click();
   log('first_A_answer_clicked');
+  const jobPending = await until(
+    state,
+    (value) =>
+      value.selection!.interactions.some(
+        (card) =>
+          card.sessionId === a.childSessionId &&
+          card.definitionId === 'shell.command' &&
+          card.state === 'pending',
+      ),
+    'original A Job requires its separate decision',
+  );
+  const jobA = jobPending.selection!.interactions.find(
+    (card) =>
+      card.sessionId === a.childSessionId &&
+      card.definitionId === 'shell.command' &&
+      card.state === 'pending',
+  )!;
+  await (await showApproval(jobA.id))
+    .getByRole('button', { name: '更多批准方式', exact: true })
+    .click();
+  await page.getByRole('menuitem', { name: '本次会话批准', exact: false }).click();
+  log('first_A_job_answer_clicked', { interactionId: jobA.id });
   await until(
     async () => existsSync(join(home, 'workspace', 'child-a.txt')),
     Boolean,
@@ -253,6 +279,35 @@ try {
       !value.selection!.runs.some((run) => run.isActive),
     'A settled and its result parent turn completed',
   );
+  const approved = await state();
+  for (const original of [oldA, jobA]) {
+    const submitted = approved.interactionSubmissions.find(
+      (entry) => entry.interaction.id === original.id,
+    )!;
+    assert.equal(submitted.interaction.sessionId, a.childSessionId);
+    assert.equal((submitted.intent.answer as { grant?: string }).grant, 'same_command');
+    assert.equal(submitted.phase, 'accepted');
+  }
+  assert.equal(
+    approved.selection!.interactions.find((card) => card.id === oldB.id)!.state,
+    'pending',
+  );
+  assert.equal(
+    approved.selection!.interactions.filter((card) => card.sessionId === a.childSessionId).length,
+    0,
+  );
+  assert.equal(
+    readFileSync(join(home, 'workspace', 'session-command.txt'), 'utf8'),
+    'approved\napproved\n',
+  );
+  await showApproval(oldB.id);
+  await page.screenshot({ path: join(home, '03-a-completed-b-pending.png') });
+  log('same_command_child_scope', {
+    sessionId: a.childSessionId,
+    siblingSessionId: b.childSessionId,
+    grant: 'same_command',
+    effects: 2,
+  });
   await fetch(`${control}/follow?agent=${encodeURIComponent(a.childSessionId!)}`);
   // Continue this work with new instructions while B retains its original work ownership.
   await send('Follow up: NATIVE_COLLAB_FOLLOW');
@@ -419,6 +474,10 @@ try {
   assert.equal(
     ((await (await fetch(`${control}/state`)).json()) as { calls: number }).calls,
     beforeCold.calls,
+  );
+  assert.equal(
+    readFileSync(join(home, 'workspace', 'session-command.txt'), 'utf8'),
+    'approved\napproved\n',
   );
   await page.screenshot({ path: join(home, '04-cold-reopened.png') });
   const report = {

@@ -226,3 +226,118 @@ test('child labels require the original Store, Session and Run and never display
   expect(nativeApprovalOwnerLabel(child, 'other', 'root', [owner])).toBe('子 Agent');
   expect(nativeApprovalOwnerLabel(child, 'store', 'root', [owner, owner])).toBe('子 Agent');
 });
+
+test('session approval submits only the selected original child while sibling and root approvals remain pending', async () => {
+  const dom = new JSDOM('<div id="root"></div>', {
+    url: 'http://localhost',
+    pretendToBeVisual: true,
+  });
+  const previous = {
+    window: globalThis.window,
+    document: globalThis.document,
+    navigator: globalThis.navigator,
+  };
+  const restore = prepareDesktopDom(dom);
+  Object.assign(globalThis, {
+    window: dom.window,
+    document: dom.window.document,
+    navigator: dom.window.navigator,
+    IS_REACT_ACT_ENVIRONMENT: true,
+  });
+  const host = dom.window.document.getElementById('root')!,
+    root = createRoot(host);
+  const interactions = [
+    approval('parent-shell', 'root'),
+    approval('child-a-shell', 'child-a'),
+    approval('child-b-shell', 'child-b'),
+  ].map((interaction) => ({
+    ...interaction,
+    definitionId: 'shell.execute',
+    definitionVersion: '1',
+    request: {
+      definitionId: 'shell.execute',
+      definitionVersion: '1',
+      grants: ['approve_once', 'same_command'],
+      input: { command: 'printf "same command"' },
+    },
+  }));
+  const answers: { original: Interaction; answer: unknown }[] = [];
+  const article = () => host.querySelector<HTMLElement>('article')!;
+  const page = async (direction: '上一项审批' | '下一项审批') => {
+    await act(async () =>
+      host.querySelector<HTMLButtonElement>(`[aria-label="${direction}"]`)!.click(),
+    );
+  };
+  try {
+    await act(async () =>
+      root.render(
+        <NativeApprovalGroup
+          interactions={interactions}
+          storeId="store"
+          rootSessionId="root"
+          owners={[]}
+          renderInteraction={(interaction, embedded) => (
+            <InteractionCard
+              compactApproval
+              interaction={interaction}
+              onAnswer={(original, answer) => {
+                answers.push({ original, answer });
+              }}
+              renderApproval={(props) => <NativeApproval {...props} embedded={embedded} />}
+            />
+          )}
+        />,
+      ),
+    );
+    expect(article().getAttribute('aria-label')).toBe('approval parent-shell');
+    await page('下一项审批');
+    expect(article().getAttribute('aria-label')).toBe('approval child-a-shell');
+    const menu = article().querySelector<HTMLButtonElement>('[aria-label="更多批准方式"]')!;
+    expect(menu.disabled).toBe(false);
+    await act(async () =>
+      menu.dispatchEvent(
+        new dom.window.KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }),
+      ),
+    );
+    const same = dom.window.document.querySelector<HTMLElement>('[role="menuitem"]')!;
+    expect(same.textContent).toContain('本次会话批准');
+    expect(same.textContent).toContain('本次及本会话内的相同命令');
+    await act(async () => same.click());
+    expect(answers).toHaveLength(1);
+    expect(answers[0]!.original).toBe(interactions[1]!);
+    expect(answers[0]!.original).toMatchObject({
+      id: 'child-a-shell',
+      originStoreId: 'store',
+      sessionId: 'child-a',
+      runId: 'child-a-run',
+      executionId: 'child-a-shell-tool',
+      presentationSessionId: 'root',
+    });
+    expect(answers[0]!.answer).toEqual({
+      kind: 'approval',
+      decision: 'approve',
+      grant: 'same_command',
+    });
+    await page('下一项审批');
+    expect(article().getAttribute('aria-label')).toBe('approval child-b-shell');
+    expect(
+      article().querySelector<HTMLButtonElement>('[aria-label="更多批准方式"]')!.disabled,
+    ).toBe(false);
+    expect(interactions[2]!.state).toBe('pending');
+    expect(interactions[2]!.answer).toBeNull();
+    await page('上一项审批');
+    await page('上一项审批');
+    expect(article().getAttribute('aria-label')).toBe('approval parent-shell');
+    expect(
+      article().querySelector<HTMLButtonElement>('[aria-label="更多批准方式"]')!.disabled,
+    ).toBe(false);
+    expect(interactions[0]!.state).toBe('pending');
+    expect(interactions[0]!.answer).toBeNull();
+    expect(answers).toHaveLength(1);
+  } finally {
+    await act(async () => root.unmount());
+    dom.window.close();
+    restore();
+    Object.assign(globalThis, previous);
+  }
+});

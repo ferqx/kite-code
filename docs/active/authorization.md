@@ -21,6 +21,8 @@ Service 注入 `permissions`／`permissionPolicy` 时仍允许用户通过原 HT
 
 Native 普通工具审批采用输入组件上方的单卡分页，根和子待批均保留 Composer／模式入口；切 Auto／Full 仍通过原持久模式和最终 dispatch read-set 重判，不由移除卡片模拟执行。主名称隐藏、子名称与稳定彩色图标只作展示，不改变准确来源 Session／Run／Interaction。分体菜单“本次会话批准”只提交原卡实际提供的 `same_command`，不扩大为所有工具授权；紧凑附件仍须完整 EOF／hash／UTF-8 核对才有回答能力。问答、计划和 MCP 特殊授权保持独立门禁。排队消息的撤回／编辑／调序只影响尚未消费的输入，不授予工具权限、不取消已执行效果，准确跨层 authority 见[执行边界](unified-agent-boundary.md)与[Native owner](../../apps/desktop/README.md#原审批面板与授权观察)。
 
+子 Agent 的会话授权选项必须保留父子策略的共同范围、原命令摘要和策略 revision；独立必需权限检查不得因会话授权被跳过。可复用的人类批准按真实来源 Session 保存，父展示根、兄弟和后代均不能借用；Auto 每次审阅正文与持久会话授权的绑定分别核实，规则和反例由[权限 owner](../../packages/agent/src/permissions/README.md)维护。
+
 最终 `markDispatching` 重读原根 applied revision，已获但未消费的一次性/同命令批准及权限检查 proof 仍须按当前策略重判；旧 revision 不能直通，也不能借兄弟或新轮批准。旧人工卡以独立准确失效事实收束，原 request/answer 保留，不伪造用户答复；迟到旧答案或检查结果不改变新轮，已派发效果保留原事实。模式写入响应丢失查原控制回执，当前策略无法读取时阻挡新效果，冷只读不执行。运行中双向竞争、三层可信注入、旧 grant／检查 proof 与资源等待由[真实模式测试](../../packages/agent/test/isolated/execution/live-permission-mode.test.ts)覆盖；[物理强杀](../../packages/agent/test/isolated/recovery/live-approval-crash.test.ts)核待批崩溃、冷读零 Provider、当前 revision 显式接续及一次效果。合成 effect、真实策略、原生工具和实际客户端范围分别由 owner 记录，不将一种证据推广为全部平台资格。
 
 下面保留旧 Kernel/SAQ 实现及仍适用理由，不据旧模式/State 推导新正式执行范围。RSS、完整观测、Windows Shell 及平台资格未因本次迁移退出。

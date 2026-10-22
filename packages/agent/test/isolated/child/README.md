@@ -10,6 +10,8 @@
 
 父子 permission 对同一准确调用串行读取并形成复合 policy revision：硬拒绝优先，双 Ask 形成一张真实根 Session 卡，双 Check 的单个闭合请求列明双方要求。Ask+Check 的 `check.requireApproval=true` 先在无资源许可阶段运行 durable checker；approve_once 仍须真实人工答案，最终派发同时携带并由 SQL 核实 check 与 interaction 引用。ask_user/失败保留现有人工 fallback，不伪造人类答案。Model permission 仍按 Model kind 交集处理；checker 记录为同 Session 中无 Run 的 Model，不创建 child。
 
+同一整文件另核父子策略均允许时的 `same_command`：原 child 卡可选择会话批准，实际接受后同 Session 连续调用无需重答，父、兄弟和嵌套子 Session 仍各自批准；单次答案不生成会话授权。包含摘要不一致、完整 input 回退、单次上限及同 upstream revision 下选项／摘要变化的反例。Auto 使用真实 `createPermissionPolicy` 产生每次不同的 invocation，核显式人类会话批准可复用；纯 checker 和原始必需 checker 继续逐次核验。实现边界及实际整文件证据归[权限 owner](../../../src/permissions/README.md)。
+
 断言涵盖追加模块自有记录与 sources、Query 不读取 sources、caller 替换 sources.capture 不改变封存回调、连续 child 模板不早 dispose、动态 v2 与旧 v1 拒绝、runless 不扩权、硬拒绝零效果、双 Ask/双 Check、Ask+Check 的零资源等待和真实 human proof、ask_user fallback、静态/fresh 后台 Job 的真实终态及 lease、并发同 key 只有一个 carrier 且落败 fresh lease 及时释放。相邻 [runtime.test.ts](runtime.test.ts)、[result-context.test.ts](result-context.test.ts)与 [authorization-check.test.ts](../execution/authorization-check.test.ts) 验证独立 owner/取消/唯一 Loop 与内部授权检查边界。
 
 绑定切片不声明默认 Service child 配置或 task 满容量立即失败已实现；也不把固定模型断言当作真实付费 Provider 或 SIGKILL checker 资格。

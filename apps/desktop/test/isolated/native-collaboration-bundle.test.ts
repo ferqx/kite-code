@@ -29,10 +29,10 @@ import { cleanupOwnedNativeCandidate } from '../owned-native-cleanup.fixture';
 
 const require = createRequire(import.meta.url);
 test.skipIf(process.platform !== 'darwin')(
-  'source-free Native six-tool dual child approvals, same-Session follow-up, late answers, exact stop and cold zero replay',
+  'source-free Native child same-command Session grants, sibling isolation, follow-up, exact stop and cold zero replay',
   async () => {
     const root = realpathSync(temporaryDirectory('kite-native-collaboration-'));
-    const evidence = resolve('dist/acceptance', `child-internal-model-boundary-${randomUUID()}`);
+    const evidence = resolve('dist/acceptance', `child-session-approval-${randomUUID()}`);
     // Isolated runner reuse only; normal product startup has no such switch.
     const reuseCandidate = process.env.KITE_TEST_COLLABORATION_CANDIDATE;
     const home = join(root, 'home'),
@@ -179,8 +179,12 @@ test.skipIf(process.platform !== 'darwin')(
           } else if (reviews.length) {
             assert.equal(reviews.length, 1);
             assert.deepEqual(body.tools ?? [], []);
-            assert.ok(['files.write', 'task.follow_up'].includes(reviews[0].target.definitionId));
-            if (reviews[0].target.definitionId === 'files.write' && gatedChecks++ < 2)
+            assert.ok(
+              ['files.write', 'shell.execute', 'shell.command', 'task.follow_up'].includes(
+                reviews[0].target.definitionId,
+              ),
+            );
+            if (reviews[0].target.definitionId === 'shell.execute' && gatedChecks++ < 2)
               await new Promise<void>((release) =>
                 heldChecks.set(reviews[0].target.executionId, release),
               );
@@ -234,24 +238,30 @@ test.skipIf(process.platform !== 'darwin')(
                 ],
               };
               reason = 'tool_calls';
-            } else if (task?.startsWith('CHILD_') && tools === 0) {
-              if (task !== 'CHILD_A_FOLLOWUP')
-                await new Promise<void>((release) => held.set(task!, release));
-              const name =
-                task === 'CHILD_A'
-                  ? 'child-a.txt'
-                  : task === 'CHILD_B'
-                    ? 'child-b.txt'
-                    : 'child-a-follow.txt';
-              const content =
-                task === 'CHILD_A'
-                  ? 'A original approved\n'
-                  : task === 'CHILD_B'
-                    ? 'B must remain absent\n'
-                    : 'A follow-up approved\n';
+            } else if ((task === 'CHILD_A' && tools < 2) || (task === 'CHILD_B' && tools === 0)) {
+              if (tools === 0) await new Promise<void>((release) => held.set(task!, release));
               delta = {
                 tool_calls: [
-                  call('write_file', { path: name, base: null, content }, `write-${task}`),
+                  call(
+                    'shell_execute',
+                    {
+                      key: `${task}-${tools}`,
+                      command: `printf 'A original approved\\n' > child-a.txt; printf 'approved\\n' >> session-command.txt`,
+                      permissions: { filesystem: 'full_access', network: 'none' },
+                    },
+                    `shell-${task}-${tools}`,
+                  ),
+                ],
+              };
+              reason = 'tool_calls';
+            } else if (task === 'CHILD_A_FOLLOWUP' && tools === 0) {
+              delta = {
+                tool_calls: [
+                  call(
+                    'write_file',
+                    { path: 'child-a-follow.txt', base: null, content: 'A follow-up approved\n' },
+                    `write-${task}`,
+                  ),
                 ],
               };
               reason = 'tool_calls';
@@ -271,6 +281,7 @@ test.skipIf(process.platform !== 'darwin')(
       const enabled = new Set([
         'ask_user',
         'files.write',
+        'shell.execute',
         'task.spawn',
         'task.follow_up',
         'task.message',
@@ -373,6 +384,9 @@ test.skipIf(process.platform !== 'darwin')(
       expect(report.coldZeroReplay).toBe(true);
       expect(titleCalls).toBe(1);
       expect(readFileSync(join(workspace, 'child-a.txt'), 'utf8')).toBe('A original approved\n');
+      expect(readFileSync(join(workspace, 'session-command.txt'), 'utf8')).toBe(
+        'approved\napproved\n',
+      );
       expect(readFileSync(join(workspace, 'child-a-follow.txt'), 'utf8')).toBe(
         'A follow-up approved\n',
       );
@@ -420,6 +434,27 @@ test.skipIf(process.platform !== 'darwin')(
         }
         expect(checks).toBeGreaterThanOrEqual(4);
         expect(titles).toBe(1);
+        const grants = await Promise.all(
+          scopes.map((sessionId) =>
+            cold.listPermissionGrants({
+              expectedStoreId: storeId!,
+              subjectId: 'local-user',
+              sessionId,
+            }),
+          ),
+        );
+        expect(grants[0]!.items).toHaveLength(0);
+        expect(grants[2]!.items).toHaveLength(0);
+        expect(
+          grants[1]!.items.map((item) => [
+            item.grant.sessionId,
+            item.grant.kind,
+            item.grant.definitionId,
+          ]),
+        ).toEqual([
+          [report.agentId, 'tool', 'shell.execute'],
+          [report.agentId, 'job', 'shell.command'],
+        ]);
         writeFileSync(
           join(home, 'cold-permission-evidence.json'),
           JSON.stringify({
@@ -428,6 +463,7 @@ test.skipIf(process.platform !== 'darwin')(
             checks,
             titles,
             scopes,
+            grants,
             internalCalls,
           }),
         );
@@ -454,6 +490,8 @@ test.skipIf(process.platform !== 'darwin')(
       for (const name of [
         '00-two-children-checks-title.png',
         '01-dual-child-pending.png',
+        '02-child-session-approval-menu.png',
+        '03-a-completed-b-pending.png',
         '04-cold-reopened.png',
         'collaboration-report.json',
         'cold-permission-evidence.json',

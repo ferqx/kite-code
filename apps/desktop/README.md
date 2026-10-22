@@ -404,6 +404,10 @@ Native 的侧栏打开入口对当前父会话及同一在途选择去重，重�
 
 [浮卡 DOM](test/isolated/native-approval-group-dom.test.tsx)连同[原审批](test/isolated/native-approval-dom.test.tsx)和[输入交互](test/isolated/native-interaction-composer-dom.test.tsx)核单卡翻页、主名称缺席、准确子名称与稳定图标、独立决定、紧凑附件门禁、单项 unknown、旧 Store／Run 名称隔离及其他交互类型保持；[环境信息停止回归](test/isolated/native-environment-stop-dom.test.tsx)继续核只读名称投影未放宽原停止资格。
 
+子 Agent 的会话批准另由同一浮卡 DOM 核实际菜单选择，答案保留原 child Interaction／Session／Run／Execution，父及兄弟卡仍各自待批；两份审批 DOM 整文件本次均通过。[双 child 窗口](test/isolated/native-collaboration-bundle.test.ts)使用新构建、源码外候选和受控模型：A／B 请求完全相同 Shell 命令，A 的 Tool 与 Job 各自选择“本次会话批准”后，同子会话第二个 operation key 无新审批执行，效果恰好两次，B 保持原卡零效果。原同 Session follow-up、旧答案／旧停止拒绝、准确停止及冷重开零重放断言保留；冷只读 Store 另核只有 A 的两条 Tool／Job grant，父和 B 均无 grant。原权限交集与版本绑定由[Agent owner](../../packages/agent/src/permissions/README.md)维护。
+
+2026-10-22 在 `761405f5e` 加本次差量、macOS／Bun1.4.2／Electron44.3.0 上，以 `bun test --parallel=1 --max-concurrency=1 /Users/chenchao/Code/ai/kite-code/apps/desktop/test/isolated/native-collaboration-bundle.test.ts` 执行上述窗口整文件：1项／43条 Bun 断言及 driver 过程断言通过，33.37秒，18次受控 Provider 请求；同时保留内部权限检查及标题生成不计入真实 child 目录的原断言。过程截图已逐张观察；正常退出和原候选清理均无强制终止或残留，冷重开无模型重放。实际 report、日志、截图与冷授权目录保存在 `dist/acceptance/child-session-approval-f34f97ba-6028-4ced-9842-9557b3b5094d`，测试成功后清理临时候选，只保留有限证据。该结果覆盖本机受控 Electron／Shell 链路，不取得付费 Provider、其他平台或签名安装资格。
+
 公共 Execution 的可选 `authorization` 是 [Store 只读观察](../../packages/agent/src/storage/README.md#只读授权观察)，只表达原 reviewer、人工答案、accepted decision 与派发事实。Native 将它映射到原 ToolActivity 的审批标签，分别显示“已提交批准，待核对”“已人工批准”、自动批准／拒绝／等待或结果未知；停止后保留可核对的已有记录。批准不覆盖工具的真实失败、取消或未知状态，也不授予执行权限。每项当前待批状态仍以实际 Interaction 为准；Auto 转人工时保留原审查原因。
 
 普通 root／child 工具审批都与父 Composer、权限选择器并存，待批时可切 Auto／Full 使原未派发工具重新判断。`nativeRootInteractionBlocksComposer` 只为准确当前根的 question、plan_review 与 MCP 特殊审批隐藏输入，仍核原 Store、父 Session、准确 Execution 与活动 Run；runless 原交互核准确原执行，不以 rootSessionId 或 waiting 文案推断。共享 SessionPage 的 `interactionHidesPrompt` 缺省保持，Native 对普通工具审批明确保留 Composer。实际输入、单轮准入及模式复核继续由原 Runtime 决定。
