@@ -4,6 +4,7 @@ import { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { Conversation } from '../../src/desktop/Conversation';
+import { DesktopDiagnosticsProvider } from '../../src/desktop/diagnostics';
 import { ToolActivity } from '../../src/desktop/ToolActivity';
 import type { Message } from '../../src/desktop/types';
 
@@ -252,7 +253,7 @@ test('unconfirmed unfinished tools preserve facts and stop queued, running and r
         );
       const unknown = render([{ ...original, executionUnconfirmed: true }]);
       try {
-        expect(unknown.window.document.body.textContent).toContain('执行状态待核实');
+        expect(unknown.window.document.body.textContent).not.toContain('执行状态待核实');
         expect(unknown.window.document.body.textContent).not.toMatch(/等待执行|正在自动审批/);
         expect(
           unknown.window.document.querySelectorAll(
@@ -303,7 +304,7 @@ test('an unconfirmed exploration group retains successful items without advertis
     ),
   );
   try {
-    expect(dom.window.document.body.textContent).toContain('执行状态待核实');
+    expect(dom.window.document.body.textContent).not.toContain('执行状态待核实');
     expect(dom.window.document.body.textContent).not.toMatch(/等待执行|正在执行|正在读取/);
     expect(dom.window.document.querySelectorAll('.is-running')).toHaveLength(0);
     expect(messages.map((message) => [message.status, message.settled])).toEqual([
@@ -328,7 +329,7 @@ test('an expanded unconfirmed Shell retains output and only resumes waiting afte
     await render([shell(true)]);
     await click(summary(host));
     const output = () => host.querySelector('[aria-label="Shell 执行输出"]');
-    expect(output()?.textContent).toBe('执行状态待核实');
+    expect(output()?.textContent).toBe('');
     expect(host.textContent).not.toContain('等待输出…');
     await render([shell(true, 'original output')]);
     expect(output()?.textContent).toBe('original output');
@@ -336,4 +337,58 @@ test('an expanded unconfirmed Shell retains output and only resumes waiting afte
     expect(output()?.textContent).toBe('等待输出…');
     expect(host.querySelectorAll('.shell-activity.is-running')).toHaveLength(1);
   });
+});
+
+test('only explicit diagnostics show missing observation labels while actual tool failures and stops remain readable', () => {
+  for (const diagnostics of [false, true])
+    for (const [message, unverified, warning] of [
+      [{ ...tool('unknown'), status: undefined, presentation: 'standalone' }, true, '状态待核对'],
+      [{ ...tool('owner'), executionUnconfirmed: true }, false, '执行状态待核实'],
+      [
+        {
+          ...tool('shell', 'running'),
+          toolName: 'shell_execute',
+          presentation: 'standalone',
+          executionUnconfirmed: true,
+        },
+        false,
+        '执行状态待核实',
+      ],
+    ] as [Message, boolean, string][]) {
+      const content = renderToStaticMarkup(
+        <DesktopDiagnosticsProvider value={diagnostics}>
+          <ToolActivity
+            messages={[message]}
+            expanded
+            unverified={unverified}
+            onToggle={() => {}}
+            renderChildren={() => null}
+          />
+        </DesktopDiagnosticsProvider>,
+      );
+      if (diagnostics) expect(content).toContain(warning);
+      else expect(content).not.toContain(warning);
+    }
+  for (const status of ['failed', 'cancelled', 'unknown'] as const) {
+    const content = renderToStaticMarkup(
+      <ToolActivity
+        messages={[
+          {
+            ...tool('actual', status),
+            toolName: 'shell_execute',
+            presentation: 'standalone',
+            settled: true,
+            text: 'ORIGINAL TOOL RESULT',
+            toolResult: { ok: status !== 'failed', stdout: 'ORIGINAL TOOL RESULT' },
+            executionUnconfirmed: true,
+          },
+        ]}
+        expanded
+        onToggle={() => {}}
+        renderChildren={() => null}
+      />,
+    );
+    expect(content).toContain('ORIGINAL TOOL RESULT');
+    expect(content).not.toContain('执行状态待核实');
+  }
 });

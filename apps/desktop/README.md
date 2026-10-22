@@ -36,7 +36,7 @@
 
 ## 真实输入消息的唯一展示
 
-新消息直接进入当前主 Agent；首次发送保留一条用户消息及实际 Agent 回复，没有额外的“关联工作”判定答复。运行中引导进入原轮次安全检查点，排队等待仍沿原队列；UI 不靠过滤新回复掩盖重复。相同正文的两次提交保持两个独立输入，冷重开只读取原历史。
+新消息直接进入当前主 Agent；首次发送保留一条用户消息及实际 Agent 回复，没有额外的“关联工作”判定答复。运行中引导进入原轮次安全检查点，排队等待仍沿原队列；UI 不靠过滤新回复掩盖重复。相同正文的两次提交保持两个独立输入，冷重开只读取原历史。普通输入的本地投递占位在原持久用户消息到达后交接；仅有 `sourceIds` 的原 `run.start` 消息也须核同 Store／Session／Run 与准确原 Command，不按正文比较或合并独立提交。Run 状态先于历史到达时，本地输入仍按原 Command 绑定该轮次，位于该轮状态、工具和回复之前；连续引导输入按原输入身份保存因果前驱，前条从本地转为持久消息时也不反转后条。
 
 旧处理／业务双记录继续通过 [呈现投影](src/native-presentation.ts)消费准确 `Message.humanInput` 证明，只有本次读取含同 Session／原输入／公开提交身份的替代 Message 才合并副本。业务对象在原输入位置呈现，保原 ID/seq/Run/正文/附件；不改 SQL 顺序、不删除原历史、不按正文去重，Fork 只映射本分支已封存的替代行。证明来源归 [输入 owner](../../packages/agent/src/storage/sqlite/inputs/README.md)。
 
@@ -65,6 +65,8 @@ Native 启动、目录与子 Agent、安排任务、分支、模型／提供商�
 当前桌面构建与启动使用仓库根 `bun run release:build --product native` 和 `bun run desktop`，定向验证为 `bun run test:desktop:native`，安装／归档／版本选择见 `bun run release:native --help`。旧 `apps/kite-desktop` 的普通开发、服务准备和打包命令已给出明确退役诊断／退出码2；不再从当前checkout构建或启动旧writer。原Vite开发热更新只属历史实现，当前Native候选启动的具体行为仍按本页及[发布owner](docs/native-release.md)核对。此项调用者退役不表示全部旧源码或阶段已退出。
 
 Windows 开发启动还会先运行 [Electron 权限预检](../../scripts/development/windows-electron-permissions.ts)及其固定 [PowerShell 实现](../../scripts/development/windows-electron-permissions.ps1)，按已安装包／实际 EXE／版本限定物理 `dist`。在固定原对象并完整扫描后，仅向缺权限的现有对象追加受限应用包 RX；无递归继承授权、ACL 重置或提权。链接、硬链接及适用的拒绝 ACE 在写入前失败；已有 ACL、所有者、继承和运行字节保留，已满足时不写入。每次启动重新解析当前安装，覆盖重装／版本切换；项目、私有应用目录、Profile 和正式 Native 权限策略不变。范围与取舍归 [Note](../../.agents/notes/implemented/bug-fix/2026-10-19-development-electron-sandbox-acl.md)，操作与错误码归[本地开发](../../docs/development/local-development.md)。[权限回归](../../tests/isolated/unified-agent/development-electron-permissions.test.ts)覆盖真实 ACL 增量、原权限／数据保全、重装、幂等、目录联接／硬链接和拒绝规则。2026-10-19 Windows x64／Bun 1.4.3／Electron 44.3.0 的独立官方 ZIP 新解压夹具复现 GPU `0x80000003`，自动修复后 renderer 加载且实际 preload 报告 sandboxed／contextIsolated 为 true，再次检查零写入；此证据只覆盖本机开发启动。
+
+2026-10-22，macOS arm64／Electron 44.3.0／Bun 1.4.2／Node 22.21.1，[普通 Native 故障整窗口](test/isolated/native-session-anomalies-electron.test.ts)使用真实 Main／preload／生产 renderer 与配套 Service，构建常量 `testDiagnostics:false`，以隔离的兼容 SSE Provider 和真实 `files.write@2` 验证：销毁 Main→Service 的实际 socket 后后台完成并自动重连；原 POST 已收到 202 响应数据后截断回执，后台仅 GET 原 Command 确认；活动 Model 期间对准确配套 Service 与 Main 执行 SIGKILL，冷重开将旧轮次收束为 interrupted，并可明确发送新轮次。六次输入各保留一个原 Command／Run，五个完成轮次各一次工具、两次 Model；被强杀的原轮次始终只有一次 Model、无工具效果。继续输入与再次冷读后原身份、请求 digest、执行集合和五份实际文件均未重放，普通退出核 Main exit 0 与所属 Service 已消失。全过程记录 129 次 DOM 观察、40 帧实际窗口画面和 11 个阶段快照，并逐段核对输入先于对应状态／工具／回复、投递与持久历史接管无重复、无通用异常文案闪现；失败现场继续保留，最终截图或脚本通过不能覆盖中间异常。该范围为本机隔离构建及 Main 作用域的实际 HTTP 故障，未做操作系统全局断网、付费 Provider、完整安装版或其他平台验收。
 
 ## 开发热更新与服务重载
 
@@ -318,9 +320,9 @@ Main 开始退出和取消退出时通过原固定 event channel 通知 renderer
 
 子详情 reader 仅返回已封存 carrier／Store／rootWork 内的准确 Run 与有限 execution.authorization DTO；renderer再核出处，唯一活动 Run 的人工 pending 优先显示“等待你的批准”，不能从 waiting 状态推断授权。打开准确 A 子详情读取该状态、再返回父输入也由上述真实窗口核实。未取得准确控制 DTO 的旧缓存保原生命周期，不伪造审批状态；同一稳定 Session 的旧卡仍绑定原 carrier。
 
-[NativeToolMessage](src/native-tool-messages.tsx)直接消费原 [ToolActivity / ToolRow](../../packages/ui/src/desktop/ToolActivity.tsx)，保轻量工具行、状态、箭头和结果展开。历史 Message 的 complete 只表示消息完整；[Main metadata reader](electron/tool-messages.ts)按已读 Message 的唯一 source Execution GET，核原 Store／Session／Run、tool kind、终态、result outcome 和完全相同的 content。每批最多32项，完整已读历史不限于 View 近200项；元数据核对前和无法核实的条目默认显示收起的工具记录，缺少执行状态时标为“状态待核对”，不推断成功或结果未知；只有用户展开才挂载原正文及其读取控件，不先将原结果 JSON 显示为消息正文再替换。读取失败仍保留原文和明确重试入口。[回执渲染回归](test/isolated/native-tool-receipt-render-dom.test.tsx)直接使用 NativeDesktop，核展示信息未到、失败、未知／未来版本及不支持格式的收起阅读和切会话清理。metadata close、切会话、detach 或 history epoch 变更只释放所属 GET，不停止、重做或恢复工具执行。同一阅读身份的普通事件刷新暂清 controller snapshot 时沿 Main 已验证 lastView 保留只读观察；明确选择、reset 或 Store 变化仍撤销旧范围。
+[NativeToolMessage](src/native-tool-messages.tsx)直接消费原 [ToolActivity / ToolRow](../../packages/ui/src/desktop/ToolActivity.tsx)，保轻量工具行、状态、箭头和结果展开。历史 Message 的 complete 只表示消息完整；[Main metadata reader](electron/tool-messages.ts)按已读 Message 的唯一 source Execution GET，核原 Store／Session／Run、tool kind、终态、result outcome 和完全相同的 content。每批最多32项，完整已读历史不限于 View 近200项；元数据核对前和无法核实的条目默认显示收起的工具记录，缺少执行状态时不推断成功或结果未知，“状态待核对”仅在显式测试诊断中显示；只有用户展开才挂载原正文及其读取控件，不先将原结果 JSON 显示为消息正文再替换。读取失败仍保留原文和明确重试入口。[回执渲染回归](test/isolated/native-tool-receipt-render-dom.test.tsx)直接使用 NativeDesktop，核展示信息未到、失败、未知／未来版本及不支持格式的收起阅读和切会话清理。metadata close、切会话、detach 或 history epoch 变更只释放所属 GET，不停止、重做或恢复工具执行。同一阅读身份的普通事件刷新暂清 controller snapshot 时沿 Main 已验证 lastView 保留只读观察；明确选择、reset 或 Store 变化仍撤销旧范围。
 
-Native 将 Tool 的 `planned` 映射为 UI `queued`，显示“等待执行”；`dispatching` 与 `running` 映射为 UI `running`，显示“执行中”并使用运行标记。普通 Tool 的实际调用等待结果期间仍为 `dispatching`，不能将它视为排队；读取、修改与独立工具行均保留执行状态文字，聚合按实际运行项生成原活动摘要。执行状态待核实与审批提示的优先级、停止请求和终态语义保持，适配不改后端 ledger、执行准入或并发。[原工具 DOM 回归](test/isolated/native-tool-messages-dom.test.tsx)沿实际适配与组件核待派发、已派发、终态和混合探索聚合。
+Native 将 Tool 的 `planned` 映射为 UI `queued`，显示“等待执行”；`dispatching` 与 `running` 映射为 UI `running`，显示“执行中”并使用运行标记。普通 Tool 的实际调用等待结果期间仍为 `dispatching`，不能将它视为排队；读取、修改与独立工具行均保留执行状态文字，聚合按实际运行项生成原活动摘要。执行权观察继续约束忙碌与读取资格，普通界面不追加“执行状态待核实”；准确审批提示、停止请求和终态语义保持，适配不改后端 ledger、执行准入或并发。[原工具 DOM 回归](test/isolated/native-tool-messages-dom.test.tsx)沿实际适配与组件核待派发、已派发、终态和混合探索聚合。
 
 Main 仅在原 Message／Execution 身份和结果完全匹配、原状态 failed、`authorization.dispatched=false`、Core `adapterAttempted/dispatchCommitted=false` 且准确刷新 code 与 content 一致时投影只读 `decisionRefresh`。Native 适配为中性的 `not_executed`，显示上下文／工具信息已更新、此次未执行；组汇总单列“重新评估”，不计入实际读取／执行或失败。持久 ledger 不被改写，冷历史复用相同核验；缺证明、实际派发失败及伪造 details 均保原事实。[Main](test/native-tool-messages.test.ts)及[DOM](test/isolated/native-tool-messages-dom.test.tsx)验证四项重新评估与一项真实失败混合时仅计失败一项。
 
@@ -328,7 +330,7 @@ Main 仅在原 Message／Execution 身份和结果完全匹配、原状态 faile
 
 唯一原调用属于已知 `files.list@1` 且省略 path 或传空字符串时，目标按该版本的已知默认值显示 `.`，表示工作区根目录；显式路径保原文。缺原调用、重复身份或未知版本不补默认路径，目录文本不获得文件打开动作。[Main 回归](test/native-tool-messages.test.ts)核默认／显式路径及缺来源／歧义／未来版本，[原组件 DOM](test/isolated/native-tool-messages-dom.test.tsx)核目录行实际保留根路径。
 
-执行中的工具行只来自当前 Store、所选会话活动 Run 的真实 tool Execution，与同 Run 的原结果消息接管；旧 Store 恢复记录不遮掉新工作。停止申请尚非终态时明确等待结果，视图不可核实时标“上次确认状态”。Shell launch/read/wait/stop 显示各自实际操作；启动受理不表示后台 Job 已完成，Job 的准确停止与完整输出仍归原环境／Runtime logs 入口。未知定义或版本保原 ID／version 和可展开原文，不借旧 UI 同名分类解释未来结果。
+执行中的工具行只来自当前 Store、所选会话活动 Run 的真实 tool Execution，与同 Run 的原结果消息接管；旧 Store 恢复记录不遮掉新工作。停止申请尚非终态时明确等待结果，视图不可核实时保留原记录并后台重读，普通界面不追加“上次确认状态”。Shell launch/read/wait/stop 显示各自实际操作；启动受理不表示后台 Job 已完成，Job 的准确停止与完整输出仍归原环境／Runtime logs 入口。未知定义或版本保原 ID／version 和可展开原文，不借旧 UI 同名分类解释未来结果。
 
 已知版本的读取、列目录和搜索在当前 Run 的执行阶段即使用同一探索分类，不等回执到齐才聚合；Execution 已结束而历史回执尚未到达时保留该工具项。回执按准确当前 Store／Session／Run／Execution 可先复用 View 的展示分类，结果状态仍等原 metadata 核验。探索块以 Run 和可读消息边界保持分组身份，回执逐项或乱序接管不更换聚合的阅读开关；新阶段的聚合独立默认收起。元数据未到的项保留在原组内，展开聚合只显示工具项，逐项主动展开才挂载该项原记录。未知版本的原始结果不进入收起标题，真实“结果未知”等状态仍显示。[运行期聚合 DOM](test/isolated/native-live-tool-aggregation-dom.test.tsx)覆盖这些交接、手动阅读和身份隔离场景。
 

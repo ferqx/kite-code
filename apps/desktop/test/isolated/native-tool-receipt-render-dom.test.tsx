@@ -36,7 +36,7 @@ const original = JSON.stringify({
   nested: { preserved: true },
 });
 type Mode = 'known' | 'empty' | 'failed' | 'future' | 'future-unknown' | 'unsupported';
-function fixture(mode: Mode) {
+function fixture(mode: Mode, testDiagnostics = false) {
   const dom = new JSDOM('<div id="root"></div>', {
     url: 'http://localhost',
     pretendToBeVisual: true,
@@ -256,7 +256,7 @@ function fixture(mode: Mode) {
     host,
     requests,
     render: async () => {
-      await act(async () => root.render(<NativeDesktop />));
+      await act(async () => root.render(<NativeDesktop testDiagnostics={testDiagnostics} />));
       await act(async () => {
         [...host.querySelectorAll<HTMLButtonElement>('button')]
           .find((button) => button.textContent === 'Original')
@@ -324,7 +324,7 @@ test('actual NativeDesktop keeps a raw tool receipt hidden while metadata reader
     expect(f.requests.some((request) => request.method === 'fileTargets.list')).toBe(true);
     expect(f.host.textContent).not.toContain(sentinel);
     expect(f.host.textContent).not.toContain('MODEL_ARGS_SENTINEL');
-    expect(f.host.textContent).toContain('状态待核对');
+    expect(f.host.textContent).not.toContain('状态待核对');
     expect(f.host.textContent).not.toContain('结果未知');
     await f.flush();
     expect(f.host.textContent).toContain('读取');
@@ -346,8 +346,7 @@ for (const mode of ['empty', 'failed', 'future', 'unsupported'] as const) {
       await f.flush();
       expect(f.host.textContent).not.toContain(sentinel);
       expect(f.host.textContent).not.toContain('MODEL_ARGS_SENTINEL');
-      if (mode === 'future') expect(f.host.textContent).not.toContain('状态待核对');
-      else expect(f.host.textContent).toContain('状态待核对');
+      expect(f.host.textContent).not.toContain('状态待核对');
       expect(f.host.textContent).not.toContain('结果未知');
       await f.toggle();
       expect(f.host.textContent).toContain(original);
@@ -368,7 +367,7 @@ test('actual NativeDesktop preserves a verified future tool outcome_unknown inst
   const f = fixture('future-unknown');
   try {
     await f.render();
-    expect(f.host.textContent).toContain('状态待核对');
+    expect(f.host.textContent).not.toContain('状态待核对');
     expect(f.host.textContent).not.toContain('结果未知');
     expect(f.host.textContent).not.toContain(sentinel);
     await f.flush();
@@ -381,6 +380,23 @@ test('actual NativeDesktop preserves a verified future tool outcome_unknown inst
     await f.toggle();
     expect(f.host.textContent).not.toContain(sentinel);
     expect(f.host.textContent).toContain('结果未知');
+  } finally {
+    await f.close();
+  }
+});
+
+test('isolated Native diagnostics may show an unverified metadata hint without claiming a tool outcome', async () => {
+  const f = fixture('known', true);
+  try {
+    await f.render();
+    expect(f.host.textContent).toContain('状态待核对');
+    expect(f.host.textContent).not.toContain('结果未知');
+    expect(f.host.textContent).not.toContain(sentinel);
+    expect(f.host.textContent).not.toContain('MODEL_ARGS_SENTINEL');
+    await f.flush();
+    expect(f.host.textContent).not.toContain('状态待核对');
+    expect(f.host.querySelector('.tool-activity')?.getAttribute('aria-label')).toBe('读取 · 成功');
+    expect(f.host.textContent).not.toContain(sentinel);
   } finally {
     await f.close();
   }

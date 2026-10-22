@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test';
 import type { AgentClient, Execution, Message } from '@kite-ai/client';
-import { SessionPage, ToolActivity } from '@kite-ai/ui/desktop';
+import { DesktopDiagnosticsProvider, SessionPage, ToolActivity } from '@kite-ai/ui/desktop';
 import { JSDOM } from 'jsdom';
 import { act } from 'react';
 import { createRoot } from 'react-dom/client';
@@ -352,7 +352,39 @@ test('live tool rows come only from current-Store active Run executions and rema
     expect(f.host.textContent).not.toContain('已停止');
     expect(f.host.querySelector('button')).toBeNull();
     await act(async () => f.root.render(<NativeLiveToolMessage {...live[0]!} unavailable />));
+    expect(f.host.textContent).not.toContain('上次确认状态');
+    expect(f.host.textContent).toContain('已请求停止，等待执行结果。');
+    await act(async () =>
+      f.root.render(
+        <DesktopDiagnosticsProvider value>
+          <NativeLiveToolMessage {...live[0]!} unavailable />
+        </DesktopDiagnosticsProvider>,
+      ),
+    );
+    expect(f.host.textContent).not.toContain('上次确认状态');
+    expect(f.host.textContent).toContain('已请求停止，等待执行结果。');
+    await act(async () =>
+      f.root.render(
+        <DesktopDiagnosticsProvider value>
+          <NativeLiveToolMessage
+            {...live[0]!}
+            execution={{ ...live[0]!.execution, cancelRequestedAt: null }}
+            unavailable
+          />
+        </DesktopDiagnosticsProvider>,
+      ),
+    );
     expect(f.host.textContent).toContain('上次确认状态');
+    await act(async () =>
+      f.root.render(
+        <NativeLiveToolMessage
+          {...live[0]!}
+          message={{ ...live[0]!.message, executionUnconfirmed: true }}
+          unavailable
+        />,
+      ),
+    );
+    expect(f.host.textContent).not.toContain('已请求停止，等待执行结果。');
     expect(
       liveToolMessages(selected, [{ ...message('result', 'recorded'), sourceIds: ['live'] }]),
     ).toEqual([]);

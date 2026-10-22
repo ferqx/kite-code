@@ -1084,6 +1084,273 @@ test('an accepted prompt is removed from its own cache after leaving, while unkn
   }
 });
 
+test('ordinary saved input takes over its local user message only with matching Store Session and Run provenance', async () => {
+  const f = fixture(true);
+  const bridge = f.dom.window.kiteNative! as NativeBridge;
+  const request = bridge.request;
+  let submitted: Extract<NativeRequest, { method: 'submit' }> | undefined;
+  bridge.request = async (input) => {
+    const result = await request(input);
+    if (input.method !== 'submit') return result;
+    submitted = input;
+    return {
+      sessionId: input.sessionId,
+      intent: input.intent,
+      phase: 'accepted',
+    };
+  };
+  try {
+    await act(async () => f.root.render(<NativeDesktop />));
+    await f.click('Original A');
+    await f.edit('ordinary original input 雪🙂', '当前会话私有草稿');
+    await f.click('发送明确的新轮次');
+    expect(submitted?.intent.kind).toBe('run.start');
+    const commandId = submitted!.intent.commandId;
+    const message: Message = {
+      id: 'ordinary-saved-input',
+      role: 'user',
+      status: 'complete',
+      sessionId: 'a',
+      runId: 'ordinary-input-run',
+      seq: '1',
+      // Deliberately different text: takeover must follow identity, never text equality.
+      content: 'durable original input 雪🙂',
+      sourceIds: [commandId],
+    };
+    const run = {
+      id: message.runId,
+      sessionId: 'a',
+      originStoreId: 'store',
+      originCommandId: commandId,
+      status: 'completed',
+      isActive: false,
+    } as Run;
+    // Source IDs on a foreign Session cannot consume A's local projection.
+    await f.publishMessages([{ ...message, sessionId: 'b' }], [{ ...run, sessionId: 'b' }]);
+    expect(f.host.querySelectorAll('.message.user')).toHaveLength(1);
+    expect(f.host.querySelector('.message.user')!.textContent).toContain('ordinary original input');
+    for (const unrelated of [
+      { ...run, originStoreId: 'another-store' },
+      { ...run, sessionId: 'b' },
+      { ...run, id: 'another-run' },
+      { ...run, originCommandId: 'another-command' },
+    ]) {
+      await f.publishMessages([message], [unrelated]);
+      expect(f.host.querySelectorAll('.message.user')).toHaveLength(2);
+      expect(f.host.body.textContent).toContain('ordinary original input');
+      expect(f.host.body.textContent).toContain('durable original input');
+    }
+    await f.publishMessages([message], [run]);
+    expect(f.host.querySelectorAll('.message.user')).toHaveLength(1);
+    expect(f.host.querySelector('.message.user')!.textContent).toContain('durable original input');
+    expect(f.host.body.textContent).not.toContain('ordinary original input');
+    expect(f.host.querySelector('.delivery-status')).toBeNull();
+    expect(f.calls.filter((call) => call.method === 'submit')).toHaveLength(1);
+    await f.click('Other B');
+    await f.click('Original A');
+    expect(f.host.querySelectorAll('.message.user')).toHaveLength(1);
+    expect(f.host.querySelector('.message.user')!.textContent).toContain('durable original input');
+    expect(f.calls.filter((call) => call.method === 'submit')).toHaveLength(1);
+  } finally {
+    await f.close();
+  }
+});
+
+test('an original pending input precedes its Run status and reply while saved user history is delayed', async () => {
+  const f = fixture(true);
+  const bridge = f.dom.window.kiteNative! as NativeBridge;
+  const request = bridge.request;
+  let submitted: Extract<NativeRequest, { method: 'submit' }> | undefined;
+  let release: (() => void) | undefined;
+  bridge.request = async (input) => {
+    const result = await request(input);
+    if (input.method !== 'submit') return result;
+    submitted = input;
+    await new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    return { sessionId: input.sessionId, intent: input.intent, phase: 'accepted' };
+  };
+  const assertUserFirst = () => {
+    const user = f.host.querySelector('.message.user');
+    const turn = f.host.querySelector('.agent-turn');
+    expect(user).not.toBeNull();
+    expect(turn).not.toBeNull();
+    expect(
+      user!.compareDocumentPosition(turn!) & f.dom.window.Node.DOCUMENT_POSITION_FOLLOWING,
+    ).not.toBe(0);
+    expect(f.host.querySelectorAll('.message.user')).toHaveLength(1);
+  };
+  try {
+    await act(async () => f.root.render(<NativeDesktop />));
+    await f.click('Original A');
+    await f.edit('original before its reply', '当前会话私有草稿');
+    await f.click('发送明确的新轮次');
+    const commandId = submitted!.intent.commandId;
+    const active = {
+      id: 'early-observed-run',
+      sessionId: 'a',
+      originStoreId: 'store',
+      originCommandId: commandId,
+      status: 'running',
+      isActive: true,
+      createdAt: Date.now(),
+      finishedAt: null,
+    } as Run;
+    // Main can observe a Run before either the submit response or user history arrives.
+    await f.publishMessages([], [active]);
+    assertUserFirst();
+    await act(async () => release?.());
+    assertUserFirst();
+    const reply: Message = {
+      id: 'early-observed-reply',
+      role: 'assistant',
+      status: 'complete',
+      sessionId: 'a',
+      runId: active.id,
+      seq: '2',
+      content: 'actual original reply',
+    };
+    await f.publishMessages([reply], [active]);
+    assertUserFirst();
+    expect(f.host.querySelector('.message.assistant')?.textContent).toContain(
+      'actual original reply',
+    );
+    await f.publishMessages(
+      [
+        {
+          id: 'late-saved-user',
+          role: 'user',
+          status: 'complete',
+          sessionId: 'a',
+          runId: active.id,
+          seq: '1',
+          content: submitted!.intent.content,
+          sourceIds: [commandId],
+        },
+        reply,
+      ],
+      [{ ...active, status: 'completed', isActive: false, finishedAt: Date.now() }],
+    );
+    assertUserFirst();
+    expect(f.calls.filter((call) => call.method === 'submit')).toHaveLength(1);
+  } finally {
+    await act(async () => release?.());
+    await f.close();
+  }
+});
+
+for (const persistBetween of [false, true])
+  test(`explicit steers keep delivery order through delayed history (${persistBetween ? 'prior steer saved' : 'both local'})`, async () => {
+    const run = {
+      id: 'original-steer-run',
+      sessionId: 'a',
+      originStoreId: 'store',
+      originCommandId: 'original-work',
+      status: 'running',
+      isActive: true,
+      createdAt: Date.now(),
+      finishedAt: null,
+    } as Run;
+    const original: Message[] = [
+      {
+        id: 'original-work-user',
+        role: 'user',
+        status: 'complete',
+        sessionId: 'a',
+        runId: run.id,
+        seq: '1',
+        content: 'original work',
+        sourceIds: [run.originCommandId],
+      },
+      {
+        id: 'original-work-reply',
+        role: 'assistant',
+        status: 'complete',
+        sessionId: 'a',
+        runId: run.id,
+        seq: '2',
+        content: 'reply before explicit steers',
+      },
+    ];
+    const f = fixture(true, true, 'accept_edits', { messages: original, runs: [run] });
+    const bridge = f.dom.window.kiteNative! as NativeBridge;
+    const request = bridge.request;
+    const submitted: Extract<NativeRequest, { method: 'submit' }>[] = [];
+    bridge.request = async (input) => {
+      const result = await request(input);
+      if (input.method === 'submit') {
+        submitted.push(input);
+        return { sessionId: input.sessionId, intent: input.intent, phase: 'accepted' };
+      }
+      if (result && 'selection' in result && result.selection)
+        return {
+          ...result,
+          selection: {
+            ...result.selection,
+            activeCommand: {
+              id: run.originCommandId,
+              sessionId: 'a',
+              originStoreId: 'store',
+              kind: 'run.start',
+              status: 'applied',
+              receipt: { runId: run.id },
+              cancelRequestedAt: null,
+            },
+          },
+        };
+      return result;
+    };
+    const savedSteer = (index: number): Message => ({
+      id: `saved-steer-${index}`,
+      role: 'user',
+      status: 'complete',
+      sessionId: 'a',
+      runId: run.id,
+      seq: String(index + 3),
+      content: submitted[index]!.intent.content,
+      sourceIds: [submitted[index]!.intent.commandId],
+      originCommandId: submitted[index]!.intent.commandId,
+    });
+    const assertOrder = () => {
+      expect(
+        [...f.host.querySelectorAll('.message.user')].map((message) => message.textContent),
+      ).toEqual(['original work', 'first explicit steer', 'second explicit steer']);
+      const reply = f.host.querySelector('.message.assistant')!;
+      const firstSteer = f.host.querySelectorAll('.message.user')[1]!;
+      expect(
+        reply.compareDocumentPosition(firstSteer) & f.dom.window.Node.DOCUMENT_POSITION_FOLLOWING,
+      ).not.toBe(0);
+    };
+    try {
+      await act(async () => f.root.render(<NativeDesktop />));
+      await f.click('Original A');
+      await f.edit('first explicit steer', '当前会话私有草稿');
+      await f.click('引导当前轮次');
+      expect(submitted[0]?.intent.kind).toBe('input.steer');
+      if (persistBetween) await f.publishMessages([...original, savedSteer(0)], [run]);
+      await f.edit('second explicit steer', '当前会话私有草稿');
+      await f.click('引导当前轮次');
+      expect(submitted[1]?.intent.kind).toBe('input.steer');
+      assertOrder();
+      await f.publishMessages([...original, savedSteer(0)], [run]);
+      assertOrder();
+      await f.publishMessages([...original, savedSteer(0), savedSteer(1)], [run]);
+      assertOrder();
+      expect(submitted).toHaveLength(2);
+      expect(new Set(submitted.map((item) => item.intent.commandId)).size).toBe(2);
+      for (const item of submitted)
+        expect(
+          f.calls.filter(
+            (call) => call.method === 'submit' && call.intent.commandId === item.intent.commandId,
+          ),
+        ).toHaveLength(1);
+      expect(f.host.querySelector('.delivery-status')).toBeNull();
+    } finally {
+      await f.close();
+    }
+  });
+
 test('a later confirmed original receipt consumes only its submitted draft when another Session is visible', async () => {
   for (const source of ['input', 'caller'] as const) {
     for (const later of [undefined, '', 'newer draft after submission']) {

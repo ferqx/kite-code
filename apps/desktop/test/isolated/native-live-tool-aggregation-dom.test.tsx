@@ -418,8 +418,10 @@ test('Native owner reconciliation stops live tool activity while retaining confi
       expect(f.host.querySelectorAll('.tool-activity .shimmer')).toHaveLength(0);
       expect(f.host.querySelectorAll('.tool-activity [data-status="running"]')).toHaveLength(0);
       expect(f.host.querySelectorAll('.tool-activity [data-status="pending"]')).toHaveLength(0);
-      expect(f.host.querySelectorAll('.tool-step-status')?.length).toBeGreaterThan(0);
-      expect(f.host.textContent).toContain('执行状态待核实');
+      expect(f.host.querySelectorAll('.tool-step-status')).toHaveLength(0);
+      expect(f.host.textContent).not.toContain('执行状态待核实');
+      expect(f.host.textContent).not.toContain('上次确认状态');
+      expect(f.host.textContent).not.toContain('状态待核对');
       expect(f.host.textContent).not.toContain('等待执行');
       expect(f.host.textContent).not.toContain('已请求停止，等待执行结果。');
       expect(f.host.querySelector('.tool-activity-step.completed') !== null).toBe(true);
@@ -450,7 +452,9 @@ test('Native directory read failure cannot revive unconfirmed activity and stale
       expect(f.host.querySelectorAll('.response-status')).toHaveLength(0);
       expect(f.host.querySelectorAll('.tool-activity.is-running')).toHaveLength(0);
       expect(f.host.querySelectorAll('button[aria-label="停止任务"]')).toHaveLength(0);
-      expect(f.host.textContent).toContain('执行状态待核实');
+      expect(f.host.textContent).not.toContain('执行状态待核实');
+      expect(f.host.textContent).not.toContain('上次确认状态');
+      expect(f.host.textContent).not.toContain('状态待核对');
       await f.observeDirectoryUnavailable(false);
     }
     expect(f.host.querySelectorAll('.response-status')).toHaveLength(1);

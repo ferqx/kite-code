@@ -112,6 +112,46 @@ import { NativeTranscriptDisplay } from './native-transcript-display';
 import { NativeUserImages } from './native-user-images';
 import { NativeWindowFrame } from './native-window-frame';
 
+function savedNativeInput(
+  message: Message,
+  commandId: string,
+  scope: { storeId: string; sessionId: string },
+  selection: NativeState['selection'],
+) {
+  return (
+    message.role === 'user' &&
+    message.sessionId === scope.sessionId &&
+    selection?.storeId === scope.storeId &&
+    selection.session.id === scope.sessionId &&
+    (message.humanInput?.publicCommandId === commandId ||
+      message.originCommandId === commandId ||
+      (message.sourceIds?.includes(commandId) &&
+        selection.runs.some(
+          (run) =>
+            run.id === message.runId &&
+            run.originStoreId === scope.storeId &&
+            run.sessionId === scope.sessionId &&
+            run.originCommandId === commandId,
+        )))
+  );
+}
+
+function nativeInputTurnId(
+  commandId: string,
+  scope: { storeId: string; sessionId: string; targetRunId?: string },
+  selection: NativeState['selection'],
+) {
+  if (selection?.storeId !== scope.storeId || selection.session.id !== scope.sessionId)
+    return undefined;
+  const run = selection.runs.find(
+    (run) =>
+      run.originStoreId === scope.storeId &&
+      run.sessionId === scope.sessionId &&
+      (run.originCommandId === commandId || run.id === scope.targetRunId),
+  );
+  return run ? JSON.stringify(['native-run', scope.storeId, scope.sessionId, run.id]) : undefined;
+}
+
 /** The renderer owns only public presentation; all I/O is the named preload bridge. */
 export function nativeRootInteractionBlocksComposer(selection: NativeState['selection']): boolean {
   return !!selection?.interactions.some(
@@ -299,6 +339,9 @@ function NativeDesktopContent({
       {
         storeId: string;
         sessionId: string;
+        targetRunId?: string;
+        afterMessageId?: string;
+        afterInputCommandId?: string;
         text: string;
         phase: 'sending' | 'unknown' | 'failed' | 'accepted';
       }
@@ -1866,14 +1909,22 @@ function NativeDesktopContent({
         sessionId,
         draft: submittedDraft,
       });
-      setInputDeliveries((previous) =>
-        new Map(previous).set(commandId, {
+      setInputDeliveries((previous) => {
+        const predecessor = [...previous]
+          .reverse()
+          .find(
+            ([, input]) => input.storeId === selection.storeId && input.sessionId === sessionId,
+          );
+        return new Map(previous).set(commandId, {
           storeId: selection.storeId,
           sessionId,
+          ...(intent.kind === 'input.steer' ? { targetRunId: intent.targetRunId } : {}),
+          afterMessageId: displayMessages.at(-1)?.id,
+          afterInputCommandId: predecessor?.[0],
           text: submittedText,
           phase: 'sending',
-        }),
-      );
+        });
+      });
       let value: NativeResult;
       try {
         value = await bridge.request({
@@ -1959,21 +2010,16 @@ function NativeDesktopContent({
         selection.session.id === firstSubmission.creation.sessionId));
   const firstSaved =
     firstVisible &&
-    messages.some(
-      (message) =>
-        message.role === 'user' &&
-        message.sessionId === firstSubmission.creation.sessionId &&
-        selection?.storeId === firstSubmission.creation.expectedStoreId &&
-        (message.humanInput?.publicCommandId === firstSubmission.commandId ||
-          message.originCommandId === firstSubmission.commandId ||
-          (message.sourceIds?.includes(firstSubmission.commandId) &&
-            selection.runs.some(
-              (run) =>
-                run.id === message.runId &&
-                run.originStoreId === selection.storeId &&
-                run.sessionId === message.sessionId &&
-                run.originCommandId === firstSubmission.commandId,
-            ))),
+    messages.some((message) =>
+      savedNativeInput(
+        message,
+        firstSubmission.commandId,
+        {
+          storeId: firstSubmission.creation.expectedStoreId,
+          sessionId: firstSubmission.creation.sessionId,
+        },
+        selection,
+      ),
     );
   // biome-ignore lint/correctness/useExhaustiveDependencies: The revision invalidates the current-view body map after verified reads and reader disposal.
   const freshTranscript = useMemo(() => {
@@ -2040,23 +2086,12 @@ function NativeDesktopContent({
       !selection.permissionUnavailable,
   });
   useEffect(() => {
-    const saved = new Set(
-      displayMessages
-        .filter((message) => message.role === 'user')
-        .flatMap((message) =>
-          [message.humanInput?.publicCommandId, message.originCommandId].filter(
-            (id): id is string => !!id,
-          ),
-        ),
-    );
-    if (!saved.size) return;
+    if (!displayMessages.length || !selection) return;
     setInputDeliveries((previous) => {
       const next = new Map(
         [...previous].filter(
           ([id, input]) =>
-            input.storeId !== selection?.storeId ||
-            input.sessionId !== selection.session.id ||
-            !saved.has(id),
+            !displayMessages.some((message) => savedNativeInput(message, id, input, selection)),
         ),
       );
       return next.size === previous.size ? previous : next;
@@ -2069,11 +2104,7 @@ function NativeDesktopContent({
           preparing ||
           input.storeId !== selection?.storeId ||
           input.sessionId !== selection.session.id ||
-          displayMessages.some(
-            (message) =>
-              message.role === 'user' &&
-              (message.humanInput?.publicCommandId === id || message.originCommandId === id),
-          )
+          displayMessages.some((message) => savedNativeInput(message, id, input, selection))
         )
           return [];
         const metadata = state?.inputSubmissions.find(
@@ -2091,9 +2122,11 @@ function NativeDesktopContent({
                 ? 'unknown'
                 : 'sending'
           : input.phase;
+        const turnId = nativeInputTurnId(id, input, selection);
         return [
           {
             id,
+            ...(turnId ? { turnId } : {}),
             role: 'user' as const,
             text: input.text,
             settled: phase === 'accepted',
@@ -2106,10 +2139,49 @@ function NativeDesktopContent({
   );
   const messageModels = useMemo(() => {
     const models = preparing ? [] : [...transcript.messages];
-    models.push(...liveTools.map((entry) => entry.message), ...pendingInputModels);
-    if (firstVisible && !firstSaved)
+    models.push(...liveTools.map((entry) => entry.message));
+    const pendingIds = new Set(pendingInputModels.map((input) => input.id));
+    for (const input of pendingInputModels) {
+      // Run observation can arrive before persisted user history. Keep the
+      // original input ahead of its own status, tool output and reply throughout.
+      const delivery = inputDeliveries.get(input.id)!;
+      const afterMessageId = delivery.afterMessageId;
+      const afterMessageIndex = afterMessageId
+        ? models.findIndex((message) => message.id === afterMessageId)
+        : -1;
+      const previousCommandId = delivery.afterInputCommandId;
+      const savedPredecessor = previousCommandId
+        ? displayMessages.find((message) =>
+            savedNativeInput(message, previousCommandId, delivery, selection),
+          )
+        : undefined;
+      const afterInputIndex = previousCommandId
+        ? models.findIndex(
+            (message) => message.id === previousCommandId || message.id === savedPredecessor?.id,
+          )
+        : -1;
+      const afterIndex = Math.max(afterMessageIndex, afterInputIndex);
+      const index = input.turnId
+        ? models.findIndex(
+            (message, index) =>
+              index > afterIndex && message.turnId === input.turnId && !pendingIds.has(message.id),
+          )
+        : -1;
+      if (index < 0) models.push(input);
+      else models.splice(index, 0, input);
+    }
+    if (firstVisible && !firstSaved) {
+      const turnId = nativeInputTurnId(
+        firstSubmission.commandId,
+        {
+          storeId: firstSubmission.creation.expectedStoreId,
+          sessionId: firstSubmission.creation.sessionId,
+        },
+        selection,
+      );
       models.unshift({
         id: firstSubmission.commandId,
+        ...(turnId ? { turnId } : {}),
         role: 'user',
         text: firstSubmission.text,
         settled: firstSubmission.result?.phase === 'accepted',
@@ -2123,15 +2195,19 @@ function NativeDesktopContent({
                 ? 'unknown'
                 : 'sending',
       });
+    }
     return groupNativeToolMessages(models);
   }, [
     preparing,
     transcript.messages,
     liveTools,
     pendingInputModels,
+    inputDeliveries,
+    displayMessages,
     firstVisible,
     firstSaved,
     firstSubmission,
+    selection,
   ]);
   const messagesById = useMemo(
     () => new Map(displayMessages.map((message) => [message.id, message])),
@@ -3049,10 +3125,10 @@ function NativeDesktopContent({
       const status =
         !live || executionUnconfirmed
           ? undefined
-          : selection?.viewLoading || selection?.permissionUnavailable
-            ? '上次确认状态'
-            : live.execution.cancelRequestedAt !== null
-              ? '已请求停止，等待执行结果。'
+          : live.execution.cancelRequestedAt !== null
+            ? '已请求停止，等待执行结果。'
+            : diagnostics && (selection?.viewLoading || selection?.permissionUnavailable)
+              ? '上次确认状态'
               : undefined;
       return status ? (
         <p key={model.id} role="status">

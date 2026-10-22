@@ -18,6 +18,7 @@ import {
   CollapsibleTrigger,
 } from './components/ui/collapsible';
 import { Marker, MarkerContent } from './components/ui/marker';
+import { useDesktopDiagnostics } from './diagnostics';
 import { MessageContent } from './MessageContent';
 import { MessageCopyButton } from './MessageCopyButton';
 import { pruneReadingState } from './reading-state';
@@ -377,6 +378,7 @@ export function Conversation({
   renderToolActivity?: (messages: readonly Message[], state: ToolActivityState) => ReactNode;
 }) {
   const readingActivity = useConversationActivity();
+  const diagnostics = useDesktopDiagnostics();
   const previousResume = useRef(readingActivity.resume);
   const viewport = useRef<HTMLDivElement>(null);
   const content = useRef<HTMLDivElement>(null);
@@ -888,9 +890,9 @@ export function Conversation({
         ? '正在思考…'
         : '正在回复…';
     const label =
-      !terminalStatus && activity?.executionUnconfirmed && isOngoingTurn(activity)
+      diagnostics && !terminalStatus && activity?.executionUnconfirmed && isOngoingTurn(activity)
         ? '执行状态待核实'
-        : activity?.unavailable
+        : diagnostics && !terminalStatus && activity?.unavailable
           ? '上次确认状态'
           : failed
             ? '本轮失败'

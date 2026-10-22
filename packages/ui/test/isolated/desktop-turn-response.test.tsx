@@ -4,6 +4,7 @@ import { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { Conversation } from '../../src/desktop/Conversation';
+import { DesktopDiagnosticsProvider } from '../../src/desktop/diagnostics';
 import type { Message, TurnActivity } from '../../src/desktop/types';
 
 const activeStatuses = ['queued', 'running', 'waiting', 'cancelling', 'recovery_required'] as const;
@@ -39,10 +40,13 @@ function inspect(
   messages: Message[],
   turnActivity: TurnActivity | undefined,
   run: (document: Document) => void,
+  diagnostics = false,
 ) {
   const dom = new JSDOM(
     renderToStaticMarkup(
-      <Conversation {...props} messages={messages} turnActivity={turnActivity} />,
+      <DesktopDiagnosticsProvider value={diagnostics}>
+        <Conversation {...props} messages={messages} turnActivity={turnActivity} />
+      </DesktopDiagnosticsProvider>,
     ),
   );
   try {
@@ -70,7 +74,7 @@ for (const status of activeStatuses)
       for (const messages of [[], [user], [user, tool], [assistant('model', true), tool]])
         inspect(messages, { turnId: 'run', status, unavailable }, (document) => {
           expectBottomResponse(document);
-          if (unavailable) expect(document.body.textContent).toContain('上次确认状态');
+          expect(document.body.textContent).not.toContain('上次确认状态');
         });
     });
 
@@ -243,9 +247,7 @@ test('unconfirmed execution hides live response and busy state while a held obse
   for (const status of activeStatuses) {
     inspect(messages, { turnId: 'run', status, executionUnconfirmed: true }, (document) => {
       expect(document.querySelectorAll('.response-status')).toHaveLength(0);
-      expect(document.querySelector('.agent-turn-status-label')?.textContent).toBe(
-        '执行状态待核实',
-      );
+      expect(document.body.textContent).not.toContain('执行状态待核实');
       expect(document.querySelector('[aria-label="会话消息"]')?.getAttribute('aria-busy')).toBe(
         'false',
       );
@@ -267,6 +269,41 @@ test('unconfirmed execution hides live response and busy state while a held obse
       },
     );
   expect(messages[1]?.settled).toBe(false);
+});
+
+test('observation and execution warnings require explicit diagnostics while committed terminal facts remain visible', () => {
+  const messages = [user, assistant('unfinished')];
+  for (const [activity, label] of [
+    [{ turnId: 'run', status: 'running', unavailable: true }, '上次确认状态'],
+    [{ turnId: 'run', status: 'running', executionUnconfirmed: true }, '执行状态待核实'],
+  ] as [TurnActivity, string][]) {
+    inspect(messages, activity, (document) =>
+      expect(document.body.textContent).not.toContain(label),
+    );
+    inspect(
+      messages,
+      activity,
+      (document) => expect(document.body.textContent).toContain(label),
+      true,
+    );
+  }
+  for (const [status, label] of [
+    ['failed', '本轮失败'],
+    ['cancelled', '已停止'],
+    ['aborted', '已中断'],
+  ] as const)
+    for (const diagnostics of [false, true])
+      inspect(
+        [assistant('original', true), terminal(status)],
+        { turnId: 'run', status: 'running', unavailable: true, executionUnconfirmed: true },
+        (document) => {
+          expect(document.body.textContent).toContain(label);
+          expect(document.body.textContent).not.toContain('上次确认状态');
+          expect(document.body.textContent).not.toContain('执行状态待核实');
+          expect(document.querySelector('.response-status')).toBeNull();
+        },
+        diagnostics,
+      );
 });
 
 test('a committed terminal wins over a stale active unconfirmed Turn observation', () => {

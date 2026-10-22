@@ -1,5 +1,10 @@
 import type { Execution, Message } from '@kite-ai/client';
-import { type Message as DesktopMessage, ToolActivity, ToolRow } from '@kite-ai/ui/desktop';
+import {
+  type Message as DesktopMessage,
+  ToolActivity,
+  ToolRow,
+  useDesktopDiagnostics,
+} from '@kite-ai/ui/desktop';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { NativeBridge, NativeSelection } from './native-bridge';
 import type {
@@ -290,13 +295,14 @@ export function NativeLiveToolMessage({
   execution: NativeToolExecution;
   unavailable: boolean;
 }) {
+  const diagnostics = useDesktopDiagnostics();
   return (
     <>
       <ToolRow message={message} />
-      {unavailable ? (
-        <p role="status">上次确认状态</p>
-      ) : execution.cancelRequestedAt !== null ? (
+      {!message.executionUnconfirmed && execution.cancelRequestedAt !== null ? (
         <p role="status">已请求停止，等待执行结果。</p>
+      ) : unavailable && diagnostics ? (
+        <p role="status">上次确认状态</p>
       ) : null}
     </>
   );

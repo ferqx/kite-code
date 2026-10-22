@@ -25,6 +25,7 @@ import {
   TraceLine,
   TraceTitle,
 } from './components/ui/trace';
+import { useDesktopDiagnostics } from './diagnostics';
 import { FileDiff } from './FileChanges';
 import { statusLabel } from './status';
 import type { Message } from './types';
@@ -330,8 +331,9 @@ function createdChildTask(message: Message): boolean {
   }
 }
 
-function executionLabel(message: Message) {
-  if (executionUnconfirmed(message)) return '执行状态待核实';
+function executionLabel(message: Message, diagnostics: boolean) {
+  if (executionUnconfirmed(message)) return diagnostics ? '执行状态待核实' : '';
+  if (message.status === undefined && !diagnostics) return '';
   if (message.status === 'not_executed')
     return message.decisionRefresh === 'context_refresh_required'
       ? '上下文已更新，此次未执行'
@@ -367,6 +369,7 @@ function traceStatus(message: Message): 'running' | 'error' | 'pending' | undefi
 }
 
 function ShellOutput({ message }: { message: Message }) {
+  const diagnostics = useDesktopDiagnostics();
   const viewport = useRef<HTMLPreElement>(null);
   const follow = useRef(true);
   const [following, setFollowing] = useState(true);
@@ -413,7 +416,8 @@ function ShellOutput({ message }: { message: Message }) {
           setFollowing(follow.current);
         }}
       >
-        {output || (executionUnconfirmed(message) ? '执行状态待核实' : '等待输出…')}
+        {output ||
+          (executionUnconfirmed(message) ? (diagnostics ? '执行状态待核实' : '') : '等待输出…')}
         {streams &&
         ['cancelled', 'failed', 'rejected'].includes(message.status ?? '') &&
         message.text &&
@@ -423,7 +427,7 @@ function ShellOutput({ message }: { message: Message }) {
           : ''}
       </CodeBlockContent>
       <span className="shell-result" role="status">
-        {executionLabel(message)}
+        {executionLabel(message, diagnostics)}
         {result?.exitCode !== undefined ? ` · 退出码 ${result.exitCode}` : ''}
         {truncated ? ' · 输出已截断' : ''}
         {result?.status === 'exhausted' ? ' · 输出已达到工具限制' : ''}
@@ -454,10 +458,11 @@ export function ToolRow({
   openFile?: (path: string) => void;
   showReadFailure?: boolean;
 }) {
+  const diagnostics = useDesktopDiagnostics();
   const target = toolTarget(message);
   const file = ['read_file', 'edit_file', 'write_file'].includes(message.toolName ?? '');
   const approval = approvalLabel(message);
-  const status = executionLabel(message);
+  const status = executionLabel(message, diagnostics);
   return (
     <TraceLine
       asChild
@@ -544,6 +549,7 @@ export function ToolActivity({
   /** The host has an original record but has not verified its execution status. */
   unverified?: boolean;
 }) {
+  const diagnostics = useDesktopDiagnostics();
   const message = messages[0]!;
   const messageOpenFile = openFileForMessage ? openFileForMessage(message) : openFile;
   let ask = message.ask;
@@ -639,12 +645,14 @@ export function ToolActivity({
           ? '已取消回答'
           : '已取消'
       : grouped
-        ? messages.some(executionUnconfirmed)
+        ? diagnostics && messages.some(executionUnconfirmed)
           ? '执行状态待核实'
           : undefined
         : unverified && message.status === undefined
-          ? '状态待核对'
-          : executionLabel(message);
+          ? diagnostics
+            ? '状态待核对'
+            : undefined
+          : executionLabel(message, diagnostics);
   const heading = (
     <>
       <TraceIcon className="tool-activity-marker-icon">

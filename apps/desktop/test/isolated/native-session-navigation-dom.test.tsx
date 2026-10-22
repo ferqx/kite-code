@@ -1013,7 +1013,7 @@ test('ordinary history and View refreshes retain reply status while actual read 
     expect(f.host.querySelector('.response-status')).toBe(status);
     expect(status.textContent).toBe('正在回复…');
     expect(status.querySelector('.shimmer')).toBe(label);
-    expect(f.host.querySelector('.agent-turn-status-label')?.textContent).toBe('上次确认状态');
+    expect(f.host.querySelector('.agent-turn-status-label')?.textContent).not.toBe('上次确认状态');
     expect(f.host.querySelector('[aria-label="当前会话后台状态"]') === null).toBe(true);
     expect(f.host.querySelector('[data-permission-trigger]')).toBeNull();
     await f.unavailable(false);
@@ -1023,7 +1023,7 @@ test('ordinary history and View refreshes retain reply status while actual read 
     expect(f.host.querySelector('.response-status')).toBe(status);
     expect(status.textContent).toBe('正在回复…');
     expect(status.querySelector('.shimmer')).toBe(label);
-    expect(f.host.querySelector('.agent-turn-status-label')?.textContent).toBe('上次确认状态');
+    expect(f.host.querySelector('.agent-turn-status-label')?.textContent).not.toBe('上次确认状态');
     expect(f.host.textContent).not.toContain('历史尚未完整校准');
     expect(f.host.textContent).not.toContain('重新加载会话');
     f.failParent(false);
@@ -1494,6 +1494,60 @@ test('explicit child close wins over a directory publication with a queued autom
   }
 });
 
+test('Native live tool observation failures stay silent outside explicit diagnostics', async () => {
+  for (const diagnostics of [false, true]) {
+    const f = fixture(true, false, '');
+    f.runningParent();
+    const source = backgroundItem(1, true).execution;
+    f.executions([
+      {
+        ...source,
+        id: 'live-write',
+        kind: 'tool',
+        runId: 'parent-run',
+        definitionId: 'files.write',
+        definitionVersion: '2',
+        status: 'running',
+        result: null,
+        cancelRequestedAt: null,
+      },
+    ]);
+    try {
+      await f.render(diagnostics);
+      await f.click('Original');
+      expect(f.host.querySelector('.tool-activity')).not.toBeNull();
+      await f.refreshing(true);
+      const toolObservationNotices = () =>
+        Array.from(f.host.querySelectorAll('.agent-turn p[role="status"]')).filter(
+          (node) => node.textContent === '上次确认状态',
+        );
+      expect(toolObservationNotices()).toHaveLength(diagnostics ? 1 : 0);
+      f.executions([
+        {
+          ...source,
+          id: 'live-write',
+          kind: 'tool',
+          runId: 'parent-run',
+          definitionId: 'files.write',
+          definitionVersion: '2',
+          status: 'running',
+          result: null,
+          cancelRequestedAt: 1,
+        },
+      ]);
+      await f.refreshing(true);
+      expect(f.host.textContent).toContain('已请求停止，等待执行结果。');
+      expect(toolObservationNotices()).toHaveLength(0);
+      await f.refreshing(false);
+      expect(toolObservationNotices()).toHaveLength(0);
+      await f.observeExecutionOwner('unheld');
+      expect(f.host.textContent).not.toContain('已请求停止，等待执行结果。');
+    } finally {
+      await f.close();
+    }
+  }
+});
+
 test('NativeDesktop marks an unowned active Run unverified without changing durable Run facts or issuing mutations', async () => {
   for (const waiting of [false, true]) {
     const f = fixture(true, false, '');
@@ -1513,7 +1567,9 @@ test('NativeDesktop marks an unowned active Run unverified without changing dura
       expect(sidebarSpinner()).toBeNull();
       expect(f.host.querySelector('.response-status') === null).toBe(true);
       expect(f.host.querySelector('button[aria-label="停止任务"]') === null).toBe(true);
-      expect(f.host.querySelector('.agent-turn-status-label')?.textContent).toBe('执行状态待核实');
+      expect(f.host.querySelector('.agent-turn-status-label')?.textContent).not.toBe(
+        '执行状态待核实',
+      );
       expect(f.host.textContent).not.toContain('正在等待子 Agent 结果');
       expect(f.observedRun()).toEqual(originalRun);
       expect(f.observedRun()?.isActive).toBe(true);
@@ -1538,13 +1594,17 @@ test('NativeDesktop marks an unowned active Run unverified without changing dura
       expect(sidebarSpinner()).toBeNull();
       expect(f.host.querySelector('.response-status') === null).toBe(true);
       expect(f.host.querySelector('button[aria-label="停止任务"]') === null).toBe(true);
-      expect(f.host.querySelector('.agent-turn-status-label')?.textContent).toBe('执行状态待核实');
+      expect(f.host.querySelector('.agent-turn-status-label')?.textContent).not.toBe(
+        '执行状态待核实',
+      );
 
       await f.observeExecutionOwner('unheld', true);
       expect(warning()).toBeNull();
       expect(f.host.querySelector('.response-status')).toBeNull();
       expect(f.host.querySelector('button[aria-label="停止任务"]')).toBeNull();
-      expect(f.host.querySelector('.agent-turn-status-label')?.textContent).toBe('执行状态待核实');
+      expect(f.host.querySelector('.agent-turn-status-label')?.textContent).not.toBe(
+        '执行状态待核实',
+      );
       expect(sidebarSpinner()).toBeNull();
       expect(f.host.querySelector('button.session-row')?.getAttribute('aria-description')).toBe(
         '上次确认状态',
@@ -1644,7 +1704,7 @@ test('Native reconciles an unowned parent and its child detail without hiding sa
       expect(f.host.querySelectorAll('.response-status')).toHaveLength(0);
       expect(child().querySelectorAll('.tool-activity .shimmer')).toHaveLength(0);
       expect(child().textContent).toContain('Saved child progress');
-      expect(child().textContent).toContain('执行状态待核实');
+      expect(child().textContent).not.toContain('执行状态待核实');
       expect(child().textContent).not.toContain('等待执行');
       expect(f.host.querySelector('.background-execution-status')?.textContent).toBe(
         '执行状态待核实',
