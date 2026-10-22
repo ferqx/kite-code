@@ -52,6 +52,35 @@ async function launch() {
   page.setDefaultTimeout(20000);
   return page;
 }
+async function assertOrder(page: import('playwright').Page, inputs: number) {
+  await until(
+    async () =>
+      (await page.getByText(`INTERPRETATION ${inputs} ACCEPTED`, { exact: true }).count()) === 1 &&
+      (await page.getByText('HUMAN INPUT BUSINESS FINAL', { exact: true }).count()) === inputs &&
+      (await page.locator('.response-status').count()) === 0,
+  );
+  const order = await page.locator('.message.user,.message.assistant').evaluateAll((messages) =>
+    messages.map((message) => ({
+      role: message.classList.contains('user') ? 'user' : 'assistant',
+      text: message.textContent ?? '',
+    })),
+  );
+  assert.equal(
+    order.length,
+    inputs * 3,
+    'each real input retains its interpretation and business replies',
+  );
+  for (let index = 0; index < inputs; index++) {
+    const offset = index * 3;
+    assert.equal(order[offset]!.role, 'user', 'user message precedes its exact interpretation');
+    assert.ok(order[offset]!.text.includes('HUMAN INPUT ELECTRON'));
+    assert.equal(order[offset + 1]!.role, 'assistant');
+    assert.ok(order[offset + 1]!.text.includes(`INTERPRETATION ${index + 1} ACCEPTED`));
+    assert.equal(order[offset + 2]!.role, 'assistant');
+    assert.ok(order[offset + 2]!.text.includes('HUMAN INPUT BUSINESS FINAL'));
+  }
+  return order;
+}
 mkdirSync(evidence!, { recursive: true });
 try {
   let page = await launch();
@@ -81,6 +110,7 @@ try {
       (await page.locator('.response-status').count()) === 0,
   );
   assert.ok((await page.locator('.message.user').innerText()).includes('HUMAN INPUT ELECTRON'));
+  const firstOrder = await assertOrder(page, 1);
   assert.equal((await page.locator('body').innerText()).includes('input_command_id'), false);
   await page.screenshot({ path: join(evidence!, '01-first-input.png') });
   const first = await facts();
@@ -91,6 +121,8 @@ try {
   page = await launch();
   await page.locator('button.session-row').filter({ hasNotText: 'Seed session' }).click();
   await until(async () => (await page.locator('.message.user').count()) === 1);
+  const coldOrder = await assertOrder(page, 1);
+  assert.deepEqual(coldOrder, firstOrder, 'cold history preserves the same causal message order');
   assert.equal((await page.locator('body').innerText()).includes('input_command_id'), false);
   assert.deepEqual(await facts(), first, 'cold reading does not create another input or Model');
   await page.screenshot({ path: join(evidence!, '02-cold-input.png') });
@@ -115,6 +147,7 @@ try {
   assert.equal(new Set(final.rawIds).size, 2);
   assert.equal(new Set(final.publicIds).size, 2);
   assert.equal((await page.locator('body').innerText()).includes('input_command_id'), false);
+  const finalOrder = await assertOrder(page, 2);
   await page.screenshot({ path: join(evidence!, '03-distinct-identical-inputs.png') });
   const pid = app!.process().pid!;
   const descendants = String(execFileSync('/bin/ps', ['-axo', 'pid=,ppid=']))
@@ -128,7 +161,16 @@ try {
   writeFileSync(
     join(evidence!, 'facts.json'),
     JSON.stringify(
-      { first, final, sessionId, normalExit: true, ownedChildrenExited: true },
+      {
+        first,
+        final,
+        sessionId,
+        firstOrder,
+        coldOrder,
+        finalOrder,
+        normalExit: true,
+        ownedChildrenExited: true,
+      },
       null,
       2,
     ),

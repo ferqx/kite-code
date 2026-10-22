@@ -10,6 +10,7 @@ import type {
   NativeRequest,
   NativeState,
 } from '../../src/native-bridge';
+import { desktopConversationMessages } from '../../src/native-presentation';
 import { prepareDesktopDom, promptValue, setPromptText } from '../native-page-dom.fixture';
 
 const bootstrap = new JSDOM('<div></div>', { pretendToBeVisual: true });
@@ -2216,6 +2217,104 @@ test('a public first input hands its optimistic bubble to processing then busine
     expect(cold.calls.some((call) => ['conversation.send', 'submit'].includes(call.method))).toBe(
       false,
     );
+  } finally {
+    await cold.close();
+  }
+});
+
+test('one human input keeps its original position before interpretation and business replies, including identical independent inputs and a cold mount', async () => {
+  const text = 'Identical original input with complete attachment';
+  const rows: Message[] = [];
+  const expected: Message[] = [];
+  for (const [index, tag] of ['first', 'second'].entries()) {
+    const base = index * 4;
+    const humanInput = { inputCommandId: `raw-${tag}`, publicCommandId: `public-${tag}` };
+    const processing: Message = {
+      id: `processing-${tag}`,
+      seq: String(base + 1),
+      sessionId: 'a',
+      runId: null,
+      role: 'user',
+      status: 'complete',
+      content: text,
+      humanInput: { ...humanInput, duplicateOfMessageId: `business-${tag}` },
+    };
+    const interpretation: Message = {
+      id: `interpretation-${tag}`,
+      seq: String(base + 2),
+      sessionId: 'a',
+      runId: null,
+      role: 'assistant',
+      status: 'complete',
+      content: `Interpretation reply for ${tag} input`,
+    };
+    const business: Message = {
+      ...processing,
+      id: `business-${tag}`,
+      seq: String(base + 3),
+      humanInput,
+      sourceIds: [`business-command-${tag}`],
+      originCommandId: `business-command-${tag}`,
+      inputKind: 'input.follow_up',
+      files: [{ name: `${tag}-complete.txt`, uri: `file:///workspace/${tag}-complete.txt` }],
+    };
+    const response: Message = {
+      ...interpretation,
+      id: `reply-${tag}`,
+      seq: String(base + 4),
+      content: `Business reply for ${tag} input`,
+    };
+    rows.push(processing, interpretation, business, response);
+    expected.push(business, interpretation, response);
+  }
+  const projected = desktopConversationMessages(rows);
+  // The complete actual business Message occupies the earlier display position;
+  // its immutable identity, sequence, provenance and attachment references survive.
+  expect(projected).toEqual(expected);
+  expect(projected[0]).toBe(rows[2]);
+  expect(projected[0]?.files).toEqual([
+    { name: 'first-complete.txt', uri: 'file:///workspace/first-complete.txt' },
+  ]);
+  expect(projected[3]).toBe(rows[6]);
+  const expectOrder = (host: Document) => {
+    const visible = [...host.querySelectorAll('.message.user, .message.assistant')];
+    expect(visible).toHaveLength(6);
+    expect(
+      visible.map((message) => (message.classList.contains('user') ? 'user' : 'assistant')),
+    ).toEqual(['user', 'assistant', 'assistant', 'user', 'assistant', 'assistant']);
+    for (const [index, tag] of ['first', 'second'].entries()) {
+      const start = index * 3;
+      expect(visible[start]?.textContent).toContain(text);
+      expect(visible[start + 1]?.textContent).toContain(`Interpretation reply for ${tag} input`);
+      expect(visible[start + 2]?.textContent).toContain(`Business reply for ${tag} input`);
+    }
+  };
+  const f = fixture(true, true, 'accept_edits');
+  let snapshot: ReturnType<typeof f.snapshot> | undefined;
+  try {
+    await act(async () => f.root.render(<NativeDesktop />));
+    await f.click('Original A');
+    await f.publishMessages(rows.slice(0, 2), []);
+    expect(f.host.querySelectorAll('.message.user')).toHaveLength(1);
+    expect(f.host.querySelectorAll('.message.user, .message.assistant')[0]?.textContent).toContain(
+      text,
+    );
+    await f.publishMessages(rows, []);
+    expectOrder(f.host);
+    snapshot = f.snapshot();
+    expect(snapshot.messages).toEqual(rows);
+  } finally {
+    await f.close();
+  }
+  const cold = fixture(true, true, 'accept_edits', { messages: snapshot!.messages });
+  try {
+    await act(async () => cold.root.render(<NativeDesktop />));
+    await cold.click('Original A');
+    expectOrder(cold.host);
+    expect(cold.calls.some((call) => ['conversation.send', 'submit'].includes(call.method))).toBe(
+      false,
+    );
+    expect(cold.snapshot().messages).toEqual(rows);
   } finally {
     await cold.close();
   }

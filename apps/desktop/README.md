@@ -38,6 +38,8 @@
 
 普通对话通过 [输入呈现投影](src/native-presentation.ts)消费公共 `Message.humanInput`，只在本次读取同时具有准确替代 Message、同 Session／原输入／公开提交身份时合并内部处理副本；原读取缺少替代消息时保留原文。首次发送的占位沿已核实的 `publicCommandId` 交接给保存后的消息，不要求公开 ID 等于处理或业务 Run 的 origin。不同原输入的相同正文分别保留，不按文本或命令名前缀去重。
 
+完整业务 Message 在较早的原输入位置展示，其稍后保存的位置不再重复展示，确保中间产生的解释答复及后续业务答复均在该用户消息之后。投影保业务对象的准确 ID、原 `seq`、Run、正文和附件，不改写 SQL 顺序或把附件配到处理副本；热刷新与冷重开沿同一规则。消息计数之外，[页面](test/isolated/native-new-conversation-dom.test.tsx)与[真实 Electron](test/isolated/native-human-input-electron.test.ts)还核逐项 DOM 顺序，保留真实助手答复以验证因果关系。
+
 SQL 原历史及分页不删除、不重排；出处证明归 [输入 owner](../../packages/agent/src/storage/sqlite/inputs/README.md)。[普通页面回归](test/isolated/native-new-conversation-dom.test.tsx)覆盖占位到处理、业务及冷挂载的唯一气泡、独立同文、未决澄清和缺少替代消息的读取。
 
 Fork 历史的替代关联只映射本分支已封存的两条消息，桌面另核同源 Store／Session；源会话后来新增业务消息不能隐藏旧分支中仍独立保留的原输入。[真实普通 Electron 回归](test/isolated/native-human-input-electron.test.ts)通过实际 Main／Service／SQLite、无工具解释与业务模型，核首次一次气泡、正常退出冷重开零新提交，以及再次提交同文仍有两条；原 SQL 同来源记录保留。

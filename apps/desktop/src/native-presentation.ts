@@ -94,19 +94,21 @@ export function desktopDirectory(
   return workspaces;
 }
 
-/** Collapse only the exact processing copy whose applied business message is in this reading. */
+/** Keep one complete business message at the original input's position in this reading. */
 export function desktopConversationMessages(messages: readonly Message[]): Message[] {
   const byId = new Map(messages.map((message) => [message.id, message]));
-  return messages.filter((message) => {
+  const replacements = new Map<string, Message>();
+  const relocated = new Set<string>();
+  for (const message of messages) {
     const input = message.humanInput;
     if (
       message.role !== 'user' ||
       !input?.duplicateOfMessageId ||
       input.duplicateOfMessageId === message.id
     )
-      return true;
+      continue;
     const replacement = byId.get(input.duplicateOfMessageId);
-    return !(
+    if (
       replacement?.role === 'user' &&
       replacement.sessionId === message.sessionId &&
       replacement.originMessage?.storeId === message.originMessage?.storeId &&
@@ -114,7 +116,20 @@ export function desktopConversationMessages(messages: readonly Message[]): Messa
       replacement.humanInput?.inputCommandId === input.inputCommandId &&
       replacement.humanInput.publicCommandId === input.publicCommandId &&
       !replacement.humanInput.duplicateOfMessageId
-    );
+    ) {
+      replacements.set(message.id, replacement);
+      relocated.add(replacement.id);
+    }
+  }
+  const emitted = new Set<string>();
+  return messages.flatMap((message) => {
+    const replacement = replacements.get(message.id);
+    if (!replacement) return relocated.has(message.id) ? [] : [message];
+    if (emitted.has(replacement.id)) return [];
+    emitted.add(replacement.id);
+    // Preserve the business identity, Run, seq and attachments. Only its display
+    // position moves before the interpretation reply caused by this same input.
+    return [replacement];
   });
 }
 

@@ -104,7 +104,7 @@ test.skipIf(process.platform !== 'darwin')(
               purpose: 'work',
               target_root_work_command_id: null,
               selection_effect: 'select_work',
-              answer: null,
+              answer: `INTERPRETATION ${processing + 1} ACCEPTED`,
               clarification: null,
               clarifies_input_id: null,
             });
