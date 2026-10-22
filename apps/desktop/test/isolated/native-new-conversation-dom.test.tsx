@@ -8,6 +8,7 @@ import type {
   NativeConversationResult,
   NativeDraft,
   NativeRequest,
+  NativeResult,
   NativeState,
 } from '../../src/native-bridge';
 import { desktopConversationMessages } from '../../src/native-presentation';
@@ -2549,6 +2550,171 @@ test('first submission keeps one readable pending message through delayed select
     expect(f.calls.filter((call) => call.method === 'conversation.send')).toHaveLength(1);
   } finally {
     await f.close();
+  }
+});
+
+test('a saved first-created conversation waits for fresh grouping when its inactive caches are invalidated', async () => {
+  const f = fixture(true);
+  const bridge = f.dom.window.kiteNative! as NativeBridge;
+  const request = bridge.request;
+  let historyEpoch = 0;
+  let coldReturn = false;
+  const metadata: { reader: 'runs' | 'tools'; release: () => void }[] = [];
+  bridge.request = async (input) => {
+    if (input.method === 'toolMessages.runs' || input.method === 'toolMessages.list') {
+      f.calls.push(input);
+      const scope = {
+        generation: input.generation,
+        storeId: 'store',
+        sessionId: f.selected(),
+        workspaceId: 'w',
+        viewSelection: input.viewSelection,
+        historyEpoch: input.historyEpoch,
+      };
+      const result =
+        input.method === 'toolMessages.runs'
+          ? {
+              kind: 'toolMessages.runs' as const,
+              readId: input.readId,
+              scope,
+              runs: f
+                .snapshot()
+                .runs.filter((run) => run.sessionId === scope.sessionId)
+                .map((run) => ({
+                  id: run.id,
+                  originStoreId: 'store',
+                  sessionId: run.sessionId,
+                  status: 'completed' as const,
+                  isActive: false,
+                  createdAt: 1000,
+                  finishedAt: 2000,
+                  reason: null,
+                })),
+            }
+          : {
+              kind: 'toolMessages.page' as const,
+              readId: input.readId,
+              scope,
+              entries: input.messageIds.map((messageId) => ({
+                messageId,
+                executionId: 'created-tool-execution',
+                definitionId: 'task.spawn',
+                definitionVersion: '1',
+                status: 'succeeded' as const,
+                resultRevision: '1',
+              })),
+            };
+      if (!coldReturn) return result;
+      return new Promise<NativeResult>((resolve) =>
+        metadata.push({
+          reader: input.method === 'toolMessages.runs' ? 'runs' : 'tools',
+          release: () => resolve(result),
+        }),
+      );
+    }
+    const result = await request(input);
+    if (
+      (input.method === 'attach' || input.method === 'state' || input.method === 'select') &&
+      result &&
+      'generation' in result
+    )
+      return {
+        ...result,
+        historyEpoch,
+        ...(result.selection
+          ? { selection: { ...result.selection, runs: coldReturn ? [] : result.selection.runs } }
+          : {}),
+      };
+    return result;
+  };
+  try {
+    await act(async () => f.root.render(<NativeDesktop />));
+    await f.click('在 Workspace 中新建对话');
+    await f.edit('Created first input remains immediate');
+    await f.click('发送首条消息');
+    expect(f.host.querySelector('.message.user')?.textContent).toContain(
+      'Created first input remains immediate',
+    );
+    const send = await f.resolve('accepted');
+    const saved = f.snapshot();
+    const original = saved.messages[0]!;
+    await f.publishMessages(
+      [
+        original,
+        {
+          ...original,
+          id: 'created-tool',
+          seq: '2',
+          role: 'tool',
+          sourceIds: ['created-tool-execution'],
+          content: 'Saved child tool receipt',
+        },
+        {
+          ...original,
+          id: 'created-final',
+          seq: '3',
+          role: 'assistant',
+          sourceIds: [],
+          content: 'Saved final reply after creation',
+        },
+      ],
+      saved.runs,
+    );
+    await f.until(() => !!f.host.querySelector('.agent-turn-final'));
+    expect(f.host.querySelectorAll('.message.user')).toHaveLength(1);
+    await f.click('Other B');
+    coldReturn = true;
+    historyEpoch++;
+    await f.refreshFacts();
+    expect(f.selected()).toBe('b');
+    f.holdHistory();
+    await act(async () => {
+      const row = f.host.querySelector<HTMLButtonElement>('.session-row[aria-label="新对话"]');
+      expect(row).not.toBeNull();
+      row!.click();
+    });
+    expect(f.selected()).toBe(send.creation.sessionId);
+    // A saved first input must never return as an optimistic placeholder while
+    // its uncached persisted history is still being read.
+    expect(f.host.querySelector('.message') === null).toBe(true);
+    expect(f.host.querySelector('.conversation-loading')).not.toBeNull();
+    await f.releaseHistory();
+    await f.until(
+      () =>
+        metadata.some((entry) => entry.reader === 'runs') &&
+        metadata.some((entry) => entry.reader === 'tools'),
+    );
+    expect(f.selected()).toBe(send.creation.sessionId);
+    expect(f.host.querySelector('.conversation-loading')).not.toBeNull();
+    expect(f.host.querySelector('.message') === null).toBe(true);
+    expect(f.host.querySelector('.agent-turn')).toBeNull();
+    await act(async () =>
+      metadata
+        .filter((entry) => entry.reader === 'runs')
+        .forEach((entry) => {
+          entry.release();
+        }),
+    );
+    expect(f.host.querySelector('.message') === null).toBe(true);
+    expect(f.host.querySelector('.conversation-loading')).not.toBeNull();
+    await act(async () =>
+      metadata
+        .filter((entry) => entry.reader === 'tools')
+        .forEach((entry) => {
+          entry.release();
+        }),
+    );
+    await f.until(() => !!f.host.querySelector('.agent-turn-final'));
+    expect(f.host.querySelector('.conversation-loading')).toBeNull();
+    expect(f.host.querySelector('.agent-turn-final')?.textContent).toContain(
+      'Saved final reply after creation',
+    );
+    expect(f.host.querySelectorAll('.message.user')).toHaveLength(1);
+    expect(f.calls.filter((input) => input.method === 'conversation.send')).toHaveLength(1);
+  } finally {
+    await f.close();
+    await f.releaseHistory();
+    for (const entry of metadata) entry.release();
   }
 });
 

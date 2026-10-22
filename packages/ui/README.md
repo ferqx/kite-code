@@ -12,6 +12,10 @@ Composer 在原停止按钮内使用 Hugeicons `StopIcon` 的实心方块，填�
 
 [Conversation](src/desktop/Conversation.tsx)首次呈现历史时，对默认展开的活动轮次同样登记 `data-restored-expanded`，直接进入完整高度，避免首次打开重播300ms展开动画而带动正文移动。缓存恢复与冷历史共用原恢复标记，后续手动开合由 `onToggle` 清除标记并继续动画；不改变展开选择、消息顺序或滚动跟随。[轮次回归](test/desktop-reasoning-turns.test.tsx)核冷／恢复两种入口；生产组件浏览器耗时、逐帧高度及连续流式证据归 [Desktop owner](../../apps/desktop/README.md#会话消息渲染验证)。
 
+宿主可通过 `initialPresentationPending` 延迟尚未呈现的 Conversation 首次内容提交，让已保存消息和结构事实同时进入原轮次布局；UI不读取或推断轮次／工具事实。第一次可读 layout commit 后该标记不再遮住正文，普通流式更新、缓存恢复和阅读滚动继续原行为；换 readingKey 或DOM淘汰后重新挂载才重新等待。Native的失败、缓存及首条输入豁免由 [Desktop owner](../../apps/desktop/README.md#原轮次阅读聚合与问答回执)负责；[阅读滚动回归](test/isolated/desktop-conversation-scroll.test.tsx)核首次等待、后续更新、重新挂载及原滚动生命周期。
+
+[SessionPage](src/desktop/SessionPage.tsx)在 layout effect 中取得首个正宽度并直接确定环境卡占位，首次测量不启动 padding 过渡，防止已绘制正文／Composer 再横移及换行。后续实际尺寸跨阈值和用户开合仍使用原动画；Native环境卡从scope建立就保留原节点，业务内容晚到不新增占位。[侧栏回归](test/isolated/desktop-sidebar.test.tsx)核初始占位、晚填内容、窗口阈值和窄窗浮层。
+
 同一组件的 `.response-status` 沿[共享 CSS](src/desktop/style.css)正常参与轮次底部排版，为“正在回复…”保留24px行高，位于处理过程折叠区外。轮次提示的上方留白使用正文块间距；上方为展开工具时使用原混合间距，抵消工具控件自身留白。显示提示时过程区不再叠加底部 padding，收起过程或尚无正文时仍保留完整块间距。底部跟随继续由阅读内容高度驱动；浏览器回归核状态文字完整位于viewport与各级裁剪容器内。
 
 “正在回复…”与工具消息共用字号、字体及文字颜色规则，使用 `--conversation-text-size`（默认14px）和 `--muted-foreground`。思考／回复标签直接使用宿主已引入的 [shadcn shimmer utility](https://ui.shadcn.com/docs/utils/shimmer)，以行内块将流光范围限制在标签文字，使用语义前景色作为高光以跟随应用主题；通过库内置 `shimmer-spread-[16px]` 和 `shimmer-duration-1500` 将高光收窄为16px、每1.5秒扫过一次，避免默认宽光带在短状态文字上仅呈现整句轻微变色；沿库内置的减少动态效果规则恢复静态文字，不新增动画实现或依赖。读取与业务交互门禁保持。

@@ -342,9 +342,10 @@ const MessageItem = memo(function MessageItem({
 });
 
 export function Conversation({
-  messages,
-  loading,
-  turnActivity,
+  messages: incomingMessages,
+  loading: historyLoading,
+  initialPresentationPending = false,
+  turnActivity: incomingTurnActivity,
   requiredSubagentWait,
   selected,
   connected,
@@ -361,6 +362,8 @@ export function Conversation({
 }: {
   messages: readonly Message[];
   loading: boolean;
+  /** First mount waits for host-owned grouping; an already readable tree stays live. */
+  initialPresentationPending?: boolean;
   turnActivity?: TurnActivity;
   requiredSubagentWait?: boolean;
   selected: boolean;
@@ -379,6 +382,14 @@ export function Conversation({
   /** Host-adapted tool facts within the original grouping and reading state. */
   renderToolActivity?: (messages: readonly Message[], state: ToolActivityState) => ReactNode;
 }) {
+  const presented = useRef(false);
+  useLayoutEffect(() => {
+    if (!historyLoading && !initialPresentationPending) presented.current = true;
+  }, [historyLoading, initialPresentationPending]);
+  const preparing = initialPresentationPending && !presented.current;
+  const messages = preparing ? [] : incomingMessages;
+  const loading = historyLoading || preparing;
+  const turnActivity = preparing ? undefined : incomingTurnActivity;
   const readingActivity = useConversationActivity();
   const diagnostics = useDesktopDiagnostics();
   const previousResume = useRef(readingActivity.resume);

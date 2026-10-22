@@ -83,13 +83,14 @@ test('native Conversation scroll follows, restores manual reading and retires RA
   const host = dom.window.document.getElementById('root')!,
     root = createRoot(host);
   let saved: ReadingState | undefined;
-  const render = (id: number, text = 'stream text') =>
+  const render = (id: number, text = 'stream text', initialPresentationPending = false) =>
     act(async () =>
       root.render(
         <Conversation
           key={id}
           messages={[{ id: 'message', role: 'assistant', text, settled: false }]}
           loading={false}
+          initialPresentationPending={initialPresentationPending}
           selected
           connected
           saveReading={(reading) => {
@@ -99,6 +100,10 @@ test('native Conversation scroll follows, restores manual reading and retires RA
       ),
     );
   try {
+    await render(0, 'unprepared history', true);
+    expect(host.querySelectorAll('.message')).toHaveLength(0);
+    expect(!!host.querySelector('.conversation-loading')).toBe(true);
+    expect(!!host.querySelector('.welcome')).toBe(false);
     await render(0);
     const viewport = host.querySelector<HTMLDivElement>('.conversation-viewport')!;
     expect(viewport.getAttribute('role')).toBe('region');
@@ -113,6 +118,11 @@ test('native Conversation scroll follows, restores manual reading and retires RA
     });
     await render(0, 'tail 1');
     expect(viewport.scrollTop).toBe(1000);
+    const message = host.querySelector('.message');
+    await render(0, 'tail 1 while later metadata loads', true);
+    expect(host.querySelector('.message') === message).toBe(true);
+    expect(host.textContent).toContain('tail 1 while later metadata loads');
+    expect(!!host.querySelector('.conversation-loading')).toBe(false);
     const column = viewport.querySelector('.reading-column')!;
     const resize = (target: Element) => {
       for (const observer of observers)
@@ -141,6 +151,10 @@ test('native Conversation scroll follows, restores manual reading and retires RA
     expect(viewport.scrollTop).toBe(2000);
     await act(async () => root.render(null));
     expect(saved).toMatchObject({ follow: true, top: 2000 });
+    await render(1, 'another cold reading', true);
+    expect(host.querySelectorAll('.message')).toHaveLength(0);
+    expect(!!host.querySelector('.conversation-loading')).toBe(true);
+    await act(async () => root.render(null));
     for (let index = 1; index <= 100; index++) {
       await render(index);
       const node = host.querySelector<HTMLDivElement>('.conversation-viewport')!;

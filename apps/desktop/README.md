@@ -354,9 +354,13 @@ Native 的侧栏打开入口对当前父会话及同一在途选择去重，重�
 
 初始没有已选会话时，`selectionHandoff` 同样参与聊天加载判断，覆盖目标 `select` 确认和模型准备，再由 `NativeHistory` 的加载阶段接续；不能因 `selection` 尚未到达而提前发布 Conversation 空状态。[新对话 DOM 回归](test/isolated/native-new-conversation-dom.test.tsx)分别核已有正文与真实空历史，延迟选择、模型及历史读取并穿插状态刷新；完整历史到达后才呈现正文或实际空状态，原首次发送的待定消息交接仍保持。
 
-进入会话时，准确阅读身份下已保存的正文先展示；轮次、工具或文件目标信息尚未核实只影响相应条目和操作资格，不遮住整段正文。查询成功但缺少对应事实和真实查询失败分别保留准确状态、原记录及必要重试。首次展示后，同一身份的流式更新和 history epoch 校准继续保留正文；切走再回会话命中有界DOM缓存时先恢复原节点、阅读位置和展开状态，再后台完整校准。发送、停止、审批和新读取继续等待当前完整scope资格，展示缓存不恢复操作权。[首次呈现回归](test/isolated/native-history-presentation-dom.test.tsx)维护正文与元数据的独立进展、失败、缓存返回及epoch校准；[活动回执回归](test/isolated/native-tool-receipt-render-dom.test.tsx)继续验证运行中延迟工具信息的折叠原文保护。
+首次挂载未缓存历史时，Native 将历史扫描及影响分组的 Run／Tool 首次读取标为 `initialPresentationPending`，原 Conversation 在首次可读提交前保留加载状态，随后一次显示完整轮次／工具布局。已核分组展示缓存可以直接使用；文件目标、图片、大正文和用量不加入结构等待。查询成功但缺少事实正常发布原文，历史／权限／结构读取失败保留原文和原恢复，不靠猜测终态或工具类型获得布局。首次输入与待定输入沿原即时展示，不等待历史接管后的结构读取。首次提交后的同一 Conversation 不再因该标记隐藏内容，流式更新、history epoch 校准及缓存返回保留原节点、阅读位置和展开；新事实或失败恢复仍按实际状态更新。发送、停止、审批和新读取继续等待当前完整scope资格，展示缓存不恢复操作权。[首次呈现回归](test/isolated/native-history-presentation-dom.test.tsx)核两种结构到达顺序、缺失／失败、缓存返回及epoch校准；[活动回执回归](test/isolated/native-tool-receipt-render-dom.test.tsx)继续验证运行中延迟工具信息的折叠原文保护。
 
 [轮次分组展示缓存](src/native-transcript-display.ts)沿原NativeDisplayCache预算，仅在同一bridge对象、generation／Store边界及准确Session／Workspace／historyEpoch内保留已验证grouping。metadata加载期间，完整消息与已核全文回复的全部字段仍相等时才复用；正文、来源或附件变化不命中，真实历史／Run／Tool／文件读取错误或非加载期权限不可用撤销对应项。非加载且完整时才更新缓存，`turnActivity`始终取当前fresh transcript；缓存不保存读取lease或操作资格，当前viewSelection的读取门禁保持。
+
+首条输入经 `savedNativeInput` 核实保存后，仅在当前窗口记住所属 Store／commandId 已由历史接管；后续冷读暂时没有该 Message 时，不重新插入旧占位或永久豁免首次分组等待。原 `firstSubmission` 的未知结果查证、失败重试及草稿／附件处理仍保留。[首条输入回归](test/isolated/native-new-conversation-dom.test.tsx)核创建并保存、离开、history epoch 清除非当前缓存，再返回时分别延迟历史／Run／Tool的完整链。
+
+提交前 review 发现并补齐上述首创会话冷返回边界：新增用例在历史仍被阻挡时复现旧占位提前出现，修复后1项／24断言通过；同一首条输入整文件69项／1317断言通过，原延迟接管、未知查证、失败重试及草稿隔离保持。
 
 当前 View 的真实 Run 可直接用于展示；完整历史超出近200项时，[Main](electron/tool-messages.ts)只接受当前已经观察、未带 `originMessage` 的 Message ID，每批32项，经当前生成 Client GET 核准确 Run ID／Session 和前后 Store 连接。结果仅含原出处、状态与时间，按原 generation／viewSelection／history epoch 绑定；关闭和切换只释放所属 GET。当前 Store 已保存的旧 Store 终态 Run 可作为历史事实展示，保原 `originStoreId`；foreign active 不进入活动轮次或控制。Fork／Include 的封存 Message 不查询来源 Run 后来的状态，也不据此标最终回复。
 
@@ -377,6 +381,10 @@ Native 的侧栏打开入口对当前父会话及同一在途选择去重，重�
 取舍见[轮次展示决定](../../.agents/notes/implemented/architecture/2026-10-08-native-run-transcript-presentation.md)。[Main／有限 IPC](test/native-tool-messages.test.ts)、[正式 caller](test/native-caller.test.ts)和[原 Conversation DOM](test/isolated/native-transcript-dom.test.tsx)核身份、所属读取、原展开／复制及问答；原[源码外 macOS 窗口](test/isolated/native-bundle.test.ts)核首次和冷读的折叠、展开与准确最终复制，保原预算和退出断言。实际执行输入与结果归[本轮进度](../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-08原轮次阅读聚合与问答回执)，有限展示证据不代替完整恢复、其他平台或整片独立审查。
 
 ## 会话消息渲染验证
+
+[首次历史浏览器夹具](test/native-history-presentation-browser.fixture.tsx)通过实际 NativeDesktop、生产样式和隔离 bridge 分别延迟选择、历史、Run 与 Tool，并按原请求身份和32项批次返回。由[逐帧 runner](test/native-history-presentation-browser-runner.fixture.ts)核首次进入、未缓存切换及缓存返回，记录目标首个可见消息之后的节点身份、宽高、滚动、留白与加载／欢迎状态；旧性能夹具提前提供完整 View Runs，其数据不覆盖这一异步重组时序。环境卡首次宽度在共享 SessionPage 的 layout effect 确定，不启动初始占位过渡；后续窗口跨阈值和用户开合保留原动画。
+
+2026-10-23，macOS arm64／Bun1.4.2，基于 `45b8275c1` 的当前工作树（含本次修复及并行子 Agent 展示改动）：合回当前目录后，相关11个DOM／组件测试文件154项、3982断言通过，UI／Desktop类型检查、定向Biome及文档检查通过。Chrome155六组首次／未缓存切换核Run先到、Tool先到、View已齐、40轮多页历史与32项事实批次，含亮暗主题、1280／1320／1440px和减少动画；目标首次显示后连续28–30帧的消息／轮次节点、阅读区几何、滚动和Composer位置不变，缓存返回保原节点。Electron44.3.0／Chromium152独立窗口沿相同生产renderer制品复核首次与未缓存切换，各80个连续可见帧同样稳定，零页面错误；过程截图确认等待后直接进入完整分组。环境卡独立9组首屏／晚到内容与8组开合／调宽验证中，1320／1440／1600px首帧已为最终占位，原403px正文高度变化和146.5px最大横移消除，后续交互动画保留。证据分别位于本机 `.cache/native-history-presentation-fyZ0mY/` 与 `.cache/session-render-fixed-electron-C3IvWz/`；使用隔离数据，不覆盖真实Service／SQLite延迟、安装包或其他平台资格。异常读取fallback后的新事实仍按原恢复规则更新，不把正常冷开布局稳定外推为恢复时不更新分组。
 
 [Code Block／Trace 聚焦夹具](test/ai-elements-browser.fixture.tsx)使用实际 Conversation、ToolActivity、MessageContent 和生产 CSS，执行 `bun run apps/desktop/test/ai-elements-browser-runner.fixture.ts` 核亮／暗主题、1280／390px viewport、代码横向滚动、文件按钮、工具聚合与 Shell 追加／取消。同组思考／回复切换保留底部状态节点，收起过程仍可见；准确 Turn 结束后移除。输出 `.cache/ai-elements-browser-*/report.json` 及各组常规／思考状态截图，所有数据固定且诊断构建值关闭。
 

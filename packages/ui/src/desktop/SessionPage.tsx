@@ -85,6 +85,8 @@ export interface SessionPageProps {
   /** Host-confirmed current Turn; omitted when the message source has no Turn identity. */
   turnActivity?: TurnActivity;
   loading: boolean;
+  /** Cold history waits for its initial grouping without pausing an existing reading. */
+  initialPresentationPending?: boolean;
   connected: boolean;
   connectionLabel: string;
   busy?: boolean;
@@ -185,6 +187,7 @@ export function SessionPage({ messages, fileChanges, ...props }: SessionPageProp
     'default',
   );
   const [environmentFits, setEnvironmentFits] = useState(false);
+  const environmentMeasured = useRef(false);
   const [environmentAnimationKey, setEnvironmentAnimationKey] = useState<string>();
   const lastAnimationReadingKey = useRef(props.readingKey);
   const environmentAnimationTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
@@ -407,13 +410,17 @@ export function SessionPage({ messages, fileChanges, ...props }: SessionPageProp
       if (frame !== undefined) cancelAnimationFrame(frame);
     };
   }, [narrow, wideSidebarOpen]);
-  useEffect(() => {
+  useLayoutEffect(() => {
     const element = sessionViewElement;
     if (!element) return;
     const update = (width: number) => {
       if (width <= 0) return;
       const fits = width >= ENVIRONMENT_INFORMATION_MIN_WIDTH;
-      if (fits !== previousEnvironmentFits.current) startEnvironmentAnimation();
+      // The first painted layout uses its final docking space. Later width
+      // changes retain the normal transition for navigation and window resizing.
+      if (environmentMeasured.current && fits !== previousEnvironmentFits.current)
+        startEnvironmentAnimation();
+      environmentMeasured.current = true;
       setEnvironmentFits(fits);
     };
     const measure = () => update(element.getBoundingClientRect().width);
@@ -625,6 +632,7 @@ export function SessionPage({ messages, fileChanges, ...props }: SessionPageProp
       renderToolActivity={props.renderToolActivity}
       turnActivity={props.turnActivity}
       loading={props.loading}
+      initialPresentationPending={props.initialPresentationPending}
       requiredSubagentWait={props.requiredSubagentWait}
       selected={!!props.selected}
       emptyState={
