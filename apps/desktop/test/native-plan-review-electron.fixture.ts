@@ -985,6 +985,7 @@ try {
       assert.deepEqual(options, {
         type: 'warning',
         message: '仍有活动工作，或尚不能完整核实。退出会停止本应用拥有的服务。',
+        detail: '确认后立即关闭窗口，未完成的任务清理将在后台继续。',
         buttons: ['保留服务', '退出'],
         defaultId: 0,
         cancelId: 0,

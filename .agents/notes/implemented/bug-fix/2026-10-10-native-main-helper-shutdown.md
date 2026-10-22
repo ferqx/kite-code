@@ -10,7 +10,7 @@ Status: implemented
 
 ## Decision
 
-同一 NativeCaller 持有私有 NativeProcessOwner；所有 Git 串行启动和默认 editor IPC 使用该 owner。关闭 Caller 在首次 await 前停止新准入并停止仍属它的准确 ChildProcess 句柄，finally 等实际 close。Conversation 保 sending，并等待所属只读 branch probes；迟到读取仍核 closed／原 scope。Main 原关闭顺序、两秒工作检查、二十秒等待／继续等待／明确强退均保持；窗口隐藏及取消退出确认不收束 owner。
+同一 NativeCaller 持有私有 NativeProcessOwner；所有 Git 串行启动和默认 editor IPC 使用该 owner。关闭 Caller 在首次 await 前停止新准入并停止仍属它的准确 ChildProcess 句柄，finally 等实际 close。Conversation 保 sending，并等待所属只读 branch probes；迟到读取仍核 closed／原 scope。Main 原关闭顺序与两秒工作检查保持；2026-10-22 [退出决定](2026-10-22-single-confirmation-exit.md)替代二十秒等待／继续等待／明确强退界面：确认后窗口立即销毁，原 owner 在后台等实际 close。普通窗口隐藏及取消退出确认不收束 owner。
 
 原 Git 十五秒 deadline、stdout／stderr 各1 MiB、严格 UTF-8、分支身份／保护根／活动任务／脏文件守卫保持；editor 原十秒及准确当前项目普通文件、封闭 editor 枚举、原 frame 门禁保持。timeout、启动错误或输出超限保首次 failure，实际 close 才结算；kill false／throw 仍等待，不伪造清理成功或用迟到 exit0覆盖失败。直接 ChildProcess handle 自身绑定真实启动，不按数值 PID发现或清理任意进程。
 
@@ -31,4 +31,4 @@ Status: implemented
 
 默认 Git 与 editor 的无所属 spawn／提前失败路径退役，有限错误与完整用户入口保持。close 未到会进入原退出等待，不能提前释放依赖 lease；用户明确强退仍是结果待核实。真实 Node 测试沿实际 Caller 关闭核原 child close 和双 EOF，编辑器 executable 仅替换为本任务隔离 child，不操作个人应用或冒称 OS 编辑器窗口通过。原会话、文件目标与源码外完整窗口分别保原业务／冷读／双锁范围；完整阶段及平台条件仍独立满足。
 
-退出误报修复保留原两秒检查、二十秒等待、强退／异常提示和使用权释放门禁。原读取归属 DOM 的八项断言与新增退出／取消检查、原完整窗口分别验证展示和资源边界，实际红绿归[当前进度](../../../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-12native-退出期间操作未完成误报)。这些有限结果不授整个 Runtime 资源观测、RSS 或 Win/Linux 资格。
+退出误报修复保留两秒检查和使用权释放门禁；后续[退出决定](2026-10-22-single-confirmation-exit.md)明确窗口先销毁、后台清理，不追加异常提示或以二十秒强杀。原读取归属 DOM 的八项断言与新增退出／取消检查、原完整窗口分别验证展示和资源边界，历史红绿归[当前进度](../../../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-12native-退出期间操作未完成误报)。这些有限结果不授整个 Runtime 资源观测、RSS 或 Win/Linux 资格。

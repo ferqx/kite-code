@@ -133,10 +133,19 @@ let artifactAccess: { close(): void }[] = windowsHandoff ? [acquireFormalWindows
 let startupDiagnostic: ServiceStartupDiagnostic | undefined;
 let quitting = false,
   exitAllowed = false;
+let quitDecision: Promise<void> | undefined;
+let resolveQuitDecision: (() => void) | undefined;
 let developmentReload: Promise<void> | undefined;
 let switchingService = false;
+function finishQuitDecision() {
+  const resolve = resolveQuitDecision;
+  quitDecision = undefined;
+  resolveQuitDecision = undefined;
+  resolve?.();
+}
 function setQuitting(value: boolean) {
   quitting = value;
+  if (!value) finishQuitDecision();
   if (value) void scheduledTasks?.stop().catch(() => {});
   else scheduledTasks?.start();
   sendLifecycle(value);
@@ -227,6 +236,7 @@ async function openCaller(): Promise<NativeCaller> {
           }
         : {}),
     });
+    if (quitDecision) await quitDecision;
     if (quitting || switchingService) {
       await paired.close();
       throw Error('native_draining');
@@ -234,6 +244,7 @@ async function openCaller(): Promise<NativeCaller> {
     if (process.platform === 'win32' && !paired.bootstrap.storeId)
       throw Error('native_profile_store_unavailable');
     privateAccess ??= await acquirePrivateAccess();
+    if (quitDecision) await quitDecision;
     if (quitting || switchingService) {
       privateAccess.close();
       await paired.close();
@@ -318,12 +329,32 @@ function closeNativeResources(): Promise<void> {
 function stopNativeProcess(code = 0): void {
   if (exitAllowed || stoppingNativeProcess) return;
   setQuitting(true);
-  stoppingNativeProcess = (async () => {
-    await developmentReload?.catch(() => {});
-    await closeNativeResources();
-    exitAllowed = true;
-    app.exit(code);
-  })().catch(() => forceExit());
+  finishQuitDecision();
+  stoppingNativeProcess = Promise.resolve()
+    .then(async () => {
+      // Commit the stop owner before destroying the last window. Its close
+      // events must not quit Main while it still owns the background drain.
+      const closingWindow = window;
+      window = undefined;
+      if (closingWindow && !closingWindow.isDestroyed()) closingWindow.destroy();
+      if (process.platform === 'darwin') {
+        app.hide();
+        app.dock?.hide();
+      }
+      const outcome = await settleDesktopQuit({
+        closeService: async () => {
+          await developmentReload?.catch(() => {});
+          await closeNativeResources();
+        },
+      });
+      if (outcome === 'force') {
+        forceExit();
+        return;
+      }
+      exitAllowed = true;
+      app.exit(code);
+    })
+    .catch(() => forceExit());
 }
 const terminateNativeProcess = () => stopNativeProcess();
 process.on('SIGINT', terminateNativeProcess);
@@ -345,6 +376,7 @@ async function reloadDevelopmentService(request: DevelopmentServiceReload) {
   sendLifecycle(true);
   developmentReload = (async () => {
     await closeNativeResources();
+    if (quitDecision) await quitDecision;
     if (quitting) throw Error('native_draining');
     activeAssets = next;
     switchingService = false;
@@ -380,6 +412,7 @@ if (development) {
 void app
   .whenReady()
   .then(async () => {
+    if (stoppingNativeProcess || exitAllowed) return;
     const rendererPath = join(app.getAppPath(), 'index.html'),
       rendererUrl = development?.rendererUrl ?? pathToFileURL(rendererPath).href;
     window = new BrowserWindow({
@@ -576,90 +609,73 @@ void app
         window?.hide();
       }
     });
-    window.once('ready-to-show', () => window?.show());
+    window.once('ready-to-show', () => {
+      if (!stoppingNativeProcess && !exitAllowed && window && !window.isDestroyed()) window.show();
+    });
     if (development) await window.loadURL(rendererUrl);
     else await window.loadFile(rendererPath);
   })
   .catch(() => {
+    if (quitting) {
+      stopNativeProcess(1);
+      return;
+    }
     dialog.showErrorBox('Kite 无法启动', '原生调用者初始化失败。请核对发行资源。');
     app.exit(1);
   });
 app.on('activate', () => {
+  if (stoppingNativeProcess || exitAllowed) return;
   window?.show();
   window?.focus();
+});
+app.on('window-all-closed', () => {
+  if (!stoppingNativeProcess && !quitting) app.quit();
 });
 app.on('before-quit', (event) => {
   if (exitAllowed) return;
   event.preventDefault();
   if (quitting) return;
+  quitDecision = new Promise<void>((resolve) => {
+    resolveQuitDecision = resolve;
+  });
   setQuitting(true);
-  if (window && !window.isDestroyed()) {
-    window.show();
-    window.focus();
-  }
   const ownsQuit = () => !stoppingNativeProcess && !exitAllowed;
   void (async () => {
-    await developmentReload?.catch(() => {});
-    if (!ownsQuit()) return;
-    const active = caller
-      ? await inspectNativeQuitWork((signal) => caller!.hasActiveWork(signal), 2000)
-      : !!opening;
+    if (window && !window.isDestroyed()) {
+      window.show();
+      window.focus();
+    }
+    const active = developmentReload
+      ? true
+      : caller
+        ? await inspectNativeQuitWork((signal) => caller!.hasActiveWork(signal), 2000)
+        : !!opening;
     if (!ownsQuit()) return;
     if (active) {
-      const result = await dialog.showMessageBox(window!, {
-        type: 'warning',
+      const options = {
+        type: 'warning' as const,
         message: '仍有活动工作，或尚不能完整核实。退出会停止本应用拥有的服务。',
+        detail: '确认后立即关闭窗口，未完成的任务清理将在后台继续。',
         buttons: ['保留服务', '退出'],
         defaultId: 0,
         cancelId: 0,
-      });
+      };
+      const result =
+        window && !window.isDestroyed()
+          ? await dialog.showMessageBox(window, options)
+          : await dialog.showMessageBox(options);
       if (!ownsQuit()) return;
       if (result.response !== 1) {
         setQuitting(false);
         return;
       }
     }
-    const outcome = await settleDesktopQuit({
-      closeService: closeNativeResources,
-      confirmForceExit: async () => (ownsQuit() ? showQuitWarning(true) : false),
-      warnFailedCleanup: async () => {
-        if (ownsQuit()) await showQuitWarning(false);
-      },
-      waitMs: 20000,
-    });
-    if (!ownsQuit()) return;
-    if (outcome === 'force') {
-      forceExit();
-      return;
-    }
-    exitAllowed = true;
-    app.quit();
+    stopNativeProcess();
   })().catch(() => {
     if (!ownsQuit()) return;
-    setQuitting(false);
-    dialog.showErrorBox('服务结果待核实', '无法确认清理完成；没有将未知结果标记为成功。');
+    stopNativeProcess(1);
   });
 });
-
-async function showQuitWarning(stillWaiting: boolean): Promise<boolean> {
-  const options = {
-    type: 'warning' as const,
-    title: stillWaiting ? '服务仍在收尾' : '服务收尾未正常完成',
-    message: stillWaiting
-      ? '可以继续等待，或强制退出 Kite。'
-      : 'Kite 无法确认服务已安全收尾，仍可退出应用。',
-    detail: '强制退出可能中断正在进行的任务。下次启动后请检查会话和文件结果。',
-    buttons: stillWaiting ? ['强制退出', '继续等待'] : ['退出应用'],
-    defaultId: stillWaiting ? 1 : 0,
-    cancelId: stillWaiting ? 1 : 0,
-    noLink: true,
-  };
-  const result =
-    window && !window.isDestroyed()
-      ? await dialog.showMessageBox(window, options)
-      : await dialog.showMessageBox(options);
-  return result.response === 0;
-}
 
 function forceExit() {
   try {

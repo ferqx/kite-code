@@ -272,9 +272,9 @@ Native 原消息复制与标题栏缩放同属窗口 Host。preload 只提供固
 
 Windows 顶栏菜单同属窗口 Host。有限 IPC 只接受四个菜单枚举、窗口内整数位置与页面可操作标记，Main 在原准确窗口／主 frame／renderer URL 校验后按真实缩放打开原生下拉；该标记不授予业务权限。文件项及三个固定快捷键只返回既有页面动作，renderer 复核当前启动、mutation 与退出状态后调用原 controller。编辑与窗口角色不打开 Service caller；隐藏和退出继续沿原生命周期，设置、目录选择及登记仍由原业务端口授权。当前实现与 Windows 有限窗口验证归[Native owner](../../apps/desktop/README.md#windows-顶栏菜单)，Core、公开 API 与私有格式保持。
 
-Native 明确退出的活动检查只读完整公共目录与 View；两秒超时仅撤销本次 GET，不能把未回答当无活动，也不撤销其他观察。原窗口隐藏／激活不停止 Service。原二十秒收尾决定由 Main 持有，继续等待复用同一清理 promise；紧急退出只调用当前配对 child 的直接进程句柄，不发现其他 PID，不给卸载或普通读取强杀资格。配对 launcher close 与实际退出状态分别核实，非零退出进入异常收尾提示；未知执行保持原事实，正常清理顺序和双层制品使用权不放宽；实现与有限故障／实际窗口范围见[Native owner](../../apps/desktop/README.md#原窗口关闭与退出收尾)。
+Native 明确退出的活动检查只读完整公共目录与 View；两秒超时仅撤销本次 GET，不能把未回答当无活动，也不撤销其他观察。普通窗口隐藏／激活不停止 Service。活动或未知时最多一次确认，空闲直接关闭界面；确认后 Main 在任何清理 await 前销毁原窗口，macOS 同时隐藏应用与 Dock，禁止激活或迟到启动重新展示。最后窗口关闭不提前结束原 Main；启动、在途重载与资源仍由原 owner 在后台收束，没有默认二十秒强杀。清理完成才退出0，清理失败沿准确 child 句柄处理并退出1，不追加提示。紧急退出不发现其他 PID，不给卸载或普通读取强杀资格。配对 launcher close 与实际退出状态分别核实，非零退出仍为失败；窗口消失不证明清理和取消成功，未知执行保持原事实，正常清理顺序和双层制品使用权不放宽；实现与有限故障／实际窗口范围见[Native owner](../../apps/desktop/README.md#原窗口关闭与退出收尾)。
 
-Main 通过原固定 channel 的闭合生命周期通知撤销 renderer 旧读取的展示归属；它不增加业务请求或执行权。退出期间暂停自动刷新，取消后沿同一 generation 恢复状态／目录／选择和原草稿读取，不重新 attach 或提交业务。该展示撤销不提前 close／detach caller，也不消除真实当前错误、已提交 mutation 的未知回执或异常收尾提示；原 frame 身份与退出资源门禁保持。
+Main 通过原固定 channel 的闭合生命周期通知撤销 renderer 旧读取的展示归属；它不增加业务请求或执行权。确认前暂停自动刷新，取消后沿同一 generation 恢复状态／目录／选择和原草稿读取，不重新 attach 或提交业务。确认前的展示撤销不提前 close／detach caller，也不消除真实当前错误或已提交 mutation 的未知回执；确认后窗口及其页面／browser view 销毁，原 caller 与 Service 仍由 Main 在后台沿原顺序关闭，不追加收尾提示。原 frame 身份与退出资源门禁保持。
 
 Native 启动诊断只来自本次所属 Service 的闭合私有 stderr 帧，经 paired launcher 重建后由 Main 持有；通用错误不变造有效报告。保存沿两个无 payload 的固定 host IPC，renderer 不提供报告或路径，Main 只写系统对话框选定的新文件，等待后复核当前 frame／窗口／报告。重试清除前次资格，保存不打开业务 caller、不修改 Store、不获得执行或恢复 authority；当前实现与范围见[Native owner](../../apps/desktop/README.md#原启动诊断保存)和[Service owner](../../apps/service/README.md)。
 

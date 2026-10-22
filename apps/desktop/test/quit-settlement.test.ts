@@ -1,74 +1,78 @@
-import { expect, test } from 'bun:test';
+import { expect, spyOn, test } from 'bun:test';
 import { settleDesktopQuit } from '../electron/quit-settlement';
 
-test('normal Service cleanup quits without warning or force', async () => {
-  let prompts = 0;
-  const outcome = await settleDesktopQuit({
-    closeService: async () => undefined,
-    confirmForceExit: async () => {
-      prompts += 1;
-      return true;
-    },
-    warnFailedCleanup: async () => {
-      prompts += 1;
-    },
-    waitMs: 10,
+function deferredClose() {
+  let resolve!: () => void;
+  let reject!: (reason: Error) => void;
+  const promise = new Promise<void>((onResolve, onReject) => {
+    resolve = onResolve;
+    reject = onReject;
   });
-  expect(outcome).toBe('clean');
-  expect(prompts).toBe(0);
-});
+  return { promise, resolve, reject };
+}
 
-test('failed Service cleanup offers exit instead of trapping the client', async () => {
-  let warnings = 0;
+test('completed Service cleanup quits cleanly and closes exactly once', async () => {
+  let closes = 0;
   const outcome = await settleDesktopQuit({
     closeService: async () => {
-      throw new Error('Service exited nonzero');
+      closes += 1;
     },
-    confirmForceExit: async () => {
-      throw new Error('Failed cleanup must not reenter a wait');
-    },
-    warnFailedCleanup: async () => {
-      warnings += 1;
-    },
-    waitMs: 10,
-  });
-  expect(outcome).toBe('force');
-  expect(warnings).toBe(1);
-});
-
-test('stalled cleanup offers force exit without waiting for the Runtime lock', async () => {
-  let prompts = 0;
-  const outcome = await settleDesktopQuit({
-    closeService: () => new Promise<void>(() => undefined),
-    confirmForceExit: async () => {
-      prompts += 1;
-      return true;
-    },
-    warnFailedCleanup: async () => {
-      throw new Error('A pending cleanup has not failed');
-    },
-    waitMs: 10,
-  });
-  expect(outcome).toBe('force');
-  expect(prompts).toBe(1);
-});
-
-test('continuing to wait still permits a clean exit when Service later settles', async () => {
-  let resolveClose!: () => void;
-  const closing = new Promise<void>((resolve) => {
-    resolveClose = resolve;
-  });
-  let prompts = 0;
-  const outcome = await settleDesktopQuit({
-    closeService: () => closing,
-    confirmForceExit: async () => {
-      prompts += 1;
-      resolveClose();
-      return false;
-    },
-    warnFailedCleanup: async () => undefined,
-    waitMs: 10,
   });
   expect(outcome).toBe('clean');
-  expect(prompts).toBe(1);
+  expect(closes).toBe(1);
 });
+
+test('rejected Service cleanup forces quit and closes exactly once', async () => {
+  let closes = 0;
+  const outcome = await settleDesktopQuit({
+    closeService: async () => {
+      closes += 1;
+      throw new Error('Service exited nonzero');
+    },
+  });
+  expect(outcome).toBe('force');
+  expect(closes).toBe(1);
+});
+
+test('synchronous cleanup failure forces quit and closes exactly once', async () => {
+  let closes = 0;
+  const outcome = await settleDesktopQuit({
+    closeService: () => {
+      closes += 1;
+      throw new Error('Service close threw');
+    },
+  });
+  expect(outcome).toBe('force');
+  expect(closes).toBe(1);
+});
+
+for (const completion of ['resolve', 'reject'] as const) {
+  test(`background cleanup stays pending without a timer until actual ${completion}`, async () => {
+    const closing = deferredClose();
+    let closes = 0;
+    let settled = false;
+    const timers = spyOn(globalThis, 'setTimeout');
+    try {
+      const outcome = settleDesktopQuit({
+        closeService: () => {
+          closes += 1;
+          return closing.promise;
+        },
+      });
+      void outcome.then(() => {
+        settled = true;
+      });
+      for (let turn = 0; turn < 10; turn += 1) await Promise.resolve();
+      expect(closes).toBe(1);
+      expect(settled).toBe(false);
+      expect(timers).not.toHaveBeenCalled();
+      if (completion === 'resolve') closing.resolve();
+      else closing.reject(new Error('Background Service cleanup failed'));
+      expect(await outcome).toBe(completion === 'resolve' ? 'clean' : 'force');
+      expect(closes).toBe(1);
+      expect(timers).not.toHaveBeenCalled();
+    } finally {
+      timers.mockRestore();
+    }
+  });
+}

@@ -1,5 +1,5 @@
 import { Database } from 'bun:sqlite';
-import { expect, test } from 'bun:test';
+import { expect, spyOn, test } from 'bun:test';
 import { EventEmitter } from 'node:events';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { createServer, type Socket } from 'node:net';
@@ -37,7 +37,15 @@ type Service = {
  * SQLite scheduling and ScheduledTaskRunner are real. Electron, paired process admission and
  * the renderer are controlled ports; this does not establish Electron or OS cleanup qualification.
  */
-async function mainFixture(barrier: Barrier, holdServiceClose = false, holdMenu = false) {
+async function mainFixture(
+  barrier: Barrier,
+  holdServiceClose = false,
+  holdMenu = false,
+  rejectServiceClose = false,
+  holdRendererLoad = false,
+  barrierService = 1,
+  holdAppReady = false,
+) {
   const root = mkdtempSync(join(tmpdir(), 'kite-main-scheduling-'));
   const mainPath = fileURLToPath(new URL('../../electron/main.ts', import.meta.url));
   const runnerPath = fileURLToPath(
@@ -56,8 +64,16 @@ async function mainFixture(barrier: Barrier, holdServiceClose = false, holdMenu 
     exitCodes: number[] = [];
   const menuEntered = deferred(),
     menuResult = deferred<{ response: number; checkboxChecked: boolean }>();
+  const rendererEntered = deferred(),
+    rendererLoad = deferred();
+  const appReady = deferred();
   const trace: string[] = [],
     errors: unknown[] = [];
+  const dialogs: unknown[][] = [];
+  let windowDestroyed = false;
+  const windows: BrowserWindow[] = [];
+  let dockHides = 0;
+  let appHides = 0;
   const clocks = new Map<
     AgentClient,
     { clock: ScheduledTaskClock; timers: Map<unknown, () => void> }
@@ -83,7 +99,17 @@ async function mainFixture(barrier: Barrier, holdServiceClose = false, holdMenu 
     getAppPath: () => root,
     getVersion: () => 'fixture',
     setAboutPanelOptions: () => {},
-    whenReady: async () => {},
+    hide: () => {
+      appHides += 1;
+    },
+    dock: {
+      hide: () => {
+        dockHides += 1;
+      },
+    },
+    whenReady: async () => {
+      if (holdAppReady) await appReady.promise;
+    },
     quit() {
       let prevented = false;
       app.emit('before-quit', {
@@ -100,9 +126,16 @@ async function mainFixture(barrier: Barrier, holdServiceClose = false, holdMenu 
     },
   });
   class BrowserWindow extends EventEmitter {
+    static getAllWindows() {
+      return windows.filter((window) => !window.isDestroyed());
+    }
+    constructor(..._args: unknown[]) {
+      super();
+      windows.push(this);
+    }
     webContents = Object.assign(new EventEmitter(), {
       mainFrame: { url: 'http://127.0.0.1:43219/' },
-      isDestroyed: () => false,
+      isDestroyed: () => windowDestroyed,
       send: (_channel: string, event: { kind: string; phase: string }) => {
         if (event.kind === 'lifecycle') lifecyclePhases.push(event.phase);
       },
@@ -115,17 +148,33 @@ async function mainFixture(barrier: Barrier, holdServiceClose = false, holdMenu 
       },
     });
     isDestroyed() {
-      return false;
+      return windowDestroyed;
     }
-    show() {}
+    show() {
+      if (this.isDestroyed()) throw Error('fixture_show_destroyed_window');
+      trace.push('window:show');
+    }
     hide() {}
-    focus() {}
+    focus() {
+      if (this.isDestroyed()) throw Error('fixture_focus_destroyed_window');
+      trace.push('window:focus');
+    }
+    destroy() {
+      if (windowDestroyed) return;
+      windowDestroyed = true;
+      trace.push('window:destroy');
+      this.emit('closed');
+      app.emit('window-all-closed');
+    }
     removeMenu() {}
     setMenu() {}
     setMenuBarVisibility() {}
     setBackgroundColor() {}
     setTitleBarOverlay() {}
-    async loadURL() {}
+    async loadURL() {
+      rendererEntered.resolve();
+      if (holdRendererLoad) await rendererLoad.promise;
+    }
   }
   const fixture = {
     errors,
@@ -136,7 +185,8 @@ async function mainFixture(barrier: Barrier, holdServiceClose = false, holdMenu 
       clipboard: { writeText: () => {} },
       dialog: {
         showErrorBox: (...args: unknown[]) => errors.push(args),
-        showMessageBox: async () => {
+        showMessageBox: async (...args: unknown[]) => {
+          dialogs.push(args);
           if (!holdMenu) throw Error('unexpected_fixture_dialog');
           menuEntered.resolve();
           return menuResult.promise;
@@ -165,7 +215,7 @@ async function mainFixture(barrier: Barrier, holdServiceClose = false, holdMenu 
       return () => {};
     },
     async acquireDesktopProfileAccess() {
-      if (++profileCalls === 1 && barrier === 'profile') {
+      if (++profileCalls === barrierService && barrier === 'profile') {
         entered.resolve();
         await release.promise;
       }
@@ -204,12 +254,13 @@ async function mainFixture(barrier: Barrier, holdServiceClose = false, holdMenu 
           trace.push(`${id}:service:closing`);
           serviceClosing.resolve();
           if (holdServiceClose) await releaseServiceClose.promise;
+          if (rejectServiceClose) throw Error('fixture_service_close_failed');
           service.closed = true;
           trace.push(`${id}:service:close`);
         },
       };
       services.push(service);
-      if (id === 1 && barrier === 'launch') {
+      if (id === barrierService && barrier === 'launch') {
         entered.resolve();
         await release.promise;
       }
@@ -402,7 +453,7 @@ async function mainFixture(barrier: Barrier, holdServiceClose = false, holdMenu 
     });
     if (!result.success) throw new AggregateError(result.logs, 'main_fixture_build_failed');
     await import(pathToFileURL(result.outputs[0]!.path).href);
-    await registered.promise;
+    if (!holdAppReady) await registered.promise;
     await connected.promise;
   } catch (error) {
     for (const socket of sockets) socket.destroy();
@@ -423,18 +474,33 @@ async function mainFixture(barrier: Barrier, holdServiceClose = false, holdMenu 
     clocks,
     trace,
     errors,
+    dialogs,
+    destroyWindow: () => {
+      windows.at(-1)?.destroy();
+    },
+    windowCount: () => BrowserWindow.getAllWindows().length,
+    dockHides: () => dockHides,
+    appHides: () => appHides,
+    activate: () => app.emit('activate'),
+    readyToShow: () => windows.at(-1)?.emit('ready-to-show'),
     lifecyclePhases,
     exitCodes,
     quit: () => app.quit(),
     menuEntered: menuEntered.promise,
     retainService: () => menuResult.resolve({ response: 0, checkboxChecked: false }),
+    confirmQuit: () => menuResult.resolve({ response: 1, checkboxChecked: false }),
     rejectMenu: () => menuResult.reject(Error('fixture_cancelled_dialog')),
+    rendererEntered: rendererEntered.promise,
+    releaseAppReady: () => appReady.resolve(),
+    rejectRendererLoad: () => rendererLoad.reject(Error('fixture_renderer_load_failed')),
     connection: await mainConnection.promise,
     parent: await connected.promise,
     serviceClosing: serviceClosing.promise,
     releaseServiceClose: () => releaseServiceClose.resolve(),
     exited: exited.promise,
     async close(expectedExit = 0) {
+      appReady.resolve();
+      rendererLoad.resolve();
       release.resolve();
       releaseServiceClose.resolve();
       const parent = await connected.promise;
@@ -613,6 +679,309 @@ test('Main still permits an ordinary menu cancellation to retain the original Se
     expect(f.services[0]!.closed).toBe(false);
     expect(f.exitCodes).toEqual([]);
     expect(f.trace).not.toContain('1:service:closing');
+    expect(f.errors).toEqual([]);
+  } finally {
+    await f.close();
+  }
+}, 15000);
+
+for (const rejectServiceClose of [false, true]) {
+  test(`Main confirmed quit ${rejectServiceClose ? 'forces exit on rejected cleanup' : 'exits after clean cleanup'} with one prompt`, async () => {
+    const f = await mainFixture('none', true, true, rejectServiceClose);
+    const exitCode = rejectServiceClose ? 1 : 0;
+    try {
+      await f.open();
+      await f.runners[0]!.tick();
+      f.quit();
+      await f.menuEntered;
+      f.quit();
+      expect(f.dialogs).toHaveLength(1);
+      expect(f.trace).not.toContain('1:service:closing');
+      f.confirmQuit();
+      await f.serviceClosing;
+      expect(f.windowCount()).toBe(0);
+      expect(f.trace.indexOf('window:destroy')).toBeLessThan(f.trace.indexOf('1:service:closing'));
+      f.quit();
+      expect(f.dialogs).toHaveLength(1);
+      expect(f.exitCodes).toEqual([]);
+      expect(f.trace.filter((item) => item === '1:service:closing')).toHaveLength(1);
+      f.releaseServiceClose();
+      expect(await f.exited).toBe(exitCode);
+      expect(f.exitCodes).toEqual([exitCode]);
+      expect(f.dialogs).toHaveLength(1);
+      expect(f.errors).toEqual([]);
+    } finally {
+      await f.close(exitCode);
+    }
+  }, 15000);
+}
+
+test('Main idle quit needs no confirmation', async () => {
+  const f = await mainFixture('none');
+  try {
+    await f.open();
+    await f.runners[0]!.tick();
+    f.quit();
+    expect(await f.exited).toBe(0);
+    expect(f.dialogs).toEqual([]);
+    expect(f.trace.filter((item) => item === '1:service:closing')).toHaveLength(1);
+    expect(f.errors).toEqual([]);
+  } finally {
+    await f.close();
+  }
+}, 15000);
+
+for (const rejectConfirmation of [false, true]) {
+  test(`Main destroyed window uses one windowless confirmation and ${rejectConfirmation ? 'exits when confirmation throws' : 'honors confirmation'}`, async () => {
+    const f = await mainFixture('none', false, true);
+    const exitCode = rejectConfirmation ? 1 : 0;
+    try {
+      await f.open();
+      await f.runners[0]!.tick();
+      f.destroyWindow();
+      f.quit();
+      await f.menuEntered;
+      expect(f.dialogs).toHaveLength(1);
+      expect(f.dialogs[0]).toHaveLength(1);
+      expect(f.dialogs[0]![0]).toMatchObject({ buttons: ['保留服务', '退出'] });
+      if (rejectConfirmation) f.rejectMenu();
+      else f.confirmQuit();
+      expect(await f.exited).toBe(exitCode);
+      expect(f.dialogs).toHaveLength(1);
+      expect(f.trace.filter((item) => item === '1:service:closing')).toHaveLength(1);
+      expect(f.errors).toEqual([]);
+    } finally {
+      await f.close(exitCode);
+    }
+  }, 15000);
+}
+
+for (const blocked of ['opening', 'reload'] as const) {
+  test(`Main confirmed quit closes the window while held ${blocked} cleans up in background`, async () => {
+    const f = await mainFixture(
+      blocked === 'opening' ? 'launch' : 'none',
+      blocked === 'reload',
+      true,
+    );
+    let pending: Promise<unknown> | undefined;
+    const timers = spyOn(globalThis, 'setTimeout');
+    try {
+      if (blocked === 'opening') {
+        pending = f.open().catch((error: unknown) => error);
+        await f.entered;
+      } else {
+        await f.open();
+        await f.runners[0]!.tick();
+        pending = f.reload(replacement).catch((error: unknown) => error);
+        await f.serviceClosing;
+      }
+      f.quit();
+      await f.menuEntered;
+      expect(f.windowCount()).toBe(1);
+      f.confirmQuit();
+      await new Promise<void>((resolve) => setTimeout(resolve, 0));
+      expect(f.windowCount()).toBe(0);
+      expect(f.trace.filter((item) => item === 'window:destroy')).toHaveLength(1);
+      if (process.platform === 'darwin') {
+        expect(f.appHides()).toBe(1);
+        expect(f.dockHides()).toBe(1);
+      }
+      expect(f.exitCodes).toEqual([]);
+      expect(timers.mock.calls.filter((call) => call[1] === 20000)).toEqual([]);
+      const presentation = f.trace.filter((item) => item.startsWith('window:'));
+      f.quit();
+      f.activate();
+      f.readyToShow();
+      await new Promise<void>((resolve) => setTimeout(resolve, 0));
+      expect(f.trace.filter((item) => item.startsWith('window:'))).toEqual(presentation);
+      expect(f.windowCount()).toBe(0);
+      expect(f.exitCodes).toEqual([]);
+      expect(f.dialogs).toHaveLength(1);
+      expect(f.errors).toEqual([]);
+      if (blocked === 'reload')
+        expect(f.trace.filter((item) => item === '1:service:closing')).toHaveLength(1);
+      else expect(f.trace).not.toContain('1:service:closing');
+      f.release();
+      f.releaseServiceClose();
+      await pending;
+      expect(await f.exited).toBe(0);
+      expect(f.exitCodes).toEqual([0]);
+      expect(f.services[0]!.closed).toBe(true);
+      expect(f.windowCount()).toBe(0);
+      expect(f.dialogs).toHaveLength(1);
+    } finally {
+      timers.mockRestore();
+      f.release();
+      f.releaseServiceClose();
+      await pending;
+      await f.close();
+    }
+  }, 15000);
+}
+
+test('Main late renderer startup rejection cannot add a dialog or duplicate background cleanup', async () => {
+  const f = await mainFixture('none', true, true, false, true);
+  const timers = spyOn(globalThis, 'setTimeout');
+  try {
+    await f.rendererEntered;
+    await f.open();
+    await f.runners[0]!.tick();
+    f.quit();
+    await f.menuEntered;
+    f.confirmQuit();
+    await f.serviceClosing;
+    const drainDeadlines = () => timers.mock.calls.filter((call) => call[1] === 20000);
+    expect(drainDeadlines()).toHaveLength(0);
+    f.rejectRendererLoad();
+    // Flush the original app.whenReady/loadURL rejection and its catch while
+    // the already-authorized Service drain remains pending.
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    f.quit();
+    expect(f.dialogs).toHaveLength(1);
+    expect(f.errors).toEqual([]);
+    expect(f.exitCodes).toEqual([]);
+    expect(drainDeadlines()).toHaveLength(0);
+    expect(f.trace.filter((item) => item === '1:service:closing')).toHaveLength(1);
+    f.releaseServiceClose();
+    expect(await f.exited).toBe(0);
+    expect(f.exitCodes).toEqual([0]);
+    expect(f.dialogs).toHaveLength(1);
+    expect(f.errors).toEqual([]);
+    expect(drainDeadlines()).toHaveLength(0);
+    expect(f.trace.filter((item) => item === '1:service:closing')).toHaveLength(1);
+  } finally {
+    timers.mockRestore();
+    await f.close();
+  }
+}, 15000);
+
+test('Main reload resumes after retained quit when original close finishes during confirmation', async () => {
+  const f = await mainFixture('none', true, true);
+  let reloading: Promise<unknown> | undefined;
+  try {
+    await f.open();
+    await f.runners[0]!.tick();
+    let reloadSettled = false;
+    reloading = f.reload(replacement).then(
+      () => {
+        reloadSettled = true;
+        return null;
+      },
+      (error: unknown) => {
+        reloadSettled = true;
+        return error;
+      },
+    );
+    await f.serviceClosing;
+    f.quit();
+    await f.menuEntered;
+    f.releaseServiceClose();
+    // Complete the original drain while the user still owns the unanswered
+    // confirmation. The replacement must wait for that decision, not fail.
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    expect(reloadSettled).toBe(false);
+    expect(f.services).toHaveLength(1);
+    expect(f.exitCodes).toEqual([]);
+    expect(f.dialogs).toHaveLength(1);
+    f.retainService();
+    expect(await reloading).toBeNull();
+    const caller = await f.open();
+    expect(caller).toBeDefined();
+    expect(await f.open()).toBe(caller);
+    expect(f.services).toHaveLength(2);
+    expect(f.services[0]!.closed).toBe(true);
+    expect(f.services[1]!.closed).toBe(false);
+    await f.runners[1]!.tick();
+    expect(f.posts.some((post) => post.service === 2 && post.kind === 'start')).toBe(true);
+    expect(f.posts.some((post) => post.afterClose)).toBe(false);
+    expect(f.exitCodes).toEqual([]);
+    expect(f.dialogs).toHaveLength(1);
+    expect(f.errors).toEqual([]);
+  } finally {
+    f.retainService();
+    f.releaseServiceClose();
+    await reloading;
+    await f.close();
+  }
+}, 15000);
+
+for (const openingKind of ['initial', 'replacement'] as const) {
+  for (const barrier of ['launch', 'profile'] as const) {
+    test(`Main retained quit resumes ${openingKind} caller held at ${barrier}`, async () => {
+      const serviceId = openingKind === 'initial' ? 1 : 2;
+      const f = await mainFixture(barrier, false, true, false, false, serviceId);
+      let pending: Promise<unknown> | undefined;
+      try {
+        if (openingKind === 'replacement') {
+          await f.open();
+          await f.runners[0]!.tick();
+        }
+        let settled = false;
+        const operation = openingKind === 'initial' ? f.open() : f.reload(replacement);
+        pending = operation.then(
+          (value) => {
+            settled = true;
+            return { value };
+          },
+          (error: unknown) => {
+            settled = true;
+            return { error };
+          },
+        );
+        await f.entered;
+        f.quit();
+        await f.menuEntered;
+        f.release();
+        // The actual openCaller continuation reaches its quit-decision fence
+        // after the host launch/profile port returns, before closing the Service.
+        await new Promise<void>((resolve) => setTimeout(resolve, 0));
+        expect(settled).toBe(false);
+        expect(f.trace).not.toContain(`${serviceId}:service:closing`);
+        expect(f.services[serviceId - 1]!.closed).toBe(false);
+        expect(f.runners).toHaveLength(serviceId - 1);
+        expect(f.exitCodes).toEqual([]);
+        expect(f.dialogs).toHaveLength(1);
+        f.retainService();
+        expect(await pending).not.toHaveProperty('error');
+        const caller = await f.open();
+        expect(caller).toBeDefined();
+        expect(await f.open()).toBe(caller);
+        expect(f.services).toHaveLength(serviceId);
+        expect(f.services[serviceId - 1]!.closed).toBe(false);
+        expect(f.runners).toHaveLength(serviceId);
+        await f.runners[serviceId - 1]!.tick();
+        expect(f.posts.some((post) => post.service === serviceId && post.kind === 'start')).toBe(
+          true,
+        );
+        expect(f.posts.some((post) => post.afterClose)).toBe(false);
+        expect(f.exitCodes).toEqual([]);
+        expect(f.dialogs).toHaveLength(1);
+        expect(f.errors).toEqual([]);
+      } finally {
+        f.retainService();
+        f.release();
+        await pending;
+        await f.close();
+      }
+    }, 15000);
+  }
+}
+
+test('Main late app readiness cannot create a client window after committed quit', async () => {
+  const f = await mainFixture('none', false, false, false, false, 1, true);
+  try {
+    expect(f.windowCount()).toBe(0);
+    f.quit();
+    expect(await f.exited).toBe(0);
+    f.releaseAppReady();
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    f.activate();
+    f.readyToShow();
+    expect(f.windowCount()).toBe(0);
+    expect(f.trace.filter((item) => item.startsWith('window:'))).toEqual([]);
+    expect(f.services).toEqual([]);
+    expect(f.dialogs).toEqual([]);
+    expect(f.exitCodes).toEqual([0]);
     expect(f.errors).toEqual([]);
   } finally {
     await f.close();
