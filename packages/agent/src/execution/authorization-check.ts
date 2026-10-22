@@ -121,12 +121,10 @@ export async function runInternalModelCall(options: {
     const providerRequest = structuredClone(options.request);
     signal.throwIfAborted();
     for await (const event of options.model.stream(providerRequest, { signal })) {
-      signal.throwIfAborted();
       if (finished) throw new AgentError('model_event_after_finish');
-      if (event.type === 'usage') {
-        usage = structuredClone({ ...event.usage });
-        continue;
-      }
+      if (event.type === 'usage') usage = structuredClone({ ...event.usage });
+      signal.throwIfAborted();
+      if (event.type === 'usage') continue;
       if (event.type === 'text_delta') {
         if (event.text.length) firstOutput ??= 'content';
         content += event.text;

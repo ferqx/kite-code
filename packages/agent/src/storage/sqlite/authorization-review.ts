@@ -943,17 +943,30 @@ export function verifyAuthorizationReviewDispatch(
       reviewExecutionId,
       input.authorization.revision,
     );
-  if (input.authorization.reviewExecutionId) {
+  // The current Runtime exposes an old, verified carrier through checkExecutionId.
+  // Adapt only that exact legacy purpose; both validators still verify its proof.
+  const checkId = input.authorization.checkExecutionId;
+  const reviewExecutionId =
+    input.authorization.reviewExecutionId ??
+    (checkId &&
+    db.row(
+      'SELECT c.kind FROM execution e JOIN command c ON c.id=e.origin_command_id WHERE e.id=?',
+      checkId,
+    )?.kind === 'authorization.review'
+      ? checkId
+      : undefined);
+  if (reviewExecutionId) {
     const review = authorizationReviewFact(
       db,
       input.executionId,
-      input.authorization.reviewExecutionId,
+      reviewExecutionId,
       input.authorization.revision,
     );
     if (
       review.result.decision !== 'approve_once' ||
       (review.payload.requireApproval === true && !input.authorization.interactionId) ||
-      object(review.payload.target!).originStoreId !== input.expectedStoreId
+      object(review.payload.target!).originStoreId !== input.expectedStoreId ||
+      invalidated(reviewExecutionId)
     )
       throw new AgentError('permission_denied');
   } else if (input.authorization.interactionId) {

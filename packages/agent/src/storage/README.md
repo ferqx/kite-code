@@ -155,6 +155,8 @@ begin 取得真实 root OS 锁并登记受限 RunResumeLease。Runtime 按实际
 
 零派发 Tool 已有结算的 Auto 检查时，同一恢复 commit 核实准确 `authorization.check` 来源、target、封存输入和终态结果，原检查 Model 与目标一并交接 fencing generation；active、unknown、取消或身份不实不取得接管资格，任一代次失真令整项事务回滚。旧 child 审核保留原 carrier/child/Model 三方核验，不能据命名继承新权限例外。原请求、输出凭据、ID/attempt 与人工决定保持，零新 Model/子会话/授权。[交接回归](../../test/isolated/recovery/run-resume-check-ownership.test.ts)验证真实冷接续。
 
+原普通根 Run 的显式恢复仅将宿主快照中旧 `authorizationReview` 与新 `authorizationCheck` 的准确 `id/version/modelId`（或 null）视为同一字段；双字段、其他配置或身份变化仍拒绝。SQL commit 消费原保存配置，绝不改写历史快照。旧结算审核经当前 check 指针仍复核原 legacy proof、失效记录及独立真人批准，不重跑旧 child。[旧版本冻结回归](../../test/isolated/recovery/run-resume-configuration-compatibility.test.ts)覆盖真实旧 producer 的有／无审核恢复、原卡一次效果与配置漂移拒绝；这不放宽子任务当前权限 revision 或恢复旧内部 child 的执行。
+
 所有四处具名 Run 创建事务捕获 `context_selection_id`；当前 selection 漂移拒绝恢复。`initialization_state` 持久区分 unstarted／started／completed：任何初始化回调前先登记 started，注册 requirement 结果与 completed 同事务提交，空 refs 也必须完成封存。恢复 completed 复用原 refs，不重跑回调；started 拒绝重放半执行的闭包；unstarted 只有零 Execution 时可进入原初始化入口。
 
 独立 accepted `run.resume` 不进入普通 accepted 队列，不阻挡普通 owner release，也不被 Session interrupt 改成 needs_review。准备期取消或删除为新申请记录取消事实、保持 accepted/null，commit 随后拒绝；applied 回执保留已恢复事实，停止原执行仍使用准确原 Run 控制。Runtime 关闭等待准备和 binding 清理；未确认清理时不能宣称 lease 与资源已释放。
