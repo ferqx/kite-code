@@ -1,5 +1,7 @@
 # 本机 Agent Service
 
+公开 Message 的可选 `humanInput` 传递 Agent SQL 生成的原输入／公开提交身份与准确重复副本指向。Service schema、OpenAPI 和生成 Client 保同一字段，不接受调用者自报该证明，也不在 HTTP 层过滤历史行或改变分页；普通 Native 的合并显示归 [Desktop](../desktop/README.md#真实输入消息的唯一展示)，实际证明归 [输入 owner](../../packages/agent/src/storage/sqlite/inputs/README.md)。
+
 ## 待消费输入队列协议
 
 [正式 HTTP owner](src/index.ts)仅在 Runtime 的三个队列方法齐备时提供 `pending_input_queue` capability。`GET /v1/sessions/{id}/input-queue` 接收 `storeId`、可选 `afterOrder`／`limit`／`expectedRevision`，返回完整原 request 联合、`orders`、`nextAfterOrder`、`revision` 与 `snapshotCursor`；后续页固定首 revision，成员或顺序变化拒绝。`POST /v1/sessions/{id}/input-queue/withdraw` 使用闭合 `input.withdraw`、Main／调用者保存的原 commandId、expected Store、targetCommandId 和 expectedRevision；`.../reorder` 使用 `input.reorder` 与完整可移动 commandIds 集合。subject 只来自已认证连接，不从正文接纳；这些公开队列入口核同一根会话、主体与 Store，子会话不取得该队列的读写资格。

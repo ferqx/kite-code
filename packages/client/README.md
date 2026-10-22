@@ -8,6 +8,8 @@
 
 ## 普通输入的业务回执
 
+公开 `Message.humanInput` 是只读呈现证明：`inputCommandId` 标识同一真实输入，可核实的 `publicCommandId` 关联原公开提交；`duplicateOfMessageId` 只在处理轮副本已有准确应用的业务消息时提供。字段由原 SQL 因果链生成，经同源 schema／validator 传递，不是调用者提交参数或执行授权。消费者须在本次读取内核对替代消息和原输入身份，缺项时保留原文；分页仍保原行数、序号和上界，不能按正文相同合并独立输入。实际生成与验证归 [输入 owner](../agent/src/storage/sqlite/inputs/README.md)。
+
 [readOrdinaryCommandApplication](src/ordinary-command.ts)只读解析原公开 Command。`human_input_applied` 沿相等的 `businessCommandId/sourceCommandId` 读取同 Store／Session／subject 的已应用业务 Command，并核其真实 Run；活动补充沿业务 steer 回执保留原 Run，新业务 Run 核实际 origin。公开 ID 不必等于 Run.originCommandId。`human_input_observed` 可在顶层 runId=null 时沿 observation 核真实 succeeded Model／Run，并返回已保存 answer／clarification；明确控制没有 Model 观察时不补造 Run 或答案。解析不提交意图、不授权派发。[纯边界测试](test/ordinary-command.test.ts)覆盖业务身份、活动补充、外来作用域、伪造关联和进度观察；实际 HTTP／SQLite 证据归 [CLI 测试](../../apps/cli/test/ordinary-command-http.test.ts)。
 
 公开输入仍为 `accepted`、但已封存 `human_input_unresolved` 观察时，同一 helper 可返回准确澄清；它要求原输入和决定 ID、空业务 Command/Run，以及可核实的成功 Model/所属 Run。这里返回的 Run 只证明解释出处，不表示业务已准入。尚未解释的 accepted 仍返回 null，缺失或外来观察拒绝；读取不把原命令改为 applied，也不创建 Interaction、取消或替代提交。

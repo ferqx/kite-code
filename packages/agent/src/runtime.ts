@@ -2879,7 +2879,7 @@ export class AgentRuntime {
         original.messages.map((message) => {
           const execution =
             message.sourceIds?.length === 1 ? executions.get(message.sourceIds[0]!) : undefined;
-          return execution ? this.publicHumanInputMessage(message, execution) : message;
+          return this.publicHumanInputMessage(message, execution);
         }),
       ),
     };

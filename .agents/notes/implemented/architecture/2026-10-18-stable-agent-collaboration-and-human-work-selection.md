@@ -10,6 +10,10 @@ Status: implemented
 
 ## Decision
 
+真实输入的公共展示保留 SQL 处理轮与业务轮的独立记录，通过只读 `Message.humanInput` 封存同一原输入及公开提交关系。只有准确已应用业务及实际替代 Message 的完整链成立时才标记处理副本；Native 还须在本次读取内核实替代行。首次占位沿公开提交 ID 交接，不能沿后来不同的业务 ID 推断。相同正文的独立新输入继续独立，固定旧上界或不完整读取保原文；此证明不取得执行或恢复权限。
+
+封存 Fork 只在原出处与本分支实际复制的替代行同时核实时映射本地重复关系，不借源会话后来新增的业务隐藏旧分支原文；正文、parts 和原游标保留。
+
 复用既有 Session/Run/Command/Execution、唯一普通 Loop、ChildSlots 和准确 Artifact/Source。稳定 agent_id 为 child Session，某轮 carrier/Run/result revision 仍各自准确；六工具收敛模型入口，旧定义仅服务真实内部调用与准确历史，不保模型 alias。目录以首次创建 Command seq 为锚点，固定枚举身份上界与每页当前状态分开，原委派/最近输入/结果各保可读来源。
 
 真实公共请求、raw 人类输入、关联/选择/control revision 决定和业务准入分开保存。Host只直接处理当前未引用的明确指令，其余由封存无工具的普通 Model 提出关联，再由Host/Store独立验证；引用、邮件、代码、自报批准均无控制权。处理轮保自身因果，不能借解释做业务。B先保存选择与queued意图，A在必要结果/交互/unknown/条件允许的安全边界技术收束；取消B仍保选择边界，明确继续A才恢复准确原配置与当前权限。
@@ -39,6 +43,8 @@ Native 子卡片和缓存绑定准确 carrier。仅有 Session 的导航先等�
 正式Native journal先验证原公开命令的ID/kind、Store/Workspace/Session、subject和canonical request digest，再复用Client的业务查回器核真实business/Run。公开输入与业务Command的身份分离，不能要求Run.origin等于原公开ID；同Run补充保原origin，封存独立工作允许越过旧技术steer target。顶层Run为空的applied观察核真实成功Model，但不成为业务Run；unresolved仍accepted。旧技术steer的target/selection、取消、extension Job与unknown/冷零POST门禁保持。
 
 ## Alternatives considered
+
+- 删除处理轮消息或在 HTTP 分页中过滤，会破坏原审计记录或让整页隐藏误报 EOF；按正文去重会吞掉用户明确重复提交的意图。选择在原 SQL 因果链生成只读呈现证明，并在完整当前读取内合并，不重写历史、游标或业务身份。
 
 - 仅按公开ID校验业务Run.origin会拒绝合法派生业务；只信receipt内任意Run又会接纳外来或未应用业务。选择复用已有精确业务查回器，并保留Native公开身份与旧技术steer边界，不新增提交或重放路径。
 

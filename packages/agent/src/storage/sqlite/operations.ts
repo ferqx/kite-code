@@ -80,6 +80,7 @@ import {
 import { readForkRecordSources } from './fork-record-sources';
 import { verifyHostControlDispatch } from './host-control-dispatch';
 import { callHostMutation } from './host-mutation-operations';
+import { humanInputDisplay } from './human-input-display';
 import {
   beginHumanInputProcessing,
   decideHumanInput,
@@ -869,6 +870,7 @@ export class SqliteOperations {
   message(row: Row): MessageRecord {
     const source = parse(row.source_json) as Record<string, Json>;
     const compression = compressionDisplay(this, row, source);
+    const humanInput = humanInputDisplay(this, row, source);
     let content = String(source.content ?? '');
     if (row.role === 'user' && row.run_id !== null && content.includes('"decisionContext"')) {
       const run = this.row(
@@ -899,6 +901,7 @@ export class SqliteOperations {
       ...(source.images ? { images: source.images as unknown as MessageRecord['images'] } : {}),
       ...(source.files ? { files: source.files as unknown as MessageRecord['files'] } : {}),
       ...(compression ? { compression } : {}),
+      ...(humanInput ? { humanInput } : {}),
       ...(['content', 'reasoning', 'tool_calls'].includes(String(source.firstOutput))
         ? { firstOutput: source.firstOutput as MessageRecord['firstOutput'] }
         : {}),

@@ -34,6 +34,14 @@
 
 2026-10-19，本次 Windows x64／Bun 1.4.3／Electron 44.3.0 工作树针对流式抖动补齐验证：[Native 页面回归](test/isolated/native-history-presentation-dom.test.tsx)核活动 Run 的连续历史扫描期间，图片自动加载且卡片、img 与 URL 不被重复重建；[预览生命周期](test/isolated/native-user-images-dom.test.tsx)核六张可见图片只有一个活跃读取、视区／隐藏释放、切换后的排队取消与坏元数据零预览及显式重试。独立沙箱 Electron 窗口中，共享 Conversation 与真实 Native 图片组件使用合成 PNG 和受控 IPC 回执，24 次流式更新零向后跳，距底部最大偏差约 0.67 CSS px；12 次手动阅读更新中锚点和卡片高度偏移均为 0，切换后释放原 URL，返回后自动重新显示。此项验证实际浏览器布局与滚动，不代表新的真实模型或安装资格。
 
+## 真实输入消息的唯一展示
+
+普通对话通过 [输入呈现投影](src/native-presentation.ts)消费公共 `Message.humanInput`，只在本次读取同时具有准确替代 Message、同 Session／原输入／公开提交身份时合并内部处理副本；原读取缺少替代消息时保留原文。首次发送的占位沿已核实的 `publicCommandId` 交接给保存后的消息，不要求公开 ID 等于处理或业务 Run 的 origin。不同原输入的相同正文分别保留，不按文本或命令名前缀去重。
+
+SQL 原历史及分页不删除、不重排；出处证明归 [输入 owner](../../packages/agent/src/storage/sqlite/inputs/README.md)。[普通页面回归](test/isolated/native-new-conversation-dom.test.tsx)覆盖占位到处理、业务及冷挂载的唯一气泡、独立同文、未决澄清和缺少替代消息的读取。
+
+Fork 历史的替代关联只映射本分支已封存的两条消息，桌面另核同源 Store／Session；源会话后来新增业务消息不能隐藏旧分支中仍独立保留的原输入。[真实普通 Electron 回归](test/isolated/native-human-input-electron.test.ts)通过实际 Main／Service／SQLite、无工具解释与业务模型，核首次一次气泡、正常退出冷重开零新提交，以及再次提交同文仍有两条；原 SQL 同来源记录保留。
+
 ## 普通客户端与测试诊断
 
 Native 启动、目录与子 Agent、安排任务、分支、模型／提供商／MCP／Skills 设置、扩展能力、文件差异、上下文、交互记录和完整日志／输出读取均不插入临时加载文案，刷新同样不追加“正在核对”提示。已有正文、静态控件标签、图片文件名和预览占位保持，忙碌由原转圈、控件禁用及 `aria-busy` 表达；共享模型输入／输出遵循 [UI owner](../../packages/ui/README.md#原桌面展示层)。真实失败、结果未知、历史不完整和原申请恢复提示继续显示，敏感内容确认、完整读取和写入准入不变。测试等待使用实际区域的忙碌状态，不能以加载文案消失推断完整读取成功。

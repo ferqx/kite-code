@@ -94,6 +94,30 @@ export function desktopDirectory(
   return workspaces;
 }
 
+/** Collapse only the exact processing copy whose applied business message is in this reading. */
+export function desktopConversationMessages(messages: readonly Message[]): Message[] {
+  const byId = new Map(messages.map((message) => [message.id, message]));
+  return messages.filter((message) => {
+    const input = message.humanInput;
+    if (
+      message.role !== 'user' ||
+      !input?.duplicateOfMessageId ||
+      input.duplicateOfMessageId === message.id
+    )
+      return true;
+    const replacement = byId.get(input.duplicateOfMessageId);
+    return !(
+      replacement?.role === 'user' &&
+      replacement.sessionId === message.sessionId &&
+      replacement.originMessage?.storeId === message.originMessage?.storeId &&
+      replacement.originMessage?.sessionId === message.originMessage?.sessionId &&
+      replacement.humanInput?.inputCommandId === input.inputCommandId &&
+      replacement.humanInput.publicCommandId === input.publicCommandId &&
+      !replacement.humanInput.duplicateOfMessageId
+    );
+  });
+}
+
 export function desktopMessages(messages: readonly Message[]): DesktopMessage[] {
   return messages.map((message) => {
     // firstOutput identifies the first channel, not the current phase. A

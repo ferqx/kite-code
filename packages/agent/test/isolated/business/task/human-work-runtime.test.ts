@@ -9,6 +9,7 @@ import type { ToolDefinition } from '../../../../src/extensions';
 import { createTaskExtension } from '../../../../src/extensions/task';
 import { createRuntime } from '../../../../src/runtime';
 import { openSqliteStore } from '../../../../src/sqlite';
+import type { Store } from '../../../../src/storage/port';
 
 const finish: ModelEvent = {
   type: 'finish',
@@ -504,8 +505,20 @@ for (const mode of ['independent', 'progress', 'idle_progress'] as const)
         yield finish;
       },
     };
+    let omitViewExecutions = false;
+    const observedStore = new Proxy(store, {
+      get(target, key) {
+        if (key === 'getView')
+          return async (...args: Parameters<Store['getView']>) => {
+            const view = await target.getView(...args);
+            return omitViewExecutions ? { ...view, executions: [] } : view;
+          };
+        const value = Reflect.get(target, key);
+        return typeof value === 'function' ? value.bind(target) : value;
+      },
+    });
     const runtime = createRuntime({
-      store,
+      store: observedStore,
       model,
       modelId: 'root',
       modelConcurrency: 3,
@@ -703,6 +716,15 @@ for (const mode of ['independent', 'progress', 'idle_progress'] as const)
             (message) => message.id === observation.observation.messageId,
           )?.content,
         ).toBe(observation.observation.answer);
+        // A bounded View can omit an older Model while retaining its Message.
+        // The ordinary transcript must still use the exact sealed observation.
+        omitViewExecutions = true;
+        expect(
+          (await runtime.getView('root')).messages.find(
+            (message) => message.id === observation.observation.messageId,
+          )?.content,
+        ).toBe(observation.observation.answer);
+        omitViewExecutions = false;
         expect(
           (await store.getView('root')).messages.find(
             (message) => message.id === observation.observation.messageId,

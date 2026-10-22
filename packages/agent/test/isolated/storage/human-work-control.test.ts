@@ -562,6 +562,10 @@ test('public command bridge keeps exact invocation identity and atomically links
       sourceCommandId: applied.command.id,
     });
     expect(applied.run.originCommandId).toBe(applied.command.id);
+    expect(applied.message.humanInput).toEqual({
+      inputCommandId: inputId,
+      publicCommandId: original.id,
+    });
     expect(registerHumanCommand(f.db, { ...f.scope, commandId: 'public-B', request })).toEqual(
       after!,
     );
@@ -862,6 +866,373 @@ test.each([
     });
   } finally {
     await runtime.close();
+    await f.cleanup();
+  }
+});
+
+async function displayInput(f: Awaited<ReturnType<typeof fixture>>, publicId: string) {
+  const original = registerHumanCommand(f.db, {
+    ...f.scope,
+    commandId: publicId,
+    request: { kind: 'run.start', content: 'same original input' },
+  });
+  const inputId = (original.receipt as { humanInputCommandId: string }).humanInputCommandId;
+  const raw = (await f.store.getCommand(inputId))!;
+  const processing = beginHumanInputProcessing(f.db, {
+    ...f.scope,
+    inputCommandId: inputId,
+    inputDigest: raw.requestDigest,
+    readOnlyTools: [],
+  });
+  const run = await f.store.startRun({
+    expectedStoreId: f.scope.expectedStoreId,
+    owner: f.owner,
+    commandId: processing.id,
+    configuration: { modelId: 'fixture' },
+  });
+  const before = (await f.store.listMessages('s')).find((message) => message.runId === run.id)!;
+  expect(before.humanInput).toEqual({ inputCommandId: inputId, publicCommandId: publicId });
+  const originalSource = f.db.row(
+    'SELECT source_json FROM message WHERE id=?',
+    before.id,
+  )!.source_json;
+  return { inputId, run, before, processing, originalSource };
+}
+
+async function finishDisplayRun(f: Awaited<ReturnType<typeof fixture>>, runId: string) {
+  await f.store.finishRun({
+    expectedStoreId: f.scope.expectedStoreId,
+    owner: f.owner,
+    runId,
+    status: 'completed',
+    requirements: [],
+  });
+}
+
+test('SQL presentation proves one original input across processing and business without removing history or merging equal new inputs', async () => {
+  const f = await fixture();
+  try {
+    await finishDisplayRun(f, f.run.id);
+    const identities: string[] = [];
+    for (const publicId of ['public-first', 'public-second']) {
+      const input = await displayInput(f, publicId);
+      identities.push(input.inputId);
+      const decision = f.decide(input.inputId, {
+        relation: 'independent_work',
+        purpose: 'work',
+        targetRootWorkCommandId: null,
+        selectionEffect: 'select_work',
+      });
+      expect(
+        (await f.store.listMessages('s')).find((message) => message.id === input.before.id)
+          ?.humanInput,
+      ).toEqual({ inputCommandId: input.inputId, publicCommandId: publicId });
+      await finishDisplayRun(f, input.run.id);
+      const applied = await f.store.applyInput({
+        expectedStoreId: f.scope.expectedStoreId,
+        owner: f.owner,
+        commandId: decision.businessCommand!.id,
+        kind: 'follow_up',
+        configuration: { modelId: 'fixture' },
+      });
+      const all = await f.store.listMessages('s');
+      const processing = all.find((message) => message.id === input.before.id)!;
+      const business = all.find((message) => message.id === applied.message.id)!;
+      expect(processing.humanInput).toEqual({
+        inputCommandId: input.inputId,
+        publicCommandId: publicId,
+        duplicateOfMessageId: business.id,
+      });
+      expect(business.humanInput).toEqual({
+        inputCommandId: input.inputId,
+        publicCommandId: publicId,
+      });
+      expect(processing.content).toBe(business.content);
+      expect(processing.id).not.toBe(business.id);
+      expect(
+        f.db.row('SELECT source_json FROM message WHERE id=?', processing.id)?.source_json,
+      ).toBe(input.originalSource);
+      const page = await f.store.listMessages('s', { afterSeq: input.before.seq, limit: 1 });
+      expect(page).toHaveLength(1);
+      expect(page[0]!.id).toBe(business.id);
+      expect((await f.store.listMessages('s', { upperSeq: input.before.seq })).at(-1)?.id).toBe(
+        input.before.id,
+      );
+      await finishDisplayRun(f, applied.run.id);
+    }
+    expect(new Set(identities).size).toBe(2);
+    const rows = (await f.store.listMessages('s')).filter(
+      (message) => message.content === 'same original input',
+    );
+    expect(rows).toHaveLength(4);
+    expect(rows.filter((message) => !message.humanInput?.duplicateOfMessageId)).toHaveLength(2);
+  } finally {
+    await f.cleanup();
+  }
+});
+
+test('unresolved processing keeps its original user message and ignores source-authored presentation authority', async () => {
+  const f = await fixture();
+  try {
+    await finishDisplayRun(f, f.run.id);
+    const input = await displayInput(f, 'public-unresolved');
+    f.decide(input.inputId, {
+      relation: 'unresolved',
+      purpose: 'clarify',
+      targetRootWorkCommandId: null,
+      selectionEffect: 'keep',
+    });
+    const original = f.db.row('SELECT * FROM message WHERE id=?', input.before.id)!;
+    const source = JSON.parse(String(original.source_json));
+    f.db.run(
+      'UPDATE message SET source_json=? WHERE id=?',
+      JSON.stringify({
+        ...source,
+        humanInput: { inputCommandId: 'forged', duplicateOfMessageId: 'discard-me' },
+      }),
+      input.before.id,
+    );
+    const projected = (await f.store.listMessages('s')).find(
+      (message) => message.id === input.before.id,
+    )!;
+    expect(projected.humanInput).toEqual({
+      inputCommandId: input.inputId,
+      publicCommandId: 'public-unresolved',
+    });
+    expect(projected.content).toBe('same original input');
+    f.db.run('UPDATE command SET subject_id=? WHERE id=?', 'foreign', input.processing.id);
+    expect(
+      (await f.store.listMessages('s')).find((message) => message.id === input.before.id)
+        ?.humanInput,
+    ).toBeUndefined();
+  } finally {
+    await f.cleanup();
+  }
+});
+
+for (const broken of [
+  'digest',
+  'business_receipt',
+  'raw_receipt',
+  'decision',
+  'message',
+  'store',
+  'public',
+] as const)
+  test(`broken ${broken} chain cannot hide an original processing message`, async () => {
+    const f = await fixture();
+    try {
+      await finishDisplayRun(f, f.run.id);
+      const input = await displayInput(f, 'public-input');
+      const decision = f.decide(input.inputId, {
+        relation: 'independent_work',
+        purpose: 'work',
+        targetRootWorkCommandId: null,
+        selectionEffect: 'select_work',
+      });
+      await finishDisplayRun(f, input.run.id);
+      const applied = await f.store.applyInput({
+        expectedStoreId: f.scope.expectedStoreId,
+        owner: f.owner,
+        commandId: decision.businessCommand!.id,
+        kind: 'follow_up',
+        configuration: { modelId: 'fixture' },
+      });
+      const baseline = (await f.store.listMessages('s')).find(
+        (message) => message.id === input.before.id,
+      )!;
+      expect(baseline.humanInput?.duplicateOfMessageId).toBe(applied.message.id);
+      if (broken === 'digest')
+        f.db.run('UPDATE command SET request_digest=? WHERE id=?', 'forged', input.inputId);
+      if (broken === 'business_receipt')
+        f.db.run(
+          "UPDATE command SET receipt_json=json_set(receipt_json,'$.messageId','foreign') WHERE id=?",
+          applied.command.id,
+        );
+      if (broken === 'raw_receipt')
+        f.db.run(
+          "UPDATE command SET receipt_json=json_set(receipt_json,'$.applicationState','queued') WHERE id=?",
+          input.inputId,
+        );
+      if (broken === 'decision')
+        f.db.run('UPDATE command SET subject_id=? WHERE id=?', 'foreign', decision.decision.id);
+      if (broken === 'message') f.db.run('DELETE FROM message WHERE id=?', applied.message.id);
+      if (broken === 'store')
+        f.db.run('UPDATE command SET origin_store_id=? WHERE id=?', 'foreign', applied.command.id);
+      if (broken === 'public')
+        f.db.run(
+          "UPDATE command SET receipt_json=json_set(receipt_json,'$.runId','foreign') WHERE id=?",
+          'public-input',
+        );
+      const projected = (await f.store.listMessages('s')).find(
+        (message) => message.id === input.before.id,
+      )!;
+      expect(projected.humanInput?.duplicateOfMessageId).toBeUndefined();
+      expect(projected.content).toBe(input.before.content);
+    } finally {
+      await f.cleanup();
+    }
+  });
+
+async function forkDisplay(
+  f: Awaited<ReturnType<typeof fixture>>,
+  newSessionId: string,
+  sourceSessionId = 's',
+) {
+  return f.store.forkSession({
+    expectedStoreId: f.scope.expectedStoreId,
+    subjectId: f.scope.subjectId,
+    commandId: `create-${newSessionId}`,
+    sourceSessionId,
+    newSessionId,
+    title: newSessionId,
+    expectedContextSelectionId: (await f.store.getSession(sourceSessionId))!.contextSelectionId,
+  });
+}
+
+test('sealed Fork and second Fork map processing duplicates to their own copied business messages without changing bytes', async () => {
+  const f = await fixture();
+  try {
+    await finishDisplayRun(f, f.run.id);
+    const input = await displayInput(f, 'public-fork-input');
+    const decision = f.decide(input.inputId, {
+      relation: 'independent_work',
+      purpose: 'work',
+      targetRootWorkCommandId: null,
+      selectionEffect: 'select_work',
+    });
+    await finishDisplayRun(f, input.run.id);
+    const applied = await f.store.applyInput({
+      expectedStoreId: f.scope.expectedStoreId,
+      owner: f.owner,
+      commandId: decision.businessCommand!.id,
+      kind: 'follow_up',
+      configuration: { modelId: 'fixture' },
+    });
+    await finishDisplayRun(f, applied.run.id);
+    const secondInput = await displayInput(f, 'public-fork-second-input');
+    const secondDecision = f.decide(secondInput.inputId, {
+      relation: 'independent_work',
+      purpose: 'work',
+      targetRootWorkCommandId: null,
+      selectionEffect: 'select_work',
+    });
+    await finishDisplayRun(f, secondInput.run.id);
+    const secondApplied = await f.store.applyInput({
+      expectedStoreId: f.scope.expectedStoreId,
+      owner: f.owner,
+      commandId: secondDecision.businessCommand!.id,
+      kind: 'follow_up',
+      configuration: { modelId: 'fixture' },
+    });
+    await finishDisplayRun(f, secondApplied.run.id);
+    const originalRows = f.db.rows('SELECT * FROM message WHERE session_id=? ORDER BY seq', 's');
+    const originalParts = f.db.rows('SELECT * FROM message_part ORDER BY message_id,ordinal');
+    await forkDisplay(f, 'first-fork');
+    await forkDisplay(f, 'second-fork', 'first-fork');
+    const beforeRows = f.db.rows('SELECT * FROM message ORDER BY session_id,seq');
+    const beforeParts = f.db.rows('SELECT * FROM message_part ORDER BY message_id,ordinal');
+    for (const sessionId of ['first-fork', 'second-fork']) {
+      const messages = await f.store.listMessages(sessionId);
+      const sameText = messages.filter((message) => message.content === 'same original input');
+      expect(sameText).toHaveLength(4);
+      expect(sameText.filter((message) => !message.humanInput?.duplicateOfMessageId)).toHaveLength(
+        2,
+      );
+      expect(new Set(sameText.map((message) => message.humanInput?.inputCommandId)).size).toBe(2);
+      const sameInput = messages.filter(
+        (message) => message.humanInput?.inputCommandId === input.inputId,
+      );
+      expect(sameInput).toHaveLength(2);
+      const processing = sameInput.find((message) => message.humanInput?.duplicateOfMessageId)!;
+      const business = sameInput.find((message) => !message.humanInput?.duplicateOfMessageId)!;
+      expect(processing.runId).toBeNull();
+      expect(business.runId).toBeNull();
+      expect(processing.humanInput).toEqual({
+        inputCommandId: input.inputId,
+        publicCommandId: 'public-fork-input',
+        duplicateOfMessageId: business.id,
+      });
+      expect(processing.humanInput!.duplicateOfMessageId).not.toBe(applied.message.id);
+      expect(
+        (await f.store.getView(sessionId)).messages.find((message) => message.id === processing.id)
+          ?.humanInput,
+      ).toEqual(processing.humanInput);
+      const page = await f.store.listMessages(sessionId, { upperSeq: processing.seq });
+      expect(page.at(-1)?.id).toBe(processing.id);
+    }
+    expect(f.db.rows('SELECT * FROM message ORDER BY session_id,seq')).toEqual(beforeRows);
+    expect(f.db.rows('SELECT * FROM message_part ORDER BY message_id,ordinal')).toEqual(
+      beforeParts,
+    );
+    expect(f.db.rows('SELECT * FROM message WHERE session_id=? ORDER BY seq', 's')).toEqual(
+      originalRows,
+    );
+    expect(
+      f.db.rows(
+        "SELECT p.* FROM message_part p JOIN message m ON m.id=p.message_id WHERE m.session_id='s' ORDER BY p.message_id,p.ordinal",
+      ),
+    ).toEqual(originalParts);
+    const forkRows = await f.store.listMessages('first-fork');
+    const processing = forkRows.find((message) => message.humanInput?.duplicateOfMessageId)!;
+    const businessId = processing.humanInput!.duplicateOfMessageId!;
+    f.db.run('UPDATE message_part SET revision=revision+1 WHERE message_id=?', businessId);
+    expect(
+      (await f.store.listMessages('first-fork')).find((message) => message.id === processing.id)
+        ?.humanInput,
+    ).toBeUndefined();
+  } finally {
+    await f.cleanup();
+  }
+});
+
+test('Fork containing only a processing snapshot keeps its input when the source business is applied later', async () => {
+  const f = await fixture();
+  try {
+    await finishDisplayRun(f, f.run.id);
+    const input = await displayInput(f, 'public-later-input');
+    await finishDisplayRun(f, input.run.id);
+    await forkDisplay(f, 'early-fork');
+    const before = await f.store.listMessages('early-fork');
+    const original = before.find(
+      (message) => message.humanInput?.inputCommandId === input.inputId,
+    )!;
+    expect(original.humanInput).toEqual({
+      inputCommandId: input.inputId,
+      publicCommandId: 'public-later-input',
+    });
+    const decision = f.decide(input.inputId, {
+      relation: 'independent_work',
+      purpose: 'work',
+      targetRootWorkCommandId: null,
+      selectionEffect: 'select_work',
+    });
+    const applied = await f.store.applyInput({
+      expectedStoreId: f.scope.expectedStoreId,
+      owner: f.owner,
+      commandId: decision.businessCommand!.id,
+      kind: 'follow_up',
+      configuration: { modelId: 'fixture' },
+    });
+    expect(
+      (await f.store.listMessages('s')).find((message) => message.id === input.before.id)
+        ?.humanInput?.duplicateOfMessageId,
+    ).toBe(applied.message.id);
+    expect(await f.store.listMessages('early-fork')).toEqual(before);
+    expect(
+      f.db.row('SELECT source_json FROM message WHERE id=?', input.before.id)?.source_json,
+    ).toBe(input.originalSource);
+    const originalPart = f.db.rows(
+      'SELECT ordinal,kind,content_version,revision,json FROM message_part WHERE message_id=?',
+      input.before.id,
+    );
+    expect(
+      f.db.rows(
+        'SELECT ordinal,kind,content_version,revision,json FROM message_part WHERE message_id=?',
+        original.id,
+      ),
+    ).toEqual(originalPart);
+  } finally {
     await f.cleanup();
   }
 });

@@ -454,6 +454,12 @@ export interface MessageContent {
   sourceIds?: string[];
 }
 export interface MessageRecord extends MessageContent {
+  /** Read-only SQL proof linking presentation rows to one original human input. */
+  humanInput?: {
+    inputCommandId: string;
+    publicCommandId?: string;
+    duplicateOfMessageId?: string;
+  };
   /** Read-only SQL proof of a compression Model response; never trusted from message content. */
   compression?: {
     id: string;

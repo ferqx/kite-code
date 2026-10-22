@@ -1073,6 +1073,13 @@ export const schemas = {
     firstOutput: z.enum(['content', 'reasoning', 'tool_calls']).optional(),
     images: z.array(inputImage).optional(),
     files: inputFiles.optional(),
+    humanInput: z
+      .object({
+        inputCommandId: id,
+        publicCommandId: id.optional(),
+        duplicateOfMessageId: id.optional(),
+      })
+      .optional(),
     compression: z
       .object({
         id,

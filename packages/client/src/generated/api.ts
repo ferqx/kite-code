@@ -1885,6 +1885,7 @@ export type Message = {
     };
   }>;
   files?: Array<{ name: string; uri: string }>;
+  humanInput?: { inputCommandId: string; publicCommandId?: string; duplicateOfMessageId?: string };
   compression?: {
     id: string;
     trigger: 'manual' | 'automatic';
@@ -2665,6 +2666,11 @@ export type SelectedContextPage = {
       };
     }>;
     files?: Array<{ name: string; uri: string }>;
+    humanInput?: {
+      inputCommandId: string;
+      publicCommandId?: string;
+      duplicateOfMessageId?: string;
+    };
     compression?: {
       id: string;
       trigger: 'manual' | 'automatic';
@@ -3028,6 +3034,7 @@ export type MessageList = Array<{
     };
   }>;
   files?: Array<{ name: string; uri: string }>;
+  humanInput?: { inputCommandId: string; publicCommandId?: string; duplicateOfMessageId?: string };
   compression?: {
     id: string;
     trigger: 'manual' | 'automatic';
@@ -3181,6 +3188,11 @@ export type SessionView = {
       };
     }>;
     files?: Array<{ name: string; uri: string }>;
+    humanInput?: {
+      inputCommandId: string;
+      publicCommandId?: string;
+      duplicateOfMessageId?: string;
+    };
     compression?: {
       id: string;
       trigger: 'manual' | 'automatic';

@@ -13540,6 +13540,31 @@
               "additionalProperties": false
             }
           },
+          "humanInput": {
+            "type": "object",
+            "properties": {
+              "inputCommandId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128,
+                "pattern": "^[A-Za-z0-9_-]+$"
+              },
+              "publicCommandId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128,
+                "pattern": "^[A-Za-z0-9_-]+$"
+              },
+              "duplicateOfMessageId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128,
+                "pattern": "^[A-Za-z0-9_-]+$"
+              }
+            },
+            "required": ["inputCommandId"],
+            "additionalProperties": false
+          },
           "compression": {
             "type": "object",
             "properties": {
@@ -18033,6 +18058,31 @@
                     "additionalProperties": false
                   }
                 },
+                "humanInput": {
+                  "type": "object",
+                  "properties": {
+                    "inputCommandId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 128,
+                      "pattern": "^[A-Za-z0-9_-]+$"
+                    },
+                    "publicCommandId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 128,
+                      "pattern": "^[A-Za-z0-9_-]+$"
+                    },
+                    "duplicateOfMessageId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 128,
+                      "pattern": "^[A-Za-z0-9_-]+$"
+                    }
+                  },
+                  "required": ["inputCommandId"],
+                  "additionalProperties": false
+                },
                 "compression": {
                   "type": "object",
                   "properties": {
@@ -20292,6 +20342,31 @@
                 "additionalProperties": false
               }
             },
+            "humanInput": {
+              "type": "object",
+              "properties": {
+                "inputCommandId": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128,
+                  "pattern": "^[A-Za-z0-9_-]+$"
+                },
+                "publicCommandId": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128,
+                  "pattern": "^[A-Za-z0-9_-]+$"
+                },
+                "duplicateOfMessageId": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128,
+                  "pattern": "^[A-Za-z0-9_-]+$"
+                }
+              },
+              "required": ["inputCommandId"],
+              "additionalProperties": false
+            },
             "compression": {
               "type": "object",
               "properties": {
@@ -21118,6 +21193,31 @@
                     "required": ["name", "uri"],
                     "additionalProperties": false
                   }
+                },
+                "humanInput": {
+                  "type": "object",
+                  "properties": {
+                    "inputCommandId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 128,
+                      "pattern": "^[A-Za-z0-9_-]+$"
+                    },
+                    "publicCommandId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 128,
+                      "pattern": "^[A-Za-z0-9_-]+$"
+                    },
+                    "duplicateOfMessageId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 128,
+                      "pattern": "^[A-Za-z0-9_-]+$"
+                    }
+                  },
+                  "required": ["inputCommandId"],
+                  "additionalProperties": false
                 },
                 "compression": {
                   "type": "object",

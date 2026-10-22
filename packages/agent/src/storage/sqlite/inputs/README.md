@@ -29,6 +29,10 @@ Public root run.start and input.follow_up accept the optional string enum reason
 
 ## 真实输入与工作选择
 
+普通 Message 的只读 `humanInput` 由 [human-input-display.ts](../human-input-display.ts) 从准确 public/raw/processing/decision/business、原摘要、主体／Store／Session 与应用回执派生，忽略 source JSON 自报字段。处理轮首条用户消息和业务消息共享原输入身份及可核实的公开提交 ID；仅在业务应用、实际 Message／Run 及各层回执完整一致时标记处理副本的 `duplicateOfMessageId`。未决、缺失或错误证明不产生替代资格；同文不同输入仍独立。SQL 原消息、正文和分页全部保留，Native 只在当前读取同时具有准确替代消息时合并展示。Runtime 的有限 View 与完整消息读取均沿同一解释投影，有限 Execution 页缺项时查回准确原执行，避免把内部分类 JSON 当普通答复。
+
+Fork／二次 Fork 复用原 `messageOriginRow` 核封存出处与正文／parts，只在本分支确已复制且可核实准确业务消息时，将替代 ID 映射为本地复制 Message ID。源会话后来应用的业务不扩大旧 Fork 的可见集合；缺少替代行或出处损坏时不取得隐藏原文的资格。读取不修改原 SQL 数据，实际回归在 [human-work-control.test.ts](../../../../test/isolated/storage/human-work-control.test.ts)。
+
 上述两个公共输入协议保留原合同。可信 Runtime 可先通过 [human-work-control owner](../human-work-control.ts) 的 `registerHumanInput` 耐久登记真实人类输入，随后由 `decideHumanInput` 保存关联决定；[私有类型](../../human-work-control.ts)不进入模型六工具，也不允许客户端自报 rootWork。`human.input` 的不可变 request 保存原文、原 selection、观察 Run、候选工作及被澄清输入，原 receipt 保存登记时的选择与 control revision。登记与 Session `control_revision` 增加同事务；待决输入只阻挡原准确候选工作的后续派发与通知接纳，不猜测取消 child。
 
 决定将原输入 ID/digest、`same_work / independent_work / unresolved`、用途、准确目标、选择变化及可信依据封为 `human.input.decision`。宿主须核实依据是当前真实指令；引用、代码、附件和 child 邮件不取得控制资格。Store 重核原文引用、原主体／Store／Session、目标、selection 和当前 revision，在同一短事务保存决定、选择、原输入应用回执及唯一派生业务 Command。进度、澄清、暂停、停止不为凑流程创建业务轮；unresolved 保持只读处理／新真实输入澄清。已封存决定不重新计算；新澄清引用旧输入，追加新决定，不改旧正文。 尚有待澄清输入、但没有已选工作时，普通纯文本不走“首个独立任务”的快速推断，先由无工具解释轮核实是否回答原待决；明确 New task 等独立意图仍按原路径处理。首条待决没有候选工作和原选择时，准确的新澄清可用 independent_work/work 准入首业务；它不能推断已有工作、执行控制或改写原封存决定。已有候选工作的澄清仍须 same_work 且目标属于原候选。

@@ -88,7 +88,11 @@ import {
   prepareNativeModels,
 } from './native-model-picker';
 import { NativeModelSettings } from './native-model-settings';
-import { desktopDirectory, desktopMessages } from './native-presentation';
+import {
+  desktopConversationMessages,
+  desktopDirectory,
+  desktopMessages,
+} from './native-presentation';
 import { NativeProviderSettings } from './native-provider-settings';
 import { NativeRecoveryView } from './native-recovery';
 import { NativeExecutionResult } from './native-result';
@@ -1003,7 +1007,7 @@ function NativeDesktopContent({
     if (child?.sessionId !== childSessionId || child.executionId !== childExecutionId)
       reader.openChild(childSessionId, childExecutionId);
   }, [childScope, childReadAvailable, childSessionId, childExecutionId]);
-  const displayMessages = messages;
+  const displayMessages = useMemo(() => desktopConversationMessages(messages), [messages]);
   const readingParent = !preparing && !scheduledTasksView;
   const inputQueue = useNativeInputQueue({
     bridge,
@@ -1697,7 +1701,8 @@ function NativeDesktopContent({
         message.role === 'user' &&
         message.sessionId === firstSubmission.creation.sessionId &&
         selection?.storeId === firstSubmission.creation.expectedStoreId &&
-        (message.originCommandId === firstSubmission.commandId ||
+        (message.humanInput?.publicCommandId === firstSubmission.commandId ||
+          message.originCommandId === firstSubmission.commandId ||
           (message.sourceIds?.includes(firstSubmission.commandId) &&
             selection.runs.some(
               (run) =>

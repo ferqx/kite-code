@@ -37,6 +37,8 @@ function fixture(
     messages?: Message[];
     workspaceIds?: readonly ('w' | 'empty')[];
     holdDirectory?: boolean;
+    firstHumanInput?: boolean;
+    runs?: Run[];
   } = {},
 ) {
   const dom = new JSDOM('<div id="root"></div>', {
@@ -59,7 +61,7 @@ function fixture(
     root = createRoot(host.getElementById('root')!);
   const calls: NativeRequest[] = [],
     messages: Message[] = [...(options.messages ?? [])],
-    runs: Run[] = [],
+    runs: Run[] = [...(options.runs ?? [])],
     drafts = new Map<string, string>([
       ['a', 'saved A'],
       ['b', 'saved B'],
@@ -112,6 +114,7 @@ function fixture(
   let holdModels = false,
     releaseModels: (() => void) | undefined;
   const permissionSubmissions: NativeState['permissionSubmissions'][number][] = [];
+  let viewGeneration = 1;
   const state = (): NativeState => ({
     generation: 1,
     creationSubmissions: [],
@@ -123,7 +126,7 @@ function fixture(
       ? {
           storeId: 'store',
           canReadModelOutput: false,
-          viewGeneration: 1,
+          viewGeneration,
           viewSelection: 1,
           session: sessions.find((session) => session.id === selected)!,
           runs: runs.filter((run) => run.sessionId === selected),
@@ -451,6 +454,16 @@ function fixture(
     refreshFacts: async () => {
       await act(async () => watcher?.({ kind: 'changed', generation: 1 }));
     },
+    publishMessages: async (next: Message[], nextRuns: Run[]) => {
+      messages.splice(0, messages.length, ...next);
+      runs.splice(0, runs.length, ...nextRuns);
+      for (const item of sessions)
+        item.nextSeq =
+          messages.filter((message) => message.sessionId === item.id).at(-1)?.seq ?? '0';
+      viewGeneration++;
+      await act(async () => watcher?.({ kind: 'changed', generation: 1 }));
+    },
+    snapshot: () => ({ messages: [...messages], runs: [...runs] }),
     lifecycle: (phase: 'active' | 'quitting') =>
       act(async () => watcher?.({ kind: 'lifecycle', phase })),
     changeTrustScope: (description: string) => {
@@ -469,12 +482,14 @@ function fixture(
       if (created && !sessions.some((item) => item.id === send.creation.sessionId))
         sessions.push(session(send.creation.sessionId));
       if (phase === 'accepted') {
-        const runId = `first-run-${send.intent.commandId}`;
+        const runId = `${options.firstHumanInput ? 'processing-run' : 'first-run'}-${send.intent.commandId}`;
         runs.push({
           id: runId,
           sessionId: send.creation.sessionId,
           originStoreId: 'store',
-          originCommandId: send.intent.commandId,
+          originCommandId: options.firstHumanInput
+            ? `processing-${send.intent.commandId}`
+            : send.intent.commandId,
           isActive: false,
           status: 'completed',
         } as Run);
@@ -486,7 +501,17 @@ function fixture(
           status: 'complete',
           role: 'user',
           content: send.intent.content,
-          sourceIds: [send.intent.commandId],
+          sourceIds: [
+            options.firstHumanInput ? `processing-${send.intent.commandId}` : send.intent.commandId,
+          ],
+          ...(options.firstHumanInput
+            ? {
+                humanInput: {
+                  inputCommandId: `raw-${send.intent.commandId}`,
+                  publicCommandId: send.intent.commandId,
+                },
+              }
+            : {}),
         });
         sessions.find((session) => session.id === send.creation.sessionId)!.nextSeq = '1';
       }
@@ -2124,6 +2149,202 @@ test('first submission keeps one readable pending message through delayed select
     );
     expect(f.host.querySelector('.delivery-status')).toBeNull();
     expect(f.calls.filter((call) => call.method === 'conversation.send')).toHaveLength(1);
+  } finally {
+    await f.close();
+  }
+});
+
+test('a public first input hands its optimistic bubble to processing then business history without duplicating it, including a cold mount', async () => {
+  const text = 'One actual first input 雪🙂';
+  const f = fixture(true, true, 'accept_edits', { firstHumanInput: true });
+  let snapshot: ReturnType<typeof f.snapshot> | undefined;
+  try {
+    await act(async () => f.root.render(<NativeDesktop />));
+    await f.click('Original A');
+    await f.click('在 Workspace 中新建对话');
+    await f.edit(text);
+    await f.click('发送首条消息');
+    expect(f.host.querySelectorAll('.message.user')).toHaveLength(1);
+    expect(f.host.querySelector('.message.user')?.textContent).toContain(text);
+    const send = await f.resolve('accepted');
+    expect(f.host.querySelectorAll('.message.user')).toHaveLength(1);
+    expect(f.host.querySelector('.message.user')?.textContent).toContain(text);
+    expect(f.host.querySelector('.message.user.sending')).toBeNull();
+
+    const processing = f.snapshot();
+    const businessId = `business-message-${send.intent.commandId}`;
+    const businessRun = {
+      ...processing.runs[0]!,
+      id: `business-run-${send.intent.commandId}`,
+      originCommandId: `business-${send.intent.commandId}`,
+    };
+    await f.publishMessages(
+      [
+        {
+          ...processing.messages[0]!,
+          humanInput: { ...processing.messages[0]!.humanInput!, duplicateOfMessageId: businessId },
+        },
+        {
+          ...processing.messages[0]!,
+          id: businessId,
+          runId: businessRun.id,
+          seq: '2',
+          sourceIds: [businessRun.originCommandId],
+          originCommandId: businessRun.originCommandId,
+          inputKind: 'input.follow_up',
+        },
+      ],
+      [...processing.runs, businessRun],
+    );
+    expect(f.host.querySelectorAll('.message.user')).toHaveLength(1);
+    expect(f.host.querySelector('.message.user')?.textContent).toContain(text);
+    expect(f.calls.filter((call) => call.method === 'conversation.send')).toHaveLength(1);
+    snapshot = f.snapshot();
+  } finally {
+    await f.close();
+  }
+
+  const cold = fixture(true, true, 'accept_edits', {
+    messages: snapshot!.messages.map((message) => ({ ...message, sessionId: 'a' })),
+    runs: snapshot!.runs.map((run) => ({ ...run, sessionId: 'a' })),
+  });
+  try {
+    await act(async () => cold.root.render(<NativeDesktop />));
+    await cold.click('Original A');
+    expect(cold.host.querySelectorAll('.message.user')).toHaveLength(1);
+    expect(cold.host.querySelector('.message.user')?.textContent).toContain(text);
+    expect(cold.calls.some((call) => ['conversation.send', 'submit'].includes(call.method))).toBe(
+      false,
+    );
+  } finally {
+    await cold.close();
+  }
+});
+
+test('ordinary history preserves independent identical inputs and processing with clarification but no business message', async () => {
+  const user = (id: string, seq: string, inputCommandId: string, content: string): Message => ({
+    id,
+    seq,
+    sessionId: 'a',
+    runId: null,
+    role: 'user',
+    status: 'complete',
+    content,
+    humanInput: { inputCommandId, publicCommandId: `public-${inputCommandId}` },
+  });
+  const f = fixture(true, true, 'accept_edits', {
+    messages: [
+      {
+        ...user('processing-one', '1', 'raw-one', 'Identical actual input'),
+        humanInput: {
+          inputCommandId: 'raw-one',
+          publicCommandId: 'public-raw-one',
+          duplicateOfMessageId: 'business-one',
+        },
+      },
+      user('business-one', '2', 'raw-one', 'Identical actual input'),
+      user('business-two', '3', 'raw-two', 'Identical actual input'),
+      user('processing-unresolved', '4', 'raw-three', 'Please clarify which work'),
+      {
+        id: 'clarification',
+        seq: '5',
+        sessionId: 'a',
+        runId: null,
+        role: 'assistant',
+        status: 'complete',
+        content: 'Which original work should receive this input?',
+      },
+      {
+        ...user(
+          'processing-with-unread-replacement',
+          '6',
+          'raw-four',
+          'Retained while replacement is unavailable',
+        ),
+        humanInput: {
+          inputCommandId: 'raw-four',
+          publicCommandId: 'public-raw-four',
+          duplicateOfMessageId: 'business-not-in-reading',
+        },
+      },
+    ],
+  });
+  try {
+    await act(async () => f.root.render(<NativeDesktop />));
+    await f.click('Original A');
+    const users = [...f.host.querySelectorAll('.message.user')];
+    expect(users).toHaveLength(4);
+    expect(
+      users.filter((message) => message.textContent?.includes('Identical actual input')),
+    ).toHaveLength(2);
+    expect(
+      users.filter((message) => message.textContent?.includes('Please clarify which work')),
+    ).toHaveLength(1);
+    expect(
+      users.filter((message) =>
+        message.textContent?.includes('Retained while replacement is unavailable'),
+      ),
+    ).toHaveLength(1);
+    expect(f.host.querySelector('.message.assistant')?.textContent).toContain(
+      'Which original work should receive this input?',
+    );
+    expect(f.calls.some((call) => ['conversation.send', 'submit'].includes(call.method))).toBe(
+      false,
+    );
+  } finally {
+    await f.close();
+  }
+});
+
+test('sealed Fork history combines only its own proven processing and business copies', async () => {
+  const processing: Message = {
+    id: 'fork-processing',
+    sessionId: 'a',
+    runId: null,
+    seq: '1',
+    role: 'user',
+    status: 'complete',
+    content: 'One original input in sealed history',
+    originMessage: {
+      storeId: 'source-store',
+      sessionId: 'source-session',
+      messageId: 'source-processing',
+      runId: 'source-processing-run',
+    },
+    humanInput: {
+      inputCommandId: 'source-input',
+      publicCommandId: 'source-public',
+      duplicateOfMessageId: 'fork-business',
+    },
+  };
+  const business: Message = {
+    ...processing,
+    id: 'fork-business',
+    seq: '2',
+    originMessage: {
+      ...processing.originMessage!,
+      messageId: 'source-business',
+      runId: 'source-business-run',
+    },
+    humanInput: { inputCommandId: 'source-input', publicCommandId: 'source-public' },
+  };
+  const f = fixture(true, true, 'accept_edits', { messages: [processing, business] });
+  try {
+    await act(async () => f.root.render(<NativeDesktop />));
+    await f.click('Original A');
+    expect(f.host.querySelectorAll('.message.user')).toHaveLength(1);
+    expect(f.host.querySelector('.message.user')?.textContent).toContain(processing.content);
+    await f.publishMessages(
+      [
+        processing,
+        { ...business, originMessage: { ...business.originMessage!, storeId: 'foreign-store' } },
+      ],
+      [],
+    );
+    expect(f.host.querySelectorAll('.message.user')).toHaveLength(2);
+    expect(f.calls.some((call) => ['conversation.send', 'submit'].includes(call.method))).toBe(
+      false,
+    );
   } finally {
     await f.close();
   }
