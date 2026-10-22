@@ -97,7 +97,8 @@ function fixture(protectMissingUserDirectory = false) {
   let loseCreation = false,
     loseInput = false,
     loseMode = false,
-    rejectMode = false;
+    rejectMode = false,
+    loseTrust = false;
   let active = false;
   let releaseCreate: (() => void) | undefined;
   const commands = new Map<string, Command>(),
@@ -172,7 +173,10 @@ function fixture(protectMissingUserDirectory = false) {
       revision: String(trusts),
       canonicalIdentity: 'a'.repeat(64),
       externalReadScopeDigest: 'b'.repeat(64),
-      readScopes: [{ kind: 'workspace', description: 'workspace' }],
+      readScopes: [
+        { kind: 'workspace', description: 'workspace' },
+        { kind: 'native_shell_read', description: 'host-selected Native Shell read scope' },
+      ],
     }),
     async setWorkspaceTrust(_workspace: string, input: { commandId: string }) {
       trusts++;
@@ -184,6 +188,7 @@ function fixture(protectMissingUserDirectory = false) {
         receipt: { status: 'applied' },
       } as PermissionMutation;
       mutations.set(input.commandId, result);
+      if (loseTrust) throw new ClientError('network_outcome_unknown');
       return result;
     },
     async setPermissionMode(_session: string, input: { commandId: string; mode: string }) {
@@ -297,6 +302,9 @@ function fixture(protectMissingUserDirectory = false) {
     losePermission: () => {
       loseMode = true;
     },
+    loseTrust: () => {
+      loseTrust = true;
+    },
     failPermission: (value: boolean) => {
       rejectMode = value;
     },
@@ -349,6 +357,55 @@ test('first send saves original text, reuses creation/permission/input callers a
     expect(f.data.modelRoute('store', 'new-session')).toBe('model');
     expect(await f.caller.invoke(f.request)).toEqual(result);
     expect(f.counts()).toMatchObject({ creates: 1, starts: 1, modes: 1, trusts: 1 });
+  } finally {
+    await f.close();
+  }
+});
+
+test('an existing project-bound Session prepares host read scope before submitting the original input without changing its mode', async () => {
+  const f = fixture();
+  try {
+    await f.ready();
+    f.untrust();
+    await f.caller.invoke({ method: 'select', generation: 1, sessionId: 'existing' });
+    expect(f.counts()).toMatchObject({ creates: 0, trusts: 0, starts: 0, modes: 0 });
+    expect(
+      await f.caller.invoke({
+        method: 'submit',
+        generation: 1,
+        sessionId: 'existing',
+        intent: f.request.intent,
+      }),
+    ).toMatchObject({ phase: 'accepted', sessionId: 'existing' });
+    expect(f.counts()).toMatchObject({ creates: 0, trusts: 1, starts: 1, modes: 0 });
+    expect(f.caller.state().selection?.permissions?.trust.trusted).toBe(true);
+    expect(f.data.callers()[0]!.intent.request).toEqual(f.request.intent);
+    expect(f.caller.state().selection?.session.id).toBe('existing');
+  } finally {
+    await f.close();
+  }
+});
+
+test('unknown background project preparation keeps its original permission query and never starts or replays input', async () => {
+  const f = fixture();
+  try {
+    await f.ready();
+    f.untrust();
+    f.loseTrust();
+    const result = (await f.caller.invoke(f.request)) as NativeConversationResult;
+    expect(result).toMatchObject({ phase: 'unknown', stage: 'permission' });
+    expect(result.permissionCommandId).toBeString();
+    expect(f.counts()).toMatchObject({ creates: 1, trusts: 1, starts: 0, modes: 0 });
+    expect(await f.caller.invoke(f.request)).toEqual(result);
+    await f.caller.invoke({
+      method: 'conversation.lookup',
+      generation: 1,
+      commandId: f.request.intent.commandId,
+    });
+    expect(f.counts()).toMatchObject({ creates: 1, trusts: 1, starts: 0, modes: 0 });
+    expect(
+      f.data.read({ storeId: 'store', workspaceId: 'w', rootSessionId: 'new-session' }).content,
+    ).toBe(text);
   } finally {
     await f.close();
   }

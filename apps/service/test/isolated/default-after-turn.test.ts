@@ -630,6 +630,7 @@ async function fixture(
       sessionId: 's',
       workspaceId: 'w',
       mode: planning ? 'full' : 'accept_edits',
+      trusted: true,
     });
   if (managed) {
     const mode = await client.getPermissionMode('s', { storeId: expectedStoreId });
@@ -1366,7 +1367,3 @@ test(
   () => plannedReport(false, true),
   25000,
 );
-
-test('paused planned work continues through a fresh proved report admission while preserving the historical suppressed receipt', async () => {
-  await plannedReport(false, false, true);
-}, 25000);

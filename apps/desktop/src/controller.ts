@@ -1099,6 +1099,37 @@ export class DesktopController {
   setWorkspaceTrust(trusted: boolean, observationId: number): Promise<PermissionMutation> {
     return this.submitPermission('workspace.trust', { trusted }, observationId);
   }
+  /** An explicit input uses its Session's bound project; preparation keeps the original control journal. */
+  async prepareWorkspaceAccess(observationId: number): Promise<DesktopPermissionFacts> {
+    const original = this.current;
+    const facts = original?.permissions;
+    if (!original || !facts || facts.observationId !== observationId)
+      throw new ClientError('permission_observation_changed');
+    if (original.view.session.parentSessionId !== null)
+      throw new ClientError('permission_child_readonly');
+    const generation = this.generation;
+    const check = () => {
+      const current = this.current;
+      if (
+        this.disposed ||
+        this.generation !== generation ||
+        current?.sessionId !== original.sessionId ||
+        current.view.storeId !== original.view.storeId ||
+        current.view.session.workspaceId !== original.view.session.workspaceId
+      )
+        throw new ClientError('permission_observation_changed');
+    };
+    check();
+    if (facts.trust.trusted) return facts;
+    const receipt = await this.setWorkspaceTrust(true, observationId);
+    check();
+    if (receipt.state !== 'applied') throw new ClientError('permission_outcome_unknown');
+    const refreshed = await this.refreshPermissions();
+    check();
+    if (!refreshed?.permissions?.trust.trusted)
+      throw new ClientError('workspace_access_unavailable');
+    return refreshed.permissions;
+  }
   private submitPermission(
     kind: PermissionSubmission['kind'],
     choice: { mode: PermissionModeState['mode']; makeDefault: boolean } | { trusted: boolean },

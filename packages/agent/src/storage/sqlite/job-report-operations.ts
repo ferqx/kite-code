@@ -21,13 +21,11 @@ const digest = (value: Json) => createHash('sha256').update(canonicalJson(value)
 
 function queuedHumanBusinessSql(c: string): string {
   return `(SELECT MAX(b.seq) FROM command b
-    JOIN command d ON d.id=b.target_command_id AND d.kind='human.input.decision'
-    JOIN command h ON h.id=json_extract(d.request_json,'$.inputCommandId') AND h.kind='human.input'
-    WHERE b.session_id=${c}.session_id AND b.root_work_command_id=${c}.root_work_command_id
-      AND b.root_work_seq=${c}.root_work_seq AND b.status='accepted' AND b.cancelled=0
-      AND json_extract(b.receipt_json,'$.outcome')='human_business_queued'
-      AND json_extract(d.receipt_json,'$.businessCommandId')=b.id
-      AND h.cancelled=0 AND json_extract(h.receipt_json,'$.applicationState')='queued')`;
+    WHERE b.session_id=${c}.session_id AND b.origin_store_id=${c}.origin_store_id
+      AND b.kind IN('run.start','input.follow_up','input.steer')
+      AND b.status='accepted' AND b.cancelled=0 AND b.agent_source_execution_id IS NULL
+      AND COALESCE(json_extract(b.receipt_json,'$.outcome'),'') NOT IN
+        ('human_input_processing','human_input_pending','human_input_queued','human_input_unresolved'))`;
 }
 
 /** A deferred result becomes runnable only when its actual admission inputs change. */
@@ -676,29 +674,26 @@ export function applyJobReport(
     }
     if (eligibility.state === 'deferred')
       return deferReport(db, command, eligibility.reason ?? 'work_not_selected');
-    // A real human continuation owns the next admission. Its durable decision
-    // may select this work before its business input has reached a Run; a result
-    // notification must wait for that exact input instead of creating a rival Run.
+    const active = db.row(
+      'SELECT * FROM run WHERE session_id=? AND is_active=1',
+      command.session_id!,
+    );
+    // A queued prompt owns the next idle admission. Results still reach the
+    // current Run, so a queued follow-up cannot deadlock work awaiting a child.
     if (
       binding.kind === 'agent_completion' &&
+      !active &&
       db.row(
         `SELECT ${queuedHumanBusinessSql('c')} AS seq FROM command c WHERE c.id=?`,
         command.id!,
       )?.seq !== null
     )
       return deferReport(db, command, 'human_business_queued');
-    const active = db.row(
-      'SELECT * FROM run WHERE session_id=? AND is_active=1',
-      command.session_id!,
-    );
     if (binding.kind !== 'agent_completion' && (active || parent?.is_active))
       return deferReport(db, command, 'report_parent_active');
     if (
       active &&
-      (active.root_work_command_id !== command.root_work_command_id ||
-        String(active.root_work_seq) !== String(command.root_work_seq) ||
-        active.cancel_requested ||
-        active.context_selection_id !== binding.contextSelectionId)
+      (active.cancel_requested || active.context_selection_id !== binding.contextSelectionId)
     )
       return deferReport(db, command, 'session_busy');
     // An active ordinary Run already has work authority. Idle wake authority is a

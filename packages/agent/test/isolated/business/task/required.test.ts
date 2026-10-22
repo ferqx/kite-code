@@ -653,10 +653,6 @@ for (const wake of ['terminal', 'input', 'raw_input', 'include', 'timeout'] as c
     const store = await openSqliteStore({ dataRoot: join(directory, 'data'), profile: 'test' });
     const releases = new Map<string, () => void>();
     let parentModels = 0;
-    let releaseRawDecision!: () => void;
-    const rawDecision = new Promise<void>((resolve) => {
-      releaseRawDecision = resolve;
-    });
     const hold: Extension = {
       id: 'hold',
       version: '1',
@@ -694,33 +690,8 @@ for (const wake of ['terminal', 'input', 'raw_input', 'include', 'timeout'] as c
       },
     };
     const parent: ModelAdapter = {
-      async *stream(request) {
+      async *stream() {
         parentModels++;
-        if (wake === 'raw_input' && parentModels === 4) {
-          const instruction = request.messages.find((message) =>
-            message.content.includes('Original input identity:'),
-          )!;
-          expect(request.tools).toHaveLength(0);
-          const line = instruction.content
-            .split('\n')
-            .find((value) => value.startsWith('Original input identity: '))!;
-          const identity = JSON.parse(line.slice('Original input identity: '.length));
-          await rawDecision;
-          yield {
-            type: 'text_delta',
-            text: JSON.stringify({
-              ...identity,
-              relation: 'same_work',
-              purpose: 'progress',
-              target_root_work_command_id: 'work',
-              selection_effect: 'keep',
-              answer: 'Both original children remain pending.',
-              clarification: null,
-            }),
-          };
-          yield finish;
-          return;
-        }
         for (const event of parentModels <= 2
           ? call('task', {
               key: `child${parentModels}`,
@@ -876,7 +847,6 @@ for (const wake of ['terminal', 'input', 'raw_input', 'include', 'timeout'] as c
             >
           ).details,
         ).toMatchObject({ reason: 'input', timedOut: false });
-        releaseRawDecision();
       }
       if (wake === 'include') {
         const source = waiting.executions.find(
@@ -906,17 +876,14 @@ for (const wake of ['terminal', 'input', 'raw_input', 'include', 'timeout'] as c
         const receipt = input.receipt as { runId: string; businessCommandId: string };
         expect(input.status).toBe('applied');
         expect(receipt.runId).toBe(view.runs[0]!.id);
-        expect((await store.getCommand(receipt.businessCommandId))!.kind).toBe('input.steer');
+        expect(input.kind).toBe('input.steer');
         expect(
-          view.messages.find((message) => message.sourceIds?.includes(receipt.businessCommandId))
-            ?.content,
+          view.messages.find((message) => message.sourceIds?.includes(input.id))?.content,
         ).toBe('补充 work：new guide without cancelling children');
       }
       if (wake === 'raw_input') {
         expect((await store.getCommand('pending-raw'))!.receipt).toMatchObject({
-          state: 'decided',
-          businessCommandId: null,
-          applicationState: 'observed',
+          state: 'pending',
         });
         expect(view.runs).toHaveLength(1);
       }
@@ -931,7 +898,6 @@ for (const wake of ['terminal', 'input', 'raw_input', 'include', 'timeout'] as c
       expect(remaining.cancelRequestedAt).toBeNull();
       expect(view.runs[0]?.requirements).toHaveLength(0);
     } finally {
-      releaseRawDecision();
       for (const release of releases.values()) release();
       await runtime.close();
       rmSync(directory, { recursive: true, force: true });

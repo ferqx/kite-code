@@ -284,18 +284,11 @@ async function fixture(off = false) {
         ).toMatchObject({ content: currentInput, sourceIds: [businessId] });
         if (id > 1) {
           expect(command.status).toBe('applied');
-          expect(receipt.businessCommandId).toBeString();
-          expect(businessId).not.toBe(commandId);
-          expect(await store.getCommand(receipt.humanInputCommandId!)).toMatchObject({
-            request: {
-              publicCommandId: commandId,
-              content: currentInput,
-              originalRequest: command.request,
-            },
-          });
-          expect(await store.getCommand(businessId)).toMatchObject({
+          expect(businessId).toBe(commandId);
+          expect(receipt).not.toHaveProperty('humanInputCommandId');
+          expect(command.request).toMatchObject({ content: currentInput });
+          expect(await store.getCommand(commandId)).toMatchObject({
             status: 'applied',
-            request: { content: currentInput },
             receipt: { runId: run!.id },
           });
         }

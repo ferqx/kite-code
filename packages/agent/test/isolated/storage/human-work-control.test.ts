@@ -105,12 +105,12 @@ async function fixture() {
   };
 }
 
-test('raw registration wins notification priority and retry preserves exact original observation', async () => {
+test('historical raw registration preserves exact observation without blocking ordinary execution', async () => {
   const f = await fixture();
   try {
     const original = f.register('input', '请告诉我 A 的进度');
     expect(original.kind).toBe('human.input');
-    expect(f.eligibility().reason).toBe('input_unresolved');
+    expect(f.eligibility().reason).toBeNull();
     expect(f.register('input', '请告诉我 A 的进度')).toEqual(original);
     expect(() => f.register('input', 'different')).toThrow('command_conflict');
     const result = f.decide('input', {
@@ -168,7 +168,7 @@ test('foreign-origin history remains readable without becoming current human con
   }
 });
 
-test('independent B is queued atomically, survives its cancellation as a selection boundary, and never steers A', async () => {
+test('historical B selection remains readable but no longer blocks A or steers it', async () => {
   const f = await fixture();
   try {
     f.register('B', '现在另做 B');
@@ -184,14 +184,14 @@ test('independent B is queued atomically, survives its cancellation as a selecti
       runId: null,
       outcome: 'human_business_queued',
     });
-    expect(f.eligibility().reason).toBe('work_not_selected');
+    expect(f.eligibility().reason).toBeNull();
     await f.store.cancelCommand({
       ...f.scope,
       commandId: 'cancel-B',
       targetCommandId: decision.businessCommand!.id,
     });
     expect(readHumanWorkState(f.db, f.scope).selectedWork?.rootWorkCommandId).toBe('B');
-    expect(f.eligibility().reason).toBe('work_not_selected');
+    expect(f.eligibility().reason).toBeNull();
     f.register('progress-A', 'A 的进度如何');
     f.decide('progress-A', {
       relation: 'same_work',
@@ -239,7 +239,7 @@ test('stale proposal cannot commit and decision response loss returns the exact 
   }
 });
 
-test('unresolved input blocks only its recorded work and a new clarification resolves without rewriting original text', async () => {
+test('historical unresolved input does not block execution; recorded explicit pause and original text remain intact', async () => {
   const f = await fixture();
   try {
     const raw = f.register('unclear', '先别做这个');
@@ -251,7 +251,7 @@ test('unresolved input blocks only its recorded work and a new clarification res
     });
     expect(unresolved.requiresReadOnlyProcessing).toBe(true);
     expect(unresolved.businessCommand).toBeNull();
-    expect(f.eligibility().reason).toBe('input_unresolved');
+    expect(f.eligibility().reason).toBeNull();
     f.register('clarification', '我说暂停 A', { clarifiesInputId: 'unclear' });
     f.decide('clarification', {
       relation: 'same_work',
@@ -450,7 +450,7 @@ test('same-work idle continuation preserves A configuration while serializing af
   }
 });
 
-test('idle interpretation uses one ordinary Run with its own cause and sealed read-only dispatch boundary', async () => {
+test('historical interpretation retains its cause but Model, Tool and Job dispatch are retired', async () => {
   const f = await fixture();
   try {
     await f.store.finishRun({
@@ -486,16 +486,16 @@ test('idle interpretation uses one ordinary Run with its own cause and sealed re
       adapter_id: 'fixed',
       definition_version: '1',
     };
-    expect(() => assertHumanWorkDispatch(f.db, execution)).not.toThrow();
+    expect(() => assertHumanWorkDispatch(f.db, execution)).toThrow('input_processing_removed');
     expect(() =>
       assertHumanWorkDispatch(f.db, { ...execution, kind: 'tool', adapter_id: 'status' }),
-    ).not.toThrow();
+    ).toThrow('input_processing_removed');
     expect(() =>
       assertHumanWorkDispatch(f.db, { ...execution, kind: 'tool', adapter_id: 'write' }),
-    ).toThrow('input_processing_read_only');
+    ).toThrow('input_processing_removed');
     expect(() =>
       assertHumanWorkDispatch(f.db, { ...execution, kind: 'job', adapter_id: 'status' }),
-    ).toThrow('input_processing_read_only');
+    ).toThrow('input_processing_removed');
     await f.store.finishRun({
       expectedStoreId: f.scope.expectedStoreId,
       owner: f.owner,
@@ -503,7 +503,7 @@ test('idle interpretation uses one ordinary Run with its own cause and sealed re
       status: 'completed',
       requirements: [],
     });
-    expect(f.eligibility().reason).toBe('input_unresolved');
+    expect(f.eligibility().reason).toBeNull();
   } finally {
     await f.cleanup();
   }

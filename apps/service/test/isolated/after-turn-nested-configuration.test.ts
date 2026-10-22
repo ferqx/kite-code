@@ -301,7 +301,7 @@ for (const mode of ['nested', 'followup'] as const) {
         followupRunId = receipt.runId;
         expect(command.status).toBe('applied');
         expect(await f.store.getRun(receipt.runId)).toMatchObject({
-          originCommandId: receipt.businessCommandId,
+          originCommandId: command.id,
           rootWorkCommandId: command.id,
           status: 'completed',
         });
@@ -311,7 +311,7 @@ for (const mode of ['nested', 'followup'] as const) {
         expect(models).toHaveLength(2);
         for (const model of models)
           expect(model).toMatchObject({
-            originCommandId: receipt.businessCommandId,
+            originCommandId: command.id,
             rootWorkCommandId: command.id,
           });
         carrier = (await f.store.getView('root')).executions.find(

@@ -841,8 +841,11 @@ export function callContextSelection(
         report.origin_store_id !== input.expectedStoreId ||
         report.root_work_command_id !== execution.root_work_command_id ||
         String(report.root_work_seq) !== String(execution.root_work_seq) ||
-        reportRun.root_work_command_id !== execution.root_work_command_id ||
-        String(reportRun.root_work_seq) !== String(execution.root_work_seq)
+        reportRun.origin_store_id !== input.expectedStoreId ||
+        reportRun.context_selection_id !== execution.context_selection_id ||
+        (parse<Record<string, Json>>(execution.after_turn_json).kind !== 'agent_completion' &&
+          (reportRun.root_work_command_id !== execution.root_work_command_id ||
+            String(reportRun.root_work_seq) !== String(execution.root_work_seq)))
       )
         throw new AgentError('result_not_pending');
     }

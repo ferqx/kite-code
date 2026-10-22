@@ -419,7 +419,7 @@ test('durable acceptance on closing observer Runtime does not cancel the survivi
       return { outcome: 'succeeded', content: 'released' };
     },
   };
-  const fixed = createFixedModel([calls, [finish]]);
+  const fixed = createFixedModel([calls, [finish], [finish]]);
   const a = await fixture(
     {
       model: fixed,
@@ -434,9 +434,8 @@ test('durable acceptance on closing observer Runtime does not cancel the survivi
     await entered.promise;
     const originalModel = (await a.original.getExecution(fixed.requests[0]!.requestId))!;
     const originalRunId = originalModel.runId!;
-    // Hold the response after the actual business admission transaction. Merely
-    // registering raw input does not yet authorize a surviving owner to run it.
-    b.afterHooks.set('decideHumanInput', async () => {
+    // The exact public command is already durable while its submitter is closing.
+    b.afterHooks.set('acceptCommand', async () => {
       accepted.release();
       await response.promise;
     });
@@ -449,30 +448,9 @@ test('durable acceptance on closing observer Runtime does not cancel the survivi
     });
     await accepted.promise;
     const pending = (await a.original.getCommand('durable'))!;
-    const receipt = pending.receipt as {
-      businessCommandId: string;
-      humanInputCommandId: string;
-    };
     expect(pending.status).toBe('accepted');
-    expect(receipt.businessCommandId).toBeString();
-    expect(receipt.businessCommandId).not.toBe(pending.id);
-    expect(await a.original.getCommand(receipt.businessCommandId)).toMatchObject({
-      status: 'accepted',
-      request: {
-        kind: 'input.follow_up',
-        content: 'New task: survives observer',
-        afterRunId: originalRunId,
-      },
-      rootWorkCommandId: 'durable',
-    });
-    expect(await a.original.getCommand(receipt.humanInputCommandId)).toMatchObject({
-      kind: 'human.input',
-      request: {
-        content: 'New task: survives observer',
-        publicCommandId: 'durable',
-        originalRequest: pending.request,
-      },
-    });
+    expect(pending.request).toEqual({ kind: 'run.start', content: 'New task: survives observer' });
+    expect(pending.receipt).not.toHaveProperty('humanInputCommandId');
     const close = b.runtime.close();
     expect(b.storeCloses()).toBe(0);
     release.release();
@@ -482,13 +460,13 @@ test('durable acceptance on closing observer Runtime does not cancel the survivi
     expect(command?.cancelRequestedAt).toBeNull();
     const runId = (command!.receipt as { runId: string }).runId;
     expect(await a.original.getRun(runId)).toMatchObject({
-      originCommandId: receipt.businessCommandId,
+      originCommandId: 'durable',
       rootWorkCommandId: 'durable',
       status: 'completed',
     });
     expect(await a.original.getRun(originalRunId)).toMatchObject({
       status: 'completed',
-      reason: 'human_work_deferred',
+      reason: null,
     });
     const tools = (await a.original.listExecutions(a.sessionId)).filter(
       (execution) => execution.definitionId === 'fixture.tool',
@@ -500,18 +478,18 @@ test('durable acceptance on closing observer Runtime does not cancel the survivi
       authorization: { dispatched: true },
     });
     expect(completedTools).toBe(1);
-    // A ends at its safe Tool boundary; the second Model belongs only to B.
-    expect(fixed.requests).toHaveLength(2);
-    expect(await a.original.getExecution(fixed.requests[1]!.requestId)).toMatchObject({
+    // A finishes normally; the third Model belongs to the queued ordinary input.
+    expect(fixed.requests).toHaveLength(3);
+    expect(await a.original.getExecution(fixed.requests[2]!.requestId)).toMatchObject({
       runId,
-      originCommandId: receipt.businessCommandId,
+      originCommandId: 'durable',
       status: 'succeeded',
     });
     expect(
-      fixed.requests[1]!.messages.find(
+      fixed.requests[2]!.messages.find(
         (message) => message.content === 'New task: survives observer',
       )?.sourceIds,
-    ).toEqual([receipt.businessCommandId]);
+    ).toEqual(['durable']);
     response.release();
     expect((await submission).id).toBe('durable');
     await close;

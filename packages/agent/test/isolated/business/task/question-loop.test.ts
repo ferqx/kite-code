@@ -404,7 +404,7 @@ for (const carried of [true, false])
     }
   }, 20000);
 
-test('same-work human successor seals both mail watermarks, never retargets R1, and a lost QueueOnly response creates no second mail', async () => {
+test('ordinary human successor does not adopt queued mail or retarget R1, and a lost QueueOnly response creates no second mail', async () => {
   const directory = realpathSync(mkdtempSync(join(tmpdir(), 'kite-parent-mail-cutoff-')));
   const profile = { dataRoot: join(directory, 'data'), profile: 'test' };
   const store = await openSqliteStore(profile),
@@ -548,11 +548,11 @@ test('same-work human successor seals both mail watermarks, never retargets R1, 
     });
     await until(async () => (requests.length === 3 ? true : undefined));
     const secondRun = (await store.getView('root')).runs.find((run) => run.id !== firstRun.id)!;
-    expect(secondRun.rootWorkCommandId).toBe(firstRun.rootWorkCommandId);
+    expect(secondRun.rootWorkCommandId).toBe('continue-A');
     const sealed = (await store.getCommand(secondRun.originCommandId))!.receipt as {
       mailAdoption?: { parentRunId: string };
     };
-    expect(sealed.mailAdoption?.parentRunId).toBe(firstRun.id);
+    expect(sealed.mailAdoption).toBeUndefined();
     lateSender.release();
     await until(async () =>
       queued.length === 3 &&

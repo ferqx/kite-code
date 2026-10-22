@@ -66,7 +66,7 @@ async function fixture(
       } else {
         if (
           request.messages.filter((message) => message.role === 'user').at(-1)?.content ===
-          '新任务：Independent B'
+          'Independent B'
         )
           await businessGate.waiting;
         if ((holdReport && requests.length === 3) || (holdOriginal && requests.length === 2))
@@ -221,63 +221,50 @@ test('new completion subscription wakes an idle parent once and prepares its exa
   }
 });
 
-test('independent B defers A without Model or policy busy waiting and cancelling B never reselects A', async () => {
+test('a later ordinary turn receives the old child result without selecting or reopening its original work', async () => {
   const f = await fixture(1);
   try {
     await f.submit();
     await f.runtime.waitForCommand('work', { timeoutMs: 5000 });
-    await f.submit('b', '新任务：Independent B');
+    await f.submit('b', 'Independent B');
     await until(async () => (f.requests.length === 3 ? true : null));
+    const b = (await f.store.getView('root')).runs.find((run) => run.originCommandId === 'b')!;
     f.childGates[0]!.release();
+    await until(async () =>
+      (await f.store.listExecutions('root')).some(
+        (execution) => execution.childSessionId && execution.status === 'succeeded',
+      )
+        ? true
+        : null,
+    );
     await until(async () => (f.reports().length === 1 ? true : null));
     expect(f.policies()).toBe(0);
     f.businessGate.release();
     await f.runtime.waitForCommand('b', { timeoutMs: 5000 });
-    const deferred = await until(
-      async () =>
-        f
-          .reports()
-          .find((row) => row.status === 'accepted' && row.receipt.outcome === 'report_deferred') ??
-        null,
-    );
-    expect(deferred.receipt.reason).toBe('work_not_selected');
+    const report = f.reports()[0]!;
+    expect(report).toMatchObject({ status: 'applied', receipt: { mode: 'active', runId: b.id } });
     expect(f.policies()).toBe(0);
-    const cursor = (await f.store.getMetadata()).lastChangeCursor;
+    expect(f.requests).toHaveLength(4);
+    expect(f.requests[3]!.messages.some((m) => m.content.includes('Complete result C1'))).toBe(
+      true,
+    );
+    expect((await f.store.getView('root')).runs.map((r) => r.originCommandId)).toEqual([
+      'work',
+      'b',
+    ]);
+    const source = f.db
+      .query('SELECT request_json FROM context_snapshot WHERE id=?')
+      .get(report.receipt.sourceId!) as { request_json: string };
+    expect(JSON.parse(source.request_json).targetRunId).toBe(b.id);
+    const count = f.requests.length;
     await f.runtime.createWorkspace({
       expectedStoreId: f.base.expectedStoreId,
       id: 'unrelated',
       name: 'unrelated',
       rootUri: pathToFileURL(f.profile.dataRoot).href,
     });
-    await Bun.sleep(150);
-    expect(f.requests).toHaveLength(3);
-    expect(f.policies()).toBe(0);
-    expect(
-      (await f.store.getChanges({ after: cursor, limit: 200 })).events.filter(
-        (event) => event.type === 'job.report_deferred',
-      ),
-    ).toHaveLength(0);
-    await f.runtime.cancelCommand({
-      ...f.base,
-      sessionId: 'root',
-      commandId: 'cancel-b',
-      targetCommandId: 'b',
-    });
-    await f.runtime.waitForCommand('b', { timeoutMs: 5000 });
-    await Bun.sleep(150);
-    expect(f.requests).toHaveLength(3);
-    expect(f.policies()).toBe(0);
-    expect(f.reports()[0]).toMatchObject({
-      status: 'accepted',
-      receipt: { reason: 'work_not_selected' },
-    });
-    expect(
-      f.db
-        .query(
-          "SELECT COUNT(*) AS count FROM run WHERE session_id='root' AND origin_command_id IN(SELECT id FROM command WHERE kind='job.report')",
-        )
-        .get(),
-    ).toMatchObject({ count: 0 });
+    await Bun.sleep(100);
+    expect(f.requests).toHaveLength(count);
   } finally {
     await f.close();
   }

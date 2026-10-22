@@ -1,135 +1,97 @@
 import { expect, test } from 'bun:test';
-import {
-  chmodSync,
-  mkdirSync,
-  mkdtempSync,
-  readFileSync,
-  realpathSync,
-  rmSync,
-  writeFileSync,
-} from 'node:fs';
-import { tmpdir } from 'node:os';
+import { rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { createRuntime } from '@kite-ai/agent';
 import { selectProfile } from '@kite-ai/agent/profile';
-import { openSqliteStore } from '@kite-ai/agent/sqlite';
-import {
-  binding,
-  permissions,
-} from '../../../../packages/agent/test/isolated/recovery/human-input-processing-crash-fixture';
+import { createClient } from '@kite-ai/client';
+import { seedLegacyProcessing } from '../../../../packages/agent/test/isolated/recovery/human-input-processing-crash-fixture';
+import { temporaryDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { createDefaultProcessConfiguration } from '../../src/configuration';
+import { startService } from '../../src/index';
 
-async function readyLine(stream: ReadableStream<Uint8Array>) {
-  const reader = stream.getReader();
-  let value = '';
-  try {
-    while (!value.includes('\n')) {
-      const next = await reader.read();
-      if (next.done) throw Error('service_processing_child_exit');
-      value += new TextDecoder().decode(next.value);
-    }
-    return JSON.parse(value.split('\n')[0]!);
-  } finally {
-    reader.releaseLock();
-  }
-}
-test('Service restores the exact original private processing snapshot after SIGKILL despite a changed current model configuration', async () => {
-  const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-service-processing-kill-')));
-  const profile = selectProfile({ dataRoot: join(root, 'data'), profile: 'test' });
-  mkdirSync(profile.profilePath, { recursive: true, mode: 0o700 });
-  chmodSync(profile.dataRoot, 0o700);
-  chmodSync(profile.profilePath, 0o700);
-  writeFileSync(join(root, 'ledger'), '');
-  const path = join(profile.profilePath, 'config.jsonc');
-  const config = {
-    modelId: 'original-A',
-    models: [
-      {
-        id: 'original-A',
-        provider: 'compatible',
-        model: 'original-A',
-        baseURL: 'http://127.0.0.1:1/v1',
-      },
-      { id: 'B', provider: 'compatible', model: 'current-B', baseURL: 'http://127.0.0.1:1/v1' },
-    ],
-    tools: [],
-  };
-  writeFileSync(path, JSON.stringify(config));
-  const child = Bun.spawn(
-    [
-      process.execPath,
-      fileURLToPath(new URL('../fixtures/human-input-processing-crash-child.ts', import.meta.url)),
-      root,
-    ],
-    { stdout: 'pipe', stderr: 'pipe' },
+test('actual Service reads old processing history and rejects its resume before loading the current model configuration', async () => {
+  const root = temporaryDirectory('kite-service-retired-input-');
+  const f = await seedLegacyProcessing(root);
+  const profile = selectProfile(f.profile);
+  const config = join(root, 'user.jsonc');
+  writeFileSync(
+    config,
+    JSON.stringify({
+      modelId: 'current-B',
+      tools: [],
+      models: [
+        {
+          id: 'current-B',
+          provider: 'compatible',
+          model: 'current-B',
+          baseURL: 'http://127.0.0.1:1/v1',
+        },
+      ],
+    }),
   );
-  let store: Awaited<ReturnType<typeof openSqliteStore>> | undefined,
-    runtime: ReturnType<typeof createRuntime> | undefined;
+  const host = createDefaultProcessConfiguration({
+    profile,
+    userConfigurationPath: config,
+    credentialBackend: {
+      kind: 'temporary',
+      async put() {
+        throw Error('no_credentials');
+      },
+      async remove() {
+        throw Error('no_credentials');
+      },
+      async resolve() {
+        throw Error('must_not_load_model');
+      },
+    },
+  });
+  const runtime = createRuntime({ ...host, store: f.store, permissions: host.permissions! });
+  host.permissionManagement?.(runtime);
+  const service = await startService({
+    runtime,
+    subjectId: 'owner',
+    buildId: 'retired-input-test',
+    profile: {
+      dataRoot: profile.dataRoot,
+      name: profile.profile,
+      accessKey: profile.profileAccessKey,
+    },
+  });
+  const client = createClient({
+    endpoint: service.endpoint,
+    token: service.bootstrap.token,
+    bootstrap: service.bootstrap,
+    expected: {
+      profile: service.bootstrap.profile,
+      apiMajor: 1,
+      requiredCapabilities: ['commands', 'run_resume'],
+    },
+  });
   try {
-    let ready: { storeId: string; runId: string; generation: string };
-    try {
-      ready = await readyLine(child.stdout);
-    } catch (error) {
-      throw Error(`${error}: ${await new Response(child.stderr).text()}`);
-    }
-    child.kill('SIGKILL');
-    expect(await child.exited).toBe(137);
-    expect(child.signalCode).toBe('SIGKILL');
-    expect(await new Response(child.stderr).text()).toBe('');
-    const before = readFileSync(join(root, 'ledger'), 'utf8');
-    // The configured default now names B; original A still resolves only by its sealed digest.
-    writeFileSync(path, JSON.stringify({ ...config, modelId: 'B' }));
-    store = await openSqliteStore({ dataRoot: profile.dataRoot, profile: profile.profile });
-    const host = createDefaultProcessConfiguration({
-      profile,
-      userConfigurationPath: path,
-      permissions,
+    await client.connect();
+    const cursor = (await f.store.getMetadata()).lastChangeCursor;
+    expect((await client.getView('s')).runs[0]?.id).toBe(f.run!.id);
+    expect((await client.getCommand(f.processing.id)).status).toBe('applied');
+    expect((await f.store.getCommand(f.processing.id))?.request).toMatchObject({
+      content: 'Old ambiguous input',
     });
-    let recoveries = 0;
-    runtime = createRuntime({
-      ...host,
-      store,
-      permissions: host.permissions!,
-      resolveRunConfiguration: async () => {
-        throw Error('current_B_resolver_forbidden');
-      },
-      resolveRecoveryRunConfiguration: async (input) => {
-        recoveries++;
-        const recovered = await host.resolveRecoveryRunConfiguration!(input);
-        expect(recovered.modelId).toBe('original-A');
-        return { ...recovered, model: binding(root).model };
-      },
-    });
-    host.permissionManagement?.(runtime);
-    const run = await store.getRun(ready.runId);
-    const cursor = (await store.getMetadata()).lastChangeCursor;
-    await runtime.getView('s');
-    expect(recoveries).toBe(0);
-    expect((await store.getMetadata()).lastChangeCursor).toBe(cursor);
-    expect(readFileSync(join(root, 'ledger'), 'utf8')).toBe(before);
-    await runtime.resumeRun({
-      expectedStoreId: ready.storeId,
-      sessionId: 's',
-      subjectId: 'owner',
-      commandId: 'resume',
-      runId: ready.runId,
-      expectedOwnerGeneration: ready.generation,
-    });
-    await runtime.waitForCommand('input', { timeoutMs: 5000 });
-    expect((await store.getRun(ready.runId))?.configuration).toEqual(run?.configuration);
-    expect((await store.getRun(ready.runId))?.status).toBe('completed');
-    const lines = readFileSync(join(root, 'ledger'), 'utf8').trim().split('\n');
-    expect(lines.filter((line) => line.startsWith('interpret:'))).toHaveLength(1);
-    expect(lines.filter((line) => line.startsWith('business:'))).toHaveLength(2);
-    expect(recoveries).toBe(2);
+    expect((await f.store.getMetadata()).lastChangeCursor).toBe(cursor);
+    const rejected = await client
+      .resumeRun('s', {
+        kind: 'run.resume',
+        expectedStoreId: f.scope.expectedStoreId,
+        commandId: 'resume',
+        runId: f.run!.id,
+      })
+      .catch((error) => error);
+    expect(rejected.code).toBe('input_processing_removed');
+    expect((await f.store.getMetadata()).lastChangeCursor).toBe(cursor);
+    expect(await f.store.getCommand(f.raw.id)).toEqual(f.raw);
+    expect((await f.store.getExecution('legacy-model'))?.status).toBe('planned');
   } finally {
-    if (child.exitCode === null) {
-      child.kill('SIGKILL');
-      await child.exited;
-    }
-    await runtime?.close();
-    await store?.close();
+    client.disposeNetwork();
+    await service.close();
+    await f.store.close();
     rmSync(root, { recursive: true, force: true });
   }
 });

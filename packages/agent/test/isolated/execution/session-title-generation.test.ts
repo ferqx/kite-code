@@ -1,4 +1,3 @@
-import { Database } from 'bun:sqlite';
 import { expect, test } from 'bun:test';
 import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -35,11 +34,6 @@ async function fixture(
   title = '',
   completionGate?: { entered: ReturnType<typeof deferred>; release: ReturnType<typeof deferred> },
   mainMode: 'success' | 'failure' | 'unavailable' | 'retrying' = 'success',
-  explainWork = false,
-  interpretationReply?: (
-    request: ModelRequest,
-    identity: Record<string, unknown>,
-  ) => Record<string, unknown>,
 ) {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-title-generation-')));
   const profile = { dataRoot: join(root, 'data'), profile: 'test' };
@@ -49,35 +43,9 @@ async function fixture(
   const model: ModelAdapter = {
     async *stream(request, { signal }) {
       requests.push(structuredClone(request));
-      const interpretation = request.messages.find(
-        (message) =>
-          message.role === 'system' && message.content.includes('Original input identity: '),
-      );
-      if ((explainWork || interpretationReply) && interpretation) {
-        expect(request.tools).toEqual([]);
-        const identity = JSON.parse(
-          interpretation.content
-            .split('\n')
-            .find((line) => line.startsWith('Original input identity: '))!
-            .slice('Original input identity: '.length),
-        );
-        yield {
-          type: 'text_delta',
-          text: JSON.stringify(
-            interpretationReply?.(request, identity) ?? {
-              ...identity,
-              relation: 'independent_work',
-              purpose: 'work',
-              target_root_work_command_id: null,
-              selection_effect: 'select_work',
-              answer: null,
-              clarification: null,
-            },
-          ),
-        };
-        yield finish;
-        return;
-      }
+      expect(
+        request.messages.some((message) => message.content.includes('Original input identity:')),
+      ).toBe(false);
       if (
         request.messages.some(
           (message) => message.role === 'system' && message.content === sessionTitleInstructions,
@@ -698,23 +666,18 @@ async function publicInputSettled(f: Awaited<ReturnType<typeof fixture>>) {
   for (;;) {
     const command = (await f.runtime.getCommand('work'))!;
     if (command.status === 'rejected') return command;
-    const receipt = command.receipt as { outcome?: string; observation?: { runId?: string } };
-    if (
-      receipt.outcome === 'human_input_unresolved' &&
-      receipt.observation?.runId &&
-      (await f.store.getRun(receipt.observation.runId))?.isActive === false
-    )
-      return command;
+    const receipt = command.receipt as { runId?: string };
+    if (receipt.runId && !(await f.store.getRun(receipt.runId))?.isActive) return command;
     if (Date.now() >= deadline) throw Error('public title input did not settle');
     await Bun.sleep(5);
   }
 }
 
 test.each([
-  'unresolved',
+  'ordinary',
   'unavailable',
   'whitespace',
-] as const)('public %s input saves only the exact first metadata fallback before business admission', async (mode) => {
+] as const)('public %s input preserves the first fallback without an input classifier', async (mode) => {
   const content = mode === 'whitespace' ? ' \t\r\n\u3000\u00a0'.repeat(2000) : original;
   const f = await fixture(
     async function* () {
@@ -728,42 +691,30 @@ test.each([
     await f.submitPublic('work', content);
     const command = await publicInputSettled(f);
     expect(command.request).toEqual({ kind: 'run.start', content });
-    const receipt = command.receipt as {
-      humanInputCommandId: string;
-      businessCommandId?: string | null;
-    };
-    const raw = (await f.store.getCommand(receipt.humanInputCommandId))!;
-    expect(raw.request).toMatchObject({
-      content,
-      publicCommandId: 'work',
-      originalRequest: command.request,
-    });
-    expect(receipt.businessCommandId ?? null).toBeNull();
-    expect((await f.store.readHumanWorkState(f.base)).selectedWork).toBeNull();
+    expect(command.receipt).not.toHaveProperty('humanInputCommandId');
     const view = await f.runtime.getView('session');
     const fallback = mode === 'whitespace' ? '新会话' : truncatedOriginal;
     expect(view.session.title).toBe(fallback);
-    expect(f.titleRequests()).toHaveLength(0);
-    expect(f.requests).toHaveLength(mode === 'unavailable' ? 0 : 1);
-    expect(view.executions.every((execution) => execution.kind === 'model')).toBe(true);
+    expect(f.titleRequests()).toHaveLength(mode === 'ordinary' ? 1 : 0);
+    expect(f.requests).toHaveLength(mode === 'unavailable' ? 0 : mode === 'whitespace' ? 1 : 2);
     expect(view.runs).toHaveLength(mode === 'unavailable' ? 0 : 1);
     expect(
       view.runs.every(
         (run) =>
-          (run.configuration as { snapshot: { kind: string } }).snapshot.kind ===
+          (run.configuration as { snapshot?: { kind?: string } }).snapshot?.kind !==
           'human_input_processing',
       ),
     ).toBe(true);
     const cursor = (await f.store.getMetadata()).lastChangeCursor;
     await f.submitPublic('work', content);
     expect((await f.store.getMetadata()).lastChangeCursor).toBe(cursor);
-    expect(f.requests).toHaveLength(mode === 'unavailable' ? 0 : 1);
+    expect(f.requests).toHaveLength(mode === 'unavailable' ? 0 : mode === 'whitespace' ? 1 : 2);
     await f.runtime.close();
     const cold = await openSqliteStore({ ...f.profile, mode: 'readonly' });
     try {
       expect((await cold.getSession('session'))?.title).toBe(fallback);
       expect((await cold.getMetadata()).lastChangeCursor).toBe(cursor);
-      expect((await cold.getCommand(raw.id))?.request).toEqual(raw.request);
+      expect((await cold.getCommand(command.id))?.request).toEqual(command.request);
     } finally {
       await cold.close();
     }
@@ -772,7 +723,7 @@ test.each([
   }
 });
 
-test('a public interpreted first task binds metadata and one AI title to its actual business Run', async () => {
+test('a public first task directly binds metadata and one AI title to its original command Run', async () => {
   const f = await fixture(
     async function* () {
       yield { type: 'text_delta', text: generated };
@@ -781,29 +732,21 @@ test('a public interpreted first task binds metadata and one AI title to its act
     '',
     undefined,
     'success',
-    true,
   );
   try {
     await f.submitPublic();
     await f.runtime.waitForCommand('work', { timeoutMs: 2000 });
     const command = (await f.runtime.getCommand('work'))!;
-    const receipt = command.receipt as {
-      businessCommandId: string;
-      runId: string;
-      humanInputCommandId: string;
-    };
-    expect(receipt).toMatchObject({ outcome: 'human_input_applied' });
-    expect(receipt.businessCommandId).not.toBe(command.id);
-    const business = (await f.store.getCommand(receipt.businessCommandId))!;
-    expect(business.request).toMatchObject({ kind: 'input.follow_up', content: original });
+    const receipt = command.receipt as { runId: string };
+    expect(receipt).not.toHaveProperty('humanInputCommandId');
     const run = (await f.store.getRun(receipt.runId))!;
     expect(run).toMatchObject({
-      originCommandId: business.id,
+      originCommandId: command.id,
       rootWorkCommandId: 'work',
       status: 'completed',
     });
     expect((await f.store.getSession('session'))?.title).toBe(generated);
-    expect(f.requests).toHaveLength(3);
+    expect(f.requests).toHaveLength(2);
     expect(f.titleRequests()).toHaveLength(1);
     expect(f.titleRequests()[0]?.messages.at(-1)?.content).toBe(
       original.replace(/\s+/gu, ' ').trim(),
@@ -813,9 +756,6 @@ test('a public interpreted first task binds metadata and one AI title to its act
     expect(
       view.executions.filter((execution) => execution.definitionId === 'agent/session-title'),
     ).toHaveLength(1);
-    expect((await f.store.getCommand(receipt.humanInputCommandId))?.request).toMatchObject({
-      content: original,
-    });
   } finally {
     await f.close();
   }
@@ -873,283 +813,38 @@ test('public metadata does not replace a manual name or name an old empty histor
   }
 });
 
-test.each([
-  'retained',
-  'missing',
-] as const)('metadata requires the %s original registration after a global event floor', async (mode) => {
-  const f = await fixture(
-    async function* () {
-      yield { type: 'text_delta', text: generated };
-      yield finish;
-    },
-    '',
-    undefined,
-    'success',
-    true,
-  );
-  const db = new Database(join(f.root, 'data', 'test', 'core.db'));
-  db.run('PRAGMA busy_timeout=1000');
+test('ordinary clarification preserves the first input, its reply and the manual title across the next input', async () => {
+  const f = await fixture(async function* () {
+    yield { type: 'text_delta', text: generated };
+    yield finish;
+  });
   try {
-    const before = (await f.store.getMetadata()).lastChangeCursor;
-    await f.store.registerHumanCommand({
-      ...f.base,
-      commandId: 'work',
-      request: { kind: 'run.start', content: original },
-    });
-    const floor = mode === 'retained' ? before : (await f.store.getMetadata()).lastChangeCursor;
-    db.run('UPDATE storage_meta SET replay_floor=? WHERE singleton=1', [BigInt(floor)]);
-    await f.submitPublic();
+    await f.submitPublic('work', '> quoted palette material');
     await f.runtime.waitForCommand('work', { timeoutMs: 2000 });
-    expect((await f.store.getSession('session'))?.title).toBe(mode === 'retained' ? generated : '');
-    expect(f.titleRequests()).toHaveLength(mode === 'retained' ? 1 : 0);
-    expect(f.requests).toHaveLength(mode === 'retained' ? 3 : 2);
-  } finally {
-    db.close();
-    await f.close();
-  }
-});
-
-test('metadata ignores a forged invocation and an equal manual rename still wins the public AI race', async () => {
-  const release = deferred();
-  const f = await fixture(
-    async function* () {
-      await release.promise;
-      yield { type: 'text_delta', text: generated };
-      yield finish;
-    },
-    '',
-    undefined,
-    'success',
-    true,
-  );
-  try {
-    const command = await f.store.registerHumanCommand({
-      ...f.base,
-      commandId: 'work',
-      request: { kind: 'run.start', content: original },
-    });
-    const cursor = (await f.store.getMetadata()).lastChangeCursor;
-    for (const changed of [
-      { subjectId: 'other' },
-      { originStoreId: 'other' },
-      { requestDigest: '0'.repeat(64) },
-    ])
-      await f.preserveInputFallback({ ...command, ...changed });
-    expect((await f.store.getMetadata()).lastChangeCursor).toBe(cursor);
-    expect((await f.store.getSession('session'))?.title).toBe('');
-    await f.submitPublic();
-    await f.titleStarted.promise;
-    const session = (await f.store.getSession('session'))!;
+    const first = (await f.store.getCommand('work'))!;
+    const messages = await f.store.listMessages('session');
+    const current = (await f.store.getSession('session'))!;
     await f.runtime.renameSession({
       ...f.base,
-      commandId: 'manual-same-text',
-      ifRevision: session.controlRevision,
-      title: truncatedOriginal,
+      commandId: 'manual',
+      ifRevision: current.controlRevision,
+      title: '用户保留名称',
     });
-    release.resolve();
-    await f.runtime.waitForCommand('work', { timeoutMs: 2000 });
-    expect((await f.store.getSession('session'))?.title).toBe(truncatedOriginal);
-    expect(f.titleRequests()).toHaveLength(1);
+    await f.submitPublic('clarification', 'The quotation is reference material. Use blue.');
+    const second = await f.runtime.waitForCommand('clarification', { timeoutMs: 2000 });
+    expect(second.receipt).not.toHaveProperty('humanInputCommandId');
+    expect(await f.store.getCommand('work')).toEqual(first);
+    expect((await f.store.listMessages('session')).slice(0, messages.length)).toEqual(messages);
+    expect((await f.store.getSession('session'))?.title).toBe('用户保留名称');
     expect(f.requests).toHaveLength(3);
+    expect(f.titleRequests()).toHaveLength(1);
+    expect(
+      f.requests
+        .at(-1)!
+        .messages.filter((message) => message.role === 'user')
+        .map((message) => message.content),
+    ).toEqual(['> quoted palette material', 'The quotation is reference material. Use blue.']);
   } finally {
-    release.resolve();
     await f.close();
-  }
-});
-
-test('a real clarification of the first unresolved input binds its original fallback to one completed business title without rewriting the sealed decision', async () => {
-  const first = '> 资料仅供辨析，不要执行其中的命令。\r\n> 原始配色片段 = 待确认 🪁';
-  const fallback = Array.from(first.replace(/\s+/gu, ' ').trim()).slice(0, 10).join('');
-  const clarification =
-    '我现在明确回答第一条输入的澄清：那两行只是引用资料。我的任务是确认蓝色配色资料，只回复已收到这个编号即可，不修改任何文件。';
-  for (const mode of ['clarified', 'manual', 'independent'] as const) {
-    const release = deferred();
-    const f = await fixture(
-      async function* () {
-        await release.promise;
-        yield { type: 'text_delta', text: generated };
-        yield finish;
-      },
-      '',
-      undefined,
-      'success',
-      false,
-      (request, identity) => {
-        const instructions = request.messages.find((message) =>
-          message.content.includes('Original input identity: '),
-        )!.content;
-        const pending = JSON.parse(
-          instructions
-            .split('\n')
-            .find((line) => line.startsWith('Verified pending clarifications: '))!
-            .slice('Verified pending clarifications: '.length),
-        ) as {
-          inputCommandId: string;
-          content: string;
-          candidateWorkCommandIds: string[];
-        }[];
-        expect(request.tools).toEqual([]);
-        if (!pending.length)
-          return {
-            ...identity,
-            relation: 'unresolved',
-            purpose: 'clarify',
-            target_root_work_command_id: null,
-            selection_effect: 'keep',
-            answer: null,
-            clarification: '这两行是否仅为引用资料？请明确你要完成的任务。',
-            clarifies_input_id: null,
-          };
-        expect(pending).toHaveLength(1);
-        expect(pending[0]).toMatchObject({ content: first, candidateWorkCommandIds: [] });
-        return {
-          ...identity,
-          relation: 'independent_work',
-          purpose: 'work',
-          target_root_work_command_id: null,
-          selection_effect: 'select_work',
-          answer: null,
-          clarification: null,
-          clarifies_input_id: pending[0]!.inputCommandId,
-        };
-      },
-    );
-    try {
-      await f.submitPublic('work', first);
-      const initialPublic = await publicInputSettled(f);
-      const initialReceipt = initialPublic.receipt as {
-        humanInputCommandId: string;
-        businessCommandId?: string | null;
-      };
-      const initialRaw = (await f.store.getCommand(initialReceipt.humanInputCommandId))!;
-      const initialRawReceipt = initialRaw.receipt as { state: string; decisionCommandId: string };
-      const sealedDecision = structuredClone(
-        (await f.store.getCommand(initialRawReceipt.decisionCommandId))!,
-      );
-      expect(initialRawReceipt.state).toBe('unresolved');
-      expect(initialReceipt.businessCommandId ?? null).toBeNull();
-      expect(initialRaw.request).toMatchObject({
-        publicCommandId: 'work',
-        content: first,
-        originalRequest: initialPublic.request,
-      });
-      expect((await f.store.getSession('session'))?.title).toBe(fallback);
-      expect((await f.store.readHumanWorkState(f.base)).selectedWork).toBeNull();
-      expect(f.requests).toHaveLength(1);
-      expect(f.titleRequests()).toHaveLength(0);
-      expect(
-        (await f.runtime.getView('session')).executions.every(
-          (execution) => execution.kind === 'model',
-        ),
-      ).toBe(true);
-      if (mode === 'manual') {
-        const session = (await f.store.getSession('session'))!;
-        await f.runtime.renameSession({
-          ...f.base,
-          commandId: 'manual-before-clarification',
-          ifRevision: session.controlRevision,
-          title: '用户保留名称',
-        });
-      }
-      const secondContent =
-        mode === 'independent'
-          ? 'New task: 另一项独立工作，只回复收到，不修改文件，不回答此前澄清。'
-          : clarification;
-      await f.submitPublic('clarification', secondContent);
-      const deadline = Date.now() + 2000;
-      for (;;) {
-        const current = (await f.runtime.getCommand('clarification'))!;
-        const receipt = current.receipt as { runId?: string };
-        if (
-          f.titleRequests().length ||
-          (receipt.runId && (await f.store.getRun(receipt.runId))?.isActive === false)
-        )
-          break;
-        if (Date.now() >= deadline) throw Error('first clarification business did not settle');
-        await Bun.sleep(5);
-      }
-      const publicCommand = (await f.runtime.getCommand('clarification'))!;
-      const receipt = publicCommand.receipt as {
-        humanInputCommandId: string;
-        businessCommandId: string;
-        runId: string;
-      };
-      const raw = (await f.store.getCommand(receipt.humanInputCommandId))!;
-      const rawReceipt = raw.receipt as { decisionCommandId: string; businessCommandId: string };
-      const decision = (await f.store.getCommand(rawReceipt.decisionCommandId))!;
-      const business = (await f.store.getCommand(receipt.businessCommandId))!;
-      expect(publicCommand.request).toEqual({ kind: 'run.start', content: secondContent });
-      expect(raw.request).toMatchObject({
-        publicCommandId: publicCommand.id,
-        content: secondContent,
-        originalRequest: publicCommand.request,
-      });
-      expect(rawReceipt.businessCommandId).toBe(business.id);
-      expect(decision.request).toMatchObject({
-        inputCommandId: raw.id,
-        inputDigest: raw.requestDigest,
-        proposal: { relation: 'independent_work', purpose: 'work', targetRootWorkCommandId: null },
-      });
-      expect(decision.receipt).toMatchObject({ businessCommandId: business.id });
-      expect(business.receipt).toMatchObject({ runId: receipt.runId });
-      expect(business.request).toMatchObject({ content: secondContent });
-      expect(await f.store.getRun(receipt.runId)).toMatchObject({
-        originCommandId: business.id,
-        rootWorkCommandId: publicCommand.id,
-      });
-      expect(await f.store.getCommand(sealedDecision.id)).toEqual(sealedDecision);
-      expect((await f.store.getCommand(initialRaw.id))?.request).toEqual(initialRaw.request);
-      if (mode === 'independent') {
-        expect((await f.store.getCommand(initialRaw.id))?.receipt).toEqual(initialRaw.receipt);
-        expect(f.requests).toHaveLength(2);
-        expect(f.titleRequests()).toHaveLength(0);
-      } else {
-        expect(
-          f.requests.filter((request) =>
-            request.messages.some((message) =>
-              message.content.includes('Original input identity: '),
-            ),
-          ),
-        ).toHaveLength(2);
-        expect(decision.request).toMatchObject({ clarifiesInputId: initialRaw.id });
-        expect((await f.store.getCommand(initialRaw.id))?.receipt).toMatchObject({
-          state: 'clarified',
-          clarifyingInputId: raw.id,
-        });
-        expect((await f.store.getCommand(initialPublic.id))?.receipt).toMatchObject({
-          reason: 'clarified_by_input',
-          clarifyingInputId: raw.id,
-        });
-        expect((await f.store.readHumanWorkState(f.base)).pendingInputIds).not.toContain(
-          initialRaw.id,
-        );
-        if (mode === 'clarified') {
-          expect(f.titleRequests()).toHaveLength(1);
-          expect(f.titleRequests()[0]?.messages.at(-1)?.content).toBe(
-            first.replace(/\s+/gu, ' ').trim(),
-          );
-          expect(await f.store.getRun(receipt.runId)).toMatchObject({ isActive: true });
-          expect((await f.store.getSession('session'))?.title).toBe(fallback);
-        } else expect(f.titleRequests()).toHaveLength(0);
-      }
-      release.resolve();
-      await f.runtime.waitForCommand('clarification', { timeoutMs: 2000 });
-      expect(await f.store.getRun(receipt.runId)).toMatchObject({
-        status: 'completed',
-        originCommandId: business.id,
-      });
-      expect((await f.store.getSession('session'))?.title).toBe(
-        mode === 'manual' ? '用户保留名称' : mode === 'clarified' ? generated : fallback,
-      );
-      const cursor = (await f.store.getMetadata()).lastChangeCursor;
-      const requestCount = f.requests.length;
-      await f.submitPublic('clarification', secondContent);
-      expect(f.requests).toHaveLength(requestCount);
-      expect((await f.store.getMetadata()).lastChangeCursor).toBe(cursor);
-      expect(f.titleRequests()).toHaveLength(mode === 'clarified' ? 1 : 0);
-    } finally {
-      release.resolve();
-      await f.close();
-    }
   }
 });

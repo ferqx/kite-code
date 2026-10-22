@@ -54,18 +54,6 @@ import {
   runSettledEvent,
   runStartedEvent,
 } from './extensions/lifecycle';
-import {
-  directHumanInputProposal,
-  explicitHumanConfirmationTarget,
-  type HumanWorkCandidate,
-  validateHumanInputProposal,
-} from './human-input-intent';
-import {
-  createHumanInputProcessingConfiguration,
-  type HumanInputProcessingContext,
-  humanInputProcessingSources,
-  parseHumanInputProcessingProposal,
-} from './human-input-processing';
 import { inputFileContent } from './input-files';
 import { decodeInputImage, inputImages, matchesImageType } from './input-images';
 import { canonicalJson, semanticDigest } from './json';
@@ -322,7 +310,6 @@ function sealSources(sources: ContextSources | undefined): ContextSources | unde
 }
 
 type RunBinding = {
-  humanInputProcessing?: HumanInputProcessingContext;
   compressor?: ContextCompressor;
   afterTurn?: AfterTurnPolicy;
   authorizationReview?: AuthorizationReviewBinding;
@@ -450,9 +437,6 @@ export type RuntimeShutdownResult =
       readonly state: RuntimeLifecycleState;
       readonly completion: Promise<void>;
     };
-
-/** Internal control flow after the exact restricted Run has durably completed. */
-class InputProcessingCompleted extends Error {}
 
 export class AgentRuntime {
   private readonly lifecycleObservers = new LifecycleObservers();
@@ -3370,6 +3354,8 @@ export class AgentRuntime {
     if (this.closing) throw new AgentError('runtime_draining');
     const state = await this.options.store.verifyRunResume(input);
     if (state.command) return state.command;
+    if (await this.isLegacyInputProcessing(state.originalCommand, state.run))
+      throw new AgentError('input_processing_removed');
     if (this.closing) throw new AgentError('runtime_draining');
     if (this.tasks.has(input.sessionId)) throw new AgentError('run_resume_busy');
     const controller = new AbortController();
@@ -3428,7 +3414,6 @@ export class AgentRuntime {
         lease = begun.lease;
         const workspace = await this.options.store.getWorkspace(state.session.workspaceId);
         if (!workspace) throw new AgentError('workspace_not_found');
-        const processing = await this.inputProcessingCommand(state.originalCommand, state.run);
         let resolved: RunConfiguration | undefined;
         if (this.options.resolveRecoveryRunConfiguration) {
           resolved = await this.resolvePreparation(() =>
@@ -3444,18 +3429,6 @@ export class AgentRuntime {
           dispose = this.preparationDisposer(resolved);
         } else if (this.options.resolveRunConfiguration)
           throw new AgentError('run_recovery_binding_unavailable');
-        if (processing) {
-          const manifest = state.run.configuration as { snapshot: { originalConfiguration: Json } };
-          resolved = createHumanInputProcessingConfiguration(
-            resolved ?? {
-              model: this.options.model,
-              modelId: this.options.modelId ?? 'fixed',
-              snapshot: manifest.snapshot.originalConfiguration,
-            },
-            processing,
-            resolved?.permissions ?? this.options.permissions,
-          );
-        }
         controller.signal.throwIfAborted();
         const model = resolved?.model ?? this.options.model;
         if (!model) throw new AgentError('run_recovery_binding_unavailable');
@@ -3465,9 +3438,7 @@ export class AgentRuntime {
           this.options.modelId ??
           'fixed';
         const catalogue = this.runDefinitions(resolved?.extensions, resolved?.toolIds);
-        const reviewer = processing
-          ? undefined
-          : sealReview(resolved?.authorizationReview ?? this.defaultReviewer);
+        const reviewer = sealReview(resolved?.authorizationReview ?? this.defaultReviewer);
         const snapshot = resolved?.snapshot ?? null;
         const configuration = this.configurationSnapshot(
           modelId,
@@ -3488,7 +3459,6 @@ export class AgentRuntime {
         if (canonicalJson(configuration) !== canonicalJson(state.run.configuration))
           throw new AgentError('run_configuration_mismatch');
         const binding: RunBinding = {
-          ...(processing ? { humanInputProcessing: processing } : {}),
           model,
           modelId,
           definitions: catalogue.definitions,
@@ -3496,13 +3466,12 @@ export class AgentRuntime {
           extensions: catalogue.extensions,
           sources: sealSources(resolved?.sources),
           permissions: resolved?.permissions,
-          conditions: processing ? undefined : resolved?.conditions,
-          initializeRequirements: processing
-            ? undefined
-            : (resolved?.initializeRequirements ?? this.options.initializeRunRequirements),
+          conditions: resolved?.conditions,
+          initializeRequirements:
+            resolved?.initializeRequirements ?? this.options.initializeRunRequirements,
           authorizationReview: reviewer,
           readStepCapabilities: resolved?.readStepCapabilities,
-          afterTurn: processing ? undefined : (resolved?.afterTurn ?? this.options.afterTurn),
+          afterTurn: resolved?.afterTurn ?? this.options.afterTurn,
           compressor: sealCompressor(resolved?.compressor ?? this.options.compressor),
           dispose,
         };
@@ -4242,22 +4211,6 @@ export class AgentRuntime {
     void task.catch((error) => this.stopDispatchPolling(input.sessionId, error));
     return ready;
   }
-  private humanInputAttachments(
-    raw: CommandRecord,
-  ): Pick<HumanInputProcessingContext, 'images' | 'files'> {
-    const request = (
-      raw.request as {
-        originalRequest?: {
-          images?: import('./storage/types').InputImage[];
-          files?: import('./storage/types').InputFileReference[];
-        };
-      }
-    ).originalRequest;
-    return {
-      ...(request?.images === undefined ? {} : { images: structuredClone(request.images) }),
-      ...(request?.files === undefined ? {} : { files: structuredClone(request.files) }),
-    };
-  }
   private async resolveInputImages(
     images: readonly import('./storage/types').InputImage[],
     sessionId: string,
@@ -4282,491 +4235,22 @@ export class AgentRuntime {
     }
     return result;
   }
-  private async humanCandidates(
-    sessionId: string,
-    selected: import('./storage/human-work-control').HumanWorkIdentity | null,
-  ): Promise<HumanWorkCandidate[]> {
-    const view = await this.options.store.getView(sessionId);
-    const ids = [
-      ...new Set([
-        ...(selected ? [selected.rootWorkCommandId] : []),
-        ...view.runs
-          .slice()
-          .reverse()
-          .filter(
-            (run) =>
-              (run.configuration as { snapshot?: { kind?: string } }).snapshot?.kind !==
-              'human_input_processing',
-          )
-          .map((run) => run.rootWorkCommandId),
-      ]),
-    ].slice(0, 16);
-    const candidates: HumanWorkCandidate[] = [];
-    for (const id of ids) {
-      const command = await this.options.store.getCommand(id);
-      const request = command?.request as { content?: string } | null;
-      if (
-        command?.sessionId === sessionId &&
-        command.originStoreId === view.storeId &&
-        command.rootWorkCommandId === command.id &&
-        typeof request?.content === 'string'
-      )
-        candidates.push({
-          rootWorkCommandId: command.id,
-          rootWorkSeq: command.rootWorkSeq,
-          content: request.content,
-        });
-    }
-    return candidates;
-  }
-  private async humanProcessingContext(raw: CommandRecord): Promise<HumanInputProcessingContext> {
-    const state = await this.options.store.readHumanWorkState({
-      expectedStoreId: raw.originStoreId,
-      sessionId: raw.sessionId,
-      subjectId: raw.subjectId,
-    });
-    const candidates = await this.humanCandidates(raw.sessionId, state.selectedWork);
-    const pendingClarifications: NonNullable<
-      HumanInputProcessingContext['pendingClarifications']
-    >[number][] = [];
-    for (const id of state.pendingInputIds.filter((id) => id !== raw.id).slice(-16)) {
-      const previous = await this.options.store.getCommand(id);
-      const fact = previous?.receipt as {
-        state?: string;
-        candidateWorkCommandIds?: string[];
-        observation?: { clarification?: string | null };
-      } | null;
-      if (previous?.kind === 'human.input' && fact?.state === 'unresolved')
-        pendingClarifications.push({
-          inputCommandId: previous.id,
-          inputDigest: previous.requestDigest,
-          content: (previous.request as { content: string }).content,
-          candidateWorkCommandIds: fact.candidateWorkCommandIds ?? [],
-          question: fact.observation?.clarification ?? null,
-        });
-    }
-    return {
-      inputCommandId: raw.id,
-      inputDigest: raw.requestDigest,
-      content: (raw.request as { content: string }).content,
-      ...this.humanInputAttachments(raw),
-      candidateWorkCommandIds: candidates.map((item) => item.rootWorkCommandId),
-      candidateWorks: candidates,
-      controlRevision: state.controlRevision,
-      selectedWork: state.selectedWork,
-      pendingClarifications,
-    };
-  }
-  private async routeHumanCommand(command: CommandRecord): Promise<void> {
-    const receipt = command.receipt as { humanInputCommandId?: string } | null;
-    if (!receipt?.humanInputCommandId) return;
-    const raw = await this.options.store.getCommand(receipt.humanInputCommandId);
+  /** Historical processing records stay readable but never start another interpreter. */
+  private async isLegacyInputProcessing(command: CommandRecord, run?: RunRecord): Promise<boolean> {
     if (
-      raw?.kind !== 'human.input' ||
-      raw.sessionId !== command.sessionId ||
-      raw.subjectId !== command.subjectId
+      (run?.configuration as { snapshot?: { kind?: string } } | undefined)?.snapshot?.kind ===
+      'human_input_processing'
     )
-      throw new AgentError('input_proposal_unverifiable');
-    const fact = raw.receipt as { state?: string; processingCommandId?: string };
-    if (fact.state !== 'pending') return;
-    const state = await this.options.store.readHumanWorkState({
-      expectedStoreId: raw.originStoreId,
-      sessionId: raw.sessionId,
-      subjectId: raw.subjectId,
-    });
-    const context = await this.humanProcessingContext(raw);
-    const proposal = directHumanInputProposal({
-      content: context.content,
-      kind: command.kind as 'run.start' | 'input.steer' | 'input.follow_up',
-      selectedWork: state.selectedWork,
-      candidates: context.candidateWorks ?? [],
-      hasPendingClarifications: (context.pendingClarifications?.length ?? 0) > 0,
-      hasAttachments: !!(context.images?.length || context.files?.length),
-    });
-    if (proposal && !['progress', 'clarify'].includes(proposal.purpose)) {
-      await this.options.store.decideHumanInput({
-        expectedStoreId: raw.originStoreId,
-        sessionId: raw.sessionId,
-        subjectId: raw.subjectId,
-        inputCommandId: raw.id,
-        inputDigest: raw.requestDigest,
-        decisionId: `human-decision-${await semanticDigest([raw.originStoreId, raw.id])}`,
-        expectedControlRevision: state.controlRevision,
-        proposal,
-      });
-      return;
-    }
-    const view = await this.options.store.getView(command.sessionId);
-    if (!view.runs.some((run) => run.isActive))
-      await this.options.store.beginHumanInputProcessing({
-        expectedStoreId: raw.originStoreId,
-        sessionId: raw.sessionId,
-        subjectId: raw.subjectId,
-        inputCommandId: raw.id,
-        inputDigest: raw.requestDigest,
-      });
-  }
-  private async pendingHumanInterpretation(
-    run: RunRecord,
-    command: CommandRecord,
-  ): Promise<HumanInputProcessingContext | undefined> {
-    const session = await this.options.store.getSession(run.sessionId);
-    if (session?.parentSessionId !== null) return undefined;
-    const state = await this.options.store.readHumanWorkState({
-      expectedStoreId: run.originStoreId,
-      sessionId: run.sessionId,
-      subjectId: command.subjectId,
-    });
-    for (const id of state.pendingInputIds) {
-      const raw = await this.options.store.getCommand(id);
-      if (!raw || (raw.receipt as { state?: string }).state !== 'pending') continue;
-      const candidates =
-        (raw.receipt as { candidateWorkCommandIds?: string[] }).candidateWorkCommandIds ?? [];
-      if (
-        !candidates.length ||
-        candidates.includes(run.rootWorkCommandId) ||
-        (raw.request as { observedRunId?: string }).observedRunId === run.id
-      )
-        return this.humanProcessingContext(raw);
-    }
-    return undefined;
-  }
-  private async acceptHumanInterpretation(
-    context: HumanInputProcessingContext,
-    response: import('./execution').ModelResponse,
-    command: CommandRecord,
-  ) {
-    const raw = await this.options.store.getCommand(context.inputCommandId);
-    if (!raw || raw.requestDigest !== context.inputDigest)
-      throw new AgentError('input_proposal_unverifiable');
-    const fact = raw.receipt as { state?: string; decisionCommandId?: string };
-    // An unresolved decision is sealed too; another Model cannot reinterpret
-    // this raw input. A later real clarification is registered separately.
-    if (
-      fact.state === 'decided' ||
-      fact.state === 'clarified' ||
-      fact.decisionCommandId !== undefined
-    )
-      return;
-    let proposal: import('./storage/human-work-control').HumanInputProposal;
-    let answer: string | null = null,
-      clarification: string | null = null;
-    let clarifiesInputId: string | undefined;
-    try {
-      const parsed = parseHumanInputProcessingProposal(response.content, context);
-      proposal = validateHumanInputProposal(
-        parsed.proposal,
-        context.content,
-        context.candidateWorks ?? [],
-        context.selectedWork ?? null,
-        !!(context.images?.length || context.files?.length),
-      );
-      answer = parsed.answer;
-      clarification = parsed.clarification;
-      clarifiesInputId = parsed.clarifiesInputId;
-      if (proposal.relation === 'unresolved' && parsed.proposal.relation !== 'unresolved') {
-        answer = null;
-        clarification = '请说明这条输入要补充哪项工作，或要另开一项工作。';
-        clarifiesInputId = undefined;
-      }
-    } catch {
-      proposal = {
-        relation: 'unresolved',
-        purpose: 'clarify',
-        targetRootWorkCommandId: null,
-        selectionEffect: 'keep',
-        basis: { kind: 'model_proposal', instruction: context.content },
-      };
-      clarification = '请说明这条输入要补充哪项工作，或要另开一项工作。';
-    }
-    const state = await this.options.store.readHumanWorkState({
-      expectedStoreId: raw.originStoreId,
-      sessionId: raw.sessionId,
-      subjectId: command.subjectId,
-    });
-    await this.options.store.decideHumanInput({
-      expectedStoreId: raw.originStoreId,
-      sessionId: raw.sessionId,
-      subjectId: raw.subjectId,
-      inputCommandId: raw.id,
-      inputDigest: raw.requestDigest,
-      decisionId: `human-decision-${await semanticDigest([raw.originStoreId, raw.id])}`,
-      expectedControlRevision: context.controlRevision ?? state.controlRevision,
-      proposal,
-      ...(clarifiesInputId ? { clarifiesInputId } : {}),
-      interpretation: { executionId: response.executionId, answer, clarification },
-    });
-  }
-  private async inputProcessingCommand(
-    command: CommandRecord,
-    run?: RunRecord,
-  ): Promise<HumanInputProcessingContext | undefined> {
-    const receipt = command.receipt as { inputCommandId?: string } | null;
-    const configuration = run?.configuration as
-      | {
-          snapshot?: {
-            kind?: string;
-            inputCommandId?: string;
-            inputDigest?: string;
-            processingContext?: HumanInputProcessingContext;
-          };
-        }
-      | undefined;
-    const snapshot = configuration?.snapshot;
-    const isProcessing = snapshot?.kind === 'human_input_processing';
-    const id = receipt?.inputCommandId ?? (isProcessing ? snapshot.inputCommandId : undefined);
-    if (!id) {
-      if (isProcessing) throw new AgentError('input_proposal_unverifiable');
-      return undefined;
-    }
-    const raw = await this.options.store.getCommand(id);
-    const valid =
+      return true;
+    const inputId = (command.receipt as { inputCommandId?: string } | null)?.inputCommandId;
+    if (!inputId) return false;
+    const raw = await this.options.store.getCommand(inputId);
+    return (
       raw?.kind === 'human.input' &&
       raw.originStoreId === command.originStoreId &&
       raw.sessionId === command.sessionId &&
       raw.subjectId === command.subjectId &&
-      (raw.receipt as { processingCommandId?: string }).processingCommandId === command.id;
-    if (
-      !valid ||
-      (isProcessing &&
-        (snapshot.inputCommandId !== raw!.id || snapshot.inputDigest !== raw!.requestDigest))
-    ) {
-      if (isProcessing) throw new AgentError('input_proposal_unverifiable');
-      return undefined;
-    }
-    if (isProcessing && snapshot.processingContext) {
-      const context = snapshot.processingContext;
-      if (
-        context.inputCommandId !== raw!.id ||
-        context.inputDigest !== raw!.requestDigest ||
-        context.content !== (raw!.request as { content: string }).content
-      )
-        throw new AgentError('input_proposal_unverifiable');
-      return structuredClone(context);
-    }
-    return this.humanProcessingContext(raw!);
-  }
-  private async preparePendingHumanInputs(sessionId: string): Promise<void> {
-    const session = await this.options.store.getSession(sessionId);
-    if (!session || session.parentSessionId !== null) return;
-    const view = await this.options.store.getView(sessionId);
-    if (view.runs.some((run) => run.isActive)) return;
-    const first = view.runs[0];
-    const origin = first ? await this.options.store.getCommand(first.originCommandId) : null;
-    if (!origin) return;
-    const state = await this.options.store.readHumanWorkState({
-      expectedStoreId: view.storeId,
-      sessionId,
-      subjectId: origin.subjectId,
-    });
-    for (const id of state.pendingInputIds) {
-      const raw = await this.options.store.getCommand(id);
-      if (!raw || (raw.receipt as { state?: string }).state !== 'pending') continue;
-      try {
-        await this.options.store.beginHumanInputProcessing({
-          expectedStoreId: view.storeId,
-          sessionId,
-          subjectId: raw.subjectId,
-          inputCommandId: raw.id,
-          inputDigest: raw.requestDigest,
-        });
-      } catch (error) {
-        // Intake can seal an exact business decision or refusal after this pending read.
-        // Only that durable outcome supersedes preparation; SQL still rejects
-        // cancelled inputs, changed selections and unverifiable decisions.
-        if (
-          !(error instanceof AgentError) ||
-          error.code !== 'input_processing_unavailable' ||
-          (!(await this.hasCommittedHumanBusinessDecision(raw)) &&
-            !(await this.hasCommittedHumanRejection(raw)))
-        )
-          throw error;
-      }
-      return;
-    }
-  }
-  private async hasCommittedHumanRejection(original: CommandRecord): Promise<boolean> {
-    const raw = await this.options.store.getCommand(original.id);
-    const session = await this.options.store.getSession(original.sessionId);
-    const sameScope = (command: CommandRecord | null): command is CommandRecord =>
-      !!command &&
-      command.originStoreId === original.originStoreId &&
-      command.sessionId === original.sessionId &&
-      command.subjectId === original.subjectId &&
-      command.cancelRequestedAt === null;
-    const body = raw?.request as Record<string, Json> | null;
-    const fact = raw?.receipt as Record<string, Json> | null;
-    if (
-      !sameScope(raw) ||
-      raw.kind !== 'human.input' ||
-      raw.status !== 'applied' ||
-      raw.requestDigest !== original.requestDigest ||
-      !session ||
-      session.parentSessionId !== null ||
-      session.deletedAt !== null ||
-      session.contextSelectionId !== body?.contextSelectionId ||
-      fact?.state !== 'decided' ||
-      fact.applicationState !== 'rejected' ||
-      fact.businessCommandId !== null ||
-      typeof fact.decisionCommandId !== 'string' ||
-      typeof fact.controlRevision !== 'string' ||
-      !/^(0|[1-9][0-9]*)$/.test(fact.controlRevision) ||
-      BigInt(fact.controlRevision) > BigInt(session.controlRevision) ||
-      typeof body?.publicCommandId !== 'string'
-    )
-      return false;
-    const decision = await this.options.store.getCommand(fact.decisionCommandId);
-    const publicCommand = await this.options.store.getCommand(body.publicCommandId);
-    const input = decision?.request as Record<string, Json> | null;
-    const receipt = decision?.receipt as Record<string, Json> | null;
-    const proposal = input?.proposal as Record<string, Json> | undefined;
-    const basis = proposal?.basis as Record<string, Json> | undefined;
-    const proof = fact.rejection as Record<string, Json> | undefined;
-    return !!(
-      sameScope(decision) &&
-      decision.kind === 'human.input.decision' &&
-      decision.status === 'rejected' &&
-      decision.requestDigest === (await semanticDigest(decision.request)) &&
-      input?.inputCommandId === raw.id &&
-      input.inputDigest === raw.requestDigest &&
-      proposal?.relation === 'same_work' &&
-      proposal.purpose === 'continue' &&
-      proposal.selectionEffect === 'select_work' &&
-      basis?.instruction === body.content &&
-      receipt?.purpose === 'continue' &&
-      receipt.selectionEffect === 'keep' &&
-      receipt.targetRootWorkCommandId === proposal.targetRootWorkCommandId &&
-      receipt.businessCommandId === null &&
-      receipt.controlRevision === fact.controlRevision &&
-      receipt.requiresReadOnlyProcessing === false &&
-      proof?.outcome === 'human_input_rejected' &&
-      ['work_resume_unavailable', 'work_resume_outcome_unknown', 'execution_group_fenced'].includes(
-        String(proof.reason),
-      ) &&
-      proof.humanInputCommandId === raw.id &&
-      proof.decisionCommandId === decision.id &&
-      proof.businessCommandId === null &&
-      proof.runId === null &&
-      proof.controlRevision === fact.controlRevision &&
-      canonicalJson(receipt.rejection ?? null) === canonicalJson(proof) &&
-      sameScope(publicCommand) &&
-      publicCommand.status === 'rejected' &&
-      canonicalJson(publicCommand.request) === canonicalJson(body.originalRequest ?? null) &&
-      canonicalJson(publicCommand.receipt) === canonicalJson(proof)
-    );
-  }
-  private async hasCommittedHumanBusinessDecision(original: CommandRecord): Promise<boolean> {
-    const raw = await this.options.store.getCommand(original.id);
-    const session = await this.options.store.getSession(original.sessionId);
-    const sameScope = (command: CommandRecord | null): command is CommandRecord =>
-      !!command &&
-      command.originStoreId === original.originStoreId &&
-      command.sessionId === original.sessionId &&
-      command.subjectId === original.subjectId &&
-      command.cancelRequestedAt === null;
-    const input = raw?.request as {
-      content?: string;
-      contextSelectionId?: string;
-      publicCommandId?: string;
-      originalRequest?: Json;
-    } | null;
-    const fact = raw?.receipt as {
-      state?: string;
-      applicationState?: string;
-      decisionCommandId?: string;
-      businessCommandId?: string;
-      controlRevision?: string;
-    } | null;
-    if (
-      !sameScope(raw) ||
-      raw.kind !== 'human.input' ||
-      raw.status !== 'applied' ||
-      raw.requestDigest !== original.requestDigest ||
-      !session ||
-      session.parentSessionId !== null ||
-      session.deletedAt !== null ||
-      session.contextSelectionId !== input?.contextSelectionId ||
-      fact?.state !== 'decided' ||
-      !['queued', 'applied'].includes(fact.applicationState ?? '') ||
-      typeof fact.decisionCommandId !== 'string' ||
-      typeof fact.businessCommandId !== 'string' ||
-      typeof fact.controlRevision !== 'string' ||
-      !/^(0|[1-9][0-9]*)$/.test(fact.controlRevision) ||
-      BigInt(fact.controlRevision) > BigInt(session.controlRevision)
-    )
-      return false;
-    try {
-      await this.options.store.readHumanWorkState({
-        expectedStoreId: original.originStoreId,
-        sessionId: original.sessionId,
-        subjectId: original.subjectId,
-      });
-    } catch {
-      return false;
-    }
-    const decision = await this.options.store.getCommand(fact.decisionCommandId);
-    const decisionInput = decision?.request as {
-      inputCommandId?: string;
-      inputDigest?: string;
-      proposal?: { relation?: string; purpose?: string };
-    } | null;
-    const decisionFact = decision?.receipt as {
-      businessCommandId?: string;
-      controlRevision?: string;
-      requiresReadOnlyProcessing?: boolean;
-    } | null;
-    const business = await this.options.store.getCommand(fact.businessCommandId);
-    const businessInput = business?.request as {
-      content?: string;
-      contextSelectionId?: string;
-    } | null;
-    const businessFact = business?.receipt as {
-      inputCommandId?: string;
-      humanInputCommandId?: string;
-      decisionCommandId?: string;
-      outcome?: string;
-    } | null;
-    if (
-      !sameScope(decision) ||
-      decision.kind !== 'human.input.decision' ||
-      decision.status !== 'applied' ||
-      decisionInput?.inputCommandId !== raw.id ||
-      decisionInput.inputDigest !== raw.requestDigest ||
-      !['same_work', 'independent_work'].includes(decisionInput.proposal?.relation ?? '') ||
-      !['work', 'continue', 'replace'].includes(decisionInput.proposal?.purpose ?? '') ||
-      decisionFact?.businessCommandId !== fact.businessCommandId ||
-      decisionFact.controlRevision !== fact.controlRevision ||
-      decisionFact.requiresReadOnlyProcessing !== false ||
-      !sameScope(business) ||
-      !['accepted', 'applied'].includes(business.status) ||
-      !['input.steer', 'input.follow_up'].includes(business.kind) ||
-      business.rootWorkCommandId !== decision.rootWorkCommandId ||
-      business.rootWorkSeq !== decision.rootWorkSeq ||
-      businessInput?.content !== input.content ||
-      businessInput?.contextSelectionId !== session.contextSelectionId ||
-      businessFact?.outcome !==
-        (business.status === 'accepted' ? 'human_business_queued' : 'input_applied') ||
-      (businessFact?.inputCommandId ?? businessFact?.humanInputCommandId) !== raw.id ||
-      businessFact?.decisionCommandId !== decision.id
-    )
-      return false;
-    if (typeof input.publicCommandId !== 'string') return false;
-    const publicCommand = await this.options.store.getCommand(input.publicCommandId);
-    const publicFact = publicCommand?.receipt as {
-      humanInputCommandId?: string;
-      decisionCommandId?: string;
-      businessCommandId?: string;
-      outcome?: string;
-    } | null;
-    return (
-      sameScope(publicCommand) &&
-      ['accepted', 'applied'].includes(publicCommand.status) &&
-      publicFact?.outcome ===
-        (publicCommand.status === 'accepted' ? 'human_input_queued' : 'human_input_applied') &&
-      canonicalJson(publicCommand.request) === canonicalJson(input.originalRequest ?? null) &&
-      publicFact?.humanInputCommandId === raw.id &&
-      publicFact.decisionCommandId === decision.id &&
-      publicFact.businessCommandId === business.id
+      (raw.receipt as { processingCommandId?: string }).processingCommandId === command.id
     );
   }
   async submitCommand(input: AcceptCommandInput): Promise<CommandRecord> {
@@ -4809,80 +4293,7 @@ export class AgentRuntime {
         },
       };
     }
-    const human = ['run.start', 'input.steer', 'input.follow_up'].includes(input.request.kind);
-    const state = human
-      ? await this.options.store.readHumanWorkState({
-          expectedStoreId: input.expectedStoreId,
-          sessionId: input.sessionId,
-          subjectId: input.subjectId,
-        })
-      : null;
-    // The first explicit work is already an unambiguous independent intention.
-    // Later input is registered before interpretation or any business dispatch.
-    let bridge: import('./storage/human-work-control').RegisterHumanCommand = input;
-    let needsHumanBridge = false;
-    if (human && state) {
-      const candidates = await this.humanCandidates(input.sessionId, state.selectedWork);
-      const proposal = directHumanInputProposal({
-        content: (input.request as { content: string }).content,
-        kind: input.request.kind as 'run.start' | 'input.steer' | 'input.follow_up',
-        selectedWork: state.selectedWork,
-        candidates,
-        hasPendingClarifications: state.pendingInputIds.length > 0,
-      });
-      needsHumanBridge =
-        !!state.selectedWork ||
-        state.pendingInputIds.length > 0 ||
-        !proposal ||
-        ['progress', 'clarify'].includes(proposal.purpose);
-      const candidateWorkCommandIds =
-        proposal?.relation === 'same_work' && proposal.targetRootWorkCommandId
-          ? [proposal.targetRootWorkCommandId]
-          : !proposal
-            ? candidates.map((candidate) => candidate.rootWorkCommandId)
-            : state.selectedWork
-              ? [state.selectedWork.rootWorkCommandId]
-              : [];
-      bridge = { ...input, candidateWorkCommandIds };
-      if (
-        proposal?.relation === 'same_work' &&
-        (explicitHumanConfirmationTarget(
-          (input.request as { content: string }).content,
-          candidates,
-        ) === proposal.targetRootWorkCommandId ||
-          /^(?:我指|指的是|就是|补充|更正|澄清|clarif|i\s+mean)/i.test(
-            (input.request as { content: string }).content.trim(),
-          ))
-      ) {
-        const pending = await Promise.all(
-          state.pendingInputIds.map((id) => this.options.store.getCommand(id)),
-        );
-        const matching = pending.filter(
-          (raw) =>
-            raw &&
-            (raw.receipt as { state?: string }).state === 'unresolved' &&
-            (
-              raw?.receipt as { candidateWorkCommandIds?: string[] }
-            ).candidateWorkCommandIds?.includes(proposal.targetRootWorkCommandId!),
-        );
-        if (matching.length === 1) bridge.clarifiesInputId = matching[0]!.id;
-      }
-    }
-    let command = needsHumanBridge
-      ? await this.options.store.registerHumanCommand(bridge)
-      : await this.options.store.acceptCommand(input);
-    if (
-      human &&
-      (command.receipt as { humanInputCommandId?: string } | null)?.humanInputCommandId
-    ) {
-      // A local metadata failure never admits business work or changes its outcome.
-      // Await this trusted Host boundary before capturing the interpretation revision.
-      await this.options.sessionInputMetadata
-        ?.preserve(freeze(structuredClone(command)))
-        .catch(() => {});
-      await this.routeHumanCommand(command);
-      command = (await this.options.store.getCommand(command.id))!;
-    }
+    const command = await this.options.store.acceptCommand(input);
     // Acceptance may already be durable when sealing happens. It grants no local
     // execution ownership: a surviving legitimate owner may still advance it.
     if (this.closing) return command;
@@ -5158,7 +4569,6 @@ export class AgentRuntime {
   private async pumpOwned(sessionId: string, owner: OwnerRef): Promise<void> {
     while (!this.closing) {
       if (this.hasUnconfirmedCleanup()) throw new AgentError('shutdown_cleanup_unconfirmed');
-      await this.preparePendingHumanInputs(sessionId);
       // Recovery query receipts never become ordinary model work, including accepted unknowns.
       const commands = (await this.options.store.listAcceptedCommands(sessionId, 32)).filter(
         (command) => command.kind !== 'job.reconcile',
@@ -5433,8 +4843,12 @@ export class AgentRuntime {
         receipt.generation !== input.owner.generation ||
         result.run.sessionId !== result.command.sessionId ||
         result.run.originStoreId !== input.expectedStoreId ||
-        result.run.rootWorkCommandId !== result.command.rootWorkCommandId ||
-        result.run.rootWorkSeq !== result.command.rootWorkSeq ||
+        ((result.run.rootWorkCommandId !== result.command.rootWorkCommandId ||
+          result.run.rootWorkSeq !== result.command.rootWorkSeq) &&
+          !(
+            receipt.mode === 'active' &&
+            (execution?.afterTurn as { kind?: string } | null)?.kind === 'agent_completion'
+          )) ||
         execution?.resultAcceptance?.runId !== result.run.id ||
         execution.resultAcceptance.sourceId !== receipt.sourceId ||
         execution.resultAcceptance.resultRevision !== receipt.resultRevision ||
@@ -5535,11 +4949,6 @@ export class AgentRuntime {
       });
       upperSeq ??= page.upperSeq;
       for (const command of page.commands) {
-        if (
-          command.rootWorkCommandId !== run.rootWorkCommandId ||
-          command.rootWorkSeq !== run.rootWorkSeq
-        )
-          continue;
         const carrier = await this.options.store.getExecution(
           (command.request as { executionId: string }).executionId,
         );
@@ -5717,7 +5126,7 @@ export class AgentRuntime {
     // Pair both business hooks on explicit input. Internal child.start/job.report
     // Runs have observations, but cannot recursively dispatch lifecycle Actions.
     if (origin.kind !== 'run.start' && origin.kind !== 'input.follow_up') return;
-    if (await this.inputProcessingCommand(origin, run ?? undefined)) return;
+    if (await this.isLegacyInputProcessing(origin, run ?? undefined)) return;
     // These persisted keys predate the public callback names. Keep their original
     // values so a rename cannot create a second Command for already accepted work.
     const phase = hook === 'beforeRun' ? 'before_start' : 'before_complete';
@@ -5781,7 +5190,6 @@ export class AgentRuntime {
     }
   }
   private async run(command: CommandRecord, owner: OwnerRef): Promise<void> {
-    const processing = await this.inputProcessingCommand(command);
     let modelId =
       (command.request as { modelId?: string }).modelId ?? this.options.modelId ?? 'fixed';
     let model = this.options.model;
@@ -5801,8 +5209,10 @@ export class AgentRuntime {
     let preparationResources: RunConfiguration | undefined;
     let continuationRun: RunRecord | null = null;
     try {
+      if (await this.isLegacyInputProcessing(command))
+        throw new AgentError('input_processing_removed');
       const queued = command.receipt as { decisionCommandId?: string } | null;
-      if (!processing && queued?.decisionCommandId) {
+      if (queued?.decisionCommandId) {
         const decision = await this.options.store.getCommand(queued.decisionCommandId);
         const fact = decision?.receipt as {
           businessCommandId?: string;
@@ -5903,12 +5313,6 @@ export class AgentRuntime {
               workspace,
             }),
           );
-        if (processing)
-          resolved = createHumanInputProcessingConfiguration(
-            resolved,
-            processing,
-            resolved.permissions ?? this.options.permissions,
-          );
         preparationResources = resolved;
         dispose = this.preparationDisposer(resolved);
         model = resolved.model;
@@ -5925,28 +5329,6 @@ export class AgentRuntime {
         snapshot = structuredClone(resolved.snapshot);
         bindings = this.runDefinitions(resolved.extensions, resolved.toolIds);
         definitions = bindings.definitions;
-      }
-      if (processing && !this.options.resolveRunConfiguration) {
-        const resolved = createHumanInputProcessingConfiguration(
-          { model, modelId, snapshot, sources, permissions },
-          processing,
-          permissions ?? this.options.permissions,
-        );
-        sources = resolved.sources;
-        permissions = resolved.permissions;
-        snapshot = resolved.snapshot;
-        bindings = this.runDefinitions([], []);
-        definitions = bindings.definitions;
-        afterTurn = undefined;
-        authorizationReview = undefined;
-        initializeRequirements = undefined;
-      }
-      if (processing) {
-        afterTurn = undefined;
-        authorizationReview = undefined;
-        initializeRequirements = undefined;
-        conditions = undefined;
-        readStepCapabilities = undefined;
       }
       if (!model) throw new AgentError('model_unavailable');
       const configuration = this.configurationSnapshot(
@@ -6001,7 +5383,6 @@ export class AgentRuntime {
     }
     command = (await this.options.store.getCommand(command.id))!;
     await this.executeRun(command, owner, run, {
-      ...(processing ? { humanInputProcessing: processing } : {}),
       model,
       modelId,
       definitions,
@@ -6428,9 +5809,6 @@ export class AgentRuntime {
             contextSelectionId: run.contextSelectionId,
             sourceRequestJournal: sourceRequestJournal as unknown as Json,
             toolFailureStreak: { ...failureStreak },
-            ...(binding.humanInputProcessing && humanInterpretation
-              ? { humanInputProcessingContext: humanInterpretation as unknown as Json }
-              : {}),
           };
         }
         return {
@@ -6441,56 +5819,7 @@ export class AgentRuntime {
             .filter(([key]) => key !== 'model')
             .map(([, request]) => request as unknown as Json),
           toolFailureStreak: { ...failureStreak },
-          ...(binding.humanInputProcessing && humanInterpretation
-            ? { humanInputProcessingContext: humanInterpretation as unknown as Json }
-            : {}),
         };
-      };
-      let humanInterpretation = binding.humanInputProcessing;
-      const savedProcessing = (
-        resumed?.modelSource?.continuation as
-          | { humanInputProcessingContext?: HumanInputProcessingContext }
-          | undefined
-      )?.humanInputProcessingContext;
-      if (binding.humanInputProcessing && savedProcessing) {
-        if (
-          savedProcessing.inputCommandId !== binding.humanInputProcessing.inputCommandId ||
-          savedProcessing.inputDigest !== binding.humanInputProcessing.inputDigest ||
-          savedProcessing.content !== binding.humanInputProcessing.content ||
-          canonicalJson((savedProcessing.images ?? []) as unknown as Json) !==
-            canonicalJson((binding.humanInputProcessing.images ?? []) as unknown as Json) ||
-          canonicalJson((savedProcessing.files ?? []) as unknown as Json) !==
-            canonicalJson((binding.humanInputProcessing.files ?? []) as unknown as Json)
-        )
-          throw new AgentError('run_continuation_invalid');
-        humanInterpretation = structuredClone(savedProcessing);
-      }
-      let childWorkObservation:
-        | (import('./storage/human-work-control').HumanWorkEligibility & { cursor: string })
-        | undefined;
-      const childWorkEligibility = () =>
-        this.options.store.readHumanWorkEligibility({
-          expectedStoreId: run.originStoreId,
-          sessionId: run.sessionId,
-          subjectId: command.subjectId,
-          rootWorkCommandId: run.rootWorkCommandId,
-          rootWorkSeq: run.rootWorkSeq,
-          contextSelectionId: run.contextSelectionId,
-        });
-      const waitForChildWork = async (signal: AbortSignal) => {
-        if (session.parentSessionId === null) return;
-        for (;;) {
-          signal.throwIfAborted();
-          const state = await childWorkEligibility();
-          if (state.state === 'eligible') return;
-          if (
-            !['input_unresolved', 'work_not_selected', 'work_paused'].includes(state.reason ?? '')
-          )
-            throw new AgentError(state.reason ?? 'human_work_blocked');
-          const waiting = this.changeWaits.wait(state.cursor, signal, 30000);
-          this.watchControls();
-          await waiting;
-        }
       };
       let captured: ContextSource[] = [];
       let capturedRequests = new Map<string, SourceRequest>();
@@ -6508,14 +5837,6 @@ export class AgentRuntime {
         }));
         const addHostSources = (values: ContextSource[]) => {
           if (!Array.isArray(values)) throw new AgentError('context_source_invalid');
-          // The sealed processing configuration remains immutable. Its dynamic
-          // interpretation source is rebuilt from current verified human state.
-          if (binding.humanInputProcessing)
-            values = values.filter(
-              (source) =>
-                source.scope !== binding.humanInputProcessing!.inputCommandId ||
-                !['human_input_processing', 'human_input'].includes(source.kind),
-            );
           addSources(values);
           for (const source of values) hostSources?.set(source.id, source);
         };
@@ -6540,20 +5861,6 @@ export class AgentRuntime {
             requests: requestList,
           }),
         );
-        if (humanInterpretation) addSources(await humanInputProcessingSources(humanInterpretation));
-        if (childWorkObservation) {
-          const content = `The original work is currently blocked: ${childWorkObservation.reason}. This Model step is read-only. Report only the actual completed and unfinished facts, including any question that still requires a decision. Do not execute business work, change the selected work, approve an action or create an Agent. A technical turn ending does not mean the business objective is complete.`;
-          addSources([
-            {
-              id: `human-work-observation-${run.id}-${childWorkObservation.controlRevision}`,
-              kind: 'human_work_observation',
-              scope: run.id,
-              digest: await semanticDigest(content),
-              role: 'system',
-              content,
-            },
-          ]);
-        }
         if (continuationSource) {
           if (sources.has(continuationSource.id))
             throw new AgentError('context_source_namespace_collision');
@@ -6790,119 +6097,32 @@ export class AgentRuntime {
             this.compressionProgress.delete(session.id);
         }
       };
-      const checkHumanHandoff = async () => {
-        if (session.parentSessionId !== null || binding.humanInputProcessing) return;
-        for (;;) {
-          controller.signal.throwIfAborted();
-          const cursor = (await this.options.store.getMetadata()).lastChangeCursor;
-          const state = await this.options.store.readHumanWorkState({
-            expectedStoreId: run.originStoreId,
-            sessionId: run.sessionId,
-            subjectId: command.subjectId,
-          });
-          if (!state.latestInputCommandId) return;
-          const raw = await this.options.store.getCommand(state.latestInputCommandId);
-          if (!raw) return;
-          const fact = raw.receipt as {
-            state?: string;
-            candidateWorkCommandIds?: string[];
-            decisionCommandId?: string;
-          };
-          if (
-            !fact.candidateWorkCommandIds?.includes(run.rootWorkCommandId) ||
-            fact.state === 'pending' ||
-            fact.state === 'clarified'
-          )
-            return;
-          if (fact.state === 'decided') {
-            const decision = fact.decisionCommandId
-              ? await this.options.store.getCommand(fact.decisionCommandId)
-              : null;
-            const proposal = (
-              decision?.request as {
-                proposal?: import('./storage/human-work-control').HumanInputProposal;
-              } | null
-            )?.proposal;
-            if (
-              !proposal ||
-              (proposal.relation !== 'independent_work' &&
-                !['pause', 'replace', 'stop'].includes(proposal.purpose))
-            )
-              return;
-          }
-          const { evaluations } = await this.execution.requirementEvaluation(
-            scope,
-            'completion',
-            undefined,
-            true,
-          );
-          const handoff = await this.options.store.handoffHumanRun({
-            expectedStoreId: run.originStoreId,
-            owner,
-            runId: run.id,
-            inputCommandId: raw.id,
-            expectedControlRevision: state.controlRevision,
-            requirements: evaluations,
-          });
-          if (handoff.handedOff) throw new AgentError('human_work_handed_off');
-          if (
-            [
-              'run_not_active',
-              'input_or_work_cancelled',
-              'input_does_not_require_handoff',
-            ].includes(handoff.reason ?? '')
-          )
-            return;
-          const waiting = this.changeWaits.wait(cursor, controller.signal, 30000);
-          this.watchControls();
-          await waiting;
-        }
-      };
       const messages = async () => {
         await applySteer();
-        await checkHumanHandoff();
         await this.consumeJobResults(run, owner, controller.signal);
-        if (binding.humanInputProcessing) {
-          const raw = await this.options.store.getCommand(
-            binding.humanInputProcessing.inputCommandId,
-          );
-          if (!raw || raw.requestDigest !== binding.humanInputProcessing.inputDigest)
-            throw new AgentError('input_proposal_unverifiable');
-          humanInterpretation = await this.humanProcessingContext(raw);
-        } else humanInterpretation = await this.pendingHumanInterpretation(run, command);
-        if (session.parentSessionId !== null) {
-          const state = await childWorkEligibility();
-          childWorkObservation =
-            state.state !== 'eligible' &&
-            ['input_unresolved', 'work_not_selected', 'work_paused'].includes(state.reason ?? '')
-              ? state
-              : undefined;
-        }
         await selectCapabilities();
         capturedInputVersion = inputVersion;
         capturedInboxVersion = inboxVersion;
         captured = await captureModelSources();
-        const attachInterpretedImages = async (
-          messages: ModelMessage[],
-        ): Promise<ModelMessage[]> => {
-          if (!humanInterpretation?.images?.length) return messages;
-          const images = await this.resolveInputImages(
-            humanInterpretation.images,
+        const assembled = assembleModelContext(
+          captured,
+          await this.modelMessages(
             run.sessionId,
-            command.subjectId,
             run.originStoreId,
             controller.signal,
-          );
-          return messages.map((message) =>
-            message.role === 'user' &&
-            message.sourceIds?.length === 1 &&
-            message.sourceIds[0] === `human-input-${humanInterpretation!.inputCommandId}`
-              ? { ...message, images }
-              : message,
-          );
-        };
-        const assembled = await attachInterpretedImages(
-          assembleModelContext(
+            command.subjectId,
+            false,
+            undefined,
+            ['context.compress', 'context.compression.reset'].includes(command.kind)
+              ? undefined
+              : run,
+          ),
+        );
+        if (
+          !['context.compress', 'context.compression.reset'].includes(command.kind) &&
+          (await compress(assembled, 'automatic'))
+        )
+          return assembleModelContext(
             captured,
             await this.modelMessages(
               run.sessionId,
@@ -6911,28 +6131,7 @@ export class AgentRuntime {
               command.subjectId,
               false,
               undefined,
-              ['context.compress', 'context.compression.reset'].includes(command.kind)
-                ? undefined
-                : run,
-            ),
-          ),
-        );
-        if (
-          !['context.compress', 'context.compression.reset'].includes(command.kind) &&
-          (await compress(assembled, 'automatic'))
-        )
-          return attachInterpretedImages(
-            assembleModelContext(
-              captured,
-              await this.modelMessages(
-                run.sessionId,
-                run.originStoreId,
-                controller.signal,
-                command.subjectId,
-                false,
-                undefined,
-                run,
-              ),
+              run,
             ),
           );
         return assembled;
@@ -6948,7 +6147,7 @@ export class AgentRuntime {
           throw new AgentError('context_refresh_required');
       };
       const modelTools = () =>
-        (humanInterpretation || childWorkObservation ? [] : [...scope.bindings.tools.values()])
+        [...scope.bindings.tools.values()]
           .sort((a, b) => a.id.localeCompare(b.id))
           .map((tool) => ({
             id: tool.id,
@@ -7161,18 +6360,9 @@ export class AgentRuntime {
           let providerAttempt = modelRetry?.attempt ?? 1;
           while (true) {
             try {
-              const interpreting = humanInterpretation;
               const response = await this.execution.model(
                 {
                   ...scope,
-                  ...(interpreting
-                    ? {
-                        humanInputInterpretation: {
-                          inputCommandId: interpreting.inputCommandId,
-                          inputDigest: interpreting.inputDigest,
-                        },
-                      }
-                    : {}),
                   decisionSources: captured,
                   checkFreshness,
                   ...(modelRetry ? { modelRetry } : {}),
@@ -7185,68 +6375,8 @@ export class AgentRuntime {
                   ? resumed.plannedModel
                   : undefined,
               );
-              if (interpreting)
-                await this.acceptHumanInterpretation(interpreting, response, command);
               return response;
             } catch (error) {
-              if (
-                binding.humanInputProcessing &&
-                error instanceof AgentError &&
-                error.code === 'input_processing_decided'
-              ) {
-                const previous = await this.options.store.getExecution(current.requestId);
-                const interpretation = (
-                  previous?.decisionSource as {
-                    humanInputInterpretation?: { inputCommandId?: string; inputDigest?: string };
-                  } | null
-                )?.humanInputInterpretation;
-                const raw = await this.options.store.getCommand(
-                  binding.humanInputProcessing.inputCommandId,
-                );
-                if (
-                  previous?.kind !== 'model' ||
-                  previous.status !== 'failed' ||
-                  previous.runId !== run.id ||
-                  previous.sessionId !== run.sessionId ||
-                  previous.originStoreId !== run.originStoreId ||
-                  previous.originCommandId !== command.id ||
-                  previous.rootWorkCommandId !== run.rootWorkCommandId ||
-                  previous.rootWorkSeq !== run.rootWorkSeq ||
-                  (previous.result as { code?: string } | null)?.code !==
-                    'input_processing_decided' ||
-                  (previous.result as { dispatchCommitted?: boolean } | null)?.dispatchCommitted !==
-                    false ||
-                  (previous.result as { incomplete?: boolean } | null)?.incomplete !== true ||
-                  interpretation?.inputCommandId !== binding.humanInputProcessing.inputCommandId ||
-                  interpretation.inputDigest !== binding.humanInputProcessing.inputDigest ||
-                  raw?.kind !== 'human.input' ||
-                  raw.sessionId !== run.sessionId ||
-                  raw.originStoreId !== run.originStoreId ||
-                  raw.subjectId !== command.subjectId ||
-                  raw.cancelRequestedAt !== null ||
-                  raw.requestDigest !== interpretation.inputDigest ||
-                  (raw.receipt as { state?: string } | null)?.state !== 'decided'
-                )
-                  throw new AgentError('input_proposal_unverifiable');
-                // The Store emitted this code only after verifying the original sealed
-                // decision and dedicated processing marker. Never invent a Model response.
-                controller.signal.throwIfAborted();
-                const { evaluations } = await this.execution.requirementEvaluation(
-                  scope,
-                  'completion',
-                  undefined,
-                  true,
-                );
-                controller.signal.throwIfAborted();
-                await this.options.store.finishRun({
-                  expectedStoreId: run.originStoreId,
-                  owner,
-                  runId: run.id,
-                  status: 'completed',
-                  requirements: evaluations,
-                });
-                throw new InputProcessingCompleted();
-              }
               const retryReason = modelRetryReason(error);
               if (retryReason) {
                 controller.signal.throwIfAborted();
@@ -7311,7 +6441,6 @@ export class AgentRuntime {
           }
         },
         executeTool: async (call, stepId, source, signal) => {
-          await waitForChildWork(signal);
           const decisionSources = structuredClone(captured);
           const modelRequests = new Map(structuredClone([...capturedRequests.entries()]));
           const decisionRequests = new Map(modelRequests);
@@ -7516,22 +6645,6 @@ export class AgentRuntime {
         await compress(await messages(), 'manual');
         return;
       }
-      // A successful ordinary interpretation can be durable before its decision.
-      // Recovery consumes that exact result under the restored processing marker.
-      if (binding.humanInputProcessing && resumed?.loop?.kind === 'response') {
-        try {
-          await this.acceptHumanInterpretation(
-            humanInterpretation!,
-            resumed.loop.response,
-            command,
-          );
-        } catch (error) {
-          if (!(error instanceof AgentError) || error.code !== 'human_control_changed') throw error;
-          // Preserve the successful old interpretation as history. Only a new
-          // ordinary Model may propose against the freshly read human control.
-          loopContext.checkpoint = undefined;
-        }
-      }
       complete: while (true) {
         await this.options.store.setRunResultWait({
           expectedStoreId: run.originStoreId,
@@ -7540,7 +6653,6 @@ export class AgentRuntime {
           executionIds: [],
         });
         await defaultLoop(loopContext);
-        await checkHumanHandoff();
         if (
           (await applySteer()) > 0 ||
           inputVersion !== capturedInputVersion ||
@@ -7599,7 +6711,6 @@ export class AgentRuntime {
                 continue;
               if (!(error instanceof AgentError) || error.code !== 'input_pending') throw error;
               if ((await applySteer()) > 0) continue complete;
-              if (await this.pendingHumanInterpretation(run, command)) continue complete;
               continue;
             }
           }
@@ -7856,8 +6967,6 @@ export class AgentRuntime {
         }
       }
     } catch (error) {
-      if (error instanceof InputProcessingCompleted) return;
-      if (error instanceof AgentError && error.code === 'human_work_handed_off') return;
       const errors: unknown[] = error instanceof AggregateError ? error.errors : [error];
       if (
         errors.some(
@@ -8991,8 +8100,8 @@ export class AgentRuntime {
         });
       }
       for (const source of page.resultSources) {
-        // Automatic delivery belongs to the exact admitted work. Historical
-        // context and explicitly selected sources remain readable across work.
+        // Accepted results are conversation data with their original provenance.
+        // Their presence grants no execution authority to this or any later Run.
         const sourceExecution =
           resultWork && source.inclusion === 'automatic'
             ? await this.options.store.getExecution(source.executionId)
@@ -9000,12 +8109,6 @@ export class AgentRuntime {
         if (resultWork && source.inclusion === 'automatic') {
           if (!sourceExecution || sourceExecution.originStoreId !== source.originStoreId)
             throw new AgentError('context_source_unverifiable');
-          if (
-            sourceExecution.sessionId === sessionId &&
-            (sourceExecution.rootWorkCommandId !== resultWork.rootWorkCommandId ||
-              sourceExecution.rootWorkSeq !== resultWork.rootWorkSeq)
-          )
-            continue;
         }
         let fullBody = '';
         if (

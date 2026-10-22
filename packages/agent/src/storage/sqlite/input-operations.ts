@@ -154,6 +154,16 @@ export function validateInputAdmission(
       throw new AgentError('invalid_compression_request');
     return null;
   }
+  if (value.kind === 'run.start') {
+    const session = db.row('SELECT * FROM session WHERE id=?', input.sessionId);
+    if (!session || session.delete_requested) throw new AgentError('session_not_found');
+    if (session.parent_id !== null) throw new AgentError('group_root_required');
+    const creator = db.row(
+      "SELECT subject_id FROM command WHERE session_id=? AND kind='session.create'",
+      input.sessionId,
+    );
+    if (creator?.subject_id !== input.subjectId) throw new AgentError('permission_denied');
+  }
   if (value.kind !== 'input.steer' && value.kind !== 'input.follow_up') return null;
   const keys =
     value.kind === 'input.steer'

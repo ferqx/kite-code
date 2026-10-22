@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import { createServer, type Socket } from 'node:net';
 import { join, relative } from 'node:path';
 import { Readable } from 'node:stream';
+import { pathToFileURL } from 'node:url';
 import { privateDirectory } from '@kite-ai/agent/windows-path-security';
 import type { DevelopmentServiceReload } from '../../apps/desktop/electron/development';
 
@@ -139,6 +140,19 @@ export async function buildDevelopmentService(
       target: 'bun',
       packages: 'bundle',
       external: ['@kite-ai/*'],
+      plugins: [
+        {
+          name: 'development-shell-assets',
+          setup(build) {
+            // The packaged locator must keep its original module URL next to built assets.
+            // Other workspace imports continue using current sources during development.
+            build.onResolve({ filter: /^@kite-ai\/agent\/jobs\/shell$/ }, () => ({
+              path: pathToFileURL(join(root, 'packages/agent/dist/jobs/shell.js')).href,
+              external: true,
+            }));
+          },
+        },
+      ],
       outdir: directory,
       naming: 'main.js',
     });

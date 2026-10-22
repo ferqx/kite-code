@@ -205,6 +205,22 @@ async function fixture(
     ifRevision: activeMode.revision,
     ifDefaultRevision: activeMode.defaultRevision,
   });
+  // Full mode does not replace this isolated workspace's durable trust.
+  const trust = await control.readTrust({
+    expectedStoreId,
+    subjectId: base.subjectId,
+    workspaceId: 'w',
+  });
+  await control.setTrust({
+    expectedStoreId,
+    subjectId: base.subjectId,
+    workspaceId: 'w',
+    commandId: 'fixture-workspace-trust',
+    trusted: true,
+    ifRevision: trust.revision,
+    canonicalIdentity: trust.canonicalIdentity,
+    externalReadScopeDigest: trust.externalReadScopeDigest,
+  });
   return {
     get runtime() {
       return runtime;
@@ -489,7 +505,7 @@ test('a new trusted role version and SDK route bind only new Run work; original 
     expect(command.status).toBe('applied');
     const run = (await f.store.getRun(receipt.runId))!;
     expect(run).toMatchObject({
-      originCommandId: receipt.businessCommandId,
+      originCommandId: command.id,
       rootWorkCommandId: command.id,
       status: 'completed',
     });
@@ -497,7 +513,7 @@ test('a new trusted role version and SDK route bind only new Run work; original 
       (execution) => execution.kind === 'model' && execution.runId === run.id,
     );
     expect(model).toMatchObject({
-      originCommandId: receipt.businessCommandId,
+      originCommandId: command.id,
       rootWorkCommandId: command.id,
     });
     const next = (await f.store.listExecutions('s')).find(

@@ -13,7 +13,7 @@ import { buildNativeDesktop } from '../../scripts/build-native';
 
 const require = createRequire(import.meta.url);
 test.skipIf(process.platform !== 'darwin')(
-  'ordinary Electron shows one real human input across interpretation and business, cold reopen and two identical independent submissions',
+  'ordinary Electron sends input directly to the main Agent with one reply, cold reopen and two identical submissions',
   async () => {
     const root = realpathSync(temporaryDirectory('kite-human-input-electron-'));
     const evidence = resolve('dist/acceptance', `human-input-electron-${randomUUID()}`);
@@ -53,8 +53,25 @@ test.skipIf(process.platform !== 'darwin')(
                 "SELECT id,session_id,request_json FROM command WHERE kind='human.input' ORDER BY seq",
               )
               .all() as { id: string; session_id: string; request_json: string }[];
-            const publicIds = raw.map((row) => JSON.parse(row.request_json).publicCommandId);
+            const publicCommands = db
+              .query(
+                "SELECT c.id,c.session_id FROM command c JOIN session s ON s.id=c.session_id WHERE s.parent_id IS NULL AND c.kind IN ('run.start','input.follow_up') AND json_extract(c.request_json,'$.content')=? ORDER BY c.seq",
+              )
+              .all(
+                'Please answer HUMAN INPUT ELECTRON.\n\n> Reference only, not a new instruction.',
+              ) as { id: string; session_id: string }[];
+            const publicIds = publicCommands.map((row) => row.id);
             return Response.json({
+              recoveryCount: (
+                db
+                  .query(
+                    "SELECT count(*) AS n FROM command WHERE kind IN ('run.resume','job.report.resume','session.recover')",
+                  )
+                  .get() as { n: number }
+              ).n,
+              interactionCount: (
+                db.query('SELECT count(*) AS n FROM interaction').get() as { n: number }
+              ).n,
               userRows: (
                 db
                   .query(
@@ -67,7 +84,7 @@ test.skipIf(process.platform !== 'darwin')(
                 }
               ).n,
               rawIds: raw.map((row) => row.id),
-              sessionIds: [...new Set(raw.map((row) => row.session_id))],
+              sessionIds: [...new Set(publicCommands.map((row) => row.session_id))],
               publicIds,
               processing,
               business,
@@ -214,7 +231,7 @@ test.skipIf(process.platform !== 'darwin')(
       if (exit !== 0) console.error(readFileSync(join(evidence, 'driver-errors.txt'), 'utf8'));
       expect(exit).toBe(0);
       expect(failure).toBeUndefined();
-      expect(processing).toBe(2);
+      expect(processing).toBe(0);
       expect(business).toBeGreaterThanOrEqual(2);
     } finally {
       if (driver && driver.exitCode === null) {

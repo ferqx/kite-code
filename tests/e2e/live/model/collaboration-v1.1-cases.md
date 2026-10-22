@@ -1,5 +1,7 @@
 # 子 Agent 协作 V1.1：真实模型测试用例
 
+2026-10-22 范围说明：本文保留移除前 V1.1 的真实模型运行历史。用户确认移除独立输入归属分类、自然语言控制预处理和 selected-work 屏障；相关 I/C04 分类验收不再适用，C04 入口在调用 Provider 前拒绝。当前行为归[直接会话输入决定](../../../../.agents/notes/implemented/architecture/2026-10-22-direct-conversation-input.md)和[测试 owner](../../../README.md#子-agent-协作-v11-验证)。过去的通过／失败不改签为当前结果。
+
 2026-10-19 整理并开始真实执行。状态按本文末尾的实际变体记录；69 个主用例及各变体不能由局部通过整体升级。本文是测试执行依据，不是产品实现计划，也不把既有受控 Provider 回归计为真实模型通过。
 
 范围对应外部《Kite 子 Agent 协作优化方案 V1.1 · 实施补充版》第 1–9 节、最新 §6.5.1 的 80 项合同；原文 SHA256 为 cce7a0760637c0517831ee8fdcf89476e717d5d0dc87f392d5ae5640f2a0280b。合同编号及现有确定性断言入口归[测试 owner](../../../README.md#子-agent-协作-v11-验证)。另补[会话手册](../../../../docs/handbook/features/sessions.md)中用户确认的标题规则，不虚挂原 80 项编号。
@@ -262,8 +264,8 @@ S01 不能仅凭文字“听起来模糊”假定 unresolved：普通首输入�
 | 问题及预期 | 实际修复与验证 |
 | --- | --- |
 | idle协作者可以只收邮件，不能因历史Run完成而拒绝或隐式启动 | [mail操作](../../../../packages/agent/src/storage/sqlite/agent-mail-operations.ts)在同事务内重新核当前摘要，仅当前活动Run绑定target；[完整回归](../../../../packages/agent/test/isolated/business/task/collaboration-surface.test.ts)及六工具真实smoke证明idle发送、显式follow-up和一次采用 |
-| 首条未决经真实澄清形成首业务，仍应命名且锚定首条原文 | [输入意图](../../../../packages/agent/src/human-input-intent.ts)不再跳过待澄清输入；[Store决定](../../../../packages/agent/src/storage/sqlite/human-work-control.ts)只在准确空候选首任务链允许关闭原未决；[标题](../../../../packages/agent/src/business/session-title/index.ts)核完整原文/澄清/业务链。[32项命名回归](../../../../packages/agent/test/isolated/execution/session-title-generation.test.ts)及S02真实闭环通过 |
-| 最新补充/独立任务不能被旧业务历史误导或把新增要求丢作只读clarify | [解释配置](../../../../packages/agent/src/human-input-processing.ts)用现有 `after_history` 放置准确当前raw，并区分新增要求work与只读问题；[实际ModelInput回归](../../../../packages/agent/test/isolated/business/task/human-work-runtime.test.ts)保原历史、零工具和最新原文，I01/I04真实复验通过 |
+| 首条未决经真实澄清形成首业务，仍应命名且锚定首条原文 | 输入意图（移除前版本 `044df65ff` 中的 `human-input-intent.ts`）不再跳过待澄清输入；[Store决定](../../../../packages/agent/src/storage/sqlite/human-work-control.ts)只在准确空候选首任务链允许关闭原未决；[标题](../../../../packages/agent/src/business/session-title/index.ts)核完整原文/澄清/业务链。[32项命名回归](../../../../packages/agent/test/isolated/execution/session-title-generation.test.ts)及S02真实闭环通过 |
+| 最新补充/独立任务不能被旧业务历史误导或把新增要求丢作只读clarify | 解释配置（移除前版本 `044df65ff` 中的 `human-input-processing.ts`）用现有 `after_history` 放置准确当前raw，并区分新增要求work与只读问题；[实际ModelInput回归](../../../../packages/agent/test/isolated/business/task/human-work-runtime.test.ts)保原历史、零工具和最新原文，I01/I04真实复验通过 |
 | queued B取消不应让A反复创建失败Model，也不能执行B或自动回选A | [handoff事务](../../../../packages/agent/src/storage/sqlite/human-work-handoff.ts)只在封存独立B决定、准确取消业务、原A与当前选择全部匹配时允许技术收束；[Runtime回归](../../../../packages/agent/test/isolated/business/task/human-work-runtime.test.ts)统计持久Model而非只统计HTTP，[负对照](../../../../packages/agent/test/isolated/storage/human-work-handoff.test.ts)保未决定取消、same-work、选择C、停止A及错业务证明拒绝；I06真实复验通过 |
 | 带合法AbortSignal读取问题Artifact应成功，读取取消只取消读取 | [Runtime.readArtifact](../../../../packages/agent/src/runtime.ts)跨SQLite Worker查询只传引用范围，signal保留本地检查与实际Artifact读取；[二进制/预取消回归](../../../../packages/agent/test/isolated/artifacts/context.test.ts)及R09真实问答闭环通过，Store/subject/Session与legacy绑定校验保持 |
 | child Run完成而外层carrier尚在收束时，嵌套报告不能永久丢入needs_review，也不能提前派发 | [报告事务](../../../../packages/agent/src/storage/sqlite/job-report-operations.ts)先核完整准确祖先，仅保存 `report_carrier_active` defer；有限等待指纹含原carrier递归状态/取消。严格派发仍要求合法终态，[child准入](../../../../packages/agent/src/storage/sqlite/operations.ts)对普通/继续报告核同一证明。[原嵌套整例](../../../../packages/agent/test/isolated/business/task/nested-after-turn.test.ts)以真实最终提交gate固定窗口，合法等待零新Run/Source/ack，终态后唯一收束；7个独立内存快照负对照拒绝取消、unknown、错Session/subject/work/start/revision。原默认round2失败与确定性红回归均保留 |
@@ -357,7 +359,7 @@ S01 不能仅凭文字“听起来模糊”假定 unresolved：普通首输入�
 
 | 原证据/分类 | 实际问题、修复与反例 |
 | --- | --- |
-| 输入候选/确认：确定性红证实的product | 未解析raw只登记B候选时，准确确认旧A不能关联；正式“我指的是 A。现在继续 A”原也不被识别。[候选持久化](../../../../packages/agent/src/storage/sqlite/human-work-control.ts)保存真实候选，[意图校验](../../../../packages/agent/src/human-input-intent.ts)只认可非引用、确切身份及紧随单一一致控制。[中英文Runtime回归](../../../../packages/agent/test/isolated/business/task/human-work-runtime.test.ts)核A/B候选、原raw/decision不改写、唯一A后继与B不变；[意图正反例](../../../../packages/agent/test/isolated/business/human-input-intent.test.ts)核引用/示例、不同目标、插入资料。最小明确确认闭环已真实通过；不据此接受任意附句 |
+| 输入候选/确认：确定性红证实的product | 未解析raw只登记B候选时，准确确认旧A不能关联；正式“我指的是 A。现在继续 A”原也不被识别。[候选持久化](../../../../packages/agent/src/storage/sqlite/human-work-control.ts)保存真实候选，意图校验（移除前版本 `044df65ff` 中的 `human-input-intent.ts`）只认可非引用、确切身份及紧随单一一致控制。[中英文Runtime回归](../../../../packages/agent/test/isolated/business/task/human-work-runtime.test.ts)核A/B候选、原raw/decision不改写、唯一A后继与B不变；意图正反例（移除前版本 `044df65ff` 中的 `human-input-intent.test.ts`）核引用/示例、不同目标、插入资料。最小明确确认闭环已真实通过；不据此接受任意附句 |
 | I08-running01、02/03、I09-clarified01/02/03：保守匹配未完成，不是越权 | running01模型确提continue A，但Host因无准确ID/控制不在句首转unresolved；I08允许后续准确确认，不能把保守路径直接叫产品越权。其余确认中的“不要…或…”触发controlQuestion保守门禁，原raw仍未决；后续成功样本用了允许的最小明确确认，不声称原自然附句已支持。原failed保留，保守提案不算恢复完成 |
 | I08-queued01、I09-clarified04：harness | oracle原误要求decision.request重复clarifiesInputId，现场真实准确链位于new raw.request与old raw.receipt且已clarified；只修取证位置，不能把此两份记成产品未关联 |
 | I04-result-first01/02、I08-running04、I09-dual01：harness | first01私有gate形成等待环；first02误要求先已封存结果仍null。running04的模型合法选已有read_case_material costs，原Files-only gate未覆盖且过早查dispatch；dual01以rootIdle早于queued B真实Run建立作终态。驱动改为真实Tool派发/原Source封存/业务Run建立同步，不提高期限、不改真实响应或最终零跨工作判据，旧报告保原状态 |

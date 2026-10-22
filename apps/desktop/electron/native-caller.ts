@@ -1984,6 +1984,12 @@ export class NativeCaller {
         const snapshot = this.writableScope(request.sessionId);
         if (request.intent.expectedStoreId !== snapshot.view.storeId)
           throw new ClientError('store_identity_mismatch');
+        if (snapshot.permissions) {
+          await this.controller.prepareWorkspaceAccess(snapshot.permissions.observationId);
+          this.check(generation);
+          if (originalSelection !== this.selection || this.selected !== request.sessionId)
+            throw new ClientError('native_selection_changed');
+        }
         let intent = request.intent;
         if (request.imageIds?.length) {
           const images = await this.images.publish(

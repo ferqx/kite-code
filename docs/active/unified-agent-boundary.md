@@ -1,6 +1,6 @@
 # 通用 Agent 新执行边界
 
-普通消息的 `humanInput` 只读证明沿 [SQL 输入 owner](../../packages/agent/src/storage/sqlite/inputs/README.md) → Service 同源 schema／生成 Client → [Native](../../apps/desktop/README.md#真实输入消息的唯一展示)交接。原 public/raw/processing/decision/business 与准确已应用 Message／Run 共同证明同一次输入，不以相同正文或 ID 前缀猜测；消息分页保原行和原序号。Native 仅在当前读取存在准确替代消息时合并处理副本，首次占位沿原公开提交 ID 交接，独立同文和未决输入保留。呈现证明不参与权限、业务准入或恢复授权。
+新普通输入沿原 Command 直接进入当前主 Agent，不创建分类 Run、判定回复或派生输入；`input.steer/input.follow_up` 保持准确目标与队列规则。旧历史消息的 `humanInput` 只读证明沿 [SQL 输入 owner](../../packages/agent/src/storage/sqlite/inputs/README.md) → Service 同源 schema／生成 Client → [Native](../../apps/desktop/README.md#真实输入消息的唯一展示)交接。原 public/raw/processing/decision/business 与准确已应用 Message／Run 共同证明同一次输入，不以相同正文或 ID 前缀猜测；消息分页保原行和原序号。Native 仅在当前读取存在准确替代消息时合并处理副本，首次占位沿原公开提交 ID 交接，独立同文和未决输入保留。呈现证明不参与权限、业务准入或恢复授权。
 
 待消费输入队列沿 [Store](../../packages/agent/src/storage/README.md#待消费输入的撤回与排序) → [Runtime](../../packages/agent/README.md#人类输入工作选择与可靠结果) → [Service](../../apps/service/README.md#待消费输入队列协议) → [Client](../../packages/client/README.md#待消费输入队列) → [Native](../../apps/desktop/README.md#原运行中消息队列)交接。持久 `pending_order` 与原不可变 `seq` 分开，真实消费使用前者；原 request、附件、digest 和历史出处不重写，`result.include` 保原槽。`pending_input_queue` 是单独能力，精确 `input.withdraw/input.reorder` 只变更原根、原主体尚未消费的合法集合，revision CAS 与单调变更计数阻止过期及 ABA；撤回不等于取消 Run／Execution。Main 只接受已观察 ID，不接 renderer 自报请求或 Store；首次写入前保存原意图，未知只查询同 ID。编辑已确认撤回后才交付普通 draft，交付 ack 前可显式查原操作取回原文，重开不重发、不恢复队列或自动覆盖草稿。事务、生成协议、私有DB11与实际验证分别由上述 owner 维护，UI 排序或持久 journal 都不签发新的执行或审批权。
 
@@ -8,7 +8,7 @@
 
 状态：active
 
-附件元数据随真实 public/raw/decision/business 链和准确原消息保留；同工作补充、独立新工作及待决解释不改写原正文或静默丢失图片／文件。附件路径与图片内容只作为低信任资料，不能成为工作选择、停止或批准依据；原 Store／Session／subject、请求摘要、业务回执与完整读取仍分别核验。
+附件元数据随原普通 Command 和准确 Message 保存；补充及新轮次不改写正文或静默丢失图片／文件。旧 public/raw/decision/business 链只供历史兼容。附件路径和图片内容是低信任资料，不能产生停止或批准；Store／Session／subject、请求摘要及实际应用回执分别核验。稳定 child 的管理核真实直接父子和当前工具授权，后续普通父轮次可以接纳原 child 的具名结果；Source/consume/ack 保准确来源与目标，不以技术 rootWork 相等代替权限。
 
 后台 Job 目录的来源观察沿 [Store](../../packages/agent/src/storage/README.md#跨会话原-job-目录) → [Service](../../apps/service/README.md#后台目录的来源投影) → [Client](../../packages/client/README.md) → [Native](../../apps/desktop/README.md#native-当前会话环境信息与子详情) 交接。`includeSourceTool:true` 只读取同原 Session／Store／root work 的直接父 Tool ID／定义／版本；默认响应保持原闭合结构，工具正文和授权材料不进入来源投影。来源缺失不推断后台身份，取消边不作为前后台标记。该观察不扩大读取或停止 authority，不改原 Job、取消和冷恢复边界。
 
@@ -35,6 +35,8 @@ Files 的原生 I/O 沿 [Node-API owner](../../packages/agent/native/files/READM
 客户端测试专用的调试入口、诊断展示和辅助控件只允许由隔离测试夹具或明确测试制品开启，dev 与 prod 客户端必须关闭。公开启动参数、环境变量、URL 或环境名不提供开启资格；TUI 普通入口拒绝 `--test-ui-diagnostics`，Native 的开发与正式 renderer 将测试常量固定为 false，组件传入 true 也不能覆盖该值。测试目录的入口可向可信 host 显式传 `testDiagnostics:true`，测试 Native 可单独构建诊断制品；共享 Desktop context 默认关闭，不再按 `NODE_ENV=development` 增加技术详情。测试诊断只控制展示，不改变公共请求、身份、原申请持久化、审批与取消权，也不跳过制品完整验证。普通界面仍保未知／失败／未确认清理、完整业务结果和用户明确的原内容检查；移植原 Ink 的纯 Header／Footer／面板不能恢复旧 provider 或执行 authority。负责实现归 [TUI](../../packages/ui/src/tui/README.md#原-ink-展示与明确测试诊断)与 [Desktop](../../apps/desktop/README.md#普通客户端与测试诊断)。
 
 [Agent 权限模块](../../packages/agent/src/permissions/README.md)统一默认三策略、执行与 Workflow 共用的 builtin effect 分类、计划/Workflow/恢复审批约束、默认 Task 后续汇报许可，以及 Shell 命令分析、摘要和最终批准范围。Service 只装配可信事实与执行工厂、处理公开接口和身份；原 Loop/Execution 接口与审批生命周期保持。默认 after-turn 判定由 Agent 核原 role/source/root work、取消／删除和当前信任，Service 只提供可信读取；Planning 装配直接调用 Agent 工厂和原状态 reader，旧单次转发层退役。静态边界检查沿真实 export/barrel 拒绝权限模块反向依赖 Service，并拒绝 Service 自有解析依赖及原策略／范围／after-turn／Planning 工厂实现；Core／SQL 的激活、报告应用及最终 CAS 保独立 owner，正式制品仍须验证实际 Agent entry 与资产闭包。
+
+Native 的明确普通输入在 Main 内按 Session 绑定的 Workspace 准备当前读取授权，不显示独立范围确认；准备使用原权限 observation、trust revision、目录身份和读取范围摘要 CAS，以及原权限 journal。未知或过期观察不继续输入，切换主体／Store／Session／项目不把旧申请改绑；打开历史和状态核实不自动授予范围，审批模式及工具硬上限独立。负责实现与回归归 [Desktop owner](../../apps/desktop/README.md#原会话输入区权限与停止)。
 
 Native累计缓存用量沿已观察Message的原Model Execution只读取得：成功结果、准确原Session／Run／content、实际cached字段及token范围须核实；封存副本按原Store／Execution去重，不查询来源Run后来状态。恢复在当前Store的旧Store结果仅接纳终态出处，foreign active拒绝。有限IPC只收已观察Message ID与阅读scope，关闭／切会话只释放所属GET；用量不成为权限、执行状态或完整正文证明。组件继续复用原Composer，当前实现与证据归[Native owner](../../apps/desktop/README.md#原输入区累计缓存命中率)，Core／生成HTTP／持久格式保持。
 
@@ -100,9 +102,9 @@ Store 在原条数与完整 frame 字节上限内投递，容量不足时调用�
 
 首次激活前已取消的稳定 child 只有在 Store 证明原 carrier 从未派发、原 `child.start` 已准确拒绝且 Session 没有真实前驱 Run 时，才由显式 `follow_up_agent` 创建新 carrier 和真实首次 `child.start`。私有证明随新命令封存，activation、邮件采用、冷恢复及跨层读取共用核验；原取消、Session 创建血缘与普通 Run 后继合同不改写。同工作原委派只作已取消背景，新指令优先；换工作不继承旧指令或邮件，旧 queued 引导不恢复。已派发、unknown、缺失或不符的来源不获新资格，不以空 Run 绑定绕过恢复门禁。准确机制与验证入口归 [Store owner](../../packages/agent/src/storage/README.md#子-agent-的首次激活复用)与 [Task owner](../../packages/agent/src/extensions/task/README.md#稳定身份准确命令和观察)。
 
-QueueOnly 邮件以原 `agent.message` Command 和 sender Execution scope 的完整私有 Artifact 保存，sender 的实际成功结算与接收资格同事务提交；失败、取消、未知或未确认不形成成功邮件。idle send 零 Run/Model，普通后来人类工作不自动采用。显式 child follow-up 的原 ensure 事务封存邮件 seq 与成功 sender completed cursor 双上界，原 key 重试不能扩大集合；每页 50 封的实际接收最终核目标 Run/selection、carrier、主体、原 Store 和 stop/delete。邮件原未绑定 intent 不改写为新 targetRunId，保存准确 receivedRunId/selection；下一 Model 只按真实 receivedMessage/source proof 完整展开。Rewind 资格属于准确目标 Session selection，根选择变化不伪称 child 选择也改变。普通 child completion 将有限订阅与 idle 自动授权分开保存；同工作 active 接纳沿原活动 Run 权限，idle 续轮另核可信当前 afterTurn policy。nested 与 follow-up 保原 child deadline，report 不递归授权；冷缺绑定 needs_review/零 Provider。报告按准确结果键在同一事务选最终 Run、创建独立 Source、consume receipt 和 ack，多个完成可进入同一 R，不要求每个 report 都是 R.origin。提交后返回丢失只查回原 Run/Source。原 after_turn 旧历史与明确内部调用仍核其实际封存授权。
+QueueOnly 邮件以原 `agent.message` Command 和 sender Execution scope 的完整私有 Artifact 保存，sender 的实际成功结算与接收资格同事务提交；失败、取消、未知或未确认不形成成功邮件。idle send 零 Run/Model，普通后来人类工作不自动采用。显式 child follow-up 的原 ensure 事务封存邮件 seq 与成功 sender completed cursor 双上界，原 key 重试不能扩大集合；每页 50 封的实际接收最终核目标 Run/selection、carrier、主体、原 Store 和 stop/delete。邮件原未绑定 intent 不改写为新 targetRunId，保存准确 receivedRunId/selection；下一 Model 只按真实 receivedMessage/source proof 完整展开。Rewind 资格属于准确目标 Session selection，根选择变化不伪称 child 选择也改变。普通 child completion 将有限订阅与 idle 自动授权分开保存；同一父会话 active 接纳沿原活动 Run 权限，idle 续轮另核可信当前 afterTurn policy。nested 与 follow-up 保原 child deadline，report 不递归授权；冷缺绑定 needs_review/零 Provider。报告按准确结果键在同一事务选最终 Run、创建独立 Source、consume receipt 和 ack，多个完成可进入同一 R，不要求每个 report 都是 R.origin。提交后返回丢失只查回原 Run/Source。原 after_turn 旧历史与明确内部调用仍核其实际封存授权。
 
-人类输入先保留真实公共请求，再由私有 raw、关联/选择决定及业务准入分别保存身份。原输入登记、决定、报告接纳和最终效果派发核同一 control revision；引用、Agent 邮件及模型自报批准不能成为控制。只读解释仍用唯一普通 Loop，无业务 extensions/Tool/Job 权限，Run 保留自身因果。同工作继续须核准确原工作配置；独立 B 先 queued，A 安全交接后才能启动，取消 B 不自动回 A。明确暂停/替换/停止只作用准确工作；暂停继续追加有限资格，不修改旧 suppressed 历史。unknown、root stop、Rewind 和 fence 保持。实现与验证归[输入 owner](../../packages/agent/src/storage/sqlite/inputs/README.md)、[Run 交接](../../packages/agent/src/storage/sqlite/human-work-handoff.ts)及[继续资格](../../packages/agent/src/storage/sqlite/job-report-continuation-README.md)。
+普通输入直接由原公共 Command 进入当前主 Agent；不生成独立 raw/归属决定/处理轮，也不按正文自动暂停、继续或改选工作。steer 在准确活动 Run 的安全边界应用，队列等准确前驱结束，新轮次使用当前显式模型配置。旧记录与明确控制只保兼容，旧 processing 恢复在 scope/恢复校验后且加载配置前拒绝。准确取消、停止、root stop、Rewind、unknown 和 fence 仍有效，具体归[输入 owner](../../packages/agent/src/storage/sqlite/inputs/README.md)。
 
 首输入的本地标题兜底独立于业务准入。可信宿主在 public/raw 耐久保存后、解释修订捕获前，通过受限 metadata 接点复用标题模块的 rename CAS；它不成为新的业务生命周期、事件总线或执行许可，解释轮仍零业务 Action。原输入、初始控制、空历史、保留的注册锚点和手动改名均须可核。后续标题 AI 只沿准确 public/raw/decision/business 链，在实际业务正常完成前执行；元数据失败不改变原输入的业务结果。当前负责入口归[Agent](../../packages/agent/README.md)与[Service](../../apps/service/README.md)。
 

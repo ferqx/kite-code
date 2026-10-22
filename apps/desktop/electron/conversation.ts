@@ -301,24 +301,14 @@ export class NativeConversation {
         throw new ClientError('conversation_session_unavailable');
       let facts = snapshot.permissions;
       if (!facts) throw new ClientError('permission_facts_unavailable');
-      if (!facts.trust.trusted) {
-        // A project choice authorizes its root. Additional host read scopes retain explicit confirmation.
-        if (facts.trust.readScopes.some((item) => item.kind !== 'workspace'))
-          throw new ClientError('workspace_trust_required');
-        const before = this.controller.permissionSubmissions.length;
-        try {
-          const mutation = await this.controller.setWorkspaceTrust(true, facts.observationId);
-          entry.result = { ...entry.result, permissionCommandId: mutation.commandId };
-          if (mutation.state !== 'applied') throw new ClientError('permission_outcome_unknown');
-        } finally {
-          const submission = this.controller.permissionSubmissions[before];
-          if (submission)
-            entry.result = { ...entry.result, permissionCommandId: submission.intent.commandId };
-        }
-        await this.controller.refreshPermissions();
-        facts = this.controller.snapshot?.permissions;
+      const beforeAccess = this.controller.permissionSubmissions.length;
+      try {
+        facts = await this.controller.prepareWorkspaceAccess(facts.observationId);
+      } finally {
+        const submission = this.controller.permissionSubmissions[beforeAccess];
+        if (submission)
+          entry.result = { ...entry.result, permissionCommandId: submission.intent.commandId };
       }
-      if (!facts?.trust.trusted) throw new ClientError('workspace_trust_required');
       if (request.permissionMode !== undefined && facts.mode.mode !== request.permissionMode) {
         const before = this.controller.permissionSubmissions.length;
         try {

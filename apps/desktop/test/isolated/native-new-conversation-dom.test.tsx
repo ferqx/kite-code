@@ -1611,7 +1611,7 @@ test('original current-Session permission menu uses the observed command, preser
     expect(f.calls).toEqual(ordinaryCalls);
     await f.edit('retained current draft 雪🙂', '当前会话私有草稿');
     expect(permission().getAttribute('aria-label')).toBe('Permission: Request Approval');
-    expect(permission().disabled).toBe(true);
+    expect(permission().disabled).toBe(false);
     expect(mutations()).toHaveLength(0);
     const tools = [...f.host.querySelectorAll<HTMLButtonElement>('button')].find(
       (button) => button.textContent === '会话工具',
@@ -2605,130 +2605,164 @@ test('Auto changes to Request Approval only through an explicit current Session 
   }
 }, 20000);
 
-test('ordinary Native confirms the exact additional read scope for a created first Session without replay or mode escalation', async () => {
+test('first Session input stays in its created Session without a separate project scope confirmation or implicit retry', async () => {
   const f = fixture(true, false);
   try {
     await act(async () => f.root.render(<NativeDesktop />));
-    await f.click('Original A');
     await f.click('在 Workspace 中新建对话');
+    expect(f.host.querySelector('[role="dialog"]')).toBeNull();
+    expect(f.calls.filter((call) => call.method === 'permission.trust')).toHaveLength(0);
     await f.edit('first input stays in its created Session');
     await f.click('发送首条消息');
-    const original = await f.resolve('failed', true, 'workspace_trust_required');
+    const original = await f.resolve('failed', true, 'workspace_trust_stale');
     await f.click('确定');
     expect(f.selected()).toBe(original.creation.sessionId);
     expect(promptValue(f.input('当前会话私有草稿'))).toBe(original.intent.content);
-    expect(f.host.body.textContent).not.toContain('会话工具');
-    await f.click('确认项目读取范围');
-    expect(f.host.querySelector('[role="dialog"]')?.textContent).toContain('file:///workspace');
-    expect(f.host.querySelector('[role="dialog"]')?.textContent).toContain(
-      '只读关联目录 /host/reference',
-    );
-    expect(f.host.querySelector('[role="dialog"]')?.textContent).not.toContain('a'.repeat(64));
-    const allow = () =>
-      [...f.host.querySelectorAll<HTMLButtonElement>('button')].find(
-        (button) => button.textContent === '允许读取所显示的范围',
-      )!;
-    expect(allow().disabled).toBe(true);
-    await f.click('暂不授权');
-    expect(f.calls.filter((call) => call.method === 'permission.trust')).toHaveLength(0);
-    await f.click('确认项目读取范围');
-    const checkbox = f.host.querySelector<HTMLInputElement>(
-      '[role="dialog"] input[type="checkbox"]',
-    )!;
-    expect(checkbox.checked).toBe(false);
-    await act(async () => checkbox.click());
-    await f.click('允许读取所显示的范围');
-    expect(f.calls.filter((call) => call.method === 'permission.trust')).toEqual([
-      { method: 'permission.trust', generation: 1, observationId: 2, trusted: true },
-    ]);
+    expect(f.host.querySelector('[aria-label="项目读取授权"]')).toBeNull();
+    expect(f.host.body.textContent).not.toContain('确认项目读取范围');
+    expect(f.host.querySelector('[role="dialog"]')).toBeNull();
     expect(f.calls.filter((call) => call.method === 'conversation.send')).toHaveLength(1);
     expect(
       f.calls.filter(
-        (call) => call.method === 'permission.mode' || call.method === 'createSession',
+        (call) => call.method === 'permission.trust' || call.method === 'permission.mode',
       ),
     ).toHaveLength(0);
-    expect(promptValue(f.input('当前会话私有草稿'))).toBe(original.intent.content);
-    expect(f.host.querySelector('[aria-label="项目读取授权"]')).toBeNull();
-    expect(f.selected()).toBe(original.creation.sessionId);
     await f.click('发送明确的新轮次');
-    expect(f.calls.filter((call) => call.method === 'conversation.send')).toHaveLength(2);
+    const retry = f.calls.filter((call) => call.method === 'conversation.send').at(-1)!;
+    expect(retry.creation).toEqual(original.creation);
+    expect(retry.intent.content).toBe(original.intent.content);
+    await f.resolve('accepted');
     expect(f.selected()).toBe(original.creation.sessionId);
+    expect(promptValue(f.input('当前会话私有草稿'))).toBe('');
+    expect(f.calls.filter((call) => call.method === 'conversation.send')).toHaveLength(2);
+    expect(f.calls.filter((call) => call.method === 'permission.trust')).toHaveLength(0);
   } finally {
     await f.close();
   }
 });
 
-test('ordinary trust confirmation is scoped to the selected facts; late trust receipt cannot move another Session draft or repeat input', async () => {
+test('opening an untrusted Session permits explicit mode selection without a scope dialog and preserves drafts across reopening', async () => {
   const f = fixture(true, false);
   try {
     await act(async () => f.root.render(<NativeDesktop />));
     await f.click('Original A');
     await f.edit('private A', '当前会话私有草稿');
-    await f.click('确认项目读取范围');
-    await act(async () => f.host.querySelector<HTMLInputElement>('[role="dialog"] input')!.click());
-    f.changeTrustScope('new exact external scope /host/changed');
-    await f.refreshFacts();
-    expect(f.selected()).toBe('a');
+    const permission = f.host.querySelector<HTMLButtonElement>('[data-permission-trigger]')!;
+    expect(permission.disabled).toBe(false);
     expect(f.host.querySelector('[role="dialog"]')).toBeNull();
-    await f.click('确认项目读取范围');
-    expect(f.host.querySelector('[role="dialog"]')?.textContent).toContain('/host/changed');
-    expect(f.host.querySelector<HTMLInputElement>('[role="dialog"] input')!.checked).toBe(false);
-    await f.click('暂不授权');
-    await f.click('Original A');
-    f.holdTrust();
-    await f.click('确认项目读取范围');
-    await act(async () => f.host.querySelector<HTMLInputElement>('[role="dialog"] input')!.click());
-    await f.click('允许读取所显示的范围');
-    await f.click('关闭');
-    await f.click('Other B');
-    await f.edit('private B', '当前会话私有草稿');
-    await f.releaseTrust();
-    expect(f.selected()).toBe('b');
-    expect(promptValue(f.input('当前会话私有草稿'))).toBe('private B');
-    expect(f.host.querySelector('[role="dialog"]')).toBeNull();
-    expect(f.calls.filter((call) => call.method === 'permission.trust')).toEqual([
-      { method: 'permission.trust', generation: 1, observationId: 1, trusted: true },
-    ]);
+    expect(f.host.body.textContent).not.toContain('确认项目读取范围');
     expect(
-      f.calls.filter(
-        (call) => call.method === 'conversation.send' || call.method === 'permission.mode',
+      f.calls.filter((call) =>
+        ['permission.trust', 'permission.mode', 'submit', 'conversation.send'].includes(
+          call.method,
+        ),
       ),
     ).toHaveLength(0);
+    await act(async () => {
+      permission.focus();
+      permission.dispatchEvent(
+        new f.dom.window.KeyboardEvent('keydown', { key: 'Enter', bubbles: true }),
+      );
+    });
+    await act(async () =>
+      f.host.querySelectorAll<HTMLElement>('[role="menuitemradio"]')[1]!.click(),
+    );
+    expect(f.calls.filter((call) => call.method === 'permission.mode')).toEqual([
+      {
+        method: 'permission.mode',
+        generation: 1,
+        observationId: 1,
+        mode: 'auto',
+        makeDefault: false,
+      },
+    ]);
+    f.changeTrustScope('new exact external scope /host/changed');
+    await f.refreshFacts();
+    expect(f.host.querySelector('[role="dialog"]')).toBeNull();
+    await f.click('Other B');
+    await f.edit('private B', '当前会话私有草稿');
     await f.click('Original A');
     expect(promptValue(f.input('当前会话私有草稿'))).toBe('private A');
+    expect(f.host.querySelector('[data-permission-trigger]')?.getAttribute('aria-label')).toBe(
+      'Permission: Auto',
+    );
+    expect(f.host.querySelector('[role="dialog"]')).toBeNull();
+    expect(f.host.body.textContent).not.toContain('确认项目读取范围');
+    await f.click('Other B');
+    expect(promptValue(f.input('当前会话私有草稿'))).toBe('private B');
+    expect(
+      f.calls.filter((call) =>
+        ['permission.trust', 'submit', 'conversation.send'].includes(call.method),
+      ),
+    ).toHaveLength(0);
   } finally {
     await f.close();
   }
 });
 
-test('ordinary unknown trust preserves the original permission lookup and never submits another trust or input', async () => {
+test('persisted unknown or failed project access retains the original permission lookup without a scope dialog or implicit submission', async () => {
   const f = fixture(true, false);
+  const bridge = f.dom.window.kiteNative! as NativeBridge;
+  const request = bridge.request;
+  let phase: 'unknown' | 'failed' = 'unknown';
+  bridge.request = async (input) => {
+    const result = await request(input);
+    if (input.method !== 'state') return result;
+    return {
+      ...(result as NativeState),
+      permissionSubmissions: [
+        {
+          sessionId: 'a',
+          rootSessionId: 'a',
+          workspaceId: 'w',
+          kind: 'workspace.trust',
+          phase,
+          ...(phase === 'failed' ? { error: 'workspace_trust_stale' } : {}),
+          intent: {
+            expectedStoreId: 'store',
+            commandId: 'original-trust',
+            trusted: true,
+            ifRevision: '0',
+            canonicalIdentity: 'a'.repeat(64),
+            externalReadScopeDigest: 'b'.repeat(64),
+          },
+        },
+      ],
+    } satisfies NativeState;
+  };
   try {
     await act(async () => f.root.render(<NativeDesktop />));
     await f.click('Original A');
     await f.edit('unsent exact draft', '当前会话私有草稿');
-    f.unknownTrust();
-    await f.click('确认项目读取范围');
-    await act(async () => f.host.querySelector<HTMLInputElement>('[role="dialog"] input')!.click());
-    await f.click('允许读取所显示的范围');
-    expect(f.host.body.textContent).toContain('结果待核实；只查询原选择');
-    expect(
-      [...f.host.querySelectorAll<HTMLButtonElement>('button')].find(
-        (button) => button.textContent === '确认项目读取范围',
-      )!.disabled,
-    ).toBe(true);
+    await f.refreshFacts();
+    const notice = () => f.host.querySelector<HTMLElement>('[aria-label="项目授权结果"]');
+    expect(notice()?.textContent).toContain('结果待核实；只查询原选择');
+    expect(f.host.querySelector<HTMLButtonElement>('[data-permission-trigger]')!.disabled).toBe(
+      true,
+    );
+    expect(f.host.querySelector('[role="dialog"]')).toBeNull();
     await f.click('查询原权限选择');
     expect(f.calls.filter((call) => call.method === 'lookupPermission')).toEqual([
       { method: 'lookupPermission', generation: 1, commandId: 'original-trust' },
     ]);
-    expect(f.calls.filter((call) => call.method === 'permission.trust')).toHaveLength(1);
+    phase = 'failed';
+    await f.refreshFacts();
+    expect(notice()?.querySelector('[role="alert"]')?.textContent).toContain(
+      'workspace_trust_stale',
+    );
+    expect(f.host.querySelector<HTMLButtonElement>('[data-permission-trigger]')!.disabled).toBe(
+      false,
+    );
+    expect(f.host.body.textContent).not.toContain('original-trust');
+    expect(f.host.body.textContent).not.toContain('确认项目读取范围');
+    expect(promptValue(f.input('当前会话私有草稿'))).toBe('unsent exact draft');
     expect(
-      f.calls.filter(
-        (call) => call.method === 'conversation.send' || call.method === 'permission.mode',
+      f.calls.filter((call) =>
+        ['permission.trust', 'permission.mode', 'submit', 'conversation.send'].includes(
+          call.method,
+        ),
       ),
     ).toHaveLength(0);
-    expect(promptValue(f.input('当前会话私有草稿'))).toBe('unsent exact draft');
-    expect(f.host.body.textContent).not.toContain('original-trust');
   } finally {
     await f.close();
   }

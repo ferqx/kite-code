@@ -776,18 +776,11 @@ test('actual development wrapper new argv binds original Work, cold caller, File
       sessionId: 's',
       status: 'applied',
     });
-    const receipt = original.receipt as { runId: string; businessCommandId: string };
-    expect(receipt.businessCommandId).not.toBe('wrapper-work');
-    const business = await seed.client.getCommand(receipt.businessCommandId);
-    expect(business).toMatchObject({
-      id: receipt.businessCommandId,
-      sessionId: 's',
-      status: 'applied',
-    });
-    expect((business.receipt as { runId: string }).runId).toBe(receipt.runId);
+    const receipt = original.receipt as { runId: string };
+    expect(original.receipt).not.toHaveProperty('humanInputCommandId');
     expect(await seed.client.getRun(receipt.runId)).toMatchObject({
       status: 'completed',
-      originCommandId: business.id,
+      originCommandId: 'wrapper-work',
       rootWorkCommandId: 'wrapper-work',
     });
     const socket = join(root, 'shared.sock');
@@ -830,7 +823,7 @@ test('actual development wrapper new argv binds original Work, cold caller, File
   }
 }, 30000);
 
-test('actual development JSON Work exits with the complete clarification and cold same-intent lookup is GET-only without a business Run', async () => {
+test('actual development JSON Work completes ordinary input and cold same-intent lookup is GET-only', async () => {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-cli-dev-clarification-')));
   const userConfiguration = ownedUserConfiguration(join(root, 'home'));
   const workspace = join(root, 'workspace');
@@ -846,33 +839,14 @@ test('actual development JSON Work exits with the complete clarification and col
         tools?: unknown[];
       };
       requests++;
-      const instruction = body.messages.find(
-        (message) =>
-          message.role === 'system' && message.content.includes('Original input identity: '),
-      )?.content;
-      let content = 'Original A completed.';
-      if (instruction) {
-        expect(body.tools ?? []).toEqual([]);
-        const identity = JSON.parse(
-          instruction
-            .split('\n')
-            .find((line) => line.startsWith('Original input identity: '))!
-            .slice('Original input identity: '.length),
-        );
-        content = JSON.stringify({
-          ...identity,
-          relation: 'unresolved',
-          purpose: 'clarify',
-          target_root_work_command_id: null,
-          selection_effect: 'keep',
-          answer: null,
-          clarification,
-          clarifies_input_id: null,
-        });
-      } else
-        expect(
-          body.messages.some((message) => message.content === 'Original clarification host A'),
-        ).toBe(true);
+      expect(
+        body.messages.some((message) => message.content.includes('Original input identity:')),
+      ).toBe(false);
+      const current = body.messages.some(
+        (message) => message.role === 'user' && message.content === '先处理一下',
+      );
+      if (requests === 2) expect(current).toBe(true);
+      const content = current ? clarification : 'Original A completed.';
       const frame = (delta: unknown, finish_reason: string | null) =>
         `data: ${JSON.stringify({ id: 'clarification-host', object: 'chat.completion.chunk', model: 'fixture', choices: [{ index: 0, delta, finish_reason }] })}\n\n`;
       return new Response(`${frame({ content }, null)}${frame({}, 'stop')}data: [DONE]\n\n`, {
@@ -1010,7 +984,7 @@ test('actual development JSON Work exits with the complete clarification and col
         new Response(child.stdout).text(),
         new Response(child.stderr).text(),
       ]);
-      expect(code).toBe(3);
+      expect(code).toBe(0);
       expect(stderr).toBe(
         shared
           ? 'Shared client disconnected; daemon work remains owned by Service'
@@ -1028,45 +1002,27 @@ test('actual development JSON Work exits with the complete clarification and col
         sessionId: 's',
         storeId,
         commandId: invocation.commandId,
-        status: 'needs_clarification',
-        exitCode: 3,
-        clarification: { answer: null, clarification },
+        status: 'succeeded',
+        exitCode: 0,
       });
-      expect(Object.hasOwn(outcome, 'run')).toBe(false);
       expect(
         events.some(
           (event) =>
             event.kind === 'work.event' && event.line.startsWith('terminal ambiguous succeeded'),
         ),
-      ).toBe(false);
+      ).toBe(true);
       return outcome;
     };
     const first = await argv();
     expect(requests).toBe(2);
     reader = await openSqliteStore({ ...profile, mode: 'readonly' });
     const original = (await reader.getCommand(invocation.commandId))!;
-    expect(original).toMatchObject({
-      status: 'accepted',
-      receipt: {
-        outcome: 'human_input_unresolved',
-        runId: null,
-        businessCommandId: null,
-        observation: first.clarification,
-      },
-    });
-    const receipt = original.receipt as { humanInputCommandId: string; decisionCommandId: string };
-    const raw = (await reader.getCommand(receipt.humanInputCommandId))!;
-    const decision = (await reader.getCommand(receipt.decisionCommandId))!;
-    expect(raw).toMatchObject({
-      kind: 'human.input',
-      request: { content: invocation.content, originalRequest: { content: invocation.content } },
-      receipt: { state: 'unresolved', decisionCommandId: decision.id, businessCommandId: null },
-    });
-    expect(decision).toMatchObject({
-      kind: 'human.input.decision',
-      status: 'applied',
-      receipt: { businessCommandId: null },
-    });
+    expect(original).toMatchObject({ status: 'applied', request: { content: invocation.content } });
+    expect(original.receipt).not.toHaveProperty('humanInputCommandId');
+    expect(
+      (await reader.listMessages('s')).filter((message) => message.role === 'assistant').at(-1)
+        ?.content,
+    ).toBe(clarification);
     const view = await reader.getView('s');
     expect(view.runs).toHaveLength(2);
     expect(view.runs.every((run) => !run.isActive)).toBe(true);
@@ -1089,12 +1045,12 @@ test('actual development JSON Work exits with the complete clarification and col
       commands.records.filter(
         (record) => (record.record as { kind: string }).kind === 'human.input',
       ),
-    ).toHaveLength(1);
+    ).toHaveLength(0);
     expect(
       commands.records.filter(
         (record) => (record.record as { kind: string }).kind === 'human.input.decision',
       ),
-    ).toHaveLength(1);
+    ).toHaveLength(0);
     expect(
       commands.records.some((record) =>
         /cancel|interaction.answer/.test((record.record as { kind: string }).kind),
@@ -1154,8 +1110,6 @@ test('actual development JSON Work exits with the complete clarification and col
     service = undefined;
     reader = await openSqliteStore({ ...profile, mode: 'readonly' });
     expect(await reader.getCommand(invocation.commandId)).toEqual(original);
-    expect(await reader.getCommand(raw.id)).toEqual(raw);
-    expect(await reader.getCommand(decision.id)).toEqual(decision);
     expect((await reader.getView('s')).runs).toHaveLength(2);
     expect(await reader.listExecutions('s')).toHaveLength(2);
     expect(requests).toBe(2);

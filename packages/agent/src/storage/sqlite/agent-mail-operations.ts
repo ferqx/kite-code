@@ -334,8 +334,6 @@ export function associateAgentMailWithResult(
     carrier.cancel_requested ||
     carrier.session_id !== run.session_id ||
     carrier.origin_store_id !== run.origin_store_id ||
-    carrier.root_work_command_id !== run.root_work_command_id ||
-    String(carrier.root_work_seq) !== String(run.root_work_seq) ||
     source.execution_id !== carrier.id ||
     String(source.result_revision) !== input.resultRevision ||
     source.session_id !== run.session_id ||
@@ -345,7 +343,6 @@ export function associateAgentMailWithResult(
     parse(source.request_json).diagnostic
   )
     throw new AgentError('agent_message_unverifiable');
-  const filter = runPredicate(db, input.runId, String(run.session_id));
   for (const id of input.messageIds) {
     const mail = query(db, id);
     if (
@@ -355,12 +352,14 @@ export function associateAgentMailWithResult(
       !mail.mail_confirmed ||
       mail.source_state !== 'succeeded' ||
       mail.mail_target_session_id !== run.session_id ||
+      mail.mail_target_run_id !== null ||
+      mail.origin_store_id !== carrier.origin_store_id ||
+      mail.session_id !== carrier.child_session_id ||
+      mail.mail_selection_id !== run.context_selection_id ||
+      mail.root_work_command_id !== carrier.root_work_command_id ||
+      String(mail.root_work_seq) !== String(carrier.root_work_seq) ||
       parse(mail.request_json).carrierExecutionId !== carrier.id ||
-      !db.row(
-        `SELECT c.id FROM command c JOIN execution e ON e.id=c.agent_source_execution_id WHERE c.id=? AND ${filter.sql}`,
-        id,
-        ...filter.args,
-      )
+      !mail.agent_source_execution_id
     )
       throw new AgentError('agent_message_unverifiable');
     const sender = db.row('SELECT * FROM execution WHERE id=?', mail.agent_source_execution_id!);
@@ -386,8 +385,8 @@ export function associateAgentMailWithResult(
       published.media_type !== body.mediaType ||
       sender.origin_store_id !== run.origin_store_id ||
       origin.subject_id !== mail.subject_id ||
-      sender.root_work_command_id !== run.root_work_command_id ||
-      String(sender.root_work_seq) !== String(run.root_work_seq) ||
+      sender.root_work_command_id !== carrier.root_work_command_id ||
+      String(sender.root_work_seq) !== String(carrier.root_work_seq) ||
       sender.cancel_requested ||
       stopped(db, origin) ||
       db.childCarrier(origin, sender.run_id === null ? null : String(sender.run_id))?.id !==
@@ -592,7 +591,6 @@ export function queueAgentMessage(
         callerRootWorkSeq: String(sender.root_work_seq),
       }).items[0];
       if (!target) throw new AgentError('agent_unavailable');
-      if (target.workRelation !== 'same_work') throw new AgentError('permission_denied');
       const current = getAgentSummary(db, {
         expectedStoreId: input.expectedStoreId,
         subjectId: String(original.subject_id),

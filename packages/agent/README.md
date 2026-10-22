@@ -10,7 +10,7 @@
 
 用户消息 source JSON 保存元数据，不把 base64 填进文本／SQL 消息正文；SQL baseline 不变。[模型历史组装](src/runtime.ts)核原用户消息出处，完整读取并验证原 Artifact 后才构建中立 `ModelMessage.images`。后续轮次、Fork 和冷重开沿原引用读取；缺失或损坏失败，不静默遗漏图片。原 ModelInput 的私有快照包含真实图片数据。上下文本地估算仍只是文本近似，图片用量以 Provider 已返回的实际统计为准，不补造图像 token。
 
-附件输入沿同一真实 public/raw/decision/business 链保存原元数据与请求摘要，派生同工作补充或独立工作时保留全部附件及原正文。只有有效附件的输入也可受理，文件或图片中的文字不因此成为当前控制指令；工作归属与执行权限仍独立核实，公开 ID 与业务 Run 的因果分别保持。
+附件沿原普通 Command/Message 保存元数据、摘要与正文；引导、队列和后继轮次保完整引用。纯附件也可受理，图片或文件名中的文字不成为停止或批准。旧 public/raw/decision/business 链仅供历史审计，新输入不派生第二条业务命令。
 
 [真实 SQLite/Artifact 测试](test/isolated/artifacts/input-images.test.ts)核纯图片输入、后继轮次、Fork、冷重开、错 scope／hash 与 URL 拒绝。持久取舍见[图片引用决定](../../.agents/notes/implemented/architecture/2026-10-18-user-image-input-references.md)，HTTP 与 Native 准入分别归各 owner。
 
@@ -26,7 +26,7 @@
 
 [会话命名扩展](src/business/session-title/index.ts)用启动前 Action 先保存首条原文规整空白后的前10个Unicode码点及自有 CAS marker，在首次主任务满足正常完成条件后、最终成功状态提交前，通过按本轮选定模型装配的无工具内部 child 尝试一次可读标题。标题专用副本去掉首尾空白，将连续空白合并为一个空格，再分别截取兜底的10码点或命名输入的8192码点；按需读取原文，只构造有界副本，原消息及主模型输入保持不变。全为空白时保存“新会话”且不发起命名模型请求。扩展持有10秒取消、32KiB输出限制、[标题校验](src/business/session-title/title.ts)与原 Session rename CAS；AI 输出裁至10码点后再次校验可读性，拒绝只剩表情、数字或符号的标题。模型不可用、重试等待、失败和迟到手动改名仍保原文兜底或手动名称。独立子会话及 caller 交付隔离正文，无 Core 标题开关、公共用途字段或专用恢复格式；后续输入和冷读不补发命名。[命名集成](test/isolated/execution/session-title-generation.test.ts)核真实 SQLite、连续空白与原文隔离、取消、手动竞争、已有空标题历史不补命名、父上下文隔离及普通主恢复点；[Store](src/storage/README.md#session-标题写入)只保存消息和执行显式 rename，不再从用户正文推导标题。设计理由与限制见[生命周期取舍](../../.agents/notes/implemented/architecture/2026-10-18-run-lifecycle-extension-actions.md)。
 
-需要解释的首输入先经可信宿主 `sessionInputMetadata.preserve` 保存本会话标题兜底，再捕获解释所用控制修订；该接点不属于 Run 的业务钩子，不准入 Action、Tool、Job 或 Model。默认标题实现核真实 public/raw、主体、初始控制与空历史，并沿稳定 rename Command 和原 CAS 保存本地名称；保留的原注册事件核手动改名，注册锚点不可核时拒绝推断。准确业务随后沿 public/raw/decision/business 回执核原文；首条未决输入经真实澄清形成首业务时，另核原待决、准确 clarifying input、新决定与业务的完整链，标题继续锚定首条原文，原启动 Action 只补 marker。明确独立新任务不借此前待决输入命名，手动标题仍受原 CAS 保护。AI 只在准确业务满足正常完成条件后、最终成功状态提交前生成；解释轮本身不触发业务 Action。全空白只可从真实公共输入登记为待澄清，不取得工作选择或执行权。
+首条普通输入的标题兜底由正常启动前 Action 保存，模型不可用、失败和空白仍保原文兜底，手动名称优先。AI 命名沿首次普通轮的完成条件执行；新输入不调用 sessionInputMetadata.preserve 或捕获分类修订。保留的旧 metadata 端口与原 raw/clarification 收据只供历史兼容，不形成新的分类入口。
 
 - [根入口](src/index.ts)：`createRuntime`，import 不打开资源。Runtime 的短命令受理与异步运行分开；模型和工具等待不占控制入口。
 - [扩展入口](src/extensions/index.ts)：具版本 Tool/Action/Query、JSON schema、公开内容 envelope 与有限操作。扩展只获得当前 Session、自有 namespace 的记录 CAS、公开 Run/Execution 和受控子工具；不取得 SQL、owner 或完整运行状态。
@@ -142,7 +142,7 @@ Job.start 的可选只读 `dispatchAuthorization` 来自资源等待后的最终
 
 可信宿主的 `readRunExtensionRecord({sessionId,runId,extensionId,key})` 只观测准确当前 Store、实际 Run manifest 所含 namespace 的原记录，拒绝外部 origin/fork provenance；返回 clone/freeze。它属于 Runtime 的普通只读资源生命周期，不取得执行 owner、不初始化 Provider，也不增加 HTTP 或 Model 能力。Service 可由原 immutable activation anchor 读取最低审批，不能用模型输入或有限当前视图猜权限。
 
-普通 Task 的模型表面由[六工具 owner](src/extensions/task/README.md)维护，默认通用 child 异步受理并在 carrier ensure 事务保存有限 `agent_completion` 订阅，不让模型选择 required/background/after_turn。稳定 Agent 以 child Session 为身份，每轮仍有准确 carrier、Run、配置、结果 revision 和取消范围。已受理 child 在工作选择使其暂缓时保留原 planned carrier，释放槽位后等准确资格恢复，激活前重新核当前权限；具体边界和回归由同一六工具 owner 维护。可信内部调用的 required 义务、caller 交付及旧记录恢复继续保持各自封存合同；它们不成为普通模型的兼容 alias。
+普通 Task 的模型表面由[六工具 owner](src/extensions/task/README.md)维护，默认通用 child 异步受理并在 carrier ensure 事务保存有限 `agent_completion` 订阅，不让模型选择 required/background/after_turn。稳定 Agent 以 child Session 为身份，每轮仍有准确 carrier、Run、配置、结果 revision 和取消范围。已受理 child 满槽时保留准确 planned carrier，等槽位后在激活前重核当前权限；后续普通父输入不因 selected-work 使它暂缓，准确停止、取消及旧控制仍核验；具体边界和回归由同一六工具 owner 维护。可信内部调用的 required 义务、caller 交付及旧记录恢复继续保持各自封存合同；它们不成为普通模型的兼容 alias。
 
 child 在实际激活时持久保存 `deadlineAt=startedAt+1_800_000`，根 Run 的 `deadlineAt=null`。Runtime 计时器与 SQL 最后派发使用同一固定期限，到期按真实 Run 提交取消并停止 attached 域；已激活独立 child 与 detached Job 保持自己的适用域。迟到 partial、终态或 unknown 可以保存，不能启动新工作。没有公开短期限或累计 token/Tool/attempt 额度。期限 owner 与真实持续等待证据见[child README](test/isolated/child/README.md)。
 
@@ -221,31 +221,19 @@ Runtime/Session 的 [串行资源 owner](src/execution/resources.ts)只保留仍
 
 ## 人类输入、工作选择与可靠结果
 
-尚未消费的普通输入由 `Runtime.getPendingInputQueue/withdrawPendingInput/reorderPendingInputs` 经原 Store 管理；[Runtime](src/runtime.ts)的安全 checkpoint 与普通 pump 消费实际持久顺序，重排后不继续按旧 seq 应用。原 `input.steer/input.follow_up` 可保完整图片／文件，`result.include` 保固定槽；撤回只移除准确 pending 输入，不停止当前 Run，不撤销已解释或已消费工作。顺序、revision 防 ABA、原 operation ID 幂等和竞争事务归 [Store 队列 owner](src/storage/README.md#待消费输入的撤回与排序)，用户交互归 [Desktop](../../docs/handbook/clients/desktop/README.md)。
+[Runtime](src/runtime.ts) 的 `submitCommand` 直接保存并派发原 `run.start/input.steer/input.follow_up`，不调用独立输入分类器、不生成 `human.input/decision` 或处理 Run。普通 Loop 理解当前用户要求并决定必要工具；没有额外的判定回复。`input.steer` 在安全检查点进入准确活动 Run，`input.follow_up` 等准确前驱结束；新轮次使用用户本次明确配置，旧 Run 不复活。原文、附件、公开 Command ID 和实际 Run 直接对应。[输入 owner](src/storage/sqlite/inputs/README.md)维护准入、配对与取消细节。
 
-[真实输入 owner](src/storage/sqlite/inputs/README.md)把原公共 Command、耐久 `human.input`、关联/选择 `human.input.decision` 和实际业务 Command 分开。`human-input-intent.ts` 只直接识别当前未引用的明确控制；未知正文由 `human-input-processing.ts` 提供封存身份及候选原文，在同一普通 Loop 的无工具 Model 中提出关联。Host 独立校验提案、当前选择及原输入 digest；Store 以 control revision CAS 保存决定。引用、邮件、代码和自报批准不能产生控制。对外回执分别给出原输入、决定、业务 Command 与可空 Run，Client/CLI 沿实际业务 Run 观察，不把输入受理当完成。
+尚未消费的输入由 `getPendingInputQueue/withdrawPendingInput/reorderPendingInputs` 经原 Store 管理，消费持久顺序而非重排前的 seq。`result.include` 保固定槽，撤回只移除准确 pending 输入，不停止 Run；编辑撤回成功后进入普通 draft，用户自行重交。[Store 队列 owner](src/storage/README.md#待消费输入的撤回与排序)维护 revision、防 ABA、原操作 ID 和竞争事务。
 
-idle pump 读到 pending 后，输入入口可能已经提交准确业务决定。`preparePendingHumanInputs` 只在真实 SQL 返回 `input_processing_unavailable` 且 `hasCommittedHumanBusinessDecision` 查回同 scope、digest、selection 的已封存决定及 public/raw/business 完整归属时放弃过期准备，随后仍沿原业务派发门禁。取消、Rewind、未封存或缺失/伪造证明保持原失败，不能因一次过期读取污染合法业务，也不能把异常一概忽略。[确定性竞争回归](test/isolated/recovery/human-input-processing-race.test.ts)用真实 SQLite 与有限 Action 唤醒原 pump，核两次业务 Model、零额外处理 Run，以及五个失败反例。
+工作编号仍表示真实执行因果，不再根据普通消息生成 selected-work 控制或阻止同会话下一轮联系自己的子 Agent。稳定 child 的 follow-up/message/interrupt 核当前已派发父 Tool、namespace、Store/主体、直接父子关系、准确 carrier 与取消边界；不能由文本或 `workRelation` 获取权限。旧暂停、停止、替换以及真实取消、Rewind、unknown 的原安全事实继续核验。
 
-处理准备先登记的相反顺序中，技术 Run 可失败并保留已登记、经最终 SQL 拒绝的 Model 请求。它与实际业务 Run 分开核验，不能仅凭 Run 或 Execution 总数判为重复业务。[组恢复回归](test/isolated/recovery/run-resume-group-runtime.test.ts)固定真实登记顺序，核准确 public/raw/decision/business 和 processing 身份；已有处理请求必须失败、无派发和执行授权，业务 Provider、效果及资源释放仍按原 ledger 精确计数。
+`executeRun` 的消息检查点与 idle pump 共用 `applyJobReport`。原 carrier/result revision/Store、目标 Session/selection、结果 Source、consume 和 ack 同事务核验；`agent_completion` 可接入同一父会话的后续活动 Run，不要求技术 rootWork 相同。实际 Source 保原执行出处并以低信任内容呈现。已有普通用户输入先于 idle 报告新建轮次；活动父 Run 仍接纳结果，避免等待 child 时被队列阻塞。历史 Tool results 按原 call 顺序配对，不因通知到达而使合法批次失效。
 
-处理轮每个新 Model 边界重读当前选择、候选与 control revision，只有新鲜唯一解释 Source 进入请求；准确当前 raw 用既有 after_history 放在完整原历史之后，避免把旧业务请求误作最新输入，原历史与工具配对仍保留。新增或更正任务要求按 work 交接，仅问已有进度／缺失信息才保持只读观察。旧成功提案观察过期时沿同一普通 Loop 重新解释。每次 Model continuation 封存其当时解释上下文，冷恢复不修改原 Run snapshot 或成功 Model 历史。处理轮使用自身因果，禁用业务 extensions、初始化义务、afterTurn、reviewer 及可变工具能力；不会替 A/B 执行工作。新真实澄清可准确关闭原 unresolved 输入。A 的进度/澄清保留订阅，B 的选择不撤销 A；取消 B 不自动回选 A。 queued B 取消后，原 A 的技术 handoff 重核已封存 B 决定、准确取消业务与当前选择，避免安全门禁拒绝后仍生成失败 Model 的空转；不为取消的 B 派发工作。同工作补充沿准确原 Run，idle 继续保留 A 配置与 current permission；热态使用原 binding lease，冷态只从准确原 A Run/Command 的 recovery resolver 复原，不能借最新 B 配置。独立 B 先保存 queued，原 A 仅在真实安全边界以 `human_work_deferred` 技术收束；该状态不宣称 A 的业务已完成。
+提交后返回丢失只查回原已应用 Run/Source/resultAcceptance；报告暂缓等待持久相关变化，无关事件不反复调用 policy/Model。idle 自动执行仍核原配置、当前 after-turn 授权和期限；QueueOnly 不启动接收者。邮件携带问题只在准确 result 已被该 Run 消费且原 carrier/mail 来源成立时关联，不复制消息、不伪造 received/prepared。
 
-要求重新读取或核验当前文件是新的业务 `work`，须交给准确原工作；只读限制约束解释轮自身，不能把新读取请求替换成旧回执或澄清。解释提案同时明确现有选择合同：progress/clarify/pause/stop及unresolved保持选择，continue/replace与独立工作须选择准确工作；Host仍独立重核。
+旧 `human.input/decision`、呈现去重证明及已封存业务链仅供历史读取和准确回执兼容。旧 queued processing 在 pump 中拒绝为 `input_processing_removed`，旧活动 processing 的恢复在原 scope/恢复校验后、加载模型配置前拒绝；读取不调用模型。历史控制不自动重算，普通新输入不被旧 unresolved/selected-work 阻塞。取舍及旧决定的部分替代见[直接会话输入](../../.agents/notes/implemented/architecture/2026-10-22-direct-conversation-input.md)。
 
-进度解释只报告上下文中已有的事实：`accepted/queued` 等历史 Tool 回执只证明当时状态；没有当前观察时必须区分最后已知事实与当前未知。没有返回报告只说明父端暂无可报告的已验证发现，不能推断 child 尚未开始、进度为零或已经完成。真实样本的独立语义复核见[协作 live 用例](../../tests/e2e/live/model/collaboration-v1.1-cases.md)。
-
-[共享资格 helper](src/storage/sqlite/human-work-control.ts)在短事务检查原 Store/主体/工作/selection、停止与取消、控制、待决候选及人类工作选择。显式压缩、重置和受管 runless Action 保持其原权限与恢复门禁，不被误当作一个需要选择的人类任务。最终 Model/Tool/Job 派发及报告接纳消费相同资格；暂停或选择其他工作时，child 仅可用封存无工具 Model 如实交付诊断，效果调用继续暂缓。显式 stop 保存准确取消命令，不能停止复用到 B 的新轮。unknown 仍由原执行域与恢复协议处理。
-
-`executeRun` 的原 `messages` checkpoint 读取持久报告，与热态 idle 报告共用 `applyJobReport`。准确结果键、目标 Run、独立低信任 Source、consume Command 和 ack 同事务；C1 创建后续 Run 后，C2 可进入同工作活动 R，不要求 R.origin 等于每个 report。普通 Model 自动展开的结果 Source 按实际 Run rootWork 过滤；显式历史/Include 来源仍可读。低信任 inbox 与人类 steer 使用独立版本，子结果到达不使当前合法 Tool 批次被误记为 superseded。Model 历史投影把同一 assistant 的 Tool results 按原 call 顺序紧接其后，再呈现后来的 inbox/用户数据；报告恰在工具中途到达也不破坏 Provider 配对，原数据库 seq、消息和来源身份保持。
-
-报告暂缓只等待持久相关变化，不在全局无关事件上反复调用 policy/Model，不占 SQL 事务或 Model/child 槽位。真正撤销保存准确原因并释放通知 binding；无法恢复的冷绑定 needs_review、零 Provider。提交后返回丢失时，Runtime 仅查回原报告的准确 applied Run/Source/resultAcceptance 再继续，不重选目标。暂停继续沿[有限资格 owner](src/storage/sqlite/job-report-continuation-README.md)新增准入，保留旧 suppressed report 与不可变订阅；停止/fence 不复活。
-
-QueueOnly 仍不启动 idle 接收者。后继父采用旧邮件需要准确 predecessor/selection/work 及邮件 seq、成功 sender completed cursor 双上界；原明确 R1 目标不改投 R2。完整结果已携带原问题时只关联该 result Source，不复制邮件、不伪造 received/prepared。`on*` 生命周期回调保持可丢失观察；可靠终态、报告登记与结果采用由原 Store 链路负责，内部 child/report 不扩大 beforeRun/beforeRunComplete 范围。
-
-[解释轮真实强杀](test/isolated/recovery/human-input-processing-crash.test.ts)核 Model 成功未决定和决定/queued 已提交未结束两窗口；[控制并发强杀](test/isolated/recovery/human-input-processing-race.test.ts)核旧提案、新鲜第二提案和当前 B 选择，cold 读取零 Provider、准确原 Run 显式恢复、原解释不重复，真实业务文件效果新增一次。[冷报告丢响应及携带问题](test/isolated/business/task/collaboration-cold-report.test.ts)核原 Source/Run 查回和邮件只关联、不重复接收。
-
-验证分别由[真实人类输入](test/isolated/business/task/human-work-runtime.test.ts)、[热冷 A 配置](test/isolated/business/task/collaboration-config-continuation.test.ts)、[通知](test/isolated/business/task/collaboration-notifications.test.ts)、[事务与丢响应](test/isolated/business/task/collaboration-report-transactions.test.ts)、[暂停继续](test/isolated/business/task/collaboration-continuation.test.ts)、[父子待决闭环及压缩](test/isolated/business/task/question-loop.test.ts)与[并发 Files](test/isolated/business/task/collaboration-files.test.ts)核对应事实；审批运行中切换、物理强杀与客户端真实交互的范围分别见权限、Service、TUI 和 Native owner。受控 Adapter 证据不等同付费 Provider 或其他操作系统资格。
+验证由[普通输入与队列](test/isolated/business/task/human-work-runtime.test.ts)、[热冷模型配置](test/isolated/business/task/collaboration-config-continuation.test.ts)、[通知](test/isolated/business/task/collaboration-notifications.test.ts)、[报告事务与丢响应](test/isolated/business/task/collaboration-report-transactions.test.ts)、[稳定协作工具](test/isolated/business/task/collaboration-surface.test.ts)、[旧处理记录真实 SIGKILL](test/isolated/recovery/human-input-processing-crash.test.ts)、[历史 SQL](test/isolated/storage/human-work-control.test.ts)与[父子问答](test/isolated/business/task/question-loop.test.ts)核对应断言；真实 Electron 的首次、同文重交及冷重开归 [Desktop owner](../../apps/desktop/README.md#真实输入消息的唯一展示)。这些受控模型证据不替代付费 Provider 或其他平台资格。
 
 ## 同一 Step 的并行工具批次
 

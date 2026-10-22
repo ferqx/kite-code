@@ -1,4 +1,6 @@
-# 暂停后原结果继续资格
+# 历史暂停后原结果继续资格
+
+普通 Runtime 已移除输入判定，不再从正文生成 pause/continue 决定或此处资格。以下只解释旧封存记录和兼容校验；新输入与结果接纳归[输入 owner](inputs/README.md)。旧明确停止、unknown 和 fence 不降低。
 
 [continueHumanWork](job-report-continuation.ts)只由 `decideHumanInput` 在保存准确 raw input、已应用 continue 决定、工作选择与 control revision 的同一事务中调用。`assertHumanWorkContinuable` 在控制决定前复核原工作停止边界、unknown 和现有 execution group fence；晚到的继续不能降低这些边界。没有另一个公开工具、Store 写 API 或订阅调度器。
 
@@ -10,4 +12,4 @@
 
 Runtime 沿原配置 lease 和准确 `originalReportCommandId` 转移绑定；冷事实不能重建 Provider。继续时通知接纳资格与原 child 是否还能运行、父是否可派发各自复核。
 
-[真实 Runtime/SQLite 测试](../../../test/isolated/business/task/collaboration-continuation.test.ts)覆盖已有 suppressed 结果与尚无结果两路径、结果形成前/消费后重复继续唯一 Source、原订阅不变和 child 一次、准入 INSERT 故障后决定/资格整体回滚及原 raw input 保留、真实停止拒绝继续、复用 child 的第二轮可信 follow-up，以及破坏 future proof 后原报告准确 continuation_required 且零 Source。unknown 用例在真实 carrier 上注入隔离 SQL 状态，证明准确决定门禁且保留 result/revision/订阅事实；它不宣称真实进程崩溃恢复。此文件不构成 SIGKILL/跨平台资格。
+旧分类驱动的 Runtime 继续场景已退役；[历史 SQL](../../../test/isolated/storage/human-work-control.test.ts)保准确决定与拒绝，[普通 Runtime](../../../test/isolated/business/task/human-work-runtime.test.ts)核新输入不产生这条链，旧记录不重跑分类。本页不构成当前自然语言继续功能或跨平台资格。

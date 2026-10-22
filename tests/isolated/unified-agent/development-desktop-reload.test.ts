@@ -4,6 +4,7 @@ import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSy
 import { connect } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { serveDevelopmentReload } from '../../../apps/desktop/electron/development';
 import {
   buildDevelopmentService,
@@ -272,6 +273,46 @@ test('actual source rebuild creates independent immutable versions; syntax failu
     expect(
       isDevelopmentServiceSource(root, join(root, '.kite-code/development/profile.json')),
     ).toBe(false);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('development rebuild preserves the built Shell locator module URL including spaces and Unicode paths', async () => {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-shell 开发-')));
+  try {
+    const source = join(root, 'apps/service/src');
+    const jobs = join(root, 'packages/agent/dist/jobs');
+    mkdirSync(source, { recursive: true });
+    mkdirSync(jobs, { recursive: true });
+    writeFileSync(
+      join(source, 'main.ts'),
+      `import {shellSupervisorAsset,linuxShellInitAsset} from '@kite-ai/agent/jobs/shell';
+console.log(JSON.stringify([shellSupervisorAsset(),linuxShellInitAsset()]));`,
+    );
+    // These locators depend on their original built module location, like the real asset owner.
+    writeFileSync(
+      join(jobs, 'shell.js'),
+      `export const shellSupervisorAsset=()=>import.meta.url;
+export const linuxShellInitAsset=()=>new URL('../platform/process/linux-shell-init',import.meta.url).href;`,
+    );
+    for (let revision = 0; revision < 2; revision++) {
+      const built = await buildDevelopmentService(root, join(root, 'output'));
+      const child = Bun.spawn(
+        [process.execPath, join(root, 'output/services', built.id, 'main.js')],
+        { stdin: 'ignore', stdout: 'pipe', stderr: 'pipe' },
+      );
+      const [code, stdout, stderr] = await Promise.all([
+        child.exited,
+        new Response(child.stdout).text(),
+        new Response(child.stderr).text(),
+      ]);
+      expect({ code, stderr }).toEqual({ code: 0, stderr: '' });
+      expect(JSON.parse(stdout)).toEqual([
+        pathToFileURL(join(jobs, 'shell.js')).href,
+        pathToFileURL(join(root, 'packages/agent/dist/platform/process/linux-shell-init')).href,
+      ]);
+    }
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

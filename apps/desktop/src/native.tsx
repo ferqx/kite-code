@@ -108,7 +108,6 @@ import {
 } from './native-tool-messages';
 import { desktopTranscript, nativeReplyKey, useNativeRuns } from './native-transcript';
 import { NativeTranscriptDisplay } from './native-transcript-display';
-import { NativeTrustConfirmation } from './native-trust';
 import { NativeUserImages } from './native-user-images';
 import { NativeWindowFrame } from './native-window-frame';
 
@@ -1155,7 +1154,6 @@ function NativeDesktopContent({
   }
   async function setPermissionMode(mode: 'accept_edits' | 'auto' | 'full', makeDefault: boolean) {
     if (!bridge || !selection?.permissions || !state) throw Error('permission_facts_unavailable');
-    if (!selection.permissions.trust.trusted) throw Error('workspace_untrusted');
     const sessionId = selection.session.id;
     const receipt = await bridge.request({
       method: 'permission.mode',
@@ -1461,7 +1459,6 @@ function NativeDesktopContent({
         draftCache.current.set(key, value.phase === 'accepted' ? { content: '' } : original.draft);
       if (page === pageIntent.current || firstOpenPage.current === pageIntent.current) {
         await select(sessionId, false);
-        if (value.code === 'workspace_trust_required') setToolsOpen(true);
       }
     } else if (
       value.phase !== 'accepted' &&
@@ -3186,43 +3183,6 @@ function NativeDesktopContent({
           {!diagnostics &&
             !preparing &&
             !scheduledTasksView &&
-            selection?.permissions &&
-            !selection.session.parentSessionId &&
-            !selection.permissions.trust.trusted && (
-              <NativeTrustConfirmation
-                key={JSON.stringify([
-                  state?.generation,
-                  selection.storeId,
-                  selection.session.id,
-                  selection.permissions.trust,
-                ])}
-                facts={selection.permissions}
-                workspace={
-                  directory?.workspaces.find(
-                    (workspace) => workspace.id === selection.session.workspaceId,
-                  )?.rootUri ?? selection.session.workspaceId
-                }
-                busy={
-                  pending ||
-                  !!selection.permissionUnavailable ||
-                  !!state?.permissionSubmissions.some((value) =>
-                    ['saved', 'submitting', 'unknown'].includes(value.phase),
-                  )
-                }
-                onTrust={async () => {
-                  await bridge.request({
-                    method: 'permission.trust',
-                    generation: generation.current,
-                    observationId: selection.permissions!.observationId,
-                    trusted: true,
-                  });
-                  await refresh();
-                }}
-              />
-            )}
-          {!diagnostics &&
-            !preparing &&
-            !scheduledTasksView &&
             selection &&
             state?.permissionSubmissions
               .filter(
@@ -3472,7 +3432,6 @@ function NativeDesktopContent({
                   historyState.phase !== 'complete' ||
                   !!selection.permissionUnavailable ||
                   !selection.permissions ||
-                  !selection.permissions.trust.trusted ||
                   state.permissionSubmissions.some((value) =>
                     ['saved', 'submitting', 'unknown'].includes(value.phase),
                   ),

@@ -36,13 +36,11 @@
 
 ## 真实输入消息的唯一展示
 
-普通对话通过 [输入呈现投影](src/native-presentation.ts)消费公共 `Message.humanInput`，只在本次读取同时具有准确替代 Message、同 Session／原输入／公开提交身份时合并内部处理副本；原读取缺少替代消息时保留原文。首次发送的占位沿已核实的 `publicCommandId` 交接给保存后的消息，不要求公开 ID 等于处理或业务 Run 的 origin。不同原输入的相同正文分别保留，不按文本或命令名前缀去重。
+新消息直接进入当前主 Agent；首次发送保留一条用户消息及实际 Agent 回复，没有额外的“关联工作”判定答复。运行中引导进入原轮次安全检查点，排队等待仍沿原队列；UI 不靠过滤新回复掩盖重复。相同正文的两次提交保持两个独立输入，冷重开只读取原历史。
 
-完整业务 Message 在较早的原输入位置展示，其稍后保存的位置不再重复展示，确保中间产生的解释答复及后续业务答复均在该用户消息之后。投影保业务对象的准确 ID、原 `seq`、Run、正文和附件，不改写 SQL 顺序或把附件配到处理副本；热刷新与冷重开沿同一规则。消息计数之外，[页面](test/isolated/native-new-conversation-dom.test.tsx)与[真实 Electron](test/isolated/native-human-input-electron.test.ts)还核逐项 DOM 顺序，保留真实助手答复以验证因果关系。
+旧处理／业务双记录继续通过 [呈现投影](src/native-presentation.ts)消费准确 `Message.humanInput` 证明，只有本次读取含同 Session／原输入／公开提交身份的替代 Message 才合并副本。业务对象在原输入位置呈现，保原 ID/seq/Run/正文/附件；不改 SQL 顺序、不删除原历史、不按正文去重，Fork 只映射本分支已封存的替代行。证明来源归 [输入 owner](../../packages/agent/src/storage/sqlite/inputs/README.md)。
 
-SQL 原历史及分页不删除、不重排；出处证明归 [输入 owner](../../packages/agent/src/storage/sqlite/inputs/README.md)。[普通页面回归](test/isolated/native-new-conversation-dom.test.tsx)覆盖占位到处理、业务及冷挂载的唯一气泡、独立同文、未决澄清和缺少替代消息的读取。
-
-Fork 历史的替代关联只映射本分支已封存的两条消息，桌面另核同源 Store／Session；源会话后来新增业务消息不能隐藏旧分支中仍独立保留的原输入。[真实普通 Electron 回归](test/isolated/native-human-input-electron.test.ts)通过实际 Main／Service／SQLite、无工具解释与业务模型，核首次一次气泡、正常退出冷重开零新提交，以及再次提交同文仍有两条；原 SQL 同来源记录保留。
+[普通页面回归](test/isolated/native-new-conversation-dom.test.tsx)保旧历史、缺替代行和独立同文的展示兼容。[真实普通 Electron 回归](test/isolated/native-human-input-electron.test.ts)使用实际 Main/Service/SQLite 与受控业务 Provider、关闭产品调试入口，核首次为用户→实际回复、正常退出冷重开零新提交，以及同文重交仍为独立用户→回复；SQL 不生成 raw/decision/processing，新请求无分类调用。
 
 ## 普通客户端与测试诊断
 
@@ -69,6 +67,8 @@ Windows 开发启动还会先运行 [Electron 权限预检](../../scripts/develo
 ## 开发热更新与服务重载
 
 根 `desktop:dev` 在已准备 workspace 资产后，由[开发宿主](../../scripts/development/unified-desktop.ts)通过 builder 的 `development` 选项构建 Main／preload 和首个独立 Service 版本，再启动[本地 Vite renderer](scripts/development-renderer.ts)。[重载协调器](../../scripts/development/desktop-reload.ts)仅监听 `apps/service/src`，合并连续保存、串行构建并保留旧版本字节；构建失败保持旧服务，新字节与当前 SHA 相同时不重启。React 组件及 CSS 沿 Vite Fast Refresh，公共 UI 真实改动已核同窗口即时更新及未发送草稿保留。
+
+开发 Service 对 `@kite-ai/agent/jobs/shell` 的导入固定为当前 checkout 已构建的 `packages/agent/dist/jobs/shell.js`，以独立文件 URL 保留资产定位器的原模块位置；其余工作区导入继续使用当前源码。不能把源码 `.ts` 的资产不可用误判为宿主缺少 Shell，也不能内联定位器后按 Service 缓存目录寻找 guardian。资产准备、平台限制和实际权限仍归[默认 Shell 装配](../service/README.md#默认-shell-装配)，子 Agent 按父 Agent 实际工具范围继承。[开发 Shell 回归](../../tests/isolated/unified-agent/development-desktop-shell.test.ts)通过普通开发构建与 paired Service，在隔离 HOME／Profile／Workspace 和受控模型下，核 macOS 主 Agent、默认通用及 code 子 Agent 的真实工具声明、Shell 执行和完整短输出；不注入工具或审批策略。[构建回归](../../tests/isolated/unified-agent/development-desktop-reload.test.ts)另核连续重建及中文／空格路径保留原资产 URL。本机执行证据不赋予 Windows／Linux Shell 或正式发行资格。
 
 开发配置由 builder 固定且仅 `kind: development` 接受。[闭合配置／父通道](electron/development.ts)限定 renderer 为 `127.0.0.1` 的实际 HTTP 地址；script 用 Vite nonce，connect 只允许同源资源及该端口 WebSocket。Main 的沙箱、隔离、导航与准确窗口／主 frame 校验保持，Vite 文件服务只开放应用／workspace／依赖源码并拒绝仓库内 Profile、缓存、密钥及内部目录。正式候选不接受这份开发配置，继续 file renderer 和原 `connect-src 'none'`。
 
@@ -426,11 +426,11 @@ Native 的侧栏打开入口对当前父会话及同一在途选择去重，重�
 
 2026-10-18 Windows x64／Bun 1.4.3，基于 `f734245a` 加本轮工作区改动：[Native 新对话整文件](test/isolated/native-new-conversation-dom.test.tsx)19项／518断言通过，新增普通模式五阶段、原 unknown 查询／零重放、失败提示、Store／会话隔离及信任进度保留，并核菜单 mousedown 不再落入输入区空白聚焦。Desktop／UI typecheck 通过。Chrome 155 隔离共享 SessionPage／Composer 布局夹具复现原临时状态段使消息区下移47px；按 Native DOM 已核实的正常状态显隐修正后，1240／800／500px 三宽度的面板、阅读区、输入框几何及手动滚动位置均不变，多行草稿保持、零页面异常。该有限布局证据不代正式安装窗口、全量默认测试或其他平台；原嵌套 `@keyframes` 编译提示保留。
 
-普通 Native 当前根会话未信任项目或新增宿主只读范围时，主区的[项目读取授权](src/native-trust.tsx)提供独立确认入口，不依赖测试诊断侧栏。复用原 Dialog 与 Button，展示当前项目 URI 和完整 `readScopes` 描述，勾选后才沿当前准确 `permission.trust` observation 提交；不改变权限模式、不重新创建会话，也不自动重发保留的首次输入。关闭、暂不授权与会话切换只结束页面确认；已提交申请仍保留原结果，未知时普通主区可准确查询原权限选择。当前 Store／会话／信任范围变化重置确认，迟到结果不移动后来选择或草稿。原诊断 PermissionPanel 继续可用。
+普通 Native 不再挂载独立的项目读取范围确认弹窗。首次与已有会话的明确发送分别由 [NativeConversation](electron/conversation.ts)和 [NativeCaller](electron/native-caller.ts)调用 [prepareWorkspaceAccess](src/controller.ts)，按当前 Session 绑定的项目准备 Workspace Trust，包含宿主声明的额外只读范围。准备保留原 observation、trust revision、目录身份和范围摘要 CAS，以及原权限 journal；未知只查询原申请且零业务提交，切会话／Store／项目或替换观察后不沿旧观察继续。打开会话只读历史及核实执行状态，不自动授予范围；审批模式与工具硬限制独立。诊断 PermissionPanel 的显式信任／撤销入口继续保留。
 
-[原新对话 DOM 整文件](test/isolated/native-new-conversation-dom.test.tsx)在普通模式覆盖带额外目录的首次创建失败后确认与明确继续、取消零申请、范围变化重置勾选、迟到授权保留另会话草稿，以及 unknown 原 ID 查询／零重放；原诊断模式与权限菜单断言保持。此处只修展示入口，不改变 Main／Service 的信任准入或底层范围证明；DOM 结果不代证安装版系统窗口或跨平台资格。
+[新对话 DOM](test/isolated/native-new-conversation-dom.test.tsx)核普通页面不再出现范围确认，权限结果未知仍沿原 ID 查询，切会话保原草稿；[Main 权限回归](test/native-permissions.test.ts)核已有会话准备授权时的未知回执、选择切换和过期观察均不提交工作。原诊断模式与权限菜单断言保持；[真实窗口](test/isolated/native-human-input-electron.test.ts)核首次输入、正常退出后冷重开和同文独立重交，重开不增加恢复申请、问答或模型调用。当前运行结果见[测试 owner](../../tests/README.md#子-agent-协作-v11-验证)。
 
-[NativeDesktop](src/native.tsx)为已有根会话接入原 [Composer](../../packages/ui/src/desktop/Composer.tsx)的请求批准／自动审核／完全访问菜单和停止按钮。模式沿现有 permission observation 提交，只改当前会话，不改工作区默认；请求批准直接提交 `accept_edits`，不再映射为旧 `ask`。Full 仍须原风险确认，确认绑定当前 generation、Store、Session、阅读选择与 history epoch；取消或切会话后的旧确认没有写入资格。模式选择不启动任务，也不清理原草稿；未读完历史、工作区未信任、事实不可用或原权限申请未核实时等待；提交回调也拒绝未信任的模式写入。会话工具中的模式表单在工作区未信任时同样只读，核对并明确设置信任后才提供模式选择；信任控制保持独立，修改模式不自动设置信任或启动 Model。原计划窗口按真实信任→Auto 顺序运行，由真实审核返回 `ask_user` 后保独立工具审批；完整审核、Files 与冷读断言保持；准确回归范围见[PC 迁移主线](../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-09pc-迁移完整默认回归)。
+[NativeDesktop](src/native.tsx)为已有根会话接入原 [Composer](../../packages/ui/src/desktop/Composer.tsx)的请求批准／自动审核／完全访问菜单和停止按钮。模式沿现有 permission observation 提交，只改当前会话，不改工作区默认；请求批准直接提交 `accept_edits`，不再映射为旧 `ask`。Full 仍须原风险确认，确认绑定当前 generation、Store、Session、阅读选择与 history epoch；取消或切会话后的旧确认没有写入资格。模式选择不启动任务，也不清理原草稿；未读完历史、事实不可用或原权限申请未核实时等待。普通 Composer 的模式选择不以项目已信任为前提，也不自动设置信任或启动 Model；项目授权在明确发送前独立准备。诊断会话工具中的模式表单仍按其显式信任入口控制。原计划窗口按真实信任→Auto 顺序运行，由真实审核返回 `ask_user` 后保独立工具审批；完整审核、Files 与冷读断言保持；准确回归范围见[PC 迁移主线](../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-09pc-迁移完整默认回归)。
 
 普通历史／View 后台刷新只暂停操作，审核标签按 generation、Store、Session 和 Workspace 保留上次已确认模式，不以新的 viewSelection／history epoch 丢弃同会话标签。模式展示使用原有界 `NativeDisplayCache`，最多12项；generation／Store 替换清理，真实权限或后台观察失败撤销当前项。缓存不保存 permission observation、trust 或写资格，未命中时显示明确读取占位。目标选择尚未得到 Main 确认时保留当前草稿并只读，确认后才一次切换到目标缓存草稿，再独立核对持久草稿；原本空草稿的禁用发送、实际发送／停止中与真实失败仍按原事实展示。Native 将普通读取等待交给 Composer 的 `sessionLoading`，已知标签、图标、透明度及悬停保持，权限、模型和执行动作仍沿当前事实准入。[页面 DOM 回归](test/isolated/native-session-navigation-dom.test.tsx)模拟 Main 在普通 View 刷新时暂撤 permissions，核标签、计时和输入节点保留，操作仍禁用，真实失败提示仍出现。
 
@@ -521,7 +521,7 @@ Main 对目录与所选会话分别保留一个在途读取和一个后继通知
 
 全局“新对话”按当前目录顺序默认选择第一个已登记空间，空间行内入口仍使用明确的空间ID；切入准备时清除上次分支选择，再沿原 `chooseWorkspace` 读取真实分支，读取期间不能发送。无当前会话的启动准备从本次完整目录的首项初始化，使用已读目录事实，避免闭包尚未更新导致默认选择遗漏；页面意图变化后不再应用旧的初始化选择。没有空间时保持未选与可编辑草稿，发送禁用。普通目录刷新不覆盖当前手动选择，重新从全局入口进入才按最新顺序重置。2026-10-19 Windows／Bun1.4.3、`f734245a`加当前改动：三项新增实际Native DOM回归在原实现均失败，修复后通过，核目录延迟、首项重排、空目录、显式入口、手动选择、迟到分支与首次发送的准确空间；连同新对话及启动两个整文件27项／700断言、Desktop类型检查和Biome通过。此为实际组件DOM证据，未复验完整安装窗口。
 
-[NativeConversation](electron/conversation.ts)负责有限编排，复用原 NativeCaller 创建意图、私有草稿、permission controller、caller journal 和 DesktopInput。发送前冻结创建五元身份、输入 Command、原文、模型／effort、Plan 与权限；先保存未来原 Session 的准确草稿，再执行原创建。准备的权限 controller 与正在阅读的选择分别持有观察，迟到结果不抢回后来页面。选择项目仅授权该根目录；实际权限包含额外宿主只读范围时，保留创建后的 Session 和原文，打开已有权限面板供明确确认。
+[NativeConversation](electron/conversation.ts)负责有限编排，复用原 NativeCaller 创建意图、私有草稿、permission controller、caller journal 和 DesktopInput。发送前冻结创建五元身份、输入 Command、原文、模型／effort、Plan 与权限；先保存未来原 Session 的准确草稿，再执行原创建。准备的权限 controller 与正在阅读的选择分别持有观察，迟到结果不抢回后来页面。首次明确发送时按原 Session 绑定的项目与宿主读取范围准备授权，不追加独立范围确认；准备失败保留 Session 和原文，未知回执不继续输入，沿原权限申请查询。
 
 原 [Git leaf](electron/git.ts)从 kite-desktop 迁入，保原分支与工作区语义，并使用上文的所属 helper 退出收束。Main 从同代次／Store 完整目录中的已登记 Workspace 解出规范路径；renderer 只能传 ID，分支结果没有路径或控制句柄。普通目录、缺 Git 的读取均可准备；只有显式选择另一分支才在首次创建前切换。实际根、HEAD、本地分支、脏文件与全部活动 Run／Job 均重新核对；Profile 和 Native／Terminal 制品根及其交叠目录不可切换。目标已与当前分支相同不执行切换，未显式选分支时使用发送时的真实环境。Service 按新 Run 读取／冻结项目配置，不沿旧单项目拓扑关闭或重启 Service。
 
@@ -873,7 +873,7 @@ renderer 按已核实有限 wire size 接收完整 EOF，严格 UTF-8/JSON 后�
 
 [private-data.test.ts](test/isolated/private-data.test.ts) 以实际 Node 子进程验证冷打开、两进程同修订竞争、133 份草稿分页而非淘汰，以及未知格式、损坏行/文件和硬链接局部失败保原字节。[native-drafts-electron.test.ts](test/isolated/native-drafts-electron.test.ts) 使用私有实际 Service 制品、真实 SQLite 与 Node Playwright/Electron：草稿与未知创建意图跨冷应用进程恢复，键盘发起的创建响应在服务提交后被真实 TCP socket 断开，刷新/重启后只核实原命令，该未知原意图的实际 POST 为 1，没有新增 Model 请求。另验证真实 command 冲突的明确业务拒绝保留原草稿，把已停止的临时业务 Store 整份保留再创建新 Store，验证同 ID 新会话输入仍空、原草稿可读且明确关联失效，并逐次核实所属服务 PID 已退出。[实际 React DOM 测试](test/isolated/native-drafts-dom.test.tsx) 另证明晚创建回执不能抢回已切换的阅读视图或移动草稿。受影响 8 文件完整组合为 16 项、112 条 Bun 断言通过；最终业务拒绝及新增边界定向 4 文件复验为 10 项、66 条断言。新私有文件 fixture 另含 23 条实际 Node 断言，新冷启动窗口 fixture 另含 26 条实际 Node 断言。Desktop 类型与局部 Biome、文档结构检查通过；这是 macOS 开发制品的限定资格，未声称完整安装、布局持久化、未保存文本自动恢复或其他平台资格。
 
-原生窗口权限控制由 main 调用公共 Client 的五个有限读写/回执方法，renderer 只提交封闭选择。权限面板展示实际根 Session、工作区读取范围和摘要；模式三选、是否设为默认、信任及撤销均须明确选择，子会话只读。main 在点击时固定原 Store、Session/root、Workspace、观察修订与摘要，同在途选择仅提交一次。未知结果保留原 commandId 与范围，在切换后也只核实原 mutation；CAS 冲突不自动重试，必须重新读取并再次选择。计划审阅答复不授予这些权限。
+原生窗口权限控制由 main 调用公共 Client 的五个有限读写/回执方法，renderer 只提交封闭选择。权限面板展示实际根 Session、工作区读取范围和摘要；诊断面板的模式三选、是否设为默认、信任及撤销保留显式选择，子会话只读。普通 Native 的发送前项目准备沿[当前输入路径](#原会话输入区权限与停止)执行。main 在点击时固定原 Store、Session/root、Workspace、观察修订与摘要，同在途选择仅提交一次。未知结果保留原 commandId 与范围，在切换后也只核实原 mutation；CAS 冲突不自动重试，必须重新读取并再次选择。计划审阅答复不授予这些权限。
 
 当前权限事实读取失败或观察流重置/失联时，main 不再向窗口提供旧的可写权限事实；窗口说明暂不可核实并提供显式重新读取入口。迟到的旧视图读取失败不能禁用或改绑新视图。网络释放与刷新只影响调用者网络，不停止所属 Service/Run；原权限意图在视图外显示。现有能力缺席时保持只读；实际授权目录管理边界见下方独立说明。
 

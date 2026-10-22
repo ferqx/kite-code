@@ -197,7 +197,21 @@ for (const mode of [
       runtime = createRuntime({
         store: wrapped,
         ...(mode === 'follow_up'
-          ? { resolveRunConfiguration: async () => binding(directory, seedMode) }
+          ? {
+              resolveRunConfiguration: async () => {
+                await continuationGate;
+                resolves++;
+                const preparation = preparationDisposals.length;
+                preparationDisposals.push(0);
+                return {
+                  ...binding(directory, seedMode),
+                  dispose: async () => {
+                    disposals++;
+                    preparationDisposals[preparation]!++;
+                  },
+                };
+              },
+            }
           : {}),
         permissions: binding(directory, seedMode).permissions!,
         artifacts: createArtifactStore({ profile, store: wrapped }),
@@ -329,20 +343,9 @@ for (const mode of [
       await until(async () => !(await store!.getRun(ready.runId))!.isActive);
       await until(async () => disposals === 1);
       if (mode === 'follow_up') {
-        await until(async () => recoveryInputs.length === 2);
+        expect(recoveryInputs).toHaveLength(1);
         expect(recoveryInputs[0]!.command).toEqual(originalWork);
         expect(recoveryInputs[0]!.run).toEqual(originalRun);
-        expect(recoveryInputs[1]!.command).toEqual(originalWork);
-        expect(recoveryInputs[1]!.run).toMatchObject({
-          id: ready.runId,
-          originCommandId: originalWork.id,
-          originStoreId: ready.expectedStoreId,
-          rootWorkCommandId: originalWork.rootWorkCommandId,
-          rootWorkSeq: originalWork.rootWorkSeq,
-          configuration: originalRun.configuration,
-          isActive: false,
-          status: 'completed',
-        });
         expect(preparationDisposals).toEqual([1]);
       }
       expect(await runtime.resumeRun(input)).toEqual(receipt);
@@ -358,13 +361,13 @@ for (const mode of [
         });
         const followup = (await store.getCommand('follow-up'))!;
         const receipt = followup.receipt as { runId: string; businessCommandId: string };
-        const business = await store.getCommand(receipt.businessCommandId);
-        expect(followup.receipt).toMatchObject({ outcome: 'human_input_applied' });
-        expect(business).toMatchObject({ status: 'applied', rootWorkCommandId: 'work' });
+        const business = followup;
+        expect(followup.receipt).not.toHaveProperty('humanInputCommandId');
+        expect(business).toMatchObject({ status: 'applied', rootWorkCommandId: 'follow-up' });
         expect(business?.receipt).toMatchObject({ runId: receipt.runId });
         expect(await store.getRun(receipt.runId)).toMatchObject({
           originCommandId: business!.id,
-          rootWorkCommandId: 'work',
+          rootWorkCommandId: 'follow-up',
           status: 'completed',
         });
         const user = (await store.listMessages('s')).find(

@@ -23,8 +23,8 @@ async function until<T>(read: () => Promise<T | null>): Promise<T> {
     await Bun.sleep(5);
   }
 }
-for (const settlement of ['cancel', 'continue-active', 'continue-pump'] as const) {
-  test(`deferred report binding is ${settlement === 'cancel' ? 'released by cancellation' : `retained for its exact ${settlement} continuation`}`, async () => {
+for (const settlement of ['cancel', 'ordinary-input'] as const) {
+  test(`deferred report binding is ${settlement === 'cancel' ? 'released by cancellation' : `retained until the next ordinary input consumes its exact result`}`, async () => {
     const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-deferred-report-cleanup-')));
     const profile = { dataRoot: join(root, 'data'), profile: 'test' };
     const store = await openSqliteStore(profile);
@@ -126,76 +126,21 @@ for (const settlement of ['cancel', 'continue-active', 'continue-pump'] as const
         });
         expect((await store.getCommand(report.id))?.status).toBe('rejected');
       } else {
-        const listAccepted = store.listAcceptedCommands.bind(store);
-        const readCommand = store.getCommand.bind(store);
-        let holdPump = true;
-        let holdBusiness = settlement === 'continue-pump';
-        let observedTerminal = false;
-        store.listAcceptedCommands = async (...args) => {
-          if (args[0] !== identity.sessionId) return listAccepted(...args);
-          if (holdPump) return [];
-          const commands = await listAccepted(...args);
-          if (settlement === 'continue-active')
-            return commands.filter((command) => command.kind !== 'job.report.continue');
-          return holdBusiness
-            ? commands.filter((command) => command.kind === 'job.report.continue')
-            : commands;
-        };
-        store.getCommand = async (id) => {
-          const command = await readCommand(id);
-          if (
-            id === report.id &&
-            (command?.receipt as { reason?: string } | undefined)?.reason ===
-              'continuation_admission'
-          ) {
-            // The next turn lets the deferred watcher handle the terminal read,
-            // while both the successor report pump and business Run remain gated.
-            setTimeout(() => {
-              observedTerminal = true;
-            }, 0);
-          }
-          return command;
-        };
-        for (const [commandId, content] of [
-          ['pause', '暂停当前任务 work'],
-          ['continue', '继续当前任务 work'],
-        ])
-          await runtime.submitCommand({
-            ...identity,
-            commandId: commandId!,
-            request: { kind: 'run.start', content: content! },
-          });
-        await until(async () => (observedTerminal ? true : null));
-        const original = await readCommand(report.id);
-        expect(original).toMatchObject({
-          status: 'rejected',
-          receipt: { reason: 'continuation_admission' },
+        await runtime.submitCommand({
+          ...identity,
+          commandId: 'next',
+          request: { kind: 'run.start', content: 'Use the result in this conversation' },
         });
-        const successorId = (original!.receipt as { continuationCommandId: string })
-          .continuationCommandId;
-        expect(await readCommand(successorId)).toMatchObject({
-          status: 'accepted',
-          kind: 'job.report.continue',
-          request: { originalReportCommandId: report.id },
+        const next = await runtime.waitForCommand('next', { timeoutMs: 8000 });
+        const nextRun = (next.receipt as { runId: string }).runId;
+        expect(await store.getCommand(report.id)).toMatchObject({
+          status: 'applied',
+          receipt: { mode: 'active', runId: nextRun },
         });
-        expect(disposed).toBe(0);
-        holdPump = false;
-        if (holdBusiness) {
-          await until(async () => {
-            const successor = await readCommand(successorId);
-            return (successor?.receipt as { outcome?: string } | undefined)?.outcome ===
-              'report_deferred'
-              ? true
-              : null;
-          });
-          expect(disposed).toBe(0);
-          holdBusiness = false;
-        }
-        await runtime.waitForCommand('continue', { timeoutMs: 8000 });
-        await until(async () =>
-          (await readCommand(successorId))?.status === 'applied' ? true : null,
-        );
-        expect((await readCommand(successorId))?.status).toBe('applied');
+        expect((await store.getView('root')).runs.map((run) => run.originCommandId)).toEqual([
+          'work',
+          'next',
+        ]);
       }
       await until(async () => (disposed === 1 ? true : null));
       expect(disposed).toBe(1);

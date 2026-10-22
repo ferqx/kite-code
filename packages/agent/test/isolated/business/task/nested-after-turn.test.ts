@@ -41,26 +41,13 @@ async function expectHumanBusiness(
     status: 'applied',
     request: { kind: 'run.start', content },
   });
-  const receipt = command.receipt as {
-    businessCommandId: string;
-    humanInputCommandId: string;
-    runId: string;
-  };
-  expect(receipt.businessCommandId).toBeString();
-  expect(receipt.businessCommandId).not.toBe(commandId);
-  expect(await store.getCommand(receipt.humanInputCommandId)).toMatchObject({
-    kind: 'human.input',
-    request: { publicCommandId: commandId, content, originalRequest: command.request },
-  });
-  expect(await store.getCommand(receipt.businessCommandId)).toMatchObject({
-    status: 'applied',
-    request: { content },
-    receipt: { runId: receipt.runId },
-  });
+  const receipt = command.receipt as { runId: string };
+  expect(receipt.runId).toBeString();
+  expect(receipt).not.toHaveProperty('humanInputCommandId');
   expect(await store.getRun(receipt.runId)).toMatchObject({
     status: 'completed',
     rootWorkCommandId: commandId,
-    originCommandId: receipt.businessCommandId,
+    originCommandId: commandId,
   });
   const models = (await store.listExecutions('root')).filter(
     (execution) => execution.runId === receipt.runId && execution.kind === 'model',
@@ -76,7 +63,7 @@ async function expectHumanBusiness(
   expect(inspected.confirmation).toBe('succeeded');
   expect(
     inspected.request.messages.find((message) => message.content === content)?.sourceIds,
-  ).toEqual([receipt.businessCommandId]);
+  ).toEqual([commandId]);
 }
 
 for (const mode of ['report', 'apply_fault', 'early_result', 'followup_before'] as const) {

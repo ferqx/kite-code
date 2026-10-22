@@ -260,7 +260,7 @@ for (const mode of [
       });
       const next = (await runtime.getCommand('next'))!;
       const receipt = next.receipt as { runId: string; businessCommandId: string };
-      const business = await runtime.getCommand(receipt.businessCommandId);
+      const business = next;
       expect(business?.receipt).toMatchObject({ runId: receipt.runId });
       expect(await store.getRun(receipt.runId)).toMatchObject({
         originCommandId: business!.id,

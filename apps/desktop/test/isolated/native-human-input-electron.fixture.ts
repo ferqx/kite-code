@@ -17,6 +17,8 @@ const facts = async () =>
     processing: number;
     business: number;
     active: number;
+    recoveryCount: number;
+    interactionCount: number;
   };
 async function until(read: () => Promise<boolean>) {
   const deadline = Date.now() + 20000;
@@ -55,7 +57,6 @@ async function launch() {
 async function assertOrder(page: import('playwright').Page, inputs: number) {
   await until(
     async () =>
-      (await page.getByText(`INTERPRETATION ${inputs} ACCEPTED`, { exact: true }).count()) === 1 &&
       (await page.getByText('HUMAN INPUT BUSINESS FINAL', { exact: true }).count()) === inputs &&
       (await page.locator('.response-status').count()) === 0,
   );
@@ -67,31 +68,28 @@ async function assertOrder(page: import('playwright').Page, inputs: number) {
   );
   assert.equal(
     order.length,
-    inputs * 3,
-    'each real input retains its interpretation and business replies',
+    inputs * 2,
+    'each real input has one ordinary reply and no attribution reply',
   );
   for (let index = 0; index < inputs; index++) {
-    const offset = index * 3;
-    assert.equal(order[offset]!.role, 'user', 'user message precedes its exact interpretation');
+    const offset = index * 2;
+    assert.equal(order[offset]!.role, 'user', 'user message precedes its actual reply');
     assert.ok(order[offset]!.text.includes('HUMAN INPUT ELECTRON'));
     assert.equal(order[offset + 1]!.role, 'assistant');
-    assert.ok(order[offset + 1]!.text.includes(`INTERPRETATION ${index + 1} ACCEPTED`));
-    assert.equal(order[offset + 2]!.role, 'assistant');
-    assert.ok(order[offset + 2]!.text.includes('HUMAN INPUT BUSINESS FINAL'));
+    assert.ok(order[offset + 1]!.text.includes('HUMAN INPUT BUSINESS FINAL'));
   }
+  assert.equal((await page.locator('body').innerText()).includes('INTERPRETATION'), false);
   return order;
 }
 mkdirSync(evidence!, { recursive: true });
 try {
   let page = await launch();
-  stage = 'trust';
+  stage = 'select_seed';
   await page.getByRole('button', { name: 'Seed session', exact: true }).click();
-  await page.getByRole('button', { name: '确认项目读取范围', exact: true }).click();
-  await page.getByRole('checkbox', { name: '我已核对所显示的项目及读取范围', exact: true }).check();
-  await page.getByRole('button', { name: '允许读取所显示的范围', exact: true }).click();
-  await page
-    .getByRole('button', { name: '确认项目读取范围', exact: true })
-    .waitFor({ state: 'detached' });
+  assert.equal(
+    await page.getByRole('button', { name: '确认项目读取范围', exact: true }).count(),
+    0,
+  );
   assert.equal(await page.getByRole('button', { name: '会话工具', exact: true }).count(), 0);
   await page.getByRole('button', { name: '新对话', exact: true }).click();
   stage = 'first_send';
@@ -100,7 +98,7 @@ try {
   await until(async () => {
     const value = await facts();
     return (
-      value.processing >= 1 && value.business >= 1 && value.active === 0 && value.userRows === 2
+      value.processing === 0 && value.business >= 1 && value.active === 0 && value.userRows === 1
     );
   });
   await until(async () => (await page.locator('.message.user').count()) === 1);
@@ -114,6 +112,8 @@ try {
   assert.equal((await page.locator('body').innerText()).includes('input_command_id'), false);
   await page.screenshot({ path: join(evidence!, '01-first-input.png') });
   const first = await facts();
+  assert.equal(first.recoveryCount, 0);
+  assert.equal(first.interactionCount, 0);
   const sessionId = first.sessionIds[0];
   // A true normal-process cold reopen must not need renderer-local suppression state.
   stage = 'cold_reopen';
@@ -122,6 +122,20 @@ try {
   await page.locator('button.session-row').filter({ hasNotText: 'Seed session' }).click();
   await until(async () => (await page.locator('.message.user').count()) === 1);
   const coldOrder = await assertOrder(page, 1);
+  assert.equal(await page.getByRole('dialog').count(), 0, 'cold reopen needs no scope selection');
+  assert.equal(
+    await page.getByRole('alertdialog').count(),
+    0,
+    'cold reopen needs no recovery alert',
+  );
+  assert.equal(
+    await page.getByRole('button', { name: '确认项目读取范围', exact: true }).count(),
+    0,
+  );
+  assert.equal(
+    await page.getByRole('heading', { name: 'Explicit recovery', exact: true }).count(),
+    0,
+  );
   assert.deepEqual(coldOrder, firstOrder, 'cold history preserves the same causal message order');
   assert.equal((await page.locator('body').innerText()).includes('input_command_id'), false);
   assert.deepEqual(await facts(), first, 'cold reading does not create another input or Model');
@@ -132,7 +146,7 @@ try {
   await until(async () => {
     const value = await facts();
     return (
-      value.processing >= 2 && value.business >= 2 && value.active === 0 && value.userRows === 4
+      value.processing === 0 && value.business >= 2 && value.active === 0 && value.userRows === 2
     );
   });
   await until(async () => (await page.locator('.message.user').count()) === 2);
@@ -144,7 +158,9 @@ try {
   for (const message of await page.locator('.message.user').all())
     assert.ok((await message.innerText()).includes('HUMAN INPUT ELECTRON'));
   const final = await facts();
-  assert.equal(new Set(final.rawIds).size, 2);
+  assert.equal(final.recoveryCount, 0);
+  assert.equal(final.interactionCount, 0);
+  assert.equal(new Set(final.rawIds).size, 0);
   assert.equal(new Set(final.publicIds).size, 2);
   assert.equal((await page.locator('body').innerText()).includes('input_command_id'), false);
   const finalOrder = await assertOrder(page, 2);

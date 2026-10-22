@@ -464,3 +464,156 @@ test('late failed permission read cannot poison a newly selected root; absent ca
     await absent.close();
   }
 });
+
+test('existing Session input keeps an unknown project grant queryable and never dispatches work', async () => {
+  const source = port();
+  let grants = 0,
+    starts = 0;
+  Object.assign(source.client, {
+    async setWorkspaceTrust() {
+      grants++;
+      throw new ClientError('network_outcome_unknown');
+    },
+    async getPermissionMutation(commandId: string, options: { storeId: string }) {
+      expect(options.storeId).toBe('store');
+      return {
+        commandId,
+        kind: 'workspace.trust',
+        state: 'applied',
+        receipt: { status: 'applied' },
+      };
+    },
+    async startRun() {
+      starts++;
+      throw Error('unexpected_work');
+    },
+  });
+  const caller = new NativeCaller(source.client, () => {});
+  try {
+    const { generation } = (await caller.invoke({ method: 'attach' })) as NativeState;
+    await caller.invoke({ method: 'select', generation, sessionId: 'a' });
+    const submit = () =>
+      caller.invoke({
+        method: 'submit',
+        generation,
+        sessionId: 'a',
+        intent: {
+          kind: 'run.start',
+          expectedStoreId: 'store',
+          commandId: 'original-input',
+          content: 'original text',
+        },
+      });
+    expect(await code(submit())).toBe('network_outcome_unknown');
+    const saved = caller.state().permissionSubmissions[0]!;
+    expect(saved).toMatchObject({
+      sessionId: 'a',
+      workspaceId: 'w',
+      kind: 'workspace.trust',
+      phase: 'unknown',
+    });
+    expect(saved.intent).toMatchObject({
+      expectedStoreId: 'store',
+      ifRevision: '0',
+      canonicalIdentity: 'a'.repeat(64),
+      externalReadScopeDigest: 'b'.repeat(64),
+    });
+    expect(await code(submit())).toBe('permission_intent_saved');
+    await caller.invoke({
+      method: 'lookupPermission',
+      generation,
+      commandId: saved.intent.commandId,
+    });
+    expect(caller.state().permissionSubmissions[0]!.phase).toBe('applied');
+    expect(grants).toBe(1);
+    expect(starts).toBe(0);
+  } finally {
+    await caller.close();
+  }
+});
+
+test('an input waiting for its project grant cannot follow a later Session selection', async () => {
+  const source = port();
+  let release!: () => void, entered!: () => void;
+  const ready = new Promise<void>((resolve) => {
+    entered = resolve;
+  });
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  let grants = 0,
+    starts = 0;
+  Object.assign(source.client, {
+    async setWorkspaceTrust(_workspace: string, input: { commandId: string }) {
+      grants++;
+      entered();
+      await gate;
+      return {
+        commandId: input.commandId,
+        kind: 'workspace.trust',
+        state: 'applied',
+        receipt: { status: 'applied' },
+      };
+    },
+    async startRun() {
+      starts++;
+      throw Error('unexpected_work');
+    },
+  });
+  const caller = new NativeCaller(source.client, () => {});
+  try {
+    const { generation } = (await caller.invoke({ method: 'attach' })) as NativeState;
+    await caller.invoke({ method: 'select', generation, sessionId: 'a' });
+    const pending = code(
+      caller.invoke({
+        method: 'submit',
+        generation,
+        sessionId: 'a',
+        intent: {
+          kind: 'run.start',
+          expectedStoreId: 'store',
+          commandId: 'original-input',
+          content: 'original text',
+        },
+      }),
+    );
+    await ready;
+    await caller.invoke({ method: 'select', generation, sessionId: 'b' });
+    release();
+    expect(await pending).toBe('permission_observation_changed');
+    expect(caller.state().selection!.session.id).toBe('b');
+    expect(caller.state().permissionSubmissions[0]).toMatchObject({
+      sessionId: 'a',
+      phase: 'applied',
+    });
+    expect(grants).toBe(1);
+    expect(starts).toBe(0);
+  } finally {
+    release();
+    await caller.close();
+  }
+});
+
+test('project preparation rejects a replaced permission observation before granting access', async () => {
+  const source = port();
+  let grants = 0;
+  Object.assign(source.client, {
+    async setWorkspaceTrust() {
+      grants++;
+      throw Error('unexpected_grant');
+    },
+  });
+  const controller = createDesktopController({ admittedClient: source.client, onSnapshot() {} });
+  try {
+    await controller.selectSession('a');
+    const old = controller.snapshot!.permissions!.observationId;
+    await controller.refreshPermissions();
+    expect(controller.snapshot!.permissions!.observationId).not.toBe(old);
+    expect(await code(controller.prepareWorkspaceAccess(old))).toBe(
+      'permission_observation_changed',
+    );
+    expect(grants).toBe(0);
+  } finally {
+    controller.disposeNetwork();
+  }
+});

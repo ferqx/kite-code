@@ -113,21 +113,10 @@ test('authenticated Client uploads image bytes and submits only immutable metada
     expect(history.find((message) => message.role === 'user')?.images).toEqual(images);
     expect(JSON.stringify(history)).not.toContain(data);
     const imagePublic = (await store.getCommand('run'))!;
-    const imageReceipt = imagePublic.receipt as {
-      humanInputCommandId: string;
-      businessCommandId: string;
-      runId: string;
-    };
-    const imageRaw = (await store.getCommand(imageReceipt.humanInputCommandId))!;
-    const imageBusiness = (await store.getCommand(imageReceipt.businessCommandId))!;
-    expect(imageReceipt.businessCommandId).not.toBe(imagePublic.id);
-    expect(imageRaw.request).toMatchObject({
-      kind: 'human.input',
-      content: '',
-      originalRequest: { images },
-    });
-    expect(imageBusiness.request).toMatchObject({ images });
-    expect((await store.getRun(imageReceipt.runId))?.originCommandId).toBe(imageBusiness.id);
+    const imageReceipt = imagePublic.receipt as { runId: string };
+    expect(imageReceipt).not.toHaveProperty('humanInputCommandId');
+    expect(imagePublic.request).toMatchObject({ kind: 'run.start', content: '', images });
+    expect((await store.getRun(imageReceipt.runId))?.originCommandId).toBe(imagePublic.id);
     await client.createSession({
       expectedStoreId,
       commandId: 'create-files',
@@ -156,21 +145,11 @@ test('authenticated Client uploads image bytes and submits only immutable metada
     expect(fileMessage?.content).toBe('');
     expect(fileMessage?.files).toEqual(files);
     const filePublic = (await store.getCommand('files-only'))!;
-    const fileReceipt = filePublic.receipt as {
-      humanInputCommandId: string;
-      businessCommandId: string;
-      runId: string;
-    };
-    const fileRaw = (await store.getCommand(fileReceipt.humanInputCommandId))!;
-    const fileBusiness = (await store.getCommand(fileReceipt.businessCommandId))!;
-    expect(fileRaw.request).toMatchObject({
-      kind: 'human.input',
-      content: '',
-      originalRequest: { files },
-    });
-    expect(fileBusiness.request).toMatchObject({ files });
+    const fileReceipt = filePublic.receipt as { runId: string };
+    expect(fileReceipt).not.toHaveProperty('humanInputCommandId');
+    expect(filePublic.request).toMatchObject({ kind: 'run.start', content: '', files });
     expect(fileMessage?.runId).toBe(fileReceipt.runId);
-    expect((await store.getRun(fileReceipt.runId))?.originCommandId).toBe(fileBusiness.id);
+    expect((await store.getRun(fileReceipt.runId))?.originCommandId).toBe(filePublic.id);
     expect(() =>
       client.startRun('s', {
         expectedStoreId,

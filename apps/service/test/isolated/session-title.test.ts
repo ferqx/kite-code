@@ -196,9 +196,9 @@ for (const policy of ['default', 'custom', 'custom-deny-title'] as const)
   );
 
 test.each([
-  'unresolved',
+  'ordinary',
   'unavailable',
-] as const)('default HTTP host preserves the exact quoted first input title before business admission: %s', async (mode) => {
+] as const)('default HTTP host preserves the exact quoted first input title for direct input: %s', async (mode) => {
   const root = temporaryDirectory('kite-service-title-metadata-');
   const profile = selectProfile({ dataRoot: join(root, 'data'), profile: 'test' });
   const original = ` \r\n“请核对这段🙂原始引用正文，不能擅自修改任务关系。”\t `;
@@ -211,7 +211,7 @@ test.each([
       const body = (await request.json()) as Record<string, unknown>;
       requests.push(body);
       return new Response(
-        `data: ${JSON.stringify({ id: 'metadata-interpretation', object: 'chat.completion.chunk', model: body.model, choices: [{ index: 0, delta: { content: '请核实原输入要关联哪项工作。' }, finish_reason: 'stop' }] })}\n\ndata: [DONE]\n\n`,
+        `data: ${JSON.stringify({ id: 'metadata-interpretation', object: 'chat.completion.chunk', model: body.model, choices: [{ index: 0, delta: { content: '普通 Agent 的实际回复。' }, finish_reason: 'stop' }] })}\n\ndata: [DONE]\n\n`,
         { headers: { 'content-type': 'text/event-stream' } },
       );
     },
@@ -221,7 +221,7 @@ test.each([
     config,
     JSON.stringify({
       tools: [],
-      ...(mode === 'unresolved'
+      ...(mode === 'ordinary'
         ? {
             modelId: 'selected',
             models: [
@@ -240,6 +240,14 @@ test.each([
   const host = createDefaultProcessConfiguration({
     profile,
     userConfigurationPath: config,
+    permissions: {
+      async authorize(request) {
+        return {
+          allowed: request.definitionId !== 'builtin.session-title/generate',
+          revision: 'quoted-input',
+        };
+      },
+    },
     observerSubjectId: 'owner',
     credentialBackend: {
       kind: 'temporary',
@@ -302,51 +310,36 @@ test.each([
     const deadline = Date.now() + 2000;
     for (;;) {
       const command = await client.getCommand(input.commandId);
-      const receipt = command.receipt as { outcome?: string; observation?: { runId?: string } };
+      const receipt = command.receipt as { runId?: string };
       if (
         command.status === 'rejected' ||
-        (receipt.outcome === 'human_input_unresolved' &&
-          receipt.observation?.runId &&
-          !(await client.getRun(receipt.observation.runId)).isActive)
+        (receipt.runId && !(await client.getRun(receipt.runId)).isActive)
       )
         break;
       if (Date.now() >= deadline) throw Error('quoted_first_input_did_not_settle');
       await Bun.sleep(5);
     }
     const command = await client.getCommand(input.commandId);
-    const receipt = command.receipt as {
-      humanInputCommandId: string;
-      businessCommandId?: string | null;
-    };
-    const raw = (await store.getCommand(receipt.humanInputCommandId))!;
-    expect(command.status).toBe(mode === 'unresolved' ? 'accepted' : 'rejected');
     const savedCommand = (await store.getCommand(command.id))!;
+    expect(command.status).toBe(mode === 'ordinary' ? 'applied' : 'rejected');
     expect(savedCommand.request).toEqual({ kind: 'run.start', content: original });
-    expect(raw.request).toMatchObject({
-      content: original,
-      publicCommandId: command.id,
-      originalRequest: savedCommand.request,
-    });
-    expect(receipt.businessCommandId ?? null).toBeNull();
-    expect(
-      (await store.readHumanWorkState({ expectedStoreId, sessionId: 's', subjectId: 'owner' }))
-        .selectedWork,
-    ).toBeNull();
+    expect(command.receipt).not.toHaveProperty('humanInputCommandId');
     const view = await client.getView('s');
     expect(view.session.title).toBe(fallback);
-    expect(view.runs).toHaveLength(mode === 'unresolved' ? 1 : 0);
+    expect(view.runs).toHaveLength(mode === 'ordinary' ? 1 : 0);
     for (const run of view.runs) {
-      expect(
-        ((await store.getRun(run.id))!.configuration as { snapshot: unknown }).snapshot,
-      ).toMatchObject({
-        kind: 'human_input_processing',
+      expect((await store.getRun(run.id))?.configuration).not.toMatchObject({
+        snapshot: { kind: 'human_input_processing' },
       });
       expect(run.status).toBe('completed');
+      expect(run.originCommandId).toBe(command.id);
     }
-    expect(view.executions.every((execution) => execution.kind === 'model')).toBe(true);
-    expect(requests).toHaveLength(mode === 'unresolved' ? 1 : 0);
+    expect(view.executions.filter((execution) => execution.kind === 'model')).toHaveLength(
+      mode === 'ordinary' ? 1 : 0,
+    );
+    expect(requests).toHaveLength(mode === 'ordinary' ? 1 : 0);
     for (const request of requests) {
-      expect(request.tools ?? []).toEqual([]);
+      expect(JSON.stringify(request.messages)).not.toContain('Original input identity:');
       expect(
         (request.messages as { role: string; content: string }[]).some(
           (message) =>
@@ -367,7 +360,7 @@ test.each([
     const cursor = (await store.getMetadata()).lastChangeCursor;
     await client.startRun('s', input);
     expect((await store.getMetadata()).lastChangeCursor).toBe(cursor);
-    expect(requests).toHaveLength(mode === 'unresolved' ? 1 : 0);
+    expect(requests).toHaveLength(mode === 'ordinary' ? 1 : 0);
     client.disposeNetwork();
     await service.close();
     const cold = await openSqliteStore({
@@ -378,8 +371,8 @@ test.each([
     try {
       expect((await cold.getSession('s'))?.title).toBe(fallback);
       expect((await cold.getMetadata()).lastChangeCursor).toBe(cursor);
-      expect((await cold.getCommand(raw.id))?.request).toEqual(raw.request);
-      expect(requests).toHaveLength(mode === 'unresolved' ? 1 : 0);
+      expect((await cold.getCommand(command.id))?.request).toEqual(savedCommand.request);
+      expect(requests).toHaveLength(mode === 'ordinary' ? 1 : 0);
     } finally {
       await cold.close();
     }

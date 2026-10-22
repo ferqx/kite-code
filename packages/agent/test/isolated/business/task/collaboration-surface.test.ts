@@ -475,15 +475,15 @@ test('queued guidance pins the original carrier; interrupt prevents late activat
   }
 }, 30000);
 
-test('independent work cannot steer/message/interrupt an active collaborator, but can reuse its idle Session with new causality', async () => {
+test('later ordinary turn can guide, message and interrupt its existing direct child with current tool authority', async () => {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-collaboration-work-')));
   const store = await openSqliteStore({ dataRoot: join(root, 'data'), profile: 'test' });
   const storeId = (await store.getMetadata()).storeId;
   let a = 0,
     b = 0,
     childCalls = 0,
-    agentId = '',
-    after = '0';
+    agentId = '';
+  const results: unknown[] = [];
   let release!: () => void;
   const gate = new Promise<void>((resolve) => {
     release = resolve;
@@ -502,47 +502,29 @@ test('independent work cannot steer/message/interrupt an active collaborator, bu
           agentId = body.agent_id;
           events = [finish];
         }
-      } else
+      } else {
+        if (body) results.push(body);
         switch (b++) {
           case 0:
-            events = call('follow_up_agent', { agent_id: agentId, content: 'B must not steer A' });
+            events = call('follow_up_agent', {
+              agent_id: agentId,
+              content: 'Guide the existing child',
+            });
             break;
           case 1:
-            expect(body).toMatchObject({ accepted: false, error: { code: 'target_changed' } });
             events = call('send_agent_message', {
               agent_id: agentId,
-              content: 'B must not inject A',
+              content: 'Context from the current parent turn',
             });
             break;
           case 2:
-            expect(body).toMatchObject({ accepted: false, error: { code: 'permission_denied' } });
             events = call('interrupt_agent', { agent_id: agentId });
             break;
-          case 3:
-            expect(body).toMatchObject({ accepted: false, error: { code: 'permission_denied' } });
-            release();
-            events = call('wait_agent_events', { wait_ms: 10000 });
-            break;
-          case 4:
-            expect(body.reason).toBe('events');
-            after = body.next_seq;
-            events = call('follow_up_agent', {
-              agent_id: agentId,
-              content: 'Authorized idle B reuse',
-            });
-            break;
-          case 5:
-            expect(body).toMatchObject({ accepted: true, agent_id: agentId, mode: 'new_turn' });
-            events = call('wait_agent_events', { after_seq: after, wait_ms: 10000 });
-            break;
-          case 6:
-            expect(body.reason).toBe('events');
-            events = [finish];
-            break;
           default:
+            release();
             events = [finish];
-            break;
         }
+      }
       for (const event of events) yield event;
     },
   };
@@ -609,16 +591,18 @@ test('independent work cannot steer/message/interrupt an active collaborator, bu
       request: { kind: 'run.start', content: 'New task: Independent B' },
     });
     const result = await runtime.waitForCommand('B', { timeoutMs: 25000 });
+    expect(results.slice(0, 3)).toHaveLength(3);
+    for (const result of results.slice(0, 3)) expect(result).toMatchObject({ accepted: true });
+    expect(results[0]).toMatchObject({ state: 'queued', agent_id: agentId });
     expect((await store.getRun((result.receipt as { runId: string }).runId))?.status).toBe(
       'completed',
     );
-    expect(childCalls).toBe(2);
+    expect(childCalls).toBe(1);
     const carriers = (await store.listExecutions('root')).filter(
       (execution) => execution.childSessionId === agentId,
     );
-    expect(carriers).toHaveLength(2);
-    expect(carriers.map((carrier) => carrier.rootWorkCommandId)).toEqual(['A', 'B']);
-    expect(carriers.every((carrier) => carrier.status === 'succeeded')).toBe(true);
+    expect(carriers).toHaveLength(1);
+    expect(carriers[0]).toMatchObject({ rootWorkCommandId: 'A', status: 'cancelled' });
     expect(
       (
         await store.listAgentMessages({
@@ -627,7 +611,7 @@ test('independent work cannot steer/message/interrupt an active collaborator, bu
           subjectId: 'owner',
         })
       ).items,
-    ).toHaveLength(0);
+    ).toHaveLength(1);
   } finally {
     release();
     await runtime.close();

@@ -30,22 +30,12 @@ test('real HTTP ordinary business lineage and saved progress Model terminate CLI
       async *stream(input) {
         const body = input.messages.map((message) => message.content ?? '').join('\n');
         requests.push(body);
-        const identity = body.match(/Original input identity: (\{[^\n]+\})/);
-        if (identity) {
-          const ids = JSON.parse(identity[1]!);
-          yield {
-            type: 'text_delta',
-            text: JSON.stringify({
-              ...ids,
-              relation: 'same_work',
-              purpose: 'progress',
-              target_root_work_command_id: 'next',
-              selection_effect: 'keep',
-              answer: '准确的已保存进度',
-              clarification: null,
-            }),
-          } as ModelEvent;
-        } else yield { type: 'text_delta', text: 'actual work answer' } as ModelEvent;
+        expect(body).not.toContain('Original input identity:');
+        const latest = input.messages.filter((message) => message.role === 'user').at(-1);
+        yield {
+          type: 'text_delta',
+          text: latest?.content === '进度 next' ? '准确的已保存进度' : 'actual work answer',
+        } as ModelEvent;
         yield {
           type: 'finish',
           reason: 'stop',
@@ -113,12 +103,9 @@ test('real HTTP ordinary business lineage and saved progress Model terminate CLI
     expect(additional.exitCode).toBe(0);
     const next = await client.getCommand('next');
     const nextApplication = await readOrdinaryCommandApplication(client, next);
-    expect(nextApplication?.run?.originCommandId).not.toBe('next');
+    expect(nextApplication?.run?.originCommandId).toBe('next');
     expect(nextApplication?.sourceCommandId).toBe(nextApplication?.run?.originCommandId);
-    const raw = await store.getCommand(
-      (next.receipt as { humanInputCommandId: string }).humanInputCommandId,
-    );
-    expect(raw?.kind).toBe('human.input');
+    expect(nextApplication?.sourceCommandId).toBe('next');
     const lines: string[] = [];
     const progress = await run(
       's',
@@ -128,12 +115,14 @@ test('real HTTP ordinary business lineage and saved progress Model terminate CLI
     expect(progress.exitCode).toBe(0);
     const saved = await client.getCommand('progress');
     expect(saved.status).toBe('applied');
-    expect((saved.receipt as { runId: null }).runId).toBeNull();
     const observed = await readOrdinaryCommandApplication(client, saved);
-    expect(observed?.observation?.answer).toBe('准确的已保存进度');
-    expect((await store.getExecution(observed!.observation!.executionId))?.status).toBe(
-      'succeeded',
-    );
+    expect(observed?.run?.originCommandId).toBe('progress');
+    expect(observed?.run?.status).toBe('completed');
+    expect(observed?.observation).toBeNull();
+    expect(
+      (await store.listMessages('s')).filter((message) => message.role === 'assistant').at(-1)
+        ?.content,
+    ).toBe('准确的已保存进度');
     expect(requests).toHaveLength(3);
     expect(lines).toEqual(['accepted progress', 'terminal progress succeeded']);
   } finally {
@@ -143,7 +132,7 @@ test('real HTTP ordinary business lineage and saved progress Model terminate CLI
   }
 });
 
-test('real HTTP unresolved input returns its sealed clarification and cold GET-only observation preserves the accepted original invocation', async () => {
+test('real HTTP ambiguous input reaches the ordinary Agent and cold GET-only observation preserves its actual reply', async () => {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-cli-unresolved-')));
   const selected = { dataRoot: join(root, 'data'), profile: 'test' };
   let store = await openSqliteStore(selected);
@@ -153,7 +142,7 @@ test('real HTTP unresolved input returns its sealed clarification and cold GET-o
     name: selected.profile,
     accessKey: resolveProfile(selected).profileAccessKey,
   };
-  const clarification = '请说明这条输入属于哪项工作。\n完整问题 😀，保留结尾空格  ';
+  const clarification = '请具体说明你想处理的内容。\n完整问题 😀，保留结尾空格  ';
   let providerCalls = 0;
   const makeRuntime = () =>
     createRuntime({
@@ -168,30 +157,14 @@ test('real HTTP unresolved input returns its sealed clarification and cold GET-o
       model: {
         async *stream(input) {
           providerCalls++;
-          const instruction = input.messages.find((message) =>
-            message.content.includes('Original input identity:'),
-          );
-          if (instruction) {
-            expect(input.tools).toHaveLength(0);
-            const identity = JSON.parse(
-              instruction.content
-                .split('\n')
-                .find((line) => line.startsWith('Original input identity: '))!
-                .slice('Original input identity: '.length),
-            );
-            yield {
-              type: 'text_delta' as const,
-              text: JSON.stringify({
-                ...identity,
-                relation: 'unresolved',
-                purpose: 'clarify',
-                target_root_work_command_id: null,
-                selection_effect: 'keep',
-                answer: null,
-                clarification,
-              }),
-            };
-          } else yield { type: 'text_delta' as const, text: 'Original A completed.' };
+          expect(
+            input.messages.some((message) => message.content.includes('Original input identity:')),
+          ).toBe(false);
+          const latest = input.messages.filter((message) => message.role === 'user').at(-1);
+          yield {
+            type: 'text_delta' as const,
+            text: latest?.content === '先处理一下' ? clarification : 'Original A completed.',
+          };
           yield {
             type: 'finish' as const,
             reason: 'stop' as const,
@@ -265,35 +238,22 @@ test('real HTTP unresolved input returns its sealed clarification and cold GET-o
       pollIntervalMs: 5,
       timeoutMs: 1000,
     });
-    expect(result.status).toBe('needs_clarification');
-    expect(result.exitCode).toBe(3);
-    const output = lines.join('\n');
-    expect(output.includes(clarification) || output.includes(JSON.stringify(clarification))).toBe(
-      true,
-    );
-    expect(output).toContain('ambiguous');
-    expect(output).not.toContain('terminal ambiguous succeeded');
+    expect(result.status).toBe('succeeded');
+    expect(result.exitCode).toBe(0);
+    expect(lines).toContain('terminal ambiguous succeeded');
     const command = await client.getCommand('ambiguous');
-    expect(command).toMatchObject({
-      status: 'accepted',
-      receipt: { outcome: 'human_input_unresolved', runId: null, businessCommandId: null },
+    expect(command.status).toBe('applied');
+    expect((await store.getCommand(command.id))?.request).toEqual({
+      kind: 'run.start',
+      content: invocation.content,
     });
-    const rawId = (command.receipt as { humanInputCommandId: string }).humanInputCommandId;
-    const raw = (await store.getCommand(rawId))!;
-    expect(raw).toMatchObject({
-      kind: 'human.input',
-      request: { content: invocation.content, originalRequest: { content: invocation.content } },
-      receipt: { state: 'unresolved' },
-    });
-    const decision = await store.getCommand(
-      (raw.receipt as { decisionCommandId: string }).decisionCommandId,
-    );
-    expect(decision?.receipt).toMatchObject({ businessCommandId: null });
     const application = await readOrdinaryCommandApplication(client, command);
-    expect(application?.observation?.clarification).toBe(clarification);
-    expect(application?.observation).toEqual(result.clarification);
-    expect(Object.hasOwn(JSON.parse(JSON.stringify(result)), 'run')).toBe(false);
-    expect(application?.run?.originCommandId).not.toBe('ambiguous');
+    expect(application?.run?.originCommandId).toBe('ambiguous');
+    expect(application?.observation).toBeNull();
+    const reply = (await store.listMessages('s'))
+      .filter((message) => message.role === 'assistant')
+      .at(-1);
+    expect(reply?.content).toBe(clarification);
     expect(providerCalls).toBe(2);
     const deadline = Date.now() + 1000;
     while ((await store.getView('s')).runs.some((run) => run.isActive)) {
@@ -323,20 +283,17 @@ test('real HTTP unresolved input returns its sealed clarification and cold GET-o
       pollIntervalMs: 5,
       timeoutMs: 1000,
     });
-    expect(cold.status).toBe('needs_clarification');
-    expect(cold.exitCode).toBe(3);
-    expect(cold.clarification).toEqual(result.clarification);
-    const coldOutput = coldLines.join('\n');
-    expect(
-      coldOutput.includes(clarification) || coldOutput.includes(JSON.stringify(clarification)),
-    ).toBe(true);
+    expect(cold.status).toBe('succeeded');
+    expect(cold.exitCode).toBe(0);
+    expect(coldLines).toContain('terminal ambiguous succeeded');
+    expect((await store.listMessages('s')).find((message) => message.id === reply?.id)).toEqual(
+      reply,
+    );
     expect(wire.slice(boundary).length).toBeGreaterThan(0);
     expect(wire.slice(boundary).every((event) => event.method === 'GET')).toBe(true);
     expect(providerCalls).toBe(2);
     expect((await store.getMetadata()).lastChangeCursor).toBe(coldCursor);
     expect(await client.getCommand('ambiguous')).toEqual(command);
-    expect(await store.getCommand(rawId)).toEqual(raw);
-    expect(await store.getCommand(decision!.id)).toEqual(decision);
   } finally {
     client.disposeNetwork();
     proxy.stop(true);

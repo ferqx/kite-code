@@ -1093,46 +1093,17 @@ export function readWorkEligibility(
         String(control.id),
       );
   }
-  for (const item of pending(db, String(session.id))) {
-    if (item.id === input.ignoreInputCommandId) continue;
-    const candidates = parse(item.receipt_json).candidateWorkCommandIds;
-    if (Array.isArray(candidates) && candidates.includes(input.rootWorkCommandId))
-      return answer('deferred', 'input_unresolved');
-  }
-  if (
-    ['run.start', 'input.follow_up', 'input.steer', 'human.input'].includes(String(origin.kind)) &&
-    result.selectedWork &&
-    (result.selectedWork.rootWorkCommandId !== input.rootWorkCommandId ||
-      result.selectedWork.rootWorkSeq !== input.rootWorkSeq)
-  )
-    return answer('deferred', 'work_not_selected');
+  // Historical classification/selection records are audit data. Ordinary input
+  // reaches its explicit Run directly; an old unresolved input or selected work
+  // cannot block that Run or its descendants. Existing explicit stop/pause and
+  // the execution-domain cancellation/recovery checks above remain effective.
   return answer('eligible', null, control ? String(control.id) : null);
 }
 export function assertHumanWorkDispatch(db: SqliteOperations, execution: Row): void {
-  if (humanInputInterpretation(db, execution)) return;
+  if (humanInputInterpretation(db, execution)) throw new AgentError('input_processing_removed');
   const processing = execution.run_id ? humanInputProcessing(db, String(execution.run_id)) : null;
   if (processing) {
-    const original = db.row('SELECT * FROM command WHERE id=?', processing.inputCommandId)!;
-    const publicId = parse(original.request_json).publicCommandId;
-    const publicCommand =
-      typeof publicId === 'string' ? db.row('SELECT * FROM command WHERE id=?', publicId) : null;
-    if (
-      original.cancelled ||
-      publicCommand?.cancelled ||
-      !['pending', 'unresolved'].includes(String(parse(original.receipt_json).state))
-    )
-      throw new AgentError('input_processing_unavailable');
-    if (execution.root_work_command_id !== processing.processingCommandId)
-      throw new AgentError('input_proposal_unverifiable');
-    if (execution.kind === 'model') return;
-    if (
-      execution.kind === 'tool' &&
-      processing.readOnlyTools.some(
-        (tool) => tool.id === execution.adapter_id && tool.version === execution.definition_version,
-      )
-    )
-      return;
-    throw new AgentError('input_processing_read_only');
+    throw new AgentError('input_processing_removed');
   }
   const result = readWorkEligibility(db, {
     sessionId: String(execution.session_id),

@@ -372,18 +372,22 @@ for (const active of [false, true])
     }
   });
 
-test('durable raw input wins a pending report final admission without a speculative Run or Source', async () => {
+test('a queued ordinary prompt wins idle completion admission; its active Run receives the original result once', async () => {
   const entered = gate(),
     admit = gate();
   let held = false;
+  let deferred: Awaited<ReturnType<Apply>> | undefined;
   const f = await fixture(1, {
     apply: async (input, actual) => {
-      if (!held && input.authorization) {
+      const hold = !held && !!input.authorization;
+      if (hold) {
         held = true;
         entered.release();
         await admit.waiting;
       }
-      return actual(input);
+      const result = await actual(input);
+      if (hold) deferred = result;
+      return result;
     },
   });
   try {
@@ -392,34 +396,39 @@ test('durable raw input wins a pending report final admission without a speculat
     await until(async () => (f.childRequests.length === 1 ? true : null));
     f.childGates[0]!.release();
     await entered.waiting;
-    const session = (await f.store.getSession('root'))!;
-    const raw = await f.store.registerHumanInput({
+    const view = await f.store.getView('root');
+    await f.runtime.submitCommand({
       ...f.base,
       sessionId: 'root',
-      commandId: 'raw-B',
-      observedRunId: null,
-      content: '另外 B',
-      contextSelectionId: session.contextSelectionId,
-      candidateWorkCommandIds: ['work'],
+      commandId: 'queued',
+      request: {
+        kind: 'input.follow_up',
+        content: 'Queued B',
+        afterRunId: view.runs.at(-1)!.id,
+        contextSelectionId: view.session.contextSelectionId,
+      },
     });
-    expect((raw.receipt as { state: string }).state).toBe('pending');
-    admit.release();
-    const report = await until(
-      async () =>
-        f
-          .reports()
-          .find(
-            (value) =>
-              value.receipt.outcome === 'report_deferred' &&
-              value.receipt.reason === 'input_unresolved',
-          ) ?? null,
-    );
-    expect(report.status).toBe('accepted');
-    expect(report.receipt.sourceId).toBeUndefined();
     expect((await f.store.getView('root')).runs).toHaveLength(1);
-    expect(f.requests).toHaveLength(2);
+    admit.release();
+    await f.runtime.waitForCommand('queued', { timeoutMs: 5000 });
+    expect(deferred?.command.receipt).toMatchObject({
+      outcome: 'report_deferred',
+      reason: 'human_business_queued',
+    });
+    const current = await f.store.getView('root');
+    expect(current.runs.map((run) => run.originCommandId)).toEqual(['work', 'queued']);
+    expect(f.reports()[0]?.receipt).toMatchObject({ mode: 'active', runId: current.runs[1]!.id });
+    expect(f.requests).toHaveLength(3);
+    expect(
+      f.requests[2]!.messages.some((message) => message.content.includes('Complete result C1')),
+    ).toBe(true);
     expect(
       f.db.query("SELECT id FROM context_snapshot WHERE kind='result_ref'").all(),
+    ).toHaveLength(1);
+    expect(
+      f.db
+        .query("SELECT id FROM command WHERE kind IN ('human.input','human.input.decision')")
+        .all(),
     ).toHaveLength(0);
   } finally {
     admit.release();
@@ -464,7 +473,12 @@ test('stopping after report ack but before Model preparation retains its origina
         )
         .all(report.id),
     ).toHaveLength(0);
-    await f.submit('stop', '停止当前任务 work');
+    await f.runtime.cancelRun({
+      ...f.base,
+      sessionId: 'root',
+      commandId: 'stop',
+      runId: report.receipt.runId!,
+    });
     release.release();
     await until(async () =>
       !(await f.store.getRun(report.receipt.runId!))!.isActive ? true : null,

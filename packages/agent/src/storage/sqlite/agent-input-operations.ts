@@ -331,8 +331,7 @@ export function applyAgentCommand(
       input.sessionId,
     );
     if (
-      !sender ||
-      sender.kind !== 'tool' ||
+      sender?.kind !== 'tool' ||
       sender.origin_store_id !== input.expectedStoreId ||
       !['dispatching', 'running'].includes(String(sender.state))
     )
@@ -353,10 +352,9 @@ export function applyAgentCommand(
     const carrier = db.row('SELECT * FROM execution WHERE id=?', target.ref.executionId!)!;
     if (carrier.state === 'outcome_unknown') throw new AgentError('operation_needs_review');
     const active = !['succeeded', 'failed', 'cancelled'].includes(String(carrier.state));
-    if (active && target.workRelation !== 'same_work')
-      throw new AgentError(
-        input.kind === 'interrupt' ? 'permission_denied' : 'input_target_changed',
-      );
+    // The current parent Tool explicitly targets this owned collaborator. A new
+    // conversation turn is not a reason to deny that command; exact parent,
+    // namespace, carrier, cancellation and current Tool authorization still apply.
     let receipt: import('../agent-collaboration').AgentCommandReceipt;
     if (input.kind === 'interrupt') {
       if (active) {
@@ -443,8 +441,8 @@ export function applyAgentCommand(
             'UPDATE command SET agent_source_execution_id=?,agent_carrier_execution_id=?,root_work_command_id=?,root_work_seq=? WHERE id=?',
             sender.id!,
             carrier.id!,
-            sender.root_work_command_id!,
-            sender.root_work_seq!,
+            carrier.root_work_command_id!,
+            carrier.root_work_seq!,
             derived.commandId,
           );
           db.event(input.agentId, derived.commandId, 'command.accepted');
