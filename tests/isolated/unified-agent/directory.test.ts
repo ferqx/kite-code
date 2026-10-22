@@ -1,7 +1,6 @@
 import { Database } from 'bun:sqlite';
 import { expect, test } from 'bun:test';
-import { mkdtempSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { createRuntime } from '@kite-ai/agent';
@@ -10,6 +9,8 @@ import { createClient } from '@kite-ai/client';
 import { createBrowserClient } from '@kite-ai/client/browser';
 import { startService } from '../../../apps/service/src';
 import { startDevelopmentWeb } from '../../../apps/service/src/development-web';
+import { semanticDigest } from '../../../packages/agent/src/json';
+import { temporaryDirectory } from '../../fixtures/test-filesystem';
 
 async function errorCode(promise: Promise<unknown>) {
   try {
@@ -20,7 +21,7 @@ async function errorCode(promise: Promise<unknown>) {
   }
 }
 test('actual SQLite/HTTP Native and cookie Browser directories exhaust >200 exact roots and workspaces at fixed original upper without writes or Model', async () => {
-  const root = mkdtempSync(join(tmpdir(), 'kite-directory-')),
+  const root = temporaryDirectory('kite-directory-'),
     store = await openSqliteStore({ dataRoot: root, profile: 'test' }),
     storeId = (await store.getMetadata()).storeId;
   let models = 0;
@@ -80,11 +81,7 @@ test('actual SQLite/HTTP Native and cookie Browser directories exhaust >200 exac
       workspaces = await client.listWorkspaceDirectory({ storeId, limit: 200 });
     expect(first.items).toHaveLength(200);
     expect(workspaces.items).toHaveLength(200);
-    expect(
-      first.items.every(
-        (item) => item.activity?.updatedAt !== null && (item.activity?.updatedAt ?? 0) > 0,
-      ),
-    ).toBe(true);
+    expect(first.items.every((item) => item.activity?.updatedAt === null)).toBe(true);
     expect(first.items.every((item) => item.activity?.run === null)).toBe(true);
     await client.createSession({
       expectedStoreId: storeId,
@@ -146,8 +143,9 @@ test('actual SQLite/HTTP Native and cookie Browser directories exhaust >200 exac
       sessionId: 's-0',
       afterCursor: '0',
     });
-    expect(renamed.activity!.updatedAt).toBe(logs.entries.at(-1)!.occurredAt!);
-    expect(renamed.activity!.updatedAt).toBeGreaterThan(beforeRename.activity!.updatedAt!);
+    expect(logs.entries.at(-1)!.occurredAt).toBeGreaterThan(0);
+    expect(renamed.activity!.updatedAt).toBe(beforeRename.activity!.updatedAt);
+    expect(renamed.activity!.updatedAt).toBeNull();
     expect(renamed.activity!.run).toBeNull();
     expect((await client.listAllSessions({ workspaceId: 'w-204' })).map((item) => item.id)).toEqual(
       ['s-204'],
@@ -237,8 +235,8 @@ test('actual SQLite/HTTP Native and cookie Browser directories exhaust >200 exac
   }
 }, 20000);
 
-test('actual Core activity follows queued work, the active or latest Run and persisted events; missing historical clocks stay unknown', async () => {
-  const root = mkdtempSync(join(tmpdir(), 'kite-session-activity-'));
+test('actual Core activity follows message clocks independently of mode, rename, reads and Run status; missing historical clocks stay unknown', async () => {
+  const root = temporaryDirectory('kite-session-activity-');
   const store = await openSqliteStore({ dataRoot: root, profile: 'test' });
   let db: Database | undefined;
   try {
@@ -276,6 +274,61 @@ test('actual Core activity follows queued work, the active or latest Run and per
       commandId: 'first-work',
       configuration: { secret: 'PRIVATE_CONFIGURATION' },
     });
+    const firstMessageTime = (await activity()).updatedAt!;
+    expect(firstMessageTime).toBeGreaterThan(0);
+    await Bun.sleep(2);
+    const safeRequest = {
+      scope: 'session',
+      sessionId: 'working',
+      mode: 'auto',
+      ifRevision: '0',
+      makeDefault: false,
+      ifDefaultRevision: '0',
+    };
+    const mode = {
+      expectedStoreId,
+      subjectId: 'owner',
+      commandId: 'mode-working',
+      kind: 'permission.mode' as const,
+      scope: 'session:working',
+      safeRequest,
+      requestDigest: await semanticDigest(safeRequest),
+    };
+    await store.beginHostMutation(mode);
+    expect((await activity()).updatedAt).toBe(firstMessageTime);
+    await store.finishHostMutation({
+      expectedStoreId,
+      subjectId: 'owner',
+      commandId: mode.commandId,
+      requestDigest: mode.requestDigest,
+      state: 'applied',
+      receipt: { status: 'applied' },
+    });
+    expect(
+      (
+        await store.readHostControl({
+          expectedStoreId,
+          subjectId: 'owner',
+          kind: 'permission.mode',
+          scope: 'session:working',
+        })
+      ).record?.safeRequest,
+    ).toMatchObject({ mode: 'auto' });
+    expect((await activity()).updatedAt).toBe(firstMessageTime);
+    await store.renameSession({
+      expectedStoreId,
+      subjectId: 'owner',
+      sessionId: 'working',
+      commandId: 'rename-working',
+      ifRevision: (await store.getSession('working'))!.controlRevision,
+      title: 'Renamed',
+    });
+    expect((await activity()).updatedAt).toBe(firstMessageTime);
+    const beforeReads = await store.getMetadata();
+    await store.getView('working');
+    await store.getView('old');
+    expect((await activity()).updatedAt).toBe(firstMessageTime);
+    expect(await store.getMetadata()).toEqual(beforeReads);
     expect(await activity()).toMatchObject({
       queued: false,
       run: { id: first.id, status: 'running', isActive: true, waitingForResults: false },
@@ -308,6 +361,8 @@ test('actual Core activity follows queued work, the active or latest Run and per
       commandId: 'second-work',
       configuration: {},
     });
+    const secondMessageTime = (await activity()).updatedAt!;
+    expect(secondMessageTime).toBeGreaterThan(firstMessageTime);
     await store.finishRun({
       expectedStoreId,
       owner,
@@ -326,7 +381,21 @@ test('actual Core activity follows queued work, the active or latest Run and per
       subjectId: 'owner',
       afterCursor: '0',
     });
-    expect(observed.updatedAt).toBe(logs.entries.at(-1)!.occurredAt!);
+    expect(observed.updatedAt).toBe(secondMessageTime);
+    expect(observed.updatedAt).toBe(
+      logs.entries.filter((entry) => entry.type === 'message.updated').at(-1)!.occurredAt!,
+    );
+    const cold = await openSqliteStore({ dataRoot: root, profile: 'test', mode: 'readonly' });
+    try {
+      const beforeColdRead = await store.getMetadata();
+      const page = await cold.listSessionDirectory({ expectedStoreId, subjectId: 'owner' });
+      expect(page.items.find((item) => item.session.id === 'working')!.activity.updatedAt).toBe(
+        secondMessageTime,
+      );
+      expect(await store.getMetadata()).toEqual(beforeColdRead);
+    } finally {
+      await cold.close();
+    }
     expect(JSON.stringify(await read())).not.toContain('PRIVATE_');
     db = new Database(join(root, 'test', 'core.db'));
     const before = await store.getMetadata();
@@ -336,11 +405,11 @@ test('actual Core activity follows queued work, the active or latest Run and per
       { format: 'kite.session-log', version: true, occurredAt: Date.now() },
     ]) {
       db.run(
-        "UPDATE change_event SET payload_json=? WHERE cursor=(SELECT MAX(cursor) FROM change_event WHERE scope_session_id='old')",
+        "UPDATE change_event SET payload_json=? WHERE cursor=(SELECT MAX(cursor) FROM change_event WHERE scope_session_id='working' AND type='message.updated')",
         [JSON.stringify(envelope)],
       );
       expect(
-        (await read()).items.find((item) => item.session.id === 'old')!.activity.updatedAt,
+        (await read()).items.find((item) => item.session.id === 'working')!.activity.updatedAt,
       ).toBeNull();
       expect(await store.getMetadata()).toEqual(before);
     }
@@ -353,7 +422,7 @@ test('actual Core activity follows queued work, the active or latest Run and per
 });
 
 test('cold readonly directory preserves original allocation upper and Store/subject scope without writing snapshot events', async () => {
-  const root = mkdtempSync(join(tmpdir(), 'kite-readonly-directory-'));
+  const root = temporaryDirectory('kite-readonly-directory-');
   let store = await openSqliteStore({ dataRoot: root, profile: 'test' });
   try {
     const storeId = (await store.getMetadata()).storeId;

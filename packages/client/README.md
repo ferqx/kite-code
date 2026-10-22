@@ -137,7 +137,7 @@ Native `listWorkspaceDirectory({storeId,afterSeq?,upperSeq?,limit?},{signal?})` 
 
 `listAllWorkspaces({signal?})`、`listAllSessions({workspaceId?,signal?})` 明确穷尽固定 upper 的所有页，没有任意总项目截断。只有完整成功才返回集合；重复 ID、范围/身份改变、游标冲突或 dispose/迟到页均失败，不发布前缀、不重绑定旧读取。原 `listWorkspaces/listSessions` 保留当前页兼容入口，不能用于完整目录或退出检查。Web 完整目录与 Native 完整退出检查应使用 listAll 方法。目录读取不执行模型、工具、恢复或 mutation，不推进 SSE 游标。
 
-`session_directory_activity` 提供 `listAllSessionDirectory({workspaceId?,signal?})`，返回全部 `{seq,session,activity}` 项。activity 提供原事件时间、准确 active／latest Run 的有限状态、排队与待输入数量，不是控制权。活动 Run 还可含 `executionOwner: held/unheld/unknown`：这是 SQL 页读取后原 root 系统锁的独立观察，不属于数据库同 cursor 的快照承诺，也不证明业务终态或资源清理完成；旧 producer 可省略该字段。生成响应 schema 为旧 producer 保留 activity 可省略；已宣告能力却缺失则拒绝。完整 reader 固定首 upper 和 snapshotCursor，`directory_changed` 时丢弃整个前缀从0重读，最多三次完整扫描；持续变化明确失败，消费者保上次事实。错误水位、缺事实、取消和迟到结果均不发布前缀。旧 listAllSessions 的身份集合合同与旧服务兼容保持，不能从它的返回值推测目录活动。
+`session_directory_activity` 提供 `listAllSessionDirectory({workspaceId?,signal?})`，返回全部 `{seq,session,activity}` 项。activity 提供最后已保存消息的更新时间、准确 active／latest Run 的有限状态、排队与待输入数量，不是控制权。活动 Run 还可含 `executionOwner: held/unheld/unknown`：这是 SQL 页读取后原 root 系统锁的独立观察，不属于数据库同 cursor 的快照承诺，也不证明业务终态或资源清理完成；旧 producer 可省略该字段。生成响应 schema 为旧 producer 保留 activity 可省略；已宣告能力却缺失则拒绝。完整 reader 固定首 upper 和 snapshotCursor，`directory_changed` 时丢弃整个前缀从0重读，最多三次完整扫描；持续变化明确失败，消费者保上次事实。错误水位、缺事实、取消和迟到结果均不发布前缀。旧 listAllSessions 的身份集合合同与旧服务兼容保持，不能从它的返回值推测目录活动。
 
 [SDK 目录反例](test/directory.test.ts) 核对高于 Number 精度的固定上界、闭合输入、未来字段、错误身份/重复项、dispose 后迟到页，另核快照漂移／缺事实／坏时间和持续变化；[真实目录链路](../../tests/isolated/unified-agent/directory.test.ts) 另用实际创建的超过 200 项验证 Native/Browser 的完整身份、workspace SQL 过滤、真实事件时间与冷 readonly 读取。
 

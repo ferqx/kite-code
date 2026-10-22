@@ -428,6 +428,7 @@ export interface TuiState {
   readonly loading: boolean;
   readonly stale: boolean;
   readonly snapshotStale: boolean;
+  readonly errorSource?: 'snapshot' | 'observation' | 'input';
   readonly observationError?: string;
   readonly observationState: 'connecting' | 'ready' | 'unknown';
   readonly error?: string;
@@ -996,11 +997,14 @@ export class TuiController {
     if (this.disposed) return;
     if (patch.panel && !this.value.panel) this.managementRead?.abort();
     const next = { ...this.value, ...patch };
+    if ('error' in patch) next.errorSource = patch.errorSource;
     if ('notice' in patch && !('noticeFragments' in patch)) next.noticeFragments = undefined;
     this.value = {
       ...next,
       stale: next.snapshotStale || next.observationError !== undefined,
       error: next.error ?? next.observationError,
+      errorSource:
+        next.error === undefined && next.observationError ? 'observation' : next.errorSource,
     };
     for (const listener of this.listeners) listener();
     this.scheduleAutomaticRead();
@@ -1039,6 +1043,7 @@ export class TuiController {
     this.publish({
       observationState: 'unknown',
       observationError: error,
+      errorSource: 'observation',
       mcpReconnectionObservation: undefined,
       mcpReconnectionReading: false,
       mcpReconnectionObserving: false,
@@ -1057,7 +1062,8 @@ export class TuiController {
     this.publish({
       observationState: 'ready',
       observationError: undefined,
-      error: this.value.error === this.value.observationError ? undefined : this.value.error,
+      error: this.value.errorSource === 'observation' ? undefined : this.value.error,
+      errorSource: this.value.errorSource === 'observation' ? undefined : this.value.errorSource,
     });
   }
   async readFileCandidates(token?: FileToken) {
@@ -1382,7 +1388,10 @@ export class TuiController {
       this.publish({
         snapshot,
         ...(reconciliationError
-          ? { error: `会话执行状态核对失败：${reconciliationError}；已保留可读历史。` }
+          ? {
+              error: `会话执行状态核对失败：${reconciliationError}；已保留可读历史。`,
+              errorSource: 'snapshot' as const,
+            }
           : {}),
         planning:
           this.planningDrafts.get(
@@ -1451,6 +1460,7 @@ export class TuiController {
         this.publish({
           loading: false,
           snapshotStale: true,
+          errorSource: 'snapshot',
           mcpReconnectionObservation: undefined,
           mcpReconnectionReading: false,
           mcpReconnectionObserving: false,
@@ -5641,6 +5651,11 @@ export class TuiController {
         this.publish({
           intent: { sessionId, commandId, kind, phase: 'rejected' },
           error: error instanceof Error ? error.message : 'caller_prepare_failed',
+          errorSource: this.value.localMessages.some(
+            (message) => message.submissionFailure?.commandId === commandId,
+          )
+            ? 'input'
+            : undefined,
         });
         return;
       }

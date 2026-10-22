@@ -152,9 +152,9 @@ Native在已验证Model正文发布前，可由静态Worker运行UI公开固定M
 
 Task carrier成功继续要求原child的attached效果域结算，child Model／Run已结束不代表排队或运行中的Shell已结束。Runtime在该边界用可信Store的准确owner／carrier快照与同事务cursor等待原变更，detached保持独立，最终成功／unknown仍由原SQLite事务复核。准确持久取消与本地读取／计算中断分别处理，不以信号本身伪造已停止，不重新执行Model或Shell；负责合同及修复验证归[Task](../../packages/agent/src/extensions/task/README.md)与[child Store](../../packages/agent/src/storage/sqlite/child/README.md)。
 
-全局 PC 目录复用原 Sidebar 展示，公共 `session_directory_activity` 从同 Store／主体的只读事务提供准确 Run／pending 和已封存事件时间。SDK 只有穷尽同 upper／snapshotCursor 后才发布，变化丢弃前缀、持续变化明确失败；没有新增 Store schema 或第二个运行索引。Native 全局读取与选中会话正文／草稿分别管理，SSE 只触发 GET，迟到读取按原 attach／Store／epoch 拒绝，失败保上次目录并标明。没有目录事实时不从当前选择推造其他会话状态，目录成功不 ACK 或授予执行／审批权；owner 见[Store](../../packages/agent/src/storage/README.md#目录分页)、[Client](../../packages/client/README.md#完整目录读取)与[Native](../../apps/desktop/README.md#native-项目会话目录)。
+全局 PC 目录复用原 Sidebar 展示，公共 `session_directory_activity` 从同 Store／主体的只读事务提供准确 Run／pending 和最后已保存对话消息的更新时间。SDK 只有穷尽同 upper／snapshotCursor 后才发布，变化丢弃前缀、持续变化明确失败；没有新增 Store schema 或第二个运行索引。Native 全局读取与选中会话正文／草稿分别管理，SSE 只触发 GET，迟到读取按原 attach／Store／epoch 拒绝，失败保上次目录并标明。没有目录事实时不从当前选择推造其他会话状态，目录成功不 ACK 或授予执行／审批权；owner 见[Store](../../packages/agent/src/storage/README.md#目录分页)、[Client](../../packages/client/README.md#完整目录读取)与[Native](../../apps/desktop/README.md#native-项目会话目录)。
 
-正式[Web目录](../../apps/web/README.md)也消费同一完整Browser摘要，按原事件时间排序与分批展示，原Tooltip仅承载详情。未读数量／未知时间不补造，读取失败明确保上次事实；Refresh与可见性／已核bfcache恢复只触发GET。页面同步暂停标志、原signal和实际document可见性共同约束数据／错误发布，迟到读取不得更新暂停页；目录成功与所选会话Run执行继续分离。原身份便利reader的兼容用途保持，公共Core／生成API／Store格式没有变化。
+正式[Web目录](../../apps/web/README.md)也消费同一完整Browser摘要，按最后对话消息更新时间排序与分批展示，原Tooltip仅承载详情。未读数量／未知时间不补造，读取失败明确保上次事实；Refresh与可见性／已核bfcache恢复只触发GET。页面同步暂停标志、原signal和实际document可见性共同约束数据／错误发布，迟到读取不得更新暂停页；目录成功与所选会话Run执行继续分离。原身份便利reader的兼容用途保持，公共Core／生成API／Store格式没有变化。
 
 Web 后台目录复用现有 `BackgroundExecutionQuery/Page`，仅增加 Cookie Gateway 的具名 GET `/browser/v1/background-executions`；Store 由已准入 Gateway 注入，浏览器不能提交 Store 或主体 authority。Browser 固定网络代次与完整目录水位，核执行、所属 Session／root／Workspace、原 Run 和实际 child 关系后发布；准确子会话链接只切换阅读。完整输出沿已有 Job reader 和固定上界覆盖校验，隐藏、暂停、关闭及切会话只释放所属读取。目录序号不冒充输出水位，成功终态不冒充清理确认，缺少公开事实时明确不可用；没有新增 Core schema、监督模型或执行操作。负责实现与验证归 [Web](../../apps/web/README.md)、[Client](../../packages/client/README.md)及 [Gateway](../../apps/service/README.md)。
 

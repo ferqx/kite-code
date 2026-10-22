@@ -891,6 +891,7 @@ export interface BackgroundExecutionPage {
 
 /** Read-only activity facts captured with the directory page, never execution authority. */
 export interface SessionDirectoryActivity {
+  /** Last persisted message update time; control changes and observation do not advance it. */
   updatedAt: number | null;
   /** Current root lock observation for an unfinished Run; neither liveness nor cleanup proof. */
   executionOwner?: 'held' | 'unheld' | 'unknown';

@@ -705,11 +705,11 @@ Service 在任何 vault 效果前核完整原 readSet，发现后和 JSONC 短 C
 
 ## Session 目录活动摘要
 
-默认 Service 声明 `session_directory_activity`，沿原认证 `GET /v1/session-directory` 返回同事务的 root 身份和有限 activity；主体仍只由宿主提供。活动 Run 优先、否则最新 Run；排队、同主体当前 Store 的待输入数量与最后 Core 事件封存时间分别保留，没有新运行或取消 authority。旧／未知时间保持 null，不读取当前配置或公开事件正文。Store 负责范围与来源，见[目录 owner](../../packages/agent/src/storage/README.md#目录分页)。
+默认 Service 声明 `session_directory_activity`，沿原认证 `GET /v1/session-directory` 返回同事务的 root 身份和有限 activity；主体仍只由宿主提供。活动 Run 优先、否则最新 Run；排队、同主体当前 Store 的待输入数量与最后对话消息更新的封存时间分别保留，没有新运行或取消 authority。旧／未知时间保持 null，不读取当前配置或公开事件正文。Store 负责范围与来源，见[目录 owner](../../packages/agent/src/storage/README.md#目录分页)。
 
 活动 Run 的 `activity.executionOwner` 是可省略的 held／unheld／unknown 观察，沿 Native 和 Cookie Gateway 原响应交付。它在原 SQL 页读取后核现有系统锁，不属于同一数据库事务，也不改 Run 或未知结果；字段缺席保持旧 producer 合同，不能用该字段取得取消、接管或恢复许可。准确读取与系统错误边界归上述目录 owner。
 
-Session closed query 新增可选 `snapshotCursor`；续页元数据变化返回409 `directory_changed`。生成响应保持 additive，旧 producer 可省略 activity；SDK 仅在宣告能力时要求它存在并完整扫描。Cookie Gateway 允许该有限只读字段并转交原准入 Store，BrowserInfo 只转发服务实际宣告能力，不增加路径、主体或写入入口。[真实目录测试](../../tests/isolated/unified-agent/directory.test.ts)核超过200项、改名无 Run 的真实更新时间、Native／Browser 一致和冷 readonly 零事件；[SDK 反例](../../packages/client/test/directory.test.ts)核变更前缀丢弃、字段缺席／坏时间和持续变化拒绝。实际 PC 窗口资格归[Native owner](../desktop/README.md#native-项目会话目录)。
+Session closed query 新增可选 `snapshotCursor`；续页元数据变化返回409 `directory_changed`。生成响应保持 additive，旧 producer 可省略 activity；SDK 仅在宣告能力时要求它存在并完整扫描。Cookie Gateway 允许该有限只读字段并转交原准入 Store，BrowserInfo 只转发服务实际宣告能力，不增加路径、主体或写入入口。[真实目录测试](../../tests/isolated/unified-agent/directory.test.ts)核超过200项、改名不推进消息时间、Native／Browser 一致和冷 readonly 零事件；[SDK 反例](../../packages/client/test/directory.test.ts)核变更前缀丢弃、字段缺席／坏时间和持续变化拒绝。实际 PC 窗口资格归[Native owner](../desktop/README.md#native-项目会话目录)。
 
 ## 完整后台执行目录
 

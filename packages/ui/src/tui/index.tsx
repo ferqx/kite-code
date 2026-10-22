@@ -1354,6 +1354,12 @@ function TuiSessionView({
   const { t, testDiagnostics } = useTuiPresentation();
   const display = (part: ComposerBuffer['parts'][number]) => composerDisplay(part, t);
   const state = useSyncExternalStore(controller.subscribe, () => controller.state);
+  const identityError = [state.observationError, state.error].find((error) =>
+    /(?:store_changed|identity_mismatch|connection_not_admitted)$/.test(error ?? ''),
+  );
+  const visibleError = testDiagnostics
+    ? state.error
+    : (identityError ?? (state.errorSource ? undefined : state.error));
   const verifiedContext = verifiedModelContext(state.snapshot);
   const nextContext = chromeFacts(state).nextContext;
   const resultScope = JSON.stringify([controller.port.storeId, state.sessionId]);
@@ -2643,16 +2649,11 @@ function TuiSessionView({
             )}
           </Text>
         )}
-      {(testDiagnostics ||
-        /(?:store_changed|identity_mismatch|connection_not_admitted)$/.test(
-          state.observationError ?? '',
-        )) &&
-        state.error && (
-          <Text color="red">
-            {t('Error:')}{' '}
-            {terminalText(testDiagnostics ? state.error : (state.observationError ?? state.error))}
-          </Text>
-        )}
+      {visibleError && (
+        <Text color="red">
+          {t('Error:')} {terminalText(visibleError)}
+        </Text>
+      )}
       {testDiagnostics && (
         <Text>
           {t(
