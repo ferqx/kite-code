@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { canonicalJson } from '../../json';
 import type { Store } from '../port';
 import { AgentError, type Json } from '../types';
+import { recordHumanCommandRejection } from './human-work-control';
 import type { SqliteOperations } from './operations';
 
 // Command.seq remains immutable provenance. Only pending prompt slots may be permuted.
@@ -175,13 +176,15 @@ export function mutatePendingInputQueue(
       if (!mutableInput(target)) throw new AgentError('input_not_editable');
       if (revision(db, input.sessionId, rows) !== input.expectedRevision)
         throw new AgentError('input_queue_changed');
-      // A withdrawal never traverses Run/execution or human work selection bindings.
+      // Settle the original public invocation when this pending command was
+      // derived from a human decision, without cancelling a Run or changing selection.
       db.run(
         "UPDATE command SET status='rejected',cancelled=1,cancel_requested_at=?,receipt_json=? WHERE id=? AND status='accepted' AND cancelled=0",
         Date.now(),
         canonicalJson({ outcome: 'withdrawn_before_apply', withdrawCommandId: input.commandId }),
         input.targetCommandId,
       );
+      recordHumanCommandRejection(db, target, 'withdrawn_before_apply', false);
       db.insertCommand(input, request, digest, 'applied', {
         outcome: 'input_withdrawn',
         targetCommandId: input.targetCommandId,

@@ -378,7 +378,7 @@ Native 的侧栏打开入口对当前父会话及同一在途选择去重，重�
 
 ## 原审批面板与授权观察
 
-[NativeApproval](src/native-approval.tsx)复用原 [Approval](../../packages/ui/src/desktop/Approval.tsx)按钮与范围菜单，只提供原请求实际允许的 `approve_once`／`same_command`。主按钮“批准一次”，分体菜单“本次会话批准”同时注明仅本次及本会话相同命令。已知 `shell.execute`、`shell.launch` 和 `shell.command` 的版本1显示准确原命令，其他定义显示原身份、目标和原因；工具标签与等宽目标分层，单行超出省略，沿原 Tooltip 悬停／聚焦查看完整内容，不再额外展示详情。`InteractionCard.renderApproval` 的紧凑模式自动沿原附件 reader 的身份、hash、UTF-8 和 EOF 资格核实完整正文，失败可重试；未读完、换卡、提交中或未知时禁用。回答仍走当前 Native／Main／公共 Client 原链，不建立第二个提交入口。
+[NativeApproval](src/native-approval.tsx)复用原 [Approval](../../packages/ui/src/desktop/Approval.tsx)按钮与范围菜单，只提供原请求实际允许的 `approve_once`／`same_command`。主按钮“批准一次”，分体菜单“本次会话批准”同时注明仅本次及本会话相同命令。已知 `shell.execute`、`shell.launch` 和 `shell.command` 的版本1显示准确原命令，其他定义显示原身份、目标和原因；工具标签与等宽目标分层，单行超出省略，沿原 Tooltip 悬停／聚焦查看核实后的完整原审批请求（包含 Shell 每次调用的 filesystem／network 权限、其他输入与策略原因），不再额外展示详情；单行命令不代替授权范围披露。`InteractionCard.renderApproval` 的紧凑模式自动沿原附件 reader 的身份、hash、UTF-8 和 EOF 资格核实完整正文，失败可重试；未读完、换卡、提交中或未知时禁用。回答仍走当前 Native／Main／公共 Client 原链，不建立第二个提交入口。
 
 [NativeApprovalGroup](src/native-approval-group.tsx)将当前普通工具审批归入输入组件上方的一张独立浮卡，高度不超过默认 Composer；右上角“‹ 1/3 ›”一次只挂载一项原 `InteractionCard` 与准确 `approval ID` article，翻页不回答其他项，当前项消失后按原位置选择后继。主 Agent 不显示名称；子 Agent 名称按实际 Store／Session／Run 核实，未匹配时显示“子 Agent”，不将内部 UUID 当名称。[ApprovalHeader](../../packages/ui/src/desktop/ApprovalHeader.tsx)按准确 Store／Session 的随机身份确定固定池中的图标及语义色槽，翻页、重开或新 Run 不重新随机。附件读取、独立 grant、在途／未知禁用、原答案身份与迟到隔离均沿原链；MCP 来源／凭据授权、问题及计划不进入普通审批组。
 

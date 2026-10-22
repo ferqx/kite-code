@@ -133,7 +133,13 @@ test('the original Approval form consumes the verified complete request and subm
       if (Date.now() >= deadline) throw new Error('approval_attachment_dom_deadline');
       await act(async () => await Bun.sleep(5));
     }
-    expect(f.host.querySelector('.approval-command')!.textContent).toBe(request.input.command);
+    const command = f.host.querySelector<HTMLElement>('.approval-command')!;
+    expect(command.textContent).toBe(request.input.command);
+    await act(async () => command.focus());
+    expect(f.dom.window.document.querySelector('.approval-command-tooltip code')?.textContent).toBe(
+      JSON.stringify(request, null, 2),
+    );
+    await act(async () => command.blur());
     expect(approve().disabled).toBe(false);
     const menu = f.host.querySelector<HTMLButtonElement>('[aria-label="更多批准方式"]')!;
     await act(async () =>
@@ -265,6 +271,48 @@ test('original tool labels distinguish saved, accepted and automatic decisions w
     );
     expect(f.host.textContent).toContain('自动审批已停止');
     expect(f.host.textContent).not.toContain('正在自动审批');
+  } finally {
+    await f.close();
+  }
+});
+
+test('compact Shell approval exposes the exact permission scope on keyboard focus', async () => {
+  const f = fixture();
+  const command = './deploy.sh';
+  try {
+    for (const permissions of [
+      { filesystem: 'workspace_write', network: 'none' },
+      { filesystem: 'full_access', network: 'internet' },
+    ]) {
+      const request = {
+        definitionId: 'shell.execute',
+        definitionVersion: '1',
+        grants: ['approve_once'],
+        input: { key: 'deploy', command, permissions, cancellation: 'detached' },
+        policy: { reason: 'approval_required', executionScope: permissions },
+      };
+      await act(async () =>
+        f.root.render(
+          <InteractionCard
+            key={permissions.filesystem}
+            compactApproval
+            interaction={{ ...card, request }}
+            onAnswer={() => {}}
+            renderApproval={(props) => <NativeApproval {...props} embedded />}
+          />,
+        ),
+      );
+      const trigger = f.host.querySelector<HTMLElement>('.approval-command')!;
+      expect(trigger.textContent).toBe(command);
+      expect(f.host.querySelector('details')).toBeNull();
+      await act(async () => trigger.focus());
+      const full = f.dom.window.document.querySelector('.approval-command-tooltip code');
+      expect(full?.textContent).toBe(JSON.stringify(request, null, 2));
+      expect(full?.textContent).toContain(permissions.filesystem);
+      expect(full?.textContent).toContain(permissions.network);
+      expect(full?.textContent).toContain('detached');
+      await act(async () => trigger.blur());
+    }
   } finally {
     await f.close();
   }

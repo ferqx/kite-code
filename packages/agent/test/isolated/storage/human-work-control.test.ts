@@ -4,6 +4,7 @@ import { chmodSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { temporaryDirectory } from '../../../../../tests/fixtures/test-filesystem';
 import { semanticDigest } from '../../../src/json';
+import { createRuntime } from '../../../src/runtime';
 import { openSqliteStore } from '../../../src/sqlite';
 import type { Json } from '../../../src/storage';
 import type { DispatchInput } from '../../../src/storage/port';
@@ -740,6 +741,127 @@ test('rejected Continue cannot hide the applied replacement or select its old wo
     expect(readHumanWorkState(f.db, f.scope).selectedWork).toEqual(before.selectedWork);
     expect(readHumanWorkState(f.db, f.scope).controlRevision).toBe(revision);
   } finally {
+    await f.cleanup();
+  }
+});
+
+test.each([
+  'steer',
+  'follow_up',
+] as const)('withdrawing decided human %s atomically settles its public invocation without cancelling active work', async (kind) => {
+  const f = await fixture();
+  const runtime = createRuntime({
+    store: f.store,
+    permissions: {
+      async authorize() {
+        throw new Error('No Tool authorization permitted');
+      },
+    },
+  });
+  try {
+    const request =
+      kind === 'steer'
+        ? {
+            kind: 'input.steer' as const,
+            content: 'More A',
+            targetRunId: f.run.id,
+            contextSelectionId: f.contextSelectionId,
+          }
+        : {
+            kind: 'input.follow_up' as const,
+            content: 'Independent B',
+            afterRunId: f.run.id,
+            contextSelectionId: f.contextSelectionId,
+          };
+    const original = registerHumanCommand(f.db, {
+      ...f.scope,
+      commandId: 'public-queued',
+      request,
+    });
+    const inputId = (original.receipt as { humanInputCommandId: string }).humanInputCommandId;
+    const decision = f.decide(
+      inputId,
+      kind === 'steer'
+        ? {
+            relation: 'same_work',
+            purpose: 'work',
+            targetRootWorkCommandId: 'A',
+            selectionEffect: 'keep',
+          }
+        : {
+            relation: 'independent_work',
+            purpose: 'work',
+            targetRootWorkCommandId: null,
+            selectionEffect: 'select_work',
+          },
+    );
+    const business = decision.businessCommand!;
+    const humanState = await f.store.readHumanWorkState(f.scope);
+    const activeRun = await f.store.getRun(f.run.id);
+    const queue = await f.store.getPendingInputQueue(f.scope);
+    expect(queue.commands.map((command) => command.id)).toEqual([business.id]);
+    const operation = {
+      ...f.scope,
+      kind: 'input.withdraw' as const,
+      commandId: 'withdraw-business',
+      targetCommandId: business.id,
+      expectedRevision: queue.revision,
+    };
+    const queuedPublic = await f.store.getCommand(original.id);
+    const queuedHuman = await f.store.getCommand(inputId);
+    f.db.run(
+      "CREATE TRIGGER fail_queue_public_settlement BEFORE UPDATE OF status ON command WHEN NEW.id='public-queued' AND NEW.status='rejected' BEGIN SELECT RAISE(ABORT,'queue_settlement_fault'); END",
+    );
+    let failure: unknown;
+    try {
+      await f.store.withdrawPendingInput(operation);
+    } catch (error) {
+      failure = error;
+    }
+    expect(failure).toBeDefined();
+    expect(await f.store.getCommand(original.id)).toEqual(queuedPublic);
+    expect(await f.store.getCommand(inputId)).toEqual(queuedHuman);
+    expect(await f.store.getCommand(business.id)).toEqual(business);
+    expect(await f.store.getCommand(operation.commandId)).toBeNull();
+    expect(await f.store.getPendingInputQueue(f.scope)).toEqual(queue);
+    f.db.run('DROP TRIGGER fail_queue_public_settlement');
+    const withdrawn = await f.store.withdrawPendingInput(operation);
+    expect(withdrawn).toMatchObject({
+      status: 'applied',
+      receipt: { outcome: 'input_withdrawn', targetCommandId: business.id },
+    });
+    expect(await f.store.getCommand(business.id)).toMatchObject({
+      status: 'rejected',
+      receipt: { outcome: 'withdrawn_before_apply' },
+    });
+    expect(await runtime.waitForCommand(original.id, { timeoutMs: 100 })).toMatchObject({
+      status: 'rejected',
+      receipt: {
+        outcome: 'human_input_rejected',
+        reason: 'withdrawn_before_apply',
+        businessCommandId: business.id,
+        runId: null,
+      },
+    });
+    expect(await f.store.getCommand(inputId)).toMatchObject({
+      receipt: {
+        applicationState: 'rejected',
+        rejection: { reason: 'withdrawn_before_apply', businessCommandId: business.id },
+      },
+    });
+    expect(await f.store.getCommand(decision.decision.id)).toEqual(decision.decision);
+    expect(await f.store.readHumanWorkState(f.scope)).toEqual(humanState);
+    expect(await f.store.getRun(f.run.id)).toEqual(activeRun);
+    expect((await f.store.getPendingInputQueue(f.scope)).commands).toEqual([]);
+    const cursor = (await f.store.getMetadata()).lastChangeCursor;
+    expect(await f.store.withdrawPendingInput(operation)).toEqual(withdrawn);
+    expect((await f.store.getMetadata()).lastChangeCursor).toBe(cursor);
+    expect(await f.store.getCommand(original.id)).toMatchObject({
+      request: original.request,
+      requestDigest: original.requestDigest,
+    });
+  } finally {
+    await runtime.close();
     await f.cleanup();
   }
 });

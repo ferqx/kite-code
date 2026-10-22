@@ -75,9 +75,7 @@ export function NativeApproval({
         command={command}
         summary={summary}
         toolLabel={shell ? 'Shell' : interaction.definitionId}
-        fullText={
-          request && !command ? JSON.stringify(request.input ?? request, null, 2) : undefined
-        }
+        fullText={request ? JSON.stringify(request, null, 2) : undefined}
         attachment={attachment}
         status={
           submission
