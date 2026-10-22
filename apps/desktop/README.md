@@ -438,7 +438,9 @@ Native 的侧栏打开入口对当前父会话及同一在途选择去重，重�
 
 普通 Native 不再挂载独立的项目读取范围确认弹窗。首次与已有会话的明确发送分别由 [NativeConversation](electron/conversation.ts)和 [NativeCaller](electron/native-caller.ts)调用 [prepareWorkspaceAccess](src/controller.ts)，按当前 Session 绑定的项目准备 Workspace Trust，包含宿主声明的额外只读范围。准备保留原 observation、trust revision、目录身份和范围摘要 CAS，以及原权限 journal；未知只查询原申请且零业务提交，切会话／Store／项目或替换观察后不沿旧观察继续。打开会话只读历史及核实执行状态，不自动授予范围；审批模式与工具硬限制独立。诊断 PermissionPanel 的显式信任／撤销入口继续保留。
 
-[新对话 DOM](test/isolated/native-new-conversation-dom.test.tsx)核普通页面不再出现范围确认，权限结果未知仍沿原 ID 查询，切会话保原草稿；[Main 权限回归](test/native-permissions.test.ts)核已有会话准备授权时的未知回执、选择切换和过期观察均不提交工作。原诊断模式与权限菜单断言保持；[真实窗口](test/isolated/native-human-input-electron.test.ts)核首次输入、正常退出后冷重开和同文独立重交，重开不增加恢复申请、问答或模型调用。当前运行结果见[测试 owner](../../tests/README.md#子-agent-协作-v11-验证)。
+同一 observation 的并发准备共享原授权和完成后的读取。已有会话发送期间，Main 只将准确原 trust command 的持久通知刷新推迟到准备结束，不让自身成功授权的通知使原输入失效；外来权限通知及导航仍立即使旧观察失效。即使通知已显示 trusted，原授权回执 unknown 时仍须查询原申请，核实不会自动发送。
+
+[新对话 DOM](test/isolated/native-new-conversation-dom.test.tsx)核普通页面不再出现范围确认，权限结果未知仍沿原 ID 查询，切会话保原草稿；[Main 权限回归](test/native-permissions.test.ts)核已有会话准备授权时的未知回执、选择切换和过期观察均不提交工作，另核回执前原通知、并发重复发送、外来权限／读取范围变化，以及已显示 trusted 的 unknown 原申请不能跳过核实。原诊断模式与权限菜单断言保持；[真实窗口](test/isolated/native-human-input-electron.test.ts)核首次输入、正常退出后冷重开和同文独立重交，重开不增加恢复申请、问答或模型调用。当前运行结果见[测试 owner](../../tests/README.md#子-agent-协作-v11-验证)。
 
 [NativeDesktop](src/native.tsx)为已有根会话接入原 [Composer](../../packages/ui/src/desktop/Composer.tsx)的请求批准／自动审核／完全访问菜单和停止按钮。模式沿现有 permission observation 提交，只改当前会话，不改工作区默认；请求批准直接提交 `accept_edits`，不再映射为旧 `ask`。Full 仍须原风险确认，确认绑定当前 generation、Store、Session、阅读选择与 history epoch；取消或切会话后的旧确认没有写入资格。模式选择不启动任务，也不清理原草稿；未读完历史、事实不可用或原权限申请未核实时等待。普通 Composer 的模式选择不以项目已信任为前提，也不自动设置信任或启动 Model；项目授权在明确发送前独立准备。诊断会话工具中的模式表单仍按其显式信任入口控制。原计划窗口按真实信任→Auto 顺序运行，由真实审核返回 `ask_user` 后保独立工具审批；完整审核、Files 与冷读断言保持；准确回归范围见[PC 迁移主线](../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-09pc-迁移完整默认回归)。
 

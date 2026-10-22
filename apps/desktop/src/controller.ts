@@ -194,6 +194,7 @@ export class DesktopController {
     string,
     { state: PermissionSubmission; promise?: Promise<PermissionMutation> }
   >();
+  private readonly workspaceAccessPreparations = new Map<number, Promise<DesktopPermissionFacts>>();
   private actionIntent: { sessionId: string; intent: ExtensionCommandRequest } | undefined;
 
   constructor(options: DesktopOptions) {
@@ -1100,7 +1101,16 @@ export class DesktopController {
     return this.submitPermission('workspace.trust', { trusted }, observationId);
   }
   /** An explicit input uses its Session's bound project; preparation keeps the original control journal. */
-  async prepareWorkspaceAccess(observationId: number): Promise<DesktopPermissionFacts> {
+  prepareWorkspaceAccess(observationId: number): Promise<DesktopPermissionFacts> {
+    const previous = this.workspaceAccessPreparations.get(observationId);
+    if (previous) return previous;
+    const work = this.prepareWorkspaceAccessOnce(observationId).finally(() => {
+      this.workspaceAccessPreparations.delete(observationId);
+    });
+    this.workspaceAccessPreparations.set(observationId, work);
+    return work;
+  }
+  private async prepareWorkspaceAccessOnce(observationId: number): Promise<DesktopPermissionFacts> {
     const original = this.current;
     const facts = original?.permissions;
     if (!original || !facts || facts.observationId !== observationId)
@@ -1120,7 +1130,20 @@ export class DesktopController {
         throw new ClientError('permission_observation_changed');
     };
     check();
-    if (facts.trust.trusted) return facts;
+    if (facts.trust.trusted) {
+      // An observed grant is not the original mutation's receipt. A lost reply
+      // still requires its exact lookup before another input may use that grant.
+      if (
+        [...this.permissionIntents.values()].some(
+          (entry) =>
+            entry.state.kind === 'workspace.trust' &&
+            entry.state.workspaceId === facts.trust.workspaceId &&
+            ['saved', 'submitting', 'unknown'].includes(entry.state.phase),
+        )
+      )
+        throw new ClientError('permission_intent_pending');
+      return facts;
+    }
     const receipt = await this.setWorkspaceTrust(true, observationId);
     check();
     if (receipt.state !== 'applied') throw new ClientError('permission_outcome_unknown');

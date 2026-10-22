@@ -3,12 +3,15 @@ import {
   type AgentClient,
   type Change,
   ClientError,
+  canonicalCallerCommandRequest,
   type PermissionMutation,
   type SetPermissionModeRequest,
 } from '@kite-ai/client';
+import { callerTextDigest } from '../electron/caller-journal';
 import { NativeCaller } from '../electron/native-caller';
 import { createDesktopController } from '../src/controller';
 import type { NativeState } from '../src/native-bridge';
+import { memoryPrivateData } from './private-data.fixture';
 
 function port() {
   let unavailable = false,
@@ -617,3 +620,143 @@ test('project preparation rejects a replaced permission observation before grant
     controller.disposeNetwork();
   }
 });
+
+for (const outcome of [
+  'applied',
+  'unknown',
+  'foreign_change',
+  'scope_change',
+  'navigation',
+] as const) {
+  test(`project preparation owns only its exact grant notification: ${outcome}`, async () => {
+    const source = port();
+    Object.assign(source.client.serverInfo!, { subjectId: 'user' });
+    let notify!: Parameters<AgentClient['observe']>[0]['onChange'];
+    source.client.observe = async (options) => {
+      notify = options.onChange;
+      await new Promise<void>((resolve) =>
+        options.signal!.addEventListener('abort', () => resolve(), { once: true }),
+      );
+    };
+    const originalTrust = source.client.getWorkspaceTrust.bind(source.client);
+    let trusted = false,
+      grants = 0,
+      starts = 0;
+    source.client.getWorkspaceTrust = async (...args) => ({
+      ...(await originalTrust(...args)),
+      trusted,
+      status: trusted ? 'trusted' : 'untrusted',
+      revision: String(grants),
+    });
+    source.client.setWorkspaceTrust = async (_workspace, input) => {
+      grants++;
+      trusted = true;
+      // The actual Service publishes this durable event before its HTTP receipt.
+      await notify({
+        ...controlChange(null, 'workspace.trust', 'workspace:w'),
+        objectId: input.commandId,
+      });
+      if (outcome === 'foreign_change')
+        await notify(controlChange('a', 'permission.mode', 'session:a'));
+      if (outcome === 'scope_change') trusted = false;
+      if (outcome === 'navigation')
+        await caller.invoke({ method: 'select', generation: 1, sessionId: 'b' });
+      if (outcome === 'unknown') throw new ClientError('network_outcome_unknown');
+      return {
+        commandId: input.commandId,
+        kind: 'workspace.trust',
+        state: 'applied',
+        receipt: {
+          status: 'applied',
+          trusted: true,
+          revision: String(grants),
+          canonicalIdentity: input.canonicalIdentity,
+          externalReadScopeDigest: input.externalReadScopeDigest,
+        },
+      };
+    };
+    source.client.startRun = async (sessionId, input) => {
+      starts++;
+      return {
+        id: input.commandId,
+        sessionId,
+        kind: 'run.start',
+        originStoreId: input.expectedStoreId,
+        subjectId: 'user',
+        requestDigest: callerTextDigest(canonicalCallerCommandRequest(input)),
+        cancelRequestedAt: null,
+        status: 'accepted',
+        receipt: null,
+      };
+    };
+    source.client.getPermissionMutation = async (commandId) => ({
+      commandId,
+      kind: 'workspace.trust',
+      state: 'applied',
+      receipt: {
+        status: 'applied',
+        trusted: true,
+        revision: String(grants),
+        canonicalIdentity: 'a'.repeat(64),
+        externalReadScopeDigest: 'b'.repeat(64),
+      },
+    });
+    const caller = new NativeCaller(source.client, () => {}, memoryPrivateData());
+    try {
+      const { generation } = (await caller.invoke({ method: 'attach' })) as NativeState;
+      await caller.invoke({ method: 'select', generation, sessionId: 'a' });
+      const submit = () =>
+        caller.invoke({
+          method: 'submit',
+          generation,
+          sessionId: 'a',
+          intent: {
+            kind: 'run.start',
+            expectedStoreId: 'store',
+            commandId: 'original-input',
+            content: 'original text',
+          },
+        });
+      const first = code(submit());
+      const repeated = outcome === 'applied' ? code(submit()) : undefined;
+      expect(await first).toBe(
+        outcome === 'applied'
+          ? 'success'
+          : outcome === 'unknown'
+            ? 'network_outcome_unknown'
+            : outcome === 'scope_change'
+              ? 'workspace_access_unavailable'
+              : 'permission_observation_changed',
+      );
+      if (repeated) expect(await repeated).toBe('success');
+      await until(
+        () => caller.state().selection?.permissions?.trust.trusted === (outcome !== 'scope_change'),
+      );
+      if (outcome === 'navigation') expect(caller.state().selection?.session.id).toBe('b');
+      expect(grants).toBe(1);
+      expect(starts).toBe(outcome === 'applied' ? 1 : 0);
+      if (outcome === 'unknown') {
+        const original = caller.state().permissionSubmissions[0]!;
+        expect(original.phase).toBe('unknown');
+        expect(await code(submit())).toBe('permission_intent_pending');
+        expect(starts).toBe(0);
+        await caller.invoke({
+          method: 'lookupPermission',
+          generation,
+          commandId: original.intent.commandId,
+        });
+        expect(caller.state().permissionSubmissions[0]!.phase).toBe('applied');
+        expect(starts).toBe(0);
+        expect(await code(submit())).toBe('success');
+        expect(starts).toBe(1);
+        expect(grants).toBe(1);
+      } else if (outcome === 'applied') {
+        expect(await code(submit())).toBe('success');
+        expect(starts).toBe(1);
+        expect(grants).toBe(1);
+      }
+    } finally {
+      await caller.close();
+    }
+  });
+}
