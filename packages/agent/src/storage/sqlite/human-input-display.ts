@@ -165,6 +165,7 @@ function originalHumanInputDisplay(
   };
   // A queued/undecided input must remain visible. Only the actual applied business
   // message can replace the processing copy; IDs and receipts must all agree.
+  // Later cancellation does not undo a proven application or its saved message.
   const business =
     typeof receipt.businessCommandId === 'string'
       ? db.row('SELECT * FROM command WHERE id=?', receipt.businessCommandId)
@@ -193,7 +194,7 @@ function originalHumanInputDisplay(
     business.status !== 'applied' ||
     appliedDecision.status !== 'applied' ||
     !['input.steer', 'input.follow_up'].includes(String(business.kind)) ||
-    receipt.state !== 'decided' ||
+    (receipt.state !== 'decided' && receipt.state !== 'cancelled') ||
     receipt.applicationState !== 'applied' ||
     business.target_command_id !== appliedDecision.id ||
     object(appliedDecision.request_json).inputCommandId !== raw.id ||

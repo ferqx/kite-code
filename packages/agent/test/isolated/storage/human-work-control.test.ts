@@ -971,6 +971,139 @@ test('SQL presentation proves one original input across processing and business 
   }
 });
 
+for (const businessState of ['active', 'completed'] as const)
+  test(`cancelling an original public input preserves its applied ${businessState} display proof and sealed Forks`, async () => {
+    const f = await fixture();
+    try {
+      await finishDisplayRun(f, f.run.id);
+      const publicId = 'public-cancel-applied';
+      const input = await displayInput(f, publicId);
+      const decision = f.decide(input.inputId, {
+        relation: 'independent_work',
+        purpose: 'work',
+        targetRootWorkCommandId: null,
+        selectionEffect: 'select_work',
+      });
+      await finishDisplayRun(f, input.run.id);
+      const applied = await f.store.applyInput({
+        expectedStoreId: f.scope.expectedStoreId,
+        owner: f.owner,
+        commandId: decision.businessCommand!.id,
+        kind: 'follow_up',
+        configuration: { modelId: 'fixture' },
+      });
+      const sessionIds = ['s'];
+      if (businessState === 'completed') {
+        await finishDisplayRun(f, applied.run.id);
+        await forkDisplay(f, 'cancel-first-fork');
+        await forkDisplay(f, 'cancel-second-fork', 'cancel-first-fork');
+        sessionIds.push('cancel-first-fork', 'cancel-second-fork');
+      }
+      const before = await Promise.all(
+        sessionIds.map((sessionId) => f.store.listMessages(sessionId)),
+      );
+      expect(before[0]!.find((message) => message.id === input.before.id)!.humanInput).toEqual({
+        inputCommandId: input.inputId,
+        publicCommandId: publicId,
+        duplicateOfMessageId: applied.message.id,
+      });
+      const messages = f.db.rows('SELECT * FROM message ORDER BY session_id,seq');
+      const parts = f.db.rows('SELECT * FROM message_part ORDER BY message_id,ordinal');
+      const original = (await f.store.getCommand(publicId))!;
+      await f.store.cancelCommand({
+        ...f.scope,
+        commandId: 'cancel-applied-public',
+        targetCommandId: publicId,
+      });
+      expect(await f.store.getCommand(input.inputId)).toMatchObject({
+        receipt: {
+          state: 'cancelled',
+          applicationState: 'applied',
+          businessCommandId: applied.command.id,
+          runId: applied.run.id,
+          messageId: applied.message.id,
+        },
+      });
+      expect(await f.store.getCommand(publicId)).toMatchObject({
+        status: 'applied',
+        receipt: original.receipt,
+      });
+      expect(await f.store.getCommand(applied.command.id)).toMatchObject({
+        status: 'applied',
+        receipt: applied.command.receipt,
+      });
+      expect(
+        f.db.row('SELECT cancel_requested FROM run WHERE id=?', applied.run.id)!.cancel_requested,
+      ).toBe(businessState === 'active' ? 1n : 0n);
+      for (const [index, sessionId] of sessionIds.entries()) {
+        expect(await f.store.listMessages(sessionId)).toEqual(before[index]!);
+        expect((await f.store.getView(sessionId)).messages).toEqual(before[index]!);
+      }
+      expect(f.db.rows('SELECT * FROM message ORDER BY session_id,seq')).toEqual(messages);
+      expect(f.db.rows('SELECT * FROM message_part ORDER BY message_id,ordinal')).toEqual(parts);
+    } finally {
+      await f.cleanup();
+    }
+  });
+
+for (const inputState of ['undecided', 'queued'] as const)
+  test(`cancelling the ${inputState} original public input keeps its processing message visible`, async () => {
+    const f = await fixture();
+    try {
+      await finishDisplayRun(f, f.run.id);
+      const publicId = 'public-cancel-unapplied';
+      const input = await displayInput(f, publicId);
+      const decision =
+        inputState === 'queued'
+          ? f.decide(input.inputId, {
+              relation: 'independent_work',
+              purpose: 'work',
+              targetRootWorkCommandId: null,
+              selectionEffect: 'select_work',
+            })
+          : undefined;
+      const before = await f.store.listMessages('s');
+      await f.store.cancelCommand({
+        ...f.scope,
+        commandId: 'cancel-unapplied-public',
+        targetCommandId: publicId,
+      });
+      expect(await f.store.getCommand(input.inputId)).toMatchObject({
+        receipt: { state: 'cancelled' },
+      });
+      if (decision) {
+        expect(await f.store.getCommand(decision.businessCommand!.id)).toMatchObject({
+          status: 'rejected',
+          receipt: { outcome: 'cancelled_before_apply' },
+        });
+        let error: unknown;
+        try {
+          await f.store.applyInput({
+            expectedStoreId: f.scope.expectedStoreId,
+            owner: f.owner,
+            commandId: decision.businessCommand!.id,
+            kind: 'follow_up',
+            configuration: { modelId: 'fixture' },
+          });
+        } catch (caught) {
+          error = caught;
+        }
+        expect((error as { code?: string })?.code).toBe('input_cancelled');
+      }
+      const projected = await f.store.listMessages('s');
+      expect(projected.map(({ humanInput, ...message }) => message)).toEqual(
+        before.map(({ humanInput, ...message }) => message),
+      );
+      expect((await f.store.getView('s')).messages).toEqual(projected);
+      expect(
+        projected.find((message) => message.id === input.before.id)!.humanInput
+          ?.duplicateOfMessageId,
+      ).toBeUndefined();
+    } finally {
+      await f.cleanup();
+    }
+  });
+
 test('unresolved processing keeps its original user message and ignores source-authored presentation authority', async () => {
   const f = await fixture();
   try {
@@ -1010,16 +1143,13 @@ test('unresolved processing keeps its original user message and ignores source-a
   }
 });
 
-for (const broken of [
-  'digest',
-  'business_receipt',
-  'raw_receipt',
-  'decision',
-  'message',
-  'store',
-  'public',
-] as const)
-  test(`broken ${broken} chain cannot hide an original processing message`, async () => {
+for (const { broken, cancelled } of (
+  ['digest', 'business_receipt', 'raw_receipt', 'decision', 'message', 'store', 'public'] as const
+).flatMap((broken) => [
+  { broken, cancelled: false },
+  { broken, cancelled: true },
+]))
+  test(`broken ${broken} chain cannot hide an original processing message${cancelled ? ' after cancellation' : ''}`, async () => {
     const f = await fixture();
     try {
       await finishDisplayRun(f, f.run.id);
@@ -1042,6 +1172,12 @@ for (const broken of [
         (message) => message.id === input.before.id,
       )!;
       expect(baseline.humanInput?.duplicateOfMessageId).toBe(applied.message.id);
+      if (cancelled)
+        await f.store.cancelCommand({
+          ...f.scope,
+          commandId: 'cancel-public-input',
+          targetCommandId: 'public-input',
+        });
       if (broken === 'digest')
         f.db.run('UPDATE command SET request_digest=? WHERE id=?', 'forged', input.inputId);
       if (broken === 'business_receipt')

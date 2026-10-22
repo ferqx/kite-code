@@ -29,7 +29,7 @@ Public root run.start and input.follow_up accept the optional string enum reason
 
 ## 真实输入与工作选择
 
-普通 Message 的只读 `humanInput` 由 [human-input-display.ts](../human-input-display.ts) 从准确 public/raw/processing/decision/business、原摘要、主体／Store／Session 与应用回执派生，忽略 source JSON 自报字段。处理轮首条用户消息和业务消息共享原输入身份及可核实的公开提交 ID；仅在业务应用、实际 Message／Run 及各层回执完整一致时标记处理副本的 `duplicateOfMessageId`。未决、缺失或错误证明不产生替代资格；同文不同输入仍独立。SQL 原消息、正文和分页全部保留，Native 只在当前读取同时具有准确替代消息时合并展示。Runtime 的有限 View 与完整消息读取均沿同一解释投影，有限 Execution 页缺项时查回准确原执行，避免把内部分类 JSON 当普通答复。
+普通 Message 的只读 `humanInput` 由 [human-input-display.ts](../human-input-display.ts) 从准确 public/raw/processing/decision/business、原摘要、主体／Store／Session 与应用回执派生，忽略 source JSON 自报字段。处理轮首条用户消息和业务消息共享原输入身份及可核实的公开提交 ID；仅在业务应用、实际 Message／Run 及各层回执完整一致时标记处理副本的 `duplicateOfMessageId`。应用后取消原公共输入保留这项历史展示证明，包括已封存 Fork 内的准确替代关系；取消前未应用、未决、缺失或错误证明不产生替代资格。同文不同输入仍独立，取消与执行准入语义不因展示改变。SQL 原消息、正文和分页全部保留，Native 只在当前读取同时具有准确替代消息时合并展示。Runtime 的有限 View 与完整消息读取均沿同一解释投影，有限 Execution 页缺项时查回准确原执行，避免把内部分类 JSON 当普通答复。
 
 Fork／二次 Fork 复用原 `messageOriginRow` 核封存出处与正文／parts，只在本分支确已复制且可核实准确业务消息时，将替代 ID 映射为本地复制 Message ID。源会话后来应用的业务不扩大旧 Fork 的可见集合；缺少替代行或出处损坏时不取得隐藏原文的资格。读取不修改原 SQL 数据，实际回归在 [human-work-control.test.ts](../../../../test/isolated/storage/human-work-control.test.ts)。
 
