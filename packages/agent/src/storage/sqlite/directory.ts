@@ -79,9 +79,10 @@ export function readDirectory(
               AND (? IS NULL OR s.workspace_id=?)
               AND EXISTS(SELECT 1 FROM command c WHERE c.session_id=s.id AND c.kind='session.create' AND c.subject_id=?)
               ORDER BY s.rowid LIMIT ?
-            ), latest_change AS (
+            ), latest_message_change AS (
               SELECT e.scope_session_id,MAX(e.cursor) AS cursor FROM change_event e
-              JOIN roots s ON s.id=e.scope_session_id GROUP BY e.scope_session_id
+              JOIN roots s ON s.id=e.scope_session_id
+              WHERE e.type='message.updated' GROUP BY e.scope_session_id
             ) SELECT s.*,r.id AS activity_run_id,r.status AS activity_run_status,r.is_active AS activity_run_active,
               r.cancel_requested AS activity_run_cancel_requested,
               r.waiting_results_json<>'[]' AS activity_run_waiting,
@@ -98,7 +99,7 @@ export function readDirectory(
                 END AS activity_updated_at
             FROM roots s
             LEFT JOIN run r ON r.rowid=(SELECT rowid FROM run WHERE session_id=s.id ORDER BY is_active DESC,rowid DESC LIMIT 1)
-            LEFT JOIN latest_change c ON c.scope_session_id=s.id
+            LEFT JOIN latest_message_change c ON c.scope_session_id=s.id
             LEFT JOIN change_event e ON e.cursor=c.cursor
             ORDER BY CAST(s.directory_seq AS INTEGER)`,
             afterSeq,

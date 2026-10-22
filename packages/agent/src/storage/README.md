@@ -120,13 +120,13 @@ Run 的可选 `carrierExecutionId` 只来自原 Command、准确 child/report �
 
 Workspace 沿用原 profile 范围，核对 expectedStoreId；现有 Workspace 没有主体创建字段，不从 Session 推造所有权，合法空 Workspace 仍可列出。Session 仅列 root、未请求删除的记录，先核当前 Store 准入，再核对真实 `session.create` Command 的宿主主体；恢复保留的旧创建出处不要求等于当前 Store，并在 SQL 分页前执行 workspace 过滤。child 入口保持 Task/父视图的独立权限，不因目录分页扩大。旧 `listWorkspaces/listSessions` 是明确当前页内部接口，不能用它们的默认 100 项证明目录已经读完。
 
-Session 每项附有限 `activity`：准确 active Run 优先、否则 latest Run 的 ID/status/isActive/是否仍有必需结果，未取消且越过停止边界的 accepted run.start/follow-up、同主体当前 Store 的 pending presentation Interaction 数量。没有 Run 不伪造完成，排队不替换尚活动的 Run。时间来自原 Session 最后 cursor 的私人 `kite.session-log@1.occurredAt`；旧／未知／损坏／非整数时间明确 null，不用读取时钟、Run 开始时间或其他会话时间填补。只读取有限字段，不公开原事件 payload、Run config 或输入。没有新增表／列、baseline checksum、Store major 或维护资产，冷读取不写事件。日志封存理由仍归[原决定](../../../../.agents/notes/implemented/architecture/2026-10-03-bounded-session-log-observation.md)，目录取舍见[本决定](../../../../.agents/notes/implemented/architecture/2026-10-08-session-directory-activity-observation.md)。
+Session 每项附有限 `activity`：准确 active Run 优先、否则 latest Run 的 ID/status/isActive/是否仍有必需结果，未取消且越过停止边界的 accepted run.start/follow-up、同主体当前 Store 的 pending presentation Interaction 数量。没有 Run 不伪造完成，排队不替换尚活动的 Run。时间仅来自原 Session 最后 `message.updated` cursor 的私人 `kite.session-log@1.occurredAt`；旧／未知／损坏／非整数时间明确 null，不用读取时钟、Run 开始时间或其他会话时间填补。只读取有限字段，不公开原事件 payload、Run config 或输入。没有新增表／列、baseline checksum、Store major 或维护资产，冷读取不写事件。日志封存理由仍归[原决定](../../../../.agents/notes/implemented/architecture/2026-10-03-bounded-session-log-observation.md)，目录取舍见[本决定](../../../../.agents/notes/implemented/architecture/2026-10-08-session-directory-activity-observation.md)。
 
 活动 Run 的目录摘要另含可选 `executionOwner: held/unheld/unknown`，由 [Store adapter](../sqlite.ts) 在 SQL 快照后，对准确 root Session 的既有排他锁做同步 shared probe。探针只读打开现存私有锁文件，不创建文件、不写 owner generation、不结算历史；确定争用才返回 held，缺失／校验或系统错误保 unknown，成功取得并释放才返回 unheld。释放失败保原锁并使读取失败，不能伪造 unheld。锁观察与 SQL 快照分开，held 不证明模型仍在推进，unheld 不证明外部资源清理完成；恢复／派发继续核原合同。无 active Run 的历史和独立未结算 Job 不增加此字段。
 
 [原 owner 丢失回归](../../test/isolated/storage/directory-owner-observation.test.ts)核真实双 Store 的 held、关闭原 Store 后冷 readonly unheld、另一 root 仍 held、缺锁 unknown 且零创建，以及完整元数据和原 Run／Execution／Command 零变化；[锁观察回归](../../test/isolated/storage/lock-observation.test.ts)核本机真实争用、私有路径拒绝和非争用系统错误。
 
-[真实目录测试](../../../../tests/isolated/unified-agent/directory.test.ts) 使用具名创建命令、超过 200 项 Workspace/root Session、多主体、Native/Browser HTTP 与冷 readonly Store，核对固定上界、准确过滤、空 Workspace、零读取事件/Model 和原身份；另核改名没有 Run 的真实事件时间、queued/active/latest 与未知时间保留，不伪造 Model 成功记录。
+[真实目录测试](../../../../tests/isolated/unified-agent/directory.test.ts) 使用具名创建命令、超过 200 项 Workspace/root Session、多主体、Native/Browser HTTP 与冷 readonly Store，核对固定上界、准确过滤、空 Workspace、零读取事件/Model 和原身份；另核审批模式、改名、只读切换与 Run 终态不推进消息时间，新消息推进时间、queued/active/latest 与未知时间保留，不伪造 Model 成功记录。
 
 [Session 管理 owner](sqlite/session-management/README.md) 负责 root 改名 CAS 和执行组删除意图；目录隐藏 tombstone，真实停止事实与只读历史保留独立。删除回执不代表所有外部效果已停止。
 

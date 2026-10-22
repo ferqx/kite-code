@@ -495,7 +495,7 @@ Renderer按generation、Store和history epoch清空有界显示缓存，按会�
 
 正式目录直接复用 [Sidebar](../../packages/ui/src/desktop/Sidebar.tsx)，替代临时 NativeDirectory。适配器按公共 workspaceId 分组，项目默认展开，可独立收起；空项目显示“暂无聊天”。上下键只移动当前项目列表焦点，确认沿原 Session ID 读取；收起不调用 bridge、不改选或取消工作。首次发送等待不阻止阅读已有会话，原 NativeDesktop 仍保护迟到创建、后来选择和草稿。选择标记核同 Store，目录 Store 更换重置展示。侧栏先显示五项、“展开更多”每次增加十项只是展示完整已读目录，不改变公共分页或高水位。
 
-Workspace/Session 完整目录分别读取；其间新登记的项目可能还未进入项目上界。相应 Session 保留在“项目待读取的会话”，可读原历史，但不提供该未观察项目的新建入口。Session 目录使用公共 `listAllSessionDirectory` 穷尽同一观察，未选中会话也有实际 active／latest Run、排队及同主体当前 Store 的待输入数量。更新时间取原 Core 最后事件封存时间，读取不修改它；未记录或未知格式保持缺席，原 Sidebar 按真实时间排序、悬浮显示本地时间。必需后台结果等待沿原通用活动指示，与人类待输入 Badge 分开。
+Workspace/Session 完整目录分别读取；其间新登记的项目可能还未进入项目上界。相应 Session 保留在“项目待读取的会话”，可读原历史，但不提供该未观察项目的新建入口。Session 目录使用公共 `listAllSessionDirectory` 穷尽同一观察，未选中会话也有实际 active／latest Run、排队及同主体当前 Store 的待输入数量。更新时间取原 Core 最后对话消息更新的封存时间，读取、改名和审批模式切换不修改它；未记录或未知格式保持缺席，原 Sidebar 按真实时间排序、悬浮显示本地时间。必需后台结果等待沿原通用活动指示，与人类待输入 Badge 分开。
 
 活动 Run 的公开 `executionOwner` 仍是只读锁观察；[DesktopController](src/controller.ts) 的选中与 [NativeCaller](electron/native-caller.ts) 重连先调用 SDK `reconcileSessionState`，再读取公开历史。后端结算后，主／子轮次、工具及环境卡使用持久终态，不继续显示排队、回复动画或 Stop。原 [目录适配器](src/native-presentation.ts) 的“执行状态待核实”和 `executionUnconfirmed` 只承担失败／证据不足的回退展示；owner 观察只适用于同一个确实 active 的 Run，旧目录不能覆盖当前终态或后来新 Run。目录刷新失败时，同一活动 Run 的缓存观察按待核实展示，不恢复运行标记或停止按钮；后续完整目录确认持有执行权后才恢复。普通事件刷新保持只读；迟到旧选择不能发布，失败保留历史并报告错误。协议归[Core owner](../../packages/agent/src/storage/sqlite/run-resume.README.md#会话恢复时的状态核实)，[真实 Native 交接](test/isolated/native-session-reconciliation.test.ts)经实际 Service／Runtime／SQLite／Client／Controller 核 SIGKILL、冷读与零重放；[导航 DOM](test/isolated/native-session-navigation-dom.test.tsx)核回退和缓存终态。
 

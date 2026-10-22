@@ -2,6 +2,8 @@
 
 Status: implemented
 
+2026-10-22：其中“所有 Core 事件均推进目录时间”的决定被[消息时间修正](../bug-fix/2026-10-22-session-message-activity-time.md)部分替代。以下原取舍保留历史原因；当前时间只取 `message.updated`。状态摘要、只读观察、分页一致性、未知时间及无新增 schema 的理由继续适用。
+
 ## Problem
 
 原 PC 侧栏需要全局会话的运行／待输入状态和更新时间排序。当前选择的 view 不能证明未打开会话的状态，Run 开始／完成时间也不能覆盖无 Run 的改名等实际变化。重构已经固定 Store baseline 与维护格式；客户端读取不应为了展示创建另一份运行权威或修改数据格式。
