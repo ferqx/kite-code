@@ -4,6 +4,8 @@
 
 ## 工具反馈与任务质量
 
+当前实现不包含按搜索／读取次数注入的收束提醒。下述 2026-10-24 r1–r3 保留为隔离实验历史：触发和送达不证明收益，固定次数不能替代任务进展，实验后已撤回该机制。保留的是搜索准确范围、字面匹配反馈、读取原文片段和 child 原执行取证预览；全文质量仍与机械断言分开审阅。
+
 [任务 runner](agent-task-quality.live.ts)复用原模型 fixture、完整原输入/输出 inspector 和真实 SQLite/Files/Task，每种场景使用两个独立合成工作区。搜索场景包含单文件、根搜索、二进制和非法编码、忽略的构建目录，以及当前入口与旧同名实现；核实际读取链、随机真实值和未检查范围。委派场景由父模型根据公开角色说明自行选择可写角色，唯一子 Agent 读原输入并写一次结果，父实际读回并验收，核准确完整结果 Source 在每份后继输入中仅出现一次。
 
 ```bash
@@ -15,6 +17,60 @@ KITE_RUN_LIVE_TASK_QUALITY=1 bun tests/e2e/live/model/agent-task-quality.live.ts
 初始化或采证失败也会按 Runtime、Files、Store 顺序关闭已经建立的资源；一项关闭失败不跳过其余清理，采证和清理错误保留为失败。[隔离清理回归](../../../isolated/unified-agent/agent-task-quality-cleanup.test.ts)使用真实资源与子进程内的故障替身，覆盖采证读写、关闭拒绝及部分初始化失败，不读取用户模型配置或调用 Provider。
 
 可选 `--scenario=search` 或 `--scenario=delegation` 只复验受影响的两个 trial。每个 trial 最多 36 次实际模型请求、240 秒测试预算，沿原 fixture 保留配置的模型、协议和推理设置，单次输出最多 4096 token；预算只用于终止隔离测试，不定义产品 Run 完成。执行前后 `liveCodeEvidence()` 核代码输入，报告保留真实差异，不把事后 hash 冒充预先冻结。
+
+另可显式选择 `--scenario=current-chain` 或 `--scenario=claim-adoption`，各运行两个独立合成工作区，每个 trial 最多 72 次实际模型请求、480 秒测试预算。默认入口仍仅运行原搜索与委派场景。[研究夹具](agent-task-quality-fixture.ts)按实际配置在两条都存在的实现中切换当前路径，包含注册表、随机独有 channel、不同结果机制与 receipt 字段，以及历史同名实现和忽略的构建目录；不能按目录新旧或符号存在推导当前架构。`current-chain` 要求父模型从启动配置独立研究；`claim-adoption` 先让真实子 Agent 转述一份错误概括当前范围的历史报告，再由父模型独立核验。报告中的建议只是低信任资料，不授予操作权限。
+
+新增场景核选中配置、注册和可达源码链及独有事实，要求父实际读取决定性文件并把准确工具结果带入最终 Model 输入；委派场景还核真实子读取、完整原 child Source 和错误报告中的事实确实到达父输入。原 Source 内的 `recorded_tool_evidence` 必须与 carrier 持久结果逐项一致，归属正确 child／Run／Store，并按原执行 ID、工具版本及完整 observation 对上 `reports/runtime-audit.md` 的实际读取与版本；正文仅出现报告文件名或声称已有证据不算收到该证据。子报告未携带待检验主张时不算覆盖该分支。搜索总数、准确重复查询、证据齐备后的 Model 与工具调用另存为观察值，不以少搜索判正确，也不禁止为解决实质疑问补读；最终事实归属、错误主张的处理与是否反复检索仍须人工阅读完整轨迹。新增场景的本机真实执行结果见下文，机械通过不能代替全文语义验收。[确定性夹具回归](../../../isolated/unified-agent/agent-task-quality-fixture.test.ts)在独立目录实际执行两种配置的合成启动入口，验证参考事实和诱饵分离，零 Provider。
+
+2026-10-24 在 macOS 本机运行新增两场景，各两个 trial。最初 `current-chain-r1` 的两次沙箱首请求均在约 0.3 秒以内以 HTTP 状态 0／`model_failed` 结束，零工具；原失败证据保留。授权网络权限后的真实结果保存于 `dist/acceptance/agent-task-quality-20261024/current-chain-r1-escalated` 和 `dist/acceptance/agent-task-quality-20261024/claim-adoption-r1`。四次均为 `assertions_passed`，各次执行前后代码证据一致，零工具失败、零清理或采证错误；原始请求、Model 输入输出及 Store 均保留。
+
+| 场景 | Model 请求 | 工具调用 | 内容搜索 | 决定性证据齐备后的工具调用／父请求（含最终） |
+| --- | --- | --- | --- | --- |
+| current-chain 1 | 8 | 24 | 4 | 10／4 |
+| current-chain 2 | 8 | 20 | 3 | 10／4 |
+| claim-adoption 1 | 15 | 30 | 7 | 15／7 |
+| claim-adoption 2 | 16 | 27 | 2 | 12／7 |
+
+已人工阅读四次实际工具序列、回执及父子最终正文。四次均正确选中配置所指实现、返回随机独有 channel／机制／receipt 字段，未把历史报告当作当前架构；两次委派的错误历史主张分支均实际触发，完整原 child Source 与准确记录的工具证据进入父最终输入。离线逐项核对七个决定性文件的原读取回执，四次都是从首行到总行数、无后续窗口，内容与各自固定合成文件一致。该核对复用原证据，不冒充运行时已有的完整窗口断言。
+
+全文仍有实际不足，不能宣称任务质量稳定通过。四次最终父回复分别为 2728／2842／2709／2492 字符，重复展开调用链与 JSON；决定性证据齐备后仍追加多次目录检查、历史读取和搜索。claim-adoption 1 的子模型把报告明写的 `preview` 误读为未给具体 profile，父最终又沿用该误读；父实际收到准确原报告工具证据，并未因此自动纠正局部错误。该例在连续查询后有三份 Model 输入收到研究反馈，但仍继续检索。claim-adoption 2 把字面 `fixtures|dist/` 用作组合查询（回零且忽略 dist），随后宣称全部归档无任何文件引用，超出查询证据；current-chain 1 也把有限字面查询概括为无任何导入引用。两种当前主链正确与这些局部误读、范围过度推断须分别评价。新增结果证明夹具能暴露这些问题，不证明建议性反馈已消除不收敛或错误采纳；未改变任务、模型或断言来追求更漂亮样本。
+
+同日补充有界原文片段、字面搜索边界说明并加强完整窗口检查后，保持原任务／模型／夹具运行第二轮，证据在 `dist/acceptance/agent-task-quality-20261024/current-chain-r2` 与 `dist/acceptance/agent-task-quality-20261024/claim-adoption-r2`。四次均机械通过、前后代码证据一致、零工具／采证／清理错误；所有决定性读取完整且正文与合成原文件匹配。两次 claim 的最终实际父输入中，原 child Source 均携带准确报告路径、版本、执行与 Run 身份，以及完整 9 行 `observation.excerpt`（`truncated:false`），不是文件名或子模型自述命中。
+
+| 第二轮场景 | Model 请求 | 工具调用 | 内容搜索 | 决定性证据齐备后工具调用／父请求（含最终） |
+| --- | --- | --- | --- | --- |
+| current-chain 1 | 9 | 21 | 2 | 12／5 |
+| current-chain 2 | 14 | 27 | 2 | 11／6 |
+| claim-adoption 1 | 15 | 24 | 0 | 9／6 |
+| claim-adoption 2 | 11 | 21 | 4 | 2／2 |
+
+已逐份审阅完整实际序列与最终正文，当前主链与四项独有事实仍正确。claim 1 无搜索而沿配置与导入读取，不能以零搜索本身判优；它仍追加多轮目录检查。claim 2 的额外两次调用用于全目录与配置引用检查，未把归档写成全仓无引用／死代码，而按当前 main 的导入链排除。current-chain 2 开始说明查询为字面范围、`complete:false`，但 current-chain 1 仍将有限查询概括为“未被任何源码 import”。证据齐备后的调用统计包含核对历史报告与并行实现的必要读取，也包含与已确定当前链无关的归档和目录检查，不能把全部计数直接称作无效。
+
+原文可见并未自动解决子结果误读：claim 1 子模型把明写的 `preview` 译成“profile 预览”、称没有具体名字，claim 2 对 `stable` 也称未给具体标识。父都独立读了报告且收到原片段，核心运行判断正确，仍未指出这些局部错误，反而笼统称转述一致／逐句一致可采纳；因此不能认定错误采纳问题已解决。四份父最终正文为 1975／2786／2785／2973 字符，两份 child 为 1884／2185 字符，正文与 JSON、委派多项转述仍有扩张。第二轮没有出现 regex-like 查询，故只验证普通字面回执边界，未验证动态特殊字符提示的真实触发效果。本轮体现部分范围表达改善，但不同 trial 波动很大，不能推导唯一因果或稳定收敛资格；未追加挑选样本。
+
+同日第三轮覆盖 inspection 反馈与明确未验证报告标记：`dist/acceptance/agent-task-quality-20261024/current-chain-r3`、`dist/acceptance/agent-task-quality-20261024/claim-adoption-r3`，任务／模型／判据保持。四次机械通过，前后代码证据一致，零工具、采证或清理错误。完整原工具读取与选中链保持；父实际输入中的 inspection 反馈分别出现 3／3／2／2 次，两次 claim 的准确原 child Source 均包含 `reportVerification:not_verified` 与完整报告 excerpt，原文路径／版本／执行／Run 身份可对上。
+
+| 第三轮场景 | Model 请求 | 工具调用 | 内容搜索 | 决定性证据齐备后工具调用／父请求（含最终） |
+| --- | --- | --- | --- | --- |
+| current-chain 1 | 8 | 17 | 0 | 4／3 |
+| current-chain 2 | 7 | 16 | 2 | 6／3 |
+| claim-adoption 1 | 13 | 21 | 1 | 6／4 |
+| claim-adoption 2 | 9 | 15 | 0 | 0／1 |
+
+完整序列中，current-chain 两例在反馈后明确剩余问题是历史审计是否适用，随后读报告／并行实现；没有继续逐目录排除全部历史代码。第二例仍补两次 apps 下的窄查询作旁证。claim 1 仍在当前链和历史值已读后补目录及配置引用检查，claim 2 接收结果后直接最终交付。调用计数体现部分样本收束改善，不能把核历史报告的必要读取与多余目录检查混为一类，也不能以零搜索／零后续工具直接认定全文正确。
+
+最终语义仍有实际不足。claim 1 子模型这次没有把 preview 说成 profile 缺失，但父笼统称其转述逐字一致，并无工具依据地提及“协作任务进行中邮件箱未再返回针对该请求的更新事件”（实际只调用 spawn 与 Files，未观察邮箱事件）。claim 2 子模型仍将明文 stable 说成未给具体 profile，父未纠正，反而以“同一 hash、9 行”支撑转述已逐字比对通过；还称自己读到 `runtime-core/{assembly,result,channel}.ts`，实际只读了该分支 result／channel，assembly 仅在 glob 路径中出现。父对当前 profile／机制／receipt／channel 的核心结论均正确，但这不能覆盖局部错误采纳、未实读来源和无依据状态描述。四份父回复为 3298／3173／2991／2296 字符，child 为 3409／1645 字符，报告扩张与正文／JSON 重复也未稳定解决。第三轮确认机制实际到达及部分收束变化，不能宣称语义核验可靠；这些原样失败表现保留，不追加筛样本或为通过放宽检查。
+
+撤回次数型提醒并合并模型合同后，按当前交付代码完成固定四次最终验证，证据在 `dist/acceptance/agent-task-quality-20261024/current-chain-final` 与 `dist/acceptance/agent-task-quality-20261024/claim-adoption-final`。原任务、模型、夹具与判据保持，没有因实验结果增加语义 judge 或改变输出要求。四次均为 `assertions_passed`，前后非 Markdown 代码 hash 均为 `336bcbddb0980d0f5e37a3cd132b293ea8f28dd66e880ae2896c611cace7cd34`；全部实际 Model 输入核零 `Research feedback from selected Tool receipts`。所有真实读取回执完整且与合成文件正文相同，零工具、采证和清理错误。两次 child 错误报告分支实际触发，完整原 Source 及准确 child／Run／执行／报告版本证据到达父最终输入，完整九行 excerpt 与 `reportVerification:not_verified` 均可直接读取。
+
+| 最终场景 | Model 请求 | 工具调用 | 内容搜索 | 决定性证据齐备后工具调用／父请求（含最终） |
+| --- | --- | --- | --- | --- |
+| current-chain 1 | 8 | 22 | 4 | 12／4 |
+| current-chain 2 | 8 | 24 | 6 | 11／4 |
+| claim-adoption 1 | 10 | 23 | 5 | 4／2 |
+| claim-adoption 2 | 17 | 27 | 1 | 7／6 |
+
+人工已阅读四次完整工具序列、回执和父子正文。当前配置所选调用链、profile、机制、receipt 字段和随机 channel 均正确，旧审计未被当作当前架构；但最终软件仍不能保证自然语言推断可靠。两次 child 继续把明文 preview／stable 说成没有具体 profile 名，父均未指出这项误读而笼统认可转述一致（claim 1 明说“全文一致，没有出入”）。current-chain 及 claim 1 仍把有限字面／忽略范围查询概括成归档零引用、无任何导入引用或全仓唯一；claim 2 的最终表述相对限定到字面搜索与当前链，但仍有多轮目录排除检查。四份父回复为 2564／2670／2498／2666 字符，两份 child 为 1625／3583 字符，正文与 JSON 重复、委派转述扩张保持为实际局限。调用数量仅作观察，不构成任务正确性或稳定收敛资格；未追加新 trial。r1–r3 的次数型反馈仍仅为已撤回实验，不能用其触发或小样本计数比较宣称最终版本保留了该机制或证明单一因果。
 
 2026-10-23 在 macOS 本机按上述入口完成两次搜索和两次委派，持久证据位于 `dist/acceptance/agent-task-quality-20261023/r8`，四次均为 `assertions_passed`，各次执行前后代码证据一致。两次搜索分别使用 6/5 次 Model 请求、14/13 次工具调用；两次委派分别使用 10/11 次 Model 请求、10/12 次工具调用，无工具失败。机械事实包括准确根目录与单文件搜索、实际当前调用链和随机值、唯一 child 的一次正确写入、写前读取因果、父独立读回、完整原 child Source 进入最终 Model，以及所有 Run 结束。
 

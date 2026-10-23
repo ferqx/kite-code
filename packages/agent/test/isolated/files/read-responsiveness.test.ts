@@ -194,7 +194,7 @@ test('search yields and observes cancellation during line matching after native 
     });
   };
   const tool = createFileTools(files).find((tool) => tool.id === 'files.search')!;
-  const result = await tool.execute({ text: 'a', limit: 1 }, {
+  const result = await tool.execute({ text: 'post-eof-unmatched-probe', limit: 1 }, {
     signal: controller.signal,
   } as ToolContext);
   completed = true;

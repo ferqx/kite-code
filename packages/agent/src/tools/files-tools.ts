@@ -1,7 +1,7 @@
 import type { ArtifactRef, ToolContext, ToolDefinition } from '../extensions';
 import type { Json, JsonSchema } from '../storage/types';
 import { AgentError } from '../storage/types';
-import type { FileBaseline, FileSnapshot, WorkspaceFiles } from './files';
+import type { FileBaseline, FileSearchResult, FileSnapshot, WorkspaceFiles } from './files';
 
 /** Optional trusted host capture. Tokens and evidence never come from Model input. */
 export interface FileMutationCapture {
@@ -415,14 +415,82 @@ export function createFileTools(
                   : {}),
               }
             : value;
+        const observation = (() => {
+          if (d.name === 'read') {
+            const snapshot = value as FileSnapshot;
+            if (
+              !snapshot.baseline ||
+              typeof snapshot.baseline.hash !== 'string' ||
+              typeof snapshot.content !== 'string'
+            )
+              return undefined;
+            const selection = snapshot.selection;
+            let excerptEnd = Math.min(snapshot.content.length, 2000);
+            if (excerptEnd > 0 && /[\uD800-\uDBFF]/.test(snapshot.content[excerptEnd - 1]!))
+              excerptEnd--;
+            const excerpt = {
+              text: snapshot.content.slice(0, excerptEnd),
+              truncated: excerptEnd < snapshot.content.length,
+            };
+            const complete =
+              !selection ||
+              (selection.fromLine === 1 &&
+                selection.nextOffset === null &&
+                (selection.toLine === selection.totalLines || selection.totalLines === 0));
+            return {
+              kind: 'inspection',
+              scope: snapshot.path,
+              sources: [
+                {
+                  path: snapshot.path,
+                  version: snapshot.baseline.hash,
+                  ...(selection
+                    ? {
+                        fromLine: selection.fromLine,
+                        ...(selection.toLine === null ? {} : { toLine: selection.toLine }),
+                      }
+                    : {}),
+                },
+              ],
+              complete,
+              coverage: complete ? 'file' : 'window',
+              windowComplete: true,
+              excerpt,
+            };
+          }
+          if (d.name === 'search') {
+            const search = value as FileSearchResult;
+            if (!search.query || !search.files) return undefined;
+            return {
+              kind: 'lookup',
+              scope: search.query.path,
+              query: JSON.stringify(search.query),
+              sources: search.files.map((file) => ({
+                path: file.path,
+                version: file.baseline.hash,
+              })),
+              matchCount: search.matches.length,
+              complete:
+                search.query.after === null &&
+                search.next === null &&
+                search.scope?.complete !== false,
+              coverage: 'page',
+              next: search.next,
+            };
+          }
+          return undefined;
+        })();
+        const observedValue = observation
+          ? { ...(publicValue as Record<string, unknown>), observation }
+          : publicValue;
         const content = JSON.stringify(
           ['read', 'write', 'edit'].includes(d.name)
             ? {
-                ...(publicValue as Record<string, unknown>),
+                ...(observedValue as Record<string, unknown>),
                 executionId: context.executionId,
                 runId: context.runId,
               }
-            : publicValue,
+            : observedValue,
         );
         if (Buffer.byteLength(content) > 1024 * 1024) {
           if (!context.artifacts) throw new AgentError('artifact_publication_unavailable');
@@ -446,6 +514,7 @@ export function createFileTools(
             outcome: 'succeeded',
             content: JSON.stringify({
               ...summary,
+              ...(observation ? { observation } : {}),
               body: {
                 complete: true,
                 encoding: 'utf-8',

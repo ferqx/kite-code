@@ -36,7 +36,9 @@ test('single file and directory share literal matching, context and complete low
       after: [{ line: 3, content: 'last' }],
     },
   ]);
-  expect(await files.search({ path: 'src', text: 'needle[.*]', contextLines: 1 })).toEqual(file);
+  expect(
+    (await files.search({ path: 'src', text: 'needle[.*]', contextLines: 1 })).matches,
+  ).toEqual(file.matches);
   put('long', `needle${'x'.repeat(20000)}`);
   expect((await files.search({ path: 'long', text: 'needle' })).matches[0]!.content).toHaveLength(
     20006,
@@ -199,4 +201,192 @@ test('content glob filtering and path discovery share invalid pattern boundaries
     });
   }
   expect((await files.search({ text: 'needle', glob: '**/*.ts' })).matches).toHaveLength(1);
+});
+
+test('search metadata records normalized parameters, actual lookahead statistics and one returned baseline per file', async () => {
+  const { root, files, put, dir } = fixture();
+  dir('src');
+  put('src/a.ts', 'needle\nneedle\nneedle');
+  const tool = createFileTools(files).find((t) => t.id === 'files.search')!;
+  const result = await tool.execute(
+    { path: join(root, 'src'), text: 'needle', limit: 1 },
+    context(),
+  );
+  const page = JSON.parse(result.content);
+  expect(page.query).toEqual({
+    path: 'src',
+    text: 'needle',
+    glob: null,
+    respectIgnore: true,
+    after: null,
+    limit: 1,
+    contextLines: 0,
+    maxLineChars: 2000,
+  });
+  expect(page.stats).toEqual({
+    checkedTextFiles: 1,
+    matchedFiles: 1,
+    matches: 2,
+    returnedMatches: 1,
+  });
+  expect(page.files).toHaveLength(1);
+  const snapshot = await files.read('src/a.ts');
+  expect(page.files[0]).toEqual({ path: 'src/a.ts', baseline: snapshot.baseline });
+  expect(page.observation).toMatchObject({
+    kind: 'lookup',
+    scope: 'src',
+    sources: [{ path: 'src/a.ts', version: snapshot.baseline.hash }],
+    matchCount: 1,
+    complete: false,
+    coverage: 'page',
+    next: page.next,
+  });
+  expect(page.feedback).toContain('Continue with next');
+  const tail = JSON.parse(
+    (await tool.execute({ path: 'src', text: 'needle', after: page.next }, context())).content,
+  );
+  expect(tail.next).toBeNull();
+  expect(tail.observation.complete).toBe(false);
+  put('src/a.ts', 'needle changed');
+  const changed = await files.search({ path: 'src/a.ts', text: 'needle' });
+  expect(changed.files![0]!.baseline.hash).not.toBe(snapshot.baseline.hash);
+  expect(changed.files![0]!.baseline).toEqual((await files.read('src/a.ts')).baseline);
+});
+
+test('zero matches retain partial-scope facts rather than implying absence', async () => {
+  const { files, put } = fixture();
+  put('text', 'unrelated');
+  put('encoded', Buffer.from([0xff]));
+  const tool = createFileTools(files).find((t) => t.id === 'files.search')!;
+  const page = JSON.parse((await tool.execute({ text: 'needle' }, context())).content);
+  expect(page.query.path).toBe('');
+  expect(page.stats).toEqual({
+    checkedTextFiles: 1,
+    matchedFiles: 0,
+    matches: 0,
+    returnedMatches: 0,
+  });
+  expect(page.files).toEqual([]);
+  expect(page.observation).toMatchObject({
+    sources: [],
+    matchCount: 0,
+    complete: false,
+    coverage: 'page',
+  });
+  expect(page.scope.skipped.encoding).toBe(1);
+  expect(page.feedback).toContain('does not establish which implementation is active');
+  expect(page.feedback).toContain('not inspected');
+});
+
+test('read observations distinguish complete selected windows from complete file content', async () => {
+  const { files, put } = fixture();
+  put('a', 'one\ntwo\nthree\n');
+  const tool = createFileTools(files).find((t) => t.id === 'files.read')!;
+  const full = JSON.parse((await tool.execute({ path: 'a' }, context())).content);
+  expect(full.observation).toMatchObject({
+    kind: 'inspection',
+    scope: 'a',
+    complete: true,
+    coverage: 'file',
+    windowComplete: true,
+    sources: [{ path: 'a', version: full.baseline.hash, fromLine: 1, toLine: 3 }],
+  });
+  const middle = JSON.parse(
+    (await tool.execute({ path: 'a', offset: 2, limit: 1 }, context())).content,
+  );
+  expect(middle.content).toBe('two\n');
+  expect(middle.observation).toMatchObject({
+    complete: false,
+    coverage: 'window',
+    windowComplete: true,
+    sources: [{ path: 'a', version: full.baseline.hash, fromLine: 2, toLine: 2 }],
+  });
+  const suffix = JSON.parse((await tool.execute({ path: 'a', offset: 2 }, context())).content);
+  expect(suffix.observation.complete).toBe(false);
+  expect(suffix.observation.coverage).toBe('window');
+});
+
+test('legacy search adapters without observation metadata keep their original successful result', async () => {
+  const { files } = fixture();
+  const adapter = new Proxy(files, {
+    get(target, key) {
+      if (key === 'search') return async () => ({ matches: [], next: null });
+      const value = Reflect.get(target, key);
+      return typeof value === 'function' ? value.bind(target) : value;
+    },
+  });
+  const tool = createFileTools(adapter).find((t) => t.id === 'files.search')!;
+  const result = await tool.execute({ text: 'needle' }, context());
+  expect(result.outcome).toBe('succeeded');
+  expect(JSON.parse(result.content)).toEqual({ matches: [], next: null });
+});
+
+test('read excerpts quote the actual selected window and never split Unicode surrogate pairs', async () => {
+  const { files, put } = fixture();
+  put('a', `outside\n${'x'.repeat(1999)}😀tail\nlast`);
+  const tool = createFileTools(files).find((t) => t.id === 'files.read')!;
+  const result = JSON.parse(
+    (await tool.execute({ path: 'a', offset: 2, limit: 1 }, context())).content,
+  );
+  expect(result.observation).toMatchObject({
+    coverage: 'window',
+    complete: false,
+    windowComplete: true,
+    excerpt: { text: 'x'.repeat(1999), truncated: true },
+  });
+  expect(result.content).toBe(`${'x'.repeat(1999)}😀tail\n`);
+  const last = JSON.parse((await tool.execute({ path: 'a', offset: 3 }, context())).content);
+  expect(last.observation.excerpt).toEqual({ text: 'last', truncated: false });
+  expect(last.observation.complete).toBe(false);
+});
+
+test('large read keeps its original full Artifact body and a separately bounded observation excerpt', async () => {
+  const { files, put } = fixture();
+  const text = `${'a'.repeat(1999)}😀${'source '.repeat(170000)}`;
+  put('large', text);
+  const published: { content: Uint8Array; mediaType: string }[] = [];
+  const c = {
+    signal: new AbortController().signal,
+    artifacts: {
+      async publish(input: { content: Uint8Array; mediaType: string }) {
+        published.push(input);
+        return {
+          id: 'actual-body',
+          size: String(input.content.byteLength),
+          mediaType: input.mediaType,
+          scope: { kind: 'execution', id: 'read' },
+        };
+      },
+    },
+  } as unknown as ToolContext;
+  const result = await createFileTools(files)
+    .find((t) => t.id === 'files.read')!
+    .execute({ path: 'large' }, c);
+  expect(result.outcome).toBe('succeeded');
+  const summary = JSON.parse(result.content);
+  expect(summary.observation).toMatchObject({
+    coverage: 'file',
+    complete: true,
+    excerpt: { text: 'a'.repeat(1999), truncated: true },
+  });
+  expect(summary.body.complete).toBe(true);
+  expect(result.modelContent).toMatchObject({ kind: 'artifact', reference: { id: 'actual-body' } });
+  expect(published).toHaveLength(1);
+  expect(Buffer.from(published[0]!.content).toString('utf8')).toBe(text);
+});
+
+test('pattern-like query feedback preserves literal matches and accurately scoped absence', async () => {
+  const { files, put } = fixture();
+  put('a', 'fixtures\ndist/\nfixtures|dist/\nvalue.*literal\n\\bword');
+  const matched = await files.search({ text: 'fixtures|dist/' });
+  expect(matched.matches.map((m) => m.line)).toEqual([3]);
+  expect(matched.feedback).toContain('matched literally, not as OR');
+  expect(matched.feedback).toContain('does not prove call reachability');
+  const missing = await files.search({ text: 'fixtures|absent' });
+  expect(missing.matches).toEqual([]);
+  expect(missing.feedback).toContain('Use separate literal queries');
+  expect(missing.feedback).toContain('differently worded references');
+  expect((await files.search({ text: 'value.*literal' })).matches.map((m) => m.line)).toEqual([4]);
+  expect((await files.search({ text: '\\bword' })).matches.map((m) => m.line)).toEqual([5]);
+  expect((await files.search({ text: 'ordinary literal' })).feedback).not.toContain('pattern-like');
 });

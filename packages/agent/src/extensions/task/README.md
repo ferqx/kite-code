@@ -10,6 +10,8 @@
 
 ## 稳定身份、准确命令和观察
 
+成功 child 的原结果可携带宿主根据准确本轮 Tool 回执生成的 `details.evidence`；工具统计、来源版本、读取行窗及原文预览用于父级核验，child 自己的总结不能填写或替换该封存字段。它只覆盖选定历史的有界预览，遗漏明确计数，旧 Run 不进入本轮证据；Source、consume、ack、`resultAcceptance` 的含义不变。父级对照原文并独立核对决定结论的连接，不因报告已接纳或 Tool 成功就认定语义正确；也不能从预览缺项推断未发生过动作。完整合同、大小边界及回归归 [Agent owner](../../../README.md)，不新增协作工具或普通客户端诊断展示。
+
 稳定目标邮件在原入队事务重新核准确 carrier、selection、工作关系和真实 Run.isActive；目录保留的已完成历史 Run 不成为活动投递目标。idle 邮件持久保存 targetRunId:null，只排队且不创建 child Run/Model；显式同工作 follow-up 再按原 predecessor 与双水位接纳。六工具回归另核这条 idle 正例的原 carrier、零激活及唯一邮件 Source，真实模型结果归测试 owner。
 
 `agent_id` 即原 child Session ID。`applyAgentCommand` 在一个 Store 写事务内先查原 invocation 回执，再选择其当前唯一 carrier，核准确直接父子、原执行因果、Store、主体、来源、控制与取消关系。运行中/queued 的 follow-up 返回 `mode:steer`；queued 引导绑定原 carrier 并在其实际 activation 后接入，不改写原委派。idle 时在同事务通过原 `ensureAgent` 建唯一 successor，复用 Session 与原配置；后续普通父轮次也可引导其现有直接 child，技术工作关系不额外拒绝。interrupt 取消首次准入选定的 carrier，包含尚无 Run 的 queued carrier，后续新轮不被迟到重试改投。普通消息/中断须有当前父 Tool 授权，不能接管其他父会话的 child。受理响应丢失时 Host 查回原持久证明；受理时 `state` 保留原快照，不用后来状态改写历史。Host 只准备了 queued 引导，而最终事务发现目标已结束时，在新 carrier 写入前返回 `target_changed`，重新观察后的新调用才准备并启动新轮；不会留下无执行绑定的已受理 carrier。首次激活前取消且可证明从未派发的 child 可复用同一 Session：新 carrier 通过真实 `child.start` 建立首次 Run，不伪造前驱 Run，也不修改原取消事实。仅接纳准确 cancelled carrier、未派发证明及原 rejected start 的 `cancelled_before_apply`／`not_activated` 回执；已派发、unknown 或缺少证明仍拒绝。私有证明由 [首次激活 owner](../../storage/sqlite/child-first-activation.ts)封存并核验。

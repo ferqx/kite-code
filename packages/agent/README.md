@@ -6,6 +6,12 @@
 
 [默认模型合同](src/model-context.ts)为主、子 Agent 提供已授权工作推进、可纠正失败、当前入口与可达调用链研究、父结果验收和收束指导。直接回答与适度交付前置，证据规则用于判断而非逐项打印成报告；委派不把约束扩展为额外报告任务。它保留原始要求、来源、压缩与未知结果约束，不添加业务完成状态或第二个 Loop。代码与符号存在不构成当前执行路径证明，子报告不因已接纳而成为正确性或权限证明。
 
+[取证观察](src/tool-observations.ts)把 Files 工具的准确查询、文件版本和读取窗口作为低信任数据供决策使用。搜索在原结果中说明字面匹配、分页和未检查范围，读取附当前窗口的原文预览，完整 Artifact 正文保持。Agent 不根据搜索／读取次数注入额外收束提醒、不设累计额度或新完成判定；研究方法由共用合同说明，实际判断仍需任务证据。次数型提醒只作过隔离实验，未保留为默认机制，其收益与局限见[任务质量 owner](../../tests/e2e/live/model/README.md#工具反馈与任务质量)。
+
+成功子结果沿原 carrier 的 `details.evidence` 携带当前 child Run 的工具结果摘要和取证预览，原完整报告正文不改写。宿主核实际 execution、call、Session／Run／Store 后记录身份，observation 仍是具名工具数据；同一 child 的后续 Run 不混用旧取证。`reportVerification:not_verified` 明确整份子报告尚未被核验，这是原结果的数据说明而非新业务状态；父级只采用逐项查实的主张，不能把核对当前路径扩张为整份报告与原文完全一致。预览保留最多 64 种工具统计，观察正文总量最多 32 KiB，lookup 使用较小的 8 KiB 阈值为 inspection 留出空间；`toolCallsOmitted/observationsOmitted` 明示省略，完整回执仍在原执行历史。`coverage:selected_history` 不证明全部历史或已压缩工作。父级须核对决定答案的入口／配置与实现连接；该材料不证明语义正确、调用可达或未发生其他动作。自动结果 Source 保原不可变结果及接纳身份；目录中的纯结果正文不另冒充取证包。
+
+[观察负例](test/isolated/context/tool-observations.test.ts)和[子结果取证](test/isolated/business/task/child-tool-evidence.test.ts)覆盖准确范围、同子会话后续轮、原文片段以及累计超过 19 MiB 原观察的正常结算。真实模型的当前／历史实现干扰、错误子报告采纳与收束证据归[任务质量 owner](../../tests/e2e/live/model/README.md#工具反馈与任务质量)；固定模型验证不保证任意模型的语义判断。
+
 [Shell owner](src/tools/shell.README.md)在本地引用明确缺失的预查处返回失败；[Files owner](src/tools/files/README.md)维护单文件/目录搜索、模型有界预览及不完整范围；[Task owner](src/extensions/task/README.md)从注册目录生成实际开放角色说明。原 Core 派发事实、精确重复失败保护和 [required 条件](src/storage/sqlite/requirements/README.md)保持，普通反馈不能解除真实 unknown。行为质量沿[任务级真实模型验证](../../tests/e2e/live/model/README.md)单独检验，不以固定模型或工具成功回执代替研究结论正确。
 
 设计原因、备选与代价保存在[工具反馈与任务质量决定](../../.agents/notes/implemented/architecture/2026-10-23-agent-feedback-and-task-quality.md)。模型指导已实施，真实样本中仍有冗长和超出证据的表述；机械执行断言与全文质量分别说明，不能据工具全部成功宣称模型结论全部正确。

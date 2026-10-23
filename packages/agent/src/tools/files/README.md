@@ -138,3 +138,13 @@ restore 复制 caller bytes，先核基线、同目录私有 temp 写全/fsync�
 [恢复原语测试](../../../test/isolated/files/recovery-primitives.test.ts)使用真实 macOS Workspace，覆盖完整 binary/BOM/CRLF、有限读取、内容与 inode CAS、反向删除、根改绑、保护组件及不安全对象拒绝。独立进程在真实 fsync 前/后注入失败，证明发布前零写、核对前外部漂移拒绝、已发布 restore/create/remove 保留 unknown 和 temp 清理；源码树外 built 公共入口实际恢复/删除原字节，无 TS fallback。此证据不外推 Windows 或 Linux qualification，也不证明任意外部 writer 原子 CAS。
 
 [Checkpoint business leaf](../../business/file-checkpoints/README.md)提供 `createFileCheckpointing`，沿原 builtin.files namespace 可选接入可信 before/after capture。普通未注入 Tools 保持原行为；注入后保存首个 confirmed preimage 的完整原 scoped Artifact 与末 postimage，封存失败不冒可恢复，发布后错误仍 outcome_unknown。该 leaf 当前只读/blocked intent 范围与尚未闭合的完整恢复边界见对应 owner。
+
+### 检索与读取观察数据
+
+真实搜索结果附 `query`（规范化相对 path、准确 text/glob/ignore、原 after 及本次有效分页／预览参数）、`stats` 和 `files`。`stats.checkedTextFiles` 是本页成功读取并验证为文本的文件数，不包含读取 ignore 规则的附带操作；`matchedFiles/matches` 计本页游标之后实际遇到的命中文件／行，包括为判断 `next` 多取的一条，`returnedMatches` 才是实际返回行数。文件可能已完整读取，但找到后页证据后不再扫描其余行，统计不代表全查询总量。`files` 只列已返回命中的文件，各 path 一次，baseline 来自该次真实读取；不为后页预读命中或未返回文件声明来源。零命中、后页或跳过范围会有简短 `feedback`，提示改查入口／范围或按原游标续读，不推断当前实现可达、业务完成或允许重放。
+
+模型 read/search 的 JSON 正文还附纯数据 `observation`：`kind=inspection/lookup`、规范相对 `scope`、search 的完整 query JSON 字符串、`sources[{path,version,fromLine?,toLine?}]` 及 `complete/coverage`。version 是原完整文件 hash，read 的行号来自实际 selection；search 来源仅取上述返回文件。`complete` 指本次是否覆盖整个文件或从头完整检索的所选查询范围，不证明任务成功。read 的局部或尾部窗口为 `coverage=window/complete=false`，`windowComplete=true` 只证明所选正文完整返回；整文件为 `coverage=file`。search 为 `coverage=page`，有原 after、next 或跳过项时 complete 为 false。大 read 沿既有完整 Artifact 正文协议，有限 JSON 摘要保留 observation。旧结构适配器未提供真实 query/files 或 baseline 时不补造观察数据。所有观察均为工具拥有的低信任结果，不授予读取、执行或解除 unknown 的权限。
+
+read 的 observation 另含 `excerpt:{text,truncated}`：仅取本次真实选区正文的前 2000 个 UTF-16 字符，不拆代理对。它是给接收方对照原句的有限片段，不是完整文件，也不改变 `coverage/complete/windowComplete` 的含义；即使片段未截断，局部窗口仍不是整文件。大 read 的有限 JSON 元数据保留该片段，原 Artifact 正文保持完整原字节。
+
+每次 search 的反馈都说明：字面匹配只覆盖本次明确范围与过滤条件，扫描完整不证明调用可达、没有其他实现或没有不同写法的引用。查询含 `|`、`.*` 或字面 `\\b` 时补充具体说明：这些符号按原字符串匹配，不是 OR、通配或词边界；需要测试不同词时分别查询。提示不改变匹配、不拒绝请求、不增加正则能力、执行权或次数限制。

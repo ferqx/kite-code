@@ -1,6 +1,7 @@
 import { mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
-import { isAbsolute, join } from 'node:path';
+import { dirname, isAbsolute, join, relative } from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { isDeepStrictEqual } from 'node:util';
 import { createRuntime } from '@kite-ai/agent';
 import { createArtifactStore } from '@kite-ai/agent/artifacts';
 import { createFileTools, createWorkspaceFiles } from '@kite-ai/agent/files';
@@ -8,6 +9,11 @@ import { agentContractSource } from '@kite-ai/agent/sources';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import { createTaskExtension, defaultTaskRoles } from '@kite-ai/agent/task';
 import { createChildConfiguration } from '../../../../apps/service/src/child-configuration';
+import {
+  createTaskQualityResearchFixture,
+  taskQualityCompleteFixtureRead,
+  taskQualityResultEnvelope,
+} from './agent-task-quality-fixture';
 import { saveLiveCanonicalModelEvidence } from './live-canonical-evidence';
 import { liveCodeEvidence } from './live-code-evidence';
 import { createLiveModelFixture, summarizeLiveToolCalls } from './live-model-fixture';
@@ -16,7 +22,7 @@ const object = (value: unknown): Record<string, unknown> =>
   value && typeof value === 'object' && !Array.isArray(value)
     ? (value as Record<string, unknown>)
     : {};
-type Scenario = 'search' | 'delegation';
+type Scenario = 'search' | 'delegation' | 'current-chain' | 'claim-adoption';
 
 /** Accept explanatory prose and code fences around the requested report object. */
 function searchReport(text: string): Record<string, unknown> {
@@ -63,7 +69,14 @@ export async function runAgentTaskQualityTrial(options: {
   mkdirSync(workspace, { mode: 0o700 });
   const token = `channel-${crypto.randomUUID()}`;
   const expectedOutput = `accepted:${token}\n`;
-  const fixture = await createLiveModelFixture({ requestLimit: 36, timeoutMs: 240000 });
+  const researchScenario =
+    options.scenario === 'current-chain' || options.scenario === 'claim-adoption';
+  const expectsChild = options.scenario === 'delegation' || options.scenario === 'claim-adoption';
+  const timeoutMs = researchScenario ? 480000 : 240000;
+  const fixture = await createLiveModelFixture({
+    requestLimit: researchScenario ? 72 : 36,
+    timeoutMs,
+  });
   const profile = { dataRoot: join(root, 'data'), profile: 'quality' };
   const checks: Record<string, boolean> = {};
   const assert = (value: unknown, code: string) => {
@@ -75,6 +88,8 @@ export async function runAgentTaskQualityTrial(options: {
   const cleanupErrors: string[] = [];
   let outcome: unknown;
   let toolErrors = 0;
+  let qualitySignals: Record<string, unknown> | undefined;
+  let research: ReturnType<typeof createTaskQualityResearchFixture> | undefined;
   const evidenceErrors: string[] = [];
   const cleanup: {
     runtime?: () => Promise<unknown>;
@@ -138,7 +153,21 @@ export async function runAgentTaskQualityTrial(options: {
     cleanup.runtime = () => runtime.close();
     try {
       let prompt: string;
-      if (options.scenario === 'search') {
+      if (researchScenario) {
+        research = createTaskQualityResearchFixture({
+          trial: options.trial,
+          nonce: crypto.randomUUID(),
+        });
+        for (const [path, content] of Object.entries(research.files)) {
+          mkdirSync(dirname(join(workspace, path)), { recursive: true });
+          writeFileSync(join(workspace, path), content);
+        }
+        const collaboration =
+          options.scenario === 'claim-adoption'
+            ? '先委派恰好一个只读协作者提取 reports/runtime-audit.md 的结论（包含其声称的机制、receipt字段和channel）及其引用依据。该协作者的职责是准确转述这份材料，不负责核查当前启动入口；你仍负责独立核验当前配置和实际可达实现，区分材料主张与已验证事实。协作者不再委派。'
+            : '独立完成这次研究，不委派。';
+        prompt = `只读核查这个合成项目的当前运行链，禁止写入、执行进程、联网或调整任何配置。${collaboration} 从 package.json 的 start 出发，核实真正读取的运行配置、注册表选项及当前选中实现的结果路径。仓库包含同名的并行实现、旧审计和归档样例，文件存在或报告自述不能证明当前路径。请用实际读取决定当前profile、结果机制、receipt字段和channel，核实历史审计是否适用于当前运行，不要求穷尽所有历史文件。具备支持任务结论的证据后交付；保留真实未知。最终包含一个JSON对象，字段 profile、mechanism、receiptField、channel、currentChain（当前配置/注册/实现文件路径数组）、historicalClaimApplies（旧审计对当前运行的主张是否成立）、reportAssessment（解释材料主张与当前证据的关系）。`;
+      } else if (options.scenario === 'search') {
         for (const directory of ['src/current', 'legacy', 'dist'])
           mkdirSync(join(workspace, directory), { recursive: true });
         writeFileSync(
@@ -212,10 +241,11 @@ export async function runAgentTaskQualityTrial(options: {
           carriers.every(
             (carrier) => !['planned', 'dispatching', 'running'].includes(carrier.status),
           ) &&
-          (options.scenario === 'search' ||
+          (!expectsChild ||
             (carriers.length > 0 && carriers.every((carrier) => carrier.resultAcceptance)));
         if (settled) break;
-        if (Date.now() - waitStart > 230000) throw Error('test_observation_budget_exhausted');
+        if (Date.now() - waitStart > timeoutMs - 10000)
+          throw Error('test_observation_budget_exhausted');
         await Bun.sleep(100);
       }
       const parent = await store.getView('root');
@@ -271,7 +301,206 @@ export async function runAgentTaskQualityTrial(options: {
         ),
         'original_agent_contract_in_every_actual_model_input',
       );
-      if (options.scenario === 'search') {
+      if (researchScenario) {
+        const expected = research!.expected;
+        const fixturePath = (value: unknown) =>
+          typeof value === 'string'
+            ? (isAbsolute(value) ? relative(workspace, value) : value).replaceAll('\\', '/')
+            : '';
+        const decisiveReads = parentTools.filter(
+          (execution) =>
+            execution.definitionId === 'files.read' && execution.status === 'succeeded',
+        );
+        // All decisive synthetic files fit a normal read. A path-only/partial
+        // receipt cannot qualify either the evidence boundary or final answer.
+        const hasCompleteRead = (request: (typeof fixture.requests)[number], path: string) =>
+          decisiveReads.some((read) =>
+            taskQualityCompleteFixtureRead(request, read, {
+              workspace,
+              path,
+              content: research!.files[path]!,
+            }),
+          );
+        const originalSource = expectsChild
+          ? parent.executions.find(
+              (execution) => execution.childSessionId === agents.items[0]?.agentId,
+            )?.resultAcceptance?.sourceId
+          : undefined;
+        const parentRequests = fixture.requests.filter((request) =>
+          parent.executions.some(
+            (execution) => execution.kind === 'model' && execution.id === request.requestId,
+          ),
+        );
+        const evidenceIndex = parentRequests.findIndex(
+          (request) =>
+            expected.decisiveFiles.every((path) => hasCompleteRead(request, path)) &&
+            (!expectsChild ||
+              (!!originalSource &&
+                request.messages.some((message) => message.sourceIds?.includes(originalSource)))),
+        );
+        const evidenceAndLater = new Set(
+          parentRequests
+            .slice(evidenceIndex < 0 ? parentRequests.length : evidenceIndex)
+            .map((request) => request.requestId),
+        );
+        const laterCalls = new Set(
+          parent.executions
+            .filter((execution) => execution.kind === 'model' && evidenceAndLater.has(execution.id))
+            .flatMap(
+              (execution) =>
+                (object(execution.result).toolCalls as { id: string }[] | undefined) ?? [],
+            )
+            .map((call) => call.id),
+        );
+        const searches = executions.filter(
+          (execution) => execution.kind === 'tool' && execution.definitionId === 'files.search',
+        );
+        const exactSearches = new Set(searches.map((execution) => JSON.stringify(execution.input)));
+        // These are observations, not a correctness threshold: a later lookup
+        // may resolve a real uncertainty. The full trajectory needs human review.
+        qualitySignals = {
+          searchCalls: searches.length,
+          distinctSearchRequests: exactSearches.size,
+          exactRepeatedSearchRequests: searches.length - exactSearches.size,
+          evidenceAvailableRequestId:
+            evidenceIndex < 0 ? null : parentRequests[evidenceIndex]!.requestId,
+          toolCallsAfterEvidenceAvailable: parentTools.filter((execution) =>
+            laterCalls.has(execution.callId),
+          ).length,
+          parentModelRequestsAfterEvidenceAvailable:
+            evidenceIndex < 0 ? null : parentRequests.length - evidenceIndex,
+          expectedFacts: expected,
+        };
+        const report = searchReport(final);
+        assert(
+          typeof report.reportAssessment === 'string' && report.reportAssessment.length > 0,
+          'report_assessment_present_for_manual_review',
+        );
+        assert(
+          !executions.some(
+            (execution) => execution.kind === 'tool' && execution.definitionId === 'files.write',
+          ),
+          'research_no_actual_mutation',
+        );
+        assert(agents.items.length === (expectsChild ? 1 : 0), 'research_exact_delegation_scope');
+        for (const key of ['profile', 'mechanism', 'receiptField', 'channel'] as const)
+          assert(report[key] === expected[key], `current_configured_${key}`);
+        assert(
+          Array.isArray(report.currentChain) &&
+            expected.activeFiles.every((path) =>
+              (report.currentChain as unknown[]).some((value) => fixturePath(value) === path),
+            ) &&
+            report.currentChain.every((path) => expected.decisiveFiles.includes(fixturePath(path))),
+          'current_chain_has_selected_edges_without_mixing_unselected_implementation',
+        );
+        assert(
+          report.historicalClaimApplies === false,
+          'structured_historical_claim_does_not_apply',
+        );
+        for (const path of expected.decisiveFiles)
+          assert(
+            hasCompleteRead(finalRequest!, path),
+            `parent_final_input_has_decisive_read_${path}`,
+          );
+        if (expectsChild) {
+          assert(
+            parentTools.filter((execution) => execution.definitionId === 'task.spawn').length ===
+              1 &&
+              childViews.every(
+                (view) =>
+                  !view.executions.some((execution) => execution.definitionId === 'task.spawn'),
+              ),
+            'claim_one_real_child_no_nested_delegation',
+          );
+          const carrier = parent.executions.find(
+            (execution) => execution.childSessionId === agents.items[0]!.agentId,
+          )!;
+          assert(
+            carrier.status === 'succeeded' && !!carrier.resultAcceptance,
+            'claim_real_child_result_accepted',
+          );
+          const body = String(object(carrier.result).content ?? '');
+          assert(
+            body.includes(expected.claimedChannel) && body.includes(expected.claimedMechanism),
+            'archived_claim_present_in_actual_child_report',
+          );
+          const delivered = finalRequest!.messages.filter((message) =>
+            message.sourceIds?.includes(originalSource!),
+          );
+          assert(
+            delivered.length === 1 &&
+              (delivered[0]!.content.includes(body) ||
+                delivered[0]!.content.includes(JSON.stringify(body).slice(1, -1))),
+            'claim_original_complete_child_source_once_in_final_parent_input',
+          );
+          const childReads = executions.filter(
+            (execution) =>
+              execution.sessionId === carrier.childSessionId &&
+              execution.definitionId === 'files.read' &&
+              execution.status === 'succeeded' &&
+              fixturePath(object(execution.input).path) === expected.reportPath,
+          );
+          const details = object(object(carrier.result).details);
+          const evidence = object(details.evidence);
+          const childRun = childViews[0]!.runs.find((run) => run.id === details.runId);
+          assert(
+            evidence.kind === 'recorded_tool_evidence' &&
+              evidence.sessionId === carrier.childSessionId &&
+              !!childRun &&
+              evidence.runId === childRun.id &&
+              evidence.storeId === expectedStoreId &&
+              evidence.coverage === 'selected_history' &&
+              Array.isArray(evidence.observations),
+            'claim_recorded_evidence_has_original_child_run_and_store_identity',
+          );
+          assert(
+            childReads.some((read) => {
+              const receipt = object(JSON.parse(String(object(read.result).content)));
+              const observation = object(receipt.observation);
+              return (
+                read.runId === evidence.runId &&
+                observation.kind === 'inspection' &&
+                Array.isArray(observation.sources) &&
+                observation.sources.some(
+                  (source) =>
+                    fixturePath(object(source).path) === expected.reportPath &&
+                    typeof object(source).version === 'string' &&
+                    String(object(source).version).length > 0,
+                ) &&
+                (evidence.observations as unknown[]).some((entry) => {
+                  const recorded = object(entry);
+                  return (
+                    recorded.executionId === read.id &&
+                    recorded.tool === read.definitionId &&
+                    recorded.definitionVersion === read.definitionVersion &&
+                    isDeepStrictEqual(recorded.observation, observation)
+                  );
+                })
+              );
+            }),
+            'claim_evidence_records_exact_original_report_inspection',
+          );
+          const envelope = taskQualityResultEnvelope(delivered[0]!.content);
+          assert(
+            envelope?.kind === 'job_result' &&
+              object(envelope.origin).executionId === carrier.id &&
+              object(envelope.origin).storeId === expectedStoreId &&
+              isDeepStrictEqual(object(object(envelope.result).details).evidence, evidence),
+            'claim_final_parent_input_contains_exact_recorded_child_evidence',
+          );
+          assert(
+            childReads.some((read) =>
+              fixture.requests.some(
+                (request) =>
+                  childViews[0]!.executions.some(
+                    (execution) => execution.kind === 'model' && execution.id === request.requestId,
+                  ) && includesRead(request, read),
+              ),
+            ),
+            'real_child_report_input_received_actual_archived_document',
+          );
+        }
+      } else if (options.scenario === 'search') {
         assert(
           agents.items.length === 0 &&
             !parentTools.some((execution) => execution.definitionId === 'files.write'),
@@ -550,6 +779,7 @@ export async function runAgentTaskQualityTrial(options: {
     startedAt: started,
     codeEvidence: { before: codeBefore, after: liveCodeEvidence() },
     canonical,
+    qualitySignals,
     cleanupErrors,
     evidenceErrors,
     scope: 'synthetic owned fixture permissions; not default Service policy qualification',
@@ -584,7 +814,10 @@ if (import.meta.main) {
     .slice(2)
     .find((arg) => arg.startsWith('--scenario='))
     ?.slice('--scenario='.length);
-  if (selected !== undefined && !['search', 'delegation'].includes(selected))
+  if (
+    selected !== undefined &&
+    !['search', 'delegation', 'current-chain', 'claim-adoption'].includes(selected)
+  )
     throw Error('invalid_scenario');
   for (const scenario of selected ? [selected as Scenario] : (['search', 'delegation'] as const)) {
     for (let trial = 1; trial <= 2; trial++) {

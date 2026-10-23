@@ -71,6 +71,24 @@ export interface FileSearchMatch {
   after?: { line: number; content: string; truncated?: true; originalLength?: number }[];
 }
 export interface FileSearchResult {
+  query?: {
+    path: string;
+    text: string;
+    glob: string | null;
+    respectIgnore: boolean;
+    after: string | null;
+    limit: number | null;
+    contextLines: number;
+    maxLineChars: number | null;
+  };
+  stats?: {
+    checkedTextFiles: number;
+    matchedFiles: number;
+    matches: number;
+    returnedMatches: number;
+  };
+  files?: { path: string; baseline: FileBaseline }[];
+  feedback?: string;
   matches: FileSearchMatch[];
   next: string | null;
   scope?: {
@@ -983,8 +1001,10 @@ export function createWorkspaceFiles(options: {
       if (input.respectIgnore !== undefined && typeof input.respectIgnore !== 'boolean')
         fail('file_search_filter_invalid');
       const matcher = input.glob === undefined ? undefined : compileFileGlob(input.glob);
-      const scope = input.path ?? '';
+      const scope = segments(input.path ?? '').join('/');
       const matches: FileSearchMatch[] = [];
+      let checkedTextFiles = 0;
+      const matchedBaselines = new Map<string, FileBaseline>();
       const skipped = { binary: 0, encoding: 0, ignored: 0, links: 0 };
       const samples: { path: string; reason: string }[] = [];
       const skip = (path: string, reason: keyof typeof skipped) => {
@@ -1024,6 +1044,7 @@ export function createWorkspaceFiles(options: {
           }
           throw error;
         }
+        checkedTextFiles++;
         // Keep at most the requested preceding lines, rather than a full-file line array.
         const preceding: {
           line: number;
@@ -1053,6 +1074,7 @@ export function createWorkspaceFiles(options: {
                 following = end === -1 ? snapshot.content.length : end + 1;
               }
             }
+            matchedBaselines.set(path, snapshot.baseline);
             matches.push(match);
             if (limit !== undefined && matches.length > limit) return true;
           }
@@ -1149,8 +1171,54 @@ export function createWorkspaceFiles(options: {
       options?.signal?.throwIfAborted();
       check();
       const more = limit !== undefined && matches.length > limit;
+      const selected = more ? matches.slice(0, limit) : matches;
+      const incomplete = more || Object.values(skipped).some(Boolean);
+      const feedback = [
+        'This is literal text matching in the selected scope and filters. Even a complete scan does not prove call reachability, absence of other implementations, or absence of differently worded references.',
+        ...(['|', '.*', '\\b'].some((marker) => input.text.includes(marker))
+          ? [
+              'The query contains pattern-like text (|, .* or \\b), but these characters are matched literally, not as OR, wildcards or word boundaries. Use separate literal queries when testing alternatives.',
+            ]
+          : []),
+        ...(selected.length === 0
+          ? [
+              'No literal match was found in the checked scope; this does not establish which implementation is active. Check the entry point/configuration or change the query or scope.',
+            ]
+          : []),
+        ...(more
+          ? [
+              'More matches remain. Continue with next using the same query and filters; this page is not the complete search.',
+            ]
+          : []),
+        ...(Object.values(skipped).some(Boolean)
+          ? [
+              'Some scope was not inspected; consult scope.skipped and samples before claiming absence.',
+            ]
+          : []),
+      ].join(' ');
       return {
-        matches: more ? matches.slice(0, limit) : matches,
+        query: {
+          path: scope,
+          text: input.text,
+          glob: input.glob ?? null,
+          respectIgnore: input.respectIgnore === true,
+          after: input.after ?? null,
+          limit: limit ?? null,
+          contextLines,
+          maxLineChars: input.maxLineChars ?? null,
+        },
+        stats: {
+          checkedTextFiles,
+          matchedFiles: matchedBaselines.size,
+          matches: matches.length,
+          returnedMatches: selected.length,
+        },
+        files: [...new Set(selected.map((match) => match.path))].map((path) => ({
+          path,
+          baseline: matchedBaselines.get(path)!,
+        })),
+        ...(feedback ? { feedback } : {}),
+        matches: selected,
         next: more ? key(matches[limit! - 1]!) : null,
         ...(more ||
         input.respectIgnore ||
@@ -1159,7 +1227,7 @@ export function createWorkspaceFiles(options: {
           ? {
               scope: {
                 kind: 'current_page' as const,
-                complete: !more && !Object.values(skipped).some(Boolean),
+                complete: !incomplete,
                 skipped,
                 samples,
                 filters: { glob: input.glob ?? null, respectIgnore: input.respectIgnore === true },

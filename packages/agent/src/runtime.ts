@@ -104,6 +104,7 @@ import {
   type SessionRecord,
   type WorkspaceRecord,
 } from './storage/types';
+import { childToolEvidence } from './tool-observations';
 
 /** A trusted configuration producer could not confirm cleanup of its actual preparation resources. */
 export class ConfigurationPreparationCleanupError extends AgentError {
@@ -1853,6 +1854,15 @@ export class AgentRuntime {
           : settlementInterrupted
             ? 'child_settlement_unconfirmed'
             : 'child_result_unavailable');
+      const evidence = await childToolEvidence(
+        messages,
+        {
+          sessionId: activation.session.id,
+          runId: activation.run.id,
+          storeId: parent.command.originStoreId,
+        },
+        (id) => this.options.store.getExecution(id),
+      );
       let modelContent: import('./extensions').ToolResult['modelContent'];
       if (Buffer.byteLength(content) > 64 * 1024) {
         if (!this.options.artifacts || !carrierExecutionId)
@@ -1908,6 +1918,7 @@ export class AgentRuntime {
           runId: activation.run.id,
           status: current?.status ?? 'unavailable',
           reason: current?.reason ?? null,
+          ...(evidence ? { evidence: evidence as unknown as Json } : {}),
         },
       };
     };
