@@ -14,6 +14,7 @@ import {
   reportRequiresContinuation,
 } from './job-report-continuation';
 import type { SqliteOperations } from './operations';
+import { resultMailEnvelope, resultMailPredicate, sealResultMail } from './result-mail';
 
 type Row = Record<string, string | number | bigint | null>;
 const parse = (value: Row[string] | undefined) => JSON.parse(String(value)) as Record<string, Json>;
@@ -335,6 +336,7 @@ export function registerJobReport(db: SqliteOperations, executionId: string): vo
   const reason = suppression(db, execution, binding);
   const request: Json = {
     kind: 'job.report',
+    ...(binding.kind === 'agent_completion' ? { mailboxVersion: 1 } : {}),
     executionId,
     resultRevision: String(execution.result_revision),
     contextSelectionId: binding.contextSelectionId!,
@@ -363,6 +365,7 @@ export function registerJobReport(db: SqliteOperations, executionId: string): vo
     execution.root_work_seq!,
     commandId,
   );
+  if (binding.kind === 'agent_completion') sealResultMail(db, commandId, execution);
   if (reason && execution.delivery === 'pending')
     db.run(
       "UPDATE execution SET delivery='suppressed',delivery_reason=? WHERE id=?",
@@ -396,7 +399,7 @@ export function listPendingJobReports(
     if (after > upper || upper > decimal(water)) throw new AgentError('cursor_ahead');
     if (!Number.isInteger(limit) || limit < 1 || limit > 100) throw new AgentError('invalid_limit');
     const rows = db.rows(
-        "SELECT * FROM command WHERE session_id=? AND kind IN('job.report','job.report.continue') AND status='accepted' AND seq>? AND seq<=? ORDER BY seq LIMIT ?",
+        `SELECT * FROM command WHERE session_id=? AND kind IN('job.report','job.report.continue') AND NOT ${resultMailEnvelope('command')} AND status='accepted' AND seq>? AND seq<=? ORDER BY seq LIMIT ?`,
         input.sessionId,
         after,
         upper,
@@ -558,8 +561,9 @@ export function applyJobReport(
     recovery?: JobReportRecovery;
     carriedMessageIds?: string[];
   },
+  inTransaction = false,
 ) {
-  return db.tx(() => {
+  const apply = () => {
     db.identity(input.expectedStoreId);
     const command = db.row(
       "SELECT * FROM command WHERE id=? AND kind IN('job.report','job.report.continue')",
@@ -569,6 +573,14 @@ export function applyJobReport(
     db.owner(input.owner, String(command.session_id));
     if (command.origin_store_id !== input.expectedStoreId)
       throw new AgentError('operation_unverifiable');
+    if (
+      db.row(`SELECT c.id FROM command c WHERE c.id=? AND ${resultMailEnvelope()}`, command.id!) &&
+      !db.row(
+        `SELECT c.id FROM command c JOIN execution e ON e.id=c.agent_source_execution_id WHERE c.id=? AND ${resultMailPredicate()}`,
+        command.id!,
+      )
+    )
+      throw new AgentError('result_mail_unverifiable');
     const prepared = input.recovery
       ? prepareReportRecovery(db, command, input.recovery)
       : undefined;
@@ -787,9 +799,20 @@ export function applyJobReport(
       command: import('../types').CommandRecord;
       source: import('../types').ResultContextSource;
     };
+    const resultMail = request.mailboxVersion === 1 && binding.kind === 'agent_completion';
     db.run(
-      'UPDATE command SET receipt_json=? WHERE id=?',
-      canonicalJson({ ...receipt, sourceId: consumed.source.id }),
+      'UPDATE command SET receipt_json=?,mail_target_run_id=CASE WHEN ? THEN ? ELSE mail_target_run_id END,mail_received_run_id=CASE WHEN ? THEN ? ELSE mail_received_run_id END,mail_received_selection_id=CASE WHEN ? THEN ? ELSE mail_received_selection_id END WHERE id=?',
+      canonicalJson({
+        ...receipt,
+        sourceId: consumed.source.id,
+        ...(resultMail ? { receivedSourceId: consumed.source.id } : {}),
+      }),
+      resultMail ? 1 : 0,
+      runId,
+      resultMail ? 1 : 0,
+      runId,
+      resultMail ? 1 : 0,
+      String(binding.contextSelectionId),
       command.id!,
     );
     if (!active)
@@ -806,6 +829,8 @@ export function applyJobReport(
       messageIds: input.carriedMessageIds ?? [],
     });
     db.event(String(command.session_id), String(command.id), 'job.report_received');
+    if (resultMail)
+      db.event(String(command.session_id), String(command.id), 'agent.message_received');
     if (!active) db.event(String(command.session_id), runId, 'run.started');
     const run = db.row('SELECT * FROM run WHERE id=?', runId)!;
     recordReportRecovery(db, command, input.recovery, prepared, run);
@@ -814,5 +839,6 @@ export function applyJobReport(
       run: db.runRecord(run),
       started: !active,
     };
-  });
+  };
+  return inTransaction ? apply() : db.tx(apply);
 }

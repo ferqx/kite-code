@@ -19,6 +19,44 @@ test('desktop carries recorded message time without inventing a timestamp for un
   ).toEqual([123, undefined]);
 });
 
+test('Agent mail and result presentation preserve recorded time and keep unknown time absent', () => {
+  const mail: Message = {
+    ...message('mail', 456),
+    role: 'system',
+    agentMessage: {
+      messageId: 'mail-command',
+      sourceSessionId: 'child',
+      sourceExecutionId: 'sender',
+      name: 'Worker',
+      contentComplete: true,
+    },
+  };
+  const result: Message = {
+    ...message('result', 789),
+    role: 'system',
+    agentResult: {
+      sourceId: 'source',
+      executionId: 'carrier',
+      resultRevision: '1',
+      childSessionId: 'child',
+      childRunId: null,
+      name: 'Worker',
+      outcome: 'succeeded',
+      contentComplete: true,
+    },
+  };
+  expect(
+    desktopMessages([mail, result, { ...mail, id: 'unknown', createdAt: undefined }]).map((row) => [
+      row.systemKind,
+      row.createdAtMs,
+    ]),
+  ).toEqual([
+    ['agent_message', 456],
+    ['agent_result', 789],
+    ['agent_message', undefined],
+  ]);
+});
+
 test('business input takeover preserves the original input time without changing independent duplicate text', () => {
   const raw = {
     ...message('raw', 100),

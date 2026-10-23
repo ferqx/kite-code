@@ -40,12 +40,14 @@ async function fixture(
   count: number,
   options: {
     active?: boolean;
+    holdReport?: boolean;
     apply?: (input: Parameters<Apply>[0], actual: Apply) => ReturnType<Apply>;
     plan?: (input: Parameters<Plan>[0], actual: Plan) => ReturnType<Plan>;
     slowObservers?: boolean;
+    childContent?: string;
   } = {},
 ) {
-  const holdReport = false,
+  const holdReport = options.holdReport ?? false,
     holdOriginal = options.active ?? false,
     holdAuthorization = false;
   const root = temporaryDirectory('kite-completion-notification-');
@@ -53,9 +55,47 @@ async function fixture(
   const actualStore = await openSqliteStore(profile);
   const store = new Proxy(actualStore, {
     get(target, key) {
-      if (key === 'applyJobReport' && options.apply)
-        return (input: Parameters<Apply>[0]) =>
-          options.apply!(input, target.applyJobReport.bind(target));
+      if (key === 'receiveAgentMessages' && options.apply)
+        return async (mailInput: Parameters<Store['receiveAgentMessages']>[0]) => {
+          if (!mailInput.resultOptions || mailInput.messageIds.length !== 1)
+            return target.receiveAgentMessages(mailInput);
+          const commandId = mailInput.messageIds[0]!;
+          let received: string[] = [];
+          // Existing fault assertions observe the old application result shape,
+          // but every commit below executes the real unified mailbox receiver.
+          const apply: Apply = async (input) => {
+            const before = await target.getCommand(commandId);
+            received = await target.receiveAgentMessages({
+              ...mailInput,
+              resultOptions: {
+                authorization: input.authorization,
+                activeOnly: input.activeOnly,
+                carriedMessageIds: input.carriedMessageIds,
+                recovery: input.recovery,
+              },
+            });
+            const command = (await target.getCommand(commandId))!;
+            const receipt = command.receipt as { runId?: string; mode?: string };
+            return {
+              command,
+              run: receipt.runId ? await target.getRun(receipt.runId) : null,
+              started:
+                before?.status !== 'applied' &&
+                command.status === 'applied' &&
+                receipt.mode === 'idle_new_turn',
+            };
+          };
+          await options.apply!(
+            {
+              expectedStoreId: mailInput.expectedStoreId,
+              owner: mailInput.owner,
+              commandId,
+              ...mailInput.resultOptions,
+            },
+            apply,
+          );
+          return received;
+        };
       if (key === 'planExecution' && options.plan)
         return (input: Parameters<Plan>[0]) =>
           options.plan!(input, target.planExecution.bind(target));
@@ -105,7 +145,7 @@ async function fixture(
       if (!Number.isInteger(index) || index < 0 || !childGates[index])
         throw Error('child_assignment_missing');
       await childGates[index]!.waiting;
-      yield { type: 'text_delta', text: `Complete result C${index + 1}` };
+      yield { type: 'text_delta', text: options.childContent ?? `Complete result C${index + 1}` };
       yield finish;
     },
   };
@@ -232,6 +272,351 @@ async function fixture(
   };
 }
 
+async function expectPublicChildResult(
+  f: Awaited<ReturnType<typeof fixture>>,
+  sourceId: string,
+  executionId: string,
+) {
+  const execution = (await f.store.getExecution(executionId))!;
+  const child = (await f.store.getSession(execution.childSessionId!))!;
+  const messages = await f.store.listMessages('root');
+  const projected = messages.filter((message) => message.agentResult);
+  expect(projected).toHaveLength(1);
+  const message = projected[0]!;
+  expect(message).toMatchObject({
+    id: sourceId,
+    role: 'system',
+    status: 'complete',
+    content: 'Complete result C1',
+    sourceIds: [sourceId],
+    agentResult: {
+      sourceId,
+      executionId,
+      resultRevision: execution.resultRevision,
+      childSessionId: child.id,
+      name: child.title,
+      outcome: 'succeeded',
+      contentComplete: true,
+    },
+  });
+  expect(message.agentResult!.childRunId).toBeString();
+  expect((await f.store.getRun(message.agentResult!.childRunId!))!.sessionId).toBe(child.id);
+  expect((await f.store.getRun(message.runId!))!.sessionId).toBe('root');
+  expect((await f.store.getView('root')).messages).toEqual(messages);
+  const paged: typeof messages = [];
+  let afterSeq = '0';
+  for (;;) {
+    const page = await f.store.listMessages('root', { afterSeq, limit: 1 });
+    if (!page.length) break;
+    paged.push(...page);
+    afterSeq = page[0]!.seq;
+  }
+  expect(paged).toEqual(messages);
+  expect(
+    await f.store.listMessages('root', {
+      afterSeq: String(BigInt(message.seq) - 1n),
+      upperSeq: message.seq,
+      limit: 1,
+    }),
+  ).toEqual([message]);
+  // Presentation is virtual: neither a second model input nor a physical message is written.
+  expect(f.db.query('SELECT id FROM message WHERE id=?').get(sourceId)).toBeNull();
+  expect(
+    f.requests.at(-1)!.messages.filter((entry) => entry.sourceIds?.includes(sourceId)),
+  ).toHaveLength(1);
+  const cold = await openSqliteStore({ ...f.profile, mode: 'readonly' });
+  try {
+    expect(await cold.listMessages('root')).toEqual(messages);
+  } finally {
+    await cold.close();
+  }
+}
+
+test('an active parent accepts child data without a bubble, including after that parent completes and reopens', async () => {
+  const accepted = gate(),
+    continueParent = gate();
+  const f = await fixture(1, {
+    active: true,
+    apply: async (input, actual) => {
+      const result = await actual(input);
+      if (result.command.status === 'applied') {
+        accepted.release();
+        await continueParent.waiting;
+      }
+      return result;
+    },
+  });
+  try {
+    await f.submit();
+    await until(async () => (f.requests.length === 2 ? true : null));
+    f.childGates[0]!.release();
+    await until(async () => (f.reports().length === 1 ? true : null));
+    f.reportGate.release();
+    await accepted.waiting;
+    const report = f.reports()[0]!;
+    expect(report.receipt.mode).toBe('active');
+    expect(report.receipt.outcome).toBe('report_received');
+    expect((await f.store.getRun(report.receipt.runId!))!.isActive).toBe(true);
+    expect((await f.store.listMessages('root')).some((message) => message.agentResult)).toBe(false);
+    continueParent.release();
+    await f.runtime.waitForCommand(report.id, { timeoutMs: 5000 });
+    expect((await f.store.getRun(report.receipt.runId!))!.isActive).toBe(false);
+    expect((await f.store.getView('root')).messages.some((message) => message.agentResult)).toBe(
+      false,
+    );
+    expect(
+      f.requests
+        .at(-1)!
+        .messages.filter((message) => message.sourceIds?.includes(report.receipt.sourceId!)),
+    ).toHaveLength(1);
+    const cold = await openSqliteStore({ ...f.profile, mode: 'readonly' });
+    try {
+      expect((await cold.listMessages('root')).some((message) => message.agentResult)).toBe(false);
+    } finally {
+      await cold.close();
+    }
+  } finally {
+    continueParent.release();
+    await f.close();
+  }
+}, 10000);
+
+test('only an idle result-created continuation publishes one bubble before and after its Run ends', async () => {
+  const f = await fixture(1, { holdReport: true });
+  const writer = new Database(join(f.profile.dataRoot, f.profile.profile, 'core.db'));
+  const update = (sql: string, ...values: string[]) => writer.query(sql).run(...values);
+  try {
+    await f.submit();
+    await f.runtime.waitForCommand('work', { timeoutMs: 5000 });
+    f.childGates[0]!.release();
+    const report = await until(
+      async () => f.reports().find((entry) => entry.status === 'applied') ?? null,
+    );
+    await until(async () => (f.requests.length === 3 ? true : null));
+    const runId = report.receipt.runId!;
+    const sourceId = report.receipt.sourceId!;
+    const executionId = JSON.parse(report.request_json).executionId as string;
+    expect(report.receipt.mode).toBe('idle_new_turn');
+    expect(report.receipt.outcome).toBe('report_started');
+    expect((await f.store.getRun(runId))!.isActive).toBe(true);
+    expect((await f.store.getRun(runId))!.originCommandId).toBe(report.id);
+    await expectPublicChildResult(f, sourceId, executionId);
+    const visible = async () =>
+      (await f.store.listMessages('root')).filter((message) => message.agentResult);
+    // Source consumption alone and a claimed mode are insufficient: every idle
+    // report identity must match its exact Source and the Run it actually created.
+    for (const [field, wrong] of [
+      ['mode', 'active'],
+      ['outcome', 'report_received'],
+      ['sourceId', 'another-source'],
+      ['executionId', 'another-carrier'],
+      ['resultRevision', '999'],
+      ['runId', 'another-run'],
+      ['contextSelectionId', 'another-selection'],
+    ]) {
+      update(
+        'UPDATE command SET receipt_json=? WHERE id=?',
+        JSON.stringify({ ...report.receipt, [field!]: wrong }),
+        report.id,
+      );
+      expect(await visible()).toEqual([]);
+      update(
+        'UPDATE command SET receipt_json=? WHERE id=?',
+        JSON.stringify(report.receipt),
+        report.id,
+      );
+    }
+    for (const [field, wrong] of [
+      ['executionId', 'another-carrier'],
+      ['resultRevision', '999'],
+      ['contextSelectionId', 'another-selection'],
+    ]) {
+      update(
+        'UPDATE command SET request_json=? WHERE id=?',
+        JSON.stringify({ ...JSON.parse(report.request_json), [field!]: wrong }),
+        report.id,
+      );
+      expect(await visible()).toEqual([]);
+      update('UPDATE command SET request_json=? WHERE id=?', report.request_json, report.id);
+    }
+    update('UPDATE run SET origin_command_id=? WHERE id=?', 'create', runId);
+    expect(await visible()).toEqual([]);
+    update('UPDATE run SET origin_command_id=? WHERE id=?', report.id, runId);
+    expect(await visible()).toHaveLength(1);
+    f.reportGate.release();
+    await f.runtime.waitForCommand(report.id, { timeoutMs: 5000 });
+    expect((await f.store.getRun(runId))!.isActive).toBe(false);
+    await expectPublicChildResult(f, sourceId, executionId);
+  } finally {
+    f.reportGate.release();
+    writer.close();
+    await f.close();
+  }
+}, 10000);
+
+test('public child results require accepted exact provenance, isolate malformed proofs and distinguish an artifact preview', async () => {
+  const body = 'Complete large child output.\n'.repeat(3000);
+  const f = await fixture(1, { childContent: body });
+  const writer = new Database(join(f.profile.dataRoot, f.profile.profile, 'core.db'));
+  // The real Runtime owner may briefly hold the WAL writer while the fixture
+  // restores its exact index/trigger definitions after corruption probes.
+  writer.exec('PRAGMA busy_timeout=1000');
+  const update = (sql: string, ...values: string[]) => writer.query(sql).run(...values);
+  try {
+    await f.submit();
+    await f.runtime.waitForCommand('work', { timeoutMs: 5000 });
+    f.childGates[0]!.release();
+    const report = await until(
+      async () => f.reports().find((entry) => entry.status === 'applied') ?? null,
+    );
+    await f.runtime.waitForCommand(report.id, { timeoutMs: 5000 });
+    const sourceId = report.receipt.sourceId!;
+    const resultMessage = () =>
+      f.store
+        .listMessages('root')
+        .then((messages) => messages.find((message) => message.id === sourceId));
+    const message = (await resultMessage())!;
+    expect(message.agentResult?.contentComplete).toBe(false);
+    expect(message.content).not.toBe(body);
+    expect(message.content).toContain('complete output available');
+    const executionId = message.agentResult!.executionId;
+    const execution = (await f.store.getExecution(executionId))!;
+    expect(message.content).toBe((execution.result as { content: string }).content);
+    const source = writer.query('SELECT * FROM context_snapshot WHERE id=?').get(sourceId) as {
+      request_json: string;
+      subject_id: string;
+    };
+    const physicalMessages = (await f.store.listMessages('root')).filter(
+      (entry) => !entry.agentResult,
+    );
+    const consume = writer
+      .query(
+        "SELECT id,request_json,receipt_json FROM command WHERE kind='job_result.consume' AND json_extract(receipt_json,'$.sourceId')=?",
+      )
+      .get(sourceId) as {
+      id: string;
+      request_json: string;
+      receipt_json: string;
+    };
+    // These unrelated reconciliation/queue schema expressions evaluate receipt
+    // JSON on UPDATE. This fixture removes them only to represent damaged bytes,
+    // then restores their exact definitions after restoring every proof row.
+    const index = writer
+      .query("SELECT sql FROM sqlite_master WHERE type='index' AND name='job_reconcile_verified'")
+      .get() as { sql: string };
+    const queueTrigger = writer
+      .query(
+        "SELECT sql FROM sqlite_master WHERE type='trigger' AND name='pending_input_queue_update'",
+      )
+      .get() as { sql: string };
+    writer.run('DROP INDEX job_reconcile_verified');
+    writer.run('DROP TRIGGER pending_input_queue_update');
+    try {
+      for (const [table, column, id, original] of [
+        ['context_snapshot', 'request_json', sourceId, source.request_json],
+        ['execution', 'result_json', executionId, JSON.stringify(execution.result)],
+        ['command', 'request_json', consume.id, consume.request_json],
+        ['command', 'receipt_json', consume.id, consume.receipt_json],
+        ['command', 'request_json', report.id, report.request_json],
+        ['command', 'receipt_json', report.id, JSON.stringify(report.receipt)],
+      ]) {
+        // Real SQLite corruption must hide only this virtual child result from
+        // message history. View already decodes Source/Execution facts separately:
+        // their damaged JSON retains that pre-existing explicit failure boundary.
+        update(`UPDATE ${table} SET ${column}=? WHERE id=?`, '{broken', id!);
+        try {
+          expect(await f.store.listMessages('root')).toEqual(physicalMessages);
+          // Consume proof is a new View dependency introduced by this projection.
+          if (table === 'command' && id === consume.id)
+            expect((await f.store.getView('root')).messages).toEqual(physicalMessages);
+        } finally {
+          update(`UPDATE ${table} SET ${column}=? WHERE id=?`, original!, id!);
+        }
+        expect(await resultMessage()).toEqual(message);
+      }
+    } finally {
+      writer.run(index.sql);
+      writer.run(queueTrigger.sql);
+    }
+    const childStart = writer
+      .query(
+        'SELECT c.id,c.request_json FROM command c JOIN run r ON r.origin_command_id=c.id WHERE r.id=?',
+      )
+      .get(message.agentResult!.childRunId!) as { id: string; request_json: string };
+    update('UPDATE command SET request_json=? WHERE id=?', '{broken', childStart.id);
+    try {
+      const withoutRunProof = {
+        ...message,
+        agentResult: { ...message.agentResult!, childRunId: null },
+      };
+      expect(await resultMessage()).toEqual(withoutRunProof);
+      expect(
+        (await f.store.getView('root')).messages.find((entry) => entry.id === sourceId),
+      ).toEqual(withoutRunProof);
+    } finally {
+      update(
+        'UPDATE command SET request_json=? WHERE id=?',
+        childStart.request_json,
+        childStart.id,
+      );
+    }
+    expect(await resultMessage()).toEqual(message);
+    // Observation uses raw history, independently of the Model's selected context branch.
+    const selection = writer
+      .query("SELECT context_selection_id FROM session WHERE id='root'")
+      .get() as {
+      context_selection_id: string;
+    };
+    update("UPDATE session SET context_selection_id='other-observation-branch' WHERE id='root'");
+    expect(await resultMessage()).toEqual(message);
+    update(
+      'UPDATE session SET context_selection_id=? WHERE id=?',
+      selection.context_selection_id,
+      'root',
+    );
+    for (const flag of ['pendingInput', 'statusOnly', 'diagnostic']) {
+      update(
+        'UPDATE context_snapshot SET request_json=? WHERE id=?',
+        JSON.stringify({ ...JSON.parse(source.request_json), [flag]: true }),
+        sourceId,
+      );
+      expect(await resultMessage()).toBeUndefined();
+      update(
+        'UPDATE context_snapshot SET request_json=? WHERE id=?',
+        source.request_json,
+        sourceId,
+      );
+    }
+    update("UPDATE context_snapshot SET subject_id='foreign' WHERE id=?", sourceId);
+    expect(await resultMessage()).toBeUndefined();
+    update('UPDATE context_snapshot SET subject_id=? WHERE id=?', source.subject_id, sourceId);
+    update('UPDATE execution SET result_revision=result_revision+1 WHERE id=?', executionId);
+    expect(await resultMessage()).toBeUndefined();
+    update(
+      'UPDATE execution SET result_revision=? WHERE id=?',
+      execution.resultRevision,
+      executionId,
+    );
+    update(
+      "UPDATE execution SET result_json=json_set(result_json,'$.outcome','failed') WHERE id=?",
+      executionId,
+    );
+    expect(await resultMessage()).toBeUndefined();
+    update(
+      'UPDATE execution SET result_json=? WHERE id=?',
+      JSON.stringify(execution.result),
+      executionId,
+    );
+    update("UPDATE execution SET kind='model' WHERE id=?", executionId);
+    expect(await resultMessage()).toBeUndefined();
+    update("UPDATE execution SET kind='job' WHERE id=?", executionId);
+    expect(await resultMessage()).toEqual(message);
+  } finally {
+    writer.close();
+    await f.close();
+  }
+}, 10000);
+
 for (const active of [false, true])
   for (const stage of ['source', 'ack'] as const) {
     test(`new completion ${active ? 'active' : 'idle'} ${stage} SQL failure rolls target Source and ack back, exact retry commits once`, async () => {
@@ -286,6 +671,9 @@ for (const active of [false, true])
             .all(executionId),
         ).toHaveLength(0);
         expect(await f.store.getCommand(`consume-${report.id}`)).toBeNull();
+        expect((await f.store.listMessages('root')).some((message) => message.agentResult)).toBe(
+          false,
+        );
         writer.run('DROP TRIGGER report_fault');
         retry.release();
         const committed = await until(
@@ -308,6 +696,37 @@ for (const active of [false, true])
             .at(-1)!
             .messages.some((message) => message.sourceIds?.includes(committed.receipt.sourceId!)),
         ).toBe(true);
+        if (active) {
+          // An active admission stays process data even after that parent Run ends.
+          expect(committed.receipt.mode).toBe('active');
+          expect((await f.store.getRun(committed.receipt.runId!))!.isActive).toBe(false);
+          expect((await f.store.listMessages('root')).some((message) => message.agentResult)).toBe(
+            false,
+          );
+          const cold = await openSqliteStore({ ...f.profile, mode: 'readonly' });
+          try {
+            expect(
+              (await cold.getView('root')).messages.some((message) => message.agentResult),
+            ).toBe(false);
+          } finally {
+            await cold.close();
+          }
+          // Rewriting an active ack's label cannot make its existing Run a result-created Run.
+          writer.query('UPDATE command SET receipt_json=? WHERE id=?').run(
+            JSON.stringify({
+              ...committed.receipt,
+              mode: 'idle_new_turn',
+              outcome: 'report_started',
+            }),
+            committed.id,
+          );
+          expect((await f.store.listMessages('root')).some((message) => message.agentResult)).toBe(
+            false,
+          );
+          writer
+            .query('UPDATE command SET receipt_json=? WHERE id=?')
+            .run(JSON.stringify(committed.receipt), committed.id);
+        } else await expectPublicChildResult(f, committed.receipt.sourceId!, executionId);
       } finally {
         writer.run('DROP TRIGGER IF EXISTS report_fault');
         retry.release();

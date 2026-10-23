@@ -133,6 +133,9 @@ export function renderMarkdownDiagram(
         container.remove();
       }
     });
-  queue = job;
+  queue = job.then(
+    () => undefined,
+    () => undefined,
+  );
   return job;
 }

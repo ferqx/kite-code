@@ -26,6 +26,25 @@ KITE_RUN_LIVE_MODEL_TOOLS=1 bun run test:model:tools:live --output=/absolute/own
 
 该 smoke 直接创建 Runtime，权限和 after-turn 由自有隔离夹具明确允许，child 仅做无工具算术。因此它证明已列身份、历史和 Source 路径，不证明正式客户端输入选择、默认审批、当前环境重读或全部 A05 变体。
 
+## 统一邮箱收件
+
+[统一收件 runner](collaboration-unified-inbox.live.ts)复用通用真实 Provider fixture，每次运行一个准确用例。`U01-active-unified-inbox` 在父第二次真实请求的原工具事件处暂挂，等普通邮件和最终结果进入同一邮箱后原样释放；核原只读工具只成功一次、同 Run 接收、完整低信任正文和唯一 Source，以及随后准确 `input.steer` 的原用户来源。`U02-idle-continuation-denied` 先让父正常完成，再实际发送普通邮件、发布最终结果，核普通消息不唤醒，当前续跑授权拒绝时两者保持排队，零 Source、新父 Run 或父模型请求。两例直接使用 owned Runtime／SQLite 与明确允许的工具策略，不授默认审批或客户端资格。
+
+```bash
+KITE_RUN_LIVE_COLLABORATION=1 bun tests/e2e/live/model/collaboration.live.ts --group=unified-inbox --case=U01-active-unified-inbox --output=/absolute/owned-directory/active.json
+KITE_RUN_LIVE_COLLABORATION=1 bun tests/e2e/live/model/collaboration.live.ts --group=unified-inbox --case=U02-idle-continuation-denied --output=/absolute/owned-directory/denied.json
+```
+
+[普通 Native 收件窗口 runner](collaboration-unified-native-window.live.ts)另从当前源码构建 `testDiagnostics:false` 的 Main／preload／renderer 和配套 Service。隔离 HOME 仅保存 loopback 配置，原凭据只在透明代理内存中使用；沿普通 UI 选择完全访问、输入任务、查看准确子详情和正常退出／冷开。测试只启用文件读取和 Agent 工具，明确选择实际目录中的 `code` 预设以保留消息能力。HTTP 200 后的响应时序门只延迟原正文，不生成、改写或重放模型回复；记录这一边界，不将其称作远端仍在计算。每次最多 40 次真实 HTTP、600 秒，单请求 60 秒，输出最多 4096 token，保留配置的模型／协议／推理设置，无外围重试或换模型。
+
+```bash
+KITE_RUN_LIVE_COLLABORATION=1 bun tests/e2e/live/model/collaboration-unified-native-window.live.ts --output=/absolute/owned-directory/window.json
+```
+
+窗口制品保存父已结束而 child 仍运行、普通邮件仅排队、idle 结果先于父回复可见、active 原轮接收、准确 child 正文、父完成和冷开两会话的阶段截图及 150ms 连续帧。另保存真实邮箱／Source 回执、完整 canonical Model input/output 和实际 Provider 输入。公开展示若把普通邮件占位当用户气泡，或把原 Run 拆成两段处理过程，独立断言必须失败并保留失败现场及此前过程帧，不以底层收件或最后截图通过覆盖展示异常。本机实际结果和未取得的展示资格由 [Desktop owner](../../../../apps/desktop/README.md#native-当前会话环境信息与子详情)维护，Core 真实收件结果归 [Store owner](../../../../packages/agent/src/storage/README.md#统一消息接收)。
+
+普通邮件展示回归逐字比较真实发送 Tool 输入与 `data-agent-message-id` 对应的唯一正文，核真实发送者、接收 Run 归属和原处理过程。终态／冷读先等 renderer 完成终态分组，再经普通展开控件读取全文，最后恢复折叠与阅读位置；不把后台已完成当成界面已经提交。`12-active-ordinary-mail-detail.png` 补存父仍运行时的邮件近照。公开 Runtime 正文、raw Store占位与实际 Provider 低信任输入分别比对，读取前后 Provider／持久化 footprint 不增。修复前的占位／拆段失败样本保留，后续通过资格以 owner 的当前证据为准。
+
 ## 输入、审批、标题与竞争
 
 [协作 live 驱动](collaboration.live.ts)从正式 Service/Client HTTP 进入当前 Runtime/SQLite，逐次只运行一个准确用例：

@@ -1,6 +1,7 @@
 import { afterAll, afterEach, expect, test } from 'bun:test';
 import { JSDOM } from 'jsdom';
 import { act } from 'react';
+import type { SessionPageProps } from '../../src/desktop/SessionPage';
 
 const dom = new JSDOM('<!doctype html><html><body></body></html>', {
   url: 'http://localhost',
@@ -17,9 +18,24 @@ const matchMedia = (query: string) =>
         media: query,
       })) as MediaQueryList;
 class TestResizeObserver {
-  observe() {}
-  unobserve() {}
-  disconnect() {}
+  static observed = new Map<Element, ResizeObserverCallback>();
+  private targets = new Set<Element>();
+  private callback: ResizeObserverCallback;
+  constructor(callback: ResizeObserverCallback) {
+    this.callback = callback;
+  }
+  observe(target: Element) {
+    this.targets.add(target);
+    TestResizeObserver.observed.set(target, this.callback);
+  }
+  unobserve(target: Element) {
+    this.targets.delete(target);
+    TestResizeObserver.observed.delete(target);
+  }
+  disconnect() {
+    for (const target of this.targets) TestResizeObserver.observed.delete(target);
+    this.targets.clear();
+  }
 }
 Object.assign(dom.window, {
   matchMedia,
@@ -77,8 +93,8 @@ afterAll(() => {
   }
 });
 
-async function render() {
-  root = createRoot(document.body);
+async function render(overrides: Partial<SessionPageProps> = {}) {
+  root ??= createRoot(document.body);
   await act(() =>
     root!.render(
       <SessionPage
@@ -91,6 +107,7 @@ async function render() {
         connectionLabel=""
         loading={false}
         actions={{}}
+        {...overrides}
       />,
     ),
   );
@@ -218,5 +235,54 @@ test('the title toggle and sidebar state change in the panel animation frame wit
       dom.window.requestAnimationFrame,
       dom.window.cancelAnimationFrame,
     ] = original;
+  }
+});
+
+test('environment docking starts at its measured layout, keeps late content stable and animates later width changes', async () => {
+  const originalRect = dom.window.HTMLElement.prototype.getBoundingClientRect;
+  let width = 1200;
+  dom.window.HTMLElement.prototype.getBoundingClientRect = function () {
+    return this.classList.contains('session-view')
+      ? new dom.window.DOMRect(0, 0, width, 800)
+      : originalRect.call(this);
+  };
+  const card = (text: string) => <aside className="environment-information">{text}</aside>;
+  const sessionView = () => document.querySelector<HTMLElement>('.session-view')!;
+  const resizeView = async (nextWidth: number) => {
+    width = nextWidth;
+    await act(() => {
+      const element = sessionView();
+      TestResizeObserver.observed.get(element)?.(
+        [
+          { target: element, contentRect: new dom.window.DOMRect(0, 0, width, 800) },
+        ] as unknown as ResizeObserverEntry[],
+        {} as ResizeObserver,
+      );
+    });
+  };
+  try {
+    await render({ environmentInformation: card('') });
+    expect(sessionView().classList.contains('environment-information-docked')).toBe(true);
+    expect(sessionView().classList.contains('environment-information-animated')).toBe(false);
+    const originalCard = document.querySelector('.environment-information');
+    await render({ environmentInformation: card('已读取环境信息') });
+    expect(document.querySelector('.environment-information')).toBe(originalCard);
+    expect(sessionView().classList.contains('environment-information-docked')).toBe(true);
+    expect(sessionView().classList.contains('environment-information-animated')).toBe(false);
+
+    await resizeView(1000);
+    expect(sessionView().classList.contains('environment-information-closed')).toBe(true);
+    expect(sessionView().classList.contains('environment-information-animated')).toBe(true);
+    await click('显示环境信息');
+    expect(sessionView().classList.contains('environment-information-overlay')).toBe(true);
+    await click('隐藏环境信息');
+    expect(sessionView().classList.contains('environment-information-closed')).toBe(true);
+    await resizeView(1200);
+    expect(sessionView().classList.contains('environment-information-closed')).toBe(true);
+    await click('显示环境信息');
+    expect(sessionView().classList.contains('environment-information-docked')).toBe(true);
+    expect(sessionView().classList.contains('environment-information-animated')).toBe(true);
+  } finally {
+    dom.window.HTMLElement.prototype.getBoundingClientRect = originalRect;
   }
 });

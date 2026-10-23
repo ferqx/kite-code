@@ -247,6 +247,10 @@ Provider Settings 的 `getProviderSettings({storeId})` 与 `updateProviderSettin
 
 ## 终端展示的只读 metadata
 
+同源 `Message.agentResult` 保留实际触发父续 Run 的子结果 Source ID、carrier Execution／revision、child Session／可核 Run、名称、终态与正文完整性；父原轮 active 接纳不生成独立消息。SDK 只按生成 schema 读取，不根据当前 Run 状态改判历史接纳，也不把这类系统展示消息当作用户输入或模型回复。`contentComplete:false` 只代表当前 content 未交付完整结果，完整阅读继续使用准确原任务入口。服务和持久来源证明归 [Service](../../apps/service/README.md#终端展示的新增只读字段)与 [Store](../agent/src/storage/README.md#人类工作与完成报告事务)。
+
+同源 `Message.agentMessage` 表示已验证接收的普通 Agent 邮件，保留原 mail ID、发送 Session／Tool Execution、发送者名称与 `contentComplete`；system 消息的 content 为完整展示正文。SDK 继续沿生成 validator 读取，不猜发送者、不把邮件改成用户输入，也不重新发送邮件或启动 Run。Native 由该元数据归入原接收轮次的处理过程；来源和 Artifact 读取仍由 [Runtime owner](../agent/src/storage/README.md#统一消息接收)负责。
+
 同源生成类型包含 Tool `toolCallId/toolInput`、实际 `compressionProgress`、模型 `connectionId`及 Files `textChange`。Files decoder 核 UTF-8、有界 preview、truncated 与实际行统计，不把展示片段当恢复 bytes；SessionLog 只放行类型／category均匹配的 `builtin.files/checkpoint/<64hex>/point`，其他动态 key 仍不可见。[Files](test/isolated/file-checkpoints.test.ts)与[SessionLog](test/isolated/session-logs.test.ts)保留原身份、分页、拒绝与零效果断言。
 
 

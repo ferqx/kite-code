@@ -375,9 +375,9 @@ export async function runLiveCollaborationCompaction(options: Options) {
         initial.agents.items.every((agent) => agent.taskName === null),
         'two_original_children_unnamed',
       );
-      const mail = (await owned.listAgentMessages(scope)).items.find(
-        (item) => item.sourceSessionId === east!.agentId,
-      );
+      const mail = (await owned.listAgentMessages(scope)).items
+        .filter((item) => item.kind === 'message')
+        .find((item) => item.sourceSessionId === east!.agentId);
       branch(mail, 'original_east_mail_exists');
       const originalSend = toolEvents.find(
         (event) =>

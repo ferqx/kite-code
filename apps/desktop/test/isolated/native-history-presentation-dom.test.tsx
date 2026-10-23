@@ -35,7 +35,12 @@ const final = '项目包含 Core、Desktop 与共享 UI。';
 const summary = 'PRIVATE_COMPRESSION_SUMMARY';
 const raw = 'ORIGINAL_TOOL_RECEIPT';
 type Reader = 'runs' | 'tools';
-function fixture(failTools = false, failRuns = false, withImage = false) {
+function fixture(
+  failTools = false,
+  failRuns = false,
+  withImage = false,
+  options: { permissionUnavailable?: boolean; missingRuns?: boolean; missingTools?: boolean } = {},
+) {
   const restoreWorker = withImage ? installImagePreviewWorker() : () => {};
   const dom = new JSDOM('<div id="root"></div>', {
     url: 'http://localhost',
@@ -60,6 +65,7 @@ function fixture(failTools = false, failRuns = false, withImage = false) {
     historyEpoch = 0,
     holdSelection = false;
   let releaseSelection: (() => void) | undefined;
+  let failHistory = false;
   let holdMessages = false,
     releaseMessages: (() => void) | undefined;
   const imageData =
@@ -104,6 +110,7 @@ function fixture(failTools = false, failRuns = false, withImage = false) {
       viewGeneration: revision,
       viewSelection,
       canReadModelOutput: false,
+      permissionUnavailable: options.permissionUnavailable,
       session: {
         ...session,
         id: selected,
@@ -184,6 +191,7 @@ function fixture(failTools = false, failRuns = false, withImage = false) {
             workspaces: [{ id: 'w', name: 'Workspace', rootUri: 'file:///workspace' }],
           };
         case 'messages': {
+          if (failHistory) throw Error('history_unavailable');
           const page = {
             messages:
               selected === 'root'
@@ -292,24 +300,26 @@ function fixture(failTools = false, failRuns = false, withImage = false) {
                       kind: 'toolMessages.runs',
                       readId: request.readId,
                       scope,
-                      runs: [
-                        {
-                          id: 'old-run',
-                          originStoreId: 'store',
-                          sessionId: captured,
-                          status: withImage ? 'running' : 'completed',
-                          isActive: withImage,
-                          createdAt: 1000,
-                          finishedAt: withImage ? null : 3000,
-                          reason: null,
-                        },
-                      ],
+                      runs: options.missingRuns
+                        ? []
+                        : [
+                            {
+                              id: 'old-run',
+                              originStoreId: 'store',
+                              sessionId: captured,
+                              status: withImage ? 'running' : 'completed',
+                              isActive: withImage,
+                              createdAt: 1000,
+                              finishedAt: withImage ? null : 3000,
+                              reason: null,
+                            },
+                          ],
                     }
                   : {
                       kind: 'toolMessages.page',
                       readId: request.readId,
                       scope,
-                      entries: [1, 2].map((number) => ({
+                      entries: (options.missingTools ? [] : [1, 2]).map((number) => ({
                         messageId: `tool-${number}`,
                         executionId: `execution-${number}`,
                         definitionId: 'files.read',
@@ -385,14 +395,26 @@ function fixture(failTools = false, failRuns = false, withImage = false) {
       });
       await until(() => pending.runs.length > 0 && pending.tools.length > 0);
     },
-    async render() {
+    async failHistory() {
+      const before = requests.filter((request) => request.method === 'messages').length;
+      await act(async () => {
+        failHistory = true;
+        revision++;
+        for (const listener of listeners) listener({ kind: 'changed', generation: 1 });
+      });
+      await until(
+        () => requests.filter((request) => request.method === 'messages').length > before,
+      );
+    },
+    async render(waitForMetadata = true) {
       await act(async () => root.render(<NativeDesktop />));
       await act(async () => {
         [...host.querySelectorAll<HTMLButtonElement>('button')]
           .find((button) => button.textContent === 'Original')
           ?.click();
       });
-      await until(() => pending.runs.length > 0 && pending.tools.length > 0);
+      if (waitForMetadata) await until(() => pending.runs.length > 0 && pending.tools.length > 0);
+      else await until(() => requests.some((request) => request.method === 'messages'));
     },
     async close() {
       await act(async () => root.unmount());
@@ -414,8 +436,19 @@ function fixture(failTools = false, failRuns = false, withImage = false) {
 function expectReadableDuringMetadata(host: HTMLElement) {
   expect(host.querySelector('.conversation-loading')).toBeNull();
   expect(host.textContent).toContain(final);
-  // Ownership and tool facts can still enrich grouping independently. Neither
-  // private compression text nor unchecked raw tool receipts become visible.
+  // Previously admitted or failed readings stay available during recalibration.
+  expect(host.textContent).not.toContain(summary);
+  expect(host.textContent).not.toContain(raw);
+}
+
+function expectInitialStructurePending(host: HTMLElement) {
+  expect(host.querySelector('.conversation-loading')).not.toBeNull();
+  expect(host.querySelector('.conversation-viewport')?.getAttribute('aria-busy')).toBe('true');
+  expect(host.querySelector('.message')).toBeNull();
+  expect(host.querySelector('.agent-turn')).toBeNull();
+  expect(host.querySelector('.welcome')).toBeNull();
+  expect(host.querySelector('.new-conversation-welcome')).toBeNull();
+  expect(host.textContent).not.toContain(final);
   expect(host.textContent).not.toContain(summary);
   expect(host.textContent).not.toContain(raw);
 }
@@ -481,7 +514,10 @@ test('sent image thumbnails retain verified nodes and URLs through streaming and
   const f = fixture(false, false, true);
   try {
     await f.render();
+    expectInitialStructurePending(f.host);
+    expect(f.urls).toHaveLength(0);
     await f.release('runs');
+    expectInitialStructurePending(f.host);
     await f.release('tools');
     await f.until(() => !!f.host.querySelector('.native-user-image img'));
     const card = f.host.querySelector('.native-user-image')!;
@@ -526,16 +562,16 @@ test('sent image thumbnails retain verified nodes and URLs through streaming and
 });
 
 for (const first of ['runs', 'tools'] as const) {
-  test(`historical Native transcript remains readable with ${first} facts arriving first, then enriches the completed collapsed Turn`, async () => {
+  test(`cold Native history publishes its completed collapsed Turn only after ${first} and the remaining structural facts arrive`, async () => {
     const f = fixture();
     try {
       await f.render();
       expect(f.pending('runs')).toBe(1);
       expect(f.pending('tools')).toBe(1);
-      expectReadableDuringMetadata(f.host);
+      expectInitialStructurePending(f.host);
       await f.release(first);
       expect(f.pending(first === 'runs' ? 'tools' : 'runs')).toBe(1);
-      expectReadableDuringMetadata(f.host);
+      expectInitialStructurePending(f.host);
       await f.release(first === 'runs' ? 'tools' : 'runs');
       await f.until(() => !!f.host.querySelector('[data-turn-status="completed"]'));
       expect(f.host.querySelector('.conversation-loading')).toBeNull();
@@ -544,6 +580,13 @@ for (const first of ['runs', 'tools'] as const) {
         'false',
       );
       expect(f.host.textContent).toContain(final);
+      const reply = f.host.querySelector('.agent-turn-final')!;
+      const viewport = f.host.querySelector('.conversation-viewport')!;
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      });
+      expect(f.host.querySelector('.agent-turn-final')).toBe(reply);
+      expect(f.host.querySelector('.conversation-viewport')).toBe(viewport);
       expect(f.host.querySelector('.context-compacted')).toBeNull();
       expect(f.host.textContent).not.toContain('状态待核对');
       await act(async () =>
@@ -563,6 +606,66 @@ for (const first of ['runs', 'tools'] as const) {
     }
   });
 }
+
+for (const missing of ['runs', 'tools'] as const) {
+  test(`a successful structural read with missing ${missing} publishes the original messages without waiting forever`, async () => {
+    const f = fixture(false, false, false, {
+      missingRuns: missing === 'runs',
+      missingTools: missing === 'tools',
+    });
+    try {
+      await f.render();
+      expectInitialStructurePending(f.host);
+      await f.release('runs');
+      expectInitialStructurePending(f.host);
+      await f.release('tools');
+      await f.until(() => !!f.host.textContent?.includes(final));
+      expect(f.host.querySelector('.conversation-loading')).toBeNull();
+      expect(f.host.querySelector('.welcome')).toBeNull();
+      expect(f.pending('runs')).toBe(0);
+      expect(f.pending('tools')).toBe(0);
+      expect(f.host.textContent).not.toContain(summary);
+      expect(f.host.textContent).not.toContain(raw);
+    } finally {
+      await f.close();
+    }
+  });
+}
+
+test('a genuine permission failure bypasses pending structural readers and keeps saved history readable', async () => {
+  const f = fixture(false, false, false, { permissionUnavailable: true });
+  try {
+    await f.render(false);
+    await f.until(() => !!f.host.textContent?.includes(final));
+    expectReadableDuringMetadata(f.host);
+    expect(f.pending('runs')).toBe(0);
+    expect(f.pending('tools')).toBe(0);
+    expect(f.requests.some((request) => request.method === 'toolMessages.runs')).toBe(false);
+    expect(f.requests.some((request) => request.method === 'toolMessages.list')).toBe(false);
+    expect(
+      f.host.querySelector<HTMLButtonElement>('.composer button[type="submit"]')?.disabled,
+    ).toBe(true);
+  } finally {
+    await f.close();
+  }
+});
+
+test('a history scan failure ends cold structural waiting and preserves the saved original messages', async () => {
+  const f = fixture();
+  try {
+    await f.render();
+    expectInitialStructurePending(f.host);
+    await f.failHistory();
+    await f.until(() => !!f.host.textContent?.includes(final));
+    expectReadableDuringMetadata(f.host);
+    expect(
+      f.host.querySelector<HTMLButtonElement>('.composer button[type="submit"]')?.disabled,
+    ).toBe(true);
+    expect(f.requests.some((request) => request.method === 'submit')).toBe(false);
+  } finally {
+    await f.close();
+  }
+});
 
 test('a failed historical tool check keeps receipts readable and retries without extra session controls', async () => {
   const f = fixture(true);
@@ -604,7 +707,7 @@ test('a failed historical Run check retains readable messages and reconciles aut
   try {
     await f.render();
     await f.release('tools');
-    expectReadableDuringMetadata(f.host);
+    expectInitialStructurePending(f.host);
     await f.release('runs');
     await f.until(() => f.pending('runs') > 0);
     expect(f.host.textContent).not.toContain('重新核对本轮状态');
@@ -842,7 +945,7 @@ test('reopening the same history while metadata loads does not restart its pendi
     expect(f.requests.slice(requests)).toEqual([]);
     expect(f.pending('runs')).toBe(1);
     expect(f.pending('tools')).toBe(1);
-    expectReadableDuringMetadata(f.host);
+    expectInitialStructurePending(f.host);
     await f.release('runs');
     await f.release('tools');
     await f.until(() => !!f.host.querySelector('.agent-turn-summary'));

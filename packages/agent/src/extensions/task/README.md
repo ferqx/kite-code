@@ -75,6 +75,8 @@ Model 完成候选只剩准确 pending required carrier 时，同一 Run 复用 
 
 ## QueueOnly 邮件
 
+普通协作邮件与新 `agent_completion` 最终结果共用 Store 邮箱，分别投影为 `kind:message` 和 `kind:result`。前者保原 sender Tool／Artifact，后者保原 carrier／result revision 并发布唯一 Source；结果回执以 `receivedSourceId` 区分普通 `receivedMessageId`，`receivedSeq` 覆盖两者的实际发布序号。用户引导在同一 Runtime 检查点汇合但仍使用原输入入口和权限。结果的条件续跑及旧记录兼容见 [Store owner](../../storage/README.md#统一消息接收)。
+
 `send_message` 使用准确 taskId 或 `target:parent`，只能在真实直接父子关系内发送。`readAgentMessageTarget` 只读原 carrier 与封存父执行链，给出有限 Session/selection/Run 目标；父原 Run 已结束时返回未绑定目标，不选择后来的人类 Run。活动 child 的准确 Run 可在安全 checkpoint 接纳；idle 或明确未绑定邮件只排队，零新 carrier、Run、Model。调用者提供的旧 Run/selection 不能被自动替换。
 
 正文最多 1MiB，完整 UTF-8 内容只保存于原 sender Execution 的不可变私有 Artifact。`agent.message` Command 封存原 Store、主体、namespace、sender、carrier、目标与原 key；发送 Tool 的终态提交同时登记接收资格。源 Tool failed/cancelled 为拒绝，未知或未确认不形成成功邮件；结算提交失败保留 pending_sender，显式恢复后可呈现原 unknown，不能重新执行发送 Tool。原 id 可查询，重复原绑定不创建第二封。

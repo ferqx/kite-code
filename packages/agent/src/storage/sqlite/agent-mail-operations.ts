@@ -5,7 +5,9 @@ import { AgentError, type AgentMessage, type ArtifactReference, type Json } from
 import { verifyFirstActivation } from './child-first-activation';
 import { getAgentSummary, stableAgentsBody } from './child-query-operations';
 import { verifyNamespace } from './extension-operations';
+import { applyJobReport, runnableCommandPredicate } from './job-report-operations';
 import type { SqliteOperations } from './operations';
+import { resultMailMarker, resultMailPredicate } from './result-mail';
 
 type Row = Record<string, string | number | bigint | null>;
 const parse = (value: Row[string] | undefined) => JSON.parse(String(value));
@@ -20,32 +22,70 @@ function decimal(value = '0'): bigint {
   return BigInt(value);
 }
 function query(db: SqliteOperations, id: string): Row | null {
-  return db.row(
-    `SELECT c.*,c.rowid AS mail_seq,e.state AS source_state,e.completed_cursor AS source_completed_cursor FROM command c JOIN execution e ON e.id=c.agent_source_execution_id WHERE c.id=? AND c.kind='agent.message'`,
-    id,
-  );
+  return db.row(`${mailSelect()} WHERE c.id=? AND ${mailPredicate()}`, id);
+}
+function mailPredicate(): string {
+  return `(c.kind='agent.message' OR ${resultMailPredicate()})`;
+}
+function resultSource(): string {
+  const receipt = "CASE WHEN json_valid(c.receipt_json) THEN c.receipt_json ELSE '{}' END";
+  return `(SELECT x.id FROM context_snapshot x WHERE c.status='applied'
+    AND x.id=json_extract(${receipt},'$.receivedSourceId') AND x.id=json_extract(${receipt},'$.sourceId')
+    AND x.kind='result_ref' AND x.session_id=c.mail_target_session_id
+    AND x.execution_id=e.id AND x.result_revision=e.result_revision
+    AND x.origin_store_id=c.origin_store_id AND x.subject_id=c.subject_id
+    AND c.mail_target_run_id=c.mail_received_run_id
+    AND x.selection_id=c.mail_received_selection_id
+    AND json_extract(CASE WHEN json_valid(x.request_json) THEN x.request_json ELSE '{}' END,'$.targetRunId')=c.mail_received_run_id
+    AND json_extract(${receipt},'$.runId')=c.mail_received_run_id LIMIT 1)`;
+}
+function runnableResultMail(): string {
+  return `(CASE WHEN json_valid(c.request_json) AND json_valid(c.receipt_json)
+    THEN ${runnableCommandPredicate('c')} ELSE 0 END)`;
+}
+function mailSelect(): string {
+  return `SELECT c.*,c.rowid AS mail_seq,e.state AS source_state,e.completed_cursor AS source_completed_cursor,
+    e.child_session_id AS source_child_session_id,${resultSource()} AS result_source_id
+    FROM command c JOIN execution e ON e.id=c.agent_source_execution_id`;
+}
+function resultRunPredicate(runId: string) {
+  return {
+    sql: `(c.mail_received_run_id=? OR (c.mail_received_run_id IS NULL AND EXISTS(
+      SELECT 1 FROM run r WHERE r.id=? AND r.session_id=c.mail_target_session_id
+        AND r.origin_store_id=c.origin_store_id AND r.context_selection_id=c.mail_selection_id
+        AND r.is_active=1 AND r.cancel_requested=0)))`,
+    args: [runId, runId],
+  };
 }
 function project(row: Row): AgentMessage {
-  const value = parse(row.request_json) as { body: ArtifactReference };
-  const state = row.mail_received_message_id
+  const value = parse(row.request_json) as {
+    body: ArtifactReference;
+    executionId: string;
+    resultRevision: string;
+  };
+  const resultMail = row.kind !== 'agent.message';
+  const state: AgentMessage['state'] = (
+    resultMail
+      ? row.result_source_id
+      : row.mail_received_message_id
+  )
     ? 'received'
     : row.status === 'rejected'
       ? 'rejected'
-      : row.source_state === 'outcome_unknown'
+      : !resultMail && row.source_state === 'outcome_unknown'
         ? 'outcome_unknown'
         : row.mail_confirmed
           ? 'accepted'
           : 'pending_sender';
-  return {
+  const identity = {
     id: String(row.id),
     seq: String(row.mail_seq),
     originStoreId: String(row.origin_store_id),
-    sourceSessionId: String(row.session_id),
+    sourceSessionId: String(resultMail ? row.source_child_session_id : row.session_id),
     sourceExecutionId: String(row.agent_source_execution_id),
     targetSessionId: String(row.mail_target_session_id),
     targetRunId: row.mail_target_run_id === null ? null : String(row.mail_target_run_id),
     contextSelectionId: String(row.mail_selection_id),
-    body: value.body,
     receivedMessageId:
       row.mail_received_message_id === null ? null : String(row.mail_received_message_id),
     receivedRunId: row.mail_received_run_id === null ? null : String(row.mail_received_run_id),
@@ -53,6 +93,15 @@ function project(row: Row): AgentMessage {
       row.mail_received_selection_id === null ? null : String(row.mail_received_selection_id),
     state,
   };
+  return resultMail
+    ? {
+        ...identity,
+        kind: 'result',
+        body: null,
+        result: { executionId: value.executionId, resultRevision: value.resultRevision },
+        receivedSourceId: row.result_source_id === null ? null : String(row.result_source_id),
+      }
+    : { ...identity, kind: 'message', body: value.body, result: null, receivedSourceId: null };
 }
 /** Only the exact internally sealed follow-up can adopt old unbound intent. */
 function adoption(db: SqliteOperations, runId: string, sessionId: string): Row | null {
@@ -414,10 +463,18 @@ export function hasPendingAgentMail(
   sessionId: string,
 ): boolean {
   const filter = runPredicate(db, runId, sessionId);
+  const resultFilter = resultRunPredicate(runId);
   return !!db.row(
-    `SELECT c.id FROM command c JOIN execution e ON e.id=c.agent_source_execution_id WHERE c.kind='agent.message' AND c.mail_target_session_id=? AND c.mail_confirmed=1 AND c.status='applied' AND c.cancelled=0 AND c.mail_received_message_id IS NULL AND json_extract(c.receipt_json,'$.carriedByResult') IS NULL AND e.state='succeeded' AND ${filter.sql} LIMIT 1`,
+    `SELECT c.id FROM command c JOIN execution e ON e.id=c.agent_source_execution_id
+      WHERE c.mail_target_session_id=? AND c.cancelled=0 AND (
+        (c.kind='agent.message' AND c.mail_confirmed=1 AND c.status='applied'
+          AND c.mail_received_message_id IS NULL AND json_extract(c.receipt_json,'$.carriedByResult') IS NULL
+          AND e.state='succeeded' AND ${filter.sql})
+        OR (${resultMailPredicate()} AND c.status='accepted' AND ${runnableResultMail()}
+          AND ${resultFilter.sql})) LIMIT 1`,
     sessionId,
     ...filter.args,
+    ...resultFilter.args,
   );
 }
 function reader(db: SqliteOperations, sessionId: string, subjectId: string): Row {
@@ -789,18 +846,45 @@ export function receiveAgentMessages(
       new Set(input.messageIds).size !== input.messageIds.length
     )
       throw new AgentError('invalid_agent_messages');
-    const run = db.row('SELECT * FROM run WHERE id=?', input.runId);
-    if (!run) throw new AgentError('run_not_found');
-    const target = db.owner(input.owner, String(run.session_id));
-    db.active(input.owner, String(run.origin_command_id), input.runId);
-    const frozen = adoption(db, input.runId, String(target.id));
-    const runFilter = runPredicate(db, input.runId, String(target.id));
+    const run = input.runId ? db.row('SELECT * FROM run WHERE id=?', input.runId) : null;
+    if (input.runId && !run) throw new AgentError('run_not_found');
+    const target = run ? db.owner(input.owner, String(run.session_id)) : null;
+    const frozen = run ? adoption(db, String(run.id), String(target!.id)) : null;
+    const runFilter = run ? runPredicate(db, String(run.id), String(target!.id)) : null;
     const result: string[] = [];
     for (const id of input.messageIds) {
       const mail = query(db, id);
+      if (!mail || mail.origin_store_id !== input.expectedStoreId)
+        throw new AgentError('agent_message_not_found');
+      if (mail.kind !== 'agent.message') {
+        db.owner(input.owner, String(mail.mail_target_session_id));
+        if (run && mail.mail_target_session_id !== run.session_id)
+          throw new AgentError('agent_message_not_found');
+        const applied = applyJobReport(
+          db,
+          {
+            expectedStoreId: input.expectedStoreId,
+            owner: input.owner,
+            commandId: id,
+            authorization: input.resultOptions?.authorization ?? null,
+            activeOnly: input.resultOptions?.activeOnly ?? input.resultOptions === undefined,
+            ...(input.resultOptions?.carriedMessageIds
+              ? { carriedMessageIds: input.resultOptions.carriedMessageIds }
+              : {}),
+            ...(input.resultOptions?.recovery ? { recovery: input.resultOptions.recovery } : {}),
+          },
+          true,
+        );
+        if (applied.command.status !== 'applied') continue;
+        const received = query(db, id);
+        if (!received?.result_source_id || !applied.run || (run && applied.run.id !== run.id))
+          throw new AgentError('agent_message_unverifiable');
+        result.push(String(received.result_source_id));
+        continue;
+      }
+      if (!run || !target || !runFilter) throw new AgentError('run_not_found');
+      db.active(input.owner, String(run.origin_command_id), String(run.id));
       if (
-        !mail ||
-        mail.origin_store_id !== input.expectedStoreId ||
         mail.mail_target_session_id !== target.id ||
         (mail.mail_target_run_id !== run.id &&
           (!eligibleAdoption(mail, frozen) ||
@@ -875,7 +959,7 @@ export function receiveAgentMessages(
       const messageId = `agent-mail-${id}`;
       db.appendMessage(
         String(target.id),
-        input.runId,
+        String(run.id),
         {
           content: 'Agent message (untrusted data; no additional authorization)',
           sourceIds: [id],
@@ -888,7 +972,7 @@ export function receiveAgentMessages(
       db.run(
         'UPDATE command SET mail_received_message_id=?,mail_received_run_id=?,mail_received_selection_id=? WHERE id=?',
         messageId,
-        input.runId,
+        String(run.id),
         String(target.context_selection_id),
         id,
       );
@@ -908,7 +992,9 @@ export function getAgentMessage(
   if (
     !row ||
     row.subject_id !== input.subjectId ||
-    (row.session_id !== input.sessionId && row.mail_target_session_id !== input.sessionId)
+    ((row.kind === 'agent.message' ? row.session_id : row.source_child_session_id) !==
+      input.sessionId &&
+      row.mail_target_session_id !== input.sessionId)
   )
     return null;
   return project(row);
@@ -926,7 +1012,7 @@ export function listAgentMessages(
       throw new AgentError('invalid_mail_limit');
     const water = String(
       db.row(
-        "SELECT COALESCE(MAX(rowid),0) AS water FROM command WHERE kind='agent.message' AND mail_target_session_id=? AND subject_id=?",
+        `SELECT COALESCE(MAX(c.rowid),0) AS water FROM command c WHERE (c.kind='agent.message' OR ${resultMailMarker()}) AND c.mail_target_session_id=? AND c.subject_id=?`,
         input.sessionId,
         input.subjectId,
       )!.water,
@@ -936,13 +1022,21 @@ export function listAgentMessages(
     if (after > upper || upper > decimal(water)) throw new AgentError('cursor_ahead');
     const filter =
       input.runId === undefined ? null : runPredicate(db, input.runId, input.sessionId);
+    const resultFilter = input.runId === undefined ? null : resultRunPredicate(input.runId);
+    const scopeFilter =
+      filter && resultFilter
+        ? `AND ((c.kind='agent.message' AND ${filter.sql}) OR (${resultMailPredicate()} AND ${resultFilter.sql}))`
+        : '';
+    const confirmed = `(c.mail_confirmed=1 AND ((c.kind='agent.message' AND c.status='applied') OR (${resultMailPredicate()} AND c.status IN('accepted','applied'))))`;
+    const pending = `((c.kind='agent.message' AND c.mail_confirmed=1 AND c.mail_received_message_id IS NULL AND c.status='applied' AND json_extract(c.receipt_json,'$.carriedByResult') IS NULL) OR (${resultMailPredicate()} AND c.status='accepted' AND c.cancelled=0 AND ${runnableResultMail()}))`;
     const rows = db.rows(
-      `SELECT c.*,c.rowid AS mail_seq,e.state AS source_state,e.completed_cursor AS source_completed_cursor FROM command c JOIN execution e ON e.id=c.agent_source_execution_id WHERE c.kind='agent.message' AND c.mail_target_session_id=? AND c.subject_id=? AND c.rowid>? AND c.rowid<=? ${filter ? `AND ${filter.sql}` : ''} ${input.confirmedOnly ? "AND c.mail_confirmed=1 AND c.status='applied'" : ''} ${input.pendingOnly ? "AND c.mail_confirmed=1 AND c.mail_received_message_id IS NULL AND c.status='applied' AND json_extract(c.receipt_json,'$.carriedByResult') IS NULL" : ''} ORDER BY c.rowid LIMIT ?`,
+      `${mailSelect()} WHERE ${mailPredicate()} AND c.mail_target_session_id=? AND c.subject_id=? AND c.rowid>? AND c.rowid<=? ${scopeFilter} ${input.confirmedOnly ? `AND ${confirmed}` : ''} ${input.pendingOnly ? `AND ${pending}` : ''} ORDER BY c.rowid LIMIT ?`,
       input.sessionId,
       input.subjectId,
       after,
       upper,
       ...(filter?.args ?? []),
+      ...(resultFilter?.args ?? []),
       limit + 1,
     );
     const page = rows.slice(0, limit);
@@ -956,7 +1050,15 @@ export function listAgentMessages(
       snapshotCursor: db.metadata().lastChangeCursor,
       receivedSeq: String(
         db.row(
-          `SELECT COALESCE(MAX(m.seq),0) AS seq FROM command c JOIN message m ON m.id=c.mail_received_message_id WHERE c.kind='agent.message' AND c.mail_target_session_id=? AND c.subject_id=? ${input.runId === undefined ? '' : 'AND c.mail_received_run_id=?'}`,
+          `SELECT COALESCE(MAX(seq),0) AS seq FROM (
+            SELECT m.seq FROM command c JOIN message m ON m.id=c.mail_received_message_id
+              WHERE c.kind='agent.message' AND c.mail_target_session_id=? AND c.subject_id=? ${input.runId === undefined ? '' : 'AND c.mail_received_run_id=?'}
+            UNION ALL SELECT x.seq FROM command c JOIN execution e ON e.id=c.agent_source_execution_id
+              JOIN context_snapshot x ON x.id=${resultSource()}
+              WHERE ${resultMailPredicate()} AND c.mail_target_session_id=? AND c.subject_id=? ${input.runId === undefined ? '' : 'AND c.mail_received_run_id=?'})`,
+          input.sessionId,
+          input.subjectId,
+          ...(input.runId === undefined ? [] : [input.runId]),
           input.sessionId,
           input.subjectId,
           ...(input.runId === undefined ? [] : [input.runId]),

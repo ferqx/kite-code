@@ -77,6 +77,7 @@
     "tests/e2e/live/model/provider-load.live.ts",
     "tests/e2e/live/model/collaboration-natural-tools.live.ts",
     "tests/e2e/live/model/collaboration-native-window.live.ts",
+    "tests/e2e/live/model/collaboration-unified-native-window.live.ts",
     "tests/e2e/live/model/session-anomalies-native-window.live.ts",
     "tests/e2e/live/model/collaboration-tui-window.live.ts",
     "tests/e2e/live/model/collaboration-agent-events.live.ts",

@@ -164,19 +164,30 @@ async function fixture(
     async appliedSteer(commandId: string) {
       const command = (await store.getCommand(commandId))!;
       const request = command.request as { content: string; targetRunId: string };
-      const receipt = command.receipt as { businessCommandId: string; runId: string };
+      const receipt = command.receipt as { messageId: string; runId: string };
       const run = (await store.getRun(request.targetRunId))!;
       expect(command).toMatchObject({ status: 'applied', receipt: { runId: run.id } });
-      expect(receipt.businessCommandId).toBeString();
-      expect(receipt.businessCommandId).not.toBe(commandId);
-      expect(await store.getCommand(receipt.businessCommandId)).toMatchObject({
+      expect(receipt.messageId).toBeString();
+      expect(command).toMatchObject({
+        id: commandId,
         kind: 'input.steer',
         rootWorkCommandId: run.rootWorkCommandId,
         status: 'applied',
         request: { content: request.content, targetRunId: run.id },
         receipt: { runId: run.id },
       });
-      return receipt.businessCommandId;
+      expect(
+        (await store.listMessages(command.sessionId)).find(
+          (message) => message.id === receipt.messageId,
+        ),
+      ).toMatchObject({
+        runId: run.id,
+        content: request.content,
+        originCommandId: commandId,
+        inputKind: 'input.steer',
+        sourceIds: [commandId],
+      });
+      return commandId;
     },
     async close() {
       await runtime.close();
@@ -419,8 +430,8 @@ test('steer never rewrites an already dispatched physical tool; cancelled pendin
     const originalModel = before.executions.find((value) => value.kind === 'model')!;
     expect(execution.status).toBe('dispatching');
     const discarded = await f.steer('discarded', 'Follow up: must not enter context');
-    const discardedId = (discarded.receipt as { businessCommandId: string }).businessCommandId;
-    expect(discardedId).toBeString();
+    const discardedId = discarded.id;
+    expect(discardedId).toBe('discarded');
     await f.runtime.cancelCommand({
       expectedStoreId: f.expectedStoreId,
       commandId: 'cancel-discarded',
@@ -444,16 +455,10 @@ test('steer never rewrites an already dispatched physical tool; cancelled pendin
       )?.sourceIds,
     ).toEqual([steerId]);
     expect(
-      model.requests[1]?.messages.some((value) =>
-        value.sourceIds?.some((id) => id === 'discarded' || id === discardedId),
-      ),
+      model.requests[1]?.messages.some((value) => value.sourceIds?.includes(discardedId)),
     ).toBe(false);
     const view = await f.runtime.getView('s');
-    expect(
-      view.messages.some((value) =>
-        value.sourceIds?.some((id) => id === 'discarded' || id === discardedId),
-      ),
-    ).toBe(false);
+    expect(view.messages.some((value) => value.sourceIds?.includes(discardedId))).toBe(false);
     expect((await f.store.getExecution(execution.id))?.input).toEqual(execution.input);
     expect((await f.store.getExecution(execution.id))?.status).toBe('succeeded');
     expect((await f.store.getExecution(originalModel.id))?.input).toEqual(originalModel.input);

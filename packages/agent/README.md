@@ -241,6 +241,10 @@ Runtime/Session 的 [串行资源 owner](src/execution/resources.ts)只保留仍
 
 上述 context 八项旧预期已在当前直接输入契约下修正：本目录完整 85 项／2070 断言、普通输入与结果交付四文件 27 项／267 断言通过，未修改 Agent／Store 生产源码。准确分类、保留及新增的断言、原失败与本次日志见[context 测试 owner](test/isolated/context/README.md)。
 
+用户引导与 Agent 通信在 Runtime 的 `receivePendingInputs` 串行检查点汇合。子 Agent 普通消息和最终结果复用同一邮箱，结果保留原 Source 与条件续跑；当前事务、旧报告兼容及验证入口见 [统一消息接收](src/storage/README.md#统一消息接收)。
+
+Runtime 公开 `listMessages/getView` 对已接收普通邮件只读验证原 Command、发送 Tool、接收 Run／selection 与 Artifact，沿 system 消息交付 `agentMessage` 来源和完整正文。物理占位及原模型低信任输入不改写；来源或正文损坏明确不可读。Native 在原接收轮次的处理过程中展示发送者与正文，不把内部占位当用户消息，也不新增分段或独立邮件气泡。实际证明和冷读回归由上述 Store owner 维护。
+
 ## 同一 Step 的并行工具批次
 
 默认产品权限使用可信 `toolDispatchOrder: model`：同一 Model 批次按声明顺序完成准入，前项等待人工决定时后项不派发；实际准入后各 Tool 的执行仍并发，拒绝终止未准入兄弟而不伪造其效果。策略进入原冻结 Run 配置并参与恢复核对，Model 输入不能选择该标记。自定义 Permissions 未声明它时保持下述独立并行行为与已开始调用的清理约束；真实乱序、接续及 T048 能力不由 TUI 推造。

@@ -4,6 +4,8 @@ Status: implemented
 
 2026-10-22 部分替代：用户确认移除独立输入归属判定，当前采用[普通消息直接进入主 Agent](2026-10-22-direct-conversation-input.md)。本记录的输入预判、自然语言控制预处理、selected-work 屏障、按工作过滤普通结果和自动恢复旧配置仅作历史理由；稳定协作者、精确来源、实时权限、unknown 和旧消息审计／呈现兼容仍适用。当前事实以手册与 owner 文档为准。
 
+2026-10-23，新的子 Agent 完成结果改为[复用现有邮箱统一接收](2026-10-23-unified-message-reception.md)，替代独立完成报告待收扫描。原稳定 Command／carrier／Source、当前续跑授权、配置 lease、事务回执和精确历史恢复的理由继续适用；用户输入与 Agent 数据保留不同权限和处理效果。
+
 ## Problem
 
 父 Agent 一次普通回复结束不代表 child 的工作、完整结果与必要清理已经结束。原单轮 task/disposition 接口把协作者身份、某次执行、观察水位和结果采用混在一起；简单去掉 report suppression 又会把 A 的迟到结果与效果带进后来独立任务 B。另一方面，用户问进度或澄清并没有撤销 A，取消 B 也不能推出选择 A。运行中改变根审批模式还必须同时作用到已存在的子孙，而不会解除可信只读能力或共享单次批准。
@@ -23,6 +25,8 @@ Status: implemented
 真实公共请求、raw 人类输入、关联/选择/control revision 决定和业务准入分开保存。Host只直接处理当前未引用的明确指令，其余由封存无工具的普通 Model 提出关联，再由Host/Store独立验证；引用、邮件、代码、自报批准均无控制权。处理轮保自身因果，不能借解释做业务。B先保存选择与queued意图，A在必要结果/交互/unknown/条件允许的安全边界技术收束；取消B仍保选择边界，明确继续A才恢复准确原配置与当前权限。
 
 有限 child completion 订阅与 idle 当前自动授权分别保存。child/carrier可靠终态登记唯一报告，父active/idle共用原SQL Source/consume/receipt/ack事务，多结果可以进入一个同工作Run；Source是采用凭据，事件水位或on*回调不是。普通Model只自动展开本工作已接纳结果，原历史、显式Include与合法Fork读取保留。暂缓等待真实相关变化，撤销保存原因并释放通知绑定；暂停继续追加新的有限准入而不改写旧suppressed历史。冷缺绑定与unknown不自动恢复。
+
+2026-10-23，用户确认保留父普通结束后的子结果续轮，并明确只有该子结果实际触发续跑时显示独立消息；父原 Turn active 接纳继续保留在本轮处理过程，终态和冷重开不补气泡。只读公共 `Message.agentResult` 沿原 Source／consume／idle report 与真实 Run 创建来源证明这项区别，不能按当前 Run 活动状态隐藏刚唤醒的新轮消息。消息复用普通输入气泡，头部为“〔名称〕Agent 发送”，正文展示具体内容；模型仍只接收原 Source 一次，Desktop 保留独立边界和准确大正文阅读。当前证明与验证归 [Store](../../../../packages/agent/src/storage/README.md#人类工作与完成报告事务)及 [Desktop](../../../../apps/desktop/README.md#native-当前会话环境信息与子详情)。
 
 根applied permission.mode/revision动态进入子孙当前策略、待批/审核/资源等待与最终dispatch，原只读/工具/信任上限独立相交。旧卡片追加准确失效事实而非伪造用户答案；旧grant/review不跨revision、兄弟或新轮使用。已派发效果保留原事实，模式变化不承诺OS沙箱热改或回滚。
 
@@ -47,6 +51,8 @@ Native 子卡片和缓存绑定准确 carrier。仅有 Session 的导航先等�
 正式Native journal先验证原公开命令的ID/kind、Store/Workspace/Session、subject和canonical request digest，再复用Client的业务查回器核真实business/Run。公开输入与业务Command的身份分离，不能要求Run.origin等于原公开ID；同Run补充保原origin，封存独立工作允许越过旧技术steer target。顶层Run为空的applied观察核真实成功Model，但不成为业务Run；unresolved仍accepted。旧技术steer的target/selection、取消、extension Job与unknown/冷零POST门禁保持。
 
 ## Alternatives considered
+
+- 在完成回调中追加客户端通知无法从冷读重建准确接纳；额外保存普通 message 会让模型同时读到 message 和 result Source。采用原 Source 的只读历史投影，代价是展示记录与实体 message 必须有明确来源区分。直接复用旧 subagent 进度项会隐藏正文并进入父过程折叠，因此采用明确的独立结果边界。
 
 - 删除处理轮消息或在 HTTP 分页中过滤，会破坏原审计记录或让整页隐藏误报 EOF；按正文去重会吞掉用户明确重复提交的意图。选择在原 SQL 因果链生成只读呈现证明，并在完整当前读取内合并，不重写历史、游标或业务身份。
 

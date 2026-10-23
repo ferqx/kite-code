@@ -43,6 +43,7 @@ import {
   runCollaborationTitleCases,
 } from './collaboration-titles.live';
 import { runLiveTreePermissions } from './collaboration-tree-permissions.live';
+import { liveUnifiedInboxCaseIds, runLiveUnifiedInbox } from './collaboration-unified-inbox.live';
 import { runLiveUntrustedResults } from './collaboration-untrusted-results.live';
 import { runLiveWorkControls } from './collaboration-work-controls.live';
 import { runLiveWorkScope } from './collaboration-work-scope.live';
@@ -174,8 +175,8 @@ const notificationReliabilityCases = [
   'R12-slow-throwing-observer-disabled-durable-report',
 ];
 const selectedCases =
-  group === 'attached-shell'
-    ? [...liveAttachedShellCaseIds]
+  group === 'attached-shell' || group === 'unified-inbox'
+    ? [...(group === 'unified-inbox' ? liveUnifiedInboxCaseIds : liveAttachedShellCaseIds)]
     : group === 'idle-question' || group === 'mail-adoption'
       ? group === 'mail-adoption'
         ? [...liveMailAdoptionCaseIds]
@@ -274,6 +275,7 @@ if (
     'notification-reliability',
     'attached-shell',
     'task-presets',
+    'unified-inbox',
   ].includes(group ?? '') ||
   !allowedCases.includes(caseId) ||
   (output !== undefined &&
@@ -291,6 +293,7 @@ const report: Record<string, unknown> = {
   group,
   caseId,
   entryLayer:
+    group === 'unified-inbox' ||
     group === 'task-presets' ||
     group === 'mail-adoption' ||
     group === 'collaboration-compaction' ||
@@ -329,10 +332,15 @@ try {
     ...(output ? { evidenceRoot: `${output}.workspace` } : {}),
   };
   const results =
-    group === 'attached-shell' || group === 'task-presets'
+    group === 'attached-shell' || group === 'task-presets' || group === 'unified-inbox'
       ? group === 'task-presets'
         ? (await runLiveTaskPreset({ ...options, caseId })).cases
-        : (await runLiveAttachedShell({ ...options, caseIds: [caseId] })).cases
+        : (
+            await (group === 'unified-inbox' ? runLiveUnifiedInbox : runLiveAttachedShell)({
+              ...options,
+              caseIds: [caseId],
+            })
+          ).cases
       : group === 'idle-question' || group === 'mail-adoption'
         ? (
             await (group === 'mail-adoption'

@@ -26,6 +26,10 @@ Composer 在原停止按钮内使用 Hugeicons `StopIcon` 的实心方块，填�
 
 [Conversation](src/desktop/Conversation.tsx)首次呈现历史时，对默认展开的活动轮次同样登记 `data-restored-expanded`，直接进入完整高度，避免首次打开重播300ms展开动画而带动正文移动。缓存恢复与冷历史共用原恢复标记，后续手动开合由 `onToggle` 清除标记并继续动画；不改变展开选择、消息顺序或滚动跟随。[轮次回归](test/desktop-reasoning-turns.test.tsx)核冷／恢复两种入口；生产组件浏览器耗时、逐帧高度及连续流式证据归 [Desktop owner](../../apps/desktop/README.md#会话消息渲染验证)。
 
+宿主可通过 `initialPresentationPending` 延迟尚未呈现的 Conversation 首次内容提交，让已保存消息和结构事实同时进入原轮次布局；UI不读取或推断轮次／工具事实。第一次可读 layout commit 后该标记不再遮住正文，普通流式更新、缓存恢复和阅读滚动继续原行为；换 readingKey 或DOM淘汰后重新挂载才重新等待。Native的失败、缓存及首条输入豁免由 [Desktop owner](../../apps/desktop/README.md#原轮次阅读聚合与问答回执)负责；[阅读滚动回归](test/isolated/desktop-conversation-scroll.test.tsx)核首次等待、后续更新、重新挂载及原滚动生命周期。
+
+[SessionPage](src/desktop/SessionPage.tsx)在 layout effect 中取得首个正宽度并直接确定环境卡占位，首次测量不启动 padding 过渡，防止已绘制正文／Composer 再横移及换行。后续实际尺寸跨阈值和用户开合仍使用原动画；Native环境卡从scope建立就保留原节点，业务内容晚到不新增占位。[侧栏回归](test/isolated/desktop-sidebar.test.tsx)核初始占位、晚填内容、窗口阈值和窄窗浮层。
+
 同一组件的 `.response-status` 沿[共享 CSS](src/desktop/style.css)正常参与轮次底部排版，为“正在回复…”保留24px行高，位于处理过程折叠区外。轮次提示的上方留白使用正文块间距；上方为展开工具时使用原混合间距，抵消工具控件自身留白。显示提示时过程区不再叠加底部 padding，收起过程或尚无正文时仍保留完整块间距。底部跟随继续由阅读内容高度驱动；浏览器回归核状态文字完整位于viewport与各级裁剪容器内。
 
 “正在回复…”与工具消息共用字号、字体及文字颜色规则，使用 `--conversation-text-size`（默认14px）和 `--muted-foreground`。思考／回复标签直接使用宿主已引入的 [shadcn shimmer utility](https://ui.shadcn.com/docs/utils/shimmer)，以行内块将流光范围限制在标签文字，使用语义前景色作为高光以跟随应用主题；通过库内置 `shimmer-spread-[16px]` 和 `shimmer-duration-1500` 将高光收窄为16px、每1.5秒扫过一次，避免默认宽光带在短状态文字上仅呈现整句轻微变色；沿库内置的减少动态效果规则恢复静态文字，不新增动画实现或依赖。读取与业务交互门禁保持。
@@ -48,9 +52,9 @@ Composer 的图片卡片保持固定预览区域，接受宿主交付的小尺�
 | 数学公式 | remark-math 与 rehype-katex 渲染 `$…$` 和独立 `$$` 围栏；KaTeX渲染与本地字体样式固定同版，`trust:false`、展开上限100、尺寸上限20em。错误公式保留可读源内容，不执行链接或加载图片。 |
 | 正文导航 | 标题使用 GitHub 风格 slug，重名递增；标题与脚注ID按消息隔离，fragment仅能跳往同一消息已有目标，跳转后移动键盘焦点。脚注保留编号、说明与返回正文链接。 |
 
-[图表 adapter](src/desktop/markdown-diagram.ts)懒加载 Mermaid，以 strict 模式、纯文字标签和客户端控制的透明主题绘制，再作为 SVG image 展示，不把生成标记或事件绑定挂进应用DOM。图表不接受配置指令、frontmatter、自定义样式、HTML、点击或图片／图标语法；原文不删除。单块源码上限16384个UTF-16单位、边数250；生成SVG上限200万个字符、单边12000及面积1600万坐标单位，超限回退源码。图表保持自然尺寸并在局部滚动，去掉默认阴影；节点边框与箭头使用蓝色 `--diagram-accent`，生命线、分组与注释边框使用青色 `--diagram-secondary`，正文保持原前景色。两种图表色分别适配深浅主题，颜色单独变化也会重绘，主题切换保留已有画面直至新版完成。渲染串行化，停用取消排队或丢弃迟到结果；已绘图资源登记到原会话缓存预算，窗口隐藏释放，恢复后重绘。详细取舍见[图表展示边界](../../.agents/notes/implemented/architecture/2026-10-22-desktop-markdown-content.md)。
+[图表 adapter](src/desktop/markdown-diagram.ts)懒加载 Mermaid，以 strict 模式、纯文字标签和客户端控制的透明主题绘制，再作为 SVG image 展示，不把生成标记或事件绑定挂进应用DOM。图表不接受配置指令、frontmatter、自定义样式、HTML、点击或图片／图标语法；原文不删除。单块源码上限16384个UTF-16单位、边数250；生成SVG上限200万个字符、单边12000及面积1600万坐标单位，超限回退源码。图表保持自然尺寸并在局部滚动，去掉默认阴影；节点边框与箭头使用蓝色 `--diagram-accent`，生命线、分组与注释边框使用青色 `--diagram-secondary`，正文保持原前景色。两种图表色分别适配深浅主题，颜色单独变化也会重绘，主题切换保留已有画面直至新版完成。渲染串行化，全局队列仅保留完成信号，不保留已结算的图像或失败对象；停用取消排队或丢弃迟到结果；已绘图资源登记到原会话缓存预算，窗口隐藏释放，恢复后重绘。详细取舍见[图表展示边界](../../.agents/notes/implemented/architecture/2026-10-22-desktop-markdown-content.md)。
 
-[内容回归](test/desktop-markdown-extensions.test.tsx)核公式／提示块／高亮、完整源码、消息锚点隔离和prepared树不变；[图表生命周期回归](test/isolated/desktop-markdown-diagram.test.tsx)核迟到结果、Activity暂停、资源记账、窗口恢复和仅图表颜色变化时的重绘／原图保持。浏览器验证归[Desktop owner](../../apps/desktop/README.md#markdown-与附件输入)。输入框继续编辑这些类型的Markdown源码，不在草稿中绘图或排版公式；[编辑器回归](test/isolated/prompt-editor.test.tsx)核无关编辑后的扩展语法保留。
+[队列回归](test/desktop-markdown-diagram-queue.test.ts)核并发串行顺序、原图交付、完成信号及取消后恢复。[内容回归](test/desktop-markdown-extensions.test.tsx)核公式／提示块／高亮、完整源码、消息锚点隔离和prepared树不变；[图表生命周期回归](test/isolated/desktop-markdown-diagram.test.tsx)核迟到结果、Activity暂停、资源记账、窗口恢复和仅图表颜色变化时的重绘／原图保持。浏览器验证归[Desktop owner](../../apps/desktop/README.md#markdown-与附件输入)。输入框继续编辑这些类型的Markdown源码，不在草稿中绘图或排版公式；[编辑器回归](test/isolated/prompt-editor.test.tsx)核无关编辑后的扩展语法保留。
 
 2026-10-22，Windows x64／Bun1.4.3、`beabc9628`加本次Markdown工作树：以准确`./`文件路径执行Markdown、扩展内容、语法缓存、代码块、提示词编辑、阅读滚动、Native Worker构建与调度8个文件，28项／1501断言通过；图表生命周期隔离文件另以独立Bun进程执行，1项／16断言通过。UI／Desktop typecheck、UI三个入口构建、定向Biome、统一边界、workspace、测试归属与文档检查通过。测试Mock只存在于隔离生命周期文件，不进入普通客户端；完整安装版Electron与其他平台未在本轮重验。
 
@@ -79,6 +83,10 @@ Composer 的图片卡片保持固定预览区域，接受宿主交付的小尺�
 当前 TUI 复用原 Ink 展示，输入、消息／工具阅读、审核和管理面板经公共 Server port 接入；功能迁移、普通模式与显式测试诊断由[终端 owner](src/tui/README.md#原-ink-展示与明确测试诊断)维护。Desktop 的[诊断展示 context](src/desktop/diagnostics.tsx)默认 false，回复失败技术详情与客户端面板只按显式测试值显示，不从 `NODE_ENV=development` 等环境名推断。dev／prod 客户端不得开启测试专用调试功能，测试 fixture 可显式提供 true；Native 另外执行构建常量的关闭门禁，见[Desktop owner](../../apps/desktop/README.md#普通客户端与测试诊断)。这份展示开关不扩大控制权限。
 
 ## 原桌面展示层
+
+Conversation 的 `systemKind:agent_result` 只消费宿主已确认实际触发父续跑的 `agentResult`，与普通消息共用 MessageItem 和输入气泡样式，增加“〔名称〕Agent 发送”头部，正文显示实际 Markdown 和非成功状态。父原轮 active 接纳不由宿主投影为此类消息，UI 也不按当前 Run 是否活动再过滤已确认的唤醒消息。独立消息边界不被相邻过程分组吸入，默认折叠及冷读仍保留正文，且不取得用户输入、助手最终回复或复制资格。同一 Turn 如被独立消息分段，整轮最终耗时仅在最后一段显示。`renderMessageContent` 仍由宿主提供准确详情入口，正文完整性由 `contentComplete` 明示。真实来源与读取由 [Desktop](../../apps/desktop/README.md#native-当前会话环境信息与子详情)及 Store 负责，UI 不根据名称、正文或子 Agent 状态制造消息。
+
+普通邮件使用 `systemKind:agent_message` 和宿主验证的 `agentMessage`，沿原接收 Run 的 turnId 留在同一处理过程。原 MessageItem／MessageContent 显示“〔名称〕Agent 发送”、完整 Markdown 和正文不可读状态；它没有独立气泡、用户输入、工具执行或助手最终回复的身份，正文中的批准文字也不生成操作入口。`data-agent-message-id` 沿原 mail ID，终态及冷历史保持同一份正文和一段过程；最终结果的独立消息边界保持上述规则。[共享邮件 DOM](test/isolated/desktop-agent-activity.test.tsx)与 [Native 投影 DOM](../../apps/desktop/test/isolated/native-transcript-dom.test.tsx)分别核来源、正文、失败状态和活动→完成→冷历史的分组、单耗时与复制边界。
 
 共享样式以 `--font-ui` 统一正文、控件与浮层字体，优先使用 Geist Variable；中文回退到系统界面字体，Windows 优先 Microsoft YaHei UI。`--ui-text-size: 14px` 是客户端默认字号，`body`、`.kite-client` 与会话字号变量共用它；挂到 `body` 的 Portal 因此保留14px正文，不通过修改HTML根字号缩放 `rem` 布局；基础层的原生按钮、输入框、选择器与文本框继承所属正文的字体，避免浏览器默认控件仍显示13.33px。普通通知／问卷及操作、任务表单、右栏标签和工作台会话主名称使用该基准，徽标、代码与辅助信息保留明确层级。共享 `Textarea` 统一使用 `text-sm`，移除 `text-base md:text-sm` 的宽窄差异；欢迎标题固定28px，通用页面一级标题固定36px，不再按窗口宽度变更字号。普通文字为 400，界面标题与 `font-semibold` token 为 500；Markdown 标题、加粗和等宽代码保留内容层级。Native 字体资源及阅读区变量由 [Desktop owner](../../apps/desktop/README.md#复用原桌面展示层)接入。
 
@@ -162,7 +170,7 @@ SessionPage 的可选 `covered` 保留主panel树、尺寸和阅读实例，以o
 
 [Clipboard context 与 hook](src/desktop/clipboard.tsx)复用原消息复制生命周期；Conversation 提供宿主 port，正文内的代码复制同时消费原 `copyText` 资格，包含自定义正文 reader 子树。预览或未核实最终回复不提供代码复制，已核实正文关闭后撤销；停用、换文或换 port 的迟到结果失效，已完成反馈沿原两秒截止时间保留。复制不从 DOM 重建文本，不新开宿主或业务接口。
 
-[ToolActivity](src/desktop/ToolActivity.tsx) 的可选 `childAgent` 只消费宿主交付的准确身份、名称、工作状态与观察新鲜度；复用 Trace 展示彩色图标、14px 单行名称和不被长名称挤掉的状态，不新增卡片或原始结果段落。图标与 [ApprovalHeader](src/desktop/ApprovalHeader.tsx) 共用 `ChildAgentIcon` 的稳定身份分配；原工具回执展开及独立详情回调保持。普通目录刷新保留已观察的状态文字，`fresh=false` 停止运行动画，不建立执行或导航 authority；真实工具失败优先于子任务装饰。[消息 DOM 回归](test/isolated/desktop-agent-activity.test.tsx)核同一行的状态更新、展开、文本选择、独立详情与失败边界，宿主关联和浏览器证据归 [Desktop owner](../../apps/desktop/README.md#native-当前会话环境信息与子详情)。
+[ToolActivity](src/desktop/ToolActivity.tsx) 的可选 `childAgent` 只消费宿主交付的准确身份、名称、工作状态与观察新鲜度；复用 Trace 展示彩色图标、14px 单行名称和不被长名称挤掉的状态，不新增卡片或原始结果段落。图标与 [ApprovalHeader](src/desktop/ApprovalHeader.tsx) 共用 `ChildAgentIcon` 的稳定身份分配；已识别的子 Agent 行使用原生共享 Button，整行调用准确 `childDetail.onOpen`；没有折叠入口、独立详情按钮或回执内容，旧 `expanded=true` 也不挂载原正文 reader。缺少详情回调时禁用整行，普通工具和真实工具失败仍沿原披露路径。普通目录刷新保留已观察的状态文字，`fresh=false` 停止运行动画，不建立执行或导航 authority；真实工具失败优先于子任务装饰。[消息 DOM 回归](test/isolated/desktop-agent-activity.test.tsx)核同一行的状态更新、文本选择、直接导航、旧展开状态隔离与失败边界，宿主关联和浏览器证据归 [Desktop owner](../../apps/desktop/README.md#native-当前会话环境信息与子详情)。
 
 ToolActivity／ToolRow 用 TraceLine、Title、Icon、Description 和受控 Collapsible 承载原工具过程；`asChild`保留原按钮／div、独立文件操作、展开身份和恢复动画层。状态只消费已有执行事实，取消或结果未知不转成 Trace error；Shell 以 CodeBlockContent 保留原具名 PRE、256px输出上限、24px跟随阈值、截断、退出码和回到最新。[聚合回归](test/isolated/desktop-tool-aggregation.test.tsx)验证真实 DOM 和输出追加；正式生产样式与浏览器验证归 [Desktop owner](../../apps/desktop/README.md#会话消息渲染验证)。
 

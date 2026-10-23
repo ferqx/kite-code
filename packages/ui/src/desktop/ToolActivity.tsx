@@ -640,7 +640,7 @@ export function ToolActivity({
     !grouped && !issues.length && message.status !== 'cancelled' ? childAgent : undefined;
   const agentRunning = !!agent?.fresh && ['starting', 'running', 'stopping'].includes(agent.status);
   const open = expanded ?? false;
-  const children = messages.map((item) => renderChildren(item.id.slice(5), true));
+  const children = agent ? [] : messages.map((item) => renderChildren(item.id.slice(5), true));
   const approval = approvalLabel(message);
   const pendingReview =
     !executionUnconfirmed(message) && !message.settled && automaticChecking(message);
@@ -661,6 +661,7 @@ export function ToolActivity({
     : summaryTraceStatus;
   const hasDiff = edit && message.changeConfirmed && !!message.toolResult;
   const canExpand =
+    !agent &&
     (grouped || message.status !== 'not_executed') &&
     (!read || childIssue) &&
     (!edit || hasDiff || childIssue) &&
@@ -720,7 +721,6 @@ export function ToolActivity({
       <TraceDescription className="tool-agent-state" role="status">
         {childAgentLabels[agent.status]}
       </TraceDescription>
-      {canExpand && <HugeiconsIcon className="tool-activity-chevron" icon={ArrowDown01Icon} />}
     </>
   ) : (
     <>
@@ -797,7 +797,18 @@ export function ToolActivity({
             : `${label}${status ? ` · ${status}` : ''}`
         }
       >
-        {childDetail ? (
+        {agent ? (
+          <TraceLine asChild status={activityTraceStatus} className="tool-activity-summary">
+            <Button
+              variant="ghost"
+              disabled={!childDetail}
+              aria-label={`查看子 Agent 详情：${agent.name}`}
+              onClick={childDetail?.onOpen}
+            >
+              {heading}
+            </Button>
+          </TraceLine>
+        ) : childDetail ? (
           <div className="tool-activity-heading-row">
             <TraceCollapsibleTrigger asChild>
               <TraceLine asChild status={activityTraceStatus} className="tool-activity-summary">
@@ -881,75 +892,77 @@ export function ToolActivity({
             <div>{heading}</div>
           </TraceLine>
         )}
-        <TraceCollapsibleContent className="tool-activity-content">
-          {grouped && (
-            <Trace className="tool-activity-steps">
-              {messages.map((item) => (
-                <Fragment key={item.id}>
-                  {renderItem?.(item) ??
-                    (item.toolName === 'shell_execute' ? (
-                      <ToolActivity
-                        key={item.id}
-                        messages={[item]}
-                        expanded={expandedItems?.[item.id]}
-                        onToggle={(next) => onToggleItem?.(item.id, next)}
-                        activityId={item.id}
-                        restoredExpanded={restoredExpanded}
-                        openFile={openFile}
-                        openFileForMessage={openFileForMessage}
-                        renderChildren={renderChildren}
-                      />
-                    ) : (
-                      <ToolRow
-                        key={item.id}
-                        message={item}
-                        openFile={openFileForMessage ? openFileForMessage(item) : openFile}
-                      />
-                    ))}
-                </Fragment>
-              ))}
-            </Trace>
-          )}
-          {shell && <ShellOutput message={message} />}
-          {hasDiff && <FileDiff message={message} />}
-          {ask && (
-            <div className="tool-ask-answers">
-              {ask.cancelled || message.status === 'cancelled' ? (
-                <span>{ask.cancelled ? '已取消回答' : '已取消'}</span>
-              ) : askMultiple ? (
-                ask.questions.map((question, index) => (
-                  <div className="tool-ask-answer" key={question.id}>
-                    <span className="tool-ask-prefix">{index + 1}. </span>
+        {!agent && (
+          <TraceCollapsibleContent className="tool-activity-content">
+            {grouped && (
+              <Trace className="tool-activity-steps">
+                {messages.map((item) => (
+                  <Fragment key={item.id}>
+                    {renderItem?.(item) ??
+                      (item.toolName === 'shell_execute' ? (
+                        <ToolActivity
+                          key={item.id}
+                          messages={[item]}
+                          expanded={expandedItems?.[item.id]}
+                          onToggle={(next) => onToggleItem?.(item.id, next)}
+                          activityId={item.id}
+                          restoredExpanded={restoredExpanded}
+                          openFile={openFile}
+                          openFileForMessage={openFileForMessage}
+                          renderChildren={renderChildren}
+                        />
+                      ) : (
+                        <ToolRow
+                          key={item.id}
+                          message={item}
+                          openFile={openFileForMessage ? openFileForMessage(item) : openFile}
+                        />
+                      ))}
+                  </Fragment>
+                ))}
+              </Trace>
+            )}
+            {shell && <ShellOutput message={message} />}
+            {hasDiff && <FileDiff message={message} />}
+            {ask && (
+              <div className="tool-ask-answers">
+                {ask.cancelled || message.status === 'cancelled' ? (
+                  <span>{ask.cancelled ? '已取消回答' : '已取消'}</span>
+                ) : askMultiple ? (
+                  ask.questions.map((question, index) => (
+                    <div className="tool-ask-answer" key={question.id}>
+                      <span className="tool-ask-prefix">{index + 1}. </span>
+                      <span className="tool-ask-text">
+                        {question.question.replace(/[：:]\s*$/, '')}：
+                        {ask.answers?.[question.id] ?? '尚未回答'}
+                      </span>
+                    </div>
+                  ))
+                ) : (
+                  <div className="tool-ask-answer">
+                    <span className="tool-ask-prefix">回答：</span>
                     <span className="tool-ask-text">
-                      {question.question.replace(/[：:]\s*$/, '')}：
-                      {ask.answers?.[question.id] ?? '尚未回答'}
+                      {ask.answers?.[ask.questions[0]?.id ?? ''] ?? ask.summary ?? '尚未回答'}
                     </span>
                   </div>
-                ))
-              ) : (
-                <div className="tool-ask-answer">
-                  <span className="tool-ask-prefix">回答：</span>
-                  <span className="tool-ask-text">
-                    {ask.answers?.[ask.questions[0]?.id ?? ''] ?? ask.summary ?? '尚未回答'}
-                  </span>
-                </div>
-              )}
-            </div>
-          )}
-          {!grouped &&
-            !ask &&
-            !shell &&
-            (!edit || childIssue) &&
-            (!read || childIssue) &&
-            message.toolName !== 'task' &&
-            !(message.status === 'cancelled' && message.text === 'Tool execution cancelled.') &&
-            (message.toolResult?.stderr || message.toolResult?.stdout || message.text) && (
-              <pre className="tool-detail">
-                {message.toolResult?.stderr || message.toolResult?.stdout || message.text}
-              </pre>
+                )}
+              </div>
             )}
-          <div className="tool-activity-children">{children}</div>
-        </TraceCollapsibleContent>
+            {!grouped &&
+              !ask &&
+              !shell &&
+              (!edit || childIssue) &&
+              (!read || childIssue) &&
+              message.toolName !== 'task' &&
+              !(message.status === 'cancelled' && message.text === 'Tool execution cancelled.') &&
+              (message.toolResult?.stderr || message.toolResult?.stdout || message.text) && (
+                <pre className="tool-detail">
+                  {message.toolResult?.stderr || message.toolResult?.stdout || message.text}
+                </pre>
+              )}
+            <div className="tool-activity-children">{children}</div>
+          </TraceCollapsibleContent>
+        )}
       </article>
     </TraceCollapsible>
   );

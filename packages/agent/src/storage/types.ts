@@ -466,6 +466,25 @@ export interface MessageContent {
 export interface MessageRecord extends MessageContent {
   /** Store-recorded first publication time in epoch milliseconds; absent for unverifiable history. */
   createdAt?: number;
+  /** Read-only ordinary Agent mail presentation; never execution authority. */
+  agentMessage?: {
+    messageId: string;
+    sourceSessionId: string;
+    sourceExecutionId: string;
+    name: string;
+    contentComplete: boolean;
+  };
+  /** Read-only provenance of one accepted child result; never execution authority. */
+  agentResult?: {
+    sourceId: string;
+    executionId: string;
+    resultRevision: string;
+    childSessionId: string;
+    childRunId: string | null;
+    name: string;
+    outcome: 'succeeded' | 'failed' | 'cancelled' | 'outcome_unknown';
+    contentComplete: boolean;
+  };
   /** Read-only SQL proof linking presentation rows to one original human input. */
   humanInput?: {
     inputCommandId: string;
@@ -736,7 +755,7 @@ export interface AfterTurnAuthorization {
   revision: string;
   controlReads?: readonly import('./port').PermissionControlRead[];
 }
-export interface AgentMessage {
+interface AgentMessageIdentity {
   id: string;
   seq: string;
   originStoreId: string;
@@ -746,11 +765,20 @@ export interface AgentMessage {
   targetRunId: string | null;
   contextSelectionId: string;
   state: 'pending_sender' | 'accepted' | 'received' | 'rejected' | 'outcome_unknown';
-  body: ArtifactReference;
   receivedMessageId: string | null;
+  receivedSourceId: string | null;
   receivedRunId: string | null;
   receivedContextSelectionId: string | null;
 }
+export type AgentMessage = AgentMessageIdentity &
+  (
+    | { kind: 'message'; body: ArtifactReference; result: null }
+    | {
+        kind: 'result';
+        body: null;
+        result: { executionId: string; resultRevision: string };
+      }
+  );
 export interface AgentMessagePage {
   storeId: string;
   sessionId: string;

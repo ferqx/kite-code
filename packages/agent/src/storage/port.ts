@@ -479,7 +479,21 @@ export interface Store {
     },
   ): Promise<CommandRecord>;
   receiveAgentMessages(
-    input: OwnedWrite & { runId: string; messageIds: string[] },
+    input: OwnedWrite & {
+      runId?: string;
+      messageIds: string[];
+      /** Only trusted result mail may request conditional idle continuation. */
+      resultOptions?: {
+        authorization: import('./types').AfterTurnAuthorization | null;
+        activeOnly?: boolean;
+        carriedMessageIds?: string[];
+        recovery?: {
+          commandId: string;
+          subjectId: string;
+          expectedConfiguration: Json;
+        };
+      };
+    },
   ): Promise<string[]>;
   getAgentMessage(
     input: WriteContext & { sessionId: string; subjectId: string; messageId: string },

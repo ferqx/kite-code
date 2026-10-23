@@ -19,6 +19,7 @@ import {
 } from './components/ui/collapsible';
 import { Marker, MarkerContent } from './components/ui/marker';
 import { useDesktopDiagnostics } from './diagnostics';
+import { cn } from './lib/utils';
 import { MessageContent } from './MessageContent';
 import { MessageCopyButton } from './MessageCopyButton';
 import { formatMessageTime } from './message-time';
@@ -284,7 +285,9 @@ const MessageItem = memo(function MessageItem({
         restoredExpanded={restoredExpanded?.has(message.id)}
       />
     );
-  if (message.role === 'system')
+  const agentResult = message.systemKind === 'agent_result' ? message.agentResult : undefined;
+  const agentMessage = message.systemKind === 'agent_message' ? message.agentMessage : undefined;
+  if (message.role === 'system' && !agentResult && !agentMessage)
     return (
       <article className={`message system ${message.status ?? ''}`}>
         <p>
@@ -297,19 +300,51 @@ const MessageItem = memo(function MessageItem({
   const timestamp = formatMessageTime(message.createdAtMs, metadataNow);
   return (
     <article
-      className={`message ${message.role}${message.delivery ? ` ${message.delivery}` : ''}${
-        message.role === 'assistant' && !message.settled ? ' responding' : ''
-      }`}
+      className={cn(
+        'message',
+        agentResult ? 'agent-result' : agentMessage ? 'agent-message' : message.role,
+        message.delivery,
+        {
+          responding: message.role === 'assistant' && !message.settled,
+        },
+      )}
       data-final-reply={message.role === 'assistant' ? Boolean(message.finalReply) : undefined}
-      aria-label={message.role === 'user' ? '用户消息' : '助手消息'}
       onPointerEnter={() => setMetadataNow(Date.now())}
       onFocus={() => setMetadataNow(Date.now())}
+      data-agent-result-source={agentResult?.sourceId}
+      data-agent-message-id={agentMessage?.messageId}
+      aria-label={
+        agentMessage
+          ? `${agentMessage.name} Agent 发送的消息`
+          : agentResult
+            ? `${agentResult.name} Agent 发送的消息`
+            : message.role === 'user'
+              ? '用户消息'
+              : '助手消息'
+      }
     >
+      {agentMessage && <p className="message-label">{agentMessage.name} Agent 发送</p>}
+      {agentResult && (
+        <p className="message-label">
+          {agentResult.name} Agent 发送
+          {agentResult.outcome !== 'succeeded' && (
+            <span className="message-status">
+              {
+                {
+                  failed: '失败',
+                  cancelled: '已取消',
+                  outcome_unknown: '结果未知',
+                }[agentResult.outcome]
+              }
+            </span>
+          )}
+        </p>
+      )}
       <CodeCopyEligibilityContext.Provider value={Boolean(copyText)}>
         {renderContent ? (
           renderContent(message)
-        ) : message.role === 'assistant' ? (
-          <>{message.text && <MessageContent text={message.text} openFile={openFile} />}</>
+        ) : message.role === 'assistant' || agentResult || agentMessage ? (
+          message.text && <MessageContent text={message.text} openFile={openFile} />
         ) : (
           <>
             <p className="user-text">{message.text}</p>
@@ -328,6 +363,10 @@ const MessageItem = memo(function MessageItem({
           </>
         )}
       </CodeCopyEligibilityContext.Provider>
+      {agentResult && !agentResult.contentComplete && <p role="status">消息正文未完整展示。</p>}
+      {agentMessage && !agentMessage.contentComplete && (
+        <p role="status">消息正文暂不可完整读取。</p>
+      )}
       {showResponseStatus && message.role === 'assistant' && !message.settled && (
         <small className="response-status" role="status">
           <span className="inline-block shimmer shimmer-color-foreground shimmer-spread-[16px] shimmer-duration-1500">
@@ -359,9 +398,10 @@ const MessageItem = memo(function MessageItem({
 });
 
 export function Conversation({
-  messages,
-  loading,
-  turnActivity,
+  messages: incomingMessages,
+  loading: historyLoading,
+  initialPresentationPending = false,
+  turnActivity: incomingTurnActivity,
   requiredSubagentWait,
   selected,
   connected,
@@ -378,6 +418,8 @@ export function Conversation({
 }: {
   messages: readonly Message[];
   loading: boolean;
+  /** First mount waits for host-owned grouping; an already readable tree stays live. */
+  initialPresentationPending?: boolean;
   turnActivity?: TurnActivity;
   requiredSubagentWait?: boolean;
   selected: boolean;
@@ -396,6 +438,14 @@ export function Conversation({
   /** Host-adapted tool facts within the original grouping and reading state. */
   renderToolActivity?: (messages: readonly Message[], state: ToolActivityState) => ReactNode;
 }) {
+  const presented = useRef(false);
+  useLayoutEffect(() => {
+    if (!historyLoading && !initialPresentationPending) presented.current = true;
+  }, [historyLoading, initialPresentationPending]);
+  const preparing = initialPresentationPending && !presented.current;
+  const messages = preparing ? [] : incomingMessages;
+  const loading = historyLoading || preparing;
+  const turnActivity = preparing ? undefined : incomingTurnActivity;
   const readingActivity = useConversationActivity();
   const diagnostics = useDesktopDiagnostics();
   const previousResume = useRef(readingActivity.resume);
@@ -722,6 +772,13 @@ export function Conversation({
   };
   for (const group of groups) {
     const message = group[0]!;
+    // A durable child result is a readable conversation event, including between
+    // two phases of the same parent Run. Never absorb it into process collapse.
+    if (message.systemKind === 'agent_result') {
+      flushUnscoped();
+      entries.push({ key: message.id, groups: [group] });
+      continue;
+    }
     const turnId = message.role === 'user' ? undefined : message.turnId;
     if (!turnId && message.role !== 'user') {
       unscoped.push(group);
@@ -897,19 +954,22 @@ export function Conversation({
     // The Run owns response activity across model/tool/approval phases. A
     // temporary observation failure is not a terminal fact. Only the last
     // entry for an exact Turn carries its indicator, outside process collapse.
+    const lastTurnEntry = entry === lastEntryByTurn.get(entry.turnId);
     const responding =
-      entry === lastEntryByTurn.get(entry.turnId) &&
+      lastTurnEntry &&
       !terminalStatus &&
       (activity ? isLiveTurn(activity) : active && !completed && !failed && !cancelled && !aborted);
-    const finishedDuration = completed
-      ? turnElapsedMilliseconds(timing?.turnStartedAtMs, timing?.turnFinishedAtMs)
-      : undefined;
+    const finishedDuration =
+      lastTurnEntry && completed
+        ? turnElapsedMilliseconds(timing?.turnStartedAtMs, timing?.turnFinishedAtMs)
+        : undefined;
     const responseLabel =
       active && thinking && !runningTool && (!activity || activity.status === 'running')
         ? '正在思考…'
         : '正在回复…';
-    const label =
-      diagnostics && !terminalStatus && activity?.executionUnconfirmed && isOngoingTurn(activity)
+    const label = !lastTurnEntry
+      ? '处理过程'
+      : diagnostics && !terminalStatus && activity?.executionUnconfirmed && isOngoingTurn(activity)
         ? '执行状态待核实'
         : diagnostics && !terminalStatus && activity?.unavailable
           ? '上次确认状态'
@@ -954,11 +1014,13 @@ export function Conversation({
         role={active && label !== '处理过程' ? 'status' : undefined}
       >
         {label}
-        <TurnElapsed
-          startedAtMs={timing?.turnStartedAtMs}
-          finishedAtMs={timing?.turnFinishedAtMs}
-          prefix={finishedDuration !== undefined ? ' ' : ' · 用时 '}
-        />
+        {lastTurnEntry && (
+          <TurnElapsed
+            startedAtMs={timing?.turnStartedAtMs}
+            finishedAtMs={timing?.turnFinishedAtMs}
+            prefix={finishedDuration !== undefined ? ' ' : ' · 用时 '}
+          />
+        )}
       </span>
     );
     return (

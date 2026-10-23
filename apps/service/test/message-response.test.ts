@@ -1,7 +1,96 @@
 import { expect, test } from 'bun:test';
 import type { AgentRuntime } from '@kite-ai/agent';
 import type { MessageRecord } from '@kite-ai/agent/storage';
+import { response_Message } from '../../../packages/client/src/generated/validators';
 import { messageResponses } from '../src/message-response';
+
+test('received Agent mail preserves its complete body and verified sender without reading it as a Fork', async () => {
+  const message: MessageRecord = {
+    id: 'received-mail-message',
+    sessionId: 'parent',
+    runId: 'parent-run',
+    seq: '8',
+    role: 'system',
+    status: 'complete',
+    content: '## Actual child note\n\nComplete body 雪🙂\n\nNo execution grant.',
+    sourceIds: ['original-mail'],
+    contextSelectionId: 'selection',
+    agentMessage: {
+      messageId: 'original-mail',
+      sourceSessionId: 'child',
+      sourceExecutionId: 'original-send-tool',
+      name: 'Reader',
+      contentComplete: true,
+    },
+  };
+  const runtime = {
+    getMessageOrigin: async () => {
+      throw Error('verified received mail is not a Fork');
+    },
+  } as unknown as AgentRuntime;
+  expect(await messageResponses(runtime, [message], 'store', 'owner')).toEqual([message]);
+  expect(response_Message(message)).toBe(true);
+  expect(
+    response_Message({
+      ...message,
+      agentMessage: { ...message.agentMessage!, contentComplete: 'true' },
+    }),
+  ).toBe(false);
+  expect(
+    response_Message({
+      ...message,
+      agentMessage: { ...message.agentMessage!, sourceExecutionId: undefined },
+    }),
+  ).toBe(false);
+  expect(
+    await messageResponses(
+      runtime,
+      [
+        {
+          ...message,
+          content: '邮件正文暂不可读取。',
+          agentMessage: { ...message.agentMessage!, contentComplete: false },
+        },
+      ],
+      'store',
+      'owner',
+    ),
+  ).toEqual([
+    {
+      ...message,
+      content: '邮件正文暂不可读取。',
+      agentMessage: { ...message.agentMessage!, contentComplete: false },
+    },
+  ]);
+});
+
+test('an accepted child result retains its Source provenance without being treated as a Fork message', async () => {
+  const message: MessageRecord = {
+    id: 'accepted-source',
+    sessionId: 'parent',
+    runId: null,
+    seq: '12',
+    role: 'system',
+    status: 'complete',
+    content: 'The exact child result 雪🙂',
+    agentResult: {
+      sourceId: 'accepted-source',
+      executionId: 'carrier',
+      resultRevision: '1',
+      childSessionId: 'child',
+      childRunId: 'child-run',
+      name: 'Research',
+      outcome: 'succeeded',
+      contentComplete: true,
+    },
+  };
+  const runtime = {
+    getMessageOrigin: async () => {
+      throw Error('a result Source has no physical Fork message');
+    },
+  } as unknown as AgentRuntime;
+  expect(await messageResponses(runtime, [message], 'store', 'owner')).toEqual([message]);
+});
 
 test('restored inline Fork history preserves the original user, Model and Tool Store instead of inventing the current Store as their source', async () => {
   const originals: MessageRecord[] = ['user', 'assistant', 'tool'].map((role, index) => ({

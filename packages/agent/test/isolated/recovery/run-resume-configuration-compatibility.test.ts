@@ -1,5 +1,5 @@
 import { Database } from 'bun:sqlite';
-import { expect, test } from 'bun:test';
+import { afterAll, beforeAll, expect, test } from 'bun:test';
 import { readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { gunzipSync } from 'node:zlib';
@@ -7,12 +7,21 @@ import {
   privateDirectory,
   temporaryDirectory,
 } from '../../../../../tests/fixtures/test-filesystem';
+import { prepareQualifiedSqliteFixture } from '../../../../../tests/fixtures/unified-agent/qualified-sqlite-fixture';
 import { createArtifactStore } from '../../../src/artifacts';
 import { createRuntime } from '../../../src/runtime';
 import { openSqliteStore } from '../../../src/sqlite';
 import type { DispatchInput } from '../../../src/storage/port';
 import { verifyAuthorizationReviewDispatch } from '../../../src/storage/sqlite/authorization-review';
 import type { SqliteOperations } from '../../../src/storage/sqlite/operations';
+
+// The default runner isolates this file. Use the release engine before any DB;
+// never warm or rewrite a frozen original Profile to make its readonly preflight pass.
+let qualified: Awaited<ReturnType<typeof prepareQualifiedSqliteFixture>> | undefined;
+beforeAll(async () => {
+  qualified = await prepareQualifiedSqliteFixture();
+}, 60000);
+afterAll(() => qualified?.close());
 
 // Genuine beabc9628afa4684667733a807c9ffddb3d8beb5 Runtime profiles, frozen after a settled review and pending
 // human card (approved), or an ordinary approval with no reviewer (none), then

@@ -24,6 +24,7 @@ import {
   DialogDescription,
   DialogHeader,
   DialogTitle,
+  MessageContent,
   ReadingStateCache,
   type SessionChildTabRequest,
   type SessionChildTarget,
@@ -1338,7 +1339,7 @@ function NativeDesktopContent({
       modelChoices.current.get(choiceKey)?.modelId ??
       (resolvedChoice?.identity === choiceIdentity ? resolvedChoice.choice?.modelId : undefined),
   });
-  // Metadata gates reuse of a fully calibrated cached DOM, never initial history reading.
+  // File targets gate reads only. Run/Tool facts also determine the first history layout.
   const historyMetadataLoading = runMessages.loading || toolMessages.loading || fileTargets.loading;
   const conversationDomScope = JSON.stringify([
     state?.generation ?? generation.current,
@@ -1360,9 +1361,8 @@ function NativeDesktopContent({
       };
     }
   }
-  // Auxiliary metadata enriches saved messages without hiding their complete
-  // reading. Individual tool rows retain their verification boundary, while
-  // writes still require the current history EOF and fresh selection authority.
+  // Once presented, metadata continues to enrich the reading without hiding it.
+  // Writes still require current history EOF and fresh selection authority.
   const replyDisplayScope = JSON.stringify([
     state?.generation ?? generation.current,
     selection?.storeId,
@@ -2003,6 +2003,10 @@ function NativeDesktopContent({
   const hasPendingRootInteraction = nativeRootInteractionBlocksComposer(selection);
   const canCompose =
     !!selection && !selection.session.parentSessionId && !hasPendingRootInteraction;
+  const savedFirstInput = useRef<string | undefined>(undefined);
+  const firstInputIdentity =
+    firstSubmission &&
+    JSON.stringify([firstSubmission.creation.expectedStoreId, firstSubmission.commandId]);
   const firstVisible =
     firstSubmission &&
     directory?.storeId === firstSubmission.creation.expectedStoreId &&
@@ -2011,17 +2015,23 @@ function NativeDesktopContent({
         selection.session.id === firstSubmission.creation.sessionId));
   const firstSaved =
     firstVisible &&
-    messages.some((message) =>
-      savedNativeInput(
-        message,
-        firstSubmission.commandId,
-        {
-          storeId: firstSubmission.creation.expectedStoreId,
-          sessionId: firstSubmission.creation.sessionId,
-        },
-        selection,
-      ),
-    );
+    (savedFirstInput.current === firstInputIdentity ||
+      messages.some((message) =>
+        savedNativeInput(
+          message,
+          firstSubmission.commandId,
+          {
+            storeId: firstSubmission.creation.expectedStoreId,
+            sessionId: firstSubmission.creation.sessionId,
+          },
+          selection,
+        ),
+      ));
+  useLayoutEffect(() => {
+    // A later cold read must not revive a first-input placeholder already
+    // replaced by verified history. Keep its receipt/retry owner intact.
+    if (firstSaved) savedFirstInput.current = firstInputIdentity;
+  }, [firstSaved, firstInputIdentity]);
   // biome-ignore lint/correctness/useExhaustiveDependencies: The revision invalidates the current-view body map after verified reads and reader disposal.
   const freshTranscript = useMemo(() => {
     if (!readingParent) return { messages: [] };
@@ -3033,6 +3043,35 @@ function NativeDesktopContent({
     if (!message || !selection || !state) return null;
     const openable =
       !selection.viewLoading && historyState.phase === 'complete' && !directory?.unavailable;
+    if (message.agentMessage)
+      return <NativeModelOutputMessage message={message} storeId={selection.storeId} />;
+    if (message.agentResult) {
+      const result = message.agentResult;
+      return (
+        <>
+          {message.content && <MessageContent text={message.content} />}
+          <DesktopButton
+            type="button"
+            variant="ghost"
+            size="sm"
+            disabled={!openable || !childReadAvailable}
+            onClick={() => {
+              if (!openable || !childReadAvailable || selected.current !== selection.session.id)
+                return;
+              setChildTabRequest({
+                parent: childParent,
+                requestId: ++childTabSequence.current,
+                sessionId: result.childSessionId,
+                executionId: result.executionId,
+                title: result.name,
+              });
+            }}
+          >
+            {result.contentComplete ? '查看子 Agent' : '查看完整结果'}
+          </DesktopButton>
+        </>
+      );
+    }
     return (
       <>
         {(!!message.images?.length || !!message.files?.length) && (
@@ -3369,6 +3408,22 @@ function NativeDesktopContent({
           !historyMetadataLoading,
       }}
       messages={messageModels}
+      initialPresentationPending={
+        !(firstVisible && !firstSaved) &&
+        !pendingInputModels.length &&
+        !!selection &&
+        transcript.messages === freshTranscript.messages &&
+        historyState.phase !== 'unavailable' &&
+        !state?.callerUnavailable &&
+        !state?.backgroundUnavailable &&
+        !(state?.selection?.permissionUnavailable && !state.selection.viewLoading) &&
+        !runMessages.error &&
+        !toolMessages.error &&
+        (historyState.phase === 'loading' ||
+          !!selection.viewLoading ||
+          runMessages.loading ||
+          toolMessages.loading)
+      }
       renderMessageContent={renderNativeMessage}
       renderToolActivity={renderNativeTools}
       turnActivity={

@@ -502,6 +502,16 @@ function fixture(
       });
     },
     releaseParent: () => act(async () => releaseParent?.()),
+    async holdMetadataForHistoryRefresh() {
+      metadataPending = true;
+      historyEpoch++;
+      revision++;
+      await act(async () => {
+        for (const listener of listeners) listener({ kind: 'changed', generation: 1 });
+      });
+      await until(() => metadataReleases.size > 0);
+    },
+    pendingMetadata: () => metadataPending && metadataReleases.size > 0,
     releaseMetadata: () =>
       act(async () => {
         metadataPending = false;
@@ -633,6 +643,15 @@ test('closing or collapsing a running child preserves saved parent messages befo
       await f.render();
       await f.click('Original');
       expect(f.requests.some((request) => request.method === 'toolMessages.list')).toBe(true);
+      // Admit the parent once, then exercise retained reading during a new scan.
+      await f.releaseMetadata();
+      await f.waitForText('Original parent delegation request');
+      expect(f.host.textContent).toContain('Parent transcript');
+      const parentMessage = f.host.querySelector('.message.assistant')!;
+      expect(parentMessage).not.toBeNull();
+      await f.holdMetadataForHistoryRefresh();
+      expect(f.pendingMetadata()).toBe(true);
+      expect(f.host.querySelector('.message.assistant')).toBe(parentMessage);
       await f.open();
       await f.waitForText('Child prefix');
       expect(f.host.textContent).toContain('Child prefix');
@@ -640,7 +659,9 @@ test('closing or collapsing a running child preserves saved parent messages befo
       await f.updateParent('Parent transcript');
       await f.click(target);
       await f.waitForText('Original parent delegation request');
-      // Neither the metadata response nor the running child has been released.
+      // The refreshed metadata response and running child remain pending.
+      expect(f.pendingMetadata()).toBe(true);
+      expect(f.host.querySelector('.message.assistant')).toBe(parentMessage);
       expect(f.host.textContent).toContain('Original parent delegation request');
       expect(f.host.textContent).toContain('Parent transcript');
       expect(f.host.textContent).not.toContain('Child prefix');
@@ -657,6 +678,8 @@ test('closing or collapsing a running child preserves saved parent messages befo
         'Draft while child and metadata remain pending',
       );
       await f.releaseParent();
+      expect(f.pendingMetadata()).toBe(true);
+      expect(f.host.querySelector('.message.assistant')).toBe(parentMessage);
       expect(f.host.querySelector<HTMLButtonElement>('[data-permission-trigger]')!.disabled).toBe(
         false,
       );

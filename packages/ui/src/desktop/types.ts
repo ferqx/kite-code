@@ -23,9 +23,30 @@ export interface Message {
     | 'compaction'
     | 'ask'
     | 'approval'
+    | 'agent_message'
+    | 'agent_result'
     | 'turn_timing'
     | 'turn_terminal'
     | 'turn_failure';
+  /** Core-confirmed ordinary Agent mail in its receiving parent's Turn. */
+  readonly agentMessage?: {
+    readonly messageId: string;
+    readonly sourceSessionId: string;
+    readonly sourceExecutionId: string;
+    readonly name: string;
+    readonly contentComplete: boolean;
+  };
+  /** Core-confirmed child result source; independent of the parent's Model replies. */
+  readonly agentResult?: {
+    readonly sourceId: string;
+    readonly executionId: string;
+    readonly resultRevision: string;
+    readonly childSessionId: string;
+    readonly childRunId: string | null;
+    readonly name: string;
+    readonly outcome: 'succeeded' | 'failed' | 'cancelled' | 'outcome_unknown';
+    readonly contentComplete: boolean;
+  };
   /** Safe terminal facts for a reply failure; never an executable retry instruction. */
   readonly failure?: {
     readonly summary: string;

@@ -4,7 +4,7 @@
 
 `MessageRecord.createdAt` 是可选的首次发布毫秒时间，由 [appendMessage](sqlite/operations.ts)在原消息事务内写入 `source_json` 和初始 `message_part`；调用者的同名值不能覆盖新记录时间。Model 流式追加与最终正文接管保留原字段，Fork 原样复制来源 JSON，冷重开沿原记录读取；不增加 DDL、迁移、格式版本或读取写入副作用。
 
-缺少该字段的旧历史在一页内批量查最早 `message.updated`，只有 replay floor 仍为0、第一条事件带原 `kite.session-log` v1 `occurredAt` 时才提供时间；日志已裁剪、原事件未带时间或无法核实时保持缺失，不使用较晚更新、Run 时间或查询时钟代替。该读取与 replay floor 的核对位于同一 SQL 快照；Fork 来源读取沿原已核实原行补出时间。[输入与消息回归](../../test/isolated/storage/inputs.test.ts)覆盖首次记录、增量与完成、冷读、旧日志和裁剪边界；元数据不进入模型正文或执行授权。
+缺少该字段的旧历史在一页内批量查最早 `message.updated`，只有 replay floor 仍为0、第一条事件带原 `kite.session-log` v1 `occurredAt` 时才提供时间；日志已裁剪、原事件未带时间或无法核实时保持缺失，不使用较晚更新、Run 时间或查询时钟代替。该读取与 replay floor 的核对位于同一 SQL 快照；普通消息与子结果混排的 `readPublicMessages` 也先批量调用 `messageRecords`，保留普通历史消息的原时间补齐规则。Fork 来源读取沿原已核实原行补出时间。[输入与消息回归](../../test/isolated/storage/inputs.test.ts)覆盖首次记录、增量与完成、冷读、旧日志和裁剪边界；元数据不进入模型正文或执行授权。
 
 2026-10-23，Windows x64／Bun1.4.3：输入整文件18项通过，增加旧元数据缺失断言后消息时间专项1项／10断言通过，Agent typecheck 与边界检查通过。[Fork record](../../test/isolated/storage/fork-record-sources.test.ts)完整文件18项通过的既有结果继续适用，本轮未改动其源码、夹具或依赖。
 
@@ -243,6 +243,30 @@ Host 自动封存 prepare 中 session namespace 的 `records.get/list` 完整原
 
 `verifyFirstActivation` 供 activation、邮件采用、冷 `attachGroup`、后台目录、Run 和报告读取共用，核原 Store／主体／父子／工作／配置／selection、请求摘要与准确命令链。同工作背景只引用该工作最初已取消委派，新工作不带旧背景；新输入独立保存，旧 queued 引导不复活。邮件仍按准确工作及 seq／completed cursor 双上界采用。缺失、篡改、已派发或未知事实不取得首次启动或恢复资格。真实用例入口见[Task owner](../extensions/task/README.md#稳定身份准确命令和观察)；冷只读检查不启动模型。
 
+## 统一消息接收
+
+[Runtime](../runtime.ts)以 `receivePendingInputs` 串行汇合原用户输入与[Agent 邮箱](sqlite/agent-mail-operations.ts)。用户引导继续使用 `applyInput` 与原队列／前驱校验，普通 Agent 消息和最终结果共用 `listAgentMessages/receiveAgentMessages`；用户输入与低信任 inbox 保留不同的输入失效语义，Agent 数据不能撤销尚未派发决定或产生工具批准。
+
+新的 `agent_completion` 在 carrier 终态事务中，将原唯一 `job.report` Command 封存 `mailboxVersion:1` 与原邮箱目标列。`job.report.continue` 继承同一协议。两者仍保原稳定 ID、父会话准入与 Run origin，由[结果邮件证明](sqlite/result-mail.ts)核准确 child／carrier／revision／订阅；新项不进入 `listPendingJobReports` 的旧扫描，没有第二条 accepted 命令或新增表。未标记旧报告与非 Agent Job 保留原读取、应用和恢复协议，读取不补迁移或重新排队。
+
+邮箱以 `kind:message/result` 区分两种内容。普通消息只从成功 sender Tool 的原 Artifact 发布实体 Message；结果从可信 carrier 发布既有 `result_ref` Source，不额外写普通正文。结果的逻辑作者是原 child Session，`receivedSourceId` 与普通 `receivedMessageId` 分开保存，禁止把 Source ID 填入 Message 外键。`receivedSeq` 取两类发布在接收会话中的真实序号，列表、等待和 received 回执均不冒充实际 Model 已读。
+
+活动父轮从同一邮箱检查点接收结果。父轮结束后，同条结果邮件经原配置 lease、after-turn 当前授权和资格检查决定是否创建一轮；普通 QueueOnly 消息仍只排队。最终接收事务选择准确 Run，整体提交 Run／Source／consume／mail 回执；多结果可进入同一轮，已接受用户输入保原空闲优先级。派发与完成的 `input_pending` 门禁识别本轮可接收结果，已暂缓且准入条件未变化的结果不把本轮永久卡住。回执丢失只查回原身份，停止、Rewind、unknown 与冷缺绑定不取得新执行资格。
+
+原 `applyJobReport` 保留为结果发布事务及旧恢复适配；新 Runtime 接收和 idle 调度均通过邮箱入口进入它。结果气泡继续由真实 idle 续跑的原 Source／回执证明投影，active 接纳在结束和重开后不补气泡。取舍见[统一接收决定](../../../../.agents/notes/implemented/architecture/2026-10-23-unified-message-reception.md)。
+
+普通邮件的物理 Message 继续保存原内部占位与 mail source ID；公开 [Runtime listMessages/getView](../runtime.ts)通过 `publicAgentMailMessage` 只读展开原 Artifact，交付 system 消息、完整 content 和 `agentMessage`（原 mail ID、发送 Session／Tool Execution、名称、完整性）。来源须核原 `agent.message`、真实 receivedMessage／Run／selection、成功 sender Tool、原主体／Store／工作身份与直接父子关系，以及原 Artifact 的引用、scope 和字节证明。来源损坏返回无推断作者的系统不可读事实；正文不可读保留已验证作者并标 `contentComplete:false`，不退成用户气泡。公开视图不修改物理消息或低信任模型输入，也不增加 Source、Run 或接收回执；Native 把邮件留在实际接收轮次的原过程。
+
+[统一邮箱回归](../../test/isolated/business/task/unified-inbox.test.ts)核真实 active／idle 接收、用户引导、原消息与结果的来源区别、准确重收和冷读取；[报告事务](../../test/isolated/business/task/collaboration-report-transactions.test.ts)与[冷报告恢复](../../test/isolated/business/task/collaboration-cold-report.test.ts)通过实际邮箱收件故障验证整体回滚与提交后丢响应。普通邮件的 sender／Artifact 和 adopted 水位仍由[邮箱](../../test/isolated/business/task/mailbox.test.ts)、[后继采用](../../test/isolated/business/task/mail-adoption.test.ts)覆盖。
+
+[邮箱展示回归](../../test/isolated/business/task/mailbox.test.ts)还核父子双向长多行 Unicode 正文及真实发送者、公开列表与 View 一致、原 Store 物理记录和模型输入不变、冷只读零请求／写入，以及同内部文案的用户输入不冒认、错 Run／损坏来源／缺 Command／损坏 kind／坏 Artifact 均不降级为用户消息。
+
+2026-10-23，macOS arm64／Bun 1.4.2，`87944be7f` 加本次工作树：`bun test ./packages/agent/test/isolated/business/task/` 的 26 个整文件 132 项／2472 断言通过；输入、工作控制、Store／Runtime report 恢复、真实 report SIGKILL、输入检查点、派发准入和 child result 八个相关整文件 95 项／1000 断言通过。新邮箱六项实际回归另核结果到达不撤销正常 Tool、损坏协议拒绝及错误轮次重收不改投。八 workspace 类型检查、API 生成一致性、包／依赖边界、测试归属、定向 Biome 与文档检查通过。实际 Native 顺序与冷重开证据归 [Desktop owner](../../../../apps/desktop/README.md#native-当前会话环境信息与子详情)；受控模型与本机测试不代替付费 Provider 或跨平台发布资格。
+
+同日，当前默认 `deepseek-v4-flash`／chat-completions／medium／4096 进行真实 Provider 验证：[统一收件 live](../../../../tests/e2e/live/model/collaboration-unified-inbox.live.ts) 的 `U01-active-unified-inbox`、`U02-idle-continuation-denied`，加既有 `R12-all-optional-observers-absent`，共 3 例／16 次实际 HTTP 200 通过。U01 的下一实际 ModelInput 同时保留完整低信任普通邮件、原唯一最终结果 Source 和准确人类 steer 来源；原只读 Tool 成功一次，父保持原 Run，邮件中伪称批准／停止不形成控制。U02 在父正常结束后证明普通消息只排队，最终结果因当前 apply 授权拒绝而保留待收，零新父请求／Run／Source。R12 则核真实 idle 允许续跑的唯一新 Run 与完整子正文。三例完整 canonical 输入／输出已核对，冷读零 Provider。证据分别为 `dist/acceptance/unified-mail-live-active-20261023-4bd8cf51.json`、`unified-mail-live-deny-20261023-c585da13.json`、`unified-mail-live-r12-20261023-4e8cde20.json` 及各自 `.workspace`。此结果限 owned 工具／after-turn 策略；普通 Native 实际运行另暴露普通邮件公开展示和分组缺口，不能由上述 Core 通过推定界面完整验收。
+
+随后普通邮件公开展示修复完成，`mailbox.test.ts` 5项／250断言、Task业务26整文件132项／2538断言，输入检查点／派发／child result／Runtime报告恢复四文件27项／375断言通过。上述 U01／U02 在当前修复上分别5次真实 HTTP 200复验通过，完整 canonical 父子正文已核；证据为 `dist/acceptance/agent-mail-display-live-active-20261023-79c8f632.json` 和 `agent-mail-display-live-denied-20261023-8e0a16b7.json` 及各自 `.workspace`。普通 Native 的发送者／完整正文／单原过程／冷读零副作用已另外真实复验通过，准确12请求与截图范围归 [Desktop owner](../../../../apps/desktop/README.md#native-当前会话环境信息与子详情)。此前展示失败保留为修复前事实，不再代表当前修复的结果。
+
 ## 人类工作与完成报告事务
 
 [输入 owner](sqlite/inputs/README.md)负责公共请求、raw 人类输入、关联/选择/control revision 和唯一业务准入的分离；[安全交接](sqlite/human-work-handoff.ts)只在原准确 Run 的必要结果、计划条件、交互和未知效果都允许时技术收束。工作选择只门禁人类工作因果，不代替显式压缩或 runless Action 的原资格。等待与解释不持有 SQL 事务；原已派发效果与 unknown 始终按原执行域处理。
@@ -250,6 +274,8 @@ Host 自动封存 prepare 中 session namespace 的 `records.get/list` 完整原
 恢复生成新 Store 后，原 Command/Run/Message 保留真实出处并可按各自只读合同读取；当前选择、待决输入、最新输入与 Runtime 候选只取当前 Store 的人类控制事实。历史 A 不能成为新 Store 中 B 的默认目标，也不阻挡 B 的独立准入；同 Store 冷重开仍保原选择和待决边界。Fork 的封存历史证明分别核业务 origin 与 rootWork ID/序号，不将旧工作当前是否可执行作为历史只读资格。
 
 [报告 owner](sqlite/job-report-operations.ts)在原结果终态保存时同事务登记唯一报告，接纳时以准确 result revision、Store/主体/原父 work/selection、当前 control revision 与取消/恢复事实核资格。active/idle 共用同一 Source/ack 事务：最终选目标，必要时建一个 idle Run，再保存 Source、consume Command、report receipt 和 delivery。C2 可进入 C1 唤起的同工作 R；不将 R.origin 当作每份结果的接纳身份。原 applied 重试只读原 target/Source，不能改投后来 Run。
+
+[触发父续跑的子结果消息投影](sqlite/agent-result-display.ts)由 `listMessages/getView` 在只读事务共用。除真实 child carrier、原主体／Store／父子与工作关系、当前结果 revision／终态和准确 consume 证明外，必须核对同一 applied report 的 `idle_new_turn/report_started`、原 Source／execution／revision／selection／runId，且真实目标 Run 的 origin 必须是该 report。active 回执改标签仍不能冒认；当前 Run 是否活动不决定显示，原 active 接纳后来终态和冷读也不产生气泡。消息沿原 Source 的 ID／seq，不写第二份实体 message。`Message.agentResult` 给出具体 carrier、child Session／可核 child Run、名称及正文完整性；普通 Job、内部 Model、pending／诊断及仅显式 Include 不冒充子返回。raw 历史保留已经发生的准入，不随当前 Model selection 擦除；Fork 缺原消费链时不推断。模型上下文仍读取原物理消息与唯一 result Source，投影不增加第二次投递或授权。大型 Artifact 结果仅展示原 content 并标记 `contentComplete:false`，完整读取沿对应 carrier。active／idle、伪造模式、事务、分页、冷读零写及身份反例由 [报告回归](../../test/isolated/business/task/collaboration-report-transactions.test.ts)覆盖，普通 Job 边界由 [child context](../../test/isolated/child/result-context.test.ts)覆盖。
 
 嵌套报告在原 child Run 已完成、但其外层 carrier 尚在真实收束时，先以完整 report/start/subject/Store/rootWork/result revision 证明核准确祖先，仅保存 `report_deferred/report_carrier_active`，不创建 Run、Source 或 ack。deferred 的有限等待指纹包含准确 carrier ancestry 的状态及取消事实，真实终态提交后才重新准入；原配置 binding 保持。普通及继续报告的派发仍由严格 sealed ancestry guard 要求合法终态，取消、unknown、错关系与过期 deadline 不取得执行资格；不通用重试 `report_unverifiable`。[嵌套整例](../../test/isolated/business/task/nested-after-turn.test.ts)用真实 carrier 最终提交门固定该窗口，并核零提前采用与最终唯一 Source/Run。
 

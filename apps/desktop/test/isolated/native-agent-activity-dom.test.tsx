@@ -12,7 +12,7 @@ import type { NativeToolMessageFact } from '../../src/tool-messages-bridge';
 import { backgroundItem } from '../background-item.fixture';
 import { prepareDesktopDom } from '../native-page-dom.fixture';
 
-test('Native environment activity preserves receipt disclosure and exact child identity through refresh beyond the display cache budget', async () => {
+test('Native environment activity preserves a receipt-free detail row and exact child identity through refresh beyond the display cache budget', async () => {
   const dom = new JSDOM('<div id="root"/>', { pretendToBeVisual: true });
   const restoreDom = prepareDesktopDom(dom);
   const keys = ['window', 'document', 'IS_REACT_ACT_ENVIRONMENT'] as const;
@@ -89,7 +89,7 @@ test('Native environment activity preserves receipt disclosure and exact child i
     sessionId: 'root',
     runId: 'parent-run',
     seq: '2',
-    content: 'accepted: queued',
+    content: '{"accepted":true,"state":"queued"}',
     sourceIds: ['spawn'],
     status: 'complete',
   };
@@ -109,9 +109,10 @@ test('Native environment activity preserves receipt disclosure and exact child i
     definitionId: 'task.follow_up',
   };
   let environment!: ReturnType<typeof useNativeEnvironment>;
+  let readerCalls = 0;
   let detailTarget: { sessionId: string; executionId: string } | undefined;
   function Harness({ revision }: { revision: number }) {
-    const [expanded, setExpanded] = useState(false);
+    const [expanded, setExpanded] = useState(true);
     environment = useNativeEnvironment({
       bridge,
       generation: 1,
@@ -147,7 +148,10 @@ test('Native environment activity preserves receipt disclosure and exact child i
                 }
               : undefined
           }
-          renderChildren={() => <p key="receipt">Original admission receipt</p>}
+          renderChildren={() => {
+            readerCalls++;
+            return <p key="receipt">Original admission receipt</p>;
+          }}
         />
         <ToolActivity
           messages={[desktopToolMessage(guidanceFact, guidance.id, guidance.content)]}
@@ -177,8 +181,8 @@ test('Native environment activity preserves receipt disclosure and exact child i
     expect(state()).toBeUndefined();
     const article = host.querySelector('article')!;
     let disclosure = host.querySelector('.tool-activity-summary') as HTMLElement;
-    await act(async () => disclosure.click());
     expect(disclosure.getAttribute('aria-expanded')).toBe('true');
+    expect(readerCalls).toBeGreaterThan(0);
     item.execution.status = 'planned';
     item.childRun = null;
     items = [item];
@@ -186,7 +190,10 @@ test('Native environment activity preserves receipt disclosure and exact child i
     await until(() => state() === '排队中');
     expect(host.querySelector('article') === article).toBe(true);
     disclosure = host.querySelector('.tool-activity-summary') as HTMLElement;
-    expect(disclosure.getAttribute('aria-expanded')).toBe('true');
+    expect(disclosure.hasAttribute('aria-expanded')).toBe(false);
+    expect(host.textContent).not.toContain('Original admission receipt');
+    expect(host.querySelector('article')!.textContent).not.toContain(saved.content);
+    const readersBefore = readerCalls;
     const selectionText = dom.window.document.getSelection()!;
     const range = dom.window.document.createRange();
     range.selectNodeContents(host.querySelector('.tool-agent-name')!);
@@ -233,13 +240,14 @@ test('Native environment activity preserves receipt disclosure and exact child i
     expect(state()).toBe('开始工作');
     expect(host.querySelector('article') === article).toBe(true);
     expect(host.querySelector('.tool-agent-name')!.textContent).toBe('Grant review');
-    expect(host.querySelector('.tool-child-detail')!.getAttribute('aria-label')).toBe(
-      '查看子 Agent 详情：Grant review',
-    );
+    expect(disclosure.getAttribute('aria-label')).toBe('查看子 Agent 详情：Grant review');
     expect(host.textContent).not.toContain('状态待核对');
     expect(host.textContent).not.toContain('执行状态待核实');
     expect(article.classList.contains('is-running')).toBe(false);
-    expect(disclosure.getAttribute('aria-expanded')).toBe('true');
+    expect(disclosure.hasAttribute('aria-expanded')).toBe(false);
+    expect(host.querySelector('.tool-child-detail')).toBeNull();
+    expect(host.querySelector('article')!.querySelector('.tool-activity-content')).toBeNull();
+    expect(readerCalls).toBe(readersBefore);
     await act(async () => release?.());
     await until(() => environment.agentActivities[0]?.childAgent.fresh === true);
     item.execution.status = 'succeeded';
@@ -248,10 +256,18 @@ test('Native environment activity preserves receipt disclosure and exact child i
     await render();
     await until(() => state() === '已完成工作');
     expect(host.querySelector('article') === article).toBe(true);
-    expect(disclosure.getAttribute('aria-expanded')).toBe('true');
+    expect(disclosure.hasAttribute('aria-expanded')).toBe(false);
     expect(host.querySelector('.tool-activity-summary') === disclosure).toBe(true);
-    expect(host.textContent).toContain('Original admission receipt');
-    await act(async () => (host.querySelector('.tool-child-detail') as HTMLElement).click());
+    expect(readerCalls).toBe(readersBefore);
+    expect(host.textContent).not.toContain('Original admission receipt');
+    expect(host.querySelector('article')!.textContent).not.toContain(saved.content);
+    item.execution.status = 'outcome_unknown';
+    await render();
+    await until(() => state() === '结果未知');
+    expect(host.querySelector('article') === article).toBe(true);
+    expect(host.querySelector('.tool-activity-summary') === disclosure).toBe(true);
+    expect(readerCalls).toBe(readersBefore);
+    await act(async () => disclosure.click());
     await until(() => requests.some((request) => request.method === 'background.child.open'));
     expect(detailTarget).toEqual({ sessionId: 'child', executionId: item.execution.id });
     expect(requests.find((request) => request.method === 'background.child.open')).toMatchObject({

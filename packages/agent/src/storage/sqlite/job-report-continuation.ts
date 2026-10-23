@@ -6,6 +6,7 @@ import { verifyFirstActivation } from './child-first-activation';
 import { assertNoExecutionGroupFence } from './execution-group-safety';
 import { readWorkEligibility } from './human-work-control';
 import type { SqliteOperations } from './operations';
+import { resultMailEnvelope, resultMailPredicate, sealResultMail } from './result-mail';
 
 type Row = Record<string, string | number | bigint | null>;
 const parse = (value: Row[string] | undefined) => JSON.parse(String(value)) as Record<string, Json>;
@@ -261,6 +262,14 @@ export function registerContinuedReport(db: SqliteOperations, execution: Row): v
     originalReportId(execution),
   );
   if (!original || execution.delivery === 'consumed') return;
+  if (
+    db.row(`SELECT c.id FROM command c WHERE c.id=? AND ${resultMailEnvelope()}`, original.id!) &&
+    !db.row(
+      `SELECT c.id FROM command c JOIN execution e ON e.id=c.agent_source_execution_id WHERE c.id=? AND ${resultMailPredicate()}`,
+      original.id!,
+    )
+  )
+    return;
   const qualifications = db.rows(
     "SELECT * FROM command WHERE kind='job.report.qualification' AND session_id=? AND json_extract(request_json,'$.carrierExecutionId')=? ORDER BY seq DESC",
     execution.session_id!,
@@ -312,6 +321,7 @@ export function registerContinuedReport(db: SqliteOperations, execution: Row): v
     execution.root_work_seq!,
     id,
   );
+  if (parse(original.request_json).mailboxVersion === 1) sealResultMail(db, id, execution);
   if (original.status === 'accepted')
     db.run(
       "UPDATE command SET status='rejected',receipt_json=? WHERE id=?",

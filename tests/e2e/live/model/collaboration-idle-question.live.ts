@@ -481,9 +481,9 @@ export async function runLiveIdleQuestion(options: Options): Promise<{ cases: Re
       'actual_question_contains_complete_missing_choice_and_source_nonce',
     );
     const scope = { expectedStoreId, sessionId: 'root', subjectId: 'live-idle-question-owner' };
-    const mail = (await owned.listAgentMessages(scope)).items.find(
-      (item) => item.sourceSessionId === held.sessionId,
-    );
+    const mail = (await owned.listAgentMessages(scope)).items
+      .filter((item) => item.kind === 'message')
+      .find((item) => item.sourceSessionId === held.sessionId);
     branch(mail, 'actual_original_question_mail_not_saved');
     const mailBody = new TextDecoder('utf-8', { fatal: true }).decode(
       (

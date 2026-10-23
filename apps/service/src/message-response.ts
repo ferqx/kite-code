@@ -57,7 +57,10 @@ export async function messageResponses(
 ) {
   return Promise.all(
     messages.map(async (message) => {
-      if (message.runId !== null) return messageResponse(message);
+      // Agent mail and child Sources carry verified read-only display provenance.
+      // They are not Fork copies of physical message rows.
+      if (message.runId !== null || message.agentResult || message.agentMessage)
+        return messageResponse(message);
       try {
         const origin = await runtime.getMessageOrigin({
           expectedStoreId: storeId,

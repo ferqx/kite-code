@@ -13648,6 +13648,104 @@
             "required": ["id", "trigger", "status"],
             "additionalProperties": false
           },
+          "agentMessage": {
+            "type": "object",
+            "properties": {
+              "messageId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128,
+                "pattern": "^[A-Za-z0-9_-]+$"
+              },
+              "sourceSessionId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128,
+                "pattern": "^[A-Za-z0-9_-]+$"
+              },
+              "sourceExecutionId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128,
+                "pattern": "^[A-Za-z0-9_-]+$"
+              },
+              "name": {
+                "type": "string"
+              },
+              "contentComplete": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "messageId",
+              "sourceSessionId",
+              "sourceExecutionId",
+              "name",
+              "contentComplete"
+            ],
+            "additionalProperties": false
+          },
+          "agentResult": {
+            "type": "object",
+            "properties": {
+              "sourceId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128,
+                "pattern": "^[A-Za-z0-9_-]+$"
+              },
+              "executionId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128,
+                "pattern": "^[A-Za-z0-9_-]+$"
+              },
+              "resultRevision": {
+                "type": "string",
+                "pattern": "^(0|[1-9][0-9]*)$"
+              },
+              "childSessionId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128,
+                "pattern": "^[A-Za-z0-9_-]+$"
+              },
+              "childRunId": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 128,
+                    "pattern": "^[A-Za-z0-9_-]+$"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "name": {
+                "type": "string"
+              },
+              "outcome": {
+                "type": "string",
+                "enum": ["succeeded", "failed", "cancelled", "outcome_unknown"]
+              },
+              "contentComplete": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "sourceId",
+              "executionId",
+              "resultRevision",
+              "childSessionId",
+              "childRunId",
+              "name",
+              "outcome",
+              "contentComplete"
+            ],
+            "additionalProperties": false
+          },
           "originMessage": {
             "type": "object",
             "properties": {
@@ -18213,6 +18311,104 @@
                   "required": ["id", "trigger", "status"],
                   "additionalProperties": false
                 },
+                "agentMessage": {
+                  "type": "object",
+                  "properties": {
+                    "messageId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 128,
+                      "pattern": "^[A-Za-z0-9_-]+$"
+                    },
+                    "sourceSessionId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 128,
+                      "pattern": "^[A-Za-z0-9_-]+$"
+                    },
+                    "sourceExecutionId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 128,
+                      "pattern": "^[A-Za-z0-9_-]+$"
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "contentComplete": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "messageId",
+                    "sourceSessionId",
+                    "sourceExecutionId",
+                    "name",
+                    "contentComplete"
+                  ],
+                  "additionalProperties": false
+                },
+                "agentResult": {
+                  "type": "object",
+                  "properties": {
+                    "sourceId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 128,
+                      "pattern": "^[A-Za-z0-9_-]+$"
+                    },
+                    "executionId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 128,
+                      "pattern": "^[A-Za-z0-9_-]+$"
+                    },
+                    "resultRevision": {
+                      "type": "string",
+                      "pattern": "^(0|[1-9][0-9]*)$"
+                    },
+                    "childSessionId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 128,
+                      "pattern": "^[A-Za-z0-9_-]+$"
+                    },
+                    "childRunId": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 128,
+                          "pattern": "^[A-Za-z0-9_-]+$"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "outcome": {
+                      "type": "string",
+                      "enum": ["succeeded", "failed", "cancelled", "outcome_unknown"]
+                    },
+                    "contentComplete": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "sourceId",
+                    "executionId",
+                    "resultRevision",
+                    "childSessionId",
+                    "childRunId",
+                    "name",
+                    "outcome",
+                    "contentComplete"
+                  ],
+                  "additionalProperties": false
+                },
                 "originMessage": {
                   "type": "object",
                   "properties": {
@@ -20502,6 +20698,104 @@
               "required": ["id", "trigger", "status"],
               "additionalProperties": false
             },
+            "agentMessage": {
+              "type": "object",
+              "properties": {
+                "messageId": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128,
+                  "pattern": "^[A-Za-z0-9_-]+$"
+                },
+                "sourceSessionId": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128,
+                  "pattern": "^[A-Za-z0-9_-]+$"
+                },
+                "sourceExecutionId": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128,
+                  "pattern": "^[A-Za-z0-9_-]+$"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "contentComplete": {
+                  "type": "boolean"
+                }
+              },
+              "required": [
+                "messageId",
+                "sourceSessionId",
+                "sourceExecutionId",
+                "name",
+                "contentComplete"
+              ],
+              "additionalProperties": false
+            },
+            "agentResult": {
+              "type": "object",
+              "properties": {
+                "sourceId": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128,
+                  "pattern": "^[A-Za-z0-9_-]+$"
+                },
+                "executionId": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128,
+                  "pattern": "^[A-Za-z0-9_-]+$"
+                },
+                "resultRevision": {
+                  "type": "string",
+                  "pattern": "^(0|[1-9][0-9]*)$"
+                },
+                "childSessionId": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128,
+                  "pattern": "^[A-Za-z0-9_-]+$"
+                },
+                "childRunId": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 128,
+                      "pattern": "^[A-Za-z0-9_-]+$"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "name": {
+                  "type": "string"
+                },
+                "outcome": {
+                  "type": "string",
+                  "enum": ["succeeded", "failed", "cancelled", "outcome_unknown"]
+                },
+                "contentComplete": {
+                  "type": "boolean"
+                }
+              },
+              "required": [
+                "sourceId",
+                "executionId",
+                "resultRevision",
+                "childSessionId",
+                "childRunId",
+                "name",
+                "outcome",
+                "contentComplete"
+              ],
+              "additionalProperties": false
+            },
             "originMessage": {
               "type": "object",
               "properties": {
@@ -21399,6 +21693,104 @@
                     }
                   },
                   "required": ["id", "trigger", "status"],
+                  "additionalProperties": false
+                },
+                "agentMessage": {
+                  "type": "object",
+                  "properties": {
+                    "messageId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 128,
+                      "pattern": "^[A-Za-z0-9_-]+$"
+                    },
+                    "sourceSessionId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 128,
+                      "pattern": "^[A-Za-z0-9_-]+$"
+                    },
+                    "sourceExecutionId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 128,
+                      "pattern": "^[A-Za-z0-9_-]+$"
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "contentComplete": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "messageId",
+                    "sourceSessionId",
+                    "sourceExecutionId",
+                    "name",
+                    "contentComplete"
+                  ],
+                  "additionalProperties": false
+                },
+                "agentResult": {
+                  "type": "object",
+                  "properties": {
+                    "sourceId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 128,
+                      "pattern": "^[A-Za-z0-9_-]+$"
+                    },
+                    "executionId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 128,
+                      "pattern": "^[A-Za-z0-9_-]+$"
+                    },
+                    "resultRevision": {
+                      "type": "string",
+                      "pattern": "^(0|[1-9][0-9]*)$"
+                    },
+                    "childSessionId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 128,
+                      "pattern": "^[A-Za-z0-9_-]+$"
+                    },
+                    "childRunId": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 128,
+                          "pattern": "^[A-Za-z0-9_-]+$"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "outcome": {
+                      "type": "string",
+                      "enum": ["succeeded", "failed", "cancelled", "outcome_unknown"]
+                    },
+                    "contentComplete": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "sourceId",
+                    "executionId",
+                    "resultRevision",
+                    "childSessionId",
+                    "childRunId",
+                    "name",
+                    "outcome",
+                    "contentComplete"
+                  ],
                   "additionalProperties": false
                 },
                 "originMessage": {

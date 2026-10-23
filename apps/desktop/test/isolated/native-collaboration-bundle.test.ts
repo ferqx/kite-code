@@ -29,10 +29,10 @@ import { cleanupOwnedNativeCandidate } from '../owned-native-cleanup.fixture';
 
 const require = createRequire(import.meta.url);
 test.skipIf(process.platform !== 'darwin')(
-  'source-free Native child same-command Session grants, sibling isolation, follow-up, exact stop and cold zero replay',
+  'source-free Native child wake-up messages, active intake without bubbles, Session grants and cold zero replay',
   async () => {
     const root = realpathSync(temporaryDirectory('kite-native-collaboration-'));
-    const evidence = resolve('dist/acceptance', `child-session-approval-${randomUUID()}`);
+    const evidence = resolve('dist/acceptance', `child-result-message-${randomUUID()}`);
     // Isolated runner reuse only; normal product startup has no such switch.
     const reuseCandidate = process.env.KITE_TEST_COLLABORATION_CANDIDATE;
     const home = join(root, 'home'),
@@ -47,6 +47,9 @@ test.skipIf(process.platform !== 'darwin')(
     const held = new Map<string, () => void>();
     const heldChecks = new Map<string, () => void>();
     const completions = new Map<string, number>();
+    let heldParentReport: (() => void) | undefined;
+    let heldActiveParent: (() => void) | undefined;
+    let heldActiveResult: (() => void) | undefined;
     let gatedChecks = 0,
       titleCalls = 0;
     const bodies: {
@@ -107,17 +110,19 @@ test.skipIf(process.platform !== 'darwin')(
       const markers = [
         'NATIVE_COLLAB_START',
         'Follow up: NATIVE_COLLAB_FOLLOW',
+        'NATIVE_COLLAB_ACTIVE',
         'CHILD_A',
         'CHILD_B',
         'CHILD_A_FOLLOWUP',
+        'CHILD_A_ACTIVE',
       ];
       function marker(content: unknown): string | undefined {
         if (typeof content !== 'string') return undefined;
         // Human Composer input is serialized Markdown; tool-authored child
         // prompts retain their exact original content without editor conversion.
-        const human = markers.slice(0, 2).find((task) => task.replaceAll('_', '\\_') === content);
+        const human = markers.slice(0, 3).find((task) => task.replaceAll('_', '\\_') === content);
         if (human) return human;
-        if (markers.slice(2).includes(content)) return content;
+        if (markers.slice(3).includes(content)) return content;
         try {
           const value = JSON.parse(content);
           return typeof value?.content === 'string' && markers.includes(value.content)
@@ -138,6 +143,9 @@ test.skipIf(process.platform !== 'darwin')(
               held: [...held.keys()],
               heldChecks: [...heldChecks.keys()],
               titleCalls,
+              parentReportHeld: !!heldParentReport,
+              activeParentHeld: !!heldActiveParent,
+              activeResultHeld: !!heldActiveResult,
             });
           if (url.pathname === '/release') {
             for (const release of held.values()) release();
@@ -149,9 +157,54 @@ test.skipIf(process.platform !== 'darwin')(
             heldChecks.clear();
             return new Response('checks released');
           }
+          if (url.pathname === '/release-report') {
+            heldParentReport?.();
+            heldParentReport = undefined;
+            return new Response('parent report released');
+          }
+          if (url.pathname === '/release-active-parent') {
+            heldActiveParent?.();
+            heldActiveParent = undefined;
+            return new Response('active parent checkpoint released');
+          }
+          if (url.pathname === '/release-active-result') {
+            heldActiveResult?.();
+            heldActiveResult = undefined;
+            return new Response('active parent final reply released');
+          }
           if (url.pathname === '/follow') {
             agentId = url.searchParams.get('agent')!;
             return new Response('recorded exact Agent');
+          }
+          if (url.pathname === '/active-intake') {
+            // Private fixture observation of the actual ack; public Execution
+            // intentionally does not expose resultAcceptance.
+            const observed = new Database(profile.databasePath, { readonly: true });
+            try {
+              const row = observed
+                .query(
+                  `SELECT s.id AS sourceId,target.id AS runId,target.status,target.is_active AS isActive,
+                    json_extract(report.receipt_json,'$.mode') AS mode
+                   FROM execution e JOIN context_snapshot s ON s.execution_id=e.id
+                    AND s.result_revision=e.result_revision AND s.kind='result_ref'
+                   JOIN command report ON report.session_id=s.session_id AND report.status='applied'
+                    AND report.kind IN('job.report','job.report.continue')
+                    AND json_extract(report.receipt_json,'$.sourceId')=s.id
+                    AND json_extract(report.receipt_json,'$.executionId')=e.id
+                   JOIN run target ON target.id=json_extract(report.receipt_json,'$.runId')
+                   WHERE e.id=? AND e.session_id='collaboration' AND e.delivery='consumed'`,
+                )
+                .get(url.searchParams.get('execution') ?? '') as {
+                sourceId: string;
+                runId: string;
+                status: string;
+                isActive: number;
+                mode: string;
+              } | null;
+              return Response.json(row);
+            } finally {
+              observed.close();
+            }
           }
           const body = (await request.json()) as (typeof bodies)[number];
           bodies.push(body);
@@ -238,6 +291,26 @@ test.skipIf(process.platform !== 'darwin')(
                 ],
               };
               reason = 'tool_calls';
+            } else if (task === 'NATIVE_COLLAB_ACTIVE' && tools === 0) {
+              assert.notEqual(agentId, '');
+              delta = {
+                tool_calls: [
+                  call(
+                    'follow_up_agent',
+                    { agent_id: agentId, content: 'CHILD_A_ACTIVE' },
+                    'follow-A-during-parent-turn',
+                  ),
+                ],
+              };
+              reason = 'tool_calls';
+            } else if (task === 'NATIVE_COLLAB_ACTIVE' && tools === 1) {
+              await new Promise<void>((release) => {
+                heldActiveParent = release;
+              });
+              delta = {
+                tool_calls: [call('wait_agent_events', { wait_ms: 0 }, 'active-parent-events')],
+              };
+              reason = 'tool_calls';
             } else if ((task === 'CHILD_A' && tools < 2) || (task === 'CHILD_B' && tools === 0)) {
               if (tools === 0) await new Promise<void>((release) => held.set(task!, release));
               delta = {
@@ -266,8 +339,29 @@ test.skipIf(process.platform !== 'darwin')(
               };
               reason = 'tool_calls';
             } else {
+              if (task === 'CHILD_A_ACTIVE')
+                await new Promise<void>((release) => held.set(task!, release));
+              if (task === 'NATIVE_COLLAB_ACTIVE')
+                await new Promise<void>((release) => {
+                  heldActiveResult = release;
+                });
               const ordinal = (completions.get(task!) ?? 0) + 1;
               completions.set(task!, ordinal);
+              if (task === 'NATIVE_COLLAB_START' && ordinal === 2) {
+                // The result must be readable before the resumed parent has a
+                // reply; a second model-facing copy would violate this boundary.
+                assert.equal(
+                  body.messages.filter(
+                    (message) =>
+                      typeof message.content === 'string' &&
+                      message.content.includes('CHILD_A_DONE_1'),
+                  ).length,
+                  1,
+                );
+                await new Promise<void>((release) => {
+                  heldParentReport = release;
+                });
+              }
               delta = { content: `${task}_DONE_${ordinal}` };
             }
           }
@@ -378,10 +472,17 @@ test.skipIf(process.platform !== 'darwin')(
         oldRun: string;
         nextRun: string;
         coldZeroReplay: boolean;
+        resultMessages: { id: string; executionId: string; content: string }[];
+        active: { executionId: string; parentRunId: string; sourceId: string };
       };
       expect(report.a).not.toBe(report.next);
       expect(report.oldRun).not.toBe(report.nextRun);
       expect(report.coldZeroReplay).toBe(true);
+      expect(report.resultMessages).toHaveLength(2);
+      expect(report.resultMessages.map((message) => message.executionId)).toEqual([
+        report.a,
+        report.next,
+      ]);
       expect(titleCalls).toBe(1);
       expect(readFileSync(join(workspace, 'child-a.txt'), 'utf8')).toBe('A original approved\n');
       expect(readFileSync(join(workspace, 'session-command.txt'), 'utf8')).toBe(
@@ -404,6 +505,12 @@ test.skipIf(process.platform !== 'darwin')(
         expect(stopped!.cancelRequestedAt).not.toBeNull();
         expect(first!.cancelRequestedAt).toBeNull();
         expect(second!.cancelRequestedAt).toBeNull();
+        const active = (await cold.getExecution(report.active.executionId))!;
+        expect(active.resultAcceptance).toMatchObject({
+          runId: report.active.parentRunId,
+          sourceId: report.active.sourceId,
+        });
+        expect((await cold.getRun(report.active.parentRunId))!.status).toBe('completed');
         const snapshotDB = new Database(profile.databasePath, { readonly: true });
         try {
           expect(snapshotDB.query('SELECT count(*) AS n FROM session').get()).toEqual({ n: 3 });
@@ -411,6 +518,26 @@ test.skipIf(process.platform !== 'darwin')(
           snapshotDB.close();
         }
         expect(await cold.listSessions()).toHaveLength(1);
+        const rootView = await cold.getView('collaboration');
+        const resultMessages = rootView.messages.filter((message) => message.agentResult);
+        expect(
+          resultMessages.map((message) => ({
+            id: message.id,
+            executionId: message.agentResult!.executionId,
+            content: message.content,
+          })),
+        ).toEqual(report.resultMessages);
+        expect(resultMessages.map((message) => message.agentResult!.childSessionId)).toEqual([
+          report.agentId,
+          report.agentId,
+        ]);
+        expect(resultMessages.map((message) => message.agentResult!.childRunId)).toEqual([
+          report.oldRun,
+          report.nextRun,
+        ]);
+        const lastCursor = (await cold.getMetadata()).lastChangeCursor;
+        expect(await cold.listMessages('collaboration')).toEqual(rootView.messages);
+        expect((await cold.getMetadata()).lastChangeCursor).toBe(lastCursor);
         const scopes = ['collaboration', report.agentId, stopped!.childSessionId!];
         const internalCalls: unknown[] = [];
         let checks = 0,
@@ -418,7 +545,7 @@ test.skipIf(process.platform !== 'darwin')(
         for (const sessionId of scopes) {
           const view = await cold.getView(sessionId);
           expect(view.executions.filter((execution) => execution.childSessionId).length).toBe(
-            sessionId === 'collaboration' ? 3 : 0,
+            sessionId === 'collaboration' ? 4 : 0,
           );
           for (const execution of view.executions) {
             const command = await cold.getCommand(execution.originCommandId);
@@ -474,6 +601,9 @@ test.skipIf(process.platform !== 'darwin')(
     } finally {
       for (const release of held.values()) release();
       for (const release of heldChecks.values()) release();
+      heldParentReport?.();
+      heldActiveParent?.();
+      heldActiveResult?.();
       if (driver && driver.exitCode === null) {
         driver.kill('SIGTERM');
       }
@@ -492,6 +622,11 @@ test.skipIf(process.platform !== 'darwin')(
         '01-dual-child-pending.png',
         '02-child-session-approval-menu.png',
         '03-a-completed-b-pending.png',
+        '03a-child-result-parent-continuing.png',
+        '03b-child-result-followup.png',
+        '03c-active-result-in-process.png',
+        '03ca-active-result-detail.png',
+        '03d-active-parent-completed.png',
         '04-cold-reopened.png',
         'collaboration-report.json',
         'cold-permission-evidence.json',
