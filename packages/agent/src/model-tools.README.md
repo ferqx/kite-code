@@ -49,6 +49,8 @@
 
 文件、Shell、Task 和 MCP 的完整参数、输出与生命周期分别归各 leaf README；本表不是另一份执行 schema。`search_content` 仍是字面文本搜索，公开名称不把它变成正则工具；MCP 搜索范围也不因改名扩大。
 
+`files.search@3` 的公开 `context_lines/max_line_chars/respect_ignore` 仍由同一声明字段映射生成，单文件、过滤、分页及当前页未读范围归 [Files owner](tools/files/README.md)。`spawn_agent` 的默认及开放 preset 说明取自实际注册角色，不从名称猜测能力；当前源目录和封存工具表面分别表达现在与当时事实。Shell 本地引用缺失由 [Shell leaf](tools/shell.README.md)返回有限确定失败；这些反馈字段不能改变原派发状态、重放权限或未知效果。
+
 ## 验证边界
 
 验证应捕获实际 Adapter 收到的公开名称/schema，发出公开调用后核对真实内部定义和准确参数，再核下一轮历史与 Inspector。当时定义变化、同名碰撞、非法字段、opaque JSON、大正文及拒权零效果分别验证，不能只比较两份同源 schema。

@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { isAbsolute, relative, resolve } from 'node:path';
 import { setImmediate } from 'node:timers/promises';
+import ignore, { type Ignore } from 'ignore';
 import { AgentError } from '../storage/types';
 import { fileChangePreview } from './files-diff';
 import { createWorkspaceFileIo } from './files-io';
@@ -50,6 +51,36 @@ export interface FileEntry {
   name: string;
   kind: 'file' | 'directory' | 'symlink' | 'other';
 }
+export interface FileSearchInput {
+  text: string;
+  path?: string;
+  after?: string;
+  limit?: number;
+  glob?: string;
+  contextLines?: number;
+  maxLineChars?: number;
+  respectIgnore?: boolean;
+}
+export interface FileSearchMatch {
+  path: string;
+  line: number;
+  content: string;
+  truncated?: true;
+  originalLength?: number;
+  before?: { line: number; content: string; truncated?: true; originalLength?: number }[];
+  after?: { line: number; content: string; truncated?: true; originalLength?: number }[];
+}
+export interface FileSearchResult {
+  matches: FileSearchMatch[];
+  next: string | null;
+  scope?: {
+    kind: 'current_page';
+    complete: boolean;
+    skipped: { binary: number; encoding: number; ignored: number; links: number };
+    samples: { path: string; reason: string }[];
+    filters: { glob: string | null; respectIgnore: boolean };
+  };
+}
 export interface WorkspaceFiles {
   /** Model Tool boundary: resolve against the fixed Workspace, never process cwd. */
   relativePath(path: string): string;
@@ -85,16 +116,34 @@ export interface WorkspaceFiles {
     afterName?: string;
     limit?: number;
   }): Promise<{ entries: FileEntry[]; next: string | null }>;
-  search(
-    input: { text: string; path?: string; after?: string; limit?: number },
-    options?: { signal?: AbortSignal },
-  ): Promise<{ matches: { path: string; line: number; content: string }[]; next: string | null }>;
+  search(input: FileSearchInput, options?: { signal?: AbortSignal }): Promise<FileSearchResult>;
   close(): Promise<void>;
 }
 const missing = (error: unknown) => (error as { code?: string }).code === 'ENOENT';
 const fail = (code: string): never => {
   throw new AgentError(code);
 };
+/** Shared lexical contract for path discovery and content filtering. */
+function compileFileGlob(pattern: unknown): Bun.Glob {
+  if (
+    typeof pattern !== 'string' ||
+    !pattern ||
+    Buffer.from(pattern).toString('utf8') !== pattern ||
+    pattern.length > 1024 ||
+    pattern.includes('\\') ||
+    pattern.includes('\0') ||
+    isAbsolute(pattern) ||
+    /^[a-z]:\//i.test(pattern) ||
+    pattern.split('/').some((part) => part === '..' || part === '.' || !part) ||
+    pattern.split('/').length > 64
+  )
+    return fail('file_glob_invalid');
+  try {
+    return new Bun.Glob(pattern);
+  } catch {
+    return fail('file_glob_invalid');
+  }
+}
 function checkTextSample(bytes: Uint8Array): void {
   if (bytes[0] === 0xef && bytes[1] === 0xbb && bytes[2] === 0xbf) return;
   const size = Math.min(bytes.byteLength, 8192);
@@ -798,30 +847,13 @@ export function createWorkspaceFiles(options: {
     async glob(input, options) {
       options?.signal?.throwIfAborted();
       const scope = segments(input.path ?? '').join('/');
-      if (
-        typeof input.pattern !== 'string' ||
-        !input.pattern ||
-        Buffer.from(input.pattern).toString('utf8') !== input.pattern ||
-        input.pattern.length > 1024 ||
-        input.pattern.includes('\\') ||
-        input.pattern.includes('\0') ||
-        isAbsolute(input.pattern) ||
-        input.pattern.split('/').some((part) => part === '..' || part === '.' || !part) ||
-        input.pattern.split('/').length > 64
-      )
-        fail('file_glob_invalid');
+      const matcher = compileFileGlob(input.pattern);
       if (input.after !== undefined) {
         const cursor = segments(input.after).join('/');
         if (!cursor || cursor !== input.after || (scope && !cursor.startsWith(`${scope}/`)))
           fail('file_page_invalid');
       }
       const limit = pageLimit(input.limit);
-      let matcher: Bun.Glob;
-      try {
-        matcher = new Bun.Glob(input.pattern);
-      } catch {
-        return fail('file_glob_invalid');
-      }
       // Only complete literal directory components can exclude a subtree. Basename
       // patterns still match at every depth, and all wildcard semantics stay with Bun.
       const prefix: string[] = [];
@@ -940,66 +972,200 @@ export function createWorkspaceFiles(options: {
         segments(parts[0]!);
       }
       const limit = input.limit === undefined ? undefined : pageLimit(input.limit);
-      const matches: { path: string; line: number; content: string }[] = [];
+      const contextLines = input.contextLines ?? 0;
+      if (!Number.isSafeInteger(contextLines) || contextLines < 0 || contextLines > 10)
+        fail('file_search_context_invalid');
+      if (
+        input.maxLineChars !== undefined &&
+        (!Number.isSafeInteger(input.maxLineChars) || input.maxLineChars < 1)
+      )
+        fail('file_search_preview_invalid');
+      if (input.respectIgnore !== undefined && typeof input.respectIgnore !== 'boolean')
+        fail('file_search_filter_invalid');
+      const matcher = input.glob === undefined ? undefined : compileFileGlob(input.glob);
+      const scope = input.path ?? '';
+      const matches: FileSearchMatch[] = [];
+      const skipped = { binary: 0, encoding: 0, ignored: 0, links: 0 };
+      const samples: { path: string; reason: string }[] = [];
+      const skip = (path: string, reason: keyof typeof skipped) => {
+        skipped[reason]++;
+        if (samples.length < 20) samples.push({ path, reason });
+      };
       const checkpoint = queryCheckpoint(options?.signal);
-      async function walk(path: string): Promise<void> {
-        for (const entry of entries(path)) {
-          await checkpoint();
-          const child = path ? `${path}/${entry.name}` : entry.name;
-          if (entry.kind === 'directory') await walk(child);
-          else if (entry.kind === 'file') {
-            let snapshot: FileSnapshot;
-            try {
-              snapshot = await trackRead(() =>
-                withReadParent(child, (parent, name) =>
-                  readAtAsync(parent, name, child, options?.signal),
-                ),
-              );
-            } catch (error) {
-              if (error instanceof AgentError && error.code === 'file_binary') continue;
-              throw error;
-            }
-            let offset = 0;
-            let index = 0;
-            for (;;) {
-              const pause = checkpoint();
-              if (pause) await pause;
-              const newline = snapshot.content.indexOf('\n', offset);
-              const line = snapshot.content.slice(offset, newline === -1 ? undefined : newline);
-              if (line.includes(input.text)) {
-                const match = { path: child, line: index + 1, content: line };
-                const cursor = `${match.path}\0${String(match.line).padStart(12, '0')}`;
-                if (!input.after || cursor > input.after) {
-                  matches.push(match);
-                  if (limit !== undefined && matches.length > limit + 1) {
-                    matches.sort((a, b) => {
-                      const ak = `${a.path}\0${String(a.line).padStart(12, '0')}`,
-                        bk = `${b.path}\0${String(b.line).padStart(12, '0')}`;
-                      return ak < bk ? -1 : ak > bk ? 1 : 0;
-                    });
-                    matches.pop();
-                  }
-                }
-              }
-              if (newline === -1) break;
-              offset = newline + 1;
-              index++;
-            }
-          }
-        }
-      }
-      await walk(input.path ?? '');
-      options?.signal?.throwIfAborted();
-      check();
       const key = (m: { path: string; line: number }) =>
         `${m.path}\0${String(m.line).padStart(12, '0')}`;
-      matches.sort((a, b) => (key(a) < key(b) ? -1 : 1));
-      const selected = matches
-        .filter((m) => !input.after || key(m) > input.after)
-        .slice(0, limit === undefined ? undefined : limit + 1);
+      const preview = (content: string) => {
+        if (input.maxLineChars === undefined || content.length <= input.maxLineChars)
+          return { content };
+        // Do not split a UTF-16 surrogate pair in the preview.
+        let end = input.maxLineChars;
+        if (end > 0 && /[\uD800-\uDBFF]/.test(content[end - 1]!)) end--;
+        return {
+          content: content.slice(0, end),
+          truncated: true as const,
+          originalLength: content.length,
+        };
+      };
+      const read = (path: string) =>
+        trackRead(() =>
+          withReadParent(path, (parent, name) => readAtAsync(parent, name, path, options?.signal)),
+        );
+      async function searchFile(path: string): Promise<boolean> {
+        let snapshot: FileSnapshot;
+        try {
+          snapshot = await read(path);
+        } catch (error) {
+          if (
+            error instanceof AgentError &&
+            ['file_binary', 'file_encoding_invalid'].includes(error.code)
+          ) {
+            skip(path, error.code === 'file_binary' ? 'binary' : 'encoding');
+            return false;
+          }
+          throw error;
+        }
+        // Keep at most the requested preceding lines, rather than a full-file line array.
+        const preceding: {
+          line: number;
+          content: string;
+          truncated?: true;
+          originalLength?: number;
+        }[] = [];
+        let offset = 0;
+        let index = 0;
+        for (;;) {
+          const pause = checkpoint();
+          if (pause) await pause;
+          const newline = snapshot.content.indexOf('\n', offset);
+          const line = snapshot.content.slice(offset, newline === -1 ? undefined : newline);
+          const match: FileSearchMatch = { path, line: index + 1, ...preview(line) };
+          if (line.includes(input.text) && (!input.after || key(match) > input.after)) {
+            if (contextLines) {
+              match.before = [...preceding];
+              match.after = [];
+              let following = newline === -1 ? snapshot.content.length : newline + 1;
+              for (let at = 0; at < contextLines && following < snapshot.content.length; at++) {
+                const end = snapshot.content.indexOf('\n', following);
+                match.after.push({
+                  line: index + at + 2,
+                  ...preview(snapshot.content.slice(following, end === -1 ? undefined : end)),
+                });
+                following = end === -1 ? snapshot.content.length : end + 1;
+              }
+            }
+            matches.push(match);
+            if (limit !== undefined && matches.length > limit) return true;
+          }
+          if (contextLines) {
+            preceding.push({ line: index + 1, ...preview(line) });
+            if (preceding.length > contextLines) preceding.shift();
+          }
+          if (newline === -1) break;
+          offset = newline + 1;
+          index++;
+        }
+        return false;
+      }
+      type IgnoreScope = { base: string; matcher: Ignore };
+      async function walk(path: string, parents: IgnoreScope[]): Promise<boolean> {
+        const all = entries(path);
+        let rules = parents;
+        let unreadableIgnore = false;
+        if (
+          input.respectIgnore &&
+          all.some((entry) => entry.name === '.gitignore' && entry.kind === 'file')
+        ) {
+          const file = path ? `${path}/.gitignore` : '.gitignore';
+          try {
+            rules = [...parents, { base: path, matcher: ignore().add((await read(file)).content) }];
+          } catch (error) {
+            if (
+              !(error instanceof AgentError) ||
+              !['file_binary', 'file_encoding_invalid'].includes(error.code)
+            )
+              throw error;
+            skip(file, error.code === 'file_binary' ? 'binary' : 'encoding');
+            unreadableIgnore = true;
+          }
+        }
+        const ordered = all.sort((a, b) => {
+          const ak = a.name + (a.kind === 'directory' ? '/' : '');
+          const bk = b.name + (b.kind === 'directory' ? '/' : '');
+          return ak < bk ? -1 : ak > bk ? 1 : 0;
+        });
+        for (const entry of ordered) {
+          await checkpoint();
+          const child = path ? `${path}/${entry.name}` : entry.name;
+          if (unreadableIgnore && entry.name === '.gitignore') continue;
+          if (entry.kind === 'symlink' || entry.kind === 'other') {
+            skip(child, 'links');
+            continue;
+          }
+          let excluded = false;
+          for (const rule of rules) {
+            const local =
+              (rule.base ? child.slice(rule.base.length + 1) : child) +
+              (entry.kind === 'directory' ? '/' : '');
+            const verdict = rule.matcher.test(local);
+            if (verdict.ignored) excluded = true;
+            else if (verdict.unignored) excluded = false;
+          }
+          if (excluded) {
+            skip(child, 'ignored');
+            continue;
+          }
+          if (entry.kind === 'directory') {
+            if (await walk(child, rules)) return true;
+          } else {
+            const local = scope ? child.slice(scope.length + 1) : child;
+            if (matcher && !matcher.match(input.glob!.includes('/') ? local : entry.name)) continue;
+            // Entire files before the continuation cannot contain a later result.
+            if (input.after && child < input.after.split('\0')[0]!) continue;
+            if (await searchFile(child)) return true;
+          }
+        }
+        return false;
+      }
+      if (!scope) await walk('', []);
+      else {
+        const kind = withParent(
+          scope,
+          (parent, name) =>
+            io
+              .listAt(parent)
+              .find((entry) =>
+                process.platform === 'win32'
+                  ? entry.name.toLowerCase() === name.toLowerCase()
+                  : entry.name === name,
+              )?.kind,
+        );
+        if (!kind) fail('ENOENT');
+        if (kind === 'directory') await walk(scope, []);
+        else if (kind === 'file') {
+          const name = scope.split('/').at(-1)!;
+          if (!matcher || matcher.match(name)) await searchFile(scope);
+        } else fail('file_not_regular');
+      }
+      options?.signal?.throwIfAborted();
+      check();
+      const more = limit !== undefined && matches.length > limit;
       return {
-        matches: limit === undefined ? selected : selected.slice(0, limit),
-        next: limit !== undefined && selected.length > limit ? key(selected[limit - 1]!) : null,
+        matches: more ? matches.slice(0, limit) : matches,
+        next: more ? key(matches[limit! - 1]!) : null,
+        ...(more ||
+        input.respectIgnore ||
+        input.glob !== undefined ||
+        Object.values(skipped).some(Boolean)
+          ? {
+              scope: {
+                kind: 'current_page' as const,
+                complete: !more && !Object.values(skipped).some(Boolean),
+                skipped,
+                samples,
+                filters: { glob: input.glob ?? null, respectIgnore: input.respectIgnore === true },
+              },
+            }
+          : {}),
       };
     },
     close() {

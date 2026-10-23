@@ -373,13 +373,15 @@ test('cancel commits during tool authorization before dispatch, then old cancel 
     expect(secondSignal!.aborted).toBe(false);
     authorizeSecondModel.release();
     const later = await data.runtime.waitForCommand('later');
-    const laterReceipt = later.receipt as { runId: string; businessCommandId: string };
-    const business = await data.runtime.getCommand(laterReceipt.businessCommandId);
-    expect(business?.receipt).toMatchObject({ runId: laterReceipt.runId });
+    const laterReceipt = later.receipt as { runId: string };
+    expect(later.id).toBe('later');
+    expect(later.status).toBe('applied');
+    expect(laterReceipt.runId).toBeString();
+    expect(await data.runtime.getCommand('later')).toEqual(later);
     const view = await data.runtime.getView('session');
     expect(view.runs.find((run) => run.id === laterReceipt.runId)).toMatchObject({
       status: 'completed',
-      originCommandId: business!.id,
+      originCommandId: later.id,
       rootWorkCommandId: 'later',
     });
     expect(view.runs.find((run) => run.originCommandId === 'original')!.status).toBe('cancelled');

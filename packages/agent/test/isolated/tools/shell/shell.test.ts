@@ -79,3 +79,74 @@ test('Shell stop Tool reports only requested cancellation and preserves the exac
   });
   expect(result.content).not.toContain('stopped');
 });
+
+for (const id of ['shell.read', 'shell.wait', 'shell.stop'])
+  test(`${id} rejects missing or mismatched local references before accessing any operation`, async () => {
+    const extension = createShellExtension({ job: definition() });
+    for (const record of [
+      null,
+      { contentType: 'wrong', contentVersion: 1 },
+      { contentType: 'application/vnd.kite.shell-reference+json', contentVersion: 2 },
+    ]) {
+      const context = {
+        records: {
+          async get() {
+            return record;
+          },
+        },
+        operations: new Proxy(
+          {},
+          {
+            get() {
+              throw Error('operation_must_not_be_accessed');
+            },
+          },
+        ),
+      } as unknown as ToolContext;
+      const result = await extension
+        .tools!.find((tool) => tool.id === id)!
+        .execute({ shellId: 'missing', commandId: 'stop' }, context);
+      expect(result.outcome).toBe('failed');
+      expect(result.details).toEqual({ code: 'shell_reference_not_found', shellId: 'missing' });
+    }
+  });
+
+test('local reference storage failures and unverifiable original operations are not converted into missing references', async () => {
+  const extension = createShellExtension({ job: definition() });
+  const storageFailure = Error('storage_unavailable');
+  for (const id of ['shell.read', 'shell.wait', 'shell.stop']) {
+    const context = {
+      records: {
+        async get() {
+          throw storageFailure;
+        },
+      },
+    } as unknown as ToolContext;
+    await expect(
+      extension
+        .tools!.find((tool) => tool.id === id)!
+        .execute({ shellId: 'original', commandId: 'stop' }, context),
+    ).rejects.toBe(storageFailure);
+  }
+  const context = {
+    records: {
+      async get() {
+        return {
+          contentType: 'application/vnd.kite.shell-reference+json',
+          contentVersion: 1,
+          value: { ref: { executionId: 'original' } },
+        };
+      },
+    },
+    operations: {
+      async get() {
+        return null;
+      },
+    },
+  } as unknown as ToolContext;
+  await expect(
+    extension
+      .tools!.find((tool) => tool.id === 'shell.read')!
+      .execute({ shellId: 'original' }, context),
+  ).rejects.toThrow('shell_unverifiable');
+});

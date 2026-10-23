@@ -1,5 +1,7 @@
 # 通用 Agent 新执行边界
 
+工具反馈不成为执行权威：[Shell leaf](../../packages/agent/src/tools/shell.README.md)仅在可确定的本地引用缺失预查返回 failed，Store 读取异常及派发后未知仍保守结算。`files.search@3` 的过滤、预览与当前页跳过范围归 [Files owner](../../packages/agent/src/tools/files/README.md)，其描述和结果不能放宽原路径、权限及恢复约束。公开预设说明来自实际注册目录，准确只读 definition/version 白名单与父能力交集保持；[行为合同](../../packages/agent/src/model-context.ts)只指导推进、取证和交付，不新增完成状态、自动重放或额外审批。Runtime 仍以原 Command/Run、真实派发和必要条件作为权威。
+
 消息的可选 `createdAt` 沿 [Store](../../packages/agent/src/storage/README.md#消息首次记录时间) → [Service 同源 schema](../../apps/service/src/http/schema/index.ts) → 生成 Client → [Native](../../apps/desktop/src/native-presentation.ts) → 共享 UI 传递，只表达原消息首次记录时间。流式与 Fork 保留来源，旧历史缺少可靠原时间时保持未知；该元数据不进入模型内容，不授权读取、写入或恢复，也不改变原 Command／Run 身份与消息次序。
 
 新普通输入沿原 Command 直接进入当前主 Agent，不创建分类 Run、判定回复或派生输入；`input.steer/input.follow_up` 保持准确目标与队列规则。旧历史消息的 `humanInput` 只读证明沿 [SQL 输入 owner](../../packages/agent/src/storage/sqlite/inputs/README.md) → Service 同源 schema／生成 Client → [Native](../../apps/desktop/README.md#真实输入消息的唯一展示)交接。原 public/raw/processing/decision/business 与准确已应用 Message／Run 共同证明同一次输入，不以相同正文或 ID 前缀猜测；消息分页保原行和原序号。Native 仅在当前读取存在准确替代消息时合并处理副本，首次占位沿原公开提交 ID 交接，独立同文和未决输入保留。呈现证明不参与权限、业务准入或恢复授权。

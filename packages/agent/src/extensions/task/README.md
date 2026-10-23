@@ -6,6 +6,8 @@
 
 工厂 `createTaskExtension({roles,defaultRole?,presets?})` 与 Service 可信装配共同解析配置。模型不能传 key、Run、selection、Provider、权限或 detached；普通 Tool invocation 的原 execution 派生受理身份。新 spawn 与 idle follow-up 没有 required completion 义务，而是封存 `agent_completion` 通知意图；通知和自动父轮授权是两份事实，没有自动授权不能启动 idle 父轮。旧显式 `after_turn` 仍必须由原可信策略授权。以下 legacy 章节说明仍有实际使用者的内部合同，不能据此向普通模型重新开放旧表面。
 
+公开 `spawn_agent` 说明实际默认角色，`preset` 参数仅展示可信宿主开放项及其注册说明；未开放角色不进入该说明。默认只读角色明确不提供进程或网络派发，父模型须按任务必需步骤选择可执行角色。自定义角色使用实际注册说明，不按名称猜测能力；说明不替代冻结工具身份、权限或当前工具交集。研究委派要求从当前入口和装配沿可达调用链取证，父核验影响结论的关键来源，文件或符号存在不能证明当前链路。角色说明用于父模型选择，不作为新的子模型权限或单独提示注入入口。
+
 ## 稳定身份、准确命令和观察
 
 稳定目标邮件在原入队事务重新核准确 carrier、selection、工作关系和真实 Run.isActive；目录保留的已完成历史 Run 不成为活动投递目标。idle 邮件持久保存 targetRunId:null，只排队且不创建 child Run/Model；显式同工作 follow-up 再按原 predecessor 与双水位接纳。六工具回归另核这条 idle 正例的原 carrier、零激活及唯一邮件 Source，真实模型结果归测试 owner。

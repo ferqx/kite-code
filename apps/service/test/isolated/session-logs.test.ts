@@ -470,7 +470,7 @@ test('default paired main exposes actual Model logs and complete original >64KiB
       { id: 'list_directory', definitionVersion: '1' },
       { id: 'read_file', definitionVersion: '4' },
       { id: 'read_user_file', definitionVersion: '2' },
-      { id: 'search_content', definitionVersion: '2' },
+      { id: 'search_content', definitionVersion: '3' },
       { id: 'write_file', definitionVersion: '2' },
       { id: 'wait_agent_events', definitionVersion: '1' },
       { id: 'follow_up_agent', definitionVersion: '1' },

@@ -240,25 +240,15 @@ test('real UnifiedExecution writes from a scoped large Artifact, reads complete 
       (value) => value.definitionId === 'files.search',
     )!;
     expect(searched.status).toBe('succeeded');
-    const searchResult = searched.result as {
-      content: string;
-      artifactRefs: (typeof publicSource)[];
-    };
-    const searchRef = searchResult.artifactRefs[0]!;
-    const searchBody = JSON.parse(
-      Buffer.from(
-        await artifacts.read({
-          expectedStoreId,
-          refId: searchRef.id,
-          sessionId: 's',
-          subjectId: 'owner',
-          scope: searchRef.scope!,
-        }),
-      ).toString('utf8'),
-    );
+    const searchResult = searched.result as { content: string };
+    const searchBody = JSON.parse(searchResult.content);
     expect(searchBody.matches).toHaveLength(1);
-    expect(searchBody.matches[0].content).toHaveLength(9 * 1024 * 1024);
+    expect(searchBody.matches[0].content).toHaveLength(2000);
+    expect(searchBody.matches[0].truncated).toBe(true);
+    expect(searchBody.matches[0].originalLength).toBe(9 * 1024 * 1024);
     expect(searchBody.next).toBeNull();
+    const completeSearch = await files.search({ text: 'x' });
+    expect(completeSearch.matches[0]!.content).toHaveLength(9 * 1024 * 1024);
     deny = true;
     await run('denied');
     expect(writes).toBe(1);

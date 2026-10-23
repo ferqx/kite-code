@@ -14,9 +14,11 @@ function input(role: string, tools: string[]) {
     version:
       id === 'files.read'
         ? '4'
-        : ['files.read_path', 'files.glob', 'files.search'].includes(id)
-          ? '2'
-          : '1',
+        : id === 'files.search'
+          ? '3'
+          : ['files.read_path', 'files.glob'].includes(id)
+            ? '2'
+            : '1',
     extensionId: id.endsWith('_path')
       ? 'builtin.files.path'
       : id.startsWith('files.')
@@ -64,6 +66,16 @@ test('default Task roles preserve worker and bind implementation plus three read
     expect(tool.description).toContain('implementation');
     expect(tool.description).toContain('multiple independent sibling task calls');
   }
+  const spawn = task.tools.get('task.spawn')!;
+  expect(spawn.description).toContain('Default role worker: General delegated work');
+  expect(spawn.inputSchema).toMatchObject({
+    properties: {
+      preset: {
+        enum: ['code', 'explore', 'plan', 'review'],
+        description: expect.stringContaining('No modifications or process/network dispatch'),
+      },
+    },
+  });
   const configured = createChildConfiguration({
     roles: defaultTaskRoles,
     async resolve(_input, selection) {
@@ -73,6 +85,7 @@ test('default Task roles preserve worker and bind implementation plus three read
   const parent = [
     'files.read',
     'files.read_path',
+    'files.search',
     'files.write',
     'shell.launch',
     'shell.stop',
@@ -87,7 +100,12 @@ test('default Task roles preserve worker and bind implementation plus three read
   }
   for (const role of ['explore', 'plan', 'review']) {
     const readonly = await configured.resolveChildRunConfiguration!(input(role, parent));
-    expect(readonly.toolIds).toEqual(['files.read', 'files.read_path', 'shell.read']);
+    expect(readonly.toolIds).toEqual([
+      'files.read',
+      'files.read_path',
+      'files.search',
+      'shell.read',
+    ]);
     expect(readonly.modelId).toBe('actual-parent');
   }
   expect(configured.childConfigurations![2]!.inputSchema).toMatchObject({
@@ -182,6 +200,15 @@ test('all read-only roles reject unknown owners, future versions and prepared mu
     tools.tools[1]!.version = 'future';
     const result = await configured.resolveChildRunConfiguration!(request);
     expect(result.toolIds).toEqual([]);
+    const oldSearch = input(role, ['files.search']);
+    expect(
+      (
+        await configured.resolveChildRunConfiguration!({
+          ...oldSearch,
+          parentTools: oldSearch.parentTools!.map((tool) => ({ ...tool, version: '2' })),
+        })
+      ).toolIds,
+    ).toEqual([]);
     let disposed = 0;
     const escalated = createChildConfiguration({
       roles: defaultTaskRoles,

@@ -24,6 +24,9 @@ export {
   type FileEntry,
   type FileIdentity,
   type FileRemoval,
+  type FileSearchInput,
+  type FileSearchMatch,
+  type FileSearchResult,
   type FileSnapshot,
   type WorkspaceFiles,
 } from './tools/files';

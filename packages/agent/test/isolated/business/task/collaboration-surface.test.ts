@@ -68,6 +68,18 @@ test('six public tools reuse one child Session, preserve responsibility and obse
   const parent: ModelAdapter = {
     async *stream(request) {
       expect(request.tools.map((tool) => tool.id).sort()).toEqual(expectedNames);
+      const spawn = request.tools.find((tool) => tool.id === 'spawn_agent')!;
+      expect(spawn.description).toContain('Default role worker: General trusted child');
+      expect(spawn.inputSchema).toMatchObject({
+        properties: {
+          preset: {
+            enum: ['investigator'],
+            description: expect.stringContaining('investigator: Custom read-only capabilities'),
+          },
+        },
+      });
+      expect(spawn.description).not.toContain('Unopened private role');
+      expect(JSON.stringify(spawn.inputSchema)).not.toContain('Unopened private role');
       const last = request.messages.filter((message) => message.role === 'tool').at(-1);
       const encoded = last?.content.includes('Complete artifact body:\n')
         ? last.content.split('Complete artifact body:\n')[1]!
@@ -157,7 +169,16 @@ test('six public tools reuse one child Session, preserve responsibility and obse
     },
   };
   const extension = createTaskExtension({
-    roles: [{ id: 'worker', configurationId: 'worker', description: 'General trusted child' }],
+    roles: [
+      { id: 'worker', configurationId: 'worker', description: 'General trusted child' },
+      {
+        id: 'investigator',
+        configurationId: 'worker',
+        description: 'Custom read-only capabilities',
+      },
+      { id: 'private', configurationId: 'worker', description: 'Unopened private role' },
+    ],
+    presets: ['investigator'],
   });
   const runtime = createRuntime({
     store,
@@ -796,10 +817,17 @@ test('public schema is exactly six closed prompt tools, with optional registered
   expect(spawn.inputSchema.required).toEqual(['prompt']);
   expect(Object.keys(spawn.inputSchema.properties!)).toEqual(['prompt', 'task_name']);
   expect(spawn.inputSchema.additionalProperties).toBe(false);
+  expect(spawn.description).toContain('Default role worker: General child');
+  expect(spawn.description).not.toContain('Trusted read-only preset');
   const preset = surface(['read_only']);
   expect(
     preset.tools.find((tool) => tool.id === 'spawn_agent')!.inputSchema.properties,
-  ).toMatchObject({ preset: { enum: ['read_only'] } });
+  ).toMatchObject({
+    preset: {
+      enum: ['read_only'],
+      description: expect.stringContaining('read_only: Trusted read-only preset'),
+    },
+  });
   for (const name of [
     'run_agent',
     'read_agent',

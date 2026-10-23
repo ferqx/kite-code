@@ -266,10 +266,35 @@ export function createFileTools(
       name: 'search',
       required: ['text'],
       properties: {
-        path: directoryPath,
+        path: {
+          ...directoryPath,
+          description: `${directoryPath.description} Search one file or a directory tree. Explicit files bypass ordinary ignore rules; explicit directories start their own ignore scope.`,
+        },
         text: { type: 'string', minLength: 1, maxLength: 1024 },
         after: { type: 'string', maxLength: 4110 },
-        limit: { type: 'integer', minimum: 1, maximum: 200 },
+        limit: { type: 'integer', minimum: 1, maximum: 200, default: 100 },
+        glob: {
+          type: 'string',
+          minLength: 1,
+          maxLength: 1024,
+          description:
+            'Filter filenames, or paths relative to the search directory when the glob contains /. **/ matches zero or more directories.',
+        },
+        contextLines: { type: 'integer', minimum: 0, maximum: 10, default: 0 },
+        maxLineChars: {
+          type: 'integer',
+          minimum: 1,
+          maximum: 10000,
+          default: 2000,
+          description:
+            'Preview characters per matching or context line. Truncation is explicit; use read_file for complete lines.',
+        },
+        respectIgnore: {
+          type: 'boolean',
+          default: true,
+          description:
+            'Apply .gitignore inside the selected directory tree. false includes ordinarily ignored files; safety restrictions always apply.',
+        },
       },
       call: (i, context) =>
         files.search(
@@ -277,7 +302,11 @@ export function createFileTools(
             text: string(i.text),
             ...(i.path === undefined ? {} : { path: string(i.path) }),
             ...(i.after === undefined ? {} : { after: string(i.after) }),
-            ...(i.limit === undefined ? {} : { limit: Number(i.limit) }),
+            limit: i.limit === undefined ? 100 : Number(i.limit),
+            maxLineChars: i.maxLineChars === undefined ? 2000 : Number(i.maxLineChars),
+            respectIgnore: i.respectIgnore === undefined ? true : (i.respectIgnore as boolean),
+            ...(i.glob === undefined ? {} : { glob: string(i.glob) }),
+            ...(i.contextLines === undefined ? {} : { contextLines: Number(i.contextLines) }),
           },
           { signal: context.signal },
         ),
@@ -309,7 +338,7 @@ export function createFileTools(
     list: 'List immediate directory entries, with name-based pagination. Defaults to the workspace root and 100 entries; limit is 1–200. Continue using the returned name cursor.',
     glob: 'Find file paths matching a glob, including **/ for zero or more directory levels. Defaults to the workspace root and 100 paths; limit is 1–200. Continue using the returned path cursor.',
     search:
-      'Search file contents for literal text, not a regular expression. Defaults to the workspace root and all matches; an explicit limit selects 1–200 matches with a continuation cursor.',
+      'Search literal text in one file or a directory tree. Defaults to 100 matches per page and 2000 characters per line preview. Continue using next; truncated lines require read_file for full content. Binary and non-UTF-8 files are skipped with current-page scope diagnostics; no matches does not prove complete coverage when scope.complete is false. Root searches respect .gitignore; explicit files bypass ordinary ignore and explicit directories do not inherit ancestor ignore rules. Filtering never grants access.',
   };
   return definitions.map((d) => ({
     id: `files.${d.name}`,
@@ -322,7 +351,13 @@ export function createFileTools(
       ? { resources: { serial: { scope: 'workspace' as const, key: 'files.mutation' } } }
       : {}),
     version:
-      d.name === 'read' ? '4' : ['write', 'edit', 'search', 'glob'].includes(d.name) ? '2' : '1',
+      d.name === 'read'
+        ? '4'
+        : d.name === 'search'
+          ? '3'
+          : ['write', 'edit', 'glob'].includes(d.name)
+            ? '2'
+            : '1',
     description: `${descriptions[d.name]} Paths are relative to the fixed workspace root or absolute inside it, never relative to Shell cwd.`,
     inputSchema: {
       type: 'object',
@@ -429,6 +464,33 @@ export function createFileTools(
           ...(change ? { details: { fileChange: change } as unknown as Json } : {}),
         };
       } catch (error) {
+        const searchCode =
+          d.name === 'search' && error instanceof AgentError ? error.code : undefined;
+        const searchAdvice: Record<string, string> = {
+          ENOENT:
+            'The selected search path does not exist. Locate an existing path with glob_files or list_directory, then search it.',
+          ENOTDIR:
+            'A path component is not a directory. Verify the selected path with list_directory; search_content accepts an existing file or directory.',
+          file_not_regular:
+            'The selected search path is not a regular file or directory. Choose a real workspace path; links are not followed.',
+          file_path_protected:
+            'The selected search scope is protected. Choose an allowed workspace scope; ignore options cannot grant access.',
+          file_path_invalid:
+            'Choose a path inside the fixed workspace without parent traversal. File tools do not follow the Shell working directory.',
+          file_search_invalid:
+            'Supply nonempty literal text up to 1024 UTF-8 bytes. For filenames use glob_files; content search is not a regular expression.',
+          file_search_filter_invalid:
+            'respect_ignore must be true or false. It never overrides protected paths or link restrictions.',
+          file_glob_invalid:
+            'Use a relative filename/path glob, without parent traversal or absolute paths. This filter is not a regular expression.',
+          file_search_context_invalid: 'context_lines must be an integer from 0 to 10.',
+          file_search_preview_invalid: 'max_line_chars must be a positive integer.',
+          file_page_invalid:
+            'Use limit from 1 to 200 and copy the previous next cursor unchanged. Start a new search without after when changing scope or pattern.',
+          file_changed:
+            'A file changed while being read. Recheck the relevant scope before making a new search; this attempt did not provide a stable complete result.',
+        };
+        const advice = searchCode ? searchAdvice[searchCode] : undefined;
         const baselineConflict =
           (d.name === 'write' || d.name === 'edit') &&
           error instanceof AgentError &&
@@ -442,10 +504,15 @@ export function createFileTools(
                 : 'failed',
           content: baselineConflict
             ? 'file_baseline_conflict: This invocation did not publish its requested change because its supplied baseline or create-only precondition was rejected. The baseline describes the complete file identity and version; this conflict does not prove that another edit targeted the same text. Compare each invocation using its own requested change and receipt. Earlier read content is historical; this failure does not report the current file content. Other successful operations are not rolled back. Do not infer that the file still has its earlier values. Before any separately authorized new edit, read the current file and use its fresh complete-file baseline.'
-            : error instanceof Error
-              ? error.message
-              : String(error),
-          details: { code: error instanceof AgentError ? error.code : 'file_io_failed' },
+            : advice
+              ? `${searchCode}: ${advice}`
+              : error instanceof Error
+                ? error.message
+                : String(error),
+          details: {
+            code: error instanceof AgentError ? error.code : 'file_io_failed',
+            ...(advice ? { next_action: advice } : {}),
+          },
         };
       }
     },

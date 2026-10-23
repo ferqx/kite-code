@@ -2,6 +2,14 @@
 
 原后台 Job 目录可显式请求直接父 Tool 的有限只读来源，供 Desktop 区分后台启动与前台执行；默认响应、取消边与 Job 生命周期保持。[Store owner](src/storage/README.md#跨会话原-job-目录)维护事务范围、敏感字段排除及冷恢复证据。
 
+## 工具反馈与任务质量
+
+[默认模型合同](src/model-context.ts)为主、子 Agent 提供已授权工作推进、可纠正失败、当前入口与可达调用链研究、父结果验收和收束指导。直接回答与适度交付前置，证据规则用于判断而非逐项打印成报告；委派不把约束扩展为额外报告任务。它保留原始要求、来源、压缩与未知结果约束，不添加业务完成状态或第二个 Loop。代码与符号存在不构成当前执行路径证明，子报告不因已接纳而成为正确性或权限证明。
+
+[Shell owner](src/tools/shell.README.md)在本地引用明确缺失的预查处返回失败；[Files owner](src/tools/files/README.md)维护单文件/目录搜索、模型有界预览及不完整范围；[Task owner](src/extensions/task/README.md)从注册目录生成实际开放角色说明。原 Core 派发事实、精确重复失败保护和 [required 条件](src/storage/sqlite/requirements/README.md)保持，普通反馈不能解除真实 unknown。行为质量沿[任务级真实模型验证](../../tests/e2e/live/model/README.md)单独检验，不以固定模型或工具成功回执代替研究结论正确。
+
+设计原因、备选与代价保存在[工具反馈与任务质量决定](../../.agents/notes/implemented/architecture/2026-10-23-agent-feedback-and-task-quality.md)。模型指导已实施，真实样本中仍有冗长和超出证据的表述；机械执行断言与全文质量分别说明，不能据工具全部成功宣称模型结论全部正确。
+
 ## 用户图片输入
 
 普通文件附件通过 start/steer/follow-up 的可选 `files` 保存最多 128 个名称与 `file:` URI，原消息正文保持用户原文。受理核闭合字段、URI 与长度，路径引用不赋予读取权限。[模型历史组装](src/runtime.ts)通过[文件引用编码](src/input-files.ts)在 user 内容中追加明确的低权限路径数据，仍由现有 Files 工具检查目标、保护范围和权限；不自动读取文件、不加载外部目录的项目说明。Fork 与冷历史沿消息 source JSON 保留引用，无 SQL 表或迁移；[真实 HTTP](../../apps/service/test/isolated/input-images.test.ts)核附件单独发送、模型得到路径与展示正文分离，[真实 Store](test/isolated/artifacts/input-images.test.ts)核混合图片／文件在后继、Fork 与冷重开时保留。

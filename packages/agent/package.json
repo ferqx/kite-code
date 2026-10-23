@@ -45,6 +45,7 @@
     "@modelcontextprotocol/sdk": "^1.29.0",
     "ajv": "8.17.1",
     "drizzle-orm": "0.44.7",
+    "ignore": "5.3.2",
     "jsonc-parser": "^3.3.1",
     "jsdom": "29.1.1",
     "@mozilla/readability": "0.6.0",

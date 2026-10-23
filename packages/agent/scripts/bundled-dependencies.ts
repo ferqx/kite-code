@@ -6,6 +6,7 @@ export const agentBundledDependencies: readonly string[] = Object.freeze([
   'ajv',
   'drizzle-orm',
   'gpt-tokenizer',
+  'ignore',
   'yaml',
   '@mozilla/readability',
   'turndown',

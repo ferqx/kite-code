@@ -38,11 +38,17 @@ function text(input: Record<string, Json>, key: string): string {
 function result(details: Json): ToolResult {
   return { outcome: 'succeeded', content: canonicalJson(details), details };
 }
-async function reference(context: ToolContext, key: string): Promise<OperationRef> {
+function missingReference(shellId: string): ToolResult {
+  return {
+    outcome: 'failed',
+    content: `Shell reference "${shellId}" was not found in this session. Use the shell_id returned by a successful shell_execute or shell_launch call; do not invent an ID or restart an earlier command to recover its result. This lookup did not start or stop a Shell Job.`,
+    details: { code: 'shell_reference_not_found', shellId },
+  };
+}
+async function reference(context: ToolContext, key: string): Promise<{ ref: OperationRef } | null> {
   const record = await context.records.get(`shell/${key}`);
-  if (!record || record.contentType !== contentType || record.contentVersion !== 1)
-    throw new AgentError('shell_reference_not_found');
-  return args(record.value).ref as unknown as OperationRef;
+  if (!record || record.contentType !== contentType || record.contentVersion !== 1) return null;
+  return { ref: args(record.value).ref as unknown as OperationRef };
 }
 /** Pure registrations. Only the ordinary Job.start path may start a process. */
 export function createShellExtension(options: ShellToolsOptions): Extension {
@@ -167,7 +173,10 @@ export function createShellExtension(options: ShellToolsOptions): Extension {
         ),
         async execute(input, context) {
           const inputArgs = args(input);
-          const ref = await reference(context, text(inputArgs, 'shellId'));
+          const shellId = text(inputArgs, 'shellId');
+          const resolved = await reference(context, shellId);
+          if (!resolved) return missingReference(shellId);
+          const { ref } = resolved;
           const execution = await context.operations.get(ref);
           if (!execution) throw new AgentError('shell_unverifiable');
           const output = await context.operations.readOutput(ref, {
@@ -198,7 +207,10 @@ export function createShellExtension(options: ShellToolsOptions): Extension {
         ),
         async execute(input, context) {
           const inputArgs = args(input);
-          const ref = await reference(context, text(inputArgs, 'shellId'));
+          const shellId = text(inputArgs, 'shellId');
+          const resolved = await reference(context, shellId);
+          if (!resolved) return missingReference(shellId);
+          const { ref } = resolved;
           try {
             const execution = await context.operations.wait(ref, {
               signal: context.signal,
@@ -226,7 +238,10 @@ export function createShellExtension(options: ShellToolsOptions): Extension {
         inputSchema: object({ shellId: idSchema, commandId: idSchema }, ['shellId', 'commandId']),
         async execute(input, context) {
           const inputArgs = args(input);
-          const ref = await reference(context, text(inputArgs, 'shellId'));
+          const shellId = text(inputArgs, 'shellId');
+          const resolved = await reference(context, shellId);
+          if (!resolved) return missingReference(shellId);
+          const { ref } = resolved;
           if (!context.operations.cancel) throw new AgentError('shell_stop_unavailable');
           await context.operations.cancel(ref, { commandId: text(inputArgs, 'commandId') });
           return result({

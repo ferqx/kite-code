@@ -751,12 +751,20 @@ function collaborationSurface(
       make(
         'task.spawn',
         'spawn_agent',
-        'Delegate prompt to a reusable general child Agent. task_name is display only. Acceptance may remain queued. Parent normal completion does not cancel the child. No Provider, permission or Run identity can be supplied.',
+        `Delegate a concrete scoped prompt to a reusable child Agent. Default role ${defaultRole}: ${roles.get(defaultRole)!.description} Choose a registered preset whose capabilities can perform the required steps; a role never adds tools or permissions beyond the parent selection and child ceiling. Review the returned evidence for the current entry point and causal path before adopting conclusions; file or symbol existence alone does not establish that path. task_name is display only. Acceptance may remain queued. Parent normal completion does not cancel the child. No Provider, permission or Run identity can be supplied.`,
         object(
           {
             prompt: content,
             taskName: { type: 'string', minLength: 1, maxLength: 120 },
-            ...(presets.length ? { preset: { type: 'string', enum: [...presets] } } : {}),
+            ...(presets.length
+              ? {
+                  preset: {
+                    type: 'string',
+                    enum: [...presets],
+                    description: `Optional trusted preset. Omit to use ${defaultRole}. Registered capabilities remain subject to the actual parent tools and child permissions.\n${presets.map((id) => `${id}: ${roles.get(id)!.description}`).join('\n')}`,
+                  },
+                }
+              : {}),
           },
           ['prompt'],
         ),

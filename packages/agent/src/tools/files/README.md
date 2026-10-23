@@ -4,9 +4,21 @@
 
 公开入口 `@kite-ai/agent/files` 的 import 不打开资源。宿主显式调用 `createWorkspaceFiles({root,maxFileBytes?})` 选定一个物理 Workspace 根，再用 `createFileTools(files)` 将六个普通 ToolDefinition 装配进扩展；工具仍走 UnifiedExecution 的权限、来源复查、计划、派发和终态。没有 CodingAgent、Git 或旧 filesystem authority 依赖。
 
-只读 `read` 的可信 options 可携带 `signal`；普通 `read_file` 和绝对 `read_user_file` 从实际 ToolContext 传入，不新增模型字段。完整文件读取仍以 64 KiB 块核 hash、UTF-8 解码及前后身份，在 8ms 或 64 块预算后通过真实 event loop 让出；行选区在块内统计完整 totalLines，只保留请求正文，不建立全文行起点数组。BOM、CRLF、跨块 UTF-8 和完整 baseline 不变，行窗口不构成字节截断。search 的单文件读取复用该异步读取，逐行匹配另按预算让出；原分页、全部命中和字面量语义不变。
+只读 `read` 的可信 options 可携带 `signal`；普通 `read_file` 和绝对 `read_user_file` 从实际 ToolContext 传入，不新增模型字段。完整文件读取仍以 64 KiB 块核 hash、UTF-8 解码及前后身份，在 8ms 或 64 块预算后通过真实 event loop 让出；行选区在块内统计完整 totalLines，只保留请求正文，不建立全文行起点数组。BOM、CRLF、跨块 UTF-8 和完整 baseline 不变，行窗口不构成字节截断。search 的单文件读取复用该异步读取，逐行匹配另按预算让出；底层未指定 limit 时保留全部命中和完整长行，模型默认改为有界预览，见下节。
 
 异步读取保留原目录及文件 FD，恢复时核原根和取消，EOF 后再次核完整文件身份；漂移不发布旧结果。`close()` 先拒绝新读取并让在途只读退出、关闭各自 FD 后再关闭 native owner，多次 close 共用同一结果。取消和异常不关闭别的读取句柄。写入/edit 的共享读取按同步方式消费同一分块校验，不在原最后 CAS 与发布之间插入让出；字节恢复和发布后 unknown 合同不变。合作让出不能给单次慢磁盘 native read/fsync 承诺耗时上限，也不为完整正文增加文件额度。
+
+## 内容搜索
+
+`search_content` 当前定义版本为 3，`path` 可选择一个普通文件或目录；省略、空字符串和 `.` 选择工作区根。匹配仍为字面文本。模型默认每页 100 条、每个匹配／上下文行 2000 个 UTF-16 字符，`limit` 可设为 1–200，`max_line_chars` 为 1–10000；截断不拆代理对，返回 `truncated:true/originalLength`。用 `read_file` 的行窗口取得完整正文。底层 `WorkspaceFiles.search` 的这两个参数均可省略，以保留全部命中及完整长行；不把预览长度变成文件读取额度。
+
+`glob` 筛选文件名，包含 `/` 时匹配相对所选目录的路径；`**/` 含零层目录。显式单文件以文件名匹配。`context_lines` 为 0–10，返回具名 `before/after` 行及真实行号，上下文同样遵循明确预览限制。遍历按完整相对路径排序，目录以 `name/` 与文件共同排序；找到下一条匹配才产生 `next`，其值是最后返回行的原路径／行号游标。后页须使用相同范围、文本和过滤条件；它不是跨外部文件变化的快照。
+
+模型默认 `respect_ignore:true`。目录规则复用固定 `ignore` matcher，只读取搜索范围内各级 `.gitignore`，逐级使用本级相对路径，包含注释、目录、否定及父目录排除规则；所有规则文件均经原 native 安全读取，链接规则文件不读取。显式非根目录不继承范围外的祖先规则，显式单文件绕过普通 ignore；`respect_ignore:false` 包含普通忽略项。底层未指定该参数时保留原不使用普通 ignore 的行为。过滤不修改授权，protected／no-follow／根和文件身份检查始终有效。
+
+二进制与非 UTF-8 内容分别计为 `binary/encoding` 并跳过，不再使其他文本结果丢失。普通忽略项和不跟随的链接／特殊对象也分别计为 `ignored/links`；目录忽略计一项，不宣称知道其后代文件数。有过滤、分页或跳过时，`scope.kind=current_page` 描述本次页实际遍历，返回计数与最多 20 个路径／原因样例。`scope.complete:false` 表示有未检查项或尚有结果后页，空 matches 不能解读为全工作区无匹配；后页诊断不累计此前页，也不宣称完整扫描未到达目录。过滤 glob 的范围由 `scope.filters` 明示。权限、根漂移、读取身份变化和其他 I/O 失败不当作二进制吞掉；失败仍沿当前 Tool 返回，常见路径／参数错误提供 `code` 和纠正信息，不获得重试或访问授权。
+
+[搜索回归](../../../test/isolated/files/search.test.ts)覆盖单文件与目录、混合编码、稳定分页、上下文与代理对预览、根／嵌套 ignore 和显式范围优先级、实际工具默认、路径错误、protected 与链接及有界诊断。[读取响应性](../../../test/isolated/files/read-responsiveness.test.ts)和[查询响应性](../../../test/isolated/files/query-responsiveness.test.ts)继续核真实 macrotask 取消、独立读取、close drain、EOF 后匹配及最终枚举边界；平台资格仍按实际执行环境说明。
 
 ## Node-API 文件后端
 
