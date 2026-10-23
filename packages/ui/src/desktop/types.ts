@@ -1,4 +1,6 @@
 export interface Message {
+  /** Host-confirmed attachments keep an otherwise empty user message visible. */
+  readonly hasAttachments?: boolean;
   readonly id: string;
   /** Verified first publication time, never the time this client read the message. */
   readonly createdAtMs?: number;

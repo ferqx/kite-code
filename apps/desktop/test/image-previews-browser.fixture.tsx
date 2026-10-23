@@ -5,10 +5,17 @@ import { Conversation } from '../../../packages/ui/src/desktop/Conversation';
 import { ConversationCache } from '../../../packages/ui/src/desktop/ConversationCache';
 import type { NativeBridge, NativeRequest, NativeResult } from '../src/native-bridge';
 import { useNativeInputImages } from '../src/native-input-images';
-import { NativeUserImages } from '../src/native-user-images';
+import { NativePendingAttachments, NativeUserImages } from '../src/native-user-images';
 import '../src/native-tailwind.css';
 import '@kite-ai/ui/desktop/style.css';
 
+export type AttachmentLayout = {
+  files: number;
+  images: number;
+  text: string;
+  phase: 'sending' | 'saved' | 'failed';
+  reply?: string;
+};
 const metrics = {
   conversions: 0,
   peakConversions: 0,
@@ -20,6 +27,7 @@ const metrics = {
   longestTaskMs: 0,
   maxFrameGapMs: 0,
   measuring: false,
+  lastCopied: '',
 };
 const OriginalWorker = Worker;
 class MeasuredWorker extends OriginalWorker {
@@ -122,7 +130,37 @@ function App() {
   const [view, setView] = useState('draft'),
     [version, setVersion] = useState(1),
     [draft, setDraft] = useState('');
+  const [layout, setLayout] = useState<AttachmentLayout>();
+  const [mount, setMount] = useState(0);
+  const messageFiles = layout
+    ? Array.from({ length: layout.files }, (_, index) => ({
+        name: ['设计说明.pdf', '尺寸规范.xlsx', 'message.css', '消息附件展示与交互说明.md'][
+          index % 4
+        ]!,
+        uri: `file:///synthetic/${index}`,
+      }))
+    : [];
+  const messageImages = files.slice(0, layout?.images ?? files.length).map((file, index) => ({
+    name: file.name,
+    reference: {
+      id: `image-${index}`,
+      storeId: 'store',
+      sessionId: 'a',
+      subjectId: 'owner',
+      scope: { kind: 'session' as const, id: 'a' },
+      mediaType: 'image/jpeg' as const,
+      size: String(file.size),
+      hash: hashes[index]!,
+    },
+  }));
   const api = {
+    layout(next: AttachmentLayout) {
+      setLayout(next);
+      setView('a');
+    },
+    reopen() {
+      setMount((value) => value + 1);
+    },
     async formats() {
       const canvas = new OffscreenCanvas(8, 4);
       const context = canvas.getContext('2d')!;
@@ -264,21 +302,46 @@ function App() {
           cache={{ scope: 'window/store', revision: '0', readActive: true }}
         >
           <Conversation
-            key={view}
+            key={`${view}/${mount}`}
             loading={false}
             selected
             connected
             saveReading={() => {}}
+            writeClipboardText={async (text) => {
+              metrics.lastCopied = text;
+            }}
             messages={[
               {
                 id: view,
                 role: 'user',
-                text: view === 'a' ? '十张原图的缩略图预览' : '另一个会话',
-                settled: true,
+                text: view === 'a' ? (layout?.text ?? '十张原图的缩略图预览') : '另一个会话',
+                settled: !layout || layout.phase === 'saved',
+                createdAtMs: 1792727100000,
+                hasAttachments: view === 'a' && !!(messageFiles.length || messageImages.length),
+                ...(layout && layout.phase !== 'saved' ? { delivery: layout.phase } : {}),
               },
+              ...(layout?.reply && view === 'a'
+                ? [{ id: 'reply', role: 'assistant' as const, text: layout.reply, settled: false }]
+                : []),
             ]}
-            renderMessageContent={() =>
-              view === 'a' ? (
+            renderMessageContent={
+              layout
+                ? (model) => (
+                    <>
+                      {model.text && <p className="user-text">{model.text}</p>}
+                      {model.delivery === 'failed' && (
+                        <p className="delivery-status" role="alert">
+                          发送失败，原文已保留。
+                        </p>
+                      )}
+                    </>
+                  )
+                : undefined
+            }
+            renderMessageAttachments={() =>
+              view !== 'a' ? null : layout && layout.phase !== 'saved' ? (
+                <NativePendingAttachments files={messageFiles} images={messageImages} />
+              ) : (
                 <NativeUserImages
                   bridge={bridge}
                   previews={attachments.previews}
@@ -294,23 +357,10 @@ function App() {
                     role: 'user',
                     status: 'complete',
                     content: '',
-                    images: files.map((file, index) => ({
-                      name: file.name,
-                      reference: {
-                        id: `image-${index}`,
-                        storeId: 'store',
-                        sessionId: 'a',
-                        subjectId: 'owner',
-                        scope: { kind: 'session', id: 'a' },
-                        mediaType: 'image/jpeg',
-                        size: String(file.size),
-                        hash: hashes[index]!,
-                      },
-                    })),
+                    files: messageFiles,
+                    images: messageImages,
                   }}
                 />
-              ) : (
-                <p>另一个会话</p>
               )
             }
           />
@@ -322,6 +372,8 @@ function App() {
 declare global {
   interface Window {
     imagePreviewFixture: {
+      layout: (next: AttachmentLayout) => void;
+      reopen: () => void;
       generate: () => Promise<number>;
       formats: () => Promise<
         {

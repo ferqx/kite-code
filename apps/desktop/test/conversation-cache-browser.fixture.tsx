@@ -289,21 +289,21 @@ function App() {
                 metrics.copies++;
                 metrics.lastCopied = text;
               }}
-              renderMessageContent={(message) =>
+              renderMessageAttachments={(message) =>
                 message.id === 'user' ? (
-                  <>
-                    <p className="user-text">{message.text}</p>
-                    <NativeUserImages
-                      bridge={bridge}
-                      previews={previews}
-                      generation={1}
-                      viewSelection={view.version}
-                      historyEpoch={0}
-                      message={imageMessage}
-                      readAvailable={!view.loading}
-                    />
-                  </>
-                ) : message.id === 'answer' ? (
+                  <NativeUserImages
+                    bridge={bridge}
+                    previews={previews}
+                    generation={1}
+                    viewSelection={view.version}
+                    historyEpoch={0}
+                    message={imageMessage}
+                    readAvailable={!view.loading}
+                  />
+                ) : null
+              }
+              renderMessageContent={(message) =>
+                message.id === 'answer' ? (
                   <NativeModelOutputMessage
                     message={modelMessage}
                     storeId="store"

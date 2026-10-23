@@ -510,6 +510,7 @@ function fixture(
           status: 'complete',
           role: 'user',
           content: send.intent.content,
+          files: send.intent.files,
           sourceIds: [
             options.firstHumanInput ? `processing-${send.intent.commandId}` : send.intent.commandId,
           ],
@@ -2517,48 +2518,79 @@ test('a completed first send preserves the scheduled page and returning enters i
   }
 });
 
-test('first submission keeps one readable pending message through delayed selection and history, then hands off without a loading or welcome flash', async () => {
-  const f = fixture(true);
-  try {
-    await act(async () => f.root.render(<NativeDesktop />));
-    await f.click('Original A');
-    await f.click('在 Workspace 中新建对话');
-    expect(f.host.querySelector('.new-conversation-welcome')).not.toBeNull();
-    await f.edit('original first message 雪🙂');
-    await f.click('发送首条消息');
-    const viewport = f.host.querySelector('.conversation-viewport'),
-      pending = f.host.querySelector('.message.user');
-    expect(pending?.textContent).toContain('original first message 雪🙂');
-    expect(f.host.querySelector('.delivery-status')).toBeNull();
-    f.holdSelection();
-    f.holdHistory();
-    await f.resolve('accepted');
-    const expectPending = () => {
-      expect(f.host.querySelector('.conversation-viewport') === viewport).toBe(true);
-      expect(f.host.querySelector('.message.user') === pending).toBe(true);
-      expect(pending!.isConnected).toBe(true);
-      expect(f.host.querySelectorAll('.message.user')).toHaveLength(1);
-      expect(f.host.querySelector('.new-conversation-welcome')).toBeNull();
-      expect(f.host.querySelector('.conversation-loading')).toBeNull();
-      expect(f.host.querySelector('.welcome')).toBeNull();
+for (const body of ['original first message 雪🙂', '']) {
+  test(`first submission keeps one readable pending message through delayed selection and history, then hands off without a loading or welcome flash (${body ? 'text and file' : 'file only'})`, async () => {
+    const f = fixture(true);
+    try {
+      await act(async () => f.root.render(<NativeDesktop />));
+      await f.click('Original A');
+      await f.click('在 Workspace 中新建对话');
+      expect(f.host.querySelector('.new-conversation-welcome')).not.toBeNull();
+      (f.dom.window.kiteNative! as NativeBridge).fileReferences = () => [
+        { name: '设计说明.pdf', uri: 'file:///synthetic/design.pdf' },
+      ];
+      await act(async () =>
+        f.host.querySelector('[aria-label="添加附件"]')!.dispatchEvent(
+          new f.dom.window.KeyboardEvent('keydown', {
+            key: 'Enter',
+            bubbles: true,
+            cancelable: true,
+          }),
+        ),
+      );
+      await act(async () => f.host.querySelector<HTMLElement>('[aria-label="添加文件"]')!.click());
+      const picker = f.host.querySelector<HTMLInputElement>('input[aria-label="选择文件"]')!;
+      Object.defineProperty(picker, 'files', {
+        value: [new f.dom.window.File(['synthetic'], '设计说明.pdf', { type: 'application/pdf' })],
+      });
+      await act(async () =>
+        picker.dispatchEvent(new f.dom.window.Event('change', { bubbles: true })),
+      );
+      await f.edit(body);
+      await f.click('发送首条消息');
+      const viewport = f.host.querySelector('.conversation-viewport'),
+        pending = f.host.querySelector('.message.user');
+      expect(pending?.textContent).toContain(body);
+      expect(
+        pending?.querySelector('.message-attachments .composer-attachment-name')?.textContent,
+      ).toBe('设计说明.pdf');
+      expect(pending?.querySelector('.user-message-body .message-attachments')).toBeNull();
       expect(f.host.querySelector('.delivery-status')).toBeNull();
-      expect(f.host.body.textContent).not.toContain('打开本次会话');
-    };
-    expectPending();
-    await f.releaseSelection();
-    expectPending();
-    await f.releaseHistory();
-    expect(f.host.querySelector('.conversation-viewport') === viewport).toBe(true);
-    expect(f.host.querySelectorAll('.message.user')).toHaveLength(1);
-    expect(f.host.querySelector('.message.user')!.textContent).toContain(
-      'original first message 雪🙂',
-    );
-    expect(f.host.querySelector('.delivery-status')).toBeNull();
-    expect(f.calls.filter((call) => call.method === 'conversation.send')).toHaveLength(1);
-  } finally {
-    await f.close();
-  }
-});
+      f.holdSelection();
+      f.holdHistory();
+      await f.resolve('accepted');
+      const expectPending = () => {
+        expect(f.host.querySelector('.conversation-viewport') === viewport).toBe(true);
+        expect(f.host.querySelector('.message.user') === pending).toBe(true);
+        expect(pending!.isConnected).toBe(true);
+        expect(f.host.querySelectorAll('.message.user')).toHaveLength(1);
+        expect(pending!.querySelectorAll('.composer-attachment')).toHaveLength(1);
+        expect(f.host.querySelector('.new-conversation-welcome')).toBeNull();
+        expect(f.host.querySelector('.conversation-loading')).toBeNull();
+        expect(f.host.querySelector('.welcome')).toBeNull();
+        expect(f.host.querySelector('.delivery-status')).toBeNull();
+        expect(f.host.body.textContent).not.toContain('打开本次会话');
+      };
+      expectPending();
+      await f.releaseSelection();
+      expectPending();
+      await f.releaseHistory();
+      expect(f.host.querySelector('.conversation-viewport') === viewport).toBe(true);
+      expect(f.host.querySelectorAll('.message.user')).toHaveLength(1);
+      expect(f.host.querySelector('.message.user')!.textContent).toContain(body);
+      expect(f.host.querySelector('.delivery-status')).toBeNull();
+      expect(f.calls.filter((call) => call.method === 'conversation.send')).toHaveLength(1);
+      expect(
+        f.host.querySelectorAll('.message.user .message-attachments .composer-attachment'),
+      ).toHaveLength(1);
+      expect(f.host.querySelector('.message.user .user-message-body')?.textContent).toBe(body);
+      if (!body)
+        expect(f.host.querySelector('.message.user .user-message-body')?.childElementCount).toBe(0);
+    } finally {
+      await f.close();
+    }
+  });
+}
 
 test('a saved first-created conversation waits for fresh grouping when its inactive caches are invalidated', async () => {
   const f = fixture(true);

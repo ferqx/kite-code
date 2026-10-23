@@ -81,6 +81,7 @@ export interface SessionPageProps {
   messages: readonly Message[];
   renderMessage?: (message: Message) => ReactNode;
   renderMessageContent?: (message: Message) => ReactNode;
+  renderMessageAttachments?: (message: Message) => ReactNode;
   renderToolActivity?: (messages: readonly Message[], state: ToolActivityState) => ReactNode;
   /** Host-confirmed current Turn; omitted when the message source has no Turn identity. */
   turnActivity?: TurnActivity;
@@ -629,6 +630,7 @@ export function SessionPage({ messages, fileChanges, ...props }: SessionPageProp
       messages={messages}
       renderMessage={props.renderMessage}
       renderMessageContent={props.renderMessageContent}
+      renderMessageAttachments={props.renderMessageAttachments}
       renderToolActivity={props.renderToolActivity}
       turnActivity={props.turnActivity}
       loading={props.loading}

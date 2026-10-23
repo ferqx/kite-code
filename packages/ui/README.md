@@ -22,6 +22,10 @@ Composer 在原停止按钮内使用 Hugeicons `StopIcon` 的实心方块，填�
 
 附件移除按钮由[共享样式](src/desktop/style.css)单独设为常显的 24px 深色圆底、白色图标、浅色描边和阴影，不依赖缩略图颜色或主题背景；悬停／按下保留实色底，键盘聚焦使用明暗双层提示，普通文件和图片共用。
 
+用户消息由 [Conversation](src/desktop/Conversation.tsx) 分为宿主 `renderMessageAttachments` 附件插槽和 `.user-message-body` 正文气泡，时间／复制继续属于同一原消息；空正文不保留气泡。`SessionPage` 透传附件插槽，Agent 内容和工具不消费它。[MessageAttachments](src/desktop/MessageAttachments.tsx) 使用 [shadcn AttachmentGroup](src/desktop/components/ui/attachment.tsx) 的横向滚动、吸附与边缘渐隐，按实际宽度决定附件总数和前后按钮，读取或缓存资格不由滚动控件授予。尺寸／数量变化重新测量，滚动只更新端点按钮；隐藏缓存暂停观察，恢复重新测量。导航文字不进入聊天全选。[AttachmentFileCard](src/desktop/AttachmentFileCard.tsx) 与 Native 图片共用 Attachment／Media／Title，保留当前148px卡宽、80px预览、8px间隔与消息卡片12px圆角；shadcn 源码仅调整本地导入，使用已有 Radix Slot、Button 和样式工具，不增加依赖。输入区沿原移除与选择流程。
+
+消息过滤使用宿主确认的 `Message.hasAttachments` 保留已保存的仅附件用户消息；标记只影响展示，不授予读取权限。Desktop 的持久消息及发送占位均从附件元数据提供此标记。发送接管、失败、重开与真实浏览器布局证据归 [Desktop owner](../../apps/desktop/README.md#markdown-与附件输入)。
+
 [Conversation](src/desktop/Conversation.tsx)按浏览器实际夹紧后的 `scrollTop` 记录自己的滚动写入；来自该位置的迟到 scroll 事件不改变跟随状态，用户改变位置时继续按原底部阈值切换跟随，恢复与“回到最新消息”共用同一写入。避免新一段内容增长先于旧 scroll 通知抵达时误判为用户上翻；[阅读滚动回归](test/isolated/desktop-conversation-scroll.test.tsx)覆盖这一顺序、手动阅读、恢复及重复卸载的观察器／监听清理。Native 图片挂载与资源生命周期见 [Desktop owner](../../apps/desktop/README.md#markdown-与附件输入)。
 
 [Conversation](src/desktop/Conversation.tsx)首次呈现历史时，对默认展开的活动轮次同样登记 `data-restored-expanded`，直接进入完整高度，避免首次打开重播300ms展开动画而带动正文移动。缓存恢复与冷历史共用原恢复标记，后续手动开合由 `onToggle` 清除标记并继续动画；不改变展开选择、消息顺序或滚动跟随。[轮次回归](test/desktop-reasoning-turns.test.tsx)核冷／恢复两种入口；生产组件浏览器耗时、逐帧高度及连续流式证据归 [Desktop owner](../../apps/desktop/README.md#会话消息渲染验证)。

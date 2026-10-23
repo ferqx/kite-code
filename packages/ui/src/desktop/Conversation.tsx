@@ -134,6 +134,7 @@ const MessageItem = memo(function MessageItem({
   restoredExpanded,
   childDetail,
   renderContent,
+  renderAttachments,
   showResponseStatus = true,
 }: {
   message: Message;
@@ -150,6 +151,7 @@ const MessageItem = memo(function MessageItem({
   writeClipboardText?: (text: string) => Promise<void>;
   childDetail?: { readonly label: string; readonly onOpen: () => void };
   renderContent?: (message: Message) => ReactNode;
+  renderAttachments?: (message: Message) => ReactNode;
   showResponseStatus?: boolean;
 }) {
   const [metadataNow, setMetadataNow] = useState(() => Date.now());
@@ -340,8 +342,31 @@ const MessageItem = memo(function MessageItem({
           )}
         </p>
       )}
+      {message.role === 'user' && !agentResult && !agentMessage && renderAttachments?.(message)}
       <CodeCopyEligibilityContext.Provider value={Boolean(copyText)}>
-        {renderContent ? (
+        {message.role === 'user' && !agentResult && !agentMessage ? (
+          <div className="user-message-body">
+            {renderContent ? (
+              renderContent(message)
+            ) : (
+              <>
+                {message.text && <p className="user-text">{message.text}</p>}
+                {message.delivery && (
+                  <small
+                    className="delivery-status"
+                    role={message.delivery === 'sending' ? 'status' : 'alert'}
+                  >
+                    {message.delivery === 'sending'
+                      ? '正在发送…'
+                      : message.delivery === 'failed'
+                        ? '发送失败，可在输入框中重试'
+                        : '发送结果待确认，请检查会话状态'}
+                  </small>
+                )}
+              </>
+            )}
+          </div>
+        ) : renderContent ? (
           renderContent(message)
         ) : message.role === 'assistant' || agentResult || agentMessage ? (
           message.text && <MessageContent text={message.text} openFile={openFile} />
@@ -414,6 +439,7 @@ export function Conversation({
   onOpenChildSession,
   renderMessage,
   renderMessageContent,
+  renderMessageAttachments,
   renderToolActivity,
 }: {
   messages: readonly Message[];
@@ -435,6 +461,8 @@ export function Conversation({
   renderMessage?: (message: Message) => ReactNode;
   /** Verified body reader within the original message and copy controls. */
   renderMessageContent?: (message: Message) => ReactNode;
+  /** Attachment presentation outside the user text bubble, sharing the same message identity. */
+  renderMessageAttachments?: (message: Message) => ReactNode;
   /** Host-adapted tool facts within the original grouping and reading state. */
   renderToolActivity?: (messages: readonly Message[], state: ToolActivityState) => ReactNode;
 }) {
@@ -521,7 +549,7 @@ export function Conversation({
           !node.textContent?.trim() ||
           !parent?.closest('.message') ||
           parent.closest(
-            'button, summary, .message-label, .message-status, .message-meta, [hidden], details:not([open])',
+            'button, summary, .message-label, .message-status, .message-meta, .message-attachments-navigation, [hidden], details:not([open])',
           )
         )
           continue;
@@ -652,7 +680,9 @@ export function Conversation({
       if (message.role === 'tool') return isVisibleTool(message);
       if (message.role === 'subagent')
         return !message.parentToolCallId || !visibleToolIds.has(message.parentToolCallId);
-      return !message.settled || !!message.text;
+      return (
+        !message.settled || !!message.text || (message.role === 'user' && !!message.hasAttachments)
+      );
     }),
   );
   const visibleTurns = new Set(
@@ -904,6 +934,7 @@ export function Conversation({
           openFile={openFile}
           writeClipboardText={writeClipboardText}
           renderContent={renderMessageContent}
+          renderAttachments={renderMessageAttachments}
           showResponseStatus={!turnScoped}
           copyText={
             message.role === 'user' && message.settled && !message.delivery && message.text

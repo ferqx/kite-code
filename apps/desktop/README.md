@@ -4,6 +4,10 @@
 
 ## Markdown 与附件输入
 
+用户消息的图片和普通文件通过 `SessionPage.renderMessageAttachments` 从正文气泡中分离，由 [NativeUserImages](src/native-user-images.tsx) 接入[共享 Attachment 列表](../../packages/ui/src/desktop/MessageAttachments.tsx)，沿原文件后图片的顺序显示，超宽时横向滚动；正文、时间和复制归原消息。首次发送及已有会话发送冻结附件名称作为占位，接管前不再将图片数量写进正文，也不借用已被草稿释放的 blob URL；历史确认后由原图片 reader／缩略图缓存显示预览。原输入身份、图片暂存、文件引用、读取与失败重试不变。空正文且没有需显示的真实格式／读取状态时不创建正文内容。产品尺寸和操作归[桌面手册](../../docs/handbook/clients/desktop/README.md#提示词与附件)。
+
+2026-10-23，Windows x64／Bun1.4.3、Chrome155.0.8059.85、`7af0dee6b` 加本次附件工作树：[图片浏览器夹具](test/image-previews-browser-runner.fixture.ts)的 `--attachments --observe` 在生产组件与样式中逐步观察深浅主题×1280／390px的发送占位→保存预览、滚动两端→键盘回翻、刷新→缓存切回、失败→仅附件→重开；正文位置、消息顺序、时间／复制数量和横向溢出均核对。发现并修正仅附件消息被空正文过滤、失败边框跨附件和窄屏焦点裁切；最终 `--attachments` 四组通过，并补核重开图片就绪与焦点轮廓。过程截图／报告位于本机 `.cache/image-previews-browser-SfuHgK`，最终复验位于 `.cache/image-previews-browser-Xpmahn`。[首条消息DOM回归](test/isolated/native-new-conversation-dom.test.tsx)70项通过，包含文字＋文件／仅文件的延迟选择与历史接管；图片读取、输入附件、消息复制及阅读滚动定向回归通过。此为隔离生产组件及受控桥接验收，未取得本轮完整安装版Electron、真实模型或其他平台资格；既有嵌套 `@keyframes` 编译提示保留。
+
 消息内容通过[共享 Markdown renderer](../../packages/ui/README.md#markdown-消息内容)显示 Mermaid、语法高亮／diff、提示块、公式及消息内标题／脚注跳转。主消息、子详情与后台正文沿原 `NativeModelOutputMessage` 复用；本文不扩展 Web 或 TUI 的独立展示能力。公式语法已加入 Worker 的同一固定 parser，图表／KaTeX排版留在 renderer；纯Worker入口不引入DOM或可视化库，原CSP、Main IPC、完整正文核验与复制资格保持。
 
 2026-10-22，Windows x64／Bun1.4.3、`beabc9628` 加本次Markdown工作树：[内容浏览器夹具](test/markdown-content-browser-runner.fixture.ts)用生产Vite资产、原生产CSP和Chrome155.0.8059.85通过1280／390px，覆盖深浅主题、五类图表、未闭合围栏、错误后恢复、源码复制、脚注往返、读取暂停和会话缓存切回，未发起外部资源请求。实际逐步观察生成占位→图表、源码展开→切会话→恢复、错误→修正及主题变化，并修正默认阴影与小图放大；字体从本地资产加载。[纯Worker构建回归](test/native-markdown-build.test.ts)核新增公式树仍可在无document／window／Node的VM运行；组件与输入编辑证据归[UI owner](../../packages/ui/README.md#markdown-消息内容)。此为隔离生产组件验收，未取得本轮完整安装版Electron或其他平台资格；保留既有嵌套`@keyframes`编译提示。

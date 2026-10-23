@@ -200,6 +200,9 @@ export function desktopMessages(messages: readonly Message[]): DesktopMessage[] 
           }
         : {}),
       text: message.compression || thinking ? '' : message.content,
+      ...((message.files?.length ?? 0) + (message.images?.length ?? 0) > 0
+        ? { hasAttachments: true }
+        : {}),
       settled: message.compression ? true : message.status === 'complete',
       // Public Message completion does not establish a final Run reply or legacy tool presentation.
     };
