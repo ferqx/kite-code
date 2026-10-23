@@ -1,4 +1,4 @@
-import { ArrowDown01Icon, KiteIcon } from '@hugeicons/core-free-icons';
+import { ArrowDown01Icon, ArrowDown02Icon, KiteIcon } from '@hugeicons/core-free-icons';
 import { HugeiconsIcon } from '@hugeicons/react';
 import {
   Fragment,
@@ -1127,6 +1127,22 @@ export function Conversation({
       </section>
     );
   };
+  const busy =
+    isLiveTurn(turnActivity) ||
+    messages.some(
+      (message) =>
+        !message.executionUnconfirmed &&
+        !(message.turnId === turnActivity?.turnId && turnActivity?.executionUnconfirmed) &&
+        message.systemKind !== 'turn_timing' &&
+        (!message.turnId || !terminalByTurn.get(message.turnId)) &&
+        (message.delivery === 'sending' ||
+          ((message.role === 'assistant' ||
+            message.role === 'tool' ||
+            message.role === 'subagent' ||
+            message.role === 'thinking' ||
+            message.role === 'system') &&
+            !message.settled)),
+    );
   return (
     <ClipboardWriteContext.Provider value={writeClipboardText}>
       <div className="conversation-container">
@@ -1137,25 +1153,7 @@ export function Conversation({
             {...{
               role: 'region',
               'aria-label': '会话消息',
-              'aria-busy':
-                loading ||
-                isLiveTurn(turnActivity) ||
-                messages.some(
-                  (message) =>
-                    !message.executionUnconfirmed &&
-                    !(
-                      message.turnId === turnActivity?.turnId && turnActivity?.executionUnconfirmed
-                    ) &&
-                    message.systemKind !== 'turn_timing' &&
-                    (!message.turnId || !terminalByTurn.get(message.turnId)) &&
-                    (message.delivery === 'sending' ||
-                      ((message.role === 'assistant' ||
-                        message.role === 'tool' ||
-                        message.role === 'subagent' ||
-                        message.role === 'thinking' ||
-                        message.role === 'system') &&
-                        !message.settled)),
-                ),
+              'aria-busy': loading || busy,
               onScroll: () => {
                 const element = viewport.current;
                 if (!element || loading || restore.current) return;
@@ -1165,7 +1163,10 @@ export function Conversation({
                 )
                   return;
                 writtenScrollTop.current = undefined;
-                const follow = element.scrollHeight - element.clientHeight - element.scrollTop < 48;
+                // Resume only at the actual bottom. A wider near-bottom zone
+                // makes the following-state commit snap a manual scroll to the tail.
+                // scrollTop is fractional while the two heights are rounded.
+                const follow = element.scrollHeight - element.clientHeight - element.scrollTop <= 1;
                 reading.current = {
                   top: element.scrollTop,
                   follow,
@@ -1206,18 +1207,31 @@ export function Conversation({
           </div>
         )}
         {!following && !loading && (
-          <Button
-            className="jump-latest"
-            onClick={() => {
-              const element = viewport.current;
-              if (!element) return;
-              writeScroll(element, element.scrollHeight);
-              reading.current = { ...reading.current, follow: true, top: element.scrollTop };
-              setFollowing(true);
-            }}
-          >
-            回到最新消息
-          </Button>
+          <div className="conversation-jump">
+            <Button
+              className="jump-latest"
+              size="icon"
+              aria-label="回到最新消息"
+              title="回到最新消息"
+              onClick={() => {
+                const element = viewport.current;
+                if (!element) return;
+                writeScroll(element, element.scrollHeight);
+                reading.current = { ...reading.current, follow: true, top: element.scrollTop };
+                setFollowing(true);
+              }}
+            >
+              {busy ? (
+                <span className="jump-latest-dots" aria-hidden="true">
+                  <span />
+                  <span />
+                  <span />
+                </span>
+              ) : (
+                <HugeiconsIcon icon={ArrowDown02Icon} aria-hidden="true" />
+              )}
+            </Button>
+          </div>
         )}
       </div>
     </ClipboardWriteContext.Provider>

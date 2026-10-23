@@ -418,6 +418,7 @@ void app
     window = new BrowserWindow({
       title: 'Kite',
       width: 1100,
+      minWidth: 800,
       height: 780,
       ...(process.platform === 'darwin'
         ? { titleBarStyle: 'hiddenInset' as const, trafficLightPosition: { x: 13, y: 19 } }

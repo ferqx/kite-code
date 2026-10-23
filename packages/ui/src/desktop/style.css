@@ -374,6 +374,10 @@ body {
     font-size: 14px;
     min-height: 0;
   }
+  :is(.client-sidebar-panel, .settings-sidebar) button,
+  :is(.client-sidebar-panel, .settings-sidebar) button * {
+    transition: none;
+  }
   .sidebar-header {
     display: flex;
     align-items: center;
@@ -450,11 +454,6 @@ body {
   .primary-navigation .button:hover:not(:disabled) {
     background: var(--control-hover);
   }
-  .primary-navigation .button.selected,
-  .primary-navigation .button.selected:hover:not(:disabled) {
-    --control-pressed: var(--control-selected);
-    background: var(--control-selected);
-  }
   .primary-navigation .new-session:disabled {
     opacity: 1;
   }
@@ -530,11 +529,6 @@ body {
   }
   .session-row:hover:not(:disabled) {
     background: var(--control-hover);
-  }
-  .session-row.selected,
-  .session-row.selected:hover:not(:disabled) {
-    --control-pressed: var(--control-selected);
-    background: var(--control-selected);
   }
   :is(.primary-navigation .button, .session-row, .profile-card):active:not(:disabled),
   .primary-navigation .button.selected:active:not(:disabled) {
@@ -687,8 +681,11 @@ body {
     min-width: 0;
     min-height: 0;
     position: relative;
+    isolation: isolate;
   }
   .conversation {
+    position: relative;
+    z-index: 0;
     width: 100%;
     min-width: 0;
     height: 100%;
@@ -720,7 +717,7 @@ body {
       animation: none;
     }
   }
-  .conversation-viewport {
+  :is(.conversation-viewport, .conversation-jump) {
     width: 100%;
     min-width: 0;
     height: 100%;
@@ -963,12 +960,49 @@ body {
   .image-description {
     color: var(--muted-foreground);
   }
-  .jump-latest {
+  .conversation-jump {
     position: absolute;
-    bottom: 12px;
-    left: 50%;
-    transform: translateX(-50%);
-    box-shadow: 0 3px 12px #20221e10;
+    z-index: 1;
+    inset: 0;
+    display: flex;
+    align-items: flex-end;
+    justify-content: center;
+    pointer-events: none;
+  }
+  .jump-latest {
+    --button-radius: 50%;
+    pointer-events: auto;
+    box-shadow: 0 2px 8px rgb(0 0 0 / 14%);
+  }
+  .jump-latest:hover:not(:disabled) {
+    background: color-mix(in srgb, var(--card), var(--foreground) 5%);
+  }
+  .jump-latest:active:not(:disabled) {
+    background: color-mix(in srgb, var(--card), var(--foreground) 8%);
+  }
+  .jump-latest-dots {
+    display: flex;
+    align-items: center;
+    gap: 3px;
+    height: 16px;
+  }
+  .jump-latest-dots > span {
+    width: 3px;
+    height: 3px;
+    border-radius: 50%;
+    background: currentColor;
+    animation: jump-latest-bounce 1s ease-in-out infinite;
+  }
+  .jump-latest-dots > span:nth-child(2) {
+    animation-delay: 150ms;
+  }
+  .jump-latest-dots > span:nth-child(3) {
+    animation-delay: 300ms;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .jump-latest-dots > span {
+      animation: none;
+    }
   }
   .conversation-footer {
     padding: 0 28px 24px;
@@ -1811,21 +1845,7 @@ body {
     color: var(--diff-removed-foreground);
   }
   @media (max-width: 900px) {
-    &.shell {
-      --sidebar-header-end-padding: 12px;
-      --session-header-start-padding: 16px;
-    }
-    .sidebar {
-      --sidebar-inline-padding: 12px;
-      padding: 0 var(--sidebar-inline-padding) 10px;
-    }
-    .sidebar-header {
-      padding-inline: 12px var(--sidebar-header-end-padding);
-    }
-    .session-header {
-      --session-header-gap: 6px;
-    }
-    .conversation-viewport {
+    :is(.conversation-viewport, .conversation-jump) {
       padding: 24px 20px 16px;
     }
     .conversation-footer {
@@ -1846,6 +1866,7 @@ body {
       flex-basis: 50%;
     }
     .conversation-viewport,
+    .conversation-jump,
     .conversation-footer {
       padding: 0 12px 12px;
     }
@@ -2026,17 +2047,6 @@ body {
 }
 [data-theme="dark"] .kite-client {
   color-scheme: dark;
-}
-@media (max-width: 600px) {
-  .kite-client .client-sidebar-panel.narrow {
-    width: 100%;
-    min-width: 0;
-    height: 100%;
-  }
-  .kite-client .client-sidebar-panel.narrow .sidebar-header,
-  .kite-client .client-sidebar-panel.narrow .sidebar {
-    width: 100%;
-  }
 }
 
 .kite-client .scheduled-scroll {
@@ -2657,6 +2667,16 @@ body {
 [data-slot="sheet-content"][data-state="closed"] {
   animation: sidebar-sheet-out var(--sidebar-motion-duration) var(--sidebar-motion-easing);
   pointer-events: none;
+}
+@keyframes jump-latest-bounce {
+  0%,
+  60%,
+  100% {
+    transform: translateY(0);
+  }
+  30% {
+    transform: translateY(-3px);
+  }
 }
 @keyframes sidebar-overlay-in {
   from {
@@ -4119,7 +4139,9 @@ body {
 .kite-client .environment-information-toggle[aria-expanded="true"]:hover:not(:disabled) {
   background: var(--control-selected);
 }
-.kite-client .session-view:has(> .environment-information) .conversation-viewport {
+.kite-client
+  .session-view:has(> .environment-information)
+  :is(.conversation-viewport, .conversation-jump) {
   padding-right: var(--environment-information-safe-area);
 }
 .kite-client .session-view:has(> .environment-information) .conversation-footer {
@@ -4127,7 +4149,7 @@ body {
 }
 .kite-client
   .session-view.environment-information-animated:has(> .environment-information)
-  .conversation-viewport {
+  :is(.conversation-viewport, .conversation-jump) {
   transition: padding-right var(--sidebar-motion-duration) var(--sidebar-motion-easing);
 }
 .kite-client
@@ -5068,7 +5090,7 @@ body {
   flex: 1;
   min-height: 0;
 }
-.kite-client .session-tab-child .conversation-viewport {
+.kite-client .session-tab-child :is(.conversation-viewport, .conversation-jump) {
   padding: 16px;
 }
 .kite-client .session-browser-start {

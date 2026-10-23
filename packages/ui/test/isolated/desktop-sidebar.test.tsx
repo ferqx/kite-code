@@ -48,6 +48,16 @@ Object.defineProperty(dom.window.HTMLElement.prototype, 'scrollIntoView', {
   configurable: true,
   value: () => {},
 });
+// The panel library sorts registrations by layout position. JSDOM has no layout;
+// preserve sibling order when navigation size constraints are re-registered.
+Object.defineProperty(dom.window.HTMLElement.prototype, 'offsetLeft', {
+  configurable: true,
+  get() {
+    return this.parentElement?.hasAttribute('data-group')
+      ? Array.from(this.parentElement.children).indexOf(this) * 200
+      : 0;
+  },
+});
 const globals = {
   window: dom.window,
   document: dom.window.document,
@@ -137,46 +147,74 @@ function expectDesktopSidebar(open: boolean) {
   expect(document.querySelector('[role="dialog"]')).toBeNull();
 }
 
-test('wide sidebar and its toggle remain consistent after repeated narrow window transitions', async () => {
+test('resizing across the old narrow breakpoint keeps the open sidebar and content mounted', async () => {
   await render();
+  const navigation = document.querySelector('#navigation');
+  const conversation = document.querySelector('.conversation-container');
   expectDesktopSidebar(true);
   for (let cycle = 0; cycle < 3; cycle++) {
-    await resize(true);
-    expect(document.querySelector('#navigation')).toBeNull();
-    expect(document.querySelector('[role="dialog"]')).toBeNull();
-    await resize(false);
-    expectDesktopSidebar(true);
+    for (const narrow of [true, false]) {
+      await resize(narrow);
+      expectDesktopSidebar(true);
+      expect(document.querySelector('#navigation')).toBe(navigation);
+      expect(document.querySelector('.conversation-container')).toBe(conversation);
+    }
   }
 });
 
-test('narrow sheet open and close do not replace the last desktop sidebar choice', async () => {
+test('only the toggle changes sidebar visibility across window widths', async () => {
   await render();
   await click('收起侧栏');
   expectDesktopSidebar(false);
   await resize(true);
-  await click('展开侧栏');
-  expect(document.querySelector('[role="dialog"]')).not.toBeNull();
-  await resize(false);
   expectDesktopSidebar(false);
-
   await click('展开侧栏');
+  expectDesktopSidebar(true);
+  await resize(false);
   expectDesktopSidebar(true);
   await resize(true);
-  await click('展开侧栏');
   await click('收起侧栏');
+  expectDesktopSidebar(false);
   await resize(false);
-  expectDesktopSidebar(true);
+  expectDesktopSidebar(false);
 });
 
-test('starting in a narrow window keeps its sheet closed and initializes one wide sidebar', async () => {
+test('a narrow startup keeps navigation open; selection, new chat and Escape do not close it', async () => {
   viewport.matches = true;
-  await render();
-  expect(document.querySelector('#navigation')).toBeNull();
-  expect(document.querySelector('[role="dialog"]')).toBeNull();
-  expect(document.querySelectorAll('.sidebar-toggle')).toHaveLength(1);
+  let selected: string | undefined;
+  let created = 0;
+  await render({
+    workspaces: [
+      {
+        id: 'w',
+        label: '工作区',
+        state: 'loaded',
+        sessionCount: 1,
+        sessions: [{ sessionId: 'other', displayName: '已有会话', status: 'idle' }],
+      },
+    ],
+    onOpen: (id) => {
+      selected = id;
+    },
+    actions: {
+      newSession: () => {
+        created++;
+      },
+    },
+  });
+  expectDesktopSidebar(true);
+  await click('已有会话');
+  expect(selected).toBe('other');
+  expectDesktopSidebar(true);
+  const newSession = [...document.querySelectorAll<HTMLButtonElement>('button')].find(
+    (button) => button.textContent === '新对话',
+  )!;
+  await act(() => newSession.click());
+  expect(created).toBe(1);
+  await act(() => window.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'Escape' })));
+  expectDesktopSidebar(true);
   await resize(false);
   expectDesktopSidebar(true);
-  expect(document.querySelectorAll('.sidebar-toggle')).toHaveLength(1);
 });
 
 test('the title toggle and sidebar state change in the panel animation frame without replacing the title', async () => {

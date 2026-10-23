@@ -271,11 +271,6 @@ html[data-platform="macos"] .kite-client .desktop-settings-dialog .settings-edit
 .kite-client .settings-sidebar nav button:hover:not(:disabled) {
   background: var(--control-hover);
 }
-.kite-client .settings-sidebar nav button[aria-pressed="true"],
-.kite-client .settings-sidebar nav button[aria-pressed="true"]:hover:not(:disabled) {
-  --control-pressed: var(--control-selected);
-  background: var(--control-selected);
-}
 .kite-client .settings-sidebar nav button:active:not(:disabled),
 .kite-client .settings-sidebar nav button[aria-pressed="true"]:active:not(:disabled) {
   background: var(--control-pressed);
@@ -821,11 +816,6 @@ html[data-native-window] .native-window-content > .kite-client.shell {
   height: 100%;
 }
 
-.native-window-content [role="dialog"]:has(> .client-sidebar-panel.narrow) {
-  top: var(--native-titlebar-height);
-  height: calc(100dvh - var(--native-titlebar-height));
-}
-
 /* macOS window controls share the first row with the navigation and session headers. */
 html[data-native-window][data-platform="macos"] {
   --native-titlebar-height: 0px;
@@ -918,8 +908,7 @@ html[data-native-window]:is([data-window-material="mica"], [data-window-material
     .client-sidebar-panel,
     .desktop-settings-dialog,
     .desktop-settings-header,
-    .settings-sidebar,
-    [role="dialog"]:has(> .client-sidebar-panel.narrow)
+    .settings-sidebar
   ) {
   background: transparent;
 }
@@ -941,8 +930,7 @@ html[data-native-window]:is(
 }
 
 /* Keep Windows navigation compact and let the profile divider span the panel. */
-html[data-native-window][data-platform="windows"] .kite-client #navigation .client-sidebar-panel,
-html[data-native-window][data-platform="windows"] .kite-client .client-sidebar-panel.narrow {
+html[data-native-window][data-platform="windows"] .kite-client #navigation .client-sidebar-panel {
   padding-inline: 0;
 }
 

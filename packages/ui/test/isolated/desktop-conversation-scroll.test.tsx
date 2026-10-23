@@ -83,12 +83,17 @@ test('native Conversation scroll follows, restores manual reading and retires RA
   const host = dom.window.document.getElementById('root')!,
     root = createRoot(host);
   let saved: ReadingState | undefined;
-  const render = (id: number, text = 'stream text', initialPresentationPending = false) =>
+  const render = (
+    id: number,
+    text = 'stream text',
+    initialPresentationPending = false,
+    settled = false,
+  ) =>
     act(async () =>
       root.render(
         <Conversation
           key={id}
-          messages={[{ id: 'message', role: 'assistant', text, settled: false }]}
+          messages={[{ id: 'message', role: 'assistant', text, settled }]}
           loading={false}
           initialPresentationPending={initialPresentationPending}
           selected
@@ -147,8 +152,41 @@ test('native Conversation scroll follows, restores manual reading and retires RA
     expect(viewport.scrollTop).toBe(200);
     await render(0, 'tail 2');
     expect(viewport.scrollTop).toBe(200);
+    // Approaching the bottom while reading must not opt into following or
+    // snap to the tail on the scroll-state commit / a later stream update.
+    for (const gap of [47, 16, 2]) {
+      const top = height - viewport.clientHeight - gap;
+      viewport.scrollTop = top;
+      await act(async () => viewport.dispatchEvent(new dom.window.Event('scroll')));
+      expect(viewport.scrollTop).toBe(top);
+      expect(host.querySelector('.jump-latest')).not.toBeNull();
+      await render(0, `near-bottom gap ${gap}`);
+      expect(viewport.scrollTop).toBe(top);
+      height += 100;
+      resize(column);
+      expect(viewport.scrollTop).toBe(top);
+    }
+    // Native scrollTop can be fractional while scroll/clientHeight are rounded.
+    viewport.scrollTop = height - viewport.clientHeight - 0.5;
+    await act(async () => viewport.dispatchEvent(new dom.window.Event('scroll')));
+    expect(host.querySelector('.jump-latest')).toBeNull();
+    height += 100;
+    resize(column);
+    expect(viewport.scrollTop).toBe(height);
+    height = 2000;
+    viewport.scrollTop = 200;
+    await act(async () => viewport.dispatchEvent(new dom.window.Event('scroll')));
+    const jump = host.querySelector<HTMLButtonElement>('.jump-latest')!;
+    expect(jump.getAttribute('aria-label')).toBe('回到最新消息');
+    expect(jump.querySelectorAll('.jump-latest-dots > span')).toHaveLength(3);
+    await render(0, 'tail 2', false, true);
+    expect(host.querySelector('.jump-latest')).toBe(jump);
+    expect(jump.querySelector('.jump-latest-dots')).toBeNull();
+    expect(jump.querySelector('svg')).not.toBeNull();
+    expect(viewport.scrollTop).toBe(200);
     await act(async () => host.querySelector<HTMLButtonElement>('.jump-latest')!.click());
     expect(viewport.scrollTop).toBe(2000);
+    expect(host.querySelector('.jump-latest')).toBeNull();
     await act(async () => root.render(null));
     expect(saved).toMatchObject({ follow: true, top: 2000 });
     await render(1, 'another cold reading', true);

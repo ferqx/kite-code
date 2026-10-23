@@ -162,7 +162,9 @@ Main 迁入原 nativeTheme.themeSource、创建时背景和 updated 监听，无
 
 Native [renderer 入口](src/native-main.tsx)明确开启 `NativeDesktop` 的 `nativeWindow` 布局，由[窗口容器](src/native-window-frame.tsx)承载启动与业务页面，启动页显隐按[启动显示规则](#原启动页与初始化重试)。普通 DOM 嵌入默认不套窗口布局。Windows／Linux 的沉浸式窗口顶栏单独占32px，内容区从 y=32px 开始；Mica 会话面板另按下文圆角留白内缩。macOS 将原生窗口按钮与52px业务 header 整合，内容区从 y=0 开始，不再额外保留32px空行。[Main](electron/main.ts)在 Windows／Linux 设置 `titleBarStyle: hidden` 和32px的透明 `titleBarOverlay`，不另显示系统应用图标与标题；macOS 保 `hiddenInset`，traffic-light位置为 `{x:13,y:19}`，与业务 header 垂直居中。`nativeTheme` 更新同步按钮符号颜色，窗口背景继续沿原主题端口。选择 [Electron 原生叠层](https://www.electronjs.org/docs/latest/tutorial/custom-title-bar)是为了保留宿主的窗口操作，不新建最小化／关闭 IPC 或另一套按钮状态。
 
-[Native CSS](src/native-tailwind.css)通过明确的 `data-native-window`和平台属性限定窗口展示；共享 Web 页面不因此变为可拖拽。Windows／Linux 只由独立顶栏声明 drag，内容区使用剩余高度，全屏设置相对内容区定位，窄侧栏浮层从顶栏下方开始。macOS 的顶栏元素改为左上角80×52px的绝对定位区域，不占流式高度；侧栏顶部隐藏重复品牌文字，侧栏收起时通过已有 `sidebar-visible` 状态将安全间距转移到主 header。设置返回按钮和窄侧栏顶部同样避开原生窗口按钮，窄浮层从 y=0 开始。macOS 的侧栏、会话、右栏与设置 header 空白声明 drag，内部按钮、链接和表单控件声明 no-drag。顶栏区域在 modal 遮罩之上保留窗口操作。此变更不增加 Service 能力，不改变关闭隐藏与原退出收尾。
+[Main](electron/main.ts)创建主窗口时设置 `minWidth: 800`（Electron逻辑像素），初始尺寸保持1100×780；系统调宽受此下限约束。当前没有保存／恢复窗口尺寸的独立路径。共享页面仍适应缩放后的CSS宽度，左侧栏仅由按钮收展；header和底部个人工作区的内边距不再受900px媒体查询改写。
+
+[Native CSS](src/native-tailwind.css)通过明确的 `data-native-window`和平台属性限定窗口展示；共享 Web 页面不因此变为可拖拽。Windows／Linux 只由独立顶栏声明 drag，内容区使用剩余高度，全屏设置相对内容区定位，所有宽度的侧栏都留在该内容区内，仅由按钮收展。macOS 的顶栏元素改为左上角80×52px的绝对定位区域，不占流式高度；侧栏顶部隐藏重复品牌文字，侧栏收起时通过已有 `sidebar-visible` 状态将安全间距转移到主 header。设置返回按钮和窄窗口中的同一侧栏顶部同样避开原生窗口按钮。macOS 的侧栏、会话、右栏与设置 header 空白声明 drag，内部按钮、链接和表单控件声明 no-drag。顶栏区域在 modal 遮罩之上保留窗口操作。此变更不增加 Service 能力，不改变关闭隐藏与原退出收尾。
 
 2026-10-15 macOS／Electron 44.3.0／Bun 1.4.2 的隔离实际 Main／preload／renderer 与配套 Service 验证了整合布局：1100×780窗口的业务区从 y=0 开始，侧栏 header 高52px，原生按钮位置为 `{x:13,y:19}`；侧栏收起、设置往返、文件变更及760／550／400px窗口的窄侧栏与设置控件均避开按钮区域，草稿往返保留，页面无异常。Windows／Linux 的平台 CSS 切换核实独立32px行保留，不代替这两平台的原生窗口验证。现有窗口交互、启动与共享页面三个完整测试文件共16项／171断言、Desktop typecheck、定向 Biome 和文档检查通过；drag／no-drag 核对为计算样式证据，未进行物理鼠标拖拽验收。
 
