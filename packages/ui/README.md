@@ -2,9 +2,13 @@
 
 桌面会话的正文阅读列与底部输入区通过[共享样式](src/desktop/style.css)统一采用 740px 最大宽度，水平居中；可用空间不足时继续随容器缩小。
 
-[MessageCopyButton](src/desktop/MessageCopyButton.tsx)使用 `icon-sm` 的 32px 按钮及统一 16px 图标，默认、成功和失败状态保持相同尺寸；[共享样式](src/desktop/style.css)为该按钮指定独立 8px 圆角，含消息信息栏的正文留出 40px 底部间距，避免覆盖下一条消息。悬停／聚焦显示和准确原文复制继续沿原生命周期。
+[公共 Button](src/desktop/components/ui/button.tsx)按[桌面规范](../../docs/handbook/clients/desktop/README.md)提供 `icon-xs/icon-sm/icon/icon-lg` 四档，消费[共享样式](src/desktop/style.css)的 `--icon-button-size-*`、`--icon-button-size` 与 `--icon-button-radius`；各档显式取消 padding、内部 gap 和最小高度叠加，使用居中图标形成固定留白。文字按钮的 padding／min-height 规则排除所有 `icon*` 尺寸，包装 Button、设置、审批及结果区域保持同一几何规则。输入区和侧栏切换使用32px标准档，标签关闭、审批翻页和代码复制使用24px紧凑档，移除相关局部尺寸与图标覆盖。
+
+[MessageCopyButton](src/desktop/MessageCopyButton.tsx)沿公共 `icon-sm` 使用28px按钮、16px图标及独立8px圆角，默认、成功和失败状态保持相同尺寸；不再单独指定按钮宽高。`--control-gap: 4px` 统一控制按钮与时间的横向间距，`--message-meta-offset: 2px` 保留用户气泡／Agent正文到信息栏的垂直间距；含信息栏的消息保留 `28 + 2 + 8 = 38px` 底部空间，确保工具栏与下一条消息至少间隔8px。悬停／聚焦显示和准确原文复制继续沿原生命周期。
 
 [Conversation](src/desktop/Conversation.tsx)的 `.message-meta` 将复制与时间放在正文下方同一行，用户消息反向排列为时间在左、复制在右。被动时间显示不恢复任何复制或读取资格；普通、最终回复和过程正文均为信息栏预留间距。信息栏使用 `user-select: none`，聊天全选寻找正文端点时同样排除它。[时间格式](src/desktop/message-time.ts)只接宿主 `Message.createdAtMs`，按本地日历区分当天、昨天、本年日期和其他年份；不以24小时差推断昨天，完整 `time` 语义保留 ISO instant、秒与原时刻 UTC 偏移。悬停／聚焦消息重新计算日期标签；缺失或无效时间保持未知，不调用当前时间补造来源。格式回归见[日期边界](test/desktop-message-time.test.ts)，复制与全选回归沿原[消息复制文件](test/isolated/desktop-message-copy.test.tsx)。
+
+2026-10-23，Windows x64／Bun1.4.3，`de498789b` 加本轮工作树：逐文件执行 `bun test ./<原测试路径>`，原[消息复制](test/isolated/desktop-message-copy.test.tsx)、[代码复制](test/isolated/desktop-code-block.test.tsx)、[侧栏](test/isolated/desktop-sidebar.test.tsx)、[标签页](test/isolated/desktop-session-tabs.test.tsx)、[排队消息](test/isolated/desktop-queued-messages.test.tsx)及[输入框](test/isolated/prompt-editor.test.tsx)六个完整文件27项／427断言通过，UI／Desktop typecheck 与定向 Biome 通过。Chrome155.0.8059.85 的隔离浏览器在基础／包装 Button、设置、审批和结果区域核22个图标控件；实际 SessionPage 配合生产编译 CSS 在深浅主题、1280／390px四组场景逐步核悬停、复制成功、复制失败和聚焦。按钮28px／图标16px，工具栏内4px、正文下方2px，下一条消息至少保留8px，反馈不引起尺寸或位置跳变，无横向溢出和页面错误。夹具只使用模拟回调，不读用户数据，未重验完整安装版 Electron。
 
 2026-10-23，Windows x64／Chrome155、当前生产 Conversation／Native 消息适配及编译 CSS，在深浅主题、1280／390px、Asia/Shanghai 固定日历下核四组操作：观察用户与 Agent 的时间位置、当天／昨天／本年／跨年及未知显示、原输入接管、复制成功／失败、流式追加和完成、重挂载历史、跨午夜再次悬停。时间和消息保持一份，较晚业务消息不覆盖原输入时间；正文实际增高时保留手动20px阅读位置，复制与全选不含信息栏，控件与下一条消息保留至少6px，无横向溢出或页面错误。日期格式另以 America/New_York 跑过夏令时与闰日断言；原消息复制3项／52断言通过。UI／Desktop 类型检查、生成 API、边界与文档检查通过。此为隔离组件与真实协议的分层证据，未重验完整安装版 Electron；保留既有嵌套 `@keyframes` 编译提示。
 
@@ -110,7 +114,7 @@ Composer 的图片卡片保持固定预览区域，接受宿主交付的小尺�
 
 `@kite-ai/ui/desktop` 的 [SessionPage](src/desktop/SessionPage.tsx)、Sidebar、Conversation、Composer、RightSidebar 与 shadcn 控件从原 kite-client-ui 展示源码迁入，保留原 CSS、交互和依赖版本；[样式导出](src/desktop/style.css)供正式 Native 的原 Vite/Tailwind 管线编译。此层不导入旧 workspace 或 Runtime，事实映射和写入 authority 属 [Desktop host](../../apps/desktop/README.md#复用原桌面展示层)。
 
-桌面圆角在[共享样式](src/desktop/style.css)的根变量 `--radius: 16px` 统一定义。面板、卡片、输入框、按钮、列表、菜单和提示框默认引用该值，消息复制按钮使用前述独立 8px 圆角；Tailwind 的 `--radius-xs` 到 `--radius-4xl` 也只作为同一变量的别名，避免 shadcn 弹层另用尺寸。圆形控件、滚动条、调宽把手保留圆形或胶囊轮廓，拼接内侧和全屏容器保留必要的直角；Native 设置样式、Mica 面板及正文排版也消费这一根变量。调整只改外观，不增加请求、写入或阅读权限；实际编译后的值和窗口验证归 [Native owner](../../apps/desktop/README.md#统一桌面圆角)。
+桌面圆角在[共享样式](src/desktop/style.css)的根变量 `--radius: 16px` 统一定义。面板、卡片、输入框、文字按钮、列表、菜单和提示框默认引用该值，图标按钮使用前述统一 8px 圆角；Tailwind 的 `--radius-xs` 到 `--radius-4xl` 也只作为同一变量的别名，避免 shadcn 弹层另用尺寸。圆形控件、滚动条、调宽把手保留圆形或胶囊轮廓，拼接内侧和全屏容器保留必要的直角；Native 设置样式、Mica 面板及正文排版也消费这一根变量。调整只改外观，不增加请求、写入或阅读权限；实际编译后的值和窗口验证归 [Native owner](../../apps/desktop/README.md#统一桌面圆角)。
 
 同一共享样式的 `--resize-handle-width: 1px` 管理调宽线。导航分隔以该值占位，收起时归零；阅读区与右侧工具之间的分隔始终不占布局宽度，以伪元素覆盖接缝，保留原命中区、把手和键盘操作，避免右栏开合改变共同外框的可分配宽度。Native Mica 以导航分隔和内容留白计算玻璃导航的外侧间距，具体视觉边界与实窗证据由 [Native owner](../../apps/desktop/README.md#玻璃导航间距)维护。
 

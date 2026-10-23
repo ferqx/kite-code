@@ -524,7 +524,7 @@ export function SessionPage({ messages, fileChanges, ...props }: SessionPageProp
           <Button
             ref={toggle}
             className="ghost sidebar-toggle"
-            size="icon-sm"
+            size="icon"
             aria-expanded={sidebarOpen}
             aria-label="收起侧栏"
             title="收起侧栏"
@@ -720,7 +720,7 @@ export function SessionPage({ messages, fileChanges, ...props }: SessionPageProp
               <Button
                 ref={toggle}
                 className="ghost sidebar-toggle"
-                size="icon-sm"
+                size="icon"
                 aria-controls="navigation"
                 aria-expanded={sidebarOpen}
                 aria-label={sidebarOpen ? '收起侧栏' : '展开侧栏'}
@@ -769,7 +769,7 @@ export function SessionPage({ messages, fileChanges, ...props }: SessionPageProp
                           <Button
                             ref={toggle}
                             className="ghost sidebar-toggle"
-                            size="icon-sm"
+                            size="icon"
                             aria-expanded={sidebarOpen}
                             aria-label="展开侧栏"
                             title="展开侧栏"

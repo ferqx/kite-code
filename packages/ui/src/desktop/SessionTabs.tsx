@@ -314,7 +314,7 @@ export function SessionTabs({
                 </TabsTrigger>
                 <Button
                   className="ghost session-tab-close"
-                  size="icon-sm"
+                  size="icon-xs"
                   aria-label={`关闭标签页：${tab.title}`}
                   title={`关闭标签页：${tab.title}`}
                   onClick={() => closeTab(tab.id)}

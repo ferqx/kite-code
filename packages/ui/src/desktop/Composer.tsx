@@ -566,7 +566,7 @@ export function Composer(props: ComposerProps) {
                   <ShadcnButton
                     ref={attachmentTrigger}
                     variant="ghost"
-                    size="icon-sm"
+                    size="icon"
                     className="composer-attach"
                     aria-label="添加附件"
                     title="添加文件"
@@ -725,7 +725,7 @@ export function Composer(props: ComposerProps) {
                         <Button
                           className="composer-context-usage"
                           variant="ghost"
-                          size="icon-sm"
+                          size="icon"
                           aria-label={
                             contextPercentage === undefined
                               ? '上下文占用未知'
@@ -776,7 +776,7 @@ export function Composer(props: ComposerProps) {
               {showStop ? (
                 <Button
                   className="primary composer-action stop-action"
-                  size="icon-sm"
+                  size="icon"
                   aria-label={props.stopping ? '正在停止…' : '停止任务'}
                   title={props.stopping ? '正在停止…' : '停止任务'}
                   onClick={props.onCancel}
@@ -790,7 +790,7 @@ export function Composer(props: ComposerProps) {
               ) : (
                 <Button
                   className="primary composer-action"
-                  size="icon-sm"
+                  size="icon"
                   type="submit"
                   aria-label={
                     props.sendLabel ??

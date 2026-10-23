@@ -38,6 +38,13 @@ body {
   --radius-2xl: var(--radius);
   --radius-3xl: var(--radius);
   --radius-4xl: var(--radius);
+  --icon-button-size-xs: 24px;
+  --icon-button-size-sm: 28px;
+  --icon-button-size: 32px;
+  --icon-button-size-lg: 36px;
+  --icon-button-radius: 8px;
+  --control-gap: 4px;
+  --message-meta-offset: 2px;
   --resize-handle-width: 1px;
   --sidebar-motion-duration: 180ms;
   --sidebar-motion-easing: ease-out;
@@ -151,15 +158,18 @@ body {
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    gap: 6px;
-    min-height: 32px;
-    padding: 5px 10px;
     border: 1px solid var(--border);
-    border-radius: var(--radius);
     background: var(--card);
     cursor: pointer;
     line-height: 20px;
     transition: background-color 120ms;
+  }
+  .button:where(:not([data-size^="icon"])),
+  :where(.interaction-area, .settings, .results) button:where(:not([data-size^="icon"])) {
+    gap: var(--control-gap);
+    min-height: 32px;
+    padding: 5px 10px;
+    border-radius: var(--radius);
   }
   .button:hover:not(:disabled),
   :where(.interaction-area) button:hover:not(:disabled),
@@ -460,7 +470,7 @@ body {
     color: var(--muted-foreground);
     font-size: inherit;
   }
-  .nav-label button {
+  .nav-label button:where(:not([data-size^="icon"])) {
     font-size: inherit;
     padding: 3px 6px;
   }
@@ -815,9 +825,9 @@ body {
     left: 0;
     display: flex;
     align-items: center;
-    gap: 4px;
-    height: 32px;
-    margin-top: 2px;
+    gap: var(--control-gap);
+    height: var(--icon-button-size-sm);
+    margin-top: var(--message-meta-offset);
     color: var(--muted-foreground);
     font-size: 12px;
     line-height: 16px;
@@ -826,11 +836,6 @@ body {
     transition: opacity 120ms;
   }
   .message-copy {
-    width: 32px;
-    height: 32px;
-    min-height: 32px;
-    padding: 0;
-    border-radius: 8px;
     border-color: transparent;
     background: transparent;
     color: var(--muted-foreground);
@@ -842,7 +847,7 @@ body {
   .reading-column
     > .message-group
     > .message.assistant[data-final-reply="false"]:has(> .message-meta) {
-    margin-bottom: 40px;
+    margin-bottom: calc(var(--icon-button-size-sm) + var(--message-meta-offset) + 8px);
   }
   .message:hover .message-meta,
   .message:focus-within .message-meta {
@@ -1224,7 +1229,7 @@ body {
     width: 32px;
     height: 32px;
     flex: none;
-    padding: 8px;
+    padding: 0;
     border: 0;
     background: transparent;
     color: var(--muted-foreground);
@@ -1899,9 +1904,6 @@ body {
 }
 .kite-client :where(.space-new-session, .space-remove) {
   flex: none;
-  width: 28px;
-  height: 28px;
-  padding: 6px;
 }
 .kite-client .nav-label .space-add,
 .kite-client .space-heading :where(.space-new-session, .space-remove) {
@@ -3495,7 +3497,7 @@ body {
 .kite-client .approval-child-icon[data-child-color="5"] {
   color: var(--color-sky-500);
 }
-.kite-client .approval-heading svg,
+.kite-client .approval-heading-label svg,
 .kite-client .approval-tool-label svg {
   width: 14px;
   height: 14px;
@@ -3508,9 +3510,6 @@ body {
   font-variant-numeric: tabular-nums;
 }
 .kite-client .approval-pager .button {
-  width: 20px;
-  height: 20px;
-  padding: 0;
   margin: 0;
   border: 0;
 }
@@ -4908,15 +4907,7 @@ body {
 }
 .kite-client .session-tab .session-tab-close {
   flex: none;
-  width: 22px;
-  height: 24px;
-  min-height: 24px;
   margin-right: 4px;
-  padding: 3px;
-}
-.kite-client .session-tab .session-tab-close > svg {
-  width: 12px;
-  height: 12px;
 }
 .kite-client .session-tabs .session-tab-add {
   flex: none;
