@@ -45,6 +45,30 @@ KITE_RUN_LIVE_COLLABORATION=1 bun tests/e2e/live/model/collaboration-unified-nat
 
 普通邮件展示回归逐字比较真实发送 Tool 输入与 `data-agent-message-id` 对应的唯一正文，核真实发送者、接收 Run 归属和原处理过程。终态／冷读先等 renderer 完成终态分组，再经普通展开控件读取全文，最后恢复折叠与阅读位置；不把后台已完成当成界面已经提交。`12-active-ordinary-mail-detail.png` 补存父仍运行时的邮件近照。公开 Runtime 正文、raw Store占位与实际 Provider 低信任输入分别比对，读取前后 Provider／持久化 footprint 不增。修复前的占位／拆段失败样本保留，后续通过资格以 owner 的当前证据为准。
 
+同一 active 场景还从普通 Composer 连续发送两条多行用户引导。原父响应的时序门只用于观察发送与受理；释放后由原接收检查点应用，在下一份真实模型请求中核原 Command／Message／Run、完整正文及准确 sourceIds。引导的发送占位、持久消息、后续回复和终态均保持同一段处理过程，完成及冷开后分别核“用时”默认收起、展开两条全文原序、再次收起；原首条输入与最终回复仍在过程外。阶段截图和连续帧记录草稿、接管、正文位置及阅读状态，不能仅凭最终折叠截图认定通过。实际 Provider 原输入和完整 canonical Model 输入也须逐字包含两条引导，不以受理或界面显示代替模型已接收。
+
+该 active 场景随后按原父任务预先授权的范围只读一份完整大材料，使用正式 `compression.thresholdTokens=24000` 在同一 Run 自动压缩。真实摘要与压缩后首业务响应分别仅延迟已返回的 HTTP 200 原正文，截图覆盖实际压缩进度和压缩后两条原引导全文。压缩覆盖上界必须涵盖两条物理引导；摘要模型实际收到原材料和引导，后继 canonical ModelInput 及 Provider 输入仍须独立携带两条原 Command 来源和全文，不能只在摘要中找到要求。最终真实回复须保留中文、两核验码，并按第二条纠正将 Red 更新为 Blue。原邮件／子结果、单段处理过程、终态折叠和冷开检查继续生效；未达到压缩分支或覆盖条件就不能计为通过。
+
+同一 active 子任务另完整读取独立大材料，在父请求等待交付时以正式阈值触发子 Run 的真实摘要。原子任务指示码与材料码独立，`child.start` 两项 sourceIds、唯一子 Run、摘要覆盖、实际 token 基线及完整材料读取均须核实；摘要和后续实际 Model／Provider 请求各自必须包含完整初始任务一次。driver 通过原子详情保存 `20-child-real-summary-original-task.png` 与 `21-child-postcompression-original-task.png`，最终子回复须使用中文并带初始指示码，冷开核任务和压缩身份不变。该真实窗口覆盖初始下行任务；父到子 steer／followup、坏来源和取消历史另由 Core 回归证明。
+
+压缩交接另由同一私有 driver 的页内 MutationObserver／rAF 记录，保留 `process-frames/compression-transitions.json`：包含压缩行、底部回复行与 Turn 的稳定节点编号、rect、滚动及增删事实，普通截图帧区分几何采样和截图起止时间。父会话的热压缩行从 held 摘要响应到 SQL completed 显示期间，必须始终恰有一行、同一 DOM 节点且行高稳定；不能用最终截图或业务请求通过掩盖中间行消失、重建及页面跳动。子详情沿现有持久消息显示压缩记录，不假设存在热进度行；其真实压缩、任务保留及 completed 状态仍独立核验。观测仅注入隔离窗口，不提供产品测试入口；实际视觉结果仍须结合新正文、主动滚动和折叠时点逐帧核对。
+
+同一 runner 可显式追加 `--parent-compaction-only`，用较小子材料独立验证父压缩展示；报告写明 `validationProfile` 与 `childCompactionIncluded:false`，不会声称验证了子压缩。真实子消息、任务全文及来源仍核实；父大材料、两条引导、四项交接检查、最终中文 Blue 和冷开保持。默认不传该参数时仍运行完整父子压缩。两种范围及失败样本分别记录，不将另一范围的旧通过写成本次通过。
+
+正常最终结果流程使用独立 `--final-results-only` 范围，不能与 `--parent-compaction-only` 同用。子任务只读取一次材料并直接结束，不要求发送普通邮件，也不注入用户引导或压缩。普通 Agent 消息工具仍沿实际 `code` 预设提供，原任务、实际 Tool 执行、全库 Command 和公开展示分别核零额外邮件；不会通过删去工具来制造零邮件结果。默认混合场景继续保留普通邮件与压缩覆盖。
+
+```bash
+KITE_RUN_LIVE_COLLABORATION=1 bun tests/e2e/live/model/collaboration-unified-native-window.live.ts --output=/absolute/owned-directory/final-results.json --final-results-only
+```
+
+该范围先核父原 Turn 正常结束，再释放子真实最终响应；原结果经当前资格与授权创建唯一续 Run，准确发送者和完整结果气泡必须先于被暂挂的父续跑回复可见。另一场景在父原 Turn 活动时让子结果进入邮箱，由原检查点与一次 `wait_agent_events` 接入本轮，完整结果进入后继实际 Model 请求，等待工具的完成事件和准确子详情可读；父始终只有原 Run、一段处理过程，完成及冷开后也不补气泡。子最终响应的时序门以真实 `read_user_file` 调用及准确配对的完整读取回执识别，不依赖请求序号或普通邮件。公开结果正文、原 carrier／revision／Source、完整低信任 Provider 输入和父最终事实分别比对；两会话冷开须保持请求及持久记录数量。阶段截图、连续帧、原输入输出与时序事实沿现有证据目录保存，本机执行资格仍由 Desktop owner 维护。
+
+`--steering-boundaries` 是同一普通窗口的独立交错范围，与另两个参数互斥。idle 仍核仅最终结果的唯一续跑；active 在原子最终结果已排队时，从 Composer 发送第一波 Blue 引导；其后实际 Provider 的首个内容 delta 已交付并显示，再发送第二波 Green 更正和明确的一次大材料读取；实际自动摘要进行时发送第三波 Purple 更正。SSE 时序门只按完整原事件划分交付，原始与实际转发字节的 SHA256 必须相同，不重写任何 delta。摘要期间的 accepted 引导阻止旧冻结摘要发布；后续若再次摘要，核新覆盖与三条原文，若沿旧窗口继续，核完整原材料及三条原文，不能为测试预设而放宽发布门禁。最终核中文、仅最新 Purple、三条引导核验码、子结果与原任务码、材料内独立事实、一次实际读取、同 Run／单过程，以及终态折叠、展开全文原序与冷开零重放。报告据实际分支记录旧摘要拒绝与新摘要是否发布；普通邮件仍为零。
+
+```bash
+KITE_RUN_LIVE_COLLABORATION=1 bun tests/e2e/live/model/collaboration-unified-native-window.live.ts --output=/absolute/owned-directory/steering-boundaries.json --steering-boundaries
+```
+
 ## 输入、审批、标题与竞争
 
 [协作 live 驱动](collaboration.live.ts)从正式 Service/Client HTTP 进入当前 Runtime/SQLite，逐次只运行一个准确用例：

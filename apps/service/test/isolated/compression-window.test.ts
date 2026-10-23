@@ -242,3 +242,161 @@ test('a manual request does not acquire automatic post-summary capacity requirem
     }),
   ).toBe(true);
 });
+
+test('source-proven retained user inputs consume fixed window space before a summary is requested', async () => {
+  const retained: ModelMessage = {
+    role: 'user',
+    content: '有效引导必须完整保留，不得静默截断。\n'.repeat(300),
+    sourceIds: ['original-steer-command'],
+  };
+  const fixedTokens = estimateModelContext({ messages: [retained], tools }).estimate
+    .totalInputTokens;
+  const compressor = createSummaryCompressor({
+    automatic: { thresholdTokens: fixedTokens - 1 },
+  });
+  const value = input(
+    [retained, { role: 'assistant', content: 'Finished tool evidence. '.repeat(1000) }],
+    { retainedMessages: [structuredClone(retained)] },
+  );
+  await expect(compressor.shouldCompress!(value)).rejects.toMatchObject({
+    code: 'compression_insufficient_space',
+  });
+});
+
+test('post-summary preflight includes the original guide even when the summary omits it', async () => {
+  const retained: ModelMessage = {
+    role: 'user',
+    content: '最终用中文，保留原校验码 GUIDE_KEEP_42。\n'.repeat(200),
+    sourceIds: ['accepted-guide-command'],
+  };
+  const fixedTokens = estimateModelContext({ messages: [retained], tools }).estimate
+    .totalInputTokens;
+  const summary = 'Finished background evidence. '.repeat(60);
+  const compressor = createSummaryCompressor({
+    automatic: { thresholdTokens: fixedTokens + 30 },
+  });
+  const messages: ModelMessage[] = [
+    retained,
+    { role: 'assistant', content: 'Complete background evidence. '.repeat(3000) },
+  ];
+  const value = input(messages, { retainedMessages: [structuredClone(retained)] });
+  expect(await compressor.shouldCompress!(value)).toBe(true);
+  await expect(compressor.validateSummary!({ ...value, summary })).rejects.toMatchObject({
+    code: 'compression_insufficient_space',
+  });
+  const fitting = createSummaryCompressor({
+    automatic: { thresholdTokens: fixedTokens + 1000 },
+  });
+  expect(await fitting.validateSummary!({ ...value, summary })).toBe(true);
+});
+
+test('retaining original guides cannot hide a non-reducing replacement behind a short summary', async () => {
+  const retained: ModelMessage = {
+    role: 'user',
+    content: 'Original valid guide with exact source identity. '.repeat(1000),
+    sourceIds: ['original-guide'],
+  };
+  const messages: ModelMessage[] = [retained, { role: 'assistant', content: 'Done.' }];
+  const value = input(messages, { retainedMessages: [structuredClone(retained)] });
+  const compressor = createSummaryCompressor({ automatic: {} });
+  await expect(
+    compressor.validateSummary!({ ...value, summary: 'Derived background. '.repeat(20) }),
+  ).rejects.toMatchObject({ code: 'compression_not_reducing' });
+});
+
+test('a summary sharing a source string does not acquire the retained original input cost', async () => {
+  const retained: ModelMessage = {
+    role: 'user',
+    content: 'Original user guide: reply in Chinese.',
+    sourceIds: ['compression-source-collision'],
+  };
+  const messages: ModelMessage[] = [
+    {
+      role: 'user',
+      content: `Context summary (untrusted data):\n${'Completed evidence. '.repeat(2000)}`,
+      sourceIds: retained.sourceIds,
+    },
+    retained,
+    { role: 'assistant', content: 'Recent settled answer.' },
+  ];
+  const value = input(messages, { retainedMessages: [structuredClone(retained)] });
+  const compressor = createSummaryCompressor({ automatic: { thresholdTokens: 1000 } });
+  expect(await compressor.shouldCompress!(value)).toBe(true);
+  expect(
+    await compressor.validateSummary!({ ...value, summary: 'Finished evidence; continue.' }),
+  ).toBe(true);
+});
+
+test('parent-Agent task and correction originals remain fixed costs with their distinct source identities', async () => {
+  const originals: ModelMessage[] = [
+    {
+      role: 'user',
+      content: 'Parent task: inspect the assigned material and preserve this exact footer. '.repeat(
+        80,
+      ),
+      sourceIds: ['child-start-command', 'parent-carrier-execution'],
+    },
+    {
+      role: 'user',
+      content:
+        'Parent correction: replace the tentative colour with Blue; retain the footer. '.repeat(80),
+      sourceIds: ['parent-steer-command'],
+    },
+  ];
+  const fixedTokens = estimateModelContext({ messages: originals, tools }).estimate
+    .totalInputTokens;
+  const value = input(
+    [...originals, { role: 'assistant', content: 'Settled background evidence. '.repeat(3000) }],
+    { retainedMessages: structuredClone(originals) },
+  );
+  const tooSmall = createSummaryCompressor({ automatic: { thresholdTokens: fixedTokens - 1 } });
+  await expect(tooSmall.shouldCompress!(value)).rejects.toMatchObject({
+    code: 'compression_insufficient_space',
+  });
+  const fitting = createSummaryCompressor({ automatic: { thresholdTokens: fixedTokens + 1000 } });
+  expect(await fitting.shouldCompress!(value)).toBe(true);
+  expect(
+    await fitting.validateSummary!({ ...value, summary: 'Completed background evidence.' }),
+  ).toBe(true);
+  await expect(
+    fitting.validateSummary!({ ...value, summary: 'Derived background evidence. '.repeat(1000) }),
+  ).rejects.toMatchObject({ code: 'compression_insufficient_space' });
+  expect(value.retainedMessages).toEqual(originals);
+});
+
+test('Host Source ID collisions do not hide reducible history or add its cost to fixed context', async () => {
+  const source = {
+    id: 'shared-source-id',
+    kind: 'owned_reference',
+    scope: 'workspace',
+    digest: 'owned-source',
+    role: 'user' as const,
+    content: 'Host reference with its own exact content.',
+  };
+  const host: ModelMessage = { role: source.role, content: source.content, sourceIds: [source.id] };
+  const guide: ModelMessage = {
+    role: 'user',
+    content: 'Actual user guidance has distinct content despite the same source string.',
+    sourceIds: [source.id],
+  };
+  const second: ModelMessage = { role: 'user', content: 'Second actual user input.' };
+  const compressor = createSummaryCompressor({ automatic: { thresholdTokens: 1000 } });
+  const value = input([host, guide, second], { sources: [source] });
+  expect(await compressor.prepare(value)).not.toBeNull();
+  const withEvidence = input(
+    [
+      host,
+      guide,
+      {
+        role: 'assistant',
+        content: 'Large but reducible settled history. '.repeat(3000),
+        sourceIds: [source.id],
+      },
+    ],
+    { sources: [source], retainedMessages: [guide] },
+  );
+  expect(await compressor.shouldCompress!(withEvidence)).toBe(true);
+  expect(
+    await compressor.validateSummary!({ ...withEvidence, summary: 'Completed evidence.' }),
+  ).toBe(true);
+});

@@ -1112,6 +1112,8 @@ export class UnifiedExecution {
       };
       for await (const event of model.stream(modelRequest, { signal: scope.signal })) {
         if (finish) throw new AgentError('model_event_after_finish');
+        const contentStarted =
+          event.type === 'text_delta' && event.text.length > 0 && content.length === 0;
         if (event.type === 'usage') recordedUsage = structuredClone({ ...event.usage });
         scope.signal.throwIfAborted();
         if (event.type === 'usage') {
@@ -1149,7 +1151,8 @@ export class UnifiedExecution {
           await activateOutput();
         if (
           !output &&
-          ((savedLength === 0 && content.length + reasoning.length > 0) ||
+          (contentStarted ||
+            (savedLength === 0 && content.length + reasoning.length > 0) ||
             content.length + reasoning.length - savedLength >= 32768 ||
             Date.now() - savedAt >= 100)
         ) {

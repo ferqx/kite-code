@@ -10,6 +10,12 @@ Status: implemented
 
 继续使用原 SessionPage／Conversation／ToolActivity。有限正文与工具分组 slot 保原外层布局、展开控制、会话阅读状态和复制按钮；公共 Run 只生成原展示标记，不恢复旧 Runtime 或增加第二条提交链。准确 Message 所属 Run、真实终态和起止时间决定过程／最终回复；Message complete 单独不够。
 
+2026-10-23 用户明确子 Agent 工具消息应保留原历史操作，不因子任务完成或中断从“创建”变成“完成／停止”。原工具受理与子任务生命周期本来就是不同事实：消息装饰仅保准确身份、名称和详情目标，标题来自原工具 Message，不再传递或派生子任务 status／fresh。真实工具失败、取消及未知结果仍由该工具原回执显示，准确 carrier／child-start 校验与整行详情入口保持。当前生命周期继续用于已有环境卡、停止准入和子详情，不以消息行作为第二份状态面板，也不新增缓存或持久状态。
+
+用户引导沿现有 `inputKind:input.steer` 与准确 Run 进入原处理过程，保原 user 角色、正文及顺序；同轮补充不会再次切开过程。首条输入与最终回复仍在外。Native 的本地 steer intent 已绑定 targetRunId，发送占位沿同一展示归属等待原持久消息接管；显示归组不表示接收检查点已应用，也不表示实际 Model 已读取，来源与执行证明仍按原输入合同核实。
+
+2026-10-23 用户实测压缩行抖动，连续几何证据捕获同轮区域约 63px 短暂收缩。压缩采用同一次 Execution 的展示 key，并从当前 View 的真实压缩 Message 补齐独立历史读取的交接；原 Message ID 和正文／动作资格保持。Core 同时在 View 首个 await 前捕获热快照，避免旧 SQL 消息与已清除 hot 的组合。逐帧检查另证实普通 refresh 清空 snapshot 后，Main／Native 按 loading 撤热行会造成约20ms缺行，随后 running／unknown 文案反复切换；同选择正常校准因此复用原 lastView 的只读热观察，真正观察／权限失败继续撤销，所有动作仍等待新资格。完整历史终态优先，下一 attempt 独立，准确实现和验证归 [Native owner](../../../../apps/desktop/README.md#原轮次阅读聚合与问答回执)。
+
 当前 View 的已核 Run 可直接展示；旧完整历史只以当前已观察、未封存的 Message ID 分批32项，经当前 Client GET 核 Run／Session、Store 连接和阅读scope。当前 Store 已保存的旧 Store 终态保原 originStoreId，仅用于历史展示；foreign active 不提供活动或控制。Fork／Include 的 originMessage 有固定历史边界，不读取来源 Run 后来的状态。这两个来源必须分别处理，不能用同一 foreign guard 丢掉已恢复终态或取得后来的热事实。
 
 同一 bridge／generation／Store／Session／Workspace／viewSelection 下，新 history epoch 仍清空读取缓存并重新核原 Run；仅已核的 inactive completed／failed／cancelled 保留展示，直到新 metadata 或 View 替换、明确缺失删除。保留层不种入新读取缓存，不减少 GET；当前已核 View 同步更新本 scope 的 read entry 与 revision，避免离开有限页后被旧 metadata 覆盖。active／interrupted 不跨 epoch 延续，换展示身份不保留。这样等待完整 metadata 或32项分批期间，原 Conversation 的准确轮次与用户展开节点不被暂时拆掉；大正文完整身份、复制撤销及动作 authority 仍归原入口。
@@ -26,10 +32,14 @@ Native 完整最终回复复制只持有原 reader 当前已验证并显示的�
 
 - 继续使用整条 renderMessage 覆盖：会绕开原消息外层、分组和复制交互；改用正文与完整工具分组 slot。
 - 从消息 complete、最后一条助手消息或工具成功推 Run 完成：这些事实没有等价关系；以准确公共 Run 终态核最终回复。
+- 让父聊天中的创建／继续工具行跟踪子任务生命周期：会改写历史工具调用的含义；原操作保持静态，当前子任务状态沿已有环境信息和详情读取。
 - 对所有 foreign Run 一律丢弃：当前 Store 已保存的终态历史也被隐藏；接纳原终态但保出处，排除 foreign active。
 - 对 Fork／Include 查询来源 Run 最新状态：越过封存边界；原封存消息保历史，不补后来终态。
 - 复制大正文预览或另加持久正文缓存：前者会截断，后者增加第二份持久资格；复用原完整reader和当前显示生命周期。
 - 从工具请求路径给整组提供一个文件回调：请求不证明效果，分组内文件身份不同；沿每项原receipt和Main目标校验。
+- 把所有同 Run 的 user 消息收入过程：会一并隐藏首条任务输入；只沿明确 steer 类别归组，不按文本或位置推断。
+- 等持久引导出现才改变归组：会让已知目标的发送占位先独立出现再跳入过程；本地准确 intent 与保存后的消息共用展示归属，failed／unknown 继续保原恢复入口。
+- 延时清除压缩热状态或仅修改动画：前者仍不能保证独立 history GET 已接管，并可能延续旧 attempt；后者不能解决已经观察到的行移除与高度收缩。复用同一 View 的真实轻量状态事实和稳定渲染身份，不引入第二份持久历史。
 
 - 用旧终态种入新 epoch 的读取缓存、跳过重新 GET，或只调换合并顺序：前两者会缩短核验，后者会使新 metadata 失去优先级；展示保留与读取 scope 分开，按新已核事实及明确缺失替换。保留 active／interrupted 也会把可恢复工作误当固定历史，因此只保三种非活动终态。
 

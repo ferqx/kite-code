@@ -14,35 +14,11 @@ export type NativeAgentActivity = {
   childAgent: ChildAgent;
 };
 
-function childStatus(item: BackgroundExecutionItem): ChildAgent['status'] {
-  const execution = item.execution;
-  switch (execution.status) {
-    case 'succeeded':
-      return 'completed';
-    case 'failed':
-      return 'failed';
-    case 'cancelled':
-      return 'cancelled';
-    case 'outcome_unknown':
-      return 'unknown';
-  }
-  if (execution.cancelRequested || execution.cancelRequestedAt !== null) return 'stopping';
-  if (execution.status === 'planned') return 'queued';
-  if (execution.status === 'dispatching' || !item.childRun) return 'starting';
-  if (!item.childRun.isActive) return 'waiting_results';
-  if (item.childRun.status === 'cancelling') return 'stopping';
-  if (item.childRun.isActive && item.childRun.status === 'waiting_interaction') return 'waiting';
-  if (item.childRun.isActive && item.childRun.status === 'waiting_execution')
-    return 'waiting_results';
-  return 'running';
-}
-
 /** Reuse the environment's verified directory; these facts grant no execution authority. */
 export function nativeAgentActivities(
   items: readonly BackgroundExecutionItem[],
   storeId: string | undefined,
   parentSessionId: string | undefined,
-  fresh: boolean,
 ): NativeAgentActivity[] {
   if (!storeId || !parentSessionId) return [];
   return items.flatMap((item) => {
@@ -87,8 +63,6 @@ export function nativeAgentActivities(
         childAgent: {
           identity: JSON.stringify([storeId, childSession.id]),
           name: childSession.title || '子 Agent',
-          status: childStatus(item),
-          fresh,
         },
       },
     ];

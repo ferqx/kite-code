@@ -409,9 +409,6 @@ test.skipIf(process.platform !== 'darwin')(
         readFileSync(
           resolve(import.meta.dir, '../native-collaboration-electron.fixture.ts'),
           'utf8',
-        ).replace(
-          "import { _electron } from 'playwright';",
-          `import {createRequire} from 'node:module';const {_electron}=createRequire(${JSON.stringify(resolve(import.meta.dir, '../../package.json'))})('playwright');`,
         ),
       );
       expect(
@@ -434,6 +431,7 @@ test.skipIf(process.platform !== 'darwin')(
           home,
           provider.url.href.replace(/\/$/, ''),
           storeId!,
+          resolve(import.meta.dir, '../../package.json'),
         ],
         {
           cwd: home,
@@ -472,12 +470,19 @@ test.skipIf(process.platform !== 'darwin')(
         oldRun: string;
         nextRun: string;
         coldZeroReplay: boolean;
+        staticCreationHistory: boolean;
+        staticHistoryStages: { phase: string; cold: boolean; names: string[] }[];
+        historyFrameErrors: unknown[];
         resultMessages: { id: string; executionId: string; content: string }[];
         active: { executionId: string; parentRunId: string; sourceId: string };
       };
       expect(report.a).not.toBe(report.next);
       expect(report.oldRun).not.toBe(report.nextRun);
       expect(report.coldZeroReplay).toBe(true);
+      expect(report.staticCreationHistory).toBe(true);
+      expect(report.staticHistoryStages.filter((stage) => !stage.cold).length).toBeGreaterThan(3);
+      expect(report.staticHistoryStages.some((stage) => stage.cold)).toBe(true);
+      expect(report.historyFrameErrors).toEqual([]);
       expect(report.resultMessages).toHaveLength(2);
       expect(report.resultMessages.map((message) => message.executionId)).toEqual([
         report.a,
@@ -503,6 +508,7 @@ test.skipIf(process.platform !== 'darwin')(
         expect(first!.childSessionId).toBe(report.agentId);
         expect(second!.childSessionId).toBe(report.agentId);
         expect(stopped!.cancelRequestedAt).not.toBeNull();
+        expect(stopped!.status).toBe('cancelled');
         expect(first!.cancelRequestedAt).toBeNull();
         expect(second!.cancelRequestedAt).toBeNull();
         const active = (await cold.getExecution(report.active.executionId))!;
@@ -627,6 +633,7 @@ test.skipIf(process.platform !== 'darwin')(
         '03c-active-result-in-process.png',
         '03ca-active-result-detail.png',
         '03d-active-parent-completed.png',
+        '03e-static-creation-after-cancel.png',
         '04-cold-reopened.png',
         'collaboration-report.json',
         'cold-permission-evidence.json',

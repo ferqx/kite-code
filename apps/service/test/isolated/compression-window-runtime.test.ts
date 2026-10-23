@@ -69,22 +69,18 @@ async function fixture(summary: string, options: Partial<RuntimeOptions> = {}) {
         request: { kind: 'run.start', content },
       });
       const command = await runtime.waitForCommand(commandId, { timeoutMs: 5000 });
-      const receipt = command.receipt as { businessCommandId?: string; runId: string };
-      const businessCommandId = content.startsWith('New task:')
-        ? receipt.businessCommandId
-        : command.id;
+      const receipt = command.receipt as { runId: string };
       expect(command.status).toBe('applied');
-      expect(businessCommandId).toBeString();
       const run = (await store.getRun(receipt.runId))!;
       expect(run).toMatchObject({
-        originCommandId: businessCommandId,
+        originCommandId: command.id,
         rootWorkCommandId: command.id,
       });
       for (const model of (await store.listExecutions('s')).filter(
         (execution) => execution.kind === 'model' && execution.runId === run.id,
       ))
         expect(model).toMatchObject({
-          originCommandId: businessCommandId,
+          originCommandId: command.id,
           rootWorkCommandId: command.id,
         });
       return run;

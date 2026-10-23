@@ -227,11 +227,11 @@ test('Native phase presentation retains real content, complete history and compr
   ];
   const presented = desktopMessages(messages);
   expect(presented.map((message) => message.role)).toEqual(
-    messages.map((message) => (message.compression ? 'system' : 'assistant')),
+    messages.filter((message) => !message.compression).map(() => 'assistant'),
   );
   expect(presented[0]!.text).toBe('Actual reply');
   expect(presented[1]!.text).toBe('');
   expect(presented[2]!.text).toBe('Complete reply');
-  expect(presented[3]!.systemKind).toBe('compaction');
-  expect(presented[6]!.text).toBe(' \n');
+  expect(presented.some((message) => message.systemKind === 'compaction')).toBe(false);
+  expect(presented[5]!.text).toBe(' \n');
 });

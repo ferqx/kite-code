@@ -249,6 +249,8 @@ Host 自动封存 prepare 中 session namespace 的 `records.get/list` 完整原
 
 [统一邮箱回归](../../test/isolated/business/task/unified-inbox.test.ts)核真实 active／idle 接收、用户引导、原消息与结果的来源区别、准确重收和冷读取；[报告事务](../../test/isolated/business/task/collaboration-report-transactions.test.ts)与[冷报告恢复](../../test/isolated/business/task/collaboration-cold-report.test.ts)通过实际邮箱收件故障验证整体回滚与提交后丢响应。普通邮件的 sender／Artifact 和 adopted 水位仍由[邮箱](../../test/isolated/business/task/mailbox.test.ts)、[后继采用](../../test/isolated/business/task/mail-adoption.test.ts)覆盖。
 
+上述最终结果用例明确不发送普通邮件，核全库零 `agent.message`、仅一条 `kind:result`、原 carrier 完整正文／revision／Store 来源和每次后继实际 Model 请求中恰一份结果 Source。active 保持原 Run，接纳、收尾及冷读均无 `agentResult`；idle 当前授权通过时仅创建一个以原报告为 origin 的续 Run，公开完整结果与准确来源保持一致；拒绝续跑授权时零新 Run、Source、Model 或结果气泡。重复接收和三次冷投影不得改变上述身份或数量。2026-10-23，统一邮箱、报告事务、冷报告三整文件共19项／467断言通过；这组确定性回归与 [Desktop owner](../../../../apps/desktop/README.md#native-当前会话环境信息与子详情) 的正常最终结果真实模型窗口证据分别维护。
+
 [邮箱展示回归](../../test/isolated/business/task/mailbox.test.ts)还核父子双向长多行 Unicode 正文及真实发送者、公开列表与 View 一致、原 Store 物理记录和模型输入不变、冷只读零请求／写入，以及同内部文案的用户输入不冒认、错 Run／损坏来源／缺 Command／损坏 kind／坏 Artifact 均不降级为用户消息。
 
 2026-10-23，macOS arm64／Bun 1.4.2，`87944be7f` 加本次工作树：`bun test ./packages/agent/test/isolated/business/task/` 的 26 个整文件 132 项／2472 断言通过；输入、工作控制、Store／Runtime report 恢复、真实 report SIGKILL、输入检查点、派发准入和 child result 八个相关整文件 95 项／1000 断言通过。新邮箱六项实际回归另核结果到达不撤销正常 Tool、损坏协议拒绝及错误轮次重收不改投。八 workspace 类型检查、API 生成一致性、包／依赖边界、测试归属、定向 Biome 与文档检查通过。实际 Native 顺序与冷重开证据归 [Desktop owner](../../../../apps/desktop/README.md#native-当前会话环境信息与子详情)；受控模型与本机测试不代替付费 Provider 或跨平台发布资格。

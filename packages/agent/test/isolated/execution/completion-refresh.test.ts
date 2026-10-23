@@ -466,16 +466,27 @@ async function fixture(
     async assertAppliedSteer(commandId: string, runId: string) {
       const command = (await store.getCommand(commandId))!;
       expect(command).toMatchObject({ status: 'applied', receipt: { runId } });
-      const receipt = command.receipt as { businessCommandId: string };
-      expect(receipt.businessCommandId).toBeString();
-      expect(receipt.businessCommandId).not.toBe(commandId);
+      const receipt = command.receipt as { messageId: string };
+      expect(receipt.messageId).toBeString();
       const request = command.request as { content: string };
-      expect(await store.getCommand(receipt.businessCommandId)).toMatchObject({
+      expect(command).toMatchObject({
+        id: commandId,
         kind: 'input.steer',
         rootWorkCommandId: 'work',
         status: 'applied',
         request: { targetRunId: runId, content: request.content },
         receipt: { runId },
+      });
+      expect(
+        (await store.listMessages(command.sessionId)).find(
+          (message) => message.id === receipt.messageId,
+        ),
+      ).toMatchObject({
+        runId,
+        content: request.content,
+        originCommandId: commandId,
+        inputKind: 'input.steer',
+        sourceIds: [commandId],
       });
     },
     async bumpRecord() {
@@ -535,6 +546,44 @@ test('steer retires a completion Tool awaiting approval and the same Run complet
       reason: next.run.reason,
       freshApproval: !!next.card,
     }).toMatchObject({ active: true, reason: null, freshApproval: true });
+    const fresh = next.card!;
+    expect(fresh.id).not.toBe(old.id);
+    expect(fresh.executionId).not.toBe(old.executionId);
+    const modelCount = f.model.requests.length;
+    const late = await f.runtime.answerInteraction({
+      ...f.base,
+      commandId: 'late-old-allow',
+      presentationSessionId: 's',
+      interactionId: old.id,
+      expectedRevision: old.revision,
+      answer: { kind: 'approval', decision: 'approve', grant: 'approve_once' },
+    });
+    expect(late.receipt).toMatchObject({
+      outcome: 'answer_saved',
+      interactionId: old.id,
+      cancelled: true,
+    });
+    const readCard = (interactionId: string) =>
+      f.store.getInteraction({
+        expectedStoreId: f.base.expectedStoreId,
+        sessionId: 's',
+        interactionId,
+      });
+    expect(await readCard(old.id)).toMatchObject({
+      state: 'cancelled',
+      acceptedDecisionRevision: null,
+      answer: { kind: 'approval', decision: 'approve', grant: 'approve_once' },
+    });
+    expect(await readCard(fresh.id)).toEqual(fresh);
+    expect(fresh).toMatchObject({ state: 'pending', answer: null, acceptedDecisionRevision: null });
+    expect(await f.store.getExecution(fresh.executionId)).toMatchObject({
+      status: 'planned',
+      authorization: { dispatched: false },
+    });
+    expect(f.effects).toEqual([]);
+    expect(f.model.requests).toHaveLength(modelCount);
+    expect((await f.store.getView('s')).runs).toHaveLength(1);
+    expect(await f.run()).toMatchObject({ id: originalRun, isActive: true });
     await f.approve(next.card!);
     expect(await f.done()).toMatchObject({ id: originalRun, status: 'completed' });
     await f.assertAppliedSteer('steer', originalRun);
@@ -545,6 +594,14 @@ test('steer retires a completion Tool awaiting approval and the same Run complet
       ),
     ).toBe(true);
     expect(f.effects).toHaveLength(1);
+    expect(await f.store.getExecution(fresh.executionId)).toMatchObject({
+      status: 'succeeded',
+      authorization: {
+        dispatched: true,
+        human: { interactionId: fresh.id, accepted: true, decision: 'approve' },
+      },
+      interactionBinding: { interactionId: fresh.id },
+    });
     expect(await f.store.getExecution(old.executionId)).toMatchObject({
       status: 'cancelled',
       authorization: { dispatched: false },

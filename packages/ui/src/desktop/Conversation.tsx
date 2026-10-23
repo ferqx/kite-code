@@ -44,6 +44,18 @@ export interface ToolActivityState {
   onToggleItem: (id: string, open: boolean) => void;
 }
 
+/** Only confirmed guidance shares its original Turn's process, including local sending. */
+function processTurnId(message: Message): string | undefined {
+  if (
+    message.role === 'user' &&
+    (message.inputKind !== 'input.steer' ||
+      message.delivery === 'failed' ||
+      message.delivery === 'unknown')
+  )
+    return undefined;
+  return message.turnId;
+}
+
 function isTurnFailure(message: Message): boolean {
   return (
     message.role === 'system' &&
@@ -308,6 +320,8 @@ const MessageItem = memo(function MessageItem({
       data-final-reply={message.role === 'assistant' ? Boolean(message.finalReply) : undefined}
       data-agent-result-source={agentResult?.sourceId}
       data-agent-message-id={agentMessage?.messageId}
+      data-input-kind={message.inputKind}
+      data-message-id={message.id}
       aria-label={
         agentMessage
           ? `${agentMessage.name} Agent 发送的消息`
@@ -638,9 +652,7 @@ export function Conversation({
       return !message.settled || !!message.text;
     }),
   );
-  const visibleTurns = new Set(
-    [...visible].filter((message) => message.role !== 'user').map((message) => message.turnId),
-  );
+  const visibleTurns = new Set([...visible].map(processTurnId).filter(Boolean));
   const anchors = new Map<string, Message>();
   for (const message of messages) {
     if (structural(message) && message.turnId && !anchors.has(message.turnId))
@@ -668,6 +680,7 @@ export function Conversation({
       // identity keeps a no-output Turn before subsequent conversation rounds.
       if (
         message.role === 'user' &&
+        !processTurnId(message) &&
         anchor &&
         !visibleTurns.has(message.turnId) &&
         !anchoredTurns.has(message.turnId)
@@ -762,7 +775,7 @@ export function Conversation({
       entries.push({ key: message.id, groups: [group] });
       continue;
     }
-    const turnId = message.role === 'user' ? undefined : message.turnId;
+    const turnId = processTurnId(message);
     if (!turnId && message.role !== 'user') {
       unscoped.push(group);
       continue;
@@ -807,7 +820,7 @@ export function Conversation({
     if (structural(message)) return null;
     if (renderMessage)
       return (
-        <div key={message.id} className="message-group">
+        <div key={message.presentationKey ?? message.id} className="message-group">
           <article className={`message ${message.role}`} aria-label={`${message.role} 消息`}>
             {renderMessage(message)}
           </article>
@@ -875,7 +888,7 @@ export function Conversation({
         }
       />
     ) : (
-      <div key={message.id} className="message-group">
+      <div key={message.presentationKey ?? message.id} className="message-group">
         <MessageItem
           message={childWithUniqueSteps(message)}
           childDetail={childDetail(message)}

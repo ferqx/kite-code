@@ -20,6 +20,7 @@ export {
 } from './context-estimate';
 export type { WorkspaceSerialLocks } from './execution/resource-port';
 export type { ModelBodyReference } from './model-body';
+export { modelHistory } from './model-context';
 export type { ModelInputMetadata, ModelRequestMetadata } from './model-snapshot';
 export {
   type AfterTurnPolicy,

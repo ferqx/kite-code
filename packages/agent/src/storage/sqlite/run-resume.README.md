@@ -34,7 +34,8 @@
 
 | 持久事实 | 恢复动作 |
 | --- | --- |
-| Model 尚未派发 | 复用完整封存请求与原 Execution |
+| planned Model 尚未派发 | 复用完整封存请求与原 Execution |
+| Model 从未派发，因已应用 steer 被准确取消替代 | 核原 Command／Message／应用回执与 superseded IDs，使用当前历史创建新请求，原取消尝试不重放 |
 | Model running/dispatching，或最后一次 failed/incomplete，且没有派生 Tool/Job | 保留 partial 和旧身份；原子结束未闭合尝试，下一请求创建新 Execution 与 retry lineage |
 | 完整 Model 与已结算 Tool | 使用完整输出和准确原结果，不重发模型段或已确认效果 |
 | 自动压缩 Model 中断、完整摘要尚未发布 | pending 不进入上下文；保留上个已发布点，按普通压缩边界创建新摘要尝试 |
@@ -45,6 +46,8 @@
 | 普通 Tool 或外部 Job 的效果不明 | 拒绝自动重放，保留核实边界 |
 
 `task.execute` 的 continuation 复用 immutable OperationRef 与幂等创建，再观察准确原 carrier。Core 不按业务工具名称放行；版本须同时匹配原封存来源、Run manifest 和当前可信实现。未声明的旧调用没有这项资格。子审批继续原 Interaction/Execution/attempt，并重新经过当前权限。Auto reviewer 的特殊活动闭包没有据此取得一般 worker 恢复资格。
+
+已应用 steer 可在旧 planned Model 取消后、新请求尚未保存前遇到进程退出。恢复仅接受准确 `superseded_by_user_input`、从未派发且无派生效果的 Model，并核原 Run／selection、steer digest、完整 Message 和应用回执确实包含该 Execution。父到子 steer 另复核真实 sender／carrier 与父子来源；两项 Agent marker 同时损坏也不能降级成人类输入。已派发、unknown、其他取消原因、旧停止或来源不符继续拒绝。恢复从当前历史读取已应用原文，创建新 Model；不复用已经失效的旧请求。
 
 Host 在父 Loop 重入前把全部原操作登记到同一 operation 目录，共同启动 barrier 之后才进入观察，防止 ensure 再启动 queued carrier。恢复和普通执行共用 Run binding lease、Job 观察、ChildSlots、取消域与 disposer。父 Run 先结束时，后代监督仍持有配置；恢复后的根任务交回同一个持 owner 的普通任务泵，独立后代继续运行期间，同会话新人类任务可以执行。后代及其配置清理由 Host 原目录持有，包含恢复后新建的独立后代；全部落定才允许释放 root owner，终态子只读结果也释放其配置。普通及恢复路径统一在 owner 释放前核 Host 监督寿命和清理失败；晚到 disposer 失败保留原 root 锁并停止调度，不以 terminal ledger 代替清理确认。子 Run 离线时间不暂停 30 分钟期限，已经超期先取消结算，零新模型调用。
 
@@ -64,6 +67,8 @@ SQL 的[事务证明](recovery-audit.ts)由普通 Store 写事务维护。持久
 
 健康证明的恢复审计成本由当前前沿和未认证增量决定，索引查找仍有 B-tree 对数成本；实际 live 树、当前完整来源和旧版 continuation 重建保各自必要成本。没有清理原历史、重标身份、扩大重试或新增任务额度。首次升级及失效证明的安全回退仍可能线性，不能据此宣称任意损坏下的固定恢复时延。
 
+steer 替代的 cancelled Model 还依赖后来保存的原 Command receipt／Message。恢复即使复用健康 Execution audit，也按原 Run 索引重验这些取消项的完整证明，避免只认证 Execution 本身而漏掉依赖损坏；这部分成本随实际被替代的 Model 数量增长，不另设累计次数门槛，也不把它们恢复为活动执行。
+
 ## 证据与限制
 
 [单 Run](../../../test/isolated/recovery/run-resume-runtime.test.ts)、[任务组](../../../test/isolated/recovery/run-resume-group-runtime.test.ts)及[连续强杀](../../../test/isolated/recovery/run-resume-repeated-runtime.test.ts)使用所属子进程真实 SIGKILL、实际 SQLite 和独立效果 ledger。任务组覆盖后台必需等待、前台 continuation、多子、排队、嵌套、激活前、已完成子、原审批、超期与配置冲突；未知效果和组漂移另明确使用 SQL 故障注入。原 Run/Execution、结果与 deadline 断言分别判断，不把 accepted 当完成。
@@ -71,6 +76,8 @@ SQL 的[事务证明](recovery-audit.ts)由普通 Store 写事务维护。持久
 [增量审计](../../../test/isolated/recovery/run-resume-audit.test.ts)在真实冷重开后比较 100 和 10000 条已认证 SQL 历史，另配同等数量的已结束子任务，两种规模在 planned 前沿均读取18行 SQL结果、running 前沿均22行，并核末次 Model/效果依赖/live 状态索引；这是受控 SQL 容量夹具，耗时只作本机测量，不冒充真实 Provider 工作或固定性能 SLA。它另用所属子进程实际 SIGKILL 卡在证明已写、COMMIT 前/后，核业务与证明共同回滚/提交；真实 SQL 证明失败回滚原 Run 激活与回执。历史坏正文、坏来源、删除/跨 Run、unknown、旧 failed Model 新效果、无通知变化和 CAS 均有反例。
 
 [升级回归](../../../test/isolated/recovery/run-resume-audit-migration.test.ts)核原 0001 schema 的 readonly 原字节、一次写入认证、后续冷读、迁移 checksum 与未知版本拒绝。[完整历史](../../../test/isolated/recovery/run-resume-history.test.ts)保全部原身份分页和未在 frontier 中的漂移；[Store](../../../test/isolated/recovery/run-resume-store.test.ts)保事务回滚、原审批及接管。Windows [实际维护与包内 leaf](../../../test/isolated/maintenance/windows.test.ts)核真实 Worker、三项包内迁移、备份/新 Store 恢复和 GC。当前证据不代表实际持续数周、任意外部效果恢复、物理存储损坏认证或全部平台资格。
+
+[steer 后强杀回归](../../../test/isolated/recovery/run-resume-steering.test.ts)在真实 applyInput 提交、新 Model 尚未 plan 的窗口 SIGKILL，核人类与父到子 group 接续、原文恰好一次和旧请求零重放。坏 receipt／正文／sender、双 Agent marker 缺失、已派发、unknown、错误输入和父取消均拒绝；另在后继 Model 已创建后损坏更早取消项的 receipt，证明健康 audit 缓存不能掩盖依赖变化。
 
 持久取舍见[执行尝试与监督恢复 Note](../../../../../.agents/notes/implemented/architecture/2026-10-16-durable-continuations-and-group-recovery.md)。
 

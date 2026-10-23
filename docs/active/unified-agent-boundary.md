@@ -221,6 +221,8 @@ Context 压缩为单选可信算法 slot，通过同一 Loop 的记录 Model Exe
 
 公共 Message 可带只读 `compression` 显示身份，仅由同 Session/Run 的准确 Model 与 snapshot 推导；已发布、失败、取消和未发布分开。压缩 Model 的完整正文不具最终回复资格，普通模型正文也不能先于实际 Run completed 取得最终回复资格。默认已知窗口使用总窗口 75% 水位，不能缩小或无继续空间的摘要以明确原 Run 失败收束；未知窗口维护点不成为 Provider 容量上限。
 
+压缩覆盖不抹除真实用户及父到子任务输入的模型可见性。Core 在原 selection／高水位中按真实 Command／应用回执及 sealed Fork 出处保留人类原文；父到子初始任务和后续指示另核 sender Tool、carrier Job、真实父子／root 与原配置输入，保留 Agent 来源而不取得人类引导身份。模型顺序为摘要、已覆盖原输入原序、未覆盖尾部；私有 `retainedInputMessageIds` 不进入 HTTP／SelectedContext schema，也不表示授权。普通邮件、子回报与工具资料由摘要承接，旧终态输入仍受原历史授权边界约束。Core 与默认 Service 复用准确 Host 组装边界，不能仅凭裸 Source ID 排除或固定普通历史。缩减和窗口校验包含完整保留成本，不能静默裁剪原指示；来源与定向回归归[压缩 owner](../../packages/agent/src/storage/sqlite/context/compression.README.md)。
+
 Native 原压缩／重置查询沿原 Command receipt 使用公共精确 Run reader；当前 View 只承担实际 scope 准入，有限近期 Run 目录的缺项不抹除原执行。调用者核原 Run／Store／Session／Command，原受理与执行状态分开，GET 失败不替换已核事实或触发新的执行；具体入口与验证归[Native owner](../../apps/desktop/README.md)。公共 API、Store 格式和原维护写入门禁保持。
 
 Native 同 Session 的压缩原输入入口沿当前准入 Store 读取准确原 Model Execution，恢复前后的 Store ID 不必相等；原压缩卡出处和 Core 的原 Execution／Run／Command／root-work 主体证明保持。实际父回调只选择原调用，敏感确认后由既有完整 reader 核 EOF／bytes／SHA 和当前选择；关闭或切换释放所属读取。跨 Session 封存卡不扩大当前 Inspector scope，压缩／重置与旧来源执行门禁不由阅读放宽；当前行为和证据归[Native owner](../../apps/desktop/README.md)。

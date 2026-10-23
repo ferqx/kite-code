@@ -173,12 +173,29 @@ test('Native environment activity preserves a receipt-free detail row and exact 
       });
     expect(ready()).toBe(true);
   };
-  const state = () => host.querySelector('.tool-agent-state')?.textContent;
+  const operation = () => host.querySelector('article')?.textContent ?? '';
+  const staticOperation = () => {
+    expect(operation()).toContain('创建子 Agent');
+    expect(host.querySelector('.tool-agent-operation')?.textContent).toBe('创建子 Agent');
+    expect(host.querySelector('.tool-agent-operation')?.getAttribute('role')).not.toBe('status');
+    expect(operation()).toContain('Grant review');
+    expect(host.querySelector('article')!.classList.contains('is-running')).toBe(false);
+    expect(host.querySelector('article')!.querySelector('[class*="shimmer"]')).toBeNull();
+    for (const label of [
+      '排队中',
+      '开始工作',
+      '已完成工作',
+      '已停止工作',
+      '结果未知',
+      '状态待核对',
+    ])
+      expect(operation()).not.toContain(label);
+  };
   try {
     await render();
     await until(() => observation > 0);
     expect(host.textContent).toContain('创建子 Agent');
-    expect(state()).toBeUndefined();
+    expect(host.querySelector('.child-agent-activity')).toBeNull();
     const article = host.querySelector('article')!;
     let disclosure = host.querySelector('.tool-activity-summary') as HTMLElement;
     expect(disclosure.getAttribute('aria-expanded')).toBe('true');
@@ -187,7 +204,8 @@ test('Native environment activity preserves a receipt-free detail row and exact 
     item.childRun = null;
     items = [item];
     await render();
-    await until(() => state() === '排队中');
+    await until(() => environment.agentActivities.length === 1);
+    staticOperation();
     expect(host.querySelector('article') === article).toBe(true);
     disclosure = host.querySelector('.tool-activity-summary') as HTMLElement;
     expect(disclosure.hasAttribute('aria-expanded')).toBe(false);
@@ -201,7 +219,8 @@ test('Native environment activity preserves a receipt-free detail row and exact 
     item.execution.status = 'running';
     item.childRun = backgroundItem(1, true).childRun;
     await render();
-    await until(() => state() === '开始工作');
+    await until(() => observation >= 3);
+    staticOperation();
     expect(selectionText.toString()).toBe('Grant review');
     expect(host.querySelector('.tool-activity-summary') === disclosure).toBe(true);
     expect(host.querySelectorAll('.child-agent-activity').length).toBe(1);
@@ -222,11 +241,7 @@ test('Native environment activity preserves a receipt-free detail row and exact 
       }),
     ];
     await render();
-    await until(
-      () =>
-        environment.agentActivities.length === 7 &&
-        environment.agentActivities[0]!.childAgent.fresh,
-    );
+    await until(() => environment.agentActivities.length === 7);
     expect(
       new TextEncoder().encode(JSON.stringify(environment.agentActivities)).byteLength,
     ).toBeGreaterThan(350000);
@@ -237,7 +252,7 @@ test('Native environment activity preserves a receipt-free detail row and exact 
     release = undefined;
     await render();
     await until(() => !!release);
-    expect(state()).toBe('开始工作');
+    staticOperation();
     expect(host.querySelector('article') === article).toBe(true);
     expect(host.querySelector('.tool-agent-name')!.textContent).toBe('Grant review');
     expect(disclosure.getAttribute('aria-label')).toBe('查看子 Agent 详情：Grant review');
@@ -249,12 +264,13 @@ test('Native environment activity preserves a receipt-free detail row and exact 
     expect(host.querySelector('article')!.querySelector('.tool-activity-content')).toBeNull();
     expect(readerCalls).toBe(readersBefore);
     await act(async () => release?.());
-    await until(() => environment.agentActivities[0]?.childAgent.fresh === true);
+    await until(() => environment.agentActivities.length === 7);
+    staticOperation();
     item.execution.status = 'succeeded';
     item.childRun!.status = 'completed';
     item.childRun!.isActive = false;
     await render();
-    await until(() => state() === '已完成工作');
+    staticOperation();
     expect(host.querySelector('article') === article).toBe(true);
     expect(disclosure.hasAttribute('aria-expanded')).toBe(false);
     expect(host.querySelector('.tool-activity-summary') === disclosure).toBe(true);
@@ -263,10 +279,43 @@ test('Native environment activity preserves a receipt-free detail row and exact 
     expect(host.querySelector('article')!.textContent).not.toContain(saved.content);
     item.execution.status = 'outcome_unknown';
     await render();
-    await until(() => state() === '结果未知');
+    staticOperation();
     expect(host.querySelector('article') === article).toBe(true);
     expect(host.querySelector('.tool-activity-summary') === disclosure).toBe(true);
     expect(readerCalls).toBe(readersBefore);
+    for (const status of [
+      'running',
+      'waiting_interaction',
+      'waiting_execution',
+      'cancelling',
+      'completed',
+      'failed',
+      'cancelled',
+      'interrupted',
+    ] as const) {
+      item.childRun!.status = status;
+      item.childRun!.isActive = !['completed', 'failed', 'cancelled', 'interrupted'].includes(
+        status,
+      );
+      await render();
+      staticOperation();
+      expect(host.querySelector('article')).toBe(article);
+      expect(host.querySelector('.tool-activity-summary')).toBe(disclosure);
+      expect(readerCalls).toBe(readersBefore);
+    }
+    const later = backgroundItem(9, true);
+    later.sourceTool = { id: 'guidance', definitionId: 'task.follow_up', definitionVersion: '1' };
+    later.execution.parentExecutionId = 'guidance';
+    later.childSession!.title = 'Grant review';
+    items = [...items, later];
+    await render();
+    await until(() => environment.agentActivities.length === 8);
+    staticOperation();
+    expect(host.querySelector('article')).toBe(article);
+    expect(host.querySelector('.tool-activity-summary')).toBe(disclosure);
+    const guidanceRow = host.querySelectorAll('article')[1]!;
+    expect(guidanceRow.querySelector('.tool-agent-operation')?.textContent).toBe('继续子 Agent');
+    expect(guidanceRow.classList.contains('is-running')).toBe(false);
     await act(async () => disclosure.click());
     await until(() => requests.some((request) => request.method === 'background.child.open'));
     expect(detailTarget).toEqual({ sessionId: 'child', executionId: item.execution.id });
@@ -274,6 +323,12 @@ test('Native environment activity preserves a receipt-free detail row and exact 
       executionId: item.execution.id,
       surface: 'environment',
     });
+    await until(() => !!environment.child?.error);
+    staticOperation();
+    expect(host.querySelector('article')).toBe(article);
+    expect(host.querySelector('.tool-activity-summary')).toBe(disclosure);
+    expect(readerCalls).toBe(readersBefore);
+    expect(detailTarget).toEqual({ sessionId: 'child', executionId: item.execution.id });
   } finally {
     release?.();
     await act(async () => root.unmount());

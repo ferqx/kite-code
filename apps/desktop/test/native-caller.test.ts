@@ -81,6 +81,71 @@ async function waitForCallerState(
     await Bun.sleep(1);
   }
 }
+
+test('Native View hands over compression metadata without exporting summary bytes or body readers', async () => {
+  const connection = client();
+  const getView = connection.getView.bind(connection);
+  const summary: Message = {
+    id: 'summary',
+    sessionId: 's',
+    runId: 'r',
+    seq: '2',
+    role: 'assistant',
+    status: 'complete',
+    content: 'PRIVATE COMPRESSION SUMMARY',
+    sourceIds: ['summary-execution'],
+    compression: { id: 'compression', trigger: 'automatic', status: 'completed' },
+    outputBody: {
+      kind: 'model_output',
+      executionId: 'PRIVATE BODY READER',
+      complete: true,
+      contentBytes: '27',
+      reasoningBytes: '0',
+      toolCallCount: 0,
+    },
+  };
+  connection.getView = async (id) => {
+    const view = await getView(id);
+    return {
+      ...view,
+      session: { ...view.session, nextSeq: '4' },
+      messages: [
+        { ...summary, id: 'ordinary', compression: undefined },
+        summary,
+        {
+          ...summary,
+          id: 'fork',
+          originMessage: { storeId: 'old', sessionId: 's', messageId: 'old', runId: 'r' },
+        },
+      ],
+    };
+  };
+  const caller = new NativeCaller(connection, () => {});
+  try {
+    const { generation } = (await caller.invoke({ method: 'attach' })) as { generation: number };
+    await caller.invoke({ method: 'select', generation, sessionId: 's' });
+    await waitForCallerState(caller, (state) => !!state.selection?.compressionMessages?.length);
+    const facts = caller.state().selection!.compressionMessages!;
+    expect(facts).toEqual([
+      {
+        id: summary.id,
+        sessionId: summary.sessionId,
+        runId: summary.runId,
+        seq: summary.seq,
+        role: 'assistant',
+        status: summary.status,
+        content: '',
+        sourceIds: summary.sourceIds,
+        compression: summary.compression,
+      },
+    ]);
+    expect(JSON.stringify(caller.state())).not.toContain('PRIVATE');
+    expect(connection.writes).toBe(0);
+  } finally {
+    await caller.close();
+  }
+});
+
 function authority() {
   const frame = { url: pathToFileURL(join(tmpdir(), 'native', 'index.html')).href };
   const contents = { mainFrame: frame };
@@ -1172,7 +1237,16 @@ test('parent history and loading state do not wait for a held same-selection met
       await gate;
     }
     const view = await originalView(id);
-    return { ...view, session: { ...view.session, nextSeq: '1' } };
+    return {
+      ...view,
+      session: { ...view.session, nextSeq: '1' },
+      compressionProgress: {
+        runId: 'compressing-run',
+        originStoreId: 'store',
+        executionId: 'compression-model',
+        phase: 'summarizing',
+      },
+    };
   };
   connection.listMessages = async (id) => (id === 'parent' ? [structuredClone(message)] : []);
   connection.verifyConnection = async () => connection.serverInfo!;
@@ -1274,6 +1348,12 @@ test('parent history and loading state do not wait for a held same-selection met
           viewLoading: true,
           permissionUnavailable: true,
           permissions: undefined,
+          compressionProgress: {
+            runId: 'compressing-run',
+            originStoreId: 'store',
+            executionId: 'compression-model',
+            phase: 'summarizing',
+          },
         },
       });
   } finally {
@@ -2410,6 +2490,13 @@ test('Native state forwards current compression progress from the public View an
       originStoreId: 'store',
       phase: 'summarizing',
     });
+    connection.getView = async () => {
+      throw Error('compression_view_unavailable');
+    };
+    await expect(caller.invoke({ method: 'permission.refresh', generation: 1 })).rejects.toThrow(
+      'compression_view_unavailable',
+    );
+    expect(caller.state().selection?.compressionProgress).toBeUndefined();
     connection.getView = getView;
     await caller.invoke({ method: 'select', generation: 1, sessionId: 'cold-session' });
     expect(caller.state().selection?.compressionProgress).toBeUndefined();

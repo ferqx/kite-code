@@ -1,7 +1,11 @@
 export interface Message {
   readonly id: string;
+  /** Host-only render identity for a transient row handed over to its persisted Message. */
+  readonly presentationKey?: string;
   /** Host-confirmed Runtime Turn or public Run ownership for presentation actions. */
   readonly turnId?: string;
+  /** Host-confirmed guidance classification; presentation only, never execution authority. */
+  readonly inputKind?: 'input.steer';
   readonly role: 'user' | 'assistant' | 'tool' | 'subagent' | 'system' | 'thinking';
   readonly text: string;
   readonly settled: boolean;

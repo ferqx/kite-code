@@ -1,4 +1,5 @@
 import { expect, test } from 'bun:test';
+import { readFileSync } from 'node:fs';
 import { JSDOM } from 'jsdom';
 import { act } from 'react';
 import { createRoot } from 'react-dom/client';
@@ -17,7 +18,7 @@ const receipt: Message = {
   settled: true,
   status: 'completed',
 };
-test('child activity is one stable detail button without mounting a cached receipt reader', async () => {
+test('child tool history keeps its operation and DOM across legacy lifecycle observations without mounting its receipt reader', async () => {
   const dom = new JSDOM('<div id="root"></div>', { pretendToBeVisual: true });
   const keys = [
     'window',
@@ -41,6 +42,13 @@ test('child activity is one stable detail button without mounting a cached recei
   const host = dom.window.document.getElementById('root')!;
   const root = createRoot(host);
   let opened = 0;
+  const openedTargets: string[] = [];
+  const css = readFileSync(new URL('../../src/desktop/style.css', import.meta.url), 'utf8');
+  const style = dom.window.document.createElement('style');
+  const summaryRule = css.match(/\.kite-client \.tool-activity-summary \{[^}]*\}/)?.[0];
+  expect(summaryRule).toBeDefined();
+  style.textContent = summaryRule!;
+  dom.window.document.head.append(style);
   let toggled = 0;
   let readerCalls = 0;
   function View({
@@ -67,13 +75,18 @@ test('child activity is one stable detail button without mounting a cached recei
                   label: agent?.name ?? 'Grant',
                   onOpen: () => {
                     opened++;
+                    openedTargets.push(agent?.identity ?? 'unavailable');
                   },
                 }
               : undefined
           }
           renderChildren={() => {
             readerCalls++;
-            return <p key="original-receipt">Original receipt</p>;
+            return (
+              <p key="original-receipt">
+                Original receipt <span>{message.text}</span>
+              </p>
+            );
           }}
         />
         <ApprovalHeader
@@ -86,7 +99,21 @@ test('child activity is one stable detail button without mounting a cached recei
       </div>
     );
   }
-  const agent = (status: ChildAgentActivity['status'], fresh = true) => ({
+  // Older bridge payloads may still carry these fields. The Tool row consumes
+  // only identity/name and must ignore lifecycle observations at runtime.
+  const lifecycleStates = [
+    'queued',
+    'starting',
+    'running',
+    'waiting',
+    'waiting_results',
+    'stopping',
+    'completed',
+    'cancelled',
+    'unknown',
+    'failed',
+  ] as const;
+  const agent = (status: (typeof lifecycleStates)[number], fresh = true) => ({
     identity: 'child-1',
     name: 'Grant review'.repeat(30),
     status,
@@ -99,6 +126,8 @@ test('child activity is one stable detail button without mounting a cached recei
     await render(agent('queued'));
     const article = host.querySelector('article')!;
     const button = host.querySelector('.tool-activity-summary') as HTMLButtonElement;
+    const name = host.querySelector('.tool-agent-name')!;
+    const operation = host.querySelector('.tool-agent-operation')!;
     const icons = host.querySelectorAll('[data-child-icon]');
     expect(icons[0]!.getAttribute('data-child-icon')).toBe(
       icons[1]!.getAttribute('data-child-icon'),
@@ -109,6 +138,10 @@ test('child activity is one stable detail button without mounting a cached recei
     const clean = () => {
       expect(host.querySelector('article') === article).toBe(true);
       expect(host.querySelector('.tool-activity-summary') === button).toBe(true);
+      expect(host.querySelector('.tool-agent-name') === name).toBe(true);
+      expect(host.querySelector('.tool-agent-operation') === operation).toBe(true);
+      expect(operation.hasAttribute('role')).toBe(false);
+      expect(article.querySelector('.tool-agent-state')).toBeNull();
       expect(button.getAttribute('aria-label')).toBe(`查看子 Agent 详情：${agent('queued').name}`);
       expect(button.hasAttribute('aria-expanded')).toBe(false);
       expect(article.querySelector('[data-slot="trace-collapsible-trigger"]')).toBeNull();
@@ -119,28 +152,54 @@ test('child activity is one stable detail button without mounting a cached recei
       expect(host.textContent).not.toContain(receipt.text);
       expect(readerCalls).toBe(0);
       expect(toggled).toBe(0);
+      expect(article.classList.contains('is-running')).toBe(false);
+      expect(button.getAttribute('data-status')).not.toBe('running');
+      expect(button.getAttribute('data-status')).not.toBe('error');
+      const computed = dom.window.getComputedStyle(button);
+      expect(computed.minHeight).toBe('32px');
+      expect(computed.height).toBe('auto');
+      expect(computed.whiteSpace).toBe('nowrap');
     };
-    clean();
-    expect(host.querySelector('.tool-agent-state')!.textContent).toBe('排队中');
-    await act(async () => button.click());
-    expect(opened).toBe(1);
     const selection = dom.window.document.getSelection()!;
     const range = dom.window.document.createRange();
-    range.selectNodeContents(host.querySelector('.tool-agent-name')!);
+    range.selectNodeContents(name);
     selection.addRange(range);
-    await render(agent('running'));
-    clean();
-    expect(selection.toString()).toBe(agent('running').name);
-    expect(article.classList.contains('is-running')).toBe(true);
-    expect(host.querySelector('.tool-agent-state')!.textContent).toBe('开始工作');
-    await render(agent('running', false));
-    clean();
-    expect(article.classList.contains('is-running')).toBe(false);
-    expect(button.getAttribute('data-status')).not.toBe('running');
-    expect(host.querySelector('.tool-agent-state')!.textContent).toBe('开始工作');
-    await act(async () => button.click());
+    for (const message of [
+      receipt,
+      {
+        ...receipt,
+        id: 'tool:follow-up',
+        toolName: 'followup_task',
+        title: '跟进子 Agent',
+        text: '{"accepted":true,"operation":"follow_up"}',
+      },
+    ]) {
+      await render(agent('running'), message);
+      const operationText = article.textContent;
+      const operationLabel = article.getAttribute('aria-label');
+      const articleClass = article.className;
+      const buttonClass = button.className;
+      const buttonStatus = button.getAttribute('data-status');
+      expect(host.querySelector('.tool-agent-operation')!.textContent).toBe(message.title!);
+      for (const state of lifecycleStates) {
+        for (const fresh of [true, false]) {
+          const legacyPayload = agent(state, fresh);
+          await render(legacyPayload, message);
+          clean();
+          expect(article.textContent).toBe(operationText);
+          expect(article.getAttribute('aria-label')).toBe(operationLabel);
+          expect(article.className).toBe(articleClass);
+          expect(button.className).toBe(buttonClass);
+          expect(button.getAttribute('data-status')).toBe(buttonStatus);
+          expect(host.querySelector('.tool-agent-operation')!.textContent).toBe(message.title!);
+          expect(selection.toString()).toBe(legacyPayload.name);
+        }
+      }
+      await act(async () => button.click());
+      expect(openedTargets.at(-1)).toBe('child-1');
+    }
     expect(opened).toBe(2);
-    await render(agent('running'), undefined, false);
+    await render(agent('running'), receipt, false);
     clean();
     expect(button.disabled).toBe(true);
     await act(async () => button.click());
@@ -148,19 +207,21 @@ test('child activity is one stable detail button without mounting a cached recei
     await render(agent('completed'));
     clean();
     expect(button.disabled).toBe(false);
-    expect(host.querySelector('.tool-agent-state')!.textContent).toBe('已完成工作');
-    await render(agent('unknown'));
-    clean();
-    expect(host.querySelector('.tool-agent-state')!.textContent).toBe('结果未知');
-    expect(button.getAttribute('data-status')).not.toBe('error');
+    expect(host.querySelector('.tool-agent-operation')!.textContent).toBe('创建子 Agent');
     await render(undefined);
     expect(host.textContent).toContain('创建子 Agent');
-    expect(host.textContent).not.toContain('开始工作');
     expect(host.textContent).toContain('Original receipt');
     expect(readerCalls).toBeGreaterThan(0);
-    await render(agent('running'), { ...receipt, status: 'failed', text: 'Actual tool failure' });
-    expect(host.querySelector('.tool-agent-state')).toBeNull();
-    expect(host.textContent).toContain('Actual tool failure');
+    for (const status of ['failed', 'cancelled'] as const) {
+      const text = `Actual original Tool ${status}`;
+      await render(agent('completed'), { ...receipt, status, text });
+      expect(host.querySelector('.tool-agent-operation')).toBeNull();
+      expect(host.textContent).toContain(text);
+      expect(host.textContent).toContain('创建子 Agent');
+      expect(host.textContent).not.toContain('已完成工作');
+      expect(host.textContent).not.toContain('已停止工作');
+      expect(host.querySelector('article')!.classList.contains('child-agent-activity')).toBe(false);
+    }
   } finally {
     await act(async () => root.unmount());
     dom.window.close();

@@ -3,6 +3,7 @@ import { JSDOM } from 'jsdom';
 import { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import { Conversation, type ReadingState } from '../../src/desktop/Conversation';
+import type { Message } from '../../src/desktop/types';
 
 test('native Conversation scroll follows, restores manual reading and retires RAF/observers/listeners on immediate repeated unmount', async () => {
   const dom = new JSDOM('<div id="root"></div>', { pretendToBeVisual: true });
@@ -13,6 +14,8 @@ test('native Conversation scroll follows, restores manual reading and retires RA
     'ResizeObserver',
     'requestAnimationFrame',
     'cancelAnimationFrame',
+    'getComputedStyle',
+    'HTMLElement',
   ] as const;
   const original = keys.map(
     (key) => [key, Object.getOwnPropertyDescriptor(globalThis, key)] as const,
@@ -73,6 +76,8 @@ test('native Conversation scroll follows, restores manual reading and retires RA
   }) as typeof dom.window.document.removeEventListener;
   for (const [key, value] of Object.entries({
     window: dom.window,
+    getComputedStyle: dom.window.getComputedStyle.bind(dom.window),
+    HTMLElement: dom.window.HTMLElement,
     document: dom.window.document,
     IS_REACT_ACT_ENVIRONMENT: true,
     ResizeObserver: ResizeObserverStub,
@@ -83,12 +88,42 @@ test('native Conversation scroll follows, restores manual reading and retires RA
   const host = dom.window.document.getElementById('root')!,
     root = createRoot(host);
   let saved: ReadingState | undefined;
+  let guidance: 'sending' | 'saved' | undefined;
+  let terminal = false;
+  let initialReading: ReadingState | undefined;
+  const guidedMessages = (text: string): Message[] => [
+    { id: 'reading-anchor', role: 'user', text: '阅读锚点：保持选区与原位', settled: true },
+    {
+      id: guidance === 'sending' ? 'local-guide' : 'persisted-guide',
+      role: 'user',
+      text: '完整引导\n第二段雪🙂',
+      inputKind: 'input.steer',
+      turnId: 'original-run',
+      settled: guidance === 'saved',
+    },
+    {
+      id: 'guided-reply',
+      role: 'assistant',
+      text,
+      turnId: 'original-run',
+      settled: terminal,
+      finalReply: terminal,
+    },
+  ];
   const render = (id: number, text = 'stream text', initialPresentationPending = false) =>
     act(async () =>
       root.render(
         <Conversation
           key={id}
-          messages={[{ id: 'message', role: 'assistant', text, settled: false }]}
+          messages={
+            guidance
+              ? guidedMessages(text)
+              : [{ id: 'message', role: 'assistant', text, settled: false }]
+          }
+          initialReading={initialReading}
+          turnActivity={
+            guidance && !terminal ? { turnId: 'original-run', status: 'running' } : undefined
+          }
           loading={false}
           initialPresentationPending={initialPresentationPending}
           selected
@@ -105,7 +140,7 @@ test('native Conversation scroll follows, restores manual reading and retires RA
     expect(!!host.querySelector('.conversation-loading')).toBe(true);
     expect(!!host.querySelector('.welcome')).toBe(false);
     await render(0);
-    const viewport = host.querySelector<HTMLDivElement>('.conversation-viewport')!;
+    let viewport = host.querySelector<HTMLDivElement>('.conversation-viewport')!;
     expect(viewport.getAttribute('role')).toBe('region');
     expect(viewport.getAttribute('aria-label')).toBe('会话消息');
     expect(viewport.getAttribute('aria-busy')).toBe('true');
@@ -147,6 +182,64 @@ test('native Conversation scroll follows, restores manual reading and retires RA
     expect(viewport.scrollTop).toBe(200);
     await render(0, 'tail 2');
     expect(viewport.scrollTop).toBe(200);
+    guidance = 'sending';
+    await render(0, '原引导尚在发送');
+    const anchor = host.querySelector('article.message.user')!;
+    const selection = dom.window.document.getSelection()!;
+    const range = dom.window.document.createRange();
+    range.selectNodeContents(anchor);
+    selection.removeAllRanges();
+    selection.addRange(range);
+    const anchorText = selection.toString();
+    expect(anchorText).toContain('阅读锚点');
+    const staysAtAnchor = () => {
+      expect(host.querySelector('article.message.user')).toBe(anchor);
+      expect(selection.toString()).toBe(anchorText);
+      expect(viewport.scrollTop).toBe(200);
+      expect(host.querySelectorAll('.agent-turn')).toHaveLength(1);
+    };
+    guidance = 'saved';
+    height = 2100;
+    await render(0, '原文接管，回复开始');
+    resize(column);
+    staysAtAnchor();
+    expect(host.textContent).toContain('完整引导');
+    height = 2300;
+    await render(0, '原文接管，回复增量追加，用户仍在离底阅读', true);
+    resize(column);
+    staysAtAnchor();
+    terminal = true;
+    height = 2000;
+    await render(0, '唯一最终回复');
+    resize(column);
+    staysAtAnchor();
+    const summary = host.querySelector<HTMLButtonElement>('.agent-turn-summary')!;
+    expect(summary.getAttribute('aria-expanded')).toBe('false');
+    await act(async () => summary.click());
+    resize(column);
+    staysAtAnchor();
+    expect(summary.getAttribute('aria-expanded')).toBe('true');
+    expect(host.textContent).toContain('完整引导');
+    await act(async () => root.render(null));
+    expect(saved).toMatchObject({ top: 200, follow: false });
+    expect(Object.values(saved!.expanded)).toContain(true);
+    initialReading = saved;
+    await render(0, '唯一最终回复');
+    const restoredViewport = host.querySelector<HTMLDivElement>('.conversation-viewport')!;
+    Object.defineProperties(restoredViewport, {
+      scrollHeight: { get: () => height },
+      clientHeight: { value: 100 },
+    });
+    expect(restoredViewport.scrollTop).toBe(200);
+    expect(host.querySelector('.agent-turn-summary')!.getAttribute('aria-expanded')).toBe('true');
+    expect(host.textContent).toContain('完整引导');
+    // Restore the original non-Turn harness for its existing cleanup/lifetime checks.
+    guidance = undefined;
+    terminal = false;
+    initialReading = undefined;
+    await render(0, 'tail 2');
+    viewport = restoredViewport;
+
     await act(async () => host.querySelector<HTMLButtonElement>('.jump-latest')!.click());
     expect(viewport.scrollTop).toBe(2000);
     await act(async () => root.render(null));
