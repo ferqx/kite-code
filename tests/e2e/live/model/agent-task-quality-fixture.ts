@@ -9,17 +9,21 @@ export function taskQualityPresentedRead(content: string) {
     /^Read (".*"); from_line=(\d+); lines=(none|\d+-\d+)\/(\d+); next_line=(null|\d+); (complete file|selected window only)\.$/.exec(
       lines[0] ?? '',
     );
-  const size = /^Content \((\d+) UTF-8 bytes; starts on next line\):$/.exec(lines[2] ?? '');
-  if (!match || !size || !lines[1]?.startsWith('baseline=')) return;
+  const referenceLine = lines[1]?.startsWith('evidence_ref=') ? 1 : 0;
+  const size = /^Content \((\d+) UTF-8 bytes; starts on next line\):$/.exec(
+    lines[2 + referenceLine] ?? '',
+  );
+  if (!match || !size || !lines[1 + referenceLine]?.startsWith('baseline=')) return;
   try {
-    const text = lines.slice(3).join('\n');
+    const text = lines.slice(3 + referenceLine).join('\n');
     if (Buffer.byteLength(text) !== Number(size[1])) return;
     const window = match[3] === 'none' ? null : match[3]!.split('-').map(Number);
     const fromLine = Number(match[2]);
     if (fromLine < 1 || (window && window[0] !== fromLine)) return;
     return {
+      evidenceRef: referenceLine ? JSON.parse(lines[1]!.slice('evidence_ref='.length)) : undefined,
       path: JSON.parse(match[1]!),
-      baseline: JSON.parse(lines[1].slice('baseline='.length)),
+      baseline: JSON.parse(lines[1 + referenceLine]!.slice('baseline='.length)),
       selection: {
         fromLine,
         toLine: window?.[1] ?? null,
@@ -45,6 +49,7 @@ export function taskQualityReadMessageMatches(presented: string, original: strin
       raw.selection.nextOffset === null &&
       (raw.selection.toLine === raw.selection.totalLines || raw.selection.totalLines === 0);
     return (
+      (decoded.evidenceRef === undefined || decoded.evidenceRef === raw.executionId) &&
       decoded.content === raw.content &&
       decoded.path === raw.path &&
       decoded.whole === whole &&

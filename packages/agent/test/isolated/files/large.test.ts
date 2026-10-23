@@ -223,7 +223,7 @@ test('real UnifiedExecution writes from a scoped large Artifact, reads complete 
         expected_matches: 1,
       }),
       [finish],
-      call('search_content', { text: 'x' }),
+      call('search_content', { text: 'x', mode: 'content' }),
       [finish],
     );
     await run('edit');

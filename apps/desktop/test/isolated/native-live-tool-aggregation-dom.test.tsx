@@ -393,14 +393,17 @@ test('Native exploration starts as one collapsed activity and retains it across 
   }
 });
 
-test('Native search v3 and reads retain one exploration node through settling and delayed receipt facts', async () => {
+test.each([
+  '3',
+  '4',
+])('Native search v%s and reads retain one exploration node through settling and delayed receipt facts', async (version) => {
   const f = fixture();
   try {
     await f.render();
     await f.start([
       tool(1, {
         definitionId: 'files.search',
-        definitionVersion: '3',
+        definitionVersion: version,
         toolInput: { path: 'src', text: 'needle' },
       }),
       tool(2),
@@ -408,7 +411,7 @@ test('Native search v3 and reads retain one exploration node through settling an
     collapsed(f.host);
     const summary = f.host.querySelector('button.tool-activity-summary');
     expect(summary?.textContent).toContain('正在搜索内容');
-    expect(f.host.textContent).not.toContain('files.search · 3');
+    expect(f.host.textContent).not.toContain(`files.search · ${version}`);
     await f.toggle();
     expect(f.host.querySelector('.tool-activity-steps')?.children).toHaveLength(2);
     expect(f.host.textContent).toContain('搜索内容');

@@ -60,9 +60,13 @@ test('observations validate bounded line identities without treating malformed J
     excerpt: { text: 'original preview 雪🙂', truncated: false },
   };
   expect(toolObservation(JSON.stringify({ observation: withExcerpt }))).toEqual(withExcerpt);
+  expect(
+    toolObservation(JSON.stringify({ observation: { ...lookup(), matchUnit: 'files' } })),
+  ).toEqual({ ...lookup(), matchUnit: 'files' });
   for (const observation of [
     { ...inspection(), complete: 'yes' },
     { ...lookup(), matchCount: -1 },
+    { ...lookup(), matchUnit: 'repositories' },
     { ...inspection(), sources: [{ path: 'a', version: 'v', fromLine: 4, toLine: 2 }] },
     { ...inspection(), sources: [{ path: 'a', version: '' }] },
     { ...inspection(), excerpt: { text: 'not a complete descriptor' } },

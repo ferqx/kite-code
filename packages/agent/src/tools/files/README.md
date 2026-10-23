@@ -1,6 +1,6 @@
 # Workspace 文件 leaf
 
-模型接口由可信 `ToolDefinition.model` 投影：`read_file/write_file/edit_file/list_directory/glob_files/search_content`，绝对用户文件为 `read_user_file/write_user_file/edit_user_file`。读取使用 `start_line/max_lines`，编辑使用 `old_text/new_text/expected_matches` 及对应 Artifact 字段，其余声明属性使用 snake_case；任意正文和 Artifact 身份保持原值。内部 `files.*` ID、定义版本、完整 baseline、权限与检查点合同保持原样。`search_content` 仍是字面量搜索，不新增正则能力。
+模型接口由可信 `ToolDefinition.model` 投影：`read_file/write_file/edit_file/list_directory/glob_files/search_content`，绝对用户文件为 `read_user_file/write_user_file/edit_user_file`。读取使用 `start_line/max_lines`，搜索续页使用 `cursor`（内部 `after`），编辑使用 `old_text/new_text/expected_matches` 及对应 Artifact 字段，其余声明属性使用 snake_case；任意正文和 Artifact 身份保持原值。内部 `files.*` ID、定义版本、完整 baseline、权限与检查点合同保持原样。`search_content` 仍是字面量搜索，不新增正则能力。
 
 公开入口 `@kite-ai/agent/files` 的 import 不打开资源。宿主显式调用 `createWorkspaceFiles({root,maxFileBytes?})` 选定一个物理 Workspace 根，再用 `createFileTools(files)` 将六个普通 ToolDefinition 装配进扩展；工具仍走 UnifiedExecution 的权限、来源复查、计划、派发和终态。没有 CodingAgent、Git 或旧 filesystem authority 依赖。
 
@@ -10,15 +10,15 @@
 
 ## 内容搜索
 
-模型历史中的工作区 `read@4/search@3` 由[纯结果呈现](model-result.ts)去除重复 JSON、observation 和常规说明，原持久回执保持不变。读取按路径、实际起始行／选区／总行数、`next_line`、完整 baseline 后接所选原文；空窗口也保留起始行，不把中途读到 EOF 称为全文。搜索只呈现一份字面查询、范围／过滤／预览限制、本页返回数、准确 `next_cursor`、未检查计数及样例，再按文件呈现完整 baseline、全部返回匹配和上下文；前瞻匹配数不冒充总命中数。分页末页和零命中均不证明全局无引用。大 Artifact 完整核实后使用完整正文，不以有界 excerpt 替代；未知结构和新增不认识的限制保留原呈现。外部路径工具保留自己的原回执。确定性[呈现回归](../../../test/isolated/files/model-result.test.ts)覆盖真实编辑基线、窗口、分页、跳过、Unicode、原正文与 Artifact 保真。
+模型历史中的工作区 `read@4/search@4`（结果呈现版本分别为 1 和 2）由[纯结果呈现](model-result.ts)去除重复 JSON、observation 和常规说明，原持久回执保持不变。读取按路径、实际起始行／选区／总行数、`next_line`、完整 baseline 后接所选原文；`next_line` 非空时原样传给下一次 `start_line`，原 JSON 回退则使用 `selection.nextOffset`。空窗口也保留起始行，不把中途读到 EOF 称为全文。搜索只呈现一份字面查询、范围／过滤／预览限制、本页返回数、准确 `next_cursor`、未检查计数及样例，再按文件呈现完整 baseline；文件定位模式仅列首命中行号，内容模式保留全部返回匹配和上下文；前瞻匹配数不冒充总命中数。分页末页和零命中均不证明全局无引用。大 Artifact 完整核实后使用完整正文，不以有界 excerpt 替代；未知结构和新增不认识的限制保留原呈现。外部路径工具保留自己的原回执。确定性[呈现回归](../../../test/isolated/files/model-result.test.ts)覆盖真实编辑基线、窗口、分页、跳过、Unicode、原正文与 Artifact 保真。
 
-`search_content` 当前定义版本为 3，`path` 可选择一个普通文件或目录；省略、空字符串和 `.` 选择工作区根。匹配仍为字面文本。模型默认每页 100 条、每个匹配／上下文行 2000 个 UTF-16 字符，`limit` 可设为 1–200，`max_line_chars` 为 1–10000；截断不拆代理对，返回 `truncated:true/originalLength`。用 `read_file` 的行窗口取得完整正文。底层 `WorkspaceFiles.search` 的这两个参数均可省略，以保留全部命中及完整长行；不把预览长度变成文件读取额度。
+`search_content` 当前定义版本为 4，`path` 可选择一个普通文件或目录；省略、空字符串和 `.` 选择工作区根。匹配仍为字面文本，不按文件名查找（文件名／路径查找使用 `glob_files`）。模型默认 `mode:files`，每页最多 100 个命中文件；每文件只返回一次 `path`、完整文件 `baseline`、`firstMatchLine`，不返回正文，也不宣称统计了该文件所有匹配。`stats.returnedFiles` 和 `observation.matchUnit:files` 明确单位。显式 `mode:content` 才返回匹配行及上下文，`stats.returnedMatches`、`matchUnit:lines` 表示行命中；此时默认每页 100 条、每个匹配／上下文行 2000 个 UTF-16 字符，`limit` 可设为 1–200，`max_line_chars` 为 1–10000；截断不拆代理对，返回 `truncated:true/originalLength`。用 `read_file` 的行窗口取得完整正文。底层 `WorkspaceFiles.search` 省略 mode 时保持 `content`；limit／maxLineChars 均可省略，以保留全部命中及完整长行；不把预览长度变成文件读取额度。
 
-`glob` 筛选文件名，包含 `/` 时匹配相对所选目录的路径；`**/` 含零层目录。显式单文件以文件名匹配。`context_lines` 为 0–10，返回具名 `before/after` 行及真实行号，上下文同样遵循明确预览限制。遍历按完整相对路径排序，目录以 `name/` 与文件共同排序；找到下一条匹配才产生 `next`，其值是最后返回行的原路径／行号游标。后页须使用相同范围、文本和过滤条件；它不是跨外部文件变化的快照。
+`glob` 筛选文件名，包含 `/` 时匹配相对所选目录的路径；`**/` 含零层目录。显式单文件以文件名匹配。`context_lines` 为 0–10，返回具名 `before/after` 行及真实行号，上下文同样遵循明确预览限制。遍历按完整相对路径排序，目录以 `name/` 与文件共同排序；只有前瞻到下一项才产生 `next`，模型呈现为 `next_cursor` 并原样传给 `cursor`（原 JSON 回退是 `next` → 内部 `after`）。游标包含格式版本、查询／模式／范围／glob／ignore 的摘要及最后返回位置；不接受不同命中域的游标，改条件时重新开始。limit 及片段预览参数可以变化。文件模式按完整文件路径续页，内容模式按路径／行号续页，不重复返回同一文件定位项。`stats.matchedFiles` 和内容模式 `stats.matches` 只记录本页实际遇到的命中文件／匹配（可含一个前瞻），不是整个搜索总数。后页须使用相同范围、文本和过滤条件；它不是跨外部文件变化的快照。
 
 模型默认 `respect_ignore:true`。目录规则复用固定 `ignore` matcher，只读取搜索范围内各级 `.gitignore`，逐级使用本级相对路径，包含注释、目录、否定及父目录排除规则；所有规则文件均经原 native 安全读取，链接规则文件不读取。显式非根目录不继承范围外的祖先规则，显式单文件绕过普通 ignore；`respect_ignore:false` 包含普通忽略项。底层未指定该参数时保留原不使用普通 ignore 的行为。过滤不修改授权，protected／no-follow／根和文件身份检查始终有效。
 
-二进制与非 UTF-8 内容分别计为 `binary/encoding` 并跳过，不再使其他文本结果丢失。普通忽略项和不跟随的链接／特殊对象也分别计为 `ignored/links`；目录忽略计一项，不宣称知道其后代文件数。有过滤、分页或跳过时，`scope.kind=current_page` 描述本次页实际遍历，返回计数与最多 20 个路径／原因样例。`scope.complete:false` 表示有未检查项或尚有结果后页，空 matches 不能解读为全工作区无匹配；后页诊断不累计此前页，也不宣称完整扫描未到达目录。过滤 glob 的范围由 `scope.filters` 明示。权限、根漂移、读取身份变化和其他 I/O 失败不当作二进制吞掉；失败仍沿当前 Tool 返回，常见路径／参数错误提供 `code` 和纠正信息，不获得重试或访问授权。
+二进制与非 UTF-8 内容分别计为 `binary/encoding` 并跳过，不再使其他文本结果丢失。普通忽略项和不跟随的链接／特殊对象也分别计为 `ignored/links`；目录忽略计一项，不宣称知道其后代文件数。有过滤、分页或跳过时，`scope.kind=current_page` 描述本次页实际遍历，返回计数与最多 20 个路径／原因样例。`scope.complete:false` 表示有未检查项或尚有结果后页，文件模式空 files 或内容模式空 matches 均不能解读为全工作区无匹配；后页诊断不累计此前页，也不宣称完整扫描未到达目录。过滤 glob 的范围由 `scope.filters` 明示。权限、根漂移、读取身份变化和其他 I/O 失败不当作二进制吞掉；失败仍沿当前 Tool 返回，常见路径／参数错误提供 `code` 和纠正信息，不获得重试或访问授权。
 
 [搜索回归](../../../test/isolated/files/search.test.ts)覆盖单文件与目录、混合编码、稳定分页、上下文与代理对预览、根／嵌套 ignore 和显式范围优先级、实际工具默认、路径错误、protected 与链接及有界诊断。[读取响应性](../../../test/isolated/files/read-responsiveness.test.ts)和[查询响应性](../../../test/isolated/files/query-responsiveness.test.ts)继续核真实 macrotask 取消、独立读取、close drain、EOF 后匹配及最终枚举边界；平台资格仍按实际执行环境说明。
 
@@ -89,7 +89,7 @@ Windows 工厂当前接受 x64 本地盘符下的 canonical Workspace，其他�
 
 [Windows 完整能力用例](../../../test/isolated/files/windows.test.ts)在 actual win32 强制运行六工具、真实 Core 大正文、binary 恢复与 Windows 路径保护，不作 backend availability skip。2026-10-16 在 Windows x64／Bun1.4.2，基于 `84b17867` 的本轮未提交 diff，本次路径、变更预览、检查点与 Native 工具展示六文件43项535断言通过（正常用户权限，51.69秒，包含实际会话的重复反斜杠输入），包含原生六工具、字节恢复、绝对路径 Core／完整 Artifact 和真实组件 DOM。原用例的 CRLF 搜索断言改为保留实际 `\r`，大正文夹具明确超过1MiB后才断言 Artifact，未降低验证要求。该结果不证明正式安装、完整 Service／客户端或其他平台。共享默认装配及恢复后新 Store 的原验证范围由[当前进度](../../../../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-10windows-普通-files-与检查点恢复源码)记录。取舍与剩余原生验收见[原 HANDLE 提案](../../../../../.agents/notes/proposed/architecture/2026-10-10-windows-workspace-files-owned-handles.md)。
 
-Model 可调用的 `files.read/files.read_path` 缺省 `limit=200`，通过 `selection.nextOffset` 续读；显式 limit 保原请求。该默认页仅控制返回范围，不改变低层全文读取、完整文件验证或累计读取能力。
+Model 可调用的 `files.read/files.read_path` 缺省 `limit=200`，将 `next_line` 传给 `start_line` 续读（原 JSON 回退为 `selection.nextOffset`）；显式 limit 保原请求。该默认页仅控制返回范围，不改变低层全文读取、完整文件验证或累计读取能力。
 
 默认没有整文件、原文、搜索匹配数或长行总额度。读取使用固定 64 KiB 字节块，严格增量 UTF-8 解码、完整 hash 与前后 FD 事实校验；默认 read 返回全部剩余行。宿主显式 `maxFileBytes` 可声明该宿主的单文件能力约束，未设置时不回退为旧 8 MiB。真实内存、磁盘、IO 与字符串表示能力仍可能局部失败，不把它们假装 Provider 窗口。二进制控制字节采样检查和严格 UTF-8 保留，BOM/CRLF 不规范化；search 不将已识别二进制当文本。
 
@@ -143,7 +143,7 @@ restore 复制 caller bytes，先核基线、同目录私有 temp 写全/fsync�
 
 ### 检索与读取观察数据
 
-真实搜索结果附 `query`（规范化相对 path、准确 text/glob/ignore、原 after 及本次有效分页／预览参数）、`stats` 和 `files`。`stats.checkedTextFiles` 是本页成功读取并验证为文本的文件数，不包含读取 ignore 规则的附带操作；`matchedFiles/matches` 计本页游标之后实际遇到的命中文件／行，包括为判断 `next` 多取的一条，`returnedMatches` 才是实际返回行数。文件可能已完整读取，但找到后页证据后不再扫描其余行，统计不代表全查询总量。`files` 只列已返回命中的文件，各 path 一次，baseline 来自该次真实读取；不为后页预读命中或未返回文件声明来源。零命中、后页或跳过范围会有简短 `feedback`，提示改查入口／范围或按原游标续读，不推断当前实现可达、业务完成或允许重放。
+真实搜索结果附 `query`（规范化相对 path、准确 text/glob/ignore、原 after 及本次有效分页／预览参数）、`stats` 和 `files`。`stats.checkedTextFiles` 是本页成功读取并验证为文本的文件数，不包含读取 ignore 规则的附带操作；`matchedFiles` 计本页游标之后实际遇到的命中文件；content 模式的 `matches` 计行命中，包括为判断 `next` 多取的一条，`returnedMatches` 才是实际返回行数。files 模式只取各文件首命中，使用 `returnedFiles`，不填写全部行命中计数。文件可能已完整读取，但找到后页证据后不再扫描其余行，统计不代表全查询总量。`files` 只列已返回命中的文件，各 path 一次，baseline 来自该次真实读取；不为后页预读命中或未返回文件声明来源。零命中、后页或跳过范围会有简短 `feedback`，提示改查入口／范围或按原游标续读，不推断当前实现可达、业务完成或允许重放。
 
 模型 read/search 的 JSON 正文还附纯数据 `observation`：`kind=inspection/lookup`、规范相对 `scope`、search 的完整 query JSON 字符串、`sources[{path,version,fromLine?,toLine?}]` 及 `complete/coverage`。version 是原完整文件 hash，read 的行号来自实际 selection；search 来源仅取上述返回文件。`complete` 指本次是否覆盖整个文件或从头完整检索的所选查询范围，不证明任务成功。read 的局部或尾部窗口为 `coverage=window/complete=false`，`windowComplete=true` 只证明所选正文完整返回；整文件为 `coverage=file`。search 为 `coverage=page`，有原 after、next 或跳过项时 complete 为 false。大 read 沿既有完整 Artifact 正文协议，有限 JSON 摘要保留 observation。旧结构适配器未提供真实 query/files 或 baseline 时不补造观察数据。所有观察均为工具拥有的低信任结果，不授予读取、执行或解除 unknown 的权限。
 

@@ -75,7 +75,7 @@ export async function runAgentTaskQualityTrial(options: {
   offlineReplay?: { originalEvidenceRoot: string; dataRoot: string };
   /** Only the dedicated synthetic A/B driver supplies this; no product configuration switch. */
   isolatedComparison?: {
-    variant: 'raw' | 'compact';
+    variant: 'raw' | 'compact' | 'production';
     workspace: string;
     research: ReturnType<typeof createTaskQualityResearchFixture>;
     beforeModelRequest?(request: ModelRequest, binding: Readonly<Record<string, unknown>>): void;
@@ -498,7 +498,7 @@ export async function runAgentTaskQualityTrial(options: {
                   message.toolCallId === read.callId &&
                   message.sourceIds?.includes(read.id) &&
                   includesRead(finalRequest!, read) &&
-                  (options.isolatedComparison!.variant === 'compact'
+                  (options.isolatedComparison!.variant !== 'raw'
                     ? !!taskQualityPresentedRead(message.content)
                     : message.content === object(read.result).content),
               ),
@@ -594,7 +594,7 @@ export async function runAgentTaskQualityTrial(options: {
           );
           if (options.isolatedComparison)
             assert(
-              options.isolatedComparison.variant === 'compact'
+              options.isolatedComparison.variant !== 'raw'
                 ? comparisonChildSourceMatches(delivered[0]!.content, carrier)
                 : !!envelope,
               'comparison_expected_child_source_presentation_actually_received',
@@ -858,6 +858,7 @@ export async function runAgentTaskQualityTrial(options: {
               requests: fixture.requests,
               root,
               subjectId: 'owner',
+              verifyRequests: !!options.isolatedComparison,
             }).catch(() => ({ complete: false }));
         if (object(canonical).complete !== true) failure ??= 'canonical_model_evidence_incomplete';
         writeFileSync(

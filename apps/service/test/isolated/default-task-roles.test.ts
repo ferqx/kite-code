@@ -15,7 +15,7 @@ function input(role: string, tools: string[]) {
       id === 'files.read'
         ? '4'
         : id === 'files.search'
-          ? '3'
+          ? '4'
           : ['files.read_path', 'files.glob'].includes(id)
             ? '2'
             : '1',

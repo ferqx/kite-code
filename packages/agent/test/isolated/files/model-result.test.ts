@@ -117,6 +117,7 @@ test('search presentation retains every match/context, baseline, exact cursor an
   const f = fixture();
   f.put('a.ts', 'head\nneedle😀tail\nneedle second\nlast\n');
   const firstResult = await f.execute('files.search', {
+    mode: 'content',
     text: 'needle',
     limit: 1,
     contextLines: 1,
@@ -125,7 +126,7 @@ test('search presentation retains every match/context, baseline, exact cursor an
   const first = JSON.parse(firstResult.content);
   const unchanged = JSON.stringify(firstResult);
   const tool = f.tools.find((tool) => tool.id === 'files.search')!;
-  expect(tool.model?.resultVersion).toBe('1');
+  expect(tool.model?.resultVersion).toBe('2');
   const text = tool.formatModelResult!({ result: firstResult })!;
   expect(text).toContain('limit=1; context_lines=1; max_line_chars=7');
   expect(text).toContain('Returned 1 matches');
@@ -140,6 +141,7 @@ test('search presentation retains every match/context, baseline, exact cursor an
   expect(JSON.stringify(firstResult)).toBe(unchanged);
   const second = formatFileSearchResult({
     result: await f.execute('files.search', {
+      mode: 'content',
       text: 'needle',
       after: first.next,
       limit: 1,
@@ -164,7 +166,7 @@ test('zero search exposes real ignore/binary/encoding gaps and conditional liter
   const result = await f.execute('files.search', { text: 'absent|other' });
   const original = JSON.stringify(result);
   const text = formatFileSearchResult({ result })!;
-  expect(text).toContain('Returned 0 matches');
+  expect(text).toContain('Returned 0 files');
   expect(text).toContain('some entries not inspected');
   expect(text).toContain('"ignored":1');
   expect(text).toContain('"binary":1');
@@ -176,7 +178,7 @@ test('zero search exposes real ignore/binary/encoding gaps and conditional liter
   expect(text.length).toBeLessThan(result.content.length);
   expect(JSON.stringify(result)).toBe(original);
   const explicit = formatFileSearchResult({
-    result: await f.execute('files.search', { path: 'dist/a', text: 'hidden' }),
+    result: await f.execute('files.search', { path: 'dist/a', text: 'hidden', mode: 'content' }),
   })!;
   expect(explicit).toContain('1 [match] hidden');
   expect(explicit).toContain('Complete search within selected scope and filters');
@@ -209,6 +211,8 @@ test('read Artifact presentation requires the verified full body and never subst
   );
   expect(result.outcome).toBe('succeeded');
   expect(result.modelContent).toBeDefined();
+  expect(JSON.parse(result.content)).not.toHaveProperty('executionId');
+  expect(JSON.parse(result.content)).not.toHaveProperty('runId');
   expect(formatFileReadResult({ result })).toBeUndefined();
   const text = formatFileReadResult({ result, body: artifactBody })!;
   expect(presentedBody(text)).toBe(content);
@@ -323,4 +327,62 @@ test('material result details and unknown search filters preserve the original r
       body: search.content,
     }),
   ).toBeUndefined();
+});
+
+test('large search presentation preserves complete Artifact content without adding model execution IDs', async () => {
+  const f = fixture();
+  f.put('large', `${'needle'.padEnd(8000, '雪')}\n`.repeat(100));
+  let fullBody = '';
+  const reference: ArtifactRef = {
+    id: 'actual-search-body',
+    mediaType: 'application/json',
+    size: '0',
+    scope: { kind: 'execution', id: 'actual-execution' },
+  };
+  const ownContext = {
+    ...f.context,
+    artifacts: {
+      async publish(input: { content: Uint8Array }) {
+        fullBody = Buffer.from(input.content).toString('utf8');
+        return { ...reference, size: String(input.content.byteLength) };
+      },
+    },
+  } as ToolContext;
+  const result = await f.execute(
+    'files.search',
+    { path: 'large', text: 'needle', mode: 'content', maxLineChars: 10000, limit: 100 },
+    ownContext,
+  );
+  expect(Buffer.byteLength(fullBody)).toBeGreaterThan(1024 * 1024);
+  expect(JSON.parse(fullBody)).not.toHaveProperty('executionId');
+  expect(JSON.parse(fullBody)).not.toHaveProperty('runId');
+  expect(JSON.parse(result.content)).not.toHaveProperty('executionId');
+  expect(JSON.parse(result.content)).not.toHaveProperty('runId');
+  expect(result.modelContent).toBeDefined();
+  expect(formatFileSearchResult({ result })).toBeUndefined();
+  const text = formatFileSearchResult({ result, body: fullBody })!;
+  expect(text).toContain('Returned 100 matches');
+  expect(text.match(/\[match\]/g)).toHaveLength(100);
+  expect(text.includes(`100 [match] ${'needle'.padEnd(8000, '雪')}`)).toBe(true);
+  expect(JSON.parse(fullBody).files[0].baseline).toEqual((await f.files.read('large')).baseline);
+});
+
+test('file presentation keeps original read receipt identity without exposing bookkeeping IDs to the model', async () => {
+  const f = fixture();
+  f.put('a', 'needle\n');
+  for (const id of ['files.read', 'files.search']) {
+    const result = await f.execute(id, id === 'files.read' ? { path: 'a' } : { text: 'needle' });
+    const raw = JSON.parse(result.content);
+    if (id === 'files.read') {
+      expect(raw.executionId).toBe('actual-execution');
+      expect(raw.runId).toBe('actual-run');
+    } else {
+      expect(raw).not.toHaveProperty('executionId');
+      expect(raw).not.toHaveProperty('runId');
+    }
+    const text = f.tools.find((tool) => tool.id === id)!.formatModelResult!({ result })!;
+    expect(text).not.toContain('evidence_ref=');
+    expect(text).not.toContain('actual-execution');
+    expect(text).not.toContain('actual-run');
+  }
 });

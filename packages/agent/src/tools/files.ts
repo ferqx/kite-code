@@ -52,6 +52,7 @@ export interface FileEntry {
   kind: 'file' | 'directory' | 'symlink' | 'other';
 }
 export interface FileSearchInput {
+  mode?: 'files' | 'content';
   text: string;
   path?: string;
   after?: string;
@@ -72,6 +73,7 @@ export interface FileSearchMatch {
 }
 export interface FileSearchResult {
   query?: {
+    mode?: 'files' | 'content';
     path: string;
     text: string;
     glob: string | null;
@@ -84,10 +86,11 @@ export interface FileSearchResult {
   stats?: {
     checkedTextFiles: number;
     matchedFiles: number;
-    matches: number;
-    returnedMatches: number;
+    matches?: number;
+    returnedMatches?: number;
+    returnedFiles?: number;
   };
-  files?: { path: string; baseline: FileBaseline }[];
+  files?: { path: string; baseline: FileBaseline; firstMatchLine?: number }[];
   feedback?: string;
   matches: FileSearchMatch[];
   next: string | null;
@@ -982,12 +985,42 @@ export function createWorkspaceFiles(options: {
       options?.signal?.throwIfAborted();
       if (typeof input.text !== 'string' || !input.text || Buffer.byteLength(input.text) > 1024)
         fail('file_search_invalid');
+      const scope = segments(input.path ?? '').join('/');
+      const mode = input.mode ?? 'content';
+      if (mode !== 'files' && mode !== 'content') fail('file_search_invalid');
+      const binding = createHash('sha256')
+        .update(
+          JSON.stringify({
+            mode,
+            path: scope,
+            text: input.text,
+            glob: input.glob ?? null,
+            respectIgnore: input.respectIgnore === true,
+          }),
+        )
+        .digest('hex');
+      let after: string | undefined;
       if (input.after !== undefined) {
-        if (typeof input.after !== 'string' || input.after.length > 4110) fail('file_page_invalid');
-        const parts = input.after.split('\0');
-        if (parts.length !== 2 || !/^\d{12}$/.test(parts[1]!) || BigInt(parts[1]!) === 0n)
+        try {
+          if (typeof input.after !== 'string' || input.after.length > 32768)
+            fail('file_page_invalid');
+          const cursor = JSON.parse(Buffer.from(input.after, 'base64url').toString('utf8'));
+          if (
+            cursor.version !== 1 ||
+            cursor.binding !== binding ||
+            typeof cursor.path !== 'string' ||
+            !Number.isSafeInteger(cursor.line) ||
+            cursor.line < 1 ||
+            cursor.line > 999999999999 ||
+            segments(cursor.path).join('/') !== cursor.path ||
+            !cursor.path ||
+            (scope && cursor.path !== scope && !cursor.path.startsWith(`${scope}/`))
+          )
+            fail('file_page_invalid');
+          after = `${cursor.path}\0${String(cursor.line).padStart(12, '0')}`;
+        } catch {
           fail('file_page_invalid');
-        segments(parts[0]!);
+        }
       }
       const limit = input.limit === undefined ? undefined : pageLimit(input.limit);
       const contextLines = input.contextLines ?? 0;
@@ -1001,8 +1034,8 @@ export function createWorkspaceFiles(options: {
       if (input.respectIgnore !== undefined && typeof input.respectIgnore !== 'boolean')
         fail('file_search_filter_invalid');
       const matcher = input.glob === undefined ? undefined : compileFileGlob(input.glob);
-      const scope = segments(input.path ?? '').join('/');
       const matches: FileSearchMatch[] = [];
+      const fileHits: { path: string; baseline: FileBaseline; firstMatchLine: number }[] = [];
       let checkedTextFiles = 0;
       const matchedBaselines = new Map<string, FileBaseline>();
       const skipped = { binary: 0, encoding: 0, ignored: 0, links: 0 };
@@ -1059,8 +1092,13 @@ export function createWorkspaceFiles(options: {
           if (pause) await pause;
           const newline = snapshot.content.indexOf('\n', offset);
           const line = snapshot.content.slice(offset, newline === -1 ? undefined : newline);
-          const match: FileSearchMatch = { path, line: index + 1, ...preview(line) };
-          if (line.includes(input.text) && (!input.after || key(match) > input.after)) {
+          if (line.includes(input.text) && (!after || key({ path, line: index + 1 }) > after)) {
+            if (mode === 'files') {
+              matchedBaselines.set(path, snapshot.baseline);
+              fileHits.push({ path, baseline: snapshot.baseline, firstMatchLine: index + 1 });
+              return limit !== undefined && fileHits.length > limit;
+            }
+            const match: FileSearchMatch = { path, line: index + 1, ...preview(line) };
             if (contextLines) {
               match.before = [...preceding];
               match.after = [];
@@ -1078,7 +1116,7 @@ export function createWorkspaceFiles(options: {
             matches.push(match);
             if (limit !== undefined && matches.length > limit) return true;
           }
-          if (contextLines) {
+          if (mode === 'content' && contextLines) {
             preceding.push({ line: index + 1, ...preview(line) });
             if (preceding.length > contextLines) preceding.shift();
           }
@@ -1142,7 +1180,12 @@ export function createWorkspaceFiles(options: {
             const local = scope ? child.slice(scope.length + 1) : child;
             if (matcher && !matcher.match(input.glob!.includes('/') ? local : entry.name)) continue;
             // Entire files before the continuation cannot contain a later result.
-            if (input.after && child < input.after.split('\0')[0]!) continue;
+            if (
+              after &&
+              (child < after.split('\0')[0]! ||
+                (mode === 'files' && child === after.split('\0')[0]!))
+            )
+              continue;
             if (await searchFile(child)) return true;
           }
         }
@@ -1165,13 +1208,31 @@ export function createWorkspaceFiles(options: {
         if (kind === 'directory') await walk(scope, []);
         else if (kind === 'file') {
           const name = scope.split('/').at(-1)!;
-          if (!matcher || matcher.match(name)) await searchFile(scope);
+          if (
+            (!after || mode !== 'files' || scope > after.split('\0')[0]!) &&
+            (!matcher || matcher.match(name))
+          )
+            await searchFile(scope);
         } else fail('file_not_regular');
       }
       options?.signal?.throwIfAborted();
       check();
-      const more = limit !== undefined && matches.length > limit;
+      const count = mode === 'files' ? fileHits.length : matches.length;
+      const more = limit !== undefined && count > limit;
       const selected = more ? matches.slice(0, limit) : matches;
+      const selectedFiles = more ? fileHits.slice(0, limit) : fileHits;
+      const last =
+        mode === 'files'
+          ? selectedFiles.at(-1) && {
+              path: selectedFiles.at(-1)!.path,
+              line: selectedFiles.at(-1)!.firstMatchLine,
+            }
+          : selected.at(-1);
+      const next = more
+        ? Buffer.from(
+            JSON.stringify({ version: 1, binding, path: last!.path, line: last!.line }),
+          ).toString('base64url')
+        : null;
       const incomplete = more || Object.values(skipped).some(Boolean);
       const feedback = [
         'This is literal text matching in the selected scope and filters. Even a complete scan does not prove call reachability, absence of other implementations, or absence of differently worded references.',
@@ -1180,7 +1241,7 @@ export function createWorkspaceFiles(options: {
               'The query contains pattern-like text (|, .* or \\b), but these characters are matched literally, not as OR, wildcards or word boundaries. Use separate literal queries when testing alternatives.',
             ]
           : []),
-        ...(selected.length === 0
+        ...(count === 0
           ? [
               'No literal match was found in the checked scope; this does not establish which implementation is active. Check the entry point/configuration or change the query or scope.',
             ]
@@ -1198,6 +1259,7 @@ export function createWorkspaceFiles(options: {
       ].join(' ');
       return {
         query: {
+          mode,
           path: scope,
           text: input.text,
           glob: input.glob ?? null,
@@ -1210,16 +1272,20 @@ export function createWorkspaceFiles(options: {
         stats: {
           checkedTextFiles,
           matchedFiles: matchedBaselines.size,
-          matches: matches.length,
-          returnedMatches: selected.length,
+          ...(mode === 'files'
+            ? { returnedFiles: selectedFiles.length }
+            : { matches: matches.length, returnedMatches: selected.length }),
         },
-        files: [...new Set(selected.map((match) => match.path))].map((path) => ({
-          path,
-          baseline: matchedBaselines.get(path)!,
-        })),
+        files:
+          mode === 'files'
+            ? selectedFiles
+            : [...new Set(selected.map((match) => match.path))].map((path) => ({
+                path,
+                baseline: matchedBaselines.get(path)!,
+              })),
         ...(feedback ? { feedback } : {}),
         matches: selected,
-        next: more ? key(matches[limit! - 1]!) : null,
+        next,
         ...(more ||
         input.respectIgnore ||
         input.glob !== undefined ||

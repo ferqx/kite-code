@@ -95,6 +95,7 @@ test('independent parser accepts actual production full/window/empty read render
     const presented = formatFileReadResult({ result: { outcome: 'succeeded', content: raw } });
     expect(presented).toBeDefined();
     expect(taskQualityPresentedRead(presented!)).toEqual({
+      evidenceRef: undefined,
       path: 'config.txt',
       content,
       baseline,
@@ -102,6 +103,12 @@ test('independent parser accepts actual production full/window/empty read render
       whole,
     });
     expect(taskQualityReadMessageMatches(presented!, raw)).toBe(true);
+    expect(
+      taskQualityReadMessageMatches(presented!.replace('\n', '\nevidence_ref="other"\n'), raw),
+    ).toBe(false);
+    const historical = presented!.replace('\n', '\nevidence_ref="read"\n');
+    expect(taskQualityReadMessageMatches(historical, raw)).toBe(true);
+    expect(presented).not.toContain('evidence_ref=');
     expect(
       taskQualityReadMessageMatches(
         presented!.replace(`from_line=${selection.fromLine}`, 'from_line=99'),

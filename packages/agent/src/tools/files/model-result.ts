@@ -57,7 +57,17 @@ function knownObservation(value: unknown, kind: 'inspection' | 'lookup'): boolea
       observation,
       kind === 'inspection'
         ? ['kind', 'scope', 'sources', 'complete', 'coverage', 'windowComplete', 'excerpt']
-        : ['kind', 'scope', 'query', 'sources', 'matchCount', 'complete', 'coverage', 'next'],
+        : [
+            'kind',
+            'scope',
+            'query',
+            'sources',
+            'matchCount',
+            'matchUnit',
+            'complete',
+            'coverage',
+            'next',
+          ],
     ) ||
     typeof observation.scope !== 'string' ||
     typeof observation.complete !== 'boolean' ||
@@ -83,6 +93,8 @@ function knownObservation(value: unknown, kind: 'inspection' | 'lookup'): boolea
     return (
       typeof observation.query === 'string' &&
       integer(observation.matchCount) &&
+      (observation.matchUnit === undefined ||
+        ['files', 'lines'].includes(String(observation.matchUnit))) &&
       nullableString(observation.next)
     );
   const excerpt = observation.excerpt === undefined ? undefined : object(observation.excerpt);
@@ -246,6 +258,7 @@ export function formatFileSearchResult({
   if (
     !query ||
     !keys(query, [
+      'mode',
       'path',
       'text',
       'glob',
@@ -255,6 +268,7 @@ export function formatFileSearchResult({
       'contextLines',
       'maxLineChars',
     ]) ||
+    (query.mode !== undefined && query.mode !== 'files' && query.mode !== 'content') ||
     typeof query.path !== 'string' ||
     typeof query.text !== 'string' ||
     !nullableString(query.glob) ||
@@ -264,15 +278,36 @@ export function formatFileSearchResult({
     !integer(query.contextLines) ||
     !nullableInteger(query.maxLineChars) ||
     !stats ||
-    !keys(stats, ['checkedTextFiles', 'matchedFiles', 'matches', 'returnedMatches']) ||
-    !['checkedTextFiles', 'matchedFiles', 'matches', 'returnedMatches'].every((key) =>
-      integer(stats[key]),
-    ) ||
+    !keys(stats, [
+      'checkedTextFiles',
+      'matchedFiles',
+      'matches',
+      'returnedMatches',
+      'returnedFiles',
+    ]) ||
+    ![
+      'checkedTextFiles',
+      'matchedFiles',
+      ...(query.mode === 'files' ? ['returnedFiles'] : ['matches', 'returnedMatches']),
+    ].every((key) => integer(stats[key])) ||
     !Array.isArray(value.matches) ||
     !Array.isArray(value.files) ||
     !nullableString(value.next) ||
-    stats.returnedMatches !== value.matches.length ||
+    (query.mode === 'files'
+      ? stats.returnedFiles !== (Array.isArray(value.files) ? value.files.length : -1) ||
+        value.matches.length !== 0 ||
+        stats.matches !== undefined ||
+        stats.returnedMatches !== undefined
+      : stats.returnedMatches !== value.matches.length || stats.returnedFiles !== undefined) ||
     (value.feedback !== undefined && typeof value.feedback !== 'string')
+  )
+    return;
+  const observed = object(value.observation);
+  if (
+    observed &&
+    observed.matchUnit !== undefined &&
+    (observed.matchUnit !== (query.mode === 'files' ? 'files' : 'lines') ||
+      observed.matchCount !== (query.mode === 'files' ? value.files.length : value.matches.length))
   )
     return;
   const queryText = query.text;
@@ -281,9 +316,10 @@ export function formatFileSearchResult({
     const file = object(item);
     if (
       !file ||
-      !keys(file, ['path', 'baseline']) ||
+      !keys(file, ['path', 'baseline', ...(query.mode === 'files' ? ['firstMatchLine'] : [])]) ||
       typeof file.path !== 'string' ||
       !baseline(file.baseline) ||
+      (query.mode === 'files' && !integer(file.firstMatchLine, 1)) ||
       files.has(file.path)
     )
       return;
@@ -321,6 +357,12 @@ export function formatFileSearchResult({
       ...((match.after as SearchLine[] | undefined) ?? []).map((item) => showLine(item, 'context')),
     );
     groups.set(match.path, lines);
+  }
+  if (query.mode === 'files') {
+    for (const item of value.files) {
+      const file = object(item)!;
+      groups.set(String(file.path), [`first_match_line=${file.firstMatchLine}; body not returned`]);
+    }
   }
   if (groups.size !== files.size) return;
   const scope = value.scope === undefined ? undefined : object(value.scope);
@@ -365,7 +407,7 @@ export function formatFileSearchResult({
           'The query contains pattern-like text (|, .* or \\b), but these characters are matched literally, not as OR, wildcards or word boundaries. Use separate literal queries when testing alternatives.',
         ]
       : []),
-    ...(value.matches.length === 0
+    ...((query.mode === 'files' ? files.size : value.matches.length) === 0
       ? [
           'No literal match was found in the checked scope; this does not establish which implementation is active. Check the entry point/configuration or change the query or scope.',
         ]
@@ -381,8 +423,8 @@ export function formatFileSearchResult({
   ].join(' ');
   if (value.feedback !== undefined && value.feedback !== knownFeedback) return;
   const output = [
-    `Search literal ${quote(query.text)} in ${quote(query.path || '.')}; glob=${quote(query.glob)}; ignore=${query.respectIgnore ? 'on' : 'off'}; limit=${query.limit}; context_lines=${query.contextLines}; max_line_chars=${query.maxLineChars}.`,
-    `Returned ${value.matches.length} matches; checked ${stats.checkedTextFiles} text files. ${reasons.some(Boolean) ? `Incomplete search: ${reasons.filter(Boolean).join('; ')}.` : 'Complete search within selected scope and filters.'}`,
+    `Search literal ${quote(query.text)}; mode=${query.mode ?? 'content'} in ${quote(query.path || '.')}; glob=${quote(query.glob)}; ignore=${query.respectIgnore ? 'on' : 'off'}; limit=${query.limit}; context_lines=${query.contextLines}; max_line_chars=${query.maxLineChars}.`,
+    `Returned ${query.mode === 'files' ? `${files.size} files` : `${value.matches.length} matches`}; checked ${stats.checkedTextFiles} text files. ${reasons.some(Boolean) ? `Incomplete search: ${reasons.filter(Boolean).join('; ')}.` : 'Complete search within selected scope and filters.'}`,
     `next_cursor=${quote(value.next)}`,
   ];
   if (skipped && Object.values(skipped).some((count) => Number(count) > 0)) {
@@ -392,7 +434,7 @@ export function formatFileSearchResult({
   }
   if (['|', '.*', '\\b'].some((marker) => queryText.includes(marker)))
     output.push('Pattern-like characters are literal; use separate queries for alternatives.');
-  if (!value.matches.length)
+  if (!(query.mode === 'files' ? files.size : value.matches.length))
     output.push(
       'No literal matches in checked files; this does not determine the active implementation.',
     );

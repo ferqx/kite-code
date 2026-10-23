@@ -356,6 +356,8 @@ Main 仅在原 Message／Execution 身份和结果完全匹配、原状态 faile
 
 已知版本的读取、列目录和搜索在当前 Run 的执行阶段即使用同一探索分类，不等回执到齐才聚合；Execution 已结束而历史回执尚未到达时保留该工具项。回执按准确当前 Store／Session／Run／Execution 可先复用 View 的展示分类，结果状态仍等原 metadata 核验。探索块以 Run 和可读消息边界保持分组身份，回执逐项或乱序接管不更换聚合的阅读开关；新阶段的聚合独立默认收起。元数据未到的项保留在原组内，展开聚合只显示工具项，逐项主动展开才挂载该项原记录。未知版本的原始结果不进入收起标题，真实“结果未知”等状态仍显示。[运行期聚合 DOM](test/isolated/native-live-tool-aggregation-dom.test.tsx)覆盖这些交接、手动阅读和身份隔离场景。
 
+2026-10-24，搜索定义 v4 复用同一探索展示，v2/v3 历史继续可读。[运行期聚合 DOM](test/isolated/native-live-tool-aggregation-dom.test.tsx)逐阶段核 v3/v4 搜索＋读取从派发、settling、延迟回执和 metadata 接管保持同一节点与展开状态。同日 macOS arm64／Chrome155.0.8059.86 的隔离生产组件浏览器夹具已改用真实 v4 搜索定义，六组阶段覆盖两种 metadata 顺序、初次／切换、深浅主题、4／40轮及缓存返回；733张过程帧和171个正文可见 RAF 采样均通过原节点、顺序、几何、滚动及输入位置检查，页面错误0。人工核延迟占位、亮色搜索聚合及暗色缓存返回；证据在 `.cache/native-history-presentation-f4b6uR/report.json` 和帧目录。该证据为隔离组件与受控 bridge，不代表完整安装版、真实模型或其他平台；原 CSS 嵌套 keyframes 提示保留。以下旧证据仍仅覆盖其原版本及场景。
+
 2026-10-23，搜索定义 v3 继续使用已知探索展示；历史 v2 保留同样展示，未知版本仍保守显示原定义，不并入探索。准确已知搜索映射为共享 `search_content`，使搜索／读取聚合显示各自次数。新增运行期回归核搜索＋读取从活动、settling 无回执、逐项回执和延迟 metadata 接管始终保同一聚合 DOM 与手动展开；主会话与子详情沿同一投影，后者保留父草稿和只读范围。相关 live aggregation／transcript／navigation 整文件共56项1333断言通过，Desktop typecheck与定向Biome通过。
 
 同次 macOS arm64／Chrome155.0.8059.86 的[隔离历史浏览器夹具](test/native-history-presentation-browser-runner.fixture.ts)改用真实 v3 搜索＋读取，六组覆盖两种metadata到达顺序、初次／切换、深浅主题、4／40轮及缓存返回。逐阶段截图与RAF帧核首次正文展示后消息因果顺序、DOM、几何、滚动／输入区位置保持，搜索聚合未闪回generic；六组均通过、页面错误0，证据在本机 `.cache/native-history-presentation-o4dtrD/report.json` 与帧目录。人工检查延迟读取占位和亮／暗最终聚合，未发现重复或跳位。本次仅为隔离生产组件和受控桥接验证，不代表完整安装版、真实模型、其他平台或所有实时推送分段资格；原嵌套 `@keyframes` CSS编译提示保留。

@@ -28,6 +28,12 @@ import {
 import { launchPairedService } from '../../src/paired';
 import { ownedUserConfiguration } from '../fixtures/user-configuration-fixture';
 
+function readToolBaseline(content: unknown): unknown {
+  const baseline = /^baseline=(.*)$/m.exec(String(content));
+  expect(baseline).not.toBeNull();
+  return JSON.parse(baseline![1]!);
+}
+
 function gate() {
   let resolve!: () => void;
   const promise = new Promise<void>((done) => {
@@ -195,13 +201,13 @@ test('ordinary paired host exposes public file schemas, edits with an exact base
       const call = requests.length <= 2;
       const edit = requests.length === 2;
       const priorResult = edit
-        ? (JSON.parse(
-            String(
+        ? {
+            baseline: readToolBaseline(
               (body.messages as { role: string; content: unknown }[]).find(
                 (message) => message.role === 'tool',
               )!.content,
             ),
-          ) as { baseline: unknown })
+          }
         : undefined;
       const chunk = (delta: unknown, finish: string | null) =>
         `data: ${JSON.stringify({ id: 'fresh-host', object: 'chat.completion.chunk', model: 'local', choices: [{ index: 0, delta, finish_reason: finish }] })}\n\n`;
@@ -301,13 +307,11 @@ test('ordinary paired host exposes public file schemas, edits with an exact base
       occurrences: 1,
     });
     expect((edit.input as Record<string, unknown>).base).toEqual(
-      JSON.parse(
-        String(
-          (requests[1]!.messages as { role: string; content: unknown }[]).find(
-            (message) => message.role === 'tool',
-          )!.content,
-        ),
-      ).baseline,
+      readToolBaseline(
+        (requests[1]!.messages as { role: string; content: unknown }[]).find(
+          (message) => message.role === 'tool',
+        )!.content,
+      ),
     );
     const history = requests[2]!.messages as {
       role: string;
@@ -324,20 +328,36 @@ test('ordinary paired host exposes public file schemas, edits with an exact base
       (tool) => tool.function.name,
     );
     expect(names).toHaveLength(15);
-    expect(names).toEqual(
-      expect.arrayContaining([
+    expect([...names].sort()).toEqual(
+      [
         'ask_user',
         'web_fetch',
         'read_user_file',
+        'read_file',
+        'write_file',
+        'edit_file',
+        'list_directory',
+        'glob_files',
+        'search_content',
         'spawn_agent',
         'send_agent_message',
         'follow_up_agent',
         'wait_agent_events',
         'list_agents',
         'interrupt_agent',
-      ]),
+      ].sort(),
     );
     expect(names.every((name) => /^[a-zA-Z0-9_-]{1,64}$/.test(name))).toBe(true);
+    const search = (
+      requests[0]!.tools as {
+        function: { name: string; parameters: { properties: Record<string, unknown> } };
+      }[]
+    ).find((tool) => tool.function.name === 'search_content')!;
+    expect(search.function.parameters.properties).toMatchObject({
+      mode: { enum: ['files', 'content'], default: 'files' },
+      cursor: { type: 'string' },
+    });
+    expect(search.function.parameters.properties).not.toHaveProperty('after');
     expect(new Set(names).size).toBe(15);
     expect(JSON.stringify(requests[1]!.messages)).toContain(marker);
     expect(

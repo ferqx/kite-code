@@ -87,6 +87,48 @@ KITE_RUN_LIVE_TASK_QUALITY=1 bun tests/e2e/live/model/agent-task-quality.live.ts
 
 r9 全文观察到委派不再要求逐字符展开或专门字节算术报告，子报告更紧凑；研究回复没有普遍缩短，仍重复正文与 JSON。两次搜索分别产生两个直接读取编码/二进制失败、一个非法 glob 参数失败，都正常纠正；未出现相同错误循环。父仍有重复格式说明和把快照一致说成期间未改动的表述。样本支持系统提示会影响报告扩张这一判断，但不证明唯一原因或稳定简洁性；不以字符数设置产品硬门槛，也不据机械断言替代全文质量判断。
 
+### 工具合同与研究状态的双 checkout 对照
+
+[双 checkout 驱动](agent-task-quality-checkout-ab.live.ts)沿用相同两类研究任务、两种 profile 与八次均衡顺序。A 是 `a10b781e2` 的独立生产 checkout（已经包含简洁工具呈现）；B 是冻结后的候选。两侧在各自目录启动相同测试代码，解析各自生产模块、native Files 与独立锁定依赖，不覆盖 Runtime formatter。固定 `deepseek-v4-flash`／deepseek／Chat Completions／medium／4096 输出上限，单样本原72请求／480秒预算不变。最终处理变量为工具声明、搜索版本与默认粒度；系统合同、任务字节、同 pair 物理文件与 nonce、模型参数和测试权限保持。早期首轮还包含后来撤回的研究状态实验，不能与最终实现混为一轮。
+
+```bash
+KITE_RUN_LIVE_TASK_QUALITY=1 bun tests/e2e/live/model/agent-task-quality-checkout-ab.live.ts --baseline=/absolute/committed-baseline --candidate=/absolute/frozen-candidate --evidence-root=/absolute/new-owned-directory
+```
+
+先零 Provider 探测，封存实际解析路径、生产源码／manifest／lock、全部本目录 TypeScript harness 与根类型配置摘要；每次 child 前后以及 parent 每 trial 前后复核两侧。初始系统／任务消息按 pair 精确比较，每 arm 工具目录固定。所有实际 root／child 请求逐一与 wire 正文核角色、顺序、完整工具与来源正文及调用身份；Store 关闭前再按原 scope `readModelInput`，将封存 request 与实际捕获的完整 request 深等，记录 `canonical.requestIdentity`，缺失或失配均停止。独立 SQLite 回归通过后才允许 Provider，不用自造旧格式样例替代两侧真实 producer。
+
+最终模型目录严格为两侧各自生产 Files 五项与 Task 六项，零 Provider 的真实 Runtime／SQLite 回归及 live preflight 均拒绝额外、缺失或重复工具。普通 Service 的15／20项默认目录另由真实配置回归覆盖，不能用此窄夹具代替。最终必须阅读完整父子轨迹，区分当前事实、搜索范围、子报告误读、逐项采用和未决连接。全部预定样本、原始失败、Store、canonical、wire 和清理结果保留；不追加样本或以少检索替代结论正确。
+
+首轮 `research-tools-ab-r1` 在 macOS arm64／Bun1.4.2 完成全部预定8次，8项机械断言通过；两侧生产与harness摘要各自全程一致，93/93请求（含8个child请求）的 sealed canonical、实际捕获 request 和 wire 全文／身份相同，HTTP均200，采证与清理无错。以下为实际任务总量，包含父子和重复历史输入，不是相同回执的呈现压缩比。
+
+| 配对任务 | A 请求／工具／搜索／输入tokens | B 请求／工具／搜索／输入tokens |
+| --- | --- | --- |
+| current-chain stable | 8／20／4／56820 | 11／27／3／89985 |
+| claim-adoption stable | 15／30／3／103788 | 19／29／2／183065 |
+| current-chain preview | 7／19／3／45343 | 9／23／2／71470 |
+| claim-adoption preview | 11／23／4／79278 | 13／25／4／100566 |
+| 合计 | 41／92／14／285229 | 52／104／11／445086 |
+
+人工已完整审读全部父子工具与正文。当前链、profile、mechanism、receiptField和随机channel均正确，旧审计未冒充当前链；但两侧仍将有限字面搜索概括成全仓无引用。stable配对中，B子报告明引 `profile preview` 后仍称没有profile名，父直接沿用；A子报告也误读，但父最终正确归入preview分支仍笼统背书。preview配对中，A父称转述字符级一致而未指出child对stable的误读；B父正确识别旧stable／当前preview，没有传播该疑点，但也未逐项说明不采用。不能据机械通过宣称语义核验可靠。
+
+研究工具仅B的stable委派样本实际使用：先把baseline hash当 `evidence_ref`、再把child Session当carrier，依次得到 `research_source_invalid` 和 `research_child_source_invalid`，改为原carrier后保存成功。两次拒绝是已知引用纠错，不是执行异常或语义纠正。成功状态含4问题、3主张，只进入最后一个父请求，21745字符，未决连接与下一检查全null；其中仍有“fixtures被任何地方引用都没有”的范围过推。其余三个B样本未使用研究工具；后两B样本6次搜索均显式content，因此不证明files默认粒度的实际收益。
+
+首轮没有显示总体收束或子结果语义改善，且增加schema／重复状态和往返成本。据此全部移除该未提交实验：工具定义、导出、records/context、权限例外、宿主选择、桌面标签与夹具注入均撤回；Files 模型正文不再添加实验引用 UUID。没有保留可选研究入口或换成另一份来源索引。第二轮预先保持同一8项矩阵，检验最终生产路径；首轮原始数据与负结果不覆盖、不替换，不凭多做样本选择结论。
+
+第二轮 `tool-contracts-ab-r2` 在相同 macOS arm64／Bun1.4.2 环境完成8项，命令退出0，全部机械断言通过。95份实际父子请求的 Store 封存输入与捕获 request 的完整内容及身份逐一核对；wire 保留消息全文、角色、顺序和调用身份，不把不同协议包装称为整个 JSON 字面相同。工具错误0，HTTP均200，采证与清理无错，生产与 harness 摘要全程保持。该窄夹具没有增加研究工具，也没有覆盖生产 formatter。
+
+| 配对任务 | A 请求／工具／搜索／输入tokens | B 请求／工具／搜索／输入tokens |
+| --- | --- | --- |
+| current-chain stable | 10／22／2／66753 | 10／23／2／65215 |
+| claim-adoption stable | 12／30／3／79076 | 14／31／2／106506 |
+| current-chain preview | 8／21／1／51417 | 13／26／2／97407 |
+| claim-adoption preview | 10／19／2／60385 | 18／30／7／141727 |
+| 合计 | 40／92／8／257631 | 55／110／13／410855 |
+
+决定性链证据齐备后的工具数合计32→27，但父请求15→17；整任务请求、工具、搜索和输入量没有显示收束收益。B的13次搜索全部显式 `mode:content`，没有触达文件定位模式，不能宣称新默认粒度带来真实模型收益。八项当前链、profile、mechanism、receiptField及精确channel均正确，均保留静态推导与实际stdout未观测的区别；然而两侧仍把有限字面搜索扩大成全局无引用。stable委派中，两侧child都否认原文已给出的 `profile preview`，父级完整读到原文和报告后仍称核对一致；B还采纳了 `channel.ts` 没有对应主张的误判，实际原文有channel值与Supporting references。完整来源已送达，不能归因于漏文。preview基线父级把“无需进一步核验”的作者建议扩大成“承认之前没有核验”，同样超出原文。preview候选虽正确识别旧stable／当前preview，没有把child否认profile的误读写入最终profile，却仍笼统称转述一致；其前缀／后缀解释也有一处写反，完整channel值仍正确。
+
+本次交付保留续页合同、明确模式与单位、原正文和范围限制及桌面已知版本适配；这些有确定性回归和接口缺陷依据。真实样本不证明整体检索收束或子结果语义核验已改善，不把主要字段正确、所有调用成功或同参数无重复当作质量验收。旧首轮与本轮原 Store、请求、正文、失败和负结论均留在各自证据目录；没有追加筛选样本。
+
 ### 模型结果呈现的固定配对对照
 
 [配对驱动](agent-task-quality-presentation-ab.live.ts)只改变模型看到的工具／child 结果正文；系统合同、研究任务、模型与推理／输出设置、工具声明保持。预先固定 `current-chain`、`claim-adoption` 各两种 profile，共四对八次，raw／compact 先后顺序交错；每对共享同一物理工作区、nonce 与文件字节，使用独立 Profile／Store。raw 仅在隔离 Runtime 实例覆盖私有呈现方法，原 Artifact 验证继续执行；生产没有 baseline 开关。原任务字节 hash 另由确定性回归锁定。

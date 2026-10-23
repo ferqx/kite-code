@@ -42,7 +42,7 @@
 
 | 负责模块／内部工具 | 模型工具名称 | 主要字段选择 |
 | --- | --- | --- |
-| `files.read/list/glob/search` | `read_file`、`list_directory`、`glob_files`、`search_content` | 读取 `offset/limit → start_line/max_lines`；路径继续按固定 Workspace 根解释 |
+| `files.read/list/glob/search` | `read_file`、`list_directory`、`glob_files`、`search_content` | 读取 `offset/limit → start_line/max_lines`；搜索 `after → cursor`；路径继续按固定 Workspace 根解释 |
 | `files.write/edit` | `write_file`、`edit_file` | `base` 保留；`find/replace/occurrences → old_text/new_text/expected_matches` |
 | `files.read_path/write_path/edit_path` | `read_user_file`、`write_user_file`、`edit_user_file` | 沿文件字段规则，独立绝对路径和原目标权限 |
 | `shell.execute/launch/read/wait/stop` | `shell_execute`、`shell_launch`、`shell_read`、`shell_wait`、`shell_stop` | 前台执行时限 `execution_timeout_ms`；等待时限 `wait_timeout_ms`；其他声明字段转 snake_case |
@@ -59,7 +59,15 @@
 
 文件、Shell、Task 和 MCP 的完整参数、输出与生命周期分别归各 leaf README；本表不是另一份执行 schema。`search_content` 仍是字面文本搜索，公开名称不把它变成正则工具；MCP 搜索范围也不因改名扩大。
 
-`files.search@3` 的公开 `context_lines/max_line_chars/respect_ignore` 仍由同一声明字段映射生成，单文件、过滤、分页及当前页未读范围归 [Files owner](tools/files/README.md)。`spawn_agent` 的默认及开放 preset 说明取自实际注册角色，不从名称猜测能力；当前源目录和封存工具表面分别表达现在与当时事实。Shell 本地引用缺失由 [Shell leaf](tools/shell.README.md)返回有限确定失败；这些反馈字段不能改变原派发状态、重放权限或未知效果。
+`files.search@4` 默认 `mode:files` 按命中文件定位，显式 `mode:content` 取正文片段；`next_cursor` 原样交回公开 `cursor`，不得换查询、模式或过滤条件。`context_lines/max_line_chars/respect_ignore` 继续由同一声明生成。`read@4` 的结果呈现版本为1，`search@4` 为2；原读取 baseline、完整正文、过滤、分页及当前页未读范围归 [Files owner](tools/files/README.md)。模型正文不增加没有后续操作用途的执行 UUID，原执行身份和 Artifact 范围仍在原记录中核实。`spawn_agent` 的默认及开放 preset 说明取自实际注册角色，不从名称猜测能力；当前源目录和封存工具表面分别表达现在与当时事实。Shell 本地引用缺失由 [Shell leaf](tools/shell.README.md)返回有限确定失败；这些反馈字段不能改变原派发状态、重放权限或未知效果。
+
+## 工具选择与职责
+
+普通宿主的实际默认目录来自 [Service defaults](../../../apps/service/src/configuration-defaults.ts)：具备合格 Shell 时为20项；不具备时为15项，包括工作区 Files 六项、外部文件读取、问题、网页及 Task 六项。最小嵌入配置仍只默认提供问题工具。上述名称表同时列出可选能力，不是每次 Run 的固定工具清单；计划／验证、Skill、Workflow 和 MCP 仍由原显式配置、能力及权限选择。旧 Task 内部定义有可信调用消费者，隐藏于模型不等于可删除内部执行合同。
+
+工具按独立操作及其可观察结果划分，不把模型填写的结论再包装成事实来源。本轮实验的研究状态工具及其 records/context、权限例外和导出入口已全部撤回，没有保留可选入口或另建替代工具。计划工具管理已存在的步骤、批准和版本，验证工具运行真实检查；它们不因此成为语义真值来源。
+
+`wait_agent_events` 只给事件摘要与游标。`list_agents` 可以重新取得最近一次终态的完整子报告，包括由原 Artifact 核身份后展开的正文；旧自动 Source 被压缩后，新的目录调用仍能重新带入该正文。它不选择任意历史轮次；当前 queued/running/waiting 状态可能仍携带上一轮结果，不能将其当作本轮完成。完整报告可读、结果接纳、最终主张有依据分别由原 Task 合同和实际证据核实。
 
 ## 验证边界
 

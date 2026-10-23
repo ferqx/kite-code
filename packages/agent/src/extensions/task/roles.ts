@@ -52,6 +52,7 @@ const readOnlyBindings = [
   ['builtin.files', 'files.list', '1'],
   ['builtin.files', 'files.glob', '2'],
   ['builtin.files', 'files.search', '3'],
+  ['builtin.files', 'files.search', '4'],
   ['builtin.shell', 'shell.read', '1'],
   ['builtin.shell', 'shell.wait', '1'],
   ['builtin.planning', 'planning.read', '1'],

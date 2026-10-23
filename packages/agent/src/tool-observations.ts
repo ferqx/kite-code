@@ -8,6 +8,8 @@ export interface ToolObservation {
   query?: string;
   sources: { path: string; version: string; fromLine?: number; toLine?: number }[];
   matchCount?: number;
+  /** Counted result unit; legacy lookups without this field counted matching lines. */
+  matchUnit?: 'files' | 'lines';
   complete: boolean;
   coverage: 'file' | 'window' | 'page';
   next?: string | null;
@@ -36,6 +38,7 @@ export function toolObservation(content: string): ToolObservation | undefined {
     (value.query !== undefined && typeof value.query !== 'string') ||
     (value.matchCount !== undefined &&
       (!Number.isSafeInteger(value.matchCount) || Number(value.matchCount) < 0)) ||
+    (value.matchUnit !== undefined && !['files', 'lines'].includes(String(value.matchUnit))) ||
     (value.next !== undefined && value.next !== null && typeof value.next !== 'string') ||
     (value.windowComplete !== undefined && typeof value.windowComplete !== 'boolean') ||
     !Array.isArray(value.sources)
@@ -77,6 +80,9 @@ export function toolObservation(content: string): ToolObservation | undefined {
     coverage: value.coverage as ToolObservation['coverage'],
     ...(value.query === undefined ? {} : { query: String(value.query) }),
     ...(value.matchCount === undefined ? {} : { matchCount: Number(value.matchCount) }),
+    ...(value.matchUnit === undefined
+      ? {}
+      : { matchUnit: value.matchUnit as ToolObservation['matchUnit'] }),
     ...(value.next === undefined ? {} : { next: value.next as string | null }),
     ...(value.windowComplete === undefined ? {} : { windowComplete: value.windowComplete }),
     ...(excerpt

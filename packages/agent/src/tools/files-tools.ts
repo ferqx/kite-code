@@ -166,7 +166,7 @@ export function createFileTools(
           maximum: Number.MAX_SAFE_INTEGER,
           default: 200,
           description:
-            'Maximum lines to return; defaults to 200. Continue at selection.nextOffset to read the next page, or request explicit max_lines.',
+            'Maximum lines to return; defaults to 200. Continue by passing returned next_line as start_line (raw JSON fallback: selection.nextOffset), or request explicit max_lines.',
         },
       },
       call: (i, context) =>
@@ -272,7 +272,18 @@ export function createFileTools(
           description: `${directoryPath.description} Search one file or a directory tree. Explicit files bypass ordinary ignore rules; explicit directories start their own ignore scope.`,
         },
         text: { type: 'string', minLength: 1, maxLength: 1024 },
-        after: { type: 'string', maxLength: 4110 },
+        mode: {
+          enum: ['files', 'content'],
+          default: 'files',
+          description:
+            'files locates matching files without body text (limit counts files); content returns matching lines and context (limit counts matches).',
+        },
+        after: {
+          type: 'string',
+          maxLength: 32768,
+          description:
+            'Pass the returned next_cursor here as cursor, keeping mode, query, path and filters unchanged (raw JSON fallback: next).',
+        },
         limit: { type: 'integer', minimum: 1, maximum: 200, default: 100 },
         glob: {
           type: 'string',
@@ -281,14 +292,21 @@ export function createFileTools(
           description:
             'Filter filenames, or paths relative to the search directory when the glob contains /. **/ matches zero or more directories.',
         },
-        contextLines: { type: 'integer', minimum: 0, maximum: 10, default: 0 },
+        contextLines: {
+          type: 'integer',
+          minimum: 0,
+          maximum: 10,
+          default: 0,
+          description:
+            'Context lines before and after each matching line, used only in mode=content.',
+        },
         maxLineChars: {
           type: 'integer',
           minimum: 1,
           maximum: 10000,
           default: 2000,
           description:
-            'Preview characters per matching or context line. Truncation is explicit; use read_file for complete lines.',
+            'In mode=content, preview characters per matching or context line. Truncation is explicit; use read_file for complete lines.',
         },
         respectIgnore: {
           type: 'boolean',
@@ -301,6 +319,7 @@ export function createFileTools(
         files.search(
           {
             text: string(i.text),
+            mode: i.mode === undefined ? 'files' : (i.mode as 'files' | 'content'),
             ...(i.path === undefined ? {} : { path: string(i.path) }),
             ...(i.after === undefined ? {} : { after: string(i.after) }),
             limit: i.limit === undefined ? 100 : Number(i.limit),
@@ -323,6 +342,7 @@ export function createFileTools(
   };
   const modelParameters: Record<string, Record<string, string>> = {
     read: { offset: 'start_line', limit: 'max_lines' },
+    search: { after: 'cursor' },
     edit: {
       find: 'old_text',
       replace: 'new_text',
@@ -332,21 +352,23 @@ export function createFileTools(
     },
   };
   const descriptions: Record<string, string> = {
-    read: 'Read UTF-8 file lines. Line numbers start at 1; return at most 200 lines by default. Continue at selection.nextOffset. The returned baseline describes the complete file and is required for later modifications.',
+    read: 'Read UTF-8 file lines. Line numbers start at 1; return at most 200 lines by default. Continue by passing returned next_line as start_line (raw JSON fallback: selection.nextOffset). The returned baseline describes the complete file and is required for later modifications.',
     write:
       'Create or replace a complete UTF-8 file. Pass base=null only to create a new file; replacing a file requires its exact complete-file baseline. Supply exactly one of content or content_artifact. Each invocation has its own outcome; a baseline conflict does not report current file content or roll back other successful operations.',
     edit: 'Replace exact, non-overlapping literal text in a UTF-8 file using its complete-file baseline. expected_matches must equal the actual number of matches. Supply old_text and new_text, or the corresponding immutable Artifact references. Each invocation has its own outcome; a baseline conflict does not report current file content or roll back other successful operations.',
     list: 'List immediate directory entries, with name-based pagination. Defaults to the workspace root and 100 entries; limit is 1–200. Continue using the returned name cursor.',
     glob: 'Find file paths matching a glob, including **/ for zero or more directory levels. Defaults to the workspace root and 100 paths; limit is 1–200. Continue using the returned path cursor.',
     search:
-      'Search literal text in one file or a directory tree. Defaults to 100 matches per page and 2000 characters per line preview. Continue using next; truncated lines require read_file for full content. Binary and non-UTF-8 files are skipped with current-page scope diagnostics; no matches does not prove complete coverage when scope.complete is false. Root searches respect .gitignore; explicit files bypass ordinary ignore and explicit directories do not inherit ancestor ignore rules. Filtering never grants access.',
+      'Search literal text in one file or a directory tree. Defaults to mode=files, returning at most 100 matching files with their first matching line number and complete-file baseline, without body text. Use mode=content for matching line previews and optional context (default 2000 characters per line). limit counts files in files mode or matches in content mode. Continue by passing next_cursor as cursor (raw JSON fallback: next), keeping mode, query, scope and filters unchanged; truncated lines require read_file for full content. Binary and non-UTF-8 files are skipped with current-page scope diagnostics; no matches does not prove complete coverage when scope.complete is false. Root searches respect .gitignore; explicit files bypass ordinary ignore and explicit directories do not inherit ancestor ignore rules. Filtering never grants access.',
   };
   return definitions.map((d) => ({
     id: `files.${d.name}`,
     model: {
       name: modelNames[d.name]!,
       snakeCase: true,
-      ...(['read', 'search'].includes(d.name) ? { resultVersion: '1' } : {}),
+      ...(['read', 'search'].includes(d.name)
+        ? { resultVersion: d.name === 'read' ? '1' : '2' }
+        : {}),
       ...(modelParameters[d.name] ? { parameterNames: modelParameters[d.name] } : {}),
     },
     ...(d.name === 'read'
@@ -361,7 +383,7 @@ export function createFileTools(
       d.name === 'read'
         ? '4'
         : d.name === 'search'
-          ? '3'
+          ? '4'
           : ['write', 'edit', 'glob'].includes(d.name)
             ? '2'
             : '1',
@@ -476,7 +498,9 @@ export function createFileTools(
                 path: file.path,
                 version: file.baseline.hash,
               })),
-              matchCount: search.matches.length,
+              matchCount:
+                search.query.mode === 'files' ? search.files.length : search.matches.length,
+              matchUnit: search.query.mode === 'files' ? 'files' : 'lines',
               complete:
                 search.query.after === null &&
                 search.next === null &&
@@ -562,7 +586,7 @@ export function createFileTools(
           file_search_context_invalid: 'context_lines must be an integer from 0 to 10.',
           file_search_preview_invalid: 'max_line_chars must be a positive integer.',
           file_page_invalid:
-            'Use limit from 1 to 200 and copy the previous next cursor unchanged. Start a new search without after when changing scope or pattern.',
+            'Use limit from 1 to 200 and copy next_cursor into cursor unchanged (raw next into after). Start a new search without cursor when changing mode, scope, query or filters.',
           file_changed:
             'A file changed while being read. Recheck the relevant scope before making a new search; this attempt did not provide a stable complete result.',
         };

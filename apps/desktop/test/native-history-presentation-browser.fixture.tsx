@@ -93,7 +93,7 @@ for (const sessionId of ['a', 'b']) {
         messageId: message.id,
         executionId,
         definitionId: tool === 0 ? 'files.search' : 'files.read',
-        definitionVersion: tool === 0 ? '3' : '4',
+        definitionVersion: '4',
         status: 'succeeded',
         resultRevision: '1',
         target: path,
