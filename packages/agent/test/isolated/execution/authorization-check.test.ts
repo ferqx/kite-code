@@ -640,6 +640,56 @@ test('precise original Command cancellation propagates to running checker and ne
   }
 });
 
+test('checker usage returned with cancellation is retained without granting the target', async () => {
+  let entered = false;
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const usage = { inputTokens: 13, outputTokens: 5, totalTokens: 18 };
+  let calls = 0;
+  const f = await fixture({
+    async *stream(_request, { signal }) {
+      calls++;
+      entered = true;
+      await gate;
+      expect(signal.aborted).toBe(true);
+      // A usage event already returned by the adapter survives the cancellation race.
+      yield { type: 'usage', usage };
+      yield { type: 'text_delta', text: '{"decision":"approve_once","reason":"late"}' };
+      yield finish;
+    },
+  });
+  try {
+    await eventually(async () => (entered ? true : null));
+    await f.runtime.cancelCommand({
+      expectedStoreId: f.expectedStoreId,
+      commandId: 'cancel',
+      sessionId: 's',
+      targetCommandId: 'work',
+      subjectId: 'owner',
+    });
+    release();
+    await f.runtime.waitForCommand('work');
+    const check = await eventually(async () => {
+      const execution = (await f.store.listExecutions('s')).find(
+        (value) => value.kind === 'model' && value.runId === null,
+      );
+      return execution?.status === 'cancelled' ? execution : null;
+    });
+    expect(check.result).toMatchObject({ incomplete: true, content: '', usage });
+    expect(check.result).not.toHaveProperty('authorizationCheckOutput');
+    expect(f.effects()).toBe(0);
+    expect(calls).toBe(1);
+    expect(
+      (await f.store.listExecutions('s')).find((value) => value.kind === 'tool')?.status,
+    ).not.toBe('succeeded');
+  } finally {
+    release();
+    await f.close();
+  }
+});
+
 test('resource-held final policy flip releases the permit without starting a human wait', async () => {
   let held = 0;
   let changed = false;

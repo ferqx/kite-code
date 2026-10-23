@@ -26,7 +26,31 @@ Composer 在原停止按钮内使用 Hugeicons `StopIcon` 的实心方块，填�
 
 Composer 的图片卡片保持固定预览区域，接受宿主交付的小尺寸URL并提示异步解码；等待URL时显示准备占位，可选 `previewError` 只显示预览失败，不改变原 `loading/error` 的发送门禁。图片转换、缓存与原字节校验归 [Desktop owner](../../apps/desktop/README.md#markdown-与附件输入)，UI不读取或转换原图。Native登记给ConversationCache的图片成本现包含缩略图编码字节与RGBA像素估算，继续使用原媒体／DOM预算、停用和释放协议；派生Blob的独立有界缓存由原窗口owner管理，不能恢复旧读取资格。
 
+## Markdown 消息内容
+
+桌面 [MessageContent](src/desktop/MessageContent.tsx) 在 GFM 上支持以下展示；Web 的 `SafeMessageMarkdown` 和独立 TUI renderer 保持各自范围。
+
+| 内容 | 语法与行为 |
+| --- | --- |
+| 图表 | `mermaid` 围栏内支持 `graph`／`flowchart`、`sequenceDiagram`、`classDiagram`、`stateDiagram`／`stateDiagram-v2`、`erDiagram`。围栏闭合后异步绘制，未闭合时显示当前源码；源码开关和复制保留原文，错误或不支持时回退源码。 |
+| 代码与差异 | lowlight 的 common 语言集合按显式语言标记高亮，包括 TypeScript、JavaScript、Python、JSON、SQL、Shell 与 diff；未知语言或超过32768个UTF-16单位的块保持全文纯文字。高亮仅改变 token 文字颜色。 |
+| 提示块 | 引用首段的 `[!NOTE]`、`[!TIP]`、`[!IMPORTANT]`、`[!WARNING]`、`[!CAUTION]` 转为中文标签、侧边线与正文，无色块背景。 |
+| 数学公式 | remark-math 与 rehype-katex 渲染 `$…$` 和独立 `$$` 围栏；KaTeX渲染与本地字体样式固定同版，`trust:false`、展开上限100、尺寸上限20em。错误公式保留可读源内容，不执行链接或加载图片。 |
+| 正文导航 | 标题使用 GitHub 风格 slug，重名递增；标题与脚注ID按消息隔离，fragment仅能跳往同一消息已有目标，跳转后移动键盘焦点。脚注保留编号、说明与返回正文链接。 |
+
+[图表 adapter](src/desktop/markdown-diagram.ts)懒加载 Mermaid，以 strict 模式、纯文字标签和客户端控制的透明主题绘制，再作为 SVG image 展示，不把生成标记或事件绑定挂进应用DOM。图表不接受配置指令、frontmatter、自定义样式、HTML、点击或图片／图标语法；原文不删除。单块源码上限16384个UTF-16单位、边数250；生成SVG上限200万个字符、单边12000及面积1600万坐标单位，超限回退源码。图表保持自然尺寸并在局部滚动，去掉默认阴影；节点边框与箭头使用蓝色 `--diagram-accent`，生命线、分组与注释边框使用青色 `--diagram-secondary`，正文保持原前景色。两种图表色分别适配深浅主题，颜色单独变化也会重绘，主题切换保留已有画面直至新版完成。渲染串行化，全局队列仅保留完成信号，不保留已结算的图像或失败对象；停用取消排队或丢弃迟到结果；已绘图资源登记到原会话缓存预算，窗口隐藏释放，恢复后重绘。详细取舍见[图表展示边界](../../.agents/notes/implemented/architecture/2026-10-22-desktop-markdown-content.md)。
+
+[队列回归](test/desktop-markdown-diagram-queue.test.ts)核并发串行顺序、原图交付、完成信号及取消后恢复。[内容回归](test/desktop-markdown-extensions.test.tsx)核公式／提示块／高亮、完整源码、消息锚点隔离和prepared树不变；[图表生命周期回归](test/isolated/desktop-markdown-diagram.test.tsx)核迟到结果、Activity暂停、资源记账、窗口恢复和仅图表颜色变化时的重绘／原图保持。浏览器验证归[Desktop owner](../../apps/desktop/README.md#markdown-与附件输入)。输入框继续编辑这些类型的Markdown源码，不在草稿中绘图或排版公式；[编辑器回归](test/isolated/prompt-editor.test.tsx)核无关编辑后的扩展语法保留。
+
+2026-10-22，Windows x64／Bun1.4.3、`beabc9628`加本次Markdown工作树：以准确`./`文件路径执行Markdown、扩展内容、语法缓存、代码块、提示词编辑、阅读滚动、Native Worker构建与调度8个文件，28项／1501断言通过；图表生命周期隔离文件另以独立Bun进程执行，1项／16断言通过。UI／Desktop typecheck、UI三个入口构建、定向Biome、统一边界、workspace、测试归属与文档检查通过。测试Mock只存在于隔离生命周期文件，不进入普通客户端；完整安装版Electron与其他平台未在本轮重验。
+
+2026-10-23 推送前同步远端 `c3cfa313a` 后，前述8个完整文件再次通过28项／1505断言，独立图表生命周期文件通过1项／22断言。编辑器扩展用例曾在JSDOM默认聚焦选区落到代码块开头时失败；夹具改为明确设置末尾用户选区并派发selectionchange后再粘贴，保留全部源码和末尾追加断言，生产编辑器不变。同步后全仓typecheck、文档range影响、统一边界和workspace检查通过；此前Electron与浏览器证据按未改变的展示范围复用。
+
 ## Markdown 提示词编辑
+
+消息正文的引用、代码和表头不铺独立底色：共享样式用2px引用竖线、1px代码外框／标题线和表格网格线区分层次；行内代码使用等宽字与细底线。表格保留完整细边框和共享圆角，单元格以横纵细线分隔，表头下边框与其他边框统一使用1px和相同主题边框色；相邻边缘不重复叠线，保留原滚动区域、焦点提示与GFM对齐。`PromptEditor` 的代码块和行内代码同步采用透明底与线条，正文解析、复制、编辑与读取边界保持。
+
+2026-10-22，Windows x64／Bun1.4.3：Markdown、语法缓存、代码块、提示词编辑与阅读滚动五个测试文件19项／913断言通过；原[浏览器夹具](../../apps/desktop/test/ai-elements-browser-runner.fixture.ts)在Chrome155的深浅主题、1280／390px四组检查通过，保持代码滚动、过程展开和回复状态转换。另用实际 `MessageContent`、`PromptEditor` 与生产编译CSS逐步观察引用嵌套、代码复制回执、表格键盘横向阅读、输入编辑，以及追加开始／中间／结束时的布局；760／342px阅读列的深浅样式均可读。此为隔离组件验证，未运行本轮完整安装版Electron窗口；编译仍有既有嵌套 `@keyframes` 提示。
 
 [PromptEditor](src/desktop/PromptEditor.tsx) 使用固定 Lexical 0.52.0 实时渲染和编辑 Markdown，`Composer` 继续通过 Markdown `draft/onChange` 与宿主交接；未编辑的外部草稿保留原源文。正文、占位提示与代码默认使用 14px 字号，Markdown 标题保持独立层级。Composer 内模型／思考、审批及项目／分支选择器的触发文字、缓存统计及上下文详情统一为 14px，模型与项目／分支的展开菜单保持 14px；附件、模型、审批、项目／分支和发送／停止的操作图标，以及相关菜单图标统一为 16px。底部控件统一 32px 高；`composer-options` 将附件、模型与审批放在左侧，`composer-trailing` 将缓存率／上下文状态组与发送／停止放在右侧，状态组与发送按钮间距为 16px。底栏按实际可用宽度在两组之间换行，右组整体右对齐；左组保持同一行，模型名称在可用空间内省略，保留原完整名称提示和无障碍名称。Native 模型容器使用 Grid 承接按钮和后续错误信息。权限菜单使用 `max-content` 按标题、名称及说明自适应宽度，同时受视口留白与 Radix 可用宽度限制，达到上限时自然换行；常规宽度下标题区单行排列，标题与选项名为 13px／18px，辅助说明为 11px／14px，均为 400 字重；容器、标题、RadioItem 和分隔线直接使用组件库默认的 padding／margin，选项高度按内容与默认内边距自然形成；名称与说明无额外行间空隙。窄区域允许说明自然换行，不裁剪内容。输入法确认、Enter 发送、Shift+Enter、撤销与 scope 切换由该组件处理，链接点击不导航，粘贴只解析 plain text Markdown，不执行 HTML 或获取远程图片。组件 handle 提供 focus/caret 操作，不再暴露 textarea。
 
@@ -70,7 +94,7 @@ Conversation 的 `systemKind:agent_result` 只消费宿主已确认实际触发�
 
 项目／分支菜单沿共享 `.context-menu` 按内容自适应宽度，常规窗口限制在160–240px，窄窗口扣除两侧16px安全间距；选项右侧保留32px选中标记空间，长名称沿原规则换行。
 
-共享[桌面样式](src/desktop/style.css)将交互状态与静态背景分开：`--control-hover`、`--control-selected`、`--control-pressed` 分别为亮色黑色5%／9%／12%、暗色白色7%／11%／15%的中性叠层，在控件所在的实色或系统材质上合成。普通按钮、问卷选项和设置内容沿用这些状态；左侧 `.client-sidebar-panel` 将 `--control-pressed` 局部映射到 `--control-hover`，使导航、空间与会话行、用户按钮和收展按钮的悬停／按下底色一致。选中导航与会话行局部将按下变量映射到 `--control-selected`，按下时也保持选中高亮；ghost 按钮静止时透明，主操作仍使用原实色配色。空间行内添加／移除等原本仅变图标的入口保持透明。正文代码、表格、状态标签等静态内容继续消费 `--accent`／`--sidebar-accent`。Native 设置、菜单焦点映射与材质验证归 [Desktop owner](../../apps/desktop/README.md#交互状态与透明材质)，本层不取得壁纸或宿主材质读取能力。
+共享[桌面样式](src/desktop/style.css)将交互状态与静态背景分开：`--control-hover`、`--control-selected`、`--control-pressed` 分别为亮色黑色5%／9%／12%、暗色白色7%／11%／15%的中性叠层，在控件所在的实色或系统材质上合成。普通按钮、问卷选项和设置内容沿用这些状态；左侧 `.client-sidebar-panel` 将 `--control-pressed` 局部映射到 `--control-hover`，使导航、空间与会话行、用户按钮和收展按钮的悬停／按下底色一致。选中导航与会话行局部将按下变量映射到 `--control-selected`，按下时也保持选中高亮；ghost 按钮静止时透明，主操作仍使用原实色配色。空间行内添加／移除等原本仅变图标的入口保持透明。状态标签等静态内容继续消费 `--accent`／`--sidebar-accent`；Markdown代码和表格使用透明底与细线。Native 设置、菜单焦点映射与材质验证归 [Desktop owner](../../apps/desktop/README.md#交互状态与透明材质)，本层不取得壁纸或宿主材质读取能力。
 
 2026-10-14 Windows x64／Bun 1.4.2，当前 `006b79d3` 工作树上的该变量修改：实际 Chrome headless 载入当前 Tailwind 编译 CSS 及共享 Sidebar／Button 的静态标记，用鼠标悬停核亮／暗、Mica／实色四种组合。亮色空间、会话、主要导航、用户按钮及设置返回样式与普通按钮均为 `rgb(236,236,236)`，选中会话与设置分类沿同值；临时替换 `--accent` 后亮色侧栏与按钮同步变化。暗色保原侧栏 `rgb(48,48,48)`，Mica 侧栏承载层仍透明。该次定向 Biome 核对保留了当时三项 `!important` 提示；此 CSS 核对不代证原生壁纸合成或完整客户端交互。
 
@@ -124,7 +148,7 @@ SessionPage 的可选 `covered` 保留主panel树、尺寸和阅读实例，以o
 
 原 [MessageContent](src/desktop/MessageContent.tsx)和 [ToolActivity / ToolRow](src/desktop/ToolActivity.tsx)公开给 Native 复用，文件操作仍只调用显式宿主回调。`ModelOutputMessage.renderText` 可为同一预览或已验证全文提供宿主展示；不改完整读取、身份／字节门禁、关闭与 onContent，未传时继续 SafeMessageMarkdown。当前 Native 的消息路径与默认模型摘要归 [Desktop owner](../../apps/desktop/README.md#原消息文件路径与常规摘要)，纯 UI 不取得文件、来源核验或编辑器权限。
 
-[Code Block](src/desktop/components/ui/code-block.tsx)与[Trace](src/desktop/components/ui/trace.tsx)使用官方 shadcn/ui 的 Radix 源码结构，分别适配现有 Button、Hugeicons 和语义 token。[MarkdownCodeBlock](src/desktop/MarkdownCodeBlock.tsx)只接块级代码，保留原 `pre > code`、语言类、缩进与换行；默认单段文本、不拆行或异步高亮，正文仍走原 Markdown parser 与安全规则。语言标题和复制操作由 Code Block parts 组合，行内代码与表格身份保持。[Markdown 回归](test/markdown.test.tsx)和[代码块回归](test/isolated/desktop-code-block.test.tsx)核语言、准确复制、原安全限制与复制资格。
+[Code Block](src/desktop/components/ui/code-block.tsx)与[Trace](src/desktop/components/ui/trace.tsx)使用官方 shadcn/ui 的 Radix 源码结构，分别适配现有 Button、Hugeicons 和语义 token。[MarkdownCodeBlock](src/desktop/MarkdownCodeBlock.tsx)只接块级代码，保留原 `pre > code`、语言类、缩进与换行；保持单个代码容器，显式语言按token高亮，不拆行；Mermaid图表使用同一标题与准确源码复制，正文仍走固定Markdown parser与安全规则。语言标题和复制操作由 Code Block parts 组合，行内代码与表格身份保持。[Markdown 回归](test/markdown.test.tsx)和[代码块回归](test/isolated/desktop-code-block.test.tsx)核语言、准确复制、原安全限制与复制资格。
 
 [Clipboard context 与 hook](src/desktop/clipboard.tsx)复用原消息复制生命周期；Conversation 提供宿主 port，正文内的代码复制同时消费原 `copyText` 资格，包含自定义正文 reader 子树。预览或未核实最终回复不提供代码复制，已核实正文关闭后撤销；停用、换文或换 port 的迟到结果失效，已完成反馈沿原两秒截止时间保留。复制不从 DOM 重建文本，不新开宿主或业务接口。
 
@@ -136,7 +160,7 @@ ToolActivity／ToolRow 用 TraceLine、Title、Icon、Description 和受控 Coll
 
 `MessageContent` 的宿主文件回调在 layout effect 取得当前已提交值，稳定派发函数只调用这一值；正文解析组件只按原 text 保持 memo。私有 Context 将当前回调能力交给独立 Markdown 链接，能力撤销仍立即把文件按钮改为不可点击文本，重新提供及正文变化正常更新；普通回调更新与历史校准的撤销／恢复都不重新解析未变化正文。[原 Markdown 测试](test/markdown.test.tsx)通过实际 DOM 点击核最新回调、撤销／恢复、解码路径、外链和正文更新；不使用忽略回调的比较器保留旧宿主权限。实际 Native 完整历史与退出证据归[本轮进度](../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-11native-完整历史校准与正文解析)，不据解析复用提升读取或阶段资格。
 
-[MessageContent](src/desktop/MessageContent.tsx) 的聊天排版由[共享 CSS](src/desktop/style.css)统一管理：会话正文统一使用固定14px，不随窗口宽度调整；Markdown行高1.8，标题、代码、表格与脚注继续按正文的相对字号缩放。工具标题、过程摘要和压缩状态共用 `--conversation-text-size`，同步为14px。标题字号按层级覆盖通用页面标题，标题上方为两份正文块间距、下方一份，不随标题字号另外放大。段落、引用和代码块按正文尺寸统一块间距，避免代码的小字号缩小留白；一级列表项间距为正文块间距的2/3、子项为1/2，项内段落及代码前后保持一份正文块间距。渲染阶段在原解析树的副本上保留紧凑列表的段落节点，使代码后的文字与松散列表具有相同块边界；间距只从相邻块的起始侧提供，代码、引用或表格结束消息时不另加尾部留白。首段归零不清除文字与子列表之间的间隔，原文、任务清单状态及解析缓存不改写。正文沿原阅读列显示；代码保原换行并在块内滚动。表格使用具名、可键盘聚焦的滚动 section 包裹真实 table，表头与单元格保GFM结构和对齐，超宽内容在该区域横向阅读。稳定的表格组件保留流式追加期间的焦点和横向阅读位置；表格颜色显式继承正文，深色主题同样可读。原固定GFM parser、缓存、完整原文、安全链接与宿主回调规则保持。[原 Markdown 测试](test/markdown.test.tsx)核两类列表的段落、代码、子列表与预解析树保全；[语法缓存](test/desktop-markdown-cache.test.tsx)和[阅读滚动](test/isolated/desktop-conversation-scroll.test.tsx)继续核原合同，实际编译样式证据见下文。
+[MessageContent](src/desktop/MessageContent.tsx) 的聊天排版由[共享 CSS](src/desktop/style.css)统一管理：会话正文统一使用固定14px，不随窗口宽度调整；Markdown行高1.8，标题、代码、表格与脚注继续按正文的相对字号缩放。工具标题、过程摘要和压缩状态共用 `--conversation-text-size`，同步为14px。标题字号按层级覆盖通用页面标题，标题上方为两份正文块间距、下方一份，不随标题字号另外放大。段落、引用和代码块按正文尺寸统一块间距，避免代码的小字号缩小留白；一级列表项间距为正文块间距的2/3、子项为1/2，项内段落及代码前后保持一份正文块间距。渲染阶段在原解析树的副本上保留紧凑列表的段落节点，使代码后的文字与松散列表具有相同块边界；间距只从相邻块的起始侧提供，代码、引用或表格结束消息时不另加尾部留白。首段归零不清除文字与子列表之间的间隔，原文、任务清单状态及解析缓存不改写。正文沿原阅读列显示；代码保原换行并在块内滚动。表格使用具名、可键盘聚焦的滚动 section 包裹真实 table，表头与单元格保GFM结构和对齐，超宽内容在该区域横向阅读。稳定的表格组件保留流式追加期间的焦点和横向阅读位置；表格颜色显式继承正文，深色主题同样可读。固定GFM加公式parser与缓存、完整原文、安全链接及宿主回调规则统一。[原 Markdown 测试](test/markdown.test.tsx)核两类列表的段落、代码、子列表与预解析树保全；[语法缓存](test/desktop-markdown-cache.test.tsx)和[阅读滚动](test/isolated/desktop-conversation-scroll.test.tsx)继续核原合同，实际编译样式证据见下文。
 
 会话间距也由这份共享样式负责：`--conversation-block-gap` 与Markdown段落共用正文字号的0.8倍；工具行已有上下各4px内边距，混合块间距扣除一份、连续工具扣除两份，因此固定14px正文下分别为文本11.2px、文本与工具7.2px、工具3.2px，宽窄窗口保持一致。处理过程以列布局统一直接子块的单侧间距，首尾按文本或工具的内部留白平衡；无轮次的原顺序消息采用同一相邻规则，展开的工具聚合列表沿用工具间距。存在最终回复时，过程容器不再提供底部内边距，由最终正文按前一项统一衔接：展开过程末尾为工具时7.2px、文本时11.2px，过程收起时与摘要相隔11.2px，避免过程尾部与最终正文顶部叠加。处理过程底部不绘制分隔线；最终回复的32px复制操作留白和用户消息原间距保持，分组、顺序、状态、折叠选择与读取权限均未改变。
 
@@ -227,7 +251,7 @@ P3 的 `InteractionCard` 直接消费生成的 Interaction：真实来源 Sessio
 
 `Conversation` 的消息区使用局部原生滚动viewport，保留原outer／viewport／reading-column、region／ARIA、细滚动条和gutter；自动跟随、手动阅读位置与跳到最新保持。同一个ResizeObserver观察viewport与reading-column，正文内部读取、折叠动画或窗口变化引起高度更新时，在绘制前同步跟随，不要求Conversation重新render，也不延后一帧；手动阅读时不改位置。真实多会话窗口曾保留13棵旧消息树，heap引用链为Document动画controller→RAF callback→旧viewport；对应原Radix ScrollAreaThumb滚动后立即卸载时遗漏持续RAF清理。因此消息区不再挂载该thumb，不修改其他ScrollArea消费者或全局RAF。[滚动生命周期回归](test/isolated/desktop-conversation-scroll.test.tsx)执行100轮滚动后立即卸载，核零自有待执行RAF、ResizeObserver与keydown监听释放，并核内部内容增高／跟随／手动位置／跳最新；实际窗口DOM与heap证据归[Native owner](../../apps/desktop/README.md#native-当前会话环境信息与子详情)。
 
-Desktop `MessageContent` 的固定 GFM parser 复用[纯语法树缓存](src/desktop/markdown-parse-cache.ts)，最多32项、8MiB估算总量、单项2MiB，原文本 key 与树数据均计入。每次管线取得独立克隆，后续转换不能污染缓存；只保存语法数据，不持有 React、processor、文件回调或操作范围。超预算正文仍完整解析与显示，HTML、图片与链接安全门禁不变。[语法缓存回归](test/desktop-markdown-cache.test.tsx)核淘汰、污染隔离、安全GFM和超预算全文；真实窗口响应测量归[Native owner](../../apps/desktop/README.md#native-当前会话环境信息与子详情)。
+Desktop `MessageContent` 的固定 GFM＋公式 parser 复用[纯语法树缓存](src/desktop/markdown-parse-cache.ts)，最多32项、8MiB估算总量、单项2MiB，原文本 key 与树数据均计入。每次管线取得独立克隆，后续转换不能污染缓存；只保存语法数据，不持有 React、processor、文件回调或操作范围。超预算正文仍完整解析与显示，HTML、图片与链接安全门禁不变。[语法缓存回归](test/desktop-markdown-cache.test.tsx)核淘汰、污染隔离、安全GFM和超预算全文；真实窗口响应测量归[Native owner](../../apps/desktop/README.md#native-当前会话环境信息与子详情)。
 
 纯子路径 `@kite-ai/ui/desktop/markdown` 公开 `parseDesktopMarkdown` 固定语法计算，compiled desktop build同时生成 `markdown-parser.js`，Worker不经UI组件barrel。`PreparedDesktopMarkdown` 是展示数据；`MessageContent.preparedMarkdown` 只在其原文与当前text准确相等时克隆该树，后续仍经过原react-markdown的HTML／图片／链接安全处理，错配回原parser；不接受树数据作为任何业务权限。`ModelOutputMessage.renderText` 的第二个可选参数只交当前复核通过的snapshot，既有单参数回调保持兼容。Native拥有Worker静态资产、纯实体decoder解析、调度、取消与活动树生命周期，UI compiled入口不内置Vite专用Worker路径；[prepared回归](test/desktop-markdown-cache.test.tsx)核准确原文、管线隔离、安全结构和超全局预算全文。
 

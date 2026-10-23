@@ -144,6 +144,47 @@ test('live Markdown preserves original source until editing, pastes plain Markdo
   expect(input.textContent).toBe('另一会话');
   expect(changes).toHaveLength(before);
 });
+test('new message syntax remains editable source through an unrelated prompt edit', async () => {
+  const inputRef = createRef<PromptEditorHandle>();
+  const changes: string[] = [];
+  const value =
+    '```mermaid\ngraph TD\nA --> B\n```\n\n> [!NOTE]\n> 公式 $x^2$\n\n$$\n\\frac{1}{2}\n$$\n\n正文[^a]\n\n[^a]: 注释\n\n末尾';
+  await render(
+    <PromptEditor
+      value={value}
+      scopeKey="extensions"
+      label="任务输入"
+      disabled={false}
+      inputRef={inputRef}
+      onChange={(text) => changes.push(text)}
+      onSend={() => {}}
+    />,
+  );
+  expect(changes).toEqual([]);
+  expect(document.querySelectorAll('.katex, .markdown-diagram, img')).toHaveLength(0);
+  const input = document.querySelector<HTMLElement>('[role="textbox"]')!;
+  await act(async () => input.focus());
+  // Set an explicit user selection: this case tests source preservation, not
+  // Lexical's asynchronous focus callback or JSDOM's default focus selection.
+  await act(async () => {
+    const range = document.createRange();
+    range.selectNodeContents(input.lastElementChild!);
+    range.collapse(false);
+    const selection = window.getSelection()!;
+    selection.removeAllRanges();
+    selection.addRange(range);
+    document.dispatchEvent(new dom.window.Event('selectionchange'));
+  });
+  await act(async () => input.dispatchEvent(new Clipboard('追加')));
+  const edited = changes.at(-1)!;
+  expect(edited).toContain('graph TD\nA --> B');
+  expect(edited).toContain('[!NOTE]');
+  expect(edited).toContain('$x^2$');
+  expect(edited).toContain('\\frac{1}{2}');
+  expect(edited).toContain('[^a]: 注释');
+  expect(edited).toContain('末尾追加');
+});
+
 test('file picker keeps references separate from text, discards late selections and permits attachment-only send', async () => {
   let resolve!: (files: { name: string; uri: string }[]) => void,
     output: readonly { name: string; uri: string }[] = [],

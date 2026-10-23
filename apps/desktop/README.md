@@ -4,6 +4,14 @@
 
 ## Markdown 与附件输入
 
+消息内容通过[共享 Markdown renderer](../../packages/ui/README.md#markdown-消息内容)显示 Mermaid、语法高亮／diff、提示块、公式及消息内标题／脚注跳转。主消息、子详情与后台正文沿原 `NativeModelOutputMessage` 复用；本文不扩展 Web 或 TUI 的独立展示能力。公式语法已加入 Worker 的同一固定 parser，图表／KaTeX排版留在 renderer；纯Worker入口不引入DOM或可视化库，原CSP、Main IPC、完整正文核验与复制资格保持。
+
+2026-10-22，Windows x64／Bun1.4.3、`beabc9628` 加本次Markdown工作树：[内容浏览器夹具](test/markdown-content-browser-runner.fixture.ts)用生产Vite资产、原生产CSP和Chrome155.0.8059.85通过1280／390px，覆盖深浅主题、五类图表、未闭合围栏、错误后恢复、源码复制、脚注往返、读取暂停和会话缓存切回，未发起外部资源请求。实际逐步观察生成占位→图表、源码展开→切会话→恢复、错误→修正及主题变化，并修正默认阴影与小图放大；字体从本地资产加载。[纯Worker构建回归](test/native-markdown-build.test.ts)核新增公式树仍可在无document／window／Node的VM运行；组件与输入编辑证据归[UI owner](../../packages/ui/README.md#markdown-消息内容)。此为隔离生产组件验收，未取得本轮完整安装版Electron或其他平台资格；保留既有嵌套`@keyframes`编译提示。
+
+2026-10-23 补充 Windows x64／Electron44.3.0 实际窗口验证：同一工作树通过 `buildNativeDesktop` 构建普通 Main／preload／生产 renderer，`testDiagnostics:false`，连接真实配套 Service、独立 Profile 与本机兼容 SSE Provider；没有使用开发 HMR 页面或用户配置。由普通输入框发送一次请求，人工逐段观察10段输出：未闭合行内公式保留原文，补全后排版；块公式增量补全正常；Mermaid 未闭合围栏显示源码，闭合后经过绘制提示成为流程图／时序图；追加正文与表格没有重复图表，表头下边线与其他表格边线一致。手动上滚稳定后追加内容保持阅读位置，返回最新恢复跟随；错误图表回退源码，后续合法图表与公式正常显示。完成时运行指示消失、复制按钮出现、正文保持一份；源码展开后切换会话再返回保留展开与阅读位置，深浅主题均可读。正常退出并冷重开后，原图表、公式与完成状态读回，Provider 总请求仍为1；两次 Main 均退出0，准确所属 Service PID 已消失。临时复现入口为本机 `.cache/native-markdown-live.ts`，分段输入与进程记录保留于 `.cache/native-markdown-live-20261022/events.json`；本次不新增生产代码改动。范围仅为当前 Windows 隔离构建的上述实际操作，不代表正式安装包、远端模型、其他平台或所有流式分段组合；此前浏览器与组件回归证据继续按原范围适用。
+
+2026-10-23 主题色修正：用户指出流程图／时序图缺少主题色，确认原 adapter 将全部线条映射为正文色。现改为深浅主题各自的蓝色节点边框／箭头和青色生命线／辅助边框，继续透明底。`bun apps/desktop/test/markdown-content-browser-runner.fixture.ts` 在 Chrome155／1280与390px下通过；新增解码图像像素断言核对蓝色确实绘出、时序生命线有青色、背景主要透明及深浅切换，页面错误和外部请求为0。生命周期隔离回归1项／22断言、UI与Desktop typecheck、定向Biome通过。再用当前生产renderer、`testDiagnostics:false`、原独立Profile和真实Service构建Electron44.3.0窗口，冷读原消息并实际检查亮／暗流程图、时序图与主题切换：颜色更新，文字可读，阅读位置保持；切换后先保留旧图再异步替换，不承诺颜色与页面背景同帧变化。此增量只复验主题色，前述流式时序／冷读等证据按未变化范围复用，不据此扩大安装或平台资格。
+
 产品操作见[桌面手册](../../docs/handbook/clients/desktop/README.md#提示词与附件)。[共享 Composer](../../packages/ui/src/desktop/Composer.tsx)承载实时 Markdown 和 12px 横向附件卡片；`+` 只有“添加文件”，同一次系统多选允许混选图片与普通文件，按 MIME／已知图片扩展名自动分流。图片选择、粘贴与拖入共用用户 File 字节流程；普通文件由[沙箱 preload](electron/preload.ts)经 [Electron webUtils](https://www.electronjs.org/docs/latest/api/web-utils)从真实磁盘 File 取得路径，[URI 编码](src/input-file-reference.ts)保留中文、空格、百分号、查询／片段字符及 UNC，不读取普通文件正文；内存 File 没有路径时明确失败。旧 Main `input.files.pick` 已退出。两者由[窗口附件草稿](src/native-input-images.ts)按 Store/Session 独立保留、移除和冻结，受理后只清本次 ID；文件 URI 不改写草稿，随正式输入 `files` 元数据保存，历史与待发送卡片均独立于正文。选择器不读取普通文件正文，renderer 不能给 Main 任意读取路径。
 
 开发热更新后的旧 preload 可能缺少 `fileReferences`，旧 Main 也可能拒绝图片暂存方法。[窗口适配器](src/native-input-images.ts)把原 `invalid_native_request/native_host_operation_unavailable` 识别为附件接口尚未加载；缺少文件路径解析 port 时以有限 `file_picker_restart_required` 错误交给共享 Composer，图片暂存直接保留明确的完全退出／重新启动提示。普通选择失败仍可重试，不展示原错误细节、不清草稿或重发。取消选择返回空列表。[窗口回归](test/isolated/native-input-images-dom.test.tsx)与[编辑器回归](../../packages/ui/test/isolated/prompt-editor.test.tsx)分别核旧协议、普通失败、取消和原草稿保持；主进程仍按原开发边界显式重新启动。
@@ -635,7 +643,7 @@ Main 的 `state` 与 `messages` 只读请求不等待父元数据刷新结束。
 
 实际多根窗口还发现滚动后立即离开会保留旧消息DOM：GC后脱离document的节点500→2217，heap snapshot定位13棵Conversation经Document动画controller→RAF closure→旧viewport持有。原Radix ScrollAreaThumb卸载遗漏持续RAF清理；消息区现用局部原生滚动viewport，原阅读位置／自动跟随／跳最新／细滚动条保持，资源归属和100轮立即卸载回归归[UI owner](../../packages/ui/README.md#完整模型正文展示)。修复前的GET已排空与单一SSE并不能证明DOM释放，两项证据分别保留。
 
-活动大正文持续改变时，纯全文key缓存仍会miss。多根长正文CPU profile曾在开发React运行时复现99次约60ms长任务，固定parser的micromark tokenizer／调用栈占主要时间；不能用Promise延后同一主线程工作解释为消除阻塞。[Native Markdown准备](src/native-markdown.ts)现将至少32768个UTF-16单位的已验证Model正文交给[静态Worker](src/native-markdown-worker.ts)，只运行UI公开的固定remark／GFM纯解析。一个active计算、最多8个pending、排队源文本估算16MiB，超限明确 `native_markdown_busy`；活动单篇仍完整解析。准确任务ID／原文和AbortSignal隔离迟到结果，取消当前计算终止对应Worker，不取消业务。
+活动大正文持续改变时，纯全文key缓存仍会miss。多根长正文CPU profile曾在开发React运行时复现99次约60ms长任务，固定parser的micromark tokenizer／调用栈占主要时间；不能用Promise延后同一主线程工作解释为消除阻塞。[Native Markdown准备](src/native-markdown.ts)现将至少32768个UTF-16单位的已验证Model正文交给[静态Worker](src/native-markdown-worker.ts)，只运行UI公开的固定remark／GFM／公式纯解析。一个active计算、最多8个pending、排队源文本估算16MiB，超限明确 `native_markdown_busy`；活动单篇仍完整解析。准确任务ID／原文和AbortSignal隔离迟到结果，取消当前计算终止对应Worker，不取消业务。
 
 child每批完整facts按序准备所有正文，缓存重进也先准备，再发布新formatted内容；旧已验证正文保留到替换完成。每批只注册一个owner abort listener，新批提交后立即释放旧批；重用稳定snapshot时清理核owner身份，inactive LRU不强持超预算AST。当前展示与正在准备的新批可短时各持一份纯树，不能将其算成全局语法缓存8MiB的进程内存上限。手动Model全文的有限HTTP／IPC在CPU准备前已关闭，成功展示的owner直到关闭／卸载才释放，验证失败立即清理。[准备回归](test/native-markdown.test.ts)核队列、超载、100次revision、共享前缀、取消及迟到身份；[正文回归](../../packages/ui/test/model-output.test.tsx)核成功展示与拒绝释放。最终真实窗口数据须同时说明React构建环境，不把旧开发运行时与production差异全部归因Worker。
 

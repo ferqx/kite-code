@@ -32,7 +32,7 @@ test('the actual browser Worker bundle decodes full GFM without document, window
   };
   runInNewContext(script.code, { self });
   const text =
-    '# &copy; &NotEqualTilde; &notit;🙂\n\n' +
+    '# &copy; &NotEqualTilde; &notit;🙂\n\n$x^2$\n\n$$\n\\frac{a}{b}\n$$\n\n' +
     '中文🙂 '.repeat(10000) +
     '\n\n[link][late]\n\n[late]: https://example.com/?a=1&amp;b=2\n\n|a|\n|-|\n|~~b~~|';
   self.onmessage!({ data: { id: 7, text } });

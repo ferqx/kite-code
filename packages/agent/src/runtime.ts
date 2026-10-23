@@ -306,6 +306,42 @@ export interface ChildAgentConfiguration extends RunConfiguration {
   readonly inputSchema?: JsonSchema;
 }
 
+/** Compare only the renamed host-owned checker field; retain the original persisted proof. */
+function matchesRecoveryConfiguration(current: Json, saved: Json): boolean {
+  const object = (value: Json): value is Record<string, Json> =>
+    value !== null && typeof value === 'object' && !Array.isArray(value);
+  if (!object(current) || !object(saved)) return canonicalJson(current) === canonicalJson(saved);
+  const actual = current.snapshot;
+  const original = saved.snapshot;
+  if (!actual || !original || !object(actual) || !object(original))
+    return canonicalJson(current) === canonicalJson(saved);
+  if (
+    (Object.hasOwn(actual, 'authorizationReview') && Object.hasOwn(actual, 'authorizationCheck')) ||
+    (Object.hasOwn(original, 'authorizationReview') &&
+      Object.hasOwn(original, 'authorizationCheck'))
+  )
+    return false;
+  if (!Object.hasOwn(original, 'authorizationReview'))
+    return canonicalJson(current) === canonicalJson(saved);
+  const legacy = original.authorizationReview;
+  if (
+    legacy !== null &&
+    (!legacy ||
+      !object(legacy) ||
+      Object.keys(legacy).sort().join(',') !== 'id,modelId,version' ||
+      !['id', 'modelId', 'version'].every((key) => typeof legacy[key] === 'string' && legacy[key]))
+  )
+    return false;
+  const { authorizationReview, ...rest } = original;
+  return (
+    canonicalJson(current) ===
+    canonicalJson({
+      ...saved,
+      snapshot: { ...rest, authorizationCheck: authorizationReview! },
+    })
+  );
+}
+
 function sealSources(sources: ContextSources | undefined): ContextSources | undefined {
   if (!sources) return undefined;
   const capture = sources.capture.bind(sources);
@@ -3815,7 +3851,7 @@ export class AgentRuntime {
           catalogue.extensions,
           resolved?.permissions,
         );
-        if (canonicalJson(configuration) !== canonicalJson(state.run.configuration))
+        if (!matchesRecoveryConfiguration(configuration, state.run.configuration))
           throw new AgentError('run_configuration_mismatch');
         const binding: RunBinding = {
           model,
@@ -3903,7 +3939,7 @@ export class AgentRuntime {
         const committed = await this.options.store.commitRunResume({
           expectedStoreId: input.expectedStoreId,
           lease,
-          expectedConfiguration: configuration,
+          expectedConfiguration: state.run.configuration,
           checkpoint,
           childConfigurations: recoveredChildren.map(({ child, agent }) => ({
             executionId: child.carrier.id,

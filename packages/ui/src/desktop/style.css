@@ -1,3 +1,4 @@
+@import "katex/dist/katex.min.css";
 @reference "shadcn/tailwind.css";
 
 @layer base {
@@ -63,6 +64,8 @@ body {
   --primary: #252525;
   --primary-hover: #414141;
   --primary-foreground: #fff;
+  --diagram-accent: #4b68b1;
+  --diagram-secondary: #478079;
   --destructive: #a13e3e;
   --success: #287a4f;
   --attention-background: #f5e6c8;
@@ -1942,6 +1945,8 @@ body {
   --primary: #ededed;
   --primary-hover: #cccccc;
   --primary-foreground: #1c1c1c;
+  --diagram-accent: #9aafe6;
+  --diagram-secondary: #85b9b2;
   --destructive: #e0a198;
   --success: #82c9a0;
   --attention-background: #4b3518;
@@ -2214,10 +2219,10 @@ body {
 }
 
 .kite-client .typeset-chat {
-  --markdown-surface: color-mix(in srgb, var(--foreground) 3%, var(--card));
-  --markdown-inline-surface: color-mix(in srgb, var(--foreground) 5%, var(--card));
+  --markdown-rule: color-mix(in srgb, var(--foreground) 24%, transparent);
   --markdown-block-gap: var(--conversation-block-gap);
   min-width: 0;
+  color: var(--foreground);
   font-size: var(--conversation-text-size);
   line-height: 1.8;
   overflow-wrap: anywhere;
@@ -2310,20 +2315,21 @@ body {
 }
 .kite-client .typeset-chat blockquote {
   margin-inline: 0;
-  padding: 0.65em 1em;
-  border-inline-start: 3px solid var(--border);
-  border-radius: var(--radius);
-  background: var(--markdown-surface);
+  padding: 0.15em 1em;
+  border-inline-start: 2px solid var(--markdown-rule);
+  border-radius: 0;
+  background: transparent;
   color: var(--muted-foreground);
 }
 .kite-client .typeset-chat blockquote > * + * {
   margin-block-start: 0.7em;
 }
 .kite-client .typeset-chat :not(pre) > code {
-  padding: 0.12em 0.35em;
-  border: 1px solid color-mix(in srgb, var(--foreground) 6%, transparent);
-  border-radius: var(--radius);
-  background: var(--markdown-inline-surface);
+  padding: 0.05em 0.2em;
+  border: 0;
+  border-block-end: 1px solid var(--markdown-rule);
+  border-radius: 0;
+  background: transparent;
   color: inherit;
   font-family: var(--typeset-font-mono, ui-monospace), Consolas, monospace;
   font-size: 0.875em;
@@ -2338,7 +2344,7 @@ body {
   overflow: auto;
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  background: var(--markdown-surface);
+  background: transparent;
   color: var(--foreground);
   font-family: var(--typeset-font-mono, ui-monospace), Consolas, monospace;
   font-size: 0.875em;
@@ -2359,11 +2365,11 @@ body {
   white-space: inherit;
   overflow-wrap: inherit;
 }
-/* Code Block owns its surface and header; the PRE keeps the original reading limits. */
+/* Outline and header rule define the block; PRE keeps the original reading limits. */
 .kite-client .typeset-chat .markdown-code-block {
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  background: var(--markdown-surface);
+  background: transparent;
   color: var(--foreground);
   font-size: inherit;
 }
@@ -2412,13 +2418,20 @@ body {
   text-align: start;
   vertical-align: top;
 }
+.kite-client .typeset-chat :where(th, td) + :where(th, td) {
+  border-inline-start: 1px solid var(--border);
+}
 .kite-client .typeset-chat thead th {
-  background: var(--markdown-surface);
+  border-block-end: 1px solid var(--border);
+  background: transparent;
   font-weight: 600;
   white-space: nowrap;
 }
 .kite-client .typeset-chat :where(tbody, tfoot) :where(th, td) {
-  border-block-start: 1px solid var(--border);
+  border-block-end: 1px solid var(--border);
+}
+.kite-client .typeset-chat table > :last-child > tr:last-child > :where(th, td) {
+  border-block-end: 0;
 }
 .kite-client .typeset-chat :where(a, .file-link) {
   text-decoration-color: color-mix(in srgb, currentColor 40%, transparent);
@@ -2444,6 +2457,88 @@ body {
 .kite-client .typeset-chat :where(blockquote, th, td) > :first-child,
 .kite-client .typeset-chat li > p:first-child {
   margin-block-start: 0;
+}
+
+.kite-client .typeset-chat .markdown-alert {
+  color: inherit;
+}
+.kite-client .typeset-chat .markdown-alert-title {
+  font-size: 0.9em;
+  font-weight: 600;
+}
+.kite-client .typeset-chat .markdown-alert[data-alert="warning"],
+.kite-client .typeset-chat .markdown-alert[data-alert="caution"] {
+  border-inline-start-color: var(--destructive);
+}
+.kite-client .markdown-source-toggle {
+  padding: 2px 6px;
+  border: 0;
+  background: transparent;
+  color: var(--muted-foreground);
+  font-size: 12px;
+  text-underline-offset: 3px;
+}
+.kite-client .markdown-source-toggle:hover,
+.kite-client .markdown-source-toggle[aria-pressed="true"] {
+  color: var(--foreground);
+  text-decoration: underline;
+}
+.kite-client .markdown-source-toggle:focus-visible {
+  outline: 1px solid var(--ring);
+  outline-offset: 2px;
+}
+.kite-client .typeset-chat .markdown-diagram-status {
+  padding: 10px 16px 0;
+  color: var(--muted-foreground);
+  font-size: 12px;
+}
+.kite-client .markdown-diagram-scroll {
+  padding: 20px;
+  max-height: 520px;
+  overflow: auto;
+}
+.kite-client .markdown-diagram-scroll img {
+  display: block;
+  width: auto;
+  height: auto;
+  max-width: none;
+  margin-inline: auto;
+}
+.kite-client .typeset-chat .katex-display {
+  margin: 0;
+  padding-block: 0.5em;
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+.kite-client .typeset-chat .katex {
+  font-size: 1.08em;
+  text-align: initial;
+}
+.kite-client .typeset-chat .katex-error {
+  font-family: var(--typeset-font-mono, monospace);
+}
+.kite-client .typeset-chat .hljs-comment,
+.kite-client .typeset-chat .hljs-quote {
+  color: var(--muted-foreground);
+}
+.kite-client .typeset-chat .hljs-keyword,
+.kite-client .typeset-chat .hljs-selector-tag,
+.kite-client .typeset-chat .hljs-type {
+  color: light-dark(#713ca4, #cba2ee);
+}
+.kite-client .typeset-chat .hljs-string,
+.kite-client .typeset-chat .hljs-addition {
+  color: light-dark(#236544, #92c9a2);
+}
+.kite-client .typeset-chat .hljs-title,
+.kite-client .typeset-chat .hljs-built_in,
+.kite-client .typeset-chat .hljs-attr {
+  color: light-dark(#275e90, #9bbfe0);
+}
+.kite-client .typeset-chat .hljs-number,
+.kite-client .typeset-chat .hljs-literal,
+.kite-client .typeset-chat .hljs-deletion {
+  color: light-dark(#a33e31, #e4a095);
 }
 
 .kite-client .history-panel {
@@ -4520,14 +4615,15 @@ body {
   display: block;
   margin: 4px 0;
   padding: 6px 8px;
-  background: var(--accent);
+  border: 1px solid var(--border);
+  background: transparent;
   border-radius: var(--radius);
   font: 14px / 20px var(--font-geist-mono, monospace);
 }
 .kite-client .prompt-inline-code {
   padding: 1px 3px;
-  border-radius: var(--radius);
-  background: var(--accent);
+  border-block-end: 1px solid color-mix(in srgb, var(--foreground) 24%, transparent);
+  background: transparent;
   font: 14px / 20px var(--font-geist-mono, monospace);
 }
 .kite-client ul.prompt-list {
