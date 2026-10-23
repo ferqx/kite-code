@@ -19,7 +19,7 @@ const labels: Record<string, readonly [readonly string[], string]> = {
   'files.write': [['2'], '写入'],
   'files.edit': [['2'], '修改'],
   'files.glob': [['2'], '查找文件'],
-  'files.search': [['2'], '搜索内容'],
+  'files.search': [['2', '3'], '搜索内容'],
   'files.list': [['1'], '列出目录'],
   'shell.launch': [['1'], '启动后台 Shell'],
   'shell.read': [['1'], '读取后台 Shell'],
@@ -53,6 +53,7 @@ export function desktopToolPresentation(
           {
             'files.read': 'read_file',
             'files.read_path': 'read_file',
+            'files.search': 'search_content',
             'files.write': 'write_file',
             'files.edit': 'edit_file',
             'task.spawn': 'spawn_agent',

@@ -393,6 +393,46 @@ test('Native exploration starts as one collapsed activity and retains it across 
   }
 });
 
+test('Native search v3 and reads retain one exploration node through settling and delayed receipt facts', async () => {
+  const f = fixture();
+  try {
+    await f.render();
+    await f.start([
+      tool(1, {
+        definitionId: 'files.search',
+        definitionVersion: '3',
+        toolInput: { path: 'src', text: 'needle' },
+      }),
+      tool(2),
+    ]);
+    collapsed(f.host);
+    const summary = f.host.querySelector('button.tool-activity-summary');
+    expect(summary?.textContent).toContain('正在搜索内容');
+    expect(f.host.textContent).not.toContain('files.search · 3');
+    await f.toggle();
+    expect(f.host.querySelector('.tool-activity-steps')?.children).toHaveLength(2);
+    expect(f.host.textContent).toContain('搜索内容');
+    for (const index of [1, 2]) {
+      await f.settleWithoutReceipt(index);
+      expect(f.host.querySelector('button.tool-activity-summary')).toBe(summary);
+      expect(f.host.querySelector('.tool-activity-steps')?.children).toHaveLength(2);
+      await f.complete(index);
+      expect(f.host.querySelector('button.tool-activity-summary')).toBe(summary);
+      expect(f.host.querySelector('.tool-activity-steps')?.children).toHaveLength(2);
+      await f.flush();
+      expect(f.host.querySelector('button.tool-activity-summary')).toBe(summary);
+      expect(summary?.getAttribute('aria-expanded')).toBe('true');
+      expect(topActivities(f.host)).toHaveLength(1);
+      expect(f.host.textContent).not.toContain(raw);
+    }
+    expect(f.host.querySelectorAll('.response-status')).toHaveLength(1);
+    expect(summary?.textContent).toContain('读取 1 次');
+    expect(summary?.textContent).toContain('搜索 1 次');
+  } finally {
+    await f.close();
+  }
+});
+
 test('Native owner reconciliation stops live tool activity while retaining confirmed receipts and original execution facts', async () => {
   const f = fixture();
   try {
@@ -553,13 +593,13 @@ test('Native exploration does not aggregate another Run, foreign Store, or unkno
         tool(2),
         tool(3, { runId: 'other-run' }),
         tool(4, { originStoreId: 'foreign-store' }),
-        tool(5, { definitionVersion: '99' }),
+        tool(5, { definitionId: 'files.search', definitionVersion: '99' }),
       ],
       [{ ...backgroundItem().run!, id: 'other-run' }],
     );
     expect(f.host.querySelectorAll('.conversation .tool-activity')).toHaveLength(3);
     expect(f.host.textContent).not.toContain('foreign-store');
-    expect(f.host.textContent).toContain('files.read · 99');
+    expect(f.host.textContent).toContain('files.search · 99');
     expect(f.host.querySelectorAll('.tool-activity-steps')).toHaveLength(0);
     await f.toggle();
     expect(f.host.querySelector('.tool-activity-steps')?.children).toHaveLength(2);

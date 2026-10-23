@@ -1875,7 +1875,7 @@ test('a completed child uses the shared collapsed process, concise exploration a
       tools: ['a', 'b'].map((suffix) => ({
         messageId: `child-read-${suffix}`,
         executionId: `child-tool-${suffix}`,
-        definitionId: 'files.read',
+        definitionId: suffix === 'a' ? 'files.read' : 'files.search',
         definitionVersion: '3',
         status: 'succeeded',
         resultRevision: '1',
@@ -1914,7 +1914,9 @@ test('a completed child uses the shared collapsed process, concise exploration a
     expect(f.host.textContent).toContain('Child process explanation');
     const exploration = child.querySelector<HTMLButtonElement>('button.tool-activity-summary')!;
     expect(exploration).not.toBeNull();
-    expect(exploration.textContent).toContain('2');
+    expect(exploration.textContent).toContain('读取 1 次');
+    expect(exploration.textContent).toContain('搜索 1 次');
+    expect(child.textContent).not.toContain('files.search · 3');
     await act(async () => exploration.click());
     expect(child.querySelectorAll('.tool-activity-steps .tool-activity-step')).toHaveLength(2);
     expect(f.host.textContent).toContain('child-a.txt');

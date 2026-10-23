@@ -298,8 +298,8 @@ try {
       `${label}: incomplete human history`,
     );
     assert.ok(
-      initial.messages.some((message) => message.text === '读取 2 次'),
-      `${label}: original file reads were not aggregated`,
+      initial.messages.some((message) => message.text === '读取 1 次 · 搜索 1 次'),
+      `${label}: search v3 and file reads were not aggregated`,
     );
     for (let index = 0; index < variant.turns; index++)
       assert.ok(

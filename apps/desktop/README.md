@@ -356,6 +356,10 @@ Main 仅在原 Message／Execution 身份和结果完全匹配、原状态 faile
 
 已知版本的读取、列目录和搜索在当前 Run 的执行阶段即使用同一探索分类，不等回执到齐才聚合；Execution 已结束而历史回执尚未到达时保留该工具项。回执按准确当前 Store／Session／Run／Execution 可先复用 View 的展示分类，结果状态仍等原 metadata 核验。探索块以 Run 和可读消息边界保持分组身份，回执逐项或乱序接管不更换聚合的阅读开关；新阶段的聚合独立默认收起。元数据未到的项保留在原组内，展开聚合只显示工具项，逐项主动展开才挂载该项原记录。未知版本的原始结果不进入收起标题，真实“结果未知”等状态仍显示。[运行期聚合 DOM](test/isolated/native-live-tool-aggregation-dom.test.tsx)覆盖这些交接、手动阅读和身份隔离场景。
 
+2026-10-23，搜索定义 v3 继续使用已知探索展示；历史 v2 保留同样展示，未知版本仍保守显示原定义，不并入探索。准确已知搜索映射为共享 `search_content`，使搜索／读取聚合显示各自次数。新增运行期回归核搜索＋读取从活动、settling 无回执、逐项回执和延迟 metadata 接管始终保同一聚合 DOM 与手动展开；主会话与子详情沿同一投影，后者保留父草稿和只读范围。相关 live aggregation／transcript／navigation 整文件共56项1333断言通过，Desktop typecheck与定向Biome通过。
+
+同次 macOS arm64／Chrome155.0.8059.86 的[隔离历史浏览器夹具](test/native-history-presentation-browser-runner.fixture.ts)改用真实 v3 搜索＋读取，六组覆盖两种metadata到达顺序、初次／切换、深浅主题、4／40轮及缓存返回。逐阶段截图与RAF帧核首次正文展示后消息因果顺序、DOM、几何、滚动／输入区位置保持，搜索聚合未闪回generic；六组均通过、页面错误0，证据在本机 `.cache/native-history-presentation-o4dtrD/report.json` 与帧目录。人工检查延迟读取占位和亮／暗最终聚合，未发现重复或跳位。本次仅为隔离生产组件和受控桥接验证，不代表完整安装版、真实模型、其他平台或所有实时推送分段资格；原嵌套 `@keyframes` CSS编译提示保留。
+
 [Main 与有限 IPC](test/native-tool-messages.test.ts)、[正式 caller 路由](test/native-caller.test.ts)、[原工具 DOM](test/isolated/native-tool-messages-dom.test.tsx)和原[源码外窗口](test/isolated/native-bundle.test.ts)分别核关联、作用域、原交互和真实执行／Files读取失败及冷读；准确输入和结果归[本轮进度](../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-08原工具过程与结果阅读)。轮次阅读、聚合与已知 Ask 回执的后续接入见下一节；自动审批历史、完整 PC、安装版全路径及其他平台资格仍未闭合。取舍见[工具消息观察决定](../../.agents/notes/implemented/architecture/2026-10-08-native-tool-message-observations.md)。
 
 原Native整窗口夹具只对准确尚未处理的pending卡要求“等待人工审批”，同一write行必须在原loop剩余期限内完成该文案后再核原断言；已提交的同一卡仍可见时不要求工具倒退到pending。此前完整默认暴露该重复／提前观察的可达错误，原红未保存失败时完整text/status，不能称唯一现场因果。生产renderer／Main／审批行为保持，原96条完整assert及顺序、whole文件bytes和10／45／120秒预算均保留；原三driver整文件1pass／13Bun断言／82.859秒，正常退出、双锁、冷正文和启动诊断均通过，具体证据与新完整默认收束归[当前进度](../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-11macos-mcp-失败建立与完整连接恢复)。
@@ -398,7 +402,7 @@ Native 的侧栏打开入口对当前父会话及同一在途选择去重，重�
 
 只有已确认 completed 且非活动 Run 的最后一条完整、支持格式、无工具调用且后面无工具结果的助手消息才成为最终回复。原起止时间与终态供原组件显示耗时／失败／停止；无法核对时保原消息，活动视图失效显示“上次确认状态”，不补造成功或计时。最终回复资格与正式 Web 共用纯 [completeRunReplies](../../packages/ui/src/run-reply-copy.ts)；Native 显式选择 `copyScope=final`，保[桌面手册](../../docs/handbook/clients/desktop/README.md)只复制完整最终回复、不含同轮工具前说明的合同，Web 整轮范围不扩到 Native。大正文预览的 `copyText=null`；仅最终段原 reader 已验证并显示的准确正文启用“复制本轮Agent回复”，关闭正文、换消息身份或换scope即撤销。本地 Map 只持有当前已显示内容，不写持久日志或格式。
 
-同一准确 Run 中相邻、已核实的 Files read2/3、glob/search2、list1 交原组件视觉聚合，正文／独立工具仍构成边界。每项文件按钮保自己的 Message 和原 receipt 观察 ID，经 Main 原文件端口核当前项目、普通目标与 frame；分组不共享文件权限。当前人工审批文字只来自同一当前 Store／活动 Run／Execution 的唯一真实 pending Interaction，实际回答仍沿原 InteractionCard 和公共提交链。
+同一准确 Run 中相邻、已核实的 Files read2/3/4、glob2、search2/3、list1 交原组件视觉聚合，正文／独立工具仍构成边界。每项文件按钮保自己的 Message 和原 receipt 观察 ID，经 Main 原文件端口核当前项目、普通目标与 frame；分组不共享文件权限。当前人工审批文字只来自同一当前 Store／活动 Run／Execution 的唯一真实 pending Interaction，实际回答仍沿原 InteractionCard 和公共提交链。
 
 默认 `ask_user` v1 的历史回执沿原成功 Execution／准确结果读取；唯一原 Model call 提供 q1–q3 的实际问题，回答保原人类选项标签与自由文本。`{cancelled:true}` 显示“已取消回答”，工具仍按实际 succeeded，Run 可继续；这不是停止任务。缺原请求不补问题，未来版本只保原文。原审批的当前接入见下一节；原记录另由[交互历史](#原交互记录只读历史)读取，所有封存／恢复组合及完整 PC 核对尚未关闭。
 

@@ -1830,3 +1830,26 @@ test('paged file read versions retain known lightweight exploration presentation
     }
   }
 });
+
+test('search v2/v3 keep exact exploration presentation while unknown versions remain generic', () => {
+  for (const definitionVersion of ['2', '3', '99']) {
+    const receipt = {
+      ...message('search-version', 'tool', '1', 'original search result'),
+      sourceIds: ['e-search-version'],
+    };
+    const projection = desktopTranscript({
+      storeId: 'store',
+      sessionId: 's',
+      runs: [run()],
+      messages: [receipt],
+      tools: [{ ...tool('search-version'), definitionId: 'files.search', definitionVersion }],
+    });
+    expect(projection.messages[0]).toMatchObject(
+      definitionVersion === '99'
+        ? { title: 'files.search · 99', toolName: undefined }
+        : { title: '搜索内容', toolName: 'search_content', presentation: 'exploration' },
+    );
+    if (definitionVersion === '99')
+      expect(projection.messages[0]?.presentation).not.toBe('exploration');
+  }
+});
