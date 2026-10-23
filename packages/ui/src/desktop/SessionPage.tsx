@@ -135,6 +135,8 @@ export interface SessionPageProps {
 export function SessionPage({ messages, fileChanges, ...props }: SessionPageProps) {
   // Keep evictable history outside props captured by persistent window listeners.
   const composerInput = useRef<PromptEditorHandle>(null);
+  const headerElement = useRef<HTMLElement>(null);
+  const footerElement = useRef<HTMLElement>(null);
   const focusComposerAfterCommit = useCallback((moveCaretToEnd = false) => {
     const focus = () => {
       const input = composerInput.current;
@@ -496,7 +498,11 @@ export function SessionPage({ messages, fileChanges, ...props }: SessionPageProp
       <aside className="sidebar" aria-label="空间与会话">
         <Sidebar
           workspaces={props.workspaces}
-          selected={props.selected}
+          selected={
+            props.newConversation || props.workbench || props.scheduledTasks
+              ? undefined
+              : props.selected
+          }
           busy={props.busy}
           mutationBusy={props.mutationBusy}
           actions={{
@@ -516,7 +522,13 @@ export function SessionPage({ messages, fileChanges, ...props }: SessionPageProp
           }}
           connectionLabel={props.connectionLabel}
           activePage={
-            props.scheduledTasks ? 'scheduledTasks' : props.workbench ? 'workbench' : 'conversation'
+            props.scheduledTasks
+              ? 'scheduledTasks'
+              : props.workbench
+                ? 'workbench'
+                : props.newConversation
+                  ? 'newConversation'
+                  : 'conversation'
           }
           onExpand={props.onExpand}
           defaultExpanded={props.defaultExpanded}
@@ -566,6 +578,34 @@ export function SessionPage({ messages, fileChanges, ...props }: SessionPageProp
   else if (props.detailPanel || props.fileChangesContent) retainedRightSidebarPanel.current = null;
   const historyVisible = !props.scheduledTasks && !props.workbench && !props.diagnosticView;
   const welcoming = !!(props.newConversation && props.composer && !messages.length);
+  const headerOverlay =
+    historyVisible && !welcoming && !props.historyError && !props.beforeConversation;
+  useLayoutEffect(() => {
+    const header = headerElement.current;
+    const panel = header?.parentElement;
+    const footer = historyVisible ? footerElement.current : null;
+    if (!header || !panel) return;
+    const measure = () => {
+      const height = header.getBoundingClientRect().height;
+      if (height > 0) panel.style.setProperty('--session-header-height', `${height}px`);
+      panel.style.setProperty(
+        '--conversation-footer-height',
+        `${footer?.getBoundingClientRect().height ?? 0}px`,
+      );
+      const viewport = panel.querySelector<HTMLElement>('.conversation-viewport');
+      if (viewport)
+        panel.style.setProperty(
+          '--conversation-scrollbar-gutter',
+          `${viewport.offsetWidth - viewport.clientWidth}px`,
+        );
+    };
+    measure();
+    if (typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(measure);
+    observer.observe(header, { box: 'border-box' });
+    if (footer) observer.observe(footer, { box: 'border-box' });
+    return () => observer.disconnect();
+  }, [historyVisible]);
   const keepAlive = !!props.conversationCache && typeof document !== 'undefined';
   const conversation = (
     <Conversation
@@ -696,9 +736,13 @@ export function SessionPage({ messages, fileChanges, ...props }: SessionPageProp
               }}
             >
               <ResizablePanel id="content" minSize="360px" style={{ overflow: 'hidden' }}>
-                <div className="client-main-panel">
+                <div className="client-main-panel" data-header-overlay={headerOverlay || undefined}>
                   {/* biome-ignore lint/a11y/noStaticElementInteractions: Desktop uses the header surface for native window dragging. */}
-                  <header className="session-header" onMouseDown={handleHeaderMouseDown}>
+                  <header
+                    ref={headerElement}
+                    className="session-header"
+                    onMouseDown={handleHeaderMouseDown}
+                  >
                     <div className="session-heading">
                       <div
                         className="session-sidebar-toggle"
@@ -839,7 +883,7 @@ export function SessionPage({ messages, fileChanges, ...props }: SessionPageProp
                           )}
                         </section>
                         {!props.workbench && !props.scheduledTasks && (
-                          <footer className="conversation-footer">
+                          <footer ref={footerElement} className="conversation-footer">
                             <div className="bottom-controls">
                               {props.statusNotice}
                               {props.interaction && (

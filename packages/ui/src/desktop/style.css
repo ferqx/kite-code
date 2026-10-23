@@ -451,6 +451,7 @@ body {
     background: transparent;
     color: var(--navigation-foreground);
   }
+  .primary-navigation .button.selected,
   .primary-navigation .button:hover:not(:disabled) {
     background: var(--control-hover);
   }
@@ -527,6 +528,7 @@ body {
     background: transparent;
     border-radius: var(--button-radius);
   }
+  .session-row.selected,
   .session-row:hover:not(:disabled) {
     background: var(--control-hover);
   }
@@ -726,6 +728,15 @@ body {
     padding: 24px 28px 16px;
     overflow-anchor: none;
     scrollbar-gutter: stable;
+  }
+  .conversation > [data-slot="scroll-area-scrollbar"] {
+    width: 10px;
+    z-index: 3;
+    -webkit-app-region: no-drag;
+  }
+  .conversation-viewport[data-radix-scroll-area-viewport] {
+    scrollbar-gutter: auto;
+    border-right: 10px solid transparent;
   }
   .conversation-viewport > div {
     display: block;
@@ -2618,6 +2629,57 @@ body {
   min-height: 0;
 }
 
+/* Empty React notice fragments must not disable the full-height reading surface. */
+.kite-client .client-main-panel[data-header-overlay]:has(> main > .session-body:first-child) {
+  isolation: isolate;
+  > .session-header {
+    position: relative;
+    z-index: 1;
+    background: color-mix(in srgb, var(--page-background) 85%, transparent);
+    backdrop-filter: blur(12px);
+  }
+  .conversation-container {
+    isolation: auto;
+  }
+  .conversation {
+    z-index: auto;
+  }
+  .conversation > [data-slot="scroll-area-scrollbar"][data-orientation="vertical"] {
+    margin-top: var(--session-header-height, var(--app-header-height));
+    height: calc(100% - var(--session-header-height, var(--app-header-height)));
+  }
+  .history-panel {
+    margin-top: calc(-1 * var(--session-header-height, var(--app-header-height)));
+  }
+  .conversation-viewport {
+    position: relative;
+    z-index: 0;
+    padding-top: calc(24px + var(--session-header-height, var(--app-header-height)));
+    padding-bottom: calc(16px + var(--conversation-footer-height, 0px));
+    scroll-padding-top: var(--session-header-height, var(--app-header-height));
+    scroll-padding-bottom: var(--conversation-footer-height, 0px);
+  }
+  .conversation-footer {
+    position: absolute;
+    z-index: 1;
+    inset: auto var(--conversation-scrollbar-gutter, 0px) 0 0;
+    background: linear-gradient(to bottom, transparent, var(--page-background) 16px);
+    pointer-events: none;
+  }
+  .conversation-footer > .bottom-controls {
+    pointer-events: auto;
+  }
+  .conversation-jump {
+    bottom: var(--conversation-footer-height, 0px);
+    height: auto;
+  }
+  @media (max-width: 600px) {
+    .conversation-viewport {
+      padding-top: var(--session-header-height, var(--app-header-height));
+    }
+  }
+}
+
 .kite-client .session-body {
   display: flex;
   flex: 1;
@@ -2728,6 +2790,11 @@ body {
   flex: 1;
   flex-direction: column;
 }
+.kite-client .session-header,
+.kite-client .right-sidebar-heading {
+  box-shadow: inset 0 -1px var(--border);
+}
+
 .kite-client .right-sidebar-heading,
 .kite-client .settings-section-heading {
   display: flex;
@@ -2865,7 +2932,6 @@ body {
 .kite-client .agent-turn-summary:active:not(:disabled),
 .kite-client .agent-turn-summary[aria-expanded="true"] {
   background-color: transparent;
-  color: var(--foreground);
 }
 .kite-client .agent-turn-summary-static,
 .kite-client .agent-turn-summary-static:hover {
@@ -2876,6 +2942,10 @@ body {
 }
 .kite-client .agent-turn-status-label {
   font-weight: 400;
+}
+.kite-client .agent-turn-summary:where(:not(:disabled)) > .agent-turn-status-label:hover,
+.kite-client .agent-turn-summary:focus-visible > .agent-turn-status-label {
+  color: var(--foreground);
 }
 .kite-client .agent-turn[data-turn-status="failed"] .agent-turn-status-label,
 .kite-client .agent-turn[data-turn-status="cancelled"] .agent-turn-status-label,

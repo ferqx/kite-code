@@ -115,6 +115,7 @@
     "typescript": "^5.9.3"
   },
   "patchedDependencies": {
-    "ink-virtual-list@0.2.3": "patches/ink-virtual-list@0.2.3.patch"
+    "ink-virtual-list@0.2.3": "patches/ink-virtual-list@0.2.3.patch",
+    "@radix-ui/react-scroll-area@1.2.18": "patches/@radix-ui%2Freact-scroll-area@1.2.18.patch"
   }
 }

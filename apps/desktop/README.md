@@ -208,7 +208,7 @@ Windows Mica 的会话 `.client-content-frame` 默认保留四周6px外边距；
 
 Windows `.sidebar-header` 的左／右内边距分别为16／10px，使 Kite 标题与主要导航、空间图标的左边缘对齐。桌面共用收展按钮的展开位置消费同一 `--sidebar-header-end-padding`，收起位置消费标题起始内边距；Mica／Vibrancy 加上内容的顶部留白，Mica 收起位置另计6px左留白，macOS 收起位置避让原窗口按钮区。按钮位于共享面板边界的零宽轨道，不受导航200px最小内容宽度的裁切，窗口拖动排除仍由 `no-drag` 保持。
 
-玻璃导航的 `.sidebar-header` 以同一 `--native-panel-inset` 设置顶部外边距，品牌、侧栏按钮与内缩后的会话标题／右侧操作共用垂直中心；Windows Mica 为6px，macOS 为0px。2026-10-19 Windows x64／Electron 44.3.0 的隔离窗口加载实际 SessionPage、NativeWindowFrame 和编译样式，以平台／材质标记核深浅共8组几何：Windows Mica 的按钮及标题中心偏差由6px降为0（浮点误差小于0.001px），Windows／Linux实色与macOS Vibrancy原对齐保持。此项是浏览器几何证据，不补充其他平台的原生材质最终合成资格。
+玻璃导航的 `.sidebar-header` 以同一 `--native-panel-inset` 设置顶部外边距，Windows Mica 为6px，macOS 为0px。Windows 标题行取消共享52px最小高度，由品牌内容、顶部12px和底部2px内边距撑开，主导航顶部外边距沿共享8px；品牌、侧栏按钮、会话标题与操作按钮共用垂直中心。收展按钮两种状态均沿原 `--sidebar-toggle-top` 定位，Mica 下计入6px留白。macOS／Linux 保留原高度与对齐。2026-10-23 的隔离浏览器加载当前生产 CSS 与标题结构，深浅主题、Mica／实色、1200／600px八组测得四处中心相同，侧栏收起与恢复时按钮中心不变；标题行随28／40px内容行高增为42／54px，主导航间距保持8px。该证据只覆盖浏览器布局，不代替完整 Electron 窗口交互或原生材质合成验收；2026-10-19 旧52px标题行的历史几何结果不作为当前自适应标题行的验收依据。
 
 Native 的面板左外边距／宽度及会话标题栏的左内边距仅在共享 Group 的 `data-animate-width=true` 时跟随180ms过渡，使 Mica 的6px留白和macOS窗口按钮安全间距与[共享标题占位](../../packages/ui/src/desktop/SessionPage.tsx)一起移动；手动调宽沿原事件关闭动画，减少动画偏好统一直接切换。2026-10-19 Windows x64／Electron44.3.0 的隔离实际组件与编译样式逐帧对照：原Windows Mica侧栏收起的标题反向跳动为50px，实色为44px，macOS样式标记为108px；修复后1086px可用宽度的反向偏移小于0.1px、垂直位移为0。786px紧凑布局另核深浅主题、有／无右侧按钮、实色及macOS样式，减少动画偏好另核五组，反向及垂直位移均为0。页面／侧栏／安排任务／Native新对话／后台五个整文件60项、1041断言和UI／Desktop类型检查通过；平台标记只验证样式，不代证其他平台原生窗口或安装资格。
 
@@ -653,7 +653,7 @@ Main 的 `state` 与 `messages` 只读请求不等待父元数据刷新结束。
 
 环境卡准确停止接纳期间，同scope目录刷新排队，先等待已经在途的完整读取，再按最新完整facts核目标与停止资格；原停止申请只提交一次。目录结果立即更新读取owner的最新facts，避免React尚未commit而使用旧observation。停止返回后恢复目录校准，换根只撤销尚未提交的等待；已提交的原停止继续收束，迟到提示不能进入新scope。Main原有prepare前后两次新鲜度校验、准确身份和unknown不重试保持。[停止竞态DOM回归](test/isolated/native-environment-stop-dom.test.tsx)在旧实现复现轮询替换观察及未等在途目录即提交，修复后3项／24断言通过；真实混合压力复测归下方监督进程对照。
 
-实际多根窗口还发现滚动后立即离开会保留旧消息DOM：GC后脱离document的节点500→2217，heap snapshot定位13棵Conversation经Document动画controller→RAF closure→旧viewport持有。原Radix ScrollAreaThumb卸载遗漏持续RAF清理；消息区现用局部原生滚动viewport，原阅读位置／自动跟随／跳最新／细滚动条保持，资源归属和100轮立即卸载回归归[UI owner](../../packages/ui/README.md#完整模型正文展示)。修复前的GET已排空与单一SSE并不能证明DOM释放，两项证据分别保留。
+实际多根窗口还发现滚动后立即离开会保留旧消息DOM：GC后脱离document的节点500→2217，heap snapshot定位13棵Conversation经Document动画controller→RAF closure→旧viewport持有。原Radix ScrollAreaThumb卸载遗漏持续RAF清理；消息区现使用组件库 ScrollArea，并通过版本绑定补丁补齐卸载清理，原阅读位置／自动跟随／跳最新／细滚动条保持，资源归属和100轮立即卸载回归归[UI owner](../../packages/ui/README.md#完整模型正文展示)。修复前的GET已排空与单一SSE并不能证明DOM释放，两项证据分别保留。
 
 活动大正文持续改变时，纯全文key缓存仍会miss。多根长正文CPU profile曾在开发React运行时复现99次约60ms长任务，固定parser的micromark tokenizer／调用栈占主要时间；不能用Promise延后同一主线程工作解释为消除阻塞。[Native Markdown准备](src/native-markdown.ts)现将至少32768个UTF-16单位的已验证Model正文交给[静态Worker](src/native-markdown-worker.ts)，只运行UI公开的固定remark／GFM／公式纯解析。一个active计算、最多8个pending、排队源文本估算16MiB，超限明确 `native_markdown_busy`；活动单篇仍完整解析。准确任务ID／原文和AbortSignal隔离迟到结果，取消当前计算终止对应Worker，不取消业务。
 

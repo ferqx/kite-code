@@ -80,7 +80,7 @@ html[data-platform="macos"][data-theme="dark"] .kite-client.shell {
   align-items: center;
   width: max-content;
   height: 100%;
-  padding: 0 8px;
+  padding: 4px 8px 0;
   -webkit-app-region: no-drag;
 }
 
@@ -943,6 +943,8 @@ html[data-native-window][data-platform="windows"] .kite-client.shell {
 }
 
 html[data-native-window][data-platform="windows"] .kite-client .sidebar-header {
+  min-height: 0;
+  padding-block: 12px 2px;
   padding-inline: 16px var(--sidebar-header-end-padding);
 }
 

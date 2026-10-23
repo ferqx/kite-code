@@ -147,6 +147,85 @@ function expectDesktopSidebar(open: boolean) {
   expect(document.querySelector('[role="dialog"]')).toBeNull();
 }
 
+test('empty Native notice fragments preserve the full-height surface and visible notices precede it', async () => {
+  const overlaySelector =
+    '.client-main-panel[data-header-overlay]:has(> main > .session-body:first-child)';
+  await render({ notices: <>{false && <p>hidden</p>}</> });
+  expect(document.querySelector(overlaySelector)).not.toBeNull();
+  const header = document.querySelector('.session-header')!;
+  const footer = document.querySelector('.conversation-footer')!;
+  expect(TestResizeObserver.observed.has(header)).toBe(true);
+  expect(TestResizeObserver.observed.has(footer)).toBe(true);
+
+  await render({
+    notices: (
+      <>
+        <p role="alert">可见提示</p>
+      </>
+    ),
+  });
+  expect(document.querySelector(overlaySelector)).toBeNull();
+  await render({ notices: <>{null}</>, workbench: true });
+  expect(document.querySelector(overlaySelector)).toBeNull();
+  expect(TestResizeObserver.observed.has(footer)).toBe(false);
+  await render({ notices: <>{null}</> });
+  expect(document.querySelector(overlaySelector)).not.toBeNull();
+  const returnedFooter = document.querySelector('.conversation-footer')!;
+  expect(TestResizeObserver.observed.has(returnedFooter)).toBe(true);
+  await act(() => root!.unmount());
+  root = undefined;
+  expect(TestResizeObserver.observed.has(header)).toBe(false);
+  expect(TestResizeObserver.observed.has(returnedFooter)).toBe(false);
+});
+
+test('sidebar selection follows the visible page without highlighting a retained conversation', async () => {
+  const shared: Partial<SessionPageProps> = {
+    workspaces: [
+      {
+        id: 'w',
+        label: '工作区',
+        state: 'loaded',
+        sessionCount: 1,
+        sessions: [{ sessionId: 's', displayName: '已有会话', status: 'idle' }],
+      },
+    ],
+    selected: 's',
+    onOpen: () => {},
+    actions: { newSession: () => {}, scheduledTasks: () => {}, workbench: () => {} },
+  };
+  const pages: { label: string; props: Partial<SessionPageProps> }[] = [
+    { label: '已有会话', props: {} },
+    {
+      label: '新对话',
+      props: {
+        newConversation: {
+          projects: [],
+          workspace: '',
+          busy: false,
+          onProject: () => {},
+          onAddProject: () => {},
+          onBranch: () => {},
+          onRefreshBranch: () => {},
+        },
+      },
+    },
+    {
+      label: '安排任务',
+      props: { scheduledTasks: { tasks: [], workspaces: shared.workspaces! } },
+    },
+    { label: '工作台', props: { workbench: true } },
+    { label: '已有会话', props: {} },
+  ];
+  for (const page of pages) {
+    await render({ ...shared, ...page.props });
+    const current = document.querySelectorAll('.sidebar [aria-current="page"]');
+    expect(current).toHaveLength(1);
+    expect(current[0]!.textContent).toBe(page.label);
+    expect(current[0]!.classList.contains('selected')).toBe(true);
+    expect(document.querySelectorAll('.sidebar .selected')).toHaveLength(1);
+  }
+});
+
 test('resizing across the old narrow breakpoint keeps the open sidebar and content mounted', async () => {
   await render();
   const navigation = document.querySelector('#navigation');
