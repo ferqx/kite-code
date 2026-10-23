@@ -1,5 +1,11 @@
 # 本机 Agent Service
 
+公开 `Message.createdAt` 为可选的消息首次记录毫秒时间，经[同源 schema](src/http/schema/index.ts)传给生成 Client；缺失保持未知。普通消息沿原 Store 事实，Fork 消息在[公开投影](src/message-response.ts)沿已核实来源保留原时间，不补造 Fork 或请求时钟。[HTTP 回归](test/isolated/http.test.ts)的真实受理／执行路径核对公开历史与 Store 时间一致；[来源回归](test/message-response.test.ts)核对 Fork 时间保真。
+
+2026-10-23，Windows x64／Bun1.4.3（`a481f3a78` 加当前工作树）：沙箱外执行 `bun test ./apps/service/test/isolated/http.test.ts`，完整文件5项／88断言通过。初始化断言逐项核对现有5条迁移；取消路径按原 `run.start` Command 核对 Run、Model 与输入来源，不再要求已移除的派生 `businessCommandId`。原拒绝、取消与 stale Store 零写入断言保留，生产迁移与命令路径未改。
+
+来源与 Client 浏览器读取两文件18项／95断言、Client typecheck 和生成 API 检查的原通过结果继续适用，本轮未改动其源码或生成输入；Service typecheck 再次通过。
+
 公开 Message 的可选 `humanInput` 传递 Agent SQL 生成的原输入／公开提交身份与准确重复副本指向。Service schema、OpenAPI 和生成 Client 保同一字段，不接受调用者自报该证明，也不在 HTTP 层过滤历史行或改变分页；普通 Native 的合并显示归 [Desktop](../desktop/README.md#真实输入消息的唯一展示)，实际证明归 [输入 owner](../../packages/agent/src/storage/sqlite/inputs/README.md)。
 
 ## 待消费输入队列协议

@@ -1,7 +1,11 @@
 export interface Message {
+  /** Host-confirmed attachments keep an otherwise empty user message visible. */
+  readonly hasAttachments?: boolean;
   readonly id: string;
   /** Host-only render identity for a transient row handed over to its persisted Message. */
   readonly presentationKey?: string;
+  /** Verified first publication time, never the time this client read the message. */
+  readonly createdAtMs?: number;
   /** Host-confirmed Runtime Turn or public Run ownership for presentation actions. */
   readonly turnId?: string;
   /** Host-confirmed guidance classification; presentation only, never execution authority. */

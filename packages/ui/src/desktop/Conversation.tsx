@@ -1,4 +1,4 @@
-import { ArrowDown01Icon, KiteIcon } from '@hugeicons/core-free-icons';
+import { ArrowDown01Icon, ArrowDown02Icon, KiteIcon } from '@hugeicons/core-free-icons';
 import { HugeiconsIcon } from '@hugeicons/react';
 import {
   Fragment,
@@ -22,6 +22,7 @@ import { useDesktopDiagnostics } from './diagnostics';
 import { cn } from './lib/utils';
 import { MessageContent } from './MessageContent';
 import { MessageCopyButton } from './MessageCopyButton';
+import { formatMessageTime } from './message-time';
 import { pruneReadingState } from './reading-state';
 import { statusLabel } from './status';
 import { ToolActivity } from './ToolActivity';
@@ -145,6 +146,7 @@ const MessageItem = memo(function MessageItem({
   restoredExpanded,
   childDetail,
   renderContent,
+  renderAttachments,
   showResponseStatus = true,
 }: {
   message: Message;
@@ -161,8 +163,10 @@ const MessageItem = memo(function MessageItem({
   writeClipboardText?: (text: string) => Promise<void>;
   childDetail?: { readonly label: string; readonly onOpen: () => void };
   renderContent?: (message: Message) => ReactNode;
+  renderAttachments?: (message: Message) => ReactNode;
   showResponseStatus?: boolean;
 }) {
+  const [metadataNow, setMetadataNow] = useState(() => Date.now());
   // Raw model reasoning is never part of the readable transcript.
   if (message.role === 'thinking') return null;
   if (message.role === 'tool') return null;
@@ -307,6 +311,7 @@ const MessageItem = memo(function MessageItem({
         {message.text && <pre>{message.text}</pre>}
       </article>
     );
+  const timestamp = formatMessageTime(message.createdAtMs, metadataNow);
   return (
     <article
       className={cn(
@@ -318,6 +323,8 @@ const MessageItem = memo(function MessageItem({
         },
       )}
       data-final-reply={message.role === 'assistant' ? Boolean(message.finalReply) : undefined}
+      onPointerEnter={() => setMetadataNow(Date.now())}
+      onFocus={() => setMetadataNow(Date.now())}
       data-agent-result-source={agentResult?.sourceId}
       data-agent-message-id={agentMessage?.messageId}
       data-input-kind={message.inputKind}
@@ -349,8 +356,31 @@ const MessageItem = memo(function MessageItem({
           )}
         </p>
       )}
+      {message.role === 'user' && !agentResult && !agentMessage && renderAttachments?.(message)}
       <CodeCopyEligibilityContext.Provider value={Boolean(copyText)}>
-        {renderContent ? (
+        {message.role === 'user' && !agentResult && !agentMessage ? (
+          <div className="user-message-body">
+            {renderContent ? (
+              renderContent(message)
+            ) : (
+              <>
+                {message.text && <p className="user-text">{message.text}</p>}
+                {message.delivery && (
+                  <small
+                    className="delivery-status"
+                    role={message.delivery === 'sending' ? 'status' : 'alert'}
+                  >
+                    {message.delivery === 'sending'
+                      ? '正在发送…'
+                      : message.delivery === 'failed'
+                        ? '发送失败，可在输入框中重试'
+                        : '发送结果待确认，请检查会话状态'}
+                  </small>
+                )}
+              </>
+            )}
+          </div>
+        ) : renderContent ? (
           renderContent(message)
         ) : message.role === 'assistant' || agentResult || agentMessage ? (
           message.text && <MessageContent text={message.text} openFile={openFile} />
@@ -383,13 +413,25 @@ const MessageItem = memo(function MessageItem({
           </span>
         </small>
       )}
-      {copyText && (
-        <MessageCopyButton
-          text={copyText}
-          copyRole={copyRole}
-          writeClipboardText={writeClipboardText}
-        />
-      )}
+      <footer className="message-meta">
+        {copyText && (
+          <MessageCopyButton
+            text={copyText}
+            copyRole={copyRole}
+            writeClipboardText={writeClipboardText}
+          />
+        )}
+        {timestamp ? (
+          <time className="message-time" dateTime={timestamp.dateTime} title={timestamp.full}>
+            <span aria-hidden="true">{timestamp.label}</span>
+            <span className="sr-only">{timestamp.full}</span>
+          </time>
+        ) : (
+          <span className="message-time" title="没有可核实的消息记录时间">
+            时间未知
+          </span>
+        )}
+      </footer>
     </article>
   );
 });
@@ -411,6 +453,7 @@ export function Conversation({
   onOpenChildSession,
   renderMessage,
   renderMessageContent,
+  renderMessageAttachments,
   renderToolActivity,
 }: {
   messages: readonly Message[];
@@ -432,6 +475,8 @@ export function Conversation({
   renderMessage?: (message: Message) => ReactNode;
   /** Verified body reader within the original message and copy controls. */
   renderMessageContent?: (message: Message) => ReactNode;
+  /** Attachment presentation outside the user text bubble, sharing the same message identity. */
+  renderMessageAttachments?: (message: Message) => ReactNode;
   /** Host-adapted tool facts within the original grouping and reading state. */
   renderToolActivity?: (messages: readonly Message[], state: ToolActivityState) => ReactNode;
 }) {
@@ -518,7 +563,7 @@ export function Conversation({
           !node.textContent?.trim() ||
           !parent?.closest('.message') ||
           parent.closest(
-            'button, summary, .message-label, .message-status, [hidden], details:not([open])',
+            'button, summary, .message-label, .message-status, .message-meta, .message-attachments-navigation, [hidden], details:not([open])',
           )
         )
           continue;
@@ -649,7 +694,9 @@ export function Conversation({
       if (message.role === 'tool') return isVisibleTool(message);
       if (message.role === 'subagent')
         return !message.parentToolCallId || !visibleToolIds.has(message.parentToolCallId);
-      return !message.settled || !!message.text;
+      return (
+        !message.settled || !!message.text || (message.role === 'user' && !!message.hasAttachments)
+      );
     }),
   );
   const visibleTurns = new Set([...visible].map(processTurnId).filter(Boolean));
@@ -900,6 +947,7 @@ export function Conversation({
           openFile={openFile}
           writeClipboardText={writeClipboardText}
           renderContent={renderMessageContent}
+          renderAttachments={renderMessageAttachments}
           showResponseStatus={!turnScoped}
           copyText={
             message.role === 'user' && message.settled && !message.delivery && message.text
@@ -1092,6 +1140,22 @@ export function Conversation({
       </section>
     );
   };
+  const busy =
+    isLiveTurn(turnActivity) ||
+    messages.some(
+      (message) =>
+        !message.executionUnconfirmed &&
+        !(message.turnId === turnActivity?.turnId && turnActivity?.executionUnconfirmed) &&
+        message.systemKind !== 'turn_timing' &&
+        (!message.turnId || !terminalByTurn.get(message.turnId)) &&
+        (message.delivery === 'sending' ||
+          ((message.role === 'assistant' ||
+            message.role === 'tool' ||
+            message.role === 'subagent' ||
+            message.role === 'thinking' ||
+            message.role === 'system') &&
+            !message.settled)),
+    );
   return (
     <ClipboardWriteContext.Provider value={writeClipboardText}>
       <div className="conversation-container">
@@ -1102,25 +1166,7 @@ export function Conversation({
             {...{
               role: 'region',
               'aria-label': '会话消息',
-              'aria-busy':
-                loading ||
-                isLiveTurn(turnActivity) ||
-                messages.some(
-                  (message) =>
-                    !message.executionUnconfirmed &&
-                    !(
-                      message.turnId === turnActivity?.turnId && turnActivity?.executionUnconfirmed
-                    ) &&
-                    message.systemKind !== 'turn_timing' &&
-                    (!message.turnId || !terminalByTurn.get(message.turnId)) &&
-                    (message.delivery === 'sending' ||
-                      ((message.role === 'assistant' ||
-                        message.role === 'tool' ||
-                        message.role === 'subagent' ||
-                        message.role === 'thinking' ||
-                        message.role === 'system') &&
-                        !message.settled)),
-                ),
+              'aria-busy': loading || busy,
               onScroll: () => {
                 const element = viewport.current;
                 if (!element || loading || restore.current) return;
@@ -1130,7 +1176,10 @@ export function Conversation({
                 )
                   return;
                 writtenScrollTop.current = undefined;
-                const follow = element.scrollHeight - element.clientHeight - element.scrollTop < 48;
+                // Resume only at the actual bottom. A wider near-bottom zone
+                // makes the following-state commit snap a manual scroll to the tail.
+                // scrollTop is fractional while the two heights are rounded.
+                const follow = element.scrollHeight - element.clientHeight - element.scrollTop <= 1;
                 reading.current = {
                   top: element.scrollTop,
                   follow,
@@ -1171,18 +1220,31 @@ export function Conversation({
           </div>
         )}
         {!following && !loading && (
-          <Button
-            className="jump-latest"
-            onClick={() => {
-              const element = viewport.current;
-              if (!element) return;
-              writeScroll(element, element.scrollHeight);
-              reading.current = { ...reading.current, follow: true, top: element.scrollTop };
-              setFollowing(true);
-            }}
-          >
-            回到最新消息
-          </Button>
+          <div className="conversation-jump">
+            <Button
+              className="jump-latest"
+              size="icon"
+              aria-label="回到最新消息"
+              title="回到最新消息"
+              onClick={() => {
+                const element = viewport.current;
+                if (!element) return;
+                writeScroll(element, element.scrollHeight);
+                reading.current = { ...reading.current, follow: true, top: element.scrollTop };
+                setFollowing(true);
+              }}
+            >
+              {busy ? (
+                <span className="jump-latest-dots" aria-hidden="true">
+                  <span />
+                  <span />
+                  <span />
+                </span>
+              ) : (
+                <HugeiconsIcon icon={ArrowDown02Icon} aria-hidden="true" />
+              )}
+            </Button>
+          </div>
         )}
       </div>
     </ClipboardWriteContext.Provider>

@@ -11,6 +11,9 @@ export function messageResponse(
     origin && origin.message.id !== message.id
       ? {
           ...message,
+          ...(origin.message.createdAt === undefined
+            ? {}
+            : { createdAt: origin.message.createdAt }),
           ...(origin.message.compression ? { compression: origin.message.compression } : {}),
           originMessage: {
             storeId: origin.storeId,

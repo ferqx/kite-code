@@ -102,7 +102,7 @@ export function getMessageOrigin(
       )
     )
       throw new AgentError('fork_content_unsupported');
-    const original = db.message(actual);
+    const original = db.messageRecords([actual])[0]!;
     // Read only immutable provenance. A source Run's later state is not a sealed-copy fact.
     const provenance = original.originCommandId
       ? db.row(

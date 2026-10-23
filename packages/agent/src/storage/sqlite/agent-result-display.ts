@@ -86,9 +86,17 @@ export function readPublicMessages(
     upperSeq,
     limit,
   );
+  const messages = new Map(
+    db
+      .messageRecords(
+        rows
+          .filter((row) => row.display_kind === 'message')
+          .map((row) => db.row('SELECT * FROM message WHERE id=?', row.id!)!),
+      )
+      .map((message) => [message.id, message] as const),
+  );
   return rows.map((row) => {
-    if (row.display_kind === 'message')
-      return db.message(db.row('SELECT * FROM message WHERE id=?', row.id!)!);
+    if (row.display_kind === 'message') return messages.get(String(row.id))!;
     // Read the same persisted source/carrier identities, never names claimed by result JSON.
     const source = db.row('SELECT * FROM context_snapshot WHERE id=?', row.id!)!;
     const execution = db.row('SELECT * FROM execution WHERE id=?', source.execution_id!)!;

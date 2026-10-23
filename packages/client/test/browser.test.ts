@@ -68,6 +68,30 @@ function gateway(
   };
 }
 
+test('generated message readers preserve recorded time and accept older history with unknown time', async () => {
+  const known = {
+    id: 'known',
+    sessionId: 's',
+    runId: null,
+    seq: '1',
+    status: 'complete',
+    role: 'user',
+    content: 'original',
+    createdAt: 1234567890000,
+  };
+  const unknown = { ...known, id: 'unknown', seq: '2', createdAt: undefined };
+  const g = gateway(() => response([known, unknown]));
+  try {
+    await g.client.connect();
+    expect((await g.client.listMessages('s')).map((message) => message.createdAt)).toEqual([
+      1234567890000,
+      undefined,
+    ]);
+  } finally {
+    await g.close();
+  }
+});
+
 test('Browser admission gates every business read and sends cookie credentials without Native authority', async () => {
   const g = gateway();
   try {

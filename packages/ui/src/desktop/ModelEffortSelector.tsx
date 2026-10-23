@@ -177,8 +177,8 @@ export function ModelEffortSelector(props: ModelEffortSelectorProps) {
             onValueChange={setActiveProvider}
             className="model-effort-columns"
           >
-            <div className="flex min-h-0 flex-col gap-2 p-2">
-              <span className="px-3 pt-1 text-muted-foreground">提供商</span>
+            <div className="flex min-h-0 min-w-0 flex-col gap-0.5 p-1">
+              <span className="px-2 py-1.5 text-muted-foreground">提供商</span>
               <ScrollArea type="auto" className="min-h-0 flex-1" data-provider-scroll>
                 <TabsList aria-label="模型提供商" className="model-effort-providers">
                   {providers.map((item) => (
@@ -192,12 +192,13 @@ export function ModelEffortSelector(props: ModelEffortSelectorProps) {
               </ScrollArea>
             </div>
             <Separator orientation="vertical" />
-            <div className="flex min-h-0 min-w-0 flex-col gap-2 py-2">
-              <span className="px-3 pt-1 text-muted-foreground">模型</span>
+            <div className="flex min-h-0 min-w-0 flex-col gap-0.5 p-1">
+              <span className="px-2 py-1.5 text-muted-foreground">模型</span>
               {providers.map((item) => (
                 <TabsContent key={item} value={item} tabIndex={-1} className="m-0 min-h-0 flex-1">
                   <Command
                     label={`${item} 模型`}
+                    className="rounded-none outline-none"
                     tabIndex={0}
                     shouldFilter={false}
                     defaultValue={
@@ -208,7 +209,7 @@ export function ModelEffortSelector(props: ModelEffortSelectorProps) {
                   >
                     <ScrollArea type="auto" className="min-h-0 flex-1" data-model-scroll>
                       <CommandList label={`${item} 模型`} className="max-h-none overflow-visible">
-                        <CommandGroup>
+                        <CommandGroup className="px-0 py-0.5">
                           {props.models
                             .filter((model) => model.provider === item)
                             .map((model) => (
@@ -222,6 +223,7 @@ export function ModelEffortSelector(props: ModelEffortSelectorProps) {
                                   focusModelSwitch();
                                 }}
                                 className="model-effort-option"
+                                data-current={selected === model || undefined}
                               >
                                 <span className="truncate" title={model.name}>
                                   {model.name}

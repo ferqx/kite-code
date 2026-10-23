@@ -13,7 +13,6 @@ import type { ToolActivityState } from './Conversation';
 import { Conversation } from './Conversation';
 import { ConversationCache, type ConversationCacheScope } from './ConversationCache';
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from './components/ui/resizable';
-import { Sheet, SheetContent, SheetDescription, SheetTitle } from './components/ui/sheet';
 import { FileChanges } from './FileChanges';
 import {
   NewConversationContext,
@@ -66,7 +65,7 @@ function sessionHeaderLabel(label: string): string {
 }
 
 function NavigationPanel({ defaultSize, ...props }: ComponentProps<typeof ResizablePanel>) {
-  // Defaults belong to this Group instance; later toggles use the imperative API.
+  // Do not replace the initial default when a drag updates the saved width.
   const initialSize = useRef(defaultSize);
   return <ResizablePanel {...props} defaultSize={initialSize.current} />;
 }
@@ -81,6 +80,7 @@ export interface SessionPageProps {
   messages: readonly Message[];
   renderMessage?: (message: Message) => ReactNode;
   renderMessageContent?: (message: Message) => ReactNode;
+  renderMessageAttachments?: (message: Message) => ReactNode;
   renderToolActivity?: (messages: readonly Message[], state: ToolActivityState) => ReactNode;
   /** Host-confirmed current Turn; omitted when the message source has no Turn identity. */
   turnActivity?: TurnActivity;
@@ -144,14 +144,7 @@ export function SessionPage({ messages, fileChanges, ...props }: SessionPageProp
     if (typeof requestAnimationFrame === 'function') requestAnimationFrame(focus);
     else queueMicrotask(focus);
   }, []);
-  const focusComposerOnClose = useRef(false);
-  const [narrow, setNarrow] = useState(
-    () => typeof matchMedia !== 'undefined' && matchMedia('(max-width: 600px)').matches,
-  );
-  const [wideSidebarOpen, setWideSidebarOpen] = useState(true);
-  const [wideSidebarCollapsed, setWideSidebarCollapsed] = useState(false);
-  const [narrowSidebarOpen, setNarrowSidebarOpen] = useState(false);
-  const sidebarOpen = narrow ? narrowSidebarOpen : wideSidebarOpen && !wideSidebarCollapsed;
+  const [sidebarOpen, setSidebarOpenIntent] = useState(true);
   const [panelsAnimating, setPanelsAnimating] = useState(false);
   const navigationWidth = useRef(savedNavigationWidth());
   const navigationPanel = useRef<PanelImperativeHandle>(null);
@@ -262,15 +255,16 @@ export function SessionPage({ messages, fileChanges, ...props }: SessionPageProp
         const group = groupElement.current;
         if (!group || group.offsetWidth <= 0 || group.getBoundingClientRect().width <= 0) return;
         const target = panel.current;
-        if (!target || target.isCollapsed() !== open) return;
+        if (!target || (panel !== navigationPanel && target.isCollapsed() !== open)) return;
         setPanelsAnimating(true);
         if (panelAnimationTimer.current !== undefined) clearTimeout(panelAnimationTimer.current);
         panelAnimationTimer.current = setTimeout(() => {
           panelAnimationTimer.current = undefined;
           setPanelsAnimating(false);
         }, 240);
-        if (open && panel === navigationPanel) target.resize(`${navigationWidth.current}px`);
-        else if (open) target.expand();
+        // Navigation uses explicit size constraints; only its button changes them.
+        if (panel === navigationPanel) return;
+        if (open) target.expand();
         else target.collapse();
       });
     },
@@ -278,16 +272,17 @@ export function SessionPage({ messages, fileChanges, ...props }: SessionPageProp
   );
   const setSidebarOpen = useCallback(
     (open: boolean) => {
-      if (narrow) setNarrowSidebarOpen(open);
-      else {
-        schedulePanelChange(navigationPanelFrame, navigationPanel, open, () => {
-          setWideSidebarOpen(open);
-          setWideSidebarCollapsed(false);
-        });
-      }
+      schedulePanelChange(navigationPanelFrame, navigationPanel, open, () => {
+        setSidebarOpenIntent(open);
+      });
     },
-    [narrow, schedulePanelChange],
+    [schedulePanelChange],
   );
+  useLayoutEffect(() => {
+    const group = panelGroupElement.current;
+    if (sidebarOpen && group && group.getBoundingClientRect().width > 0)
+      navigationPanel.current?.resize(`${navigationWidth.current}px`);
+  }, [sidebarOpen]);
   const stopPanelAnimationOnResize = useCallback((event: SyntheticEvent) => {
     if (
       !(event.target instanceof Element) ||
@@ -372,7 +367,6 @@ export function SessionPage({ messages, fileChanges, ...props }: SessionPageProp
       setScheduledEditor(undefined);
     }
   }, [props.scheduledTasks, collapseDetails]);
-  // biome-ignore lint/correctness/useExhaustiveDependencies: The narrow breakpoint remounts the panel group even when the open intent is unchanged.
   useEffect(() => {
     if (!rightSidebarOpen) {
       collapseDetails();
@@ -384,10 +378,10 @@ export function SessionPage({ messages, fileChanges, ...props }: SessionPageProp
     const observer = new ResizeObserver(expandDetails);
     observer.observe(group);
     return () => observer.disconnect();
-  }, [narrow, rightSidebarOpen, expandDetails, collapseDetails]);
+  }, [rightSidebarOpen, expandDetails, collapseDetails]);
   useEffect(() => {
     const group = panelGroupElement.current;
-    if (narrow || !wideSidebarOpen || !group || typeof ResizeObserver === 'undefined') return;
+    if (!sidebarOpen || !group || typeof ResizeObserver === 'undefined') return;
     let previousWidth = group.getBoundingClientRect().width;
     let frame: number | undefined;
     const observer = new ResizeObserver(() => {
@@ -409,7 +403,7 @@ export function SessionPage({ messages, fileChanges, ...props }: SessionPageProp
       observer.disconnect();
       if (frame !== undefined) cancelAnimationFrame(frame);
     };
-  }, [narrow, wideSidebarOpen]);
+  }, [sidebarOpen]);
   useLayoutEffect(() => {
     const element = sessionViewElement;
     if (!element) return;
@@ -477,39 +471,10 @@ export function SessionPage({ messages, fileChanges, ...props }: SessionPageProp
         focusControlAfterCommit(tabsOpen ? tabsToggle : scheduledEditorToggle);
         return;
       }
-      if (narrow) {
-        setSidebarOpen(false);
-        toggle.current?.focus();
-      }
     };
     window.addEventListener('keydown', cancel);
     return () => window.removeEventListener('keydown', cancel);
-  }, [
-    narrow,
-    tabsOpen,
-    rightSidebarOpen,
-    focusControlAfterCommit,
-    collapseDetails,
-    changeTabsOpen,
-    setSidebarOpen,
-  ]);
-  useEffect(() => {
-    if (typeof matchMedia === 'undefined') return;
-    const media = matchMedia('(max-width: 600px)');
-    const resize = () => {
-      setNarrow(media.matches);
-      setWideSidebarCollapsed(false);
-      setNarrowSidebarOpen(false);
-    };
-    resize();
-    media.addEventListener('change', resize);
-    return () => media.removeEventListener('change', resize);
-  }, []);
-  const open = (id: string) => {
-    if (!props.onOpen) return;
-    props.onOpen(id);
-    if (narrow) setSidebarOpen(false);
-  };
+  }, [tabsOpen, rightSidebarOpen, focusControlAfterCommit, collapseDetails, changeTabsOpen]);
   const handleHeaderMouseDown = (event: React.MouseEvent<HTMLElement>) => {
     if (
       event.button !== 0 ||
@@ -523,23 +488,10 @@ export function SessionPage({ messages, fileChanges, ...props }: SessionPageProp
     props.onHeaderMouseDown?.(event.detail);
   };
   const sidebarPanel = (
-    <div className={`client-sidebar-panel ${narrow ? 'narrow' : ''}`}>
+    <div className="client-sidebar-panel">
       {/* biome-ignore lint/a11y/noStaticElementInteractions: Desktop uses the header surface for native window dragging. */}
       <header className="sidebar-header" onMouseDown={handleHeaderMouseDown}>
         <strong className="brand">Kite</strong>
-        {narrow && (
-          <Button
-            ref={toggle}
-            className="ghost sidebar-toggle"
-            size="icon-sm"
-            aria-expanded={sidebarOpen}
-            aria-label="收起侧栏"
-            title="收起侧栏"
-            onClick={() => setSidebarOpen(false)}
-          >
-            <HugeiconsIcon icon={PanelLeftCloseIcon} />
-          </Button>
-        )}
       </header>
       <aside className="sidebar" aria-label="空间与会话">
         <Sidebar
@@ -552,20 +504,12 @@ export function SessionPage({ messages, fileChanges, ...props }: SessionPageProp
             newWorkspaceSession: props.actions.newWorkspaceSession
               ? (id) => {
                   props.actions.newWorkspaceSession?.(id);
-                  if (narrow) {
-                    focusComposerOnClose.current = true;
-                    setSidebarOpen(false);
-                  }
                   focusComposerAfterCommit();
                 }
               : undefined,
             newSession: props.actions.newSession
               ? () => {
                   props.actions.newSession?.();
-                  if (narrow) {
-                    focusComposerOnClose.current = true;
-                    setSidebarOpen(false);
-                  }
                   focusComposerAfterCommit();
                 }
               : undefined,
@@ -576,7 +520,7 @@ export function SessionPage({ messages, fileChanges, ...props }: SessionPageProp
           }
           onExpand={props.onExpand}
           defaultExpanded={props.defaultExpanded}
-          onOpen={props.onOpen ? open : undefined}
+          onOpen={props.onOpen}
         />
       </aside>
     </div>
@@ -629,6 +573,7 @@ export function SessionPage({ messages, fileChanges, ...props }: SessionPageProp
       messages={messages}
       renderMessage={props.renderMessage}
       renderMessageContent={props.renderMessageContent}
+      renderMessageAttachments={props.renderMessageAttachments}
       renderToolActivity={props.renderToolActivity}
       turnActivity={props.turnActivity}
       loading={props.loading}
@@ -663,7 +608,6 @@ export function SessionPage({ messages, fileChanges, ...props }: SessionPageProp
   return (
     <div className={`kite-client shell ${sidebarOpen ? 'sidebar-visible' : ''}`}>
       <ResizablePanelGroup
-        key={narrow ? 'narrow' : 'wide'}
         id="client-layout"
         orientation="horizontal"
         elementRef={panelGroupElement}
@@ -675,12 +619,7 @@ export function SessionPage({ messages, fileChanges, ...props }: SessionPageProp
         inert={props.covered}
         style={props.covered ? { opacity: 0, pointerEvents: 'none' } : undefined}
         onLayoutChanged={(layout, meta) => {
-          const group = panelGroupElement.current;
-          if (!narrow && group && group.offsetWidth > 0 && group.getBoundingClientRect().width > 0)
-            setWideSidebarCollapsed((layout.navigation ?? 0) === 0);
-          if (!meta.isUserInteraction) return;
-          if (narrow) return;
-          setWideSidebarOpen((layout.navigation ?? 0) > 0);
+          if (!meta.isUserInteraction || !sidebarOpen) return;
           const groupWidth = Array.from(
             panelGroupElement.current?.querySelectorAll<HTMLElement>(':scope > [data-panel]') ?? [],
           ).reduce((width, panel) => width + panel.offsetWidth, 0);
@@ -694,57 +633,49 @@ export function SessionPage({ messages, fileChanges, ...props }: SessionPageProp
           }
         }}
       >
-        {!narrow && (
-          <>
-            <NavigationPanel
-              id="navigation"
-              className="collapsible-sidebar-viewport"
-              style={{ overflow: 'hidden' }}
-              panelRef={navigationPanel}
-              collapsible
-              collapsedSize="0px"
-              defaultSize={wideSidebarOpen ? `${navigationWidth.current}px` : '0px'}
-              groupResizeBehavior="preserve-pixel-size"
-              minSize={`${NAVIGATION_MIN_WIDTH}px`}
-              maxSize={`${NAVIGATION_MAX_WIDTH}px`}
-            >
-              <div
-                className="collapsible-sidebar-content"
-                style={{ minWidth: '200px' }}
-                aria-hidden={!sidebarOpen}
-                inert={!sidebarOpen}
-              >
-                {sidebarPanel}
-              </div>
-            </NavigationPanel>
-            <ResizableHandle
-              id="navigation-resize"
-              className="collapsible-sidebar-handle"
-              data-open={sidebarOpen ? 'true' : 'false'}
-              withHandle
-            />
-            {/* Follow the panel boundary without clipping or replacing the focused control. */}
-            <div className="desktop-sidebar-toggle" data-open={sidebarOpen ? 'true' : undefined}>
-              <Button
-                ref={toggle}
-                className="ghost sidebar-toggle"
-                size="icon-sm"
-                aria-controls="navigation"
-                aria-expanded={sidebarOpen}
-                aria-label={sidebarOpen ? '收起侧栏' : '展开侧栏'}
-                title={sidebarOpen ? '收起侧栏' : '展开侧栏'}
-                onClick={() => setSidebarOpen(!sidebarOpen)}
-              >
-                <HugeiconsIcon icon={sidebarOpen ? PanelLeftCloseIcon : PanelLeftOpenIcon} />
-              </Button>
-            </div>
-          </>
-        )}
-        <ResizablePanel
-          id="workspace"
-          minSize={rightSidebarOpen ? '660px' : '360px'}
-          style={{ overflow: 'visible' }}
+        <NavigationPanel
+          id="navigation"
+          className="collapsible-sidebar-viewport"
+          style={{ overflow: 'hidden' }}
+          panelRef={navigationPanel}
+          defaultSize={`${navigationWidth.current}px`}
+          groupResizeBehavior="preserve-pixel-size"
+          minSize={sidebarOpen ? `${NAVIGATION_MIN_WIDTH}px` : '0px'}
+          maxSize={sidebarOpen ? `${NAVIGATION_MAX_WIDTH}px` : '0px'}
         >
+          <div
+            className="collapsible-sidebar-content"
+            style={{ minWidth: '200px' }}
+            aria-hidden={!sidebarOpen}
+            inert={!sidebarOpen}
+          >
+            {sidebarPanel}
+          </div>
+        </NavigationPanel>
+        <ResizableHandle
+          key={sidebarOpen ? 'navigation-open' : 'navigation-closed'}
+          id="navigation-resize"
+          disabled={!sidebarOpen}
+          className="collapsible-sidebar-handle"
+          data-open={sidebarOpen ? 'true' : 'false'}
+          withHandle
+        />
+        {/* Follow the panel boundary without clipping or replacing the focused control. */}
+        <div className="desktop-sidebar-toggle" data-open={sidebarOpen ? 'true' : undefined}>
+          <Button
+            ref={toggle}
+            className="ghost sidebar-toggle"
+            size="icon"
+            aria-controls="navigation"
+            aria-expanded={sidebarOpen}
+            aria-label={sidebarOpen ? '收起侧栏' : '展开侧栏'}
+            title={sidebarOpen ? '收起侧栏' : '展开侧栏'}
+            onClick={() => setSidebarOpen(!sidebarOpen)}
+          >
+            <HugeiconsIcon icon={sidebarOpen ? PanelLeftCloseIcon : PanelLeftOpenIcon} />
+          </Button>
+        </div>
+        <ResizablePanel id="workspace" minSize="200px" style={{ overflow: 'visible' }}>
           <div className="client-content-frame">
             <ResizablePanelGroup
               id="content-layout"
@@ -765,28 +696,14 @@ export function SessionPage({ messages, fileChanges, ...props }: SessionPageProp
               }}
             >
               <ResizablePanel id="content" minSize="360px" style={{ overflow: 'hidden' }}>
-                <div className="client-main-panel" inert={narrow && sidebarOpen}>
+                <div className="client-main-panel">
                   {/* biome-ignore lint/a11y/noStaticElementInteractions: Desktop uses the header surface for native window dragging. */}
                   <header className="session-header" onMouseDown={handleHeaderMouseDown}>
                     <div className="session-heading">
                       <div
                         className="session-sidebar-toggle"
                         data-open={!sidebarOpen ? 'true' : undefined}
-                      >
-                        {narrow && !sidebarOpen && (
-                          <Button
-                            ref={toggle}
-                            className="ghost sidebar-toggle"
-                            size="icon-sm"
-                            aria-expanded={sidebarOpen}
-                            aria-label="展开侧栏"
-                            title="展开侧栏"
-                            onClick={() => setSidebarOpen(true)}
-                          >
-                            <HugeiconsIcon icon={PanelLeftOpenIcon} />
-                          </Button>
-                        )}
-                      </div>
+                      />
                       <div className="breadcrumb">
                         {props.scheduledTasks ? (
                           <strong>安排任务</strong>
@@ -878,10 +795,7 @@ export function SessionPage({ messages, fileChanges, ...props }: SessionPageProp
                             }}
                           />
                         ) : props.workbench ? (
-                          <Workbench
-                            workspaces={props.workspaces}
-                            onOpen={props.onOpen ? open : undefined}
-                          />
+                          <Workbench workspaces={props.workspaces} onOpen={props.onOpen} />
                         ) : (
                           props.diagnosticView
                         )}
@@ -1017,32 +931,6 @@ export function SessionPage({ messages, fileChanges, ...props }: SessionPageProp
           </div>
         </ResizablePanel>
       </ResizablePanelGroup>
-      {narrow && (
-        <Sheet
-          open={sidebarOpen && !props.covered}
-          onOpenChange={(open) => {
-            setSidebarOpen(open);
-            if (open) return;
-            if (focusComposerOnClose.current) {
-              focusComposerOnClose.current = false;
-              focusComposerAfterCommit();
-            } else toggle.current?.focus();
-          }}
-        >
-          <SheetContent
-            side="left"
-            portalled={false}
-            showCloseButton={false}
-            onCloseAutoFocus={(event) => {
-              if (props.covered) event.preventDefault();
-            }}
-          >
-            <SheetTitle className="sr-only">空间与会话</SheetTitle>
-            <SheetDescription className="sr-only">选择空间或会话</SheetDescription>
-            {sidebarPanel}
-          </SheetContent>
-        </Sheet>
-      )}
       {props.overlays}
     </div>
   );

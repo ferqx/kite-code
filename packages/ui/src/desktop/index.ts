@@ -30,6 +30,7 @@ export {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from './components/ui/alert-dialog';
+export { Attachment, AttachmentMedia, AttachmentTitle } from './components/ui/attachment';
 export { Badge } from './components/ui/badge';
 export {
   Dialog,
@@ -69,6 +70,7 @@ export {
 } from './components/ui/tooltip';
 export { DesktopDiagnosticsProvider, useDesktopDiagnostics } from './diagnostics';
 export { FileChanges, FileDiff } from './FileChanges';
+export { MessageAttachments } from './MessageAttachments';
 export { MessageContent } from './MessageContent';
 export { MessageCopyButton } from './MessageCopyButton';
 export {

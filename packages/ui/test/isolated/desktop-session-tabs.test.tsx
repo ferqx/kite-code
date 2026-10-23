@@ -200,7 +200,7 @@ test('tabs replace the direct file changes action; only the visible selected too
   expect(document.querySelector('button button')).toBeNull();
   expect(released).toHaveLength(0);
 });
-test('responsive remount retains tabs; switching session releases their native resources and reader', async () => {
+test('responsive resize retains tabs; switching session releases their native resources and reader', async () => {
   mounted = closed = 0;
   released.length = 0;
   await render();

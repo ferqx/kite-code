@@ -4,6 +4,10 @@
 
 ## Markdown 与附件输入
 
+用户消息的图片和普通文件通过 `SessionPage.renderMessageAttachments` 从正文气泡中分离，由 [NativeUserImages](src/native-user-images.tsx) 接入[共享 Attachment 列表](../../packages/ui/src/desktop/MessageAttachments.tsx)，沿原文件后图片的顺序显示，超宽时横向滚动；正文、时间和复制归原消息。首次发送及已有会话发送冻结附件名称作为占位，接管前不再将图片数量写进正文，也不借用已被草稿释放的 blob URL；历史确认后由原图片 reader／缩略图缓存显示预览。原输入身份、图片暂存、文件引用、读取与失败重试不变。空正文且没有需显示的真实格式／读取状态时不创建正文内容。产品尺寸和操作归[桌面手册](../../docs/handbook/clients/desktop/README.md#提示词与附件)。
+
+2026-10-23，Windows x64／Bun1.4.3、Chrome155.0.8059.85、`7af0dee6b` 加本次附件工作树：[图片浏览器夹具](test/image-previews-browser-runner.fixture.ts)的 `--attachments --observe` 在生产组件与样式中逐步观察深浅主题×1280／390px的发送占位→保存预览、滚动两端→键盘回翻、刷新→缓存切回、失败→仅附件→重开；正文位置、消息顺序、时间／复制数量和横向溢出均核对。发现并修正仅附件消息被空正文过滤、失败边框跨附件和窄屏焦点裁切；最终 `--attachments` 四组通过，并补核重开图片就绪与焦点轮廓。过程截图／报告位于本机 `.cache/image-previews-browser-SfuHgK`，最终复验位于 `.cache/image-previews-browser-Xpmahn`。[首条消息DOM回归](test/isolated/native-new-conversation-dom.test.tsx)70项通过，包含文字＋文件／仅文件的延迟选择与历史接管；图片读取、输入附件、消息复制及阅读滚动定向回归通过。此为隔离生产组件及受控桥接验收，未取得本轮完整安装版Electron、真实模型或其他平台资格；既有嵌套 `@keyframes` 编译提示保留。
+
 消息内容通过[共享 Markdown renderer](../../packages/ui/README.md#markdown-消息内容)显示 Mermaid、语法高亮／diff、提示块、公式及消息内标题／脚注跳转。主消息、子详情与后台正文沿原 `NativeModelOutputMessage` 复用；本文不扩展 Web 或 TUI 的独立展示能力。公式语法已加入 Worker 的同一固定 parser，图表／KaTeX排版留在 renderer；纯Worker入口不引入DOM或可视化库，原CSP、Main IPC、完整正文核验与复制资格保持。
 
 2026-10-22，Windows x64／Bun1.4.3、`beabc9628` 加本次Markdown工作树：[内容浏览器夹具](test/markdown-content-browser-runner.fixture.ts)用生产Vite资产、原生产CSP和Chrome155.0.8059.85通过1280／390px，覆盖深浅主题、五类图表、未闭合围栏、错误后恢复、源码复制、脚注往返、读取暂停和会话缓存切回，未发起外部资源请求。实际逐步观察生成占位→图表、源码展开→切会话→恢复、错误→修正及主题变化，并修正默认阴影与小图放大；字体从本地资产加载。[纯Worker构建回归](test/native-markdown-build.test.ts)核新增公式树仍可在无document／window／Node的VM运行；组件与输入编辑证据归[UI owner](../../packages/ui/README.md#markdown-消息内容)。此为隔离生产组件验收，未取得本轮完整安装版Electron或其他平台资格；保留既有嵌套`@keyframes`编译提示。
@@ -158,7 +162,9 @@ Main 迁入原 nativeTheme.themeSource、创建时背景和 updated 监听，无
 
 Native [renderer 入口](src/native-main.tsx)明确开启 `NativeDesktop` 的 `nativeWindow` 布局，由[窗口容器](src/native-window-frame.tsx)承载启动与业务页面，启动页显隐按[启动显示规则](#原启动页与初始化重试)。普通 DOM 嵌入默认不套窗口布局。Windows／Linux 的沉浸式窗口顶栏单独占32px，内容区从 y=32px 开始；Mica 会话面板另按下文圆角留白内缩。macOS 将原生窗口按钮与52px业务 header 整合，内容区从 y=0 开始，不再额外保留32px空行。[Main](electron/main.ts)在 Windows／Linux 设置 `titleBarStyle: hidden` 和32px的透明 `titleBarOverlay`，不另显示系统应用图标与标题；macOS 保 `hiddenInset`，traffic-light位置为 `{x:13,y:19}`，与业务 header 垂直居中。`nativeTheme` 更新同步按钮符号颜色，窗口背景继续沿原主题端口。选择 [Electron 原生叠层](https://www.electronjs.org/docs/latest/tutorial/custom-title-bar)是为了保留宿主的窗口操作，不新建最小化／关闭 IPC 或另一套按钮状态。
 
-[Native CSS](src/native-tailwind.css)通过明确的 `data-native-window`和平台属性限定窗口展示；共享 Web 页面不因此变为可拖拽。Windows／Linux 只由独立顶栏声明 drag，内容区使用剩余高度，全屏设置相对内容区定位，窄侧栏浮层从顶栏下方开始。macOS 的顶栏元素改为左上角80×52px的绝对定位区域，不占流式高度；侧栏顶部隐藏重复品牌文字，侧栏收起时通过已有 `sidebar-visible` 状态将安全间距转移到主 header。设置返回按钮和窄侧栏顶部同样避开原生窗口按钮，窄浮层从 y=0 开始。macOS 的侧栏、会话、右栏与设置 header 空白声明 drag，内部按钮、链接和表单控件声明 no-drag。顶栏区域在 modal 遮罩之上保留窗口操作。此变更不增加 Service 能力，不改变关闭隐藏与原退出收尾。
+[Main](electron/main.ts)创建主窗口时设置 `minWidth: 800`（Electron逻辑像素），初始尺寸保持1100×780；系统调宽受此下限约束。当前没有保存／恢复窗口尺寸的独立路径。共享页面仍适应缩放后的CSS宽度，左侧栏仅由按钮收展；header和底部个人工作区的内边距不再受900px媒体查询改写。
+
+[Native CSS](src/native-tailwind.css)通过明确的 `data-native-window`和平台属性限定窗口展示；共享 Web 页面不因此变为可拖拽。Windows／Linux 只由独立顶栏声明 drag，内容区使用剩余高度，全屏设置相对内容区定位，所有宽度的侧栏都留在该内容区内，仅由按钮收展。macOS 的顶栏元素改为左上角80×52px的绝对定位区域，不占流式高度；侧栏顶部隐藏重复品牌文字，侧栏收起时通过已有 `sidebar-visible` 状态将安全间距转移到主 header。设置返回按钮和窄窗口中的同一侧栏顶部同样避开原生窗口按钮。macOS 的侧栏、会话、右栏与设置 header 空白声明 drag，内部按钮、链接和表单控件声明 no-drag。顶栏区域在 modal 遮罩之上保留窗口操作。此变更不增加 Service 能力，不改变关闭隐藏与原退出收尾。
 
 2026-10-15 macOS／Electron 44.3.0／Bun 1.4.2 的隔离实际 Main／preload／renderer 与配套 Service 验证了整合布局：1100×780窗口的业务区从 y=0 开始，侧栏 header 高52px，原生按钮位置为 `{x:13,y:19}`；侧栏收起、设置往返、文件变更及760／550／400px窗口的窄侧栏与设置控件均避开按钮区域，草稿往返保留，页面无异常。Windows／Linux 的平台 CSS 切换核实独立32px行保留，不代替这两平台的原生窗口验证。现有窗口交互、启动与共享页面三个完整测试文件共16项／171断言、Desktop typecheck、定向 Biome 和文档检查通过；drag／no-drag 核对为计算样式证据，未进行物理鼠标拖拽验收。
 
@@ -250,7 +256,9 @@ Mica／Vibrancy 的背景明度与壁纸合成继续由系统材质管理，承�
 
 ## 统一桌面圆角
 
-Native 统一消费[共享 UI 的根圆角变量](../../packages/ui/README.md#原桌面展示层)，采用统一的16px圆角；[设置／Mica 样式](src/native-tailwind.css)和[正文排版](src/native-typeset.css)均引用 `--radius`，没有另立 Native 圆角值。macOS 主内容与设置内容另按上文采用直角，内部控件仍消费共享圆角。Tailwind 尺寸别名、圆形及拼接直角的范围归 UI owner。现有 Mica 透明层、6px留白、设置覆盖与业务交互保持。
+Native 统一消费[共享 UI 的圆角变量](../../packages/ui/README.md#原桌面展示层)：普通按钮和菜单项为8px，字段与弹出层为16px，提示词输入框内部按钮为胶囊形。[设置／Mica 样式](src/native-tailwind.css)与[提供商表单](src/native-provider-settings.css)分别按用途引用 `--button-radius`、`--input-radius` 和 `--radius`；[正文排版](src/native-typeset.css)继续消费表面圆角。macOS 主内容与设置内容另按上文采用直角；Tailwind 尺寸别名、圆形及拼接直角的范围归 UI owner。现有 Mica 透明层、6px留白、设置覆盖与业务交互保持。
+
+2026-10-23，Windows x64／Bun1.4.3／Chrome155.0.8059.85，基于 `de498789b` 的当前圆角与输入区 diff：实际共享组件与生产编译 CSS 在深浅两套组件画廊及1280／390px四组会话中核对按钮、字段、主／子菜单、Tooltip、Dialog 和 Sheet。提示词选择器为13px文字、14px图标、28px高度与上下4px／左右6px内边距，附件／发送图标保持16px；宽屏左右两组中心一致，窄屏换行后各组仍居中，无横向溢出。观察圆环提示的悬停与键盘聚焦、复制反馈、模型选择、权限和附件菜单的展开与关闭，以及弹窗归焦，草稿与消息保持；14px状态圆环为独立SVG，鼠标、Enter与Space均未提交任务，无页面异常。四个相关原文件22项／198断言、UI／Desktop类型检查及定向Biome通过。夹具使用模拟回调，不读取用户数据；未重验完整安装版Electron，保留既有嵌套 `@keyframes` 编译提示。
 
 2026-10-14 同环境、基于 `006b79d3` 的当前圆角 diff：隔离普通 Native 构建和真实 Service，由实际空间选择入口登记测试目录（仅控制系统选择框回调）。亮／暗实际 computed style 核空间列表、主面板、Composer、建议按钮、项目选择、用户菜单及菜单项、设置内容、卡片、选择框与导航按钮均为10px；临时将根变量改为14px后全部随之改变，随后恢复10px。顶栏、设置分类栏与返回区保透明；500px窄窗口仍为同一圆角，返回与Escape保原输入实例和未发送草稿，圆形发送按钮与全屏直角保持。截图核布局，零页面异常、Main退出0通过。Desktop／UI typecheck、三份 CSS 的 Biome 和 diff 检查通过（保留原三项 `!important` 提示）；构建保原 keyframes 优化与大chunk提示。仅核本轮桌面外观，未运行完整默认测试或其他平台／安装制品验证，不将先前完整状态矩阵作为本轮重跑结果。
 
@@ -402,6 +410,10 @@ Native 的侧栏打开入口对当前父会话及同一在途选择去重，重�
 
 ## 会话消息渲染验证
 
+[消息适配](src/native-presentation.ts)将公开 `Message.createdAt` 交给 UI 的 `createdAtMs`，Agent 邮件和结果的专用展示分支也保留已提供的时间，缺失时不补造；旧输入的真实业务副本接管原行时，保留原输入的记录时间、独立同文与原业务身份。普通刷新、完整正文读取和重开不生成客户端替代时间；尚未保存或历史缺失时保持未知。[时间投影回归](test/native-message-time.test.ts)核字段与接管，具体格式与布局由 [UI owner](../../packages/ui/README.md)和[桌面手册](../../docs/handbook/clients/desktop/README.md)负责。
+
+2026-10-23，Windows x64／Bun1.4.3：时间投影2项通过（含原输入时间未知时不借用较晚业务时间），原[会话消息 DOM](test/isolated/native-transcript-dom.test.tsx)整文件9项／143断言通过；隔离 Chrome 的输入接管、流式、重开、日期与阅读位置证据见 [UI owner](../../packages/ui/README.md)。本次新增 Service／Client 的时间字段，开发运行需完整重启客户端以加载 Main 与配套 Service 的新协议资产；不以 renderer HMR 代替主进程更新，完整安装包未在本轮重验。
+
 [首次历史浏览器夹具](test/native-history-presentation-browser.fixture.tsx)通过实际 NativeDesktop、生产样式和隔离 bridge 分别延迟选择、历史、Run 与 Tool，并按原请求身份和32项批次返回。由[逐帧 runner](test/native-history-presentation-browser-runner.fixture.ts)核首次进入、未缓存切换及缓存返回，记录目标首个可见消息之后的节点身份、宽高、滚动、留白与加载／欢迎状态；旧性能夹具提前提供完整 View Runs，其数据不覆盖这一异步重组时序。环境卡首次宽度在共享 SessionPage 的 layout effect 确定，不启动初始占位过渡；后续窗口跨阈值和用户开合保留原动画。
 
 2026-10-23，macOS arm64／Bun1.4.2，基于 `45b8275c1` 的当前工作树（含本次修复及并行子 Agent 展示改动）：合回当前目录后，相关11个DOM／组件测试文件154项、3982断言通过，UI／Desktop类型检查、定向Biome及文档检查通过。Chrome155六组首次／未缓存切换核Run先到、Tool先到、View已齐、40轮多页历史与32项事实批次，含亮暗主题、1280／1320／1440px和减少动画；目标首次显示后连续28–30帧的消息／轮次节点、阅读区几何、滚动和Composer位置不变，缓存返回保原节点。Electron44.3.0／Chromium152独立窗口沿相同生产renderer制品复核首次与未缓存切换，各80个连续可见帧同样稳定，零页面错误；过程截图确认等待后直接进入完整分组。环境卡独立9组首屏／晚到内容与8组开合／调宽验证中，1320／1440／1600px首帧已为最终占位，原403px正文高度变化和146.5px最大横移消除，后续交互动画保留。证据分别位于本机 `.cache/native-history-presentation-fyZ0mY/` 与 `.cache/session-render-fixed-electron-C3IvWz/`；使用隔离数据，不覆盖真实Service／SQLite延迟、安装包或其他平台资格。异常读取fallback后的新事实仍按原恢复规则更新，不把正常冷开布局稳定外推为恢复时不更新分组。
@@ -484,7 +496,7 @@ Native 的侧栏打开入口对当前父会话及同一在途选择去重，重�
 
 ## 输入区上下文占用
 
-[NativeDesktop](src/native.tsx)通过 [useNativeContextUsage](src/native-context-usage.ts)向共享 [Composer](../../packages/ui/src/desktop/Composer.tsx)传只读上下文估算。圆环的比例固定为 totalInputTokens / contextWindowTokens，分母是最近已保存原请求所属冻结模型的完整窗口，不能使用累计缓存率、累计输入或API中扣除输出预留后的 utilization。浮层标明约数，显示上下文已用与总容量；窗口容量未知时显示未知，尚无可用原请求或读取失败时隐藏圆环。输入框旁仍独立显示原累计缓存文字。
+[NativeDesktop](src/native.tsx)通过 [useNativeContextUsage](src/native-context-usage.ts)向共享 [Composer](../../packages/ui/src/desktop/Composer.tsx)传只读上下文估算。圆环的比例固定为 totalInputTokens / contextWindowTokens，分母是最近已保存原请求所属冻结模型的完整窗口，不能使用累计缓存率、累计输入或API中扣除输出预留后的 utilization。浮层标明约数，显示上下文已用与总容量；窗口容量未知时显示未知，尚无可用原请求或读取失败时隐藏圆环。输入框旁仍独立显示原累计缓存文字。圆环由共享 Composer 直接渲染为无点击操作的状态图标，保留悬停与键盘聚焦的详情提示。
 
 [Main reader](electron/tool-messages.ts)的 toolMessages.contextUsage沿原有限IPC只接受一个已观察的完整助手Message ID，复用原read lease、关闭与退出释放；核准确当前Store、Session、Run、成功Model Execution、消息正文与来源后，调用现有 getContextEstimate，只回传模型、上下文选择及输入／窗口数字。响应前再核当前View、选择、工作区和原消息；不向Renderer回传上下文正文，不写入、不初始化Provider、不启动模型。这个用户可见的数值展示不开放测试Context面板。API的完整历史预测、实测基线和来源限制归 [Core owner](../../packages/agent/src/context-estimate.README.md)，未发送草稿、重新捕获的项目来源与随后模型／工具配置变化不在该预测内。
 

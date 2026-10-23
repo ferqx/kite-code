@@ -131,7 +131,7 @@ test('actual Conversation copies only original settled user and host-confirmed f
   const user = '完整用户消息 中文🙂\n原始第二行';
   const final = '第一段 **原始 Markdown**\n\n第二段最终回答🙂';
   const messages: Message[] = [
-    { id: 'u', turnId: 'run', role: 'user', settled: true, text: user },
+    { id: 'u', turnId: 'run', role: 'user', settled: true, text: user, createdAtMs: 1234567890000 },
     { id: 'reasoning', turnId: 'run', role: 'thinking', settled: true, text: 'private reasoning' },
     { id: 'a1', turnId: 'run', role: 'assistant', settled: true, text: '第一段 **原始 Markdown**' },
     {
@@ -201,6 +201,11 @@ test('actual Conversation copies only original settled user and host-confirmed f
     });
   try {
     await render(messages);
+    const time = host.querySelector('.message.user time')!;
+    expect(time.getAttribute('datetime')).toBe(new Date(1234567890000).toISOString());
+    expect(time.getAttribute('title')).toContain('2009年');
+    expect(host.querySelector('.message.user .message-meta > :first-child')).toBe(buttons()[0]!);
+    expect(host.querySelector('.message.assistant .message-time')?.textContent).toBe('时间未知');
     expect(buttons()).toHaveLength(2);
     expect(buttons().map((button) => button.getAttribute('aria-label'))).toEqual([
       '复制本轮用户消息',

@@ -18,36 +18,27 @@ import { openSqliteStore, resolveProfile } from '@kite-ai/agent/sqlite';
 import { createFixedModel, type ModelEvent } from '@kite-ai/ai';
 import { startService } from '../../src';
 
-async function assertBusinessInput(
+async function assertDirectInput(
   runtime: ReturnType<typeof createRuntime>,
   commandId: string,
   content: string,
 ) {
   const command = (await runtime.getCommand(commandId))!;
-  const receipt = command.receipt as {
-    businessCommandId: string;
-    humanInputCommandId: string;
-    runId: string;
-  };
+  const receipt = command.receipt as { runId: string };
   expect(command).toMatchObject({ status: 'applied', request: { kind: 'run.start', content } });
-  expect(receipt.businessCommandId).toBeString();
-  expect(receipt.businessCommandId).not.toBe(commandId);
-  expect(await runtime.getCommand(receipt.humanInputCommandId)).toMatchObject({
-    request: { publicCommandId: commandId, content, originalRequest: command.request },
-  });
-  expect(await runtime.getCommand(receipt.businessCommandId)).toMatchObject({
-    status: 'applied',
-    request: { content },
-    receipt: { runId: receipt.runId },
-  });
+  expect(receipt.runId).toBeString();
+  expect(receipt).not.toHaveProperty('businessCommandId');
+  expect(receipt).not.toHaveProperty('humanInputCommandId');
   const run = (await runtime.getRun(receipt.runId))!;
   expect(run).toMatchObject({
-    originCommandId: receipt.businessCommandId,
+    originCommandId: commandId,
     rootWorkCommandId: commandId,
+    rootWorkSeq: command.rootWorkSeq,
   });
   const view = await runtime.getView('session');
   const model = view.executions.find((item) => item.kind === 'model' && item.runId === run.id)!;
   expect(model).toBeDefined();
+  expect(model.originCommandId).toBe(commandId);
   const input = await runtime.readModelInput({
     expectedStoreId: command.originStoreId,
     sessionId: 'session',
@@ -55,10 +46,8 @@ async function assertBusinessInput(
     executionId: model.id,
   });
   expect(input.confirmation).toBe('succeeded');
-  const source = input.request.messages.find((message) =>
-    message.sourceIds?.includes(receipt.businessCommandId),
-  );
-  expect(source).toMatchObject({ content, sourceIds: [receipt.businessCommandId] });
+  const source = input.request.messages.find((message) => message.sourceIds?.includes(commandId));
+  expect(source).toMatchObject({ content, sourceIds: [commandId] });
   return run;
 }
 
@@ -214,9 +203,13 @@ test('real HTTP exposes projected facts, distinguishes initialization writes and
   try {
     const db = new Database(data.paths.databasePath, { readonly: true });
     try {
-      expect(db.query('SELECT COUNT(*) AS count FROM schema_migration').get()).toEqual({
-        count: 2,
-      });
+      expect(db.query('SELECT id FROM schema_migration ORDER BY id').all()).toEqual([
+        { id: '0001-baseline' },
+        { id: '0002-recovery-audit' },
+        { id: '0003-session-reconciliation' },
+        { id: '0004-pending-input-order' },
+        { id: '0005-authorization-check' },
+      ]);
       expect(db.query('SELECT COUNT(*) AS count FROM command').get()).toEqual({ count: 0 });
     } finally {
       db.close();
@@ -380,6 +373,15 @@ test('202 acceptance and disconnected SSE stay separate from actual execution; S
     expect(readFileSync(ledger, 'utf8')).toBe('effect');
     const view = await (await data.request('/v1/sessions/session/view')).json();
     expect(view.runs[0].status).toBe('completed');
+    const history = await (await data.request('/v1/sessions/session/messages')).json();
+    const recorded = await data.store.listMessages('session');
+    expect(history.length).toBeGreaterThan(0);
+    expect(history.map((message: { createdAt?: number }) => message.createdAt)).toEqual(
+      recorded.map((message) => message.createdAt),
+    );
+    expect(
+      history.every((message: { createdAt?: number }) => Number.isSafeInteger(message.createdAt)),
+    ).toBe(true);
     const run = await (await data.request(`/v1/runs/${view.runs[0].id}`)).json();
     expect(run.status).toBe('completed');
     const execution = view.executions.find((item: { kind: string }) => item.kind === 'tool');
@@ -477,7 +479,7 @@ test('HTTP command.cancel targets the original command and rejects a stale Store
     ).toBe(202);
     await data.runtime.waitForCommand('later');
     expect((await data.post('/v1/sessions/session/commands', cancel)).status).toBe(202);
-    expect(await assertBusinessInput(data.runtime, 'later', 'New task: Later work')).toMatchObject({
+    expect(await assertDirectInput(data.runtime, 'later', 'New task: Later work')).toMatchObject({
       status: 'completed',
     });
     expect(calls).toBe(0);

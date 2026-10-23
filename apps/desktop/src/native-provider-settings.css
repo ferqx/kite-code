@@ -44,7 +44,7 @@
   min-height: 36px;
   padding: 8px 13px;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--button-radius);
   color: var(--foreground);
   background: var(--card);
   font: inherit;
@@ -330,7 +330,7 @@
   padding: 9px 11px;
   margin: 0;
   border: 1px solid var(--input);
-  border-radius: 7px;
+  border-radius: var(--input-radius);
   background: var(--background);
   color: var(--foreground);
   font: inherit;

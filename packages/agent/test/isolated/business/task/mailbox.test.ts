@@ -563,18 +563,18 @@ test('actual QueueOnly parent/child exchange keeps twelve complete private bodie
     const finalCursor = (await store.getMetadata()).lastChangeCursor;
     await runtime.close();
     const readonly = await openSqliteStore({ ...profile, mode: 'readonly' });
-    try {
-      const coldRuntime = createRuntime({
-        store: readonly,
-        artifacts: createArtifactStore({ profile, store: readonly }),
-        model: parent,
-        modelId: 'root',
-        permissions: {
-          async authorize() {
-            throw Error('cold_display_must_not_request_authorization');
-          },
+    const coldRuntime = createRuntime({
+      store: readonly,
+      artifacts: createArtifactStore({ profile, store: readonly }),
+      model: parent,
+      modelId: 'root',
+      permissions: {
+        async authorize() {
+          throw Error('cold_display_must_not_request_authorization');
         },
-      });
+      },
+    });
+    try {
       expect(
         (await coldRuntime.listMessages(ref.childSessionId!)).filter(
           (message) => message.agentMessage,
@@ -598,7 +598,7 @@ test('actual QueueOnly parent/child exchange keeps twelve complete private bodie
       expect(rootRequests).toHaveLength(5);
       expect(childRequests).toHaveLength(3);
     } finally {
-      await readonly.close();
+      await coldRuntime.close();
     }
   } finally {
     childGate.release();

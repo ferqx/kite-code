@@ -521,6 +521,7 @@ function fixture(
           status: 'complete',
           role: 'user',
           content: send.intent.content,
+          files: send.intent.files,
           sourceIds: [
             options.firstHumanInput ? `processing-${send.intent.commandId}` : send.intent.commandId,
           ],
@@ -1252,8 +1253,12 @@ test('an original pending input precedes its Run status and reply while saved us
   }
 });
 
-for (const persistBetween of [false, true])
-  test(`explicit steers keep delivery order through delayed history (${persistBetween ? 'prior steer saved' : 'both local'})`, async () => {
+for (const { persistBetween, attachmentOnly } of [
+  { persistBetween: false, attachmentOnly: false },
+  { persistBetween: true, attachmentOnly: false },
+  { persistBetween: false, attachmentOnly: true },
+])
+  test(`explicit steers keep delivery order through delayed history (${attachmentOnly ? 'first steer file only' : persistBetween ? 'prior steer saved' : 'both local'})`, async () => {
     const run = {
       id: 'original-steer-run',
       sessionId: 'a',
@@ -1313,6 +1318,7 @@ for (const persistBetween of [false, true])
         };
       return result;
     };
+    const firstText = attachmentOnly ? '' : 'first explicit steer';
     const savedSteer = (index: number): Message => ({
       id: `saved-steer-${index}`,
       role: 'user',
@@ -1323,13 +1329,37 @@ for (const persistBetween of [false, true])
       content: submitted[index]!.intent.content,
       sourceIds: [submitted[index]!.intent.commandId],
       originCommandId: submitted[index]!.intent.commandId,
+      inputKind: 'input.steer',
+      ...(submitted[index]!.intent.files ? { files: submitted[index]!.intent.files } : {}),
     });
     const assertOrder = () => {
+      const userMessages = [...f.host.querySelectorAll('.message.user')];
       expect(
-        [...f.host.querySelectorAll('.message.user')].map((message) => message.textContent),
-      ).toEqual(['original work', 'first explicit steer', 'second explicit steer']);
+        userMessages.map((message) => {
+          const body = message.cloneNode(true) as Element;
+          for (const extra of body.querySelectorAll('.message-meta, .message-attachments'))
+            extra.remove();
+          return body.textContent;
+        }),
+      ).toEqual(['original work', firstText, 'second explicit steer']);
+      for (const message of userMessages)
+        expect(message.querySelector('.message-time')?.textContent).toBe('时间未知');
       const reply = f.host.querySelector('.message.assistant')!;
-      const firstSteer = f.host.querySelectorAll('.message.user')[1]!;
+      const firstSteer = userMessages[1]!;
+      expect(f.host.querySelectorAll('.agent-turn-process')).toHaveLength(1);
+      expect(firstSteer.closest('.agent-turn-process')).not.toBeNull();
+      expect(userMessages[2]!.closest('.agent-turn-process')).toBe(
+        firstSteer.closest('.agent-turn-process'),
+      );
+      if (attachmentOnly) {
+        expect(
+          firstSteer.querySelectorAll('.message-attachments .composer-attachment'),
+        ).toHaveLength(1);
+        expect(firstSteer.querySelector('.composer-attachment-name')?.textContent).toBe(
+          '补充要求.txt',
+        );
+        expect(firstSteer.querySelector('.user-message-body')?.textContent).toBe('');
+      }
       expect(
         reply.compareDocumentPosition(firstSteer) & f.dom.window.Node.DOCUMENT_POSITION_FOLLOWING,
       ).not.toBe(0);
@@ -1337,7 +1367,31 @@ for (const persistBetween of [false, true])
     try {
       await act(async () => f.root.render(<NativeDesktop />));
       await f.click('Original A');
-      await f.edit('first explicit steer', '当前会话私有草稿');
+      if (attachmentOnly) {
+        bridge.fileReferences = () => [
+          { name: '补充要求.txt', uri: 'file:///synthetic/steer.txt' },
+        ];
+        await act(async () =>
+          f.host.querySelector('[aria-label="添加附件"]')!.dispatchEvent(
+            new f.dom.window.KeyboardEvent('keydown', {
+              key: 'Enter',
+              bubbles: true,
+              cancelable: true,
+            }),
+          ),
+        );
+        await act(async () =>
+          f.host.querySelector<HTMLElement>('[aria-label="添加文件"]')!.click(),
+        );
+        const picker = f.host.querySelector<HTMLInputElement>('input[aria-label="选择文件"]')!;
+        Object.defineProperty(picker, 'files', {
+          value: [new f.dom.window.File(['synthetic'], '补充要求.txt', { type: 'text/plain' })],
+        });
+        await act(async () =>
+          picker.dispatchEvent(new f.dom.window.Event('change', { bubbles: true })),
+        );
+      }
+      await f.edit(firstText, '当前会话私有草稿');
       await f.click('引导当前轮次');
       expect(submitted[0]?.intent.kind).toBe('input.steer');
       if (persistBetween) await f.publishMessages([...original, savedSteer(0)], [run]);
@@ -2901,48 +2955,79 @@ test('a completed first send preserves the scheduled page and returning enters i
   }
 });
 
-test('first submission keeps one readable pending message through delayed selection and history, then hands off without a loading or welcome flash', async () => {
-  const f = fixture(true);
-  try {
-    await act(async () => f.root.render(<NativeDesktop />));
-    await f.click('Original A');
-    await f.click('在 Workspace 中新建对话');
-    expect(f.host.querySelector('.new-conversation-welcome')).not.toBeNull();
-    await f.edit('original first message 雪🙂');
-    await f.click('发送首条消息');
-    const viewport = f.host.querySelector('.conversation-viewport'),
-      pending = f.host.querySelector('.message.user');
-    expect(pending?.textContent).toContain('original first message 雪🙂');
-    expect(f.host.querySelector('.delivery-status')).toBeNull();
-    f.holdSelection();
-    f.holdHistory();
-    await f.resolve('accepted');
-    const expectPending = () => {
-      expect(f.host.querySelector('.conversation-viewport') === viewport).toBe(true);
-      expect(f.host.querySelector('.message.user') === pending).toBe(true);
-      expect(pending!.isConnected).toBe(true);
-      expect(f.host.querySelectorAll('.message.user')).toHaveLength(1);
-      expect(f.host.querySelector('.new-conversation-welcome')).toBeNull();
-      expect(f.host.querySelector('.conversation-loading')).toBeNull();
-      expect(f.host.querySelector('.welcome')).toBeNull();
+for (const body of ['original first message 雪🙂', '']) {
+  test(`first submission keeps one readable pending message through delayed selection and history, then hands off without a loading or welcome flash (${body ? 'text and file' : 'file only'})`, async () => {
+    const f = fixture(true);
+    try {
+      await act(async () => f.root.render(<NativeDesktop />));
+      await f.click('Original A');
+      await f.click('在 Workspace 中新建对话');
+      expect(f.host.querySelector('.new-conversation-welcome')).not.toBeNull();
+      (f.dom.window.kiteNative! as NativeBridge).fileReferences = () => [
+        { name: '设计说明.pdf', uri: 'file:///synthetic/design.pdf' },
+      ];
+      await act(async () =>
+        f.host.querySelector('[aria-label="添加附件"]')!.dispatchEvent(
+          new f.dom.window.KeyboardEvent('keydown', {
+            key: 'Enter',
+            bubbles: true,
+            cancelable: true,
+          }),
+        ),
+      );
+      await act(async () => f.host.querySelector<HTMLElement>('[aria-label="添加文件"]')!.click());
+      const picker = f.host.querySelector<HTMLInputElement>('input[aria-label="选择文件"]')!;
+      Object.defineProperty(picker, 'files', {
+        value: [new f.dom.window.File(['synthetic'], '设计说明.pdf', { type: 'application/pdf' })],
+      });
+      await act(async () =>
+        picker.dispatchEvent(new f.dom.window.Event('change', { bubbles: true })),
+      );
+      await f.edit(body);
+      await f.click('发送首条消息');
+      const viewport = f.host.querySelector('.conversation-viewport'),
+        pending = f.host.querySelector('.message.user');
+      expect(pending?.textContent).toContain(body);
+      expect(
+        pending?.querySelector('.message-attachments .composer-attachment-name')?.textContent,
+      ).toBe('设计说明.pdf');
+      expect(pending?.querySelector('.user-message-body .message-attachments')).toBeNull();
       expect(f.host.querySelector('.delivery-status')).toBeNull();
-      expect(f.host.body.textContent).not.toContain('打开本次会话');
-    };
-    expectPending();
-    await f.releaseSelection();
-    expectPending();
-    await f.releaseHistory();
-    expect(f.host.querySelector('.conversation-viewport') === viewport).toBe(true);
-    expect(f.host.querySelectorAll('.message.user')).toHaveLength(1);
-    expect(f.host.querySelector('.message.user')!.textContent).toContain(
-      'original first message 雪🙂',
-    );
-    expect(f.host.querySelector('.delivery-status')).toBeNull();
-    expect(f.calls.filter((call) => call.method === 'conversation.send')).toHaveLength(1);
-  } finally {
-    await f.close();
-  }
-});
+      f.holdSelection();
+      f.holdHistory();
+      await f.resolve('accepted');
+      const expectPending = () => {
+        expect(f.host.querySelector('.conversation-viewport') === viewport).toBe(true);
+        expect(f.host.querySelector('.message.user') === pending).toBe(true);
+        expect(pending!.isConnected).toBe(true);
+        expect(f.host.querySelectorAll('.message.user')).toHaveLength(1);
+        expect(pending!.querySelectorAll('.composer-attachment')).toHaveLength(1);
+        expect(f.host.querySelector('.new-conversation-welcome')).toBeNull();
+        expect(f.host.querySelector('.conversation-loading')).toBeNull();
+        expect(f.host.querySelector('.welcome')).toBeNull();
+        expect(f.host.querySelector('.delivery-status')).toBeNull();
+        expect(f.host.body.textContent).not.toContain('打开本次会话');
+      };
+      expectPending();
+      await f.releaseSelection();
+      expectPending();
+      await f.releaseHistory();
+      expect(f.host.querySelector('.conversation-viewport') === viewport).toBe(true);
+      expect(f.host.querySelectorAll('.message.user')).toHaveLength(1);
+      expect(f.host.querySelector('.message.user')!.textContent).toContain(body);
+      expect(f.host.querySelector('.delivery-status')).toBeNull();
+      expect(f.calls.filter((call) => call.method === 'conversation.send')).toHaveLength(1);
+      expect(
+        f.host.querySelectorAll('.message.user .message-attachments .composer-attachment'),
+      ).toHaveLength(1);
+      expect(f.host.querySelector('.message.user .user-message-body')?.textContent).toBe(body);
+      if (!body)
+        expect(f.host.querySelector('.message.user .user-message-body')?.childElementCount).toBe(0);
+    } finally {
+      await f.close();
+    }
+  });
+}
 
 test('a saved first-created conversation waits for fresh grouping when its inactive caches are invalidated', async () => {
   const f = fixture(true);

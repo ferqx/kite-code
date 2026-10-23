@@ -921,6 +921,11 @@ export class SqliteOperations {
       status: row.status as MessageRecord['status'],
       role: row.role as MessageRecord['role'],
       content,
+      ...(typeof source.createdAt === 'number' &&
+      Number.isSafeInteger(source.createdAt) &&
+      source.createdAt >= 0
+        ? { createdAt: source.createdAt }
+        : {}),
       ...(source.images ? { images: source.images as unknown as MessageRecord['images'] } : {}),
       ...(source.files ? { files: source.files as unknown as MessageRecord['files'] } : {}),
       ...(compression ? { compression } : {}),
@@ -943,6 +948,47 @@ export class SqliteOperations {
       ...(source.inputKind ? { inputKind: source.inputKind as MessageRecord['inputKind'] } : {}),
     };
   }
+  messageRecords(rows: Row[]): MessageRecord[] {
+    const messages = rows.map((row) => this.message(row));
+    const missing = messages.filter((message) => message.createdAt === undefined);
+    // A retained update after pruning cannot prove when a message was first published.
+    if (
+      !missing.length ||
+      String(this.row('SELECT replay_floor FROM storage_meta WHERE singleton=1')!.replay_floor) !==
+        '0'
+    )
+      return messages;
+    const times = new Map<string, number>();
+    for (const row of this.rows(
+      `SELECT object_id,payload_json FROM change_event WHERE cursor IN (
+        SELECT MIN(cursor) FROM change_event WHERE type='message.updated'
+        AND (SELECT replay_floor FROM storage_meta WHERE singleton=1)=0
+        AND object_id IN (${missing.map(() => '?').join(',')}) GROUP BY object_id
+      )`,
+      ...missing.map((message) => message.id),
+    )) {
+      let event: Record<string, Json> | null;
+      try {
+        event = parse(row.payload_json) as Record<string, Json> | null;
+      } catch (error) {
+        // Optional display metadata cannot make the original Message unreadable.
+        if (error instanceof SyntaxError) continue;
+        throw error;
+      }
+      if (
+        event?.format === 'kite.session-log' &&
+        event.version === 1 &&
+        typeof event.occurredAt === 'number' &&
+        Number.isSafeInteger(event.occurredAt) &&
+        event.occurredAt >= 0
+      )
+        times.set(String(row.object_id), event.occurredAt);
+    }
+    return messages.map((message) => {
+      const createdAt = message.createdAt ?? times.get(message.id);
+      return createdAt === undefined ? message : { ...message, createdAt };
+    });
+  }
   appendMessage(
     sessionId: string,
     runId: string | null,
@@ -951,6 +997,7 @@ export class SqliteOperations {
     status = 'complete',
     id: string = randomUUID(),
   ): string {
+    const source = { ...(content as Record<string, Json>), createdAt: Date.now() };
     this.allocateSessionSequence(sessionId);
     this.run(
       'INSERT INTO message(id,session_id,run_id,seq,role,status,source_json) SELECT ?,id,?,next_seq,?,?,? FROM session WHERE id=?',
@@ -958,10 +1005,10 @@ export class SqliteOperations {
       runId,
       role,
       status,
-      canonicalJson(content),
+      canonicalJson(source),
       sessionId,
     );
-    this.run('INSERT INTO message_part VALUES(?,0,?,1,0,?)', id, 'text', canonicalJson(content));
+    this.run('INSERT INTO message_part VALUES(?,0,?,1,0,?)', id, 'text', canonicalJson(source));
     this.event(sessionId, id, 'message.updated');
     return id;
   }
@@ -2003,12 +2050,13 @@ export class SqliteOperations {
                   )
                 : undefined;
             if (partial) {
-              const firstOutput = modelFirstOutput(
-                parse(partial.source_json),
-                input.message.firstOutput,
-              );
+              const previousSource = parse(partial.source_json) as Record<string, Json>;
+              const firstOutput = modelFirstOutput(previousSource, input.message.firstOutput);
               const body = canonicalJson({
                 ...input.message,
+                ...(previousSource.createdAt === undefined
+                  ? {}
+                  : { createdAt: previousSource.createdAt }),
                 ...(firstOutput === undefined ? {} : { firstOutput }),
               } as unknown as Json);
               this.run(
@@ -2079,12 +2127,13 @@ export class SqliteOperations {
           }
           const id = `partial_${input.executionId}`;
           const prior = this.row('SELECT * FROM message WHERE id=?', id);
-          const firstOutput = modelFirstOutput(
-            prior ? parse(prior.source_json) : null,
-            input.firstOutput,
-          );
+          const previousSource = prior ? (parse(prior.source_json) as Record<string, Json>) : null;
+          const firstOutput = modelFirstOutput(previousSource, input.firstOutput);
           const messageBody = {
             content: input.content,
+            ...(previousSource?.createdAt !== undefined
+              ? { createdAt: previousSource.createdAt }
+              : {}),
             ...(firstOutput === undefined ? {} : { firstOutput }),
             ...(input.reasoning === undefined ? {} : { reasoning: input.reasoning }),
             sourceIds: [input.executionId],

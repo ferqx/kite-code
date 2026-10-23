@@ -1,7 +1,11 @@
 import type { InputImage, Message } from '@kite-ai/client';
 import {
+  Attachment,
   AttachmentFileCard,
+  AttachmentMedia,
+  AttachmentTitle,
   Button,
+  MessageAttachments,
   useConversationReadActive,
   useConversationResourceRetention,
 } from '@kite-ai/ui/desktop';
@@ -228,8 +232,12 @@ function NativeUserImage({ image, index, ...props }: Props & { image: InputImage
     return stopRead;
   }, [nearby, visible, readAvailable, readScope, clear, open, stopRead]);
   return (
-    <div ref={card} className="composer-attachment native-user-image">
-      <div className="composer-attachment-preview" aria-busy={loading || undefined}>
+    <Attachment ref={card} orientation="vertical" className="composer-attachment native-user-image">
+      <AttachmentMedia
+        variant="image"
+        className="composer-attachment-preview"
+        aria-busy={loading || undefined}
+      >
         {url ? (
           <img src={url} alt={image.name} decoding="async" />
         ) : error ? (
@@ -243,16 +251,19 @@ function NativeUserImage({ image, index, ...props }: Props & { image: InputImage
             预览失败，重试
           </Button>
         ) : null}
-      </div>
-      <span className="composer-attachment-name" title={image.name}>
+      </AttachmentMedia>
+      <AttachmentTitle className="composer-attachment-name" title={image.name}>
         {image.name}
-      </span>
-    </div>
+      </AttachmentTitle>
+    </Attachment>
   );
 }
 export function NativeUserImages(props: Props) {
   return (
-    <section className="composer-attachments native-user-images" aria-label="消息附件">
+    <MessageAttachments
+      count={(props.message.files?.length ?? 0) + (props.message.images?.length ?? 0)}
+      className="native-user-images"
+    >
       {props.message.files?.map((file, index) => (
         <AttachmentFileCard name={file.name} key={`${index}/${file.uri}`} />
       ))}
@@ -270,6 +281,40 @@ export function NativeUserImages(props: Props) {
           ])}
         />
       ))}
-    </section>
+    </MessageAttachments>
+  );
+}
+
+/** Freeze names only; draft blob URLs remain owned and released by the input draft lifecycle. */
+export type NativePendingAttachmentNames = {
+  files?: readonly { name: string }[];
+  images?: readonly { name: string }[];
+};
+
+export function NativePendingAttachments({ files, images }: NativePendingAttachmentNames) {
+  return (
+    <MessageAttachments count={(files?.length ?? 0) + (images?.length ?? 0)}>
+      {files?.map((file, index) => (
+        <AttachmentFileCard name={file.name} key={`file:${index}`} />
+      ))}
+      {images?.map((image, index) => (
+        <Attachment
+          orientation="vertical"
+          className="composer-attachment native-user-image"
+          key={`image:${index}`}
+        >
+          <AttachmentMedia
+            variant="image"
+            className="composer-attachment-preview"
+            role="img"
+            aria-label="图片预览等待消息保存"
+            aria-busy="true"
+          />
+          <AttachmentTitle className="composer-attachment-name" title={image.name}>
+            {image.name}
+          </AttachmentTitle>
+        </Attachment>
+      ))}
+    </MessageAttachments>
   );
 }

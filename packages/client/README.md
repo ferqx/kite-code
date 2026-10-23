@@ -1,5 +1,7 @@
 # Client
 
+公开 `Message.createdAt` 是可选的首次记录毫秒时间，仅用于呈现；生成 schema／validator 同源接纳并保留该字段，也接纳未提供时间的旧历史。SDK 不生成时间或发起补写。[浏览器读取回归](test/browser.test.ts)核对已知与未知时间的传递；原记录与日志补齐规则归 [Store owner](../agent/src/storage/README.md#消息首次记录时间)。
+
 ## 待消费输入队列
 
 [AgentClient](src/index.ts)提供 `getPendingInputQueue(sessionId,{storeId,afterOrder?,limit?,expectedRevision?})`、`withdrawPendingInput(sessionId,{kind:'input.withdraw',expectedStoreId,commandId,targetCommandId,expectedRevision})` 与 `reorderPendingInputs(sessionId,{kind:'input.reorder',expectedStoreId,commandId,expectedRevision,commandIds})`。三个方法要求当前 `pending_input_queue` capability，缺能力在本地拒绝；写入仍核原连接和 expected Store。请求沿生成闭合 schema 克隆，SDK 不生成或替换原 operation ID，不自动重试 POST。

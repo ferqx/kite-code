@@ -49,7 +49,7 @@ const DialogContent = React.forwardRef<
         >
           {children}
           {showCloseButton && (
-            <DialogPrimitive.Close className="absolute right-4 top-4 rounded-sm opacity-70 transition-opacity hover:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none">
+            <DialogPrimitive.Close className="absolute right-4 top-4 rounded-[var(--button-radius,8px)] opacity-70 transition-opacity hover:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none">
               <HugeiconsIcon icon={Cancel01Icon} />
               <span className="sr-only">关闭</span>
             </DialogPrimitive.Close>

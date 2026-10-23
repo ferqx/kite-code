@@ -17,7 +17,6 @@ import {
   AlertDialogFooter,
   AlertDialogHeader,
   AlertDialogTitle,
-  AttachmentFileCard,
   Button as DesktopButton,
   Dialog,
   DialogContent,
@@ -117,7 +116,7 @@ import {
   useNativeRuns,
 } from './native-transcript';
 import { NativeTranscriptDisplay } from './native-transcript-display';
-import { NativeUserImages } from './native-user-images';
+import { NativePendingAttachments, NativeUserImages } from './native-user-images';
 import { NativeWindowFrame } from './native-window-frame';
 
 function savedNativeInput(
@@ -243,6 +242,7 @@ function NativeDesktopContent({
     plan: boolean;
     permissionMode: 'accept_edits' | 'auto' | 'full';
     imageIds?: readonly string[];
+    images?: readonly { name: string }[];
     files?: readonly { id: string; name: string; uri: string }[];
     imageScope?: string;
     result?: NativeConversationResult;
@@ -337,6 +337,8 @@ function NativeDesktopContent({
         afterInputCommandId?: string;
         text: string;
         phase: 'sending' | 'unknown' | 'failed' | 'accepted';
+        files?: readonly { name: string }[];
+        images?: readonly { name: string }[];
       }
     >(),
   );
@@ -1753,6 +1755,7 @@ function NativeDesktopContent({
       preparationRevision: newDraftRevision.current,
       imageScope: newImageScope,
       imageIds: imageDrafts.get(newImageScope).map((image) => image.id),
+      images: imageDrafts.get(newImageScope).map(({ name }) => ({ name })),
       files: imageDrafts.files(newImageScope),
       choice: newModelReady.choice ?? newChoice,
       plan: newPlanMode,
@@ -1845,6 +1848,7 @@ function NativeDesktopContent({
           imageScope: imageScope(selection.storeId, sessionId),
           imageIds,
           files,
+          images: images.map(({ name }) => ({ name })),
           choice: resolvedChoice?.choice ?? {},
           plan: planMode,
           result: undefined,
@@ -1916,6 +1920,8 @@ function NativeDesktopContent({
           afterInputCommandId: predecessor?.[0],
           text: submittedText,
           phase: 'sending',
+          files: files.map(({ name }) => ({ name })),
+          images: images.map(({ name }) => ({ name })),
         });
       });
       let value: NativeResult;
@@ -2123,7 +2129,12 @@ function NativeDesktopContent({
                 ? 'unknown'
                 : 'sending'
           : input.phase;
-        return [nativePendingInputMessage(id, input, phase, selection)];
+        return [
+          {
+            ...nativePendingInputMessage(id, input, phase, selection),
+            hasAttachments: !!(input.files?.length || input.images?.length),
+          },
+        ];
       }),
     [inputDeliveries, preparing, selection, displayMessages, state?.inputSubmissions],
   );
@@ -2174,6 +2185,7 @@ function NativeDesktopContent({
         ...(turnId ? { turnId } : {}),
         role: 'user',
         text: firstSubmission.text,
+        hasAttachments: !!(firstSubmission.files?.length || firstSubmission.images?.length),
         settled: firstSubmission.result?.phase === 'accepted',
         copyText: null,
         delivery:
@@ -2983,23 +2995,37 @@ function NativeDesktopContent({
       setPreparing(false);
     },
   });
+  const renderNativeAttachments: NonNullable<SessionPageProps['renderMessageAttachments']> = (
+    model,
+  ) => {
+    if (firstVisible && !firstSaved && model.id === firstSubmission.commandId)
+      return (
+        <NativePendingAttachments files={firstSubmission.files} images={firstSubmission.images} />
+      );
+    const delivery = inputDeliveries.get(model.id);
+    if (delivery && !messagesById.has(model.id))
+      return <NativePendingAttachments files={delivery.files} images={delivery.images} />;
+    const message = messagesById.get(model.id);
+    if (!message || !selection || !state) return null;
+    return (
+      <NativeUserImages
+        bridge={bridge}
+        previews={imageDrafts.previews}
+        generation={state.generation}
+        viewSelection={selection.viewSelection ?? selection.viewGeneration}
+        historyEpoch={state.historyEpoch ?? 0}
+        message={message}
+        readAvailable={
+          !selection.viewLoading && historyState.phase === 'complete' && !directory?.unavailable
+        }
+      />
+    );
+  };
   const renderNativeMessage: NonNullable<SessionPageProps['renderMessageContent']> = (model) => {
     if (firstVisible && !firstSaved && model.id === firstSubmission.commandId)
       return (
         <>
-          {!!firstSubmission.files?.length && (
-            <section className="composer-attachments" aria-label="消息附件">
-              {firstSubmission.files.map((file) => (
-                <AttachmentFileCard name={file.name} key={file.id} />
-              ))}
-            </section>
-          )}
-          <p>
-            {model.text ||
-              (firstSubmission.imageIds?.length
-                ? `图片附件（${firstSubmission.imageIds.length} 张）`
-                : '')}
-          </p>
+          {model.text && <p className="user-text">{model.text}</p>}
           {(model.delivery === 'unknown' || model.delivery === 'failed') && (
             <p className="delivery-status" role="alert">
               {model.delivery === 'unknown' ? '发送结果尚未确认。' : '发送失败，原文已恢复供重试。'}
@@ -3010,7 +3036,7 @@ function NativeDesktopContent({
     if (inputDeliveries.has(model.id) && !messagesById.has(model.id))
       return (
         <>
-          <p>{model.text}</p>
+          {model.text && <p className="user-text">{model.text}</p>}
           {(model.delivery === 'unknown' || model.delivery === 'failed') && (
             <p className="delivery-status" role="alert">
               {model.delivery === 'unknown' ? '发送结果尚未确认。' : '发送失败，原文已保留。'}
@@ -3051,76 +3077,70 @@ function NativeDesktopContent({
         </>
       );
     }
+    if (
+      message.role === 'user' &&
+      !message.content &&
+      !message.outputBody &&
+      message.contentFormat !== 'unsupported'
+    )
+      return null;
     return (
-      <>
-        {(!!message.images?.length || !!message.files?.length) && (
-          <NativeUserImages
-            bridge={bridge}
-            previews={imageDrafts.previews}
-            generation={state.generation}
-            viewSelection={selection.viewSelection ?? selection.viewGeneration}
-            historyEpoch={state.historyEpoch ?? 0}
-            message={message}
-            readAvailable={openable}
-          />
-        )}
-        <NativeModelOutputMessage
-          key={JSON.stringify([
-            state.generation,
-            selection.storeId,
-            selection.session.id,
-            message.id,
-          ])}
-          message={message}
-          storeId={selection.storeId}
-          canReadRestoredOrigin
-          openFile={(path) => {
-            if (!openable || selected.current !== selection.session.id) return;
-            void report(() =>
-              bridge.request({
-                method: 'messageFile.open',
-                generation: state.generation,
-                viewSelection: selection.viewSelection ?? selection.viewGeneration,
-                historyEpoch: state.historyEpoch ?? 0,
-                messageId: message.id,
-                path,
-                editor,
-              }),
-            );
-          }}
-          onContent={(text) => {
-            const key = JSON.stringify([replyDisplayScope, message.id]);
-            const before = verifiedReplyBodies.current.get(key),
-              identity = nativeReplyKey(replyDisplayScope, message);
-            if (text === undefined) verifiedReplyBodies.current.delete(key);
-            else verifiedReplyBodies.current.set(key, { identity, text });
-            if (before?.text !== text || (before && before.identity !== identity))
-              renderVerifiedReply((value) => value + 1);
-          }}
-          onRead={
-            selection.canReadModelOutput
-              ? async ({ sessionId, executionId, signal }) => {
-                  const current = state.generation,
-                    nonce = viewIntent.current;
-                  return readNativeModelOutput({
-                    bridge,
-                    generation: current,
-                    expectedStoreId: selection.storeId,
-                    sessionId,
-                    viewSessionId: selection.session.id,
-                    messageId: message.id,
-                    executionId,
-                    signal,
-                    isCurrent: () =>
-                      generation.current === current &&
-                      viewIntent.current === nonce &&
-                      selected.current === selection.session.id,
-                  });
-                }
-              : undefined
-          }
-        />
-      </>
+      <NativeModelOutputMessage
+        key={JSON.stringify([
+          state.generation,
+          selection.storeId,
+          selection.session.id,
+          message.id,
+        ])}
+        message={message}
+        storeId={selection.storeId}
+        canReadRestoredOrigin
+        openFile={(path) => {
+          if (!openable || selected.current !== selection.session.id) return;
+          void report(() =>
+            bridge.request({
+              method: 'messageFile.open',
+              generation: state.generation,
+              viewSelection: selection.viewSelection ?? selection.viewGeneration,
+              historyEpoch: state.historyEpoch ?? 0,
+              messageId: message.id,
+              path,
+              editor,
+            }),
+          );
+        }}
+        onContent={(text) => {
+          const key = JSON.stringify([replyDisplayScope, message.id]);
+          const before = verifiedReplyBodies.current.get(key),
+            identity = nativeReplyKey(replyDisplayScope, message);
+          if (text === undefined) verifiedReplyBodies.current.delete(key);
+          else verifiedReplyBodies.current.set(key, { identity, text });
+          if (before?.text !== text || (before && before.identity !== identity))
+            renderVerifiedReply((value) => value + 1);
+        }}
+        onRead={
+          selection.canReadModelOutput
+            ? async ({ sessionId, executionId, signal }) => {
+                const current = state.generation,
+                  nonce = viewIntent.current;
+                return readNativeModelOutput({
+                  bridge,
+                  generation: current,
+                  expectedStoreId: selection.storeId,
+                  sessionId,
+                  viewSessionId: selection.session.id,
+                  messageId: message.id,
+                  executionId,
+                  signal,
+                  isCurrent: () =>
+                    generation.current === current &&
+                    viewIntent.current === nonce &&
+                    selected.current === selection.session.id,
+                });
+              }
+            : undefined
+        }
+      />
     );
   };
   const renderNativeTools: NonNullable<SessionPageProps['renderToolActivity']> = (
@@ -3404,6 +3424,7 @@ function NativeDesktopContent({
           toolMessages.loading)
       }
       renderMessageContent={renderNativeMessage}
+      renderMessageAttachments={renderNativeAttachments}
       renderToolActivity={renderNativeTools}
       turnActivity={
         preparing || !transcript.turnActivity

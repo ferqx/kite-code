@@ -316,19 +316,28 @@ test('model navigation captures real input metadata, not event name; old metadat
     expect(old.recordedStatus).toBeNull();
     expect(old.modelExecutionId).toBeNull();
     expect(JSON.stringify(page)).not.toContain('modelInputDigest');
-    // Actual private Store command with a different original subject cannot gain Model navigation for the root creator.
-    await f.store.acceptCommand({
-      expectedStoreId: f.input.expectedStoreId,
-      commandId: 'foreign-work',
-      sessionId: 'other',
-      subjectId: 'foreign',
-      request: { kind: 'run.start', content: 'private' },
-    });
+    // Foreign input is rejected before it can create a private Model in this actor's Session.
+    const beforeForeign = (await f.store.getMetadata()).lastChangeCursor;
+    expect(
+      await rejection(
+        f.store.acceptCommand({
+          expectedStoreId: f.input.expectedStoreId,
+          commandId: 'foreign-work',
+          sessionId: 'other',
+          subjectId: 'foreign',
+          request: { kind: 'run.start', content: 'private' },
+        }),
+      ),
+    ).toMatchObject({ code: 'permission_denied' });
+    expect(await f.store.getCommand('foreign-work')).toBeNull();
+    expect((await f.store.getMetadata()).lastChangeCursor).toBe(beforeForeign);
+    // A legitimately captured Model loses navigation if its original subject later drifts.
+    await f.append(1, 'other');
     const foreignOwner = (await f.store.acquireSessionOwner('other', 'owner'))!;
     const foreignRun = await f.store.startRun({
       expectedStoreId: f.input.expectedStoreId,
       owner: foreignOwner,
-      commandId: 'foreign-work',
+      commandId: 'work-1',
       configuration: {},
     });
     const metadata = JSON.parse(
@@ -346,7 +355,7 @@ test('model navigation captures real input metadata, not event name; old metadat
       executionId: 'foreign-model',
       sessionId: 'other',
       runId: foreignRun.id,
-      originCommandId: 'foreign-work',
+      originCommandId: 'work-1',
       stepId: 'foreign',
       callId: 'foreign',
       kind: 'model',
@@ -356,6 +365,12 @@ test('model navigation captures real input metadata, not event name; old metadat
       decisionSource: { kind: 'model_decision', executionId: 'foreign-model' },
       modelMetadata: metadata,
     });
+    expect(
+      (await f.store.getSessionLogs({ ...f.input, sessionId: 'other' })).entries.find(
+        (entry) => entry.objectId === 'foreign-model',
+      )!.modelExecutionId,
+    ).toBe('foreign-model');
+    f.db.query("UPDATE command SET subject_id='foreign' WHERE id='work-1'").run();
     expect(
       (await f.store.getSessionLogs({ ...f.input, sessionId: 'other' })).entries.find(
         (entry) => entry.objectId === 'foreign-model',

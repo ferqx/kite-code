@@ -1,5 +1,15 @@
 # Store 边界
 
+## 消息首次记录时间
+
+`MessageRecord.createdAt` 是可选的首次发布毫秒时间，由 [appendMessage](sqlite/operations.ts)在原消息事务内写入 `source_json` 和初始 `message_part`；调用者的同名值不能覆盖新记录时间。Model 流式追加与最终正文接管保留原字段，Fork 原样复制来源 JSON，冷重开沿原记录读取；不增加 DDL、迁移、格式版本或读取写入副作用。
+
+缺少该字段的旧历史在一页内批量查最早 `message.updated`，只有 replay floor 仍为0、第一条事件带原 `kite.session-log` v1 `occurredAt` 时才提供时间；日志已裁剪、原事件未带时间或无法核实时保持缺失，不使用较晚更新、Run 时间或查询时钟代替；可选时间日志的 JSON 损坏也只使时间缺省，不能阻断原消息、View 或已核实出处读取，原正文与权限证明仍按原规则校验。该读取与 replay floor 的核对位于同一 SQL 快照；普通消息与子结果混排的 `readPublicMessages` 也先批量调用 `messageRecords`，保留普通历史消息的原时间补齐规则。Fork 来源读取沿原已核实原行补出时间。[输入与消息回归](../../test/isolated/storage/inputs.test.ts)覆盖首次记录、增量与完成、冷读、旧日志和裁剪边界；元数据不进入模型正文或执行授权。
+
+2026-10-23，Windows x64／Bun1.4.3：输入整文件18项通过，增加旧元数据缺失断言后消息时间专项1项／10断言通过，Agent typecheck 与边界检查通过。[Fork record](../../test/isolated/storage/fork-record-sources.test.ts)完整文件18项通过的既有结果继续适用，本轮未改动其源码、夹具或依赖。
+
+同日以 `a481f3a78` 加当前工作树执行 `bun test ./packages/agent/test/isolated/storage/fork-readonly-sources.test.ts`，沙箱外完整文件22项／381断言通过；`bun test ./packages/agent/test/isolated/storage/session-logs.test.ts` 完整文件7项／136断言通过，Agent typecheck 再次通过。旧回执断言改为原 Command 的准确来源与 root-work 身份，仍验证漂移拒绝、真实 Fork 和冷读零写入。日志夹具先验证跨主体输入拒绝且零写入，再对合法捕获的 Model 注入主体漂移并核对导航撤销；物理损坏夹具复用既有 `rewriteArtifact`，在 Windows 临时取得真实文件 ACL 写权限并恢复只读。原4项失败均已修复，生产授权、来源与文件权限合同未改。
+
 ## 待消费输入的撤回与排序
 
 [pending-input-queue.ts](sqlite/pending-input-queue.ts)在原根 Session／Store／subject 内读取和变更尚未消费的输入。`getPendingInputQueue` 返回原完整 Command request、独立顺序游标 `orders`、`revision` 和快照水位；首 revision 固定后续分页，变化报 `input_queue_changed`。普通 steer／follow-up 包含空正文附件输入，均可撤回或重排；`result.include` 保留原固定槽。`input.withdraw` 原子标记准确目标 `withdrawn_before_apply` 并保存独立 applied／`input_withdrawn` 回执，已消费竞争返回 `input_already_consumed`，不进入 Run／Execution 取消链。`input.reorder` 必须提交完整当前可移动 ID 集合，保留原请求、附件、request digest 和不可变 Command.seq。

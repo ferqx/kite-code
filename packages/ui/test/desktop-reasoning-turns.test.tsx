@@ -159,9 +159,12 @@ test('late Native terminal markers anchor a no-output turn after its exact origi
     ordered.map((element) =>
       element.classList.contains('agent-turn')
         ? element.getAttribute('data-turn-status')
-        : element.textContent?.trim(),
+        : element.querySelector('.user-message-body')?.textContent?.trim(),
     ),
   ).toEqual(['first-user', 'cancelled', 'second-user', 'completed']);
+  expect(
+    [...document.querySelectorAll('.message.user .message-time')].map((time) => time.textContent),
+  ).toEqual(['时间未知', '时间未知']);
   expect(document.querySelector('.agent-turn .message.user')).toBeNull();
   expect(document.querySelector('.agent-turn')?.querySelector('button') === null).toBe(true);
   expect(render([firstUser]).document.querySelector('.agent-turn') === null).toBe(true);

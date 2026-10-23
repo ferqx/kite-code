@@ -13453,6 +13453,11 @@
             "maxLength": 128,
             "pattern": "^[A-Za-z0-9_-]+$"
           },
+          "createdAt": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
           "sessionId": {
             "type": "string",
             "minLength": 1,
@@ -18111,6 +18116,11 @@
                   "maxLength": 128,
                   "pattern": "^[A-Za-z0-9_-]+$"
                 },
+                "createdAt": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
                 "sessionId": {
                   "type": "string",
                   "minLength": 1,
@@ -20493,6 +20503,11 @@
               "maxLength": 128,
               "pattern": "^[A-Za-z0-9_-]+$"
             },
+            "createdAt": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
             "sessionId": {
               "type": "string",
               "minLength": 1,
@@ -21484,6 +21499,11 @@
                   "minLength": 1,
                   "maxLength": 128,
                   "pattern": "^[A-Za-z0-9_-]+$"
+                },
+                "createdAt": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
                 },
                 "sessionId": {
                   "type": "string",

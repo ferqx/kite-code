@@ -677,7 +677,7 @@ export function readForkSourceMessage(
     const row = db.row('SELECT * FROM message WHERE id=?', input.messageId);
     if (!row) return fail();
     const result = {
-      ...db.message(row),
+      ...db.messageRecords([row])[0]!,
       parts: db
         .rows(
           'SELECT ordinal,kind,content_version,revision,json FROM message_part WHERE message_id=? ORDER BY ordinal LIMIT 8193',

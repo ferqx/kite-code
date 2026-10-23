@@ -30,7 +30,7 @@ export function MessageCopyButton({
       className="message-copy"
       data-copy-state={copyState}
       variant="ghost"
-      size="icon-xs"
+      size="icon-sm"
       disabled={disabled}
       aria-disabled={!readActive || disabled || undefined}
       aria-label={copyLabel}
@@ -38,7 +38,6 @@ export function MessageCopyButton({
       onClick={() => void copyMessage()}
     >
       <HugeiconsIcon
-        className={copyState === 'copied' ? 'size-[18px]' : undefined}
         icon={copyState === 'copied' ? Tick02Icon : copyState === 'failed' ? CopyXIcon : Copy01Icon}
       />
     </Button>

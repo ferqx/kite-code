@@ -464,6 +464,8 @@ export interface MessageContent {
   sourceIds?: string[];
 }
 export interface MessageRecord extends MessageContent {
+  /** Store-recorded first publication time in epoch milliseconds; absent for unverifiable history. */
+  createdAt?: number;
   /** Read-only ordinary Agent mail presentation; never execution authority. */
   agentMessage?: {
     messageId: string;

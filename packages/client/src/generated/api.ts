@@ -1878,6 +1878,7 @@ export type ExecutionOutputPage = {
 };
 export type Message = {
   id: string;
+  createdAt?: number;
   sessionId: string;
   runId: string | null;
   seq: string;
@@ -2690,6 +2691,7 @@ export type SelectedContextPage = {
   highWaterSeq: string;
   messages: Array<{
     id: string;
+    createdAt?: number;
     sessionId: string;
     runId: string | null;
     seq: string;
@@ -3075,6 +3077,7 @@ export type SessionList = Array<{
 }>;
 export type MessageList = Array<{
   id: string;
+  createdAt?: number;
   sessionId: string;
   runId: string | null;
   seq: string;
@@ -3260,6 +3263,7 @@ export type SessionView = {
   }>;
   messages: Array<{
     id: string;
+    createdAt?: number;
     sessionId: string;
     runId: string | null;
     seq: string;

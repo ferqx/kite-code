@@ -238,6 +238,12 @@ test('optimistic and persisted guidance remain in one original Run process while
   }
 });
 
+function messageBodyText(element: Element) {
+  const body = element.cloneNode(true) as Element;
+  for (const metadata of body.querySelectorAll('.message-meta')) metadata.remove();
+  return body.textContent;
+}
+
 test('the original Conversation owns collapsed Run history, adjacent exploration and exact copy controls while host body/file callbacks retain their identities', async () => {
   const f = fixture(),
     copied: string[] = [],
@@ -573,9 +579,9 @@ test('durable child results stay visible between completed parent replies, retai
       ),
     ).toBe(true);
     const readableOrder = () =>
-      [...f.host.querySelectorAll('.agent-turn-final, .agent-result')].map(
-        (entry) => entry.textContent,
-      );
+      [...f.host.querySelectorAll('.agent-turn-final, .agent-result')].map(messageBodyText);
+    for (const entry of f.host.querySelectorAll('.agent-turn-final, .agent-result'))
+      expect(entry.querySelector('.message-time')?.textContent).toBe('时间未知');
     expect(readableOrder()).toEqual([
       '原父回复',
       '协作者 result-a Agent 发送最新结果 A\n真实内容 雪🙂',
@@ -693,7 +699,9 @@ test('a host-confirmed standalone message preserves process boundaries and one f
     expect(f.host.querySelectorAll('.agent-result')).toHaveLength(1);
     expect(f.host.querySelectorAll('.response-status')).toHaveLength(0);
     expect(f.host.querySelectorAll('[data-final-reply="true"]')).toHaveLength(1);
-    expect(f.host.querySelector('[data-final-reply="true"]')!.textContent).toBe('父继续处理');
+    const final = f.host.querySelector('[data-final-reply="true"]')!;
+    expect(messageBodyText(final)).toBe('父继续处理');
+    expect(final.querySelector('.message-time')?.textContent).toBe('时间未知');
     expect(
       [...f.host.querySelectorAll('.agent-turn-status-label')].map((entry) => entry.textContent),
     ).toEqual(['处理过程', '用时 2 秒']);
