@@ -1,10 +1,10 @@
 import { Database } from 'bun:sqlite';
 import { expect, test } from 'bun:test';
-import { chmodSync, rmSync, writeFileSync } from 'node:fs';
+import { rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import type { ModelAdapter, ModelEvent } from '@kite-ai/ai';
-import { temporaryDirectory } from '../../../../../tests/fixtures/test-filesystem';
+import { rewriteArtifact, temporaryDirectory } from '../../../../../tests/fixtures/test-filesystem';
 import { createArtifactStore } from '../../../src/artifacts';
 import { artifactPath } from '../../../src/artifacts-files';
 import type { Extension, ReadContext } from '../../../src/extensions';
@@ -574,8 +574,7 @@ test('exact sealed ref subset does not expand to later media; physical incomplet
       (await f.read()).proof.sources.find((s) => s.kind === 'tool')!.artifactRefs.map((r) => r.id),
     ).toEqual([f.artifactId()]);
     const r = s.artifactRefs[0]!;
-    chmodSync(artifactPath(join(f.profile.dataRoot, f.profile.profile), r.hash), 0o600);
-    writeFileSync(
+    rewriteArtifact(
       artifactPath(join(f.profile.dataRoot, f.profile.profile), r.hash),
       Buffer.from('bad'),
     );
@@ -723,13 +722,13 @@ test('legal User command ID colliding with source Model never becomes Execution 
     expect(message.role).toBe('user');
     expect(message.content).toBe('New task: real later user collision');
     const collisionCommand = (await f.store.getCommand(source.executionId))!;
-    const receipt = collisionCommand.receipt as { businessCommandId: string; runId: string };
+    const receipt = collisionCommand.receipt as { runId: string };
     expect(collisionCommand.id).toBe(source.executionId);
-    expect(receipt.businessCommandId).not.toBe(source.executionId);
-    const business = (await f.store.getCommand(receipt.businessCommandId))!;
-    expect(business.rootWorkCommandId).toBe(source.executionId);
-    expect((await f.store.getRun(receipt.runId))!.originCommandId).toBe(business.id);
-    expect(message.sourceIds).toEqual([business.id]);
+    expect(receipt.runId).toBeString();
+    expect(receipt).not.toHaveProperty('businessCommandId');
+    expect(collisionCommand.rootWorkCommandId).toBe(source.executionId);
+    expect((await f.store.getRun(receipt.runId))!.originCommandId).toBe(collisionCommand.id);
+    expect(message.sourceIds).toEqual([source.executionId]);
     expect(observed.proof.sources.map((s) => s.executionId)).toEqual(
       (await f.read()).proof.sources.map((s) => s.executionId),
     );
@@ -853,7 +852,7 @@ test('new actual branch Model and sealed inherited Tool combine without reopenin
   }
 });
 
-test('derived second-work Model keeps separate business origin and public work proof through a real Fork and cold history', async () => {
+test('direct second-work Model keeps exact command origin and root-work proof through a real Fork and cold history', async () => {
   const f = await fixture();
   let cold: Awaited<ReturnType<typeof openSqliteStore>> | undefined;
   try {
@@ -867,18 +866,17 @@ test('derived second-work Model keeps separate business origin and public work p
       await f.runtime.waitForCommand(commandId, { timeoutMs: 5000 });
     }
     const publicCommand = (await f.store.getCommand('branch-second'))!;
-    const receipt = publicCommand.receipt as { runId: string; businessCommandId: string };
-    expect(receipt.businessCommandId).toBeString();
-    expect(receipt.businessCommandId).not.toBe(publicCommand.id);
-    const business = (await f.store.getCommand(receipt.businessCommandId))!;
+    const receipt = publicCommand.receipt as { runId: string };
+    expect(receipt.runId).toBeString();
+    expect(receipt).not.toHaveProperty('businessCommandId');
     const run = (await f.store.getRun(receipt.runId))!;
     const model = (await f.store.listExecutions('f2')).find(
       (execution) => execution.kind === 'model' && execution.runId === run.id,
     )!;
     expect(model.status).toBe('succeeded');
-    expect(run.originCommandId).toBe(business.id);
-    expect(model.originCommandId).toBe(business.id);
-    for (const fact of [business, run, model]) {
+    expect(run.originCommandId).toBe(publicCommand.id);
+    expect(model.originCommandId).toBe(publicCommand.id);
+    for (const fact of [publicCommand, run, model]) {
       expect(fact.rootWorkCommandId).toBe(publicCommand.id);
       expect(fact.rootWorkSeq).toBe(publicCommand.rootWorkSeq);
     }
@@ -902,7 +900,7 @@ test('derived second-work Model keeps separate business origin and public work p
     // each row must reproduce the original v1 proof, rather than silently retarget it.
     for (const [table, id] of [
       ['run', run.id],
-      ['command', business.id],
+      ['command', publicCommand.id],
     ] as const) {
       for (const [column, original, invalid] of [
         ['root_work_command_id', publicCommand.id, 'branch-first'],
@@ -923,18 +921,23 @@ test('derived second-work Model keeps separate business origin and public work p
         expect(await f.store.prepareForkReadonlySources(input)).toEqual(prepared);
       }
     }
-    // Sharing the public work is insufficient: the exact business origin must match too.
+    // Matching the root work is insufficient: the exact command origin must match too.
+    // Use an actual command without a Run so the drift reaches proof validation.
     try {
-      f.physical.run('UPDATE run SET origin_command_id=? WHERE id=?', [publicCommand.id, run.id]);
+      f.physical.run('UPDATE run SET origin_command_id=? WHERE id=?', ['fork-f2', run.id]);
       expect(await code(f.store.prepareForkReadonlySources(input))).toBe(
         'fork_source_unverifiable',
       );
     } finally {
-      f.physical.run('UPDATE run SET origin_command_id=? WHERE id=?', [business.id, run.id]);
+      f.physical.run('UPDATE run SET origin_command_id=? WHERE id=?', [
+        run.originCommandId,
+        run.id,
+      ]);
     }
+    expect(await f.store.prepareForkReadonlySources(input)).toEqual(prepared);
     f.setExtraModel(model.id);
-    await f.fork('f2', 'derived-work-fork');
-    const sealed = await f.read('derived-work-fork');
+    await f.fork('f2', 'direct-work-fork');
+    const sealed = await f.read('direct-work-fork');
     expect(sealed.proof.version).toBe(1);
     expect(sealed.proof.sources.map((source) => source.executionId)).toContain(model.id);
     for (const stamp of prepared.stamps) expect(sealed.proof.stamps).toContainEqual(stamp);
@@ -944,7 +947,7 @@ test('derived second-work Model keeps separate business origin and public work p
     const cursor = (await cold.getMetadata()).lastChangeCursor;
     const reopened = await cold.readForkSourceProjection({
       ...f.base,
-      sessionId: 'derived-work-fork',
+      sessionId: 'direct-work-fork',
       extensionId: 'fixture',
       localKey: 'bundle',
     });

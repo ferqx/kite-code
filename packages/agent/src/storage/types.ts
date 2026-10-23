@@ -464,6 +464,8 @@ export interface MessageContent {
   sourceIds?: string[];
 }
 export interface MessageRecord extends MessageContent {
+  /** Store-recorded first publication time in epoch milliseconds; absent for unverifiable history. */
+  createdAt?: number;
   /** Read-only SQL proof linking presentation rows to one original human input. */
   humanInput?: {
     inputCommandId: string;

@@ -1,5 +1,7 @@
 # 通用 Agent 新执行边界
 
+消息的可选 `createdAt` 沿 [Store](../../packages/agent/src/storage/README.md#消息首次记录时间) → [Service 同源 schema](../../apps/service/src/http/schema/index.ts) → 生成 Client → [Native](../../apps/desktop/src/native-presentation.ts) → 共享 UI 传递，只表达原消息首次记录时间。流式与 Fork 保留来源，旧历史缺少可靠原时间时保持未知；该元数据不进入模型内容，不授权读取、写入或恢复，也不改变原 Command／Run 身份与消息次序。
+
 新普通输入沿原 Command 直接进入当前主 Agent，不创建分类 Run、判定回复或派生输入；`input.steer/input.follow_up` 保持准确目标与队列规则。旧历史消息的 `humanInput` 只读证明沿 [SQL 输入 owner](../../packages/agent/src/storage/sqlite/inputs/README.md) → Service 同源 schema／生成 Client → [Native](../../apps/desktop/README.md#真实输入消息的唯一展示)交接。原 public/raw/processing/decision/business 与准确已应用 Message／Run 共同证明同一次输入，不以相同正文或 ID 前缀猜测；消息分页保原行和原序号。Native 仅在当前读取存在准确替代消息时合并处理副本，首次占位沿原公开提交 ID 交接，独立同文和未决输入保留。呈现证明不参与权限、业务准入或恢复授权。
 
 待消费输入队列沿 [Store](../../packages/agent/src/storage/README.md#待消费输入的撤回与排序) → [Runtime](../../packages/agent/README.md#人类输入工作选择与可靠结果) → [Service](../../apps/service/README.md#待消费输入队列协议) → [Client](../../packages/client/README.md#待消费输入队列) → [Native](../../apps/desktop/README.md#原运行中消息队列)交接。持久 `pending_order` 与原不可变 `seq` 分开，真实消费使用前者；原 request、附件、digest 和历史出处不重写，`result.include` 保原槽。`pending_input_queue` 是单独能力，精确 `input.withdraw/input.reorder` 只变更原根、原主体尚未消费的合法集合，revision CAS 与单调变更计数阻止过期及 ABA；撤回不等于取消 Run／Execution。Main 只接受已观察 ID，不接 renderer 自报请求或 Store；首次写入前保存原意图，未知只查询同 ID。编辑已确认撤回后才交付普通 draft，交付 ack 前可显式查原操作取回原文，重开不重发、不恢复队列或自动覆盖草稿。事务、生成协议、私有DB11与实际验证分别由上述 owner 维护，UI 排序或持久 journal 都不签发新的执行或审批权。

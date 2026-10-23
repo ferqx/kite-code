@@ -1073,6 +1073,7 @@ export const schemas = {
   ExecutionOutputPage: z.object({ items: z.array(executionOutputRecord), highWaterSeq: sequence }),
   Message: z.object({
     id,
+    createdAt: z.number().int().nonnegative().optional(),
     sessionId: id,
     runId: id.nullable(),
     seq: sequence,

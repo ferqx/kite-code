@@ -21,6 +21,7 @@ import { Marker, MarkerContent } from './components/ui/marker';
 import { useDesktopDiagnostics } from './diagnostics';
 import { MessageContent } from './MessageContent';
 import { MessageCopyButton } from './MessageCopyButton';
+import { formatMessageTime } from './message-time';
 import { pruneReadingState } from './reading-state';
 import { statusLabel } from './status';
 import { ToolActivity } from './ToolActivity';
@@ -150,6 +151,7 @@ const MessageItem = memo(function MessageItem({
   renderContent?: (message: Message) => ReactNode;
   showResponseStatus?: boolean;
 }) {
+  const [metadataNow, setMetadataNow] = useState(() => Date.now());
   // Raw model reasoning is never part of the readable transcript.
   if (message.role === 'thinking') return null;
   if (message.role === 'tool') return null;
@@ -292,6 +294,7 @@ const MessageItem = memo(function MessageItem({
         {message.text && <pre>{message.text}</pre>}
       </article>
     );
+  const timestamp = formatMessageTime(message.createdAtMs, metadataNow);
   return (
     <article
       className={`message ${message.role}${message.delivery ? ` ${message.delivery}` : ''}${
@@ -299,6 +302,8 @@ const MessageItem = memo(function MessageItem({
       }`}
       data-final-reply={message.role === 'assistant' ? Boolean(message.finalReply) : undefined}
       aria-label={message.role === 'user' ? '用户消息' : '助手消息'}
+      onPointerEnter={() => setMetadataNow(Date.now())}
+      onFocus={() => setMetadataNow(Date.now())}
     >
       <CodeCopyEligibilityContext.Provider value={Boolean(copyText)}>
         {renderContent ? (
@@ -330,13 +335,25 @@ const MessageItem = memo(function MessageItem({
           </span>
         </small>
       )}
-      {copyText && (
-        <MessageCopyButton
-          text={copyText}
-          copyRole={copyRole}
-          writeClipboardText={writeClipboardText}
-        />
-      )}
+      <footer className="message-meta">
+        {copyText && (
+          <MessageCopyButton
+            text={copyText}
+            copyRole={copyRole}
+            writeClipboardText={writeClipboardText}
+          />
+        )}
+        {timestamp ? (
+          <time className="message-time" dateTime={timestamp.dateTime} title={timestamp.full}>
+            <span aria-hidden="true">{timestamp.label}</span>
+            <span className="sr-only">{timestamp.full}</span>
+          </time>
+        ) : (
+          <span className="message-time" title="没有可核实的消息记录时间">
+            时间未知
+          </span>
+        )}
+      </footer>
     </article>
   );
 });
@@ -454,7 +471,7 @@ export function Conversation({
           !node.textContent?.trim() ||
           !parent?.closest('.message') ||
           parent.closest(
-            'button, summary, .message-label, .message-status, [hidden], details:not([open])',
+            'button, summary, .message-label, .message-status, .message-meta, [hidden], details:not([open])',
           )
         )
           continue;

@@ -12,12 +12,14 @@ test('restored inline Fork history preserves the original user, Model and Tool S
     role: role as MessageRecord['role'],
     status: 'complete',
     content: `original ${role} 雪🙂`,
+    createdAt: 1234567890000 + index,
   }));
   const copies = originals.map((message) => ({
     ...message,
     id: `copy-${message.role}`,
     sessionId: 'fork',
     runId: null,
+    createdAt: undefined,
   }));
   const runtime = {
     getMessageOrigin: async ({
@@ -39,6 +41,7 @@ test('restored inline Fork history preserves the original user, Model and Tool S
   for (let index = 0; index < messages.length; index++) {
     expect(messages[index]).toMatchObject({
       ...copies[index]!,
+      createdAt: originals[index]!.createdAt,
       originMessage: {
         storeId: 'original-store',
         sessionId: 'source',

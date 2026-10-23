@@ -121,6 +121,89 @@ async function dispatch(f: Awaited<ReturnType<typeof fixture>>, id: string) {
     freshness: { checked: true, source: f.source },
   });
 }
+
+test('message first-publication time survives streamed updates, finalization and cold reads; legacy time requires complete original logs', async () => {
+  const before = Date.now();
+  const f = await fixture();
+  try {
+    const user = (await f.store.listMessages('s'))[0]!;
+    expect(user.createdAt).toBeGreaterThanOrEqual(before);
+    expect(user.createdAt).toBeLessThanOrEqual(Date.now());
+    await f.plan('message-time-model', 'model');
+    await dispatch(f, 'message-time-model');
+    await f.store.persistModelPartial({
+      ...f.write,
+      executionId: 'message-time-model',
+      content: 'first',
+    });
+    const partialId = 'partial_message-time-model';
+    const first = (await f.store.listMessages('s')).find((message) => message.id === partialId)!;
+    expect(first.createdAt).toBeGreaterThanOrEqual(before);
+    f.db
+      .query("UPDATE message SET source_json=json_set(source_json,'$.createdAt',42) WHERE id=?")
+      .run(partialId);
+    await f.store.persistModelPartial({
+      ...f.write,
+      executionId: 'message-time-model',
+      content: 'first and second',
+    });
+    expect(
+      (await f.store.listMessages('s')).find((message) => message.id === partialId)?.createdAt,
+    ).toBe(42);
+    await f.store.finishExecution({
+      ...f.write,
+      executionId: 'message-time-model',
+      status: 'succeeded',
+      result: {},
+      message: { role: 'assistant', content: 'final reply', sourceIds: ['message-time-model'] },
+    });
+    expect(
+      (await f.store.getView('s')).messages.find((message) => message.id === partialId),
+    ).toMatchObject({ content: 'final reply', status: 'complete', createdAt: 42 });
+    f.db
+      .query("UPDATE message SET source_json=json_remove(source_json,'$.createdAt') WHERE id=?")
+      .run(user.id);
+    const event = f.db
+      .query(
+        "SELECT payload_json FROM change_event WHERE object_id=? AND type='message.updated' ORDER BY cursor LIMIT 1",
+      )
+      .get(user.id) as { payload_json: string };
+    expect(
+      (await f.store.listMessages('s')).find((message) => message.id === user.id)?.createdAt,
+    ).toBe(JSON.parse(event.payload_json).occurredAt);
+    f.db
+      .query(
+        "UPDATE change_event SET payload_json='null' WHERE cursor=(SELECT MIN(cursor) FROM change_event WHERE object_id=? AND type='message.updated')",
+      )
+      .run(user.id);
+    expect(
+      (await f.store.listMessages('s')).find((message) => message.id === user.id)?.createdAt,
+    ).toBeUndefined();
+    f.db
+      .query(
+        "UPDATE change_event SET payload_json=? WHERE cursor=(SELECT MIN(cursor) FROM change_event WHERE object_id=? AND type='message.updated')",
+      )
+      .run(event.payload_json, user.id);
+    f.db.run('UPDATE storage_meta SET replay_floor=1 WHERE singleton=1');
+    expect(
+      (await f.store.listMessages('s')).find((message) => message.id === user.id)?.createdAt,
+    ).toBeUndefined();
+    expect(
+      (await f.store.listMessages('s')).find((message) => message.id === partialId)?.createdAt,
+    ).toBe(42);
+    await f.store.close();
+    const reopened = await openSqliteStore(f.profile);
+    try {
+      expect(
+        (await reopened.listMessages('s')).find((message) => message.id === partialId)?.createdAt,
+      ).toBe(42);
+    } finally {
+      await reopened.close();
+    }
+  } finally {
+    await f.cleanup();
+  }
+});
 test('steer preserves real Run/order/provenance, supersedes only unstarted calls/cards and leaves dispatched request immutable', async () => {
   const f = await fixture();
   try {

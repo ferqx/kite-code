@@ -127,9 +127,13 @@ export function desktopConversationMessages(messages: readonly Message[]): Messa
     if (!replacement) return relocated.has(message.id) ? [] : [message];
     if (emitted.has(replacement.id)) return [];
     emitted.add(replacement.id);
-    // Preserve the business identity, Run, seq and attachments. Only its display
-    // position moves before the interpretation reply caused by this same input.
-    return [replacement];
+    // Keep the business identity, Run, seq and attachments. Display position and
+    // creation time belong to the original human input, including an unknown time.
+    return [
+      message.createdAt === replacement.createdAt
+        ? replacement
+        : { ...replacement, createdAt: message.createdAt },
+    ];
   });
 }
 
@@ -151,6 +155,7 @@ export function desktopMessages(messages: readonly Message[]): DesktopMessage[] 
           message.outputBody.toolCallCount === 0));
     return {
       id: message.id,
+      ...(message.createdAt === undefined ? {} : { createdAtMs: message.createdAt }),
       role: message.compression ? 'system' : thinking ? 'thinking' : message.role,
       ...(message.compression
         ? {

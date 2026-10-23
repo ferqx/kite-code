@@ -1,5 +1,7 @@
 export interface Message {
   readonly id: string;
+  /** Verified first publication time, never the time this client read the message. */
+  readonly createdAtMs?: number;
   /** Host-confirmed Runtime Turn or public Run ownership for presentation actions. */
   readonly turnId?: string;
   readonly role: 'user' | 'assistant' | 'tool' | 'subagent' | 'system' | 'thinking';

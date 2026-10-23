@@ -386,6 +386,10 @@ Native 的侧栏打开入口对当前父会话及同一在途选择去重，重�
 
 ## 会话消息渲染验证
 
+[消息适配](src/native-presentation.ts)将公开 `Message.createdAt` 交给 UI 的 `createdAtMs`；旧输入的真实业务副本接管原行时，保留原输入的记录时间、独立同文与原业务身份。普通刷新、完整正文读取和重开不生成客户端替代时间；尚未保存或历史缺失时保持未知。[时间投影回归](test/native-message-time.test.ts)核字段与接管，具体格式与布局由 [UI owner](../../packages/ui/README.md)和[桌面手册](../../docs/handbook/clients/desktop/README.md)负责。
+
+2026-10-23，Windows x64／Bun1.4.3：时间投影2项通过（含原输入时间未知时不借用较晚业务时间），原[会话消息 DOM](test/isolated/native-transcript-dom.test.tsx)整文件9项／143断言通过；隔离 Chrome 的输入接管、流式、重开、日期与阅读位置证据见 [UI owner](../../packages/ui/README.md)。本次新增 Service／Client 的时间字段，开发运行需完整重启客户端以加载 Main 与配套 Service 的新协议资产；不以 renderer HMR 代替主进程更新，完整安装包未在本轮重验。
+
 [Code Block／Trace 聚焦夹具](test/ai-elements-browser.fixture.tsx)使用实际 Conversation、ToolActivity、MessageContent 和生产 CSS，执行 `bun run apps/desktop/test/ai-elements-browser-runner.fixture.ts` 核亮／暗主题、1280／390px viewport、代码横向滚动、文件按钮、工具聚合与 Shell 追加／取消。同组思考／回复切换保留底部状态节点，收起过程仍可见；准确 Turn 结束后移除。输出 `.cache/ai-elements-browser-*/report.json` 及各组常规／思考状态截图，所有数据固定且诊断构建值关闭。
 
 2026-10-21，`c89911153` 加本次工作树，macOS arm64／Bun 1.4.2／Chrome 155.0.8059.86：上述四组均无页面横向溢出或脚本异常，Shell 输出保持256px上限，上翻后追加保持原位置，回到最新准确到达底部；手动开合、取消后的实际日志及独立文件回调保持。[缓存夹具](test/conversation-cache-browser-runner.fixture.ts)在亮／暗两组的各24个观测帧核代码 PRE 与复制节点身份、80px横向位置、暂停操作及宿主原文复制。[桌面代码块回归](../../packages/ui/test/isolated/desktop-code-block.test.tsx)、共享桌面／Markdown／缓存与 Native 正文缓存共13文件59项通过，Native 工具显示／回执／聚合另3文件17项通过；UI／Desktop typecheck、UI Desktop 生产构建和定向 Biome 通过。原 Native 渲染夹具六组继续通过流式更新、回复状态边界、减少动画和缓存返回检查；本次未运行安装版 Electron 窗口或其他平台。

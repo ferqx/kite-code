@@ -730,13 +730,13 @@ body {
     -webkit-user-select: text;
     user-select: text;
   }
-  .message :is(button, summary, .message-label, .message-status) {
+  .message :is(button, summary, .message-label, .message-status, .message-meta) {
     -webkit-user-select: none;
     user-select: none;
   }
   .reading-column,
   .bottom-controls {
-    max-width: 844px;
+    max-width: 740px;
     width: 100%;
     margin-inline: auto;
     position: relative;
@@ -809,29 +809,46 @@ body {
     margin-top: 2px;
     white-space: nowrap;
   }
-  .message-copy {
+  .message-meta {
     position: absolute;
     top: 100%;
     left: 0;
-    width: 24px;
-    height: 24px;
-    min-height: 24px;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    height: 32px;
     margin-top: 2px;
+    color: var(--muted-foreground);
+    font-size: 12px;
+    line-height: 16px;
+    white-space: nowrap;
+    opacity: 0;
+    transition: opacity 120ms;
+  }
+  .message-copy {
+    width: 32px;
+    height: 32px;
+    min-height: 32px;
     padding: 0;
-    border-radius: var(--radius);
+    border-radius: 8px;
     border-color: transparent;
     background: transparent;
     color: var(--muted-foreground);
-    opacity: 0;
-    transition:
-      background-color 120ms,
-      opacity 120ms;
+    transition: background-color 120ms;
   }
-  .message:hover .message-copy,
-  .message:focus-within .message-copy {
+  .message:has(> .message-meta),
+  .agent-turn-final .message.assistant:has(> .message-meta),
+  .agent-turn-process-messages .message.assistant:has(> .message-meta),
+  .reading-column
+    > .message-group
+    > .message.assistant[data-final-reply="false"]:has(> .message-meta) {
+    margin-bottom: 40px;
+  }
+  .message:hover .message-meta,
+  .message:focus-within .message-meta {
     opacity: 1;
   }
-  .message-copy::before {
+  .message-meta::before {
     content: "";
     position: absolute;
     right: 0;
@@ -839,9 +856,10 @@ body {
     left: 0;
     height: 2px;
   }
-  .message.user .message-copy {
+  .message.user .message-meta {
     right: 0;
     left: auto;
+    flex-direction: row-reverse;
   }
   .user-text,
   .system pre {
@@ -4020,8 +4038,7 @@ body {
   opacity: 0;
   visibility: hidden;
   pointer-events: none;
-  transform: translateX(12px) scale(0.98);
-  transform-origin: top right;
+  transform: translateX(calc(100% + 16px));
   transition:
     opacity var(--sidebar-motion-duration) var(--sidebar-motion-easing),
     transform var(--sidebar-motion-duration) var(--sidebar-motion-easing),
@@ -4029,6 +4046,7 @@ body {
 }
 .kite-client .session-view:has(> .environment-information) {
   --environment-information-safe-area: 28px;
+  overflow-x: clip;
 }
 .kite-client .session-view.environment-information-docked {
   /* 1560px = 28px + 844px + 2 * 344px; reuse the centered column's right gutter. */
@@ -4040,7 +4058,7 @@ body {
   opacity: 1;
   visibility: visible;
   pointer-events: auto;
-  transform: translateX(0) scale(1);
+  transform: translateX(0);
 }
 .kite-client
   .session-view:is(.environment-information-docked, .environment-information-overlay)
@@ -4055,7 +4073,7 @@ body {
     .session-view:is(.environment-information-docked, .environment-information-overlay)
     > .environment-information {
     opacity: 0;
-    transform: translateX(12px) scale(0.98);
+    transform: translateX(calc(100% + 16px));
   }
 }
 .kite-client .environment-information-toggle[aria-expanded="true"],
