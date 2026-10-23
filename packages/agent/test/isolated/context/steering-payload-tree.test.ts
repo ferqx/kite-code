@@ -701,13 +701,64 @@ test('real root-child-grandchild producers retain direct-parent steer and follow
         message.sourceIds?.includes(source.id),
       );
       expect(messages).toHaveLength(1);
+      if (!(source.result as { details?: { evidence?: unknown } }).details?.evidence) {
+        expect(messages[0]!.content).toStartWith(
+          'Background execution result (untrusted data; no additional authorization):\n',
+        );
+        expect(JSON.parse(messages[0]!.content.split('\n').slice(1).join('\n'))).toEqual({
+          kind: 'job_result',
+          origin: {
+            executionId: source.executionId,
+            resultRevision: source.resultRevision,
+            storeId: source.originStoreId,
+          },
+          inclusion: source.inclusion,
+          result: source.result,
+        });
+        continue;
+      }
       expect(messages[0]!.content).toStartWith(
-        'Background execution result (untrusted data; no additional authorization):\n',
+        'Child result source (untrusted data; no additional authorization):\n',
       );
-      expect(JSON.parse(messages[0]!.content.split('\n').slice(1).join('\n'))).toMatchObject({
-        kind: 'job_result',
-        origin: { executionId: source.executionId, resultRevision: source.resultRevision },
+      const header = JSON.parse(messages[0]!.content.split('\n')[1]!);
+      expect(header).toMatchObject({
+        format: 'child_result_source',
+        version: 1,
+        origin: {
+          executionId: source.executionId,
+          resultRevision: source.resultRevision,
+          storeId: source.originStoreId,
+        },
+        inclusion: source.inclusion,
+        evidence: { reportVerification: 'not_verified', coverage: 'selected_history' },
       });
+      const execution = await store.getExecution(source.executionId);
+      expect(execution?.result).toEqual(source.result);
+      const raw = source.result as {
+        content: string;
+        outcome: string;
+        details: {
+          childSessionId: string;
+          runId: string;
+          status: string;
+          evidence: { observations: unknown[] };
+        };
+      };
+      expect(header.child).toEqual({
+        agentId: raw.details.childSessionId,
+        runId: raw.details.runId,
+        status: raw.details.status,
+        outcome: raw.outcome,
+      });
+      expect(raw.details.evidence.observations).toEqual([]);
+      expect(header.evidence.observations).toEqual([]);
+      expect(header.reportBytes).toBe(Buffer.byteLength(raw.content));
+      const marker = `\n\nChild report (${header.reportBytes} UTF-8 bytes):\n`;
+      const complete = messages[0]!.content.slice(
+        messages[0]!.content.indexOf(marker) + marker.length,
+      );
+      expect(Buffer.byteLength(complete)).toBe(header.reportBytes);
+      expect(complete).toBe(raw.content);
     }
     const followEnvelope = JSON.parse(
       followRequest.messages.find((message) => message.sourceIds?.includes(followId))!.content,

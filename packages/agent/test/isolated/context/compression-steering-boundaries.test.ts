@@ -379,11 +379,16 @@ test('a retained reference guide can reacquire omitted random facts through the 
           return;
         }
         const actual = request.messages.filter(
-          (message) =>
-            message.role === 'tool' && message.content.includes(JSON.stringify(fact).slice(1, -1)),
+          (message) => message.role === 'tool' && message.content.includes(fact),
         );
         expect(actual).toHaveLength(1);
-        expect(JSON.parse(actual[0]!.content).content).toBe(fact);
+        const presented = actual[0]!.content;
+        expect(presented).toStartWith('Read "report.txt";');
+        const marker = /\nContent \((\d+) UTF-8 bytes; starts on next line\):\n/.exec(presented);
+        expect(marker).not.toBeNull();
+        const complete = presented.slice(marker!.index + marker![0].length);
+        expect(Buffer.byteLength(complete)).toBe(Number(marker![1]));
+        expect(complete).toBe(fact);
         expect(request.messages.filter((message) => message.content === guide)).toHaveLength(1);
         yield {
           type: 'text_delta',

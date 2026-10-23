@@ -168,10 +168,8 @@ test('exact small Model input survives later steer and source changes; read auth
     await f.done();
     const steer = (await f.store.getCommand('steer'))!;
     expect(steer).toMatchObject({ status: 'applied', receipt: { runId: run.id } });
-    const businessId = (steer.receipt as { businessCommandId: string }).businessCommandId;
-    expect(businessId).toBeString();
-    expect(businessId).not.toBe('steer');
-    expect(await f.store.getCommand(businessId)).toMatchObject({
+    expect(steer).toMatchObject({
+      id: 'steer',
       kind: 'input.steer',
       rootWorkCommandId: 'work',
       status: 'applied',
@@ -183,7 +181,7 @@ test('exact small Model input survives later steer and source changes; read auth
     expect(
       model.requests[1]!.messages.find((message) => message.content === 'Follow up: later guide')
         ?.sourceIds,
-    ).toEqual([businessId]);
+    ).toEqual(['steer']);
     expect((await f.runtime.readModelInput(target)).request).toEqual(model.requests[0]!);
     await code(
       f.runtime.readModelInput({ ...target, expectedStoreId: 'foreign' }),
@@ -514,9 +512,9 @@ test('directory navigates more than two hundred real Store Model intents with a 
     await f.done('later');
     const later = (await f.store.getCommand('later'))!;
     expect(later.status).toBe('applied');
-    const laterReceipt = later.receipt as { runId: string; businessCommandId: string };
+    const laterReceipt = later.receipt as { runId: string };
     expect(await f.store.getRun(laterReceipt.runId)).toMatchObject({
-      originCommandId: laterReceipt.businessCommandId,
+      originCommandId: 'later',
       rootWorkCommandId: 'later',
       status: 'completed',
     });

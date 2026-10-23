@@ -1,5 +1,60 @@
 import { createHash } from 'node:crypto';
 import { isAbsolute, relative } from 'node:path';
+import { isDeepStrictEqual } from 'node:util';
+
+/** Decode the display contract independently of the production formatter. */
+export function taskQualityPresentedRead(content: string) {
+  const lines = content.split('\n');
+  const match =
+    /^Read (".*"); from_line=(\d+); lines=(none|\d+-\d+)\/(\d+); next_line=(null|\d+); (complete file|selected window only)\.$/.exec(
+      lines[0] ?? '',
+    );
+  const size = /^Content \((\d+) UTF-8 bytes; starts on next line\):$/.exec(lines[2] ?? '');
+  if (!match || !size || !lines[1]?.startsWith('baseline=')) return;
+  try {
+    const text = lines.slice(3).join('\n');
+    if (Buffer.byteLength(text) !== Number(size[1])) return;
+    const window = match[3] === 'none' ? null : match[3]!.split('-').map(Number);
+    const fromLine = Number(match[2]);
+    if (fromLine < 1 || (window && window[0] !== fromLine)) return;
+    return {
+      path: JSON.parse(match[1]!),
+      baseline: JSON.parse(lines[1].slice('baseline='.length)),
+      selection: {
+        fromLine,
+        toLine: window?.[1] ?? null,
+        totalLines: Number(match[4]),
+        nextOffset: match[5] === 'null' ? null : Number(match[5]),
+      },
+      whole: match[6] === 'complete file',
+      content: text,
+    };
+  } catch {
+    return;
+  }
+}
+
+export function taskQualityReadMessageMatches(presented: string, original: string) {
+  if (presented === original) return true;
+  const decoded = taskQualityPresentedRead(presented);
+  if (!decoded) return false;
+  try {
+    const raw = JSON.parse(original);
+    const whole =
+      raw.selection.fromLine === 1 &&
+      raw.selection.nextOffset === null &&
+      (raw.selection.toLine === raw.selection.totalLines || raw.selection.totalLines === 0);
+    return (
+      decoded.content === raw.content &&
+      decoded.path === raw.path &&
+      decoded.whole === whole &&
+      isDeepStrictEqual(decoded.baseline, raw.baseline) &&
+      isDeepStrictEqual(decoded.selection, raw.selection)
+    );
+  } catch {
+    return false;
+  }
+}
 
 /** Read the actual automatic result envelope, never a path or JSON quoted by a child. */
 export function taskQualityResultEnvelope(content: string): Record<string, unknown> | undefined {
@@ -142,6 +197,6 @@ export function taskQualityCompleteFixtureRead(
       message.role === 'tool' &&
       message.toolCallId === execution.callId &&
       message.sourceIds?.includes(execution.id as string) &&
-      message.content === result.content,
+      taskQualityReadMessageMatches(message.content, result.content as string),
   );
 }

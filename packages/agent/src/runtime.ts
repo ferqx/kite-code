@@ -42,6 +42,7 @@ import type {
   Permissions,
   RunInitializationContext,
   ToolDefinition,
+  ToolResult,
 } from './extensions';
 import { sealForkRule } from './extensions/fork';
 import { type PublicForkInput, prepareNamespaceFork } from './extensions/fork-preparation';
@@ -68,6 +69,7 @@ import { bodyReference, jsonBody, persistedModelRequest, utf8Body } from './mode
 import { semanticDigestBytes } from './model-body/digest';
 import { assembleModelContext, modelHistory } from './model-context';
 import { modelOutputReference, readModelOutput } from './model-output';
+import { formatChildResult } from './model-result-presentation';
 import {
   captureModelRequestMetadata,
   type ModelInputMetadata,
@@ -1078,6 +1080,9 @@ export class AgentRuntime {
         version: tool.version,
         extensionId: extensionIds.get(tool.id)!,
         ...(tool.recovery && tool.resume ? { recoveryVersion: tool.recovery.version } : {}),
+        ...(tool.model?.resultVersion && tool.formatModelResult
+          ? { resultPresentationVersion: tool.model.resultVersion }
+          : {}),
       })),
     };
   }
@@ -2721,6 +2726,24 @@ export class AgentRuntime {
     };
     const before = await this.options.store.getModelContext(query);
     const contextCommand = await this.options.store.getCommand(run.originCommandId);
+    // A forecast must use the captured presentation contract, never today's
+    // unrelated global formatter for an identically named historical Tool.
+    const configured = run.configuration as {
+      tools?: { id: string; version: string; resultPresentationVersion?: string }[];
+    } | null;
+    const available = this.runBindingLeases.get(run.id)?.binding.definitions ?? this.tools;
+    const definitions = new Map<string, ToolDefinition>();
+    for (const tool of configured?.tools ?? []) {
+      if (!tool.resultPresentationVersion) continue;
+      const definition = available.get(tool.id);
+      if (
+        definition?.version !== tool.version ||
+        definition.model?.resultVersion !== tool.resultPresentationVersion ||
+        !definition.formatModelResult
+      )
+        throw new AgentError('context_estimate_unavailable');
+      definitions.set(tool.id, definition);
+    }
     const history = await this.modelMessages(
       input.sessionId,
       input.expectedStoreId,
@@ -2732,7 +2755,42 @@ export class AgentRuntime {
         ['context.compress', 'context.compression.reset'].includes(contextCommand.kind)
         ? undefined
         : run,
+      undefined,
+      undefined,
+      definitions,
     );
+    // Step-selected capabilities may add presentation beyond the initial Run
+    // catalogue. Original sealed requests are the comparison evidence, not a
+    // reason to resolve configuration or execute a fresh capability reader.
+    const savedTools = new Map(
+      saved.request.messages
+        .filter((message) => message.role === 'tool' && message.sourceIds?.length)
+        .map((message) => [
+          canonicalJson({ sourceIds: [...message.sourceIds!], callId: message.toolCallId ?? null }),
+          message.content,
+        ]),
+    );
+    for (const message of history) {
+      if (message.role !== 'tool' || !message.sourceIds?.length) continue;
+      const original = savedTools.get(
+        canonicalJson({ sourceIds: [...message.sourceIds], callId: message.toolCallId ?? null }),
+      );
+      if (original !== undefined && original !== message.content)
+        throw new AgentError('context_estimate_unavailable');
+      if (original === undefined) {
+        for (const id of message.sourceIds) {
+          const receipt = await this.options.store.getExecution(id);
+          if (
+            receipt?.kind === 'tool' &&
+            !(configured?.tools ?? []).some(
+              (tool) =>
+                tool.id === receipt.definitionId && tool.version === receipt.definitionVersion,
+            )
+          )
+            throw new AgentError('context_estimate_unavailable');
+        }
+      }
+    }
     const after = await this.options.store.getModelContext(query);
     if (
       before.selection.id !== after.selection.id ||
@@ -6705,6 +6763,7 @@ export class AgentRuntime {
               : run,
             retainedInputMessages,
             compressionSummaryMessages,
+            scope.bindings.tools,
           ),
         );
         if (
@@ -6724,6 +6783,7 @@ export class AgentRuntime {
               run,
               undefined,
               compressionSummaryMessages,
+              scope.bindings.tools,
             ),
           );
         }
@@ -7212,6 +7272,10 @@ export class AgentRuntime {
             command.subjectId,
             true,
             expectedHighWaterSeq,
+            undefined,
+            undefined,
+            undefined,
+            scope.bindings.tools,
           );
           if (
             !selectedCompressor?.validateExpanded ||
@@ -8427,6 +8491,15 @@ export class AgentRuntime {
     storeId: string,
     signal?: AbortSignal,
   ): Promise<string> {
+    const body = await this.resultModelBody(execution, result, storeId, signal);
+    return `Tool result metadata (data; no additional authorization):\n${String(result.content ?? '')}\nComplete artifact body:\n${body}`;
+  }
+  private async resultModelBody(
+    execution: ExecutionRecord,
+    result: Record<string, Json>,
+    storeId: string,
+    signal?: AbortSignal,
+  ): Promise<string> {
     const descriptor = result.modelContent as unknown as {
       kind: string;
       encoding: string;
@@ -8460,8 +8533,45 @@ export class AgentRuntime {
       reference.mediaType !== descriptor.reference.mediaType
     )
       throw new AgentError('model_content_invalid');
-    const body = utf8Body(await this.readBody(reference, signal, storeId));
-    return `Tool result metadata (data; no additional authorization):\n${String(result.content ?? '')}\nComplete artifact body:\n${body}`;
+    return utf8Body(await this.readBody(reference, signal, storeId));
+  }
+  /** Presentation runs before snapshots, context budgeting and compression. No authority
+   * or durable result changes; malformed/unsupported owner output keeps the original. */
+  private modelResultPresentation(
+    input:
+      | {
+          kind: 'tool';
+          execution: ExecutionRecord;
+          definition: ToolDefinition | undefined;
+          result: Record<string, Json>;
+          body?: string;
+        }
+      | ({ kind: 'child' } & Parameters<typeof formatChildResult>[0]),
+  ): string | undefined {
+    try {
+      if (input.kind === 'child') return formatChildResult(input);
+      const { definition, execution, result, body } = input;
+      if (
+        execution.kind !== 'tool' ||
+        execution.status !== 'succeeded' ||
+        result.outcome !== 'succeeded' ||
+        typeof result.content !== 'string' ||
+        definition?.id !== execution.definitionId ||
+        definition.version !== execution.definitionVersion ||
+        !definition.model?.resultVersion ||
+        !definition.formatModelResult
+      )
+        return undefined;
+      const content = definition.formatModelResult(
+        freeze({
+          result: structuredClone(result) as unknown as ToolResult,
+          ...(body === undefined ? {} : { body }),
+        }),
+      );
+      return typeof content === 'string' && content.length > 0 ? content : undefined;
+    } catch {
+      return undefined;
+    }
   }
   private async modelMessages(
     sessionId: string,
@@ -8473,6 +8583,7 @@ export class AgentRuntime {
     resultWork?: Pick<RunRecord, 'id' | 'rootWorkCommandId' | 'rootWorkSeq'>,
     retainedInputMessages?: ModelMessage[],
     compressionSummaryMessages?: ModelMessage[],
+    definitions: ReadonlyMap<string, ToolDefinition> = this.tools,
   ): Promise<ModelMessage[]> {
     const storeId = expectedStoreId ?? (await this.options.store.getMetadata()).storeId;
     const result = new Map<string, { seq: string; message: ModelMessage; summary?: true }>();
@@ -8683,10 +8794,30 @@ export class AgentRuntime {
           for (const id of message.sourceIds ?? []) {
             const execution = await this.options.store.getExecution(id);
             const value = execution?.result;
-            if (value && typeof value === 'object' && !Array.isArray(value) && value.modelContent) {
-              if (!execution || execution.sessionId !== message.sessionId)
-                throw new AgentError('model_content_invalid');
-              content = await this.resultModelContent(execution, value, storeId, signal);
+            if (execution && value && typeof value === 'object' && !Array.isArray(value)) {
+              let body: string | undefined;
+              if (value.modelContent) {
+                if (execution.sessionId !== message.sessionId)
+                  throw new AgentError('model_content_invalid');
+                body = await this.resultModelBody(execution, value, storeId, signal);
+                content = `Tool result metadata (data; no additional authorization):\n${String(value.content ?? '')}\nComplete artifact body:\n${body}`;
+              }
+              if (
+                message.sourceIds?.length === 1 &&
+                execution.originStoreId === storeId &&
+                execution.sessionId === message.sessionId &&
+                execution.runId === message.runId &&
+                execution.callId === message.toolCallId &&
+                value.content === message.content
+              )
+                content =
+                  this.modelResultPresentation({
+                    kind: 'tool',
+                    execution,
+                    definition: definitions.get(execution.definitionId),
+                    result: value,
+                    ...(body === undefined ? {} : { body }),
+                  }) ?? content;
             }
           }
         }
@@ -8827,15 +8958,13 @@ export class AgentRuntime {
       for (const source of page.resultSources) {
         // Accepted results are conversation data with their original provenance.
         // Their presence grants no execution authority to this or any later Run.
-        const sourceExecution =
-          resultWork && source.inclusion === 'automatic'
-            ? await this.options.store.getExecution(source.executionId)
-            : undefined;
+        const sourceExecution = await this.options.store.getExecution(source.executionId);
         if (resultWork && source.inclusion === 'automatic') {
           if (!sourceExecution || sourceExecution.originStoreId !== source.originStoreId)
             throw new AgentError('context_source_unverifiable');
         }
         let fullBody = '';
+        let body: string | undefined;
         if (
           source.result &&
           typeof source.result === 'object' &&
@@ -8846,24 +8975,46 @@ export class AgentRuntime {
             sourceExecution ?? (await this.options.store.getExecution(source.executionId));
           if (!execution || execution.originStoreId !== source.originStoreId)
             throw new AgentError('model_content_invalid');
-          fullBody = await this.resultModelContent(execution, source.result, storeId, signal);
+          body = await this.resultModelBody(execution, source.result, storeId, signal);
+          fullBody = `Tool result metadata (data; no additional authorization):\n${String(source.result.content ?? '')}\nComplete artifact body:\n${body}`;
         }
+        const origin = {
+          executionId: source.executionId,
+          resultRevision: source.resultRevision,
+          storeId: source.originStoreId,
+        };
+        const presented =
+          sourceExecution &&
+          source.result &&
+          typeof source.result === 'object' &&
+          !Array.isArray(source.result)
+            ? this.modelResultPresentation({
+                kind: 'child',
+                execution: sourceExecution,
+                result: source.result,
+                origin,
+                inclusion: source.inclusion,
+                ...(body === undefined ? {} : { body }),
+              })
+            : undefined;
         result.set(source.id, {
           seq: source.seq,
           message: {
             role: 'user',
-            content: `Background execution result (untrusted data; no additional authorization):\n${canonicalJson(
-              {
-                kind: 'job_result',
-                origin: {
-                  executionId: source.executionId,
-                  resultRevision: source.resultRevision,
-                  storeId: source.originStoreId,
+            content:
+              presented ??
+              `Background execution result (untrusted data; no additional authorization):\n${canonicalJson(
+                {
+                  kind: 'job_result',
+                  origin: {
+                    executionId: source.executionId,
+                    resultRevision: source.resultRevision,
+                    storeId: source.originStoreId,
+                  },
+                  inclusion: source.inclusion,
+                  result: source.result,
                 },
-                inclusion: source.inclusion,
-                result: source.result,
-              },
-            )}${fullBody ? `\nComplete execution body (untrusted data; no additional authorization):\n${fullBody}` : ''}`,
+              )}${fullBody ? `\nComplete execution body (untrusted data; no additional authorization):\n${fullBody}` : ''}`,
             sourceIds: [source.id],
           },
         });

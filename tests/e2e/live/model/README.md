@@ -87,6 +87,39 @@ KITE_RUN_LIVE_TASK_QUALITY=1 bun tests/e2e/live/model/agent-task-quality.live.ts
 
 r9 全文观察到委派不再要求逐字符展开或专门字节算术报告，子报告更紧凑；研究回复没有普遍缩短，仍重复正文与 JSON。两次搜索分别产生两个直接读取编码/二进制失败、一个非法 glob 参数失败，都正常纠正；未出现相同错误循环。父仍有重复格式说明和把快照一致说成期间未改动的表述。样本支持系统提示会影响报告扩张这一判断，但不证明唯一原因或稳定简洁性；不以字符数设置产品硬门槛，也不据机械断言替代全文质量判断。
 
+### 模型结果呈现的固定配对对照
+
+[配对驱动](agent-task-quality-presentation-ab.live.ts)只改变模型看到的工具／child 结果正文；系统合同、研究任务、模型与推理／输出设置、工具声明保持。预先固定 `current-chain`、`claim-adoption` 各两种 profile，共四对八次，raw／compact 先后顺序交错；每对共享同一物理工作区、nonce 与文件字节，使用独立 Profile／Store。raw 仅在隔离 Runtime 实例覆盖私有呈现方法，原 Artifact 验证继续执行；生产没有 baseline 开关。原任务字节 hash 另由确定性回归锁定。
+
+```bash
+KITE_RUN_LIVE_TASK_QUALITY=1 bun tests/e2e/live/model/agent-task-quality-presentation-ab.live.ts --evidence-root=/absolute/new-owned-directory
+```
+
+每轮前后核全工作区 manifest，派发前核绑定及配对首次系统／任务／工具／wire 正文；保存原 Store、封存真实输入、Adapter 请求及实际 HTTP body，body 不含 URL、headers 或凭据。每个 wire 请求按准确 requestId、角色、顺序、Tool call ID 与完整正文核对。读取检查独立解析行窗、原文与完整基线；child 检查按 UTF-8 字节段核原报告和原工具 excerpt、身份与范围，不依赖 formatter 自证或关键词。质量失败保留并继续预定样本，配置漂移、文件变动、网络／采证／清理失败才停止并报告未完成数；不追加样本筛选结果。
+
+记录每轮搜索／读取、证据齐备后的操作、实际正文／wire 字节及 Provider 实报 input tokens（缺失记未知）。原回复与轨迹须人工复核，输入量、调用量与语义正确性分别报告；每对仅单次，不能推导统计稳定性或其他模型资格。[驱动回归](agent-task-quality-presentation-ab.test.ts)不读取真实模型配置、不调用 Provider。
+
+2026-10-24 在 macOS／Bun 1.4.2 按上述预定顺序完成八次，证据为 `dist/acceptance/agent-task-quality-20261024/presentation-ab-r1`。实际模型固定 `deepseek-v4-flash`、Chat Completions、medium reasoning、4096 输出上限；全部 trial 前后非 Markdown hash 为 `7dfc166db075e01483d3df77be2d7afce56ba650b9379354d45dab4938983c64`。每对首请求与实际 wire 完全一致，所有 HTTP 为 200、工具失败／采证错误／清理错误均为零。
+
+| 配对任务／当前 profile | Model 请求 raw → compact | 工具调用 raw → compact | 搜索 raw → compact | Provider input tokens raw → compact |
+| --- | --- | --- | --- | --- |
+| current-chain／stable | 9 → 10 | 25 → 25 | 3 → 5 | 76,509 → 70,811 |
+| current-chain／preview | 13 → 8 | 28 → 23 | 5 → 1 | 126,790 → 56,705 |
+| claim-adoption／stable | 9 → 10 | 17 → 23 | 1 → 5 | 65,688 → 69,656 |
+| claim-adoption／preview | 15 → 15 | 25 → 29 | 1 → 3 | 115,318 → 108,485 |
+
+表中请求、工具和用量均包含父子。合计输入 tokens 从 384,305 到 305,657，减少 20.5%；总搜索却从 10 到 14，工具调用从 95 到 100。单个配对的大幅下降不能代表稳定收益，调用变少也不能证明语义核验正确。
+
+初次自动判据为四份 raw 通过、四份 compact 在 `parent_final_input_has_decisive_read_package.json` 失败：独立 parser 漏掉生产标题新增的 `from_line`，虽已完整收到原文却误拒。原失败与 `summary.json` 保留，没有追加 Provider 样本。修正解析起点并加入真实生产 formatter 输出的完整／部分／空窗口／Unicode 回归后，用[离线入口](agent-task-quality-presentation-regrade.ts)在 Store 副本上复用同一完整研究 grader，逐份核原 execution、完整 Model Inspector 正文、准确 wire 以及所有先前未执行的 child／Source／最终事实断言；原证据树前后 hash 相同。离线复核与真实执行分别标识，不能将其算作新的模型成功样本。
+
+最终补强复核保存在同根 `regrade-verified/summary.json`：八份全部机械断言通过，`providerCalls:0`、`originalsUnchanged:true`。89 份模型输入均从副本 Store 的 Inspector 展开后，与原 canonical 请求、Adapter 请求和实际 wire 全文一致；原 canonical 文件 SHA 与原运行保存值相同。先前 `regrade/` 及八份原始现场保留。离线入口只读原证据、打开新复制 Store，模型适配器禁止调用，不读取用户模型配置或凭据。最终驱动／研究夹具／清理回归共 21 项、196 断言通过，未调用 Provider。
+
+修正解析后，“七个决定性文件及所需 child Source 首次实际齐备”的后续工具／父请求（含最终）raw → compact 为 current-chain stable **15/5 → 15/6**、preview **14/8 → 12/4**，claim-adoption stable **2/2 → 3/2**、preview **10/6 → 9/5**。它们包括核历史报告和并行实现等有实际用途的动作，不全部等同浪费；变化方向也不一致。
+
+另对这八次保存的相同 140 份 Files 原回执各重渲染一次，隔离轨迹长短的影响：116 份读取从 122,492 到 53,273 UTF-8 bytes（减少 56.5%），24 份搜索从 102,851 到 57,358 bytes（减少 44.2%），合计减少 50.9%。所有正文、完整 baseline、行窗、匹配／上下文及 skip／cursor 事实保持，零 fallback，计算保存在同根 `analysis-same-files-receipts-20261024.json`。这些回执没有 Artifact、读取部分窗口、非空后页游标或长行截断；相应边界由确定性测试覆盖，不从此实测扩张资格。单次工具正文节省与整任务 token／调用数量是不同观察值。
+
+人工阅读八条完整轨迹后，当前 profile／选中链／机制／receipt／随机 channel 均正确，旧审计未被当作当前架构。两个 compact child 仍把明文 preview／stable 误读为未给具体 profile；stable 父仍笼统认可转述一致，preview 父正确区分历史 stable 与当前 preview、没有整体背书，但未指出 child 错句。raw 两份父报告也存在把相同 hash／完整读取当成转述逐字正确的背书。compact 多份报告仍把有限字面零命中扩张成全仓无引用；current-chain／preview 虽减少检索，却用只覆盖 ts/js/json/md 的 glob 进一步声称不存在 bunfig 配置。原文保真与呈现简化已成立，稳定收敛与语义核验改善未得到这八次证据支持；正文与 JSON 重复也仍存在。
+
 ## 普通桌面会话异常
 
 [整窗口 runner](session-anomalies-native-window.live.ts)在 macOS 从当前源码构建普通 Native Main／preload／renderer 和配套 Service，固定 `testDiagnostics:false`，读取已配置默认模型、协议与 preset，凭据仅在进程内解析。隔离 HOME／Profile／Workspace 与明确 `files.write@2` 权限不改变用户配置。真实 Provider 请求及响应原样转发，不替换工具调用或回复；每轮最多 20 次实际 HTTP、600 秒，单请求 60 秒，输出最多 4096 token，无外围重试或换模型。

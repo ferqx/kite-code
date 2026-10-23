@@ -1,3 +1,5 @@
+import { AsyncLocalStorage } from 'node:async_hooks';
+import { createHash } from 'node:crypto';
 import { createCredentialVault, createOsCredentialBackend } from '@kite-ai/agent/config';
 import type { ModelAdapter, ModelRequest, ModelToolCall, ModelUsage } from '@kite-ai/ai';
 import { createCompatibleModelBinding, createSdkModelAdapter } from '@kite-ai/ai/sdk';
@@ -47,6 +49,15 @@ export async function createLiveModelFixture(options: {
   transportResponse?(response: Response, physicalIndex: number): Promise<Response>;
   /** Preserve SDK's own neutral retry classification for Runtime fault controls. */
   preserveSdkAttemptErrors?: true;
+  /** Private synthetic A/B evidence only. Bodies exclude transport URL and headers. */
+  captureWireRequests?: true;
+  /** Isolated paired-run guards, before any dispatch. No request mutation. */
+  beforeModelRequest?(request: ModelRequest, binding: Readonly<Record<string, unknown>>): void;
+  beforeWireRequest?(entry: {
+    physicalIndex: number;
+    requestId: string | null;
+    body: string;
+  }): void;
   /** Isolated crash artifact only: synchronous durable observation, never response edits. */
   observe?(state: {
     event: string;
@@ -70,6 +81,13 @@ export async function createLiveModelFixture(options: {
   const calls: ModelToolCall[] = [];
   const usage: ModelUsage[] = [];
   const wire: { status: number; tools: string[] }[] = [];
+  const wireRequests: {
+    physicalIndex: number;
+    requestId: string | null;
+    body: string;
+    bytes: number;
+  }[] = [];
+  const requestContext = new AsyncLocalStorage<string>();
   const metadata: Record<string, unknown> = {};
   const observe = (event: string) => options.observe?.({ event, requests, wire, usage, metadata });
   const configuration = createUserConfiguration();
@@ -100,6 +118,18 @@ export async function createLiveModelFixture(options: {
   metadata.provider = selected.provider;
   metadata.protocol = protocol;
   metadata.settings = preset;
+  // Detect endpoint/model binding drift without disclosing endpoint or credentials.
+  metadata.bindingFingerprint = createHash('sha256')
+    .update(
+      JSON.stringify({
+        provider: selected.provider,
+        baseURL: selected.baseURL,
+        model: selected.model,
+        protocol,
+        preset,
+      }),
+    )
+    .digest('hex');
   const vault = createCredentialVault({
     backend: createOsCredentialBackend({ service: 'kite-agent', accountNamespace: 'user-models' }),
   });
@@ -126,6 +156,18 @@ export async function createLiveModelFixture(options: {
       );
       const observation = { status: 0, tools };
       const physicalIndex = wire.length;
+      options.beforeWireRequest?.({
+        physicalIndex,
+        requestId: requestContext.getStore() ?? null,
+        body: String(init?.body),
+      });
+      if (options.captureWireRequests)
+        wireRequests.push({
+          physicalIndex,
+          requestId: requestContext.getStore() ?? null,
+          body: String(init?.body),
+          bytes: Buffer.byteLength(String(init?.body)),
+        });
       wire.push(observation);
       observe('http_dispatch_intent');
       try {
@@ -172,17 +214,26 @@ export async function createLiveModelFixture(options: {
     async *stream(request, context) {
       deadline.throwIfAborted();
       check(requests.length < options.requestLimit, 'request_budget_exhausted');
+      options.beforeModelRequest?.(request, metadata);
       requests.push(structuredClone(request));
       observe('model_started');
       const signal = AbortSignal.any([deadline, context.signal]);
       try {
-        for await (const event of sdk.stream(request, { signal })) {
-          if (event.type === 'tool_call') calls.push(structuredClone(event));
-          if (event.type === 'finish') {
-            usage.push(event.usage);
-            observe('model_finish_usage');
+        const iterator = sdk.stream(request, { signal })[Symbol.asyncIterator]();
+        try {
+          for (;;) {
+            const step = await requestContext.run(request.requestId, () => iterator.next());
+            if (step.done) break;
+            const event = step.value;
+            if (event.type === 'tool_call') calls.push(structuredClone(event));
+            if (event.type === 'finish') {
+              usage.push(event.usage);
+              observe('model_finish_usage');
+            }
+            yield event;
           }
-          yield event;
+        } finally {
+          await iterator.return?.();
         }
       } catch (error) {
         observe('model_attempt_failed');
@@ -193,5 +244,15 @@ export async function createLiveModelFixture(options: {
     },
   };
 
-  return { model, modelId: 'live', signal: deadline, requests, calls, usage, wire, metadata };
+  return {
+    model,
+    modelId: 'live',
+    signal: deadline,
+    requests,
+    calls,
+    usage,
+    wire,
+    wireRequests,
+    metadata,
+  };
 }

@@ -80,7 +80,15 @@ export interface ToolDefinition {
     /** Restrict a public entry without removing the original internal control contract. */
     readonly omitParameters?: readonly string[];
     readonly requiredParameters?: readonly string[];
+    /** Version of the owner's pure result presentation; original results remain durable. */
+    readonly resultVersion?: string;
   };
+  /** Model history only. Receives a frozen copy and, when present, the verified complete
+   * artifact body. Return undefined for unsupported results; never infer new facts. */
+  formatModelResult?(input: {
+    readonly result: ToolResult;
+    readonly body?: string;
+  }): string | undefined;
   readonly resources?: ResourceRequest;
   /** Trusted I/O factory opt-in: an observation may discover new host project instructions.
    * Existing decision sources and all permissions still require fresh verification. */

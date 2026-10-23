@@ -1,6 +1,16 @@
 # 模型工具名称与参数投影
 
-[model-tools.ts](model-tools.ts) 是 Agent 内部工具合同与模型公开工具表面的唯一转换位置。[ToolDefinition.model](extensions/index.ts) 只保存纯数据：`name`、`snakeCase`、`parameterNames`、`hidden`、`omitParameters` 和 `requiredParameters`，不接收执行函数、权限对象或第二套工具实现。各 leaf 拥有名称、说明与字段选择；实际定义 ID、version、input schema、execute/resume、effects、来源和权限继续由原 owner 负责。
+[model-tools.ts](model-tools.ts) 负责 Agent 内部工具名称、参数与模型公开工具表面的转换。[ToolDefinition.model](extensions/index.ts) 只保存纯数据：`name`、`snakeCase`、`parameterNames`、`hidden`、`omitParameters`、`requiredParameters` 和结果呈现的 `resultVersion`，不接收执行函数、权限对象或第二套工具实现。各 leaf 拥有名称、说明与字段选择；实际定义 ID、version、input schema、execute/resume、effects、来源和权限继续由原 owner 负责。
+
+## 结果呈现
+
+工具可在定义顶层提供同步纯函数 `formatModelResult`，并声明 `model.resultVersion`。Runtime 在重建下一次模型历史时核原执行、调用、Session／Run／Store 与当前捕获定义的准确 ID/version，只向 formatter 传冻结的原 `ToolResult` 副本和已核完整读取的 Artifact 正文。未知定义、旧版本、不支持的形状或 formatter 异常保留原呈现；真实 Artifact 身份、读取和完整性失败继续拒绝，不能被展示 fallback 吞掉。
+
+目前 [Files](tools/files/README.md) 对工作区读取和搜索去除重复 envelope，保留正文、基线、行窗、分页和未检查范围。[child Source 呈现](model-result-presentation.ts)依据原持久 child 配置和执行身份，前置未核验状态、范围与实际原文预览，再给出完整子报告；未覆盖的工作不能被推断为未发生。失败、取消、未知或无法识别的来源沿原格式交付。
+
+呈现在 [Runtime.modelMessages](runtime.ts) 中完成，早于输入封存、预算估算、续写／重试及压缩；只读 Inspector 读取当时封存的真实输入，不用今天的 formatter 改写旧快照。原 Message、ToolResult、Source、Artifact、邮件携带判断及结果接纳保持原内容和身份。没有生产配置开关或按搜索次数注入的提醒。回归见[真实 Runtime 呈现](../test/isolated/execution/model-result-presentation.test.ts)及[子取证](../test/isolated/business/task/child-tool-evidence.test.ts)。
+
+只读上下文预测须核原 Run 捕获的呈现版本。无法取得准确动态定义，或重建工具正文与已封存输入不一致时，沿原 `context_estimate_unavailable` 返回，不能把原始长 JSON 误报为模型正在使用的短正文；也不为估算重新解析配置或调用模型。[预测回归](../test/isolated/context/result-presentation-estimate.test.ts)覆盖这条边界。
 
 ## 请求、派发与历史
 

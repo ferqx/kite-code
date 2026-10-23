@@ -8,12 +8,17 @@ import { createFileTools, createWorkspaceFiles } from '@kite-ai/agent/files';
 import { agentContractSource } from '@kite-ai/agent/sources';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import { createTaskExtension, defaultTaskRoles } from '@kite-ai/agent/task';
+import type { ModelRequest } from '@kite-ai/ai';
 import { createChildConfiguration } from '../../../../apps/service/src/child-configuration';
 import {
   createTaskQualityResearchFixture,
   taskQualityCompleteFixtureRead,
+  taskQualityPresentedRead,
+  taskQualityReadMessageMatches,
   taskQualityResultEnvelope,
 } from './agent-task-quality-fixture';
+import { comparisonChildSourceMatches } from './agent-task-quality-presentation-ab-fixture';
+import { loadTaskQualityReplay } from './agent-task-quality-replay-fixture';
 import { saveLiveCanonicalModelEvidence } from './live-canonical-evidence';
 import { liveCodeEvidence } from './live-code-evidence';
 import { createLiveModelFixture, summarizeLiveToolCalls } from './live-model-fixture';
@@ -52,32 +57,80 @@ function searchReport(text: string): Record<string, unknown> {
   throw Error('structured_search_report_missing');
 }
 
+/** Original research task bytes, shared by ordinary and paired live trials. */
+export function taskQualityResearchPrompt(scenario: 'current-chain' | 'claim-adoption') {
+  const collaboration =
+    scenario === 'claim-adoption'
+      ? '先委派恰好一个只读协作者提取 reports/runtime-audit.md 的结论（包含其声称的机制、receipt字段和channel）及其引用依据。该协作者的职责是准确转述这份材料，不负责核查当前启动入口；你仍负责独立核验当前配置和实际可达实现，区分材料主张与已验证事实。协作者不再委派。'
+      : '独立完成这次研究，不委派。';
+  return `只读核查这个合成项目的当前运行链，禁止写入、执行进程、联网或调整任何配置。${collaboration} 从 package.json 的 start 出发，核实真正读取的运行配置、注册表选项及当前选中实现的结果路径。仓库包含同名的并行实现、旧审计和归档样例，文件存在或报告自述不能证明当前路径。请用实际读取决定当前profile、结果机制、receipt字段和channel，核实历史审计是否适用于当前运行，不要求穷尽所有历史文件。具备支持任务结论的证据后交付；保留真实未知。最终包含一个JSON对象，字段 profile、mechanism、receiptField、channel、currentChain（当前配置/注册/实现文件路径数组）、historicalClaimApplies（旧审计对当前运行的主张是否成立）、reportAssessment（解释材料主张与当前证据的关系）。`;
+}
+
 /** Isolated opt-in task evaluation. Budgets abort the test, never define product completion. */
 export async function runAgentTaskQualityTrial(options: {
   scenario: Scenario;
   trial: number;
   evidenceRoot: string;
+  /** Test-only original-evidence regrade. dataRoot MUST be a disposable Store copy. */
+  offlineReplay?: { originalEvidenceRoot: string; dataRoot: string };
+  /** Only the dedicated synthetic A/B driver supplies this; no product configuration switch. */
+  isolatedComparison?: {
+    variant: 'raw' | 'compact';
+    workspace: string;
+    research: ReturnType<typeof createTaskQualityResearchFixture>;
+    beforeModelRequest?(request: ModelRequest, binding: Readonly<Record<string, unknown>>): void;
+    beforeWireRequest?(entry: {
+      physicalIndex: number;
+      requestId: string | null;
+      body: string;
+    }): void;
+  };
 }) {
-  if (process.env.KITE_RUN_LIVE_TASK_QUALITY !== '1')
+  if (
+    options.offlineReplay &&
+    (!options.isolatedComparison ||
+      !['current-chain', 'claim-adoption'].includes(options.scenario) ||
+      realpathSync(options.offlineReplay.dataRoot) ===
+        realpathSync(join(options.offlineReplay.originalEvidenceRoot, 'data')))
+  )
+    throw Error('offline_regrade_requires_research_and_copied_store');
+  if (!options.offlineReplay && process.env.KITE_RUN_LIVE_TASK_QUALITY !== '1')
     throw Error('requires_KITE_RUN_LIVE_TASK_QUALITY_1');
   const started = Date.now();
   const codeBefore = liveCodeEvidence();
   const id = `${options.scenario}-${options.trial}`;
   mkdirSync(options.evidenceRoot, { mode: 0o700 });
   const root = realpathSync(options.evidenceRoot);
-  const workspace = join(root, 'workspace');
-  mkdirSync(workspace, { mode: 0o700 });
+  const workspace = options.isolatedComparison
+    ? realpathSync(options.isolatedComparison.workspace)
+    : join(root, 'workspace');
+  if (!options.isolatedComparison) mkdirSync(workspace, { mode: 0o700 });
   const token = `channel-${crypto.randomUUID()}`;
   const expectedOutput = `accepted:${token}\n`;
   const researchScenario =
     options.scenario === 'current-chain' || options.scenario === 'claim-adoption';
   const expectsChild = options.scenario === 'delegation' || options.scenario === 'claim-adoption';
   const timeoutMs = researchScenario ? 480000 : 240000;
-  const fixture = await createLiveModelFixture({
-    requestLimit: researchScenario ? 72 : 36,
-    timeoutMs,
-  });
-  const profile = { dataRoot: join(root, 'data'), profile: 'quality' };
+  const replay = options.offlineReplay
+    ? loadTaskQualityReplay(options.offlineReplay.originalEvidenceRoot)
+    : undefined;
+  const fixture =
+    replay?.fixture ??
+    (await createLiveModelFixture({
+      requestLimit: researchScenario ? 72 : 36,
+      timeoutMs,
+      ...(options.isolatedComparison
+        ? {
+            captureWireRequests: true as const,
+            beforeModelRequest: options.isolatedComparison.beforeModelRequest,
+            beforeWireRequest: options.isolatedComparison.beforeWireRequest,
+          }
+        : {}),
+    }));
+  const profile = {
+    dataRoot: options.offlineReplay?.dataRoot ?? join(root, 'data'),
+    profile: 'quality',
+  };
   const checks: Record<string, boolean> = {};
   const assert = (value: unknown, code: string) => {
     checks[code] = !!value;
@@ -99,6 +152,15 @@ export async function runAgentTaskQualityTrial(options: {
   try {
     const store = await openSqliteStore(profile);
     cleanup.store = () => store.close();
+    if (replay)
+      for (const record of replay.records)
+        assert(
+          isDeepStrictEqual(
+            await store.getExecution(String(record.execution.id)),
+            record.execution,
+          ),
+          `replay_raw_store_matches_canonical_execution_${record.execution.id}`,
+        );
     const files = createWorkspaceFiles({ root: workspace });
     cleanup.files = () => files.close();
     const fileTools = createFileTools(files).filter((tool) =>
@@ -151,22 +213,39 @@ export async function runAgentTaskQualityTrial(options: {
       },
     });
     cleanup.runtime = () => runtime.close();
+    if (options.isolatedComparison?.variant === 'raw') {
+      // Exact isolated instance override. Production has no baseline policy switch;
+      // bypass only rendering, preserving original receipt/artifact validation.
+      if (
+        typeof (runtime as unknown as Record<string, unknown>).modelResultPresentation !==
+        'function'
+      )
+        throw Error('comparison_runtime_presentation_seam_missing');
+      Object.defineProperty(runtime, 'modelResultPresentation', { value: () => undefined });
+    }
     try {
+      if (replay)
+        for (const record of replay.records) {
+          const sealed = await runtime.readModelInput(record.scope);
+          assert(
+            isDeepStrictEqual(sealed.request, record.input.request),
+            `replay_sealed_store_model_input_matches_canonical_${record.execution.id}`,
+          );
+        }
       let prompt: string;
       if (researchScenario) {
-        research = createTaskQualityResearchFixture({
-          trial: options.trial,
-          nonce: crypto.randomUUID(),
-        });
-        for (const [path, content] of Object.entries(research.files)) {
-          mkdirSync(dirname(join(workspace, path)), { recursive: true });
-          writeFileSync(join(workspace, path), content);
-        }
-        const collaboration =
-          options.scenario === 'claim-adoption'
-            ? '先委派恰好一个只读协作者提取 reports/runtime-audit.md 的结论（包含其声称的机制、receipt字段和channel）及其引用依据。该协作者的职责是准确转述这份材料，不负责核查当前启动入口；你仍负责独立核验当前配置和实际可达实现，区分材料主张与已验证事实。协作者不再委派。'
-            : '独立完成这次研究，不委派。';
-        prompt = `只读核查这个合成项目的当前运行链，禁止写入、执行进程、联网或调整任何配置。${collaboration} 从 package.json 的 start 出发，核实真正读取的运行配置、注册表选项及当前选中实现的结果路径。仓库包含同名的并行实现、旧审计和归档样例，文件存在或报告自述不能证明当前路径。请用实际读取决定当前profile、结果机制、receipt字段和channel，核实历史审计是否适用于当前运行，不要求穷尽所有历史文件。具备支持任务结论的证据后交付；保留真实未知。最终包含一个JSON对象，字段 profile、mechanism、receiptField、channel、currentChain（当前配置/注册/实现文件路径数组）、historicalClaimApplies（旧审计对当前运行的主张是否成立）、reportAssessment（解释材料主张与当前证据的关系）。`;
+        research =
+          options.isolatedComparison?.research ??
+          createTaskQualityResearchFixture({
+            trial: options.trial,
+            nonce: crypto.randomUUID(),
+          });
+        if (!options.isolatedComparison)
+          for (const [path, content] of Object.entries(research.files)) {
+            mkdirSync(dirname(join(workspace, path)), { recursive: true });
+            writeFileSync(join(workspace, path), content);
+          }
+        prompt = taskQualityResearchPrompt(options.scenario as 'current-chain' | 'claim-adoption');
       } else if (options.scenario === 'search') {
         for (const directory of ['src/current', 'legacy', 'dist'])
           mkdirSync(join(workspace, directory), { recursive: true });
@@ -202,51 +281,53 @@ export async function runAgentTaskQualityTrial(options: {
       }
       const expectedStoreId = (await store.getMetadata()).storeId;
       const identity = { expectedStoreId, sessionId: 'root', subjectId: 'owner' };
-      await runtime.createWorkspace({
-        expectedStoreId,
-        id: 'w',
-        name: 'Synthetic task quality',
-        rootUri: pathToFileURL(workspace).href,
-      });
-      await runtime.createSession({
-        ...identity,
-        commandId: 'create',
-        workspaceId: 'w',
-        title: id,
-      });
-      await runtime.submitCommand({
-        ...identity,
-        commandId: 'work',
-        request: { kind: 'run.start', content: prompt },
-      });
-      const waitStart = Date.now();
-      for (;;) {
-        fixture.signal.throwIfAborted();
-        const parent = await store.getView('root');
-        if (parent.runs.some((run) => !run.isActive && run.status !== 'completed'))
-          throw Error(
-            `actual_parent_run_${parent.runs.find((run) => run.status !== 'completed')!.status}`,
+      if (!replay) {
+        await runtime.createWorkspace({
+          expectedStoreId,
+          id: 'w',
+          name: 'Synthetic task quality',
+          rootUri: pathToFileURL(workspace).href,
+        });
+        await runtime.createSession({
+          ...identity,
+          commandId: 'create',
+          workspaceId: 'w',
+          title: id,
+        });
+        await runtime.submitCommand({
+          ...identity,
+          commandId: 'work',
+          request: { kind: 'run.start', content: prompt },
+        });
+        const waitStart = Date.now();
+        for (;;) {
+          fixture.signal.throwIfAborted();
+          const parent = await store.getView('root');
+          if (parent.runs.some((run) => !run.isActive && run.status !== 'completed'))
+            throw Error(
+              `actual_parent_run_${parent.runs.find((run) => run.status !== 'completed')!.status}`,
+            );
+          const agents = await store.listStableAgents({ ...identity, extensionId: task.id });
+          const childViews = await Promise.all(
+            agents.items.map((agent) => store.getView(agent.agentId)),
           );
-        const agents = await store.listStableAgents({ ...identity, extensionId: task.id });
-        const childViews = await Promise.all(
-          agents.items.map((agent) => store.getView(agent.agentId)),
-        );
-        const carriers = parent.executions.filter((execution) => execution.childSessionId);
-        const settled =
-          parent.runs.length > 0 &&
-          parent.runs.every((run) => !run.isActive) &&
-          childViews.every(
-            (view) => view.runs.length > 0 && view.runs.every((run) => !run.isActive),
-          ) &&
-          carriers.every(
-            (carrier) => !['planned', 'dispatching', 'running'].includes(carrier.status),
-          ) &&
-          (!expectsChild ||
-            (carriers.length > 0 && carriers.every((carrier) => carrier.resultAcceptance)));
-        if (settled) break;
-        if (Date.now() - waitStart > timeoutMs - 10000)
-          throw Error('test_observation_budget_exhausted');
-        await Bun.sleep(100);
+          const carriers = parent.executions.filter((execution) => execution.childSessionId);
+          const settled =
+            parent.runs.length > 0 &&
+            parent.runs.every((run) => !run.isActive) &&
+            childViews.every(
+              (view) => view.runs.length > 0 && view.runs.every((run) => !run.isActive),
+            ) &&
+            carriers.every(
+              (carrier) => !['planned', 'dispatching', 'running'].includes(carrier.status),
+            ) &&
+            (!expectsChild ||
+              (carriers.length > 0 && carriers.every((carrier) => carrier.resultAcceptance)));
+          if (settled) break;
+          if (Date.now() - waitStart > timeoutMs - 10000)
+            throw Error('test_observation_budget_exhausted');
+          await Bun.sleep(100);
+        }
       }
       const parent = await store.getView('root');
       const agents = await store.listStableAgents({ ...identity, extensionId: task.id });
@@ -285,7 +366,10 @@ export async function runAgentTaskQualityTrial(options: {
             message.role === 'tool' &&
             message.toolCallId === read.callId &&
             message.sourceIds?.includes(read.id) &&
-            message.content === String(object(read.result).content ?? ''),
+            taskQualityReadMessageMatches(
+              message.content,
+              String(object(read.result).content ?? ''),
+            ),
         );
       assert(
         allViews.every((view) =>
@@ -359,6 +443,9 @@ export async function runAgentTaskQualityTrial(options: {
         // These are observations, not a correctness threshold: a later lookup
         // may resolve a real uncertainty. The full trajectory needs human review.
         qualitySignals = {
+          readCalls: executions.filter(
+            (execution) => execution.kind === 'tool' && execution.definitionId === 'files.read',
+          ).length,
           searchCalls: searches.length,
           distinctSearchRequests: exactSearches.size,
           exactRepeatedSearchRequests: searches.length - exactSearches.size,
@@ -401,6 +488,22 @@ export async function runAgentTaskQualityTrial(options: {
           assert(
             hasCompleteRead(finalRequest!, path),
             `parent_final_input_has_decisive_read_${path}`,
+          );
+        if (options.isolatedComparison)
+          assert(
+            decisiveReads.some((read) =>
+              finalRequest!.messages.some(
+                (message) =>
+                  message.role === 'tool' &&
+                  message.toolCallId === read.callId &&
+                  message.sourceIds?.includes(read.id) &&
+                  includesRead(finalRequest!, read) &&
+                  (options.isolatedComparison!.variant === 'compact'
+                    ? !!taskQualityPresentedRead(message.content)
+                    : message.content === object(read.result).content),
+              ),
+            ),
+            'comparison_expected_read_presentation_actually_received',
           );
         if (expectsChild) {
           assert(
@@ -482,12 +585,20 @@ export async function runAgentTaskQualityTrial(options: {
           );
           const envelope = taskQualityResultEnvelope(delivered[0]!.content);
           assert(
-            envelope?.kind === 'job_result' &&
+            (envelope?.kind === 'job_result' &&
               object(envelope.origin).executionId === carrier.id &&
               object(envelope.origin).storeId === expectedStoreId &&
-              isDeepStrictEqual(object(object(envelope.result).details).evidence, evidence),
+              isDeepStrictEqual(object(object(envelope.result).details).evidence, evidence)) ||
+              comparisonChildSourceMatches(delivered[0]!.content, carrier),
             'claim_final_parent_input_contains_exact_recorded_child_evidence',
           );
+          if (options.isolatedComparison)
+            assert(
+              options.isolatedComparison.variant === 'compact'
+                ? comparisonChildSourceMatches(delivered[0]!.content, carrier)
+                : !!envelope,
+              'comparison_expected_child_source_presentation_actually_received',
+            );
           assert(
             childReads.some((read) =>
               fixture.requests.some(
@@ -732,13 +843,22 @@ export async function runAgentTaskQualityTrial(options: {
             ).length;
           outcome ??= { views, checks, failure };
         }
-        canonical = await saveLiveCanonicalModelEvidence({
-          runtime,
-          store,
-          requests: fixture.requests,
-          root,
-          subjectId: 'owner',
-        }).catch(() => ({ complete: false }));
+        canonical = replay
+          ? {
+              ...replay.original.canonical,
+              file: join(
+                options.offlineReplay!.originalEvidenceRoot,
+                'canonical-model-evidence.json',
+              ),
+              provenance: 'original_live_canonical_unchanged',
+            }
+          : await saveLiveCanonicalModelEvidence({
+              runtime,
+              store,
+              requests: fixture.requests,
+              root,
+              subjectId: 'owner',
+            }).catch(() => ({ complete: false }));
         if (object(canonical).complete !== true) failure ??= 'canonical_model_evidence_incomplete';
         writeFileSync(
           join(root, 'original-requests.json'),
@@ -747,6 +867,18 @@ export async function runAgentTaskQualityTrial(options: {
             mode: 0o600,
           },
         );
+        if (options.isolatedComparison) {
+          writeFileSync(
+            join(root, 'wire-requests.json'),
+            JSON.stringify(fixture.wireRequests ?? [], null, 2),
+            { mode: 0o600 },
+          );
+          writeFileSync(
+            join(root, 'model-binding.json'),
+            JSON.stringify(fixture.metadata, null, 2),
+            { mode: 0o600 },
+          );
+        }
         writeFileSync(join(root, 'actual-outcome.json'), JSON.stringify(outcome ?? null, null, 2), {
           mode: 0o600,
         });
@@ -782,16 +914,51 @@ export async function runAgentTaskQualityTrial(options: {
     qualitySignals,
     cleanupErrors,
     evidenceErrors,
+    ...(replay
+      ? {
+          executionMode: 'offline_original_evidence_regrade',
+          originalResult: replay.original,
+          providerCalls: 0,
+        }
+      : {}),
     scope: 'synthetic owned fixture permissions; not default Service policy qualification',
-    metrics: {
-      modelRequests: fixture.requests.length,
-      toolCalls: fixture.calls.length,
-      toolErrors,
-      calls: summarizeLiveToolCalls(fixture.requests, fixture.calls),
-      usage: fixture.usage,
-      httpStatuses: fixture.wire.map((entry) => entry.status),
-    },
+    metrics: replay
+      ? replay.original.metrics
+      : {
+          modelRequests: fixture.requests.length,
+          toolCalls: fixture.calls.length,
+          toolErrors,
+          calls: summarizeLiveToolCalls(fixture.requests, fixture.calls),
+          usage: fixture.usage,
+          httpStatuses: fixture.wire.map((entry) => entry.status),
+        },
     evidenceRoot: root,
+    ...(options.isolatedComparison
+      ? {
+          comparison: {
+            variant: options.isolatedComparison.variant,
+            workspace,
+            modelBinding: fixture.metadata,
+            modelRequestBytes: fixture.requests.map((request) => ({
+              requestId: request.requestId,
+              bytes: Buffer.byteLength(JSON.stringify(request)),
+              messageBytes: request.messages.reduce(
+                (sum, message) => sum + Buffer.byteLength(message.content),
+                0,
+              ),
+            })),
+            wireRequestBytes: (fixture.wireRequests ?? []).map(
+              ({ physicalIndex, requestId, bytes }) => ({ physicalIndex, requestId, bytes }),
+            ),
+            inputTokens:
+              fixture.usage.length > 0 &&
+              fixture.usage.length === fixture.requests.length &&
+              fixture.usage.every((usage) => typeof usage.inputTokens === 'number')
+                ? fixture.usage.reduce((sum, usage) => sum + usage.inputTokens!, 0)
+                : null,
+          },
+        }
+      : {}),
   };
   writeFileSync(join(root, 'result.json'), `${JSON.stringify(result, null, 2)}\n`, { mode: 0o600 });
   return result;

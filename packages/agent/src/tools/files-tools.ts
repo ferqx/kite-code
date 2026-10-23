@@ -2,6 +2,7 @@ import type { ArtifactRef, ToolContext, ToolDefinition } from '../extensions';
 import type { Json, JsonSchema } from '../storage/types';
 import { AgentError } from '../storage/types';
 import type { FileBaseline, FileSearchResult, FileSnapshot, WorkspaceFiles } from './files';
+import { formatFileReadResult, formatFileSearchResult } from './files/model-result';
 
 /** Optional trusted host capture. Tokens and evidence never come from Model input. */
 export interface FileMutationCapture {
@@ -345,8 +346,14 @@ export function createFileTools(
     model: {
       name: modelNames[d.name]!,
       snakeCase: true,
+      ...(['read', 'search'].includes(d.name) ? { resultVersion: '1' } : {}),
       ...(modelParameters[d.name] ? { parameterNames: modelParameters[d.name] } : {}),
     },
+    ...(d.name === 'read'
+      ? { formatModelResult: formatFileReadResult }
+      : d.name === 'search'
+        ? { formatModelResult: formatFileSearchResult }
+        : {}),
     ...(capture && (d.name === 'write' || d.name === 'edit')
       ? { resources: { serial: { scope: 'workspace' as const, key: 'files.mutation' } } }
       : {}),
