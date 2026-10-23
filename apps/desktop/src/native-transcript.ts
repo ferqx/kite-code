@@ -319,8 +319,8 @@ export function desktopTranscript({
     const result: DesktopMessage = {
       ...(fact ? desktopToolMessage(fact, message.id, message.content) : model),
       ...(execution ? desktopToolPresentation(execution) : {}),
-      ...(run ? { turnId: identity(run.id) } : {}),
-      ...(replies.has(message.id)
+      ...(run && !model.agentResult ? { turnId: identity(run.id) } : {}),
+      ...(!model.agentResult && !model.agentMessage && replies.has(message.id)
         ? {
             finalReply: true,
             copyText: replies.get(message.id)?.text ?? null,

@@ -1905,6 +1905,23 @@ export type Message = {
     trigger: 'manual' | 'automatic';
     status: 'running' | 'completed' | 'failed' | 'cancelled' | 'unpublished';
   };
+  agentMessage?: {
+    messageId: string;
+    sourceSessionId: string;
+    sourceExecutionId: string;
+    name: string;
+    contentComplete: boolean;
+  };
+  agentResult?: {
+    sourceId: string;
+    executionId: string;
+    resultRevision: string;
+    childSessionId: string;
+    childRunId: string | null;
+    name: string;
+    outcome: 'succeeded' | 'failed' | 'cancelled' | 'outcome_unknown';
+    contentComplete: boolean;
+  };
   originMessage?: { storeId: string; sessionId: string; messageId: string; runId: string | null };
   contentFormat?: 'unsupported';
   outputBody?: {
@@ -2704,6 +2721,23 @@ export type SelectedContextPage = {
       trigger: 'manual' | 'automatic';
       status: 'running' | 'completed' | 'failed' | 'cancelled' | 'unpublished';
     };
+    agentMessage?: {
+      messageId: string;
+      sourceSessionId: string;
+      sourceExecutionId: string;
+      name: string;
+      contentComplete: boolean;
+    };
+    agentResult?: {
+      sourceId: string;
+      executionId: string;
+      resultRevision: string;
+      childSessionId: string;
+      childRunId: string | null;
+      name: string;
+      outcome: 'succeeded' | 'failed' | 'cancelled' | 'outcome_unknown';
+      contentComplete: boolean;
+    };
     originMessage?: { storeId: string; sessionId: string; messageId: string; runId: string | null };
     contentFormat?: 'unsupported';
     outputBody?: {
@@ -3068,6 +3102,23 @@ export type MessageList = Array<{
     trigger: 'manual' | 'automatic';
     status: 'running' | 'completed' | 'failed' | 'cancelled' | 'unpublished';
   };
+  agentMessage?: {
+    messageId: string;
+    sourceSessionId: string;
+    sourceExecutionId: string;
+    name: string;
+    contentComplete: boolean;
+  };
+  agentResult?: {
+    sourceId: string;
+    executionId: string;
+    resultRevision: string;
+    childSessionId: string;
+    childRunId: string | null;
+    name: string;
+    outcome: 'succeeded' | 'failed' | 'cancelled' | 'outcome_unknown';
+    contentComplete: boolean;
+  };
   originMessage?: { storeId: string; sessionId: string; messageId: string; runId: string | null };
   contentFormat?: 'unsupported';
   outputBody?: {
@@ -3239,6 +3290,23 @@ export type SessionView = {
       id: string;
       trigger: 'manual' | 'automatic';
       status: 'running' | 'completed' | 'failed' | 'cancelled' | 'unpublished';
+    };
+    agentMessage?: {
+      messageId: string;
+      sourceSessionId: string;
+      sourceExecutionId: string;
+      name: string;
+      contentComplete: boolean;
+    };
+    agentResult?: {
+      sourceId: string;
+      executionId: string;
+      resultRevision: string;
+      childSessionId: string;
+      childRunId: string | null;
+      name: string;
+      outcome: 'succeeded' | 'failed' | 'cancelled' | 'outcome_unknown';
+      contentComplete: boolean;
     };
     originMessage?: { storeId: string; sessionId: string; messageId: string; runId: string | null };
     contentFormat?: 'unsupported';

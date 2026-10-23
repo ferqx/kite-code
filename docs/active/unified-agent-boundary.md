@@ -10,6 +10,8 @@
 
 附件元数据随原普通 Command 和准确 Message 保存；补充及新轮次不改写正文或静默丢失图片／文件。旧 public/raw/decision/business 链只供历史兼容。附件路径和图片内容是低信任资料，不能产生停止或批准；Store／Session／subject、请求摘要及实际应用回执分别核验。稳定 child 的管理核真实直接父子和当前工具授权，后续普通父轮次可以接纳原 child 的具名结果；Source/consume/ack 保准确来源与目标，不以技术 rootWork 相等代替权限。
 
+实际创建父续 Run 的 child 结果才投影为独立公共 Message，须沿原 Source／carrier／revision、consume 和 idle report 回执核对真实目标 Run 的创建来源；原 active 接纳后来结束也不补气泡，不能用 Run 当前活动状态猜历史时机。投影不另写普通消息造成模型双重接收，展示名称和正文不取得人类输入或执行授权；大型结果预览必须明确完整性。具体证明与分页由 [Store owner](../../packages/agent/src/storage/README.md#人类工作与完成报告事务)维护。
+
 后台 Job 目录的来源观察沿 [Store](../../packages/agent/src/storage/README.md#跨会话原-job-目录) → [Service](../../apps/service/README.md#后台目录的来源投影) → [Client](../../packages/client/README.md) → [Native](../../apps/desktop/README.md#native-当前会话环境信息与子详情) 交接。`includeSourceTool:true` 只读取同原 Session／Store／root work 的直接父 Tool ID／定义／版本；默认响应保持原闭合结构，工具正文和授权材料不进入来源投影。来源缺失不推断后台身份，取消边不作为前后台标记。该观察不扩大读取或停止 authority，不改原 Job、取消和冷恢复边界。
 
 自动权限检查沿 [权限 owner](../../packages/agent/src/permissions/README.md)与 Core 的 `authorization.check`／`authorizationCheck` 执行，记录一次原 Session 内的无 Run Model；它不创建或管理子 Agent。通用子 Agent 共用创建、执行、生命周期与渲染，`review` 等只作类别配置。内部检查与标题 Model 的 `runId:null` 由准确用途／父目标／原命令／Store／主体／root work 与封存请求证明认证，不向普通 runless Model 开放。Service 同源 schema、生成 Client 与 Inspector 保留可空 Run；后台 Job 目录仍只取真实 Job，因此自然不出现这些内部 Model 的 child 项。新完整检查结果和旧 `authorization.review` 原 proof 均保留读取，冷读不启动模型；[HTTP 回归](../../apps/service/test/isolated/authorization-review-history.test.ts)、[标题回归](../../packages/agent/test/isolated/execution/session-title-generation.test.ts)与[准备窗口分页](../../packages/agent/test/isolated/model-input/authorization-check-window.test.ts)分别核这些边界。
@@ -107,6 +109,10 @@ Store 在原条数与完整 frame 字节上限内投递，容量不足时调用�
 QueueOnly 邮件以原 `agent.message` Command 和 sender Execution scope 的完整私有 Artifact 保存，sender 的实际成功结算与接收资格同事务提交；失败、取消、未知或未确认不形成成功邮件。idle send 零 Run/Model，普通后来人类工作不自动采用。显式 child follow-up 的原 ensure 事务封存邮件 seq 与成功 sender completed cursor 双上界，原 key 重试不能扩大集合；每页 50 封的实际接收最终核目标 Run/selection、carrier、主体、原 Store 和 stop/delete。邮件原未绑定 intent 不改写为新 targetRunId，保存准确 receivedRunId/selection；下一 Model 只按真实 receivedMessage/source proof 完整展开。Rewind 资格属于准确目标 Session selection，根选择变化不伪称 child 选择也改变。普通 child completion 将有限订阅与 idle 自动授权分开保存；同一父会话 active 接纳沿原活动 Run 权限，idle 续轮另核可信当前 afterTurn policy。nested 与 follow-up 保原 child deadline，report 不递归授权；冷缺绑定 needs_review/零 Provider。报告按准确结果键在同一事务选最终 Run、创建独立 Source、consume receipt 和 ack，多个完成可进入同一 R，不要求每个 report 都是 R.origin。提交后返回丢失只查回原 Run/Source。原 after_turn 旧历史与明确内部调用仍核其实际封存授权。
 
 普通输入直接由原公共 Command 进入当前主 Agent；不生成独立 raw/归属决定/处理轮，也不按正文自动暂停、继续或改选工作。steer 在准确活动 Run 的安全边界应用，队列等准确前驱结束，新轮次使用当前显式模型配置。旧记录与明确控制只保兼容，旧 processing 恢复在 scope/恢复校验后且加载配置前拒绝。准确取消、停止、root stop、Rewind、unknown 和 fence 仍有效，具体归[输入 owner](../../packages/agent/src/storage/sqlite/inputs/README.md)。
+
+用户输入与 Agent 通信由 Runtime 同一串行接收入口汇合，仍分别保留用户引导与低信任 inbox 的失效语义。新 `agent_completion` 将原唯一结果 Command 封存为 typed 邮箱项，经现有邮箱查询／接收／水位去重；原 Source、准入回执和父续 Run origin 保持，不另建影子队列或复制正文。活动轮接纳与 idle 续跑共用该收件入口，续跑仍核原配置、当前授权与用户队列优先；未标记旧报告和非 Agent Job 保留准确旧协议。具体事务与兼容边界归 [Store owner](../../packages/agent/src/storage/README.md#统一消息接收)。
+
+普通收件的公开 `Message.agentMessage` 由 Runtime 核原邮箱回执、发送 Tool／主体／父子关系、接收 Message／Run／selection 和原 Artifact 后只读投影；system 展示携真实发送者及完整正文，未核实来源或正文明确不可读。Service／Client 同源 schema 只交付这些展示事实，Native 复用原过程和 MessageItem，保原 Run 分组，不创建额外输入、Source、轮次或授权。物理内部占位和模型上下文的低信任装配保持独立，邮件内容不能取得用户或工具执行身份。
 
 首输入的本地标题兜底独立于业务准入。可信宿主在 public/raw 耐久保存后、解释修订捕获前，通过受限 metadata 接点复用标题模块的 rename CAS；它不成为新的业务生命周期、事件总线或执行许可，解释轮仍零业务 Action。原输入、初始控制、空历史、保留的注册锚点和手动改名均须可核。后续标题 AI 只沿准确 public/raw/decision/business 链，在实际业务正常完成前执行；元数据失败不改变原输入的业务结果。当前负责入口归[Agent](../../packages/agent/README.md)与[Service](../../apps/service/README.md)。
 

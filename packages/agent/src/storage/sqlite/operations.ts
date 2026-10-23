@@ -37,6 +37,7 @@ import {
   receiveAgentMessages,
   settleAgentMessages,
 } from './agent-mail-operations';
+import { readPublicMessages } from './agent-result-display';
 import { callArtifact } from './artifact-operations';
 import {
   dispatchAuthorizationCheck,
@@ -2130,23 +2131,31 @@ export class SqliteOperations {
             this.event(String(execution.session_id), id, 'message.updated');
           }
         });
-      case 'listMessages':
-        return this.rows(
-          'SELECT * FROM message WHERE session_id=? AND seq>? AND seq<=? ORDER BY seq LIMIT ?',
-          String(args[0]),
-          String(
-            (args[1] as { afterSeq?: string; upperSeq?: string; limit?: number } | undefined)
-              ?.afterSeq ?? '0',
-          ),
-          String(
-            (args[1] as { afterSeq?: string; upperSeq?: string; limit?: number } | undefined)
-              ?.upperSeq ?? '9223372036854775807',
-          ),
-          limit(
-            (args[1] as { afterSeq?: string; upperSeq?: string; limit?: number } | undefined)
-              ?.limit,
-          ),
-        ).map((row) => this.message(row));
+      case 'listMessages': {
+        this.db.run('BEGIN');
+        try {
+          const messages = readPublicMessages(
+            this,
+            String(args[0]),
+            String(
+              (args[1] as { afterSeq?: string; upperSeq?: string; limit?: number } | undefined)
+                ?.afterSeq ?? '0',
+            ),
+            String(
+              (args[1] as { afterSeq?: string; upperSeq?: string; limit?: number } | undefined)
+                ?.upperSeq ?? '9223372036854775807',
+            ),
+            limit(
+              (args[1] as { afterSeq?: string; upperSeq?: string; limit?: number } | undefined)
+                ?.limit,
+            ),
+          );
+          this.db.run('COMMIT');
+          return messages;
+        } catch (error) {
+          return this.rollback(error);
+        }
+      }
       case 'getView': {
         this.db.run('BEGIN');
         try {
@@ -2178,10 +2187,7 @@ export class SqliteOperations {
               id,
               id,
             ).map((row) => this.execution(row)),
-            messages: this.rows(
-              'SELECT * FROM message WHERE session_id=? ORDER BY seq LIMIT 200',
-              id,
-            ).map((row) => this.message(row)),
+            messages: readPublicMessages(this, id, '0', '9223372036854775807', 200),
             snapshotCursor: meta.lastChangeCursor,
             storeId: meta.storeId,
           };

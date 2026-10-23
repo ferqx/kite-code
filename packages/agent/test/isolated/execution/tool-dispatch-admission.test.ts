@@ -326,10 +326,10 @@ test('steer retires approved-waiting ordered decisions and their sibling without
     await f.runtime.waitForCommand('work', { timeoutMs: 3000 });
     const steer = (await f.store.getCommand('steer'))!;
     expect(steer).toMatchObject({ status: 'applied', receipt: { runId: run.id } });
-    const businessId = (steer.receipt as { businessCommandId: string }).businessCommandId;
-    expect(businessId).toBeString();
-    expect(businessId).not.toBe('steer');
-    expect(await f.store.getCommand(businessId)).toMatchObject({
+    const messageId = (steer.receipt as { messageId: string }).messageId;
+    expect(messageId).toBeString();
+    expect(steer).toMatchObject({
+      id: 'steer',
       kind: 'input.steer',
       rootWorkCommandId: 'work',
       status: 'applied',
@@ -338,6 +338,15 @@ test('steer retires approved-waiting ordered decisions and their sibling without
         content: 'Follow up: Stop the old effects and summarize instead',
       },
       receipt: { runId: run.id },
+    });
+    expect(
+      (await f.store.listMessages('s')).find((message) => message.id === messageId),
+    ).toMatchObject({
+      runId: run.id,
+      originCommandId: 'steer',
+      inputKind: 'input.steer',
+      sourceIds: ['steer'],
+      content: 'Follow up: Stop the old effects and summarize instead',
     });
     expect(await f.store.getRun(run.id)).toMatchObject({
       status: 'completed',
@@ -357,7 +366,7 @@ test('steer retires approved-waiting ordered decisions and their sibling without
       f.model.requests[1]!.messages.find(
         (message) => message.content === 'Follow up: Stop the old effects and summarize instead',
       )?.sourceIds,
-    ).toEqual([businessId]);
+    ).toEqual(['steer']);
     expect(
       (
         await f.runtime.getInteraction({

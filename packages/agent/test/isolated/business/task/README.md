@@ -1,5 +1,11 @@
 # Task 业务测试
 
+[unified-inbox.test.ts](unified-inbox.test.ts)使用真实 Runtime／SQLite／Task carrier，核用户引导与 typed 邮箱在同轮汇合、active 结果只发布一个 Source、idle 依原权限续跑、普通消息不自行开轮和冷读零重放。原发送来源、物理 Message 与结果 Source 回执分别核实，错误 Run 重收不改投；新结果 marker 缺失、未知或破损时不能降级为旧报告消费。旧报告的无标记目录语义由下述 after-turn 的 cold_read／dual 保留，Source／ack 回滚与提交后丢响应由报告事务文件通过真实邮箱接收验证。
+
+[mailbox.test.ts](mailbox.test.ts)的真实父子双向邮件同时核公开展示：Runtime 只读交付原发送者与长多行 Unicode 全文，list/getView 一致，物理占位／模型输入／Source 不变；冷 Runtime 无 Provider 或写入。用户同文案不冒认，损坏接收 Run／sourceIds、原 Command 缺失或 kind 损坏、Artifact 不符分别返回正确的系统不可读状态。
+
+同文件还核子结果在父 Model 请求期间到达后，该响应返回的正常只读 Tool 仍成功执行一次；后继 Model 同时含唯一结果 Source 和真实工具回执。用户引导撤销未派发旧决定的对照归执行层 input-checkpoints 与 tool-dispatch-admission，两者按原 input Command／receipt.messageId 核准确 Message，不再假设退役的 businessCommandId 桥接。
+
 前半旧Task场景使用隔离的 `createLegacyTaskFixture` 显式测试仍被内部调用和恢复消费的历史合同；这些名称、required/disposition 与 wait-any 不进入普通模型目录。当前六工具、普通完成订阅与真实人类输入的断言见本页 collaboration、question-loop 及对应 owner；旧fixture绿色不替代新接口验收。
 
 [task.test.ts](task.test.ts) 使用真实 SQLite Worker、普通 Tool、固定 Model 与私有临时 profile，证明角色封存、原 key 去重、shared Loop 单槽等待、父拒绝零 child Provider、detached 父完成后继续与实际取消终态。fixture 在 finally 关闭 Runtime/删除临时目录；read 重试 cursor 与调用计数保持不变。

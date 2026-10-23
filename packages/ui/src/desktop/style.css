@@ -767,7 +767,7 @@ body {
     overflow-wrap: anywhere;
     min-width: 0;
   }
-  .message.user {
+  .message:is(.user, .agent-result) {
     position: relative;
     margin-left: auto;
     background: var(--accent);
@@ -776,7 +776,7 @@ body {
     max-width: 85%;
     width: fit-content;
   }
-  .message.user {
+  .message:is(.user, .agent-result) {
     margin-bottom: 32px;
   }
   .message.user.sending {
@@ -1783,7 +1783,7 @@ body {
     .conversation-footer {
       padding: 0 12px 12px;
     }
-    .message.user {
+    .message:is(.user, .agent-result) {
       max-width: 95%;
     }
     .hint {

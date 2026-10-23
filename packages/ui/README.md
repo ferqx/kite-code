@@ -46,6 +46,10 @@ Composer 的图片卡片保持固定预览区域，接受宿主交付的小尺�
 
 ## 原桌面展示层
 
+Conversation 的 `systemKind:agent_result` 只消费宿主已确认实际触发父续跑的 `agentResult`，与普通消息共用 MessageItem 和输入气泡样式，增加“〔名称〕Agent 发送”头部，正文显示实际 Markdown 和非成功状态。父原轮 active 接纳不由宿主投影为此类消息，UI 也不按当前 Run 是否活动再过滤已确认的唤醒消息。独立消息边界不被相邻过程分组吸入，默认折叠及冷读仍保留正文，且不取得用户输入、助手最终回复或复制资格。同一 Turn 如被独立消息分段，整轮最终耗时仅在最后一段显示。`renderMessageContent` 仍由宿主提供准确详情入口，正文完整性由 `contentComplete` 明示。真实来源与读取由 [Desktop](../../apps/desktop/README.md#native-当前会话环境信息与子详情)及 Store 负责，UI 不根据名称、正文或子 Agent 状态制造消息。
+
+普通邮件使用 `systemKind:agent_message` 和宿主验证的 `agentMessage`，沿原接收 Run 的 turnId 留在同一处理过程。原 MessageItem／MessageContent 显示“〔名称〕Agent 发送”、完整 Markdown 和正文不可读状态；它没有独立气泡、用户输入、工具执行或助手最终回复的身份，正文中的批准文字也不生成操作入口。`data-agent-message-id` 沿原 mail ID，终态及冷历史保持同一份正文和一段过程；最终结果的独立消息边界保持上述规则。[共享邮件 DOM](test/isolated/desktop-agent-activity.test.tsx)与 [Native 投影 DOM](../../apps/desktop/test/isolated/native-transcript-dom.test.tsx)分别核来源、正文、失败状态和活动→完成→冷历史的分组、单耗时与复制边界。
+
 共享样式以 `--font-ui` 统一正文、控件与浮层字体，优先使用 Geist Variable；中文回退到系统界面字体，Windows 优先 Microsoft YaHei UI。`--ui-text-size: 14px` 是客户端默认字号，`body`、`.kite-client` 与会话字号变量共用它；挂到 `body` 的 Portal 因此保留14px正文，不通过修改HTML根字号缩放 `rem` 布局；基础层的原生按钮、输入框、选择器与文本框继承所属正文的字体，避免浏览器默认控件仍显示13.33px。普通通知／问卷及操作、任务表单、右栏标签和工作台会话主名称使用该基准，徽标、代码与辅助信息保留明确层级。共享 `Textarea` 统一使用 `text-sm`，移除 `text-base md:text-sm` 的宽窄差异；欢迎标题固定28px，通用页面一级标题固定36px，不再按窗口宽度变更字号。普通文字为 400，界面标题与 `font-semibold` token 为 500；Markdown 标题、加粗和等宽代码保留内容层级。Native 字体资源及阅读区变量由 [Desktop owner](../../apps/desktop/README.md#复用原桌面展示层)接入。
 
 共享[桌面样式](src/desktop/style.css)的主体背景由 `--page-background` 跟随 `--background`：深色为炭黑 `#191919`，亮色为浅灰 `#fafafa`；输入框使用独立的 `--composer-background`，深色为 `#202020`、亮色为 `#fff`，与阅读区保留轻微明度层次；卡片和浮层继续使用 `--card` 的深色 `#242424`／亮色 `#fff`。会话标题、阅读区、设置内容与右侧详情沿同一主体变量，会话与右侧栏的标题栏下方均不绘制分隔线；文字、交互叠层和侧栏实色回退值保持。原生透明侧栏与窗口底色由 [Desktop owner](../../apps/desktop/README.md#原主题与窗口背景联动)负责。

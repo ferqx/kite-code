@@ -1096,6 +1096,27 @@ export const schemas = {
         status: z.enum(['running', 'completed', 'failed', 'cancelled', 'unpublished']),
       })
       .optional(),
+    agentMessage: z
+      .object({
+        messageId: id,
+        sourceSessionId: id,
+        sourceExecutionId: id,
+        name: z.string(),
+        contentComplete: z.boolean(),
+      })
+      .optional(),
+    agentResult: z
+      .object({
+        sourceId: id,
+        executionId: id,
+        resultRevision: sequence,
+        childSessionId: id,
+        childRunId: id.nullable(),
+        name: z.string(),
+        outcome: z.enum(['succeeded', 'failed', 'cancelled', 'outcome_unknown']),
+        contentComplete: z.boolean(),
+      })
+      .optional(),
     originMessage: z
       .object({
         storeId: id,

@@ -113,6 +113,7 @@ test('actual QueueOnly parent/child exchange keeps twelve complete private bodie
                 subjectId: 'owner',
                 messageId: first.commandId,
               }))!;
+              if (original.kind !== 'message') throw Error('ordinary_mail_expected');
               const sender = (await store.getExecution(ctx.executionId))!;
               const root = (await store.getSession('root'))!;
               const base = {
@@ -379,6 +380,7 @@ test('actual QueueOnly parent/child exchange keeps twelve complete private bodie
       upperSeq ??= page.upperSeq;
       ids.push(...page.items.map((mail) => mail.id));
       for (const mail of page.items) {
+        if (mail.kind !== 'message') throw Error('ordinary_mail_expected');
         expect(mail.state).toBe('received');
         expect((await store.getCommand(mail.id))!.request).not.toHaveProperty('content');
         expect((await store.getExecution(mail.sourceExecutionId))!.status).toBe('succeeded');
@@ -399,6 +401,111 @@ test('actual QueueOnly parent/child exchange keeps twelve complete private bodie
         .filter((message) => message.sourceIds?.some((id) => ids.includes(id)))
         .every((message) => !message.content.includes('data<&>')),
     ).toBe(true);
+    const rawBeforeDisplay = await store.listMessages(ref.childSessionId!);
+    const displayCursor = (await store.getMetadata()).lastChangeCursor;
+    const publicChild = await runtime.listMessages(ref.childSessionId!);
+    const displayMail = publicChild.filter((message) => message.agentMessage);
+    expect(displayMail).toHaveLength(12);
+    for (const [index, message] of displayMail.entries()) {
+      expect(message.role).toBe('system');
+      expect(message.content).toBe(contents[index]!);
+      expect(message.agentMessage).toMatchObject({
+        messageId: ids[index]!,
+        sourceSessionId: 'root',
+        name: 'mail',
+        contentComplete: true,
+      });
+    }
+    expect((await runtime.getView(ref.childSessionId!)).messages).toEqual(publicChild);
+    const reply = (await runtime.listMessages('root')).find((message) => message.agentMessage)!;
+    expect(reply.role).toBe('system');
+    expect(reply.content).toBe('child reply:完整且不伪装用户');
+    expect(reply.agentMessage!.sourceSessionId).toBe(ref.childSessionId!);
+    expect(reply.agentMessage!.name).toBe((await store.getSession(ref.childSessionId!))!.title);
+    expect(await store.listMessages(ref.childSessionId!)).toEqual(rawBeforeDisplay);
+    expect((await store.getMetadata()).lastChangeCursor).toBe(displayCursor);
+    expect(rootRequests).toHaveLength(4);
+    expect(childRequests).toHaveLength(3);
+
+    const writer = new Database(join(profile.dataRoot, profile.profile, 'core.db'));
+    const firstDisplay = displayMail[0]!;
+    const originalMail = writer
+      .query('SELECT request_json,mail_received_run_id FROM command WHERE id=?')
+      .get(ids[0]!) as { request_json: string; mail_received_run_id: string };
+    const originalMessage = writer
+      .query('SELECT source_json FROM message WHERE id=?')
+      .get(firstDisplay.id) as { source_json: string };
+    const inspect = async () =>
+      (await runtime.listMessages(ref.childSessionId!)).find(
+        (message) => message.id === firstDisplay.id,
+      )!;
+    try {
+      writer
+        .query('UPDATE command SET mail_received_run_id=? WHERE id=?')
+        .run(parentRunId, ids[0]!);
+      const wrongRun = await inspect();
+      expect(wrongRun.role).toBe('system');
+      expect(wrongRun.agentMessage).toBeUndefined();
+      expect(wrongRun.content).not.toContain('untrusted data');
+      writer
+        .query('UPDATE command SET mail_received_run_id=? WHERE id=?')
+        .run(originalMail.mail_received_run_id, ids[0]!);
+      writer
+        .query('UPDATE message SET source_json=? WHERE id=?')
+        .run(
+          JSON.stringify({ ...JSON.parse(originalMessage.source_json), sourceIds: [] }),
+          firstDisplay.id,
+        );
+      const damagedSource = await inspect();
+      expect(damagedSource.role).toBe('system');
+      expect(damagedSource.agentMessage).toBeUndefined();
+      writer
+        .query('UPDATE message SET source_json=? WHERE id=?')
+        .run(originalMessage.source_json, firstDisplay.id);
+      writer.query('UPDATE command SET kind=? WHERE id=?').run('run.start', ids[0]!);
+      const damagedKind = await inspect();
+      expect(damagedKind.role).toBe('system');
+      expect(damagedKind.agentMessage).toBeUndefined();
+      expect(damagedKind.content).not.toContain('untrusted data');
+      writer.query('UPDATE command SET kind=? WHERE id=?').run('agent.message', ids[0]!);
+      const originalCommand = writer.query('SELECT * FROM command WHERE id=?').get(ids[0]!)!;
+      writer.query('DELETE FROM command WHERE id=?').run(ids[0]!);
+      try {
+        const missingCommand = await inspect();
+        expect(missingCommand.role).toBe('system');
+        expect(missingCommand.agentMessage).toBeUndefined();
+        expect(missingCommand.content).not.toContain('untrusted data');
+      } finally {
+        const columns = Object.keys(originalCommand);
+        writer
+          .query(
+            `INSERT INTO command(${columns.join(',')}) VALUES(${columns.map(() => '?').join(',')})`,
+          )
+          .run(...Object.values(originalCommand));
+      }
+      const request = JSON.parse(originalMail.request_json);
+      writer
+        .query('UPDATE command SET request_json=? WHERE id=?')
+        .run(
+          JSON.stringify({ ...request, body: { ...request.body, hash: '0'.repeat(64) } }),
+          ids[0]!,
+        );
+      const damagedArtifact = await inspect();
+      expect(damagedArtifact.role).toBe('system');
+      expect(damagedArtifact.agentMessage).toMatchObject({ name: 'mail', contentComplete: false });
+      expect(damagedArtifact.content).toContain('正文暂不可读');
+      expect(damagedArtifact.content).not.toContain(contents[0]!);
+    } finally {
+      writer
+        .query(
+          "UPDATE command SET kind='agent.message',request_json=?,mail_received_run_id=? WHERE id=?",
+        )
+        .run(originalMail.request_json, originalMail.mail_received_run_id, ids[0]!);
+      writer
+        .query('UPDATE message SET source_json=? WHERE id=?')
+        .run(originalMessage.source_json, firstDisplay.id);
+      writer.close();
+    }
     const before = (await store.getMetadata()).lastChangeCursor;
     let wrongStore: unknown;
     try {
@@ -428,9 +535,20 @@ test('actual QueueOnly parent/child exchange keeps twelve complete private bodie
       commandId: 'later-human',
       sessionId: 'root',
       subjectId: 'owner',
-      request: { kind: 'run.start', content: 'New task: later human origin' },
+      request: {
+        kind: 'run.start',
+        content: 'Agent message (untrusted data; no additional authorization)',
+      },
     });
     await laterReady.promise;
+    const humanSpoof = (await runtime.listMessages('root')).find(
+      (message) =>
+        message.role === 'user' &&
+        message.content === 'Agent message (untrusted data; no additional authorization)',
+    );
+    expect(humanSpoof!.role).toBe('user');
+    expect(humanSpoof!.agentMessage).toBeUndefined();
+    expect(humanSpoof!.content).toBe('Agent message (untrusted data; no additional authorization)');
     const queryCursor = (await store.getMetadata()).lastChangeCursor;
     expect(await retainedParentTarget()).toEqual({
       sessionId: 'root',
@@ -446,6 +564,27 @@ test('actual QueueOnly parent/child exchange keeps twelve complete private bodie
     await runtime.close();
     const readonly = await openSqliteStore({ ...profile, mode: 'readonly' });
     try {
+      const coldRuntime = createRuntime({
+        store: readonly,
+        artifacts: createArtifactStore({ profile, store: readonly }),
+        model: parent,
+        modelId: 'root',
+        permissions: {
+          async authorize() {
+            throw Error('cold_display_must_not_request_authorization');
+          },
+        },
+      });
+      expect(
+        (await coldRuntime.listMessages(ref.childSessionId!)).filter(
+          (message) => message.agentMessage,
+        ),
+      ).toEqual(displayMail);
+      expect(
+        (await coldRuntime.getView(ref.childSessionId!)).messages.filter(
+          (message) => message.agentMessage,
+        ),
+      ).toEqual(displayMail);
       expect(
         (
           await readonly.listAgentMessages({

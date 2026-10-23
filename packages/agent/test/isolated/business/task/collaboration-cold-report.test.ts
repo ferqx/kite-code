@@ -126,16 +126,21 @@ test('explicit cold report recovers its committed lost response once and associa
       },
     ],
   });
-  const hotApply = store.applyJobReport.bind(store);
-  store.applyJobReport = async (input) => {
-    if (!input.activeOnly && !input.recovery && input.authorization) {
+  const hotReceive = store.receiveAgentMessages.bind(store);
+  store.receiveAgentMessages = async (input) => {
+    if (
+      input.resultOptions &&
+      !input.resultOptions.activeOnly &&
+      !input.resultOptions.recovery &&
+      input.resultOptions.authorization
+    ) {
       hotFaults++;
       throw new AgentError(
         'report_recovery_required',
         'isolated recoverable hot Store failure before commit',
       );
     }
-    return hotApply(input);
+    return hotReceive(input);
   };
   let runtime = createRuntime({ ...options(), model: parent });
   try {
@@ -176,9 +181,14 @@ test('explicit cold report recovers its committed lost response once and associa
     });
     expect(hotFaults).toBe(1);
     const mails = (await store.listAgentMessages({ ...identity })).items;
-    expect(mails).toHaveLength(2);
-    const oldMail = mails.find((mail) => mail.targetRunId === originalRun.id)!;
-    const queued = mails.find((mail) => mail.targetRunId === null)!;
+    expect(mails).toHaveLength(3);
+    const ordinary = mails.filter((mail) => mail.kind === 'message');
+    expect(ordinary).toHaveLength(2);
+    expect(mails.filter((mail) => mail.kind === 'result').map((mail) => mail.id)).toEqual([
+      reportId,
+    ]);
+    const oldMail = ordinary.find((mail) => mail.targetRunId === originalRun.id)!;
+    const queued = ordinary.find((mail) => mail.targetRunId === null)!;
     expect(oldMail).toBeDefined();
     expect(queued).toBeDefined();
     expect(queued.receivedMessageId).toBeNull();
@@ -186,16 +196,24 @@ test('explicit cold report recovers its committed lost response once and associa
     await runtime.close();
     await store.close();
     store = await openSqliteStore(profile);
-    const coldApply = store.applyJobReport.bind(store);
-    store.applyJobReport = async (input) => {
-      const result = await coldApply(input);
-      if (input.recovery)
+    const coldReceive = store.receiveAgentMessages.bind(store);
+    store.receiveAgentMessages = async (input) => {
+      const before = input.resultOptions ? await store.getCommand(input.messageIds[0]!) : null;
+      const result = await coldReceive(input);
+      const command = input.resultOptions ? await store.getCommand(input.messageIds[0]!) : null;
+      const receipt = command?.receipt as
+        | { runId?: string; sourceId?: string; mode?: string }
+        | undefined;
+      if (input.resultOptions?.recovery)
         coldAdmissions.push({
-          runId: result.run?.id ?? null,
-          sourceId: (result.command.receipt as { sourceId?: string }).sourceId,
-          started: result.started,
+          runId: receipt?.runId ?? null,
+          sourceId: receipt?.sourceId,
+          started:
+            before?.status !== 'applied' &&
+            command?.status === 'applied' &&
+            receipt?.mode === 'idle_new_turn',
         });
-      if (input.recovery && !lost && result.command.status === 'applied') {
+      if (input.resultOptions?.recovery && !lost && command?.status === 'applied') {
         lost = true;
         throw Error('isolated cold Store response lost after actual commit');
       }

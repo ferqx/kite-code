@@ -722,6 +722,10 @@ Session closed query 新增可选 `snapshotCursor`；续页元数据变化返回
 
 ## 终端展示的新增只读字段
 
+公开 `Message.agentResult` 仅传递 Store 已证明实际创建父续 Run 的子结果，原样保留 Source／carrier／child Session 与 Run、结果 revision、名称、终态和 `contentComplete`；原活动轮接纳不投影此消息。`view/messages` 共用同一投影和 seq 分页，Source 不当作物理 Fork 消息查原行，也不按当前 Run 活动状态猜接纳时机。字段由 [同源 schema](src/http/schema/index.ts)生成给 Client，不接受调用者提交，也不成为模型输入、接纳或执行授权。准确准入见 [Store owner](../../packages/agent/src/storage/README.md#人类工作与完成报告事务)，响应边界见 [message-response 回归](test/message-response.test.ts)。
+
+普通已收 Agent 邮件另由 `Message.agentMessage` 保留原 mail ID、发送 Session／Tool Execution、名称和正文完整性，公开角色为 system，顶层 content 为原 Artifact 的完整展示正文。来源由 Runtime 核真实收件回执、接收 Run／selection、原发送关系与 Artifact；Service 原样交付该只读投影，同源 schema 生成给 Client。字段不接受提交、不增加 Source、实体消息、模型输入或权限；损坏来源或正文的不可读事实也沿同一消息传递。Native 在原接收轮次的处理过程中展示，边界与验证归 [Store owner](../../packages/agent/src/storage/README.md#统一消息接收)和 [Desktop owner](../desktop/README.md#native-当前会话环境信息与子详情)。
+
 `Execution` 仅对 Tool 投影原 `toolCallId/toolInput`，不公开 Model／Job private intent；SessionView 可携实际 Runtime 的 `compressionProgress`。模型目录的 optional `connectionId`使用既有准确 Provider connection 身份，供首次配置选择原发现模型，不按同名模型猜路由。Files preview 的 `textChange` 和 SessionLog 的准确 immutable point 白名单由同源 schema／响应校验传递。Service 不新增权限分析、运行器或恢复判定，客户端仍核原身份和完整字段；[HTTP Files 回归](test/isolated/file-checkpoint-browser.test.ts)保原字节／权限／归属断言。
 
 `SessionView.session` 可携同一次 Store 视图已有的 `ownerInstanceId`／`ownerGeneration`；普通 Session DTO 保持原范围。字段沿同源 schema／Client decoder 传递，不新增 Store 读取或 owner 存活判定。当前连接可将已认证 Service 实例与原 owner 比较，只用于活动显示的可确认性；不同实例不证明 owner 死亡，不授恢复、取消或派发权。原 [恢复 HTTP](test/isolated/session-recovery.test.ts)核实际 owner 字段与显式中断边界，多 Service 的原锁、执行与观察规则保持。

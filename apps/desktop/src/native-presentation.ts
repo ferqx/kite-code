@@ -135,6 +135,26 @@ export function desktopConversationMessages(messages: readonly Message[]): Messa
 
 export function desktopMessages(messages: readonly Message[]): DesktopMessage[] {
   return messages.map((message) => {
+    const agentMessage = message.agentMessage;
+    if (agentMessage)
+      return {
+        id: message.id,
+        role: 'system',
+        systemKind: 'agent_message',
+        agentMessage,
+        text: message.content,
+        settled: true,
+      };
+    const agentResult = message.agentResult;
+    if (agentResult)
+      return {
+        id: message.id,
+        role: 'system',
+        systemKind: 'agent_result',
+        agentResult,
+        text: message.content,
+        settled: true,
+      };
     // firstOutput identifies the first channel, not the current phase. A
     // reasoning-first response starts rendering as soon as it has actual text.
     const thinking =

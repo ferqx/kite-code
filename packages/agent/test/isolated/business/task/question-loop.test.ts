@@ -44,7 +44,13 @@ for (const carried of [true, false])
       releaseReceive = resolve;
     });
     store.receiveAgentMessages = async (input) => {
-      if (!carried && !intercepted && (await store.getRun(input.runId))?.sessionId === 'root') {
+      if (
+        !carried &&
+        !intercepted &&
+        !input.resultOptions &&
+        input.runId &&
+        (await store.getRun(input.runId))?.sessionId === 'root'
+      ) {
         intercepted = input;
         await receiveGate;
       }

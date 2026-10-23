@@ -95,6 +95,7 @@ import {
   type ExecutionRecord,
   type Json,
   type JsonSchema,
+  type MessageRecord,
   type ModelInputIdentity,
   type ModelInputPage,
   type OwnerRef,
@@ -3004,9 +3005,148 @@ export class AgentRuntime {
   async listMessages(id: string, options?: Parameters<Store['listMessages']>[1]) {
     return Promise.all(
       (await this.options.store.listMessages(id, options)).map((message) =>
-        this.publicHumanInputMessage(message),
+        this.publicMessage(message),
       ),
     );
+  }
+  private async publicMessage(message: MessageRecord, known?: ExecutionRecord) {
+    return this.publicAgentMailMessage(await this.publicHumanInputMessage(message, known));
+  }
+  /** Resolve presentation from the original mailbox receipt, without publishing another input. */
+  private async publicAgentMailMessage(message: MessageRecord): Promise<MessageRecord> {
+    if (message.role !== 'user') return message;
+    const candidates = new Set(message.sourceIds ?? []);
+    // This only locates a candidate. Its real Command and receipt establish identity below.
+    if (message.id.startsWith('agent-mail-'))
+      candidates.add(message.id.slice('agent-mail-'.length));
+    for (const id of candidates) {
+      const internalReceipt =
+        message.id === `agent-mail-${id}` &&
+        message.sourceIds?.length === 1 &&
+        message.sourceIds[0] === id &&
+        message.contextSelectionId !== undefined;
+      const unavailable: MessageRecord = {
+        ...message,
+        role: 'system',
+        content: 'Agent 消息暂不可读，无法核实原始接收记录。',
+      };
+      let command: CommandRecord | null;
+      try {
+        command = await this.options.store.getCommand(id);
+      } catch {
+        if (internalReceipt) return unavailable;
+        continue;
+      }
+      if (command?.kind !== 'agent.message') {
+        if (internalReceipt) return unavailable;
+        continue;
+      }
+      if (!message.runId) return unavailable;
+      try {
+        const storeId = (await this.options.store.getMetadata()).storeId;
+        const mail = await this.options.store.getAgentMessage({
+          expectedStoreId: storeId,
+          sessionId: message.sessionId,
+          subjectId: command.subjectId,
+          messageId: command.id,
+        });
+        if (
+          mail?.kind !== 'message' ||
+          mail.state !== 'received' ||
+          mail.originStoreId !== storeId ||
+          command.originStoreId !== storeId ||
+          mail.receivedMessageId !== message.id ||
+          mail.targetSessionId !== message.sessionId ||
+          mail.receivedRunId !== message.runId ||
+          mail.receivedContextSelectionId !== message.contextSelectionId ||
+          message.sourceIds?.length !== 1 ||
+          message.sourceIds[0] !== mail.id ||
+          command.sessionId !== mail.sourceSessionId
+        )
+          return unavailable;
+        const sender = await this.options.store.getExecution(mail.sourceExecutionId);
+        const source = await this.options.store.getSession(mail.sourceSessionId);
+        const target = await this.options.store.getSession(mail.targetSessionId);
+        const run = await this.options.store.getRun(message.runId);
+        const origin = sender && (await this.options.store.getCommand(sender.originCommandId));
+        if (
+          sender?.kind !== 'tool' ||
+          sender.status !== 'succeeded' ||
+          sender.sessionId !== mail.sourceSessionId ||
+          sender.originStoreId !== storeId ||
+          !source ||
+          !target ||
+          source.rootSessionId !== target.rootSessionId ||
+          source.workspaceId !== target.workspaceId ||
+          (source.parentSessionId !== target.id && target.parentSessionId !== source.id) ||
+          !run ||
+          run.sessionId !== target.id ||
+          run.originStoreId !== storeId ||
+          run.contextSelectionId !== mail.receivedContextSelectionId ||
+          !origin ||
+          origin.originStoreId !== storeId ||
+          origin.subjectId !== command.subjectId ||
+          origin.sessionId !== source.id ||
+          command.rootWorkCommandId !== sender.rootWorkCommandId ||
+          command.rootWorkSeq !== sender.rootWorkSeq ||
+          (command.request as { sourceExecutionId?: string }).sourceExecutionId !== sender.id
+        )
+          return unavailable;
+        const projected: MessageRecord = {
+          ...message,
+          role: 'system',
+          content: 'Agent 消息正文暂不可读。',
+          agentMessage: {
+            messageId: mail.id,
+            sourceSessionId: source.id,
+            sourceExecutionId: sender.id,
+            name: source.title,
+            contentComplete: false,
+          },
+        };
+        try {
+          if (
+            !this.options.artifacts ||
+            mail.body.storeId !== storeId ||
+            mail.body.sessionId !== source.id ||
+            mail.body.subjectId !== command.subjectId ||
+            mail.body.scope.kind !== 'execution' ||
+            mail.body.scope.id !== sender.id
+          )
+            return projected;
+          const original = await this.options.store.getArtifactReference({
+            expectedStoreId: storeId,
+            refId: mail.body.id,
+            sessionId: source.id,
+            subjectId: command.subjectId,
+            scope: mail.body.scope,
+          });
+          if (
+            !original ||
+            canonicalJson(original as unknown as Json) !==
+              canonicalJson(mail.body as unknown as Json)
+          )
+            return projected;
+          const bytes = await this.options.artifacts.read({
+            expectedStoreId: storeId,
+            refId: original.id,
+            sessionId: original.sessionId,
+            subjectId: original.subjectId,
+            scope: original.scope,
+          });
+          return {
+            ...projected,
+            content: new TextDecoder('utf-8', { fatal: true }).decode(bytes),
+            agentMessage: { ...projected.agentMessage!, contentComplete: true },
+          };
+        } catch {
+          return projected;
+        }
+      } catch {
+        return unavailable;
+      }
+    }
+    return message;
   }
   private async publicHumanInputMessage(
     message: import('./storage/types').MessageRecord,
@@ -3076,7 +3216,7 @@ export class AgentRuntime {
         original.messages.map((message) => {
           const execution =
             message.sourceIds?.length === 1 ? executions.get(message.sourceIds[0]!) : undefined;
-          return this.publicHumanInputMessage(message, execution);
+          return this.publicMessage(message, execution);
         }),
       ),
     };
@@ -4356,7 +4496,7 @@ export class AgentRuntime {
             };
         }
         controller.signal.throwIfAborted();
-        const applied = await this.applyJobReportWithReceipt({
+        const applied = await this.receiveResultWithReceipt({
           expectedStoreId: input.expectedStoreId,
           owner,
           commandId: report.id,
@@ -5002,14 +5142,36 @@ export class AgentRuntime {
     const command = await this.options.store.getCommand(commandId);
     if (this.closing) return;
     const pending: CommandRecord[] = command?.status === 'accepted' ? [command] : [];
+    const mailbox =
+      (command?.request as { mailboxVersion?: number } | undefined)?.mailboxVersion === 1;
     let afterSeq = '0';
     for (;;) {
-      const page = await this.options.store.listPendingJobReports({
-        expectedStoreId: execution.originStoreId,
-        sessionId: execution.sessionId,
-        afterSeq,
-        limit: 100,
-      });
+      const page = mailbox
+        ? await this.options.store
+            .listAgentMessages({
+              expectedStoreId: execution.originStoreId,
+              sessionId: execution.sessionId,
+              subjectId: command!.subjectId,
+              pendingOnly: true,
+              afterSeq,
+              limit: 100,
+            })
+            .then(async (page) => ({
+              ...page,
+              commands: (
+                await Promise.all(
+                  page.items
+                    .filter((mail) => mail.kind === 'result')
+                    .map((mail) => this.options.store.getCommand(mail.id)),
+                )
+              ).filter((item): item is CommandRecord => item !== null),
+            }))
+        : await this.options.store.listPendingJobReports({
+            expectedStoreId: execution.originStoreId,
+            sessionId: execution.sessionId,
+            afterSeq,
+            limit: 100,
+          });
       for (const continued of page.commands) {
         if (
           continued.kind === 'job.report.continue' &&
@@ -5092,17 +5254,54 @@ export class AgentRuntime {
     const retained = this.reportBindings.get(commandId);
     if (retained && this.reportBindings.delete(commandId)) await retained.release();
   }
-  /** Safe active checkpoint: each result keeps its own Source and durable ack. */
-  private async applyJobReportWithReceipt(input: Parameters<Store['applyJobReport']>[0]) {
+  /** Mailbox publication and its exact receipt share one durable result identity. */
+  private async receiveResultWithReceipt(
+    input: Parameters<Store['applyJobReport']>[0],
+    targetRunId?: string,
+  ) {
+    const receive = async () => {
+      const original = await this.options.store.getCommand(input.commandId);
+      // Unmarked historical reports and non-Agent Jobs retain their original protocol.
+      const version = (original?.request as { mailboxVersion?: number } | undefined)
+        ?.mailboxVersion;
+      if (version === undefined) return this.options.store.applyJobReport(input);
+      if (version !== 1) throw new AgentError('agent_message_unverifiable');
+      await this.options.store.receiveAgentMessages({
+        expectedStoreId: input.expectedStoreId,
+        owner: input.owner,
+        ...(targetRunId === undefined ? {} : { runId: targetRunId }),
+        messageIds: [input.commandId],
+        resultOptions: {
+          authorization: input.authorization,
+          activeOnly: input.activeOnly,
+          carriedMessageIds: input.carriedMessageIds,
+          recovery: input.recovery,
+        },
+      });
+      const command = await this.options.store.getCommand(input.commandId);
+      if (!command) throw new AgentError('agent_message_not_found');
+      const receipt = command.receipt as { runId?: string; mode?: string };
+      const run = receipt.runId ? await this.options.store.getRun(receipt.runId) : null;
+      return {
+        command,
+        run,
+        started:
+          command.status === 'applied' &&
+          receipt.mode === 'idle_new_turn' &&
+          run?.isActive === true &&
+          run.originCommandId === command.id &&
+          !this.runBindingLeases.has(run.id),
+      };
+    };
     try {
-      return await this.options.store.applyJobReport(input);
+      return await receive();
     } catch (error) {
       // Recover only this invocation's committed receipt. Repeating the same
       // Store admission takes its applied/read-only branch; it cannot choose a
       // different Run or publish another Source.
       const original = await this.options.store.getCommand(input.commandId).catch(() => null);
       if (original?.status !== 'applied') throw error;
-      const result = await this.options.store.applyJobReport(input);
+      const result = await receive();
       const receipt = result.command.receipt as {
         runId?: string;
         sourceId?: string;
@@ -5188,6 +5387,7 @@ export class AgentRuntime {
       upperSeq ??= page.upperSeq;
       for (const mail of page.items) {
         if (
+          mail.kind !== 'message' ||
           mail.state !== 'accepted' ||
           mail.sourceSessionId !== execution.childSessionId ||
           mail.targetRunId !== null
@@ -5209,7 +5409,8 @@ export class AgentRuntime {
       afterSeq = page.nextAfterSeq;
     }
   }
-  private async receiveReports(
+  /** Compatibility for persisted reports created before the shared mailbox protocol. */
+  private async receiveLegacyReports(
     run: RunRecord,
     owner: OwnerRef,
     signal: AbortSignal,
@@ -5237,7 +5438,7 @@ export class AgentRuntime {
         )
           continue;
         const carriedMessageIds = await this.carriedAgentMessageIds(command, carrier, signal);
-        const applied = await this.applyJobReportWithReceipt({
+        const applied = await this.receiveResultWithReceipt({
           expectedStoreId: run.originStoreId,
           owner,
           commandId: command.id,
@@ -5282,7 +5483,7 @@ export class AgentRuntime {
           ? await this.carriedAgentMessageIds(command, originalCarrier, controller.signal)
           : [];
       if (collaboration) {
-        const active = await this.applyJobReportWithReceipt({
+        const active = await this.receiveResultWithReceipt({
           expectedStoreId: command.originStoreId,
           owner,
           commandId: command.id,
@@ -5351,7 +5552,7 @@ export class AgentRuntime {
             ...(decision.controlReads ? { controlReads: decision.controlReads } : {}),
           };
       }
-      const applied = await this.applyJobReportWithReceipt({
+      const applied = await this.receiveResultWithReceipt({
         expectedStoreId: command.originStoreId,
         owner,
         commandId: command.id,
@@ -5906,7 +6107,7 @@ export class AgentRuntime {
       let inboxVersion = 0;
       let capturedInboxVersion = 0;
       let inputTask: Promise<number> | undefined;
-      const applySteer = () => {
+      const receivePendingInputs = () => {
         if (inputTask) return inputTask;
         inputTask = (async () => {
           let applied = 0;
@@ -5954,16 +6155,18 @@ export class AgentRuntime {
             }
             if (!page.nextAfterOrder) break;
           }
-          const reports = await this.receiveReports(run, owner, controller.signal);
-          if (reports) inboxVersion++;
-          return applied + (await applyMail()) + reports;
+          // New child results are mailbox items. Only old unmarked records need
+          // the historical report reader; it cannot observe new result mail.
+          const legacy = await this.receiveLegacyReports(run, owner, controller.signal);
+          if (legacy) inboxVersion++;
+          return applied + (await receiveMail()) + legacy;
         })().finally(() => {
           inputTask = undefined;
         });
         return inputTask;
       };
       let observedMailSeq = '0';
-      const applyMail = async () => {
+      const receiveMail = async () => {
         let receivedAny = false;
         let receivedSeq = '0';
         let afterSeq = '0';
@@ -5982,15 +6185,43 @@ export class AgentRuntime {
           upperSeq ??= page.upperSeq;
           receivedSeq = page.receivedSeq;
           const pending = page.items.filter((mail) => mail.state === 'accepted');
-          if (pending.length) {
-            receivedAny = true;
-            const received = await this.options.store.receiveAgentMessages({
-              expectedStoreId: run.originStoreId,
-              owner,
-              runId: run.id,
-              messageIds: pending.map((mail) => mail.id),
-            });
-            void received;
+          for (let index = 0; index < pending.length; ) {
+            const mail = pending[index++]!;
+            if (mail.kind === 'message') {
+              const messageIds = [mail.id];
+              while (pending[index]?.kind === 'message') messageIds.push(pending[index++]!.id);
+              await this.options.store.receiveAgentMessages({
+                expectedStoreId: run.originStoreId,
+                owner,
+                runId: run.id,
+                messageIds,
+              });
+              receivedAny = true;
+              continue;
+            }
+            const command = await this.options.store.getCommand(mail.id);
+            const carrier = await this.options.store.getExecution(mail.result.executionId);
+            if (!command || !carrier) throw new AgentError('agent_message_unverifiable');
+            const carriedMessageIds = await this.carriedAgentMessageIds(
+              command,
+              carrier,
+              controller.signal,
+            );
+            const received = await this.receiveResultWithReceipt(
+              {
+                expectedStoreId: run.originStoreId,
+                owner,
+                commandId: mail.id,
+                authorization: null,
+                activeOnly: true,
+                carriedMessageIds,
+              },
+              run.id,
+            );
+            this.transferContinuedReportBinding(received.command);
+            if (received.command.status === 'accepted') this.watchDeferredReport(received.command);
+            else await this.releaseReportBinding(mail.id);
+            receivedAny ||= received.command.status === 'applied';
           }
           if (!page.nextAfterSeq) break;
           afterSeq = page.nextAfterSeq;
@@ -6012,7 +6243,7 @@ export class AgentRuntime {
         return 0;
       };
       const checkpoint = async () => {
-        await applySteer();
+        await receivePendingInputs();
       };
       const scope = {
         run,
@@ -6379,7 +6610,7 @@ export class AgentRuntime {
         }
       };
       const messages = async () => {
-        await applySteer();
+        await receivePendingInputs();
         await this.consumeJobResults(run, owner, controller.signal);
         await selectCapabilities();
         capturedInputVersion = inputVersion;
@@ -6935,7 +7166,7 @@ export class AgentRuntime {
         });
         await defaultLoop(loopContext);
         if (
-          (await applySteer()) > 0 ||
+          (await receivePendingInputs()) > 0 ||
           inputVersion !== capturedInputVersion ||
           inboxVersion !== capturedInboxVersion
         )
@@ -6959,7 +7190,7 @@ export class AgentRuntime {
             continue;
           }
           if (
-            (await applySteer()) > 0 ||
+            (await receivePendingInputs()) > 0 ||
             inputVersion !== capturedInputVersion ||
             inboxVersion !== capturedInboxVersion
           )
@@ -6991,7 +7222,7 @@ export class AgentRuntime {
                 // this settle boundary; the rejected transaction performed no effect.
                 continue;
               if (!(error instanceof AgentError) || error.code !== 'input_pending') throw error;
-              if ((await applySteer()) > 0) continue complete;
+              if ((await receivePendingInputs()) > 0) continue complete;
               continue;
             }
           }
@@ -7001,7 +7232,7 @@ export class AgentRuntime {
           for (const extension of scope.bindings.extensions) {
             if (!extension.completionGovernance) continue;
             if (
-              (await applySteer()) > 0 ||
+              (await receivePendingInputs()) > 0 ||
               inputVersion !== capturedInputVersion ||
               inboxVersion !== capturedInboxVersion
             )
@@ -7043,7 +7274,7 @@ export class AgentRuntime {
               },
             });
             if (
-              (await applySteer()) > 0 ||
+              (await receivePendingInputs()) > 0 ||
               inputVersion !== preparationInputVersion ||
               inboxVersion !== preparationInboxVersion
             )
@@ -7093,7 +7324,7 @@ export class AgentRuntime {
               )
             )
               throw new AgentError('completion_tool_unavailable');
-            await applySteer();
+            await receivePendingInputs();
             await selectCapabilities();
             const requests: SourceRequest[] = [
               {
@@ -7172,7 +7403,7 @@ export class AgentRuntime {
                   )))
             ) {
               controller.signal.throwIfAborted();
-              await applySteer();
+              await receivePendingInputs();
               // The completion directive was never executed. A fresh Model/condition
               // boundary must prepare a new directive instead of reusing its old input.
               continue complete;
@@ -7224,7 +7455,7 @@ export class AgentRuntime {
             controller.signal,
             Math.max(0, Math.min(30000, (run.deadlineAt ?? Number.MAX_SAFE_INTEGER) - Date.now())),
           );
-          if ((await applySteer()) > 0) continue complete;
+          if ((await receivePendingInputs()) > 0) continue complete;
           for (const event of events) {
             if (
               seenInteractions.has(event.objectId) ||
@@ -8255,7 +8486,7 @@ export class AgentRuntime {
             messageId: sourceId,
           });
           if (
-            !mail ||
+            mail?.kind !== 'message' ||
             mail.receivedMessageId !== message.id ||
             mail.targetSessionId !== message.sessionId ||
             mail.receivedRunId !== message.runId ||

@@ -24,6 +24,7 @@ import {
   DialogDescription,
   DialogHeader,
   DialogTitle,
+  MessageContent,
   ReadingStateCache,
   type SessionChildTabRequest,
   type SessionChildTarget,
@@ -3042,6 +3043,35 @@ function NativeDesktopContent({
     if (!message || !selection || !state) return null;
     const openable =
       !selection.viewLoading && historyState.phase === 'complete' && !directory?.unavailable;
+    if (message.agentMessage)
+      return <NativeModelOutputMessage message={message} storeId={selection.storeId} />;
+    if (message.agentResult) {
+      const result = message.agentResult;
+      return (
+        <>
+          {message.content && <MessageContent text={message.content} />}
+          <DesktopButton
+            type="button"
+            variant="ghost"
+            size="sm"
+            disabled={!openable || !childReadAvailable}
+            onClick={() => {
+              if (!openable || !childReadAvailable || selected.current !== selection.session.id)
+                return;
+              setChildTabRequest({
+                parent: childParent,
+                requestId: ++childTabSequence.current,
+                sessionId: result.childSessionId,
+                executionId: result.executionId,
+                title: result.name,
+              });
+            }}
+          >
+            {result.contentComplete ? '查看子 Agent' : '查看完整结果'}
+          </DesktopButton>
+        </>
+      );
+    }
     return (
       <>
         {(!!message.images?.length || !!message.files?.length) && (

@@ -111,12 +111,15 @@ for (const settlement of ['cancel', 'ordinary-input'] as const) {
       });
       await runtime.waitForCommand('work', { timeoutMs: 8000 });
       release();
-      const report = await until(
-        async () =>
-          (await store.listPendingJobReports(identity)).commands.find(
-            (command) => (command.receipt as { outcome?: string }).outcome === 'report_deferred',
-          ) ?? null,
-      );
+      const report = await until(async () => {
+        const mail = (await store.listAgentMessages(identity)).items.find(
+          (item) => item.kind === 'result' && item.state === 'accepted',
+        );
+        const command = mail && (await store.getCommand(mail.id));
+        return (command?.receipt as { outcome?: string } | undefined)?.outcome === 'report_deferred'
+          ? command!
+          : null;
+      });
       expect(disposed).toBe(0);
       if (settlement === 'cancel') {
         await runtime.cancelSession({

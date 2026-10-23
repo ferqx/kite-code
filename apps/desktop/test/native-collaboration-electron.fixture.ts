@@ -263,15 +263,54 @@ try {
   await page.getByRole('menuitem', { name: '本次会话批准', exact: false }).click();
   log('first_A_job_answer_clicked', { interactionId: jobA.id });
   await until(
-    async () => existsSync(join(home, 'workspace', 'child-a.txt')),
-    Boolean,
-    'only approved A effect',
+    async () => (await (await fetch(`${control}/state`)).json()) as { parentReportHeld: boolean },
+    (value) => value.parentReportHeld,
+    'parent continuation is held after accepting the exact child result',
   );
+  // Both approved shell commands must have settled before inspecting their
+  // shared output: existence alone can observe the second command's truncate.
   assert.equal(
     readFileSync(join(home, 'workspace', 'child-a.txt'), 'utf8'),
     'A original approved\n',
   );
   assert.equal(existsSync(join(home, 'workspace', 'child-b.txt')), false);
+  const firstResultCard = page
+    .locator('article[data-agent-result-source]')
+    .filter({ hasText: 'CHILD_A_DONE_1' });
+  await firstResultCard.getByText('CHILD_A_DONE_1', { exact: true }).waitFor();
+  const firstResultId = (await firstResultCard.getAttribute('data-agent-result-source'))!;
+  assert.ok(firstResultId);
+  assert.ok((await state()).selection!.runs.some((run) => run.isActive));
+  assert.equal(await firstResultCard.getAttribute('aria-label'), 'CHILD_A Agent 发送的消息');
+  await firstResultCard.getByText('CHILD_A Agent 发送', { exact: true }).waitFor();
+  const bubbleAppearance = async (node: ReturnType<typeof page.locator>) =>
+    node.evaluate((element) => {
+      const style = getComputedStyle(element);
+      return {
+        background: style.backgroundColor,
+        borderRadius: style.borderRadius,
+        padding: style.padding,
+        maxWidth: style.maxWidth,
+        fontSize: style.fontSize,
+      };
+    });
+  assert.deepEqual(
+    await bubbleAppearance(firstResultCard),
+    await bubbleAppearance(page.locator('article.message.user').first()),
+  );
+  assert.equal(await firstResultCard.count(), 1);
+  assert.equal(await page.getByText('NATIVE_COLLAB_START_DONE_2', { exact: true }).count(), 0);
+  await page.screenshot({ path: join(home, '03a-child-result-parent-continuing.png') });
+  await firstResultCard.getByRole('button', { name: '查看子 Agent', exact: true }).click();
+  await page.locator('.session-tab-child').getByText('CHILD_A_DONE_1', { exact: true }).waitFor();
+  await page.getByRole('button', { name: '收起标签栏', exact: true }).click();
+  log('child_result_visible_before_parent_reply', {
+    sourceId: firstResultId,
+    childSessionId: a.childSessionId,
+    executionId: a.id,
+    childRunId: oldA.runId,
+  });
+  await fetch(`${control}/release-report`);
   await until(
     state,
     (value) =>
@@ -280,6 +319,24 @@ try {
     'A settled and its result parent turn completed',
   );
   const approved = await state();
+  await page.getByText('NATIVE_COLLAB_START_DONE_2', { exact: true }).waitFor();
+  assert.equal(
+    await page.evaluate((sourceId) => {
+      const result = document.querySelector(`[data-agent-result-source="${sourceId}"]`)!;
+      const replies = [...document.querySelectorAll('article[data-final-reply="true"]')];
+      const initial = replies.find((reply) =>
+        reply.textContent?.includes('NATIVE_COLLAB_START_DONE_1'),
+      )!;
+      const resumed = replies.find((reply) =>
+        reply.textContent?.includes('NATIVE_COLLAB_START_DONE_2'),
+      )!;
+      return !!(
+        initial.compareDocumentPosition(result) & Node.DOCUMENT_POSITION_FOLLOWING &&
+        result.compareDocumentPosition(resumed) & Node.DOCUMENT_POSITION_FOLLOWING
+      );
+    }, firstResultId),
+    true,
+  );
   for (const original of [oldA, jobA]) {
     const submitted = approved.interactionSubmissions.find(
       (entry) => entry.interaction.id === original.id,
@@ -398,7 +455,10 @@ try {
     .getByRole('button', { name: '批准一次', exact: true })
     .click();
   await until(
-    async () => existsSync(join(home, 'workspace', 'child-a-follow.txt')),
+    async () =>
+      existsSync(join(home, 'workspace', 'child-a-follow.txt')) &&
+      readFileSync(join(home, 'workspace', 'child-a-follow.txt'), 'utf8') ===
+        'A follow-up approved\n',
     Boolean,
     'new precise A approval effect',
   );
@@ -445,6 +505,27 @@ try {
     'all exact child carriers and result turns settled',
   );
   const final = await state();
+  const nextResultCard = page
+    .locator('article[data-agent-result-source]')
+    .filter({ hasText: 'CHILD_A_FOLLOWUP_DONE_1' });
+  await nextResultCard.waitFor();
+  const resultMessages = [
+    { id: firstResultId, executionId: a.id, content: 'CHILD_A_DONE_1' },
+    {
+      id: (await nextResultCard.getAttribute('data-agent-result-source'))!,
+      executionId: nextCarrier.id,
+      content: 'CHILD_A_FOLLOWUP_DONE_1',
+    },
+  ];
+  assert.notEqual(resultMessages[0]!.id, resultMessages[1]!.id);
+  assert.equal(await page.locator('article[data-agent-result-source]').count(), 2);
+  for (const message of resultMessages) {
+    const card = page.locator(`article[data-agent-result-source="${message.id}"]`);
+    await card.waitFor();
+    assert.equal(await card.count(), 1);
+    assert.equal(await card.getByText(message.content, { exact: true }).isVisible(), true);
+  }
+  await page.screenshot({ path: join(home, '03b-child-result-followup.png') });
   assert.equal(final.selection!.executions.find((row) => row.id === a.id)!.cancelRequestedAt, null);
   assert.equal(
     final.selection!.executions.find((row) => row.id === nextCarrier.id)!.cancelRequestedAt,
@@ -454,11 +535,124 @@ try {
     final.selection!.executions.find((row) => row.id === b.id)!.cancelRequestedAt,
     null,
   );
+  await send('NATIVE_COLLAB_ACTIVE');
+  await until(
+    async () =>
+      (await (await fetch(`${control}/state`)).json()) as {
+        activeParentHeld: boolean;
+        held: string[];
+      },
+    (value) => value.activeParentHeld && value.held.includes('CHILD_A_ACTIVE'),
+    'parent original Turn and exact child both remain active',
+  );
+  const activeStarted = await state();
+  const activeRun = activeStarted.selection!.runs.find((run) => run.isActive)!;
+  const activeCarrier = activeStarted.selection!.executions.find(
+    (row) =>
+      row.childSessionId === a.childSessionId && row.id !== a.id && row.id !== nextCarrier.id,
+  )!;
+  assert.ok(activeRun);
+  assert.ok(activeCarrier);
+  assert.equal(
+    activeStarted.selection!.executions.find((row) => row.id === activeCarrier.parentExecutionId)
+      ?.runId,
+    activeRun.id,
+  );
+  log('active_parent_and_child_running', {
+    parentRunId: activeRun.id,
+    executionId: activeCarrier.id,
+  });
+  await fetch(`${control}/release`);
+  await until(
+    state,
+    (value) =>
+      value.selection!.executions.find((row) => row.id === activeCarrier.id)?.status ===
+      'succeeded',
+    'child terminal result arrives before the original parent Turn ends',
+  );
+  await fetch(`${control}/release-active-parent`);
+  await until(
+    async () => (await (await fetch(`${control}/state`)).json()) as { activeResultHeld: boolean },
+    (value) => value.activeResultHeld,
+    'original parent reached its next Model after receiving the child result',
+  );
+  const receivedActive = await until(
+    async () =>
+      (await (
+        await fetch(`${control}/active-intake?execution=${encodeURIComponent(activeCarrier.id)}`)
+      ).json()) as { sourceId: string; runId: string; isActive: number; mode: string } | null,
+    (value) => value?.runId === activeRun.id && value.mode === 'active' && value.isActive === 1,
+    'active intake keeps the exact original parent Run',
+  );
+  const activeSourceId = receivedActive!.sourceId;
+  assert.equal(
+    (await state()).selection!.runs.find((run) => run.id === activeRun.id)!.isActive,
+    true,
+  );
+  const activeProcess = page.locator('.agent-turn[data-turn-status="running"]');
+  const events = activeProcess
+    .locator('.tool-activity-summary')
+    .filter({ hasText: '等待 Agent 事件' });
+  await events.waitFor();
+  await events.click();
+  await until(
+    () => activeProcess.innerText(),
+    (text) => text.includes(a.childSessionId!) && text.includes('"kind":"completed"'),
+    'the ordinary parent process still contains the completed Agent event',
+  );
+  assert.equal(
+    await page.locator(`article[data-agent-result-source="${activeSourceId}"]`).count(),
+    0,
+  );
+  assert.equal(await page.locator('article[data-agent-result-source]').count(), 2);
+  await events.click();
+  await page.screenshot({ path: join(home, '03c-active-result-in-process.png') });
+  // Event notifications carry lifecycle facts; the original process links to
+  // the exact child carrier for its actual returned body.
+  await activeProcess.getByRole('button', { name: /^查看子 Agent 详情：/ }).click();
+  await page
+    .locator('.session-tab-child')
+    .getByText('CHILD_A_ACTIVE_DONE_1', { exact: true })
+    .waitFor();
+  await page.screenshot({ path: join(home, '03ca-active-result-detail.png') });
+  await page.getByRole('button', { name: '收起标签栏', exact: true }).click();
+  assert.equal(
+    (await state()).selection!.runs.find((run) => run.id === activeRun.id)!.isActive,
+    true,
+  );
+  assert.equal(await page.locator('article[data-agent-result-source]').count(), 2);
+  log('active_result_received_without_bubble', {
+    parentRunId: activeRun.id,
+    executionId: activeCarrier.id,
+    sourceId: activeSourceId,
+  });
+  await fetch(`${control}/release-active-result`);
+  await until(
+    state,
+    (value) =>
+      value.selection!.runs.find((run) => run.id === activeRun.id)?.status === 'completed' &&
+      !value.selection!.runs.some((run) => run.isActive),
+    'the original parent Turn completes without creating a report continuation',
+  );
+  await page.getByText('NATIVE_COLLAB_ACTIVE_DONE_1', { exact: true }).waitFor();
+  assert.equal(await page.locator('article[data-agent-result-source]').count(), 2);
+  await page.screenshot({ path: join(home, '03d-active-parent-completed.png') });
   const beforeCold = (await (await fetch(`${control}/state`)).json()) as { calls: number };
   await close();
   page = await launch();
   await select();
   const cold = await state();
+  await until(
+    () => page.locator('article[data-agent-result-source]').count(),
+    (count) => count === resultMessages.length,
+    'both accepted results survive cold history once',
+  );
+  for (const message of resultMessages) {
+    const card = page.locator(`article[data-agent-result-source="${message.id}"]`);
+    await card.waitFor();
+    assert.equal(await card.count(), 1);
+    assert.equal(await card.getByText(message.content, { exact: true }).isVisible(), true);
+  }
   const coldTasks = cold.selection!.executions.filter(
     (row) =>
       row.childSessionId &&
@@ -469,7 +663,14 @@ try {
           ['task.spawn', 'task.follow_up'].includes(parent.definitionId ?? ''),
       ),
   );
-  assert.deepEqual(coldTasks.map((row) => row.id).sort(), [a.id, b.id, nextCarrier.id].sort());
+  assert.deepEqual(
+    coldTasks.map((row) => row.id).sort(),
+    [a.id, b.id, nextCarrier.id, activeCarrier.id].sort(),
+  );
+  assert.equal(
+    await page.locator(`article[data-agent-result-source="${activeSourceId}"]`).count(),
+    0,
+  );
   assert.equal(existsSync(join(home, 'workspace', 'child-b.txt')), false);
   assert.equal(
     ((await (await fetch(`${control}/state`)).json()) as { calls: number }).calls,
@@ -493,6 +694,8 @@ try {
     lateB,
     calls: beforeCold.calls,
     coldZeroReplay: true,
+    resultMessages,
+    active: { executionId: activeCarrier.id, parentRunId: activeRun.id, sourceId: activeSourceId },
   };
   writeFileSync(join(home, 'collaboration-report.json'), JSON.stringify(report));
   log('six_tool_native_collaboration_complete', report);

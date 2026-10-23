@@ -526,9 +526,9 @@ async function runQuestion(
         (await ownedStore.getView(firstRead.sessionId)).runs.every((run) => !run.isActive),
         'pending_child_idle_before_human_answer',
       );
-      const mail = (await ownedStore.listAgentMessages(scope)).items.find(
-        (item) => item.sourceSessionId === firstRead.sessionId,
-      );
+      const mail = (await ownedStore.listAgentMessages(scope)).items
+        .filter((item) => item.kind === 'message')
+        .find((item) => item.sourceSessionId === firstRead.sessionId);
       branch(mail, 'real_child_question_mail_missing');
       assert(
         mail!.targetRunId === originalRun!.id,
