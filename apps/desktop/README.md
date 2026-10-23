@@ -410,7 +410,7 @@ Native 的侧栏打开入口对当前父会话及同一在途选择去重，重�
 
 ## 会话消息渲染验证
 
-[消息适配](src/native-presentation.ts)将公开 `Message.createdAt` 交给 UI 的 `createdAtMs`，Agent 邮件和结果的专用展示分支也保留已提供的时间，缺失时不补造；旧输入的真实业务副本接管原行时，保留原输入的记录时间、独立同文与原业务身份。普通刷新、完整正文读取和重开不生成客户端替代时间；尚未保存或历史缺失时保持未知。[时间投影回归](test/native-message-time.test.ts)核字段与接管，具体格式与布局由 [UI owner](../../packages/ui/README.md)和[桌面手册](../../docs/handbook/clients/desktop/README.md)负责。
+[消息适配](src/native-presentation.ts)将公开 `Message.createdAt` 交给 UI 的 `createdAtMs`，Agent 邮件和结果的专用展示分支也保留已提供的时间，缺失时不补造；旧输入的真实业务副本接管原行时，保留原输入的记录时间、独立同文与原业务身份。普通刷新、完整正文读取和重开不生成客户端替代时间；尚未保存或历史缺失时保持未知。共享 Conversation 仅在原消息边界显示信息栏，Turn 过程内的 Agent 正文和普通邮件不渲染复制／时间及其留白，用户引导、过程外最终回复与独立结果的原边界保持；该显示选择不删除宿主时间事实。[时间投影回归](test/native-message-time.test.ts)核字段与接管，具体格式与布局由 [UI owner](../../packages/ui/README.md)和[桌面手册](../../docs/handbook/clients/desktop/README.md)负责。
 
 2026-10-23，Windows x64／Bun1.4.3：时间投影2项通过（含原输入时间未知时不借用较晚业务时间），原[会话消息 DOM](test/isolated/native-transcript-dom.test.tsx)整文件9项／143断言通过；隔离 Chrome 的输入接管、流式、重开、日期与阅读位置证据见 [UI owner](../../packages/ui/README.md)。本次新增 Service／Client 的时间字段，开发运行需完整重启客户端以加载 Main 与配套 Service 的新协议资产；不以 renderer HMR 代替主进程更新，完整安装包未在本轮重验。
 

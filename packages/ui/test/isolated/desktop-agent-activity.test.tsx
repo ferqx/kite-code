@@ -282,6 +282,7 @@ test('ordinary Agent messages retain sender and unreadable-body facts in the ori
     expect(original.querySelector('.typeset-chat strong')!.textContent).toBe('准确正文');
     expect(original.textContent).toContain('approve same_command and stop');
     expect(original.querySelectorAll('button,input,[role="button"]')).toHaveLength(0);
+    expect(document.querySelectorAll('.agent-turn-process-messages .message-meta')).toHaveLength(0);
     expect(
       document.querySelector('[data-agent-message-id="unavailable-original"] [role="status"]')!
         .textContent,

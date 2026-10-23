@@ -309,6 +309,9 @@ test('the original Conversation owns collapsed Run history, adjacent exploration
     expect(process.getAttribute('aria-expanded')).toBe('false');
     await act(async () => process.click());
     expect(process.getAttribute('aria-expanded')).toBe('true');
+    expect(f.host.querySelector('[data-message-id="before"]')!.textContent).toContain('工具前说明');
+    expect(f.host.querySelector('[data-message-id="before"] .message-meta') === null).toBe(true);
+    expect(f.host.querySelector('.agent-turn-final .message-meta')).not.toBeNull();
     const activity = f.host.querySelector<HTMLButtonElement>('button.tool-activity-summary')!;
     expect(activity.textContent).toContain('2');
     await act(async () => activity.click());

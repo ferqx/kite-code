@@ -422,6 +422,10 @@ test('two interleaved steers stay in one process from local sending through pers
     expect(steers[0]!.textContent).toContain('最后一行 ONE');
     expect(steers[1]!.textContent).toContain('末尾 TWO');
     const process = host.querySelector('.agent-turn-process-messages')!;
+    expect(process.querySelectorAll('.message.assistant .message-meta')).toHaveLength(0);
+    expect(host.querySelector('[data-message-id="first"] .message-meta')).not.toBeNull();
+    expect(steers[1]!.querySelector('.message-meta')).not.toBeNull();
+    if (finished) expect(host.querySelector('.agent-turn-final .message-meta')).not.toBeNull();
     const expected = ['模型前段', '引导一完整正文', '工具A', '模型中段', '引导二完整正文', '工具B'];
     const positions = expected.map((text) => process.textContent!.indexOf(text));
     expect(positions.every((value) => value >= 0)).toBe(true);

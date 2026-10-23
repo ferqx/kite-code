@@ -133,7 +133,14 @@ test('actual Conversation copies only original settled user and host-confirmed f
   const messages: Message[] = [
     { id: 'u', turnId: 'run', role: 'user', settled: true, text: user, createdAtMs: 1234567890000 },
     { id: 'reasoning', turnId: 'run', role: 'thinking', settled: true, text: 'private reasoning' },
-    { id: 'a1', turnId: 'run', role: 'assistant', settled: true, text: '第一段 **原始 Markdown**' },
+    {
+      id: 'a1',
+      turnId: 'run',
+      role: 'assistant',
+      settled: true,
+      text: '第一段 **原始 Markdown**',
+      createdAtMs: 1234567891000,
+    },
     {
       id: 'tool:t',
       turnId: 'run',
@@ -205,7 +212,17 @@ test('actual Conversation copies only original settled user and host-confirmed f
     expect(time.getAttribute('datetime')).toBe(new Date(1234567890000).toISOString());
     expect(time.getAttribute('title')).toContain('2009年');
     expect(host.querySelector('.message.user .message-meta > :first-child')).toBe(buttons()[0]!);
-    expect(host.querySelector('.message.assistant .message-time')?.textContent).toBe('时间未知');
+    expect(host.querySelector('.agent-turn-final .message-time')?.textContent).toBe('时间未知');
+    await click(host.querySelector<HTMLButtonElement>('.agent-turn-summary')!);
+    const intermediate = host.querySelector<HTMLElement>('[data-message-id="a1"]')!;
+    expect(intermediate.textContent).toContain('第一段');
+    expect(intermediate.querySelector('.message-meta') === null).toBe(true);
+    expect(host.querySelector('[data-message-id="stream"] .message-meta') === null).toBe(true);
+    await act(async () => {
+      intermediate.dispatchEvent(new dom.window.MouseEvent('pointerover', { bubbles: true }));
+      intermediate.dispatchEvent(new dom.window.FocusEvent('focusin', { bubbles: true }));
+    });
+    expect(intermediate.querySelector('.message-meta') === null).toBe(true);
     expect(buttons()).toHaveLength(2);
     expect(buttons().map((button) => button.getAttribute('aria-label'))).toEqual([
       '复制本轮用户消息',

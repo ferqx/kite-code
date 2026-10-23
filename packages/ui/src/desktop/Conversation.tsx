@@ -148,6 +148,7 @@ const MessageItem = memo(function MessageItem({
   renderContent,
   renderAttachments,
   showResponseStatus = true,
+  showMetadata = true,
 }: {
   message: Message;
   expanded?: boolean;
@@ -165,6 +166,7 @@ const MessageItem = memo(function MessageItem({
   renderContent?: (message: Message) => ReactNode;
   renderAttachments?: (message: Message) => ReactNode;
   showResponseStatus?: boolean;
+  showMetadata?: boolean;
 }) {
   const [metadataNow, setMetadataNow] = useState(() => Date.now());
   // Raw model reasoning is never part of the readable transcript.
@@ -323,8 +325,8 @@ const MessageItem = memo(function MessageItem({
         },
       )}
       data-final-reply={message.role === 'assistant' ? Boolean(message.finalReply) : undefined}
-      onPointerEnter={() => setMetadataNow(Date.now())}
-      onFocus={() => setMetadataNow(Date.now())}
+      onPointerEnter={showMetadata ? () => setMetadataNow(Date.now()) : undefined}
+      onFocus={showMetadata ? () => setMetadataNow(Date.now()) : undefined}
       data-agent-result-source={agentResult?.sourceId}
       data-agent-message-id={agentMessage?.messageId}
       data-input-kind={message.inputKind}
@@ -413,25 +415,27 @@ const MessageItem = memo(function MessageItem({
           </span>
         </small>
       )}
-      <footer className="message-meta">
-        {copyText && (
-          <MessageCopyButton
-            text={copyText}
-            copyRole={copyRole}
-            writeClipboardText={writeClipboardText}
-          />
-        )}
-        {timestamp ? (
-          <time className="message-time" dateTime={timestamp.dateTime} title={timestamp.full}>
-            <span aria-hidden="true">{timestamp.label}</span>
-            <span className="sr-only">{timestamp.full}</span>
-          </time>
-        ) : (
-          <span className="message-time" title="没有可核实的消息记录时间">
-            时间未知
-          </span>
-        )}
-      </footer>
+      {showMetadata && (
+        <footer className="message-meta">
+          {copyText && (
+            <MessageCopyButton
+              text={copyText}
+              copyRole={copyRole}
+              writeClipboardText={writeClipboardText}
+            />
+          )}
+          {timestamp ? (
+            <time className="message-time" dateTime={timestamp.dateTime} title={timestamp.full}>
+              <span aria-hidden="true">{timestamp.label}</span>
+              <span className="sr-only">{timestamp.full}</span>
+            </time>
+          ) : (
+            <span className="message-time" title="没有可核实的消息记录时间">
+              时间未知
+            </span>
+          )}
+        </footer>
+      )}
     </article>
   );
 });
@@ -862,7 +866,10 @@ export function Conversation({
   const lastEntryByTurn = new Map(
     entries.filter((entry) => entry.turnId).map((entry) => [entry.turnId, entry]),
   );
-  const renderGroup = (group: Message[], turnScoped = false) => {
+  const renderGroup = (
+    group: Message[],
+    placement: 'standalone' | 'process' | 'result' = 'standalone',
+  ) => {
     const message = group[0]!;
     if (structural(message)) return null;
     if (renderMessage)
@@ -948,7 +955,8 @@ export function Conversation({
           writeClipboardText={writeClipboardText}
           renderContent={renderMessageContent}
           renderAttachments={renderMessageAttachments}
-          showResponseStatus={!turnScoped}
+          showResponseStatus={placement === 'standalone'}
+          showMetadata={placement !== 'process' || message.role === 'user'}
           copyText={
             message.role === 'user' && message.settled && !message.delivery && message.text
               ? message.copyText === null
@@ -1111,7 +1119,7 @@ export function Conversation({
               </div>
               <AnimatedCollapsibleContent className="agent-turn-content">
                 <section className="agent-turn-process-messages" aria-label="本轮处理过程">
-                  {processGroups.map((group) => renderGroup(group, true))}
+                  {processGroups.map((group) => renderGroup(group, 'process'))}
                 </section>
               </AnimatedCollapsibleContent>
             </div>
@@ -1124,10 +1132,10 @@ export function Conversation({
               {statusContent}
             </div>
           )}
-        {finalGroup && <div className="agent-turn-final">{renderGroup(finalGroup, true)}</div>}
+        {finalGroup && <div className="agent-turn-final">{renderGroup(finalGroup, 'result')}</div>}
         {failureGroups.length > 0 && (
           <div className="agent-turn-failure">
-            {failureGroups.map((group) => renderGroup(group, true))}
+            {failureGroups.map((group) => renderGroup(group, 'result'))}
           </div>
         )}
         {responding && (
