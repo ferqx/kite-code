@@ -1,16 +1,21 @@
+import type { ComponentPropsWithoutRef } from 'react';
 import {
   createContext,
   memo,
   type ReactNode,
   useCallback,
   useContext,
+  useId,
   useLayoutEffect,
   useRef,
 } from 'react';
-import Markdown from 'react-markdown';
+import Markdown, { type ExtraProps } from 'react-markdown';
+import rehypeKatex from 'rehype-katex';
 import remarkGfm from 'remark-gfm';
+import remarkMath from 'remark-math';
 import { useConversationReadActive } from '../conversation-activity';
-import { MarkdownCodeBlock } from './MarkdownCodeBlock';
+import { MarkdownCodeBlock, MarkdownSourceContext } from './MarkdownCodeBlock';
+import { desktopMarkdownSemantics } from './markdown-extensions';
 import { type PreparedDesktopMarkdown, reuseDesktopMarkdownParse } from './markdown-parse-cache';
 
 type MarkdownNode = {
@@ -65,18 +70,41 @@ function segmentLongTextNodes() {
 
 const FileLinkContext = createContext<((path: string) => void) | undefined>(undefined);
 
-function MarkdownLink({ href, children }: { href?: string; children?: ReactNode }) {
+function MarkdownLink({
+  href,
+  children,
+  node: _node,
+  ...props
+}: ComponentPropsWithoutRef<'a'> & ExtraProps) {
   const openFile = useContext(FileLinkContext);
   const readActive = useConversationReadActive();
   if (!href) return <span>{children}</span>;
+  if (href.startsWith('#'))
+    return (
+      <a
+        {...props}
+        href={href}
+        onClick={(event) => {
+          event.preventDefault();
+          if (!readActive) return;
+          const root = event.currentTarget.closest('.typeset-chat');
+          const target = [...(root?.querySelectorAll<HTMLElement>('[id]') ?? [])].find(
+            (element) => element.id === href.slice(1),
+          );
+          target?.scrollIntoView({ block: 'nearest' });
+          target?.focus({ preventScroll: true });
+        }}
+      >
+        {children}
+      </a>
+    );
   if (/^https?:\/\//i.test(href))
     return (
       <a href={href} target="_blank" rel="noreferrer">
         {children}
       </a>
     );
-  if (!openFile || href.startsWith('#') || /^[a-z][a-z\d+.-]*:/i.test(href))
-    return <span>{children}</span>;
+  if (!openFile || /^[a-z][a-z\d+.-]*:/i.test(href)) return <span>{children}</span>;
   return (
     <button
       type="button"
@@ -142,24 +170,46 @@ const MarkdownContent = memo(function MarkdownContent({
   text: string;
   prepared?: PreparedDesktopMarkdown;
 }) {
+  const prefix = `md-${useId().replace(/[^a-zA-Z0-9_-]/g, '')}-`;
   return (
-    <div className="typeset typeset-chat">
-      <Markdown
-        remarkPlugins={[remarkGfm, [reuseDesktopMarkdownParse, prepared], retainListParagraphs]}
-        rehypePlugins={[segmentLongTextNodes]}
-        skipHtml
-        components={{
-          a: MarkdownLink,
-          pre: MarkdownCodeBlock,
-          table: MarkdownTable,
-          // Message bodies must not fetch remote images or interpret local paths as web assets.
-          img: ({ alt }) => (
-            <span className="image-description">{alt ? `图片：${alt}` : '图片'}</span>
-          ),
-        }}
-      >
-        {text}
-      </Markdown>
-    </div>
+    <MarkdownSourceContext.Provider value={text}>
+      <div className="typeset typeset-chat">
+        <Markdown
+          remarkPlugins={[
+            remarkGfm,
+            remarkMath,
+            [reuseDesktopMarkdownParse, prepared],
+            retainListParagraphs,
+          ]}
+          remarkRehypeOptions={{ footnoteLabel: '脚注', footnoteBackLabel: '返回正文' }}
+          rehypePlugins={[
+            [
+              rehypeKatex,
+              {
+                trust: false,
+                strict: 'ignore',
+                maxExpand: 100,
+                maxSize: 20,
+                errorColor: 'var(--foreground)',
+              },
+            ],
+            [desktopMarkdownSemantics, { prefix }],
+            segmentLongTextNodes,
+          ]}
+          skipHtml
+          components={{
+            a: MarkdownLink,
+            pre: MarkdownCodeBlock,
+            table: MarkdownTable,
+            // Message bodies must not fetch remote images or interpret local paths as web assets.
+            img: ({ alt }) => (
+              <span className="image-description">{alt ? `图片：${alt}` : '图片'}</span>
+            ),
+          }}
+        >
+          {text}
+        </Markdown>
+      </div>
+    </MarkdownSourceContext.Provider>
   );
 });

@@ -1,6 +1,7 @@
 import { expect, test } from 'bun:test';
 import { renderToStaticMarkup } from 'react-dom/server';
 import remarkGfm from 'remark-gfm';
+import remarkMath from 'remark-math';
 import remarkParse from 'remark-parse';
 import { unified } from 'unified';
 import { MessageContent } from '../src/desktop/MessageContent';
@@ -11,7 +12,11 @@ import {
 import { parseDesktopMarkdown } from '../src/desktop/markdown-parser';
 
 test('Desktop caches exact GFM syntax data and isolates every mutable pipeline tree', () => {
-  const processor = unified().use(remarkParse).use(remarkGfm).use(reuseDesktopMarkdownParse);
+  const processor = unified()
+    .use(remarkParse)
+    .use(remarkGfm)
+    .use(remarkMath)
+    .use(reuseDesktopMarkdownParse);
   const source =
     '# cache isolation\n\n| A |\n| - |\n| ~~B~~ |\n\n- [x] checked\n\n[link](src/a.ts)';
   const first = processor.parse(source),

@@ -8,7 +8,7 @@ const MAX_ENTRIES = 32;
 const MAX_BYTES = 8 * 1024 * 1024;
 const MAX_ENTRY_BYTES = 2 * 1024 * 1024;
 
-/** Fixed Desktop GFM syntax only. Never retain processors, files, React nodes or host callbacks. */
+/** Fixed Desktop GFM + math syntax only. Never retain processors, files, React nodes or host callbacks. */
 export class DesktopMarkdownParseCache {
   private readonly entries = new Map<string, { tree: DesktopMarkdownTree; bytes: number }>();
   private bytes = 0;
