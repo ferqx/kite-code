@@ -111,7 +111,8 @@ test('restored compression opens the exact sensitive original input through the 
     IS_REACT_ACT_ENVIRONMENT: (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean })
       .IS_REACT_ACT_ENVIRONMENT,
   };
-  const methods: string[] = [];
+  const requests: { method: string; pathname: string }[] = [];
+  const reconciliations: { request: unknown; response: unknown }[] = [];
   const connect = async (currentRuntime: ReturnType<typeof createRuntime>, buildId: string) => {
     service = await startService({ runtime: currentRuntime, profile, buildId, subjectId: 'owner' });
     client = createClient({
@@ -339,8 +340,16 @@ test('restored compression opens the exact sensitive original input through the 
     expect(restored.storeId).not.toBe(originalStoreId);
     globalThis.fetch = Object.assign(
       async (url: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => {
-        methods.push(init?.method ?? (url instanceof Request ? url.method : 'GET'));
-        return originalFetch(url, init);
+        const method = init?.method ?? (url instanceof Request ? url.method : 'GET');
+        const pathname = new URL(url instanceof Request ? url.url : String(url)).pathname;
+        requests.push({ method, pathname });
+        const response = await originalFetch(url, init);
+        if (method === 'POST' && pathname.endsWith('/reconcile'))
+          reconciliations.push({
+            request: await new Request(url, init).json(),
+            response: await response.clone().json(),
+          });
+        return response;
       },
       { preconnect: originalFetch.preconnect },
     );
@@ -462,8 +471,30 @@ test('restored compression opens the exact sensitive original input through the 
       await close();
     }
     expect(originalModel.requests).toHaveLength(2);
-    expect(methods.length).toBeGreaterThan(0);
-    expect(methods.every((method) => method === 'GET')).toBe(true);
+    expect(requests.some(({ method }) => method === 'GET')).toBe(true);
+    // Actual Native selection performs its existing lifecycle reconciliation before reading
+    // history. Only these exact, unchanged activations may POST; original-input reads stay GET.
+    expect(requests.filter(({ method }) => method !== 'GET')).toEqual([
+      { method: 'POST', pathname: '/v1/sessions/session/reconcile' },
+      { method: 'POST', pathname: '/v1/sessions/other/reconcile' },
+      { method: 'POST', pathname: '/v1/sessions/session/reconcile' },
+    ]);
+    for (const [index, sessionId] of ['session', 'other', 'session'].entries()) {
+      expect(reconciliations[index]).toEqual({
+        request: {
+          expectedStoreId: restored.storeId,
+          commandId: expect.stringMatching(/^session-reconcile-[a-f0-9]{64}$/),
+          expectedOwnerGeneration: expect.any(String),
+        },
+        response: {
+          storeId: restored.storeId,
+          sessionId,
+          outcome: 'unchanged',
+          commandId: null,
+          report: null,
+        },
+      });
+    }
   } finally {
     releaseHeld?.();
     await close();

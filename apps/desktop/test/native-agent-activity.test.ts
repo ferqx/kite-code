@@ -30,64 +30,72 @@ function fixture(id = 1, toolId = 'spawn', definitionId = 'task.spawn') {
   return { item, message, fact };
 }
 
-test('accepted spawn waits for its exact child activation and carrier outcome', () => {
+test('successful spawn history preserves its identity and name across every child lifecycle', () => {
   const { item, message, fact } = fixture();
   const project = () =>
-    nativeAgentActivityForTool(
-      nativeAgentActivities([item], 'store', 'root', true),
-      message,
-      fact,
-    )!;
-  item.execution.status = 'planned';
-  item.childRun = null;
-  expect(project().childAgent).toMatchObject({ name: 'Grant review', status: 'queued' });
-  item.execution.status = 'running';
-  expect(project().childAgent.status).toBe('starting');
-  item.childRun = fixture().item.childRun;
-  expect(project().childAgent.status).toBe('running');
-  item.childRun!.status = 'waiting_interaction';
-  expect(project().childAgent.status).toBe('waiting');
-  item.childRun!.status = 'waiting_execution';
-  expect(project().childAgent.status).toBe('waiting_results');
-  for (const status of ['completed', 'failed', 'cancelled', 'interrupted'] as const) {
-    item.childRun!.status = status;
-    item.childRun!.isActive = false;
-    expect(project().childAgent.status).toBe('waiting_results');
+    nativeAgentActivityForTool(nativeAgentActivities([item], 'store', 'root'), message, fact)!;
+  const original = project();
+  expect(original.childAgent).toEqual({
+    identity: JSON.stringify(['store', 'child']),
+    name: 'Grant review',
+  });
+  for (const status of [
+    'planned',
+    'dispatching',
+    'running',
+    'succeeded',
+    'failed',
+    'cancelled',
+    'outcome_unknown',
+  ] as const) {
+    item.execution.status = status;
+    expect(project()).toEqual(original);
   }
   item.execution.cancelRequested = true;
-  expect(project().childAgent.status).toBe('stopping');
-  item.execution.status = 'succeeded';
-  expect(project().childAgent.status).toBe('completed');
-  item.execution.status = 'failed';
-  expect(project().childAgent.status).toBe('failed');
-  item.execution.status = 'outcome_unknown';
-  expect(project().childAgent.status).toBe('unknown');
-  item.execution.status = 'cancelled';
-  expect(project().childAgent.status).toBe('cancelled');
+  expect(project()).toEqual(original);
+  for (const status of [
+    'running',
+    'waiting_interaction',
+    'waiting_execution',
+    'cancelling',
+    'completed',
+    'failed',
+    'cancelled',
+    'interrupted',
+  ] as const) {
+    item.childRun!.status = status;
+    item.childRun!.isActive = !['completed', 'failed', 'cancelled', 'interrupted'].includes(status);
+    expect(project()).toEqual(original);
+  }
+  item.childRun = null;
+  expect(project()).toEqual(original);
 });
 
 test('later work on the same Agent never restarts an earlier spawn or active guidance row', () => {
   const spawn = fixture();
   spawn.item.execution.status = 'succeeded';
   const followup = fixture(2, 'followup', 'task.follow_up');
-  const activities = nativeAgentActivities([spawn.item, followup.item], 'store', 'root', true);
+  const activities = nativeAgentActivities([spawn.item, followup.item], 'store', 'root');
   const first = nativeAgentActivityForTool(activities, spawn.message, spawn.fact)!;
   const second = nativeAgentActivityForTool(activities, followup.message, followup.fact)!;
-  expect(first.childAgent.status).toBe('completed');
-  expect(second.childAgent.status).toBe('running');
+  expect(first.childAgent).toEqual({
+    identity: JSON.stringify(['store', 'child']),
+    name: 'Grant review',
+  });
+  expect(second.childAgent).toEqual(first.childAgent);
   expect(first.childAgent.identity).toBe(second.childAgent.identity);
   expect(first.executionId).not.toBe(second.executionId);
   const guidance = fixture(3, 'guidance', 'task.follow_up');
   expect(nativeAgentActivityForTool(activities, guidance.message, guidance.fact)).toBeUndefined();
   for (const definitionId of ['task.message', 'task.list', 'task.events']) {
     const other = fixture(4, 'other', definitionId);
-    expect(nativeAgentActivities([other.item], 'store', 'root', true)).toEqual([]);
+    expect(nativeAgentActivities([other.item], 'store', 'root')).toEqual([]);
   }
 });
 
 test('an Agent activity cannot come from another run, Store, source, restored receipt or failed Tool', () => {
   const { item, message, fact } = fixture();
-  const activities = nativeAgentActivities([item], 'store', 'root', true);
+  const activities = nativeAgentActivities([item], 'store', 'root');
   expect(
     nativeAgentActivityForTool(activities, { ...message, runId: 'later-run' }, fact),
   ).toBeUndefined();
@@ -115,19 +123,16 @@ test('an Agent activity cannot come from another run, Store, source, restored re
       fact,
     ),
   ).toBeUndefined();
-  expect(nativeAgentActivities([item], 'other-store', 'root', true)).toEqual([]);
-  expect(nativeAgentActivities([item], 'store', 'other-session', true)).toEqual([]);
+  expect(nativeAgentActivities([item], 'other-store', 'root')).toEqual([]);
+  expect(nativeAgentActivities([item], 'store', 'other-session')).toEqual([]);
   expect(nativeAgentActivityForTool([...activities, ...activities], message, fact)).toBeUndefined();
   item.childRun!.originCommandId = 'child-start-another-carrier';
-  expect(nativeAgentActivities([item], 'store', 'root', true)).toEqual([]);
+  expect(nativeAgentActivities([item], 'store', 'root')).toEqual([]);
 });
 
-test('cached display retains the observed start and stable target without claiming fresh execution', () => {
+test('reprojecting historical display preserves the exact operation and navigation target', () => {
   const { item, message, fact } = fixture();
-  const fresh = nativeAgentActivities([item], 'store', 'root', true);
-  const stale = nativeAgentActivities([item], 'store', 'root', false);
-  expect(nativeAgentActivityForTool(stale, message, fact)).toEqual({
-    ...fresh[0]!,
-    childAgent: { ...fresh[0]!.childAgent, fresh: false },
-  });
+  const fresh = nativeAgentActivities([item], 'store', 'root');
+  const stale = nativeAgentActivities([item], 'store', 'root');
+  expect(nativeAgentActivityForTool(stale, message, fact)).toEqual(fresh[0]!);
 });

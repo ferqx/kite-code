@@ -186,7 +186,7 @@ SessionPage 的可选 `covered` 保留主panel树、尺寸和阅读实例，以o
 
 [Clipboard context 与 hook](src/desktop/clipboard.tsx)复用原消息复制生命周期；Conversation 提供宿主 port，正文内的代码复制同时消费原 `copyText` 资格，包含自定义正文 reader 子树。预览或未核实最终回复不提供代码复制，已核实正文关闭后撤销；停用、换文或换 port 的迟到结果失效，已完成反馈沿原两秒截止时间保留。复制不从 DOM 重建文本，不新开宿主或业务接口。
 
-[ToolActivity](src/desktop/ToolActivity.tsx) 的可选 `childAgent` 只消费宿主交付的准确身份、名称、工作状态与观察新鲜度；复用 Trace 展示彩色图标、14px 单行名称和不被长名称挤掉的状态，不新增卡片或原始结果段落。图标与 [ApprovalHeader](src/desktop/ApprovalHeader.tsx) 共用 `ChildAgentIcon` 的稳定身份分配；已识别的子 Agent 行使用原生共享 Button，整行调用准确 `childDetail.onOpen`；没有折叠入口、独立详情按钮或回执内容，旧 `expanded=true` 也不挂载原正文 reader。缺少详情回调时禁用整行，普通工具和真实工具失败仍沿原披露路径。普通目录刷新保留已观察的状态文字，`fresh=false` 停止运行动画，不建立执行或导航 authority；真实工具失败优先于子任务装饰。[消息 DOM 回归](test/isolated/desktop-agent-activity.test.tsx)核同一行的状态更新、文本选择、直接导航、旧展开状态隔离与失败边界，宿主关联和浏览器证据归 [Desktop owner](../../apps/desktop/README.md#native-当前会话环境信息与子详情)。
+[ToolActivity](src/desktop/ToolActivity.tsx) 的可选 `childAgent` 只消费宿主交付的准确身份和名称，不接收子任务生命周期或新鲜度。Trace 复用彩色图标、14px 单行名称和来自原 Message 的静态工具标题；子任务完成、失败、中断或后续工作不改写历史操作，Trace 状态与运行动画只按该次工具调用的原事实显示，不从子任务派生。图标与 [ApprovalHeader](src/desktop/ApprovalHeader.tsx) 共用 `ChildAgentIcon` 的稳定身份分配；已识别的子 Agent 行使用原生共享 Button，整行调用准确 `childDetail.onOpen`，没有折叠入口、独立详情按钮或回执内容，旧 `expanded=true` 也不挂载原正文 reader。缺少详情回调时禁用整行，普通工具和真实工具失败、取消、结果未知仍沿原披露路径，不建立执行或导航 authority。[消息 DOM 回归](test/isolated/desktop-agent-activity.test.tsx)核创建／继续操作在旧生命周期输入变化后文字、ARIA、DOM 和原工具状态不变，保文本选择、直接导航、旧展开隔离与真实工具失败边界；宿主关联和窗口证据归 [Desktop owner](../../apps/desktop/README.md#native-当前会话环境信息与子详情)。
 
 ToolActivity／ToolRow 用 TraceLine、Title、Icon、Description 和受控 Collapsible 承载原工具过程；`asChild`保留原按钮／div、独立文件操作、展开身份和恢复动画层。状态只消费已有执行事实，取消或结果未知不转成 Trace error；Shell 以 CodeBlockContent 保留原具名 PRE、256px输出上限、24px跟随阈值、截断、退出码和回到最新。[聚合回归](test/isolated/desktop-tool-aggregation.test.tsx)验证真实 DOM 和输出追加；正式生产样式与浏览器验证归 [Desktop owner](../../apps/desktop/README.md#会话消息渲染验证)。
 
@@ -229,6 +229,8 @@ SessionPage／Conversation 的 `renderMessageContent` 和 `renderToolActivity` �
 [QueuedMessages](src/desktop/QueuedMessages.tsx)由 Composer 的可选 `queue` 接入，在同一外框顶部显示受控 pending 条目。真实 Markdown 经原 [MessageContent](src/desktop/MessageContent.tsx)安全解析；预览将块元素压为单行并省略，Tooltip 展示完整 Markdown，保持禁 HTML／远程图片获取的原合同。无序号或额外业务状态串；可折叠，常显手柄、编辑和删除。原生拖拽及手柄 Alt+↑／↓只交付当前完整 ID 排列，拖拽中成员变化拒绝旧操作；所有内容移除、变更和异步状态均由宿主确认，不维护乐观副本。`editable:false` 仅禁编辑，附件等条目保删除和调序。编辑成功后的普通 `draft` 仍由宿主 `onChange` 管理，`queueFocusKey` 只在同 scope 变更后聚焦并移 caret 至末尾，暂时 disabled 等待解锁，换 scope 不抢焦点；没有编辑模式或取消／恢复逻辑。[队列 DOM](test/isolated/desktop-queued-messages.test.tsx)核委托回调、完整 MD、Tooltip／Escape、折叠、迟到拖拽隔离、pending门禁与聚焦，服务撤回和未知结果归 [Native owner](../../apps/desktop/README.md#原运行中消息队列)。
 
 Conversation 在调用宿主 `renderMessage` 之前统一排除 thinking、timing、terminal 内容。只有结构标记的准确 Turn 保留一个原顺序锚点和静态状态行，不产生空折叠控件；有可读正文或工具的 Turn 沿用原分组，隐藏思考不会打断相邻探索聚合。已确认终态的原 Turn 不因遗留 incomplete 前缀继续标记忙碌，其他活动 Turn 仍保持实际状态。过程 Collapsible 以原 Turn 的 process／complete 阅读 key 区分生命周期，终态重分组直接进入关闭状态，避免旧过程在退出动画中与最终回复同时重绘；手动展开与收起保留原动画，工具展开选择仍由 Conversation 阅读状态保存。单条工具详情与工具聚合使用独立的阅读 key，聚合使用宿主的 `presentationGroupId`（缺省回退首项 ID），不随首个回执替换而重置；阅读缓存按仍存在的分组身份裁剪。新形成的聚合默认收起，后续增加工具和状态更新保留用户对聚合的选择。ToolActivity 的 `renderItem` 只替换组内单项，原组壳和开关仍由组件管理，让宿主把未核实原记录保留在独立的逐项展开内；缺已识别 toolName 时不把原始 text 作为收起的错误预览，实际状态仍显示。[聚合 DOM 回归](test/isolated/desktop-tool-aggregation.test.tsx)核活动聚合、单项升级、手动选择与后续更新。[思考轮次回归](test/desktop-reasoning-turns.test.tsx)核宿主不接收原思考、无正文终态／耗时／原用户顺序、无空控件与工具聚合。
+
+宿主明确交付 `Message.inputKind:input.steer` 及 `turnId` 的用户引导属于原 Turn 的过程，沿同一 MessageItem／Markdown／附件与复制入口渲染；多条引导和前后工具／说明保持输入顺序，不新增处理段。可读轮次与结构锚点使用相同归组判断，只有引导及隐藏结构标记时也保一段过程。准确本地 sending 占位沿同一归属接管，failed／unknown 保原独立恢复展示；缺少类别或 Turn 身份的用户消息不推断为引导。终态后随原“用时”折叠，展开、阅读恢复和冷挂载保留完整正文，原最终回复与耗时仍各一份。
 
 ## 公共表单与观察
 
@@ -333,6 +335,8 @@ TUI Markdown 根布局约束实际正文列宽，普通及流式回复的长段�
 共享 [completeRunReplies](src/run-reply-copy.ts)仅对准确 completed 且非 active 的 Run 建立最终回复资格，排除带原压缩身份的 assistant 消息；Native 最终复制与 Web 整轮复制均不包含压缩摘要。完整模型消息仍可能是候选或维护输出，不能先于真实 Run 完成显示为最终结果。回归见[最终回复复制](test/run-reply-copy.test.ts)与[Native 实际链路](../../apps/desktop/test/isolated/native-transcript-dom.test.tsx)。
 
 桌面 [Conversation](src/desktop/Conversation.tsx)的压缩状态使用普通 `Marker`，按工具消息标题的字号、行高和上下留白左对齐显示，不绘制文字两侧的分隔线；进行中扫光、失败颜色和具体错误说明保留。
+
+宿主可以为临时压缩行与对应持久消息提供相同 `presentationKey`，使原 MessageGroup 在状态接管时保留 DOM。它仅是渲染身份，真实消息、来源、正文读取和复制仍使用 `id`；每次压缩须独立标识，跨 Store／Session／Run 不复用。实际热进度与持久事实合并和回归归 [Native owner](../../apps/desktop/README.md#原轮次阅读聚合与问答回执)。
 
 ## 选中与重连的后端状态核实
 

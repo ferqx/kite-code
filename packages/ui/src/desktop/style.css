@@ -5201,7 +5201,7 @@ body {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.kite-client .tool-agent-state {
+.kite-client .tool-agent-operation {
   flex: none;
   font-size: inherit;
 }

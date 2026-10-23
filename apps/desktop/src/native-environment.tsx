@@ -152,7 +152,7 @@ export function environmentDisplay(
   return {
     rows,
     children,
-    agents: nativeAgentActivities(items, storeId, items[0]?.rootSession.id, true),
+    agents: nativeAgentActivities(items, storeId, items[0]?.rootSession.id),
   };
 }
 
@@ -765,13 +765,7 @@ export function useNativeEnvironment({
 
   return {
     child: visibleChild,
-    agentActivities: (display?.agents ?? []).map((activity) => ({
-      ...activity,
-      childAgent: {
-        ...activity.childAgent,
-        fresh: !busy && !stale && !executionUnconfirmed,
-      },
-    })),
+    agentActivities: display?.agents ?? [],
     approvalOwners:
       !busy && !stale
         ? (current?.facts?.items.flatMap((item) => {

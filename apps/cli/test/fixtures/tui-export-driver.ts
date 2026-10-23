@@ -277,6 +277,58 @@ const files = () =>
   readdirSync(input.profilePath)
     .filter((name) => name.startsWith('session-') && name.endsWith('.md'))
     .map((name) => join(input.profilePath, name));
+async function childProcessIds(parentPid: number): Promise<number[]> {
+  if (process.platform !== 'win32') {
+    const listing = Bun.spawnSync(['ps', '-axo', 'pid,ppid'], { stdout: 'pipe', stderr: 'pipe' });
+    assert.equal(listing.exitCode, 0, Buffer.from(listing.stderr).toString());
+    return Buffer.from(listing.stdout)
+      .toString()
+      .trim()
+      .split(/\r?\n/)
+      .map((line) => line.trim().split(/\s+/).map(Number))
+      .filter((row) => row[1] === parentPid)
+      .map((row) => row[0]!);
+  }
+  // Observe the same direct children without launching PowerShell, whose first
+  // use can create protected INetCache junctions in the fixture's isolated HOME.
+  const { dlopen, ptr } = await import('bun:ffi');
+  const kernel = dlopen('kernel32.dll', {
+    CreateToolhelp32Snapshot: { args: ['u32', 'u32'], returns: 'u64' },
+    Process32FirstW: { args: ['u64', 'ptr'], returns: 'bool' },
+    Process32NextW: { args: ['u64', 'ptr'], returns: 'bool' },
+    GetLastError: { args: [], returns: 'u32' },
+    CloseHandle: { args: ['u64'], returns: 'bool' },
+  });
+  const api = kernel.symbols;
+  let snapshot: bigint | undefined;
+  let failure: unknown;
+  const children: number[] = [];
+  try {
+    const handle = BigInt(api.CreateToolhelp32Snapshot(2, 0));
+    assert(handle !== 0n && handle !== -1n && handle !== 0xffffffffffffffffn);
+    snapshot = handle;
+    // PROCESSENTRY32W on Windows x64, as used by the existing native process owner.
+    assert.equal(process.arch, 'x64');
+    const entry = Buffer.alloc(568);
+    entry.writeUInt32LE(entry.length, 0);
+    let more = api.Process32FirstW(snapshot, ptr(entry));
+    for (let count = 0; more; count++) {
+      assert(count < 131072, 'process snapshot did not terminate');
+      if (entry.readUInt32LE(32) === parentPid) children.push(entry.readUInt32LE(8));
+      more = api.Process32NextW(snapshot, ptr(entry));
+    }
+    assert.equal(api.GetLastError(), 18, 'process snapshot must reach ERROR_NO_MORE_FILES');
+  } catch (error) {
+    failure = error;
+  }
+  if (snapshot !== undefined && !api.CloseHandle(snapshot)) {
+    const closeError = Error('process_snapshot_close_unconfirmed');
+    throw failure ? new AggregateError([failure, closeError]) : closeError;
+  }
+  kernel.close();
+  if (failure) throw failure;
+  return children;
+}
 let owned: number[] = [],
   normal = false,
   failure: unknown;
@@ -284,31 +336,7 @@ try {
   stage('driver_started');
   await wait('New Run');
   stage('initial_composer');
-  const listing =
-    process.platform === 'win32'
-      ? Bun.spawnSync(
-          [
-            'powershell.exe',
-            '-NoProfile',
-            '-NonInteractive',
-            '-Command',
-            `Get-CimInstance Win32_Process -Filter "ParentProcessId = ${pty.host.pid}" | Select-Object -ExpandProperty ProcessId`,
-          ],
-          { stdout: 'pipe', stderr: 'pipe' },
-        )
-      : Bun.spawnSync(['ps', '-axo', 'pid,ppid'], { stdout: 'pipe', stderr: 'pipe' });
-  assert.equal(listing.exitCode, 0, Buffer.from(listing.stderr).toString());
-  owned = Buffer.from(listing.stdout)
-    .toString()
-    .trim()
-    .split(/\r?\n/)
-    .map((line) => line.trim().split(/\s+/).map(Number))
-    .filter((row) =>
-      process.platform === 'win32'
-        ? Number.isSafeInteger(row[0]) && row[0]! > 0
-        : row[1] === pty.host.pid,
-    )
-    .map((row) => row[0]!);
+  owned = await childProcessIds(pty.host.pid);
   assert(owned.length > 0, 'original paired Service child required');
   for (const pid of owned) process.kill(pid, 0);
   await key('owned task');

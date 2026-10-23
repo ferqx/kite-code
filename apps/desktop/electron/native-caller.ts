@@ -982,7 +982,26 @@ export class NativeCaller {
             storeId: snapshot.view.storeId,
             session: snapshot.view.session,
             runs: snapshot.view.runs,
-            compressionProgress: unavailable ? undefined : snapshot.view.compressionProgress,
+            // Same-selection refresh keeps readonly display facts, while all
+            // actions still wait for fresh permissions. Real observation or
+            // permission loss revokes the hot indicator immediately.
+            compressionProgress:
+              this.observationUnavailable || this.permissionUnavailable
+                ? undefined
+                : snapshot.view.compressionProgress,
+            compressionMessages: snapshot.view.messages
+              .filter((message) => message.compression && !message.originMessage)
+              .map(({ id, sessionId, runId, seq, sourceIds, status, compression }) => ({
+                id,
+                sessionId,
+                runId,
+                seq,
+                sourceIds,
+                status,
+                compression,
+                role: 'assistant' as const,
+                content: '',
+              })),
             activeCommand: snapshot.activeCommand,
             executions: snapshot.view.executions,
             interactions: snapshot.interactions,

@@ -51,6 +51,7 @@ async function fixture(
     skipGovernance?: boolean;
     refreshAfterAutoFailure?: boolean;
     instructions?: string;
+    holdPreparing?: boolean;
   } = {},
 ) {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-compression-'))),
@@ -87,6 +88,10 @@ async function fixture(
       order.push('compression');
       expect(input.messages.length).toBeGreaterThan(0);
       expect(input.sources.map((s) => s.id)).toContain('fixture:memory');
+      if (options.holdPreparing) {
+        entered.release();
+        await held.waiting;
+      }
       return {
         instructions: options.instructions ?? 'SUMMARIZE EXACT INPUT; no tool calls',
         snapshot: {
@@ -334,6 +339,52 @@ async function fixture(
   };
 }
 
+test('a View crossing compression publication keeps the same attempt observed before its Store snapshot', async () => {
+  const f = await fixture({ holdPreparing: true });
+  const snapshotEntered = gate(),
+    snapshotHeld = gate();
+  const getView = f.store.getView.bind(f.store);
+  try {
+    await f.work('original', 'original work');
+    await f.runtime.compressContext({
+      ...f.base,
+      commandId: 'compress',
+      expectedContextSelectionId: (await f.store.getView('s')).session.contextSelectionId,
+    });
+    await bounded(f.entered.waiting);
+    const preparing = await f.runtime.getView('s');
+    expect(preparing.compressionProgress?.phase).toBe('preparing');
+    expect(typeof preparing.compressionProgress?.executionId).toBe('string');
+    let hold = true;
+    f.store.getView = async (id) => {
+      const view = await getView(id);
+      if (hold && id === 's') {
+        hold = false;
+        snapshotEntered.release();
+        await snapshotHeld.waiting;
+      }
+      return view;
+    };
+    const crossing = f.runtime.getView('s');
+    await bounded(snapshotEntered.waiting);
+    f.held.release();
+    await f.runtime.waitForCommand('compress', { timeoutMs: 5000 });
+    const published = await f.runtime.getView('s');
+    const summary = published.messages.find((entry) => entry.compression);
+    expect(summary?.compression?.status).toBe('completed');
+    expect(summary?.sourceIds).toEqual([preparing.compressionProgress!.executionId!]);
+    expect(published.compressionProgress).toBeUndefined();
+    snapshotHeld.release();
+    const observed = await bounded(crossing);
+    expect(observed.messages.some((entry) => entry.compression)).toBe(false);
+    expect(observed.compressionProgress).toEqual(preparing.compressionProgress);
+  } finally {
+    snapshotHeld.release();
+    f.store.getView = getView;
+    await f.close();
+  }
+});
+
 test('accepted follow-up between summary completion and publication does not change compression input', async () => {
   const f = await fixture();
   try {
@@ -440,12 +491,15 @@ for (const addition of ['message', 'result_ref'] as const)
     }
   });
 
-test('manual compression has recorded Model/usage and exact immutable coverage, new explicit work receives summary without old history or replay', async () => {
+test('manual compression has recorded Model/usage and exact immutable coverage, new explicit work receives summary and original user inputs without old assistant history or replay', async () => {
   const f = await fixture();
   try {
     await f.work('original', 'original work');
     const before = await f.store.getView('s'),
       selection = before.session.contextSelectionId;
+    const originalReplySources = before.messages.find((message) => message.role === 'assistant')!
+      .sourceIds!;
+    expect(originalReplySources.length).toBeGreaterThan(0);
     const command = await f.runtime.compressContext({
       ...f.base,
       commandId: 'compact',
@@ -480,7 +534,19 @@ test('manual compression has recorded Model/usage and exact immutable coverage, 
     expect(f.requests).toHaveLength(2);
     await f.work('next', 'New task: new explicit work');
     const actual = f.requests[2]!;
-    expect(actual.messages.some((m) => m.content === 'original work')).toBe(false);
+    const retainedOriginal = actual.messages.filter((message) =>
+      message.sourceIds?.includes('original'),
+    );
+    expect(retainedOriginal).toHaveLength(1);
+    expect(retainedOriginal[0]!.role).toBe('user');
+    expect(retainedOriginal[0]!.content).toBe('original work');
+    expect(
+      actual.messages.some(
+        (message) =>
+          message.role === 'assistant' &&
+          originalReplySources.some((source) => message.sourceIds?.includes(source)),
+      ),
+    ).toBe(false);
     expect(actual.messages.filter((m) => m.sourceIds?.includes(page.compression!.id))).toHaveLength(
       1,
     );
@@ -507,7 +573,21 @@ test('manual compression has recorded Model/usage and exact immutable coverage, 
     });
     await f.runtime.waitForCommand('fork-work', { timeoutMs: 10000 });
     expect(f.requests[3]!.messages.some((m) => m.content.includes(f.summary))).toBe(true);
-    expect(f.requests[3]!.messages.some((m) => m.content === 'original work')).toBe(false);
+    const forkOriginal = f.requests[3]!.messages.filter((message) =>
+      message.sourceIds?.includes('original'),
+    );
+    expect(forkOriginal).toHaveLength(1);
+    expect(forkOriginal[0]!.role).toBe('user');
+    expect(forkOriginal[0]!.content).toBe('original work');
+    // The uncompressed new-work tail has the same fixed answer text. Only the
+    // original covered assistant Source must be absent from the Fork input.
+    expect(
+      f.requests[3]!.messages.some(
+        (message) =>
+          message.role === 'assistant' &&
+          originalReplySources.some((source) => message.sourceIds?.includes(source)),
+      ),
+    ).toBe(false);
     const first = before.messages[0]!;
     const rewind = await f.runtime.selectContext({
       ...f.base,

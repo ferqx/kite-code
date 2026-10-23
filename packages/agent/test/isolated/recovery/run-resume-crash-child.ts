@@ -143,6 +143,29 @@ const wrapped = new Proxy(store, {
       return async (input: Parameters<Store['markDispatching']>[0]) => {
         const ex = await store.getExecution(input.executionId);
         if (ex?.kind === 'model') {
+          if (mode === 'steer_applied') {
+            const run = (await store.getView('s')).runs.find((candidate) => candidate.isActive)!;
+            await store.acceptCommand({
+              expectedStoreId,
+              sessionId: 's',
+              subjectId: 'owner',
+              commandId: 'applied-steer',
+              request: {
+                kind: 'input.steer',
+                targetRunId: run.id,
+                contextSelectionId: run.contextSelectionId,
+                content: 'Keep the original task; correction: Blue 雪, never Red.',
+              },
+            });
+            await store.applyInput({
+              expectedStoreId,
+              owner: input.owner,
+              commandId: 'applied-steer',
+              kind: 'steer',
+              runId: run.id,
+            });
+            await stop(ex.id);
+          }
           dispatchedModels++;
           if (
             mode.startsWith('planned_') ||

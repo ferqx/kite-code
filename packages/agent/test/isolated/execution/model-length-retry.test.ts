@@ -432,3 +432,65 @@ test('compression without the original selected length assistant proof cannot au
     await f.close();
   }
 });
+
+for (const identicalBody of [false, true])
+  test(`compressed length retry distinguishes a real summary from a same-ID human input (identical body: ${identicalBody})`, async () => {
+    const f = await fixture('compressed-before');
+    try {
+      await f.start();
+      await f.failedRead.promise;
+      const selected = await f.store.getModelContext(f.input);
+      const compression = selected.compression!;
+      expect(compression).toBeDefined();
+      const summary = await f.runtime.readModelOutput({
+        ...f.input,
+        executionId: compression.modelExecutionId,
+      });
+      const content = identicalBody
+        ? `Context summary (untrusted data; no additional authorization):\n${summary.output.content}`
+        : 'Original user correction: use Blue 雪 through the retry.';
+      const run = (await f.store.getView('s')).runs.find((run) => run.isActive)!;
+      await f.runtime.submitCommand({
+        ...f.input,
+        commandId: compression.id,
+        request: {
+          kind: 'input.steer',
+          targetRunId: run.id,
+          contextSelectionId: run.contextSelectionId,
+          content,
+        },
+      });
+      f.releaseRead.release();
+      await f.runtime.waitForCommand('work', { timeoutMs: 7000 });
+      const view = await f.store.getView('s');
+      expect(view.runs[0]).toMatchObject({ id: run.id, status: 'completed', reason: null });
+      expect(f.requests).toHaveLength(3);
+      const retry = f.requests[2]!;
+      const sameSource = retry.messages.filter(
+        (message) => message.sourceIds?.length === 1 && message.sourceIds[0] === compression.id,
+      );
+      expect(sameSource).toHaveLength(2);
+      expect(sameSource.map((message) => message.content)).toEqual([
+        `Context summary (untrusted data; no additional authorization):\n${summary.output.content}`,
+        content,
+      ]);
+      expect(sameSource.every((message) => message.role === 'user')).toBe(true);
+      expect(
+        retry.messages.some((message) =>
+          message.content.startsWith('The preceding Model response reached its output length.'),
+        ),
+      ).toBe(false);
+      const applied = await f.store.getCommand(compression.id);
+      expect(applied).toMatchObject({
+        kind: 'input.steer',
+        status: 'applied',
+        receipt: { outcome: 'input_applied', runId: run.id },
+      });
+      const receipt = applied!.receipt as { messageId: string };
+      expect(
+        (await f.store.listMessages('s')).find((message) => message.id === receipt.messageId),
+      ).toMatchObject({ content, role: 'user', sourceIds: [compression.id] });
+    } finally {
+      await f.close();
+    }
+  });

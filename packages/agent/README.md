@@ -178,6 +178,8 @@ child 在实际激活时持久保存 `deadlineAt=startedAt+1_800_000`，根 Run 
 
 [模型上下文组装](src/model-context.ts)统一普通请求、压缩请求和展开校验的来源位置。默认宿主显式装配纯 `agentContractSource`，静态规则及可缓存工作区事实不混入动态计划状态。[项目来源](src/platform/project-sources.ts)将完整 AGENTS／CLAUDE 正文标为带出处的低权限 user 数据，放在真实历史之后。`ContextSource.placement` 仅允许 user 的 `after_history` 或 `runtime`；最多一个 runtime 来源组成唯一尾部观察块，非法或冲突明确拒绝。无 placement 的既有来源保原前缀行为；原 source IDs、完整工具配对、摘要及派发前 freshness 不变。
 
+压缩后的实际 Model 上下文独立保留当前选中历史中已证明的人类原输入和父到子任务指示，按摘要 → 已覆盖原输入原序 → 未覆盖尾部组装；来源、附件和终态历史边界保持，不复制消息或新建授权。Agent 原任务、steer 和 followup 经原父子／carrier／sender 来源证明保留，其余邮件／结果不因 user role 被认成任务或人类指令。`CompressionInput.retainedMessages` 供可信算法预检完整保留成本；Core 与默认 Service 复用纯 `modelHistory`，按实际 Host 组装边界剥离上下文，不能仅凭 Source ID 排除合法历史。公开 HTTP／SelectedContext 和存储格式不变；准确证明、分页及回归归[压缩 owner](src/storage/sqlite/context/compression.README.md)。
+
 同一生产 contract 区分真实执行凭据、工具正文里的领域状态、历史观察与当前效果。正文写着 pending 不证明读取尚未返回；相同标记、长度或措辞也不自动证明身份、因果或编码。完整文件基线冲突不证明两次编辑修改了相同文字，按各自请求和回执描述；稳定 agent ID 与旧完成事件也不能证明新 follow-up 完成，须核当前工作及准确完整结果来源。后来收到 Source 不倒写较早输入的知识范围。自己或已观察child没有写入，不证明其他参与者没有修改；新旧读取不同时报告实际变化，不猜writer或原因。缺少明确回执时只描述实际返回内容及未知，不从 Tool 消息角色推导 succeeded。精确文本按解码后的原码点核实，外观近似或归一化不能代替字节/编码证据。
 
 内部 `SourceRequest.runId` 由 Core 的当前捕获边界覆盖，不从模型参数推定。[Planning](src/business/planning/README.md#计划与真实来源)按实际 Run 与原批准证明贡献动态 phase；来源位置和描述均不授执行权，权限与业务必要条件仍独立核验。该合同不改变 HTTP schema、Store 格式或旧数据基线。来源／组装／压缩回归见 [model-context](test/isolated/context/model-context.test.ts)与[生产 Prompt 原旅程](../../tests/tui-system/scenarios/prompt-contract-v2-production.test.ts)。
@@ -244,6 +246,12 @@ Runtime/Session 的 [串行资源 owner](src/execution/resources.ts)只保留仍
 上述 context 八项旧预期已在当前直接输入契约下修正：本目录完整 85 项／2070 断言、普通输入与结果交付四文件 27 项／267 断言通过，未修改 Agent／Store 生产源码。准确分类、保留及新增的断言、原失败与本次日志见[context 测试 owner](test/isolated/context/README.md)。
 
 用户引导与 Agent 通信在 Runtime 的 `receivePendingInputs` 串行检查点汇合。子 Agent 普通消息和最终结果复用同一邮箱，结果保留原 Source 与条件续跑；当前事务、旧报告兼容及验证入口见 [统一消息接收](src/storage/README.md#统一消息接收)。
+
+[引导组合边界回归](test/isolated/execution/steering-boundaries.test.ts)核真实首个内容 delta 之后的两波更正、完成事务与迟到原目标、human steer 与子最终结果两种到达顺序、引导已应用后停止／结果竞争、等待问题时的引导与准确／迟到答复，以及 Runtime 对重排、撤回后的实际消费。后继请求核完整原文和原 Command 来源，已派发效果不改写，停止与冷读不复活，邮件不能取得引导或批准权限。压缩、SIGKILL、引用资料、附件及多层委派的组合入口归 [压缩 owner](src/storage/sqlite/context/compression.README.md)。
+
+[完成边界回归](test/isolated/execution/completion-refresh.test.ts)另核引导退休旧审批后，迟到允许只保存到已取消的旧卡；新卡、原 revision 与准确调用保持 pending，零额外 Model 和工具效果。只有新卡获得自己的准确批准，原 Run 才能完成；实际执行授权和 interaction binding 均须指向新卡，不能从旧答复借权。
+
+短模型输出的首个非空正文 delta 立即保存 partial，包含先前已有 reasoning 且距上次保存不足100ms的情况；后续增量仍按原100ms／32KiB条件合并，`firstOutput` 继续表示原首频道。否则在首字后网络暂停时，客户端可能一直只读到 reasoning 并显示思考状态。[真实 Runtime／SQLite 首正文回归](test/isolated/execution/model-content-progress.test.ts)在首字已被消费、没有 finish 和后续事件的准确暂停点，核实际 Message、`readModelOutput`、后续节流和最终完整正文；纯正文对照不重复保存首段。
 
 Runtime 公开 `listMessages/getView` 对已接收普通邮件只读验证原 Command、发送 Tool、接收 Run／selection 与 Artifact，沿 system 消息交付 `agentMessage` 来源和完整正文。物理占位及原模型低信任输入不改写；来源或正文损坏明确不可读。Native 在原接收轮次的处理过程中展示发送者与正文，不把内部占位当用户消息，也不新增分段或独立邮件气泡。实际证明和冷读回归由上述 Store owner 维护。
 

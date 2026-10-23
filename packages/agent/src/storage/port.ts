@@ -1048,10 +1048,12 @@ export interface Store {
       requirements?: RequirementEvaluation[];
     },
   ): Promise<{ reset: boolean }>;
-  getModelContext(input: Parameters<Store['getSelectedContext']>[0]): Promise<SelectedContextPage>;
+  getModelContext(
+    input: Parameters<Store['getSelectedContext']>[0],
+  ): Promise<SelectedContextPage & { retainedInputMessageIds: string[] }>;
   getExpandedContext(
     input: Parameters<Store['getSelectedContext']>[0],
-  ): Promise<SelectedContextPage>;
+  ): Promise<SelectedContextPage & { retainedInputMessageIds: string[] }>;
   renameSession(input: {
     expectedStoreId: string;
     subjectId: string;

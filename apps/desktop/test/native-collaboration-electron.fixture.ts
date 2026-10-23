@@ -1,19 +1,25 @@
 import { strict as assert } from 'node:assert';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { createRequire } from 'node:module';
 import { join } from 'node:path';
-import { _electron } from 'playwright';
+import type { ElementHandle } from 'playwright';
 import type { NativeState } from '../src/native-bridge';
 
-const [candidate, home, control, storeId] = process.argv.slice(2) as [
+const [candidate, home, control, storeId, desktopPackage] = process.argv.slice(2) as [
+  string,
   string,
   string,
   string,
   string,
 ];
+const require = createRequire(desktopPackage);
+const { _electron } = require('playwright') as typeof import('playwright');
 let app: Awaited<ReturnType<typeof _electron.launch>> | undefined;
 let phase = 'launch',
   frameNumber = 0;
 const frames: { file: string; phase: string; at: number }[] = [];
+const historyFrameErrors: { phase: string; at: number; errors: string[] }[] = [];
+type HistoryWindow = Window & { __staticCreationRows?: Record<string, Element> };
 let frameTimer: ReturnType<typeof setInterval> | undefined;
 let frameSaving: Promise<void> | undefined;
 const frameDirectory = join(home, 'process-frames');
@@ -53,7 +59,24 @@ try {
       const samplePhase = phase;
       const file = `${String(frameNumber++).padStart(4, '0')}-${samplePhase}.png`;
       frameSaving = page
-        .screenshot({ path: join(frameDirectory, file) })
+        .evaluate(() =>
+          Object.entries((window as HistoryWindow).__staticCreationRows ?? {}).flatMap(
+            ([name, node]) => {
+              const errors: string[] = [];
+              if (!node.isConnected) errors.push(`${name}: original creation row disconnected`);
+              if (node.querySelector('.tool-agent-operation')?.textContent !== '创建子 Agent')
+                errors.push(`${name}: creation operation changed`);
+              if (node.classList.contains('is-running') || node.querySelector('[class*="shimmer"]'))
+                errors.push(`${name}: historical creation animates`);
+              return errors;
+            },
+          ),
+        )
+        .then(async (errors) => {
+          if (errors.length)
+            historyFrameErrors.push({ phase: samplePhase, at: Date.now(), errors });
+          await page.screenshot({ path: join(frameDirectory, file) });
+        })
         .then(() => {
           frames.push({ file, phase: samplePhase, at: Date.now() });
         })
@@ -78,6 +101,53 @@ try {
       assert.ok(Date.now() < end, label);
       await page.waitForTimeout(20);
     }
+  }
+  const creationRows = new Map<string, ElementHandle<HTMLElement | SVGElement>>();
+  const staticHistoryStages: { phase: string; cold: boolean; names: string[] }[] = [];
+  async function assertCreationHistory(cold = false) {
+    // These are the original completed parent Turn's operation records. Child
+    // detail and later follow-up Turns have separate presentation ownership.
+    const originalTurn = page.locator('.agent-turn:not(.session-tab-child *)').first();
+    const summary = originalTurn.locator('.agent-turn-summary[aria-expanded="false"]');
+    if (await summary.count()) await summary.click();
+    for (const name of ['CHILD_A', 'CHILD_B']) {
+      const row = originalTurn.locator('.child-agent-activity').filter({
+        has: page.locator('.tool-agent-name').filter({ hasText: new RegExp(`^${name}$`) }),
+      });
+      await until(
+        () => row.count(),
+        (count) => count === 1,
+        `original ${name} creation directory ready`,
+      );
+      assert.equal(await row.locator('.tool-agent-operation').innerText(), '创建子 Agent');
+      assert.equal(
+        await row.getAttribute('class').then((value) => value?.split(/\s+/).includes('is-running')),
+        false,
+      );
+      assert.equal(await row.locator('[class*="shimmer"]').count(), 0);
+      assert.equal(await row.locator('.tool-agent-operation[role="status"]').count(), 0);
+      const navigation = row.locator('.tool-activity-summary');
+      assert.equal(await navigation.getAttribute('aria-label'), `查看子 Agent 详情：${name}`);
+      assert.equal(await navigation.getAttribute('aria-expanded'), null);
+      const previous = creationRows.get(name);
+      if (previous && !cold)
+        assert.equal(
+          await row.evaluate((node, original) => node === original, previous),
+          true,
+          `${name} creation row survives child lifecycle`,
+        );
+      else {
+        const node = await row.elementHandle();
+        assert.ok(node);
+        creationRows.set(name, node);
+        await node.evaluate((element, name) => {
+          const target = window as HistoryWindow;
+          target.__staticCreationRows ??= {};
+          target.__staticCreationRows[name] = element;
+        }, name);
+      }
+    }
+    staticHistoryStages.push({ phase, cold, names: ['CHILD_A', 'CHILD_B'] });
   }
   async function showApproval(id: string) {
     const card = page.getByRole('article', { name: `approval ${id}`, exact: true });
@@ -162,6 +232,7 @@ try {
     b = carrier('CHILD_B');
   assert.ok(a && b);
   assert.notEqual(a.childSessionId, b.childSessionId);
+  await assertCreationHistory();
   // Tighten within the same accepted children; no child or Run is rebuilt.
   await mode(1, 'auto');
   await fetch(`${control}/release`);
@@ -300,6 +371,7 @@ try {
   );
   assert.equal(await firstResultCard.count(), 1);
   assert.equal(await page.getByText('NATIVE_COLLAB_START_DONE_2', { exact: true }).count(), 0);
+  await assertCreationHistory();
   await page.screenshot({ path: join(home, '03a-child-result-parent-continuing.png') });
   await firstResultCard.getByRole('button', { name: '查看子 Agent', exact: true }).click();
   await page.locator('.session-tab-child').getByText('CHILD_A_DONE_1', { exact: true }).waitFor();
@@ -357,6 +429,7 @@ try {
     readFileSync(join(home, 'workspace', 'session-command.txt'), 'utf8'),
     'approved\napproved\n',
   );
+  await assertCreationHistory();
   await showApproval(oldB.id);
   await page.screenshot({ path: join(home, '03-a-completed-b-pending.png') });
   log('same_command_child_scope', {
@@ -443,6 +516,7 @@ try {
     afterOldStop.selection!.executions.find((row) => row.id === nextCarrier.id)!.cancelRequestedAt,
     null,
   );
+  await assertCreationHistory();
   log('same_session_followup_old_answer_isolated', {
     first: a.id,
     next: nextCarrier.id,
@@ -505,6 +579,15 @@ try {
     'all exact child carriers and result turns settled',
   );
   const final = await state();
+  assert.equal(final.selection!.executions.find((row) => row.id === b.id)!.status, 'cancelled');
+  await assertCreationHistory();
+  const originalCreations = page
+    .locator('.agent-turn:not(.session-tab-child *)')
+    .first()
+    .locator('.child-agent-activity');
+  await originalCreations.first().scrollIntoViewIfNeeded();
+  await originalCreations.last().scrollIntoViewIfNeeded();
+  await page.screenshot({ path: join(home, '03e-static-creation-after-cancel.png') });
   const nextResultCard = page
     .locator('article[data-agent-result-source]')
     .filter({ hasText: 'CHILD_A_FOLLOWUP_DONE_1' });
@@ -636,6 +719,7 @@ try {
   );
   await page.getByText('NATIVE_COLLAB_ACTIVE_DONE_1', { exact: true }).waitFor();
   assert.equal(await page.locator('article[data-agent-result-source]').count(), 2);
+  await assertCreationHistory();
   await page.screenshot({ path: join(home, '03d-active-parent-completed.png') });
   const beforeCold = (await (await fetch(`${control}/state`)).json()) as { calls: number };
   await close();
@@ -680,7 +764,13 @@ try {
     readFileSync(join(home, 'workspace', 'session-command.txt'), 'utf8'),
     'approved\napproved\n',
   );
+  await assertCreationHistory(true);
   await page.screenshot({ path: join(home, '04-cold-reopened.png') });
+  assert.deepEqual(
+    historyFrameErrors,
+    [],
+    'original creation history stays static in continuous frames',
+  );
   const report = {
     storeId,
     a: a.id,
@@ -694,6 +784,9 @@ try {
     lateB,
     calls: beforeCold.calls,
     coldZeroReplay: true,
+    staticCreationHistory: true,
+    staticHistoryStages,
+    historyFrameErrors,
     resultMessages,
     active: { executionId: activeCarrier.id, parentRunId: activeRun.id, sourceId: activeSourceId },
   };

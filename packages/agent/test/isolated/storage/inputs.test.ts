@@ -183,6 +183,36 @@ test('message first-publication time survives streamed updates, finalization and
       .query(
         "UPDATE change_event SET payload_json=? WHERE cursor=(SELECT MIN(cursor) FROM change_event WHERE object_id=? AND type='message.updated')",
       )
+      .run('{malformed', user.id);
+    const legacyExpected = { ...user };
+    delete legacyExpected.createdAt;
+    const cursor = (await f.store.getMetadata()).lastChangeCursor;
+    expect((await f.store.listMessages('s')).find((message) => message.id === user.id)).toEqual(
+      legacyExpected,
+    );
+    expect((await f.store.getView('s')).messages.find((message) => message.id === user.id)).toEqual(
+      legacyExpected,
+    );
+    expect((await f.store.getMessageOrigin({ ...f.base, messageId: user.id })).message).toEqual(
+      legacyExpected,
+    );
+    await rejected(
+      f.store.getMessageOrigin({ ...f.base, subjectId: 'foreign', messageId: user.id }),
+      'permission_denied',
+    );
+    const cold = await openSqliteStore({ ...f.profile, mode: 'readonly' });
+    try {
+      expect((await cold.listMessages('s')).find((message) => message.id === user.id)).toEqual(
+        legacyExpected,
+      );
+      expect((await cold.getMetadata()).lastChangeCursor).toBe(cursor);
+    } finally {
+      await cold.close();
+    }
+    f.db
+      .query(
+        "UPDATE change_event SET payload_json=? WHERE cursor=(SELECT MIN(cursor) FROM change_event WHERE object_id=? AND type='message.updated')",
+      )
       .run(event.payload_json, user.id);
     f.db.run('UPDATE storage_meta SET replay_floor=1 WHERE singleton=1');
     expect(

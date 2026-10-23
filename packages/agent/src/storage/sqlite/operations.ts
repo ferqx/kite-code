@@ -973,7 +973,14 @@ export class SqliteOperations {
       )`,
       ...missing.map((message) => message.id),
     )) {
-      const event = parse(row.payload_json) as Record<string, Json> | null;
+      let event: Record<string, Json> | null;
+      try {
+        event = parse(row.payload_json) as Record<string, Json> | null;
+      } catch (error) {
+        // Optional display metadata cannot make the original Message unreadable.
+        if (error instanceof SyntaxError) continue;
+        throw error;
+      }
       if (
         event?.format === 'kite.session-log' &&
         event.version === 1 &&

@@ -4,7 +4,7 @@
 
 `MessageRecord.createdAt` 是可选的首次发布毫秒时间，由 [appendMessage](sqlite/operations.ts)在原消息事务内写入 `source_json` 和初始 `message_part`；调用者的同名值不能覆盖新记录时间。Model 流式追加与最终正文接管保留原字段，Fork 原样复制来源 JSON，冷重开沿原记录读取；不增加 DDL、迁移、格式版本或读取写入副作用。
 
-缺少该字段的旧历史在一页内批量查最早 `message.updated`，只有 replay floor 仍为0、第一条事件带原 `kite.session-log` v1 `occurredAt` 时才提供时间；日志已裁剪、原事件未带时间或无法核实时保持缺失，不使用较晚更新、Run 时间或查询时钟代替。该读取与 replay floor 的核对位于同一 SQL 快照；普通消息与子结果混排的 `readPublicMessages` 也先批量调用 `messageRecords`，保留普通历史消息的原时间补齐规则。Fork 来源读取沿原已核实原行补出时间。[输入与消息回归](../../test/isolated/storage/inputs.test.ts)覆盖首次记录、增量与完成、冷读、旧日志和裁剪边界；元数据不进入模型正文或执行授权。
+缺少该字段的旧历史在一页内批量查最早 `message.updated`，只有 replay floor 仍为0、第一条事件带原 `kite.session-log` v1 `occurredAt` 时才提供时间；日志已裁剪、原事件未带时间或无法核实时保持缺失，不使用较晚更新、Run 时间或查询时钟代替；可选时间日志的 JSON 损坏也只使时间缺省，不能阻断原消息、View 或已核实出处读取，原正文与权限证明仍按原规则校验。该读取与 replay floor 的核对位于同一 SQL 快照；普通消息与子结果混排的 `readPublicMessages` 也先批量调用 `messageRecords`，保留普通历史消息的原时间补齐规则。Fork 来源读取沿原已核实原行补出时间。[输入与消息回归](../../test/isolated/storage/inputs.test.ts)覆盖首次记录、增量与完成、冷读、旧日志和裁剪边界；元数据不进入模型正文或执行授权。
 
 2026-10-23，Windows x64／Bun1.4.3：输入整文件18项通过，增加旧元数据缺失断言后消息时间专项1项／10断言通过，Agent typecheck 与边界检查通过。[Fork record](../../test/isolated/storage/fork-record-sources.test.ts)完整文件18项通过的既有结果继续适用，本轮未改动其源码、夹具或依赖。
 
@@ -258,6 +258,8 @@ Host 自动封存 prepare 中 session namespace 的 `records.get/list` 完整原
 普通邮件的物理 Message 继续保存原内部占位与 mail source ID；公开 [Runtime listMessages/getView](../runtime.ts)通过 `publicAgentMailMessage` 只读展开原 Artifact，交付 system 消息、完整 content 和 `agentMessage`（原 mail ID、发送 Session／Tool Execution、名称、完整性）。来源须核原 `agent.message`、真实 receivedMessage／Run／selection、成功 sender Tool、原主体／Store／工作身份与直接父子关系，以及原 Artifact 的引用、scope 和字节证明。来源损坏返回无推断作者的系统不可读事实；正文不可读保留已验证作者并标 `contentComplete:false`，不退成用户气泡。公开视图不修改物理消息或低信任模型输入，也不增加 Source、Run 或接收回执；Native 把邮件留在实际接收轮次的原过程。
 
 [统一邮箱回归](../../test/isolated/business/task/unified-inbox.test.ts)核真实 active／idle 接收、用户引导、原消息与结果的来源区别、准确重收和冷读取；[报告事务](../../test/isolated/business/task/collaboration-report-transactions.test.ts)与[冷报告恢复](../../test/isolated/business/task/collaboration-cold-report.test.ts)通过实际邮箱收件故障验证整体回滚与提交后丢响应。普通邮件的 sender／Artifact 和 adopted 水位仍由[邮箱](../../test/isolated/business/task/mailbox.test.ts)、[后继采用](../../test/isolated/business/task/mail-adoption.test.ts)覆盖。
+
+上述最终结果用例明确不发送普通邮件，核全库零 `agent.message`、仅一条 `kind:result`、原 carrier 完整正文／revision／Store 来源和每次后继实际 Model 请求中恰一份结果 Source。active 保持原 Run，接纳、收尾及冷读均无 `agentResult`；idle 当前授权通过时仅创建一个以原报告为 origin 的续 Run，公开完整结果与准确来源保持一致；拒绝续跑授权时零新 Run、Source、Model 或结果气泡。重复接收和三次冷投影不得改变上述身份或数量。2026-10-23，统一邮箱、报告事务、冷报告三整文件共19项／467断言通过；这组确定性回归与 [Desktop owner](../../../../apps/desktop/README.md#native-当前会话环境信息与子详情) 的正常最终结果真实模型窗口证据分别维护。
 
 [邮箱展示回归](../../test/isolated/business/task/mailbox.test.ts)还核父子双向长多行 Unicode 正文及真实发送者、公开列表与 View 一致、原 Store 物理记录和模型输入不变、冷只读零请求／写入，以及同内部文案的用户输入不冒认、错 Run／损坏来源／缺 Command／损坏 kind／坏 Artifact 均不降级为用户消息。
 

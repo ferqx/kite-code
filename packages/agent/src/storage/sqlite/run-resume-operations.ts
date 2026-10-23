@@ -183,6 +183,14 @@ function originalScope(
   let plannedModels = 0;
   let rows: Iterable<Row>;
   if (certificate) {
+    // Supersession also depends on the applied input's receipt and Message.
+    // Those are not Execution audit rows: recheck them even when this Model is
+    // older than the latest frontier and its own row certificate is unchanged.
+    for (const superseded of db.rows(
+      "SELECT * FROM execution WHERE run_id=? AND kind='model' AND state='cancelled'",
+      input.runId,
+    ))
+      assertHistoricalExecution(db, superseded, input.expectedStoreId, String(session.root_id));
     const frontier = db.rows(
       "SELECT rowid AS resume_position,* FROM execution WHERE run_id=? AND session_id=? AND state IN('planned','dispatching','running','outcome_unknown') ORDER BY rowid LIMIT 4097",
       input.runId,

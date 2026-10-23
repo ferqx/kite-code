@@ -13,7 +13,11 @@ import { act, type ReactNode, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import type { NativeBridge, NativeRequest, NativeSelection } from '../../src/native-bridge';
 import { NativeModelOutputMessage } from '../../src/native-model-output-message';
-import { desktopTranscript, useNativeRuns } from '../../src/native-transcript';
+import {
+  desktopTranscript,
+  nativePendingInputMessage,
+  useNativeRuns,
+} from '../../src/native-transcript';
 import type {
   NativeRunFact,
   NativeToolMessageFact,
@@ -73,6 +77,165 @@ const tool = (id: string): NativeToolMessageFact => ({
   status: 'succeeded',
   resultRevision: '1',
   target: `${id}.txt`,
+});
+
+test('only a local original user steer receives guidance classification; initial, follow-up, Fork and incomplete ownership stay ordinary', () => {
+  const steer = { ...message('steer', 'user', '2', '精确引导'), inputKind: 'input.steer' as const };
+  const inputs: Message[] = [
+    message('initial', 'user', '1', '首条任务'),
+    steer,
+    { ...message('follow-up', 'user', '3', '下一轮'), inputKind: 'input.follow_up' },
+    { ...steer, id: 'assistant-claim', role: 'assistant' },
+    {
+      ...steer,
+      id: 'fork',
+      originMessage: { storeId: 'store', sessionId: 's', messageId: 'old', runId: 'r' },
+    },
+    { ...steer, id: 'foreign-session', sessionId: 'other' },
+    { ...steer, id: 'unknown-run', runId: 'missing' },
+    { ...steer, id: 'no-run', runId: null },
+    message('old-history', 'user', '4', '历史文本自称引导'),
+  ];
+  const project = (runs = [run()]) =>
+    desktopTranscript({ messages: inputs, runs, tools: [], storeId: 'store', sessionId: 's' });
+  const models = project().messages;
+  expect(models.filter((entry) => entry.inputKind).map((entry) => entry.id)).toEqual(['steer']);
+  expect(models.find((entry) => entry.id === 'steer')!.turnId).toBe(
+    JSON.stringify(['native-run', 'store', 's', 'r']),
+  );
+  expect(
+    project([{ ...run(), originStoreId: 'foreign' }]).messages.every((entry) => !entry.inputKind),
+  ).toBe(true);
+  expect(project([]).messages.every((entry) => !entry.inputKind)).toBe(true);
+});
+
+test('optimistic and persisted guidance remain in one original Run process while failed or unknown delivery stays visible outside it', async () => {
+  const f = fixture();
+  const body = '引导原文 雪🙂\n保留全部内容';
+  const scope = {
+    storeId: 'store',
+    sessionId: 's',
+    targetRunId: 'r',
+    kind: 'input.steer',
+    text: body,
+  };
+  const selection = {
+    storeId: 'store',
+    session: { id: 's' },
+    runs: [{ ...run(), originCommandId: 'initial-command' }],
+  } as unknown as NativeSelection;
+  const initial = message('initial', 'user', '1', '首条任务保持可见');
+  const saved: Message = {
+    ...message('saved-steer', 'user', '3', body),
+    inputKind: 'input.steer',
+    originCommandId: 'steer-command',
+    sourceIds: ['steer-command'],
+  };
+  const render = async (
+    phase: 'sending' | 'accepted' | 'failed' | 'unknown' | 'saved',
+    active: boolean,
+    key = 'hot',
+  ) => {
+    const transcript = desktopTranscript({
+      messages: [
+        initial,
+        message('before', 'assistant', '2', '处理过程开始'),
+        ...(phase === 'saved' ? [saved] : []),
+        message('after', 'assistant', '4', '唯一最终回复'),
+      ],
+      runs: [
+        {
+          ...run(),
+          status: active ? 'running' : 'completed',
+          isActive: active,
+          finishedAt: active ? null : 3000,
+        },
+      ],
+      tools: [],
+      storeId: 'store',
+      sessionId: 's',
+    });
+    const models = [...transcript.messages];
+    if (phase !== 'saved')
+      models.splice(2, 0, nativePendingInputMessage('steer-command', scope, phase, selection));
+    await act(async () =>
+      f.root.render(
+        <Conversation
+          key={key}
+          loading={false}
+          selected
+          connected
+          saveReading={() => {}}
+          messages={models}
+          turnActivity={transcript.turnActivity}
+          renderMessageContent={(model) => <p>{model.text}</p>}
+        />,
+      ),
+    );
+  };
+  try {
+    for (const phase of ['sending', 'accepted', 'saved'] as const) {
+      await render(phase, true);
+      const guidance = [...f.host.querySelectorAll('article.message')].find((element) =>
+        element.textContent?.includes(body),
+      )!;
+      expect(guidance.closest('.agent-turn-process')).not.toBeNull();
+      expect(
+        [...f.host.querySelectorAll('article.message')].filter((element) =>
+          element.textContent?.includes(body),
+        ),
+      ).toHaveLength(1);
+      expect(f.host.querySelectorAll('.agent-turn-process')).toHaveLength(1);
+      expect(f.host.textContent).toContain('首条任务保持可见');
+    }
+    for (const phase of ['failed', 'unknown'] as const) {
+      await render(phase, true);
+      const guidance = [...f.host.querySelectorAll('article.message')].find((element) =>
+        element.textContent?.includes(body),
+      )!;
+      expect(guidance.closest('.agent-turn-process')).toBeNull();
+    }
+    for (const key of ['hot', 'cold']) {
+      await render('saved', false, key);
+      expect(f.host.querySelectorAll('.agent-turn-process')).toHaveLength(1);
+      await act(async () =>
+        f.host.querySelector<HTMLButtonElement>('button.agent-turn-summary')!.click(),
+      );
+      const guidance = [...f.host.querySelectorAll('article.message')].find((element) =>
+        element.textContent?.includes(body),
+      )!;
+      expect(guidance.closest('.agent-turn-process')).not.toBeNull();
+      expect(f.host.textContent).toContain('唯一最终回复');
+    }
+    for (const phase of ['sending', 'accepted'] as const) {
+      expect(
+        nativePendingInputMessage(
+          'steer-command',
+          { ...scope, storeId: 'foreign' },
+          phase,
+          selection,
+        ).inputKind,
+      ).toBeUndefined();
+      expect(
+        nativePendingInputMessage(
+          'steer-command',
+          { ...scope, targetRunId: 'other' },
+          phase,
+          selection,
+        ).inputKind,
+      ).toBeUndefined();
+      expect(
+        nativePendingInputMessage(
+          'steer-command',
+          { ...scope, kind: 'input.follow_up' },
+          phase,
+          selection,
+        ).inputKind,
+      ).toBeUndefined();
+    }
+  } finally {
+    await f.close();
+  }
 });
 
 function messageBodyText(element: Element) {
@@ -1082,6 +1245,219 @@ test('automatic compression is a live separator only for the matching active Run
   }
 });
 
+test('compression keeps its DOM row and order when the hot View hands over before history catches up', async () => {
+  const f = fixture();
+  const initial = message('u-compress', 'user', '1', '了解项目');
+  const before = message('before-compress', 'assistant', '2', '先检查项目');
+  const summary: Message = {
+    ...message('actual-summary-message', 'assistant', '3', 'PRIVATE SUMMARY'),
+    sourceIds: ['summary-execution'],
+    compression: { id: 'compression', trigger: 'automatic', status: 'completed' },
+  };
+  const after = message('after-compress', 'assistant', '4', '压缩后继续处理');
+  const progress = {
+    runId: 'r',
+    originStoreId: 'store',
+    executionId: 'summary-execution',
+    phase: 'preparing' as const,
+  };
+  const input = {
+    messages: [initial, before],
+    runs: [{ ...run(), status: 'running' as const, isActive: true, finishedAt: null }],
+    tools: [],
+    storeId: 'store',
+    sessionId: 's',
+  };
+  const render = async (options: {
+    messages?: Message[];
+    compressionMessages?: Message[];
+    compressionProgress?: NativeSelection['compressionProgress'];
+  }) => {
+    const transcript = desktopTranscript({ ...input, ...options });
+    await act(async () =>
+      f.root.render(
+        <Conversation
+          messages={transcript.messages}
+          turnActivity={transcript.turnActivity}
+          loading={false}
+          selected
+          connected
+          saveReading={() => {}}
+        />,
+      ),
+    );
+    return transcript;
+  };
+  try {
+    await render({ compressionProgress: progress });
+    const row = f.host.querySelector('.context-compacted')!;
+    const turn = row.closest('.agent-turn');
+    const response = turn?.querySelector('.response-status');
+    expect(row.textContent).toBe('正在压缩上下文');
+    for (const phase of ['summarizing', 'validating'] as const) {
+      await render({ compressionProgress: { ...progress, phase } });
+      expect(f.host.querySelector('.context-compacted') === row).toBe(true);
+    }
+    // The same View confirms publication, but the independent history GET is held.
+    await render({ compressionMessages: [{ ...summary, content: '' }] });
+    expect(f.host.querySelector('.context-compacted') === row).toBe(true);
+    expect(row.textContent).toBe('上下文压缩完成');
+    expect(row.closest('.agent-turn') === turn).toBe(true);
+    expect(turn?.querySelector('.response-status') === response).toBe(true);
+    // A newer streamed message can arrive before that history GET as well.
+    const pending = await render({
+      messages: [initial, before, after],
+      compressionMessages: [{ ...summary, content: '' }],
+    });
+    expect(pending.messages.filter((entry) => entry.systemKind === 'compaction')).toHaveLength(1);
+    expect(pending.messages.find((entry) => entry.systemKind === 'compaction')?.id).toBe(
+      summary.id,
+    );
+    expect(f.host.querySelector('.context-compacted') === row).toBe(true);
+    expect(
+      row.compareDocumentPosition(
+        f.host.querySelector('.agent-turn-process-messages')!.lastElementChild!,
+      ) & 4,
+    ).toBe(4);
+    await render({ messages: [initial, before, summary, after] });
+    expect(f.host.querySelector('.context-compacted') === row).toBe(true);
+    expect(f.host.textContent).not.toContain('PRIVATE SUMMARY');
+    const oldView: Message = {
+      ...summary,
+      compression: { ...summary.compression!, status: 'running' },
+    };
+    await render({ messages: [initial, before, summary, after], compressionMessages: [oldView] });
+    expect(row.textContent).toBe('上下文压缩完成');
+    expect(f.host.querySelector('.context-compacted') === row).toBe(true);
+  } finally {
+    await f.close();
+  }
+});
+
+test('View-only compression facts insert without sorting already-projected original input history, and updates keep that position', () => {
+  // The complete business Message occupies an earlier display position after
+  // historical input de-duplication; its physical seq intentionally stays 3.
+  const business = {
+    ...message('business-original', 'user', '3', '真人原输入与附件'),
+    sourceIds: ['original-input'],
+    files: [{ name: 'original.txt', uri: 'file:///workspace/original.txt' }],
+  };
+  const interpretation = message('interpretation', 'assistant', '2', '原解释');
+  const reply = message('reply', 'assistant', '4', '原回复');
+  const compression = (
+    id: string,
+    seq: string,
+    status: 'running' | 'completed' = 'completed',
+  ): Message => ({
+    ...message(id, 'assistant', seq, 'PRIVATE SUMMARY BYTES'),
+    sourceIds: [`execution-${id}`],
+    compression: { id: `compression-${id}`, trigger: 'automatic', status },
+  });
+  const input = {
+    runs: [{ ...run(), status: 'running' as const, isActive: true, finishedAt: null }],
+    tools: [],
+    storeId: 'store',
+    sessionId: 's',
+  };
+  const order = (messages: Message[], facts: Message[]) => {
+    const output = desktopTranscript({ ...input, messages, compressionMessages: facts }).messages;
+    expect(output.some((row) => row.text.includes('PRIVATE SUMMARY BYTES'))).toBe(false);
+    return output
+      .filter((row) => !['turn_timing', 'turn_terminal'].includes(row.systemKind ?? ''))
+      .map((row) => row.id);
+  };
+  const after = compression('after', '5');
+  expect(order([business, interpretation, reply], [after])).toEqual([
+    'business-original',
+    'interpretation',
+    'reply',
+    'after',
+  ]);
+  const laterReply = { ...reply, seq: '6' };
+  const last = compression('last', '7');
+  expect(order([business, interpretation, laterReply], [last, after])).toEqual([
+    'business-original',
+    'interpretation',
+    'after',
+    'reply',
+    'last',
+  ]);
+  // Once history owns a compression row, a View refresh updates its status
+  // in place even when that row's surrounding display order is not seq order.
+  const historical = compression('historical', '5', 'running');
+  const updated = {
+    ...historical,
+    compression: { ...historical.compression!, status: 'completed' as const },
+  };
+  const history = [business, historical, interpretation, laterReply];
+  expect(order(history, [updated, updated])).toEqual([
+    'business-original',
+    'historical',
+    'interpretation',
+    'reply',
+  ]);
+  const output = desktopTranscript({
+    ...input,
+    messages: history,
+    compressionMessages: [updated],
+  }).messages;
+  expect(output.find((row) => row.id === historical.id)?.status).toBe('completed');
+  expect(history.map((row) => row.id)).toEqual([
+    'business-original',
+    'historical',
+    'interpretation',
+    'reply',
+  ]);
+  expect(business).toMatchObject({
+    seq: '3',
+    sourceIds: ['original-input'],
+    files: [{ name: 'original.txt', uri: 'file:///workspace/original.txt' }],
+  });
+});
+
+test('compression View facts are scope-bound, preserve history and distinguish attempts', () => {
+  const original = message('u', 'user', '1', '原任务');
+  const summary: Message = {
+    ...message('summary', 'assistant', '2', ''),
+    sourceIds: ['old-execution'],
+    compression: { id: 'old-compression', trigger: 'automatic', status: 'completed' },
+  };
+  const input = {
+    messages: [original, summary],
+    runs: [{ ...run(), status: 'running' as const, isActive: true, finishedAt: null }],
+    tools: [],
+    storeId: 'store',
+    sessionId: 's',
+  };
+  const transcript = desktopTranscript({
+    ...input,
+    compressionMessages: [
+      { ...summary, id: 'foreign-session', sessionId: 'other' },
+      { ...summary, id: 'foreign-run', runId: 'other' },
+      { ...summary, id: 'ordinary-message', compression: undefined },
+      {
+        ...summary,
+        id: 'fork',
+        originMessage: { storeId: 'store', sessionId: 's', messageId: summary.id, runId: 'r' },
+      },
+    ],
+    compressionProgress: {
+      runId: 'r',
+      originStoreId: 'store',
+      executionId: 'new-execution',
+      phase: 'preparing',
+    },
+  });
+  const rows = transcript.messages.filter((entry) => entry.systemKind === 'compaction');
+  expect(rows).toHaveLength(2);
+  expect(rows[0]?.id).toBe(summary.id);
+  expect(rows[0]?.presentationKey).not.toBe(rows[1]?.presentationKey);
+  expect(transcript.messages.some((entry) => entry.id === 'foreign-session')).toBe(false);
+  expect(transcript.messages.some((entry) => entry.id === 'foreign-run')).toBe(false);
+  expect(transcript.messages.some((entry) => entry.id === 'ordinary-message')).toBe(false);
+  expect(transcript.messages.some((entry) => entry.id === 'fork')).toBe(false);
+});
+
 test('real Core compression, later tool work and completion remain distinct through HTTP, generated Client and Native transcript', async () => {
   const { mkdtempSync, realpathSync, rmSync } = await import('node:fs');
   const { tmpdir } = await import('node:os');
@@ -1304,7 +1680,7 @@ test('real Core compression, later tool work and completion remain distinct thro
 test('cold compression outcomes stay separators without summary prose or final-copy controls; validating deduplicates its in-flight Model', async () => {
   const f = fixture();
   const labels = {
-    running: '上下文压缩上次确认为进行中',
+    running: null,
     completed: '上下文压缩完成',
     failed: '上下文压缩失败',
     cancelled: '上下文压缩已取消',
@@ -1353,12 +1729,33 @@ test('cold compression outcomes stay separators without summary prose or final-c
       const summary = f.host.querySelector<HTMLButtonElement>('.agent-turn-summary');
       if (summary?.getAttribute('aria-expanded') === 'false')
         await act(async () => summary.click());
-      expect(f.host.querySelectorAll('.context-compacted')).toHaveLength(1);
-      expect(f.host.querySelector('.context-compacted')?.textContent).toBe(labels[status]);
+      expect(f.host.querySelectorAll('.context-compacted')).toHaveLength(
+        status === 'running' ? 0 : 1,
+      );
+      expect(f.host.querySelector('.context-compacted')?.textContent ?? null).toBe(labels[status]);
       expect(f.host.textContent).not.toContain('Internal summary must stay hidden');
       expect(f.host.querySelector('[aria-label="复制本轮Agent回复"]')).toBeNull();
       expect(transcript.messages.some((entry) => entry.finalReply)).toBe(false);
     }
+    const live = project('running', {
+      runId: 'r',
+      originStoreId: 'store',
+      phase: 'summarizing',
+      executionId: 'summary-execution',
+    });
+    expect(live.messages.filter((entry) => entry.systemKind === 'compaction')).toHaveLength(1);
+    expect(live.messages.find((entry) => entry.id === 'summary-status')).toMatchObject({
+      title: '正在压缩上下文',
+      status: 'running',
+      settled: false,
+    });
+    const foreign = project('running', {
+      runId: 'r',
+      originStoreId: 'foreign-store',
+      phase: 'summarizing',
+      executionId: 'summary-execution',
+    });
+    expect(foreign.messages.some((entry) => entry.systemKind === 'compaction')).toBe(false);
     const validating = project('unpublished', {
       runId: 'r',
       originStoreId: 'store',

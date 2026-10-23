@@ -137,8 +137,14 @@ export function desktopConversationMessages(messages: readonly Message[]): Messa
   });
 }
 
-export function desktopMessages(messages: readonly Message[]): DesktopMessage[] {
-  return messages.map((message) => {
+export function desktopMessages(
+  messages: readonly Message[],
+  includeRunningCompression = false,
+): DesktopMessage[] {
+  const visible = includeRunningCompression
+    ? messages
+    : messages.filter((message) => message.compression?.status !== 'running');
+  return visible.map((message) => {
     const agentMessage = message.agentMessage;
     if (agentMessage)
       return {
@@ -190,7 +196,7 @@ export function desktopMessages(messages: readonly Message[]): DesktopMessage[] 
                   : message.compression.status === 'cancelled'
                     ? '上下文压缩已取消'
                     : message.compression.status === 'running'
-                      ? '上下文压缩上次确认为进行中'
+                      ? '正在压缩上下文'
                       : '上下文压缩未发布',
             status:
               message.compression.status === 'unpublished' ||

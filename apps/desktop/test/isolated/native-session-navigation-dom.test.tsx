@@ -45,6 +45,7 @@ function fixture(
   activeParent = false,
   pendingToolMetadata = false,
   initialDraft = 'Original private draft',
+  compressingParent = false,
 ) {
   const dom = new JSDOM('<div id="root"></div>', {
     url: 'http://localhost',
@@ -139,6 +140,15 @@ function fixture(
       session: item.rootSession,
       viewLoading,
       permissionUnavailable,
+      compressionProgress:
+        compressingParent && (!permissionUnavailable || viewLoading)
+          ? {
+              runId: item.run!.id,
+              originStoreId: 'store',
+              executionId: 'compression-model',
+              phase: 'summarizing',
+            }
+          : undefined,
       ...(activeParent && !viewLoading && !permissionUnavailable
         ? {
             permissions: {
@@ -934,6 +944,36 @@ test('opening the selected parent preserves its child tab without selecting agai
       'Original private draft',
     );
     expect(f.requests.filter((request) => request.method === 'select')).toHaveLength(selections);
+  } finally {
+    await f.close();
+  }
+});
+
+test('same-selection refresh retains the hot compression DOM and label; true permission loss revokes it', async () => {
+  const f = fixture(true, false, '', true);
+  try {
+    await f.render();
+    await f.click('Original');
+    await until(() => !!f.host.querySelector('.context-compacted'));
+    const row = f.host.querySelector('.context-compacted')!;
+    const turn = row.closest('.agent-turn');
+    expect(row.textContent).toBe('正在压缩上下文');
+    for (let index = 0; index < 3; index++) {
+      await f.refreshing(true);
+      expect(f.host.querySelector('.context-compacted') === row).toBe(true);
+      expect(row.textContent).toBe('正在压缩上下文');
+      expect(row.classList.contains('running')).toBe(true);
+      await f.refreshing(false);
+      expect(f.host.querySelector('.context-compacted') === row).toBe(true);
+      expect(row.closest('.agent-turn') === turn).toBe(true);
+      expect(f.host.querySelectorAll('.context-compacted')).toHaveLength(1);
+    }
+    await f.unavailable(true);
+    expect(f.host.querySelector('.context-compacted')).toBeNull();
+    expect(f.host.textContent).toContain('Parent transcript');
+    await f.unavailable(false);
+    await until(() => !!f.host.querySelector('.context-compacted'));
+    expect(f.host.querySelector('.context-compacted')?.textContent).toBe('正在压缩上下文');
   } finally {
     await f.close();
   }

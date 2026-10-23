@@ -108,7 +108,13 @@ import {
   liveToolMessages,
   useNativeToolMessages,
 } from './native-tool-messages';
-import { desktopTranscript, nativeReplyKey, useNativeRuns } from './native-transcript';
+import {
+  desktopTranscript,
+  nativeInputTurnId,
+  nativePendingInputMessage,
+  nativeReplyKey,
+  useNativeRuns,
+} from './native-transcript';
 import { NativeTranscriptDisplay } from './native-transcript-display';
 import { NativePendingAttachments, NativeUserImages } from './native-user-images';
 import { NativeWindowFrame } from './native-window-frame';
@@ -135,22 +141,6 @@ function savedNativeInput(
             run.originCommandId === commandId,
         )))
   );
-}
-
-function nativeInputTurnId(
-  commandId: string,
-  scope: { storeId: string; sessionId: string; targetRunId?: string },
-  selection: NativeState['selection'],
-) {
-  if (selection?.storeId !== scope.storeId || selection.session.id !== scope.sessionId)
-    return undefined;
-  const run = selection.runs.find(
-    (run) =>
-      run.originStoreId === scope.storeId &&
-      run.sessionId === scope.sessionId &&
-      (run.originCommandId === commandId || run.id === scope.targetRunId),
-  );
-  return run ? JSON.stringify(['native-run', scope.storeId, scope.sessionId, run.id]) : undefined;
 }
 
 /** The renderer owns only public presentation; all I/O is the named preload bridge. */
@@ -341,6 +331,7 @@ function NativeDesktopContent({
       {
         storeId: string;
         sessionId: string;
+        kind: 'run.start' | 'input.steer' | 'input.follow_up';
         targetRunId?: string;
         afterMessageId?: string;
         afterInputCommandId?: string;
@@ -1925,6 +1916,7 @@ function NativeDesktopContent({
         return new Map(previous).set(commandId, {
           storeId: selection.storeId,
           sessionId,
+          kind: intent.kind,
           ...(intent.kind === 'input.steer' ? { targetRunId: intent.targetRunId } : {}),
           afterMessageId: displayMessages.at(-1)?.id,
           afterInputCommandId: predecessor?.[0],
@@ -2050,10 +2042,8 @@ function NativeDesktopContent({
       runs: runMessages.runs,
       tools: toolMessages.entries,
       executions: selection.executions,
-      compressionProgress:
-        !selection.viewLoading && !selection.permissionUnavailable
-          ? selection.compressionProgress
-          : undefined,
+      compressionMessages: selection.compressionMessages,
+      compressionProgress: selection.compressionProgress,
       storeId: selection.storeId,
       sessionId: selection.session.id,
       fullReply: (message) => {
@@ -2142,17 +2132,10 @@ function NativeDesktopContent({
                 ? 'unknown'
                 : 'sending'
           : input.phase;
-        const turnId = nativeInputTurnId(id, input, selection);
         return [
           {
-            id,
-            ...(turnId ? { turnId } : {}),
-            role: 'user' as const,
-            text: input.text,
+            ...nativePendingInputMessage(id, input, phase, selection),
             hasAttachments: !!(input.files?.length || input.images?.length),
-            settled: phase === 'accepted',
-            copyText: null,
-            delivery: phase === 'accepted' ? undefined : phase,
           },
         ];
       }),

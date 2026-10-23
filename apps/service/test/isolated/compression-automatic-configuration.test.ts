@@ -150,16 +150,16 @@ for (const rejectSummary of [false, true])
         content: '新任务：Automatic next work',
       });
       const applied = await runtime.waitForCommand('next', { timeoutMs: 5000 });
-      const application = applied.receipt as { runId: string; businessCommandId: string };
+      const application = applied.receipt as { runId: string };
       const view = await client.getView('s'),
         context = await client.getContext('s', { storeId: expectedStoreId }),
         inputs = (await client.listModelInputs('s')).items.filter(
-          (item) => item.originCommandId === application.businessCommandId,
+          (item) => item.originCommandId === applied.id,
         );
       expect(view.runs.find((run) => run.id === application.runId)).toMatchObject({
         status: 'completed',
         reason: null,
-        originCommandId: application.businessCommandId,
+        originCommandId: applied.id,
         rootWorkCommandId: 'next',
       });
       expect(validations).toBe(1);
@@ -169,6 +169,65 @@ for (const rejectSummary of [false, true])
       const summaryInput = await client.getModelInput('s', inputs[0]!.executionId),
         actual = await client.getModelInput('s', inputs[1]!.executionId);
       expect(summaryInput.request.tools).toHaveLength(0);
+      const checkpointInstructions = summaryInput.request.messages.filter((message) =>
+        message.content.startsWith('Summarize the preceding recorded conversation'),
+      );
+      expect(checkpointInstructions).toHaveLength(1);
+      const maintenance = checkpointInstructions[0]!;
+      expect(maintenance.role).toBe('user');
+      const compressionSource = (await store.getExecution(inputs[0]!.executionId))!
+        .decisionSource as { compressionId: string };
+      expect(maintenance.sourceIds).toEqual([compressionSource.compressionId]);
+      // Protect the maintenance contract in the actual SDK request, while the
+      // assertions below verify isolation rather than a fixed Model's obedience.
+      expect(maintenance.content).toContain('internal context checkpoint, not a new user task');
+      expect(maintenance.content).toContain('Do not record these checkpoint instructions');
+      expect(maintenance.content).toContain('For this checkpoint response only');
+      expect(maintenance.content).toContain('do not cancel pending task actions');
+      // The same trusted contract must reach the actual post-checkpoint SDK
+      // call. Historical continuation must not require replaying compacted
+      // work, while the summary still cannot supply fresh receipts or rights.
+      const continuationContracts = actual.request.messages.filter((message) =>
+        message.sourceIds?.includes('agent:contract'),
+      );
+      expect(continuationContracts).toHaveLength(1);
+      const continuationContract = continuationContracts[0]!;
+      expect(continuationContract.role).toBe('system');
+      expect(continuationContract.content).toContain(
+        'Compaction changes the model window, not execution history',
+      );
+      expect(continuationContract.content).toContain('preserve once-only task limits');
+      expect(continuationContract.content).toContain(
+        'not as a fresh execution receipt or authorization',
+      );
+      expect(continuationContract.content).toContain(
+        'Preserve uncertainty about missing or unknown outcomes',
+      );
+      expect(continuationContract.content).toContain(
+        'do not by themselves prove current external state, new effects or overall business completion',
+      );
+      expect(
+        summaryInput.request.messages.filter((message) =>
+          message.sourceIds?.includes('agent:contract'),
+        ),
+      ).toEqual(continuationContracts);
+      for (const request of requests) {
+        expect(
+          (request.messages as { role: string; content: string }[]).filter(
+            (message) => message.content === continuationContract.content,
+          ),
+        ).toEqual([{ role: 'system', content: continuationContract.content }]);
+      }
+      expect(
+        actual.request.messages.some((message) => message.content === maintenance.content),
+      ).toBe(false);
+      expect(
+        (await client.listMessages('s')).some((message) => message.content === maintenance.content),
+      ).toBe(false);
+      expect((await store.getCommand('next'))!.request).toMatchObject({
+        kind: 'run.start',
+        content: '新任务：Automatic next work',
+      });
       expect(
         summaryInput.request.messages.some(
           (message) => message.content === '新任务：Automatic next work',
@@ -208,6 +267,16 @@ for (const rejectSummary of [false, true])
         expect(
           actual.request.messages.some((message) => message.content === 'Original actual answer'),
         ).toBe(false);
+        expect(
+          actual.request.messages
+            .filter((message) => message.sourceIds?.some((id) => ['original', 'next'].includes(id)))
+            .map((message) => [message.role, message.content, message.sourceIds]),
+        ).toEqual([
+          ['user', 'Original actual user', ['original']],
+          ['user', '新任务：Automatic next work', ['next']],
+        ]);
+        expect(JSON.stringify(requests[2])).toContain('Original actual user');
+        expect(JSON.stringify(requests[2])).toContain('新任务：Automatic next work');
       }
       expect(
         (await client.listMessages('s')).slice(0, 2).map((message) => message.content),

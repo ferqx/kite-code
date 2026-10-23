@@ -4,6 +4,7 @@ import { drizzle } from 'drizzle-orm/bun-sqlite';
 import { canonicalJson } from '../../json';
 import type { Store } from '../port';
 import { AgentError, type ContextSelection, type Json, type ResultContextSource } from '../types';
+import { originalCompressionInput } from './compression-inputs';
 import { activeCompression, historyOnlyCompression } from './compression-operations';
 import { continuationReportProof } from './job-report-continuation';
 import type { SqliteOperations } from './operations';
@@ -600,7 +601,7 @@ export function callContextSelection(
           : activeCompression(db, input.sessionId, selection.id, upper);
       const mf = filter(selection, 'seq'),
         sf = filter(selection, 'seq');
-      if (method !== 'getSelectedContext') {
+      if (method === 'getExpandedContext') {
         const unsupported = db.row(
           `SELECT message.fork_source_message_id FROM message WHERE message.session_id=? AND message.seq>? AND message.seq<=? AND message.status='complete' AND ${mf.sql} AND ${historyOnlyCompression()} AND message.seq>${compression ? BigInt(compression.coveredThroughSeq) : 0n} AND (NOT EXISTS(SELECT 1 FROM message_part part WHERE part.message_id=message.id AND part.ordinal=0) OR EXISTS(SELECT 1 FROM message_part part WHERE part.message_id=message.id AND (part.kind<>'text' OR part.content_version<>1 OR part.ordinal<>0))) LIMIT 1`,
           input.sessionId,
@@ -615,8 +616,11 @@ export function callContextSelection(
               : 'context_content_unsupported',
           );
       }
+      const covered = compression ? BigInt(compression.coveredThroughSeq) : 0n;
+      const modelContext = method === 'getModelContext';
+      const identifyInputs = modelContext || method === 'getExpandedContext';
       const messageRows = db.rows(
-        `SELECT * FROM message WHERE session_id=? AND seq>? AND seq<=? AND status='complete' AND ${mf.sql} AND ${historyOnlyCompression()} AND seq>${compression ? BigInt(compression.coveredThroughSeq) : 0n} ORDER BY seq LIMIT ?`,
+        `SELECT * FROM message WHERE session_id=? AND seq>? AND seq<=? AND status='complete' AND ${mf.sql} AND ${historyOnlyCompression()} AND ${modelContext ? `(seq>${covered} OR role='user')` : `seq>${covered}`} ORDER BY seq LIMIT ?`,
         input.sessionId,
         after,
         upper,
@@ -632,15 +636,52 @@ export function callContextSelection(
         sourceLimit + 1,
       );
       const messages: ReturnType<SqliteOperations['message']>[] = [];
+      const retainedInputMessageIds: string[] = [];
       const resultSources: ResultContextSource[] = [];
+      const inputSubject = identifyInputs ? subject(db, input.sessionId) : undefined;
+      let scannedMessageSeq = after;
+      let scannedMessages = 0;
       let bytes = compression ? Buffer.byteLength(JSON.stringify(compression)) : 0;
       if (bytes > byteLimit) throw new AgentError('context_item_too_large');
       for (const row of messageRows.slice(0, messageLimit)) {
+        const originalInput = identifyInputs
+          ? originalCompressionInput(db, row, inputSubject!)
+          : null;
+        const duplicate =
+          originalInput?.duplicateOfMessageId &&
+          db.row(
+            `SELECT id FROM message WHERE id=? AND session_id=? AND seq<=? AND ${mf.sql}`,
+            originalInput.duplicateOfMessageId,
+            input.sessionId,
+            upper,
+            ...mf.args,
+          );
+        if (modelContext && ((BigInt(row.seq!) <= covered && !originalInput) || duplicate)) {
+          scannedMessageSeq = String(row.seq);
+          scannedMessages++;
+          continue;
+        }
+        if (
+          modelContext &&
+          db.row(
+            "SELECT 1 FROM message m WHERE m.id=? AND (NOT EXISTS(SELECT 1 FROM message_part p WHERE p.message_id=m.id AND p.ordinal=0) OR EXISTS(SELECT 1 FROM message_part p WHERE p.message_id=m.id AND (p.kind<>'text' OR p.content_version<>1 OR p.ordinal<>0)))",
+            row.id!,
+          )
+        )
+          throw new AgentError(
+            row.fork_source_message_id ? 'fork_content_unsupported' : 'context_content_unsupported',
+          );
         const value = db.message(row),
           size = Buffer.byteLength(JSON.stringify(value));
         if (size > byteLimit) throw new AgentError('context_item_too_large');
-        if (bytes + size > byteLimit) break;
+        if (bytes + size > byteLimit) {
+          if (modelContext && messages.length === 0) throw new AgentError('context_item_too_large');
+          break;
+        }
         messages.push(value);
+        if (originalInput) retainedInputMessageIds.push(value.id);
+        scannedMessageSeq = String(row.seq);
+        scannedMessages++;
         bytes += size;
       }
       for (const row of sourceRows.slice(0, sourceLimit)) {
@@ -658,8 +699,15 @@ export function callContextSelection(
         ...(compression ? { compression } : {}),
         highWaterSeq: upper,
         messages,
+        ...(identifyInputs ? { retainedInputMessageIds } : {}),
         resultSources,
-        nextAfterSeq: messageRows.length > messages.length ? (messages.at(-1)?.seq ?? after) : null,
+        nextAfterSeq: modelContext
+          ? messageRows.length > scannedMessages
+            ? scannedMessageSeq
+            : null
+          : messageRows.length > messages.length
+            ? (messages.at(-1)?.seq ?? after)
+            : null,
         nextAfterSourceId:
           sourceRows.length > resultSources.length
             ? (resultSources.at(-1)?.id ?? input.afterSourceId ?? '')

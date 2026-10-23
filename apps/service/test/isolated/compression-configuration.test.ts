@@ -206,11 +206,11 @@ for (const { guardedReset, rejectedSummary } of [
         content: '新任务：Additional settled user turn',
       });
       const settled = await runtime.waitForCommand('additional-history', { timeoutMs: 5000 });
-      const settledApplication = settled.receipt as { runId: string; businessCommandId: string };
+      const settledApplication = settled.receipt as { runId: string };
       expect(
         (await client.getView('s')).runs.find((run) => run.id === settledApplication.runId),
       ).toMatchObject({
-        originCommandId: settledApplication.businessCommandId,
+        originCommandId: settled.id,
         rootWorkCommandId: 'additional-history',
       });
       const history = await client.listMessages('s'),
@@ -283,16 +283,16 @@ for (const { guardedReset, rejectedSummary } of [
           content: '新任务：Next explicit work',
         });
         const nextApplied = await runtime.waitForCommand('next', { timeoutMs: 5000 });
-        const nextApplication = nextApplied.receipt as { runId: string; businessCommandId: string };
+        const nextApplication = nextApplied.receipt as { runId: string };
         expect(
           (await client.getView('s')).runs.find((run) => run.id === nextApplication.runId),
         ).toMatchObject({
-          originCommandId: nextApplication.businessCommandId,
+          originCommandId: nextApplied.id,
           rootWorkCommandId: 'next',
         });
         expect(requests).toHaveLength(4);
         const next = (await client.listModelInputs('s')).items.find(
-          (item) => item.originCommandId === nextApplication.businessCommandId,
+          (item) => item.originCommandId === nextApplied.id,
         )!;
         expect(
           (await client.getModelInput('s', next.executionId)).request.messages.some(
@@ -367,16 +367,16 @@ for (const { guardedReset, rejectedSummary } of [
         content: '新任务：Next explicit work',
       });
       const nextApplied = await runtime.waitForCommand('next', { timeoutMs: 5000 });
-      const nextApplication = nextApplied.receipt as { runId: string; businessCommandId: string };
+      const nextApplication = nextApplied.receipt as { runId: string };
       expect(
         (await client.getView('s')).runs.find((run) => run.id === nextApplication.runId),
       ).toMatchObject({
-        originCommandId: nextApplication.businessCommandId,
+        originCommandId: nextApplied.id,
         rootWorkCommandId: 'next',
       });
       expect(requests).toHaveLength(4);
       const nextInput = (await client.listModelInputs('s')).items.find(
-        (item) => item.originCommandId === nextApplication.businessCommandId,
+        (item) => item.originCommandId === nextApplied.id,
       )!;
       const actual = await client.getModelInput('s', nextInput.executionId);
       expect(
@@ -390,6 +390,19 @@ for (const { guardedReset, rejectedSummary } of [
       expect(
         actual.request.messages.some((message) => message.content === 'Original actual answer'),
       ).toBe(false);
+      const retainedUsers = actual.request.messages.filter((message) =>
+        message.sourceIds?.some((id) => ['work', 'additional-history', 'next'].includes(id)),
+      );
+      expect(
+        retainedUsers.map((message) => [message.role, message.content, message.sourceIds]),
+      ).toEqual([
+        ['user', 'Original actual user', ['work']],
+        ['user', '新任务：Additional settled user turn', ['additional-history']],
+        ['user', '新任务：Next explicit work', ['next']],
+      ]);
+      expect(actual.request.messages.indexOf(retainedUsers[0]!)).toBeGreaterThan(
+        actual.request.messages.findIndex((message) => message.sourceIds?.includes(compression.id)),
+      );
       const reset = {
         expectedStoreId,
         commandId: 'reset',
@@ -461,7 +474,17 @@ test('default reduction preflight admits settled Tool steps within one long user
       { role: 'assistant', content: 'additional model step' },
       { role: 'user', content: 'remote quoted source', sourceIds: ['remote-source'] },
     ],
-    sources: [{ id: 'remote-source' }],
+    sources: [
+      {
+        id: 'remote-source',
+        kind: 'remote_reference',
+        scope: 'workspace',
+        digest: 'owned-source',
+        role: 'user',
+        placement: 'after_history',
+        content: 'remote quoted source',
+      },
+    ],
     signal: new AbortController().signal,
   } as unknown as Parameters<ContextCompressor['prepare']>[0];
   expect(await compressor.prepare(input)).not.toBeNull();

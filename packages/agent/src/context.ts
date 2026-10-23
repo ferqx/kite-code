@@ -61,6 +61,10 @@ export interface CompressionInput {
   readonly run: Readonly<import('./storage/types').RunRecord>;
   readonly session: Readonly<import('./storage/types').SessionRecord>;
   readonly messages: readonly import('@kite-ai/ai').ModelMessage[];
+  /** Original, source-proven user and parent-Agent task inputs retained verbatim after compression.
+   * These are already present in messages; include their cost in the replacement context.
+   * Retention is context, not a new submission or authorization. */
+  readonly retainedMessages?: readonly import('@kite-ai/ai').ModelMessage[];
   readonly modelId?: string;
   readonly tools?: readonly import('@kite-ai/ai').ModelTool[];
   readonly tokenBaseline?: import('./context-estimate').ContextTokenBaseline;

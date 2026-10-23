@@ -13,6 +13,44 @@ import {
   presentableRun,
 } from './tool-messages-bridge';
 
+export function nativeInputTurnId(
+  commandId: string,
+  scope: { storeId: string; sessionId: string; targetRunId?: string },
+  selection: NativeSelection | undefined,
+) {
+  if (selection?.storeId !== scope.storeId || selection.session.id !== scope.sessionId)
+    return undefined;
+  const run = selection.runs.find(
+    (run) =>
+      run.originStoreId === scope.storeId &&
+      run.sessionId === scope.sessionId &&
+      (run.originCommandId === commandId || run.id === scope.targetRunId),
+  );
+  return run ? JSON.stringify(['native-run', scope.storeId, scope.sessionId, run.id]) : undefined;
+}
+
+/** Preserve the submitted intent until its exact persisted Message takes over. */
+export function nativePendingInputMessage(
+  id: string,
+  input: { storeId: string; sessionId: string; targetRunId?: string; kind: string; text: string },
+  phase: 'sending' | 'accepted' | 'failed' | 'unknown',
+  selection: NativeSelection | undefined,
+): DesktopMessage {
+  const turnId = nativeInputTurnId(id, input, selection);
+  return {
+    id,
+    ...(turnId ? { turnId } : {}),
+    ...(turnId && input.kind === 'input.steer' && phase !== 'failed' && phase !== 'unknown'
+      ? { inputKind: 'input.steer' as const }
+      : {}),
+    role: 'user',
+    text: input.text,
+    settled: phase === 'accepted',
+    copyText: null,
+    delivery: phase === 'accepted' ? undefined : phase,
+  };
+}
+
 /** Read admitted Run facts without replacing a sealed Fork/Include boundary with later source state. */
 export function useNativeRuns({
   bridge,
@@ -262,7 +300,7 @@ export function nativeReplyKey(scope: string, message: Message) {
 
 /** Original Conversation presentation from exact public Run ownership and confirmed tool receipts. */
 export function desktopTranscript({
-  messages,
+  messages: history,
   runs,
   tools,
   executions = [],
@@ -270,6 +308,7 @@ export function desktopTranscript({
   sessionId,
   fullReply,
   compressionProgress,
+  compressionMessages = [],
 }: {
   messages: readonly Message[];
   runs: readonly NativeRunFact[];
@@ -279,11 +318,57 @@ export function desktopTranscript({
   sessionId: string;
   fullReply?: (message: Message) => string | undefined;
   compressionProgress?: NativeSelection['compressionProgress'];
+  compressionMessages?: NativeSelection['compressionMessages'];
 }): { messages: DesktopMessage[]; turnActivity?: TurnActivity } {
   const observed = new Map(
     runs.filter((run) => presentableRun(run, storeId, sessionId)).map((run) => [run.id, run]),
   );
   const identity = (runId: string) => JSON.stringify(['native-run', storeId, sessionId, runId]);
+  const compressionIdentity = (runId: string, executionId: string) =>
+    JSON.stringify(['native-compression', storeId, sessionId, runId, executionId]);
+  // The View and complete history have independent readers. Only same-scope
+  // compression metadata may fill that handoff; the bounded View never replaces
+  // history or supplies summary bytes. A confirmed history terminal wins.
+  const merged = new Map(history.map((message) => [message.id, message]));
+  const additions = new Set<string>();
+  for (const fact of compressionMessages) {
+    if (
+      !fact.compression ||
+      fact.originMessage ||
+      fact.sessionId !== sessionId ||
+      !fact.runId ||
+      !observed.has(fact.runId)
+    )
+      continue;
+    const previous = merged.get(fact.id);
+    if (!previous) {
+      merged.set(fact.id, { ...fact, content: '' });
+      additions.add(fact.id);
+    } else if (
+      previous.compression?.id === fact.compression.id &&
+      previous.sessionId === fact.sessionId &&
+      previous.runId === fact.runId &&
+      previous.sourceIds?.length === 1 &&
+      fact.sourceIds?.length === 1 &&
+      previous.sourceIds[0] === fact.sourceIds[0] &&
+      !['completed', 'failed', 'cancelled'].includes(previous.compression.status)
+    )
+      merged.set(fact.id, { ...previous, compression: fact.compression });
+  }
+  // History already places verified input replacements at their original display
+  // position. Its immutable physical sequences may therefore be out of order.
+  const messages = [...merged.values()].filter((message) => !additions.has(message.id));
+  const added = [...additions]
+    .map((id) => merged.get(id)!)
+    .sort((left, right) => {
+      const a = BigInt(left.seq),
+        b = BigInt(right.seq);
+      return a < b ? -1 : a > b ? 1 : 0;
+    });
+  for (const fact of added) {
+    const index = messages.findIndex((message) => BigInt(message.seq) > BigInt(fact.seq));
+    messages.splice(index === -1 ? messages.length : index, 0, fact);
+  }
   const replies = completeRunReplies({
     messages,
     runs: [...observed.values()],
@@ -291,7 +376,7 @@ export function desktopTranscript({
     fullContent: fullReply,
     copyScope: 'final',
   });
-  const modeled = desktopMessages(messages).map((model, index) => {
+  const modeled = desktopMessages(messages, true).map((model, index) => {
     const message = messages[index]!,
       run =
         !message.originMessage && message.sessionId === sessionId && message.runId
@@ -320,6 +405,15 @@ export function desktopTranscript({
       ...(fact ? desktopToolMessage(fact, message.id, message.content) : model),
       ...(execution ? desktopToolPresentation(execution) : {}),
       ...(run && !model.agentResult ? { turnId: identity(run.id) } : {}),
+      ...(run && message.compression && message.sourceIds?.length === 1
+        ? { presentationKey: compressionIdentity(run.id, message.sourceIds[0]!) }
+        : {}),
+      ...(run &&
+      run.originStoreId === storeId &&
+      message.role === 'user' &&
+      message.inputKind === 'input.steer'
+        ? { inputKind: 'input.steer' as const }
+        : {}),
       ...(!model.agentResult && !model.agentMessage && replies.has(message.id)
         ? {
             finalReply: true,
@@ -361,6 +455,9 @@ export function desktopTranscript({
     } else
       modeled.push({
         id: `native-compression:${identity(compressing.id)}`,
+        presentationKey: compressionProgress.executionId
+          ? compressionIdentity(compressing.id, compressionProgress.executionId)
+          : undefined,
         turnId: identity(compressing.id),
         role: 'system',
         systemKind: 'compaction',
@@ -429,7 +526,16 @@ export function desktopTranscript({
   }
   const active = [...observed.values()].find((run) => run.isActive);
   return {
-    messages: modeled,
+    // An old SQL running record cannot establish current execution. Only the
+    // matching hot observation above may make that attempt a visible live row.
+    messages: modeled.filter(
+      (model) =>
+        !(
+          model.systemKind === 'compaction' &&
+          model.status === 'unknown' &&
+          merged.get(model.id)?.compression?.status === 'running'
+        ),
+    ),
     ...(active
       ? {
           turnActivity: {

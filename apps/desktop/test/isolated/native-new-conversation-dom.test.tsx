@@ -1,7 +1,15 @@
 import { expect, test } from 'bun:test';
-import type { Message, Run, Session } from '@kite-ai/client';
+import { rmSync } from 'node:fs';
+import { pathToFileURL } from 'node:url';
+import { createRuntime } from '@kite-ai/agent';
+import { openSqliteStore } from '@kite-ai/agent/sqlite';
+import { createFixedModel, type ModelAdapter } from '@kite-ai/ai';
+import { createClient, type Message, type Run, type Session } from '@kite-ai/client';
+import { startService } from '@kite-ai/service';
 import { JSDOM } from 'jsdom';
 import { act } from 'react';
+import { temporaryDirectory } from '../../../../tests/fixtures/test-filesystem';
+import { DesktopInput, inputMetadata } from '../../src/input';
 import type {
   NativeBridge,
   NativeCallerMetadata,
@@ -41,8 +49,11 @@ function fixture(
     holdDirectory?: boolean;
     firstHumanInput?: boolean;
     runs?: Run[];
+    storeId?: string;
+    contextSelectionId?: string;
   } = {},
 ) {
+  const fixtureStoreId = options.storeId ?? 'store';
   const dom = new JSDOM('<div id="root"></div>', {
     url: 'http://localhost',
     pretendToBeVisual: true,
@@ -77,7 +88,7 @@ function fixture(
     nextSeq: messages.filter((message) => message.sessionId === id).at(-1)?.seq ?? '0',
     deletedAt: null,
     controlRevision: '0',
-    contextSelectionId: 'context',
+    contextSelectionId: options.contextSelectionId ?? 'context',
   });
   const sessions = [session('a'), session('b')];
   const modes = new Map<string, 'accept_edits' | 'auto' | 'full'>([
@@ -90,7 +101,7 @@ function fixture(
   ];
   let workspaceIds = options.workspaceIds ?? ['w', 'empty'];
   const directoryFacts = () => ({
-    storeId: 'store',
+    storeId: fixtureStoreId,
     sessions,
     workspaces: workspaceIds.map(
       (id) => registeredWorkspaces.find((workspace) => workspace.id === id)!,
@@ -126,7 +137,7 @@ function fixture(
     ...(publishDirectory ? { directory: directoryFacts() } : {}),
     selection: selectionPresent
       ? {
-          storeId: 'store',
+          storeId: fixtureStoreId,
           canReadModelOutput: false,
           viewGeneration,
           viewSelection: 1,
@@ -140,7 +151,7 @@ function fixture(
                 permissions: {
                   observationId: selected === 'a' ? 1 : 2,
                   mode: {
-                    storeId: 'store',
+                    storeId: fixtureStoreId,
                     sessionId: selected,
                     scopeSessionId: selected,
                     mode: modes.get(selected) ?? 'auto',
@@ -149,7 +160,7 @@ function fixture(
                     defaultRevision: '0',
                   },
                   trust: {
-                    storeId: 'store',
+                    storeId: fixtureStoreId,
                     workspaceId: 'w',
                     status: trusted ? ('trusted' as const) : ('untrusted' as const),
                     trusted,
@@ -223,7 +234,7 @@ function fixture(
             kind: 'workspace.trust',
             phase: 'unknown',
             intent: {
-              expectedStoreId: 'store',
+              expectedStoreId: fixtureStoreId,
               commandId: 'original-trust',
               canonicalIdentity: 'a'.repeat(64),
               externalReadScopeDigest: 'b'.repeat(64),
@@ -285,7 +296,7 @@ function fixture(
       if (input.method === 'draft.read')
         return {
           id: input.sessionId,
-          storeId: 'store',
+          storeId: fixtureStoreId,
           workspaceId: 'w',
           rootSessionId: input.sessionId,
           revision: 1,
@@ -294,7 +305,7 @@ function fixture(
       if (input.method === 'conversation.branch') {
         const result = {
           kind: 'conversation.branch' as const,
-          storeId: 'store',
+          storeId: fixtureStoreId,
           workspaceId: input.workspaceId,
           repository: input.workspaceId === 'w',
           current: input.workspaceId === 'w' ? 'main' : undefined,
@@ -327,7 +338,7 @@ function fixture(
           kind: 'settings.models',
           observationId: 1,
           scope: input.method === 'settings.models.read' ? input.scope : 'user',
-          storeId: 'store',
+          storeId: fixtureStoreId,
           canWrite: false,
           errors: [],
           defaultModelId: 'model',
@@ -348,7 +359,7 @@ function fixture(
         return {
           kind: 'settings.providers',
           observationId: 1,
-          storeId: 'store',
+          storeId: fixtureStoreId,
           canWrite: true,
           errors: [],
           providers: [
@@ -495,7 +506,7 @@ function fixture(
         runs.push({
           id: runId,
           sessionId: send.creation.sessionId,
-          originStoreId: 'store',
+          originStoreId: fixtureStoreId,
           originCommandId: options.firstHumanInput
             ? `processing-${send.intent.commandId}`
             : send.intent.commandId,
@@ -1242,8 +1253,12 @@ test('an original pending input precedes its Run status and reply while saved us
   }
 });
 
-for (const persistBetween of [false, true])
-  test(`explicit steers keep delivery order through delayed history (${persistBetween ? 'prior steer saved' : 'both local'})`, async () => {
+for (const { persistBetween, attachmentOnly } of [
+  { persistBetween: false, attachmentOnly: false },
+  { persistBetween: true, attachmentOnly: false },
+  { persistBetween: false, attachmentOnly: true },
+])
+  test(`explicit steers keep delivery order through delayed history (${attachmentOnly ? 'first steer file only' : persistBetween ? 'prior steer saved' : 'both local'})`, async () => {
     const run = {
       id: 'original-steer-run',
       sessionId: 'a',
@@ -1303,6 +1318,7 @@ for (const persistBetween of [false, true])
         };
       return result;
     };
+    const firstText = attachmentOnly ? '' : 'first explicit steer';
     const savedSteer = (index: number): Message => ({
       id: `saved-steer-${index}`,
       role: 'user',
@@ -1313,20 +1329,37 @@ for (const persistBetween of [false, true])
       content: submitted[index]!.intent.content,
       sourceIds: [submitted[index]!.intent.commandId],
       originCommandId: submitted[index]!.intent.commandId,
+      inputKind: 'input.steer',
+      ...(submitted[index]!.intent.files ? { files: submitted[index]!.intent.files } : {}),
     });
     const assertOrder = () => {
       const userMessages = [...f.host.querySelectorAll('.message.user')];
       expect(
         userMessages.map((message) => {
           const body = message.cloneNode(true) as Element;
-          body.querySelector('.message-meta')?.remove();
+          for (const extra of body.querySelectorAll('.message-meta, .message-attachments'))
+            extra.remove();
           return body.textContent;
         }),
-      ).toEqual(['original work', 'first explicit steer', 'second explicit steer']);
+      ).toEqual(['original work', firstText, 'second explicit steer']);
       for (const message of userMessages)
         expect(message.querySelector('.message-time')?.textContent).toBe('时间未知');
       const reply = f.host.querySelector('.message.assistant')!;
       const firstSteer = userMessages[1]!;
+      expect(f.host.querySelectorAll('.agent-turn-process')).toHaveLength(1);
+      expect(firstSteer.closest('.agent-turn-process')).not.toBeNull();
+      expect(userMessages[2]!.closest('.agent-turn-process')).toBe(
+        firstSteer.closest('.agent-turn-process'),
+      );
+      if (attachmentOnly) {
+        expect(
+          firstSteer.querySelectorAll('.message-attachments .composer-attachment'),
+        ).toHaveLength(1);
+        expect(firstSteer.querySelector('.composer-attachment-name')?.textContent).toBe(
+          '补充要求.txt',
+        );
+        expect(firstSteer.querySelector('.user-message-body')?.textContent).toBe('');
+      }
       expect(
         reply.compareDocumentPosition(firstSteer) & f.dom.window.Node.DOCUMENT_POSITION_FOLLOWING,
       ).not.toBe(0);
@@ -1334,7 +1367,38 @@ for (const persistBetween of [false, true])
     try {
       await act(async () => f.root.render(<NativeDesktop />));
       await f.click('Original A');
-      await f.edit('first explicit steer', '当前会话私有草稿');
+      if (attachmentOnly) {
+        bridge.fileReferences = () => [
+          { name: '补充要求.txt', uri: 'file:///synthetic/steer.txt' },
+        ];
+        await act(async () =>
+          f.host.querySelector('[aria-label="添加附件"]')!.dispatchEvent(
+            new f.dom.window.KeyboardEvent('keydown', {
+              key: 'Enter',
+              bubbles: true,
+              cancelable: true,
+            }),
+          ),
+        );
+        await act(async () =>
+          f.host.querySelector<HTMLElement>('[aria-label="添加文件"]')!.click(),
+        );
+        const picker = f.host.querySelector<HTMLInputElement>('input[aria-label="选择文件"]')!;
+        Object.defineProperty(picker, 'files', {
+          value: [new f.dom.window.File(['synthetic'], '补充要求.txt', { type: 'text/plain' })],
+        });
+        await act(async () =>
+          picker.dispatchEvent(new f.dom.window.Event('change', { bubbles: true })),
+        );
+        // The persisted-file path finishes byte preparation before this steer can be sent.
+        for (let attempt = 0; attempt < 100; attempt++) {
+          if (f.host.querySelector('.composer-attachment-name')?.textContent === '补充要求.txt')
+            break;
+          await act(async () => new Promise((resolve) => setTimeout(resolve, 10)));
+        }
+        expect(f.host.querySelector('.composer-attachment-name')?.textContent).toBe('补充要求.txt');
+      }
+      await f.edit(firstText, '当前会话私有草稿');
       await f.click('引导当前轮次');
       expect(submitted[0]?.intent.kind).toBe('input.steer');
       if (persistBetween) await f.publishMessages([...original, savedSteer(0)], [run]);
@@ -1359,6 +1423,386 @@ for (const persistBetween of [false, true])
       await f.close();
     }
   });
+
+for (const admission of ['accepted', 'rejected'] as const)
+  test(`Composer steer frozen to its original Run stays ${admission} when completion races admission, without implicit follow-up`, async () => {
+    const run = {
+      id: 'racing-run',
+      sessionId: 'a',
+      originStoreId: 'store',
+      originCommandId: 'original-work',
+      status: 'running',
+      isActive: true,
+      createdAt: 1,
+      finishedAt: null,
+    } as Run;
+    const initial: Message = {
+      id: 'original',
+      sessionId: 'a',
+      runId: run.id,
+      seq: '1',
+      role: 'user',
+      status: 'complete',
+      content: 'original work',
+      sourceIds: ['original-work'],
+    };
+    const f = fixture(true, true, 'accept_edits', { runs: [run], messages: [initial] });
+    const bridge = f.dom.window.kiteNative! as NativeBridge,
+      request = bridge.request;
+    let submitted: Extract<NativeRequest, { method: 'submit' }> | undefined;
+    let answer!: () => void;
+    const held = new Promise<void>((resolve) => {
+      answer = resolve;
+    });
+    bridge.request = async (input) => {
+      if (input.method === 'submit') {
+        f.calls.push(input);
+        submitted = input;
+        await held;
+        return {
+          sessionId: input.sessionId,
+          intent: input.intent,
+          phase: admission,
+          ...(admission === 'rejected' ? { error: 'input_target_stopped' } : {}),
+        };
+      }
+      const value = await request(input);
+      if (value && 'selection' in value && value.selection)
+        return {
+          ...value,
+          selection: {
+            ...value.selection,
+            activeCommand: {
+              id: run.originCommandId,
+              kind: 'run.start',
+              sessionId: 'a',
+              originStoreId: 'store',
+              status: 'applied',
+              receipt: { runId: run.id },
+              cancelRequestedAt: null,
+            },
+          },
+        };
+      return value;
+    };
+    try {
+      await act(async () => f.root.render(<NativeDesktop />));
+      await f.click('Original A');
+      const text = '原轮引导全文，结束竞态不能改投新轮。';
+      await f.edit(text, '当前会话私有草稿');
+      // Let the actual Composer dispatch while its own response is still held.
+      const click = f.click('引导当前轮次');
+      await click;
+      expect(submitted?.intent).toMatchObject({
+        kind: 'input.steer',
+        targetRunId: run.id,
+        content: text,
+      });
+      const terminal = { ...run, status: 'completed' as const, isActive: false, finishedAt: 2 };
+      await f.publishMessages([initial], [terminal]);
+      await act(async () => answer());
+      if (admission === 'accepted') {
+        await f.publishMessages(
+          [
+            initial,
+            {
+              id: 'persisted-guide',
+              sessionId: 'a',
+              runId: run.id,
+              seq: '2',
+              role: 'user',
+              status: 'complete',
+              content: text,
+              inputKind: 'input.steer',
+              originCommandId: submitted!.intent.commandId,
+              sourceIds: [submitted!.intent.commandId],
+            },
+          ],
+          [terminal],
+        );
+        expect(promptValue(f.input('当前会话私有草稿'))).toBe('');
+        const summary = f.host.querySelector<HTMLButtonElement>(
+          '.agent-turn-summary[aria-expanded="false"]',
+        );
+        if (summary) await act(async () => summary.click());
+        expect(f.host.querySelectorAll('article[data-input-kind="input.steer"]')).toHaveLength(1);
+      } else {
+        expect(promptValue(f.input('当前会话私有草稿'))).toBe(text);
+        expect(f.host.querySelector('article[data-input-kind="input.steer"]')).toBeNull();
+      }
+      await f.refreshFacts();
+      expect(f.calls.filter((call) => call.method === 'submit')).toHaveLength(1);
+      expect(
+        f.calls.some((call) => call.method === 'submit' && call.intent.kind === 'input.follow_up'),
+      ).toBe(false);
+    } finally {
+      answer();
+      await f.close();
+    }
+  });
+
+test('Composer steer lost after HTTP commit survives Session switch, original GET recovery and real Adapter handoff without duplicate POST', async () => {
+  // The renderer/selection bridge is controlled; the input owner, HTTP, SQLite,
+  // checkpoint and Model Adapter are real. This is not an Electron/Main claim.
+  const rootPath = temporaryDirectory('kite-steering-handoff-');
+  const store = await openSqliteStore({ dataRoot: rootPath, profile: 'controlled' });
+  const storeId = (await store.getMetadata()).storeId;
+  let releaseModel!: () => void, releaseLookup!: () => void, enterModel!: () => void;
+  const modelEntered = new Promise<void>((resolve) => {
+    enterModel = resolve;
+  });
+  const modelHeld = new Promise<void>((resolve) => {
+    releaseModel = resolve;
+  });
+  const lookupHeld = new Promise<void>((resolve) => {
+    releaseLookup = resolve;
+  });
+  const fixed = createFixedModel([
+    [
+      { type: 'text_delta', text: '原请求已经派发' },
+      { type: 'finish', reason: 'stop', usage: { inputTokens: 1, outputTokens: 1 } },
+    ],
+    [
+      { type: 'text_delta', text: '后续请求已收到原引导全文' },
+      { type: 'finish', reason: 'stop', usage: { inputTokens: 1, outputTokens: 1 } },
+    ],
+  ]);
+  const model: ModelAdapter = {
+    async *stream(request, options) {
+      const iterator = fixed.stream(request, options)[Symbol.asyncIterator]();
+      const first = await iterator.next();
+      enterModel();
+      if (!first.done) yield first.value;
+      if (fixed.requests.length === 1) await modelHeld;
+      for (;;) {
+        const event = await iterator.next();
+        if (event.done) break;
+        yield event.value;
+      }
+    },
+  };
+  const runtime = createRuntime({
+    store,
+    model,
+    modelId: 'fixed',
+    permissions: { authorize: async () => ({ allowed: true, revision: '1' }) },
+  });
+  await runtime.createWorkspace({
+    expectedStoreId: storeId,
+    id: 'w',
+    name: 'controlled',
+    rootUri: pathToFileURL(rootPath).href,
+  });
+  for (const id of ['a', 'b'])
+    await runtime.createSession({
+      expectedStoreId: storeId,
+      subjectId: 'owner',
+      commandId: `create-${id}`,
+      sessionId: id,
+      workspaceId: 'w',
+      title: id,
+    });
+  const service = await startService({
+    runtime,
+    profile: { dataRoot: rootPath, name: 'controlled', accessKey: 'owned' },
+    subjectId: 'owner',
+    buildId: 'steering-handoff',
+  });
+  let originalId = '',
+    posts = 0,
+    gets = 0;
+  const relay = Bun.serve({
+    hostname: '127.0.0.1',
+    port: 0,
+    async fetch(request) {
+      const url = new URL(request.url);
+      const body = request.method === 'POST' ? await request.text() : undefined;
+      const intent = body ? JSON.parse(body) : undefined;
+      if (intent?.kind === 'input.steer') {
+        originalId = intent.commandId;
+        posts++;
+      }
+      if (
+        originalId &&
+        request.method === 'GET' &&
+        url.pathname.endsWith(`/commands/${originalId}`)
+      ) {
+        gets++;
+        await lookupHeld;
+      }
+      const result = await fetch(`${service.endpoint}${url.pathname}${url.search}`, {
+        method: request.method,
+        headers: {
+          authorization: `Bearer ${service.bootstrap.token}`,
+          'content-type': 'application/json',
+        },
+        ...(body === undefined ? {} : { body }),
+      });
+      if (intent?.kind === 'input.steer') {
+        await result.arrayBuffer();
+        expect((await store.getCommand(originalId))?.kind).toBe('input.steer');
+        return new Response('owned lost receipt after durable commit', { status: 502 });
+      }
+      return result;
+    },
+  });
+  const expected = {
+    profile: service.bootstrap.profile,
+    apiMajor: 1,
+    requiredCapabilities: ['sessions', 'commands', 'history'],
+    instanceId: service.bootstrap.instanceId,
+    buildId: service.bootstrap.buildId,
+  };
+  const control = createClient({
+    endpoint: service.endpoint,
+    token: service.bootstrap.token,
+    expected,
+  });
+  const client = createClient({
+    endpoint: `http://127.0.0.1:${relay.port}`,
+    token: service.bootstrap.token,
+    expected,
+  });
+  let dispose = () => {};
+  let f: ReturnType<typeof fixture> | undefined;
+  try {
+    await control.connect();
+    await client.connect();
+    const inputs = new DesktopInput({ admittedClient: client });
+    dispose = () => inputs.disposeObserver();
+    await control.startRun('a', {
+      expectedStoreId: storeId,
+      commandId: 'original-work',
+      kind: 'run.start',
+      content: '原任务',
+    });
+    await Promise.race([
+      modelEntered,
+      Bun.sleep(3000).then(() => {
+        throw Error('controlled_model_not_entered');
+      }),
+    ]);
+    const view = await control.getView('a'),
+      run = view.runs.find((item) => item.isActive)!;
+    expect(run).toBeDefined();
+    const work = await control.getCommand('original-work');
+    f = fixture(true, true, 'accept_edits', {
+      storeId,
+      contextSelectionId: view.session.contextSelectionId!,
+      runs: [run],
+      messages: [...view.messages],
+    });
+    const bridge = f.dom.window.kiteNative! as NativeBridge,
+      request = bridge.request;
+    bridge.request = async (input) => {
+      if (input.method === 'submit') {
+        f!.calls.push(input);
+        expect(input.intent.kind).toBe('input.steer');
+        return inputMetadata(
+          await inputs.steer(input.sessionId, input.intent as Parameters<DesktopInput['steer']>[1]),
+        );
+      }
+      if (input.method === 'lookupInput') {
+        f!.calls.push(input);
+        return inputMetadata(await inputs.lookup(input.commandId));
+      }
+      const result = await request(input);
+      if (result && 'generation' in result)
+        return {
+          ...result,
+          inputSubmissions: inputs.submissions.map(inputMetadata),
+          ...(result.selection
+            ? {
+                selection: {
+                  ...result.selection,
+                  activeCommand: result.selection.session.id === 'a' ? work : undefined,
+                },
+              }
+            : {}),
+        };
+      return result;
+    };
+    await act(async () => f!.root.render(<NativeDesktop />));
+    await f.until(() =>
+      [...f!.host.querySelectorAll('button')].some((button) => button.textContent === 'Original A'),
+    );
+    await f.click('Original A');
+    const body = '只补充原轮要求：完整雪🙂é\n第二段保留，不能重发。';
+    await f.until(() => !!f!.host.querySelector('[aria-label="引导当前轮次"]'));
+    await f.edit(body, '当前会话私有草稿');
+    await f.click('引导当前轮次');
+    await f.until(() => inputs.submissions[0]?.phase === 'unknown');
+    expect(posts).toBe(1);
+    expect((await store.getCommand(originalId))?.request).toMatchObject({
+      content: body,
+      targetRunId: run.id,
+    });
+    await f.click('Other B');
+    await f.until(() => promptValue(f!.input('当前会话私有草稿')) === 'saved B');
+    await f.edit('B 新草稿不得被 A 的回执清空', '当前会话私有草稿');
+    await f.refreshFacts();
+    await client.connect();
+    const recovery = bridge.request({
+      method: 'lookupInput',
+      generation: 1,
+      commandId: originalId,
+    });
+    await f.until(() => gets > 0);
+    await act(async () => {
+      releaseLookup();
+      await recovery;
+    });
+    await f.until(() => inputs.submissions[0]?.phase === 'accepted');
+    await f.refreshFacts();
+    expect(promptValue(f.input('当前会话私有草稿'))).toBe('B 新草稿不得被 A 的回执清空');
+    releaseModel();
+    await runtime.waitForCommand('original-work', { timeoutMs: 5000 });
+    await runtime.waitForCommand(originalId, { timeoutMs: 5000 });
+    const settled = await control.getView('a');
+    const physical = settled.messages.filter((message) => message.originCommandId === originalId);
+    expect(physical).toHaveLength(1);
+    expect(physical[0]).toMatchObject({
+      content: body,
+      runId: run.id,
+      sourceIds: [originalId],
+      inputKind: 'input.steer',
+    });
+    expect(fixed.requests).toHaveLength(2);
+    expect(
+      fixed.requests[0]!.messages.filter((message) => message.sourceIds?.includes(originalId)),
+    ).toHaveLength(0);
+    expect(
+      fixed.requests[1]!.messages.filter(
+        (message) =>
+          message.content === body &&
+          JSON.stringify(message.sourceIds) === JSON.stringify([originalId]),
+      ),
+    ).toHaveLength(1);
+    await f.publishMessages([...settled.messages], [...settled.runs]);
+    expect(promptValue(f.input('当前会话私有草稿'))).toBe('B 新草稿不得被 A 的回执清空');
+    await f.click('Original A');
+    const summary = f.host.querySelector<HTMLButtonElement>(
+      '.agent-turn-summary[aria-expanded="false"]',
+    );
+    if (summary) await act(async () => summary.click());
+    expect(
+      [...f.host.querySelectorAll('article[data-input-kind="input.steer"]')].map((node) =>
+        node.getAttribute('data-message-id'),
+      ),
+    ).toEqual([physical[0]!.id]);
+    expect(posts).toBe(1);
+    expect(f.calls.filter((call) => call.method === 'submit')).toHaveLength(1);
+  } finally {
+    releaseLookup();
+    releaseModel();
+    dispose();
+    await f?.close();
+    relay.stop(true);
+    await service.close();
+    await runtime.close();
+    rmSync(rootPath, { recursive: true, force: true });
+  }
+});
 
 test('a later confirmed original receipt consumes only its submitted draft when another Session is visible', async () => {
   for (const source of ['input', 'caller'] as const) {

@@ -160,6 +160,8 @@ export type NativeSelection = {
   readonly runs: readonly Run[];
   readonly activeCommand?: Command;
   readonly compressionProgress?: SessionView['compressionProgress'];
+  /** Same-View compression metadata, without summary bytes, while history catches up. */
+  readonly compressionMessages?: readonly Message[];
   readonly executions: readonly Execution[];
   readonly interactions: readonly Interaction[];
   readonly interactionsAfterId: string | null;

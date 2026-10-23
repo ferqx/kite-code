@@ -530,32 +530,7 @@ export function ToolRow({
 export interface ChildAgentActivity {
   readonly identity: string;
   readonly name: string;
-  readonly status:
-    | 'queued'
-    | 'starting'
-    | 'running'
-    | 'waiting'
-    | 'waiting_results'
-    | 'stopping'
-    | 'completed'
-    | 'failed'
-    | 'cancelled'
-    | 'unknown';
-  /** Observation freshness, never execution or navigation authority. */
-  readonly fresh: boolean;
 }
-const childAgentLabels: Record<ChildAgentActivity['status'], string> = {
-  queued: '排队中',
-  starting: '准备工作',
-  running: '开始工作',
-  waiting: '等待交互',
-  waiting_results: '等待结果',
-  stopping: '正在停止',
-  completed: '已完成工作',
-  failed: '工作失败',
-  cancelled: '已停止工作',
-  unknown: '结果未知',
-};
 
 export function ToolActivity({
   messages,
@@ -638,7 +613,6 @@ export function ToolActivity({
   // A failed original Tool receipt always keeps its own failure presentation.
   const agent =
     !grouped && !issues.length && message.status !== 'cancelled' ? childAgent : undefined;
-  const agentRunning = !!agent?.fresh && ['starting', 'running', 'stopping'].includes(agent.status);
   const open = expanded ?? false;
   const children = agent ? [] : messages.map((item) => renderChildren(item.id.slice(5), true));
   const approval = approvalLabel(message);
@@ -652,13 +626,6 @@ export function ToolActivity({
         : messages.some((item) => traceStatus(item) === 'pending')
           ? 'pending'
           : undefined;
-  const activityTraceStatus = agent
-    ? agentRunning
-      ? 'running'
-      : agent.status === 'failed'
-        ? 'error'
-        : undefined
-    : summaryTraceStatus;
   const hasDiff = edit && message.changeConfirmed && !!message.toolResult;
   const canExpand =
     !agent &&
@@ -718,9 +685,7 @@ export function ToolActivity({
       <TraceTitle className="tool-agent-name tool-label" title={agent.name}>
         {agent.name}
       </TraceTitle>
-      <TraceDescription className="tool-agent-state" role="status">
-        {childAgentLabels[agent.status]}
-      </TraceDescription>
+      <TraceDescription className="tool-agent-operation">{label}</TraceDescription>
     </>
   ) : (
     <>
@@ -789,16 +754,12 @@ export function ToolActivity({
   return (
     <TraceCollapsible asChild open={Boolean(open && canExpand)} onOpenChange={onToggle}>
       <article
-        className={`message tool-activity${shell ? ' shell-activity' : ''}${agent ? ' child-agent-activity' : ''}${agent ? (agentRunning ? ' is-running' : '') : running || pendingReview ? ' is-running' : ''}`}
+        className={`message tool-activity${shell ? ' shell-activity' : ''}${agent ? ' child-agent-activity' : ''}${running || pendingReview ? ' is-running' : ''}`}
         data-restored-expanded={restoredExpanded?.has(activityId ?? message.id) || undefined}
-        aria-label={
-          agent
-            ? `${agent.name} · ${childAgentLabels[agent.status]}`
-            : `${label}${status ? ` · ${status}` : ''}`
-        }
+        aria-label={agent ? `${agent.name} · ${label}` : `${label}${status ? ` · ${status}` : ''}`}
       >
         {agent ? (
-          <TraceLine asChild status={activityTraceStatus} className="tool-activity-summary">
+          <TraceLine asChild status={summaryTraceStatus} className="tool-activity-summary">
             <Button
               variant="ghost"
               disabled={!childDetail}
@@ -811,7 +772,7 @@ export function ToolActivity({
         ) : childDetail ? (
           <div className="tool-activity-heading-row">
             <TraceCollapsibleTrigger asChild>
-              <TraceLine asChild status={activityTraceStatus} className="tool-activity-summary">
+              <TraceLine asChild status={summaryTraceStatus} className="tool-activity-summary">
                 <Button variant="ghost">{heading}</Button>
               </TraceLine>
             </TraceCollapsibleTrigger>
@@ -883,12 +844,12 @@ export function ToolActivity({
           </TraceLine>
         ) : canExpand ? (
           <TraceCollapsibleTrigger asChild>
-            <TraceLine asChild status={activityTraceStatus} className="tool-activity-summary">
+            <TraceLine asChild status={summaryTraceStatus} className="tool-activity-summary">
               <Button variant="ghost">{heading}</Button>
             </TraceLine>
           </TraceCollapsibleTrigger>
         ) : (
-          <TraceLine asChild status={activityTraceStatus} className="tool-activity-summary">
+          <TraceLine asChild status={summaryTraceStatus} className="tool-activity-summary">
             <div>{heading}</div>
           </TraceLine>
         )}

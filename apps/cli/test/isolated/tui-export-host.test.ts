@@ -332,10 +332,17 @@ for (const mode of ['complete'] as readonly string[]) {
         }
       } finally {
         provider.stop(true);
-        console.log(
-          JSON.stringify({ evidence, calls, reviewCalls, retainedRoot: passed ? null : root }),
-        );
-        if (passed) rmSync(root, { recursive: true, force: true });
+        let cleaned = false;
+        try {
+          if (passed) {
+            rmSync(root, { recursive: true, force: true });
+            cleaned = true;
+          }
+        } finally {
+          console.log(
+            JSON.stringify({ evidence, calls, reviewCalls, retainedRoot: cleaned ? null : root }),
+          );
+        }
       }
     }
   }, 90000);
