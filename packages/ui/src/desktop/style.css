@@ -28,8 +28,10 @@ body {
     "Microsoft YaHei UI", "Microsoft YaHei", sans-serif;
   --ui-text-size: 14px;
   --font-weight-semibold: 500;
-  /* Shared desktop corner radius for surfaces and controls. */
+  /* Surfaces and fields stay soft; actions use a tighter corner. */
   --radius: 16px;
+  --button-radius: 8px;
+  --input-radius: 16px;
   --radius-xs: var(--radius);
   --radius-sm: var(--radius);
   --radius-md: var(--radius);
@@ -42,7 +44,6 @@ body {
   --icon-button-size-sm: 28px;
   --icon-button-size: 32px;
   --icon-button-size-lg: 36px;
-  --icon-button-radius: 8px;
   --control-gap: 4px;
   --message-meta-offset: 2px;
   --resize-handle-width: 1px;
@@ -169,7 +170,7 @@ body {
     gap: var(--control-gap);
     min-height: 32px;
     padding: 5px 10px;
-    border-radius: var(--radius);
+    border-radius: var(--button-radius);
   }
   .button:hover:not(:disabled),
   :where(.interaction-area) button:hover:not(:disabled),
@@ -196,7 +197,7 @@ body {
   textarea {
     border: 1px solid var(--input);
     background: var(--card);
-    border-radius: var(--radius);
+    border-radius: var(--input-radius);
     padding: 7px 10px;
   }
   input::placeholder,
@@ -525,7 +526,7 @@ body {
     padding: 4px 10px 4px 26px;
     border: 0;
     background: transparent;
-    border-radius: var(--radius);
+    border-radius: var(--button-radius);
   }
   .session-row:hover:not(:disabled) {
     background: var(--control-hover);
@@ -926,7 +927,7 @@ body {
     min-height: 0;
     padding: 0;
     border: 0;
-    border-radius: var(--radius);
+    border-radius: var(--button-radius);
     background: transparent;
     text-align: left;
     font: inherit;
@@ -951,7 +952,7 @@ body {
     display: flex;
     flex-direction: column;
     border: 1px solid var(--composer-border-color);
-    border-radius: var(--radius);
+    border-radius: var(--input-radius);
     background: var(--composer-background);
     min-height: 112px;
     padding: 10px 12px 4px;
@@ -959,6 +960,9 @@ body {
     transition:
       border-color 120ms,
       box-shadow 120ms;
+  }
+  .composer button {
+    --button-radius: 9999px;
   }
   .composer:focus-within:where(:root:not([data-input-modality="pointer"]) *) {
     border-color: var(--composer-focus-border-color);
@@ -1097,6 +1101,7 @@ body {
   .composer-options {
     display: flex;
     align-items: center;
+    min-height: 32px;
     min-width: 0;
     max-width: 100%;
     gap: 4px;
@@ -1131,6 +1136,17 @@ body {
   .model-trigger,
   .permission-trigger {
     font-size: 14px;
+  }
+  .composer :is(.model-trigger, .permission-trigger, .context-trigger) {
+    height: 28px;
+    min-height: 28px;
+    padding: 4px 6px;
+    font-size: 13px;
+    line-height: 18px;
+  }
+  .composer :is(.model-trigger, .permission-trigger, .context-trigger) > svg {
+    width: 14px;
+    height: 14px;
   }
   .model-trigger > svg,
   .permission-trigger > svg,
@@ -1221,24 +1237,22 @@ body {
     align-items: center;
     height: 32px;
     flex: none;
-    font-size: 14px;
+    font-size: 13px;
     color: var(--muted-foreground);
     white-space: nowrap;
   }
   .composer-context-usage {
-    width: 32px;
-    height: 32px;
+    width: 14px;
+    height: 14px;
     flex: none;
-    padding: 0;
-    border: 0;
-    background: transparent;
     color: var(--muted-foreground);
-  }
-  .composer-context-usage > svg {
-    width: 16px;
-    height: 16px;
     stroke: currentColor;
     stroke-width: 2.5px;
+  }
+  .composer-context-usage:focus-visible {
+    outline: 2px solid var(--ring, var(--input));
+    outline-offset: 3px;
+    border-radius: 50%;
   }
   .composer-context-track {
     opacity: 0.25;
@@ -1268,7 +1282,7 @@ body {
   }
   .permission-menu-item {
     gap: 8px;
-    border-radius: var(--radius);
+    border-radius: var(--button-radius);
     font-size: inherit;
     font-weight: 400;
     line-height: inherit;
@@ -1436,7 +1450,7 @@ body {
     min-height: 40px;
     padding: 6px 8px;
     border: 1px solid var(--input);
-    border-radius: var(--radius);
+    border-radius: var(--button-radius);
     background: var(--card);
     cursor: pointer;
   }
@@ -1557,7 +1571,7 @@ body {
     align-items: center;
     min-height: 44px;
     border: 1px solid var(--border);
-    border-radius: 8px;
+    border-radius: var(--button-radius);
     background: var(--background);
   }
   .questionnaire-choice:hover {
@@ -1634,7 +1648,7 @@ body {
     max-width: min(320px, 70vw);
     padding: 10px 12px;
     border: 1px solid var(--border);
-    border-radius: 8px;
+    border-radius: var(--radius);
     background: var(--card);
     color: var(--foreground);
     box-shadow: 0 4px 16px #0002;
@@ -1656,7 +1670,7 @@ body {
     min-height: 88px;
     margin: 8px 0 0;
     padding: 10px 12px;
-    border-radius: 8px;
+    border-radius: var(--input-radius);
     background: var(--background);
     resize: vertical;
   }
@@ -1885,7 +1899,7 @@ body {
   display: flex;
   align-items: center;
   gap: 2px;
-  border-radius: var(--radius);
+  border-radius: var(--button-radius);
 }
 .kite-client .space-heading:hover {
   background: var(--control-hover);
@@ -2113,7 +2127,7 @@ body {
   max-height: 220px;
   padding: 16px;
   border-color: var(--border);
-  border-radius: var(--radius);
+  border-radius: var(--input-radius);
   resize: vertical;
   font-size: 14px;
   line-height: 22px;
@@ -2698,7 +2712,7 @@ body {
   min-height: 30px;
   padding: 4px 10px;
   border: 0;
-  border-radius: var(--radius);
+  border-radius: var(--button-radius);
   background: transparent;
   color: var(--muted-foreground);
   font: inherit;
@@ -2922,7 +2936,7 @@ body {
   gap: 8px;
   justify-content: flex-start;
   border: 0;
-  border-radius: var(--radius);
+  border-radius: var(--button-radius);
   background: transparent;
   color: inherit;
   font: inherit;
@@ -3393,10 +3407,10 @@ body {
   display: inline-flex;
 }
 .kite-client .approval-split > .button:first-child {
-  border-radius: var(--radius) 0 0 var(--radius);
+  border-radius: var(--button-radius) 0 0 var(--button-radius);
 }
 .kite-client .approval-split > .button:last-child {
-  border-radius: 0 var(--radius) var(--radius) 0;
+  border-radius: 0 var(--button-radius) var(--button-radius) 0;
   border-left: 1px solid color-mix(in srgb, var(--background) 25%, transparent);
   width: 32px;
   padding: 0;
@@ -3433,7 +3447,7 @@ body {
   padding: 10px 12px;
   margin: 0 0 8px;
   border: 1px solid var(--border);
-  border-radius: 12px;
+  border-radius: var(--radius);
   background: var(--card);
   box-shadow: 0 4px 16px var(--composer-shadow-color);
   font-size: 12px;
@@ -3768,7 +3782,7 @@ body {
   min-height: 68px;
   height: auto;
   padding: 12px 14px;
-  border-radius: var(--radius);
+  border-radius: var(--button-radius);
   justify-content: flex-start;
   align-items: center;
   gap: 10px;
@@ -3805,7 +3819,7 @@ body {
   padding: 3px 7px;
   max-width: 100%;
   gap: 6px;
-  border-radius: var(--radius);
+  border-radius: var(--button-radius);
 }
 .kite-client .context-trigger span {
   min-width: 0;
@@ -3862,7 +3876,7 @@ body {
   padding: 6px 8px;
   justify-content: flex-start;
   align-items: center;
-  border-radius: var(--radius);
+  border-radius: var(--button-radius);
   text-align: left;
   overflow-wrap: anywhere;
   white-space: normal;
@@ -4434,6 +4448,7 @@ body {
   color: var(--foreground);
   font-family: var(--font-ui);
   font-size: 14px;
+  font-weight: 400;
   line-height: 18px;
   box-sizing: border-box;
 }
@@ -4443,6 +4458,7 @@ body {
 .model-effort-popover button {
   font-family: inherit;
   font-size: inherit;
+  font-weight: inherit;
   line-height: inherit;
   color: inherit;
 }
@@ -4452,6 +4468,11 @@ body {
 }
 .model-effort-popover-models {
   width: 288px;
+  font-size: 13px;
+}
+.model-effort-popover-models .model-effort-option > svg {
+  width: 14px;
+  height: 14px;
 }
 .model-effort-panel {
   padding: 12px;
@@ -4504,15 +4525,18 @@ body {
   flex-direction: column;
   align-items: stretch;
   justify-content: flex-start;
-  gap: 4px;
+  gap: 2px;
+  padding: 2px 0;
   background: transparent;
 }
-.model-effort-popover .model-effort-provider {
+.model-effort-popover :is(.model-effort-provider, .model-effort-option) {
   height: 28px;
   min-width: 0;
-  justify-content: flex-start;
-  padding-inline: 8px;
+  padding: 4px 8px;
   font-size: inherit;
+}
+.model-effort-popover .model-effort-provider {
+  justify-content: flex-start;
   border: 0;
   background: transparent;
 }
@@ -4521,12 +4545,32 @@ body {
   color: var(--foreground);
   box-shadow: none;
 }
+.model-effort-popover [cmdk-group-items] {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
 .model-effort-popover .model-effort-option {
-  height: 28px;
-  min-width: 0;
   justify-content: space-between;
-  font-size: inherit;
+  background: transparent;
+  color: var(--muted-foreground);
+  font-weight: inherit;
   line-height: inherit;
+}
+.model-effort-popover .model-effort-option[data-current="true"] {
+  color: var(--foreground);
+}
+@media (hover: hover) {
+  .model-effort-popover .model-effort-provider:hover,
+  .model-effort-popover .model-effort-option:hover {
+    background: var(--control-hover);
+  }
+}
+.model-effort-popover
+  [cmdk-root]:focus-visible:where(:root:not([data-input-modality="pointer"]) *)
+  .model-effort-option[data-selected="true"] {
+  outline: 1px solid var(--ring, var(--input));
+  outline-offset: -1px;
 }
 .model-effort-popover .model-effort-option small {
   font-size: inherit;
@@ -4665,7 +4709,7 @@ body {
   width: 32px;
   height: 32px;
   min-height: 32px;
-  border-radius: 50%;
+  border-radius: var(--button-radius);
   color: var(--muted-foreground);
 }
 .kite-client .composer-attach:is(:hover, [data-state="open"]) {
@@ -4701,7 +4745,7 @@ body {
   min-height: 32px;
   gap: 8px;
   padding: 8px;
-  border-radius: var(--radius);
+  border-radius: var(--button-radius);
   font-size: inherit;
   line-height: inherit;
 }
@@ -4877,7 +4921,7 @@ body {
   min-width: 90px;
   max-width: 180px;
   border: 1px solid transparent;
-  border-radius: var(--radius);
+  border-radius: var(--button-radius);
 }
 .kite-client .session-tab[data-active="true"] {
   border-color: var(--border);

@@ -250,7 +250,9 @@ Mica／Vibrancy 的背景明度与壁纸合成继续由系统材质管理，承�
 
 ## 统一桌面圆角
 
-Native 统一消费[共享 UI 的根圆角变量](../../packages/ui/README.md#原桌面展示层)，采用统一的16px圆角；[设置／Mica 样式](src/native-tailwind.css)和[正文排版](src/native-typeset.css)均引用 `--radius`，没有另立 Native 圆角值。macOS 主内容与设置内容另按上文采用直角，内部控件仍消费共享圆角。Tailwind 尺寸别名、圆形及拼接直角的范围归 UI owner。现有 Mica 透明层、6px留白、设置覆盖与业务交互保持。
+Native 统一消费[共享 UI 的圆角变量](../../packages/ui/README.md#原桌面展示层)：普通按钮和菜单项为8px，字段与弹出层为16px，提示词输入框内部按钮为胶囊形。[设置／Mica 样式](src/native-tailwind.css)与[提供商表单](src/native-provider-settings.css)分别按用途引用 `--button-radius`、`--input-radius` 和 `--radius`；[正文排版](src/native-typeset.css)继续消费表面圆角。macOS 主内容与设置内容另按上文采用直角；Tailwind 尺寸别名、圆形及拼接直角的范围归 UI owner。现有 Mica 透明层、6px留白、设置覆盖与业务交互保持。
+
+2026-10-23，Windows x64／Bun1.4.3／Chrome155.0.8059.85，基于 `de498789b` 的当前圆角与输入区 diff：实际共享组件与生产编译 CSS 在深浅两套组件画廊及1280／390px四组会话中核对按钮、字段、主／子菜单、Tooltip、Dialog 和 Sheet。提示词选择器为13px文字、14px图标、28px高度与上下4px／左右6px内边距，附件／发送图标保持16px；宽屏左右两组中心一致，窄屏换行后各组仍居中，无横向溢出。观察圆环提示的悬停与键盘聚焦、复制反馈、模型选择、权限和附件菜单的展开与关闭，以及弹窗归焦，草稿与消息保持；14px状态圆环为独立SVG，鼠标、Enter与Space均未提交任务，无页面异常。四个相关原文件22项／198断言、UI／Desktop类型检查及定向Biome通过。夹具使用模拟回调，不读取用户数据；未重验完整安装版Electron，保留既有嵌套 `@keyframes` 编译提示。
 
 2026-10-14 同环境、基于 `006b79d3` 的当前圆角 diff：隔离普通 Native 构建和真实 Service，由实际空间选择入口登记测试目录（仅控制系统选择框回调）。亮／暗实际 computed style 核空间列表、主面板、Composer、建议按钮、项目选择、用户菜单及菜单项、设置内容、卡片、选择框与导航按钮均为10px；临时将根变量改为14px后全部随之改变，随后恢复10px。顶栏、设置分类栏与返回区保透明；500px窄窗口仍为同一圆角，返回与Escape保原输入实例和未发送草稿，圆形发送按钮与全屏直角保持。截图核布局，零页面异常、Main退出0通过。Desktop／UI typecheck、三份 CSS 的 Biome 和 diff 检查通过（保留原三项 `!important` 提示）；构建保原 keyframes 优化与大chunk提示。仅核本轮桌面外观，未运行完整默认测试或其他平台／安装制品验证，不将先前完整状态矩阵作为本轮重跑结果。
 
@@ -468,7 +470,7 @@ Native 的侧栏打开入口对当前父会话及同一在途选择去重，重�
 
 ## 输入区上下文占用
 
-[NativeDesktop](src/native.tsx)通过 [useNativeContextUsage](src/native-context-usage.ts)向共享 [Composer](../../packages/ui/src/desktop/Composer.tsx)传只读上下文估算。圆环的比例固定为 totalInputTokens / contextWindowTokens，分母是最近已保存原请求所属冻结模型的完整窗口，不能使用累计缓存率、累计输入或API中扣除输出预留后的 utilization。浮层标明约数，显示上下文已用与总容量；窗口容量未知时显示未知，尚无可用原请求或读取失败时隐藏圆环。输入框旁仍独立显示原累计缓存文字。
+[NativeDesktop](src/native.tsx)通过 [useNativeContextUsage](src/native-context-usage.ts)向共享 [Composer](../../packages/ui/src/desktop/Composer.tsx)传只读上下文估算。圆环的比例固定为 totalInputTokens / contextWindowTokens，分母是最近已保存原请求所属冻结模型的完整窗口，不能使用累计缓存率、累计输入或API中扣除输出预留后的 utilization。浮层标明约数，显示上下文已用与总容量；窗口容量未知时显示未知，尚无可用原请求或读取失败时隐藏圆环。输入框旁仍独立显示原累计缓存文字。圆环由共享 Composer 直接渲染为无点击操作的状态图标，保留悬停与键盘聚焦的详情提示。
 
 [Main reader](electron/tool-messages.ts)的 toolMessages.contextUsage沿原有限IPC只接受一个已观察的完整助手Message ID，复用原read lease、关闭与退出释放；核准确当前Store、Session、Run、成功Model Execution、消息正文与来源后，调用现有 getContextEstimate，只回传模型、上下文选择及输入／窗口数字。响应前再核当前View、选择、工作区和原消息；不向Renderer回传上下文正文，不写入、不初始化Provider、不启动模型。这个用户可见的数值展示不开放测试Context面板。API的完整历史预测、实测基线和来源限制归 [Core owner](../../packages/agent/src/context-estimate.README.md)，未发送草稿、重新捕获的项目来源与随后模型／工具配置变化不在该预测内。
 

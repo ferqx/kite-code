@@ -40,7 +40,7 @@ const SheetContent = React.forwardRef<
           data-side={side}
           ref={ref}
           className={cn(
-            'fixed z-50 flex flex-col bg-background shadow-lg',
+            'fixed z-50 flex flex-col rounded-[var(--radius,16px)] bg-background shadow-lg',
             side === 'right' &&
               'inset-y-0 right-0 h-full w-[min(760px,92vw)] border-l max-sm:w-full',
             side === 'left' && 'inset-y-0 left-0 h-full w-[min(300px,86vw)] border-r',
@@ -52,7 +52,7 @@ const SheetContent = React.forwardRef<
         >
           {children}
           {showCloseButton && (
-            <DialogPrimitive.Close className="absolute right-4 top-4 rounded-sm opacity-70 transition-opacity hover:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none">
+            <DialogPrimitive.Close className="absolute right-4 top-4 rounded-[var(--button-radius,8px)] opacity-70 transition-opacity hover:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none">
               <HugeiconsIcon icon={Cancel01Icon} />
               <span className="sr-only">关闭</span>
             </DialogPrimitive.Close>

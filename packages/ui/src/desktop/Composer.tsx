@@ -722,10 +722,13 @@ export function Composer(props: ComposerProps) {
                   <TooltipProvider delayDuration={200}>
                     <Tooltip>
                       <TooltipTrigger asChild>
-                        <Button
+                        <svg
                           className="composer-context-usage"
-                          variant="ghost"
-                          size="icon"
+                          viewBox="0 0 16 16"
+                          fill="none"
+                          role="img"
+                          // biome-ignore lint/a11y/noNoninteractiveTabindex: Keyboard focus exposes the read-only icon's tooltip without giving it button semantics.
+                          tabIndex={0}
                           aria-label={
                             contextPercentage === undefined
                               ? '上下文占用未知'
@@ -733,20 +736,18 @@ export function Composer(props: ComposerProps) {
                           }
                           aria-description={`上下文估算 ${contextTokens} / ${contextWindowTokens ?? '未知'} tokens`}
                         >
-                          <svg viewBox="0 0 16 16" fill="none" aria-hidden="true">
-                            <circle className="composer-context-track" cx="8" cy="8" r="6" />
-                            {contextPercentage !== undefined && contextPercentage > 0 && (
-                              <circle
-                                cx="8"
-                                cy="8"
-                                r="6"
-                                pathLength="100"
-                                strokeDasharray={`${Math.min(contextPercentage, 100)} 100`}
-                                transform="rotate(-90 8 8)"
-                              />
-                            )}
-                          </svg>
-                        </Button>
+                          <circle className="composer-context-track" cx="8" cy="8" r="6" />
+                          {contextPercentage !== undefined && contextPercentage > 0 && (
+                            <circle
+                              cx="8"
+                              cy="8"
+                              r="6"
+                              pathLength="100"
+                              strokeDasharray={`${Math.min(contextPercentage, 100)} 100`}
+                              transform="rotate(-90 8 8)"
+                            />
+                          )}
+                        </svg>
                       </TooltipTrigger>
                       <TooltipContent
                         className="kite-client composer-context-tooltip"

@@ -88,7 +88,7 @@ html[data-platform="macos"][data-theme="dark"] .kite-client.shell {
   height: 26px;
   padding: 0 10px;
   border: 0;
-  border-radius: var(--radius, 16px);
+  border-radius: var(--button-radius, 8px);
   background: transparent;
   color: var(--muted-foreground);
   font: inherit;
@@ -350,7 +350,7 @@ html[data-platform="macos"] .kite-client .desktop-settings-dialog .settings-edit
   min-width: 130px;
   padding: 5px 11px;
   border: 1px solid var(--input);
-  border-radius: var(--radius);
+  border-radius: var(--input-radius);
   background: var(--card);
 }
 .kite-client .settings-value {
@@ -377,7 +377,7 @@ html[data-platform="macos"] .kite-client .desktop-settings-dialog .settings-edit
   min-height: 34px;
   padding: 5px 10px;
   border: 1px solid var(--input);
-  border-radius: var(--radius);
+  border-radius: var(--input-radius);
   background: var(--card);
   color: var(--foreground);
 }
@@ -435,7 +435,7 @@ html[data-platform="macos"] .kite-client .desktop-settings-dialog .settings-edit
   min-height: 34px;
   padding: 6px 14px;
   border: 1px solid var(--border);
-  border-radius: var(--radius);
+  border-radius: var(--button-radius);
   font-size: var(--ui-text-size);
   font-weight: 500;
   flex-shrink: 0;
@@ -471,7 +471,7 @@ html[data-platform="macos"] .kite-client .desktop-settings-dialog .settings-edit
   font-size: var(--ui-text-size);
   justify-content: space-between;
   padding: 8px 12px;
-  border-radius: var(--radius);
+  border-radius: var(--button-radius);
 }
 .kite-client .desktop-settings .settings-model-trigger > span {
   display: block;
@@ -492,7 +492,7 @@ html[data-platform="macos"] .kite-client .desktop-settings-dialog .settings-edit
 }
 .kite-client .desktop-settings .settings-model-menu [role="menuitemradio"] {
   min-height: 36px;
-  border-radius: var(--radius);
+  border-radius: var(--button-radius);
   overflow-wrap: anywhere;
 }
 .kite-client .desktop-settings .settings-model-section-heading {
@@ -689,7 +689,7 @@ html[data-platform="macos"] .kite-client .desktop-settings-dialog .settings-edit
   min-height: 34px;
   padding: 5px 10px;
   border: 1px solid var(--input);
-  border-radius: var(--radius);
+  border-radius: var(--input-radius);
   background: var(--card);
   color: var(--foreground);
 }
@@ -723,7 +723,7 @@ html[data-platform="macos"] .kite-client .desktop-settings-dialog .settings-edit
   min-height: 34px;
   padding: 6px 12px;
   border: 1px solid var(--border);
-  border-radius: var(--radius);
+  border-radius: var(--button-radius);
   background: var(--card);
   color: var(--foreground);
 }
@@ -1156,7 +1156,7 @@ html[data-native-window][data-platform="macos"]
   height: 32px;
   padding: 4px 10px;
   border: 1px solid transparent;
-  border-radius: var(--radius);
+  border-radius: var(--input-radius);
   background: var(--control-hover);
   color: var(--foreground);
   font: inherit;
