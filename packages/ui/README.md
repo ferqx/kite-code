@@ -124,7 +124,7 @@ SessionPage 的可选 `covered` 保留主panel树、尺寸和阅读实例，以o
 
 [Clipboard context 与 hook](src/desktop/clipboard.tsx)复用原消息复制生命周期；Conversation 提供宿主 port，正文内的代码复制同时消费原 `copyText` 资格，包含自定义正文 reader 子树。预览或未核实最终回复不提供代码复制，已核实正文关闭后撤销；停用、换文或换 port 的迟到结果失效，已完成反馈沿原两秒截止时间保留。复制不从 DOM 重建文本，不新开宿主或业务接口。
 
-[ToolActivity](src/desktop/ToolActivity.tsx) 的可选 `childAgent` 只消费宿主交付的准确身份、名称、工作状态与观察新鲜度；复用 Trace 展示彩色图标、14px 单行名称和不被长名称挤掉的状态，不新增卡片或原始结果段落。图标与 [ApprovalHeader](src/desktop/ApprovalHeader.tsx) 共用 `ChildAgentIcon` 的稳定身份分配；原工具回执展开及独立详情回调保持。普通目录刷新保留已观察的状态文字，`fresh=false` 停止运行动画，不建立执行或导航 authority；真实工具失败优先于子任务装饰。[消息 DOM 回归](test/isolated/desktop-agent-activity.test.tsx)核同一行的状态更新、展开、文本选择、独立详情与失败边界，宿主关联和浏览器证据归 [Desktop owner](../../apps/desktop/README.md#native-当前会话环境信息与子详情)。
+[ToolActivity](src/desktop/ToolActivity.tsx) 的可选 `childAgent` 只消费宿主交付的准确身份、名称、工作状态与观察新鲜度；复用 Trace 展示彩色图标、14px 单行名称和不被长名称挤掉的状态，不新增卡片或原始结果段落。图标与 [ApprovalHeader](src/desktop/ApprovalHeader.tsx) 共用 `ChildAgentIcon` 的稳定身份分配；已识别的子 Agent 行使用原生共享 Button，整行调用准确 `childDetail.onOpen`；没有折叠入口、独立详情按钮或回执内容，旧 `expanded=true` 也不挂载原正文 reader。缺少详情回调时禁用整行，普通工具和真实工具失败仍沿原披露路径。普通目录刷新保留已观察的状态文字，`fresh=false` 停止运行动画，不建立执行或导航 authority；真实工具失败优先于子任务装饰。[消息 DOM 回归](test/isolated/desktop-agent-activity.test.tsx)核同一行的状态更新、文本选择、直接导航、旧展开状态隔离与失败边界，宿主关联和浏览器证据归 [Desktop owner](../../apps/desktop/README.md#native-当前会话环境信息与子详情)。
 
 ToolActivity／ToolRow 用 TraceLine、Title、Icon、Description 和受控 Collapsible 承载原工具过程；`asChild`保留原按钮／div、独立文件操作、展开身份和恢复动画层。状态只消费已有执行事实，取消或结果未知不转成 Trace error；Shell 以 CodeBlockContent 保留原具名 PRE、256px输出上限、24px跟随阈值、截断、退出码和回到最新。[聚合回归](test/isolated/desktop-tool-aggregation.test.tsx)验证真实 DOM 和输出追加；正式生产样式与浏览器验证归 [Desktop owner](../../apps/desktop/README.md#会话消息渲染验证)。
 

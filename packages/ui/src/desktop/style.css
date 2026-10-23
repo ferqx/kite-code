@@ -4880,14 +4880,12 @@ body {
   background: var(--control-hover);
 }
 
-/* Child activity shares the existing Trace disclosure and identity decoration. */
+/* Child activity is a direct navigation row with the shared identity decoration. */
 .kite-client .child-agent-activity .tool-activity-summary {
+  width: 100%;
   min-width: 0;
   font-size: var(--ui-text-size, 14px);
   color: var(--muted-foreground);
-}
-.kite-client .child-agent-activity .tool-activity-heading-row > .tool-activity-summary {
-  flex: 0 1 auto;
 }
 .kite-client .tool-agent-name {
   flex: 0 1 auto;

@@ -567,11 +567,13 @@ Main 对目录与所选会话分别保留一个在途读取和一个后继通知
 
 ## Native 当前会话环境信息与子详情
 
-子 Agent 工作消息复用原 [ToolActivity](../../packages/ui/src/desktop/ToolActivity.tsx) 的 Trace 单行与工具回执展开。[nativeAgentActivities / nativeAgentActivityForTool](src/native-agent-activity.ts) 只从原环境目录投影已知版本 `task.spawn / task.follow_up` 的准确 carrier，核原 Store、父 Session／Run、`sourceTool` 与工具执行、子 Session 和原 child-start；已成功受理的原工具回执与目录吻合后，才在原消息行显示名称与任务状态。工具成功不表示子任务开始或完成；同一 child Session 的较新 carrier 不改写旧消息，活动中追加指导和单纯消息／列表读取保持原工具语义。子 Run 已终止但 carrier 尚未结算时显示等待结果；只有 carrier 成功才显示工作完成。详情沿原右侧标签交付准确 Session／Execution，不增加 mutation。
+子 Agent 工作消息复用原 [ToolActivity](../../packages/ui/src/desktop/ToolActivity.tsx) 的 Trace 单行。[nativeAgentActivities / nativeAgentActivityForTool](src/native-agent-activity.ts) 只从原环境目录投影已知版本 `task.spawn / task.follow_up` 的准确 carrier，核原 Store、父 Session／Run、`sourceTool` 与工具执行、子 Session 和原 child-start；已成功受理的原工具回执与目录吻合后，才在原消息行显示名称与任务状态。工具成功不表示子任务开始或完成；同一 child Session 的较新 carrier 不改写旧消息，活动中追加指导和单纯消息／列表读取保持原工具语义。子 Run 已终止但 carrier 尚未结算时显示等待结果；只有 carrier 成功才显示工作完成。整行点击沿原右侧标签交付准确 Session／Execution，不增加 mutation；移除折叠和独立详情按钮，旧的展开缓存也不会把原始受理 JSON 或子 reader 挂回父会话。详情回调暂不可用时仅暂停该行点击。
 
-[环境 hook](src/native-environment.tsx) 复用原完整目录和有界展示缓存，不增加网络读取；缓存成本包含子 Agent 展示事实，同 scope 校准先保留最新已读 display，即使完整展示超过缓存预算也不闪回旧行。普通刷新保留名称／状态／展开和详情目标，旧观察只作为已发生的展示事实，`fresh=false` 停止运行动画。图标按原 Store／child Session 稳定身份与审批卡共用。
+[环境 hook](src/native-environment.tsx) 复用原完整目录和有界展示缓存，不增加网络读取；缓存成本包含子 Agent 展示事实，同 scope 校准先保留最新已读 display，即使完整展示超过缓存预算也不闪回旧行。普通刷新保留名称／状态和详情目标，旧观察只作为已发生的展示事实，`fresh=false` 停止运行动画。图标按原 Store／child Session 稳定身份与审批卡共用。
 
 [关联回归](test/native-agent-activity.test.ts)核排队／激活／结算、同 Agent 多任务和活动指导、准确来源与恢复历史；[目录到消息 DOM 回归](test/isolated/native-agent-activity-dom.test.tsx)核真实环境 hook、精确投影、原共享组件、超缓存预算刷新与准确 child reader 请求。此范围不代替完整 NativeDesktop、真实模型或安装发行验收。
+
+2026-10-23，`45b8275c1` 加本次直接导航修正：消息、目录到消息、原工具聚合与侧栏标签四个完整测试文件共18项／474断言通过，UI／Desktop typecheck、定向 Biome、统一边界和文档检查通过。旧 `expanded=true` 不调用回执 reader，也不生成折叠控件、受理 JSON 或独立详情按钮。Chrome 隔离夹具以生产组件和 Native 投影逐次核对状态变化，鼠标、Enter 和 Space 均直接打开原右侧详情并保留父正文；500px 窄窗长名称省略、状态保留，深浅主题保持14px、32px行高且无横向溢出。Native DOM核到准确 child reader 请求；浏览器详情正文为夹具内容，不代替完整真实任务、模型或安装版验收。
 
 2026-10-23，macOS arm64／Bun 1.4.2，`655fb9a97` 加本次 diff：上述关联、目录到消息 DOM、[共享消息 DOM](../../packages/ui/test/isolated/desktop-agent-activity.test.tsx)和[原工具聚合](../../packages/ui/test/isolated/desktop-tool-aggregation.test.tsx)四个完整文件15项／317断言通过，UI／Desktop typecheck、定向 Biome、统一边界、测试归属和文档检查通过。Chrome 以隔离夹具加载生产 SessionPage／ToolActivity、真实 Native 投影及原 Vite／Tailwind 编译样式，逐次观察受理、排队、开始、等待、结算和各终态：始终只有一行，展开选择与行位置保持；500px 窄窗长名称省略且状态保留，深浅主题保持14px正文，页面无横向溢出。该夹具不读取用户数据、不运行模型、不加入普通客户端。邻近 `native-background-panel.test.tsx` 的旧环境卡断言仍期待普通界面显示“上次状态 · 待核实”，在未含本次 diff 的 `655fb9a97` 主工作区也单独复现同一失败；其余本轮实际通过与这项既有失败分开记录。
 
