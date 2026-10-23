@@ -8,8 +8,13 @@ import {
   type CheckpointSource,
   createFileCheckpointing,
   createScopedFileCheckpointing,
+  type EditablePlanFile,
   type FileCheckpoint,
   type FileCheckpointCaptureProof,
+  type SessionOutput,
+  withInputFileReads,
+  withPlanFileTools,
+  withSessionOutputs,
 } from '@kite-ai/agent/files';
 import type { ProfileSelection } from '@kite-ai/agent/profile';
 import type {
@@ -426,5 +431,204 @@ export function createDefaultFileCheckpointConfiguration(options: {
     },
     { includeTools: true },
   );
-  return { extension, tools: extension.tools ?? [] };
+  const inputFiles = withInputFileReads({
+    profilePath: options.profile.profilePath,
+    tools: extension.tools ?? [],
+    async resolve(request, uri) {
+      const runtime = options.runtime();
+      const actual = await runtime.getExecution(request.executionId);
+      const metadata = await runtime.getMetadata();
+      const command = actual && (await runtime.getCommand(actual.originCommandId));
+      if (
+        !actual ||
+        !command ||
+        actual.sessionId !== request.sessionId ||
+        actual.originStoreId !== metadata.storeId ||
+        command.originStoreId !== metadata.storeId ||
+        actual.kind !== 'tool' ||
+        actual.definitionId !== 'files.read' ||
+        actual.definitionVersion !== '5'
+      )
+        throw new AgentError('input_file_scope_denied');
+      return runtime.resolveInputFile({
+        expectedStoreId: metadata.storeId,
+        sessionId: request.sessionId,
+        subjectId: command.subjectId,
+        uri,
+        signal: request.signal,
+      });
+    },
+  });
+  const planFiles = withPlanFileTools({
+    profilePath: options.profile.profilePath,
+    tools: inputFiles.tools,
+    async write(request, input) {
+      const runtime = options.runtime();
+      const actual = await runtime.getExecution(request.executionId);
+      const command = actual && (await runtime.getCommand(actual.originCommandId));
+      const metadata = await runtime.getMetadata();
+      if (
+        !actual ||
+        !command ||
+        actual.sessionId !== request.sessionId ||
+        actual.originStoreId !== metadata.storeId ||
+        command.originStoreId !== metadata.storeId
+      )
+        throw new AgentError('plan_file_scope_denied');
+      const receipt = await runtime.invokeActionFromTool({
+        expectedStoreId: metadata.storeId,
+        sessionId: request.sessionId,
+        subjectId: command.subjectId,
+        parentExecutionId: actual.id,
+        commandId: `plan-file-${actual.id}`,
+        request: {
+          kind: 'extension.invoke',
+          extensionId: 'builtin.planning',
+          actionId: 'planning.write',
+          definitionVersion: '1',
+          input,
+        },
+      });
+      const id = object(receipt.receipt)?.executionId;
+      const completed = typeof id === 'string' ? await runtime.getExecution(id) : null;
+      if (completed?.status !== 'succeeded')
+        throw new AgentError(
+          completed?.status === 'outcome_unknown'
+            ? 'file_publish_outcome_unknown'
+            : 'plan_file_write_failed',
+        );
+    },
+    async current(request) {
+      const runtime = options.runtime();
+      const actual = await runtime.getExecution(request.executionId);
+      const metadata = await runtime.getMetadata();
+      const command = actual && (await runtime.getCommand(actual.originCommandId));
+      if (
+        !actual ||
+        !command ||
+        actual.sessionId !== request.sessionId ||
+        actual.originStoreId !== metadata.storeId ||
+        command.originStoreId !== metadata.storeId ||
+        actual.kind !== 'tool' ||
+        !['files.read', 'files.write', 'files.edit'].includes(actual.definitionId)
+      )
+        throw new AgentError('plan_file_scope_denied');
+      const views = await runtime.queryExtension({
+        expectedStoreId: metadata.storeId,
+        sessionId: request.sessionId,
+        subjectId: command.subjectId,
+        extensionId: 'builtin.planning',
+        queryId: 'planning.file',
+        input: {},
+      });
+      return (views[0]?.payload as unknown as EditablePlanFile) ?? null;
+    },
+  });
+  const outputs = withSessionOutputs({
+    profilePath: options.profile.profilePath,
+    extension: { ...extension, tools: planFiles.tools },
+    async storeId() {
+      return (await options.runtime().getMetadata()).storeId;
+    },
+    async readInherited(request, key) {
+      const runtime = options.runtime();
+      const actual = await runtime.getExecution(request.executionId);
+      const metadata = await runtime.getMetadata();
+      const command = actual && (await runtime.getCommand(actual.originCommandId));
+      if (
+        !actual ||
+        !command ||
+        actual.sessionId !== request.sessionId ||
+        actual.originStoreId !== metadata.storeId ||
+        command.originStoreId !== metadata.storeId
+      )
+        throw new AgentError('output_file_scope_denied');
+      const query = () =>
+        runtime.queryExtension({
+          expectedStoreId: metadata.storeId,
+          sessionId: request.sessionId,
+          subjectId: command.subjectId,
+          extensionId: extension.id,
+          queryId: 'files.output-source',
+          input: { key },
+        });
+      const views = await query();
+      const source = views[0]?.payload as
+        | {
+            executionId: string;
+            sessionId: string;
+            reference: import('@kite-ai/agent/extensions').ArtifactRef;
+          }
+        | undefined;
+      const original = source && (await runtime.getExecution(source.executionId));
+      const originCommand = original && (await runtime.getCommand(original.originCommandId));
+      if (
+        !source ||
+        !original ||
+        !originCommand ||
+        source.sessionId !== original.sessionId ||
+        originCommand.sessionId !== original.sessionId
+      )
+        throw new AgentError('output_file_source_unavailable');
+      const read = await runtime.readArtifact({
+        expectedStoreId: metadata.storeId,
+        sessionId: source.sessionId,
+        subjectId: originCommand.subjectId,
+        refId: source.reference.id,
+        scope: source.reference.scope!,
+        signal: request.signal,
+      });
+      if (
+        canonical(views as unknown as Json) !== canonical((await query()) as unknown as Json) ||
+        read.reference.size !== source.reference.size ||
+        read.reference.mediaType !== source.reference.mediaType
+      )
+        throw new AgentError('output_file_source_changed');
+      return read.content;
+    },
+    async scope(request, path) {
+      const runtime = options.runtime();
+      const actual = await runtime.getExecution(request.executionId);
+      const metadata = await runtime.getMetadata();
+      const command = actual && (await runtime.getCommand(actual.originCommandId));
+      if (
+        !actual ||
+        !command ||
+        actual.sessionId !== request.sessionId ||
+        actual.originStoreId !== metadata.storeId ||
+        command.originStoreId !== metadata.storeId ||
+        actual.kind !== 'tool' ||
+        !['files.read', 'files.write', 'files.edit'].includes(actual.definitionId)
+      )
+        throw new AgentError('output_file_scope_denied');
+      const views = await runtime.queryExtension({
+        expectedStoreId: metadata.storeId,
+        sessionId: request.sessionId,
+        subjectId: command.subjectId,
+        extensionId: extension.id,
+        queryId: 'files.outputs',
+        input: { path },
+      });
+      return {
+        storeId: metadata.storeId,
+        files: (views[0]?.payload ?? []) as unknown as {
+          key: string;
+          revision: string;
+          value: SessionOutput;
+        }[],
+      };
+    },
+  });
+  return {
+    extension: outputs.extension,
+    tools: outputs.extension.tools!,
+    isPlanFileEdit: planFiles.isPlanFileEdit,
+    async describeRequest(request: import('@kite-ai/agent/extensions').AuthorizationRequest) {
+      return (
+        (await outputs.describeRequest(request)) ??
+        (await planFiles.describeRequest(request)) ??
+        (await inputFiles.describeRequest(request))
+      );
+    },
+  };
 }

@@ -36,6 +36,7 @@ import {
   type RunRecord,
   type ToolCall,
 } from '../storage/types';
+import { toolImages } from '../tool-images';
 import { runInternalModelCall } from './authorization-check';
 import {
   type AuthorizationChangeWait,
@@ -1528,6 +1529,11 @@ export class UnifiedExecution {
         typeof result.content !== 'string'
       )
         throw new AgentError('invalid_tool_result');
+      if (result.modelImages !== undefined) {
+        if (!this.options.validateArtifacts)
+          throw new AgentError('artifact_references_unavailable');
+        await this.options.validateArtifacts(scope, toolImages(result.modelImages, executionId));
+      }
       if (result.modelContent) {
         if (
           result.modelContent.kind !== 'artifact' ||
@@ -1774,6 +1780,7 @@ export class UnifiedExecution {
           )
             throw new AgentError('invalid_job_result');
           result = event.result;
+          if (result.modelImages !== undefined) throw new AgentError('job_images_unsupported');
           if (result.modelContent) {
             if (
               result.modelContent.kind !== 'artifact' ||
@@ -2119,6 +2126,7 @@ export class UnifiedExecution {
         typeof result.content !== 'string'
       )
         throw new AgentError('invalid_action_result');
+      if (result.modelImages !== undefined) throw new AgentError('action_images_unsupported');
       if (result.modelContent) {
         if (
           result.modelContent.kind !== 'artifact' ||

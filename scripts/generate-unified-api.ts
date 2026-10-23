@@ -119,6 +119,7 @@ const responseNames = [
   'Message',
   'InputImage',
   'InputFileReference',
+  'InputFileImport',
   'Change',
   'WorkspaceList',
   'SessionList',
@@ -198,6 +199,8 @@ const requestNames = [
   'CreateSessionRequest',
   'StartCommandRequest',
   'InputImageUploadRequest',
+  'InputFileUploadQuery',
+  'InputFileReleaseRequest',
   'CancelCommandRequest',
   'CancelRunRequest',
   'CancelExecutionRequest',
@@ -334,7 +337,16 @@ for (const route of apiRoutes)
               },
             },
           }
-        : {}),
+        : 'binaryRequest' in route && route.binaryRequest
+          ? {
+              requestBody: {
+                required: true,
+                content: {
+                  'application/octet-stream': { schema: { type: 'string', format: 'binary' } },
+                },
+              },
+            }
+          : {}),
       responses: Object.fromEntries(
         ('statuses' in route ? route.statuses : [200]).map((status) => [
           String(status),

@@ -26,7 +26,7 @@ Skill 目录当前是闭合 DTO。直接给全部知识读取加字段会使旧 
 
 ## Consequences
 
-终端调用者已接线：Service 目录与实际 Run 使用同源编译及绑定，Client 严格核 opt-in 全页与闭合状态；CLI argv 与实际配对/共享 Service、活动原 Run/new follow-up 和物理丢回执均已验证。TUI 有动态名称、原 scope/草稿 CAS、Ctrl+L 原 unknown 查回和实际 inline/fork PTY；目录失败在关闭面板时也显示原 scope 的有限原因。
+终端调用者已接线：Service 目录与实际 Run 使用同源编译及绑定，Client 严格核 opt-in 全页与闭合状态；CLI argv 与实际配对/共享 Service、活动原 Run/new follow-up 和物理丢回执均已验证。TUI 有动态名称、原 scope/草稿 CAS、原 unknown 只读查回和实际 inline/fork PTY；目录失败在关闭面板时也显示原 scope 的有限原因。2026-10-23 按用户要求移除 Ctrl+L 刷新与查询；当前会话的原回执由已有自动退避核对，原 ID、零重发和范围隔离合同保持。
 
 完整 canonical compiled entries 回归修正两处可选 undefined，使知识、坏项与合法 Workflow 可同时落库；Core JSON、来源和权限门禁保持严格。最终冻结源码完整统一入口通过270个测试作业（parallel=87文件、isolated=253、exclusive=0），日志 `/private/tmp/kite-workflow-callers-unified-sixth-qualified.log`；根及26workspace build/types、API、边界、测试归属与格式通过。实际 Service/Client、CLI、TUI 与 paired/shared inline/fork 的具体断言及前五轮失败、修正和复验见[实施进度](../../../../docs/plans/unified-agent-refactor-v1-progress.md)。旧 mock 和 PTY 前提修正保留原严格身份、期限、正文和零重放要求，不用局部通过抵消失败的整轮。
 

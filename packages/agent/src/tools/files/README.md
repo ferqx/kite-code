@@ -1,5 +1,37 @@
 # Workspace 文件 leaf
 
+默认 Service 已接入准确会话文件适配器；持久取舍见[会话文件决定](../../../../../.agents/notes/implemented/architecture/2026-10-23-persistent-session-files.md)，客户端和发行资格分别见 [Desktop](../../../../../apps/desktop/README.md)与 [Terminal](../../../../../apps/cli/docs/terminal-release.md)。低层 Files 和独立工厂保持原版本；默认宿主的 `files.read@5` 组合以下能力，write/edit 仍为版本 2。
+
+## 会话文件与 PDF
+
+普通 Workspace 与明确外部路径的文本写入／编辑通过原 [文件工具](../files-tools.ts)封存完整 postimage，结果 `details.fileOutput` 与 `artifactRefs` 绑定原 Execution。为避免靠文件名或模型自然语言猜测“交付”，每次具备 Artifact port 的成功文本变更均保留该快照；没有另建外部工作文件登记数据库。当前目标仍在原路径，原权限与 Workspace 检查点保持。快照发布失败返回 `outcome_unknown`，不重做实际已发生的写入。外部路径的未封存修改不进入 Profile 备份，恢复只保历史快照，绝不回写外部目标。此范围由 [完整快照与失败窗口回归](../../../test/isolated/files/change-preview.test.ts)验证。
+
+[默认 Service 文件联验](../../../../../apps/service/test/isolated/planning-configuration.test.ts)另在会话输出物理写后分别注入 Artifact 登记失败与 saved record 写失败，真实两分支67断言通过：当前与原 operation 保留 pending，原 Execution 为 unknown，无成功交付卡；原 Command 重复提交与冷查询都不改文件、不增加模型或效果。现有 `session.recover interrupt` 仍报告该已尝试的未知副作用，不能据此解锁后继工作；未取得可靠结果证明时保留 `recovery_required`，不自动重放写入。这与正常已成功输出的后续编辑、备份恢复后新授权读写是不同边界。
+
+2026-10-24，Windows x64／Bun1.4.3、主仓库 `60a2d984c` 加当前改动，`bun test packages/agent/test/isolated/files/pdf.test.ts packages/agent/test/isolated/files/pdf-packaged.test.ts` 整两叶9项61断言通过，覆盖中文本地 CMap、物理页／页标签、分页、旋转大页、无文本页、坏文件、缓存损坏／删除重建，以及真实 AES 加密文件的 `pdf_password_required`。取消例使用真实 Worker：两个在途请求占满并发，第三个排队取消不创建 Worker；取消一个在途请求不影响另一个，原 Worker 各调用一次 terminate，后续读取仍成功。这证明取消调度与调用范围，不代证操作系统线程已经物理退出。[源码外闭包](../../../test/isolated/files/pdf-packaged.test.ts)实际复制 parser、Canvas 和 native 依赖，在空 PATH／NODE_PATH、禁止自动安装的独立目录提取文本及渲染 PNG；完整候选的资源验收归 [Terminal owner](../../../../../apps/cli/docs/terminal-release.md)。其他平台与完整安装资格仍独立验证。
+
+其中[固定两栏与表格样本](../../../../../tests/fixtures/pdf.ts)经公开 Files 适配器、真实原生读取及 PDF Worker，核列优先正文与表格逐行文字、完整模型正文和实际 PNG 的尺寸、表头与格线；另渲染并目视确认两栏及表格完整清晰。此例以准确范围／Artifact 发布测试端口隔离格式行为，既有真实 Store 绑定及后继 Model 交接仍由上文 Service 联验覆盖。结果继续明确 `text_extracted_reading_order_not_guaranteed`；固定样本通过不保证任意复杂多栏或表格的阅读顺序，页面图像保留文字提取不含的布局。
+
+固定 2048×2048 噪声图像的一页 PNG 成功，两页实际输出超过 16 MiB 时明确 `pdf_result_too_large`，后续普通读取仍成功；这验证单批结果预算，不是机器 OOM 资格。源码外私有物理副本分别移除准确 Worker／校验文件、写入错误校验摘要，真实子进程核 `ENOENT`／`pdf_assets_invalid`，每次恢复原字节后同进程重新读取成功；未修改源依赖或增加网络回退。损坏的嵌入 TrueType 字体在 text／image 均返回 `pdf_font_invalid`，后续正常读取成功；修复前真实 parser 曾仅警告并生成替代字体页图，不能将该旧成功计为准确结果。
+
+同日 [真实视觉 runner](../../../../../tests/e2e/live/model/pdf-vision.live.ts)经默认 Service Files 装配、Runtime／SQLite／Artifact 和实际 SDK，上传只有栅格图片的合成 PDF，删除原路径后由模型调用 `read_file` 获取页图。已配置 `deepseek-v4-flash`／Chat Completions 在两次 HTTP 200、一次成功页图读取后，准确返回随机六字母及红7／蓝3柱图。此前含易混淆字符的样本把 B 识别成 8，柱图仍正确；该失败保留，成功样本不能证明任意扫描件的识别准确率。测试没有本地 OCR、模型回答替换或协议回退，预算与复现命令见 [live 测试说明](../../../../../tests/e2e/live/model/README.md#pdf-扫描页与图表)。
+
+不支持视觉的端点明确失败、不改为纯文本或切换协议；两协议受控 HTTP 400 的准确请求与错误证据归 [AI 图片消息](../../../../ai/README.md#图片消息)。
+
+[输入文件](../input-files.ts)只接受所选消息有效原件的准确绝对路径，核完整 hash／size、引用与派发快照；私有目录的其他路径仍拒绝。上传原件只读。普通文件继续沿严格 UTF-8、完整 baseline 和范围读取。`read_file` 对 PDF 附件新增 `pages` 与 `mode=text|image`，默认第 1 页；每次最多 20 页文字或 4 张页图，返回物理页码、标签、总页数和 nextPage。页图每边最多 2048 像素，单批结果最多 16 MiB，源文件最多 256 MiB，不进行 OCR。
+
+[PDF Worker](../documents/pdf-worker.ts)使用固定 PDF.js 6.4.299、本地字体／CMap／WASM 与 Canvas；禁用文档网络、XFA 和系统字体回退。解析在独立可取消 Worker 执行，同时最多两次，单次 60 秒；Worker 不是 OS 沙箱，仍需安装制品及平台资源资格。原提取顺序不保证复杂多栏／表格语义。缓存键含完整源 hash、Store、配方、页范围、模式和 Worker 摘要，命中前仍核原件权限和全字节。缓存不进入历史：实际交给模型的正文及页图分别保存为准确 Tool Execution 的 Artifact。中立 `tool` 消息保存视觉结果来源；Responses 使用原工具结果的图像部分，Chat Completions 保留原工具配对并追加明确标记为工具数据的视觉载体，不产生人类输入或批准。
+
+该固定 parser 会把部分字体错误降为警告；Worker 只识别已核对的字体诊断前缀并返回 `pdf_font_invalid`，其他格式错误警告返回 `pdf_processing_failed`，不发布降级的文本或页图，也不传播命中的原始诊断。记录只存在于单次解析 Worker，结束恢复原警告处理；版本变化必须重新核对。未嵌入字体的 `missingFile` 也可能合法，不能据此拒绝无故障的 CMap 文本读取。此处理拒绝已识别的解析失败，不修复字体，也不承诺任意字体或排版都可读取。
+
+[输出文件](../session-outputs.ts)复用 `builtin.files` typed records、原生 Files CAS 和 Artifact。当前文件存于 `<profile>/files/<SHA256 Store>/<SHA256 Session>/outputs/`，首版文件名为 1–120 位 ASCII 字母数字、点、下划线或连字符并以字母数字开头；原生层继续拒绝设备名、别名与链接。`base=null` 只创建，不因同名覆盖。发布前写 pending 意图；字节、不可变交付快照及登记均完成才成功，后半段失败保持 unknown。工作区源码与检查点沿原链路，会话文件不进入工作区恢复点。
+
+Fork 从所选执行的不可变交付建立只读来源锚点，首次读取生成独立真实副本；分支编辑另建当前记录，保留继承锚点供再次 Fork。来源文件的后续外部修改不进入旧交付。文件清单上下文至多展示 200 项且标明是否完整，准确路径查找没有累计文件数量上限。`files.outputs`／`files.output-source` 是宿主登记查询，不新增模型缓存工具。
+
+Canvas 固定为必需依赖 `@napi-rs/canvas@1.0.10`，Agent 构建纳入 PDF Worker、校验摘要和本地资源；宿主保护范围包含实际 parser／Canvas 与平台 native 依赖根。缓存内容按字节基线读取，坏 JSON／非法 UTF-8／无效页范围或图像可在原权限核验后重新解析，发布沿相同基线 CAS；链接和不可核实 IO 不降格为普通缓存 miss。超过本地缓存字节预算仍明确失败，不承诺任意大小损坏缓存能自动修复。Worker 取消和60秒超时不等同于 OS 硬内存限制，Win/Linux 原线程退出资格仍沿现有 owner 保留 unknown。
+
+Windows 本机联验已覆盖附件→PDF→Artifact→后继模型 wire、输出编辑、历史快照、Fork 独立副本及备份恢复；两协议 wire 不等于真实视觉模型识别资格。测试入口为 [Service 文件／Plan 联验](../../../../../apps/service/test/isolated/planning-configuration.test.ts)、[真实 PDF Worker](../../../test/isolated/files/pdf.test.ts)与 [AI 图片协议](../../../../ai/test/input-images.test.ts)。
+
 模型接口由可信 `ToolDefinition.model` 投影：`read_file/write_file/edit_file/list_directory/glob_files/search_content`，绝对用户文件为 `read_user_file/write_user_file/edit_user_file`。读取使用 `start_line/max_lines`，编辑使用 `old_text/new_text/expected_matches` 及对应 Artifact 字段，其余声明属性使用 snake_case；任意正文和 Artifact 身份保持原值。内部 `files.*` ID、定义版本、完整 baseline、权限与检查点合同保持原样。`search_content` 仍是字面量搜索，不新增正则能力。
 
 公开入口 `@kite-ai/agent/files` 的 import 不打开资源。宿主显式调用 `createWorkspaceFiles({root,maxFileBytes?})` 选定一个物理 Workspace 根，再用 `createFileTools(files)` 将六个普通 ToolDefinition 装配进扩展；工具仍走 UnifiedExecution 的权限、来源复查、计划、派发和终态。没有 CodingAgent、Git 或旧 filesystem authority 依赖。

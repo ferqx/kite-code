@@ -14,7 +14,7 @@ import type {
 } from './tool-messages-bridge';
 
 const labels: Record<string, readonly [readonly string[], string]> = {
-  'files.read': [['2', '3', '4'], '读取'],
+  'files.read': [['2', '3', '4', '5'], '读取'],
   'files.read_path': [['1', '2'], '读取'],
   'files.write': [['2'], '写入'],
   'files.edit': [['2'], '修改'],

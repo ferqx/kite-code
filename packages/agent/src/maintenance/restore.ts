@@ -49,6 +49,7 @@ import {
   type ProfileRestoreResult,
   type RestoreProfileBackupInput,
 } from './types';
+import { restoreWorkingFiles } from './working-files';
 
 function supported() {
   if (!['darwin', 'linux', 'win32'].includes(process.platform))
@@ -297,6 +298,12 @@ async function runProfileRestoreOwned(
       db.close(true);
     }
     await restoreAssets(selected.directory, staging, selected.manifest.assets, input.signal);
+    await restoreWorkingFiles(
+      selected.directory,
+      staging,
+      selected.manifest.workingFiles,
+      input.signal,
+    );
     // Reinspect the selected source after copying; every copied file must match its source.
     await inspectProfileBackup({ directory: selected.directory, signal: input.signal });
     if (fingerprint(join(staging, 'core.db')).sha256 !== selected.manifest.database.sha256)

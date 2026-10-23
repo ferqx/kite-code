@@ -71,6 +71,7 @@
     "scripts/release/entrypoints/windows-terminal-verifier.ts",
     "tests/fixtures/unified-agent/**/*.ts",
     "tests/e2e/live/model/model-tools.live.ts",
+    "tests/e2e/live/model/pdf-vision.live.ts",
     "tests/e2e/live/model/collaboration.live.ts",
     "tests/e2e/live/model/collaboration-transport-fault.live.ts",
     "tests/e2e/live/model/collaboration-input-crash.live.ts",

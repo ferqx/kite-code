@@ -1,5 +1,6 @@
 import { ClientError, type Execution, type Message } from '@kite-ai/client';
 import type { NativeToolMessageFact } from '../src/tool-messages-bridge';
+import { nativeToolImages } from './tool-images';
 
 const object = (value: unknown): Record<string, unknown> | undefined =>
   value && typeof value === 'object' && !Array.isArray(value)
@@ -164,6 +165,7 @@ export function nativeToolMessageFact({
     definitionVersion: execution.definitionVersion,
     status: execution.status,
     resultRevision: execution.resultRevision,
+    ...(result.modelImages !== undefined ? { images: nativeToolImages(execution) } : {}),
     ...(decisionRefresh ? { decisionRefresh } : {}),
     target: target(call, execution.definitionId, execution.definitionVersion),
     ...(!message.originMessage && execution.authorization

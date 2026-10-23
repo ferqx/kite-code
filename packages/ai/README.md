@@ -2,9 +2,11 @@
 
 ## 图片消息
 
-中立 `ModelMessage.images` 只为 user role 提供明确 MIME 的 base64 原图，不接受 URL，支持 PNG、JPEG、WebP、GIF。AI 不读取本地路径或远程图片；[SDK adapter](src/sdk.ts)映射为 SDK file parts，分别编码为 Chat Completions 的 `image_url.url` Data URL 和 Responses 的 `input_image.image_url` 字符串，不使用 Provider 文件上传引用。本轮不接 Anthropic Messages；所有兼容提供商复用选定协议，不能因字段名相似而混用结构。`kite.sdk.messages` 转换版本更新为 Chat 4／Responses 5，旧历史的内容与原适配器元数据保持原值。
+中立 `ModelMessage.images` 为 user 输入或原 tool 结果提供明确 MIME 的 base64 图像，不接受 URL，支持 PNG、JPEG、WebP、GIF。AI 不读取本地路径或远程图片；[SDK adapter](src/sdk.ts)将 user 图像映射为 SDK file parts。tool 页图保留原工具调用／结果配对：Responses 在原 tool output 内编码文件数据；Chat Completions 的 tool reply 只能承载文字，因此在整组工具回复之后追加明确注明调用 ID、非人类请求／批准的视觉载体。中立持久历史仍是 tool 来源，不新增人类 Command 或 Run。本轮不接 Anthropic Messages，真实视觉支持由 Provider 决定。转换版本随此变化更新，旧历史与原适配器元数据保持原值。
 
 [受控请求测试](test/input-images.test.ts)实际捕获两种协议的图片字节和文字，并核 URL 拒绝；不根据模型名称猜图片能力，真实支持仍由所选 Provider 决定。Artifact 引用、来源校验和历史图片读回归 [Agent owner](../agent/README.md#用户图片输入)。
+
+2026-10-24，Windows x64／Bun1.4.3、主仓库 `60a2d984c` 加当前改动，`bun test packages/ai/test/input-images.test.ts` 整文件10项100断言通过。Chat Completions／Responses 的受控 HTTP 400 视觉拒绝响应，核实际 SDK 请求保留准确工具调用、结果和页图配对，只发送一次请求，返回 `model_transport_failed` 且不泄漏供应商错误正文；没有成功事件、纯文本降级或协议重试。此负例验证本地错误合同，不冒充真实外部供应商拒绝资格。
 
 构建使用 Bun splitting 内联[明确声明的 SDK 普通 JS 依赖](bundled-dependencies.ts)，中立入口与 SDK 入口仍独立导出。Terminal 打包扫描全部生成模块，拒绝声明已内联的残余 bare import，并保存安装声明图的原 package manifest 摘要与许可全文；不改变实际 Provider 尝试、取消或用量合同。跨包打包取舍归[Windows 闭包成本决定](../../.agents/notes/implemented/bug-fix/2026-10-17-windows-bundle-admission-cost.md)。
 

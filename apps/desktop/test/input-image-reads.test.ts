@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import type { AgentClient, Message } from '@kite-ai/client';
+import type { AgentClient, Execution, Message } from '@kite-ai/client';
 import { NativeInputImageReads } from '../electron/input-image-reads';
 import type { NativeToolMessageScope } from '../src/tool-messages-bridge';
 
@@ -62,4 +62,87 @@ test('Native image reader accepts only an observed original user image and inval
   scope = { ...scope, viewSelection: 4 };
   expect(() => reads.read('read', 0)).toThrow('input_image_view_changed');
   await reads.closeAll();
+});
+
+test('PDF preview uses the observed original tool receipt across Fork and rejects a forged image scope', async () => {
+  const scope = {
+    generation: 1,
+    storeId: 'current',
+    sessionId: 'fork',
+    viewSelection: 2,
+    historyEpoch: 0,
+  } as NativeToolMessageScope;
+  const ref = {
+    id: 'page-one',
+    scope: { kind: 'execution' as const, id: 'execution' },
+    mediaType: 'image/png',
+    size: '3',
+  };
+  const content = JSON.stringify({ pages: [{ number: 7 }] });
+  const message = {
+    id: 'copied',
+    sessionId: 'fork',
+    runId: null,
+    role: 'tool',
+    status: 'complete',
+    sourceIds: ['execution'],
+    content,
+    originMessage: {
+      storeId: 'original',
+      sessionId: 'source',
+      runId: 'run',
+      messageId: 'original-message',
+    },
+  } as Message;
+  const execution = {
+    id: 'execution',
+    originStoreId: 'original',
+    sessionId: 'source',
+    runId: 'run',
+    kind: 'tool',
+    definitionId: 'files.read',
+    definitionVersion: '5',
+    status: 'succeeded',
+    resultRevision: '1',
+    result: { outcome: 'succeeded', content, artifactRefs: [ref], modelImages: [ref] },
+  } as unknown as Execution;
+  let reads = 0;
+  const client = {
+    getExecution: async () => execution,
+    readArtifact: async (sessionId: string, input: unknown) => {
+      reads++;
+      expect(sessionId).toBe('source');
+      expect(input).toEqual({ expectedStoreId: 'current', refId: ref.id, scope: ref.scope });
+      return {
+        content: new Uint8Array([1, 2, 3]),
+        reference: { ...ref, hash: 'a'.repeat(64), storeId: 'original' },
+      };
+    },
+  } as unknown as AgentClient;
+  const reader = new NativeInputImageReads(
+    client,
+    () => scope,
+    () => new Map([['copied', message]]),
+  );
+  const request = {
+    method: 'input.image.open' as const,
+    generation: 1,
+    viewSelection: 2,
+    historyEpoch: 0,
+    readId: 'pdf',
+    messageId: 'copied',
+    index: 0,
+  };
+  try {
+    expect(await reader.open(request)).toMatchObject({ size: 3, mediaType: 'image/png' });
+    expect(reader.read('pdf', 0)).toMatchObject({ data: 'AQID', done: true });
+    reader.close('pdf');
+    ref.scope.id = 'foreign-execution';
+    await expect(reader.open({ ...request, readId: 'forged' })).rejects.toThrow(
+      'tool_images_invalid',
+    );
+    expect(reads).toBe(1);
+  } finally {
+    await reader.closeAll();
+  }
 });

@@ -47,3 +47,8 @@ export async function encodeInputImageChunk(blob: Blob, signal: AbortSignal): Pr
   if (prefix < 0) throw Error('image_encoding_failed');
   return dataURL.slice(prefix + 8);
 }
+
+export async function readInputFileChunk(blob: Blob, signal: AbortSignal): Promise<Uint8Array> {
+  if (blob.size > 65536) throw Error('file_chunk_too_large');
+  return new Uint8Array((await read(blob, 'buffer', signal)) as ArrayBuffer);
+}

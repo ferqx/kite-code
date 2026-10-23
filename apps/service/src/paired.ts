@@ -170,7 +170,15 @@ export async function launchPairedService(options: PairedServiceOptions) {
   try {
     child = options.spawnChild
       ? options.spawnChild(command, { env })
-      : Bun.spawn(command, { stdin: 'pipe', stdout: 'pipe', stderr: 'pipe', env });
+      : Bun.spawn(command, {
+          stdin: 'pipe',
+          stdout: 'pipe',
+          stderr: 'pipe',
+          env,
+          // A Windows caller's console close/Ctrl+C is not the Service's parent
+          // EOF. Keep the owned pipe lifecycle without attaching its console.
+          ...(process.platform === 'win32' ? { windowsHide: true } : {}),
+        });
   } catch (error) {
     try {
       artifact?.release();

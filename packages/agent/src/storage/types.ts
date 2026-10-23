@@ -639,6 +639,8 @@ export interface InputImage {
 export interface InputFileReference {
   name: string;
   uri: string;
+  /** Absent on legacy path-only inputs. The URI is display data, never access authority. */
+  reference?: ArtifactReference & { scope: { kind: 'session'; id: string } };
 }
 
 export interface HostControlState {

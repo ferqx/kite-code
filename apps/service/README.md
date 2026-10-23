@@ -1,5 +1,11 @@
 # 本机 Agent Service
 
+## 会话持久文件
+
+`input_files` 能力通过现有受认证 Session 路由提供流式二进制上传、稳定导入查询与释放；参数与响应进入同源 schema／生成 SDK。上传上限 256 MiB，完整 SHA／size 核验后才返回准确原件引用，正式输入绑定仍由原 Command 事务负责。缺失能力不伪装为上传成功，旧 URI 输入继续保持原含义。
+
+默认 Files 装配依次组合工作区检查点、只读输入、Plan owner 协调与会话输出；请求分类和 execute 使用同一准确目标 revision，不放开整个 Profile。PDF 解析在独立 Worker，工具页图经 Artifact 和 Runtime 进入后继模型。具体文件、权限、Plan 与维护合同归 [Files](../../packages/agent/src/tools/files/README.md)、[Planning](../../packages/agent/src/business/planning/README.md)与[维护](../../packages/agent/src/maintenance/README.md)；[真实默认宿主联验](test/isolated/planning-configuration.test.ts)覆盖这些交接，完整客户端和安装验收不从该测试推定。
+
 公开 `Message.createdAt` 为可选的消息首次记录毫秒时间，经[同源 schema](src/http/schema/index.ts)传给生成 Client；缺失保持未知。普通消息沿原 Store 事实，Fork 消息在[公开投影](src/message-response.ts)沿已核实来源保留原时间，不补造 Fork 或请求时钟。[HTTP 回归](test/isolated/http.test.ts)的真实受理／执行路径核对公开历史与 Store 时间一致；[来源回归](test/message-response.test.ts)核对 Fork 时间保真。
 
 2026-10-23，Windows x64／Bun1.4.3（`a481f3a78` 加当前工作树）：沙箱外执行 `bun test ./apps/service/test/isolated/http.test.ts`，完整文件5项／88断言通过。初始化断言逐项核对现有5条迁移；取消路径按原 `run.start` Command 核对 Run、Model 与输入来源，不再要求已移除的派生 `businessCommandId`。原拒绝、取消与 stale Store 零写入断言保留，生产迁移与命令路径未改。
@@ -151,6 +157,8 @@ heap／external／ArrayBuffer明显回落，但RSS仍较高，不能仅据此判
 `@kite-ai/service/paired` 提供 `launchPairedService`。调用者启动前通过只读 `@kite-ai/agent/profile` API 选定 profile，并传入选定 entrypoint、instance/build 身份、API major 和必要 capabilities。launcher 发送一行私有 startup JSON（最多 64 KiB），保持 stdin 作为独立父进程存活通道，并读取一行 bootstrap JSON（最多 16 KiB）。凭据和 token 不进入 argv、URL 或继承的模型凭据环境变量。Client 准入将 bootstrap 与认证 HTTP 身份和启动前选择逐项比较，不从响应推导预期 profile；启动失败只清理本次建立的 child。
 
 可信 Native main 可显式提供中立 `spawnChild` port，用 Node 的进程/stream 能力启动已选定的 Bun 制品；省略时保留 Bun 宿主实现。port 不改变 bootstrap、准入、父存活或所属关闭协议，也不增加默认 PATH/源码回退。Electron main 只持有自己启动的 PID 和 handle；[paired 测试](test/isolated/paired.test.ts)及 Native 实际窗口证据分别证明 launcher 与 Node 调用者的边界。
+
+默认 Bun launcher 在 Windows 用 `windowsHide:true` 启动所属 Service，使其不继承 TUI 的控制台 Ctrl+C／ConPTY 关闭事件；不使用 detached，stdin 父存活通道、所属 child 与真实 exited 等待保持。2026-10-23 Windows x64／Bun1.4.3 的 [实际 TUI Host](../cli/test/isolated/tui-host.test.ts)完整4项54断言通过，核大文件完整读写、取消、冷重开零重放以及真实 ConPTY 关闭后 waiting Run／Service 仍保所属，随后显式正常停止并确认准确进程退出。PTY EOF 不冒充业务取消，独立安装资格不由开发 Host 测试推定。 同版 `paired.test.ts` 与 `paired-shutdown.test.ts` 合计7项88断言通过；两份 Service 的网络断开、所属 stdin EOF、真实退出和另一 Service 继续存活保持。原4项 POSIX 信号用例在 Windows 继续跳过，不以模拟信号补造通过。
 
 显式 Desktop 开发宿主监听 Service 源码，构建新的独立开发 bundle，并沿同一 paired 关闭／实际退出与新 SHA／build 准入替换进程。第三方依赖随版本打包，workspace 保外部 source 解析及原运行资产；开发版本不成为正式完整制品证明。UI 整页重新 attach 原 Store，不自动重发工作；编译失败保持旧服务，未知关闭和回执阻止继续替换。此行为归[Desktop 开发 owner](../desktop/README.md#开发热更新与服务重载)，Service 公共 API、Core 生命周期和正式 caller 合同保持。
 

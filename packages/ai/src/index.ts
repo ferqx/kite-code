@@ -21,7 +21,7 @@ export interface ModelToolCall {
 export interface ModelMessage {
   readonly role: 'system' | 'user' | 'assistant' | 'tool';
   readonly content: string;
-  /** Inline immutable image bytes, encoded as base64; only user messages carry images. */
+  /** Inline immutable image bytes, encoded as base64; user input or exact tool result. */
   readonly images?: readonly ModelImage[];
   readonly toolCalls?: readonly ModelToolCall[];
   readonly toolCallId?: string;

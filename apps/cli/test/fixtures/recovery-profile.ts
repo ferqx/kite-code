@@ -76,7 +76,7 @@ export async function recoveryProfile(
                 .reverse()
                 .find((message) => message.role === 'user')?.content as string) ?? '',
             );
-            if (candidate.purpose === 'authorization_review') input = candidate;
+            if (candidate.purpose === 'authorization_check') input = candidate;
           } catch {}
           if (input) reviews.push({ body, input });
           else calls++;
@@ -261,7 +261,7 @@ export async function recoveryProfile(
     const rows = (sql: string) => database().query(sql).all();
     const reviewProof = () =>
       rows(
-        "SELECT e.state,json_extract(e.result_json,'$.outcome') AS outcome,json_extract(json_extract(e.result_json,'$.content'),'$.decision') AS decision,e.parent_execution_id AS target FROM execution e JOIN command c ON c.id=e.origin_command_id WHERE c.kind='authorization.review'",
+        "SELECT e.state,json_extract(e.result_json,'$.outcome') AS outcome,json_extract(json_extract(e.result_json,'$.content'),'$.decision') AS decision,e.parent_execution_id AS target FROM execution e JOIN command c ON c.id=e.origin_command_id WHERE c.kind='authorization.check'",
       ) as { state: string; outcome: string | null; decision: string | null; target: string }[];
     if (
       reviews.length !== 1 ||
@@ -284,7 +284,7 @@ export async function recoveryProfile(
         JSON.stringify([
           {
             state: 'succeeded',
-            outcome: 'succeeded',
+            outcome: null,
             decision: 'ask_user',
             target: target.executionId,
           },

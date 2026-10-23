@@ -1,5 +1,15 @@
 # Plan 与确定性验证业务叶子
 
+默认 Service 通过 [PlanFiles](files.ts)保存 `<profile>/files/<SHA256 Store>/<SHA256 Session>/plans/<SHA256 plan ID>/plan.md`。普通文件编辑由精确目标适配器通过已有 `invokeActionFromTool` 调用 `planning.write`；不扩展通用嵌套工具调度，也不全局放开写工具。原 Plan ceiling 与必要条件均重新核真实执行输入及准确目标，独立文件权限仍生效。
+
+Planning 先持久保存 publication pending，再发布文件、不可变版本和 `plan.current` CAS，最后标记 committed；未完成时阻断批准和新效果。同一预期版本与内容可查回／完成原发布，不以重试提交不同正文。pending 恢复只验证原正文已完整发布；若文件又有外部修改，保持 pending 和实际字节，不自动覆盖或据此批准。已完成发布后的显式外部修改恢复可使用 `fileBase`，必须是刚读取的完整原生基线，null 仅创建缺失文件；保存新版本不继承旧批准。当前上下文明确 `fileState`，外部漂移可能先使旧模型来源失效，刷新后再读取、编辑。审阅前后及实际派发都核文件与原版本，迟到答案不能掩盖漂移。
+
+Plan 原记录和历史审阅正文不随当前文件变化；恢复保留实际字节，不从旧记录覆盖新文件或恢复批准。新 Store 经独立权限设置后的实际读取与编辑证据归[维护 owner](../../maintenance/README.md#会话工作文件与-manifest-v20)，客户端与发布范围沿 [Desktop](../../../../../apps/desktop/README.md)及 [Terminal](../../../../../apps/cli/docs/terminal-release.md)分别核对。
+
+2026-10-23，`ba34a2e6d` 加本次会话文件工作树、Windows x64／Bun1.4.3：[默认 Service 隔离回归](../../../../../apps/service/test/isolated/planning-configuration.test.ts)通过真实 SQLite、Artifact、文件工具及受控兼容 Provider 验证：v1 批准后，普通 `read_file`／`edit_file` 形成 v2，旧批准保留为历史，项目写入在 adapter 派发前被 `plan_approval_required` 拒绝；独立批准 v2 后实际写入与 progress 成功，共15断言。
+
+同一回归在物理 Plan、不可变版本和 current 已保存后，精确注入首次 publication committed 的 SQL 写失败。原调用保持 unknown、publication 保持 pending，后续审阅不产生可答交互、项目写入零派发；显式同版本同内容重试完成原 publication，文件 inode／size／mtime 不变，独立审阅后才能执行。另分支在重试前修改实际文件，确认外部字节、pending 和原 unknown 均保留，不产生新版本或批准。该故障用例35断言通过，只证明同内容确认与外部变化保护，不宣称 pending 外部漂移可自动修复。
+
 模型工具使用 `read_plan`、`write_plan`、`request_plan_review`、`update_plan_progress` 与 `define_validation_checks`、`run_validation_checks`、`rebind_validation_checks`、`request_validation_waiver`；自动文件检查公开为 `check_file_changes`。声明过的输入字段通过模型投影使用 snake_case，内部 definition ID/version、计划批准、receipt、权限与最终 CAS 保持原合同。开放 JSON 检查输入与业务 payload 不按字段名猜测改写。
 
 `createPlanningValidation` 显式装配 ordinary Tools、用户 Actions、只读 Query、必要条件 evaluator 与 Run initializer。import 不读文件、不启动 Model/进程。默认未启用计划或 required 验证，普通对话可以直接完成；默认 Service 装配由 Service owner 接入，本叶子的存在不代表正式 UI/默认入口已迁移。

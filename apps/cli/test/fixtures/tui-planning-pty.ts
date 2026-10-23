@@ -1,6 +1,6 @@
 import { Database } from 'bun:sqlite';
 import assert from 'node:assert/strict';
-import { existsSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { ptyDeadline, spawnTuiPTY, terminateTuiTree } from './tui-pty';
 
@@ -12,8 +12,10 @@ const input = JSON.parse(process.argv[2]!) as {
   runner: string;
   firstLost: string;
   transcript: string;
+  expectedBodyPath: string;
 };
 const abort = new AbortController();
+const expectedBody = readFileSync(input.expectedBodyPath, 'utf8').normalize().replace(/\s+/g, '');
 const interrupted = () => abort.abort(Error('owned_planning_interrupted'));
 process.once('SIGINT', interrupted);
 process.once('SIGTERM', interrupted);
@@ -23,7 +25,12 @@ const shutdown = (message: unknown) => {
 // Windows TerminateProcess cannot run finally. The private driver channel
 // enters the same abort path, which owns termination of its ConPTY subtree.
 if (process.platform === 'win32') process.on('message', shutdown);
-const pty = spawnTuiPTY({ cmd: [process.execPath, '--no-install', input.runner], cwd: input.root });
+const pty = spawnTuiPTY({
+  cmd: [process.execPath, '--no-install', input.runner],
+  cwd: input.root,
+  conptyCellWidths: process.platform === 'win32',
+  scrollback: 20000,
+});
 const current = async () => {
   abort.signal.throwIfAborted();
   return pty.projection();
@@ -44,14 +51,24 @@ const waitOriginalAttachment = async () => {
     const frame = await current();
     // The whole verified attachment is emitted into real terminal scrollback.
     // Its EOF need not share the finite viewport with the answer choices.
-    const emitted = pty.text();
-    if (
-      frame.fresh &&
-      emitted.includes('ORIGINAL_PLAN_UTF8') &&
-      emitted.includes('ORIGINAL_PLAN_FULL_TAIL')
-    )
-      return;
+    // ConPTY may repaint its final cells and wrap inside an ASCII marker. Decode
+    // the actual terminal cells, then compare every original non-layout character.
+    // Ink's wrap-ansi normalizes wrapped text to NFC. Compare canonical
+    // equivalents here; the Artifact and saved body retain exact byte checks.
+    const emitted = frame.text.normalize().replace(/\s+/g, '');
+    if (frame.fresh && emitted.includes(expectedBody)) return;
     if (Date.now() > end) throw Error('original complete Plan attachment was not emitted');
+    if (pty.ended) throw Error('original Planning host ended');
+    await Bun.sleep(50);
+  }
+};
+const waitViewport = async (text: string) => {
+  const end = Date.now() + 8000;
+  for (;;) {
+    const frame = await current();
+    const viewport = pty.viewport().replace(/\s+/g, ' ');
+    if (frame.fresh && viewport.includes(text)) return;
+    if (Date.now() > end) throw Error(`expected current ${text} viewport=${viewport}`);
     if (pty.ended) throw Error('original Planning host ended');
     await Bun.sleep(50);
   }
@@ -64,20 +81,30 @@ const key = async (value: string) => {
 };
 const choose = async (id: string, title: string) => {
   await key('\x12');
-  await wait('Select Session');
+  await waitViewport('Select Session');
   await key('\t');
+  await waitViewport('❯ Search:');
   await key(title);
-  await wait(`Search: ${title}`);
+  await waitViewport(`Search: ${title}`);
   await key('\x1b[B');
   const end = Date.now() + 8000;
+  let moved = false;
   for (;;) {
     const frame = await current();
-    if (frame.fresh && frame.text.replace(/\s+/g, ' ').includes(`❯ ${title} [${id}]`)) {
+    const viewport = pty.viewport().replace(/\s+/g, ' ');
+    if (frame.fresh && viewport.includes(`❯ ${title} [${id}]`)) {
       await key('\r');
       await wait(`Session ${id} ·`);
       return;
     }
-    if (Date.now() > end) throw Error(`original Session target not selected ${id}`);
+    // "Original Plan" also matches "Other original Plan scope". Search does
+    // not choose a target: move through the actual remaining two rows.
+    if (frame.fresh && !moved && viewport.includes(`${title} [${id}]`)) {
+      moved = true;
+      await key('\x1b[B');
+      continue;
+    }
+    if (Date.now() > end) throw Error(`original Session target not selected ${id}: ${viewport}`);
     if (pty.ended) throw Error('original Planning host ended');
     await Bun.sleep(50);
   }
@@ -152,7 +179,10 @@ try {
     await wait('original single plan');
     await key('\r');
   }
-  await wait('plan_review');
+  await wait('planning.write [');
+  // A model's serialized request may already mention plan_review before the
+  // interactive card has mounted. Wait for its actual attachment action.
+  await waitViewport('Ctrl+A: read required attachment.');
   assert.equal(
     existsSync(join(input.workspace, 'before.txt')),
     false,
@@ -165,15 +195,32 @@ try {
   );
   await key('\x01');
   await waitOriginalAttachment();
+  for (const choice of [
+    '1. Start execution in Auto mode',
+    '2. Start execution in Accept edits mode',
+    '3. Continue planning with feedback',
+  ])
+    assert.ok(
+      pty.viewport().replace(/\s+/g, ' ').includes(choice),
+      `original Plan choice is outside the current viewport: ${choice}\n${pty.viewport()}`,
+    );
   await key('\x1b[B');
   await key('\x1b[B');
   await wait('❯ 2. Start execution in Accept edits mode');
   await key('\r');
   await wait('interaction.answer: unknown');
-  await key('\x0c');
-  await wait('interaction.answer: unknown');
+  const firstReadDeadline = Date.now() + 8000;
+  while (!existsSync(input.firstLost)) {
+    abort.signal.throwIfAborted();
+    if (pty.ended || Date.now() > firstReadDeadline)
+      throw Error('automatic original answer receipt read did not occur');
+    await Bun.sleep(50);
+    await pty.drain();
+  }
+  // The controller retries only the original GET after its first lost response.
+  // No key, new request, or approval is needed to recover this receipt.
+  await waitViewport('interaction.answer: unknown');
   assert.equal(existsSync(input.firstLost), true);
-  await key('\x0c');
   await wait('interaction.answer: applied');
   await wait('ORIGINAL_PLAN_ACTUALLY_COMPLETED');
   const end = Date.now() + 8000;
@@ -189,6 +236,33 @@ try {
     if (Date.now() > end) throw Error(`actual original Run not completed ${JSON.stringify(run)}`);
     await pty.drain();
     await Bun.sleep(50);
+  }
+  if (input.entrance === 'active-queued') {
+    // Verify the removed key after the normal observer has reached Idle, so a
+    // concurrent receipt poll cannot be mistaken for an input-triggered read.
+    await waitViewport('New Run >');
+    const requests = () =>
+      readFileSync(join(input.root, 'plan-wire.jsonl'), 'utf8')
+        .trim()
+        .split('\n')
+        .map((line) => JSON.parse(line) as { method: string; path: string });
+    const quietDeadline = Date.now() + 8000;
+    let before = requests();
+    for (;;) {
+      await Bun.sleep(150);
+      const after = requests();
+      if (JSON.stringify(after) === JSON.stringify(before)) break;
+      if (Date.now() > quietDeadline) throw Error('original Idle observer did not settle');
+      before = after;
+    }
+    const displayed = (await current()).text;
+    const viewport = pty.viewport();
+    await key('\x0c');
+    await Bun.sleep(150);
+    const frame = await current();
+    assert.deepEqual(requests(), before, 'Ctrl+L must not query or submit original requests');
+    assert.equal(pty.viewport(), viewport, 'Ctrl+L must not refresh the current display');
+    assert.equal(frame.text, displayed, 'Ctrl+L must preserve every currently displayed character');
   }
   if (input.entrance === 'scope-draft') {
     await choose('b', 'Other original Plan scope');

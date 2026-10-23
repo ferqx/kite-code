@@ -46,6 +46,7 @@ export function OverlayStatusColumn({
 }
 
 interface OverlayFrameProps {
+  compact?: boolean;
   contentPaddingX?: number;
   title: ReactNode;
   hint?: string;
@@ -56,6 +57,7 @@ interface OverlayFrameProps {
 }
 
 export default function OverlayFrame({
+  compact = false,
   contentPaddingX = 1,
   title,
   meta,
@@ -67,7 +69,7 @@ export default function OverlayFrame({
   const t = useTheme();
   footer ??= hint ? <Text color={t.dim}>{hint}</Text> : undefined;
   return (
-    <Box flexDirection="column" marginTop={1} width="100%">
+    <Box flexDirection="column" marginTop={compact ? 0 : 1} width="100%">
       <Box width="100%" alignItems="center">
         <Text color={t.dim}>── </Text>
         <Text bold color={t.primary}>
@@ -99,14 +101,14 @@ export default function OverlayFrame({
         )}
       </Box>
       <Box flexDirection="column" paddingX={contentPaddingX}>
-        <Box marginTop={1} flexDirection="column">
+        <Box marginTop={compact ? 0 : 1} flexDirection="column">
           {children}
         </Box>
         {message && <Box marginTop={1}>{message}</Box>}
         {footer && (
           <Box
-            marginTop={1}
-            borderStyle="single"
+            marginTop={compact ? 0 : 1}
+            borderStyle={compact ? undefined : 'single'}
             borderTop
             borderBottom={false}
             borderLeft={false}

@@ -109,7 +109,7 @@ function baseline(value: Json | undefined): FileBaseline | null {
 /** Ordinary Tools: permission, source freshness and execution receipts remain core responsibilities. */
 export function createFileTools(
   files: WorkspaceFiles,
-  options: { capture?: FileMutationCapture } = {},
+  options: { capture?: FileMutationCapture; snapshot?: boolean } = {},
 ): readonly ToolDefinition[] {
   const capture = options.capture;
   async function mutation(
@@ -364,6 +364,22 @@ export function createFileTools(
         if (['read', 'list', 'glob', 'search'].includes(d.name)) context.signal.throwIfAborted();
         const mutationResult =
           d.name === 'write' || d.name === 'edit' ? (value as FileSnapshot) : undefined;
+        let delivery: ArtifactRef | undefined;
+        if (mutationResult && context.artifacts && options.snapshot !== false) {
+          try {
+            delivery = await context.artifacts.publish({
+              key: 'output-file-version',
+              content: Buffer.from(mutationResult.content),
+              mediaType: 'text/plain',
+            });
+          } catch (error) {
+            // The file already changed. Do not report a safe-to-retry failed write.
+            throw new AgentError(
+              'file_publish_outcome_unknown',
+              error instanceof Error ? error.message : String(error),
+            );
+          }
+        }
         const change = mutationResult?.change;
         const publicValue =
           d.name === 'write' || d.name === 'edit'
@@ -426,7 +442,17 @@ export function createFileTools(
         return {
           outcome: 'succeeded',
           content,
-          ...(change ? { details: { fileChange: change } as unknown as Json } : {}),
+          ...(delivery ? { artifactRefs: [delivery] } : {}),
+          ...(change || delivery
+            ? {
+                details: {
+                  ...(change ? { fileChange: change } : {}),
+                  ...(delivery
+                    ? { fileOutput: { path: mutationResult!.path, snapshot: delivery } }
+                    : {}),
+                } as unknown as Json,
+              }
+            : {}),
         };
       } catch (error) {
         const baselineConflict =

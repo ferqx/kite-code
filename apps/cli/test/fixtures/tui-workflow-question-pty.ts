@@ -38,7 +38,7 @@ async function main(settings: Settings) {
       db.close();
     }
   };
-  // biome-ignore lint/suspicious/noControlCharactersInRegex: Preserve original-question material across explicit Ctrl+L display clears.
+  // biome-ignore lint/suspicious/noControlCharactersInRegex: Preserve original-question material across automatic original-answer recovery.
   const ansi = /\x1b\[[0-?]*[ -/]*[@-~]/g;
   const wait = async (text: string, latestReady = false, material = false) => {
     const end = Date.now() + 10000;
@@ -180,11 +180,10 @@ async function main(settings: Settings) {
       await wait(detail, true);
       await host.drain();
       // Only this original Question's final Enter opens the material window.
-      // Ctrl+L can clear display history while the original answer is recovered.
+      // Automatic original-answer recovery may repaint the current display.
       questionSubmitted = true;
       await key('\r');
       await wait('interaction.answer: unknown');
-      await key('\x0c');
       await until(
         () => existsSync(join(settings.root, 'first-get-lost')),
         Boolean,
@@ -192,7 +191,6 @@ async function main(settings: Settings) {
       );
       await wait('interaction.answer: unknown');
       assert.ok(existsSync(join(settings.root, 'first-get-lost')));
-      await key('\x0c');
       await wait('interaction.answer: applied');
       if (settings.scenario === 'replan') {
         await approve('complete_skill');

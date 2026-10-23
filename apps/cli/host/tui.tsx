@@ -9,9 +9,10 @@ import {
   type TuiPort,
   TuiSession,
   translateTuiLabel,
+  useInkWindowSize,
 } from '@kite-ai/ui/tui';
-import { Box, render, Text, useInput } from '@kite-ai/ui/tui/ink';
-import { useState, useSyncExternalStore } from 'react';
+import { Box, type DOMElement, measureElement, render, Text, useInput } from '@kite-ai/ui/tui/ink';
+import { useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react';
 import {
   getCompleteContext,
   includeHistoricalResult,
@@ -82,6 +83,10 @@ function TerminalHost({
   const state = useSyncExternalStore(controller.subscribe, () => controller.state);
   const [notice, setNotice] = useState('');
   const [ready, setReady] = useState(!controller.port.onboarding);
+  const { rows } = useInkWindowSize();
+  const heading = useRef<DOMElement>(null);
+  const notices = useRef<DOMElement>(null);
+  const [chromeRows, setChromeRows] = useState(0);
   const t = (label: string) => translateTuiLabel(label, state.preferences.resolvedLanguage);
   const original =
     /^Original Session creation unknown: ([A-Za-z0-9_-]+)(; Ctrl\+N reads this ID only)?$/.exec(
@@ -90,28 +95,46 @@ function TerminalHost({
   const shownNotice = original
     ? `${t('Original Session creation unknown:')} ${original[1]}${original[2] ? t(original[2]) : ''}`
     : t(notice);
+  useLayoutEffect(() => {
+    const height =
+      (heading.current ? measureElement(heading.current).height : 0) +
+      (notices.current ? measureElement(notices.current).height : 0);
+    setChromeRows(height);
+  });
   useInput((input, key) => {
     if (ready && key.ctrl && input === 'n') void onNew().then(setNotice);
     if (key.ctrl && input === 'q') onQuit();
   });
+  // Dedicated panels and onboarding own their existing reading windows.
+  // Do not clip their controls to the conversational history/composer budget.
+  const boundedConversation = ready && state.panel === undefined;
   return (
-    <Box flexDirection="column">
-      {testDiagnostics && (
-        <Text>
-          {t('Development TUI · Ctrl+N new Workspace Session · Ctrl+Q')}{' '}
-          {shared ? t('disconnect shared service') : t('quit owned host')}
-        </Text>
-      )}
+    <Box
+      flexDirection="column"
+      maxHeight={boundedConversation ? Math.max(1, rows - 1) : undefined}
+      overflowY={boundedConversation ? 'hidden' : undefined}
+    >
+      <Box ref={heading} flexDirection="column" flexShrink={0}>
+        {testDiagnostics && (
+          <Text>
+            {t('Development TUI · Ctrl+N new Workspace Session · Ctrl+Q')}{' '}
+            {shared ? t('disconnect shared service') : t('quit owned host')}
+          </Text>
+        )}
+      </Box>
       <TuiSession
         controller={controller}
         testDiagnostics={testDiagnostics}
         onQuit={onQuit}
         onReadinessChange={setReady}
+        availableRows={Math.max(1, rows - 1 - chromeRows)}
       />
-      {notice && <Text>{shownNotice}</Text>}
-      {state.intent?.phase === 'unknown' && (
-        <Text>{t('Original outcome unknown: Ctrl+L only reads original Command')}</Text>
-      )}
+      <Box ref={notices} flexDirection="column" flexShrink={0}>
+        {notice && <Text>{shownNotice}</Text>}
+        {state.intent?.phase === 'unknown' && (
+          <Text>{t('Checking the original request automatically in its Session')}</Text>
+        )}
+      </Box>
     </Box>
   );
 }

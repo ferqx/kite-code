@@ -214,8 +214,8 @@ try {
     false,
   );
   await key('PRIVATE_CARD_DRAFT');
-  await wait('PRIVATE_CARD_DRAFT');
-  await key('\x0c');
+  await wait('Approve this execution only');
+  await wait('pending · revision 1');
   await wait('PRIVATE_CARD_DRAFT');
   await check('draft-clear');
   await key('\x11');

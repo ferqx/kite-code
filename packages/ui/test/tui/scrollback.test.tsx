@@ -3,11 +3,202 @@ import { createHash } from 'node:crypto';
 import { PassThrough } from 'node:stream';
 import type { ReadStream, WriteStream } from 'node:tty';
 import type { ModelOutputSnapshot, SessionView } from '@kite-ai/client';
-import { render } from 'ink';
+import { Terminal } from '@xterm/headless';
+import { Box, render, Text } from 'ink';
 import { render as renderFrames } from 'ink-testing-library';
-import { TuiController, type TuiPort, TuiSession, type TuiSnapshot } from '../../src/tui';
+import stringWidth from 'string-width';
+import {
+  TuiController,
+  type TuiPort,
+  TuiSession,
+  type TuiSnapshot,
+  useInkWindowSize,
+} from '../../src/tui';
 
 const pause = () => new Promise((resolve) => setTimeout(resolve, 200));
+
+test('finite Plan controls reserve Host rows and retain every choice, description and draft across resize', async () => {
+  for (const [diagnostics, chromeRows] of [
+    [false, 0],
+    [false, 2],
+    [true, 3],
+  ] as const) {
+    const current = snapshot('a', []);
+    current.view.runs = [
+      {
+        id: 'run',
+        sessionId: 'a',
+        originStoreId: 'store',
+        originCommandId: 'work',
+        status: 'waiting_interaction',
+        isActive: true,
+        createdAt: 1,
+        finishedAt: null,
+        reason: null,
+      },
+    ];
+    current.view.executions = [
+      {
+        id: 'review',
+        originStoreId: 'store',
+        sessionId: 'a',
+        runId: 'run',
+        kind: 'tool',
+        definitionId: 'review',
+        definitionVersion: '1',
+        status: 'dispatching',
+        result: null,
+        resultRevision: '0',
+        cancelRequestedAt: null,
+      },
+    ];
+    Object.assign(current, {
+      interactions: [
+        {
+          id: 'original-plan',
+          originStoreId: 'store',
+          sessionId: 'a',
+          presentationSessionId: 'a',
+          runId: 'run',
+          executionId: 'review',
+          attempt: 1,
+          ancestry: ['a'],
+          definitionId: 'planning.review',
+          definitionVersion: '1',
+          inputDigest: 'original-plan-input',
+          policyRevision: 'original-plan-policy',
+          requiredRefs: [],
+          answer: null,
+          acceptedDecisionRevision: null,
+          kind: 'plan_review',
+          state: 'pending',
+          revision: '1',
+          request: { allowedModes: ['auto', 'accept_edits'] },
+        },
+      ] as TuiSnapshot['interactions'],
+    });
+    let writes = 0;
+    const forbidden = async () => {
+      writes++;
+      throw Error('reading and editing never approve');
+    };
+    const controller = new TuiController({
+      storeId: 'store',
+      nextCommandId: () => 'unused',
+      listSessions: async () => [],
+      readSession: async () => current,
+      submit: forbidden,
+      answer: forbidden,
+      cancel: forbidden,
+      getCommand: forbidden,
+    });
+    await controller.select('a');
+    const stdout = Object.assign(new PassThrough(), { isTTY: true, columns: 80, rows: 24 });
+    const stdin = Object.assign(new PassThrough(), {
+      isTTY: true,
+      setRawMode: () => stdin,
+      ref: () => stdin,
+      unref: () => stdin,
+    });
+    const terminal = new Terminal({
+      cols: 80,
+      rows: 24,
+      scrollback: 1000,
+      convertEol: true,
+      allowProposedApi: true,
+    });
+    let bytes = '',
+      parsed = Promise.resolve();
+    stdout.on('data', (chunk) => {
+      bytes += chunk.toString();
+      parsed = new Promise<void>((resolve) => terminal.write(chunk, resolve));
+    });
+    const viewport = async () => {
+      await parsed;
+      return Array.from(
+        { length: stdout.rows },
+        (_, row) =>
+          terminal.buffer.active
+            .getLine(terminal.buffer.active.viewportY + row)
+            ?.translateToString(true) ?? '',
+      )
+        .join('\n')
+        .replace(/\s+/g, ' ');
+    };
+    function Host() {
+      const { rows } = useInkWindowSize();
+      return (
+        <Box flexDirection="column" maxHeight={rows - 1} overflowY="hidden">
+          {chromeRows > 0 && (
+            <Text>
+              {Array.from(
+                { length: chromeRows },
+                (_, index) => `Original Host notice ${index}`,
+              ).join('\n')}
+            </Text>
+          )}
+          <TuiSession
+            controller={controller}
+            testDiagnostics={diagnostics}
+            availableRows={rows - 1 - chromeRows}
+          />
+        </Box>
+      );
+    }
+    const app = render(<Host />, {
+      stdout: stdout as unknown as WriteStream,
+      stdin: stdin as unknown as ReadStream,
+      stderr: new PassThrough() as unknown as WriteStream,
+      interactive: true,
+      patchConsole: false,
+      exitOnCtrlC: false,
+    });
+    try {
+      await pause();
+      const first = await viewport();
+      for (const text of [
+        '1. Start execution in Auto mode',
+        'Automatically review non-destructive actions',
+        '2. Start execution in Accept edits mode',
+        'Edit workspace files without confirming each change',
+        '3. Continue planning with feedback',
+        'Provide feedback to revise the plan',
+        'none (Enter has no answer)',
+      ])
+        expect(first).toContain(text);
+      bytes = '';
+      controller.setDraft('original unsent task');
+      await pause();
+      expect(bytes).not.toContain('\u001b[3J');
+      stdin.write('\u001b[B\u001b[B\u001b[B');
+      await pause();
+      stdin.write('\r');
+      await pause();
+      stdin.write('literal feedback');
+      await pause();
+      expect(await viewport()).toContain('literal feedback');
+      stdout.columns = 60;
+      stdout.rows = 30;
+      terminal.resize(60, 30);
+      stdout.emit('resize');
+      await pause();
+      expect(await viewport()).toContain('literal feedback');
+      bytes = '';
+      controller.setDraft('original unsent task still here');
+      await pause();
+      expect(bytes).not.toContain('\u001b[3J');
+      expect(controller.state.draft).toBe('original unsent task still here');
+      expect(writes).toBe(0);
+    } finally {
+      app.unmount();
+      app.cleanup();
+      controller.dispose();
+      stdin.destroy();
+      stdout.destroy();
+      terminal.dispose();
+    }
+  }
+});
 
 test('empty Enter toggles only the original tail result; input, refresh and earlier results keep their original facts', async () => {
   const current = snapshot('a', ['MODEL_HISTORY_ORIGINAL']);
@@ -425,6 +616,149 @@ test('interactive Ink emits completed bodies once across status/edit/append and 
   }
 });
 
+test('late verified giant body replaces its preview in original Static order before the composer', async () => {
+  const body = `${'正文'.repeat(1500000)}ACTUAL_HOST_VERIFIED_TAIL`;
+  const reasoning = 'ACTUAL_LOADED_REASON_TAIL\n';
+  const current = snapshot('a', ['EARLIER_ORIGINAL_MESSAGE', 'ORIGINAL_PREVIEW']);
+  const toolResult = `LONG_TOOL_RESULT_${'x'.repeat(620)}_END`;
+  current.messages[0]!.toolCalls = [{ id: 'long-call', name: 'original-tool', arguments: '{}' }];
+  current.view.executions = [
+    {
+      id: 'original-tool',
+      originStoreId: 'store',
+      sessionId: 'a',
+      runId: null,
+      kind: 'tool',
+      definitionId: 'original-tool',
+      definitionVersion: '1',
+      status: 'succeeded',
+      result: { text: toolResult },
+      resultRevision: '1',
+      cancelRequestedAt: null,
+      toolCallId: 'long-call',
+      parentExecutionId: null,
+    },
+  ];
+  const message = current.messages[1]!;
+  Object.assign(message, {
+    runId: 'original-run',
+    firstOutput: 'reasoning',
+    outputBody: {
+      kind: 'model_output',
+      executionId: 'original-model',
+      complete: true,
+      contentBytes: String(Buffer.byteLength(body)),
+      reasoningBytes: String(Buffer.byteLength(reasoning)),
+      toolCallCount: 0,
+    },
+  });
+  const forbidden = async () => {
+    throw Error('late body display must not submit');
+  };
+  const controller = new TuiController({
+    storeId: 'store',
+    nextCommandId: () => 'unused',
+    listSessions: async () => [],
+    readSession: async () => current,
+    readModelOutput: async () => {
+      const output = { content: body, reasoning, toolCalls: [], complete: true };
+      const encoded = Buffer.from(JSON.stringify(output));
+      return {
+        storeId: 'store',
+        sessionId: 'a',
+        rootSessionId: 'a',
+        runId: 'original-run',
+        executionId: 'original-model',
+        originCommandId: 'original-work',
+        rootWorkCommandId: 'original-work',
+        rootWorkSeq: '1',
+        attempt: 1,
+        status: 'succeeded',
+        bodyHash: createHash('sha256').update(encoded).digest('hex'),
+        bodyBytes: String(encoded.byteLength),
+        contentBytes: String(Buffer.byteLength(body)),
+        reasoningBytes: String(Buffer.byteLength(reasoning)),
+        snapshotCursor: '1',
+        output,
+      };
+    },
+    submit: forbidden,
+    answer: forbidden,
+    cancel: forbidden,
+    getCommand: forbidden,
+  });
+  await controller.select('a');
+  const stdout = Object.assign(new PassThrough(), { isTTY: true, columns: 80, rows: 24 });
+  const stdin = Object.assign(new PassThrough(), {
+    isTTY: true,
+    setRawMode: () => stdin,
+    ref: () => stdin,
+    unref: () => stdin,
+  });
+  let bytes = '';
+  stdout.on('data', (data) => {
+    bytes += data.toString();
+  });
+  const app = render(<TuiSession testDiagnostics controller={controller} />, {
+    stdout: stdout as unknown as WriteStream,
+    stdin: stdin as unknown as ReadStream,
+    stderr: new PassThrough() as unknown as WriteStream,
+    interactive: true,
+    incrementalRendering: false,
+    patchConsole: false,
+    exitOnCtrlC: false,
+  });
+  try {
+    await pause();
+    expect(bytes).toContain('ORIGINAL_PREVIEW');
+    expect(bytes.replace(/\s+/g, '')).toContain(toolResult);
+    expect(
+      Math.max(
+        ...Bun.stripANSI(bytes)
+          .split('\n')
+          .map((line) => stringWidth(line)),
+      ),
+    ).toBeLessThanOrEqual(80);
+    bytes = '';
+    stdout.columns = 60;
+    stdout.emit('resize');
+    await pause();
+    expect(bytes.replace(/\s+/g, '')).toContain(toolResult);
+    expect(
+      Math.max(
+        ...Bun.stripANSI(bytes)
+          .split('\n')
+          .map((line) => stringWidth(line)),
+      ),
+    ).toBeLessThanOrEqual(60);
+    stdout.columns = 80;
+    stdout.emit('resize');
+    await pause();
+    bytes = '';
+    await controller.loadOutput(message);
+    await app.waitUntilRenderFlush();
+    const emitted = bytes.replace(/\s+/g, '');
+    expect(bytes).toContain('\u001b[3J');
+    expect(emitted.includes(body)).toBe(true);
+    expect(bytes.split('ACTUAL_HOST_VERIFIED_TAIL')).toHaveLength(2);
+    expect(bytes.indexOf('EARLIER_ORIGINAL_MESSAGE')).toBeLessThan(bytes.indexOf('正文'));
+    expect(bytes.indexOf('LONG_TOOL_RESULT_')).toBeLessThan(bytes.indexOf('正文'));
+    expect(bytes.indexOf('ACTUAL_HOST_VERIFIED_TAIL')).toBeLessThan(bytes.lastIndexOf('New Run'));
+    bytes = '';
+    controller.setDraft('preserved input');
+    await pause();
+    expect(bytes).toContain('preserved input');
+    expect(bytes).not.toContain('ACTUAL_HOST_VERIFIED_TAIL');
+    expect(bytes).not.toContain('\u001b[3J');
+  } finally {
+    app.unmount();
+    app.cleanup();
+    controller.dispose();
+    stdin.destroy();
+    stdout.destroy();
+  }
+}, 30000);
+
 test('Ink preserves message and execution order across the first unsettled row and later history append', async () => {
   let current = snapshot('a', ['EARLY_INCOMPLETE', 'LATER_COMPLETE']);
   current = {
@@ -515,152 +849,197 @@ test('Ink preserves message and execution order across the first unsettled row a
   }
 });
 
-test('long original question after running Tool keeps material bytes stable on status and answer editing', async () => {
-  let current = snapshot('a', ['ROUND_ORIGINAL_MATERIAL']);
-  current.view.runs = [
-    {
-      id: 'run',
-      sessionId: 'a',
-      originStoreId: 'store',
-      originCommandId: 'original',
-      status: 'waiting_interaction',
-      isActive: true,
-      createdAt: 1,
-      finishedAt: null,
-      reason: null,
-    },
-  ];
-  current.view.executions = [
-    {
-      id: 'active',
-      originStoreId: 'store',
-      sessionId: 'a',
-      runId: 'run',
-      definitionVersion: '1',
-      cancelRequestedAt: null,
-      kind: 'tool',
-      definitionId: 'RUNNING_ORIGINAL_TOOL',
-      status: 'running',
-      resultRevision: '0',
-      result: null,
-    },
-  ] as SessionView['executions'];
-  current = {
-    ...current,
-    interactions: [
-      {
-        id: 'q',
-        originStoreId: 'store',
-        sessionId: 'a',
-        presentationSessionId: 'a',
-        ancestry: ['a'],
-        runId: 'run',
-        executionId: 'active',
-        kind: 'question',
-        state: 'pending',
-        revision: '1',
-        request: {
-          schema: {
-            type: 'string',
-            title: 'ORIGINAL_QUESTION_TITLE',
-            description: Array.from({ length: 35 }, (_, i) => `QUESTION_LINE_${i}_END`).join('\n'),
-          },
-        },
-        answer: null,
-      },
-    ] as unknown as TuiSnapshot['interactions'],
-  };
-  const forbidden = async () => {
-    throw new Error('material update must not submit');
-  };
-  const controller = new TuiController({
-    storeId: 'store',
-    nextCommandId: () => 'unused',
-    listSessions: async () => [],
-    readSession: async () => current,
-    submit: forbidden,
-    answer: forbidden,
-    cancel: forbidden,
-    getCommand: forbidden,
-  });
-  await controller.select('a');
-  const stdout = Object.assign(new PassThrough(), { isTTY: true, columns: 80, rows: 24 });
-  const stdin = Object.assign(new PassThrough(), {
-    isTTY: true,
-    setRawMode: () => stdin,
-    ref: () => stdin,
-    unref: () => stdin,
-  });
-  let bytes = '';
-  stdout.on('data', (data) => {
-    bytes += data.toString();
-  });
-  const app = render(<TuiSession testDiagnostics controller={controller} />, {
-    stdout: stdout as unknown as WriteStream,
-    stdin: stdin as unknown as ReadStream,
-    stderr: new PassThrough() as unknown as WriteStream,
-    interactive: true,
-    patchConsole: false,
-    exitOnCtrlC: false,
-  });
-  try {
-    await pause();
-    expect(bytes.indexOf('ROUND_ORIGINAL_MATERIAL')).toBeLessThan(
-      bytes.indexOf('RUNNING_ORIGINAL_TOOL'),
-    );
-    expect(bytes.indexOf('RUNNING_ORIGINAL_TOOL')).toBeLessThan(
-      bytes.indexOf('QUESTION_LINE_34_END'),
-    );
-    bytes = '';
-    controller.openPreferences('language');
-    await pause();
-    controller.closePanel();
-    await pause();
-    expect(bytes).not.toContain('ROUND_ORIGINAL_MATERIAL');
-    expect(bytes).not.toContain('RUNNING_ORIGINAL_TOOL');
-    expect(bytes).not.toContain('QUESTION_LINE_');
-    expect(bytes).not.toContain('\u001b[3J');
-    bytes = '';
-    controller.observationUnavailable('bounded-status');
-    await pause();
-    expect(bytes).not.toContain('\u001b[3J');
-    expect(bytes).not.toContain('ROUND_ORIGINAL_MATERIAL');
-    expect(bytes).not.toContain('RUNNING_ORIGINAL_TOOL');
-    expect(bytes).not.toContain('QUESTION_LINE_');
-    bytes = '';
-    stdin.write('original typed answer');
-    await pause();
-    expect(bytes).toContain('original typed answer');
-    expect(bytes).not.toContain('\u001b[3J');
-    expect(bytes).not.toContain('QUESTION_LINE_');
-    expect(bytes).not.toContain('ROUND_ORIGINAL_MATERIAL');
-    bytes = '';
-    stdin.write('界'.repeat(700));
-    await pause();
-    expect(bytes).toContain('Earlier input');
-    expect(bytes).not.toContain('QUESTION_LINE_');
-    expect(bytes).not.toContain('ROUND_ORIGINAL_MATERIAL');
-    expect(bytes).not.toContain('\u001b[3J');
-    bytes = '';
+for (const [diagnostics, splitTail] of [
+  [true, false],
+  [false, true],
+] as const)
+  test(`long original question after running Tool keeps material bytes stable on status and answer editing (${diagnostics ? 'diagnostic' : 'normal split tail'})`, async () => {
+    let current = snapshot('a', ['ROUND_ORIGINAL_MATERIAL']);
+    const prefix = `${splitTail ? 'STABLE_ORIGINAL_PREFIX\n\n' : ''}MUTABLE_ORIGINAL_BEGIN ${'原始🙂e\u0301正文'.repeat(1300)} MUTABLE_ORIGINAL_TAIL`;
     current = {
       ...current,
-      messages: current.messages.map((message) => ({
-        ...message,
-        content: 'REPLACED_CURRENT_MESSAGE',
-      })),
+      messages: [
+        ...current.messages,
+        {
+          ...current.messages[0]!,
+          id: 'mutable-original',
+          seq: '2',
+          runId: 'run',
+          status: 'incomplete',
+          sourceIds: ['original-model'],
+          content: prefix,
+        },
+      ],
     };
+    current.view.runs = [
+      {
+        id: 'run',
+        sessionId: 'a',
+        originStoreId: 'store',
+        originCommandId: 'original',
+        status: 'waiting_interaction',
+        isActive: true,
+        createdAt: 1,
+        finishedAt: null,
+        reason: null,
+      },
+    ];
+    current.view.executions = [
+      {
+        id: 'original-model',
+        originStoreId: 'store',
+        sessionId: 'a',
+        runId: 'run',
+        kind: 'model',
+        definitionId: 'original-model',
+        definitionVersion: '1',
+        status: 'running',
+        resultRevision: '0',
+        result: null,
+        cancelRequestedAt: null,
+      },
+      {
+        id: 'active',
+        originStoreId: 'store',
+        sessionId: 'a',
+        runId: 'run',
+        definitionVersion: '1',
+        cancelRequestedAt: null,
+        kind: 'tool',
+        definitionId: 'RUNNING_ORIGINAL_TOOL',
+        status: 'running',
+        resultRevision: '0',
+        result: null,
+      },
+    ] as SessionView['executions'];
+    current = {
+      ...current,
+      interactions: [
+        {
+          id: 'q',
+          originStoreId: 'store',
+          sessionId: 'a',
+          presentationSessionId: 'a',
+          ancestry: ['a'],
+          runId: 'run',
+          executionId: 'active',
+          kind: 'question',
+          state: 'pending',
+          revision: '1',
+          request: {
+            schema: {
+              type: 'string',
+              title: 'ORIGINAL_QUESTION_TITLE',
+              description: Array.from({ length: 35 }, (_, i) => `QUESTION_LINE_${i}_END`).join(
+                '\n',
+              ),
+            },
+          },
+          answer: null,
+        },
+      ] as unknown as TuiSnapshot['interactions'],
+    };
+    const forbidden = async () => {
+      throw new Error('material update must not submit');
+    };
+    const controller = new TuiController({
+      storeId: 'store',
+      nextCommandId: () => 'unused',
+      listSessions: async () => [],
+      readSession: async () => current,
+      submit: forbidden,
+      answer: forbidden,
+      cancel: forbidden,
+      getCommand: forbidden,
+    });
     await controller.select('a');
-    await pause();
-    expect(bytes).toContain('\u001b[3J');
-    expect(bytes).toContain('REPLACED_CURRENT_MESSAGE');
-    expect(bytes).toContain('QUESTION_LINE_34_END');
-    expect(bytes).toContain('Earlier input');
-    expect(bytes).not.toContain('ROUND_ORIGINAL_MATERIAL');
-  } finally {
-    app.unmount();
-    app.cleanup();
-    controller.dispose();
-    stdin.destroy();
-    stdout.destroy();
-  }
-});
+    const stdout = Object.assign(new PassThrough(), { isTTY: true, columns: 80, rows: 24 });
+    const stdin = Object.assign(new PassThrough(), {
+      isTTY: true,
+      setRawMode: () => stdin,
+      ref: () => stdin,
+      unref: () => stdin,
+    });
+    let bytes = '';
+    stdout.on('data', (data) => {
+      bytes += data.toString();
+    });
+    const app = render(<TuiSession testDiagnostics={diagnostics} controller={controller} />, {
+      stdout: stdout as unknown as WriteStream,
+      stdin: stdin as unknown as ReadStream,
+      stderr: new PassThrough() as unknown as WriteStream,
+      interactive: true,
+      patchConsole: false,
+      exitOnCtrlC: false,
+    });
+    try {
+      await pause();
+      expect(bytes.indexOf('ROUND_ORIGINAL_MATERIAL')).toBeLessThan(
+        bytes.indexOf('RUNNING_ORIGINAL_TOOL'),
+      );
+      expect(bytes.indexOf('RUNNING_ORIGINAL_TOOL')).toBeLessThan(
+        bytes.indexOf('QUESTION_LINE_34_END'),
+      );
+      // A pending material card promotes even mutable history into Static. The
+      // live viewport projection must not crop that original published prefix.
+      const plain = bytes
+        // biome-ignore lint/suspicious/noControlCharactersInRegex: decode Ink styling, not body characters.
+        .replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, '')
+        .normalize()
+        .replace(/\s/gu, '');
+      expect(plain).toContain(prefix.normalize().replace(/\s/gu, ''));
+      expect(plain.split('MUTABLE_ORIGINAL_BEGIN')).toHaveLength(2);
+      bytes = '';
+      controller.openPreferences('language');
+      await pause();
+      controller.closePanel();
+      await pause();
+      expect(bytes).not.toContain('ROUND_ORIGINAL_MATERIAL');
+      expect(bytes).not.toContain('RUNNING_ORIGINAL_TOOL');
+      expect(bytes).not.toContain('QUESTION_LINE_');
+      expect(bytes).not.toContain('MUTABLE_ORIGINAL_');
+      expect(bytes).not.toContain('\u001b[3J');
+      bytes = '';
+      controller.observationUnavailable('bounded-status');
+      await pause();
+      expect(bytes).not.toContain('\u001b[3J');
+      expect(bytes).not.toContain('ROUND_ORIGINAL_MATERIAL');
+      expect(bytes).not.toContain('RUNNING_ORIGINAL_TOOL');
+      expect(bytes).not.toContain('QUESTION_LINE_');
+      bytes = '';
+      stdin.write('original typed answer');
+      await pause();
+      expect(bytes).toContain('original typed answer');
+      expect(bytes).not.toContain('\u001b[3J');
+      expect(bytes).not.toContain('QUESTION_LINE_');
+      expect(bytes).not.toContain('ROUND_ORIGINAL_MATERIAL');
+      bytes = '';
+      stdin.write('界'.repeat(700));
+      await pause();
+      expect(bytes).toContain('Earlier input');
+      expect(bytes).not.toContain('QUESTION_LINE_');
+      expect(bytes).not.toContain('ROUND_ORIGINAL_MATERIAL');
+      expect(bytes).not.toContain('\u001b[3J');
+      bytes = '';
+      current = {
+        ...current,
+        messages: current.messages.map((message) => ({
+          ...message,
+          content: 'REPLACED_CURRENT_MESSAGE',
+        })),
+      };
+      await controller.select('a');
+      await pause();
+      expect(bytes).toContain('\u001b[3J');
+      expect(bytes).toContain('REPLACED_CURRENT_MESSAGE');
+      expect(bytes).toContain('QUESTION_LINE_34_END');
+      expect(bytes).toContain('Earlier input');
+      expect(bytes).not.toContain('ROUND_ORIGINAL_MATERIAL');
+    } finally {
+      app.unmount();
+      app.cleanup();
+      controller.dispose();
+      stdin.destroy();
+      stdout.destroy();
+    }
+  });

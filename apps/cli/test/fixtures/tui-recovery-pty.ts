@@ -1,4 +1,6 @@
+import { Database } from 'bun:sqlite';
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -78,6 +80,22 @@ async function drive(config: Configuration) {
     await key('\r');
     await wait('Explicit recovery');
   };
+  const automaticRecovery = async () => {
+    await key('\x1b');
+    await wait('Session s');
+    const end = Date.now() + 10000;
+    const phase = config.mode === 'interrupt' ? 'interrupted' : 'resumed';
+    for (;;) {
+      const journal = JSON.parse(
+        readFileSync(join(config.profilePath, 'ui/recovery.json'), 'utf8'),
+      ) as Journal;
+      if (journal.records.some((row) => row.phase === phase)) break;
+      if (active.ended || Date.now() > end)
+        throw Error('automatic original recovery GET not confirmed');
+      await Bun.sleep(50);
+    }
+    await enterRecovery();
+  };
   const exitNormally = async () => {
     await key('\x11');
     const end = Date.now() + 6000;
@@ -94,11 +112,35 @@ async function drive(config: Configuration) {
   let failure: unknown;
   try {
     launch();
-    await wait(
-      config.mode === 'report' || config.cold
-        ? 'Session s'
-        : `approval [${config.cardId}] original Session s`,
-    );
+    await wait('Session s');
+    if (config.mode !== 'report' && !config.cold) {
+      // The real seed owner was killed. Initial activation must settle its
+      // undispatched work before any explicit recovery may restore the frontier.
+      await wait('owner_lost_before_dispatch');
+      const database = new Database(join(config.profilePath, 'core.db'), { readonly: true });
+      try {
+        assert.deepEqual(
+          database.query('SELECT status,is_active FROM run WHERE id=?').get(config.runId!),
+          { status: 'interrupted', is_active: 0 },
+        );
+        assert.deepEqual(
+          database.query('SELECT state FROM interaction WHERE id=?').get(config.cardId!),
+          { state: 'cancelled' },
+        );
+        assert.deepEqual(
+          database
+            .query(
+              "SELECT state,json_extract(result_json,'$.code') AS code FROM execution WHERE run_id=? AND adapter_id='files.write'",
+            )
+            .all(config.runId!),
+          [{ state: 'cancelled', code: 'owner_lost_before_dispatch' }],
+        );
+      } finally {
+        database.close();
+      }
+      assert.equal(existsSync(join(config.root, 'workspace/effect')), false);
+      assert.equal(readFileSync(join(config.root, 'model-ledger'), 'utf8'), 'decision\n');
+    }
     await enterRecovery();
     const input =
       config.mode === 'run'
@@ -126,6 +168,20 @@ async function drive(config: Configuration) {
         serviceExitTimeoutMs: 6000,
       });
       active.close();
+      const database = new Database(join(config.profilePath, 'core.db'), { readonly: true });
+      let originalOwner: string;
+      let originalActive: boolean;
+      try {
+        const session = database
+          .query('SELECT CAST(owner_generation AS TEXT) AS generation FROM session WHERE id=?')
+          .get(original.sessionId) as { generation: string };
+        originalOwner = session.generation;
+        originalActive = !!database
+          .query('SELECT id FROM run WHERE session_id=? AND is_active=1')
+          .get(original.sessionId);
+      } finally {
+        database.close();
+      }
       launch();
       const cold = active.host.pid;
       assert.notEqual(cold, warm);
@@ -137,7 +193,7 @@ async function drive(config: Configuration) {
       await wait(original.request.commandId);
       await key('\x03');
       await Bun.sleep(100);
-      await key('\x0c');
+      await automaticRecovery();
       await wait(config.mode === 'run' ? 'run · resumed' : 'interrupt · interrupted');
       await wait(original.request.commandId);
       await exitNormally();
@@ -148,7 +204,12 @@ async function drive(config: Configuration) {
         pid: number;
         method: string;
         path: string;
-        body?: { kind?: string };
+        body?: {
+          kind?: string;
+          commandId?: string;
+          expectedStoreId?: string;
+          expectedOwnerGeneration?: string;
+        };
       }[];
       const writes = rows.filter(
         (row) =>
@@ -156,7 +217,41 @@ async function drive(config: Configuration) {
       );
       assert.equal(writes.length, 1);
       assert.equal(writes[0]!.pid, warm);
-      assert.equal(rows.filter((row) => row.pid === cold && row.method === 'POST').length, 0);
+      const coldPosts = rows.filter((row) => row.pid === cold && row.method === 'POST');
+      const reconciliations = coldPosts.filter(
+        (row) => row.path === `/v1/sessions/${original.sessionId}/reconcile`,
+      );
+      // Cold Host admission and initial selection reconcile one frozen scope.
+      // The original recovery operation itself must remain strictly GET-only.
+      assert.equal(reconciliations.length, 2);
+      const generations = [
+        originalOwner,
+        String(BigInt(originalOwner) + (originalActive ? 1n : 0n)),
+      ];
+      // Reconciliation of an interrupted active Run fences its previous owner.
+      // Initial selection then uses that observed new generation, never a retry
+      // of the saved recovery operation or a new business command.
+      for (const [index, row] of reconciliations.entries()) {
+        const expectedOwnerGeneration = generations[index]!;
+        const digest: string = createHash('sha256')
+          .update(
+            JSON.stringify([
+              original.request.expectedStoreId,
+              original.sessionId,
+              expectedOwnerGeneration,
+            ]),
+          )
+          .digest('hex');
+        assert.deepEqual(row.body, {
+          commandId: `session-reconcile-${digest}`,
+          expectedStoreId: original.request.expectedStoreId,
+          expectedOwnerGeneration,
+        });
+      }
+      assert.deepEqual(
+        coldPosts.filter((row) => !reconciliations.includes(row)),
+        [],
+      );
       assert.ok(
         rows.some(
           (row) => row.pid === cold && row.path === `/v1/commands/${original.request.commandId}`,
@@ -165,7 +260,8 @@ async function drive(config: Configuration) {
       console.log('COLD_ORIGINAL_JOURNAL_ONLY_GET');
     } else {
       if (config.mode !== 'report') assert.ok(existsSync(join(config.root, 'lost')));
-      await key('\x03\x0c');
+      await key('\x03');
+      await automaticRecovery();
       await wait(
         config.mode === 'run'
           ? 'run · resumed'

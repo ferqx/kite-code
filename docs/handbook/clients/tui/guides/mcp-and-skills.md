@@ -120,7 +120,7 @@ Login、Refresh credentials、Clear local credentials、Revoke remote credential
 
 宿主同时支持 Workflow 目录与激活时，详情显示独立的 Workflow 状态、失败原因和合格的 `/<Skill 名称> [任务]`。知识可用不代表 Workflow 可用；名称重名、禁止手动调用、需要结构化输入、缺角色或核验能力的项目不能借目录激活。固定命令及别名优先，不被同名 Skill 覆盖。
 
-输入动态命令后会重新读取当前完整目录，再以空对象作为原 Workflow 输入；任务文字只作为任务内容，省略任务时使用该 Skill 的默认请求文字。空闲会话启动新 Run，活动会话排为准确原 Run 之后的 follow-up。读取期间 Ctrl+C 只取消读取；切换会话或修改草稿使旧读取失效。提交结果未知时保留原草稿，Ctrl+L 查询原命令后刷新当前会话，不重复提交；迟到回执不会清除后来编辑的草稿。目录显示的版本不预订未来执行版本，实际开始以 Service 核实的可信源为准。
+输入动态命令后会重新读取当前完整目录，再以空对象作为原 Workflow 输入；任务文字只作为任务内容，省略任务时使用该 Skill 的默认请求文字。空闲会话启动新 Run，活动会话排为准确原 Run 之后的 follow-up。读取期间 Ctrl+C 只取消读取；切换会话或修改草稿使旧读取失效。提交结果未知时保留原草稿，回到原会话主界面后自动查询原命令，不重复提交；迟到回执不会清除后来编辑的草稿。目录显示的版本不预订未来执行版本，实际开始以 Service 核实的可信源为准。
 
 CLI 的 `--skill` 仍用于选择本次 Run 可以按需使用的知识；显式 Workflow 使用 `--activate-skill`。正式 CLI、Terminal 与开发 TUI 已消费当前公共能力；完整 Workflow、终端交互与平台资格仍按[实施进度](../../../../plans/unified-agent-refactor-v1-progress.md)分别核对。
 

@@ -65,7 +65,7 @@ try:
   key(b'\\r')
   if i==0:
    wait('interaction.answer: unknown');before=open(wire).read().count('"method":"POST"');choose(next(c for c in cards() if c['id']!=card['id']));key(b'\\r');assert open(wire).read().count('"method":"POST"')==before
-   key(b'\\x0c');wait('interaction.answer: unknown');key(b'\\x0c');wait('interaction.answer: applied')
+   wait('interaction.answer: unknown');wait('interaction.answer: applied')
   waitcards(3-i)
  wait('MULTI_CARD_DONE',material=True);os.kill(p.pid,signal.SIGTERM)
  deadline=time.monotonic()+5

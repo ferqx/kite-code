@@ -149,7 +149,7 @@ export const tuiChinese: Readonly<Record<string, string>> = {
   Submission: '提交状态',
   'Input rejected': '输入被拒绝',
   'This input was not applied; the original Run has ended.': '本次输入未应用，原轮次已结束。',
-  'Ctrl+L: check the original request': 'Ctrl+L 查询原申请',
+  'Checking the original request automatically in its Session': '在原会话自动核对原申请',
   'Add guidance to the current task': '补充当前任务',
   'Observation unknown: new writes disabled': '观察状态未知，暂不能提交新申请',
   Loading: '读取中',
@@ -226,8 +226,8 @@ export const tuiChinese: Readonly<Record<string, string>> = {
   'Result collapsed': '结果已收起',
   'Empty Enter expands the current tail result': '空输入 Enter 展开当前尾部结果',
   'Empty Enter collapses the current tail result': '空输入 Enter 收起当前尾部结果',
-  'Ctrl+B pending cards · Ctrl+R sessions · Ctrl+L refresh · Ctrl+O full output · Ctrl+C cancels exact original Command':
-    'Ctrl+B 待决卡片 · Ctrl+R 会话 · Ctrl+L 刷新 · Ctrl+O 完整输出 · Ctrl+C 取消准确原 Command',
+  'Ctrl+B pending cards · Ctrl+R sessions · Ctrl+O full output · Ctrl+C cancels exact original Command':
+    'Ctrl+B 待决卡片 · Ctrl+R 会话 · Ctrl+O 完整输出 · Ctrl+C 取消准确原 Command',
   'Queue Planning after original Run': '在原 Run 后排队计划',
   'Planning next Run': '计划下一 Run',
   'Reading Workspace file names…': '读取工作区文件名中…',
@@ -254,8 +254,8 @@ export const tuiChinese: Readonly<Record<string, string>> = {
   '; L queries selected original intent': '；L 查询所选原申请',
   ' · restored history; read only': ' · 恢复历史；只读',
   'Original background Jobs · Session': '原后台任务 · 会话',
-  'Up/Down target · O complete recorded output · C child logs · S then Enter stop original Job · R refresh · Ctrl+L original receipt · Esc/Ctrl+C close reader':
-    '上下键选择目标 · O 读取已保存完整输出 · C 子日志 · S 后按 Enter 停止原 Job · R 刷新 · Ctrl+L 查询原回执 · Esc/Ctrl+C 关闭读取',
+  'Up/Down target · O complete recorded output · C child logs · S then Enter stop original Job · R refresh · Esc/Ctrl+C close reader':
+    '上下键选择目标 · O 读取已保存完整输出 · C 子日志 · S 后按 Enter 停止原 Job · R 刷新 · Esc/Ctrl+C 关闭读取',
   ' · cancel requested; cleanup not confirmed': ' · 取消已请求；清理尚未确认',
   'No verified Job in the current snapshot': '当前快照中没有已核验的 Job',
   'No verified execution in the current snapshot': '当前快照中没有已核验的执行',
@@ -286,11 +286,11 @@ export const tuiChinese: Readonly<Record<string, string>> = {
     'run <原 Run ID> / report <原报告 Command ID>',
   "interrupt confirm: explicitly interrupt this root Session's orphan execution group; unknown effects remain unknown.":
     'interrupt confirm：明确中断此根会话的孤立执行组；未知效果仍为未知。',
-  'Enter submits once; Ctrl+L checks the original request; Ctrl+C stops this read; Esc closes.':
-    'Enter 提交一次；Ctrl+L 查询原申请；Ctrl+C 停止本次读取；Esc 关闭。',
+  'Enter submits once; close this panel to check original receipts automatically; Ctrl+C stops this read; Esc closes.':
+    'Enter 提交一次；关闭面板后自动核对原回执；Ctrl+C 停止本次读取；Esc 关闭。',
   'Saved caller intents': '已保存原申请',
-  ' · ↑/↓ select · Ctrl+L original GET · Ctrl+V full frozen request · Ctrl+D clear confirmed caller only':
-    ' · ↑/↓ 选择 · Ctrl+L 查询原申请 · Ctrl+V 查看完整固定请求 · Ctrl+D 仅清理已核实原申请',
+  ' · ↑/↓ select · Ctrl+V full frozen request · Ctrl+D clear confirmed caller only':
+    ' · ↑/↓ 选择 · Ctrl+V 查看完整固定请求 · Ctrl+D 仅清理已核实原申请',
   'Original Store': '原 Store',
   '· Session': '· 会话',
   Subject: '主体',
@@ -532,8 +532,6 @@ export const tuiChinese: Readonly<Record<string, string>> = {
   'K: choose an original Context/Session request': 'K：选择上下文或会话的原申请',
   Original: '原操作',
   '(receipt is not dispatch success)': '（回执不代表派发成功）',
-  'Ctrl+R sessions · Ctrl+L refresh · Ctrl+O full output · Ctrl+C cancels exact original Command':
-    'Ctrl+R 会话 · Ctrl+L 刷新 · Ctrl+O 完整输出 · Ctrl+C 取消准确原 Command',
   '· Workspace': '· 工作区',
   'Reading actual configured models': '读取实际配置模型',
   'Desired default:': '期望默认模型：',
@@ -710,8 +708,6 @@ export const tuiChinese: Readonly<Record<string, string>> = {
     '终端界面 · Ctrl+N 新工作区会话 · Ctrl+Q',
   'disconnect shared service': '断开共享服务',
   'quit owned host': '退出当前宿主',
-  'Original outcome unknown: Ctrl+L only reads original Command':
-    '原结果未知：Ctrl+L 只读取原 Command',
   'Session creation already in progress': '会话创建正在进行',
   'Original Session creation rejected': '原会话创建已拒绝',
   'Original Session creation unknown:': '原会话创建结果未知：',

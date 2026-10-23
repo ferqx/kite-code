@@ -522,6 +522,7 @@ export type NativeRequest =
       intent: StartCommandRequest;
       permissionMode?: 'accept_edits' | 'auto' | 'full';
       imageIds?: readonly string[];
+      fileIds?: readonly string[];
       targetBranch?: string;
     }
   | { method: 'conversation.lookup'; generation: number; commandId: string }
@@ -716,6 +717,7 @@ export type NativeRequest =
       intent: InputRequest;
       draft?: NativeCallerIntent['draft'];
       imageIds?: readonly string[];
+      fileIds?: readonly string[];
     }
   | {
       method: 'caller.prepare';

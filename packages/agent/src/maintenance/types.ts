@@ -32,8 +32,30 @@ export interface CapturedAsset {
   present: boolean;
   proof: { sha256: string; byteLength: string } | null;
 }
+export type LegacyBackupVersion =
+  | 2
+  | 3
+  | 4
+  | 5
+  | 6
+  | 7
+  | 8
+  | 9
+  | 10
+  | 11
+  | 12
+  | 13
+  | 14
+  | 15
+  | 16
+  | 17
+  | 18
+  | 19;
 export interface BackupManifest {
-  version: 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15 | 16 | 17 | 18 | 19;
+  version: LegacyBackupVersion | 20;
+  /** v20 extends the exact selected legacy asset format without weakening its closed grammar. */
+  assetFormatVersion?: LegacyBackupVersion;
+  workingFiles?: import('./working-files').WorkingFileInventory;
   kind: 'profile_backup';
   createdAt: string;
   source: {

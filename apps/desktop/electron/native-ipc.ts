@@ -38,6 +38,10 @@ const fields: Record<NativeRequest['method'], readonly string[]> = {
   'input.queue.lookup': ['commandId'],
   'input.queue.ack': ['commandId'],
   'input.images.begin': ['id', 'name', 'mediaType', 'size', 'hash'],
+  'input.files.begin': ['id', 'name', 'mediaType', 'size'],
+  'input.files.append': ['id', 'offset', 'data'],
+  'input.files.finish': ['id'],
+  'input.files.release': ['id'],
   'input.images.append': ['id', 'offset', 'data'],
   'input.images.finish': ['id'],
   'input.images.release': ['id'],
@@ -78,7 +82,7 @@ const fields: Record<NativeRequest['method'], readonly string[]> = {
   'interactionHistory.attachment.close': ['readId'],
   'fileChanges.list': ['readId', 'messageIds', 'viewSelection', 'historyEpoch'],
   'fileTargets.list': ['readId', 'messageIds', 'viewSelection', 'historyEpoch'],
-  'fileChanges.detail': ['readId', 'changeId'],
+  'fileChanges.detail': ['readId', 'changeId', 'offset'],
   'fileChanges.close': ['readId'],
   'fileChanges.open': ['changeId', 'editor'],
   'messageFile.open': ['viewSelection', 'historyEpoch', 'messageId', 'path', 'editor'],
@@ -118,7 +122,14 @@ const fields: Record<NativeRequest['method'], readonly string[]> = {
   'input.models.read': [],
   'conversation.models.read': [],
   'conversation.branch': ['workspaceId'],
-  'conversation.send': ['creation', 'intent', 'permissionMode', 'targetBranch', 'imageIds'],
+  'conversation.send': [
+    'creation',
+    'intent',
+    'permissionMode',
+    'targetBranch',
+    'imageIds',
+    'fileIds',
+  ],
   'conversation.lookup': ['commandId'],
   'settings.providers.read': [],
   'settings.providers.close': [],
@@ -180,7 +191,7 @@ const fields: Record<NativeRequest['method'], readonly string[]> = {
   createSession: ['workspaceId', 'commandId', 'sessionId', 'title', 'expectedStoreId'],
   messages: ['sessionId', 'expectedStoreId', 'readId', 'afterSeq', 'upperSeq', 'limit'],
   'messages.close': ['readId'],
-  submit: ['sessionId', 'intent', 'draft', 'imageIds'],
+  submit: ['sessionId', 'intent', 'draft', 'imageIds', 'fileIds'],
   'caller.prepare': ['sessionId', 'intent', 'draft'],
   'caller.submit': ['commandId'],
   'caller.lookup': ['commandId'],
@@ -213,7 +224,12 @@ function exact(value: Record<string, unknown>, keys: readonly string[]) {
 export function decodeNativeRequest(value: unknown): NativeRequest {
   let bytes: number;
   try {
-    bytes = Buffer.byteLength(JSON.stringify(value));
+    const candidate = record(value);
+    bytes =
+      candidate.method === 'input.files.append' && candidate.data instanceof Uint8Array
+        ? candidate.data.byteLength +
+          Buffer.byteLength(JSON.stringify({ ...candidate, data: null }))
+        : Buffer.byteLength(JSON.stringify(value));
   } catch {
     throw Error('invalid_native_request');
   }
@@ -230,6 +246,41 @@ export function decodeNativeRequest(value: unknown): NativeRequest {
   const input = record(value),
     method = input.method;
   if (typeof method !== 'string' || !Object.hasOwn(fields, method))
+    throw Error('invalid_native_request');
+  if (method.startsWith('input.files.')) {
+    if (typeof input.id !== 'string' || !/^[A-Za-z0-9_-]{1,64}$/.test(input.id))
+      throw Error('invalid_native_request');
+    if (
+      method === 'input.files.begin' &&
+      (typeof input.name !== 'string' ||
+        !input.name ||
+        input.name.length > 512 ||
+        typeof input.mediaType !== 'string' ||
+        !input.mediaType ||
+        input.mediaType.length > 256 ||
+        !Number.isSafeInteger(input.size) ||
+        Number(input.size) < 0 ||
+        Number(input.size) > 256 * 1024 * 1024)
+    )
+      throw Error('invalid_native_request');
+    if (
+      method === 'input.files.append' &&
+      (!(input.data instanceof Uint8Array) ||
+        !input.data.byteLength ||
+        input.data.byteLength > 65536 ||
+        !Number.isSafeInteger(input.offset) ||
+        Number(input.offset) < 0)
+    )
+      throw Error('invalid_native_request');
+  }
+  if (
+    input.fileIds !== undefined &&
+    (!['submit', 'conversation.send'].includes(method) ||
+      !Array.isArray(input.fileIds) ||
+      input.fileIds.length > 128 ||
+      !input.fileIds.every((id) => typeof id === 'string' && /^[A-Za-z0-9_-]{1,64}$/.test(id)) ||
+      new Set(input.fileIds).size !== input.fileIds.length)
+  )
     throw Error('invalid_native_request');
   if (method.startsWith('input.images.')) {
     if (typeof input.id !== 'string' || !/^[A-Za-z0-9_-]{1,64}$/.test(input.id))
@@ -660,6 +711,12 @@ export function decodeNativeRequest(value: unknown): NativeRequest {
     )
       throw Error('invalid_native_request');
   }
+  if (
+    method === 'fileChanges.detail' &&
+    input.offset !== undefined &&
+    (!Number.isSafeInteger(input.offset) || Number(input.offset) < 0)
+  )
+    throw Error('invalid_native_request');
   if (
     method === 'context.compress' &&
     input.focus !== undefined &&

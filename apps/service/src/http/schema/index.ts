@@ -58,6 +58,18 @@ const inputImage = z.strictObject({
 const inputFileReference = z.strictObject({
   name: z.string().min(1).max(512),
   uri: z.string().min(1).max(8192).startsWith('file://'),
+  reference: z
+    .strictObject({
+      id: z.string().regex(/^input-file-[A-Za-z0-9_-]{1,100}$/),
+      storeId: id,
+      sessionId: id,
+      subjectId: z.string().min(1).max(256),
+      scope: z.strictObject({ kind: z.literal('session'), id }),
+      hash: z.string().regex(/^[a-f0-9]{64}$/),
+      size: sequence.max(16).refine((value) => Number.isSafeInteger(Number(value))),
+      mediaType: z.string().min(1).max(256),
+    })
+    .optional(),
 });
 const inputFiles = z.array(inputFileReference).max(128);
 const inputImages = z.array(inputImage).max(10);
@@ -417,6 +429,27 @@ const providerSettingsMarker = z.strictObject({
 export const schemas = {
   InputImage: inputImage,
   InputFileReference: inputFileReference,
+  InputFileUploadQuery: z.strictObject({
+    expectedStoreId: id,
+    id: id.max(100),
+    name: z.string().min(1).max(512),
+    mediaType: z.string().min(1).max(256),
+    size: sequence.max(9).refine((value) => BigInt(value) <= 256n * 1024n * 1024n),
+    hash: z.string().regex(/^[a-f0-9]{64}$/),
+  }),
+  InputFileReleaseRequest: z.strictObject({ expectedStoreId: id }),
+  InputFileImport: z.strictObject({
+    id: id.max(100),
+    sessionId: id,
+    subjectId: z.string().min(1).max(256),
+    originStoreId: id,
+    name: z.string().min(1).max(512),
+    uri: z.string().startsWith('file://'),
+    reference: inputFileReference.shape.reference.unwrap(),
+    state: z.enum(['prepared', 'bound', 'released']),
+    boundCommandId: id.nullable(),
+    createdAt: z.number().int().nonnegative(),
+  }),
   InputImageUploadRequest: z.strictObject({
     expectedStoreId: id,
     id: id.max(100),
@@ -1865,6 +1898,26 @@ export const apiSchemas = {
   SessionExportCompletion: SessionExportCompletionSchema,
 };
 export const apiRoutes = [
+  {
+    method: 'post',
+    path: '/v1/sessions/{id}/input-files',
+    query: 'InputFileUploadQuery',
+    binaryRequest: true,
+    response: 'InputFileReference',
+    statuses: [201],
+  },
+  {
+    method: 'get',
+    path: '/v1/sessions/{id}/input-files/{importId}',
+    query: 'HostMutationQuery',
+    response: 'InputFileImport',
+  },
+  {
+    method: 'post',
+    path: '/v1/sessions/{id}/input-files/{importId}/release',
+    request: 'InputFileReleaseRequest',
+    response: 'InputFileImport',
+  },
   {
     method: 'post',
     path: '/v1/sessions/{id}/reconcile',

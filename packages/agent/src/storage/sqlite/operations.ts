@@ -110,6 +110,12 @@ import {
 } from './human-work-control';
 import { assertHumanRunHandoff, handoffHumanRun } from './human-work-handoff';
 import {
+  admitInputFiles,
+  getInputFileImport,
+  registerInputFileImport,
+  releaseInputFileImport,
+} from './input-file-imports';
+import {
   applyInput,
   assertInputBoundary,
   listPendingInputs,
@@ -1154,6 +1160,18 @@ export class SqliteOperations {
       case 'getArtifactReference':
       case 'getLegacyReviewArtifactReference':
         return callArtifact(this, method, args, this.requestId);
+      case 'registerInputFileImport':
+        return registerInputFileImport(
+          this,
+          args[0] as Parameters<Store['registerInputFileImport']>[0],
+        );
+      case 'getInputFileImport':
+        return getInputFileImport(this, args[0] as Parameters<Store['getInputFileImport']>[0]);
+      case 'releaseInputFileImport':
+        return releaseInputFileImport(
+          this,
+          args[0] as Parameters<Store['releaseInputFileImport']>[0],
+        );
       case 'getExtensionRecord':
       case 'listExtensionRecords':
       case 'writeExtensionRecord':
@@ -2462,6 +2480,12 @@ export class SqliteOperations {
       session.next_seq,
       (request as { targetCommandId?: string }).targetCommandId ?? null,
     );
+    const value = request as { kind?: string; files?: Json };
+    if (
+      ['run.start', 'input.steer', 'input.follow_up'].includes(value.kind ?? '') &&
+      value.files !== undefined
+    )
+      admitInputFiles(this, input, value.files, input.commandId);
   }
 }
 function parse(value: string | number | bigint | null | undefined): Json {

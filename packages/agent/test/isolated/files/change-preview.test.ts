@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { createFixedModel, type ModelEvent } from '@kite-ai/ai';
 import { AgentError, createRuntime } from '../../../src';
+import { createArtifactStore } from '../../../src/artifacts';
 import { createFileTools, createWorkspaceFiles, type FileChangePreview } from '../../../src/files';
 import { openSqliteStore } from '../../../src/sqlite';
 
@@ -217,6 +218,10 @@ test('real Core saves the preview in original Execution receipts; repeated call 
   const model = createFixedModel(calls);
   const runtime = createRuntime({
     store,
+    artifacts: createArtifactStore({
+      profile: { dataRoot: join(f.root, 'data'), profile: 'owned' },
+      store,
+    }),
     model,
     extensions: [{ id: 'files', version: '1', apiMajor: 1, tools: createFileTools(f.files) }],
     permissions: {
@@ -307,15 +312,55 @@ test('real Core saves the preview in original Execution receipts; repeated call 
       });
       const result = execution.result as unknown as {
         content: string;
-        details: { fileChange: FileChangePreview };
+        artifactRefs: { id: string; scope: { kind: 'execution'; id: string } }[];
+        details: {
+          fileChange: FileChangePreview;
+          fileOutput: { path: string; snapshot: { id: string } };
+        };
       };
       expect(result.content).toBe(message.content);
       const facts = JSON.parse(message.content);
       expect(result.details.fileChange.after).toEqual(facts.baseline);
       expect(result.details.fileChange.text).toContain(`actual ${facts.path} bytes`);
+      expect(result.details.fileOutput.path).toBe(facts.path);
+      const ref = result.artifactRefs.find(
+        (ref) => ref.id === result.details.fileOutput.snapshot.id,
+      )!;
+      writeFileSync(join(f.root, facts.path), 'later outside edit');
+      const saved = await runtime.readArtifact({
+        expectedStoreId: storeId,
+        sessionId: 's',
+        subjectId: 'owner',
+        refId: ref.id,
+        scope: ref.scope,
+      });
+      expect(Buffer.from(saved.content).toString()).toBe(`actual ${facts.path} bytes`);
     }
   } finally {
     await runtime.close();
+    await f.close();
+  }
+});
+
+test('workspace snapshot publication failure preserves the actual write and reports unknown delivery', async () => {
+  const f = fixture();
+  try {
+    const tool = createFileTools(f.files).find((tool) => tool.id === 'files.write')!;
+    const result = await tool.execute(
+      { path: 'report.md', base: null, content: 'actual saved body' },
+      {
+        signal: new AbortController().signal,
+        artifacts: {
+          async publish() {
+            throw Error('snapshot unavailable');
+          },
+        },
+      } as unknown as Parameters<typeof tool.execute>[1],
+    );
+    expect(result.outcome).toBe('outcome_unknown');
+    expect(result.artifactRefs).toBeUndefined();
+    expect(readFileSync(join(f.root, 'report.md'), 'utf8')).toBe('actual saved body');
+  } finally {
     await f.close();
   }
 });

@@ -121,7 +121,11 @@ export function createPlanningPermissionPolicy(options: {
   ): Promise<PlanningState>;
   run: () => PlanningRunIdentity | undefined;
   current: Permissions;
-  describe: (request: AuthorizationRequest) => CapabilityDescription | null;
+  describe: (
+    request: AuthorizationRequest,
+  ) => CapabilityDescription | null | Promise<CapabilityDescription | null>;
+  /** Trusted exact file-to-Planning adapter. This only relaxes the plan ceiling, never Tool permission. */
+  isPlanFileEdit?: (request: AuthorizationRequest) => Promise<boolean>;
 }): Permissions {
   return {
     toolDispatchOrder: options.current.toolDispatchOrder,
@@ -148,9 +152,13 @@ export function createPlanningPermissionPolicy(options: {
         );
       }
       request.signal.throwIfAborted();
-      const description = options.describe(request);
+      const description = await options.describe(request);
       const beforeApproval =
         request.kind === 'model' ||
+        (request.kind === 'job' &&
+          request.definitionId === 'builtin.planning/planning.write' &&
+          request.definitionVersion === '1') ||
+        (await options.isPlanFileEdit?.(request)) === true ||
         (request.kind === 'tool' &&
           ((request.definitionVersion === '1' && management.has(request.definitionId)) ||
             (!!description?.safeRead && description.effects.every((effect) => effect === 'read'))));

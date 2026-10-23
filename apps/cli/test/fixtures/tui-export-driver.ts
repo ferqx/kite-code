@@ -1,6 +1,6 @@
 import { Database } from 'bun:sqlite';
 import assert from 'node:assert/strict';
-import { readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { appendFileSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { basename, join } from 'node:path';
 import { StringDecoder } from 'node:string_decoder';
 import { defaultWindowsPathSecurity } from '@kite-ai/agent/windows-path-security';
@@ -20,6 +20,12 @@ const input = JSON.parse(process.argv[2]!) as {
   databasePath: string;
 };
 const abort = new AbortController();
+const startedAt = Date.now();
+const stage = (name: string) =>
+  appendFileSync(
+    join(input.evidence, 'stages.jsonl'),
+    `${JSON.stringify({ stage: name, elapsedMs: Date.now() - startedAt, at: Date.now() })}\n`,
+  );
 const interrupted = () => abort.abort(Error('original_export_interrupted'));
 const stop = (message: unknown) => {
   if (message === 'export-driver-stop') interrupted();
@@ -37,6 +43,7 @@ let originalToolExecutionId: string | undefined;
 const decoder = new StringDecoder('utf8');
 const normalize = (text: string) => text.replace(/\s+/g, '');
 const expectedBody = normalize(input.bodyText.repeat(input.bodyRepeats) + input.tail);
+const nativeCells = process.platform === 'win32';
 let bodyPosition = 0,
   bodyVerified = false,
   currentBodyVerified = false;
@@ -75,6 +82,7 @@ const clearAction = () => {
   clearSeen = false;
 };
 const printable = (value: string) => {
+  if (nativeCells) return;
   const text = normalize(value);
   if (!text) return;
   // Consume every exact original character once. Neither API/export text nor a
@@ -133,9 +141,12 @@ const scan = (bytes: Uint8Array) => {
           actionFrameReady = false;
           nativeFrameReady = false;
         }
-        if (csi === '?2026l' && currentBodyVerified && composerPainted()) {
-          actionFrameReady = true;
-          nativeFrameReady = true;
+        if (csi === '?2026l') {
+          synchronizedOutput = false;
+          if (currentBodyVerified && composerPainted()) {
+            actionFrameReady = true;
+            nativeFrameReady = true;
+          }
         }
         if (csi === '3J') {
           clearAction();
@@ -168,7 +179,11 @@ const pty = spawnTuiPTY({
     input.dataRoot,
   ],
   cwd: input.root,
-  observation: 'stream',
+  observation: nativeCells ? 'screen' : 'stream',
+  conptyCellWidths: nativeCells,
+  // Three million full-width characters occupy 75,000 real 80-column rows.
+  // Retain all of them plus the original Tool and composer for exact comparison.
+  scrollback: nativeCells ? 100000 : undefined,
   onData(bytes) {
     dataRevision++;
     raw.push(bytes.slice());
@@ -176,6 +191,29 @@ const pty = spawnTuiPTY({
     buffer = Buffer.concat([buffer, bytes]).subarray(-131072);
   },
 });
+const observe = async () => {
+  if (!nativeCells) return;
+  const frame = await pty.projection();
+  if (!frame.fresh) return;
+  // ConPTY may paint a line-end cell twice using an absolute cursor move.
+  // Only its final cells represent visible text; removing ANSI from raw bytes
+  // instead duplicates characters and cannot verify the original full body.
+  const text = normalize(frame.text);
+  currentBodyVerified = text.includes(expectedBody);
+  bodyVerified ||= currentBodyVerified;
+  nativeTail = text.slice(-4096);
+  actionTail = nativeTail;
+  actionMarkers.clear();
+  for (const marker of markers) if (text.includes(marker)) actionMarkers.add(marker);
+  reasonSeen = text.includes('ACTUAL_LOADED_REASON_TAIL');
+  const header = `files.read[${originalToolExecutionId}]`;
+  const offset = originalToolExecutionId ? text.lastIndexOf(header) : -1;
+  readingOriginalTool = offset >= 0;
+  originalToolMaterial =
+    offset < 0 ? '' : text.slice(offset + header.length, offset + header.length + 65536);
+  actionFrameReady = nativeFrameReady =
+    !synchronizedOutput && currentBodyVerified && composerPainted();
+};
 const reset = () => {
   buffer = Buffer.alloc(0);
   clearAction();
@@ -190,6 +228,7 @@ const wait = async (text: string) => {
   const end = Date.now() + 30000;
   for (;;) {
     abort.signal.throwIfAborted();
+    await observe();
     const observed =
       text === 'ACTUAL_LOADED_REASON_TAIL'
         ? reasonSeen
@@ -201,11 +240,12 @@ const wait = async (text: string) => {
   }
 };
 // Static output remains original native terminal material until an actual 3J.
-// This stream observation proves printed bytes and clear boundaries, not cursor geometry.
+// Windows verifies final console cells, while POSIX retains its original stream proof.
 const waitNative = async (text: string) => {
   const end = Date.now() + 30000;
   for (;;) {
     abort.signal.throwIfAborted();
+    await observe();
     if (text === input.tail ? currentBodyVerified : nativeTail.includes(normalize(text)))
       return text;
     if (pty.ended || Date.now() > end)
@@ -218,8 +258,10 @@ const waitNative = async (text: string) => {
 // does not prove that the previous frame has handed input back.
 const waitCompletePaint = async (currentAction: boolean) => {
   const end = Date.now() + 30000;
-  while (!currentBodyVerified || !(currentAction ? actionFrameReady : nativeFrameReady)) {
+  for (;;) {
     abort.signal.throwIfAborted();
+    await observe();
+    if (currentBodyVerified && (currentAction ? actionFrameReady : nativeFrameReady)) return;
     if (pty.ended || Date.now() > end) throw Error('original body/composer paint did not complete');
     await Bun.sleep(100);
   }
@@ -239,7 +281,9 @@ let owned: number[] = [],
   normal = false,
   failure: unknown;
 try {
+  stage('driver_started');
   await wait('New Run');
+  stage('initial_composer');
   const listing =
     process.platform === 'win32'
       ? Bun.spawnSync(
@@ -271,6 +315,7 @@ try {
   await Bun.sleep(100);
   await key('\r');
   await wait('9000025 bytes, complete');
+  stage('complete_metadata');
   const database = new Database(input.databasePath, { readonly: true });
   try {
     const originals = database
@@ -292,6 +337,7 @@ try {
   assert.equal(exported.length, 1, 'first export paths');
   const preview = readFileSync(exported[0]!, 'utf8');
   const firstExportPath = exported[0]!;
+  stage('first_export');
   // The writer freezes its actual loaded-output map. Automatic verified reading
   // may finish before this explicit export; never relabel that full snapshot a preview.
   if (preview.includes('Loaded preview only')) {
@@ -323,6 +369,7 @@ try {
   assert(bodyVerified, 'complete original Model body was not painted to native terminal history');
   await waitNative('New Run >');
   await waitCompletePaint(false);
+  stage('full_body_painted');
   reset();
   await key('\r');
   await wait('Result collapsed');
@@ -336,6 +383,7 @@ try {
     'collapsed result',
   );
   await waitCompletePaint(true);
+  stage('collapsed_body_painted');
   reset();
   await key('\r');
   await waitNative(input.tail);
@@ -349,6 +397,7 @@ try {
     'expanded result',
   );
   await waitCompletePaint(true);
+  stage('expanded_body_painted');
   console.log('TAIL_RESULT_COLLAPSE_EXPAND_ORIGINAL_ARTIFACT_REFS');
   // Ctrl+O loads one verified Model output body, including its reasoning.
   // Reasoning export is independent of any screen-only display shortcut.
@@ -389,6 +438,7 @@ try {
   }
   console.log('LOADED_REASON_EXPORTED_WITHOUT_SCREEN_TOGGLE');
   console.log('EXPORT_FULL_TAIL_REASON_0600');
+  stage('second_export_verified');
   await key('\x11');
   const exitDeadline = Date.now() + 6000;
   while (!pty.ended && Date.now() < exitDeadline) {
@@ -409,6 +459,7 @@ try {
     );
   }
   normal = true;
+  stage('normal_host_and_service_exit');
   console.log('OWNED_SERVICE_STOPPED');
   console.log('HOST_EXIT 0');
   console.log('FULL_TAIL_OBSERVED True');

@@ -262,12 +262,16 @@ try {
     await key('\r');
     await wait('Confirm project source review:');
     await control(`before-confirm/${n}`);
+    const completionBefore =
+      selections()
+        .filter((row) => row.phase === 'warm')
+        .at(-1)?.completion ?? 0;
     await key('\r');
     const originalId = await waitNewOriginal(ids);
     const ordinary = await control(`ordinary/${n}`);
     assert.equal(ordinary.commandId, originalId);
-    // Close management before another control key. An original ID is not a
-    // completed navigation, and adjacent Ctrl+C/Ctrl+L can be one input batch.
+    // Observe management closing before reading the original approval; an
+    // original ID alone does not prove completed navigation.
     const navigationDeadline = Date.now() + 10000;
     await key('\x03');
     for (;;) {
@@ -283,16 +287,9 @@ try {
         throw Error(`owned_source_management_close_deadline:${viewport}`);
       await Bun.sleep(50);
     }
-    // Refresh the exact original public work after the observed close, within
-    // the original card-read deadline; no approval or Source answer is sent.
+    // The existing observer must publish a fresh, exact original card after
+    // submission. No approval or Source answer is sent to obtain this read.
     await wait(`approval[${ordinary.id}]originalSessiona`, true, navigationDeadline);
-    // A read-only lookup may preserve this exact already painted card. Retain
-    // only its proven main-screen observation; any later paint supersedes it.
-    const completionBefore =
-      selections()
-        .filter((row) => row.phase === 'warm')
-        .at(-1)?.completion ?? 0;
-    await key('\x0c', true);
     for (;;) {
       const completion = selections().find(
         (row) =>
@@ -438,7 +435,11 @@ try {
   console.log('SOURCE_APPROVAL_WARM_COLD_COMPLETE');
 } catch (error) {
   failure = error;
-  note('failure', { message: String(error), frame: normalized(latestFrame).slice(-32768) });
+  note('failure', {
+    message: String(error),
+    frame: normalized(latestFrame).slice(-32768),
+    viewport: active?.viewport(),
+  });
 } finally {
   process.removeListener('SIGINT', interrupted);
   process.removeListener('SIGTERM', interrupted);
@@ -470,10 +471,11 @@ try {
         : error;
     }
   }
-  for (const owned of owners) {
+  for (const [index, owned] of owners.entries()) {
     try {
       await owned.drain();
       owned.close();
+      durableReceipt(join(evidence, `pty-${index}.ansi`), owned.text(), 'wx');
     } catch (error) {
       failure = failure
         ? new AggregateError([failure, error], 'Source approval PTY close failed')

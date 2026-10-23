@@ -65,7 +65,7 @@ import {
 import { NativeDisplayCache } from './native-display-cache';
 import { useNativeEnvironment } from './native-environment';
 import { NativeExtensions } from './native-extensions';
-import { NativeFileChanges } from './native-file-changes';
+import { NativeFileChanges, NativeOutputFile } from './native-file-changes';
 import { NativeFileRecoveryPanel } from './native-file-recovery';
 import { useNativeFileTargets } from './native-file-targets';
 import { NativeGeneralSettings } from './native-general-settings';
@@ -253,7 +253,7 @@ function NativeDesktopContent({
     permissionMode: 'accept_edits' | 'auto' | 'full';
     imageIds?: readonly string[];
     images?: readonly { name: string }[];
-    files?: readonly { id: string; name: string; uri: string }[];
+    files?: readonly { id: string; name: string; uri: string; prepared?: boolean }[];
     imageScope?: string;
     result?: NativeConversationResult;
   }>();
@@ -1785,6 +1785,7 @@ function NativeDesktopContent({
           creation: original.creation,
           intent: firstIntent(original.commandId, original.text, original.files),
           imageIds: original.imageIds,
+          fileIds: original.files?.filter((file) => file.prepared).map((file) => file.id),
           permissionMode: original.permissionMode,
           targetBranch,
         });
@@ -1874,6 +1875,7 @@ function NativeDesktopContent({
             intent,
             permissionMode: original.permissionMode,
             imageIds,
+            fileIds: files.filter((file) => file.prepared).map((file) => file.id),
           });
           if (!value || !('kind' in value) || value.kind !== 'conversation' || !('stage' in value))
             throw Error('conversation_response_unknown');
@@ -1940,6 +1942,7 @@ function NativeDesktopContent({
           sessionId,
           intent,
           imageIds,
+          fileIds: files.filter((file) => file.prepared).map((file) => file.id),
         });
       } catch (cause) {
         const code =
@@ -3315,6 +3318,41 @@ function NativeDesktopContent({
             };
           }}
         />
+        {state &&
+          displayTargets
+            .filter(
+              (entry) => entry.snapshot && group.some((model) => model.id === entry.messageId),
+            )
+            .map((entry) => (
+              <NativeOutputFile
+                key={entry.changeId}
+                bridge={bridge}
+                generation={state.generation}
+                entry={entry}
+                editor={editor}
+              />
+            ))}
+        {group.map((model) => {
+          const message = messagesById.get(model.id);
+          const images = displayTools.find((entry) => entry.messageId === model.id)?.images;
+          return message && images?.length && selection && state ? (
+            <NativeUserImages
+              key={model.id}
+              bridge={bridge}
+              previews={imageDrafts.previews}
+              generation={state.generation}
+              viewSelection={selection.viewSelection ?? selection.viewGeneration}
+              historyEpoch={state.historyEpoch ?? 0}
+              message={message}
+              images={images}
+              readAvailable={
+                !selection.viewLoading &&
+                historyState.phase === 'complete' &&
+                !directory?.unavailable
+              }
+            />
+          ) : null;
+        })}
         {liveNotices}
       </>
     );

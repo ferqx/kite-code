@@ -65,7 +65,7 @@ async function fixture(
             .reverse()
             .find((message) => message.role === 'user')?.content ?? '',
         );
-        reviewing = input.purpose === 'authorization_review';
+        reviewing = input.purpose === 'authorization_check';
       } catch {}
       if (reviewing) authReviews.push(body);
       else requests.push(body);
@@ -132,7 +132,7 @@ async function fixture(
     allowed: [
       { kind: 'model', definitionId: 'local', definitionVersion: '1' },
       { kind: 'tool', definitionId: 'files.write', definitionVersion: '2' },
-      { kind: 'tool', definitionId: 'files.read', definitionVersion: '4' },
+      { kind: 'tool', definitionId: 'files.read', definitionVersion: '5' },
     ],
   };
   const host = createDefaultProcessConfiguration({
@@ -444,7 +444,7 @@ test('old default Run keeps actual selected definitions across JSONC disable, wh
       });
       await f.run('new-work', 'New task: explicit file task');
       const command = await f.runtime.waitForCommand('new-work', { timeoutMs: 5000 });
-      const receipt = command.receipt as { businessCommandId: string; runId: string };
+      const receipt = command.receipt as { businessCommandId?: string; runId: string };
       expect(command.status).toBe('applied');
       const request = f.requests.at(-1)!;
       const tools = request.tools as { type: string; function: { name: string } }[];
@@ -454,14 +454,14 @@ test('old default Run keeps actual selected definitions across JSONC disable, wh
       const view = await f.client.getView('s'),
         newRun = (await f.store.getRun(receipt.runId))!;
       expect(newRun).toMatchObject({
-        originCommandId: receipt.businessCommandId,
+        originCommandId: receipt.businessCommandId ?? command.id,
         rootWorkCommandId: command.id,
       });
       const model = (await f.store.listExecutions('s')).find(
         (execution) => execution.kind === 'model' && execution.runId === newRun.id,
       );
       expect(model).toMatchObject({
-        originCommandId: receipt.businessCommandId,
+        originCommandId: receipt.businessCommandId ?? command.id,
         rootWorkCommandId: command.id,
       });
       expect(newRun.status).toBe('completed');

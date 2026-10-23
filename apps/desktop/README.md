@@ -1,5 +1,17 @@
 # Desktop 与 Native 制品
 
+普通 Workspace／明确外部路径写入的完整快照同样复用消息内交付卡。外部文件只提供原交付的阅读，不借用 Workspace 的编辑器打开权限。2026-10-23 最新 Main／交付 DOM 两文件12项118断言通过；工作文件删除、改动不改变原快照，中文跨页仍完整。受控浏览器中 Plan 修订为版本2后，选择 Auto 并批准，原待审卡退出、原轮次继续结束；此结果不外推 TUI／安装版资格。
+
+会话文件已接入 Main 字节准备、稳定导入、原消息绑定及后续 [Files 读取](../../packages/agent/src/tools/files/README.md)；输出和 Plan 的准确会话文件可由现有文件入口打开。下述受控页面、IPC 合同与真实 Node 冷查分别证明其覆盖的路径，不替代完整 Electron 安装制品或其他平台资格。
+
+会话输出在对应工具消息提供“查看本次交付的文件”。[历史 reader](electron/file-changes.ts)核原 succeeded Execution、原结果 revision、scope、Artifact 成员及完整 hash／size，按完整 UTF-8 边界返回每段至多64KiB；界面提供续读和回到开头，当前文件被改动或删除也不改旧版本。“打开当前文件”仍单独走原编辑器路径及准确登记重核。历史读取目前沿 Client 完整 Artifact reader 后分页 IPC，不宣称流式磁盘分页或大文件内存限额。
+
+PDF 工具页图复用 [图片 reader](electron/input-image-reads.ts)及 [NativeUserImages](src/native-user-images.tsx)：Main 只接观察到的完成 Tool 消息和索引，核原执行、最多4个 PNG 引用及16MiB总量，renderer 不能指定任意引用或路径。后继轮次、Fork 与冷历史按原来源读取，预览缓存只负责显示，不承担历史保存。只含一次读取的工具组也显示其页图。
+
+2026-10-23，`ba34a2e6` 加本轮修复、同一 Windows 开发环境：实际页面观察复制中源文件变化的失败提示、准备中状态、显式取消保留草稿与后续重新添加。补正准备完毕但界面未接纳的生命周期：signal 保持到 `addFiles` 接管，失效输入或丢弃的晚结果释放准确 Main 项，已接纳附件不随准备结束删除。[准备 owner DOM 回归](test/isolated/native-input-files-dom.test.tsx)1项30断言和 [Composer 回归](../../packages/ui/test/isolated/prompt-editor.test.tsx)8项78断言通过。最新页面再次混选文本／PDF／图片，实际观察发送占位→一条持久用户消息→三次读取→页图与报告交付→终态；源文件删除后重载，原图片、页图和历史正文仍可读，没有重复消息或卡住。该观察使用上述隔离浏览器桥，仍不代证完整 Electron 安装窗口。
+
+2026-10-23，`5c28cd1fd` 加当前会话文件工作树、Windows x64／Bun1.4.3：[会话文件浏览器夹具](test/session-files-browser-runner.fixture.ts)通过真实页面、Main 请求、HTTP、SQLite、Artifact 与受控模型逐步观察三种附件准备、删除临时源文件、发送占位接管、文本与 PDF 读取、页图、输出写入、进程关闭后重开及后继编辑。旧报告与修改后报告同时展开核对，各保原版本；过程未见重复消息。原 Plan 文件经普通 Files 修订后，审核显示相同修订正文和版本2。Main／DOM 历史交付与工具展示三文件23项284断言通过。夹具的传输桥、模型和私有 UI 数据端口是测试替身；不证明完整 Electron IPC、外部编辑器启动、真实模型识别或安装版资格。普通侧栏在此窄视口出现零宽现象，未计作通过；消息内交付阅读独立可用。
+
 产品展示名称统一为 **Kite**：共享侧栏、启动页、页面与窗口标题、关于菜单和原生提示使用相同大小写。原 `kite-native` 运行标识、workspace 包名、IPC 与本机偏好键保持，已有用户数据路径保持。
 
 ## Markdown 与附件输入
@@ -16,7 +28,17 @@
 
 2026-10-23 主题色修正：用户指出流程图／时序图缺少主题色，确认原 adapter 将全部线条映射为正文色。现改为深浅主题各自的蓝色节点边框／箭头和青色生命线／辅助边框，继续透明底。`bun apps/desktop/test/markdown-content-browser-runner.fixture.ts` 在 Chrome155／1280与390px下通过；新增解码图像像素断言核对蓝色确实绘出、时序生命线有青色、背景主要透明及深浅切换，页面错误和外部请求为0。生命周期隔离回归1项／22断言、UI与Desktop typecheck、定向Biome通过。再用当前生产renderer、`testDiagnostics:false`、原独立Profile和真实Service构建Electron44.3.0窗口，冷读原消息并实际检查亮／暗流程图、时序图与主题切换：颜色更新，文字可读，阅读位置保持；切换后先保留旧图再异步替换，不承诺颜色与页面背景同帧变化。此增量只复验主题色，前述流式时序／冷读等证据按未变化范围复用，不据此扩大安装或平台资格。
 
-产品操作见[桌面手册](../../docs/handbook/clients/desktop/README.md#提示词与附件)。[共享 Composer](../../packages/ui/src/desktop/Composer.tsx)承载实时 Markdown 和 12px 横向附件卡片；`+` 只有“添加文件”，同一次系统多选允许混选图片与普通文件，按 MIME／已知图片扩展名自动分流。图片选择、粘贴与拖入共用用户 File 字节流程；普通文件由[沙箱 preload](electron/preload.ts)经 [Electron webUtils](https://www.electronjs.org/docs/latest/api/web-utils)从真实磁盘 File 取得路径，[URI 编码](src/input-file-reference.ts)保留中文、空格、百分号、查询／片段字符及 UNC，不读取普通文件正文；内存 File 没有路径时明确失败。旧 Main `input.files.pick` 已退出。两者由[窗口附件草稿](src/native-input-images.ts)按 Store/Session 独立保留、移除和冻结，受理后只清本次 ID；文件 URI 不改写草稿，随正式输入 `files` 元数据保存，历史与待发送卡片均独立于正文。选择器不读取普通文件正文，renderer 不能给 Main 任意读取路径。
+产品操作见[桌面手册](../../docs/handbook/clients/desktop/README.md#提示词与附件)。[共享 Composer](../../packages/ui/src/desktop/Composer.tsx)按 MIME／图片扩展名分流。图片保留现有字节流程；普通 File 由 renderer 分块读取，每块至多 64 KiB，经闭合 IPC 交给 [Main 准备 owner](electron/input-files.ts)，不让 renderer 自报路径触发 Main 任意文件读取。每窗口最多 128 个准备项，单项及总量至多 256 MiB；显式取消、移除与换代终止所属准备并释放 Main 项，上传在途保留预算直到真实完成。
+
+新会话先创建准确 Session，再将冻结准备项通过 Service 流式发布为 Artifact；稳定导入 ID 绑定 Store／Session／draft ID。ACK 丢失先 GET 原导入，同 ID 不重复创建逻辑附件。调用 journal 保存已准备引用，原 command 接纳事务完成绑定；未知提交保留原意图而不盲目重新发送。历史附件和占位仍使用原文件名，普通附件从此不依赖源路径。未发送草稿仍仅保窗口生命周期。旧路径附件不静默转换。
+
+2026-10-23，`ba34a2e6d` 加本次会话文件工作树、Windows x64／Bun1.4.3：[普通附件 IPC 回归](test/isolated/native-session-files-ipc.test.ts)实际构建生产 preload，在 VM 中接入真实 Main handler、NativeCaller、Service HTTP、SQLite 与 Artifact，31断言通过。准确 sender、未完成／已释放／换代准备项和传入字节复制均核对；在实际 Windows Artifact 临时文件写入边界注入一次 ENOSPC 后，确认临时文件关闭并删除、输入导入与绑定均未形成、无 command／caller journal／模型调用、原文本草稿保持。解除故障后直接复用原准备 ID 和原字节重试，随后分别丢弃成功上传与 command 的 ACK，确认 GET 查回原导入，只有一次成功上传和一次 command POST。重建 caller 后首次 GET 再丢回执，第二次只查回原 command，原消息绑定、完整 Artifact 字节与模型调用数保持。此为实际链路写失败注入，不是物理磁盘满额资格；Electron 传输和此例私有 UI 数据端口为替身，也不代证完整 Electron 进程冷恢复。
+
+[普通文件 DOM 回归](test/isolated/native-input-files-dom.test.tsx)接真实 Main 准备 owner，核活动 FileReader 上显式 AbortSignal 取消及 scope 换代均不 append／finish、不生成 ready 草稿，并释放准确准备项；重新选择随后成功。本例本轮1项30断言通过；[Main 字节回归](test/input-files.test.ts)的原预算与字节合同证据继续适用。取消后的用户全过程观察仍以上述浏览器证据为准。
+
+[真实 Node 冷查](test/isolated/native-caller-journal-host.test.ts)使用 Node24.15.0、真实私有 SQLite journal 与 Profile 准入：原 `run.start` 携普通附件，在真实 HTTP 接纳后断开回执并强制退出 caller，冷进程首次 GET 再丢回执，后续只 GET 查回原 ID／摘要／scope，零重发；原附件绑定与字节仍可读。另两例核合法恢复活动 Run 后的 `input.steer` 原 ID 查回及已完成原公共 Run 的冷查，三例共102断言通过。冷重开本身不启动新模型或恢复业务效果。既有 `execution.cancel` 子进程夹具依赖 Unix Shell，在本机仍为 `shell_unavailable`；该独立平台限制不由附件或 command 查回测试取得资格。
+
+[文件入口](electron/file-changes.ts)保留原消息／执行回执核验；默认读取版本增加 5，旧 3／4 保持可读。打开 Profile 中的输出或方案时，先通过当前 Session 的 Files／Planning 查询匹配准确绝对目标，再核实际目录身份、规范路径与单链接；其他受保护路径仍拒绝。历史预览与“打开当前文件”的含义分开，外部编辑不会改变原保存的预览。
 
 开发热更新后的旧 preload 可能缺少 `fileReferences`，旧 Main 也可能拒绝图片暂存方法。[窗口适配器](src/native-input-images.ts)把原 `invalid_native_request/native_host_operation_unavailable` 识别为附件接口尚未加载；缺少文件路径解析 port 时以有限 `file_picker_restart_required` 错误交给共享 Composer，图片暂存直接保留明确的完全退出／重新启动提示。普通选择失败仍可重试，不展示原错误细节、不清草稿或重发。取消选择返回空列表。[窗口回归](test/isolated/native-input-images-dom.test.tsx)与[编辑器回归](../../packages/ui/test/isolated/prompt-editor.test.tsx)分别核旧协议、普通失败、取消和原草稿保持；主进程仍按原开发边界显式重新启动。
 

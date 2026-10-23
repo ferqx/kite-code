@@ -81,7 +81,7 @@ test('actual default Files rebuild Fork false receipt is applied and cold origin
         { id: 'fixed', provider: 'compatible', model: 'fixed', baseURL: `${provider.url.href}v1` },
       ],
       tools: [
-        { id: 'files.read', definitionVersion: '4' },
+        { id: 'files.read', definitionVersion: '5' },
         { id: 'files.write', definitionVersion: '2' },
       ],
     }),

@@ -123,12 +123,22 @@ try {
     await key('\r');
     await wait('Saved caller intents 1');
     await wait('unknown');
-    await key('\x0c');
+    await key('\x1b');
     if (input.crash === 'post-lost') {
       await until(() => existsSync(input.firstGet), 'original GET was not dropped', 5000);
+      await key('/recovery');
+      await key('\r');
+      await wait('Saved caller intents 1');
       await key('\x03');
       await pump();
-      await key('\x0c');
+      await key('\x1b');
+      await until(
+        () => JSON.parse(readFileSync(input.journal, 'utf8')).records[0]?.phase === 'applied',
+        'original caller automatic GET did not confirm applied',
+        10000,
+      );
+      await key('/recovery');
+      await key('\r');
       await wait('run.start · applied');
     } else {
       await until(
@@ -142,8 +152,10 @@ try {
         5000,
       );
     }
-    await key('\x03');
-    await key('\x1b');
+    if (input.crash === 'post-lost') {
+      await key('\x03');
+      await key('\x1b');
+    }
     await wait('Session caller');
     await key('\x11');
     assert.equal(await exited(6000), 0);

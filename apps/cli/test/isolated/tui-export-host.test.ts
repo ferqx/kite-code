@@ -1,7 +1,15 @@
 import { Database } from 'bun:sqlite';
 import { expect, test } from 'bun:test';
 import { randomUUID } from 'node:crypto';
-import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  appendFileSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -10,13 +18,17 @@ import { initializeSqliteEngine } from '@kite-ai/agent/sqlite-engine';
 import { privateDirectory } from '@kite-ai/agent/windows-path-security';
 import { launchPairedService } from '@kite-ai/service/paired';
 import { terminalSqliteEngineRoot } from '@kite-ai/service/sqlite-release-assets';
+import { testToolchainEnvironment } from '../../../../scripts/test-environment';
 import { ownedUserConfiguration } from '../../../service/test/fixtures/user-configuration-fixture';
 import { verifyTerminalBundle } from '../../host/terminal-artifact';
+import { verifyTerminalMarkdownAssets } from '../fixtures/terminal-markdown-assets';
+import { verifyTerminalPdfAssets } from '../fixtures/terminal-pdf-assets';
 import { ptyDeadline } from '../fixtures/tui-pty';
 
 const repository = resolve(import.meta.dir, '../../../..');
 for (const mode of ['complete'] as readonly string[]) {
   test(`formal Terminal PTY reads original tail result/reason and exports frozen giant text in the original profile`, async () => {
+    const started = Date.now();
     const root =
       process.platform === 'win32'
         ? join(realpathSync(tmpdir()), `kite-tui-host-${randomUUID()}`)
@@ -24,10 +36,20 @@ for (const mode of ['complete'] as readonly string[]) {
     if (process.platform === 'win32') privateDirectory(root);
     const workspace = join(root, 'workspace');
     privateDirectory(workspace);
+    // Windows candidate admission verifies both this directory and its parent.
+    // Keep both owned by the fixture instead of depending on the system Temp ACL.
+    const buildRoot = join(root, 'build');
+    privateDirectory(buildRoot);
+    const candidatePath = join(buildRoot, 'candidate');
     const profile = selectProfile({ dataRoot: join(root, 'data'), profile: 'default' });
     const userConfiguration = ownedUserConfiguration(join(root, 'home'));
     const evidence = join(tmpdir(), `kite-export-evidence-${randomUUID()}`);
     mkdirSync(evidence);
+    const stage = (name: string) =>
+      appendFileSync(
+        join(evidence, 'parent-stages.jsonl'),
+        `${JSON.stringify({ stage: name, elapsedMs: Date.now() - started, at: Date.now() })}\n`,
+      );
     let passed = false;
     let child: Bun.Subprocess<'ignore', 'pipe', 'pipe'> | undefined;
     let calls = 0;
@@ -103,10 +125,14 @@ for (const mode of ['complete'] as readonly string[]) {
           join(repository, 'scripts/release/terminal.ts'),
           'build',
           '--directory',
-          join(root, 'candidate'),
+          candidatePath,
         ],
         {
-          env: { ...process.env, ...userConfiguration.homeEnvironment },
+          env: {
+            ...process.env,
+            ...testToolchainEnvironment(),
+            ...userConfiguration.homeEnvironment,
+          },
           stdout: 'pipe',
           stderr: 'pipe',
         },
@@ -118,8 +144,16 @@ for (const mode of ['complete'] as readonly string[]) {
       ]);
       if (buildExit !== 0) console.error(buildOut + buildErr);
       expect(buildExit).toBe(0);
-      const candidate = verifyTerminalBundle(join(root, 'candidate'));
+      expect(existsSync(join(root, 'home', '.cargo'))).toBe(false);
+      expect(existsSync(join(root, 'home', '.rustup'))).toBe(false);
+      const candidate = verifyTerminalBundle(candidatePath);
+      verifyTerminalMarkdownAssets(repository, candidate.root);
       const artifact = candidate.artifact;
+      await verifyTerminalPdfAssets({
+        candidate: candidate.root,
+        executable: artifact.executable,
+        scratch: join(root, 'pdf-probe'),
+      });
       // Use the verified formal engine before the fixture's first independent DB read.
       const engine = initializeSqliteEngine({
         root: join(candidate.root, terminalSqliteEngineRoot),
@@ -143,7 +177,7 @@ for (const mode of ['complete'] as readonly string[]) {
           modelId: 'local',
           tools: [
             { id: 'files.write', definitionVersion: '2' },
-            { id: 'files.read', definitionVersion: '4' },
+            { id: 'files.read', definitionVersion: '5' },
           ],
           models: [
             {
@@ -234,6 +268,7 @@ for (const mode of ['complete'] as readonly string[]) {
         new Response(child.stderr).text(),
         child.exited,
       ]);
+      stage('driver_exit_observed');
       if (exit !== 0) console.error(err);
       expect(exit).toBe(0);
       expect(err).toBe('');
@@ -274,6 +309,7 @@ for (const mode of ['complete'] as readonly string[]) {
         database.close();
       }
       // A new genuine paired owner can acquire the same profile immediately after explicit host exit.
+      stage('paired_reopen_started');
       const reopened = await launchPairedService({
         spawnChild: userConfiguration.spawnChild,
         profile,
@@ -281,7 +317,9 @@ for (const mode of ['complete'] as readonly string[]) {
         instanceId: crypto.randomUUID(),
         requiredCapabilities: ['sessions'],
       });
+      stage('paired_reopen_ready');
       await reopened.close();
+      stage('paired_reopen_closed');
       expect(calls).toBe(mode === 'complete' ? 2 : 1);
       expect(reviewCalls).toBe(mode === 'complete' ? 0 : 1);
       passed = true;

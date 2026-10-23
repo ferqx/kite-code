@@ -2,7 +2,7 @@ import { Box, Text } from 'ink';
 import React, { useMemo, useRef } from 'react';
 import terminalStringWidth from 'string-width';
 import { type InkTheme, useInkTheme } from '../presentation';
-import { wrapPlainText } from './plain-text-wrap';
+import { lastWrappedRows, wrapPlainText } from './plain-text-wrap';
 import { useInkWindowSize } from './window-size';
 
 interface MarkdownBlockProps {
@@ -12,6 +12,7 @@ interface MarkdownBlockProps {
   /** 覆盖 useInkWindowSize 的 columns，用于容器已缩进时限制可用宽度 */
   maxWidth?: number;
   parsedSlice?: MarkdownRenderSlice;
+  viewportRows?: number;
 }
 
 export interface InlineSegment {
@@ -991,6 +992,7 @@ export default React.memo(function MarkdownBlock({
   color,
   maxWidth,
   parsedSlice,
+  viewportRows,
 }: MarkdownBlockProps) {
   const t = useInkTheme();
   const { columns: termColumns } = useInkWindowSize();
@@ -1051,7 +1053,14 @@ export default React.memo(function MarkdownBlock({
       }
 
       if (group.kind === 'paragraph') {
-        return <MarkdownLine content={group.lines.join('\n')} color={color} maxWidth={columns} />;
+        return (
+          <MarkdownLine
+            content={group.lines.join('\n')}
+            color={color}
+            maxWidth={columns}
+            viewportRows={viewportRows}
+          />
+        );
       }
 
       if (group.kind === 'list') {
@@ -1161,9 +1170,11 @@ export default React.memo(function MarkdownBlock({
         );
       }
 
-      return <MarkdownLine content={line} color={color} maxWidth={columns} />;
+      return (
+        <MarkdownLine content={line} color={color} maxWidth={columns} viewportRows={viewportRows} />
+      );
     },
-    [color, columns, t.dim, t.muted, t.primary],
+    [color, columns, viewportRows, t.dim, t.muted, t.primary],
   );
 
   let prevGroup: LineGroup | undefined = parsedSlice?.previousGroup;
@@ -1191,28 +1202,42 @@ function MarkdownLine({
   content,
   color,
   maxWidth,
+  viewportRows,
 }: {
   content: string;
   color?: string;
   maxWidth?: number;
+  viewportRows?: number;
 }) {
   const t = useInkTheme();
-  const segments = parseInline(content);
-
-  if (
+  const segments = useMemo(() => parseInline(content), [content]);
+  const plain =
     segments.length === 1 &&
     !segments[0]!.bold &&
     !segments[0]!.italic &&
     !segments[0]!.code &&
-    !segments[0]!.strikethrough
-  ) {
-    return (
-      <Text color={color}>
-        {maxWidth && content.length > 8192
-          ? wrapPlainText(segments[0]!.text, maxWidth)
-          : segments[0]!.text}
-      </Text>
-    );
+    !segments[0]!.strikethrough;
+  // Cache the complete parsed/wrapped text by content and real column width.
+  // Clock/input renders and row-only resizing must not re-wrap a growing body.
+  const wrapped = useMemo(
+    () =>
+      plain && maxWidth && content.length > 8192
+        ? wrapPlainText(segments[0]!.text, maxWidth)
+        : undefined,
+    [plain, maxWidth, content, segments],
+  );
+  const visible = useMemo(
+    () =>
+      wrapped === undefined
+        ? undefined
+        : viewportRows === undefined
+          ? wrapped
+          : lastWrappedRows(wrapped, viewportRows),
+    [wrapped, viewportRows],
+  );
+
+  if (plain) {
+    return <Text color={color}>{visible ?? segments[0]!.text}</Text>;
   }
 
   return (

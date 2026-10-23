@@ -1,4 +1,4 @@
-import type { InputImage, Message } from '@kite-ai/client';
+import type { Message } from '@kite-ai/client';
 import {
   Attachment,
   AttachmentFileCard,
@@ -21,8 +21,13 @@ type Props = {
   message: Message;
   readAvailable: boolean;
   previews: NativeImagePreviews;
+  images?: readonly ImageDescriptor[];
 };
-async function readImage(props: Props, index: number, image: InputImage, signal: AbortSignal) {
+type ImageDescriptor = {
+  name: string;
+  reference: { hash?: string; mediaType: string; size: string };
+};
+async function readImage(props: Props, index: number, image: ImageDescriptor, signal: AbortSignal) {
   const readId = crypto.randomUUID(),
     { bridge, generation } = props;
   const close = () =>
@@ -48,7 +53,8 @@ async function readImage(props: Props, index: number, image: InputImage, signal:
       !('hash' in opened) ||
       !('size' in opened) ||
       opened.readId !== readId ||
-      opened.hash !== image.reference.hash ||
+      !/^[a-f0-9]{64}$/.test(opened.hash) ||
+      (image.reference.hash !== undefined && opened.hash !== image.reference.hash) ||
       opened.mediaType !== image.reference.mediaType ||
       opened.size !== Number(image.reference.size) ||
       opened.size > 16 * 1024 * 1024
@@ -91,8 +97,8 @@ async function readImage(props: Props, index: number, image: InputImage, signal:
       .map((value) => value.toString(16).padStart(2, '0'))
       .join('');
     signal.throwIfAborted();
-    if (hash !== image.reference.hash) throw Error('input_image_hash_mismatch');
-    return bytes;
+    if (hash !== opened.hash) throw Error('input_image_hash_mismatch');
+    return { bytes, hash };
   } finally {
     signal.removeEventListener('abort', close);
     await close();
@@ -102,14 +108,14 @@ async function readImage(props: Props, index: number, image: InputImage, signal:
 // One visible preview at a time per window bridge; do not overrun Main's read leases
 // when several historical messages enter the viewport together.
 const previewReads = new WeakMap<NativeBridge, Promise<void>>();
-function queueImage(props: Props, index: number, image: InputImage, signal: AbortSignal) {
+function queueImage(props: Props, index: number, image: ImageDescriptor, signal: AbortSignal) {
   const pending = (previewReads.get(props.bridge) ?? Promise.resolve()).then(async () => {
     signal.throwIfAborted();
-    const bytes = await readImage(props, index, image, signal);
+    const { bytes, hash } = await readImage(props, index, image, signal);
     signal.throwIfAborted();
     return props.previews.prepare(
       new Blob([bytes.buffer as ArrayBuffer], { type: image.reference.mediaType }),
-      image.reference.hash,
+      hash,
       signal,
     );
   });
@@ -124,7 +130,11 @@ function queueImage(props: Props, index: number, image: InputImage, signal: Abor
   return pending;
 }
 
-function NativeUserImage({ image, index, ...props }: Props & { image: InputImage; index: number }) {
+function NativeUserImage({
+  image,
+  index,
+  ...props
+}: Props & { image: ImageDescriptor; index: number }) {
   const readActive = useConversationReadActive();
   const retention = useConversationResourceRetention();
   const readAvailable = props.readAvailable && readActive;
@@ -259,15 +269,16 @@ function NativeUserImage({ image, index, ...props }: Props & { image: InputImage
   );
 }
 export function NativeUserImages(props: Props) {
+  const images = props.images ?? props.message.images;
   return (
     <MessageAttachments
-      count={(props.message.files?.length ?? 0) + (props.message.images?.length ?? 0)}
+      count={(props.message.files?.length ?? 0) + (images?.length ?? 0)}
       className="native-user-images"
     >
       {props.message.files?.map((file, index) => (
         <AttachmentFileCard name={file.name} key={`${index}/${file.uri}`} />
       ))}
-      {props.message.images?.map((image, index) => (
+      {images?.map((image, index) => (
         <NativeUserImage
           {...props}
           image={image}

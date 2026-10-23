@@ -60,7 +60,7 @@ test('Native fixed checkpoint GETs preserve two-Fork aliases, original media sco
       modelId: 'fixed',
       models: [model],
       tools: [
-        { id: 'files.read', definitionVersion: '4' },
+        { id: 'files.read', definitionVersion: '5' },
         { id: 'files.write', definitionVersion: '2' },
       ],
     }),

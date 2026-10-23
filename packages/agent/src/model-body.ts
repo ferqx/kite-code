@@ -77,7 +77,7 @@ export function persistedModelRequest(value: Json): ModelRequest {
       !['system', 'user', 'assistant', 'tool'].includes(String(message.role)) ||
       !text(message.content) ||
       (message.images !== undefined &&
-        (message.role !== 'user' ||
+        (!['user', 'tool'].includes(String(message.role)) ||
           !Array.isArray(message.images) ||
           !message.images.every(isModelImage))) ||
       (message.continuation !== undefined && message.role !== 'assistant') ||

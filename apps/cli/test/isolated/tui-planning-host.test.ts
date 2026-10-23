@@ -5,9 +5,49 @@ import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { launchPairedService } from '@kite-ai/service/paired';
 import { compileFileRecoveryTUI } from '../fixtures/file-recovery-profile';
+import { ptyDeadline, spawnTuiPTY, terminateTuiTree } from '../fixtures/tui-pty';
 import { workflowQuestionProfile } from '../fixtures/workflow-question-profile';
 
 const repo = resolve(import.meta.dir, '../../../..');
+test('native 80x24 PTY observer preserves complete Unicode and styled material across wraps', async () => {
+  const samples = [
+    '原完整🙂e\u0301方案',
+    'o\u0308n\u0303a\u0301\u0327',
+    '中文🚀🌍',
+    'AB\x1b[31m彩色\x1b[0m',
+  ];
+  const body = samples
+    .map((sample, index) => `BEGIN${index}${sample.repeat(80)}END${index}\r\n`)
+    .join('');
+  const pty = spawnTuiPTY({
+    cmd: [
+      process.execPath,
+      '-e',
+      `process.stdout.write(${JSON.stringify(body)});await Bun.sleep(250);`,
+    ],
+    cwd: repo,
+    conptyCellWidths: process.platform === 'win32',
+  });
+  try {
+    const [code] = await ptyDeadline(
+      Promise.all([pty.host.exited, pty.eof]),
+      8000,
+      'native Unicode probe exit',
+    );
+    expect(code).toBe(0);
+    const frame = await pty.projection();
+    for (const [index, sample] of samples.entries()) {
+      // biome-ignore lint/suspicious/noControlCharactersInRegex: remove only the fixture's ANSI styling.
+      const printable = sample.replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, '');
+      expect(frame.text.replace(/\s+/g, '')).toContain(
+        `BEGIN${index}${printable.repeat(80)}END${index}`,
+      );
+    }
+  } finally {
+    if (!pty.ended) await terminateTuiTree(pty, { exitTimeoutMs: 3000 });
+    pty.close();
+  }
+});
 for (const entrance of ['slash-task', 'draft-mode', 'active-queued', 'scope-draft'] as const)
   test(`80x24 actual ${entrance} single Planning intent reviews full original Artifact and never inherits Full authority`, async () => {
     const f = await workflowQuestionProfile('waive');
@@ -157,7 +197,7 @@ for (const entrance of ['slash-task', 'draft-mode', 'active-queued', 'scope-draf
             },
           ],
           tools: [
-            { id: 'files.read', definitionVersion: '4' },
+            { id: 'files.read', definitionVersion: '5' },
             { id: 'files.write', definitionVersion: '2' },
           ],
         }),
@@ -225,6 +265,8 @@ for (const entrance of ['slash-task', 'draft-mode', 'active-queued', 'scope-draf
       );
       const compiled = await compileFileRecoveryTUI(f.root, runner);
       if (!compiled.success) throw new AggregateError(compiled.logs, 'owned Planning host build');
+      const expectedBodyPath = join(f.root, 'original-plan-body.txt');
+      writeFileSync(expectedBodyPath, body);
       driver = Bun.spawn(
         [
           process.execPath,
@@ -238,6 +280,7 @@ for (const entrance of ['slash-task', 'draft-mode', 'active-queued', 'scope-draf
             runner: join(f.root, 'plan-runner.js'),
             firstLost,
             transcript,
+            expectedBodyPath,
           }),
         ],
         {
@@ -288,7 +331,30 @@ for (const entrance of ['slash-task', 'draft-mode', 'active-queued', 'scope-draf
             ['permission.mode', 'command.cancel', 'execution.cancel'].includes(row.body?.kind),
         ),
       ).toHaveLength(0);
-      expect(network.filter((row) => row.method === 'POST')).toHaveLength(
+      const posts = network.filter((row) => row.method === 'POST');
+      const reconciliations = posts.filter((row) =>
+        /^\/v1\/sessions\/(s|b)\/reconcile$/.test(row.path),
+      );
+      // The real Host admits the initial Session, then its Controller selects it.
+      // Explicit chooser navigation also reconciles the selected original scope;
+      // automatic answer receipt recovery must add none of these mutations.
+      expect(reconciliations.map((row) => row.path)).toEqual(
+        (entrance === 'scope-draft' ? ['s', 's', 'b', 's', 'b'] : ['s', 's']).map(
+          (session) => `/v1/sessions/${session}/reconcile`,
+        ),
+      );
+      for (const row of reconciliations)
+        expect(row.body).toEqual({
+          expectedStoreId: storeId!,
+          expectedOwnerGeneration: '0',
+          commandId: expect.stringMatching(/^session-reconcile-[a-f0-9]{64}$/),
+        });
+      expect(reconciliations[0].body).toEqual(reconciliations[1].body);
+      if (entrance === 'scope-draft') {
+        expect(reconciliations[3].body).toEqual(reconciliations[0].body);
+        expect(reconciliations[4].body).toEqual(reconciliations[2].body);
+      }
+      expect(posts.filter((row) => !reconciliations.includes(row))).toHaveLength(
         entrance === 'active-queued' ? 3 : 2,
       );
       const answers = network.filter(
@@ -388,42 +454,54 @@ for (const entrance of ['slash-task', 'draft-mode', 'active-queued', 'scope-draf
         };
         if (entrance === 'active-queued') {
           const publicWork = db
-            .query('SELECT status,receipt_json FROM command WHERE id=?')
-            .get(work[0].body.commandId) as { status: string; receipt_json: string };
+            .query(
+              'SELECT status,request_json,receipt_json,root_work_command_id FROM command WHERE id=?',
+            )
+            .get(work[0].body.commandId) as {
+            status: string;
+            request_json: string;
+            receipt_json: string;
+            root_work_command_id: string;
+          };
           const workReceipt = JSON.parse(publicWork.receipt_json);
           expect(publicWork.status).toBe('applied');
+          expect(actualRun.origin_command_id).toBe(work[0].body.commandId);
+          expect(publicWork.root_work_command_id).toBe(work[0].body.commandId);
           expect(workReceipt).toMatchObject({
-            outcome: 'human_input_applied',
-            businessCommandId: actualRun.origin_command_id,
+            outcome: 'input_applied',
             runId: actualRun.id,
+            contextSelectionId: work[0].body.contextSelectionId,
+          });
+          expect(JSON.parse(publicWork.request_json)).toEqual({
+            kind: 'input.follow_up',
+            content: work[0].body.content,
+            afterRunId: work[0].body.afterRunId,
+            contextSelectionId: work[0].body.contextSelectionId,
+            extensionInputs: work[0].body.extensionInputs,
+          });
+          const message = db
+            .query('SELECT session_id,run_id,role,source_json FROM message WHERE id=?')
+            .get(workReceipt.messageId) as {
+            session_id: string;
+            run_id: string;
+            role: string;
+            source_json: string;
+          };
+          expect(message).toMatchObject({ session_id: 's', run_id: actualRun.id, role: 'user' });
+          expect(JSON.parse(message.source_json)).toMatchObject({
+            content: work[0].body.content,
+            sourceIds: [work[0].body.commandId],
+            originCommandId: work[0].body.commandId,
+            inputKind: 'input.follow_up',
+            contextSelectionId: work[0].body.contextSelectionId,
           });
           expect(
             db
-              .query('SELECT status,root_work_command_id FROM command WHERE id=?')
-              .get(workReceipt.businessCommandId),
-          ).toEqual({ status: 'applied', root_work_command_id: work[0].body.commandId });
-          const raw = db
-            .query('SELECT request_json FROM command WHERE id=?')
-            .get(workReceipt.humanInputCommandId) as { request_json: string };
-          expect(JSON.parse(raw.request_json)).toMatchObject({
-            kind: 'human.input',
-            publicCommandId: work[0].body.commandId,
-            content: work[0].body.content,
-            observedRunId: work[0].body.afterRunId,
-            originalRequest: {
-              kind: 'input.follow_up',
-              content: work[0].body.content,
-              afterRunId: work[0].body.afterRunId,
-              extensionInputs: work[0].body.extensionInputs,
-            },
-          });
-          const decision = db
-            .query('SELECT request_json FROM command WHERE id=?')
-            .get(workReceipt.decisionCommandId) as { request_json: string };
-          expect(JSON.parse(decision.request_json)).toMatchObject({
-            inputCommandId: workReceipt.humanInputCommandId,
-            proposal: { relation: 'independent_work', purpose: 'work' },
-          });
+              .query(
+                "SELECT count(*) AS n FROM command WHERE kind IN ('human.input','human.input.decision')",
+              )
+              .get(),
+          ).toEqual({ n: 0 });
           expect(
             db.query('SELECT root_work_command_id FROM run WHERE id=?').get(actualRun.id),
           ).toEqual({ root_work_command_id: work[0].body.commandId });
@@ -490,9 +568,20 @@ for (const entrance of ['slash-task', 'draft-mode', 'active-queued', 'scope-draf
       }
     } finally {
       closing = true;
+      const preservedWire = join(f.root, 'plan-wire.jsonl');
+      if (existsSync(preservedWire))
+        writeFileSync(`${f.root}-plan-wire.jsonl`, readFileSync(preservedWire));
+      const preservedAttachment = join(f.root, 'plan-attachment.bin');
+      if (existsSync(preservedAttachment))
+        writeFileSync(`${f.root}-plan-attachment.bin`, readFileSync(preservedAttachment));
       if (driver && driver.exitCode === null) {
-        if (process.platform === 'win32') driver.send('owned-planning-stop');
-        else driver.kill();
+        if (process.platform === 'win32') {
+          try {
+            driver.send('owned-planning-stop');
+          } catch (error) {
+            expect(error).toHaveProperty('code', 'ERR_IPC_CHANNEL_CLOSED');
+          }
+        } else driver.kill();
         await driver.exited;
       }
       provider.stop(true);

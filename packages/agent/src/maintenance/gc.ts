@@ -26,6 +26,7 @@ import {
 import { collectHistory, planHistoryCollection } from './gc-history';
 import { capture, openBackupDatabase, openMaintenanceDatabase } from './sqlite';
 import { MaintenanceError } from './types';
+import { collectWorkingFiles } from './working-files';
 
 export interface CollectProfileGarbageInput {
   profile: ProfileOptions;
@@ -329,6 +330,16 @@ async function collectProfileGarbageOwned(
       input.signal?.throwIfAborted();
       await snapshot((db) => collectArtifacts(db, access.profilePath, result, now, input.signal));
     }
+    await snapshot(async (db) => {
+      const managed = await collectWorkingFiles(
+        access.profilePath,
+        db,
+        now - gracePeriodMs,
+        input.signal,
+      );
+      result.removedFiles += managed.removedFiles;
+      result.removedBytes = String(BigInt(result.removedBytes) + managed.removedBytes);
+    });
     return result;
   } finally {
     if (maintenanceResourcesClosed()) access.lock.release();

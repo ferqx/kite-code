@@ -573,7 +573,50 @@ export type InputImage = {
     mediaType: 'image/png' | 'image/jpeg' | 'image/webp' | 'image/gif';
   };
 };
-export type InputFileReference = { name: string; uri: string };
+export type InputFileReference = {
+  name: string;
+  uri: string;
+  reference?: {
+    id: string;
+    storeId: string;
+    sessionId: string;
+    subjectId: string;
+    scope: { kind: 'session'; id: string };
+    hash: string;
+    size: string;
+    mediaType: string;
+  };
+};
+export type InputFileUploadQuery = {
+  expectedStoreId: string;
+  id: string;
+  name: string;
+  mediaType: string;
+  size: string;
+  hash: string;
+};
+export type InputFileReleaseRequest = { expectedStoreId: string };
+export type InputFileImport = {
+  id: string;
+  sessionId: string;
+  subjectId: string;
+  originStoreId: string;
+  name: string;
+  uri: string;
+  reference: {
+    id: string;
+    storeId: string;
+    sessionId: string;
+    subjectId: string;
+    scope: { kind: 'session'; id: string };
+    hash: string;
+    size: string;
+    mediaType: string;
+  };
+  state: 'prepared' | 'bound' | 'released';
+  boundCommandId: string | null;
+  createdAt: number;
+};
 export type InputImageUploadRequest = {
   expectedStoreId: string;
   id: string;
@@ -1165,7 +1208,20 @@ export type SteerCommandRequest = {
       mediaType: 'image/png' | 'image/jpeg' | 'image/webp' | 'image/gif';
     };
   }>;
-  files?: Array<{ name: string; uri: string }>;
+  files?: Array<{
+    name: string;
+    uri: string;
+    reference?: {
+      id: string;
+      storeId: string;
+      sessionId: string;
+      subjectId: string;
+      scope: { kind: 'session'; id: string };
+      hash: string;
+      size: string;
+      mediaType: string;
+    };
+  }>;
   targetRunId: string;
   contextSelectionId: string;
   expectedStoreId: string;
@@ -1194,7 +1250,20 @@ export type FollowUpCommandRequest = {
       mediaType: 'image/png' | 'image/jpeg' | 'image/webp' | 'image/gif';
     };
   }>;
-  files?: Array<{ name: string; uri: string }>;
+  files?: Array<{
+    name: string;
+    uri: string;
+    reference?: {
+      id: string;
+      storeId: string;
+      sessionId: string;
+      subjectId: string;
+      scope: { kind: 'session'; id: string };
+      hash: string;
+      size: string;
+      mediaType: string;
+    };
+  }>;
   afterRunId: string | null;
   contextSelectionId: string;
   modelId?: string;
@@ -1899,7 +1968,20 @@ export type Message = {
       mediaType: 'image/png' | 'image/jpeg' | 'image/webp' | 'image/gif';
     };
   }>;
-  files?: Array<{ name: string; uri: string }>;
+  files?: Array<{
+    name: string;
+    uri: string;
+    reference?: {
+      id: string;
+      storeId: string;
+      sessionId: string;
+      subjectId: string;
+      scope: { kind: 'session'; id: string };
+      hash: string;
+      size: string;
+      mediaType: string;
+    };
+  }>;
   humanInput?: { inputCommandId: string; publicCommandId?: string; duplicateOfMessageId?: string };
   compression?: {
     id: string;
@@ -2047,7 +2129,20 @@ export type StartCommandRequest = {
       mediaType: 'image/png' | 'image/jpeg' | 'image/webp' | 'image/gif';
     };
   }>;
-  files?: Array<{ name: string; uri: string }>;
+  files?: Array<{
+    name: string;
+    uri: string;
+    reference?: {
+      id: string;
+      storeId: string;
+      sessionId: string;
+      subjectId: string;
+      scope: { kind: 'session'; id: string };
+      hash: string;
+      size: string;
+      mediaType: string;
+    };
+  }>;
   modelId?: string;
   reasoningEffort?: 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max' | 'ultar';
   selectedSkills?: Array<string>;
@@ -2712,7 +2807,20 @@ export type SelectedContextPage = {
         mediaType: 'image/png' | 'image/jpeg' | 'image/webp' | 'image/gif';
       };
     }>;
-    files?: Array<{ name: string; uri: string }>;
+    files?: Array<{
+      name: string;
+      uri: string;
+      reference?: {
+        id: string;
+        storeId: string;
+        sessionId: string;
+        subjectId: string;
+        scope: { kind: 'session'; id: string };
+        hash: string;
+        size: string;
+        mediaType: string;
+      };
+    }>;
     humanInput?: {
       inputCommandId: string;
       publicCommandId?: string;
@@ -3098,7 +3206,20 @@ export type MessageList = Array<{
       mediaType: 'image/png' | 'image/jpeg' | 'image/webp' | 'image/gif';
     };
   }>;
-  files?: Array<{ name: string; uri: string }>;
+  files?: Array<{
+    name: string;
+    uri: string;
+    reference?: {
+      id: string;
+      storeId: string;
+      sessionId: string;
+      subjectId: string;
+      scope: { kind: 'session'; id: string };
+      hash: string;
+      size: string;
+      mediaType: string;
+    };
+  }>;
   humanInput?: { inputCommandId: string; publicCommandId?: string; duplicateOfMessageId?: string };
   compression?: {
     id: string;
@@ -3284,7 +3405,20 @@ export type SessionView = {
         mediaType: 'image/png' | 'image/jpeg' | 'image/webp' | 'image/gif';
       };
     }>;
-    files?: Array<{ name: string; uri: string }>;
+    files?: Array<{
+      name: string;
+      uri: string;
+      reference?: {
+        id: string;
+        storeId: string;
+        sessionId: string;
+        subjectId: string;
+        scope: { kind: 'session'; id: string };
+        hash: string;
+        size: string;
+        mediaType: string;
+      };
+    }>;
     humanInput?: {
       inputCommandId: string;
       publicCommandId?: string;
@@ -3363,7 +3497,20 @@ export type CommandRequest =
           mediaType: 'image/png' | 'image/jpeg' | 'image/webp' | 'image/gif';
         };
       }>;
-      files?: Array<{ name: string; uri: string }>;
+      files?: Array<{
+        name: string;
+        uri: string;
+        reference?: {
+          id: string;
+          storeId: string;
+          sessionId: string;
+          subjectId: string;
+          scope: { kind: 'session'; id: string };
+          hash: string;
+          size: string;
+          mediaType: string;
+        };
+      }>;
       targetRunId: string;
       contextSelectionId: string;
       expectedStoreId: string;
@@ -3385,7 +3532,20 @@ export type CommandRequest =
           mediaType: 'image/png' | 'image/jpeg' | 'image/webp' | 'image/gif';
         };
       }>;
-      files?: Array<{ name: string; uri: string }>;
+      files?: Array<{
+        name: string;
+        uri: string;
+        reference?: {
+          id: string;
+          storeId: string;
+          sessionId: string;
+          subjectId: string;
+          scope: { kind: 'session'; id: string };
+          hash: string;
+          size: string;
+          mediaType: string;
+        };
+      }>;
       afterRunId: string | null;
       contextSelectionId: string;
       modelId?: string;
@@ -3417,7 +3577,20 @@ export type CommandRequest =
           mediaType: 'image/png' | 'image/jpeg' | 'image/webp' | 'image/gif';
         };
       }>;
-      files?: Array<{ name: string; uri: string }>;
+      files?: Array<{
+        name: string;
+        uri: string;
+        reference?: {
+          id: string;
+          storeId: string;
+          sessionId: string;
+          subjectId: string;
+          scope: { kind: 'session'; id: string };
+          hash: string;
+          size: string;
+          mediaType: string;
+        };
+      }>;
       modelId?: string;
       reasoningEffort?: 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max' | 'ultar';
       selectedSkills?: Array<string>;
@@ -3650,7 +3823,20 @@ export type PendingInputPage = {
               mediaType: 'image/png' | 'image/jpeg' | 'image/webp' | 'image/gif';
             };
           }>;
-          files?: Array<{ name: string; uri: string }>;
+          files?: Array<{
+            name: string;
+            uri: string;
+            reference?: {
+              id: string;
+              storeId: string;
+              sessionId: string;
+              subjectId: string;
+              scope: { kind: 'session'; id: string };
+              hash: string;
+              size: string;
+              mediaType: string;
+            };
+          }>;
           targetRunId: string;
           contextSelectionId: string;
         }
@@ -3670,7 +3856,20 @@ export type PendingInputPage = {
               mediaType: 'image/png' | 'image/jpeg' | 'image/webp' | 'image/gif';
             };
           }>;
-          files?: Array<{ name: string; uri: string }>;
+          files?: Array<{
+            name: string;
+            uri: string;
+            reference?: {
+              id: string;
+              storeId: string;
+              sessionId: string;
+              subjectId: string;
+              scope: { kind: 'session'; id: string };
+              hash: string;
+              size: string;
+              mediaType: string;
+            };
+          }>;
           afterRunId: string | null;
           contextSelectionId: string;
           modelId?: string;
@@ -3738,7 +3937,20 @@ export type PendingInputQueue = {
               mediaType: 'image/png' | 'image/jpeg' | 'image/webp' | 'image/gif';
             };
           }>;
-          files?: Array<{ name: string; uri: string }>;
+          files?: Array<{
+            name: string;
+            uri: string;
+            reference?: {
+              id: string;
+              storeId: string;
+              sessionId: string;
+              subjectId: string;
+              scope: { kind: 'session'; id: string };
+              hash: string;
+              size: string;
+              mediaType: string;
+            };
+          }>;
           targetRunId: string;
           contextSelectionId: string;
         }
@@ -3758,7 +3970,20 @@ export type PendingInputQueue = {
               mediaType: 'image/png' | 'image/jpeg' | 'image/webp' | 'image/gif';
             };
           }>;
-          files?: Array<{ name: string; uri: string }>;
+          files?: Array<{
+            name: string;
+            uri: string;
+            reference?: {
+              id: string;
+              storeId: string;
+              sessionId: string;
+              subjectId: string;
+              scope: { kind: 'session'; id: string };
+              hash: string;
+              size: string;
+              mediaType: string;
+            };
+          }>;
           afterRunId: string | null;
           contextSelectionId: string;
           modelId?: string;

@@ -134,7 +134,7 @@ async function fixture(
     tools: delegateChild
       ? [{ id: 'task.spawn', definitionVersion: '1' }]
       : readUserConfiguration
-        ? [{ id: 'files.read', definitionVersion: '4' }]
+        ? [{ id: 'files.read', definitionVersion: '5' }]
         : [],
   };
   privateDirectory(join(root, '.kite-code'));

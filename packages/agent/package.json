@@ -35,24 +35,26 @@
     "./session-title": "./src/business/session-title/index.ts"
   },
   "scripts": {
-    "build": "bun build ./src/index.ts ./src/context-estimate.ts ./src/extensions/index.ts ./src/permissions/index.ts ./src/permissions/shell.ts ./src/storage/index.ts ./src/sqlite.ts ./src/sqlite-engine.ts ./src/platform/windows-path-security.ts ./src/sources.ts ./src/profile.ts ./src/profile-access.ts ./src/artifact-access.ts ./src/resources.ts ./src/process-observation.ts ./src/jobs/shell.ts ./src/config/index.ts ./src/files.ts ./src/artifacts.ts ./src/skills/index.ts ./src/mcp/index.ts ./src/extensions/task/index.ts ./src/tools/shell.ts ./src/business/planning/index.ts ./src/business/session-title/index.ts ./src/business/skill-workflow/index.ts ./src/tools/web-fetch/index.ts ./src/tools/ask-user/index.ts ./src/maintenance/index.ts --target=bun --splitting --packages=bundle --external=@kite-ai/ai --external=@kite-ai/agent --external=@napi-rs/keyring --external=jsdom --external=tree-sitter-bash --external=web-tree-sitter --root=./src --outdir=dist && bun src/storage/worker/build-assets.ts dist && bun src/jobs/build-assets.ts dist && bun src/mcp/build-assets.ts dist && bun src/skills/workflow-contract/build-assets.ts dist && bun src/tools/web-fetch/build-assets.ts dist && bun scripts/build-native-files.ts dist",
+    "build": "bun build ./src/index.ts ./src/context-estimate.ts ./src/extensions/index.ts ./src/permissions/index.ts ./src/permissions/shell.ts ./src/storage/index.ts ./src/sqlite.ts ./src/sqlite-engine.ts ./src/platform/windows-path-security.ts ./src/sources.ts ./src/profile.ts ./src/profile-access.ts ./src/artifact-access.ts ./src/resources.ts ./src/process-observation.ts ./src/jobs/shell.ts ./src/config/index.ts ./src/files.ts ./src/artifacts.ts ./src/skills/index.ts ./src/mcp/index.ts ./src/extensions/task/index.ts ./src/tools/shell.ts ./src/business/planning/index.ts ./src/business/session-title/index.ts ./src/business/skill-workflow/index.ts ./src/tools/web-fetch/index.ts ./src/tools/ask-user/index.ts ./src/maintenance/index.ts --target=bun --splitting --packages=bundle --external=@kite-ai/ai --external=@kite-ai/agent --external=@napi-rs/keyring --external=jsdom --external=tree-sitter-bash --external=web-tree-sitter --root=./src --outdir=dist && bun src/storage/worker/build-assets.ts dist && bun src/jobs/build-assets.ts dist && bun src/mcp/build-assets.ts dist && bun src/skills/workflow-contract/build-assets.ts dist && bun src/tools/web-fetch/build-assets.ts dist && bun src/tools/documents/build-assets.ts dist && bun scripts/build-native-files.ts dist",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "bun run ../../scripts/run-owned-tests.ts ."
   },
   "dependencies": {
     "@kite-ai/ai": "workspace:*",
-    "@napi-rs/keyring": "1.3.0",
     "@modelcontextprotocol/sdk": "^1.29.0",
+    "@mozilla/readability": "0.6.0",
+    "@napi-rs/canvas": "1.0.10",
+    "@napi-rs/keyring": "1.3.0",
     "ajv": "8.17.1",
     "drizzle-orm": "0.44.7",
-    "jsonc-parser": "^3.3.1",
+    "gpt-tokenizer": "^3.4.0",
     "jsdom": "29.1.1",
-    "@mozilla/readability": "0.6.0",
-    "turndown": "7.2.4",
+    "jsonc-parser": "^3.3.1",
+    "pdfjs-dist": "6.4.299",
     "tree-sitter-bash": "0.25.1",
+    "turndown": "7.2.4",
     "web-tree-sitter": "0.25.10",
-    "yaml": "2.9.0",
-    "gpt-tokenizer": "^3.4.0"
+    "yaml": "2.9.0"
   },
   "devDependencies": {
     "@types/jsdom": "28.0.3",

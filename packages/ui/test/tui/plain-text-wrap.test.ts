@@ -15,6 +15,7 @@ for (const [name, text, width] of [
   ['Unicode clusters', '原🌿e\u0301 👩🏽‍💻 🇨🇳 漢字 repeated e\u0301 FULL_TAIL', 8],
   ['long word across segmentation spans', `${'👩🏽‍💻e\u0301漢'.repeat(210)} END`, 17],
   ['spaces and tabs', ' leading  multiple spaces   and\ttab  tail ', 11],
+  ['Unicode tab stops', '原🌿e\u0301\t👩🏽‍💻\t\t🇨🇳 漢字\ttail ', 13],
   ['explicit newlines', 'one paragraph\n\n second line \r\nfinal tail', 9],
 ] as const) {
   test(`bounded plain wrapping preserves Ink ${name}`, () => {

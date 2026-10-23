@@ -31,7 +31,7 @@ import {
   type Json,
   type Permissions,
 } from '@kite-ai/agent/extensions';
-import { createPathFileTools, filesNativeAssets } from '@kite-ai/agent/files';
+import { createPathFileTools, filesNativeAssets, pdfAssets } from '@kite-ai/agent/files';
 import {
   createMcpResourceModelSource,
   type McpLifecycleOptions,
@@ -59,7 +59,11 @@ import {
   type ShellConfigurationOptions,
   shellToolIds,
 } from '@kite-ai/agent/permissions/shell';
-import { createPlanningValidation, type PlanningOptions } from '@kite-ai/agent/planning';
+import {
+  createPlanFiles,
+  createPlanningValidation,
+  type PlanningOptions,
+} from '@kite-ai/agent/planning';
 import type { ProfileSelection } from '@kite-ai/agent/profile';
 import { createSessionTitleExtension } from '@kite-ai/agent/session-title';
 import { workflowCompilerAssets } from '@kite-ai/agent/skill-workflow';
@@ -336,7 +340,16 @@ export function createDefaultProcessConfiguration(options: {
   const configurationDefaults = options.ordinaryHostTools
     ? ordinaryHostConfigurationDefaults(options.shell !== undefined, task.extension !== undefined)
     : defaultConfiguration;
-  const planning = createPlanningValidation(planningOptions);
+  const planning = createPlanningValidation(
+    planningOptions,
+    createPlanFiles(options.profile.profilePath),
+    async (id) => {
+      if (!policyRuntime) throw new AgentError('execution_scope_unavailable');
+      const execution = await policyRuntime.getExecution(id);
+      if (!execution) throw new AgentError('execution_scope_unavailable');
+      return execution.input;
+    },
+  );
   const askUser = createAskUserExtension();
   const askUserTools = new Map((askUser.tools ?? []).map((tool) => [tool.id, tool]));
   const vault = createCredentialVault({
@@ -373,6 +386,7 @@ export function createDefaultProcessConfiguration(options: {
   const runtimeAssets = () => {
     const storage = sqliteStorageAssets();
     const extractor = webExtractorAssets();
+    const pdf = pdfAssets();
     const compilers = [mcpSchemaWorkerAssets(), workflowCompilerAssets()];
     return [
       dirname(userConfiguration.path),
@@ -397,6 +411,9 @@ export function createDefaultProcessConfiguration(options: {
         ? [options.mcpSources.stdio.guardianPath, options.mcpSources.stdio.bunExecutable]
         : []),
       ...(options.webFetch?.extractor ? [] : [extractor.worker, extractor.checksum]),
+      pdf.worker,
+      pdf.checksum,
+      ...pdf.dependencies,
       ...(options.runtimeAssets ?? []),
     ];
   };
@@ -1219,6 +1236,12 @@ export function createDefaultProcessConfiguration(options: {
             });
           }
         }
+        // The exact file adapter may invoke the selected Planning owner's existing Action.
+        // A Run without write_plan retains no new action capability.
+        if (actual.has(key('tool', 'planning.write', '1'))) {
+          const action = globalCapabilities.get(key('job', 'builtin.planning/planning.write', '1'));
+          if (action) actual.set(key('job', action.definitionId, action.definitionVersion), action);
+        }
         // A selected mutation must match the actual definition/effect metadata; a typo
         // cannot silently leave its real mutation outside the sealed obligation.
         if (planningOptions.automaticValidation) {
@@ -1283,6 +1306,7 @@ export function createDefaultProcessConfiguration(options: {
                     ...description,
                     ...(await shell.describeRequest(request)),
                     ...(await pathFiles.describeRequest(request)),
+                    ...(await files.describeRequest(request)),
                     ...describeDefaultTask(request),
                     ...(commandDigest ? { commandDigest } : {}),
                   }
@@ -1308,6 +1332,7 @@ export function createDefaultProcessConfiguration(options: {
           workflow.enabled;
         const planningOriginStoreId = command.originStoreId;
         const planningPermissions = createPlanningPermissionPolicy({
+          isPlanFileEdit: files.isPlanFileEdit,
           required: requirePlan,
           run: () => planningRun,
           current: classifiedPermissions,
@@ -1322,7 +1347,7 @@ export function createDefaultProcessConfiguration(options: {
               identity,
             );
           },
-          describe: (request) => {
+          describe: async (request) => {
             const description = actual.get(
               key(request.kind, request.definitionId, request.definitionVersion),
             );
@@ -1330,6 +1355,8 @@ export function createDefaultProcessConfiguration(options: {
             return description
               ? {
                   ...description,
+                  ...(await pathFiles.describeRequest(request)),
+                  ...(await files.describeRequest(request)),
                   ...(commandDigest ? { commandDigest } : {}),
                 }
               : (mcpSources.describe(request) ?? selectedMcp.describe(request));

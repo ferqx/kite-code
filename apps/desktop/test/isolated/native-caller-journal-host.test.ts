@@ -4,7 +4,16 @@ import { readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import type { CallerCommandRequest } from '@kite-ai/client';
 import { canonicalCallerCommandRequest } from '@kite-ai/client';
+import { initializeDesktopBuildEnvironment } from '../../../../scripts/development/windows-desktop-environment';
 import { callerDigest } from '../../electron/caller-journal';
+import { buildWindowsAccess } from '../../scripts/build-windows-access';
+
+async function windowsAccess(root: string) {
+  if (process.platform !== 'win32') return '';
+  initializeDesktopBuildEnvironment();
+  const asset = await buildWindowsAccess(root);
+  return JSON.stringify({ path: join(root, asset.relativePath), sha256: asset.sha256 });
+}
 
 for (const kind of ['run.start', 'input.steer', 'input.follow_up', 'command.cancel'] as const)
   test(`actual Node Native ${kind} durable POST loss and SIGKILL; cold physical first GET loss never repeats original request`, async () => {
@@ -16,7 +25,20 @@ for (const kind of ['run.start', 'input.steer', 'input.follow_up', 'command.canc
       child: Bun.Subprocess<'ignore', 'pipe', 'pipe'> | undefined;
     const wire = `${f.root}-native-caller-${kind}.wire.jsonl`;
     try {
+      const access = await windowsAccess(f.root);
       warm = await f.launch();
+      if (kind === 'input.steer') {
+        await warm.client.resumeRun('s', {
+          kind: 'run.resume',
+          expectedStoreId: f.storeId,
+          commandId: 'resume-steer-target',
+          runId: f.run.id,
+        });
+        await module.untilRecovery(async () => {
+          const run = await warm!.client.getRun(f.run.id);
+          return run.isActive && run.status === 'waiting_interaction';
+        });
+      }
       const view = await warm.client.getView('s'),
         common = { expectedStoreId: f.storeId, commandId: 'native-original' };
       const contextSelectionId = view.session.contextSelectionId;
@@ -63,6 +85,22 @@ for (const kind of ['run.start', 'input.steer', 'input.follow_up', 'command.canc
                     },
                   ],
                 };
+      const attachmentBytes = Buffer.from('Native 冷恢复附件原件\r\nACK_LOST_ATTACHMENT');
+      if (input.kind === 'run.start') {
+        const file = await warm.client.uploadInputFile(
+          's',
+          {
+            expectedStoreId: f.storeId,
+            id: 'native-original-attachment',
+            name: '原件.txt',
+            mediaType: 'text/plain',
+            size: String(attachmentBytes.length),
+            hash: createHash('sha256').update(attachmentBytes).digest('hex'),
+          },
+          attachmentBytes,
+        );
+        input = { ...input, files: [file] };
+      }
       const helper = await Bun.build({
         entrypoints: [resolve(import.meta.dir, '../../electron/profile-access-helper.ts')],
         target: 'bun',
@@ -101,6 +139,8 @@ for (const kind of ['run.start', 'input.steer', 'input.follow_up', 'command.canc
             hash(join(f.root, 'native-profile-access.js')),
             JSON.stringify(input),
             wire,
+            's',
+            access,
           ],
           { stdin: 'ignore', stdout: 'pipe', stderr: 'pipe' },
         );
@@ -229,6 +269,19 @@ for (const kind of ['run.start', 'input.steer', 'input.follow_up', 'command.canc
           ),
         ),
       );
+      if (input.kind === 'run.start') {
+        const imported = await warm.client.getInputFileImport('s', 'native-original-attachment');
+        expect(imported.state).toBe('bound');
+        expect(imported.boundCommandId).toBe(input.commandId);
+        expect(imported.reference).toEqual(input.files![0]!.reference!);
+        const saved = await warm.client.readArtifact('s', {
+          expectedStoreId: f.storeId,
+          refId: imported.reference.id,
+          scope: imported.reference.scope,
+        });
+        expect(Buffer.from(saved.content)).toEqual(attachmentBytes);
+        expect(requests.filter((r) => r.path.includes('/input-files'))).toHaveLength(0);
+      }
       console.log('native caller retained', wire);
     } finally {
       if (child?.exitCode === null) {
@@ -248,6 +301,7 @@ test('actual Node Native execution.cancel preserves original independent Job thr
   let child: Bun.Subprocess<'ignore', 'pipe', 'pipe'> | undefined;
   const wire = `${f.root}-native-execution-cancel.wire.jsonl`;
   try {
+    const access = await windowsAccess(f.root);
     const helper = await Bun.build({
       entrypoints: [resolve(import.meta.dir, '../../electron/profile-access-helper.ts')],
       target: 'bun',
@@ -287,6 +341,8 @@ test('actual Node Native execution.cancel preserves original independent Job thr
           hash(join(f.root, 'native-profile-access.js')),
           JSON.stringify(input),
           wire,
+          's',
+          access,
         ],
         { stdin: 'ignore', stdout: 'pipe', stderr: 'pipe' },
       );
@@ -343,7 +399,7 @@ test('actual Node Native execution.cancel preserves original independent Job thr
   }
 }, 30000);
 
-test('actual Node Native cold lookup confirms the original public input through its completed derived business without replay', async () => {
+test('actual Node Native cold lookup confirms the completed original public Run without replay', async () => {
   const sessionId = 'native-derived',
     module = await import('../../../cli/test/fixtures/recovery-profile'),
     f = await module.recoveryProfile({ completeModelSessionId: sessionId });
@@ -351,6 +407,7 @@ test('actual Node Native cold lookup confirms the original public input through 
     child: Bun.Subprocess<'ignore', 'pipe', 'pipe'> | undefined;
   const wire = `${f.root}-native-derived.wire.jsonl`;
   try {
+    const access = await windowsAccess(f.root);
     warm = await f.launch();
     await warm.client.createSession({
       expectedStoreId: f.storeId,
@@ -399,6 +456,7 @@ test('actual Node Native cold lookup confirms the original public input through 
           JSON.stringify(input),
           wire,
           sessionId,
+          access,
         ],
         { stdin: 'ignore', stdout: 'pipe', stderr: 'pipe' },
       );
@@ -448,16 +506,9 @@ test('actual Node Native cold lookup confirms the original public input through 
       );
     });
     const original = await warm.client.getCommand(input.commandId),
-      receipt = original.receipt as {
-        runId: string;
-        humanInputCommandId: string;
-        decisionCommandId: string;
-        businessCommandId: string;
-        sourceCommandId: string;
-      },
-      business = await warm.client.getCommand(receipt.businessCommandId),
+      receipt = original.receipt as { runId: string },
       run = await warm.client.getRun(receipt.runId);
-    expect(original.status).toBe('applied');
+    expect(original).toMatchObject({ status: 'applied', sessionId, originStoreId: f.storeId });
     const publicRow = f.rows(
       "SELECT request_json,request_digest FROM command WHERE id='native-derived-original'",
     )[0] as { request_json: string; request_digest: string };
@@ -469,43 +520,12 @@ test('actual Node Native cold lookup confirms the original public input through 
     expect(publicRow.request_digest).toBe(
       createHash('sha256').update(canonicalCallerCommandRequest(input)).digest('hex'),
     );
-    expect(receipt).toMatchObject({ outcome: 'human_input_applied', sourceCommandId: business.id });
-    expect(business.id).not.toBe(original.id);
-    expect(business).toMatchObject({
-      status: 'applied',
-      sessionId,
-      subjectId: original.subjectId,
-      originStoreId: f.storeId,
-      receipt: { runId: run.id },
-    });
     expect(run).toMatchObject({
       status: 'completed',
-      originCommandId: business.id,
+      originCommandId: original.id,
       rootWorkCommandId: original.id,
     });
-    const raw = f.rows(
-      `SELECT request_json,request_digest,receipt_json FROM command WHERE id='${receipt.humanInputCommandId}'`,
-    )[0] as { request_json: string; request_digest: string; receipt_json: string };
-    expect(JSON.parse(raw.request_json)).toMatchObject({
-      publicCommandId: original.id,
-      content: input.content,
-      originalRequest: { kind: input.kind, content: input.content },
-    });
-    expect(JSON.parse(raw.receipt_json)).toMatchObject({
-      state: 'decided',
-      decisionCommandId: receipt.decisionCommandId,
-      businessCommandId: business.id,
-    });
-    const decision = f.rows(
-      `SELECT status,request_json,receipt_json FROM command WHERE id='${receipt.decisionCommandId}'`,
-    )[0] as { status: string; request_json: string; receipt_json: string };
-    expect(decision.status).toBe('applied');
-    expect(JSON.parse(decision.request_json)).toMatchObject({
-      inputCommandId: receipt.humanInputCommandId,
-      inputDigest: raw.request_digest,
-      proposal: { relation: 'independent_work', purpose: 'work' },
-    });
-    expect(JSON.parse(decision.receipt_json)).toMatchObject({ businessCommandId: business.id });
+    expect(run.id).not.toBe(seedRun.id);
     expect(
       f.rows(
         `SELECT kind,state,origin_command_id,root_work_command_id FROM execution WHERE run_id='${run.id}'`,
@@ -514,7 +534,7 @@ test('actual Node Native cold lookup confirms the original public input through 
       {
         kind: 'model',
         state: 'succeeded',
-        origin_command_id: business.id,
+        origin_command_id: original.id,
         root_work_command_id: original.id,
       },
     ]);
@@ -524,8 +544,8 @@ test('actual Node Native cold lookup confirms the original public input through 
     const modelInput = await warm.client.getModelInput(sessionId, model.id);
     expect(modelInput.confirmation).toBe('succeeded');
     expect(
-      modelInput.request.messages.find((message) => message.sourceIds?.includes(business.id)),
-    ).toMatchObject({ content: input.content, sourceIds: [business.id] });
+      modelInput.request.messages.find((message) => message.sourceIds?.includes(original.id)),
+    ).toMatchObject({ content: input.content, sourceIds: [original.id] });
     expect(f.calls()).toBe(callsBefore + 1);
     const snapshot = () => ({
       cursor: f.rows('SELECT last_change_cursor FROM storage_meta'),
@@ -566,10 +586,7 @@ test('actual Node Native cold lookup confirms the original public input through 
     expect(
       requests.filter((request) => request.path === `/v1/commands/${input.commandId}`),
     ).toHaveLength(3);
-    writeFileSync(
-      `${wire}.facts.json`,
-      JSON.stringify({ original, raw, decision, business, run, modelInput, before }),
-    );
+    writeFileSync(`${wire}.facts.json`, JSON.stringify({ original, run, modelInput, before }));
     console.log('native derived caller retained', wire);
   } finally {
     if (child?.exitCode === null) {

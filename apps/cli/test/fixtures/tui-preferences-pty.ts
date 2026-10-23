@@ -162,7 +162,7 @@ async function main(settings: Settings) {
     await wait('/recovery');
     await key('\r');
     await wait('显式恢复 · a');
-    await wait('Ctrl+L 查询原申请');
+    await wait('关闭面板后自动核对原回执');
     await key('\x1b');
     await wait('会话 a');
     await wait('新 Run >');

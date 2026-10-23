@@ -2546,6 +2546,13 @@ for (const body of ['original first message 雪🙂', '']) {
       await act(async () =>
         picker.dispatchEvent(new f.dom.window.Event('change', { bubbles: true })),
       );
+      // File selection now copies independent bytes asynchronously before it becomes sendable.
+      for (let attempt = 0; attempt < 100; attempt++) {
+        if (f.host.querySelector('.composer-attachment-name')?.textContent === '设计说明.pdf')
+          break;
+        await act(async () => new Promise((resolve) => setTimeout(resolve, 10)));
+      }
+      expect(f.host.querySelector('.composer-attachment-name')?.textContent).toBe('设计说明.pdf');
       await f.edit(body);
       await f.click('发送首条消息');
       const viewport = f.host.querySelector('.conversation-viewport'),

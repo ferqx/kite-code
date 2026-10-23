@@ -4,6 +4,18 @@
 
 ## 构建与操作
 
+2026-10-24 Windows x64／Bun 1.4.3 会话文件变更的本轮 Terminal 回归已通过。共享 CLI Plan HTTP 回归2项43断言、UI 计划／审核4文件12项71断言，以及真实 [TUI Host](../test/isolated/tui-host.test.ts) 4项54断言已通过。原 Python `termios` 驱动已由 Windows ConPTY／POSIX PTY 共用夹具承接，中文、emoji 与组合字符按真实 console cell 核对，原正文及退出断言保持。[Caller 恢复](../test/isolated/tui-caller-intents-host.test.ts)的 prepared／post-lost 两例、[显式恢复](../test/isolated/tui-recovery-host.test.ts)的原 Run／中断、两种冷重开与报告共五例，以及 [paired 配置](../test/isolated/tui-preferences-host.test.ts)已分别通过。冷启动的 Session reconciliation 独立核对原 Store、Session、准确代次和派生命令身份；丢失回应仅查原申请，业务 POST 和模型不重放。启动先结束旧待批状态，只有用户明确接续且后端验证原边界后才独立回答原审批。
+
+[Planning](../test/isolated/tui-planning-host.test.ts)完整原生回归已通过5项181断言：Unicode probe 与四个原场景全部完成，各场景仍在原30秒内；空闲时实际 Ctrl+L 不新增任何 HTTP 请求，当前完整画面和阅读窗口不变。源码 Host 的9 MB完整正文／导出对照通过1项19断言、65.03秒，核三百万字、折叠展开、两次冻结导出、Windows 私有 ACL 与正常退出，原各30秒期限保持。[正式完整正文／导出](../test/isolated/tui-export-host.test.ts)从整合后的主仓库全新构建通过1项539断言、78.35秒，原90秒总期限与各30秒步骤期限保持。完整资源、三百万字真实终端绘制、折叠展开、两份冻结导出和同两文件原生 ACL 均通过；原 Host 退出0、其 Service 确认结束后，同 Profile 新 paired owner 在72.885秒开始重开、77.271秒就绪、77.401秒完成关闭。模型调用恰两次、审核零次，成功清理候选。保留的27,624,507字节原生终端记录、原阶段时间及正常退出回执覆盖这次完整流程。[MCP 选择](../test/isolated/tui-mcp-pty.test.ts)原完整例已通过1项29断言，核当前普通 `run.start` 原 Command／Run 因果及零 MCP RPC；[Source Review](../test/isolated/tui-mcp-source-approval-pty.test.ts)原完整例通过1项343断言，实际完成暖态批准、拒绝、取消，冷移除与缺失 Workspace 的原结果读取，以及 v16 备份恢复到新 Store 后拒绝旧申请；四个 Host 正常退出、五个 Service 的原关闭回执全部确认。正常暖／冷启动的两次 Session reconciliation 单独核 Store、Session、冻结代次、确定命令 ID 和完整请求摘要；暖态业务请求仍恰九次、冷态零次，缺失 Workspace 的只读 observer 全部 POST 为零，模型、MCP RPC、凭据与地址解析均为零。最新布局已恢复专用面板完整边界，原180秒整例与步骤期限保持。Windows [Shell Job caller](../test/isolated/tui-caller-job-stop.test.ts)在创建 Job 前被真实 `shell_unavailable` 拒绝；[Workflow Question](../test/isolated/tui-workflow-question-host.test.ts)三例在首次 Work 前被 `workflow_verifier_unavailable` 拒绝，尚未进入相应 TUI 恢复驱动。两者保留独立平台资格限制，不以假后端或缩减原断言代替。
+
+最终原生终端记录另沿阶段边界复核：首次 live、元数据接管及第一次导出没有清屏，之后三次重绘分别对应完整正文、折叠与展开；每次均只有一份完整三百万字及原尾部、一条相同身份的用户消息。Tool 展示按展开、折叠、恢复展开变化，最终输入区与光标恢复，没有额外清屏循环或重复历史。原始流没有逐帧时间戳，不据此承诺瞬时画面的停留时长。
+
+本轮候选内的 [PDF Worker 实际 probe](../test/fixtures/terminal-pdf-assets.ts)已使用候选 Bun、候选公开 Files export 和其真实 Worker，在空 PATH／NODE_PATH 下核英文、中文 CMap、分页标签、旋转 PNG 尺寸及一次错误后的继续读取；不从源码运行时回退。该资源闭包证据与 [Files owner](../../../packages/agent/src/tools/files/README.md)的解析验证均不能替代完整终端、搬迁或安装验收。
+
+上述正式通过之前，整合后主仓库的两次全新候选均在原90秒失败：第一次执行521断言，仅确认资源和首份 preview，完整正文、第二次导出与正常退出未确认；第二次执行537断言，已确认全部绘制／导出及原 Host／Service 正常退出，但最后同 Profile 新 paired owner 的重开／关闭未完成。两次失败的准确进程身份查询均无遗留进程，候选与已有证据保留，不能追记为通过。随后移除已证明重复的 Windows 逐文件操作、修正无样式行序列化并采用有界 workspace 构建，经同一完整入口重新构建，才取得本次539断言、78.35秒及最后重开／关闭的通过结果；原时限、正文、权限和恢复断言始终保持。
+
+会话文件新增固定 PDF.js 6.4.299、Canvas 1.0.10 及平台原生依赖。Agent manifest 构建包含 `tools/documents/pdf-worker.js`／摘要；Terminal 继续通过现有依赖闭包物化 parser 的字体、CMap、WASM 与 Canvas，不在运行时下载。本轮源码解析与独立候选 PDF 资源读取已通过，具体解析与错误恢复边界见 [Files owner](../../../packages/agent/src/tools/files/README.md)。这些结果不授予完整搬迁／安装资格，仍按本页独立资格范围记录，不能复用没有这些新资产的旧候选证据。
+
 Windows 的完整原文件 owner 现可由同进程 verifier/归档复用；每次仍扫描准确库存、全部 SHA 和原对象/ACL，复制、错根、关闭或部分关闭的对象不提供权利。归档从原 HANDLE 读完整字节，压缩后复验保持。私有批量写入仅合并祖先持有，CREATE_NEW、每文件 Flush 和关闭未知保资源的合同保持。AI/Agent/Service/UI 的[明确普通 JS 构建声明](../../../.agents/notes/implemented/bug-fix/2026-10-17-windows-bundle-admission-cost.md)减少重复 npm 文件，React/React DOM、原生资产、WASM 和 jsdom 动态资源仍完整物化；构建扫描残余 bare import，并保安装声明图的原 manifest 摘要和许可全文。CLI renderer 与 hooks 共用 UI 的 Ink 入口。安装前门的错误出口优先保留有界业务 `code`（如 `owner_busy`），未知细节仍只返回原封闭 fallback；不把维护忙拒绝误写成注册失败。
 
 根 `npm run agent`／`npm run tui` 使用固定 `dist/unified-terminal`，先执行 `npm run release:build`。缺候选路径现沿同一结构化资产错误返回 `terminal_bundle_unavailable` 并说明构建／开发命令；纯帮助、版本和非TTY拒绝仍先于候选与Profile访问。取锁、完整闭包验证和原finally释放保持，不自动构建或转向源码。日常源码调整使用 `npm run build` 后 `npm run cli:dev`／`npm run tui:dev`，步骤见[本地开发](../../../docs/development/local-development.md)。
@@ -29,9 +41,21 @@ bun run release:terminal uninstall --prefix /absolute/install/kite-terminal
 
 [构建器](../../../scripts/release/terminal-bundle.ts)从六个 workspace 的 build 生成 AI、Agent、Client、UI、Service、CLI，固定实际 Bun 文件，加入 Agent SQLite Worker、迁移、Shell/MCP 监督资源、Web extractor 和 Web 静态资产。workspace 的 exports 指向实际 JS。CLI/TUI 入口引用公开 CLI 子路径，保留 package-local npm 解析位置。
 
+Windows 同次候选最多并发构建两个 workspace；每个包只读取源码／已安装依赖，并写入自己的准确 outdir，同一包内的 build segments 保持串行。任一失败后不再领取其他包，等待全部在途包及其原子进程退出后才执行原失败清理；退出结果未知返回 `terminal_build_close_unconfirmed` 并保留候选。POSIX 仍逐包构建。许可全文、残余 import 扫描、exports、完整库存和 SHA／原生权限 verifier 均不跳过，也不复用旧候选。真实子进程[顺序与失败回归](../../../tests/isolated/unified-agent/terminal-workspace-build.test.ts)核最多两包、六份独立原输出、逐包段顺序，以及一包失败后原兄弟包完成、所有原进程确实退出才清理。
+
+Windows 候选测试由现有私有目录夹具创建 `root/build/candidate`；准确 `root` 与 `build` 均属当前 SID 私有 DACL，避免将系统 Temp 的宽权限当作候选父目录资格。已有目录不被修复权限，原祖先／对象／ACL 准入保持。[构建子进程](../../../scripts/release/terminal-bundle.ts)在原有限 PATH／LANG 之外仅传递调用者显式设置的 `CARGO_HOME`、`RUSTUP_HOME`，隔离应用 HOME 不另选新工具链；正式候选测试核隔离 HOME 未生成 `.cargo`／`.rustup`。这不改变运行时资产选择或授予任意环境变量透传。
+
+清单物化的 Windows 完整字节读取现使用至多8个异步 reader，每个复用1 MiB缓冲区，逐文件读到 EOF 并计算完整 SHA-256，实际字节数必须与本次库存大小一致；增长、截断或读取失败均拒绝。所有 reader 都完成关闭尝试后才允许失败清理，关闭结果未知时保留整个候选并返回 `terminal_inventory_close_unconfirmed`。此处不再重复改写不能证明 Windows 私有性的 POSIX mode；完整原生对象／ACL／库存／SHA verifier 仍在清单生成后执行。POSIX 原 chmod 和完整读取路径保持，不缓存旧源证明或跨构建摘要。
+
+本机诊断中，补齐已内联 UI 依赖声明后，一份候选由15,170文件减至4,267文件；优化前约36.44秒库存阶段中 `readFileSync` 占35.40秒，热读同候选约1.81秒，说明冷文件读取是当次瓶颈。500个新建同类文件的有界并发对照为436毫秒、串行为2,344毫秒，完整 SHA 相同；原生逐文件 pin／hash 对照更慢，未采用。异步读取后的实际完整候选约33秒生成 manifest、约46秒进入 Provider／PTY，这些是该机器和候选的分段观测，不是跨平台性能承诺或90秒整例通过。定向故障验证覆盖打开失败、读取失败、增长、截断和关闭失败：正常路径最多8个原 reader，其他失败均等待所有已打开对象关闭，关闭未知保留候选。
+
 [依赖复制器](../../../scripts/release/terminal-dependencies.ts)按已安装包的物理依赖图复制实际版本、正文、资源与许可证；每个包保留自己的依赖边，支持 peer、多版本、alias 与循环。POSIX 只允许指向候选内部的相对链接。Windows 采用全部普通文件的物理展开，以实际共同 `node_modules` 祖先放置每个查找名的确定默认源节点；版本或 peer context 冲突仍在局部放置准确源节点，原本缺失的 optional／peer 名称不提升。保留资源及许可证，不按版本文本合并不同源节点；同版本循环复用原祖先，无法有限表达的多版本遮蔽循环明确拒绝。它不在运行时搜索 checkout、全局 node_modules 或 PATH Bun；manifest 固定实际文件字节，并不证明 npm 来源或锁文件真实性。
 
+Windows 文件复制复用目录递归已创建的父目录，由原生 CopyFile 保留源只读属性，不再逐文件重复创建同一父目录或改写 POSIX mode；包根、目录与链接分支的创建和拒绝检查保持，最终原生 ACL／对象身份／全部 SHA 验证保持。POSIX 原路径不变。本机600个实际依赖文件、共4.34 MB的两轮正反序对照中，原复制为695／728毫秒，去掉两项重复操作后为453／469毫秒；3,600份目标逐一核完整 SHA、mode 和原生私有权限，只读与可写源的 Windows 文件属性也一致。这是局部成本证据，不能代替完整候选的原90秒门禁。
+
 共享 UI 的 Desktop 产物已内联唯一的 `@hugeicons/core-free-icons`；builder扫描全部生成 JS，拒绝残留该包或子路径的外部引用，然后从生成 UI manifest 与该 workspace 的复制边中移除这条已内联普通依赖。peer、optional、workspace 不能借此跳过；其他 npm 包若真正依赖它仍按原图复制。UI exports、其他解析边和原许可证继续保留，详见[UI build owner](../../../packages/ui/README.md#原桌面展示层)。新闭包的每个实际文件仍由同一完整 verifier 核验，未添加运行时豁免或内容缓存。
+
+UI 的 [bundled 声明](../../../packages/ui/scripts/bundled-dependencies.ts)另补 `github-slugger`、`lowlight`、`mermaid`：它们已在实际 Desktop JS 内联，移除的是多余 npm 复制边。候选 [Markdown 资产验证](../test/fixtures/terminal-markdown-assets.ts)扫描全部生成 JS，核三包没有残余外部 import，并检查各包原 manifest、许可／通知全文及 Desktop 许可文件的准确字节。KaTeX 仍按外部依赖物化，CSS 与其全部引用字体逐字核对；不因图减小省略这些资源或 native／PDF 依赖。
 
 manifest 中声明的裸 npm 名称必须按包自己的实际解析位置复制，即使与 builtin 同名；`punycode` 包的 `punycode/` 调用不由 runtime builtin 代替。只省略显式 `node:`/`bun:` 依赖，必需包缺失拒绝构建，不从 builtin 名称推导可用。实际候选 JSDOM/parser 的运行资格与文件清单完整性分别核验。
 

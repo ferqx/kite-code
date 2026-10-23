@@ -1,5 +1,7 @@
 # 通用 Agent 新执行边界
 
+会话文件沿 Native 字节准备 → Service 流式导入 → Store 原消息事务绑定 → Files 精确对象权限 → Artifact／模型结果交接。Blob、可变工作文件和可重建缓存职责分开；会话路径不扩大 Shell／普通外部文件工具的 Profile 权限。Plan 文件编辑经原 Planning Action 保存新版本，文件事实不能替代原 Run／版本批准。PDF 页图由准确 Tool Execution 的不可变 Artifact 进入中立 tool 消息，协议视觉载体不产生人类授权。跨介质发布保留 pending／unknown；备份 v20 保存最新实际工作文件和明确缺失，恢复生成新 Store。详细合同分别归 [Files](../../packages/agent/src/tools/files/README.md)、[Planning](../../packages/agent/src/business/planning/README.md)、[维护](../../packages/agent/src/maintenance/README.md)和 [AI](../../packages/ai/README.md#图片消息)。
+
 消息的可选 `createdAt` 沿 [Store](../../packages/agent/src/storage/README.md#消息首次记录时间) → [Service 同源 schema](../../apps/service/src/http/schema/index.ts) → 生成 Client → [Native](../../apps/desktop/src/native-presentation.ts) → 共享 UI 传递，只表达原消息首次记录时间。流式与 Fork 保留来源，旧历史缺少可靠原时间时保持未知；该元数据不进入模型内容，不授权读取、写入或恢复，也不改变原 Command／Run 身份与消息次序。
 
 新普通输入沿原 Command 直接进入当前主 Agent，不创建分类 Run、判定回复或派生输入；`input.steer/input.follow_up` 保持准确目标与队列规则。旧历史消息的 `humanInput` 只读证明沿 [SQL 输入 owner](../../packages/agent/src/storage/sqlite/inputs/README.md) → Service 同源 schema／生成 Client → [Native](../../apps/desktop/README.md#真实输入消息的唯一展示)交接。原 public/raw/processing/decision/business 与准确已应用 Message／Run 共同证明同一次输入，不以相同正文或 ID 前缀猜测；消息分页保原行和原序号。Native 仅在当前读取存在准确替代消息时合并处理副本，首次占位沿原公开提交 ID 交接，独立同文和未决输入保留。呈现证明不参与权限、业务准入或恢复授权。
@@ -188,7 +190,7 @@ Native 的[单次 Plan 入口与审核](../../apps/desktop/README.md#native-计�
 
 显式 run/report/interrupt 的 caller journal 在首次 POST 前持久保存原请求：CLI/TUI 是私人有限 `ui/recovery.json@1`，Native 的 `recovery_intents` 保留原 v2 合同，当前私人 SQLite v3 另承载完整普通 caller intents。坏文件、满槽、坏身份或无 profile-use 时零 POST；冷 submitting/accepted 只查询原命令，不换 Store/Session、不自动驱逐或重发。UI/renderer 没有文件或执行权，关闭/切换仅释放读取。维护 closed manifest v5 白名单保存上述恢复 journal、准确 Desktop v1/v2/v3 一致副本及完整普通申请 callerIntents.v1；原 closed v2/v3/v4 reader 的字段和物理路径白名单各自保持，不能将 DB3 标为旧 schema；恢复新 Store 不重标旧申请。理由与实测限制见[持久恢复申请记录](../../.agents/notes/implemented/architecture/2026-10-03-durable-caller-recovery-intents.md)。原 Session 中断事务已用准确 private proof/full ModelOutput reader关闭未派发取消 Tool 的原历史；attempted/跨Store unknown仍保阻挡，同ID原receipt零重读/写入。真实同Session SDK/PTY与sealed/CAS/unknown关联107/1307通过，取舍见[修复记录](../../.agents/notes/implemented/bug-fix/2026-10-03-interruption-settles-original-tool-history.md)。
 
-共享 TUI 的[恢复面板](../../packages/ui/src/tui/README.md)区分原生 Ctrl+C/Ctrl+L 批次与 literal bracketed paste；前者只取消所属读取并查原申请，后者不能触发恢复或查询。原 GET 取消后的迟到结果不发布；原 POST 结果仍按原身份保存，取消读取不撤销业务效果。不新增 HTTP、执行权限或 journal 结构，输入边界与有限 macOS 资格见[恢复输入决定](../../.agents/notes/implemented/bug-fix/2026-10-06-recovery-native-controls-and-literal-paste.md)。
+共享 TUI 的[恢复面板](../../packages/ui/src/tui/README.md)区分原生控制键批次与 literal bracketed paste：批次中的 Ctrl+C 只取消所属读取，Ctrl+L 完全忽略；粘贴中的控制字节不触发恢复或查询。原申请由自动观察只读核对，原 GET 取消后的迟到结果不发布；原 POST 结果仍按原身份保存，取消读取不撤销业务效果。不新增 HTTP、执行权限或 journal 结构；历史输入边界与当前替代范围见[恢复输入决定](../../.agents/notes/implemented/bug-fix/2026-10-06-recovery-native-controls-and-literal-paste.md)，当前客户端验证见 TUI owner。
 
 Model 的来源请求集与完整来源在同一检查点冻结；单个 Tool 复核该原请求集加本次准确输入，整批累计请求只供后续 Model 和持久恢复。可信文件工厂可声明 `contextDiscovery=read_only`，仅允许原模型依据完全未变时接纳宿主新发现的低权限项目指令；扩展来源、自报 kind、未知工具及副作用不获得此例外。原 Model 仍保原来源，下一 Model 记录新指令及工具真实结果。Core-only 条件读集冲突只重新评估纯条件；有序输入取代及完成治理刷新按真实未派发证明继续同 Run，拒绝、已派发失败与 unknown 不被转成成功。实现与回归归[Agent owner](../../packages/agent/README.md)。
 

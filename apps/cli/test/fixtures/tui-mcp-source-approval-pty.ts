@@ -140,6 +140,8 @@ if (!process.stdin.isTTY) {
                   body.kind ??
                   (url.pathname.endsWith('/answer') ? 'interaction.answer' : undefined),
                 commandId: body.commandId,
+                expectedStoreId: body.expectedStoreId,
+                expectedOwnerGeneration: body.expectedOwnerGeneration,
                 extensionId: body.extensionId,
                 actionId: body.actionId,
                 requestSha256: digest(body),

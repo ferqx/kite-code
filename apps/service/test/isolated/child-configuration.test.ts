@@ -622,7 +622,7 @@ test('trusted role carrier is an independent exact unknown-effect Job: Ask appro
               ? []
               : [
                   { kind: 'job' as const, definitionId: 'agent/worker', definitionVersion: '7' },
-                  { kind: 'tool' as const, definitionId: 'files.read', definitionVersion: '4' },
+                  { kind: 'tool' as const, definitionId: 'files.read', definitionVersion: '5' },
                 ]),
           ],
         }),

@@ -1,6 +1,7 @@
 import { mkdirSync, readFileSync, realpathSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { dirname, join, resolve } from 'node:path';
+import { plainInkOutput } from './ink-output';
 
 const [argument] = process.argv.slice(2);
 if (!argument?.startsWith('--outdir=') || process.argv.slice(2).length !== 1)
@@ -25,6 +26,7 @@ const result = await Bun.build({
   packages: 'bundle',
   external: ['react', 'react-dom', '@kite-ai/client'],
   plugins: [
+    plainInkOutput(inkDirectory),
     {
       name: 'closed-ink-devtools',
       setup(build) {

@@ -174,7 +174,7 @@ test('80x24 actual composer edits graphemes and bracketed paste without prematur
     ).toEqual(
       Array(2).fill({
         state: 'succeeded',
-        outcome: 'succeeded',
+        outcome: null,
         decision: 'ask_user',
       }),
     );

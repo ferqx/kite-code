@@ -5,6 +5,193 @@
     "version": "1.0.0"
   },
   "paths": {
+    "/v1/sessions/{id}/input-files": {
+      "post": {
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "expectedStoreId",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "pattern": "^[A-Za-z0-9_-]+$"
+            }
+          },
+          {
+            "name": "id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 100,
+              "pattern": "^[A-Za-z0-9_-]+$"
+            }
+          },
+          {
+            "name": "name",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 512
+            }
+          },
+          {
+            "name": "mediaType",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            }
+          },
+          {
+            "name": "size",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "maxLength": 9,
+              "pattern": "^(0|[1-9][0-9]*)$"
+            }
+          },
+          {
+            "name": "hash",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/octet-stream": {
+              "schema": {
+                "type": "string",
+                "format": "binary"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Committed public facts",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InputFileReference"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/sessions/{id}/input-files/{importId}": {
+      "get": {
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "importId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "storeId",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "pattern": "^[A-Za-z0-9_-]+$"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Committed public facts",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InputFileImport"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/sessions/{id}/input-files/{importId}/release": {
+      "post": {
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "importId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InputFileReleaseRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Committed public facts",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InputFileImport"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/sessions/{id}/reconcile": {
       "post": {
         "parameters": [
@@ -6209,9 +6396,271 @@
             "minLength": 1,
             "maxLength": 8192,
             "pattern": "^file:\\/\\/.*"
+          },
+          "reference": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "pattern": "^input-file-[A-Za-z0-9_-]{1,100}$"
+              },
+              "storeId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128,
+                "pattern": "^[A-Za-z0-9_-]+$"
+              },
+              "sessionId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128,
+                "pattern": "^[A-Za-z0-9_-]+$"
+              },
+              "subjectId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256
+              },
+              "scope": {
+                "type": "object",
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "const": "session"
+                  },
+                  "id": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 128,
+                    "pattern": "^[A-Za-z0-9_-]+$"
+                  }
+                },
+                "required": ["kind", "id"],
+                "additionalProperties": false
+              },
+              "hash": {
+                "type": "string",
+                "pattern": "^[a-f0-9]{64}$"
+              },
+              "size": {
+                "type": "string",
+                "maxLength": 16,
+                "pattern": "^(0|[1-9][0-9]*)$"
+              },
+              "mediaType": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256
+              }
+            },
+            "required": [
+              "id",
+              "storeId",
+              "sessionId",
+              "subjectId",
+              "scope",
+              "hash",
+              "size",
+              "mediaType"
+            ],
+            "additionalProperties": false
           }
         },
         "required": ["name", "uri"],
+        "additionalProperties": false
+      },
+      "InputFileUploadQuery": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "expectedStoreId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "pattern": "^[A-Za-z0-9_-]+$"
+          },
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100,
+            "pattern": "^[A-Za-z0-9_-]+$"
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 512
+          },
+          "mediaType": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "size": {
+            "type": "string",
+            "maxLength": 9,
+            "pattern": "^(0|[1-9][0-9]*)$"
+          },
+          "hash": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          }
+        },
+        "required": ["expectedStoreId", "id", "name", "mediaType", "size", "hash"],
+        "additionalProperties": false
+      },
+      "InputFileReleaseRequest": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "expectedStoreId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "pattern": "^[A-Za-z0-9_-]+$"
+          }
+        },
+        "required": ["expectedStoreId"],
+        "additionalProperties": false
+      },
+      "InputFileImport": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100,
+            "pattern": "^[A-Za-z0-9_-]+$"
+          },
+          "sessionId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "pattern": "^[A-Za-z0-9_-]+$"
+          },
+          "subjectId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "originStoreId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "pattern": "^[A-Za-z0-9_-]+$"
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 512
+          },
+          "uri": {
+            "type": "string",
+            "pattern": "^file:\\/\\/.*"
+          },
+          "reference": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "pattern": "^input-file-[A-Za-z0-9_-]{1,100}$"
+              },
+              "storeId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128,
+                "pattern": "^[A-Za-z0-9_-]+$"
+              },
+              "sessionId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128,
+                "pattern": "^[A-Za-z0-9_-]+$"
+              },
+              "subjectId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256
+              },
+              "scope": {
+                "type": "object",
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "const": "session"
+                  },
+                  "id": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 128,
+                    "pattern": "^[A-Za-z0-9_-]+$"
+                  }
+                },
+                "required": ["kind", "id"],
+                "additionalProperties": false
+              },
+              "hash": {
+                "type": "string",
+                "pattern": "^[a-f0-9]{64}$"
+              },
+              "size": {
+                "type": "string",
+                "maxLength": 16,
+                "pattern": "^(0|[1-9][0-9]*)$"
+              },
+              "mediaType": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256
+              }
+            },
+            "required": [
+              "id",
+              "storeId",
+              "sessionId",
+              "subjectId",
+              "scope",
+              "hash",
+              "size",
+              "mediaType"
+            ],
+            "additionalProperties": false
+          },
+          "state": {
+            "type": "string",
+            "enum": ["prepared", "bound", "released"]
+          },
+          "boundCommandId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128,
+                "pattern": "^[A-Za-z0-9_-]+$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "createdAt": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          }
+        },
+        "required": [
+          "id",
+          "sessionId",
+          "subjectId",
+          "originStoreId",
+          "name",
+          "uri",
+          "reference",
+          "state",
+          "boundCommandId",
+          "createdAt"
+        ],
         "additionalProperties": false
       },
       "InputImageUploadRequest": {
@@ -9486,6 +9935,74 @@
                   "minLength": 1,
                   "maxLength": 8192,
                   "pattern": "^file:\\/\\/.*"
+                },
+                "reference": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "pattern": "^input-file-[A-Za-z0-9_-]{1,100}$"
+                    },
+                    "storeId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 128,
+                      "pattern": "^[A-Za-z0-9_-]+$"
+                    },
+                    "sessionId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 128,
+                      "pattern": "^[A-Za-z0-9_-]+$"
+                    },
+                    "subjectId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 256
+                    },
+                    "scope": {
+                      "type": "object",
+                      "properties": {
+                        "kind": {
+                          "type": "string",
+                          "const": "session"
+                        },
+                        "id": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 128,
+                          "pattern": "^[A-Za-z0-9_-]+$"
+                        }
+                      },
+                      "required": ["kind", "id"],
+                      "additionalProperties": false
+                    },
+                    "hash": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "size": {
+                      "type": "string",
+                      "maxLength": 16,
+                      "pattern": "^(0|[1-9][0-9]*)$"
+                    },
+                    "mediaType": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 256
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "storeId",
+                    "sessionId",
+                    "subjectId",
+                    "scope",
+                    "hash",
+                    "size",
+                    "mediaType"
+                  ],
+                  "additionalProperties": false
                 }
               },
               "required": ["name", "uri"],
@@ -9640,6 +10157,74 @@
                   "minLength": 1,
                   "maxLength": 8192,
                   "pattern": "^file:\\/\\/.*"
+                },
+                "reference": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "pattern": "^input-file-[A-Za-z0-9_-]{1,100}$"
+                    },
+                    "storeId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 128,
+                      "pattern": "^[A-Za-z0-9_-]+$"
+                    },
+                    "sessionId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 128,
+                      "pattern": "^[A-Za-z0-9_-]+$"
+                    },
+                    "subjectId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 256
+                    },
+                    "scope": {
+                      "type": "object",
+                      "properties": {
+                        "kind": {
+                          "type": "string",
+                          "const": "session"
+                        },
+                        "id": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 128,
+                          "pattern": "^[A-Za-z0-9_-]+$"
+                        }
+                      },
+                      "required": ["kind", "id"],
+                      "additionalProperties": false
+                    },
+                    "hash": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "size": {
+                      "type": "string",
+                      "maxLength": 16,
+                      "pattern": "^(0|[1-9][0-9]*)$"
+                    },
+                    "mediaType": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 256
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "storeId",
+                    "sessionId",
+                    "subjectId",
+                    "scope",
+                    "hash",
+                    "size",
+                    "mediaType"
+                  ],
+                  "additionalProperties": false
                 }
               },
               "required": ["name", "uri"],
@@ -13596,6 +14181,74 @@
                   "minLength": 1,
                   "maxLength": 8192,
                   "pattern": "^file:\\/\\/.*"
+                },
+                "reference": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "pattern": "^input-file-[A-Za-z0-9_-]{1,100}$"
+                    },
+                    "storeId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 128,
+                      "pattern": "^[A-Za-z0-9_-]+$"
+                    },
+                    "sessionId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 128,
+                      "pattern": "^[A-Za-z0-9_-]+$"
+                    },
+                    "subjectId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 256
+                    },
+                    "scope": {
+                      "type": "object",
+                      "properties": {
+                        "kind": {
+                          "type": "string",
+                          "const": "session"
+                        },
+                        "id": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 128,
+                          "pattern": "^[A-Za-z0-9_-]+$"
+                        }
+                      },
+                      "required": ["kind", "id"],
+                      "additionalProperties": false
+                    },
+                    "hash": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "size": {
+                      "type": "string",
+                      "maxLength": 16,
+                      "pattern": "^(0|[1-9][0-9]*)$"
+                    },
+                    "mediaType": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 256
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "storeId",
+                    "sessionId",
+                    "subjectId",
+                    "scope",
+                    "hash",
+                    "size",
+                    "mediaType"
+                  ],
+                  "additionalProperties": false
                 }
               },
               "required": ["name", "uri"],
@@ -14507,6 +15160,74 @@
                   "minLength": 1,
                   "maxLength": 8192,
                   "pattern": "^file:\\/\\/.*"
+                },
+                "reference": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "pattern": "^input-file-[A-Za-z0-9_-]{1,100}$"
+                    },
+                    "storeId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 128,
+                      "pattern": "^[A-Za-z0-9_-]+$"
+                    },
+                    "sessionId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 128,
+                      "pattern": "^[A-Za-z0-9_-]+$"
+                    },
+                    "subjectId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 256
+                    },
+                    "scope": {
+                      "type": "object",
+                      "properties": {
+                        "kind": {
+                          "type": "string",
+                          "const": "session"
+                        },
+                        "id": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 128,
+                          "pattern": "^[A-Za-z0-9_-]+$"
+                        }
+                      },
+                      "required": ["kind", "id"],
+                      "additionalProperties": false
+                    },
+                    "hash": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{64}$"
+                    },
+                    "size": {
+                      "type": "string",
+                      "maxLength": 16,
+                      "pattern": "^(0|[1-9][0-9]*)$"
+                    },
+                    "mediaType": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 256
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "storeId",
+                    "sessionId",
+                    "subjectId",
+                    "scope",
+                    "hash",
+                    "size",
+                    "mediaType"
+                  ],
+                  "additionalProperties": false
                 }
               },
               "required": ["name", "uri"],
@@ -18259,6 +18980,74 @@
                         "minLength": 1,
                         "maxLength": 8192,
                         "pattern": "^file:\\/\\/.*"
+                      },
+                      "reference": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string",
+                            "pattern": "^input-file-[A-Za-z0-9_-]{1,100}$"
+                          },
+                          "storeId": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 128,
+                            "pattern": "^[A-Za-z0-9_-]+$"
+                          },
+                          "sessionId": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 128,
+                            "pattern": "^[A-Za-z0-9_-]+$"
+                          },
+                          "subjectId": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 256
+                          },
+                          "scope": {
+                            "type": "object",
+                            "properties": {
+                              "kind": {
+                                "type": "string",
+                                "const": "session"
+                              },
+                              "id": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 128,
+                                "pattern": "^[A-Za-z0-9_-]+$"
+                              }
+                            },
+                            "required": ["kind", "id"],
+                            "additionalProperties": false
+                          },
+                          "hash": {
+                            "type": "string",
+                            "pattern": "^[a-f0-9]{64}$"
+                          },
+                          "size": {
+                            "type": "string",
+                            "maxLength": 16,
+                            "pattern": "^(0|[1-9][0-9]*)$"
+                          },
+                          "mediaType": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 256
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "storeId",
+                          "sessionId",
+                          "subjectId",
+                          "scope",
+                          "hash",
+                          "size",
+                          "mediaType"
+                        ],
+                        "additionalProperties": false
                       }
                     },
                     "required": ["name", "uri"],
@@ -20646,6 +21435,74 @@
                     "minLength": 1,
                     "maxLength": 8192,
                     "pattern": "^file:\\/\\/.*"
+                  },
+                  "reference": {
+                    "type": "object",
+                    "properties": {
+                      "id": {
+                        "type": "string",
+                        "pattern": "^input-file-[A-Za-z0-9_-]{1,100}$"
+                      },
+                      "storeId": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 128,
+                        "pattern": "^[A-Za-z0-9_-]+$"
+                      },
+                      "sessionId": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 128,
+                        "pattern": "^[A-Za-z0-9_-]+$"
+                      },
+                      "subjectId": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 256
+                      },
+                      "scope": {
+                        "type": "object",
+                        "properties": {
+                          "kind": {
+                            "type": "string",
+                            "const": "session"
+                          },
+                          "id": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 128,
+                            "pattern": "^[A-Za-z0-9_-]+$"
+                          }
+                        },
+                        "required": ["kind", "id"],
+                        "additionalProperties": false
+                      },
+                      "hash": {
+                        "type": "string",
+                        "pattern": "^[a-f0-9]{64}$"
+                      },
+                      "size": {
+                        "type": "string",
+                        "maxLength": 16,
+                        "pattern": "^(0|[1-9][0-9]*)$"
+                      },
+                      "mediaType": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 256
+                      }
+                    },
+                    "required": [
+                      "id",
+                      "storeId",
+                      "sessionId",
+                      "subjectId",
+                      "scope",
+                      "hash",
+                      "size",
+                      "mediaType"
+                    ],
+                    "additionalProperties": false
                   }
                 },
                 "required": ["name", "uri"],
@@ -21643,6 +22500,74 @@
                         "minLength": 1,
                         "maxLength": 8192,
                         "pattern": "^file:\\/\\/.*"
+                      },
+                      "reference": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string",
+                            "pattern": "^input-file-[A-Za-z0-9_-]{1,100}$"
+                          },
+                          "storeId": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 128,
+                            "pattern": "^[A-Za-z0-9_-]+$"
+                          },
+                          "sessionId": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 128,
+                            "pattern": "^[A-Za-z0-9_-]+$"
+                          },
+                          "subjectId": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 256
+                          },
+                          "scope": {
+                            "type": "object",
+                            "properties": {
+                              "kind": {
+                                "type": "string",
+                                "const": "session"
+                              },
+                              "id": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 128,
+                                "pattern": "^[A-Za-z0-9_-]+$"
+                              }
+                            },
+                            "required": ["kind", "id"],
+                            "additionalProperties": false
+                          },
+                          "hash": {
+                            "type": "string",
+                            "pattern": "^[a-f0-9]{64}$"
+                          },
+                          "size": {
+                            "type": "string",
+                            "maxLength": 16,
+                            "pattern": "^(0|[1-9][0-9]*)$"
+                          },
+                          "mediaType": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 256
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "storeId",
+                          "sessionId",
+                          "subjectId",
+                          "scope",
+                          "hash",
+                          "size",
+                          "mediaType"
+                        ],
+                        "additionalProperties": false
                       }
                     },
                     "required": ["name", "uri"],
@@ -22122,6 +23047,74 @@
                       "minLength": 1,
                       "maxLength": 8192,
                       "pattern": "^file:\\/\\/.*"
+                    },
+                    "reference": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string",
+                          "pattern": "^input-file-[A-Za-z0-9_-]{1,100}$"
+                        },
+                        "storeId": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 128,
+                          "pattern": "^[A-Za-z0-9_-]+$"
+                        },
+                        "sessionId": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 128,
+                          "pattern": "^[A-Za-z0-9_-]+$"
+                        },
+                        "subjectId": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 256
+                        },
+                        "scope": {
+                          "type": "object",
+                          "properties": {
+                            "kind": {
+                              "type": "string",
+                              "const": "session"
+                            },
+                            "id": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 128,
+                              "pattern": "^[A-Za-z0-9_-]+$"
+                            }
+                          },
+                          "required": ["kind", "id"],
+                          "additionalProperties": false
+                        },
+                        "hash": {
+                          "type": "string",
+                          "pattern": "^[a-f0-9]{64}$"
+                        },
+                        "size": {
+                          "type": "string",
+                          "maxLength": 16,
+                          "pattern": "^(0|[1-9][0-9]*)$"
+                        },
+                        "mediaType": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 256
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "storeId",
+                        "sessionId",
+                        "subjectId",
+                        "scope",
+                        "hash",
+                        "size",
+                        "mediaType"
+                      ],
+                      "additionalProperties": false
                     }
                   },
                   "required": ["name", "uri"],
@@ -22275,6 +23268,74 @@
                       "minLength": 1,
                       "maxLength": 8192,
                       "pattern": "^file:\\/\\/.*"
+                    },
+                    "reference": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string",
+                          "pattern": "^input-file-[A-Za-z0-9_-]{1,100}$"
+                        },
+                        "storeId": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 128,
+                          "pattern": "^[A-Za-z0-9_-]+$"
+                        },
+                        "sessionId": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 128,
+                          "pattern": "^[A-Za-z0-9_-]+$"
+                        },
+                        "subjectId": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 256
+                        },
+                        "scope": {
+                          "type": "object",
+                          "properties": {
+                            "kind": {
+                              "type": "string",
+                              "const": "session"
+                            },
+                            "id": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 128,
+                              "pattern": "^[A-Za-z0-9_-]+$"
+                            }
+                          },
+                          "required": ["kind", "id"],
+                          "additionalProperties": false
+                        },
+                        "hash": {
+                          "type": "string",
+                          "pattern": "^[a-f0-9]{64}$"
+                        },
+                        "size": {
+                          "type": "string",
+                          "maxLength": 16,
+                          "pattern": "^(0|[1-9][0-9]*)$"
+                        },
+                        "mediaType": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 256
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "storeId",
+                        "sessionId",
+                        "subjectId",
+                        "scope",
+                        "hash",
+                        "size",
+                        "mediaType"
+                      ],
+                      "additionalProperties": false
                     }
                   },
                   "required": ["name", "uri"],
@@ -22489,6 +23550,74 @@
                       "minLength": 1,
                       "maxLength": 8192,
                       "pattern": "^file:\\/\\/.*"
+                    },
+                    "reference": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string",
+                          "pattern": "^input-file-[A-Za-z0-9_-]{1,100}$"
+                        },
+                        "storeId": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 128,
+                          "pattern": "^[A-Za-z0-9_-]+$"
+                        },
+                        "sessionId": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 128,
+                          "pattern": "^[A-Za-z0-9_-]+$"
+                        },
+                        "subjectId": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 256
+                        },
+                        "scope": {
+                          "type": "object",
+                          "properties": {
+                            "kind": {
+                              "type": "string",
+                              "const": "session"
+                            },
+                            "id": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 128,
+                              "pattern": "^[A-Za-z0-9_-]+$"
+                            }
+                          },
+                          "required": ["kind", "id"],
+                          "additionalProperties": false
+                        },
+                        "hash": {
+                          "type": "string",
+                          "pattern": "^[a-f0-9]{64}$"
+                        },
+                        "size": {
+                          "type": "string",
+                          "maxLength": 16,
+                          "pattern": "^(0|[1-9][0-9]*)$"
+                        },
+                        "mediaType": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 256
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "storeId",
+                        "sessionId",
+                        "subjectId",
+                        "scope",
+                        "hash",
+                        "size",
+                        "mediaType"
+                      ],
+                      "additionalProperties": false
                     }
                   },
                   "required": ["name", "uri"],
@@ -24126,6 +25255,74 @@
                                 "minLength": 1,
                                 "maxLength": 8192,
                                 "pattern": "^file:\\/\\/.*"
+                              },
+                              "reference": {
+                                "type": "object",
+                                "properties": {
+                                  "id": {
+                                    "type": "string",
+                                    "pattern": "^input-file-[A-Za-z0-9_-]{1,100}$"
+                                  },
+                                  "storeId": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "maxLength": 128,
+                                    "pattern": "^[A-Za-z0-9_-]+$"
+                                  },
+                                  "sessionId": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "maxLength": 128,
+                                    "pattern": "^[A-Za-z0-9_-]+$"
+                                  },
+                                  "subjectId": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "maxLength": 256
+                                  },
+                                  "scope": {
+                                    "type": "object",
+                                    "properties": {
+                                      "kind": {
+                                        "type": "string",
+                                        "const": "session"
+                                      },
+                                      "id": {
+                                        "type": "string",
+                                        "minLength": 1,
+                                        "maxLength": 128,
+                                        "pattern": "^[A-Za-z0-9_-]+$"
+                                      }
+                                    },
+                                    "required": ["kind", "id"],
+                                    "additionalProperties": false
+                                  },
+                                  "hash": {
+                                    "type": "string",
+                                    "pattern": "^[a-f0-9]{64}$"
+                                  },
+                                  "size": {
+                                    "type": "string",
+                                    "maxLength": 16,
+                                    "pattern": "^(0|[1-9][0-9]*)$"
+                                  },
+                                  "mediaType": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "maxLength": 256
+                                  }
+                                },
+                                "required": [
+                                  "id",
+                                  "storeId",
+                                  "sessionId",
+                                  "subjectId",
+                                  "scope",
+                                  "hash",
+                                  "size",
+                                  "mediaType"
+                                ],
+                                "additionalProperties": false
                               }
                             },
                             "required": ["name", "uri"],
@@ -24260,6 +25457,74 @@
                                 "minLength": 1,
                                 "maxLength": 8192,
                                 "pattern": "^file:\\/\\/.*"
+                              },
+                              "reference": {
+                                "type": "object",
+                                "properties": {
+                                  "id": {
+                                    "type": "string",
+                                    "pattern": "^input-file-[A-Za-z0-9_-]{1,100}$"
+                                  },
+                                  "storeId": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "maxLength": 128,
+                                    "pattern": "^[A-Za-z0-9_-]+$"
+                                  },
+                                  "sessionId": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "maxLength": 128,
+                                    "pattern": "^[A-Za-z0-9_-]+$"
+                                  },
+                                  "subjectId": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "maxLength": 256
+                                  },
+                                  "scope": {
+                                    "type": "object",
+                                    "properties": {
+                                      "kind": {
+                                        "type": "string",
+                                        "const": "session"
+                                      },
+                                      "id": {
+                                        "type": "string",
+                                        "minLength": 1,
+                                        "maxLength": 128,
+                                        "pattern": "^[A-Za-z0-9_-]+$"
+                                      }
+                                    },
+                                    "required": ["kind", "id"],
+                                    "additionalProperties": false
+                                  },
+                                  "hash": {
+                                    "type": "string",
+                                    "pattern": "^[a-f0-9]{64}$"
+                                  },
+                                  "size": {
+                                    "type": "string",
+                                    "maxLength": 16,
+                                    "pattern": "^(0|[1-9][0-9]*)$"
+                                  },
+                                  "mediaType": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "maxLength": 256
+                                  }
+                                },
+                                "required": [
+                                  "id",
+                                  "storeId",
+                                  "sessionId",
+                                  "subjectId",
+                                  "scope",
+                                  "hash",
+                                  "size",
+                                  "mediaType"
+                                ],
+                                "additionalProperties": false
                               }
                             },
                             "required": ["name", "uri"],
@@ -24648,6 +25913,74 @@
                                 "minLength": 1,
                                 "maxLength": 8192,
                                 "pattern": "^file:\\/\\/.*"
+                              },
+                              "reference": {
+                                "type": "object",
+                                "properties": {
+                                  "id": {
+                                    "type": "string",
+                                    "pattern": "^input-file-[A-Za-z0-9_-]{1,100}$"
+                                  },
+                                  "storeId": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "maxLength": 128,
+                                    "pattern": "^[A-Za-z0-9_-]+$"
+                                  },
+                                  "sessionId": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "maxLength": 128,
+                                    "pattern": "^[A-Za-z0-9_-]+$"
+                                  },
+                                  "subjectId": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "maxLength": 256
+                                  },
+                                  "scope": {
+                                    "type": "object",
+                                    "properties": {
+                                      "kind": {
+                                        "type": "string",
+                                        "const": "session"
+                                      },
+                                      "id": {
+                                        "type": "string",
+                                        "minLength": 1,
+                                        "maxLength": 128,
+                                        "pattern": "^[A-Za-z0-9_-]+$"
+                                      }
+                                    },
+                                    "required": ["kind", "id"],
+                                    "additionalProperties": false
+                                  },
+                                  "hash": {
+                                    "type": "string",
+                                    "pattern": "^[a-f0-9]{64}$"
+                                  },
+                                  "size": {
+                                    "type": "string",
+                                    "maxLength": 16,
+                                    "pattern": "^(0|[1-9][0-9]*)$"
+                                  },
+                                  "mediaType": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "maxLength": 256
+                                  }
+                                },
+                                "required": [
+                                  "id",
+                                  "storeId",
+                                  "sessionId",
+                                  "subjectId",
+                                  "scope",
+                                  "hash",
+                                  "size",
+                                  "mediaType"
+                                ],
+                                "additionalProperties": false
                               }
                             },
                             "required": ["name", "uri"],
@@ -24782,6 +26115,74 @@
                                 "minLength": 1,
                                 "maxLength": 8192,
                                 "pattern": "^file:\\/\\/.*"
+                              },
+                              "reference": {
+                                "type": "object",
+                                "properties": {
+                                  "id": {
+                                    "type": "string",
+                                    "pattern": "^input-file-[A-Za-z0-9_-]{1,100}$"
+                                  },
+                                  "storeId": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "maxLength": 128,
+                                    "pattern": "^[A-Za-z0-9_-]+$"
+                                  },
+                                  "sessionId": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "maxLength": 128,
+                                    "pattern": "^[A-Za-z0-9_-]+$"
+                                  },
+                                  "subjectId": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "maxLength": 256
+                                  },
+                                  "scope": {
+                                    "type": "object",
+                                    "properties": {
+                                      "kind": {
+                                        "type": "string",
+                                        "const": "session"
+                                      },
+                                      "id": {
+                                        "type": "string",
+                                        "minLength": 1,
+                                        "maxLength": 128,
+                                        "pattern": "^[A-Za-z0-9_-]+$"
+                                      }
+                                    },
+                                    "required": ["kind", "id"],
+                                    "additionalProperties": false
+                                  },
+                                  "hash": {
+                                    "type": "string",
+                                    "pattern": "^[a-f0-9]{64}$"
+                                  },
+                                  "size": {
+                                    "type": "string",
+                                    "maxLength": 16,
+                                    "pattern": "^(0|[1-9][0-9]*)$"
+                                  },
+                                  "mediaType": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "maxLength": 256
+                                  }
+                                },
+                                "required": [
+                                  "id",
+                                  "storeId",
+                                  "sessionId",
+                                  "subjectId",
+                                  "scope",
+                                  "hash",
+                                  "size",
+                                  "mediaType"
+                                ],
+                                "additionalProperties": false
                               }
                             },
                             "required": ["name", "uri"],

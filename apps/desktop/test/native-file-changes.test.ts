@@ -166,6 +166,71 @@ function fixture() {
   };
 }
 
+for (const external of [false, true])
+  test(`historical output reads the exact immutable receipt in UTF-8 pages after the current file changes (external=${external})`, async () => {
+    const f = fixture();
+    try {
+      const execution = f.executions.get('execution-first')!;
+      if (external) {
+        execution.definitionId = 'files.write_path';
+        execution.definitionVersion = '1';
+      }
+      const text = 'a'.repeat(65535) + '中文🙂 historical tail';
+      const bytes = Buffer.from(text);
+      const old = JSON.parse((execution.result as { content: string }).content);
+      const baseline = {
+        ...old.baseline,
+        hash: createHash('sha256').update(bytes).digest('hex'),
+        size: bytes.length,
+      };
+      const ref = {
+        id: 'snapshot-original',
+        size: String(bytes.length),
+        mediaType: 'text/plain',
+        scope: { kind: 'execution', id: execution.id },
+      };
+      const content = JSON.stringify({ path: f.path, baseline });
+      execution.result = {
+        outcome: 'succeeded',
+        content,
+        artifactRefs: [ref],
+        details: { fileOutput: { path: f.path, snapshot: ref } },
+      };
+      f.messages.get('first')!.content = content;
+      f.client.readArtifact = async (sessionId, input, options) => {
+        expect(sessionId).toBe('s');
+        expect(input).toMatchObject({ expectedStoreId: 'store', refId: ref.id, scope: ref.scope });
+        expect(options?.expectedReference?.hash).toBe(baseline.hash);
+        return {
+          content: bytes,
+          reference: {
+            ...ref,
+            storeId: 'store',
+            hash: baseline.hash,
+            scope: { kind: 'execution', id: execution.id },
+          },
+        };
+      };
+      writeFileSync(join(f.workspace, f.path), 'later editable content');
+      const page = await f.list(['first']);
+      expect(page.entries[0]).toMatchObject({ snapshot: true, preview: 'available' });
+      if (external) expect(page.entries[0]!.openable).toBe(false);
+      const first = await f.manager.detail(page.entries[0]!.changeId, 'snapshot-1');
+      expect(first.text).toBe('a'.repeat(65535));
+      expect(first.nextOffset).toBe(65535);
+      const last = await f.manager.detail(
+        page.entries[0]!.changeId,
+        'snapshot-2',
+        first.nextOffset!,
+      );
+      expect(last.text).toBe('中文🙂 historical tail');
+      expect(last.nextOffset).toBeNull();
+      expect(first.text! + last.text!).toBe(text);
+    } finally {
+      f.close();
+    }
+  });
+
 test('PC file list accepts exact succeeded file receipts, retains repeated calls independently, and explicitly leaves old/unknown formats unavailable', async () => {
   const f = fixture();
   try {
@@ -635,22 +700,83 @@ test('paged files.read v4 retains the original baseline-based file target while 
   try {
     f.add('historical-read', 'files.read', 'succeeded', true, '3');
     f.add('paged-read', 'files.read', 'succeeded', true, '4');
+    f.add('session-read', 'files.read', 'succeeded', true, '5');
     const targets = await f.manager.list(
       {
         readId: 'paged-targets',
         viewSelection: 1,
         historyEpoch: 0,
-        messageIds: ['historical-read', 'paged-read'],
+        messageIds: ['historical-read', 'paged-read', 'session-read'],
       },
       true,
     );
-    expect(targets.entries.map((entry) => entry.operation)).toEqual(['read', 'read']);
+    expect(targets.entries.map((entry) => entry.operation)).toEqual(['read', 'read', 'read']);
     expect(targets.entries.every((entry) => entry.openable)).toBe(true);
     const opened: string[] = [];
     await f.manager.open(targets.entries[1]!.changeId, 'vscode', async (_editor, path) => {
       opened.push(path);
     });
     expect(opened).toEqual([join(f.workspace, f.path)]);
+  } finally {
+    f.close();
+  }
+});
+
+test('managed file editor entry requires the current Session exact registration on every opening', async () => {
+  const f = fixture();
+  try {
+    const path = join(
+      f.workspace,
+      'protected',
+      'files',
+      'a'.repeat(64),
+      'b'.repeat(64),
+      'outputs',
+      'report.md',
+    );
+    mkdirSync(dirname(path), { recursive: true });
+    writeFileSync(path, 'confirmed old bytes\r\n');
+    const execution = f.executions.get('execution-first')!;
+    const result = execution.result as {
+      content: string;
+      details: { fileChange: { path: string } };
+    };
+    result.content = JSON.stringify({ ...JSON.parse(result.content), path });
+    result.details.fileChange.path = path;
+    f.messages.get('first')!.content = result.content;
+    let registered = true;
+    f.client.queryExtension = async (_session, extension, _query, input) =>
+      extension === 'builtin.files' && registered && (input as { path?: string }).path === path
+        ? [
+            {
+              extensionId: 'builtin.files',
+              contentType: 'builtin.files.output',
+              contentVersion: 1,
+              summary: 'Current file',
+              payload: [{ path }],
+              artifactRefs: [],
+              actions: [],
+            },
+          ]
+        : [];
+    const entry = (await f.list(['first'])).entries[0]!;
+    expect(entry.openable).toBe(true);
+    const opened: string[] = [];
+    await f.manager.open(entry.changeId, 'vscode', async (_editor, actual) => {
+      opened.push(actual);
+    });
+    expect(opened).toEqual([path]);
+    registered = false;
+    let rejected: unknown;
+    try {
+      await f.manager.open(entry.changeId, 'vscode', async (_editor, actual) => {
+        opened.push(actual);
+      });
+    } catch (error) {
+      rejected = error;
+    }
+    expect(rejected).toBeDefined();
+    expect(opened).toHaveLength(1);
   } finally {
     f.close();
   }

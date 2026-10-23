@@ -18,7 +18,7 @@ const policy: NonNullable<PlanningOptions['automaticValidation']> = {
     { definitionId: 'files.write', definitionVersion: '2', effects: ['workspace_write'] },
     { definitionId: 'files.edit', definitionVersion: '2', effects: ['workspace_write'] },
   ],
-  fileHashChecker: { definitionId: 'files.read', definitionVersion: '4' },
+  fileHashChecker: { definitionId: 'files.read', definitionVersion: '5' },
 };
 type Call = { name: string; input: Json } | null;
 async function fixture(options: {
@@ -100,7 +100,7 @@ async function fixture(options: {
       ],
       tools: tools.map((id) => ({
         id,
-        definitionVersion: id === 'files.read' ? '4' : id === 'files.write' ? '2' : '1',
+        definitionVersion: id === 'files.read' ? '5' : id === 'files.write' ? '2' : '1',
       })),
       // This document is deliberately not an authority to enable requirements.
       planning: { automaticValidation: policy },
@@ -272,7 +272,7 @@ test('trusted automatic validation initializes without plan flags, runs the real
     const check = executions.find((x) => x.definitionId === 'validation.auto_check')!;
     expect(read.status).toBe('succeeded');
     expect(read.parentExecutionId).toBe(check.id);
-    expect(read.definitionVersion).toBe('4');
+    expect(read.definitionVersion).toBe('5');
     const configuration = run!.configuration as Record<string, Json>;
     const planning = (configuration.snapshot as Record<string, Json>).planning as Record<
       string,

@@ -17,10 +17,6 @@ export function TuiRecoveryPanel({ controller }: { controller: TuiController }) 
     controller.cancelCallerRead();
     controller.cancelRecoveryRead();
   };
-  const lookupOriginal = () => {
-    if (caller) void controller.lookupCaller(callerKey(caller.intent));
-    else void controller.lookup();
-  };
   usePaste((input) => setText((previous) => previous + input));
   useInput((input, key) => {
     // Ink can group native control bytes; bracketed paste uses the separate hook above.
@@ -28,10 +24,7 @@ export function TuiRecoveryPanel({ controller }: { controller: TuiController }) 
       input.length > 1 &&
       [...input].every((control) => control === '\u0003' || control === '\u000c')
     ) {
-      for (const control of input) {
-        if (control === '\u0003') cancelRead();
-        else lookupOriginal();
-      }
+      if (input.includes('\u0003')) cancelRead();
       return;
     }
     if (key.escape) {
@@ -40,10 +33,6 @@ export function TuiRecoveryPanel({ controller }: { controller: TuiController }) 
     }
     if (key.ctrl && input === 'c') {
       cancelRead();
-      return;
-    }
-    if (key.ctrl && input === 'l') {
-      lookupOriginal();
       return;
     }
     if (!text && callers.length && (key.upArrow || key.downArrow)) {
@@ -86,7 +75,7 @@ export function TuiRecoveryPanel({ controller }: { controller: TuiController }) 
       </Text>
       <Text>
         {t(
-          'Enter submits once; Ctrl+L checks the original request; Ctrl+C stops this read; Esc closes.',
+          'Enter submits once; close this panel to check original receipts automatically; Ctrl+C stops this read; Esc closes.',
         )}
       </Text>
       <Text>{terminalText(text)}</Text>
@@ -94,9 +83,7 @@ export function TuiRecoveryPanel({ controller }: { controller: TuiController }) 
         <>
           <Text>
             {t('Saved caller intents')} {callers.length}
-            {t(
-              ' · ↑/↓ select · Ctrl+L original GET · Ctrl+V full frozen request · Ctrl+D clear confirmed caller only',
-            )}
+            {t(' · ↑/↓ select · Ctrl+V full frozen request · Ctrl+D clear confirmed caller only')}
           </Text>
           {callers.slice(Math.max(0, selected - 2), selected + 3).map((row) => (
             <Text key={callerKey(row.intent)}>

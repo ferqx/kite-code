@@ -46,6 +46,7 @@ export function prepareDesktopDom(dom: JSDOM) {
     DOMRect: dom.window.DOMRect,
     Event: dom.window.Event,
     CustomEvent: dom.window.CustomEvent,
+    FileReader: dom.window.FileReader,
     getComputedStyle: dom.window.getComputedStyle,
     ResizeObserver: ResizeObserverStub,
     matchMedia: media,

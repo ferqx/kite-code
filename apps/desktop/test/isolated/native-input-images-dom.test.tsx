@@ -116,14 +116,30 @@ test('Native attachments preserve original scopes and distinguish an outdated Ma
     expect(images.get('a')).toEqual([]);
     expect(document.getElementById('root')!.textContent).toBe('0');
     expect(calls).toContainEqual({ method: 'input.images.release', generation: 1, id: draft.id });
-    expect(images.fileReferences([file])).toEqual(files);
-    expect(images.fileReferences([])).toEqual([]);
+    const prepared = await images.fileReferences([file]);
+    expect(prepared).toMatchObject([{ ...files[0], prepared: true }]);
+    expect(calls.find((request) => request.method === 'input.files.append')).toMatchObject({
+      data: new Uint8Array([1, 2, 3]),
+    });
+    expect(await images.fileReferences([])).toEqual([]);
     const resolver = bridge.fileReferences;
     delete bridge.fileReferences;
-    expect(() => images.fileReferences([file])).toThrow('file_picker_restart_required');
+    let unavailable: unknown;
+    try {
+      await images.fileReferences([file]);
+    } catch (error) {
+      unavailable = error;
+    }
+    expect((unavailable as Error).message).toBe('file_picker_restart_required');
     bridge.fileReferences = resolver;
     failure = 'temporary_picker_failure';
-    expect(() => images.fileReferences([file])).toThrow('temporary_picker_failure');
+    let failedPicker: unknown;
+    try {
+      await images.fileReferences([file]);
+    } catch (error) {
+      failedPicker = error;
+    }
+    expect((failedPicker as Error).message).toBe('temporary_picker_failure');
     failure = 'invalid_native_request';
     await act(async () => images.add('a', [file]));
     expect(images.get('a')[0]?.error).toBe('图片附件功能尚未加载，请完全退出并重新打开应用。');

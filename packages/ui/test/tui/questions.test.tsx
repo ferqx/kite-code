@@ -509,7 +509,7 @@ test('drafts stay with card and revision, session switch preserves original draf
   app.unmount();
 });
 
-test('unknown answer freezes original request and Ctrl+L only queries original command', async () => {
+test('unknown answer remains frozen and Ctrl+L cannot query it from another session', async () => {
   const f = fixture({ enum: ['wire-id'] });
   f.unknown();
   await f.controller.select('a');
@@ -526,7 +526,7 @@ test('unknown answer freezes original request and Ctrl+L only queries original c
   await tick();
   app.stdin.write('\u000c');
   await tick();
-  expect(f.reads).toEqual(['answer-1']);
+  expect(f.reads).toEqual([]);
   expect(f.answers).toHaveLength(1);
   app.unmount();
 });
@@ -567,7 +567,7 @@ test('submitting and unknown answers freeze only their original question draft u
     app.stdin.write('\r');
     await tick();
     expect(app.lastFrame()).toContain('Answer receipt unknown');
-    expect(app.lastFrame()).toContain('Ctrl+L checks this original submission');
+    expect(app.lastFrame()).toContain('checking this original submission automatically');
     expect(app.lastFrame()).not.toContain('must-not-');
     expect(f.answers).toHaveLength(1);
     const other = { ...question(schema, 'other'), sessionId: 'b', presentationSessionId: 'b' };
@@ -582,8 +582,8 @@ test('submitting and unknown answers freeze only their original question draft u
     await tick();
     expect(app.lastFrame()).toContain('exact original 🙂');
     expect(app.lastFrame()).not.toContain('other question draft');
-    app.stdin.write('\u000c');
-    await tick();
+    const deadline = Date.now() + 1500;
+    while (!f.reads.length && Date.now() < deadline) await tick();
     expect(f.reads).toEqual(['answer-1']);
     expect(app.lastFrame()).toContain('Answer submitted');
     app.stdin.write('must-not-change');

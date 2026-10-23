@@ -1,5 +1,9 @@
 # Client
 
+## 文件上传
+
+`uploadInputFile/getInputFileImport/releaseInputFileImport` 复用当前连接与 `input_files` 能力，上传传送二进制流，不将普通文件全文塞入 JSON。查回核对稳定导入 ID、Session、原 Store、subject 与完整引用；异步返回必须仍属于原连接代次。释放只作用于原准备项，不隐式取消消息或 Run。消息 `files` 的新完整引用与旧 `{name,uri}` 均由生成协议保存，SDK 不从 URI 推定权限或偷偷读取本机路径。实际持久关系归 [Agent](../agent/README.md#用户图片输入)，公开路由归 [Service](../../apps/service/README.md#会话持久文件)。
+
 公开 `Message.createdAt` 是可选的首次记录毫秒时间，仅用于呈现；生成 schema／validator 同源接纳并保留该字段，也接纳未提供时间的旧历史。SDK 不生成时间或发起补写。[浏览器读取回归](test/browser.test.ts)核对已知与未知时间的传递；原记录与日志补齐规则归 [Store owner](../agent/src/storage/README.md#消息首次记录时间)。
 
 ## 待消费输入队列

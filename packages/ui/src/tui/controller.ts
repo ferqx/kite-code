@@ -916,6 +916,13 @@ export class TuiController {
   private recoveryTimer?: ReturnType<typeof setTimeout>;
   private recoveryAttempt = 0;
   private recoveryRunning = false;
+  private automaticRecoveryIntents() {
+    return [...this.recoveryIntents.values()].filter(
+      (entry) =>
+        entry.intent.sessionId === this.value.sessionId &&
+        ['outcome_unknown', 'accepted'].includes(entry.status),
+    );
+  }
   private needsAutomaticRead() {
     return (
       !!this.value.sessionId &&
@@ -927,6 +934,7 @@ export class TuiController {
         (this.answerIntent?.sessionId === this.value.sessionId &&
           this.answerIntent?.phase === 'unknown') ||
         this.pendingCaller()?.phase === 'unknown' ||
+        this.automaticRecoveryIntents().length > 0 ||
         (this.value.management?.intent.sessionId === this.value.sessionId &&
           ['outcome_unknown', 'accepted', 'queued'].includes(this.value.management.status)) ||
         [...this.value.jobStops.values()].some(
@@ -967,6 +975,10 @@ export class TuiController {
             this.pendingCaller()?.phase === 'unknown'
           )
             await this.lookup();
+          for (const saved of this.automaticRecoveryIntents()) {
+            if (this.disposed || this.value.panel || sessionId !== this.value.sessionId) break;
+            await this.lookupRecovery(saved.intent.request.commandId);
+          }
           if (
             this.value.management &&
             this.value.management.intent.sessionId === sessionId &&
@@ -2182,11 +2194,12 @@ export class TuiController {
     this.recoveryIntents.set(intent.request.commandId, safe);
     this.publish({ recovery: safe });
   }
-  async lookupRecovery() {
-    const saved =
-      [...this.recoveryIntents.values()].find((entry) =>
-        ['submitting', 'accepted', 'outcome_unknown'].includes(entry.status),
-      ) ?? this.value.recovery;
+  async lookupRecovery(commandId?: string) {
+    const saved = commandId
+      ? this.recoveryIntents.get(commandId)
+      : ([...this.recoveryIntents.values()].find((entry) =>
+          ['submitting', 'accepted', 'outcome_unknown'].includes(entry.status),
+        ) ?? this.value.recovery);
     if (!saved || !this.port.recovery || (this.recoveryRead && !this.recoveryRead.signal.aborted))
       return;
     const read = this.reading();

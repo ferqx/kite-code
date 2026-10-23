@@ -28,6 +28,7 @@ const [
   requestJson,
   wire,
   sessionId = 's',
+  windowsAssetJson,
 ] = process.argv.slice(2) as string[];
 const profileInput = JSON.parse(profileJson!),
   connection = JSON.parse(connectionJson!),
@@ -92,6 +93,7 @@ const access = await acquireDesktopProfileAccess({
     bunSha256: bunSha256!,
     helperPath: helperPath!,
     helperSha256: helperSha256!,
+    ...(windowsAssetJson ? { windowsAsset: JSON.parse(windowsAssetJson) } : {}),
   }),
   data = openPrivateData(selectProfile(profileInput).profilePath, access),
   client = createClient({

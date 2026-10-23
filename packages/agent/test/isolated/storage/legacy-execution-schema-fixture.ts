@@ -31,6 +31,8 @@ export function restoreLegacyExecutionSchema(db: Database, schemaIndex: number) 
     ))
       db.exec(object.sql);
     db.run("DELETE FROM schema_migration WHERE id='0005-authorization-check'");
+    db.exec('DROP TABLE IF EXISTS input_file_import');
+    db.run("DELETE FROM schema_migration WHERE id='0006-input-file-imports'");
     db.exec('COMMIT');
   } catch (error) {
     db.exec('ROLLBACK');

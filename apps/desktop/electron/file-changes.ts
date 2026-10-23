@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { realpathSync, statSync } from 'node:fs';
-import { isAbsolute, relative, sep } from 'node:path';
+import { basename, dirname, isAbsolute, relative, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   type AgentClient,
@@ -20,7 +20,7 @@ import type {
 } from '../src/file-changes-bridge';
 import { editorFileTarget } from './editor';
 
-type Root = { path: string; device: string; inode: string; rootUri: string };
+type Root = { path: string; device: string; inode: string; rootUri: string; managed?: true };
 type Entry = {
   public: NativeFileChange;
   scope: NativeFileChangeScope;
@@ -60,8 +60,10 @@ function resultFacts(execution: Execution) {
   }
   const path =
     (execution.definitionVersion === '2' ||
+      (['files.write_path', 'files.edit_path'].includes(execution.definitionId) &&
+        execution.definitionVersion === '1') ||
       (execution.definitionId === 'files.read' &&
-        ['3', '4'].includes(execution.definitionVersion))) &&
+        ['3', '4', '5'].includes(execution.definitionVersion))) &&
     baseline(content?.baseline) &&
     typeof content?.path === 'string'
       ? content.path
@@ -84,7 +86,43 @@ function resultFacts(execution: Execution) {
     ['hash', 'size', 'device', 'inode'].every((key) => after[key] === expected[key])
       ? { text: change.text as string, truncated: change.truncated as boolean }
       : undefined;
-  return { path, preview };
+  const output = object(object(result?.details)?.fileOutput);
+  const candidate = object(output?.snapshot),
+    scope = object(candidate?.scope);
+  const snapshot =
+    path &&
+    output?.path === path &&
+    expected &&
+    typeof candidate?.id === 'string' &&
+    /^[A-Za-z0-9_-]{1,128}$/.test(candidate.id) &&
+    candidate.mediaType === 'text/plain' &&
+    candidate.size === String(expected.size) &&
+    scope?.kind === 'execution' &&
+    scope.id === execution.id &&
+    Array.isArray(result?.artifactRefs) &&
+    result.artifactRefs.some((value) => {
+      const ref = object(value),
+        source = object(ref?.scope);
+      return (
+        !!ref &&
+        ref.id === candidate.id &&
+        ref.mediaType === candidate.mediaType &&
+        ref.size === candidate.size &&
+        source?.kind === 'execution' &&
+        source.id === execution.id
+      );
+    })
+      ? {
+          id: candidate.id,
+          mediaType: 'text/plain',
+          size: String(expected.size),
+          hash: String(expected.hash),
+          scope: { kind: 'execution' as const, id: execution.id },
+          sessionId: execution.sessionId,
+          storeId: execution.originStoreId,
+        }
+      : undefined;
+  return { path, preview, snapshot };
 }
 
 function sourceIdentity(execution: Execution, run: Run) {
@@ -188,7 +226,9 @@ export class NativeFileChanges {
       throw new ClientError('file_change_identity_mismatch');
     const result = object(execution.result);
     return execution.kind === 'tool' &&
-      (['files.write', 'files.edit'].includes(execution.definitionId) ||
+      (['files.write', 'files.edit', 'files.write_path', 'files.edit_path'].includes(
+        execution.definitionId,
+      ) ||
         (includeRead && execution.definitionId === 'files.read')) &&
       execution.status === 'succeeded' &&
       result?.outcome === 'succeeded' &&
@@ -216,6 +256,58 @@ export class NativeFileChanges {
       return stat.isDirectory()
         ? { path, device: String(stat.dev), inode: String(stat.ino), rootUri: actual.rootUri }
         : undefined;
+    } catch {
+      return undefined;
+    }
+  }
+  private async managedRoot(lease: Lease, path: string | undefined): Promise<Root | undefined> {
+    if (
+      !path ||
+      !isAbsolute(path) ||
+      !/[\\/]files[\\/][a-f0-9]{64}[\\/][a-f0-9]{64}[\\/](?:outputs[\\/][A-Za-z0-9][A-Za-z0-9._-]{0,119}|plans[\\/][a-f0-9]{64}[\\/]plan\.md)$/.test(
+        path,
+      )
+    )
+      return undefined;
+    let found = false;
+    for (const [extension, query] of [
+      ['builtin.files', 'files.outputs'],
+      ['builtin.planning', 'planning.file'],
+    ] as const) {
+      try {
+        const views = await this.client.queryExtension(
+          lease.scope.sessionId,
+          extension,
+          query,
+          extension === 'builtin.files' ? { path } : {},
+          { signal: lease.abort.signal },
+        );
+        this.check(lease);
+        const payload = views[0]?.payload;
+        const entries = Array.isArray(payload) ? payload : [payload];
+        if (entries.some((value) => object(value)?.path === path)) {
+          found = true;
+          break;
+        }
+      } catch {
+        this.check(lease);
+      }
+    }
+    if (!found) return undefined;
+    try {
+      const parent = dirname(path);
+      if (realpathSync.native(parent) !== parent || realpathSync.native(path) !== path)
+        return undefined;
+      const file = statSync(path, { bigint: true }),
+        directory = statSync(parent, { bigint: true });
+      if (!file.isFile() || file.nlink !== 1n || !directory.isDirectory()) return undefined;
+      return {
+        path: parent,
+        device: String(directory.dev),
+        inode: String(directory.ino),
+        rootUri: path,
+        managed: true,
+      };
     } catch {
       return undefined;
     }
@@ -273,22 +365,32 @@ export class NativeFileChanges {
         const { execution, source } = receipt;
         const facts = resultFacts(execution),
           changeId = randomUUID();
+        const managed = await this.managedRoot(lease, facts.path);
         const entry: Entry = {
           public: {
             changeId,
             messageId: message.id,
             ...(facts.path ? { path: facts.path } : {}),
-            preview: facts.preview ? 'available' : 'unavailable',
+            preview: facts.preview || facts.snapshot ? 'available' : 'unavailable',
+            ...(facts.snapshot ? { snapshot: true } : {}),
             // Reading Fork provenance does not bind another physical Workspace.
-            openable: !!root && !!facts.path && (await this.sameWorkspace(lease, message)),
-            operation: execution.definitionId.slice('files.'.length) as 'read' | 'write' | 'edit',
+            openable:
+              !!managed ||
+              (!execution.definitionId.endsWith('_path') &&
+                !!root &&
+                !!facts.path &&
+                (await this.sameWorkspace(lease, message))),
+            operation: execution.definitionId.slice('files.'.length).replace(/_path$/, '') as
+              | 'read'
+              | 'write'
+              | 'edit',
           },
           scope: lease.scope,
           message: structuredClone(message),
           executionId: execution.id,
           resultRevision: execution.resultRevision,
           source,
-          root,
+          root: managed ?? root,
         };
         const previous = this.byMessage.get(message.id);
         const original = previous ? this.entries.get(previous) : undefined;
@@ -358,11 +460,48 @@ export class NativeFileChanges {
       throw new ClientError('file_change_observation_unavailable');
     return resultFacts(execution);
   }
-  async detail(changeId: string, readId: string): Promise<NativeFileChangeDetail> {
+  async detail(changeId: string, readId: string, offset = 0): Promise<NativeFileChangeDetail> {
     const entry = this.entry(changeId),
       lease = this.begin(readId, entry.scope);
     try {
       const facts = await this.original(lease, entry);
+      if (facts.snapshot) {
+        const ref = facts.snapshot;
+        const result = await this.client.readArtifact(
+          ref.sessionId,
+          {
+            expectedStoreId: lease.scope.storeId,
+            refId: ref.id,
+            scope: ref.scope,
+          },
+          { signal: lease.abort.signal, expectedReference: ref },
+        );
+        this.check(lease);
+        await this.original(lease, entry);
+        await this.client.verifyConnection({ signal: lease.abort.signal });
+        this.check(lease);
+        if (
+          !Number.isSafeInteger(offset) ||
+          offset < 0 ||
+          offset > result.content.length ||
+          (offset < result.content.length && (result.content[offset]! & 0xc0) === 0x80)
+        )
+          throw new ClientError('file_snapshot_offset_invalid');
+        let end = Math.min(offset + 65536, result.content.length);
+        while (end < result.content.length && (result.content[end]! & 0xc0) === 0x80) end--;
+        const text = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(
+          result.content.subarray(offset, end),
+        );
+        return {
+          kind: 'fileChanges.detail',
+          changeId,
+          snapshot: true,
+          text,
+          offset,
+          nextOffset: end < result.content.length ? end : null,
+          truncated: false,
+        };
+      }
       await this.client.verifyConnection({ signal: lease.abort.signal });
       this.check(lease);
       return { kind: 'fileChanges.detail', changeId, ...facts.preview };
@@ -383,7 +522,9 @@ export class NativeFileChanges {
       if (!entry.public.openable || !entry.root || !entry.public.path)
         throw new ClientError('file_editor_target_unavailable');
       const facts = await this.original(lease, entry);
-      const root = await this.root(lease);
+      const root = entry.root.managed
+        ? await this.managedRoot(lease, facts.path)
+        : await this.root(lease);
       if (
         !root ||
         root.path !== entry.root.path ||
@@ -393,15 +534,16 @@ export class NativeFileChanges {
         facts.path !== entry.public.path
       )
         throw new ClientError('workspace_directory_unavailable');
-      if (!(await this.sameWorkspace(lease, entry.message)))
+      if (!root.managed && !(await this.sameWorkspace(lease, entry.message)))
         throw new ClientError('file_editor_target_unavailable');
       let target: string;
       try {
-        target = editorFileTarget(root.path, facts.path!);
+        target = editorFileTarget(root.path, root.managed ? basename(facts.path!) : facts.path!);
       } catch {
         throw new ClientError('file_editor_target_unavailable');
       }
       if (
+        !root.managed &&
         this.protectedRoots.some((root) => {
           const path = relative(root, target);
           return !isAbsolute(path) && path !== '..' && !path.startsWith(`..${sep}`);
@@ -458,8 +600,9 @@ export class NativeFileChanges {
         )
           throw new ClientError('file_change_message_unavailable');
       }
-      const root = await this.root(lease);
-      if (!root || !(await this.sameWorkspace(lease, message)))
+      const managed = await this.managedRoot(lease, input.path);
+      const root = managed ?? (await this.root(lease));
+      if (!root || (!managed && !(await this.sameWorkspace(lease, message))))
         throw new ClientError('file_editor_target_unavailable');
       await this.client.verifyConnection({ signal: lease.abort.signal });
       this.check(lease);
@@ -468,12 +611,13 @@ export class NativeFileChanges {
         const current = statSync(root.path, { bigint: true });
         if (String(current.dev) !== root.device || String(current.ino) !== root.inode)
           throw new ClientError('workspace_directory_unavailable');
-        target = editorFileTarget(root.path, input.path);
+        target = editorFileTarget(root.path, managed ? basename(input.path) : input.path);
       } catch (cause) {
         if (cause instanceof ClientError) throw cause;
         throw new ClientError('file_editor_target_unavailable');
       }
       if (
+        !managed &&
         this.protectedRoots.some((root) => {
           const path = relative(root, target);
           return !isAbsolute(path) && path !== '..' && !path.startsWith(`..${sep}`);

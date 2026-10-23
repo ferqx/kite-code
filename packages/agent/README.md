@@ -1,10 +1,12 @@
 # 通用 Agent
 
+会话附件、输出文件和 Plan 当前文件已接入；机制与验证见 [Files](src/tools/files/README.md)、[Planning](src/business/planning/README.md)和[维护](src/maintenance/README.md)。客户端过程与发行资格分别归 [Desktop](../../apps/desktop/README.md)和 [Terminal](../../apps/cli/docs/terminal-release.md)，不从单项测试推定完整安装或其他平台资格。
+
 原后台 Job 目录可显式请求直接父 Tool 的有限只读来源，供 Desktop 区分后台启动与前台执行；默认响应、取消边与 Job 生命周期保持。[Store owner](src/storage/README.md#跨会话原-job-目录)维护事务范围、敏感字段排除及冷恢复证据。
 
 ## 用户图片输入
 
-普通文件附件通过 start/steer/follow-up 的可选 `files` 保存最多 128 个名称与 `file:` URI，原消息正文保持用户原文。受理核闭合字段、URI 与长度，路径引用不赋予读取权限。[模型历史组装](src/runtime.ts)通过[文件引用编码](src/input-files.ts)在 user 内容中追加明确的低权限路径数据，仍由现有 Files 工具检查目标、保护范围和权限；不自动读取文件、不加载外部目录的项目说明。Fork 与冷历史沿消息 source JSON 保留引用，无 SQL 表或迁移；[真实 HTTP](../../apps/service/test/isolated/input-images.test.ts)核附件单独发送、模型得到路径与展示正文分离，[真实 Store](test/isolated/artifacts/input-images.test.ts)核混合图片／文件在后继、Fork 与冷重开时保留。
+普通文件附件通过 start/steer/follow-up 的可选 `files` 保存最多 128 个附件，原消息正文保持用户原文。新上传沿 Artifact 流式发布原件，`0006-input-file-imports` 保存稳定导入 ID、准确 Store／Session／subject 与引用；消息准入事务同时核验并绑定，释放与绑定互斥。原件不另复制到 `inputs/`。模型只得到可按需读取的准确定位信息，Files 在读取时反查所选消息来源并校验完整字节；同 hash 不代表相同访问权。旧 `{name,uri}` 保持路径引用，不后台读取或迁移。文本、PDF 页读取及输出文件见 Files owner；[输入文件测试](test/isolated/artifacts/input-files.test.ts)覆盖删源、错会话、稳定重试及新 Store 恢复。
 
 [Runtime.uploadInputImage](src/runtime.ts)先按准确 Store/Session/subject 核作用域，再校验 PNG、JPEG、WebP、GIF 的 canonical base64、格式头和单张 16 MiB 限制，以既有 Artifact owner 发布不可变 session 引用；不接收路径或 URL。`run.start/input.steer/input.follow_up` 的可选 `images` 是名称与完整引用，同次新输入最多 10 张、总量最多 64 MiB；受理事务先核数量，再比对原登记元数据，不能跨会话借用、改写 hash 或凭空声明引用。
 

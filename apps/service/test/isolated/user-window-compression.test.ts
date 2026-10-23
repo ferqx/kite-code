@@ -80,7 +80,7 @@ for (const mode of ['legacy-1m', 'default-256k', 'explicit-threshold'] as const)
         },
         model: 'ds:deepseek-v4-flash',
         ...(shouldCompress ? { compression: { thresholdTokens: 32768 } } : {}),
-        tools: [{ id: 'files.read', definitionVersion: '4' }],
+        tools: [{ id: 'files.read', definitionVersion: '5' }],
       }),
     );
     const host = createDefaultProcessConfiguration({

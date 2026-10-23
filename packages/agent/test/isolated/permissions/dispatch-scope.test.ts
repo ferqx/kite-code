@@ -41,6 +41,29 @@ function context(snapshot: Snapshot): JobContext & ToolContext {
 const verifyFile = (snapshot: Snapshot) =>
   verifyPathFileDispatch(context(snapshot), 'files.write_path', 'target');
 
+test('Planning wrappers preserve the current target and every nonempty approval ceiling', () => {
+  const planning = (current: Snapshot, ceiling: Snapshot | null): Snapshot => ({
+    namespace: 'builtin.planning.permissions',
+    version: '1',
+    data: {
+      planning: { status: ceiling ? 'approved' : 'pending' },
+      originalRun: { sessionId: 's', runId: 'r' },
+      current: current as never,
+      ceiling: ceiling as never,
+    },
+  });
+  expect(() => verifyFile(planning(leaf('tool'), null))).not.toThrow();
+  expect(() => verifyFile(planning(leaf('tool'), leaf('tool')))).not.toThrow();
+  const changed = leaf('tool');
+  (changed.data as { capability: { revision: string } }).capability.revision = 'other';
+  expect(() => verifyFile(planning(changed, leaf('tool')))).toThrow('file_dispatch_scope_changed');
+  expect(() => verifyFile(planning(leaf('tool'), changed))).toThrow('file_dispatch_scope_changed');
+  const malformed = planning(leaf('tool'), null);
+  (malformed.data as Record<string, unknown>).current = null;
+  expect(() => verifyFile(malformed)).toThrow('file_dispatch_scope_unavailable');
+  expect(() => verifyFile(planning(leaf('job'), null))).toThrow('file_dispatch_scope_changed');
+});
+
 test('accepted parent and child challenges retain every adapter ceiling and leaf identity', () => {
   expect(hostExecutionScope(context(intersection(leaf('job'), leaf('job', 'auto'))))).toEqual({
     filesystem: 'workspace_write',

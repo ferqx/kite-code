@@ -137,6 +137,7 @@ export interface ComposerProps {
   /** A host can reject with code file_picker_restart_required when its picker is not loaded. */
   onFileReferences?: (
     files: readonly File[],
+    signal?: AbortSignal,
   ) => Promise<readonly { name: string; uri: string }[]> | readonly { name: string; uri: string }[];
   onFilesSelected?: (files: readonly { name: string; uri: string }[]) => void;
   files?: readonly { id: string; name: string; uri: string }[];
@@ -216,16 +217,19 @@ export function Composer(props: ComposerProps) {
     sideOffset: 6,
   });
   const current = useRef(props);
-  const filePick = useRef<object | null>(null);
+  const filePick = useRef<AbortController | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
   const fileDialog = useRef<ComposerProps | null>(null);
   const [pickingFiles, setPickingFiles] = useState(false);
+  const [preparingFiles, setPreparingFiles] = useState(false);
   const [fileError, setFileError] = useState<string>();
   useLayoutEffect(() => {
     if (current.current.scopeKey !== props.scopeKey) {
       fileDialog.current = null;
+      filePick.current?.abort();
       filePick.current = null;
       setPickingFiles(false);
+      setPreparingFiles(false);
       setFileError(undefined);
     }
     if (current.current.scopeKey !== props.scopeKey || props.disabled || props.promptHidden)
@@ -272,6 +276,7 @@ export function Composer(props: ComposerProps) {
   }, [attachmentMenuOpen]);
   useLayoutEffect(
     () => () => {
+      filePick.current?.abort();
       filePick.current = null;
       fileDialog.current = null;
     },
@@ -305,7 +310,8 @@ export function Composer(props: ComposerProps) {
   async function attachFiles(selected: readonly File[], original = current.current) {
     if (!selected.length || original.disabled || current.current.scopeKey !== original.scopeKey)
       return;
-    const token = {};
+    filePick.current?.abort();
+    const token = new AbortController();
     filePick.current = token;
     setPickingFiles(true);
     setFileError(undefined);
@@ -319,10 +325,17 @@ export function Composer(props: ComposerProps) {
         throw Object.assign(Error('input_image_count_limit'), { code: 'input_image_count_limit' });
       if (ordinary.length && !original.onFileReferences) throw Error('file_reference_unavailable');
       if (images.length && !original.onImageFiles) throw Error('image_input_unavailable');
-      const files = ordinary.length ? await original.onFileReferences!(ordinary) : [];
+      setPreparingFiles(ordinary.length > 0);
+      const files = ordinary.length ? await original.onFileReferences!(ordinary, token.signal) : [];
       const latest = current.current;
-      if (filePick.current !== token || latest.scopeKey !== original.scopeKey || latest.disabled)
+      if (
+        filePick.current !== token ||
+        latest.scopeKey !== original.scopeKey ||
+        latest.disabled ||
+        latest.promptHidden
+      )
         return;
+      setPreparingFiles(false);
       if (
         new Set([...(latest.files ?? []).map((file) => file.uri), ...files.map((file) => file.uri)])
           .size > 128
@@ -347,9 +360,13 @@ export function Composer(props: ComposerProps) {
                 : '无法添加文件，请重试。',
         );
     } finally {
+      // The host releases prepared files that were never handed to onFilesSelected.
+      // Successfully adopted attachments have already left this preparation scope.
+      token.abort();
       if (filePick.current === token) {
         filePick.current = null;
         setPickingFiles(false);
+        setPreparingFiles(false);
       }
     }
   }
@@ -552,6 +569,27 @@ export function Composer(props: ComposerProps) {
           <p className="composer-input-error" role="alert">
             {props.imageError || fileError}
           </p>
+        )}
+        {preparingFiles && (
+          <div
+            className="flex items-center gap-2 px-3 py-1 text-sm text-muted-foreground"
+            role="status"
+          >
+            <HugeiconsIcon icon={Loading03Icon} size={16} className="animate-spin" />
+            <span>正在保存附件…</span>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => {
+                filePick.current?.abort();
+                filePick.current = null;
+                setPreparingFiles(false);
+                setPickingFiles(false);
+              }}
+            >
+              取消添加
+            </Button>
+          </div>
         )}
         <div className="composer-bottom">
           <div className="composer-options">

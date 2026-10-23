@@ -41,7 +41,6 @@ export function TuiHelpPanel({ controller }: { controller: TuiController }) {
         ['Ctrl+N', 'New conversation'],
         ['Ctrl+R', 'Sessions'],
         ['Ctrl+B', 'Pending requests'],
-        ['Ctrl+L', 'Clear screen'],
         ['Ctrl+Q', 'Exit the terminal'],
         ['?', 'Help'],
         ['Esc', 'Back / cancel'],

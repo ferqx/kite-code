@@ -14,6 +14,7 @@ export type NativeFileChange = {
   preview: 'available' | 'unavailable';
   openable: boolean;
   operation?: 'read' | 'write' | 'edit';
+  snapshot?: boolean;
 };
 export type NativeFileChangePage = {
   kind: 'fileChanges.page';
@@ -26,6 +27,9 @@ export type NativeFileChangeDetail = {
   changeId: string;
   text?: string;
   truncated?: boolean;
+  snapshot?: boolean;
+  offset?: number;
+  nextOffset?: number | null;
 };
 export type NativeFileTargetPage = Omit<NativeFileChangePage, 'kind'> & {
   kind: 'fileTargets.page';
@@ -47,7 +51,13 @@ export type NativeFileChangeRequest =
       readId: string;
       messageIds: string[];
     }
-  | { method: 'fileChanges.detail'; generation: number; changeId: string; readId: string }
+  | {
+      method: 'fileChanges.detail';
+      generation: number;
+      changeId: string;
+      readId: string;
+      offset?: number;
+    }
   | { method: 'fileChanges.close'; generation: number; readId: string }
   | { method: 'fileChanges.open'; generation: number; changeId: string; editor: DesktopEditor }
   | {

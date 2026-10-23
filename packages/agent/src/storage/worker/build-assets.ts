@@ -23,6 +23,7 @@ export async function buildStorageAssets(outdir: string): Promise<void> {
     '0003-session-reconciliation.sql',
     '0004-pending-input-order.sql',
     '0005-authorization-check.sql',
+    '0006-input-file-imports.sql',
   ])
     copyFileSync(new URL(`../migrations/${name}`, import.meta.url), join(migrations, name));
 }

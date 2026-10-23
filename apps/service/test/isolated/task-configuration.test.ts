@@ -136,7 +136,7 @@ async function fixture(
       ...(options.defaultRole ? ['files.write'] : []),
     ].map((id) => ({
       id,
-      definitionVersion: id === 'files.read' ? '4' : id === 'files.write' ? '2' : '1',
+      definitionVersion: id === 'files.read' ? '5' : id === 'files.write' ? '2' : '1',
     })),
   };
   writeFileSync(configurationPath, JSON.stringify(configuration));
@@ -159,7 +159,7 @@ async function fixture(
           allowed: [
             { kind: 'model' as const, definitionId: 'parent', definitionVersion: '1' },
             { kind: 'model' as const, definitionId: 'child', definitionVersion: '1' },
-            { kind: 'tool' as const, definitionId: 'files.read', definitionVersion: '4' },
+            { kind: 'tool' as const, definitionId: 'files.read', definitionVersion: '5' },
             ...['task.spawn', 'task.list', 'task.events', 'task.interrupt']
               .filter((id) => id !== (options.deny === 'task' ? 'task.spawn' : options.deny))
               .map((id) => ({ kind: 'tool' as const, definitionId: id, definitionVersion: '1' })),
@@ -616,7 +616,7 @@ test('default plan and review run through the real Task carrier and expose only 
       expect(child.session.parentSessionId).toBe('s');
       expect(child.runs[0]!.configuration).toMatchObject({
         snapshot: { roleId: role, roleVersion: '1', roleToolIds: ['files.read'] },
-        tools: [{ id: 'files.read', version: '4', extensionId: 'builtin.files' }],
+        tools: [{ id: 'files.read', version: '5', extensionId: 'builtin.files' }],
       });
       const childRequests = f.a.requests.filter((request) =>
         (request.messages as { role: string; content: unknown }[]).some(

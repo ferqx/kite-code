@@ -1,14 +1,6 @@
 import { expect, test } from 'bun:test';
 import { createHash, randomUUID } from 'node:crypto';
-import {
-  existsSync,
-  mkdtempSync,
-  readFileSync,
-  realpathSync,
-  rmSync,
-  symlinkSync,
-  writeFileSync,
-} from 'node:fs';
+import { existsSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -20,7 +12,7 @@ import {
   requiresInteractionAttachment,
 } from '@kite-ai/client';
 import { launchPairedService } from '@kite-ai/service/paired';
-import { privateDirectory } from '../../../../tests/fixtures/test-filesystem';
+import { privateDirectory, temporaryDirectory } from '../../../../tests/fixtures/test-filesystem';
 import type { CLIServiceArtifact } from '../../host';
 import { verifyTerminalBundle } from '../../host/terminal-artifact';
 import { openTuiDraftFile } from '../../host/tui-drafts';
@@ -38,10 +30,11 @@ async function until<T>(read: () => Promise<T | undefined>): Promise<T> {
 }
 
 test('80x24 source-free MCP selection and clear preserve original pending work and complete history', async () => {
-  const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-tui-mcp-pty-')));
+  const root = temporaryDirectory('kite-tui-mcp-pty-');
   const evidenceRoot = join(tmpdir(), `kite-tui-mcp-pty-evidence-${randomUUID()}`);
   privateDirectory(evidenceRoot);
   const workspace = join(root, 'workspace');
+  privateDirectory(join(root, 'build'));
   privateDirectory(workspace);
   const profile = selectProfile({ dataRoot: join(root, 'data'), profile: 'development' });
   let reviewCalls = 0;
@@ -57,7 +50,7 @@ test('80x24 source-free MCP selection and clear preserve original pending work a
       const review = body.messages.some((message) => {
         if (message.role !== 'user' || !message.content) return false;
         try {
-          return JSON.parse(message.content).purpose === 'authorization_review';
+          return JSON.parse(message.content).purpose === 'authorization_check';
         } catch {
           return false;
         }
@@ -123,7 +116,7 @@ test('80x24 source-free MCP selection and clear preserve original pending work a
         join(repo, 'scripts/release/terminal.ts'),
         'build',
         '--directory',
-        join(root, 'candidate'),
+        join(root, 'build/candidate'),
       ],
       { stdout: 'pipe', stderr: 'pipe' },
     );
@@ -134,7 +127,7 @@ test('80x24 source-free MCP selection and clear preserve original pending work a
     ]);
     writeFileSync(join(evidenceRoot, 'candidate-build.log'), buildOut + buildErr);
     if (buildExit !== 0) throw Error('source_free_candidate_build_failed');
-    const candidate = verifyTerminalBundle(join(root, 'candidate'));
+    const candidate = verifyTerminalBundle(join(root, 'build/candidate'));
     symlinkSync(
       join(candidate.root, 'node_modules'),
       join(root, 'node_modules'),
@@ -308,7 +301,16 @@ test('80x24 source-free MCP selection and clear preserve original pending work a
         existsSync(join(root, 'mcp-admit')) ||
         existsSync(join(workspace, 'effect-next.txt'))
       )
-        throw Error('read_caused_effect');
+        throw Error(
+          `read_caused_effect:${JSON.stringify({
+            calls,
+            expectedCalls,
+            rpc,
+            credentialIo: existsSync(join(root, 'credential-io')),
+            mcpAdmit: existsSync(join(root, 'mcp-admit')),
+            nextEffect: existsSync(join(workspace, 'effect-next.txt')),
+          })}`,
+        );
       const drafts = JSON.parse(readFileSync(join(profile.profilePath, 'ui/tui.json'), 'utf8')) as {
         drafts: { sessionId: string; text: string }[];
       };
@@ -434,11 +436,10 @@ test('80x24 source-free MCP selection and clear preserve original pending work a
             const run = application.run!;
             expect(run.originCommandId).toBe(application.sourceCommandId);
             expect(run.rootWorkCommandId).toBe(commandId);
-            expect(command.receipt).toMatchObject({
-              outcome: 'human_input_applied',
-              businessCommandId: application.sourceCommandId,
-              runId: run.id,
-            });
+            expect(command.id).toBe(commandId);
+            expect(command.kind).toBe('run.start');
+            expect(application.sourceCommandId).toBe(commandId);
+            expect(command.receipt).toEqual({ runId: run.id });
             originalRun = run.id;
             originalCommand = application.sourceCommandId;
             receipts.push({
