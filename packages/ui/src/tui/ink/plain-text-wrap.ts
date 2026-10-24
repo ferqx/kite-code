@@ -2,6 +2,16 @@ import stringWidth from 'string-width';
 
 const segmenter = new Intl.Segmenter(undefined, { granularity: 'grapheme' });
 
+/** Slice physical rows only after parsing and wrapping; never slice source Markdown. */
+export function lastWrappedRows(text: string, rows: number): string {
+  let start = text.length;
+  for (let row = 0; row < Math.max(1, Math.floor(rows)); row++) {
+    start = text.lastIndexOf('\n', start - 1);
+    if (start < 0) return text;
+  }
+  return text.slice(start + 1);
+}
+
 /** Retain the final cluster until the next bounded span establishes its boundary. */
 function* clusters(text: string): Generator<string> {
   let carry = '';
@@ -47,14 +57,15 @@ export function wrapPlainText(text: string, columns: number): string {
     .map((source) => {
       let expanded = '',
         visible = 0;
-      for (const [index, part] of source.split('\t').entries()) {
+      const tabParts = source.split('\t');
+      for (const [index, part] of tabParts.entries()) {
         if (index) {
           const spaces = 8 - (visible % 8);
           expanded += ' '.repeat(spaces);
           visible += spaces;
         }
         expanded += part;
-        visible += length(part);
+        if (index < tabParts.length - 1) visible += length(part);
       }
       const rows = [''];
       let rowWidth = 0;

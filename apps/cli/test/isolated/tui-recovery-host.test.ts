@@ -9,7 +9,7 @@ import { runRecoveryPTY } from '../fixtures/tui-recovery-pty';
 
 const repo = resolve(import.meta.dir, '../../../..');
 for (const mode of ['run', 'interrupt'] as const)
-  test(`80x24 actual TUI ${mode} retains original cold intent through lost receipt, Ctrl+C and Ctrl+L`, async () => {
+  test(`80x24 actual TUI ${mode} retains original cold intent through lost receipt, Ctrl+C and automatic original lookup`, async () => {
     const f = await recoveryProfile();
     try {
       const runner = join(f.root, 'runner.ts'),
@@ -67,7 +67,7 @@ for (const mode of ['run', 'interrupt'] as const)
       expect(f.reviewProof()).toEqual([
         {
           state: 'succeeded',
-          outcome: 'succeeded',
+          outcome: null,
           decision: 'ask_user',
           target: (f.reviews[0]!.input.target as { executionId: string }).executionId,
         },
@@ -126,7 +126,7 @@ for (const kind of ['run', 'interrupt'] as const)
       expect(f.reviewProof()).toEqual([
         {
           state: 'succeeded',
-          outcome: 'succeeded',
+          outcome: null,
           decision: 'ask_user',
           target: (f.reviews[0]!.input.target as { executionId: string }).executionId,
         },

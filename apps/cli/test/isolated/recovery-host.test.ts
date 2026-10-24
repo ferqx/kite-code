@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { acquireProfileAccess, acquireProfileDataLock } from '@kite-ai/agent/profile-access';
 import type { AgentClient } from '@kite-ai/client';
+import { selectDaemonEndpoint } from '@kite-ai/service/daemon';
 import { openRecoveryJournal } from '../../host/recovery-journal';
 import { lookupRecovery, type RecoveryIntent, submitRecovery } from '../../src/recovery';
 import { recoveryProfile, untilRecovery } from '../fixtures/recovery-profile';
@@ -91,7 +92,7 @@ for (const mode of ['run', 'interrupt'] as const)
       expect(f.reviewProof()).toEqual([
         {
           state: 'succeeded',
-          outcome: 'succeeded',
+          outcome: null,
           decision: 'ask_user',
           target: (f.reviews[0]!.input.target as { executionId: string }).executionId,
         },
@@ -166,7 +167,10 @@ for (const mode of ['paired', 'shared'] as const)
           outdir: join(f.root, 'artifact'),
         });
         expect(built.success).toBe(true);
-        const socket = join(f.root, 's.sock'),
+        const socket = selectDaemonEndpoint({
+            profileAccessKey: f.profile.profileAccessKey,
+            ...(process.platform === 'win32' ? {} : { explicitSocket: join(f.root, 's.sock') }),
+          }).socket,
           web = join(f.root, 'web');
         mkdirSync(web);
         const raw = JSON.stringify(
@@ -434,7 +438,7 @@ for (const mode of ['paired', 'shared'] as const)
           expect(f.reviewProof()).toEqual([
             {
               state: 'succeeded',
-              outcome: 'succeeded',
+              outcome: null,
               decision: 'ask_user',
               target: (f.reviews[0]!.input.target as { executionId: string }).executionId,
             },
@@ -503,7 +507,7 @@ test('actual recovered Run observation abort releases original approval wait wit
     expect(f.reviewProof()).toEqual([
       {
         state: 'succeeded',
-        outcome: 'succeeded',
+        outcome: null,
         decision: 'ask_user',
         target: (f.reviews[0]!.input.target as { executionId: string }).executionId,
       },

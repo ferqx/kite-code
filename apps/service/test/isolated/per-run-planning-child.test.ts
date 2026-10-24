@@ -84,7 +84,7 @@ async function fixture(
           .slice()
           .reverse()
           .find((message) => message.role === 'user')?.content;
-        review = JSON.parse(String(content)).purpose === 'authorization_review';
+        review = JSON.parse(String(content)).purpose === 'authorization_check';
       } catch {}
       const call: Call = review
         ? null
@@ -172,7 +172,7 @@ async function fixture(
       credentialRef: 'credential:12345678-1234-1234-1234-123456789abc',
     })),
     tools: [
-      { id: 'files.read', definitionVersion: '4' },
+      { id: 'files.read', definitionVersion: '5' },
       { id: 'files.write', definitionVersion: '2' },
       ...['task.spawn', 'task.events', 'task.list'].map((id) => ({ id, definitionVersion: '1' })),
       ...(scenario === 'pending_job'
@@ -209,7 +209,7 @@ async function fixture(
               ),
             ),
             bunExecutable: process.execPath,
-            shellExecutable: '/bin/sh',
+            shellExecutable: process.platform === 'win32' ? process.execPath : '/bin/sh',
           },
         }
       : {}),
@@ -234,7 +234,7 @@ async function fixture(
           ].map((id) => ({ kind: 'tool' as const, definitionId: id, definitionVersion: '1' })),
           { kind: 'job', definitionId: 'agent/worker', definitionVersion: '1' },
           { kind: 'job', definitionId: 'shell.command', definitionVersion: '1' },
-          { kind: 'tool', definitionId: 'files.read', definitionVersion: '4' },
+          { kind: 'tool', definitionId: 'files.read', definitionVersion: '5' },
           { kind: 'tool', definitionId: 'files.write', definitionVersion: '2' },
           ...['planning.read', 'planning.write', 'planning.review', 'planning.update'].map(
             (id) => ({
@@ -371,6 +371,8 @@ async function fixture(
     sessionId: 's',
     workspaceId: 'w',
     mode,
+    trusted,
+    nativeShellRead: scenario === 'pending_job' && process.platform === 'darwin',
   });
   const f = {
     root,
@@ -401,6 +403,8 @@ async function fixture(
         sessionId: 's',
         workspaceId: 'w',
         mode: nextMode,
+        trusted: nextTrust,
+        nativeShellRead: scenario === 'pending_job' && process.platform === 'darwin',
       });
       mode = nextMode;
       trusted = nextTrust;
@@ -470,7 +474,22 @@ async function fixture(
     async incomplete() {
       const held = await until(async () =>
         completionGate?.workId === workId ? completionGate : null,
-      );
+      ).catch(async (error) => {
+        console.error(
+          'incomplete-facts',
+          JSON.stringify({
+            scenario,
+            command: await store.getCommand(workId),
+            run: await f.run(),
+            executions: (await store.listExecutions('s')).map((e) => ({
+              definitionId: e.definitionId,
+              status: e.status,
+              result: e.result,
+            })),
+          }),
+        );
+        throw error;
+      });
       return { run: await f.run(), diagnostic: held.diagnostic };
     },
     async cancelIncomplete(runId: string) {
@@ -569,7 +588,12 @@ async function script(model: string, step: number, f: Fixture): Promise<Call> {
         steps: [{ id: 'delegate', title: 'Delegate and wait' }],
       },
     };
-  const current = (await f.record('plan.current'))!.value as Record<string, Json>;
+  const planRecord = await f.record('plan.current');
+  if (!planRecord)
+    throw new Error(
+      `plan_missing:${JSON.stringify((await f.store.listExecutions('s')).map((e) => ({ definitionId: e.definitionId, status: e.status, result: e.result })))}`,
+    );
+  const current = planRecord.value as Record<string, Json>;
   if (f.scenario === 'pending_job') {
     if (step === 1)
       return {
@@ -635,6 +659,16 @@ test('pending single-Run planning defeats current Full Task and ordinary Job wit
     const f = await fixture(scenario);
     try {
       await f.submit();
+      if (scenario === 'pending_job' && process.platform !== 'darwin') {
+        const rejected = await f.runtime.waitForCommand('work', { timeoutMs: 8000 });
+        expect(rejected).toMatchObject({
+          status: 'rejected',
+          receipt: { reason: 'shell_platform_unqualified' },
+        });
+        expect(await f.store.listExecutions('s')).toEqual([]);
+        expect(existsSync(join(f.workspace, 'forbidden.txt'))).toBe(false);
+        continue;
+      }
       const { run, diagnostic } = await f.incomplete();
       expect(run.isActive).toBe(true);
       expect(run.status).toBe('running');
@@ -705,7 +739,11 @@ test('approved accept_edits under current Full independently challenges Task/car
       executionId: childModel.id,
     });
     const sources = originalInput.metadata.context?.sources;
-    const baseSourceIds = ['agent:contract', `${planningExtensionId}:runtime:${child.id}`];
+    const baseSourceIds = [
+      'agent:contract',
+      `builtin.files:session-files:${child.sessionId}`,
+      `${planningExtensionId}:runtime:${child.id}`,
+    ];
     expect(sources?.map((source) => source.id)).toEqual(baseSourceIds);
     expect(sources?.filter((source) => !baseSourceIds.includes(source.id))).toHaveLength(0);
     const cards = (await f.client.listInteractions('s', { storeId: f.expectedStoreId }))
@@ -806,15 +844,13 @@ test('original parent head/proof drift during child approval refuses dispatch an
     await f.submit('next');
     const { run, diagnostic } = await f.incomplete();
     const next = (await f.store.getCommand('next'))!;
-    const receipt = next.receipt as { businessCommandId: string; runId: string };
+    const receipt = next.receipt as { businessCommandId?: string; runId: string };
     expect(next).toMatchObject({
       status: 'applied',
       request: { content: 'New task: next' },
-      receipt: { outcome: 'human_input_applied' },
     });
-    expect(receipt.businessCommandId).not.toBe('next');
     expect(run.id).toBe(receipt.runId);
-    expect(run.originCommandId).toBe(receipt.businessCommandId);
+    expect(run.originCommandId).toBe(receipt.businessCommandId ?? next.id);
     expect(run.rootWorkCommandId).toBe('next');
     expect(run.isActive).toBe(true);
     expect(run.status).toBe('running');

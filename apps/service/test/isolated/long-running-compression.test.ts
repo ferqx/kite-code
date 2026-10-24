@@ -83,7 +83,7 @@ for (const window of [4096, undefined])
       JSON.stringify({
         modelId: 'fixed',
         ...(window === undefined ? { compression: { thresholdTokens: 32768 } } : {}),
-        tools: [{ id: 'files.read', definitionVersion: '4' }],
+        tools: [{ id: 'files.read', definitionVersion: '5' }],
         models: [
           {
             id: 'fixed',

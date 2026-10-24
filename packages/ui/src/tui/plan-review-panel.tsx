@@ -15,12 +15,14 @@ export function TuiPlanReviewPanel({
   onAnswer,
   busy = false,
   error,
+  compact = false,
 }: {
   card: Interaction;
   feedback: ComposerBuffer;
   onAnswer(answer: string): void;
   busy?: boolean;
   error?: string;
+  compact?: boolean;
 }) {
   const { t } = useTuiPresentation();
   const { t: translate } = useInkI18n();
@@ -129,6 +131,7 @@ export function TuiPlanReviewPanel({
   });
   return (
     <OverlayFrame
+      compact={compact}
       title={translate('planReview.title')}
       footer={
         <OverlayShortcutBar
@@ -159,7 +162,7 @@ export function TuiPlanReviewPanel({
       ) : (
         <>
           <Text>{translate('planReview.choose')}</Text>
-          <Box marginTop={1}>
+          <Box marginTop={compact ? 0 : 1}>
             <OverlayChoiceList
               options={choices.map((choice) => ({
                 id: choice.answer,
@@ -168,6 +171,7 @@ export function TuiPlanReviewPanel({
               }))}
               selectedId={shownChoice?.answer}
               numbered
+              compact={compact}
             />
           </Box>
           <Text>{t('Up/Down: choose · Enter: confirm · Esc: deny')}</Text>

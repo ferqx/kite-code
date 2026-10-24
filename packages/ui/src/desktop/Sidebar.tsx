@@ -247,7 +247,7 @@ export function Sidebar({
 }: DirectoryProps & {
   actions: PageActions;
   connectionLabel: string;
-  activePage?: 'conversation' | 'workbench' | 'scheduledTasks';
+  activePage?: 'conversation' | 'newConversation' | 'workbench' | 'scheduledTasks';
 }) {
   return (
     <>
@@ -255,7 +255,8 @@ export function Sidebar({
         <nav className="primary-navigation" aria-label="主要导航">
           {actions.newSession && (
             <Button
-              className="new-session"
+              className={activePage === 'newConversation' ? 'new-session selected' : 'new-session'}
+              aria-current={activePage === 'newConversation' ? 'page' : undefined}
               variant="ghost"
               disabled={props.busy || props.mutationBusy}
               onClick={actions.newSession}

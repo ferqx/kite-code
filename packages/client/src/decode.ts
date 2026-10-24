@@ -3,6 +3,8 @@ import { queryInput, requestValidators, responseValidators } from './generated/v
 
 export interface Responses {
   InputImage: API.InputImage;
+  InputFileReference: API.InputFileReference;
+  InputFileImport: API.InputFileImport;
   WorkspaceRemoval: API.WorkspaceRemoval;
   FileCheckpointPage: API.FileCheckpointPage;
   FileCheckpointDetail: API.FileCheckpointDetail;
@@ -163,6 +165,8 @@ export function validateRequest(
     | 'ResumeJobReportTarget'
     | 'StartCommandRequest'
     | 'InputImageUploadRequest'
+    | 'InputFileUploadQuery'
+    | 'InputFileReleaseRequest'
     | 'CancelCommandRequest'
     | 'CancelRunRequest'
     | 'CancelExecutionRequest'

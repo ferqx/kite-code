@@ -3,6 +3,22 @@ export const inputImageWindowCount = 128;
 
 export type NativeInputImageRequest =
   | {
+      method: 'input.files.begin';
+      generation: number;
+      id: string;
+      name: string;
+      mediaType: string;
+      size: number;
+    }
+  | {
+      method: 'input.files.append';
+      generation: number;
+      id: string;
+      offset: number;
+      data: Uint8Array;
+    }
+  | { method: 'input.files.finish' | 'input.files.release'; generation: number; id: string }
+  | {
       method: 'input.images.begin';
       generation: number;
       id: string;

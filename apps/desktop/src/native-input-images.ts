@@ -5,6 +5,7 @@ import {
   inputImageBytes,
   inputImageChunkBytes,
   inputImageTotalBytes,
+  readInputFileChunk,
 } from './input-image-encoding';
 import { inputImageCount, inputImageWindowCount } from './input-images-bridge';
 import type { NativeBridge } from './native-bridge';
@@ -22,7 +23,7 @@ type ImageDraft = {
   previewError?: string;
 };
 const mediaTypes = ['image/png', 'image/jpeg', 'image/webp', 'image/gif'] as const;
-type FileDraft = { id: string; name: string; uri: string; generation: number };
+type FileDraft = { id: string; name: string; uri: string; generation: number; prepared?: boolean };
 function attachmentHostOutdated(error: unknown) {
   const code = error && typeof error === 'object' && 'code' in error ? error.code : undefined;
   return code === 'invalid_native_request' || code === 'native_host_operation_unavailable';
@@ -38,6 +39,9 @@ export function useNativeInputImages(
   const previews = useMemo(() => new NativeImagePreviews(), [bridge, generation, storeId]);
   const drafts = useRef(new Map<string, (ImageDraft | FileDraft)[]>());
   const preparation = useRef(Promise.resolve());
+  const preparingFiles = useRef(new Set<AbortController>());
+  const preparedFiles = useRef(new Set<string>());
+  const fileHandoffs = useRef(new Map<string, () => void>());
   const [, redraw] = useReducer((value) => value + 1, 0);
   const current = useRef({ bridge, generation, storeId });
   useLayoutEffect(() => {
@@ -46,6 +50,12 @@ export function useNativeInputImages(
   useEffect(() => {
     return () => {
       previews.clear();
+      for (const controller of preparingFiles.current) controller.abort();
+      preparingFiles.current.clear();
+      if (bridge && generation)
+        for (const id of preparedFiles.current)
+          void bridge.request({ method: 'input.files.release', generation, id }).catch(() => {});
+      preparedFiles.current.clear();
       for (const images of drafts.current.values())
         for (const image of images) {
           if (!('url' in image)) continue;
@@ -68,7 +78,10 @@ export function useNativeInputImages(
   function files(key: string) {
     return all(key).filter((item): item is FileDraft => 'uri' in item);
   }
-  function addFiles(key: string, selected: readonly { name: string; uri: string }[]) {
+  function addFiles(
+    key: string,
+    selected: readonly { name: string; uri: string; id?: string; prepared?: boolean }[],
+  ) {
     if (
       !bridge ||
       !generation ||
@@ -83,11 +96,23 @@ export function useNativeInputImages(
       ...all(key),
       ...selected
         .filter((file) => {
-          if (uris.has(file.uri)) return false;
+          if (uris.has(file.uri)) {
+            if (file.prepared && file.id) {
+              fileHandoffs.current.get(file.id)?.();
+              preparedFiles.current.delete(file.id);
+              void bridge
+                .request({ method: 'input.files.release', generation, id: file.id })
+                .catch(() => {});
+            }
+            return false;
+          }
           uris.add(file.uri);
           return true;
         })
-        .map((file) => ({ ...file, id: crypto.randomUUID(), generation })),
+        .map((file) => {
+          if (file.prepared && file.id) fileHandoffs.current.get(file.id)?.();
+          return { ...file, id: file.id ?? crypto.randomUUID(), generation };
+        }),
     ]);
     redraw();
   }
@@ -95,7 +120,14 @@ export function useNativeInputImages(
     const selected = new Set(ids);
     for (const [key, images] of drafts.current) {
       for (const image of images.filter((image) => selected.has(image.id))) {
-        if (!('url' in image)) continue;
+        if (!('url' in image)) {
+          preparedFiles.current.delete(image.id);
+          if (image.prepared && bridge && generation)
+            void bridge
+              .request({ method: 'input.files.release', generation, id: image.id })
+              .catch(() => {});
+          continue;
+        }
         image.abort.abort();
         if (image.url) URL.revokeObjectURL(image.url);
         if (bridge && generation)
@@ -244,12 +276,110 @@ export function useNativeInputImages(
     redraw();
     await Promise.all(pending);
   }
-  function fileReferences(selected: readonly File[]) {
+  async function fileReferences(selected: readonly File[], signal?: AbortSignal) {
     if (!bridge?.fileReferences)
       throw Object.assign(Error('file_picker_restart_required'), {
         code: 'file_picker_restart_required',
       });
-    return bridge.fileReferences(selected);
+    if (!generation || !storeId) throw Error('file_reference_unavailable');
+    const references = bridge.fileReferences(selected);
+    const controller = new AbortController();
+    const abort = () => controller.abort(signal?.reason);
+    signal?.addEventListener('abort', abort, { once: true });
+    if (signal?.aborted) abort();
+    preparingFiles.current.add(controller);
+    const ids: string[] = [];
+    const unclaimed = new Set<string>();
+    let ready = false;
+    const cleanup = () => {
+      signal?.removeEventListener('abort', abort);
+      preparingFiles.current.delete(controller);
+    };
+    controller.signal.addEventListener(
+      'abort',
+      () => {
+        if (!ready) return;
+        for (const id of unclaimed) {
+          fileHandoffs.current.delete(id);
+          preparedFiles.current.delete(id);
+          void bridge.request({ method: 'input.files.release', generation, id }).catch(() => {});
+        }
+        unclaimed.clear();
+        cleanup();
+      },
+      { once: true },
+    );
+    const prepare = async () => {
+      const result: { name: string; uri: string; id: string; prepared: true }[] = [];
+      const check = () => {
+        controller.signal.throwIfAborted();
+        if (
+          current.current.bridge !== bridge ||
+          current.current.generation !== generation ||
+          current.current.storeId !== storeId
+        )
+          throw Error('file_preparation_cancelled');
+      };
+      try {
+        for (const [index, file] of selected.entries()) {
+          check();
+          if (file.size > 256 * 1024 * 1024) throw Error('input_file_too_large');
+          const id = crypto.randomUUID();
+          ids.push(id);
+          preparedFiles.current.add(id);
+          await bridge.request({
+            method: 'input.files.begin',
+            generation,
+            id,
+            name: file.name,
+            mediaType:
+              file.type ||
+              (file.name.toLowerCase().endsWith('.pdf')
+                ? 'application/pdf'
+                : 'application/octet-stream'),
+            size: file.size,
+          });
+          for (let offset = 0; offset < file.size; offset += 65536) {
+            check();
+            const data = await readInputFileChunk(
+              file.slice(offset, offset + 65536),
+              controller.signal,
+            );
+            await bridge.request({ method: 'input.files.append', generation, id, offset, data });
+          }
+          check();
+          await bridge.request({ method: 'input.files.finish', generation, id });
+          check();
+          result.push({ ...references[index]!, id, prepared: true });
+        }
+        check();
+        ready = true;
+        for (const id of ids) {
+          unclaimed.add(id);
+          fileHandoffs.current.set(id, () => {
+            fileHandoffs.current.delete(id);
+            unclaimed.delete(id);
+            if (!unclaimed.size) cleanup();
+          });
+        }
+        if (!unclaimed.size) cleanup();
+        return result;
+      } catch (error) {
+        for (const id of ids) preparedFiles.current.delete(id);
+        await Promise.allSettled(
+          ids.map((id) => bridge.request({ method: 'input.files.release', generation, id })),
+        );
+        throw error;
+      } finally {
+        if (!ready) cleanup();
+      }
+    };
+    const task = preparation.current.then(prepare);
+    preparation.current = task.then(
+      () => {},
+      () => {},
+    );
+    return task;
   }
   return { get, files, add, addFiles, removeIds, move, fileReferences, previews };
 }

@@ -126,7 +126,7 @@ test('one ordinary Run retains complete project sources across 257 distinct File
         ],
         tools: [
           { id: 'ask_user', enabled: false },
-          { id: 'files.read', definitionVersion: '4' },
+          { id: 'files.read', definitionVersion: '5' },
         ],
       }),
     );

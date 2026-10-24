@@ -19,6 +19,7 @@ import {
   symlinkSync,
   writeFileSync,
 } from 'node:fs';
+import { open } from 'node:fs/promises';
 import { dirname, join, relative, resolve, sep } from 'node:path';
 import { cliBundledDependencies } from '../../apps/cli/bundled-dependencies';
 import { CLI_REGISTRATION_FILE, readCLIRegistration } from '../../apps/cli/host/cli-registration';
@@ -97,16 +98,30 @@ function ownedDirectory(path: string) {
 async function run(executable: string, args: string[], cwd: string): Promise<string> {
   const child = Bun.spawn([executable, ...args], {
     cwd,
-    env: { PATH: process.env.PATH ?? '', LANG: 'en_US.UTF-8' },
+    env: {
+      PATH: process.env.PATH ?? '',
+      LANG: 'en_US.UTF-8',
+      // An isolated application HOME must not silently select a fresh compiler
+      // installation. Retain only the caller's explicit Rust cache locations.
+      ...(process.env.CARGO_HOME ? { CARGO_HOME: process.env.CARGO_HOME } : {}),
+      ...(process.env.RUSTUP_HOME ? { RUSTUP_HOME: process.env.RUSTUP_HOME } : {}),
+    },
     stdin: 'ignore',
     stdout: 'pipe',
     stderr: 'pipe',
   });
-  const [code, stdout, stderr] = await Promise.all([
+  const [exit, output, diagnostic] = await Promise.allSettled([
     child.exited,
     new Response(child.stdout).text(),
     new Response(child.stderr).text(),
   ]);
+  if (exit.status === 'rejected')
+    throw new AggregateError([exit.reason], 'terminal_build_close_unconfirmed');
+  if (output.status === 'rejected') throw output.reason;
+  if (diagnostic.status === 'rejected') throw diagnostic.reason;
+  const code = exit.value,
+    stdout = output.value,
+    stderr = diagnostic.value;
   if (code !== 0) throw Error(`terminal_build_failed:${args[0]}:${stderr.slice(-4000)}`);
   return stdout.trim();
 }
@@ -166,8 +181,8 @@ function createInstallDirectory(path: string): void {
   mkdirSync(path, { mode: 0o700 });
   syncDirectory(dirname(path));
 }
-function inventory(root: string) {
-  const files: TerminalBundleManifest['files'][number][] = [],
+async function inventory(root: string) {
+  const files: { path: string; size: number; sha256: string; mode: 420 | 493 }[] = [],
     links: TerminalBundleManifest['links'][number][] = [];
   const walk = (directory: string) => {
     for (const name of readdirSync(directory).sort()) {
@@ -185,13 +200,67 @@ function inventory(root: string) {
             : stat.mode & 0o111
               ? 493
               : 420;
-        chmodSync(path, mode);
-        const bytes = readFileSync(path);
-        files.push({ path: item, size: bytes.length, sha256: sha(bytes), mode });
+        // Windows admission uses the original native owner/DACL, not POSIX mode
+        // bits. Rewriting unchanged attributes here adds no permission evidence.
+        if (process.platform !== 'win32') chmodSync(path, mode);
+        if (process.platform === 'win32')
+          files.push({ path: item, size: stat.size, sha256: '', mode });
+        else {
+          const bytes = readFileSync(path);
+          files.push({ path: item, size: bytes.length, sha256: sha(bytes), mode });
+        }
       } else error('file_unsupported');
     }
   };
   walk(root);
+  if (process.platform === 'win32') {
+    // Bound both cold-file reads and memory. Every file is hashed from this
+    // candidate; the complete native permission/identity verifier still follows.
+    let next = 0;
+    const closeFailures: unknown[] = [];
+    const reads = await Promise.allSettled(
+      Array.from({ length: Math.min(8, files.length) }, async () => {
+        const buffer = Buffer.allocUnsafe(1024 * 1024);
+        for (;;) {
+          if (closeFailures.length) return;
+          const file = files[next++];
+          if (!file) return;
+          const handle = await open(join(root, file.path), 'r');
+          try {
+            const hash = createHash('sha256');
+            let total = 0;
+            for (;;) {
+              const { bytesRead } = await handle.read(buffer, 0, buffer.length, null);
+              if (!bytesRead) break;
+              total += bytesRead;
+              if (total > file.size) error('file_changed');
+              hash.update(buffer.subarray(0, bytesRead));
+            }
+            if (total !== file.size) error('file_changed');
+            file.sha256 = hash.digest('hex');
+          } finally {
+            try {
+              await handle.close();
+            } catch (cause) {
+              closeFailures.push(cause);
+            }
+          }
+        }
+      }),
+    );
+    // Wait for every original reader to close before the builder may remove a
+    // failed candidate. A rejected read must never race the cleanup operation.
+    if (closeFailures.length)
+      throw new AggregateError(
+        [
+          ...reads.flatMap((read) => (read.status === 'rejected' ? [read.reason] : [])),
+          ...closeFailures,
+        ],
+        'terminal_inventory_close_unconfirmed',
+      );
+    const failed = reads.find((read) => read.status === 'rejected');
+    if (failed?.status === 'rejected') throw failed.reason;
+  }
   return {
     files: files.sort((a, b) => a.path.localeCompare(b.path)),
     links: links.sort((a, b) => a.path.localeCompare(b.path)),
@@ -258,7 +327,7 @@ export async function buildTerminalBundle(input: {
                     : [],
       };
     });
-    for (const item of packages) {
+    const buildWorkspace = async (item: (typeof packages)[number]) => {
       mkdirSync(item.destination, { recursive: true, mode: 0o700 });
       for (const segment of item.manifest.scripts.build.split(/\s*&&\s*/)) {
         const words = segment.trim().split(/\s+/);
@@ -333,7 +402,34 @@ export async function buildTerminalBundle(input: {
           2,
         ) + '\n',
       );
-    }
+    };
+    // Each workspace reads source and writes its own output. Keep that package's
+    // segments ordered, and wait for every original child before failure cleanup.
+    let nextWorkspace = 0,
+      buildFailed = false;
+    const builds = await Promise.allSettled(
+      Array.from({ length: process.platform === 'win32' ? 2 : 1 }, async () => {
+        while (!buildFailed) {
+          const item = packages[nextWorkspace++];
+          if (!item) return;
+          try {
+            await buildWorkspace(item);
+          } catch (cause) {
+            buildFailed = true;
+            throw cause;
+          }
+        }
+      }),
+    );
+    const unconfirmed = builds.find(
+      (build) =>
+        build.status === 'rejected' &&
+        build.reason instanceof AggregateError &&
+        build.reason.message === 'terminal_build_close_unconfirmed',
+    );
+    if (unconfirmed?.status === 'rejected') throw unconfirmed.reason;
+    const failed = builds.find((build) => build.status === 'rejected');
+    if (failed?.status === 'rejected') throw failed.reason;
     // Standalone Service lifetimes outlive the launching CLI and retain the same candidate.
     for (const [entry, run] of [
       ['main', 'runServiceProcess'],
@@ -502,14 +598,22 @@ if(import.meta.main){const lease=acquireArtifactAccess({root:resolve(import.meta
       productVersion,
       source,
       entries,
-      ...inventory(root),
+      ...(await inventory(root)),
     };
     writeFileSync(join(root, 'terminal-manifest.json'), JSON.stringify(manifest, null, 2) + '\n', {
       mode: 0o644,
     });
     return verifyTerminalBundle(root);
   } catch (cause) {
-    rmSync(destination, { recursive: true, force: true });
+    if (
+      !(
+        cause instanceof AggregateError &&
+        ['terminal_inventory_close_unconfirmed', 'terminal_build_close_unconfirmed'].includes(
+          cause.message,
+        )
+      )
+    )
+      rmSync(destination, { recursive: true, force: true });
     throw cause;
   }
 }

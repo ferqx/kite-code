@@ -61,7 +61,7 @@
 
 `/skills` 不接受参数，只读当前 Workspace 的完整知识目录。上下选择，左右翻阅详情，R 刷新，Esc 返回；面板内 Ctrl+C 仍请求原整轮取消，并关闭本地读取。可用、禁用、不可用与当前未知分别显示；宿主支持时另列 Workflow 资格与合格命令。查看目录不启动 Model、工具或 Workflow。
 
-`/<Skill 名称> [任务]` 显式激活当前唯一且允许手动调用、接受空对象输入的 Workflow；固定命令优先。任务文字只作任务内容，活动 Run 上排独立 follow-up。结果未知时 Ctrl+L 查询原命令并刷新，不重发。详见[扩展指南](../guides/mcp-and-skills.md#通用开发-tui-的-skill-目录)。
+`/<Skill 名称> [任务]` 显式激活当前唯一且允许手动调用、接受空对象输入的 Workflow；固定命令优先。任务文字只作任务内容，活动 Run 上排独立 follow-up。结果未知时自动查询当前会话的原命令，不重发。详见[扩展指南](../guides/mcp-and-skills.md#通用开发-tui-的-skill-目录)。
 
 ## 通用开发 TUI 显示设置
 

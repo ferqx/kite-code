@@ -24,6 +24,8 @@ import { buildOwnedDaemon } from '../fixtures/daemon-host-build';
 const repository = resolve(import.meta.dir, '../../../..');
 for (const mode of ['complete', 'cancel', 'eof'] as const) {
   test(`built development TUI actual PTY ${mode} preserves work and owned lifecycle`, async () => {
+    let driver: Bun.Subprocess<'ignore', 'pipe', 'pipe'> | undefined;
+    let verified = false;
     const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-tui-host-')));
     const workspace = join(root, 'workspace');
     privateDirectory(workspace);
@@ -37,9 +39,10 @@ for (const mode of ['complete', 'cancel', 'eof'] as const) {
       process.platform === 'win32' ? 'junction' : 'dir',
     );
     const developmentEntry = join(root, 'development-tui.ts');
+    const stopPath = join(root, 'owned-host-stop');
     writeFileSync(
       developmentEntry,
-      `import {runDevelopmentTUI as run} from ${JSON.stringify(join(repository, 'scripts/development/unified-tui.ts'))};export function runDevelopmentTUI(input){return run({...input,root:${JSON.stringify(root)}});}`,
+      `import {existsSync} from 'node:fs';import {runDevelopmentTUI as run} from ${JSON.stringify(pathToFileURL(join(repository, 'scripts/development/unified-tui.ts')).href)};export async function runDevelopmentTUI(input){const timer=process.platform==='win32'?setInterval(()=>{if(existsSync(${JSON.stringify(stopPath)})){clearInterval(timer);process.emit('SIGTERM')}},10):undefined;try{return await run({...input,root:${JSON.stringify(root)}})}finally{clearInterval(timer)}}`,
     );
     const entrypoint = join(root, 'apps/service/dist/main.js');
     const sha = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('hex');
@@ -70,7 +73,7 @@ for (const mode of ['complete', 'cancel', 'eof'] as const) {
         const review = body.messages.some((message) => {
           if (message.role !== 'user' || !message.content) return false;
           try {
-            return JSON.parse(message.content).purpose === 'authorization_review';
+            return JSON.parse(message.content).purpose === 'authorization_check';
           } catch {
             return false;
           }
@@ -128,7 +131,7 @@ for (const mode of ['complete', 'cancel', 'eof'] as const) {
           modelId: 'local',
           tools: [
             { id: 'files.write', definitionVersion: '2' },
-            { id: 'files.read', definitionVersion: '4' },
+            { id: 'files.read', definitionVersion: '5' },
           ],
           models: [
             {
@@ -187,48 +190,31 @@ for (const mode of ['complete', 'cancel', 'eof'] as const) {
       } finally {
         await seed.close();
       }
-      const program = `import os,pty,subprocess,select,time,signal,re,json,sqlite3
-master,slave=pty.openpty()
-p=subprocess.Popen([${JSON.stringify(process.execPath)},${JSON.stringify(join(repository, 'apps/cli/test/fixtures/tui-diagnostics-entry.ts'))},${JSON.stringify(developmentEntry)},'--workspace',${JSON.stringify(workspace)},'--thread','a','--data-root',${JSON.stringify(join(root, 'data'))}],stdin=slave,stdout=slave,stderr=slave,start_new_session=True)
-os.close(slave);buffer=b''
-def wait(text):
- global buffer
- deadline=time.monotonic()+10
- while text not in re.sub(r'\\s+',' ',re.sub(r'\\x1b\\[[0-?]*[ -/]*[@-~]','',buffer.decode(errors='replace'))):
-  if time.monotonic()>deadline: raise RuntimeError('expected '+text+' tail='+buffer[-2000:].decode(errors='replace'))
-  if select.select([master],[],[],.1)[0]:
-   try: buffer+=os.read(master,65536)
-   except OSError: raise RuntimeError('host ended '+buffer[-2000:].decode(errors='replace'))
-try:
- wait('New Run');owned=[int(line.split()[0]) for line in subprocess.check_output(['ps','-axo','pid,ppid'],text=True).splitlines()[1:] if len(line.split())==2 and line.split()[1]==str(p.pid)];assert owned;os.write(master,b'owned task');time.sleep(.1);os.write(master,b'\\r')
- ${
-   mode === 'complete'
-     ? `wait('360025 bytes, complete');buffer=b'';os.write(master,b'\\x0f');wait('${tail}');os.write(master,b'\\x0e');wait('New Workspace Session selected');os.write(master,b'\\x12');wait('Select Session');os.write(master,b'\\x1b');os.write(master,b'\\x11')`
-     : mode === 'cancel'
-       ? `wait('approval [');buffer=b'';os.write(master,b'\\x03');time.sleep(.1);os.write(master,b'\\x03');wait('Idle');os.write(master,b'\\x11')`
-       : `wait('approval [');os.close(master);master=-1;time.sleep(.3);assert p.poll() is None;db=sqlite3.connect('file:'+${JSON.stringify(profile.databasePath)}+'?mode=ro',uri=True);assert db.execute("SELECT status FROM run WHERE session_id='a'").fetchall()==[('waiting_interaction',)];assert db.execute("SELECT count(*) FROM interaction WHERE state='accepted'").fetchone()[0]==0;db.close();print('EOF_WAITING_ZERO_APPROVAL');os.kill(p.pid,signal.SIGTERM)`
-}
- deadline=time.monotonic()+6
- while master>=0 and p.poll() is None and time.monotonic()<deadline:
-  if select.select([master],[],[],.1)[0]:
-   try: buffer+=os.read(master,65536)
-   except OSError: break
- p.wait(timeout=3);assert p.returncode==0, ('exit '+str(p.returncode)+' tail='+buffer[-2000:].decode(errors='replace'))
- for pid in owned:
-  try: os.kill(pid,0);raise RuntimeError('owned Service process remains')
-  except ProcessLookupError: pass
- print('OWNED_SERVICE_STOPPED')
- print('HOST_EXIT '+str(p.returncode))
- print('FULL_TAIL '+str('${tail}' in buffer.decode(errors='replace')))
-finally:
- if p.poll() is None: os.killpg(p.pid,signal.SIGKILL);p.wait()
- if master>=0: os.close(master)
-`;
-      const child = Bun.spawn(['python3', '-c', program], {
-        env: { ...process.env, ...userConfiguration.homeEnvironment },
-        stdout: 'pipe',
-        stderr: 'pipe',
-      });
+      const child = Bun.spawn(
+        [
+          process.execPath,
+          join(repository, 'apps/cli/test/fixtures/tui-host-pty.ts'),
+          JSON.stringify({
+            mode,
+            root,
+            workspace,
+            dataRoot: join(root, 'data'),
+            databasePath: profile.databasePath,
+            entrypoint: developmentEntry,
+            serviceEntry: entrypoint,
+            evidence: `${root}.pty.log`,
+            stopPath,
+            tail,
+          }),
+        ],
+        {
+          env: { ...process.env, ...userConfiguration.homeEnvironment },
+          stdout: 'pipe',
+          stderr: 'pipe',
+          ...(process.platform === 'win32' ? { ipc() {} } : {}),
+        },
+      );
+      driver = child;
       const [out, err, exit] = await Promise.all([
         new Response(child.stdout).text(),
         new Response(child.stderr).text(),
@@ -246,8 +232,33 @@ finally:
       const database = new Database(profile.databasePath, { readonly: true });
       try {
         const runs = database.query("SELECT status FROM run WHERE session_id='a'").all();
-        expect(database.query("SELECT status FROM run WHERE session_id<>'a'").all()).toEqual(
-          mode === 'complete' ? [] : [{ status: 'completed' }],
+        expect(database.query("SELECT status FROM run WHERE session_id<>'a'").all()).toEqual([]);
+        // Auto checks now persist one runless Model in the original Session,
+        // bound to the actual write target; they create no synthetic child Run.
+        expect(
+          database
+            .query(
+              "SELECT c.status AS commandStatus,e.state,e.session_id AS sessionId,e.run_id AS runId,e.child_session_id AS childSessionId,t.session_id AS targetSessionId,t.adapter_id AS targetDefinition,json_extract(e.result_json,'$.content') AS content FROM command c JOIN execution e ON e.origin_command_id=c.id JOIN execution t ON t.id=e.parent_execution_id WHERE c.kind='authorization.check'",
+            )
+            .all(),
+        ).toEqual(
+          mode === 'complete'
+            ? []
+            : [
+                {
+                  commandStatus: 'applied',
+                  state: 'succeeded',
+                  sessionId: 'a',
+                  runId: null,
+                  childSessionId: null,
+                  targetSessionId: 'a',
+                  targetDefinition: 'files.write',
+                  content: JSON.stringify({
+                    decision: 'ask_user',
+                    reason: 'original workspace write requires explicit fixture review',
+                  }),
+                },
+              ],
         );
         expect(runs).toEqual([
           {
@@ -281,9 +292,20 @@ finally:
       await reopened.close();
       expect(calls).toBe(mode === 'complete' ? 2 : 1);
       expect(reviewCalls).toBe(mode === 'complete' ? 0 : 1);
+      verified = true;
     } finally {
+      if (driver && driver.exitCode === null) {
+        if (process.platform === 'win32') {
+          try {
+            driver.send('owned-host-stop');
+          } catch (error) {
+            expect(error).toHaveProperty('code', 'ERR_IPC_CHANNEL_CLOSED');
+          }
+        } else driver.kill();
+        await driver.exited;
+      }
       provider.stop(true);
-      rmSync(root, { recursive: true, force: true });
+      if (verified) rmSync(root, { recursive: true, force: true });
     }
   }, 30000);
 }

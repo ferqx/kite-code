@@ -1,5 +1,17 @@
 # Desktop 与 Native 制品
 
+普通 Workspace／明确外部路径写入的完整快照同样复用消息内交付卡。外部文件只提供原交付的阅读，不借用 Workspace 的编辑器打开权限。2026-10-23 最新 Main／交付 DOM 两文件12项118断言通过；工作文件删除、改动不改变原快照，中文跨页仍完整。受控浏览器中 Plan 修订为版本2后，选择 Auto 并批准，原待审卡退出、原轮次继续结束；此结果不外推 TUI／安装版资格。
+
+会话文件已接入 Main 字节准备、稳定导入、原消息绑定及后续 [Files 读取](../../packages/agent/src/tools/files/README.md)；输出和 Plan 的准确会话文件可由现有文件入口打开。下述受控页面、IPC 合同与真实 Node 冷查分别证明其覆盖的路径，不替代完整 Electron 安装制品或其他平台资格。
+
+会话输出在对应工具消息提供“查看本次交付的文件”。[历史 reader](electron/file-changes.ts)核原 succeeded Execution、原结果 revision、scope、Artifact 成员及完整 hash／size，按完整 UTF-8 边界返回每段至多64KiB；界面提供续读和回到开头，当前文件被改动或删除也不改旧版本。“打开当前文件”仍单独走原编辑器路径及准确登记重核。历史读取目前沿 Client 完整 Artifact reader 后分页 IPC，不宣称流式磁盘分页或大文件内存限额。
+
+PDF 工具页图复用 [图片 reader](electron/input-image-reads.ts)及 [NativeUserImages](src/native-user-images.tsx)：Main 只接观察到的完成 Tool 消息和索引，核原执行、最多4个 PNG 引用及16MiB总量，renderer 不能指定任意引用或路径。后继轮次、Fork 与冷历史按原来源读取，预览缓存只负责显示，不承担历史保存。只含一次读取的工具组也显示其页图。
+
+2026-10-23，`ba34a2e6` 加本轮修复、同一 Windows 开发环境：实际页面观察复制中源文件变化的失败提示、准备中状态、显式取消保留草稿与后续重新添加。补正准备完毕但界面未接纳的生命周期：signal 保持到 `addFiles` 接管，失效输入或丢弃的晚结果释放准确 Main 项，已接纳附件不随准备结束删除。[准备 owner DOM 回归](test/isolated/native-input-files-dom.test.tsx)1项30断言和 [Composer 回归](../../packages/ui/test/isolated/prompt-editor.test.tsx)8项78断言通过。最新页面再次混选文本／PDF／图片，实际观察发送占位→一条持久用户消息→三次读取→页图与报告交付→终态；源文件删除后重载，原图片、页图和历史正文仍可读，没有重复消息或卡住。该观察使用上述隔离浏览器桥，仍不代证完整 Electron 安装窗口。
+
+2026-10-23，`5c28cd1fd` 加当前会话文件工作树、Windows x64／Bun1.4.3：[会话文件浏览器夹具](test/session-files-browser-runner.fixture.ts)通过真实页面、Main 请求、HTTP、SQLite、Artifact 与受控模型逐步观察三种附件准备、删除临时源文件、发送占位接管、文本与 PDF 读取、页图、输出写入、进程关闭后重开及后继编辑。旧报告与修改后报告同时展开核对，各保原版本；过程未见重复消息。原 Plan 文件经普通 Files 修订后，审核显示相同修订正文和版本2。Main／DOM 历史交付与工具展示三文件23项284断言通过。夹具的传输桥、模型和私有 UI 数据端口是测试替身；不证明完整 Electron IPC、外部编辑器启动、真实模型识别或安装版资格。普通侧栏在此窄视口出现零宽现象，未计作通过；消息内交付阅读独立可用。
+
 产品展示名称统一为 **Kite**：共享侧栏、启动页、页面与窗口标题、关于菜单和原生提示使用相同大小写。原 `kite-native` 运行标识、workspace 包名、IPC 与本机偏好键保持，已有用户数据路径保持。
 
 ## Markdown 与附件输入
@@ -16,7 +28,17 @@
 
 2026-10-23 主题色修正：用户指出流程图／时序图缺少主题色，确认原 adapter 将全部线条映射为正文色。现改为深浅主题各自的蓝色节点边框／箭头和青色生命线／辅助边框，继续透明底。`bun apps/desktop/test/markdown-content-browser-runner.fixture.ts` 在 Chrome155／1280与390px下通过；新增解码图像像素断言核对蓝色确实绘出、时序生命线有青色、背景主要透明及深浅切换，页面错误和外部请求为0。生命周期隔离回归1项／22断言、UI与Desktop typecheck、定向Biome通过。再用当前生产renderer、`testDiagnostics:false`、原独立Profile和真实Service构建Electron44.3.0窗口，冷读原消息并实际检查亮／暗流程图、时序图与主题切换：颜色更新，文字可读，阅读位置保持；切换后先保留旧图再异步替换，不承诺颜色与页面背景同帧变化。此增量只复验主题色，前述流式时序／冷读等证据按未变化范围复用，不据此扩大安装或平台资格。
 
-产品操作见[桌面手册](../../docs/handbook/clients/desktop/README.md#提示词与附件)。[共享 Composer](../../packages/ui/src/desktop/Composer.tsx)承载实时 Markdown 和 12px 横向附件卡片；`+` 只有“添加文件”，同一次系统多选允许混选图片与普通文件，按 MIME／已知图片扩展名自动分流。图片选择、粘贴与拖入共用用户 File 字节流程；普通文件由[沙箱 preload](electron/preload.ts)经 [Electron webUtils](https://www.electronjs.org/docs/latest/api/web-utils)从真实磁盘 File 取得路径，[URI 编码](src/input-file-reference.ts)保留中文、空格、百分号、查询／片段字符及 UNC，不读取普通文件正文；内存 File 没有路径时明确失败。旧 Main `input.files.pick` 已退出。两者由[窗口附件草稿](src/native-input-images.ts)按 Store/Session 独立保留、移除和冻结，受理后只清本次 ID；文件 URI 不改写草稿，随正式输入 `files` 元数据保存，历史与待发送卡片均独立于正文。选择器不读取普通文件正文，renderer 不能给 Main 任意读取路径。
+产品操作见[桌面手册](../../docs/handbook/clients/desktop/README.md#提示词与附件)。[共享 Composer](../../packages/ui/src/desktop/Composer.tsx)按 MIME／图片扩展名分流。图片保留现有字节流程；普通 File 由 renderer 分块读取，每块至多 64 KiB，经闭合 IPC 交给 [Main 准备 owner](electron/input-files.ts)，不让 renderer 自报路径触发 Main 任意文件读取。每窗口最多 128 个准备项，单项及总量至多 256 MiB；显式取消、移除与换代终止所属准备并释放 Main 项，上传在途保留预算直到真实完成。
+
+新会话先创建准确 Session，再将冻结准备项通过 Service 流式发布为 Artifact；稳定导入 ID 绑定 Store／Session／draft ID。ACK 丢失先 GET 原导入，同 ID 不重复创建逻辑附件。调用 journal 保存已准备引用，原 command 接纳事务完成绑定；未知提交保留原意图而不盲目重新发送。历史附件和占位仍使用原文件名，普通附件从此不依赖源路径。未发送草稿仍仅保窗口生命周期。旧路径附件不静默转换。
+
+2026-10-23，`ba34a2e6d` 加本次会话文件工作树、Windows x64／Bun1.4.3：[普通附件 IPC 回归](test/isolated/native-session-files-ipc.test.ts)实际构建生产 preload，在 VM 中接入真实 Main handler、NativeCaller、Service HTTP、SQLite 与 Artifact，31断言通过。准确 sender、未完成／已释放／换代准备项和传入字节复制均核对；在实际 Windows Artifact 临时文件写入边界注入一次 ENOSPC 后，确认临时文件关闭并删除、输入导入与绑定均未形成、无 command／caller journal／模型调用、原文本草稿保持。解除故障后直接复用原准备 ID 和原字节重试，随后分别丢弃成功上传与 command 的 ACK，确认 GET 查回原导入，只有一次成功上传和一次 command POST。重建 caller 后首次 GET 再丢回执，第二次只查回原 command，原消息绑定、完整 Artifact 字节与模型调用数保持。此为实际链路写失败注入，不是物理磁盘满额资格；Electron 传输和此例私有 UI 数据端口为替身，也不代证完整 Electron 进程冷恢复。
+
+[普通文件 DOM 回归](test/isolated/native-input-files-dom.test.tsx)接真实 Main 准备 owner，核活动 FileReader 上显式 AbortSignal 取消及 scope 换代均不 append／finish、不生成 ready 草稿，并释放准确准备项；重新选择随后成功。本例本轮1项30断言通过；[Main 字节回归](test/input-files.test.ts)的原预算与字节合同证据继续适用。取消后的用户全过程观察仍以上述浏览器证据为准。
+
+[真实 Node 冷查](test/isolated/native-caller-journal-host.test.ts)使用 Node24.15.0、真实私有 SQLite journal 与 Profile 准入：原 `run.start` 携普通附件，在真实 HTTP 接纳后断开回执并强制退出 caller，冷进程首次 GET 再丢回执，后续只 GET 查回原 ID／摘要／scope，零重发；原附件绑定与字节仍可读。另两例核合法恢复活动 Run 后的 `input.steer` 原 ID 查回及已完成原公共 Run 的冷查，三例共102断言通过。冷重开本身不启动新模型或恢复业务效果。既有 `execution.cancel` 子进程夹具依赖 Unix Shell，在本机仍为 `shell_unavailable`；该独立平台限制不由附件或 command 查回测试取得资格。
+
+[文件入口](electron/file-changes.ts)保留原消息／执行回执核验；默认读取版本增加 5，旧 3／4 保持可读。打开 Profile 中的输出或方案时，先通过当前 Session 的 Files／Planning 查询匹配准确绝对目标，再核实际目录身份、规范路径与单链接；其他受保护路径仍拒绝。历史预览与“打开当前文件”的含义分开，外部编辑不会改变原保存的预览。
 
 开发热更新后的旧 preload 可能缺少 `fileReferences`，旧 Main 也可能拒绝图片暂存方法。[窗口适配器](src/native-input-images.ts)把原 `invalid_native_request/native_host_operation_unavailable` 识别为附件接口尚未加载；缺少文件路径解析 port 时以有限 `file_picker_restart_required` 错误交给共享 Composer，图片暂存直接保留明确的完全退出／重新启动提示。普通选择失败仍可重试，不展示原错误细节、不清草稿或重发。取消选择返回空列表。[窗口回归](test/isolated/native-input-images-dom.test.tsx)与[编辑器回归](../../packages/ui/test/isolated/prompt-editor.test.tsx)分别核旧协议、普通失败、取消和原草稿保持；主进程仍按原开发边界显式重新启动。
 
@@ -208,7 +230,7 @@ Windows Mica 的会话 `.client-content-frame` 默认保留四周6px外边距；
 
 Windows `.sidebar-header` 的左／右内边距分别为16／10px，使 Kite 标题与主要导航、空间图标的左边缘对齐。桌面共用收展按钮的展开位置消费同一 `--sidebar-header-end-padding`，收起位置消费标题起始内边距；Mica／Vibrancy 加上内容的顶部留白，Mica 收起位置另计6px左留白，macOS 收起位置避让原窗口按钮区。按钮位于共享面板边界的零宽轨道，不受导航200px最小内容宽度的裁切，窗口拖动排除仍由 `no-drag` 保持。
 
-玻璃导航的 `.sidebar-header` 以同一 `--native-panel-inset` 设置顶部外边距，品牌、侧栏按钮与内缩后的会话标题／右侧操作共用垂直中心；Windows Mica 为6px，macOS 为0px。2026-10-19 Windows x64／Electron 44.3.0 的隔离窗口加载实际 SessionPage、NativeWindowFrame 和编译样式，以平台／材质标记核深浅共8组几何：Windows Mica 的按钮及标题中心偏差由6px降为0（浮点误差小于0.001px），Windows／Linux实色与macOS Vibrancy原对齐保持。此项是浏览器几何证据，不补充其他平台的原生材质最终合成资格。
+玻璃导航的 `.sidebar-header` 以同一 `--native-panel-inset` 设置顶部外边距，Windows Mica 为6px，macOS 为0px。Windows 标题行取消共享52px最小高度，由品牌内容、顶部12px和底部2px内边距撑开，主导航顶部外边距沿共享8px；品牌、侧栏按钮、会话标题与操作按钮共用垂直中心。收展按钮两种状态均沿原 `--sidebar-toggle-top` 定位，Mica 下计入6px留白。macOS／Linux 保留原高度与对齐。2026-10-23 的隔离浏览器加载当前生产 CSS 与标题结构，深浅主题、Mica／实色、1200／600px八组测得四处中心相同，侧栏收起与恢复时按钮中心不变；标题行随28／40px内容行高增为42／54px，主导航间距保持8px。该证据只覆盖浏览器布局，不代替完整 Electron 窗口交互或原生材质合成验收；2026-10-19 旧52px标题行的历史几何结果不作为当前自适应标题行的验收依据。
 
 Native 的面板左外边距／宽度及会话标题栏的左内边距仅在共享 Group 的 `data-animate-width=true` 时跟随180ms过渡，使 Mica 的6px留白和macOS窗口按钮安全间距与[共享标题占位](../../packages/ui/src/desktop/SessionPage.tsx)一起移动；手动调宽沿原事件关闭动画，减少动画偏好统一直接切换。2026-10-19 Windows x64／Electron44.3.0 的隔离实际组件与编译样式逐帧对照：原Windows Mica侧栏收起的标题反向跳动为50px，实色为44px，macOS样式标记为108px；修复后1086px可用宽度的反向偏移小于0.1px、垂直位移为0。786px紧凑布局另核深浅主题、有／无右侧按钮、实色及macOS样式，减少动画偏好另核五组，反向及垂直位移均为0。页面／侧栏／安排任务／Native新对话／后台五个整文件60项、1041断言和UI／Desktop类型检查通过；平台标记只验证样式，不代证其他平台原生窗口或安装资格。
 
@@ -689,7 +711,7 @@ Main 的 `state` 与 `messages` 只读请求不等待父元数据刷新结束。
 
 环境卡准确停止接纳期间，同scope目录刷新排队，先等待已经在途的完整读取，再按最新完整facts核目标与停止资格；原停止申请只提交一次。目录结果立即更新读取owner的最新facts，避免React尚未commit而使用旧observation。停止返回后恢复目录校准，换根只撤销尚未提交的等待；已提交的原停止继续收束，迟到提示不能进入新scope。Main原有prepare前后两次新鲜度校验、准确身份和unknown不重试保持。[停止竞态DOM回归](test/isolated/native-environment-stop-dom.test.tsx)在旧实现复现轮询替换观察及未等在途目录即提交，修复后3项／24断言通过；真实混合压力复测归下方监督进程对照。
 
-实际多根窗口还发现滚动后立即离开会保留旧消息DOM：GC后脱离document的节点500→2217，heap snapshot定位13棵Conversation经Document动画controller→RAF closure→旧viewport持有。原Radix ScrollAreaThumb卸载遗漏持续RAF清理；消息区现用局部原生滚动viewport，原阅读位置／自动跟随／跳最新／细滚动条保持，资源归属和100轮立即卸载回归归[UI owner](../../packages/ui/README.md#完整模型正文展示)。修复前的GET已排空与单一SSE并不能证明DOM释放，两项证据分别保留。
+实际多根窗口还发现滚动后立即离开会保留旧消息DOM：GC后脱离document的节点500→2217，heap snapshot定位13棵Conversation经Document动画controller→RAF closure→旧viewport持有。原Radix ScrollAreaThumb卸载遗漏持续RAF清理；消息区现使用组件库 ScrollArea，并通过版本绑定补丁补齐卸载清理，原阅读位置／自动跟随／跳最新／细滚动条保持，资源归属和100轮立即卸载回归归[UI owner](../../packages/ui/README.md#完整模型正文展示)。修复前的GET已排空与单一SSE并不能证明DOM释放，两项证据分别保留。
 
 活动大正文持续改变时，纯全文key缓存仍会miss。多根长正文CPU profile曾在开发React运行时复现99次约60ms长任务，固定parser的micromark tokenizer／调用栈占主要时间；不能用Promise延后同一主线程工作解释为消除阻塞。[Native Markdown准备](src/native-markdown.ts)现将至少32768个UTF-16单位的已验证Model正文交给[静态Worker](src/native-markdown-worker.ts)，只运行UI公开的固定remark／GFM／公式纯解析。一个active计算、最多8个pending、排队源文本估算16MiB，超限明确 `native_markdown_busy`；活动单篇仍完整解析。准确任务ID／原文和AbortSignal隔离迟到结果，取消当前计算终止对应Worker，不取消业务。
 

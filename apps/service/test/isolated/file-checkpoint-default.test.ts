@@ -74,7 +74,7 @@ test('default paired Files captures actual two-Run Model boundaries and complete
       modelId: 'fixed',
       models: [model],
       tools: [
-        { id: 'files.read', definitionVersion: '4' },
+        { id: 'files.read', definitionVersion: '5' },
         { id: 'files.write', definitionVersion: '2' },
       ],
     }),

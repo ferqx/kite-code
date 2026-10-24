@@ -308,6 +308,7 @@ export async function startService(options: ServiceOptions) {
     capabilities.push('pending_input_queue');
   if (options.runtime?.supportsSelectedSkills) capabilities.push('run_skill_selection');
   if (options.runtime?.supportsInputImages) capabilities.push('input_images');
+  if (options.runtime?.supportsInputFiles) capabilities.push('input_files');
   if (options.runtime?.supportsExtensionInputs) capabilities.push('run_extension_inputs');
   if (options.diagnosticSource) capabilities.push('host_status');
   if (options.skillCatalogue) capabilities.push('skill_catalogue');
@@ -906,6 +907,78 @@ export async function startService(options: ServiceOptions) {
       subjectId,
     });
     return context.json(schemas.Command.parse(receipt), 202);
+  });
+  app.post('/v1/sessions/:id/input-files', async (context) => {
+    const query = schemas.InputFileUploadQuery.safeParse(
+      Object.fromEntries(
+        Object.entries(context.req.queries()).map(([key, values]) => [
+          key,
+          values.length === 1 ? values[0] : values,
+        ]),
+      ),
+    );
+    if (
+      !query.success ||
+      context.req.header('content-type') !== 'application/octet-stream' ||
+      !context.req.raw.body
+    )
+      throw new HttpFailure('invalid_request', 400);
+    const input = query.data;
+    const body = context.req.raw.body;
+    async function* chunks() {
+      const reader = body.getReader();
+      try {
+        for (;;) {
+          const next = await reader.read();
+          if (next.done) return;
+          yield next.value;
+        }
+      } finally {
+        await reader.cancel().catch(() => {});
+        reader.releaseLock();
+      }
+    }
+    const file = await runtime.uploadInputFile({
+      ...input,
+      sessionId: context.req.param('id'),
+      subjectId,
+      content: chunks(),
+      expectedContent: { size: input.size, hash: input.hash },
+      signal: context.req.raw.signal,
+    });
+    return context.json(schemas.InputFileReference.parse(file), 201);
+  });
+  app.get('/v1/sessions/:id/input-files/:importId', async (context) => {
+    const query = schemas.HostMutationQuery.safeParse(
+      Object.fromEntries(
+        Object.entries(context.req.queries()).map(([key, values]) => [
+          key,
+          values.length === 1 ? values[0] : values,
+        ]),
+      ),
+    );
+    if (!query.success) throw new HttpFailure('invalid_request', 400);
+    const file = await runtime.getInputFileImport({
+      expectedStoreId: query.data.storeId,
+      sessionId: context.req.param('id'),
+      subjectId,
+      id: context.req.param('importId'),
+    });
+    if (!file) throw new HttpFailure('input_file_not_found', 404);
+    return context.json(schemas.InputFileImport.parse(file));
+  });
+  app.post('/v1/sessions/:id/input-files/:importId/release', async (context) => {
+    const input = await readBusinessBody(context.req.raw, schemas.InputFileReleaseRequest, 1024);
+    return context.json(
+      schemas.InputFileImport.parse(
+        await runtime.releaseInputFileImport({
+          ...input,
+          sessionId: context.req.param('id'),
+          subjectId,
+          id: context.req.param('importId'),
+        }),
+      ),
+    );
   });
   app.post('/v1/sessions/:id/input-images', async (context) => {
     const input = await readBusinessBody(

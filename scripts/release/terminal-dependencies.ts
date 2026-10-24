@@ -355,9 +355,12 @@ export function copyTerminalDependencies(input: {
         copy(join(canonical, name), join(target, name), root, next);
       }
     } else if (stat.isFile()) {
-      mkdirSync(dirname(target), { recursive: true, mode: 0o755 });
+      // Directory recursion has already created the parent; Windows CopyFile
+      // also preserves the source read-only attribute without a chmod rewrite.
+      if (process.platform !== 'win32')
+        mkdirSync(dirname(target), { recursive: true, mode: 0o755 });
       copyFileSync(canonical, target);
-      chmodSync(target, stat.mode & 0o777);
+      if (process.platform !== 'win32') chmodSync(target, stat.mode & 0o777);
     } else fail('asset_invalid');
   };
   if (input.dependencyLayout === 'materialized') {

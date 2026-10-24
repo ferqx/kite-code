@@ -24,6 +24,7 @@ function ChangeDetail({
   const [error, setError] = useState('');
   const [revision, setRevision] = useState(0);
   const [opening, setOpening] = useState(false);
+  const [offset, setOffset] = useState(0);
   useEffect(() => {
     if (entry.preview === 'unavailable') return;
     const readId = `${revision}-${crypto.randomUUID()}`;
@@ -31,7 +32,13 @@ function ChangeDetail({
     setError('');
     setBody(undefined);
     void bridge
-      .request({ method: 'fileChanges.detail', generation, changeId: entry.changeId, readId })
+      .request({
+        method: 'fileChanges.detail',
+        generation,
+        changeId: entry.changeId,
+        readId,
+        offset,
+      })
       .then((value) => {
         if (!active) return;
         if (
@@ -51,7 +58,7 @@ function ChangeDetail({
       active = false;
       void bridge.request({ method: 'fileChanges.close', generation, readId }).catch(() => {});
     };
-  }, [bridge, generation, entry.changeId, entry.preview, revision]);
+  }, [bridge, generation, entry.changeId, entry.preview, revision, offset]);
   async function open() {
     setOpening(true);
     setError('');
@@ -86,22 +93,58 @@ function ChangeDetail({
     <>
       {entry.path && entry.openable && (
         <Button className="file-link" disabled={opening} onClick={() => void open()}>
-          {entry.path}
+          打开当前文件：{entry.path}
         </Button>
       )}
       {error && <p role="alert">{error}</p>}
       {error && entry.preview === 'available' && (
-        <Button onClick={() => setRevision((value) => value + 1)}>重新读取差异</Button>
+        <Button onClick={() => setRevision((value) => value + 1)}>重新读取历史内容</Button>
       )}
       {entry.preview === 'unavailable' || (body && body.text === undefined) ? (
         <p>历史记录未保存可读差异，不会从当前文件内容重建。</p>
       ) : body?.text !== undefined ? (
         <>
           {body.truncated && <p role="status">差异预览已截断；编辑器打开文件的当前内容。</p>}
-          <FileDiff message={message} />
+          {body.snapshot ? (
+            <>
+              <p>本次交付的历史版本；后续编辑不会改变此内容。</p>
+              <pre
+                style={{
+                  whiteSpace: 'pre-wrap',
+                  overflowWrap: 'anywhere',
+                  maxHeight: 480,
+                  overflow: 'auto',
+                }}
+              >
+                {body.text}
+              </pre>
+              {offset > 0 && <Button onClick={() => setOffset(0)}>回到开头</Button>}
+              {body.nextOffset != null && (
+                <Button onClick={() => setOffset(body.nextOffset!)}>读取下一段</Button>
+              )}
+            </>
+          ) : (
+            <FileDiff message={message} />
+          )}
         </>
       ) : null}
     </>
+  );
+}
+
+/** A delivery is readable from its own message, including when the current file is gone. */
+export function NativeOutputFile(props: {
+  bridge: NativeBridge;
+  generation: number;
+  entry: NativeFileChange;
+  editor: DesktopEditor;
+}) {
+  const [open, setOpen] = useState(false);
+  return (
+    <details open={open} onToggle={(event) => setOpen(event.currentTarget.open)}>
+      <summary>查看本次交付的文件</summary>
+      {open && <ChangeDetail {...props} />}
+    </details>
   );
 }
 

@@ -188,7 +188,69 @@ test('TUI interrupt requires explicit orphan-group confirmation and never infers
   f.controller.dispose();
 });
 
-test('recovery native Ctrl+C and Ctrl+L in one input chunk abort only the original read then query the same intent', async () => {
+test('closing recovery automatically queries only the original receipt after a lost GET without another submission', async () => {
+  const f = fixture();
+  await f.controller.select('a');
+  await f.controller.openRecovery();
+  const submitted = f.controller.submitRecovery('run', 'original-run');
+  f.resolve({ intent: f.original(), status: 'outcome_unknown' });
+  await submitted;
+  const original = structuredClone(f.original());
+  const reads: TuiRecoveryIntent[] = [];
+  f.port.recovery!.lookup = async (intent) => {
+    reads.push(structuredClone(intent));
+    if (reads.length === 1) throw Error('lost original GET');
+    return {
+      intent,
+      status: 'resumed',
+      command: {
+        kind: 'run.resume',
+        id: original.request.commandId,
+        originStoreId: 'store',
+        sessionId: 'a',
+        status: 'applied',
+        cancelRequestedAt: null,
+        receipt: {
+          outcome: 'run_resumed',
+          runId: 'original-run',
+          originalCommandId: 'work',
+          boundary: 'tool_calls',
+        },
+      },
+      run: {
+        id: 'original-run',
+        originStoreId: 'store',
+        sessionId: 'a',
+        originCommandId: 'work',
+        status: 'completed',
+      } as TuiRecoveryOutcome['run'],
+    };
+  };
+  try {
+    await new Promise((resolve) => setTimeout(resolve, 600));
+    expect(reads).toEqual([]);
+    await f.controller.select('b');
+    f.controller.closePanel();
+    await new Promise((resolve) => setTimeout(resolve, 600));
+    expect(reads).toEqual([]);
+    await f.controller.select('a');
+    const firstDeadline = Date.now() + 1500;
+    while (!reads.length && Date.now() < firstDeadline) await tick();
+    expect(reads).toEqual([original]);
+    expect(f.controller.state.recovery?.status).toBe('outcome_unknown');
+    const finalDeadline = Date.now() + 1500;
+    while (f.controller.state.recovery?.status !== 'resumed' && Date.now() < finalDeadline)
+      await tick();
+    expect(reads).toEqual([original, original]);
+    expect(f.controller.state.recovery?.status).toBe('resumed');
+    expect(f.controller.state.recovery?.intent).toEqual(original);
+    expect(f.stats()).toEqual({ writes: 1, reads: 0, cancels: 0 });
+  } finally {
+    f.controller.dispose();
+  }
+});
+
+test('recovery native Ctrl+C aborts only the original read while the adjacent Ctrl+L is ignored', async () => {
   const f = fixture();
   await f.controller.select('a');
   await f.controller.openRecovery();
@@ -212,9 +274,9 @@ test('recovery native Ctrl+C and Ctrl+L in one input chunk abort only the origin
     await tick();
     app.stdin.write('\u0003\u000c');
     await tick();
-    expect(reads).toHaveLength(2);
+    expect(reads).toHaveLength(1);
     expect(reads[0]!.signal.aborted).toBe(true);
-    expect(reads.map((read) => read.intent)).toEqual([original, original]);
+    expect(reads.map((read) => read.intent)).toEqual([original]);
     expect({ writes: f.stats().writes, cancels: f.stats().cancels }).toEqual({
       writes: 1,
       cancels: 0,
@@ -336,3 +398,32 @@ for (const failure of ['corrupt', 'privateAuthority'] as const)
     expect(f.controller.state.error).toBeDefined();
     f.controller.dispose();
   });
+
+test('automatic recovery checks every restored original in the selected Session even when the displayed intent belongs elsewhere', async () => {
+  const f = fixture();
+  const saved: TuiRecoveryIntent[] = ['b', 'a', 'a'].map((sessionId, index) => ({
+    kind: 'report',
+    sessionId,
+    reportCommandId: `report-${index}`,
+    request: { expectedStoreId: 'store', commandId: `restored-${index}` },
+  }));
+  const reads: TuiRecoveryIntent[] = [];
+  f.port.recovery!.restore = async () =>
+    saved.map((intent) => ({ intent, status: 'outcome_unknown' }));
+  f.port.recovery!.lookup = async (intent) => {
+    reads.push(structuredClone(intent));
+    return { intent, status: 'outcome_unknown' };
+  };
+  try {
+    await f.controller.select('a');
+    await f.controller.openRecovery();
+    expect(f.controller.state.recovery?.intent).toEqual(saved[0]);
+    f.controller.closePanel();
+    const deadline = Date.now() + 1500;
+    while (reads.length < 2 && Date.now() < deadline) await tick();
+    expect(reads).toEqual(saved.slice(1));
+    expect(f.stats()).toEqual({ writes: 0, reads: 0, cancels: 0 });
+  } finally {
+    f.controller.dispose();
+  }
+});

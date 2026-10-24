@@ -174,6 +174,7 @@ console.log(JSON.stringify({tasks:data.scheduledTasks(),runs:data.scheduledTaskR
         '0003-session-reconciliation',
         '0004-pending-input-order',
         '0005-authorization-check',
+        '0006-input-file-imports',
       ]);
       coreChecksum = schema.checksum;
       originalAudits = sourceCore.query('SELECT * FROM recovery_audit ORDER BY run_id').all();

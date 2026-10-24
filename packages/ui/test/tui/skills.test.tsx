@@ -505,7 +505,7 @@ test('capability absence, disabled Workflow, unknown read and changed selection 
   f.controller.dispose();
 });
 
-test('Ink CtrlL recovers only the original lost Workflow receipt then refreshes without resubmission', async () => {
+test('lost Workflow receipt recovers automatically without CtrlL or resubmission', async () => {
   const f = workflowFixture();
   await f.controller.select('a');
   f.controller.setDraft('/review original task');
@@ -525,6 +525,9 @@ test('Ink CtrlL recovers only the original lost Workflow receipt then refreshes 
   expect(ui.lastFrame()).toContain('unknown');
   ui.stdin.write('\u000c');
   await new Promise((resolve) => setTimeout(resolve, 30));
+  expect(lookups).toBe(0);
+  const deadline = Date.now() + 1500;
+  while (!lookups && Date.now() < deadline) await Bun.sleep(30);
   expect(lookups).toBe(1);
   expect(f.sent).toHaveLength(1);
   expect(f.controller.state.intent?.phase).toBe('accepted');

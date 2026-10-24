@@ -22,9 +22,11 @@ Host 从同 Scope 的公开 SessionView 取得原 owner，并提供当前已认�
 
 无 Thinking 的单次只读调用保留原统计，阶段收束后补充普通工具卡结果；活动时保留原 StepRow，已有失败／取消卡不重复。卡片 node 与来源 version 使用同一个执行投影，不能只用 phase 摘要代替完整结果与引用版本。合法的 runless Shell carrier 只经唯一、准确的父 Tool 归到原 Run；同一调用来源用于消息顺序和结果去重，保留 Bash 后探索顺序，取消前驱的历史不会浮到后继输入之后。foreign 或多个 carrier 不推定归属，完整 Job 输出读取入口不变。MCP 原名称经同一 Scope／catalogue／definition／name hash 校验后同时提供运行预览和终态详情；已确认工具失败与传输后的未知效果分别保留，未知不自动续跑。
 
-已核实的完整附件与历史共用单一 Static 输出队列，关闭审批卡仍继续输出后续回复。真实 producer 完成后，有界预览可按来源顺序封存；显式全文读取继续独立核 EOF、字节和原引用，后来完整正文变化沿原版本重建。Ctrl+L 查询原申请并刷新，显式 `/clear` 清理当前显示。提供 `same_command` 的审批要求先明确选择范围，初始空 Enter 不发送回答。
+已核实的完整附件与历史共用单一 Static 输出队列，关闭审批卡仍继续输出后续回复。 Static 宽度固定为当前终端列数，避免工具长单行把历史缓冲区撑宽，造成大正文输出延迟；正文仍完整换行，列数变化沿原 epoch 重排。Host 测量标题和提示的实际行高，为主对话及 Plan／Question 保留小于终端总高度的动态区域，避免 Windows Ink 在满屏时逐帧清屏并重放全部 Static。Plan 只压缩重复留白，选项及完整说明保持；独立长管理面板和首次配置继续使用原展开边界。真实 producer 完成后，有界预览可按来源顺序封存；显式全文读取继续独立核 EOF、字节和原引用，后来完整正文变化沿原版本重建。Ctrl+L 不触发任何刷新或查询；当前会话未知回执沿原自动退避只读核对；恢复目录中的每个原申请按准确 Session 分别查回，不查询其他会话或正在提交的申请，也不重发任何申请。显式 `/clear` 清理当前显示。提供 `same_command` 的审批要求先明确选择范围，初始空 Enter 不发送回答。
 
-活动 Markdown 复用原增量解析缓存，由 [live-markdown](live-markdown.ts) 按原行偏移分出稳定段落和仍变化的尾段；稳定段落进入同一 Static 队列，完整来源变化才重建。已输出材料不因动态尾段暂时缩短而回放，reason-first 缓冲和真实工具归属仍决定正文顺序。Question 的完整材料保留原换行，输入窗口按实际内容列宽计算光标；只有 Question 明确使用完整宽度，其他 Overlay 的默认内边距保持。
+活动 Markdown 复用原增量解析缓存，由 [live-markdown](live-markdown.ts) 按原行偏移分出稳定段落和仍变化的尾段；稳定段落进入同一 Static 队列，完整来源变化才重建。增长中的长纯文本尾段先完整解析，再由 [plain-text-wrap](ink/plain-text-wrap.ts) 按真实列宽换行，最后仅向有限动态区域提供可见末行，避免 Ink 每帧遍历整段巨型文本后再裁剪。换行结果按原内容与列宽复用，计时、输入及仅行数变化不重算；原文、来源版本和完整读取缓存保持，稳定段及完成正文进入 Static 时不裁剪。小段、富样式、代码和表格保持原渲染，本项不宣称优化其所有大输入。已输出材料不因动态尾段暂时缩短而回放，reason-first 缓冲和真实工具归属仍决定正文顺序。Question 的完整材料保留原换行，输入窗口按实际内容列宽计算光标；只有 Question 明确使用完整宽度，其他 Overlay 的默认内边距保持。
+
+2026-10-23，Windows x64／Bun1.4.3、`ba34a2e6d` 加当前修复：[scrollback](../../test/tui/scrollback.test.tsx)、主屏和 Plan 面板17项252断言通过，含长 Tool 名后9MB完整正文的顺序、窗口变化和后继输入；增量 Markdown、Unicode 换行和窗口11项41断言通过。普通无 Host 标题、额外提示及诊断三种布局另核全部 Plan 选择与完整描述、无默认选择、反馈及草稿在80×24至60×30之间保持，状态和编辑零历史清屏重放。实际原生 Host／正式候选的整链结果由 [Terminal owner](../../../../apps/cli/docs/terminal-release.md#构建与操作)记录，不以组件通过代替。
 
 原 `apps/kite-cli/src/tui` 的纯 UI 已迁入 [ink](ink/MarkdownBlock.tsx)：Markdown 的增量闭合缓存、代码语言框与高亮、表格边框和中英文宽度，用户原文背景块与 30 行首尾窗口，工具五行预览／Shell tail、文件 diff、Thinking 聚合、子任务树、ConcurrentSubAgent、计划步骤与压缩阶段。主题色板、语言目录、frame、选择行、搜索框和首次配置保留原展示算法；不导入旧 Runtime、provider、reducer 或旧客户端。
 
@@ -48,11 +50,11 @@ Host 在 SSE ready、合法 `host_control.changed` 及首次／跨 Session 选�
 
 Question 的取消 caller 向 Host 提供当前卡的准确 ID／revision／presentation 范围，Host 重新核原 pending Question 与 Execution 后才准备同一持久 `execution.cancel`。普通 Job 停止仍保 Job 专属核验；错卡、错 Scope、已终结或无法核实不取得 POST 资格。纯 `ask_user` 的实际原执行取消结果允许同 Run 继续，不能将其他 Tool 的 abort 或未知副作用当成问答取消成功。
 
-Question 的可编辑状态取自 Controller 保存的准确原 Answer，匹配 Store／presentation Session／Interaction ID／revision；提交中、unknown 和保存已确认但卡片尚未更新时冻结原选项、正文与步骤，保 Ctrl+L 原查询、会话目录及整轮取消。明确未提交和 rejected 可编辑重试，不把另一卡的回执套到当前卡。新空草稿不立即报长度错误，原不合格提交、Unicode 长度和零 POST 门禁仍适用；问卷使用专用“提交回答”文案。失败 `ask_user` 保实际参数错误及原代码，并说明该调用未创建问卷，后续合法调用保持独立状态。
+Question 的可编辑状态取自 Controller 保存的准确原 Answer，匹配 Store／presentation Session／Interaction ID／revision；提交中、unknown 和保存已确认但卡片尚未更新时冻结原选项、正文与步骤，保原回执自动核对、会话目录及整轮取消。明确未提交和 rejected 可编辑重试，不把另一卡的回执套到当前卡。新空草稿不立即报长度错误，原不合格提交、Unicode 长度和零 POST 门禁仍适用；问卷使用专用“提交回答”文案。失败 `ask_user` 保实际参数错误及原代码，并说明该调用未创建问卷，后续合法调用保持独立状态。
 
 Files 目录 Enter 只读预览并进入范围确认，默认 both，次序为 both／session／code；确认页 Enter 才申请，数字键只选范围。独立 diff reader 的 Enter 不提交或重读目录。继承的恢复点标题按唯一原 message 出处绑定，不猜当前位置。完整“代码和会话”成功后，Controller 仍需 Host 的只读完成证明、准确原 intent／Scope 和读取代次才切换新会话、关闭面板并显示实际恢复数量；preview 数量或历史成功不足以代替当前证明。关闭、切范围和迟到结果不污染后来会话，代码审批及第二步继续仍需各自明确操作，详见[恢复指南](../../../../docs/handbook/clients/tui/guides/cancellation-and-recovery.md)。
 
-仅测试 fixture 或可信 host 显式传入 `TuiSession({testDiagnostics:true})` 才显示 ID／协议 JSON／回执诊断；development 和正式启动均拒绝 `--test-ui-diagnostics`，环境变量不会启用诊断。诊断模式保留手动全文／附件读取，便于核原门禁；正常界面在所属消息／执行记录中保留真实失败、未知、部分内容与取消未确认；连接观察、队列读取和提交回执异常不再通过消息区外横幅、Error 行或 Ctrl+L 临时提示显示。身份拒绝及用户显式操作失败（例如导出失败、草稿保存失败阻止退出）仍显示必要错误；controller 独立标记快照读取错误，避免把它们与用户操作失败一并隐藏。观察与原申请只读核对自动退避重试，切范围或关闭时停止，不重放已尝试写入。两种模式使用同一新 Client／Service／Agent 业务链。
+仅测试 fixture 或可信 host 显式传入 `TuiSession({testDiagnostics:true})` 才显示 ID／协议 JSON／回执诊断；development 和正式启动均拒绝 `--test-ui-diagnostics`，环境变量不会启用诊断。诊断模式保留手动全文／附件读取，便于核原门禁；正常界面在所属消息／执行记录中保留真实失败、未知、部分内容与取消未确认；连接观察、队列读取和提交回执异常不再通过消息区外横幅、Error 行或临时刷新提示显示。身份拒绝及用户显式操作失败（例如导出失败、草稿保存失败阻止退出）仍显示必要错误；controller 独立标记快照读取错误，避免把它们与用户操作失败一并隐藏。观察与原申请只读核对自动退避重试，切范围或关闭时停止，不重放已尝试写入。两种模式使用同一新 Client／Service／Agent 业务链。
 
 原 renderer／panel 与必要来源测试见 [Ink renderer](../../test/tui/ink-renderers.test.tsx)、[主屏集成](../../test/tui/ink-main-integration.test.tsx)、[source projection](../../test/tui/execution-ink-projection.test.tsx)、[scrollback](../../test/tui/scrollback.test.tsx)。实际终端和跨平台资格归 [CLI owner](../../../../apps/cli/README.md)及[当前进度](../../../../docs/plans/unified-agent-refactor-v1-progress.md)，不从复制组件推导阶段退出。
 

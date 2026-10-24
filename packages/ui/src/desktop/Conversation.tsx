@@ -18,6 +18,7 @@ import {
   CollapsibleTrigger,
 } from './components/ui/collapsible';
 import { Marker, MarkerContent } from './components/ui/marker';
+import { ScrollArea } from './components/ui/scroll-area';
 import { useDesktopDiagnostics } from './diagnostics';
 import { cn } from './lib/utils';
 import { MessageContent } from './MessageContent';
@@ -1167,61 +1168,61 @@ export function Conversation({
   return (
     <ClipboardWriteContext.Provider value={writeClipboardText}>
       <div className="conversation-container">
-        <div className="conversation">
-          <div
-            ref={viewport}
-            className="conversation-viewport"
-            {...{
-              role: 'region',
-              'aria-label': '会话消息',
-              'aria-busy': loading || busy,
-              onScroll: () => {
-                const element = viewport.current;
-                if (!element || loading || restore.current) return;
-                if (
-                  writtenScrollTop.current !== undefined &&
-                  Math.abs(element.scrollTop - writtenScrollTop.current) < 1
-                )
-                  return;
-                writtenScrollTop.current = undefined;
-                // Resume only at the actual bottom. A wider near-bottom zone
-                // makes the following-state commit snap a manual scroll to the tail.
-                // scrollTop is fractional while the two heights are rounded.
-                const follow = element.scrollHeight - element.clientHeight - element.scrollTop <= 1;
-                reading.current = {
-                  top: element.scrollTop,
-                  follow,
-                  expanded: reading.current.expanded,
-                };
-                setFollowing(follow);
-              },
-            }}
-          >
-            <div ref={content} className="reading-column">
-              {!loading &&
-                (!entries.length ? (
-                  <div className="welcome">
-                    <h1>{emptyState?.title ?? (selected ? '从一个想法开始' : '继续你的工作')}</h1>
-                    <p>
-                      {emptyState?.detail ??
-                        (selected
-                          ? '描述你的目标，或写下需要一起解决的问题。'
-                          : connected
-                            ? '选择已有会话，或为新的工作创建一个会话。'
-                            : '选择本地项目，连接你的模型与工具。')}
-                    </p>
-                  </div>
-                ) : (
-                  entries.map(renderEntry)
-                ))}
-              {!loading && selected && requiredSubagentWait && (
-                <Marker className="mt-4" role="status">
-                  <MarkerContent>正在等待子 Agent 结果</MarkerContent>
-                </Marker>
-              )}
-            </div>
+        <ScrollArea
+          type="always"
+          className="conversation"
+          viewportRef={viewport}
+          viewportClassName="conversation-viewport"
+          viewportProps={{
+            role: 'region',
+            'aria-label': '会话消息',
+            'aria-busy': loading || busy,
+            onScroll: () => {
+              const element = viewport.current;
+              if (!element || loading || restore.current) return;
+              if (
+                writtenScrollTop.current !== undefined &&
+                Math.abs(element.scrollTop - writtenScrollTop.current) < 1
+              )
+                return;
+              writtenScrollTop.current = undefined;
+              // Resume only at the actual bottom. A wider near-bottom zone
+              // makes the following-state commit snap a manual scroll to the tail.
+              // scrollTop is fractional while the two heights are rounded.
+              const follow = element.scrollHeight - element.clientHeight - element.scrollTop <= 1;
+              reading.current = {
+                top: element.scrollTop,
+                follow,
+                expanded: reading.current.expanded,
+              };
+              setFollowing(follow);
+            },
+          }}
+        >
+          <div ref={content} className="reading-column">
+            {!loading &&
+              (!entries.length ? (
+                <div className="welcome">
+                  <h1>{emptyState?.title ?? (selected ? '从一个想法开始' : '继续你的工作')}</h1>
+                  <p>
+                    {emptyState?.detail ??
+                      (selected
+                        ? '描述你的目标，或写下需要一起解决的问题。'
+                        : connected
+                          ? '选择已有会话，或为新的工作创建一个会话。'
+                          : '选择本地项目，连接你的模型与工具。')}
+                  </p>
+                </div>
+              ) : (
+                entries.map(renderEntry)
+              ))}
+            {!loading && selected && requiredSubagentWait && (
+              <Marker className="mt-4" role="status">
+                <MarkerContent>正在等待子 Agent 结果</MarkerContent>
+              </Marker>
+            )}
           </div>
-        </div>
+        </ScrollArea>
         {loading && (
           <div className="conversation-loading" role="status" aria-label="正在加载聊天">
             <HugeiconsIcon aria-hidden="true" data-icon="kite-loading" icon={KiteIcon} />

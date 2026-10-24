@@ -174,6 +174,17 @@ bun tests/e2e/live/model/session-anomalies-native-window.live.ts --output=/absol
 
 `--checkpoint` 为可选的外部人工观察暂停：查看证据目录的 `checkpoint.json`、对应 PNG、DOM 顺序轨迹及阶段事实后，在指定目录创建 `<name>.continue`。01 和 08 阶段持有实际 HTTP 响应，观察须在原 60 秒请求期限内完成，不延长产品超时。driver 同时记录窗口连续帧和 DOM Mutation／动画帧观察，检查消息因果位置及会话外异常文案；最终通过不能覆盖过程中发现的异常。报告或 workspace 已存在会拒绝，失败证据保持；该制品不是普通客户端的调试开关。本机执行结果与此前真实失败归[Desktop owner](../../../../apps/desktop/README.md#普通客户端与测试诊断)，不赋其他模型、平台或安装版资格。
 
+## PDF 扫描页与图表
+
+[PDF 视觉 runner](pdf-vision.live.ts)读取当前配置的默认模型，或由 `--model-id=<已配置ID>` 明确选择单一模型。它只上传自造的随机代码／柱图栅格 PDF，在删除源文件后核真实 `read_file` 页图和最终回答；沿默认 Service Files 装配、实际 SQLite／Artifact 和 SDK，权限由隔离夹具明确允许。需要显式设置 `KITE_RUN_LIVE_PDF_VISION=1`，最多5次实际 HTTP、120秒总预算和45秒单请求，不外围重试、不换模型或协议。
+
+```powershell
+$env:KITE_RUN_LIVE_PDF_VISION = '1'
+bun run test:model:pdf:live --output=C:/absolute/owned-directory/pdf-vision.json
+```
+
+报告与 `<output>.workspace` 必须不存在；保留合成源、实际持久数据和有限结果供复核，不写凭据、endpoint、请求正文或原始远端错误。该测试证明指定模型使用过工具页图，不证明完整 Native 窗口、安装、复杂 PDF 阅读顺序或普遍识别精度。本机成功与先前字符误识别的范围归 [Files owner](../../../../packages/agent/src/tools/files/README.md#会话文件与-pdf)。
+
 ## 工具与稳定协作者 smoke
 
 [工具模型 runner](model-tools.live.ts)使用当前 Agent Runtime、实际 SQLite、Files 与 SDK，读取现有用户配置的默认模型与协议。凭据沿 Service 相同规则在内存解析，不修改用户配置。

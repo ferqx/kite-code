@@ -225,6 +225,15 @@ function get(ops: SqliteOperations, input: Get, publishing = false): ArtifactRef
       }
     : null;
 }
+/** Internal lookup inside the caller's existing transaction; it does not establish byte integrity. */
+export function lookupArtifactReference(
+  ops: SqliteOperations,
+  input: Get,
+): ArtifactReference | null {
+  ops.identity(input.expectedStoreId);
+  scope(ops, input, false);
+  return get(ops, input);
+}
 export function callArtifact(
   ops: SqliteOperations,
   method: string,

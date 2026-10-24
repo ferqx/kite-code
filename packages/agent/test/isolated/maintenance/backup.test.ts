@@ -465,6 +465,7 @@ test('built maintenance leaf creates and inspects a backup from a consumer outsi
       '0003-session-reconciliation.sql',
       '0004-pending-input-order.sql',
       '0005-authorization-check.sql',
+      '0006-input-file-imports.sql',
     ])
       copyFileSync(
         new URL(`../../../src/storage/migrations/${name}`, import.meta.url),

@@ -15,6 +15,13 @@ export interface ArtifactReferenceReadInput {
 }
 /** Host I/O port; the core imports no filesystem implementation. */
 export interface ArtifactContentStore {
+  /** Optional host streaming transport, with the same publication and cancellation guarantees. */
+  publishStream?(
+    input: ArtifactReadInput & {
+      content: AsyncIterable<Uint8Array> | Iterable<Uint8Array>;
+      mediaType: string;
+    },
+  ): Promise<ArtifactReference>;
   publish(
     input: ArtifactReadInput & { content: Uint8Array; mediaType: string },
   ): Promise<ArtifactReference>;

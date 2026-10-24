@@ -160,6 +160,9 @@ test('ordinary Ink keeps the original conversation layout and complete result; d
     expect(app.lastFrame()).not.toContain('check the original request');
     app.stdin.write('\u000c');
     await tick();
+    expect(gets).toBe(0);
+    const deadline = Date.now() + 1500;
+    while (!gets && Date.now() < deadline) await tick();
     expect(gets).toBe(1);
     expect(posts).toBe(1);
     app.rerender(<TuiSession controller={controller} testDiagnostics />);

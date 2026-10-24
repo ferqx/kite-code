@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { launchPairedService } from '@kite-ai/service/paired';
+import { taskQualityPresentedRead } from '../../../../tests/e2e/live/model/agent-task-quality-fixture';
 import { privateDirectory, temporaryDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { ownedUserConfiguration } from '../../../service/test/fixtures/user-configuration-fixture';
 import { lookupManagementOutcome, submitManagement } from '../../src/session-management';
@@ -35,7 +36,9 @@ test('actual default Files rebuild Fork false receipt is applied and cold origin
     async fetch(request) {
       const body = (await request.json()) as { messages: { role: string; content: string }[] };
       const n = requests++;
-      const read = body.messages.filter((m) => m.role === 'tool').at(-1);
+      const result = body.messages.filter((m) => m.role === 'tool').at(-1);
+      const read = n === 1 && result ? taskQualityPresentedRead(result.content) : undefined;
+      if (n === 1 && read?.path !== 'original.txt') throw Error('actual_file_read_result_invalid');
       const call =
         n === 0
           ? { name: 'read_file', input: { path: 'original.txt', max_lines: 1000 } }
@@ -45,7 +48,7 @@ test('actual default Files rebuild Fork false receipt is applied and cold origin
                 input: {
                   path: 'original.txt',
                   content: 'actual changed bytes\r\n',
-                  base: JSON.parse(read!.content).baseline,
+                  base: read!.baseline,
                 },
               }
             : null;
@@ -81,7 +84,7 @@ test('actual default Files rebuild Fork false receipt is applied and cold origin
         { id: 'fixed', provider: 'compatible', model: 'fixed', baseURL: `${provider.url.href}v1` },
       ],
       tools: [
-        { id: 'files.read', definitionVersion: '4' },
+        { id: 'files.read', definitionVersion: '5' },
         { id: 'files.write', definitionVersion: '2' },
       ],
     }),

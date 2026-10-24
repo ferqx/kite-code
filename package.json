@@ -22,6 +22,7 @@
     "test:mock": "bun test --parallel=1 --max-concurrency=1 apps/service/test/isolated/compression-configuration.test.ts apps/service/test/isolated/compression-automatic-configuration.test.ts packages/agent/test/isolated/context/compression.test.ts packages/agent/test/isolated/storage/context-compression-history-source.test.ts",
     "test:mcp:live": "bun run scripts/runtime/unified-mcp-live-smoke.ts",
     "test:model:tools:live": "bun run tests/e2e/live/model/model-tools.live.ts",
+    "test:model:pdf:live": "bun run tests/e2e/live/model/pdf-vision.live.ts",
     "test:model:collaboration:live": "bun run tests/e2e/live/model/collaboration.live.ts",
     "test:e2e": "bun test --parallel=1 --max-concurrency=1 apps/service/test/isolated/paired.test.ts apps/service/test/isolated/lifecycle.test.ts apps/service/test/isolated/assembly-http.test.ts apps/service/test/isolated/http.test.ts packages/client/test/sse.test.ts packages/client/test/isolated/lifecycle.test.ts",
     "test:runtime:fault": "bun test --parallel=1 --max-concurrency=1 tests/isolated/unified-agent/unified-soak.test.ts tests/isolated/unified-agent/dispatch-recovery.test.ts packages/agent/test/isolated/recovery/crash.test.ts packages/agent/test/isolated/execution/owner-handoff.test.ts apps/service/test/isolated/process-cleanup-retention.test.ts apps/service/test/isolated/run-resume.test.ts",
@@ -115,6 +116,7 @@
     "typescript": "^5.9.3"
   },
   "patchedDependencies": {
-    "ink-virtual-list@0.2.3": "patches/ink-virtual-list@0.2.3.patch"
+    "ink-virtual-list@0.2.3": "patches/ink-virtual-list@0.2.3.patch",
+    "@radix-ui/react-scroll-area@1.2.18": "patches/@radix-ui%2Freact-scroll-area@1.2.18.patch"
   }
 }

@@ -1078,10 +1078,13 @@ for (const mismatch of [
   });
 }
 
-test('Ink Ctrl+L restores the frozen answer GET and refreshes without clearing; explicit /clear changes only display', async () => {
+test('Ink Ctrl+L does nothing; explicit /clear changes only display and preserves the unknown original answer', async () => {
   const f = fixture();
   let terminal = false;
   const events: string[] = [];
+  f.port.reconcileSession = async (id) => {
+    events.push(`reconcile:${id}`);
+  };
   f.port.readSession = async (id) => {
     events.push(`read:${id}`);
     return { ...snapshot(id, !terminal), interactions: terminal ? [] : [card] };
@@ -1092,9 +1095,10 @@ test('Ink Ctrl+L restores the frozen answer GET and refreshes without clearing; 
   const c = new TuiController(f.port);
   await c.select('a');
   await c.answer(card, 'approve');
-  const original = c.state.intent!;
   terminal = true;
   await c.select('b');
+  expect(events).toContain('reconcile:a');
+  expect(events).toContain('reconcile:b');
   events.length = 0;
   f.port.getCommand = async (id, session) => {
     events.push(`get:${session}:${id}`);
@@ -1109,9 +1113,9 @@ test('Ink Ctrl+L restores the frozen answer GET and refreshes without clearing; 
   await Bun.sleep(25);
   rendered.stdin.write('\u000c');
   await Bun.sleep(40);
-  expect(events).toEqual([`get:a:${original.commandId}`, 'read:b']);
+  expect(events).toEqual([]);
   expect(c.state.sessionId).toBe('b');
-  expect(c.state.intent).toMatchObject({ sessionId: 'a', phase: 'applied' });
+  expect(c.state.intent).toMatchObject({ sessionId: 'a', phase: 'unknown' });
   expect(c.state.snapshot?.messages).toHaveLength(1);
   expect(c.visibleMessages).toHaveLength(1);
   expect(rendered.lastFrame()).toContain('full正文尾部');
@@ -1119,9 +1123,9 @@ test('Ink Ctrl+L restores the frozen answer GET and refreshes without clearing; 
   expect(f.cancels).toEqual([]);
   rendered.stdin.write('/clear\r');
   await Bun.sleep(40);
-  expect(events).toEqual([`get:a:${original.commandId}`, 'read:b']);
+  expect(events).toEqual([]);
   expect(c.state.sessionId).toBe('b');
-  expect(c.state.intent).toMatchObject({ sessionId: 'a', phase: 'applied' });
+  expect(c.state.intent).toMatchObject({ sessionId: 'a', phase: 'unknown' });
   expect(c.state.snapshot?.messages).toHaveLength(1);
   expect(c.visibleMessages).toHaveLength(0);
   expect(rendered.lastFrame()).not.toContain('full正文尾部');

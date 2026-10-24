@@ -1,11 +1,10 @@
+import { Database } from 'bun:sqlite';
 import { expect, test } from 'bun:test';
 import { createHash, randomUUID } from 'node:crypto';
 import {
   appendFileSync,
   existsSync,
-  mkdtempSync,
   readFileSync,
-  realpathSync,
   renameSync,
   rmSync,
   symlinkSync,
@@ -26,7 +25,7 @@ import { ClientError, createClient, type Interaction } from '@kite-ai/client';
 import { launchPairedService } from '@kite-ai/service/paired';
 import { assertSqliteReleaseIdentity } from '@kite-ai/service/sqlite-release-assets';
 import type { TuiMcpSourceApprovalFact } from '@kite-ai/ui/tui';
-import { privateDirectory } from '../../../../tests/fixtures/test-filesystem';
+import { privateDirectory, temporaryDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { serviceBundledDependencies } from '../../../service/bundled-dependencies';
 import type { CLIServiceArtifact } from '../../host';
 import { mcpSha } from '../../host/mcp-selection-intents';
@@ -64,6 +63,8 @@ type Wire = {
   body?: {
     kind?: string;
     commandId?: string;
+    expectedStoreId?: string;
+    expectedOwnerGeneration?: string;
     extensionId?: string;
     actionId?: string;
     requestSha256?: string;
@@ -73,10 +74,11 @@ type Wire = {
 };
 
 test('80x24 Source Review independently confirms Action and original Question decisions; cold removed Source/Workspace checks original IDs GET-only and foreign restored Store rejects original lookups', async () => {
-  const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-tui-mcp-source-approval-')));
+  const root = temporaryDirectory('kite-tui-mcp-source-approval-');
   const evidence = join(tmpdir(), `kite-tui-mcp-source-approval-evidence-${randomUUID()}`);
   privateDirectory(evidence);
   const workspace = join(root, 'workspace');
+  privateDirectory(join(root, 'build'));
   privateDirectory(workspace);
   privateDirectory(join(workspace, '.kite-code'));
   const profile = selectProfile({ dataRoot: join(root, 'data'), profile: 'development' });
@@ -120,6 +122,56 @@ test('80x24 Source Review independently confirms Action and original Question de
     observer: ReturnType<typeof createClient> | undefined,
     artifact: CLIServiceArtifact | undefined,
     control: ReturnType<typeof Bun.serve> | undefined;
+  const sessionOwners = new Map<string, { storeId: string; generation: string }>();
+  const captureSessionOwner = () => {
+    const db = new Database(join(profile.profilePath, 'core.db'), { readonly: true });
+    try {
+      const row = db
+        .query<{ generation: string }, []>(
+          "SELECT CAST(owner_generation AS TEXT) AS generation FROM session WHERE id='a'",
+        )
+        .get();
+      expect(row).not.toBeNull();
+      sessionOwners.set(phase, { storeId: currentStoreId, generation: row!.generation });
+    } finally {
+      db.close();
+    }
+  };
+  const assertSessionPosts = (targetPhase = phase) => {
+    const posts = wire().filter((row) => row.phase === targetPhase && row.method === 'POST');
+    if (targetPhase === 'cold-missing' || targetPhase === 'cold-foreign') {
+      // A missing Workspace enters the existing read-only observer. It cannot
+      // acquire live Session authority or perform even lifecycle reconciliation.
+      expect(existsSync(workspace)).toBe(false);
+      expect(posts).toHaveLength(0);
+      return;
+    }
+    expect(['warm', 'cold-removed']).toContain(targetPhase);
+    const frozen = sessionOwners.get(targetPhase);
+    expect(frozen).toBeDefined();
+    const reconciliations = posts.filter((row) => row.path === '/v1/sessions/a/reconcile');
+    // Host admission and first selection reconcile this frozen Session scope.
+    // Source actions and original decisions remain strictly GET-only on reopen.
+    expect(reconciliations).toHaveLength(2);
+    const commandId = `session-reconcile-${sha(
+      Buffer.from(JSON.stringify([frozen!.storeId, 'a', frozen!.generation])),
+    )}`;
+    const request = {
+      expectedStoreId: frozen!.storeId,
+      commandId,
+      expectedOwnerGeneration: frozen!.generation,
+    };
+    for (const row of reconciliations)
+      expect(row.body).toEqual({
+        commandId,
+        expectedStoreId: frozen!.storeId,
+        expectedOwnerGeneration: frozen!.generation,
+        requestSha256: sha(Buffer.from(JSON.stringify(request))),
+      });
+    expect(posts.filter((row) => !reconciliations.includes(row))).toHaveLength(
+      targetPhase === 'warm' ? 9 : 0,
+    );
+  };
   let failure: unknown;
   let candidateAccess: ReturnType<typeof acquireArtifactAccess> | undefined;
   const cleanupErrors: unknown[] = [],
@@ -171,7 +223,7 @@ test('80x24 Source Review independently confirms Action and original Question de
         join(repo, 'scripts/release/terminal.ts'),
         'build',
         '--directory',
-        join(root, 'candidate'),
+        join(root, 'build/candidate'),
       ],
       { stdout: 'pipe', stderr: 'pipe' },
     );
@@ -182,7 +234,7 @@ test('80x24 Source Review independently confirms Action and original Question de
     ]);
     writeFileSync(join(evidence, 'build.log'), out + err, { mode: 0o600, flag: 'wx' });
     expect(code).toBe(0);
-    const initialCandidate = verifyTerminalBundle(join(root, 'candidate'));
+    const initialCandidate = verifyTerminalBundle(join(root, 'build/candidate'));
     candidateAccess = acquireArtifactAccess({ root: initialCandidate.root, mode: 'shared' });
     const candidate = verifyTerminalBundle(initialCandidate.root);
     expect(candidate.digest).toBe(initialCandidate.digest);
@@ -329,6 +381,7 @@ test('80x24 Source Review independently confirms Action and original Question de
     await seed.close();
     expect(await seed.exited).toBe(0);
     seed = undefined;
+    captureSessionOwner();
     facts.push({ seedPid, storeId, subjectId, sourceId });
     async function connected() {
       if (observer) return observer;
@@ -537,6 +590,7 @@ test('80x24 Source Review independently confirms Action and original Question de
           if (action === 'cold-removed') rmSync(join(workspace, '.kite-code/mcp.json'));
           else renameSync(workspace, join(root, 'removed-workspace'));
           rmSync(join(root, 'observer-private.json'), { force: true });
+          captureSessionOwner();
           settings();
           selectedBaseline = 0;
           return Response.json({ phase });
@@ -600,6 +654,7 @@ test('80x24 Source Review independently confirms Action and original Question de
           expect(readFileSync(journalPath)).toEqual(before);
           phase = 'cold-foreign';
           rmSync(join(root, 'observer-private.json'), { force: true });
+          captureSessionOwner();
           settings();
           selectedBaseline = 0;
           facts.push({
@@ -617,8 +672,7 @@ test('80x24 Source Review independently confirms Action and original Question de
           expect(currentStoreId).not.toBe(storeId);
           const client = await connected();
           expect(client.serverInfo!.storeId).toBe(currentStoreId);
-          const rows = wire().filter((row) => row.phase === 'cold-foreign');
-          expect(rows.filter((row) => row.method === 'POST')).toHaveLength(0);
+          assertSessionPosts();
           expect(sourceGets()).toBe(0);
           expect(
             readFileSync(join(profile.profilePath, 'ui/mcp-source-approval-intents.json')),
@@ -638,7 +692,8 @@ test('80x24 Source Review independently confirms Action and original Question de
               checkObservation:
                 'Explicit key on proven original detail; identical unknown display is retained, not a new server receipt',
               originalLookupHttp: 0,
-              post: 0,
+              businessPosts: 0,
+              reconciliationPosts: 0,
               journalHash,
             });
           return Response.json({ checked: true });
@@ -648,8 +703,7 @@ test('80x24 Source Review independently confirms Action and original Question de
           return Response.json({ checked: true });
         }
         if (action === 'cold-selected') {
-          const rows = wire().filter((row) => row.phase === phase);
-          expect(rows.filter((row) => row.method === 'POST')).toHaveLength(0);
+          assertSessionPosts();
           expect(sourceGets()).toBe(selectedBaseline);
           return Response.json({ checked: true });
         }
@@ -657,9 +711,7 @@ test('80x24 Source Review independently confirms Action and original Question de
           const id = identities[n - 1]!,
             fact = await query(id.commandId);
           expect(fact).toEqual(id.fact);
-          expect(wire().filter((row) => row.phase === phase && row.method === 'POST')).toHaveLength(
-            0,
-          );
+          assertSessionPosts();
           expect(sourceGets()).toBeGreaterThan(selectedBaseline);
           expect(
             sha(readFileSync(join(profile.profilePath, 'ui/mcp-source-approval-intents.json'))),
@@ -739,14 +791,15 @@ test('80x24 Source Review independently confirms Action and original Question de
     expect(sourcePosts()).toHaveLength(3);
     expect(new Set(sourcePosts().map((row) => row.body!.commandId)).size).toBe(3);
     expect(answers()).toHaveLength(6);
-    expect(wire().filter((row) => row.phase === 'warm' && row.method === 'POST')).toHaveLength(9);
+    assertSessionPosts('warm');
     expect(answers().filter((row) => row.body!.answerKind === 'approval')).toHaveLength(3);
     expect(
       answers()
         .filter((row) => row.body!.answerKind === 'question')
         .map((row) => row.body!.decision),
     ).toEqual(['approved', 'rejected', 'cancel']);
-    expect(wire().filter((row) => row.phase !== 'warm' && row.method === 'POST')).toHaveLength(0);
+    for (const coldPhase of ['cold-removed', 'cold-missing', 'cold-foreign'])
+      assertSessionPosts(coldPhase);
     expect(peerCalls).toBe(0);
     expect(modelCalls).toBe(0);
     expect(ledger('credentials.jsonl')).toHaveLength(0);

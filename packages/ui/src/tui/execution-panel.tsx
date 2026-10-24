@@ -43,10 +43,6 @@ export function TuiExecutionPanel({
       controller.closePanel();
       return;
     }
-    if (key.ctrl && input === 'l') {
-      void controller.lookup();
-      return;
-    }
     if (key.upArrow || key.downArrow) {
       setConfirm(undefined);
       setSelected((current) => {
@@ -132,7 +128,7 @@ export function TuiExecutionPanel({
     >
       <Text>
         {t(
-          'Up/Down target · O complete recorded output · C child logs · S then Enter stop original Job · R refresh · Ctrl+L original receipt · Esc/Ctrl+C close reader',
+          'Up/Down target · O complete recorded output · C child logs · S then Enter stop original Job · R refresh · Esc/Ctrl+C close reader',
         )}
       </Text>
       {jobs.slice(start, start + page).map((item, offset) => (

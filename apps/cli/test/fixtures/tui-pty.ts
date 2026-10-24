@@ -1,5 +1,34 @@
 import assert from 'node:assert/strict';
 import { Terminal } from '@xterm/headless';
+import stringWidth from 'string-width';
+
+/** ConPTY serializes its own cells, including spacing combining marks. */
+export function configureConPTYCellWidths(screen: Terminal): void {
+  const widths = new Map<number, 0 | 1 | 2>();
+  screen.unicode.register({
+    version: 'conpty-cells',
+    wcwidth(codepoint) {
+      const known = widths.get(codepoint);
+      if (known !== undefined) return known;
+      const character = String.fromCodePoint(codepoint);
+      const width = /\p{Mark}/u.test(character) ? 1 : (stringWidth(character) as 0 | 1 | 2);
+      widths.set(codepoint, width);
+      return width;
+    },
+    charProperties(codepoint, preceding) {
+      let width = this.wcwidth(codepoint);
+      let join = width === 0 && preceding !== 0;
+      if (join) {
+        const previousWidth = (preceding >> 1) & 3;
+        if (previousWidth === 0) join = false;
+        else width = previousWidth as 0 | 1 | 2;
+      }
+      // xterm 6's public Unicode provider packs width in bits 1–2 and joining in bit 0.
+      return (width << 1) | Number(join);
+    },
+  });
+  screen.unicode.activeVersion = 'conpty-cells';
+}
 
 export function readTuiRender(screen: Terminal): string {
   return Array.from(
@@ -29,11 +58,20 @@ export function spawnTuiPTY(input: {
   onData?: (bytes: Uint8Array) => void;
   /** Explicit raw-material consumer; provides no cursor or screen projection. */
   observation?: 'screen' | 'stream';
+  /** Explicit observation of Windows console cells, qualified by the native Unicode probe. */
+  conptyCellWidths?: boolean;
+  scrollback?: number;
 }) {
   const screen =
     input.observation === 'stream'
       ? undefined
-      : new Terminal({ cols: 80, rows: 24, scrollback: 1000, allowProposedApi: true });
+      : new Terminal({
+          cols: 80,
+          rows: 24,
+          scrollback: input.scrollback ?? 1000,
+          allowProposedApi: true,
+        });
+  if (screen && input.conptyCellWidths) configureConPTYCellWidths(screen);
   const requireScreen = () => {
     if (!screen) throw Error('stream_observation_has_no_screen');
     return screen;
@@ -41,6 +79,8 @@ export function spawnTuiPTY(input: {
   const output: Uint8Array[] = [];
   let parsed = Promise.resolve();
   let revision = 0;
+  let renderedRevision = -1;
+  let renderedText = '';
   let actionRevision = -1;
   let actionOffset = 0;
   let byteLength = 0;
@@ -64,11 +104,16 @@ export function spawnTuiPTY(input: {
         input.onData?.(copy);
         byteLength += copy.byteLength;
         if (screen) {
-          parsed = parsed
-            .then(() => new Promise<void>((resolve) => screen.write(copy, resolve)))
-            .then(() => {
+          // xterm already owns an ordered write queue. Enqueue native chunks
+          // immediately so it can parse a burst in one turn; chaining writes
+          // behind each callback adds a timer turn for every ConPTY fragment.
+          // The last callback also proves every earlier queued chunk was parsed.
+          parsed = new Promise<void>((resolve) => {
+            screen.write(copy, () => {
               revision++;
+              resolve();
             });
+          });
         } else revision++;
       },
       exit() {
@@ -123,7 +168,11 @@ export function spawnTuiPTY(input: {
     async projection() {
       const actual = requireScreen();
       await parsed;
-      return { fresh: revision > actionRevision, text: readTuiRender(actual) };
+      if (renderedRevision !== revision) {
+        renderedText = readTuiRender(actual);
+        renderedRevision = revision;
+      }
+      return { fresh: revision > actionRevision, text: renderedText };
     },
     async drain() {
       await parsed;

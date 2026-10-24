@@ -1,6 +1,5 @@
 import { randomUUID } from 'node:crypto';
 import { reasoningEfforts } from '@kite-ai/ai';
-import { inputFileReferences } from '../../input-files';
 import { canonicalJson } from '../../json';
 import type { AcceptCommandInput, ApplyInputInput, Store } from '../port';
 import { AgentError, type InputApplication, type Json, type PendingInputPage } from '../types';
@@ -15,6 +14,7 @@ import {
   readWorkEligibility,
   recordHumanBusinessApplication,
 } from './human-work-control';
+import { admitInputFiles } from './input-file-imports';
 import type { SqliteOperations } from './operations';
 
 type Row = Record<string, string | number | bigint | null>;
@@ -53,7 +53,7 @@ export function validateInputAdmission(
     'files' in value &&
     value.files !== undefined
   )
-    inputFileReferences(value.files);
+    admitInputFiles(db, input, value.files);
   if (
     ['run.start', 'input.steer', 'input.follow_up'].includes(value.kind) &&
     'images' in value &&

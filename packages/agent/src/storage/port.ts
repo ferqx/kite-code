@@ -866,6 +866,18 @@ export interface Store {
       mediaType: string;
     },
   ): Promise<ArtifactReference>;
+  registerInputFileImport(
+    input: import('./input-file-imports').InputFileImportScope & {
+      name: string;
+      reference: ArtifactReference;
+    },
+  ): Promise<import('./input-file-imports').InputFileImport>;
+  getInputFileImport(
+    input: import('./input-file-imports').InputFileImportScope,
+  ): Promise<import('./input-file-imports').InputFileImport | null>;
+  releaseInputFileImport(
+    input: import('./input-file-imports').InputFileImportScope,
+  ): Promise<import('./input-file-imports').InputFileImport>;
   getArtifactReference(
     input: WriteContext & {
       refId: string;

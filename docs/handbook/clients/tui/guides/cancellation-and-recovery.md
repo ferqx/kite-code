@@ -43,6 +43,6 @@ Server 返回需要恢复时，TUI 停止显示 Working 和无法确认的工具
 
 ## 通用 TUI 的显式原申请恢复
 
-`/recovery` 支持输入 `run <原 Run ID>`、`report <原报告 Command ID>` 或 `interrupt confirm`，再按 Enter 明确提交。回执丢失保留原申请；Ctrl+L 查询原 ID，Ctrl+C 只停止本次读取，Esc 关闭面板，不另发工作取消或重新提交。连续 Ctrl+C、Ctrl+L 仍分别执行这两项操作，已停止读取的迟到结果不会覆盖后来查询。
+`/recovery` 支持输入 `run <原 Run ID>`、`report <原报告 Command ID>` 或 `interrupt confirm`，再按 Enter 明确提交。回执丢失保留原申请；Ctrl+C 只停止本次读取，Esc 关闭面板。回到原会话主界面后自动按原 ID 核对，不另发工作取消或重新提交；已停止读取的迟到结果不会覆盖后来查询。
 
 粘贴只填入文字，粘贴中的 Enter 或控制字符不能代替按键确认、查询或取消。恢复受理与实际 Run 完成分别核对，原审批仍须独立回答；具体接续、中断、报告范围见[恢复说明](../../../features/recovery.md)。

@@ -1,6 +1,8 @@
 import { type AgentClient, ClientError, type Message } from '@kite-ai/client';
 import type { NativeInputFileResult, NativeInputImageRequest } from '../src/input-images-bridge';
 import type { NativeToolMessageScope } from '../src/tool-messages-bridge';
+import { nativeToolImages } from './tool-images';
+import { nativeToolMessageFact } from './tool-message-fact';
 
 type Lease = {
   readId: string;
@@ -28,12 +30,12 @@ export class NativeInputImageReads {
   }
   private check(lease: Lease) {
     const now = this.current(),
-      image = this.messages().get(lease.messageId)?.images?.[lease.index];
+      message = this.messages().get(lease.messageId);
     if (
       lease.abort.signal.aborted ||
       !now ||
       JSON.stringify(now) !== JSON.stringify(lease.scope) ||
-      JSON.stringify(image) !== lease.identity ||
+      JSON.stringify(message) !== lease.identity ||
       this.reads.get(lease.readId) !== lease
     )
       throw new ClientError('input_image_view_changed');
@@ -53,25 +55,20 @@ export class NativeInputImageReads {
     request: Extract<NativeInputImageRequest, { method: 'input.image.open' }>,
   ): Promise<NativeInputFileResult> {
     const scope = this.current(),
-      message = this.messages().get(request.messageId),
-      image = message?.images?.[request.index];
+      message = this.messages().get(request.messageId);
     if (
       !scope ||
       scope.generation !== request.generation ||
       scope.viewSelection !== request.viewSelection ||
       scope.historyEpoch !== request.historyEpoch ||
       !message ||
-      message.role !== 'user' ||
+      !['user', 'tool'].includes(message.role) ||
       message.status !== 'complete' ||
-      !image
+      !Number.isSafeInteger(request.index) ||
+      request.index < 0
     )
       throw new ClientError('input_image_view_changed');
-    if (
-      this.reads.has(request.readId) ||
-      this.reads.size >= 4 ||
-      this.pending.size >= 4 ||
-      BigInt(image.reference.size) > 16n * 1024n * 1024n
-    )
+    if (this.reads.has(request.readId) || this.reads.size >= 4 || this.pending.size >= 4)
       throw new ClientError('input_image_read_busy');
     const lease: Lease = {
       readId: request.readId,
@@ -79,10 +76,31 @@ export class NativeInputImageReads {
       abort: new AbortController(),
       messageId: message.id,
       index: request.index,
-      identity: JSON.stringify(image),
+      identity: JSON.stringify(message),
     };
     this.reads.set(request.readId, lease);
     try {
+      const resolveImage = async () => {
+        if (message.role === 'user') return message.images?.[request.index];
+        if (message.sourceIds?.length !== 1) throw new ClientError('tool_images_invalid');
+        const execution = await this.client.getExecution(message.sourceIds[0]!, {
+          signal: lease.abort.signal,
+        });
+        this.check(lease);
+        if (
+          !nativeToolMessageFact({
+            execution,
+            message,
+            messages: this.messages().values(),
+            sessionId: scope.sessionId,
+          })
+        )
+          throw new ClientError('tool_images_invalid');
+        return nativeToolImages(execution)[request.index];
+      };
+      const image = await resolveImage();
+      if (!image || BigInt(image.reference.size) > 16n * 1024n * 1024n)
+        throw new ClientError('input_image_view_changed');
       const ref = image.reference;
       const result = await this.client.readArtifact(
         ref.sessionId,
@@ -90,12 +108,14 @@ export class NativeInputImageReads {
         { signal: lease.abort.signal, expectedReference: ref },
       );
       this.check(lease);
+      if (message.role === 'tool' && JSON.stringify(await resolveImage()) !== JSON.stringify(image))
+        throw new ClientError('tool_images_invalid');
       lease.bytes = result.content;
       return {
         kind: 'input.image.open',
         readId: lease.readId,
         size: lease.bytes.byteLength,
-        hash: ref.hash,
+        hash: result.reference.hash,
         mediaType: ref.mediaType,
       };
     } catch (error) {

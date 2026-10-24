@@ -1,6 +1,6 @@
 import { Database } from 'bun:sqlite';
 import assert from 'node:assert/strict';
-import { readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { appendFileSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { basename, join } from 'node:path';
 import { StringDecoder } from 'node:string_decoder';
 import { defaultWindowsPathSecurity } from '@kite-ai/agent/windows-path-security';
@@ -20,6 +20,12 @@ const input = JSON.parse(process.argv[2]!) as {
   databasePath: string;
 };
 const abort = new AbortController();
+const startedAt = Date.now();
+const stage = (name: string) =>
+  appendFileSync(
+    join(input.evidence, 'stages.jsonl'),
+    `${JSON.stringify({ stage: name, elapsedMs: Date.now() - startedAt, at: Date.now() })}\n`,
+  );
 const interrupted = () => abort.abort(Error('original_export_interrupted'));
 const stop = (message: unknown) => {
   if (message === 'export-driver-stop') interrupted();
@@ -37,6 +43,7 @@ let originalToolExecutionId: string | undefined;
 const decoder = new StringDecoder('utf8');
 const normalize = (text: string) => text.replace(/\s+/g, '');
 const expectedBody = normalize(input.bodyText.repeat(input.bodyRepeats) + input.tail);
+const nativeCells = process.platform === 'win32';
 let bodyPosition = 0,
   bodyVerified = false,
   currentBodyVerified = false;
@@ -75,6 +82,7 @@ const clearAction = () => {
   clearSeen = false;
 };
 const printable = (value: string) => {
+  if (nativeCells) return;
   const text = normalize(value);
   if (!text) return;
   // Consume every exact original character once. Neither API/export text nor a
@@ -133,9 +141,12 @@ const scan = (bytes: Uint8Array) => {
           actionFrameReady = false;
           nativeFrameReady = false;
         }
-        if (csi === '?2026l' && currentBodyVerified && composerPainted()) {
-          actionFrameReady = true;
-          nativeFrameReady = true;
+        if (csi === '?2026l') {
+          synchronizedOutput = false;
+          if (currentBodyVerified && composerPainted()) {
+            actionFrameReady = true;
+            nativeFrameReady = true;
+          }
         }
         if (csi === '3J') {
           clearAction();
@@ -168,7 +179,11 @@ const pty = spawnTuiPTY({
     input.dataRoot,
   ],
   cwd: input.root,
-  observation: 'stream',
+  observation: nativeCells ? 'screen' : 'stream',
+  conptyCellWidths: nativeCells,
+  // Three million full-width characters occupy 75,000 real 80-column rows.
+  // Retain all of them plus the original Tool and composer for exact comparison.
+  scrollback: nativeCells ? 100000 : undefined,
   onData(bytes) {
     dataRevision++;
     raw.push(bytes.slice());
@@ -176,6 +191,29 @@ const pty = spawnTuiPTY({
     buffer = Buffer.concat([buffer, bytes]).subarray(-131072);
   },
 });
+const observe = async () => {
+  if (!nativeCells) return;
+  const frame = await pty.projection();
+  if (!frame.fresh) return;
+  // ConPTY may paint a line-end cell twice using an absolute cursor move.
+  // Only its final cells represent visible text; removing ANSI from raw bytes
+  // instead duplicates characters and cannot verify the original full body.
+  const text = normalize(frame.text);
+  currentBodyVerified = text.includes(expectedBody);
+  bodyVerified ||= currentBodyVerified;
+  nativeTail = text.slice(-4096);
+  actionTail = nativeTail;
+  actionMarkers.clear();
+  for (const marker of markers) if (text.includes(marker)) actionMarkers.add(marker);
+  reasonSeen = text.includes('ACTUAL_LOADED_REASON_TAIL');
+  const header = `files.read[${originalToolExecutionId}]`;
+  const offset = originalToolExecutionId ? text.lastIndexOf(header) : -1;
+  readingOriginalTool = offset >= 0;
+  originalToolMaterial =
+    offset < 0 ? '' : text.slice(offset + header.length, offset + header.length + 65536);
+  actionFrameReady = nativeFrameReady =
+    !synchronizedOutput && currentBodyVerified && composerPainted();
+};
 const reset = () => {
   buffer = Buffer.alloc(0);
   clearAction();
@@ -190,6 +228,7 @@ const wait = async (text: string) => {
   const end = Date.now() + 30000;
   for (;;) {
     abort.signal.throwIfAborted();
+    await observe();
     const observed =
       text === 'ACTUAL_LOADED_REASON_TAIL'
         ? reasonSeen
@@ -201,11 +240,12 @@ const wait = async (text: string) => {
   }
 };
 // Static output remains original native terminal material until an actual 3J.
-// This stream observation proves printed bytes and clear boundaries, not cursor geometry.
+// Windows verifies final console cells, while POSIX retains its original stream proof.
 const waitNative = async (text: string) => {
   const end = Date.now() + 30000;
   for (;;) {
     abort.signal.throwIfAborted();
+    await observe();
     if (text === input.tail ? currentBodyVerified : nativeTail.includes(normalize(text)))
       return text;
     if (pty.ended || Date.now() > end)
@@ -218,8 +258,10 @@ const waitNative = async (text: string) => {
 // does not prove that the previous frame has handed input back.
 const waitCompletePaint = async (currentAction: boolean) => {
   const end = Date.now() + 30000;
-  while (!currentBodyVerified || !(currentAction ? actionFrameReady : nativeFrameReady)) {
+  for (;;) {
     abort.signal.throwIfAborted();
+    await observe();
+    if (currentBodyVerified && (currentAction ? actionFrameReady : nativeFrameReady)) return;
     if (pty.ended || Date.now() > end) throw Error('original body/composer paint did not complete');
     await Bun.sleep(100);
   }
@@ -235,42 +277,73 @@ const files = () =>
   readdirSync(input.profilePath)
     .filter((name) => name.startsWith('session-') && name.endsWith('.md'))
     .map((name) => join(input.profilePath, name));
+async function childProcessIds(parentPid: number): Promise<number[]> {
+  if (process.platform !== 'win32') {
+    const listing = Bun.spawnSync(['ps', '-axo', 'pid,ppid'], { stdout: 'pipe', stderr: 'pipe' });
+    assert.equal(listing.exitCode, 0, Buffer.from(listing.stderr).toString());
+    return Buffer.from(listing.stdout)
+      .toString()
+      .trim()
+      .split(/\r?\n/)
+      .map((line) => line.trim().split(/\s+/).map(Number))
+      .filter((row) => row[1] === parentPid)
+      .map((row) => row[0]!);
+  }
+  // Observe the same direct children without launching PowerShell, whose first
+  // use can create protected INetCache junctions in the fixture's isolated HOME.
+  const { dlopen, ptr } = await import('bun:ffi');
+  const kernel = dlopen('kernel32.dll', {
+    CreateToolhelp32Snapshot: { args: ['u32', 'u32'], returns: 'u64' },
+    Process32FirstW: { args: ['u64', 'ptr'], returns: 'bool' },
+    Process32NextW: { args: ['u64', 'ptr'], returns: 'bool' },
+    GetLastError: { args: [], returns: 'u32' },
+    CloseHandle: { args: ['u64'], returns: 'bool' },
+  });
+  const api = kernel.symbols;
+  let snapshot: bigint | undefined;
+  let failure: unknown;
+  const children: number[] = [];
+  try {
+    const handle = BigInt(api.CreateToolhelp32Snapshot(2, 0));
+    assert(handle !== 0n && handle !== -1n && handle !== 0xffffffffffffffffn);
+    snapshot = handle;
+    // PROCESSENTRY32W on Windows x64, as used by the existing native process owner.
+    assert.equal(process.arch, 'x64');
+    const entry = Buffer.alloc(568);
+    entry.writeUInt32LE(entry.length, 0);
+    let more = api.Process32FirstW(snapshot, ptr(entry));
+    for (let count = 0; more; count++) {
+      assert(count < 131072, 'process snapshot did not terminate');
+      if (entry.readUInt32LE(32) === parentPid) children.push(entry.readUInt32LE(8));
+      more = api.Process32NextW(snapshot, ptr(entry));
+    }
+    assert.equal(api.GetLastError(), 18, 'process snapshot must reach ERROR_NO_MORE_FILES');
+  } catch (error) {
+    failure = error;
+  }
+  if (snapshot !== undefined && !api.CloseHandle(snapshot)) {
+    const closeError = Error('process_snapshot_close_unconfirmed');
+    throw failure ? new AggregateError([failure, closeError]) : closeError;
+  }
+  kernel.close();
+  if (failure) throw failure;
+  return children;
+}
 let owned: number[] = [],
   normal = false,
   failure: unknown;
 try {
+  stage('driver_started');
   await wait('New Run');
-  const listing =
-    process.platform === 'win32'
-      ? Bun.spawnSync(
-          [
-            'powershell.exe',
-            '-NoProfile',
-            '-NonInteractive',
-            '-Command',
-            `Get-CimInstance Win32_Process -Filter "ParentProcessId = ${pty.host.pid}" | Select-Object -ExpandProperty ProcessId`,
-          ],
-          { stdout: 'pipe', stderr: 'pipe' },
-        )
-      : Bun.spawnSync(['ps', '-axo', 'pid,ppid'], { stdout: 'pipe', stderr: 'pipe' });
-  assert.equal(listing.exitCode, 0, Buffer.from(listing.stderr).toString());
-  owned = Buffer.from(listing.stdout)
-    .toString()
-    .trim()
-    .split(/\r?\n/)
-    .map((line) => line.trim().split(/\s+/).map(Number))
-    .filter((row) =>
-      process.platform === 'win32'
-        ? Number.isSafeInteger(row[0]) && row[0]! > 0
-        : row[1] === pty.host.pid,
-    )
-    .map((row) => row[0]!);
+  stage('initial_composer');
+  owned = await childProcessIds(pty.host.pid);
   assert(owned.length > 0, 'original paired Service child required');
   for (const pid of owned) process.kill(pid, 0);
   await key('owned task');
   await Bun.sleep(100);
   await key('\r');
   await wait('9000025 bytes, complete');
+  stage('complete_metadata');
   const database = new Database(input.databasePath, { readonly: true });
   try {
     const originals = database
@@ -292,6 +365,7 @@ try {
   assert.equal(exported.length, 1, 'first export paths');
   const preview = readFileSync(exported[0]!, 'utf8');
   const firstExportPath = exported[0]!;
+  stage('first_export');
   // The writer freezes its actual loaded-output map. Automatic verified reading
   // may finish before this explicit export; never relabel that full snapshot a preview.
   if (preview.includes('Loaded preview only')) {
@@ -323,6 +397,7 @@ try {
   assert(bodyVerified, 'complete original Model body was not painted to native terminal history');
   await waitNative('New Run >');
   await waitCompletePaint(false);
+  stage('full_body_painted');
   reset();
   await key('\r');
   await wait('Result collapsed');
@@ -336,6 +411,7 @@ try {
     'collapsed result',
   );
   await waitCompletePaint(true);
+  stage('collapsed_body_painted');
   reset();
   await key('\r');
   await waitNative(input.tail);
@@ -349,6 +425,7 @@ try {
     'expanded result',
   );
   await waitCompletePaint(true);
+  stage('expanded_body_painted');
   console.log('TAIL_RESULT_COLLAPSE_EXPAND_ORIGINAL_ARTIFACT_REFS');
   // Ctrl+O loads one verified Model output body, including its reasoning.
   // Reasoning export is independent of any screen-only display shortcut.
@@ -389,6 +466,7 @@ try {
   }
   console.log('LOADED_REASON_EXPORTED_WITHOUT_SCREEN_TOGGLE');
   console.log('EXPORT_FULL_TAIL_REASON_0600');
+  stage('second_export_verified');
   await key('\x11');
   const exitDeadline = Date.now() + 6000;
   while (!pty.ended && Date.now() < exitDeadline) {
@@ -409,6 +487,7 @@ try {
     );
   }
   normal = true;
+  stage('normal_host_and_service_exit');
   console.log('OWNED_SERVICE_STOPPED');
   console.log('HOST_EXIT 0');
   console.log('FULL_TAIL_OBSERVED True');

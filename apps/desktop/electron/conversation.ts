@@ -56,6 +56,10 @@ export class NativeConversation {
     sessionId: string,
     ids: readonly string[],
   ) => Promise<import('@kite-ai/client').InputImage[]>;
+  private readonly publishFiles: (
+    sessionId: string,
+    ids: readonly string[],
+  ) => Promise<import('@kite-ai/client').InputFileReference[]>;
   constructor(
     client: AgentClient,
     current: () => Scope | undefined,
@@ -73,7 +77,17 @@ export class NativeConversation {
       sessionId: string,
       ids: readonly string[],
     ) => Promise<import('@kite-ai/client').InputImage[]>,
+    publishFiles?: (
+      sessionId: string,
+      ids: readonly string[],
+    ) => Promise<import('@kite-ai/client').InputFileReference[]>,
   ) {
+    this.publishFiles =
+      publishFiles ??
+      (async (_sessionId, ids) => {
+        if (ids.length) throw new ClientError('native_file_unavailable');
+        return [];
+      });
     this.publishImages =
       publishImages ??
       (async (_sessionId, ids) => {
@@ -330,8 +344,15 @@ export class NativeConversation {
       const images = request.imageIds?.length
         ? await this.publishImages(creation.input.sessionId, request.imageIds)
         : undefined;
+      const files = request.fileIds?.length
+        ? await this.publishFiles(creation.input.sessionId, request.fileIds)
+        : undefined;
       this.check(scope);
-      const intent = { ...request.intent, ...(images?.length ? { images } : {}) };
+      const intent = {
+        ...request.intent,
+        ...(images?.length ? { images } : {}),
+        ...(files?.length ? { files } : {}),
+      };
       const prepared = await this.journal().prepare(creation.input.sessionId, intent, {
         id: draft.id,
         revision: String(draft.revision),

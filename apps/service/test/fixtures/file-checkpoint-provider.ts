@@ -1,5 +1,6 @@
 import { expect } from 'bun:test';
 import type { Json } from '@kite-ai/agent/extensions';
+import { taskQualityPresentedRead } from '../../../../tests/e2e/live/model/agent-task-quality-fixture';
 
 type ProviderBody = {
   messages: { role: string; content: string }[];
@@ -42,7 +43,8 @@ export function createFileCheckpointProvider(
       else if (step === 1) {
         const read = body.messages.filter((message) => message.role === 'tool').at(-1);
         if (!read) throw Error('actual_file_read_baseline_missing');
-        const actual = JSON.parse(read.content) as { path: string; baseline: Json };
+        const actual = taskQualityPresentedRead(read.content);
+        if (!actual) throw Error('actual_file_read_result_invalid');
         expect(actual.path).toBe('original.txt');
         call = {
           name: 'write_file',

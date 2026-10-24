@@ -6,7 +6,7 @@ export function inputFileReferences(value: unknown): InputFileReference[] {
   for (const file of value) {
     if (
       !file ||
-      Object.keys(file).sort().join(',') !== 'name,uri' ||
+      !['name,uri', 'name,reference,uri'].includes(Object.keys(file).sort().join(',')) ||
       typeof file.name !== 'string' ||
       !file.name ||
       file.name.length > 512 ||
@@ -15,6 +15,36 @@ export function inputFileReferences(value: unknown): InputFileReference[] {
       file.uri.length > 8192
     )
       throw new AgentError('input_file_invalid');
+    if ('reference' in file) {
+      const ref = file.reference;
+      if (
+        !ref ||
+        Object.keys(ref).sort().join(',') !==
+          'hash,id,mediaType,scope,sessionId,size,storeId,subjectId' ||
+        typeof ref.id !== 'string' ||
+        !/^input-file-[A-Za-z0-9_-]{1,100}$/.test(ref.id) ||
+        typeof ref.storeId !== 'string' ||
+        !/^[A-Za-z0-9_-]{1,128}$/.test(ref.storeId) ||
+        typeof ref.sessionId !== 'string' ||
+        !/^[A-Za-z0-9_-]{1,128}$/.test(ref.sessionId) ||
+        typeof ref.subjectId !== 'string' ||
+        !ref.subjectId ||
+        ref.subjectId.length > 256 ||
+        !ref.scope ||
+        Object.keys(ref.scope).sort().join(',') !== 'id,kind' ||
+        ref.scope.kind !== 'session' ||
+        ref.scope.id !== ref.sessionId ||
+        typeof ref.hash !== 'string' ||
+        !/^[a-f0-9]{64}$/.test(ref.hash) ||
+        typeof ref.size !== 'string' ||
+        !/^(0|[1-9][0-9]{0,15})$/.test(ref.size) ||
+        !Number.isSafeInteger(Number(ref.size)) ||
+        typeof ref.mediaType !== 'string' ||
+        !ref.mediaType ||
+        ref.mediaType.length > 256
+      )
+        throw new AgentError('input_file_invalid');
+    }
     try {
       const uri = new URL(file.uri);
       if (uri.protocol !== 'file:' || uri.username || uri.password || uri.search || uri.hash)

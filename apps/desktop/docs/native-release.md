@@ -2,6 +2,8 @@
 
 本页负责完整 Native 物化、归档、使用锁和安装注册。构建后的候选包含实际 Electron、完整新 Terminal、main/preload/renderer 与目录/框架链接；它不从运行环境搜索 Service、Bun、CLI 或 npm。根入口已切换，整体 V1.3、签名与三平台发布仍未完成。
 
+本轮会话 PDF 能力的 parser／Canvas／字体／CMap／WASM 由内含 Terminal 的同次依赖闭包交付，准确版本与剩余资格见[Terminal 构建说明](../../cli/docs/terminal-release.md#构建与操作)。隔离浏览器里的 Native 页面和 Main reader 通过不等于完整 Electron 制品或各平台的原生解析资产通过；旧窗口／安装证据不自动覆盖新增闭包。
+
 Windows 构建预检和运行清单均要求 Chromium 的 `chrome_100_percent.pak`、`chrome_200_percent.pak`、`resources.pak` 为非空普通资源文件，仍核完整递归库存与每字节摘要。只有 Electron Node/SQLite 通过不能证明窗口资源完整。本机原已安装 Electron 44.3.0 分发后来发现缺两份 scale pak；原字节一致性证据只证明当时副本与该输入相同。新的隔离输入从缓存原 ZIP 解出，SHA256 `26bf9a617d58d81772b3d68305d59ee48272969c15083c06db634a77358a8d9d` 与锁定 npm checksums 和[官方发布清单](https://github.com/electron/electron/releases/download/v44.3.0/SHASUMS256.txt)一致，不修改原安装。缺资源反例归[归档/构建合同](../../../tests/isolated/unified-agent/native-archive.test.ts)；真实窗口和维护仍须分别通过原 caller。
 
 当前 renderer 沿原桌面的 Vite/React/Tailwind 管线编译复用页面，CSS 与 Geist 字体是候选内的实际文件；Vite 输出保留 Main/preload/helper 的共同目录。新增 UI exports 在 workspace build 中产生实际 desktop/index.js 与 style.css，候选继续逐项核完整递归 manifest。macOS 源码外窗口范围与剩余迁移见[Desktop owner](../README.md#复用原桌面展示层)和[本片进度](../../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-08复用原-pc-桌面展示层)，不替代完整 installed 或三平台资格。

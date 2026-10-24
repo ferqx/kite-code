@@ -1,4 +1,5 @@
 import { expect, test } from 'bun:test';
+import { createHash } from 'node:crypto';
 import {
   existsSync,
   mkdirSync,
@@ -10,7 +11,7 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { pathToFileURL } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { createRuntime } from '@kite-ai/agent';
 import {
   createCredentialVault,
@@ -132,6 +133,156 @@ function fixture() {
     },
   };
 }
+
+test('paired host streams saved attachments through scoped read_file and rejects foreign/private targets', async () => {
+  const f = fixture();
+  const bytes = Buffer.from('\ufeff中文附件\r\nSAVED_ATTACHMENT_BYTES\r\n');
+  let path = '';
+  const requests: Record<string, unknown>[] = [];
+  const chunk = (delta: unknown, reason: string | null) =>
+    `data: ${JSON.stringify({ id: 'saved-file', object: 'chat.completion.chunk', model: 'local', choices: [{ index: 0, delta, finish_reason: reason }] })}\n\n`;
+  const provider = Bun.serve({
+    hostname: '127.0.0.1',
+    port: 0,
+    async fetch(request) {
+      const body = (await request.json()) as Record<string, unknown>;
+      if (Array.isArray(body.tools)) requests.push(body);
+      const call = Array.isArray(body.tools) && requests.length % 2 === 1;
+      return new Response(
+        chunk(
+          call
+            ? {
+                tool_calls: [
+                  {
+                    index: 0,
+                    id: `read-${requests.length}`,
+                    type: 'function',
+                    function: { name: 'read_file', arguments: JSON.stringify({ path }) },
+                  },
+                ],
+              }
+            : { content: 'Read completed' },
+          null,
+        ) +
+          chunk({}, call ? 'tool_calls' : 'stop') +
+          'data: [DONE]\n\n',
+        { headers: { 'content-type': 'text/event-stream' } },
+      );
+    },
+  });
+  let child: Awaited<ReturnType<typeof launch>> | undefined;
+  try {
+    writeFileSync(
+      f.file,
+      JSON.stringify({ modelId: 'local', models: [model('local', provider.url.href)] }),
+    );
+    child = await launch(f);
+    const client = child.handle.client,
+      expectedStoreId = child.storeId;
+    const trust = await client.getWorkspaceTrust('workspace', { storeId: expectedStoreId });
+    await client.setWorkspaceTrust('workspace', {
+      expectedStoreId,
+      commandId: 'trust-saved',
+      canonicalIdentity: trust.canonicalIdentity,
+      externalReadScopeDigest: trust.externalReadScopeDigest,
+      trusted: true,
+      ifRevision: trust.revision,
+    });
+    const metadata = {
+      expectedStoreId,
+      id: 'saved',
+      name: '附件.txt',
+      mediaType: 'text/plain',
+      size: String(bytes.length),
+      hash: createHash('sha256').update(bytes).digest('hex'),
+    };
+    const file = await client.uploadInputFile(
+      'session',
+      metadata,
+      new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(bytes.subarray(0, 7));
+          controller.enqueue(bytes.subarray(7));
+          controller.close();
+        },
+      }),
+    );
+    path = fileURLToPath(file.uri);
+    expect((await client.getInputFileImport('session', metadata.id)).state).toBe('prepared');
+    await client.startRun('session', {
+      expectedStoreId,
+      commandId: 'saved-read',
+      kind: 'run.start',
+      content: 'Read attachment',
+      files: [file],
+    });
+    const view = await child.finished('saved-read');
+    expect(view.commandRun.status).toBe('completed');
+    expect(requests).toHaveLength(2);
+    expect(JSON.stringify(requests[1]!.messages)).toContain('SAVED_ATTACHMENT_BYTES');
+    expect((await client.getInputFileImport('session', metadata.id)).state).toBe('bound');
+    await client.createSession({
+      expectedStoreId,
+      commandId: 'create-foreign',
+      sessionId: 'foreign',
+      workspaceId: 'workspace',
+      title: 'foreign',
+    });
+    await client.startRun('foreign', {
+      expectedStoreId,
+      commandId: 'foreign-read',
+      kind: 'run.start',
+      content: 'Read the same path without an attachment',
+    });
+    await until(
+      () => client.getView('foreign'),
+      (view) => view.runs.some((run) => run.originCommandId === 'foreign-read' && !run.isActive),
+    );
+    expect(requests).toHaveLength(4);
+    expect(JSON.stringify(requests[3]!.messages)).not.toContain('SAVED_ATTACHMENT_BYTES');
+    expect(JSON.stringify(requests[3]!.messages)).toContain('permission_denied');
+    const inspected = await openSqliteStore({
+      dataRoot: f.profile.dataRoot,
+      profile: f.profile.profile,
+      mode: 'readonly',
+    });
+    try {
+      expect(
+        (await inspected.listExecutions('foreign')).find((e) => e.kind === 'tool')?.result,
+      ).toMatchObject({
+        details: {
+          reason: 'input_file_scope_denied',
+          adapterAttempted: false,
+          dispatchCommitted: false,
+        },
+      });
+    } finally {
+      await inspected.close();
+    }
+    const released = await client.uploadInputFile(
+      'foreign',
+      { ...metadata, id: 'abandoned' },
+      bytes,
+    );
+    expect((await client.releaseInputFileImport('foreign', 'abandoned')).state).toBe('released');
+    expect(released.reference?.hash).toBe(file.reference?.hash);
+    let mismatch: unknown;
+    try {
+      await client.uploadInputFile(
+        'foreign',
+        { ...metadata, id: 'bad', hash: 'f'.repeat(64) },
+        bytes,
+      );
+    } catch (error) {
+      mismatch = error;
+    }
+    expect(mismatch).toMatchObject({ code: 'input_file_content_mismatch' });
+  } finally {
+    await child?.handle.close();
+    provider.stop(true);
+    f.close();
+  }
+}, 60000);
 
 test('ordinary host defaults select only available Shell and Task capabilities and preserve minimal embedding defaults', () => {
   expect(defaultConfiguration.tools).toEqual([{ id: 'ask_user' }]);

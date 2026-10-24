@@ -67,6 +67,7 @@ test('legacy readonly is unchanged; one writer upgrade certifies all history the
           { id: '0003-session-reconciliation' },
           { id: '0004-pending-input-order' },
           { id: '0005-authorization-check' },
+          { id: '0006-input-file-imports' },
         ]);
         expect(
           db

@@ -26,6 +26,7 @@ export function supportedSchemas(
       '0003-session-reconciliation',
       '0004-pending-input-order',
       '0005-authorization-check',
+      '0006-input-file-imports',
     ]) {
       const sql = readFileSync(new URL(`./${id}.sql`, baseline), 'utf8');
       const checksum = createHash('sha256').update(sql).digest('hex');

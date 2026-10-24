@@ -20,7 +20,7 @@
 
 ## 用户图片引用
 
-普通文件的 `files` 名称／URI 同样在消息 source JSON 保存，start 与 steer/follow-up 共用原事务。它不是 Artifact 引用或来源读取收据，也不授予文件访问；`MessageRecord.content` 始终保留原文，模型端路径文本由 Runtime 单独组装。
+旧普通文件的 `files` 名称／URI 仍只是路径数据，不授予文件访问。新上传另外携带完整 Artifact 引用，由[输入文件登记](sqlite/input-file-imports.ts)和[迁移0006](migrations/0006-input-file-imports.sql)保存稳定导入身份、原主体／会话、名称、原引用与 prepared／bound／released 状态。start、steer 和 follow-up 在原输入事务核全部引用元数据并绑定准确 Command；绑定与释放竞争串行，释放不能撤销已接受输入。释放记录保留原引用，历史 GC 证明无依赖后才收集，不用草稿 TTL 删除已接受消息的唯一原件。`MessageRecord.content` 始终保留原文，模型端可读路径由 Runtime 按当前 Profile 与原引用投影，旧历史不会自动迁移。
 
 用户输入的 `images` 在原消息 source JSON 保存名称和完整、不可变的 session Artifact 引用；[输入受理](sqlite/input-operations.ts)在原事务调用[引用核验](sqlite/artifact-operations.ts)比对 Store、Session、subject、scope 和全部原元数据。图片正文由既有 Artifact owner 保存，不新增 SQL 表或迁移。Fork 保留原来源链，离线 GC 继续依据原消息／会话关系保留被存活分支依赖的源会话；Runtime 按原出处完整读回图片，不能借当前会话重新声明原发布权。测试与语义见 [Agent](../../README.md#用户图片输入)。
 

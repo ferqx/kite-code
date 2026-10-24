@@ -15,6 +15,7 @@ test('select all belongs to one visible conversation and preserves editor shortc
     'window',
     'document',
     'IS_REACT_ACT_ENVIRONMENT',
+    'getComputedStyle',
     'requestAnimationFrame',
     'cancelAnimationFrame',
   ] as const;
@@ -25,6 +26,7 @@ test('select all belongs to one visible conversation and preserves editor shortc
     window: dom.window,
     document: dom.window.document,
     IS_REACT_ACT_ENVIRONMENT: true,
+    getComputedStyle: dom.window.getComputedStyle.bind(dom.window),
     requestAnimationFrame: dom.window.requestAnimationFrame.bind(dom.window),
     cancelAnimationFrame: dom.window.cancelAnimationFrame.bind(dom.window),
   });

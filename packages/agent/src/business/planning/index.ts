@@ -19,9 +19,11 @@ import type {
 } from '../../extensions';
 import { AgentError } from '../../storage/types';
 import { type AutomaticValidationOptions, createAutomaticValidation } from './automatic';
+import type { PlanFile, PlanFiles } from './files';
 import { checkArtifactSchema, checkSemanticResult } from './verification';
 
 export type { AutomaticValidationOptions } from './automatic';
+export { createPlanFiles } from './files';
 
 export const planningExtensionId = 'builtin.planning';
 const contentType = 'builtin.planning.record';
@@ -167,6 +169,10 @@ const knownPreflight = new Set([
   'planning_review_body_invalid',
   'planning_review_body_unavailable',
   'plan_version_conflict',
+  'plan_file_changed',
+  'plan_file_missing',
+  'plan_file_recovery_required',
+  'file_baseline_conflict',
   'plan_steps_invalid',
   'plan_identity_mismatch',
   'plan_missing',
@@ -340,7 +346,45 @@ async function unknownVerification(
 }
 
 /** Business records and predicates only. Permissions and execution authority remain in the host. */
-export function createPlanningValidation(inputOptions: PlanningOptions = {}) {
+export function createPlanningValidation(
+  inputOptions: PlanningOptions = {},
+  planFiles?: PlanFiles,
+  readExecutionInput?: (executionId: string) => Promise<Json>,
+) {
+  async function isFileEdit(
+    read: ConditionReadContext,
+    boundary: import('../../extensions').NecessaryConditionContext['boundary'],
+  ) {
+    if (
+      !planFiles ||
+      !readExecutionInput ||
+      boundary.kind !== 'tool' ||
+      !boundary.executionId ||
+      boundary.sessionId !== read.sessionId ||
+      !['files.write', 'files.edit'].includes(boundary.definitionId ?? '') ||
+      boundary.definitionVersion !== '2'
+    )
+      return false;
+    const actual = await read.getExecution(boundary.executionId);
+    if (
+      !actual ||
+      actual.runId !== boundary.runId ||
+      actual.definitionId !== boundary.definitionId ||
+      actual.definitionVersion !== boundary.definitionVersion
+    )
+      return false;
+    const input = await readExecutionInput(boundary.executionId);
+    if ((await digest(input)) !== actual.inputDigest) return false;
+    const current = decode(await read.records.get('plan.current'));
+    const plan = current ? decode(await read.records.get(string(current.key))) : null;
+    if (
+      !plan?.file ||
+      decode(await read.records.get('plan.file.publication'))?.state === 'pending' ||
+      object(input).path !== planFiles.path(plan.file as unknown as PlanFile)
+    )
+      return false;
+    return true;
+  }
   const configured = inputOptions.requiredReceiptDefinitions ?? [];
   if (
     !Array.isArray(configured) ||
@@ -531,13 +575,29 @@ export function createPlanningValidation(inputOptions: PlanningOptions = {}) {
     'validation.check',
     'validation.rebind',
   ]);
-  const planInput = schema({
-    planId: text,
-    expectedVersion: { type: ['integer', 'null'], minimum: 1 },
-    title: text,
-    body: text,
-    steps: { type: 'array', minItems: 1, items: schema({ id: text, title: text }) },
-  });
+  const planInput = schema(
+    {
+      planId: text,
+      expectedVersion: { type: ['integer', 'null'], minimum: 1 },
+      title: text,
+      body: text,
+      steps: { type: 'array', minItems: 1, items: schema({ id: text, title: text }) },
+      fileBase: {
+        anyOf: [
+          { type: 'null' },
+          schema({
+            hash: { type: 'string', pattern: '^[a-f0-9]{64}$' },
+            size: { type: 'integer', minimum: 0 },
+            device: text,
+            inode: text,
+          }),
+        ],
+        description:
+          'Only for deliberate reconciliation of an externally changed plan: pass the fresh complete file baseline. Null is create-only recovery of a missing file. Approval remains separate.',
+      },
+    },
+    ['planId', 'expectedVersion', 'title', 'body', 'steps'],
+  );
   const reviewInput = schema({
     planId: text,
     version: { type: 'integer', minimum: 1 },
@@ -663,6 +723,9 @@ export function createPlanningValidation(inputOptions: PlanningOptions = {}) {
         return result({
           current: current?.value ?? null,
           plan: plan?.value ?? null,
+          ...(planFiles && plan && object(plan.value).file
+            ? { filePath: planFiles.path(object(plan.value).file as unknown as PlanFile) }
+            : {}),
           runId: own?.runId ?? null,
           progress: progress ? { revision: progress.revision, value: progress.value } : null,
         });
@@ -674,6 +737,28 @@ export function createPlanningValidation(inputOptions: PlanningOptions = {}) {
         const value = object(input),
           original = await context.records.get('plan.current'),
           current = decode(original);
+        if (planFiles && current && current.version === Number(value.expectedVersion ?? 0) + 1) {
+          const pending = decode(await context.records.get('plan.file.publication'));
+          const saved = decode(await context.records.get(string(current.key)));
+          if (
+            pending?.state === 'pending' &&
+            pending.key === current.key &&
+            pending.digest === current.digest &&
+            saved?.file &&
+            ['planId', 'title', 'body', 'steps'].every(
+              (name) => canonical(saved[name]!) === canonical(value[name]!),
+            )
+          ) {
+            await planFiles.verify(saved.file as unknown as PlanFile, string(saved.body));
+            await write(context, 'plan.file.publication', { ...pending, state: 'committed' });
+            return result({
+              planId: current.planId!,
+              version: current.version!,
+              digest: current.digest!,
+              filePath: planFiles.path(saved.file as unknown as PlanFile),
+            });
+          }
+        }
         if ((current?.version ?? null) !== value.expectedVersion)
           throw new Error('plan_version_conflict');
         const steps = value.steps;
@@ -692,7 +777,66 @@ export function createPlanningValidation(inputOptions: PlanningOptions = {}) {
         };
         const hash = await digest(plan),
           key = `plan/${encodeURIComponent(plan.planId)}/${version}`;
-        await write(context, key, { kind: 'plan_document', ...plan, digest: hash }, true);
+        let file: PlanFile | undefined;
+        if (planFiles) {
+          const own = await context.getExecution(context.executionId);
+          if (!own?.originStoreId || own.sessionId !== context.sessionId)
+            throw new Error('planning_run_mismatch');
+          const priorPlan = current ? decode(await context.records.get(string(current.key))) : null;
+          const pendingRecord = await context.records.get('plan.file.publication');
+          const pending = decode(pendingRecord);
+          const recovering = pending?.state === 'pending';
+          const publication = {
+            storeId: own.originStoreId,
+            sessionId: context.sessionId,
+            planId: plan.planId,
+            body: plan.body,
+            previous:
+              priorPlan?.planId === plan.planId && priorPlan.file
+                ? (priorPlan.file as unknown as PlanFile)
+                : null,
+            ...(value.fileBase !== undefined
+              ? {
+                  fileBase: value.fileBase as unknown as
+                    | import('../../tools/files').FileBaseline
+                    | null,
+                }
+              : {}),
+          };
+          if (recovering && (pending.digest !== hash || pending.key !== key))
+            throw new Error('plan_file_recovery_required');
+          if (!recovering) {
+            if (priorPlan?.file && value.fileBase === undefined)
+              await planFiles.verify(priorPlan.file as unknown as PlanFile, string(priorPlan.body));
+            await writeAt(
+              context,
+              'plan.file.publication',
+              {
+                kind: 'plan_file_publication',
+                state: 'pending',
+                key,
+                digest: hash,
+                file: planFiles.describe(publication) as unknown as Json,
+              },
+              pendingRecord,
+            );
+          }
+          file = await planFiles.publish({
+            ...publication,
+            recover: recovering,
+          });
+        }
+        await write(
+          context,
+          key,
+          {
+            kind: 'plan_document',
+            ...plan,
+            digest: hash,
+            ...(file ? { file: file as unknown as Json } : {}),
+          },
+          true,
+        );
         await writeAt(
           context,
           'plan.current',
@@ -705,7 +849,20 @@ export function createPlanningValidation(inputOptions: PlanningOptions = {}) {
           },
           original,
         );
-        return result({ planId: plan.planId, version, digest: hash });
+        if (file)
+          await write(context, 'plan.file.publication', {
+            kind: 'plan_file_publication',
+            state: 'committed',
+            key,
+            digest: hash,
+            file: file as unknown as Json,
+          });
+        return result({
+          planId: plan.planId,
+          version,
+          digest: hash,
+          ...(file ? { filePath: planFiles!.path(file) } : {}),
+        });
       },
     },
     'planning.review': {
@@ -718,6 +875,14 @@ export function createPlanningValidation(inputOptions: PlanningOptions = {}) {
         const planRecord = await context.records.get(string(current.key));
         const plan = decode(planRecord);
         if (!plan) throw new Error('plan_missing');
+        if (planFiles) {
+          if (
+            !plan.file ||
+            decode(await context.records.get('plan.file.publication'))?.state === 'pending'
+          )
+            throw new Error('plan_file_recovery_required');
+          await planFiles.verify(plan.file as unknown as PlanFile, string(plan.body));
+        }
         const execution = await context.getExecution(context.executionId);
         if (!execution?.originStoreId || execution.sessionId !== context.sessionId)
           throw new Error('planning_run_mismatch');
@@ -775,6 +940,11 @@ export function createPlanningValidation(inputOptions: PlanningOptions = {}) {
         const latest = decode(await context.records.get('plan.current'));
         if (!latest || ['planId', 'version', 'digest'].some((k) => latest[k] !== requested[k]))
           throw new Error('plan_identity_mismatch');
+        if (planFiles) {
+          if (decode(await context.records.get('plan.file.publication'))?.state === 'pending')
+            throw new Error('plan_file_recovery_required');
+          await planFiles.verify(plan.file as unknown as PlanFile, string(plan.body));
+        }
         const approval = {
           kind: 'plan_approval',
           runId: execution?.runId ?? null,
@@ -1663,6 +1833,14 @@ export function createPlanningValidation(inputOptions: PlanningOptions = {}) {
               const boundary = context.boundary;
               if (
                 phase === 'dispatch' &&
+                !inheritedPlanContinuation &&
+                (await isFileEdit(read, boundary))
+              ) {
+                outcome = 'satisfied';
+                reason = 'planning_exact_file_boundary';
+              }
+              if (
+                phase === 'dispatch' &&
                 boundary.kind === 'tool' &&
                 Array.isArray(obligation.readOnlyDefinitions) &&
                 obligation.readOnlyDefinitions.some((item) => {
@@ -1682,6 +1860,9 @@ export function createPlanningValidation(inputOptions: PlanningOptions = {}) {
                 boundary &&
                 !inheritedPlanContinuation &&
                 (boundary.kind === 'model' ||
+                  (boundary.kind === 'job' &&
+                    boundary.definitionId === `${planningExtensionId}/planning.write` &&
+                    boundary.definitionVersion === '1') ||
                   (boundary.kind === 'tool' &&
                     boundary.definitionVersion === '1' &&
                     management.has(boundary.definitionId ?? '')))
@@ -1995,6 +2176,15 @@ export function createPlanningValidation(inputOptions: PlanningOptions = {}) {
             })),
             {
               ...schema({
+                kind: { const: 'plan_file_publication' },
+                state: { enum: ['pending', 'committed'] },
+                key: text,
+                digest: text,
+                file: { type: 'object' },
+              }),
+            },
+            {
+              ...schema({
                 kind: { const: 'plan_document' },
                 planId: text,
                 version: { type: 'integer', minimum: 1 },
@@ -2107,6 +2297,45 @@ export function createPlanningValidation(inputOptions: PlanningOptions = {}) {
       },
     ],
     queries: [
+      ...(planFiles
+        ? [
+            {
+              id: 'planning.file',
+              version: '1',
+              description: 'Read the exact current editable plan file binding',
+              inputSchema: empty,
+              outputSchema: { type: 'array', items: { type: 'object' } } as JsonSchema,
+              async execute(_input: Json, context: ReadContext) {
+                const pointer = decode(await context.records.get('plan.current'));
+                const plan = pointer
+                  ? decode(await context.records.get(string(pointer.key)))
+                  : null;
+                if (!plan?.file) return [];
+                if (decode(await context.records.get('plan.file.publication'))?.state === 'pending')
+                  throw new AgentError('plan_file_recovery_required');
+                return [
+                  {
+                    extensionId: planningExtensionId,
+                    contentType,
+                    contentVersion: 1,
+                    summary: 'Current plan file',
+                    payload: {
+                      planId: plan.planId!,
+                      title: plan.title!,
+                      steps: plan.steps!,
+                      version: plan.version!,
+                      digest: plan.digest!,
+                      file: plan.file,
+                      path: planFiles.path(plan.file as unknown as PlanFile),
+                    },
+                    artifactRefs: [],
+                    actions: [],
+                  },
+                ];
+              },
+            },
+          ]
+        : []),
       {
         id: 'planning.status',
         version: '1',
@@ -2303,6 +2532,18 @@ export function createPlanningValidation(inputOptions: PlanningOptions = {}) {
     if (!current) return { status: 'pending' };
     const planRecord = await read.records.get(string(current.key));
     const plan = decode(planRecord);
+    if (planFiles) {
+      if (
+        !plan?.file ||
+        decode(await read.records.get('plan.file.publication'))?.state === 'pending'
+      )
+        return { status: 'pending' };
+      try {
+        await planFiles.verify(plan.file as unknown as PlanFile, string(plan.body));
+      } catch {
+        return { status: 'pending' };
+      }
+    }
     const approval = decode(
       await read.records.get(
         `run/${identity.runId}/approval/${encodeURIComponent(string(current.planId))}/${current.version}`,
@@ -2456,19 +2697,39 @@ export function createPlanningValidation(inputOptions: PlanningOptions = {}) {
         }
       }
     }
-    return planSource(sessionId, pointer, plan, approval);
+    return planSource(sessionId, pointer, plan, approval, context);
   }
   async function planSource(
     sessionId: string,
     pointer: Record<string, Json>,
     plan: Record<string, Json>,
     approval: Record<string, Json> | null,
+    context: { records: Pick<ReadContext['records'], 'get'> },
   ): Promise<ContextSource[]> {
-    const proof = approval ? object(approval.proof) : null;
+    let fileState: string | undefined;
+    if (planFiles) {
+      fileState = 'unavailable';
+      if (decode(await context.records.get('plan.file.publication'))?.state === 'pending')
+        fileState = 'publication_pending';
+      else if (plan.file) {
+        try {
+          await planFiles.verify(plan.file as unknown as PlanFile, string(plan.body));
+          fileState = 'matches_record';
+        } catch {
+          fileState = 'changed_or_unavailable';
+        }
+      }
+    }
+    const proof =
+      approval && (!planFiles || fileState === 'matches_record') ? object(approval.proof) : null;
     const content = {
       kind: 'current_plan',
       current: pointer,
       plan,
+      ...(fileState ? { fileState } : {}),
+      ...(planFiles && plan.file
+        ? { filePath: planFiles.path(plan.file as unknown as PlanFile) }
+        : {}),
       approval: proof
         ? {
             interactionId: proof.interactionId!,
@@ -2539,7 +2800,7 @@ export function createPlanningValidation(inputOptions: PlanningOptions = {}) {
       ),
     );
     if (!plan || !approval) return false;
-    const expected = await planSource(context.sessionId, pointer, plan, approval);
+    const expected = await planSource(context.sessionId, pointer, plan, approval, context);
     return !!actual.sources?.some(
       (source) => source.id === expected[0]!.id && source.digest === expected[0]!.digest,
     );

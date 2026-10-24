@@ -8,11 +8,14 @@ export const TerminalMarkdown = memo(function TerminalMarkdown({
   streaming = false,
   maxWidth,
   parsedSlice,
+  viewportRows,
 }: {
   content: string;
   streaming?: boolean;
   maxWidth?: number;
   parsedSlice?: MarkdownRenderSlice;
+  /** Only a mutable tail already displayed inside a finite, bottom-aligned viewport. */
+  viewportRows?: number;
 }) {
   return (
     <MarkdownBlock
@@ -20,6 +23,7 @@ export const TerminalMarkdown = memo(function TerminalMarkdown({
       streaming={streaming}
       maxWidth={maxWidth}
       parsedSlice={parsedSlice}
+      viewportRows={viewportRows}
     />
   );
 });

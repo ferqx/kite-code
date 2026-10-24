@@ -106,6 +106,7 @@ import {
 
 export * from './controller';
 export { TuiErrorBoundary } from './error-boundary';
+export { useInkWindowSize } from './ink/window-size';
 export { TerminalMarkdown } from './markdown';
 export * from './mcp-auth';
 export * from './mcp-connection';
@@ -127,11 +128,14 @@ export function TuiSession({
   testDiagnostics = false,
   onQuit,
   onReadinessChange,
+  availableRows,
 }: {
   controller: TuiController;
   testDiagnostics?: boolean;
   onQuit?: () => void;
   onReadinessChange?: (ready: boolean) => void;
+  /** Dynamic rows left after Host chrome; native history remains outside this budget. */
+  availableRows?: number;
 }) {
   const state = useSyncExternalStore(controller.subscribe, () => controller.state);
   const [admittedWorkspace, setAdmittedWorkspace] = useState<string>();
@@ -161,7 +165,7 @@ export function TuiSession({
           onExit={onQuit ?? (() => void controller.routeCommand('/exit'))}
         />
       ) : (
-        <TuiSessionView controller={controller} onQuit={onQuit} />
+        <TuiSessionView controller={controller} onQuit={onQuit} availableRows={availableRows} />
       )}
     </TuiPresentationProvider>
   );
@@ -171,6 +175,8 @@ type HistoryItem = {
   key: string;
   version: string;
   node: ReactNode;
+  /** Optional finite projection; Static always receives the complete node. */
+  liveNode?: ReactNode;
   mutable?: boolean;
   subagentSteps?: readonly number[];
   renderWithLayout?: (layout: SubagentLayout) => ReactNode;
@@ -703,7 +709,7 @@ function TuiHistory({
           model?.status === 'succeeded' &&
           !model.modelRetry &&
           (!message.outputBody || body?.complete === true);
-        const renderMessage = (hideBody: boolean, hideHeading = false) =>
+        const renderMessage = (hideBody: boolean, hideHeading = false, viewportRows?: number) =>
           item.kind === 'message' ? (
             <TuiMessage
               message={message}
@@ -732,6 +738,7 @@ function TuiHistory({
               hideContent={hideBody}
               suppressThought={suppressThought}
               finalReasoning={stream?.finalReasoning}
+              viewportRows={viewportRows}
             />
           ) : (
             <TuiToolResult item={item} />
@@ -769,6 +776,10 @@ function TuiHistory({
                     ) : (
                       renderMessage(hideContent)
                     ),
+                  liveNode:
+                    item.kind === 'message' && message.status === 'incomplete'
+                      ? renderMessage(hideContent, false, Math.max(1, rows - 8))
+                      : undefined,
                 },
               ].flatMap((entry): HistoryItem[] => {
                 const identity = markdownIdentity(message);
@@ -798,13 +809,21 @@ function TuiHistory({
                   recordedPreview && parts.tail ? [...parts.stable, parts.tail] : parts.stable;
                 const liveTail = recordedPreview ? undefined : parts.tail;
                 markdownStreams.current.set(identity, parsed);
-                const bodyNode = (part: NonNullable<typeof parts.tail>) => (
+                const bodyNode = (part: NonNullable<typeof parts.tail>, mutable = false) => (
                   <Box paddingLeft={testDiagnostics ? 0 : 2}>
                     <TerminalMarkdown
                       content=""
                       parsedSlice={part.slice}
                       maxWidth={Math.max(1, columns - (testDiagnostics ? 0 : 2))}
+                      viewportRows={mutable ? Math.max(1, rows - 8) : undefined}
                     />
+                  </Box>
+                );
+                const tailNode = (mutable = false) => (
+                  <Box flexDirection="column">
+                    {liveTail && bodyNode(liveTail, mutable)}
+                    {testDiagnostics && <Text dimColor>{message.status}</Text>}
+                    {renderMessage(true, true)}
                   </Box>
                 );
                 return [
@@ -830,13 +849,8 @@ function TuiHistory({
                     key: `message:${message.id}:tail:${liveTail?.key ?? 'state'}`,
                     version: JSON.stringify([entry.version, liveTail?.version]),
                     mutable: entry.mutable,
-                    node: (
-                      <Box flexDirection="column">
-                        {liveTail && bodyNode(liveTail)}
-                        {testDiagnostics && <Text dimColor>{message.status}</Text>}
-                        {renderMessage(true, true)}
-                      </Box>
-                    ),
+                    node: tailNode(),
+                    liveNode: entry.mutable ? tailNode(true) : undefined,
                   },
                 ];
               })),
@@ -1048,7 +1062,9 @@ function TuiHistory({
       marginBottom={items.length > 1 ? 1 : 0}
     >
       <Box height={0} overflow="hidden">
-        <Static key={history.epoch} items={history.items}>
+        {/* Static is absolutely positioned; a long Tool line must not enlarge
+            its cell grid beyond the terminal width for every later body row. */}
+        <Static key={history.epoch} items={history.items} style={{ width: columns }}>
           {(item) => (
             <Box key={item.key} flexDirection="column">
               {item.node}
@@ -1069,7 +1085,7 @@ function TuiHistory({
             <Box key={item.key} flexDirection="column">
               {item.renderWithLayout && layouts.has(item.key)
                 ? item.renderWithLayout(layouts.get(item.key)!)
-                : item.node}
+                : (item.liveNode ?? item.node)}
             </Box>
           ))}
         </Box>
@@ -1096,8 +1112,10 @@ function TuiMessage({
   suppressThought = false,
   finalReasoning,
   hideHeading = false,
+  viewportRows,
 }: {
   message: Message;
+  viewportRows?: number;
   hideHeading?: boolean;
   controller: TuiController;
   fullOutput?: string;
@@ -1202,6 +1220,7 @@ function TuiMessage({
               <TerminalMarkdown
                 content={fullOutput ?? message.content}
                 maxWidth={maxWidth}
+                viewportRows={viewportRows}
                 streaming={
                   message.status === 'incomplete' &&
                   ['planned', 'dispatching', 'running'].includes(modelStatus ?? '')
@@ -1339,9 +1358,11 @@ function TuiExecution({
 function TuiSessionView({
   controller,
   onQuit,
+  availableRows,
 }: {
   controller: TuiController;
   onQuit?: () => void;
+  availableRows?: number;
 }) {
   const { stdout } = useStdout();
   const { rows } = useInkWindowSize();
@@ -1914,15 +1935,6 @@ function TuiSessionView({
         setChooser(true);
         return;
       }
-      if (key.ctrl && input === 'l') {
-        const sessionId = state.sessionId;
-        if (sessionId)
-          void (async () => {
-            await controller.lookup();
-            if (controller.state.sessionId === sessionId) await controller.select(sessionId);
-          })();
-        return;
-      }
       if (key.ctrl && input === 'o') {
         const message = state.snapshot?.messages.find(
           (m) =>
@@ -2201,8 +2213,8 @@ function TuiSessionView({
   return (
     <Box
       flexDirection="column"
-      maxHeight={focused ? undefined : Math.max(1, rows - 1)}
-      overflowY={focused ? undefined : 'hidden'}
+      maxHeight={Math.max(1, Math.min(rows - 1, availableRows ?? rows - 1))}
+      overflowY="hidden"
       justifyContent="flex-end"
     >
       {history}
@@ -2321,6 +2333,7 @@ function TuiSessionView({
           {card.kind === 'plan_review' && (
             <TuiPlanReviewPanel
               key={approvalKey}
+              compact={Math.min(rows - 1, availableRows ?? rows - 1) < 28}
               card={card}
               feedback={answerBuffer}
               onAnswer={(text) => void controller.answer(card, text)}
@@ -2644,7 +2657,7 @@ function TuiSessionView({
             {state.intent.phase === 'unknown' && (
               <>
                 {' · '}
-                {t('Ctrl+L: check the original request')}
+                {t('Checking the original request automatically in its Session')}
               </>
             )}
           </Text>
@@ -2657,7 +2670,7 @@ function TuiSessionView({
       {testDiagnostics && (
         <Text>
           {t(
-            'Ctrl+B pending cards · Ctrl+R sessions · Ctrl+L refresh · Ctrl+O full output · Ctrl+C cancels exact original Command',
+            'Ctrl+B pending cards · Ctrl+R sessions · Ctrl+O full output · Ctrl+C cancels exact original Command',
           )}
         </Text>
       )}

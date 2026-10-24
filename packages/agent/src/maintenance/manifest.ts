@@ -30,6 +30,42 @@ function hash(value: unknown): void {
     throw new MaintenanceError('backup_invalid_manifest');
 }
 export function parseManifest(value: unknown): BackupManifest {
+  if (value && typeof value === 'object' && 'version' in value && value.version === 20) {
+    const row = object(value, [
+      'version',
+      'kind',
+      'createdAt',
+      'source',
+      'engine',
+      'database',
+      'media',
+      'consistency',
+      'assets',
+      'excluded',
+      'assetFormatVersion',
+      'workingFiles',
+    ]);
+    if (
+      !Number.isInteger(row.assetFormatVersion) ||
+      Number(row.assetFormatVersion) < 2 ||
+      Number(row.assetFormatVersion) > 19
+    )
+      throw new MaintenanceError('backup_invalid_manifest');
+    const files = object(row.workingFiles, ['inventory', 'sha256', 'byteLength', 'fileCount']);
+    if (files.inventory !== 'working-files.jsonl')
+      throw new MaintenanceError('backup_invalid_manifest');
+    hash(files.sha256);
+    decimal(files.byteLength);
+    decimal(files.fileCount);
+    const { assetFormatVersion, workingFiles, ...base } = row;
+    const legacy = parseManifest({ ...base, version: assetFormatVersion });
+    return {
+      ...legacy,
+      version: 20,
+      assetFormatVersion: legacy.version as Exclude<BackupManifest['version'], 20>,
+      workingFiles: workingFiles as BackupManifest['workingFiles'],
+    };
+  }
   const row = object(value, [
     'version',
     'kind',

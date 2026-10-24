@@ -50,6 +50,8 @@ export interface ToolResult {
   artifactRefs?: ArtifactRef[];
   /** Complete UTF-8 Model body; Core must verify original scope and read to successful EOF. */
   modelContent?: { kind: 'artifact'; reference: ArtifactRef; encoding: 'utf-8' };
+  /** Immutable visual results from this exact Tool Execution, never human input. */
+  modelImages?: ArtifactRef[];
 }
 export interface ToolContext extends ActionContext {
   readonly runId: string | null;

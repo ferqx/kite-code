@@ -1,5 +1,15 @@
 # 显式离线备份
 
+## 会话工作文件与 manifest v20
+
+[工作文件 owner](working-files.ts)仅从 `builtin.planning.record` 的 plan 文档／发布意图与 `builtin.files.output` 登记提取准确路径，不扫描任意 JSON 猜来源。Profile 中有登记工作文件时，备份使用 closed manifest v20：`assetFormatVersion` 保留原 v2–v19 资产语法，`workingFiles` 绑定 `working-files.jsonl` 的完整 SHA、字节数和文件数。无工作文件的旧格式继续沿原验证合同。
+
+备份在原 Profile EX 下复制实际当前字节，并在全部复制后复核源文件，包含尚未再次交付的修改。缺失文件保存为明确 null proof；inspect 核准确登记集合、无额外文件、无链接、全字节 hash／size，restore 不以旧 Plan 或 Artifact 快照补造缺失当前文件。新 Store 保留来源相对定位与历史事实，外部漂移继续阻断 Plan 批准。解析 cache 不属于备份必需资产。
+
+2026-10-23，`ba34a2e6d` 加本次会话文件工作树、Windows x64／Bun1.4.3：[默认 Service 恢复回归](../../../../apps/service/test/isolated/planning-configuration.test.ts)关闭真实 runtime／Store 后，通过本维护入口备份并恢复为新 Store，再创建全新 Service runtime。夹具通过既有权限管理入口为新 Store 明确设置 Full 与 Workspace 信任，不继承旧 Store 授权。输出备份包含尚未再次交付的最新修改；重开及这些权限设置没有 Provider 调用。用户显式开始新轮次后，真实模型上下文投影恢复文件的准确路径及 `approval:null`、`fileState:matches_record`，普通 `read_file`／`edit_file` 实际读取并修改输出和 Plan，后者形成 v2。旧 Plan、原交付 Artifact、执行身份／状态／revision／originStoreId 保持，新执行属于新 Store，共22断言通过。该例使用同一隔离 Profile 根与受控兼容 Provider，证明新 Store 的后续消费，不替代异地迁移、完整安装版或其他平台恢复资格。
+
+原 GC 完成准确历史收集后才处理工作文件：仍有 typed 登记的文件全部保留，只有失去登记且过宽限的合法管理路径可沿原生 Files 完整基线删除。派生 `cache/documents` 独立按相同宽限淘汰，不能删除 blobs 或当前文件；无链接、关闭未知与原维护 EX 保有规则继续生效。已释放上传登记保留墓碑和原 Artifact 引用，直到原历史 GC 证明依赖可收集；当前没有按 TTL 强删未发送引用。客户端与发布验收范围见 [Desktop](../../../../apps/desktop/README.md)和 [Terminal](../../../../apps/cli/docs/terminal-release.md)，不把本维护入口的恢复证据外推为完整生命周期资格。
+
 Desktop DB10 使用独立 closed manifest v19；定时任务快照与旧格式隔离见[DB10合同](#desktop-db10-与-manifest-v19)。
 
 MCP 五类申请与文件恢复申请的 document reader 共用内部 [intent-document](intent-document.ts)：沿原 `openPrivate/closePrivate` 保有同一 FD／Windows pin，执行 16MiB 完整读取、实体前后复核、fatal UTF-8 和闭合 version/records envelope；各资产继续独立核原 records grammar、摘要、数量及错误码。普通 caller reader 保留自己的 `backup_content_changed`、实体字段、平台前置检查及布尔返回合同，不以共享 reader 改写其兼容语义。

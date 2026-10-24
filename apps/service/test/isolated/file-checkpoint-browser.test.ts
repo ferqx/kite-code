@@ -83,7 +83,7 @@ test('Cookie Browser reads actual default checkpoints, keyset preview and origin
       modelId: 'fixed',
       models: [model],
       tools: [
-        { id: 'files.read', definitionVersion: '4' },
+        { id: 'files.read', definitionVersion: '5' },
         { id: 'files.write', definitionVersion: '2' },
       ],
     }),

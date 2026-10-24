@@ -306,6 +306,12 @@ export function collectHistory(db: Database, plan: HistoryCollectionPlan, now: n
         ])
           db.run(`DELETE FROM ${table} WHERE session_id IN (${members})`, [id]);
         db.run(`DELETE FROM execution_output WHERE execution_id IN (${executions})`, [id]);
+        if (
+          db
+            .query("SELECT 1 FROM sqlite_schema WHERE type='table' AND name='input_file_import'")
+            .get()
+        )
+          db.run(`DELETE FROM input_file_import WHERE session_id IN (${members})`, [id]);
         db.run(`DELETE FROM blob_ref WHERE session_id IN (${members})`, [id]);
         db.run(
           `DELETE FROM extension_record WHERE scope_kind='session' AND scope_id IN (${members})`,

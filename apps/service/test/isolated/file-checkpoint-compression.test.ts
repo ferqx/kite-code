@@ -13,6 +13,7 @@ import type {
 import { selectProfile } from '@kite-ai/agent/profile';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import type { Store } from '@kite-ai/agent/storage';
+import { taskQualityPresentedRead } from '../../../../tests/e2e/live/model/agent-task-quality-fixture';
 import { privateDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { launchPairedService } from '../../src/paired';
 import { ownedUserConfiguration } from '../fixtures/user-configuration-fixture';
@@ -76,7 +77,8 @@ for (const collision of ['published-summary', 'generated-instruction'] as const)
           else if (step === 1) {
             const raw = body.messages.filter((message) => message.role === 'tool').at(-1);
             if (!raw) throw Error('actual_baseline_missing');
-            const read = JSON.parse(raw.content) as { path: string; baseline: Json };
+            const read = taskQualityPresentedRead(raw.content);
+            if (!read) throw Error('actual_file_read_result_invalid');
             expect(read.path).toBe('original.txt');
             call = {
               name: 'write_file',
@@ -128,7 +130,7 @@ for (const collision of ['published-summary', 'generated-instruction'] as const)
           },
         ],
         tools: [
-          { id: 'files.read', definitionVersion: '4' },
+          { id: 'files.read', definitionVersion: '5' },
           { id: 'files.write', definitionVersion: '2' },
         ],
       }),

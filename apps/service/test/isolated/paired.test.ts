@@ -14,7 +14,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { selectProfile } from '@kite-ai/agent/profile';
-import { openSqliteStore } from '@kite-ai/agent/sqlite';
+import { openSqliteStore, sqliteStorageAssets } from '@kite-ai/agent/sqlite';
 import { privateDirectory } from '@kite-ai/agent/windows-path-security';
 import type { AgentClient } from '@kite-ai/client';
 import {
@@ -30,24 +30,17 @@ async function assertBusinessInput(
   content: string,
 ) {
   const command = await client.getCommand(commandId);
-  const receipt = command.receipt as {
-    businessCommandId: string;
-    humanInputCommandId: string;
-    runId: string;
-  };
+  const receipt = command.receipt as { runId: string };
   expect(command.status).toBe('applied');
-  expect(receipt.businessCommandId).toBeString();
-  expect(receipt.businessCommandId).not.toBe(commandId);
+  expect(receipt).toEqual({ runId: expect.any(String) });
   const store = await openSqliteStore({ dataRoot: profile.dataRoot, profile: profile.profile });
   try {
     const original = (await store.getCommand(commandId))!;
-    expect(original).toMatchObject({ status: 'applied', request: { kind: 'run.start', content } });
-    expect(await store.getCommand(receipt.humanInputCommandId)).toMatchObject({
-      request: { publicCommandId: commandId, content, originalRequest: original.request },
-    });
-    expect(await store.getCommand(receipt.businessCommandId)).toMatchObject({
+    expect(original).toMatchObject({
+      id: commandId,
+      rootWorkCommandId: commandId,
       status: 'applied',
-      request: { content },
+      request: { kind: 'run.start', content },
       receipt: { runId: receipt.runId },
     });
   } finally {
@@ -55,7 +48,7 @@ async function assertBusinessInput(
   }
   const run = await client.getRun(receipt.runId);
   expect(run).toMatchObject({
-    originCommandId: receipt.businessCommandId,
+    originCommandId: commandId,
     rootWorkCommandId: commandId,
   });
   const view = await client.getView('session');
@@ -63,10 +56,8 @@ async function assertBusinessInput(
   expect(model).toBeDefined();
   const input = await client.getModelInput('session', model.id);
   expect(input.confirmation).toBe('succeeded');
-  const source = input.request.messages.find((message) =>
-    message.sourceIds?.includes(receipt.businessCommandId),
-  );
-  expect(source).toMatchObject({ content, sourceIds: [receipt.businessCommandId] });
+  const source = input.request.messages.find((message) => message.sourceIds?.includes(commandId));
+  expect(source).toMatchObject({ content, sourceIds: [commandId] });
   return run;
 }
 
@@ -141,7 +132,7 @@ test.each([
     const db = new Database(data.profile.databasePath, { readonly: true });
     try {
       expect(db.query('SELECT COUNT(*) AS count FROM schema_migration').get()).toEqual({
-        count: 2,
+        count: sqliteStorageAssets().migrations.length,
       });
       expect(db.query('SELECT COUNT(*) AS count FROM command').get()).toEqual({ count: 0 });
       expect(db.query('SELECT COUNT(*) AS count FROM execution').get()).toEqual({ count: 0 });

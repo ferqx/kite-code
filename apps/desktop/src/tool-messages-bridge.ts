@@ -18,6 +18,8 @@ export type NativeToolMessageFact = Pick<
   decisionRefresh?: 'context_refresh_required' | 'capability_refresh_required';
   /** Display only: unique original Model call fields, or its known version's directory default. */
   target?: string;
+  /** Original PDF page image metadata, loaded through the same bounded image reader. */
+  images?: { name: string; reference: { mediaType: string; size: string } }[];
   /** Read-only original Execution authorization; never a grant or answer capability. */
   authorization?: Execution['authorization'];
   /** Known ask_user v1 request and successful result; no Interaction authority. */

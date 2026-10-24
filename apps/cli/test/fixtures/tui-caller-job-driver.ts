@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { appendFileSync, existsSync, writeFileSync } from 'node:fs';
+import { appendFileSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { ptyDeadline, spawnTuiPTY, terminateTuiTree } from './tui-pty';
 
 const input = JSON.parse(process.argv[2]!) as {
@@ -48,15 +48,31 @@ try {
     await key('/recovery');
     await key('\r');
     await wait('execution.cancel');
-    await key('\x0c');
+    await key('\x1b');
     const end = Date.now() + 5000;
     while (!existsSync(`${input.base}.get-lost`)) {
       if (Date.now() > end) throw Error('GET loss missing');
       await pump();
     }
+    await key('/recovery');
+    await key('\r');
+    await wait('execution.cancel');
     await key('\x03');
     await pump();
-    await key('\x0c');
+    await key('\x1b');
+    const lookupDeadline = Date.now() + 5000;
+    for (;;) {
+      const originalGets = readFileSync(`${input.base}.wire.jsonl`, 'utf8')
+        .split('\n')
+        .filter(Boolean)
+        .map((line) => JSON.parse(line))
+        .filter((row) => row.cold && row.method === 'GET' && row.path?.startsWith('/v1/commands/'));
+      if (originalGets.length >= 2) break;
+      if (Date.now() > lookupDeadline) throw Error('original cancel automatic GET did not resume');
+      await pump();
+    }
+    await key('/recovery');
+    await key('\r');
     await wait('execution.cancel · applied');
     await key('\x11');
     await ptyDeadline(

@@ -560,6 +560,7 @@ console.log(JSON.stringify({storeId:meta.storeId,pending:pending.status,backupSt
           '0003-session-reconciliation.sql',
           '0004-pending-input-order.sql',
           '0005-authorization-check.sql',
+          '0006-input-file-imports.sql',
         ],
       });
     } finally {

@@ -13,10 +13,17 @@ import { join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { launchPairedService } from '@kite-ai/service/paired';
+import { taskQualityPresentedRead } from '../../../../tests/e2e/live/model/agent-task-quality-fixture';
 import { privateDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { ownedUserConfiguration } from '../../../service/test/fixtures/user-configuration-fixture';
 import type { CLIServiceArtifact } from '../../host';
 import { buildOwnedDaemon } from './daemon-host-build';
+
+function readToolBaseline(content: string) {
+  const actual = taskQualityPresentedRead(content);
+  if (actual?.path !== 'original.txt') throw Error('actual_file_read_result_invalid');
+  return actual.baseline;
+}
 
 async function until<T>(read: () => Promise<T>, matches: (value: T) => boolean) {
   const deadline = Date.now() + 20000;
@@ -59,7 +66,7 @@ export async function fileRecoveryProfile(input: { secondMutation?: boolean } = 
                 input: {
                   path: 'original.txt',
                   content: n === 1 ? 'actual changed bytes\r\n' : 'later actual Run bytes\r\n',
-                  base: JSON.parse(read!.content).baseline,
+                  base: readToolBaseline(read!.content),
                 },
               }
             : null;
@@ -95,7 +102,7 @@ export async function fileRecoveryProfile(input: { secondMutation?: boolean } = 
         { id: 'fixed', provider: 'compatible', model: 'fixed', baseURL: `${provider.url.href}v1` },
       ],
       tools: [
-        { id: 'files.read', definitionVersion: '4' },
+        { id: 'files.read', definitionVersion: '5' },
         { id: 'files.write', definitionVersion: '2' },
       ],
     }),

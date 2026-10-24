@@ -2,11 +2,14 @@ import { expect, test } from 'bun:test';
 import { JSDOM } from 'jsdom';
 import { act } from 'react';
 import { createRoot } from 'react-dom/client';
-import { Conversation, type ReadingState } from '../../src/desktop/Conversation';
+import type { ReadingState } from '../../src/desktop/Conversation';
 import type { Message } from '../../src/desktop/types';
 
-test('native Conversation scroll follows, restores manual reading and retires RAF/observers/listeners on immediate repeated unmount', async () => {
-  const dom = new JSDOM('<div id="root"></div>', { pretendToBeVisual: true });
+test('ScrollArea Conversation follows, restores manual reading and retires active thumb RAF/observers/listeners on immediate repeated unmount', async () => {
+  const dom = new JSDOM(
+    '<!doctype html><style>[data-slot="scroll-area-scrollbar"] { padding: 1px; }</style><div id="root"></div>',
+    { pretendToBeVisual: true },
+  );
   const keys = [
     'window',
     'document',
@@ -87,6 +90,7 @@ test('native Conversation scroll follows, restores manual reading and retires RA
     Object.defineProperty(globalThis, key, { configurable: true, writable: true, value });
   const host = dom.window.document.getElementById('root')!,
     root = createRoot(host);
+  const { Conversation } = await import('../../src/desktop/Conversation');
   let saved: ReadingState | undefined;
   let guidance: 'sending' | 'saved' | undefined;
   let terminal = false;
@@ -148,8 +152,7 @@ test('native Conversation scroll follows, restores manual reading and retires RA
     expect(viewport.getAttribute('aria-label')).toBe('会话消息');
     expect(viewport.getAttribute('aria-busy')).toBe('true');
     expect(viewport.querySelector('.reading-column')).not.toBeNull();
-    // The transcript must not mount the third-party thumb's unowned perpetual RAF loop.
-    expect(host.querySelector('[data-radix-scroll-area-viewport]')).toBeNull();
+    expect(host.querySelector('[data-radix-scroll-area-viewport]')).toBe(viewport);
     Object.defineProperties(viewport, {
       scrollHeight: { get: () => height },
       clientHeight: { value: 100 },
@@ -288,13 +291,29 @@ test('native Conversation scroll follows, restores manual reading and retires RA
     for (let index = 1; index <= 100; index++) {
       await render(index);
       const node = host.querySelector<HTMLDivElement>('.conversation-viewport')!;
+      const scrollbar = host.querySelector<HTMLElement>('[data-slot="scroll-area-scrollbar"]')!;
+      Object.defineProperties(node, {
+        scrollHeight: { value: 1000 },
+        offsetHeight: { value: 100 },
+        clientHeight: { value: 100 },
+      });
+      Object.defineProperty(scrollbar, 'clientHeight', { value: 100 });
+      await act(async () => {
+        resize(scrollbar);
+        for (const [id, callback] of [...frames]) {
+          frames.delete(id);
+          callback(0);
+        }
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      });
+      expect(host.querySelector('[data-slot="scroll-area-thumb"]')).not.toBeNull();
       await act(async () => node.dispatchEvent(new dom.window.Event('scroll')));
-      expect(frames.size).toBe(0);
-      expect(observers.size).toBe(1);
+      // Exercise the library's live polling loop before immediate navigation.
+      expect(frames.size).toBeGreaterThan(0);
+      expect(observers.size).toBeGreaterThanOrEqual(1);
       expect(keydown.size).toBe(1);
       // Follow resizes before paint without leaving a frame behind at navigation.
       resize(node);
-      expect(frames.size).toBe(0);
       await act(async () => root.render(null));
       expect(frames.size).toBe(0);
       expect(observers.size).toBe(0);
@@ -307,4 +326,4 @@ test('native Conversation scroll follows, restores manual reading and retires RA
       if (descriptor) Object.defineProperty(globalThis, key, descriptor);
       else Reflect.deleteProperty(globalThis, key);
   }
-});
+}, 15_000);

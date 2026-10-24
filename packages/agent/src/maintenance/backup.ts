@@ -48,6 +48,7 @@ import {
   MaintenanceError,
   type ProfileBackup,
 } from './types';
+import { captureWorkingFiles, verifyWorkingFiles } from './working-files';
 
 function platform(): void {
   if (!['darwin', 'linux', 'win32'].includes(process.platform))
@@ -108,6 +109,7 @@ function exactTree(directory: string, database: Database, manifest: BackupManife
           'media.jsonl',
           'blobs',
           'ready.json',
+          ...(manifest.workingFiles ? ['working-files.jsonl', 'files'] : []),
           ...(manifest.assets.configuration.present ? ['config.jsonc'] : []),
           ...(manifest.assets.skillWorkflowConfiguration.present ? ['skill-workflow.jsonc'] : []),
           ...(manifest.assets.mcpConfiguration?.present ? ['mcp.json'] : []),
@@ -282,14 +284,9 @@ async function verify(
       directory,
       manifest.assets,
       signal,
-      manifest.version === 13 ||
-        manifest.version === 14 ||
-        manifest.version === 15 ||
-        manifest.version === 16 ||
-        manifest.version === 17 ||
-        manifest.version === 18 ||
-        manifest.version === 19,
+      (manifest.assetFormatVersion ?? manifest.version) >= 13,
     );
+    verifyWorkingFiles(directory, database, manifest.workingFiles, signal);
     exactTree(directory, database, manifest);
   } catch (error) {
     preserveMaintenanceFailure(error);
@@ -386,6 +383,7 @@ async function createProfileBackupOwned(input: CreateProfileBackupInput): Promis
     const candidate = openBackupDatabase(candidatePath);
     let blobs = 0n,
       refs = 0n;
+    let workingFiles: BackupManifest['workingFiles'];
     const inventoryPath = join(staging, 'media.jsonl');
     const inventory = openMaintenanceFile(
       inventoryPath,
@@ -406,6 +404,9 @@ async function createProfileBackupOwned(input: CreateProfileBackupInput): Promis
         await checkpoint(input.signal);
       }
       fsyncSync(inventory);
+      workingFiles =
+        (await captureWorkingFiles(access.profilePath, staging, candidate, input.signal)) ??
+        undefined;
     } catch (error) {
       preserveMaintenanceFailure(error);
       throw error;
@@ -416,7 +417,7 @@ async function createProfileBackupOwned(input: CreateProfileBackupInput): Promis
       );
     }
     const assets = await captureAssets(access.profilePath, staging, input.signal);
-    const manifest = parseManifest({
+    const legacyManifest = parseManifest({
       version:
         assets.desktopUi.format?.userVersion === 10
           ? 19
@@ -463,6 +464,14 @@ async function createProfileBackupOwned(input: CreateProfileBackupInput): Promis
       consistency: 'sqlite_snapshot_with_verified_media_and_separate_assets',
       excluded,
     });
+    const manifest = workingFiles
+      ? parseManifest({
+          ...legacyManifest,
+          version: 20,
+          assetFormatVersion: legacyManifest.version,
+          workingFiles,
+        })
+      : legacyManifest;
     await verify(staging, manifest, input.signal);
     const after = sourceFiles(access.databasePath, input.signal);
     if (canonicalJson(before) !== canonicalJson(after))

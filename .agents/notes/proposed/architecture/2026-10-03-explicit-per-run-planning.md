@@ -8,6 +8,8 @@ Status: proposed
 
 ## Proposal
 
+2026-10-23 的[会话持久文件决定](../../implemented/architecture/2026-10-23-persistent-session-files.md)已实现当前方案文件与普通文件工具的协调；本文的原 Run、准确版本、独立工具权限与批准合同继续适用，不由文件存在替代，也不改变本提案其余范围的实施状态。
+
 原 `run.start/input.follow_up` 的通用 extensionInputs 可显式携 `builtin.planning@1` 的闭合 `{mode:'plan'}` 意图。Service 分发已知扩展输入，保持 Core 的原 Command 摘要与幂等；规划与 Workflow 的 envelope 独立，未知/重复/坏输入在凭据和 Provider 前拒绝。单次意图加强原 Run 义务，不改变 Agent 类别、Loop、基础 schema 或后续普通对话。
 
 Planning initializer 允许 trusted host 对本 Run 单调设置 requirePlan，并封存来自实际已装配 safe-read Tool 的准确 kind/id/version。Model、Skill、JSONC 和远端 annotations 不能提供这个集合。未批准时仅 Model、原 Planning 管理工具和这些准确只读定义可派发；Job、child、Shell、写入或未知效果不因 Full 越过计划。现有 trusted requiredValidation/automaticValidation 和硬拒绝继续保持。

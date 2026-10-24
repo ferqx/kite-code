@@ -1,0 +1,34 @@
+diff --git a/dist/index.js b/dist/index.js
+index 54e1bd29d062ad8cab1568bf43905ee3371faa87..31ecad1a985cacc75ad72ecfc10f70196dfeeafc 100644
+--- a/dist/index.js
++++ b/dist/index.js
+@@ -615,7 +615,11 @@ var ScrollAreaThumbImpl = /* @__PURE__ */ React2.forwardRef(
+         }, "handleScroll");
+         onThumbPositionChange();
+         viewport.addEventListener("scroll", handleScroll);
+-        return () => viewport.removeEventListener("scroll", handleScroll);
++        return () => {
++          viewport.removeEventListener("scroll", handleScroll);
++          removeUnlinkedScrollListenerRef.current?.();
++          removeUnlinkedScrollListenerRef.current = void 0;
++        };
+       }
+     }, [scrollAreaContext.viewport, debounceScrollEnd, onThumbPositionChange]);
+     return /* @__PURE__ */ (0, import_jsx_runtime.jsx)(
+diff --git a/dist/index.mjs b/dist/index.mjs
+index b98d4bc14ad4184b2f46b28679fb5f8d55767782..6e9a7c42a588a78a6112325384152b0ff6e7b013 100644
+--- a/dist/index.mjs
++++ b/dist/index.mjs
+@@ -571,7 +571,11 @@ var ScrollAreaThumbImpl = /* @__PURE__ */ React2.forwardRef(
+         }, "handleScroll");
+         onThumbPositionChange();
+         viewport.addEventListener("scroll", handleScroll);
+-        return () => viewport.removeEventListener("scroll", handleScroll);
++        return () => {
++          viewport.removeEventListener("scroll", handleScroll);
++          removeUnlinkedScrollListenerRef.current?.();
++          removeUnlinkedScrollListenerRef.current = void 0;
++        };
+       }
+     }, [scrollAreaContext.viewport, debounceScrollEnd, onThumbPositionChange]);
+     return /* @__PURE__ */ jsx(

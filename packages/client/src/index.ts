@@ -311,7 +311,13 @@ export class AgentClient {
   private async fetchJSON<K extends keyof Responses>(
     path: string,
     shape: K,
-    options: { method?: string; body?: unknown; token?: string; signal?: AbortSignal } = {},
+    options: {
+      method?: string;
+      body?: unknown;
+      rawBody?: ReadableStream<Uint8Array> | Uint8Array;
+      token?: string;
+      signal?: AbortSignal;
+    } = {},
   ): Promise<Responses[K]> {
     const controller = new AbortController();
     const abort = () => controller.abort(options.signal?.reason);
@@ -327,8 +333,12 @@ export class AgentClient {
           authorization: `Bearer ${options.token ?? this.token}`,
           accept: 'application/json',
           ...(options.body === undefined ? {} : { 'content-type': 'application/json' }),
+          ...(options.rawBody === undefined ? {} : { 'content-type': 'application/octet-stream' }),
         },
         ...(options.body === undefined ? {} : { body: JSON.stringify(options.body) }),
+        ...(options.rawBody === undefined
+          ? {}
+          : { body: options.rawBody as BodyInit, duplex: 'half' }),
       });
       if (response.ok && shape === 'ModelInputSnapshot')
         return (await readModelInputResponse(response, controller.signal)) as Responses[K];
@@ -1474,6 +1484,93 @@ export class AgentClient {
       throw new ClientError(
         'network_outcome_unknown',
         'The original Job report resume receipt did not verify.',
+      );
+    return result;
+  }
+  async uploadInputFile(
+    sessionId: string,
+    input: import('./generated/api').InputFileUploadQuery,
+    content: ReadableStream<Uint8Array> | Uint8Array,
+    options: { signal?: AbortSignal } = {},
+  ): Promise<import('./generated/api').InputFileReference> {
+    this.requireCapability('input_files');
+    const intent = structuredClone(input);
+    validateRequest('InputFileUploadQuery', intent);
+    if (intent.expectedStoreId !== this.serverInfo!.storeId)
+      throw new ClientError('store_identity_mismatch');
+    const generation = this.connectionGeneration;
+    const result = await this.fetchJSON(
+      `/v1/sessions/${encodeURIComponent(sessionId)}/input-files?${new URLSearchParams(intent)}`,
+      'InputFileReference',
+      { method: 'POST', rawBody: content, signal: options.signal },
+    );
+    if (generation !== this.connectionGeneration) throw new ClientError('connection_superseded');
+    if (
+      result.name !== intent.name ||
+      result.reference?.id !== `input-file-${intent.id}` ||
+      result.reference.storeId !== intent.expectedStoreId ||
+      result.reference.sessionId !== sessionId ||
+      result.reference.hash !== intent.hash ||
+      result.reference.size !== intent.size ||
+      result.reference.mediaType !== intent.mediaType
+    )
+      throw new ClientError(
+        'network_outcome_unknown',
+        'Query the original input file import identity.',
+      );
+    return result;
+  }
+  async getInputFileImport(sessionId: string, id: string, options: { signal?: AbortSignal } = {}) {
+    this.requireCapability('input_files');
+    const storeId = this.serverInfo?.storeId;
+    if (!storeId) throw new ClientError('store_identity_mismatch');
+    const generation = this.connectionGeneration;
+    const result = await this.fetchJSON(
+      `/v1/sessions/${encodeURIComponent(sessionId)}/input-files/${encodeURIComponent(id)}?${new URLSearchParams({ storeId })}`,
+      'InputFileImport',
+      options,
+    );
+    if (generation !== this.connectionGeneration) throw new ClientError('connection_superseded');
+    if (
+      result.id !== id ||
+      result.sessionId !== sessionId ||
+      result.reference.id !== `input-file-${id}` ||
+      result.reference.sessionId !== sessionId ||
+      result.reference.storeId !== result.originStoreId ||
+      result.reference.subjectId !== result.subjectId ||
+      result.reference.scope.kind !== 'session' ||
+      result.reference.scope.id !== sessionId
+    )
+      throw new ClientError('input_file_scope_mismatch');
+    return result;
+  }
+  async releaseInputFileImport(
+    sessionId: string,
+    id: string,
+    options: { signal?: AbortSignal } = {},
+  ) {
+    this.requireCapability('input_files');
+    const generation = this.connectionGeneration,
+      storeId = this.serverInfo!.storeId;
+    const result = await this.fetchJSON(
+      `/v1/sessions/${encodeURIComponent(sessionId)}/input-files/${encodeURIComponent(id)}/release`,
+      'InputFileImport',
+      {
+        method: 'POST',
+        body: { expectedStoreId: this.serverInfo!.storeId },
+        signal: options.signal,
+      },
+    );
+    if (generation !== this.connectionGeneration) throw new ClientError('connection_superseded');
+    if (
+      result.id !== id ||
+      result.sessionId !== sessionId ||
+      result.originStoreId !== storeId ||
+      result.state !== 'released'
+    )
+      throw new ClientError(
+        'network_outcome_unknown',
+        'Query the original input file import identity.',
       );
     return result;
   }

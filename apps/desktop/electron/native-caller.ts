@@ -39,6 +39,7 @@ import { openEditor } from './editor';
 import { NativeExtensions } from './extensions';
 import { NativeFileChanges } from './file-changes';
 import { NativeFileRecovery } from './file-recovery';
+import { NativeInputFiles } from './input-files';
 import { NativeInputImageReads } from './input-image-reads';
 import { NativeInputImages } from './input-images';
 import { NativeInteractionAttachmentReads } from './interaction-attachment-reads';
@@ -106,6 +107,7 @@ export class NativeCaller {
   };
   private readonly providers: NativeProviderSettings;
   private readonly images = new NativeInputImages();
+  private readonly inputFiles = new NativeInputFiles();
   private readonly imageReads: NativeInputImageReads;
   private readonly mcp: NativeMcpSettings;
   private readonly skills: NativeSkillCatalogueReads;
@@ -312,6 +314,8 @@ export class NativeCaller {
       this.processes,
       (sessionId, ids) =>
         this.images.publish(this.client, this.client.serverInfo!.storeId!, sessionId, ids),
+      (sessionId, ids) =>
+        this.inputFiles.publish(this.client, this.client.serverInfo!.storeId!, sessionId, ids),
     );
     const current = () =>
       !this.closed && this.selected
@@ -1160,6 +1164,7 @@ export class NativeCaller {
     if (request.method === 'attach') {
       if (this.closed) throw new ClientError('native_closed');
       this.images.reset();
+      this.inputFiles.reset();
       this.releaseReads();
       this.background.release();
       this.invalidateDirectory(true);
@@ -1212,6 +1217,10 @@ export class NativeCaller {
         'input.images.append',
         'input.images.finish',
         'input.images.release',
+        'input.files.begin',
+        'input.files.append',
+        'input.files.finish',
+        'input.files.release',
         'fileChanges.detail',
         'fileChanges.close',
       ].includes(request.method)
@@ -1245,6 +1254,22 @@ export class NativeCaller {
         break;
       case 'input.images.begin':
         this.images.begin(request);
+        result = null;
+        break;
+      case 'input.files.begin':
+        this.inputFiles.begin(request);
+        result = null;
+        break;
+      case 'input.files.append':
+        this.inputFiles.append(request.id, request.offset, request.data);
+        result = null;
+        break;
+      case 'input.files.finish':
+        this.inputFiles.finish(request.id);
+        result = null;
+        break;
+      case 'input.files.release':
+        this.inputFiles.release(request.id);
         result = null;
         break;
       case 'input.images.append':
@@ -1365,7 +1390,7 @@ export class NativeCaller {
         result = await this.fileChanges.list(request, true);
         break;
       case 'fileChanges.detail':
-        result = await this.fileChanges.detail(request.changeId, request.readId);
+        result = await this.fileChanges.detail(request.changeId, request.readId, request.offset);
         break;
       case 'fileChanges.close':
         this.fileChanges.close(request.readId);
@@ -2110,6 +2135,18 @@ export class NativeCaller {
             throw new ClientError('native_selection_changed');
           intent = { ...request.intent, images };
         }
+        if (request.fileIds?.length) {
+          const files = await this.inputFiles.publish(
+            this.client,
+            snapshot.view.storeId,
+            request.sessionId,
+            request.fileIds,
+          );
+          this.check(generation);
+          if (originalSelection !== this.selection || this.selected !== request.sessionId)
+            throw new ClientError('native_selection_changed');
+          intent = { ...intent, files };
+        }
         let draftProof = request.draft;
         if (!draftProof) {
           const saved = this.requirePrivateData().read({
@@ -2333,6 +2370,7 @@ export class NativeCaller {
     this.selection++;
     this.generation++;
     this.images.reset();
+    this.inputFiles.reset();
     this.selected = undefined;
   }
   async disposeNetwork() {
@@ -2355,6 +2393,7 @@ export class NativeCaller {
     const stopped = this.processes.close();
     try {
       await this.images.close();
+      await this.inputFiles.close();
       await this.imageReads.closeAll();
       await this.disposeNetwork();
       await this.inputQueue.close();

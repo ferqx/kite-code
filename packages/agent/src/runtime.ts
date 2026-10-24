@@ -54,7 +54,7 @@ import {
   runSettledEvent,
   runStartedEvent,
 } from './extensions/lifecycle';
-import { inputFileContent } from './input-files';
+import { inputFileContent, inputFileReferences } from './input-files';
 import { decodeInputImage, inputImages, matchesImageType } from './input-images';
 import { canonicalJson, semanticDigest } from './json';
 import {
@@ -106,6 +106,7 @@ import {
   type SessionRecord,
   type WorkspaceRecord,
 } from './storage/types';
+import { toolImages } from './tool-images';
 import { childToolEvidence } from './tool-observations';
 
 /** A trusted configuration producer could not confirm cleanup of its actual preparation resources. */
@@ -487,6 +488,7 @@ export class AgentRuntime {
   private readonly lifecycleObservers = new LifecycleObservers();
   readonly supportsSelectedSkills: boolean;
   readonly supportsInputImages: boolean;
+  readonly supportsInputFiles: boolean;
   readonly supportsExtensionInputs: boolean;
   private readonly instanceId: string;
   private readonly tools = new Map<string, ToolDefinition>();
@@ -588,6 +590,7 @@ export class AgentRuntime {
         preserve: options.sessionInputMetadata.preserve.bind(options.sessionInputMetadata),
       });
     this.supportsInputImages = !!options.artifacts;
+    this.supportsInputFiles = !!options.artifacts?.publishStream;
     this.supportsSelectedSkills =
       options.supportsSelectedSkills === true && !!options.resolveRunConfiguration;
     this.supportsExtensionInputs =
@@ -830,6 +833,10 @@ export class AgentRuntime {
     this.reconcileJob = this.accountEntry(this.reconcileJob, 'admission');
     this.resumeRun = this.accountEntry(this.resumeRun, 'admission');
     this.submitCommand = this.accountEntry(this.submitCommand, 'admission');
+    this.uploadInputFile = this.accountEntry(this.uploadInputFile, 'admission');
+    this.releaseInputFileImport = this.accountEntry(this.releaseInputFileImport, 'admission');
+    this.getInputFileImport = this.accountEntry(this.getInputFileImport, 'observation');
+    this.resolveInputFile = this.accountEntry(this.resolveInputFile, 'observation');
     this.getMetadata = this.accountEntry(this.getMetadata, 'observation');
     this.readRunExtensionRecord = this.accountEntry(this.readRunExtensionRecord, 'observation');
     this.readSessionExportText = this.accountEntry(this.readSessionExportText, 'observation');
@@ -2591,6 +2598,150 @@ export class AgentRuntime {
       reasoningBytes: String(Buffer.byteLength(output.reasoning)),
       output,
     };
+  }
+  async uploadInputFile(
+    input: import('./storage/input-file-imports').InputFileImportScope & {
+      name: string;
+      mediaType: string;
+      content: AsyncIterable<Uint8Array> | Iterable<Uint8Array>;
+      expectedContent?: { size: string; hash: string };
+      signal?: AbortSignal;
+    },
+  ): Promise<import('./storage/types').InputFileReference> {
+    if (this.closing) throw new AgentError('service_draining');
+    const artifacts = this.options.artifacts;
+    if (!artifacts?.publishStream) throw new AgentError('artifact_stream_unavailable');
+    input.signal?.throwIfAborted();
+    if (
+      !/^[A-Za-z0-9_-]{1,100}$/.test(input.id) ||
+      !input.name ||
+      input.name.length > 512 ||
+      !input.mediaType ||
+      input.mediaType.length > 256
+    )
+      throw new AgentError('input_file_invalid');
+    const scope = {
+      expectedStoreId: input.expectedStoreId,
+      sessionId: input.sessionId,
+      subjectId: input.subjectId,
+      id: input.id,
+    };
+    const prior = await this.options.store.getInputFileImport(scope);
+    if (prior?.state === 'released') throw new AgentError('input_file_released');
+    // The initial transport ceiling is explicit, independent of image limits. Enforce it
+    // while consuming the producer; no full Base64 or request-body allocation is needed.
+    async function* limited() {
+      let size = 0;
+      const hash = createHash('sha256');
+      for await (const chunk of input.content) {
+        input.signal?.throwIfAborted();
+        if (!(chunk instanceof Uint8Array)) throw new AgentError('input_file_invalid');
+        size += chunk.byteLength;
+        if (size > 256 * 1024 * 1024) throw new AgentError('input_file_too_large');
+        hash.update(chunk);
+        yield chunk;
+      }
+      input.signal?.throwIfAborted();
+      if (
+        input.expectedContent &&
+        (String(size) !== input.expectedContent.size ||
+          hash.digest('hex') !== input.expectedContent.hash)
+      )
+        throw new AgentError('input_file_content_mismatch');
+    }
+    const reference = await artifacts.publishStream({
+      ...scope,
+      refId: `input-file-${input.id}`,
+      scope: { kind: 'session', id: input.sessionId },
+      mediaType: input.mediaType,
+      content: limited(),
+      signal: input.signal,
+    });
+    const imported = await this.options.store.registerInputFileImport({
+      ...scope,
+      name: input.name,
+      reference,
+    });
+    return {
+      name: imported.name,
+      uri: imported.uri,
+      reference: { ...imported.reference, scope: { kind: 'session', id: imported.sessionId } },
+    };
+  }
+  getInputFileImport(input: import('./storage/input-file-imports').InputFileImportScope) {
+    return this.options.store.getInputFileImport(input);
+  }
+  /** Resolve only selected human attachments, including sealed Fork sources. A Blob path alone
+   * cannot expose private model bodies or any other unselected session reference. */
+  async resolveInputFile(input: {
+    expectedStoreId: string;
+    sessionId: string;
+    subjectId: string;
+    uri: string;
+    signal?: AbortSignal;
+  }): Promise<import('./storage/input-file-imports').InputFileImport | null> {
+    const { signal, uri, ...scope } = input;
+    let afterSeq = '0',
+      afterSourceId = '';
+    let contextSelectionId: string | undefined, upperSeq: string | undefined;
+    for (;;) {
+      input.signal?.throwIfAborted();
+      const page = await this.options.store.getExpandedContext({
+        expectedStoreId: input.expectedStoreId,
+        sessionId: input.sessionId,
+        afterSeq,
+        afterSourceId,
+        ...(contextSelectionId ? { contextSelectionId } : {}),
+        ...(upperSeq ? { upperSeq } : {}),
+        messageLimit: 200,
+        sourceLimit: 100,
+        byteLimit: 8 * 1024 * 1024,
+      });
+      contextSelectionId ??= page.selection.id;
+      upperSeq ??= page.highWaterSeq;
+      for (const selected of page.messages) {
+        if (selected.status !== 'complete' || selected.role !== 'user') continue;
+        const message =
+          selected.runId === null
+            ? (await this.options.store.getMessageOrigin({ ...scope, messageId: selected.id }))
+                .message
+            : selected;
+        for (const file of inputFileReferences(message.files ?? [])) {
+          if (
+            !file.reference ||
+            file.reference.sessionId !== message.sessionId ||
+            file.reference.subjectId !== input.subjectId
+          )
+            continue;
+          const imported = await this.options.store.getInputFileImport({
+            ...scope,
+            sessionId: message.sessionId,
+            id: file.reference.id.slice('input-file-'.length),
+          });
+          if (
+            imported?.state === 'bound' &&
+            imported.uri === input.uri &&
+            imported.name === file.name &&
+            canonicalJson(imported.reference as unknown as Json) ===
+              canonicalJson(file.reference as unknown as Json)
+          ) {
+            input.signal?.throwIfAborted();
+            return imported;
+          }
+        }
+      }
+      if (page.nextAfterSeq === null && page.nextAfterSourceId === null) return null;
+      const nextSeq = page.nextAfterSeq ?? upperSeq;
+      const nextSourceId = page.nextAfterSourceId ?? page.resultSources.at(-1)?.id ?? afterSourceId;
+      if (nextSeq === afterSeq && nextSourceId === afterSourceId)
+        throw new AgentError('input_file_scope_denied');
+      afterSeq = nextSeq;
+      afterSourceId = nextSourceId;
+    }
+  }
+  releaseInputFileImport(input: import('./storage/input-file-imports').InputFileImportScope) {
+    if (this.closing) throw new AgentError('service_draining');
+    return this.options.store.releaseInputFileImport(input);
   }
   async uploadInputImage(input: {
     expectedStoreId: string;
@@ -8679,7 +8830,34 @@ export class AgentRuntime {
         let content = message.content;
         if (message.files !== undefined) {
           if (message.role !== 'user') throw new AgentError('input_file_invalid');
-          content = inputFileContent(content, message.files);
+          const files = [];
+          for (const file of inputFileReferences(message.files)) {
+            if (!file.reference) {
+              files.push(file);
+              continue;
+            }
+            if (
+              !subjectId ||
+              file.reference.subjectId !== subjectId ||
+              file.reference.sessionId !== message.sessionId
+            )
+              throw new AgentError('input_file_scope_denied');
+            const imported = await this.options.store.getInputFileImport({
+              expectedStoreId: storeId,
+              sessionId: message.sessionId,
+              subjectId,
+              id: file.reference.id.slice('input-file-'.length),
+            });
+            if (
+              imported?.state !== 'bound' ||
+              imported.name !== file.name ||
+              canonicalJson(imported.reference as unknown as Json) !==
+                canonicalJson(file.reference as unknown as Json)
+            )
+              throw new AgentError('input_file_scope_denied');
+            files.push({ ...file, uri: imported.uri });
+          }
+          content = inputFileContent(content, files);
         }
         for (const sourceId of message.sourceIds ?? []) {
           if (!sourceId.startsWith('agent-mail-') || !message.runId) continue;
@@ -8794,6 +8972,51 @@ export class AgentRuntime {
           for (const id of message.sourceIds ?? []) {
             const execution = await this.options.store.getExecution(id);
             const value = execution?.result;
+            if (
+              value &&
+              typeof value === 'object' &&
+              !Array.isArray(value) &&
+              value.modelImages !== undefined
+            ) {
+              const command =
+                execution && (await this.options.store.getCommand(execution.originCommandId));
+              if (
+                !execution ||
+                !command ||
+                message.status !== 'complete' ||
+                execution.kind !== 'tool' ||
+                execution.status !== 'succeeded' ||
+                execution.sessionId !== message.sessionId ||
+                execution.runId !== message.runId ||
+                command.sessionId !== execution.sessionId ||
+                command.originStoreId !== execution.originStoreId ||
+                message.sourceIds?.length !== 1
+              )
+                throw new AgentError('tool_images_invalid');
+              for (const ref of toolImages(value.modelImages, execution.id)) {
+                const original = await this.options.store.getArtifactReference({
+                  expectedStoreId: storeId,
+                  sessionId: execution.sessionId,
+                  subjectId: command.subjectId,
+                  refId: ref.id,
+                  scope: ref.scope!,
+                });
+                if (
+                  !original ||
+                  original.storeId !== execution.originStoreId ||
+                  original.mediaType !== ref.mediaType ||
+                  original.size !== ref.size
+                )
+                  throw new AgentError('tool_images_invalid');
+                const bytes = await this.readBody(original, signal, storeId);
+                if (!matchesImageType(bytes, ref.mediaType))
+                  throw new AgentError('tool_images_invalid');
+                images.push({
+                  mediaType: 'image/png',
+                  data: Buffer.from(bytes).toString('base64'),
+                });
+              }
+            }
             if (execution && value && typeof value === 'object' && !Array.isArray(value)) {
               let body: string | undefined;
               if (value.modelContent) {

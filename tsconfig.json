@@ -74,6 +74,7 @@
     "tests/e2e/live/model/agent-task-quality.live.ts",
     "tests/e2e/live/model/agent-task-quality-checkout-ab.live.ts",
     "tests/e2e/live/model/agent-task-quality-checkout-ab.test.ts",
+    "tests/e2e/live/model/pdf-vision.live.ts",
     "tests/e2e/live/model/collaboration.live.ts",
     "tests/e2e/live/model/collaboration-transport-fault.live.ts",
     "tests/e2e/live/model/collaboration-input-crash.live.ts",

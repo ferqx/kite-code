@@ -239,6 +239,86 @@ test('file picker keeps references separate from text, discards late selections 
   expect(document.querySelector('[role="textbox"]')?.textContent).toBe('');
 });
 
+test('ordinary file preparation is visible and cancellable without accepting a late result', async () => {
+  const signals: AbortSignal[] = [];
+  let resolve!: (files: { name: string; uri: string }[]) => void;
+  let accepted: readonly { name: string; uri: string }[] = [];
+  const props = {
+    draft: '保留草稿',
+    scopeKey: 'a',
+    disabled: false,
+    active: false,
+    stopping: false,
+    onChange: () => {},
+    onFilesSelected: (files: readonly { name: string; uri: string }[]) => {
+      accepted = files;
+    },
+    onFileReferences: (_files: readonly File[], signal?: AbortSignal) => {
+      signals.push(signal!);
+      return new Promise<{ name: string; uri: string }[]>((done) => {
+        resolve = done;
+      });
+    },
+  };
+  const file = new dom.window.File(['text'], 'report.txt') as unknown as File;
+  await render(<Composer {...props} />);
+  await chooseAttachment('添加文件');
+  await selectFiles([file]);
+  expect(document.querySelector('[role="status"]')?.textContent).toContain('正在保存附件');
+  const cancel = [...document.querySelectorAll('button')].find(
+    (button) => button.textContent === '取消添加',
+  )!;
+  await act(async () => cancel.click());
+  expect(signals[0]!.aborted).toBe(true);
+  await act(async () => resolve([{ name: 'late', uri: 'file:///late' }]));
+  expect(accepted).toEqual([]);
+  expect(document.querySelector('[role="status"]')).toBeNull();
+  expect(document.querySelector('[role="textbox"]')?.textContent).toBe('保留草稿');
+  await chooseAttachment('添加文件');
+  await selectFiles([file]);
+  expect(signals[1]!.aborted).toBe(false);
+  await act(async () => resolve([{ name: 'report.txt', uri: 'file:///report.txt' }]));
+  expect(accepted).toEqual([{ name: 'report.txt', uri: 'file:///report.txt' }]);
+  expect(document.querySelector('[role="status"]')).toBeNull();
+});
+
+test('a prepared ordinary file arriving after the composer becomes unavailable is released without changing the draft', async () => {
+  for (const unavailable of ['disabled', 'promptHidden'] as const) {
+    let signal!: AbortSignal;
+    let finish!: (files: readonly { name: string; uri: string }[]) => void;
+    let accepted = 0;
+    const props = {
+      scopeKey: unavailable,
+      draft: '保留未发送的正文',
+      disabled: false,
+      active: false,
+      stopping: false,
+      onChange: () => {
+        throw Error('preparation must preserve draft');
+      },
+      onFileReferences: (_files: readonly File[], owner?: AbortSignal) => {
+        signal = owner!;
+        return new Promise<readonly { name: string; uri: string }[]>((resolve) => {
+          finish = resolve;
+        });
+      },
+      onFilesSelected: () => {
+        accepted++;
+      },
+    };
+    await render(<Composer {...props} />);
+    await chooseAttachment('添加文件');
+    await selectFiles([new dom.window.File(['saved'], 'late.txt') as unknown as File]);
+    await render(<Composer {...props} {...{ [unavailable]: true }} />);
+    await act(async () => finish([{ name: 'late.txt', uri: 'file:///late.txt' }]));
+    expect(signal.aborted).toBe(true);
+    expect(accepted).toBe(0);
+    await render(<Composer {...props} />);
+    expect(document.querySelector('[role="textbox"]')?.textContent).toBe(props.draft);
+    expect(document.body.textContent).not.toContain('正在保存附件');
+  }
+});
+
 test('one file selection automatically separates images from path references, cancels stale selections and never edits text', async () => {
   const images: File[][] = [];
   const references: File[][] = [];
