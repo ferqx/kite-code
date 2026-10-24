@@ -70,6 +70,7 @@ export async function runDevelopmentDesktop(
   const { buildNativeDesktop } = await import('../../apps/desktop/scripts/build-native');
   const {
     buildDevelopmentService,
+    developmentServiceSourceRoots,
     startDesktopRenderer,
     isDevelopmentServiceSource,
     createDesktopReloadQueue,
@@ -95,7 +96,7 @@ export async function runDevelopmentDesktop(
     renderer = await startDesktopRenderer(root);
     control = await startDesktopControl();
     const service = await buildDevelopmentService(root, outdir);
-    let serviceSha256 = service.sha256;
+    let sourceSha256 = service.sourceSha256;
     await buildNativeDesktop(
       {
         kind: 'development',
@@ -131,32 +132,43 @@ export async function runDevelopmentDesktop(
     reloadQueue = createDesktopReloadQueue({
       async reload() {
         const fresh = await buildDevelopmentService(root, outdir);
-        if (fresh.sha256 === serviceSha256) return;
-        await channel!.reload(fresh);
-        serviceSha256 = fresh.sha256;
+        if (fresh.sourceSha256 === sourceSha256) return;
+        await channel!.reload({ id: fresh.id, sha256: fresh.sha256 });
+        sourceSha256 = fresh.sourceSha256;
         process.stdout.write('[desktop:dev] Service updated; page reloaded.\n');
       },
       failed(error) {
         process.stderr.write(
           `[desktop:dev] ${releaseErrorCode(error, 'development_service_reload_failed')}\n`,
         );
+        if (error instanceof Error && releaseErrorCode(error) === 'development_service_load_failed')
+          process.stderr.write(`${error.message}\n`);
       },
     });
-    renderer.server.watcher.add(join(root, 'apps/service/src'));
+    renderer.server.watcher.add(developmentServiceSourceRoots(root));
     renderer.server.watcher.on('all', (_event, file) => {
       if (isDevelopmentServiceSource(root, file)) reloadQueue?.changed();
     });
-    process.stdout.write(`[desktop:dev] UI hot update: ${renderer.configuration.rendererUrl}\n`);
+    process.stdout.write(
+      `[desktop:dev] Service ready; UI hot update: ${renderer.configuration.rendererUrl}\n`,
+    );
     const code = await child.exited;
     return requested ? (requested === 'SIGINT' ? 130 : 143) : code;
+  } catch (error) {
+    if (requested) return requested === 'SIGINT' ? 130 : 143;
+    throw error;
   } finally {
-    process.removeListener('SIGINT', interrupt);
-    process.removeListener('SIGTERM', stop);
-    await reloadQueue?.close();
-    await renderer?.server.close();
-    await control?.close();
-    await channel?.read;
-    rmSync(outdir, { recursive: true, force: true });
+    try {
+      await reloadQueue?.close();
+      await renderer?.close();
+      await control?.close();
+      await child?.exited;
+      await channel?.read;
+      rmSync(outdir, { recursive: true, force: true });
+    } finally {
+      process.removeListener('SIGINT', interrupt);
+      process.removeListener('SIGTERM', stop);
+    }
   }
 }
 
@@ -166,6 +178,8 @@ if (import.meta.main) {
   } catch (error) {
     const code = releaseErrorCode(error, 'desktop_development_failed');
     process.stderr.write(`${code}\n`);
+    if (code === 'development_service_load_failed' && error instanceof Error)
+      process.stderr.write(`${error.message}\n`);
     if (code === 'development_service_asset_unavailable')
       process.stderr.write('Build the local workspaces first: npm run build\n');
     if (code === 'development_electron_runtime_scope_invalid')

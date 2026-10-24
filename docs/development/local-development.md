@@ -12,7 +12,7 @@
 | 正式 daemon/Web | `bun run server` | 先显式启动候选 daemon，再读取 Web 地址；不自动构建缺失资源 |
 | CLI 开发 | `bun run cli:dev run --task "任务"` | 已构建 Service 与独立 development profile |
 | TUI 开发 | `bun run tui:dev --workspace .` | 同一 development profile 与 Ink；`--thread <id>` 选择原 Session |
-| Desktop 开发 | `bun run desktop:dev` | 已准备 workspace 资产、已安装 Electron；UI 热更新，Service 源码变更自动构建并重启配套服务 |
+| Desktop 开发 | `bun run desktop:dev` | 已准备 workspace 资产、已安装 Electron；检查运行时依赖加载与真实 Service 就绪，UI 热更新，Service 及其 workspace 源码变更自动重载 |
 | 只读 Web 开发 | `bun run web:dev` | 已构建 Service/Web assets、development profile 与只读 Gateway |
 | 完整 Native 候选 | `bun run release:build --product native` 后 `bun run desktop` | 验证完整 Native、内嵌 Terminal/Bun 与实际 Electron Node；不依赖旧 Vite/配套服务 |
 | Desktop 定向验证 | `bun run test:desktop:native` | 新 Native bundle/process/Files 的隔离实际场景，使用本地固定 Provider |
@@ -39,11 +39,13 @@ npm run desktop:dev
 
 三种开发客户端使用同一 development profile；任务仍需要已配置模型和工作区信任。CLI/TUI 修改代码后退出客户端，重新执行 `npm run build` 并启动。Desktop 每次启动编译 Main/preload，在自己的 `.cache/unified-desktop-*` 目录运行，由本地 Vite 提供 renderer；退出后清理该次应用目录和开发服务器，会话、设置和显式保存的草稿保留在开发 profile。
 
-`desktop:dev` 的页面、组件和样式（包括共享 UI）使用 Vite／React Fast Refresh，保存后即时更新，通常保留组件的页面状态；不能进行 Fast Refresh 的模块由 Vite 重新加载。`apps/service/src` 的 TypeScript／JSON 源码保存后合并连续变更，构建到新的私有 Service 版本；构建成功且字节变化后，在同一 Electron 窗口内关闭并核实旧配套服务实际退出，再按新 SHA／build 身份准入新服务并重载页面。运行中的开发任务会正常取消和收尾，不自动重发或接续；Service 重载会重置页面内存中的未保存状态，持久数据保留。
+`desktop:dev` 在启动 Electron 前，用独立 Bun 进程加载实际 Service 版本及其外部 workspace 导入；不执行入口的 `import.meta.main` 分支，不启动业务服务，不自动安装缺失依赖。缺失导出或模块加载失败会阻止启动，并在终端保留具体加载诊断。Electron 的父控制连接只有在实际 Service 握手、连接及 Native caller 初始化成功后才报告就绪；初次失败返回非零并等待所属进程退出，再清理应用目录。打开窗口或启动 Vite 不表示后台就绪。这不是完整类型检查或任意业务逻辑验证。
+
+页面、组件和样式（包括共享 UI）使用 Vite／React Fast Refresh，保存后即时更新，通常保留组件的页面状态；不能进行 Fast Refresh 的模块由 Vite 重新加载。Service 以及 Agent、AI、Client 的 `src` 源码保存后合并连续变更，构建到新的私有 Service 版本并再次检查运行时加载；同时比较这些源码的内容摘要，外部依赖变化不会因入口字节未变而被跳过，内容未变不重启。检查失败保持旧服务，修正保存后可再次检查。在同一 Electron 窗口内关闭并核实旧配套服务实际退出，再按新 SHA／build 身份准入新服务并重载页面。运行中的开发任务会正常取消和收尾，不自动重发或接续；Service 重载会重置页面内存中的未保存状态，持久数据保留。
 
 开发 Service 的 Shell 资产定位器使用当前 checkout 已构建的 Agent 入口，主 Agent 和默认通用／code 子 Agent 因而能够在宿主资产可用时取得 Shell；其余工作区代码继续使用源码。修改开发构建脚本或更新 Shell 资产后，退出并重新运行 `desktop:dev`；资产未准备时先执行 `npm run build`。该选择不改变工作区信任和审批要求，具体装配与回归归 [Desktop owner](../../apps/desktop/README.md#开发热更新与服务重载)。
 
-Service 编译失败时旧服务继续运行，修正代码再保存即可重试。启动、收尾或回执无法确认时终端报告失败，停止该实例的后续自动切换；请完全退出并重新运行开发命令后检查结果。Main／preload、原生模块、workspace Worker 资产或依赖清单变更仍需退出后重新启动；需要更新包资产时先执行 `npm run build`，依赖清单变更先安装依赖。UI／Service 热更新只属于显式开发入口，正式 Native 仍加载固定制品。实现与验证归[Desktop owner](../../apps/desktop/README.md#开发热更新与服务重载)。
+Vite 以 middleware 模式接入宿主拥有的 loopback HTTP／WebSocket 服务，不另接管 SIGTERM 或 stdin EOF。退出由开发宿主统一收尾，信号处理器保留到清理完成，等待所属 Electron 退出后再删除该次应用目录。Service 编译／加载检查失败时旧服务继续运行，修正代码再保存即可重试。启动、收尾或回执无法确认时终端报告失败，停止该实例的后续自动切换；请完全退出并重新运行开发命令后检查结果。Main／preload、原生模块、workspace Worker 资产或依赖清单变更仍需退出后重新启动；需要更新包资产时先执行 `npm run build`，依赖清单变更先安装依赖。UI／Service 热更新只属于显式开发入口，正式 Native 仍加载固定制品。实现与验证归[Desktop owner](../../apps/desktop/README.md#开发热更新与服务重载)。
 
 切换分支或 workspace 清单变更后，先重新执行 `bun install --frozen-lockfile`，确保 `node_modules/@kite-ai/*` 链接当前八个 workspace；缺少这些链接会在启动前报 `Cannot find module '@kite-ai/cli/host'`。
 

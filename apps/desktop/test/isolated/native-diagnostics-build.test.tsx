@@ -70,7 +70,7 @@ test('the real development renderer fixes diagnostics off despite explicit compo
   } finally {
     if (previous) Object.defineProperty(globalThis, '__KITE_DESKTOP_TEST_DIAGNOSTICS__', previous);
     else Reflect.deleteProperty(globalThis, '__KITE_DESKTOP_TEST_DIAGNOSTICS__');
-    await renderer?.server.close();
+    await renderer?.close();
     if (environment === undefined) delete process.env.NODE_ENV;
     else process.env.NODE_ENV = environment;
     rmSync(temporary, { recursive: true, force: true });

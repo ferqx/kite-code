@@ -257,3 +257,170 @@ test('desktop development pure help and missing built Service never build, launc
     rmSync(root, { recursive: true, force: true });
   }
 }, 15000);
+
+test.skipIf(process.platform !== 'darwin')(
+  'real development Main reports Service admission failure, waits for readiness and drains its owned process',
+  async () => {
+    const repository = realpathSync(join(import.meta.dir, '../../..'));
+    const cache = join(repository, '.cache');
+    mkdirSync(cache, { recursive: true });
+    const root = realpathSync(mkdtempSync(join(cache, 'desktop-startup-')));
+    const source = join(root, 'apps/service/src');
+    const desktop = join(root, 'apps/desktop');
+    const electronPackage = join(desktop, 'node_modules/electron');
+    const shell = join(root, 'packages/agent/dist/jobs');
+    const dependency = join(root, 'node_modules/@kite-ai/startup-fixture');
+    const client = join(root, 'packages/client/src');
+    for (const directory of [
+      source,
+      electronPackage,
+      shell,
+      dependency,
+      client,
+      join(root, 'apps/service/dist'),
+    ])
+      mkdirSync(directory, { recursive: true });
+    writeFileSync(join(dependency, 'package.json'), '{"type":"module","main":"index.ts"}');
+    writeFileSync(
+      join(dependency, 'index.ts'),
+      "export * from '../../../packages/client/src/observation.ts';",
+    );
+    writeFileSync(join(client, 'known.ts'), 'export const available = 1;');
+    writeFileSync(join(root, 'apps/service/dist/main.js'), '// selected development asset');
+    writeFileSync(join(desktop, 'package.json'), '{"type":"module"}');
+    writeFileSync(join(electronPackage, 'package.json'), '{"main":"index.cjs"}');
+    writeFileSync(
+      join(electronPackage, 'index.cjs'),
+      `module.exports=require(${JSON.stringify(join(repository, 'apps/desktop/node_modules/electron'))});`,
+    );
+    writeFileSync(
+      join(desktop, 'index.html'),
+      '<html><body><main>Isolated development startup</main></body></html>',
+    );
+    writeFileSync(
+      join(shell, 'shell.js'),
+      `export * from ${JSON.stringify(pathToFileURL(join(repository, 'packages/agent/dist/jobs/shell.js')).href)};`,
+    );
+    const driver = join(root, 'driver.ts');
+    const observeService =
+      "const cp=require('node:child_process');const spawn=cp.spawn;cp.spawn=function(...args){const child=spawn.apply(this,args);if(String(args[1]?.[0]).endsWith('/main.js'))process.stdout.write('SERVICE_PID='+child.pid+'\\n');return child;};";
+    writeFileSync(
+      driver,
+      `import {mkdirSync,writeFileSync} from 'node:fs';import {join} from 'node:path';import {runDevelopmentDesktop} from ${JSON.stringify(pathToFileURL(join(repository, 'scripts/development/unified-desktop.ts')).href)};
+try { const code=await runDevelopmentDesktop({root:${JSON.stringify(root)},spawnElectron(executable,outdir,env){const data=join(outdir,'isolated-electron-data');mkdirSync(data,{mode:0o700});writeFileSync(join(outdir,'isolated-main.cjs'),${JSON.stringify(observeService)}+\`const {app}=require('electron');app.setPath('userData',\${JSON.stringify(data)});app.setPath('sessionData',\${JSON.stringify(data)});require('./main.cjs');\`);writeFileSync(join(outdir,'package.json'),JSON.stringify({main:'isolated-main.cjs'}));const child=Bun.spawn([executable,outdir],{cwd:${JSON.stringify(root)},env,stdin:'pipe',stdout:'pipe',stderr:'inherit'});void(async()=>{for await(const chunk of child.stdout)process.stdout.write(chunk);})();process.stdout.write('ELECTRON_PID='+child.pid+'\\n');return child;}});process.stdout.write('DEVELOPMENT_EXIT='+code+'\\n');process.exitCode=code; }
+catch(error){console.error(error);process.exitCode=1;}`,
+    );
+    try {
+      for (const scenario of ['load-failed', 'failed', 'ready'] as const) {
+        const observation = join(client, 'observation.ts');
+        const invalid =
+          "import {missingObservation} from './known';export const observation=missingObservation();";
+        writeFileSync(
+          observation,
+          scenario === 'load-failed' ? invalid : 'export const observation = 1;',
+        );
+        writeFileSync(
+          join(source, 'main.ts'),
+          scenario === 'failed'
+            ? "if(import.meta.main) throw Error('isolated_service_startup_failure');"
+            : `import {observation} from '@kite-ai/startup-fixture';export {observation};import {runServiceProcess} from ${JSON.stringify(join(repository, 'apps/service/src/main.ts'))};if(import.meta.main)await runServiceProcess();`,
+        );
+        const child = Bun.spawn([process.execPath, driver], {
+          cwd: root,
+          stdin: 'ignore',
+          stdout: 'pipe',
+          stderr: 'pipe',
+          env: { ...process.env, BUN_RUNTIME_TRANSPILER_CACHE_PATH: '0' },
+        });
+        let stdout = '';
+        let requestedReload = false,
+          repaired = false,
+          stopped = false,
+          oldServiceAlive = false;
+        const output = (async () => {
+          for await (const chunk of child.stdout) {
+            stdout += new TextDecoder().decode(chunk);
+            if (
+              scenario === 'ready' &&
+              !requestedReload &&
+              stdout.includes('[desktop:dev] Service ready;')
+            ) {
+              requestedReload = true;
+              writeFileSync(observation, invalid);
+            }
+            if (
+              scenario === 'ready' &&
+              !stopped &&
+              stdout.includes('[desktop:dev] Service updated;')
+            ) {
+              stopped = true;
+              child.kill('SIGTERM');
+            }
+          }
+        })();
+        const errors = (async () => {
+          let stderr = '';
+          for await (const chunk of child.stderr) {
+            stderr += new TextDecoder().decode(chunk);
+            if (
+              scenario === 'ready' &&
+              !repaired &&
+              stderr.includes('development_service_load_failed') &&
+              stderr.includes('missingObservation')
+            ) {
+              repaired = true;
+              const original = Number(/SERVICE_PID=(\d+)/.exec(stdout)?.[1]);
+              try {
+                process.kill(original, 0);
+                oldServiceAlive = [...stdout.matchAll(/SERVICE_PID=(\d+)/g)].length === 1;
+              } catch {
+                /* Assert the original owner below. */
+              }
+              writeFileSync(observation, 'export const observation = 2;');
+            }
+          }
+          return stderr;
+        })();
+        const timeout = setTimeout(() => child.kill('SIGKILL'), 30000);
+        try {
+          const [code, , stderr] = await Promise.all([child.exited, output, errors]);
+          if (code !== (scenario === 'ready' ? 143 : 1))
+            console.error({ scenario, code, stdout, stderr });
+          expect(code).toBe(scenario === 'ready' ? 143 : 1);
+          expect(stdout.includes('[desktop:dev] Service ready;')).toBe(scenario === 'ready');
+          if (scenario === 'failed') expect(stderr).toContain('bootstrap_channel_closed');
+          if (scenario === 'load-failed') {
+            expect(stderr).toContain('development_service_load_failed');
+            expect(stderr).toContain('missingObservation');
+            expect(stdout).not.toContain('ELECTRON_PID=');
+          } else {
+            const pids = [...stdout.matchAll(/(?:ELECTRON|SERVICE)_PID=(\d+)/g)].map((match) =>
+              Number(match[1]),
+            );
+            expect(pids.length).toBe(scenario === 'ready' ? 3 : 2);
+            for (const pid of pids) {
+              expect(pid).toBeGreaterThan(0);
+              expect(() => process.kill(pid, 0)).toThrow();
+            }
+          }
+          if (scenario === 'ready') {
+            expect(stdout).toContain('DEVELOPMENT_EXIT=143');
+            expect(oldServiceAlive).toBe(true);
+            expect(repaired).toBe(true);
+            expect(stdout.match(/Service updated;/g)).toHaveLength(1);
+          }
+          expect(readdirSync(join(root, '.cache'))).toEqual([]);
+        } finally {
+          clearTimeout(timeout);
+          if (child.exitCode === null) {
+            child.kill('SIGKILL');
+            await child.exited;
+          }
+        }
+      }
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  },
+  65000,
+);

@@ -1,6 +1,7 @@
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
-import { readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { createServer, type Socket } from 'node:net';
+import { homedir } from 'node:os';
 import { join, relative } from 'node:path';
 import { Readable } from 'node:stream';
 import { pathToFileURL } from 'node:url';
@@ -16,14 +17,17 @@ export async function startDesktopControl() {
   let stopping = false;
   let channel: ReturnType<typeof createDesktopReloadChannel> | undefined;
   let accept: ((peer: Socket) => void) | undefined;
-  const ready = new Promise<Socket>((resolve) => {
+  let rejectStartup: ((error: Error) => void) | undefined;
+  const ready = new Promise<Socket>((resolve, reject) => {
     accept = resolve;
+    rejectStartup = reject;
   });
+  void ready.catch(() => {});
   const candidates = new Set<Socket>();
   const server = createServer((peer) => {
     candidates.add(peer);
     let buffer = '';
-    const timeout = setTimeout(() => peer.destroy(), 3000);
+    const timeout = setTimeout(() => peer.destroy(), 45000);
     const receive = (chunk: Buffer) => {
       buffer += chunk.toString('utf8');
       if (Buffer.byteLength(buffer) > 512) {
@@ -44,9 +48,13 @@ export async function startDesktopControl() {
         !value ||
         typeof value !== 'object' ||
         Array.isArray(value) ||
-        Object.keys(value).length !== 2 ||
         !('kind' in value) ||
-        value.kind !== 'desktop.ready' ||
+        !['desktop.ready', 'desktop.failed'].includes(String(value.kind)) ||
+        Object.keys(value).length !== (value.kind === 'desktop.ready' ? 2 : 3) ||
+        (value.kind === 'desktop.failed' &&
+          (!('code' in value) ||
+            typeof value.code !== 'string' ||
+            !/^[a-z][a-z0-9_]{0,80}$/.test(value.code))) ||
         !('token' in value) ||
         typeof value.token !== 'string' ||
         !/^[a-f0-9]{64}$/.test(value.token) ||
@@ -61,7 +69,9 @@ export async function startDesktopControl() {
       peer.pause();
       socket = peer;
       if (stopping) peer.end();
-      accept!(peer);
+      if (value.kind === 'desktop.failed')
+        rejectStartup!(Error(String(Reflect.get(value, 'code'))));
+      else accept!(peer);
     };
     peer.on('data', receive);
     peer.on('error', () => {});
@@ -88,7 +98,7 @@ export async function startDesktopControl() {
             throw Error('development_desktop_exited');
           }),
           new Promise<never>((_, reject) => {
-            timer = setTimeout(() => reject(Error('development_control_unavailable')), 15000);
+            timer = setTimeout(() => reject(Error('development_control_unavailable')), 45000);
           }),
         ]);
         let writing = Promise.resolve();
@@ -117,16 +127,100 @@ export async function startDesktopControl() {
       socket?.end();
     },
     async close() {
+      rejectStartup!(Error('development_desktop_stopping'));
       for (const peer of candidates) peer.destroy();
       await new Promise<void>((resolve) => server.close(() => resolve()));
     },
   };
 }
 
+const serviceWorkspaces = ['apps/service', 'packages/agent', 'packages/ai', 'packages/client'];
+export function developmentServiceSourceRoots(root: string): string[] {
+  return serviceWorkspaces.map((workspace) => join(root, workspace, 'src'));
+}
+const sourceFile = /\.(?:[cm]?[jt]sx?|json)$/;
+
+/** External workspace imports do not change the generated entry bytes. */
+function developmentSourceSha256(root: string): string {
+  const hash = createHash('sha256');
+  function visit(directory: string) {
+    for (const entry of readdirSync(directory, { withFileTypes: true }).sort((a, b) =>
+      a.name < b.name ? -1 : a.name > b.name ? 1 : 0,
+    )) {
+      const path = join(directory, entry.name);
+      if (entry.isDirectory()) visit(path);
+      else if (entry.isFile() && sourceFile.test(entry.name)) {
+        const bytes = readFileSync(path);
+        hash
+          .update(relative(root, path).replaceAll('\\', '/'))
+          .update('\0')
+          .update(String(bytes.byteLength))
+          .update('\0')
+          .update(bytes);
+      }
+    }
+  }
+  for (const directory of developmentServiceSourceRoots(root))
+    if (existsSync(directory)) visit(directory);
+  return hash.digest('hex');
+}
+
+/** Load the actual external dependency graph in a fresh process, without executing import.meta.main. */
+async function verifyDevelopmentService(entrypoint: string, root: string): Promise<void> {
+  const child = Bun.spawn(
+    [
+      process.execPath,
+      '--no-install',
+      '--eval',
+      `await import(${JSON.stringify(pathToFileURL(entrypoint).href)})`,
+    ],
+    {
+      cwd: root,
+      env: {
+        PATH: process.env.PATH ?? '',
+        HOME: homedir(),
+        LANG: 'C.UTF-8',
+        ...(process.platform === 'win32' ? { USERPROFILE: homedir() } : {}),
+        BUN_RUNTIME_TRANSPILER_CACHE_PATH: '0',
+      },
+      stdin: 'ignore',
+      stdout: 'ignore',
+      stderr: 'pipe',
+    },
+  );
+  let timedOut = false;
+  const timeout = setTimeout(() => {
+    timedOut = true;
+    child.kill('SIGKILL');
+  }, 10000);
+  let diagnostic = '';
+  const read = (async () => {
+    const decoder = new TextDecoder();
+    for await (const chunk of child.stderr) {
+      if (diagnostic.length < 16384)
+        diagnostic += decoder.decode(chunk, { stream: true }).slice(0, 16384 - diagnostic.length);
+    }
+  })();
+  try {
+    const [code] = await Promise.all([child.exited, read]);
+    if (code !== 0 || timedOut) {
+      const failure = timedOut
+        ? 'development_service_load_timeout'
+        : 'development_service_load_failed';
+      throw Object.assign(Error(diagnostic.trim() || failure), { code: failure });
+    }
+  } finally {
+    clearTimeout(timeout);
+    if (child.exitCode === null) child.kill('SIGKILL');
+    await Promise.allSettled([child.exited, read]);
+  }
+}
+
 export async function buildDevelopmentService(
   root: string,
   outdir: string,
-): Promise<DevelopmentServiceReload> {
+): Promise<DevelopmentServiceReload & { readonly sourceSha256: string }> {
+  const sourceSha256 = developmentSourceSha256(root);
   const id = randomUUID().replaceAll('-', ''),
     services = join(outdir, 'services'),
     directory = join(services, id);
@@ -160,8 +254,12 @@ export async function buildDevelopmentService(
     throw new AggregateError([error], 'development_service_build_failed');
   }
   if (!result.success) throw new AggregateError(result.logs, 'development_service_build_failed');
+  await verifyDevelopmentService(join(directory, 'main.js'), root);
+  if (developmentSourceSha256(root) !== sourceSha256)
+    throw Error('development_service_source_changed');
   return {
     id,
+    sourceSha256,
     sha256: createHash('sha256')
       .update(readFileSync(join(directory, 'main.js')))
       .digest('hex'),
@@ -170,7 +268,10 @@ export async function buildDevelopmentService(
 
 export function isDevelopmentServiceSource(root: string, file: string): boolean {
   const path = relative(root, file).replaceAll('\\', '/');
-  return /^apps\/service\/src\/.*\.(?:[cm]?tsx?|json)$/.test(path);
+  return (
+    serviceWorkspaces.some((workspace) => path.startsWith(`${workspace}/src/`)) &&
+    sourceFile.test(path)
+  );
 }
 
 /** Coalesce saves and serialize builds/reloads; a failed build can be retried by the next save. */

@@ -15,6 +15,92 @@ import {
   startDesktopRenderer,
 } from '../../../scripts/development/desktop-reload';
 
+test('runtime workspace exports are checked before publishing a development Service version', async () => {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-development-exports-')));
+  try {
+    const source = join(root, 'apps/service/src');
+    const agent = join(root, 'packages/agent/src');
+    const dependency = join(root, 'node_modules/@kite-ai/agent');
+    for (const directory of [source, agent, dependency]) mkdirSync(directory, { recursive: true });
+    writeFileSync(
+      join(dependency, 'package.json'),
+      JSON.stringify({ type: 'module', main: 'index.ts' }),
+    );
+    writeFileSync(
+      join(dependency, 'index.ts'),
+      "export * from '../../../packages/agent/src/index.ts';",
+    );
+    writeFileSync(join(agent, 'model-result.ts'), 'export const available = 1;');
+    writeFileSync(join(agent, 'index.ts'), 'export const revision = 1;');
+    writeFileSync(
+      join(source, 'main.ts'),
+      "import {revision} from '@kite-ai/agent'; export {revision};",
+    );
+    const output = join(root, 'output');
+    const first = await buildDevelopmentService(root, output);
+    const firstPath = join(output, 'services', first.id, 'main.js');
+    const bytes = readFileSync(firstPath);
+    writeFileSync(
+      join(agent, 'index.ts'),
+      "import {formatFileListResult} from './model-result'; export const revision = formatFileListResult();",
+    );
+    await expect(buildDevelopmentService(root, output)).rejects.toMatchObject({
+      code: 'development_service_load_failed',
+      message: expect.stringContaining('formatFileListResult'),
+    });
+    expect(readFileSync(firstPath)).toEqual(bytes);
+    writeFileSync(join(agent, 'index.ts'), 'export const revision = 2;');
+    const repaired = await buildDevelopmentService(root, output);
+    expect(repaired.sha256).toBe(first.sha256);
+    expect(repaired.sourceSha256).not.toBe(first.sourceSha256);
+    const unchanged = await buildDevelopmentService(root, output);
+    expect(unchanged.sourceSha256).toBe(repaired.sourceSha256);
+    for (const path of [
+      'packages/agent/src/tools/files-tools.ts',
+      'packages/ai/src/sdk.ts',
+      'packages/client/src/generated/validators.js',
+    ])
+      expect(isDevelopmentServiceSource(root, join(root, path))).toBe(true);
+    expect(
+      isDevelopmentServiceSource(root, join(root, 'packages/ui/src/desktop/Composer.tsx')),
+    ).toBe(false);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('a connected Desktop is not ready until Service startup succeeds; authenticated startup failure reaches the parent', async () => {
+  const control = await startDesktopControl();
+  const peer = connect({ host: '127.0.0.1', port: control.configuration.port });
+  peer.on('error', () => {});
+  let ready = false;
+  let finish!: (code: number) => void;
+  const exited = new Promise<number>((resolve) => {
+    finish = resolve;
+  });
+  const attached = control.attach(exited);
+  void attached.then(
+    () => {
+      ready = true;
+    },
+    () => {},
+  );
+  try {
+    await new Promise<void>((resolve) => peer.once('connect', resolve));
+    await Bun.sleep(5);
+    expect(ready).toBe(false);
+    peer.write(
+      `${JSON.stringify({ kind: 'desktop.failed', token: control.configuration.token, code: 'required_capability_missing' })}\n`,
+    );
+    await expect(attached).rejects.toThrow('required_capability_missing');
+    expect(ready).toBe(false);
+  } finally {
+    finish(1);
+    peer.destroy();
+    await control.close();
+  }
+});
+
 test('private loopback control rejects unauthenticated peers and carries reloads independently of GUI stdin', async () => {
   const control = await startDesktopControl();
   const rejected = connect({ host: '127.0.0.1', port: control.configuration.port });
@@ -337,10 +423,38 @@ test('Vite serves a nonce-bearing hot renderer on loopback, rejects development 
       mkdirSync(join(root, directory), { recursive: true });
       writeFileSync(join(root, directory, 'private.txt'), 'private-profile-sentinel');
     }
+    const signalListeners = process.listenerCount('SIGTERM');
+    const stdinListeners = process.stdin.listenerCount('end');
     renderer = await startDesktopRenderer(root);
+    expect(process.listenerCount('SIGTERM')).toBe(signalListeners);
+    expect(process.stdin.listenerCount('end')).toBe(stdinListeners);
     const html = await (await fetch(renderer.configuration.rendererUrl)).text();
     expect(html).toContain('/@vite/client');
     expect(html).toContain(`nonce="${renderer.configuration.cspNonce}"`);
+    const client = await (await fetch(`${renderer.configuration.rendererUrl}@vite/client`)).text();
+    expect(Number(/const hmrPort = (\d+);/.exec(client)?.[1])).toBe(
+      Number(new URL(renderer.configuration.rendererUrl).port),
+    );
+    const token = /const wsToken = "([^"]+)";/.exec(client)?.[1];
+    expect(token).toBeTruthy();
+    const socket = new WebSocket(
+      `${renderer.configuration.rendererUrl.replace('http:', 'ws:')}?token=${token}`,
+      'vite-hmr',
+    );
+    let timeout: ReturnType<typeof setTimeout> | undefined;
+    try {
+      const connected = await new Promise<boolean>((resolve, reject) => {
+        timeout = setTimeout(() => reject(Error('development_hmr_timeout')), 2000);
+        socket.onmessage = (event) => {
+          if (JSON.parse(String(event.data)).type === 'connected') resolve(true);
+        };
+        socket.onerror = () => reject(Error('development_hmr_unavailable'));
+      });
+      expect(connected).toBe(true);
+    } finally {
+      clearTimeout(timeout);
+      socket.close();
+    }
     const publicFile = await fetch(
       `${renderer.configuration.rendererUrl}@fs/${join(root, 'apps/desktop/public-probe.txt').replaceAll('\\', '/')}`,
     );
@@ -353,10 +467,10 @@ test('Vite serves a nonce-bearing hot renderer on loopback, rejects development 
       expect(denied.status).toBe(403);
       expect(await denied.text()).not.toContain('private-profile-sentinel');
     }
-    await renderer.server.close();
+    await renderer.close();
     await expect(fetch(renderer.configuration.rendererUrl)).rejects.toThrow();
   } finally {
-    await renderer?.server.close();
+    await renderer?.close();
     rmSync(root, { recursive: true, force: true });
   }
 });

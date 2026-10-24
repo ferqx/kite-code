@@ -387,13 +387,30 @@ async function reloadDevelopmentService(request: DevelopmentServiceReload) {
   await developmentReload;
   developmentReload = undefined;
 }
+let reportDevelopmentStartup: (error?: unknown) => void = () => {};
 if (development) {
   const parent = connect({ host: '127.0.0.1', port: development.control.port });
-  parent.once('connect', () =>
-    parent.write(
-      `${JSON.stringify({ kind: 'desktop.ready', token: development.control.token })}\n`,
-    ),
-  );
+  let startup: { kind: 'desktop.ready' } | { kind: 'desktop.failed'; code: string } | undefined;
+  let sent = false;
+  const sendStartup = () => {
+    if (!startup || sent || parent.connecting || parent.destroyed) return;
+    sent = true;
+    parent.write(`${JSON.stringify({ ...startup, token: development.control.token })}\n`);
+  };
+  parent.once('connect', sendStartup);
+  reportDevelopmentStartup = (error) => {
+    if (startup) return;
+    const code =
+      error instanceof Error ? ('code' in error ? String(error.code) : error.message) : '';
+    startup =
+      error === undefined
+        ? { kind: 'desktop.ready' }
+        : {
+            kind: 'desktop.failed',
+            code: /^[a-z][a-z0-9_]{0,80}$/.test(code) ? code : 'native_startup_failed',
+          };
+    sendStartup();
+  };
   parent.on('error', () => stopNativeProcess(1));
   const stop = serveDevelopmentReload({
     stream: parent,
@@ -613,10 +630,21 @@ void app
     window.once('ready-to-show', () => {
       if (!stoppingNativeProcess && !exitAllowed && window && !window.isDestroyed()) window.show();
     });
-    if (development) await window.loadURL(rendererUrl);
-    else await window.loadFile(rendererPath);
+    if (development) {
+      await window.loadURL(rendererUrl);
+      try {
+        await openCaller();
+        reportDevelopmentStartup();
+      } catch (error) {
+        reportDevelopmentStartup(error);
+      }
+    } else await window.loadFile(rendererPath);
   })
-  .catch(() => {
+  .catch((error) => {
+    if (development) {
+      reportDevelopmentStartup(error);
+      return;
+    }
     if (quitting) {
       stopNativeProcess(1);
       return;

@@ -106,7 +106,15 @@ Windows 开发启动还会先运行 [Electron 权限预检](../../scripts/develo
 
 ## 开发热更新与服务重载
 
-根 `desktop:dev` 在已准备 workspace 资产后，由[开发宿主](../../scripts/development/unified-desktop.ts)通过 builder 的 `development` 选项构建 Main／preload 和首个独立 Service 版本，再启动[本地 Vite renderer](scripts/development-renderer.ts)。[重载协调器](../../scripts/development/desktop-reload.ts)仅监听 `apps/service/src`，合并连续保存、串行构建并保留旧版本字节；构建失败保持旧服务，新字节与当前 SHA 相同时不重启。React 组件及 CSS 沿 Vite Fast Refresh，公共 UI 真实改动已核同窗口即时更新及未发送草稿保留。
+根 `desktop:dev` 在已准备 workspace 资产后，由[开发宿主](../../scripts/development/unified-desktop.ts)通过 builder 的 `development` 选项构建 Main／preload 和首个独立 Service 版本，由[本地 Vite renderer](scripts/development-renderer.ts)提供页面。[重载协调器](../../scripts/development/desktop-reload.ts)在初次构建和每次重建后，以新 Bun 进程实际加载 Service 及外部 workspace 导入；不执行 `import.meta.main` 分支、不自动安装依赖，最长等待10秒，失败保留最多16K字符诊断并回收探测进程。缺失导出不能只因入口 bundle 生成而放行。加载检查不代替完整类型检查或业务验证。
+
+协调器监听 Service、Agent、AI、Client 的 `src`，合并连续保存、串行构建并保留旧版本字节；同时核源码内容摘要，避免外部 workspace 变化而入口 SHA 未变时跳过重载，内容相同不重启。检查中源码变化拒绝发布该版本，后续保存仍沿原队列处理；编译／加载检查失败保持旧服务。React 组件及 CSS 沿 Vite Fast Refresh，共享 UI 保存不重启 Service。
+
+开发 Main 在页面加载后沿原 `openCaller` 完成 Service 握手、Client 连接和私有数据准入，才在准确父连接报告 `desktop.ready`；初次失败携有限错误码报告 `desktop.failed`。连接建立本身不报告就绪；父宿主最长等待45秒，失败以非零结束并等待所属 Electron 退出后清理目录，不把加载失败窗口当成成功。正常候选的启动错误／重试展示及控制边界保持。
+
+Vite 使用 middleware 模式，HTTP 与 HMR WebSocket 共用宿主拥有的 loopback 端口；其默认 SIGTERM／stdin EOF 退出处理不再接管整个开发进程。宿主信号处理器保留到 Vite、父通道与所属 Electron 收尾完成并清理私有应用目录，防止 Vite 直接退出而跳过清理。
+
+2026-10-24，macOS／Bun1.4.2：[真实开发 Main 回归](../../tests/isolated/unified-agent/development-desktop.test.ts)在隔离 Profile、独立 Electron 数据目录及最小 renderer 中逐步核缺失导出先于 Electron 启动失败、有效模块但后台失败返回非零、实际 Service／Native caller 就绪、外部依赖加载失败保留原 Service PID、修正保存后唯一一次更新及新旧 PID 退出；开发函数真实返回143后应用目录为空。未调用模型，不代表完整聊天界面、其他平台或安装版验收。
 
 开发 Service 对 `@kite-ai/agent/jobs/shell` 的导入固定为当前 checkout 已构建的 `packages/agent/dist/jobs/shell.js`，以独立文件 URL 保留资产定位器的原模块位置；其余工作区导入继续使用当前源码。不能把源码 `.ts` 的资产不可用误判为宿主缺少 Shell，也不能内联定位器后按 Service 缓存目录寻找 guardian。资产准备、平台限制和实际权限仍归[默认 Shell 装配](../service/README.md#默认-shell-装配)，子 Agent 按父 Agent 实际工具范围继承。[开发 Shell 回归](../../tests/isolated/unified-agent/development-desktop-shell.test.ts)通过普通开发构建与 paired Service，在隔离 HOME／Profile／Workspace 和受控模型下，核 macOS 主 Agent、默认通用及 code 子 Agent 的真实工具声明、Shell 执行和完整短输出；不注入工具或审批策略。[构建回归](../../tests/isolated/unified-agent/development-desktop-reload.test.ts)另核连续重建及中文／空格路径保留原资产 URL。本机执行证据不赋予 Windows／Linux Shell 或正式发行资格。
 
