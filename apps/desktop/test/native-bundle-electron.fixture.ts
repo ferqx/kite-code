@@ -598,15 +598,16 @@ try {
   });
   await prepareButton.focus();
   await prepareButton.press('Enter');
-  await page.getByRole('button', { name: '研究与理解资料', exact: true }).click();
+  assert.equal(await page.locator('.new-conversation-welcome button').count(), 0);
+  await page.getByRole('textbox', { name: '新对话草稿' }).fill('manually prepared draft');
   assert.equal(
     await page.getByRole('textbox', { name: '新对话草稿' }).innerText(),
-    '研究与理解资料：',
+    'manually prepared draft',
   );
   await page.getByRole('button', { name: '新对话', exact: true }).click();
   assert.equal(
     await page.getByRole('textbox', { name: '新对话草稿' }).innerText(),
-    '研究与理解资料：',
+    'manually prepared draft',
   );
   const beforeFirst = await page.evaluate(
     async () =>

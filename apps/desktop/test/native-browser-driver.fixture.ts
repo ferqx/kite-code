@@ -290,6 +290,45 @@ try {
     await page.evaluate((theme) => (document.documentElement.dataset.theme = theme), theme);
     await page.screenshot({ path: join(directory, `sidebar-${theme}.png`) });
   }
+  if (process.platform === 'darwin') {
+    await page.evaluate(() => {
+      document.documentElement.dataset.platform = 'macos';
+      document.documentElement.dataset.windowMaterial = 'vibrancy';
+    });
+    for (const theme of ['dark', 'light']) {
+      await page.evaluate((theme) => (document.documentElement.dataset.theme = theme), theme);
+      await page.getByRole('button', { name: '收起侧栏', exact: true }).click();
+      await page.waitForFunction(
+        () =>
+          document.querySelector('.session-header')!.getBoundingClientRect().x < 1 &&
+          document.querySelector('.client-panels')!.getAttribute('data-animate-width') !== 'true',
+      );
+      const region = await page.evaluate(() => {
+        const header = document.querySelector('.session-header')!;
+        const placeholder = document.querySelector('.session-sidebar-toggle')!;
+        const button = document.querySelector('.desktop-sidebar-toggle button')!;
+        const bounds = button.getBoundingClientRect();
+        const space = placeholder.getBoundingClientRect();
+        return {
+          header: getComputedStyle(header).getPropertyValue('-webkit-app-region'),
+          placeholder: getComputedStyle(placeholder).getPropertyValue('-webkit-app-region'),
+          containsButton:
+            space.left <= bounds.left &&
+            space.right >= bounds.right &&
+            space.top <= bounds.top &&
+            space.bottom >= bounds.bottom,
+        };
+      });
+      assert.equal(region.header, 'drag');
+      assert.equal(region.placeholder, 'no-drag');
+      assert.equal(region.containsButton, true);
+      await page.getByRole('button', { name: '展开侧栏', exact: true }).click();
+      await page.getByRole('button', { name: '收起侧栏', exact: true }).waitFor();
+      await page.waitForFunction(
+        () => document.querySelector('.session-header')!.getBoundingClientRect().x >= 199,
+      );
+    }
+  }
   console.log(
     'browser_electron_pass: navigation, history, readers, resize, isolation, foreign IPC, popup, download, destruction',
   );

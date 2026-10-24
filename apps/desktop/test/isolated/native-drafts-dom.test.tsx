@@ -9,7 +9,7 @@ import type {
   NativeRequest,
   NativeState,
 } from '../../src/native-bridge';
-import { prepareDesktopDom, promptValue } from '../native-page-dom.fixture';
+import { prepareDesktopDom, promptValue, setPromptText } from '../native-page-dom.fixture';
 
 const bootstrap = new JSDOM('<div></div>', { pretendToBeVisual: true });
 const previous = {
@@ -150,7 +150,12 @@ test('actual React DOM keeps the new selected view when an original creation rec
     ).toBe('original text');
     await click('在 Workspace 中新建对话');
     expect(posts).toBe(0);
-    await click('研究与理解资料');
+    await act(async () => {
+      await setPromptText(
+        dom.window.document.querySelector('[role="textbox"][aria-label="新对话草稿"]')!,
+        'first prepared message',
+      );
+    });
     await click('发送首条消息');
     expect(posts).toBe(1);
     await click('Other B');

@@ -27,6 +27,15 @@ body {
     "Geist Variable", -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
     "Microsoft YaHei UI", "Microsoft YaHei", sans-serif;
   --ui-text-size: 14px;
+  /* Compact selectors share metrics across triggers, menus, and body portals. */
+  --select-font-size: 13px;
+  --select-line-height: 18px;
+  --select-min-height: 28px;
+  --select-padding-block: 4px;
+  --select-padding-inline: 8px;
+  --select-icon-size: 14px;
+  --select-trigger-gap: 6px;
+  --select-trigger-radius: 9999px;
   --font-weight-semibold: 500;
   /* Surfaces and fields stay soft; actions use a tighter corner. */
   --radius: 16px;
@@ -225,12 +234,12 @@ body {
     border-color: transparent;
   }
   &.shell {
-    --app-header-height: 52px;
+    --app-header-height: 48px;
     --sidebar-width: 236px;
     --sidebar-header-end-padding: 16px;
     --session-header-start-padding: 24px;
     --sidebar-toggle-closed-offset: var(--session-header-start-padding);
-    --sidebar-toggle-top: 10px;
+    --sidebar-toggle-top: 8px;
     display: block;
     height: 100dvh;
     overflow: hidden;
@@ -616,7 +625,7 @@ body {
     align-items: center;
     min-height: var(--app-header-height);
     gap: var(--session-header-gap);
-    padding: 10px var(--session-header-start-padding);
+    padding: 8px var(--session-header-start-padding);
     flex: none;
     min-width: 0;
     background: var(--page-background);
@@ -1209,15 +1218,15 @@ body {
     font-size: 14px;
   }
   .composer :is(.model-trigger, .permission-trigger, .context-trigger) {
-    height: 28px;
-    min-height: 28px;
-    padding: 4px 6px;
-    font-size: 13px;
-    line-height: 18px;
+    height: auto;
+    min-height: var(--select-min-height);
+    padding: var(--select-padding-block) 6px;
+    font-size: var(--select-font-size);
+    line-height: var(--select-line-height);
   }
   .composer :is(.model-trigger, .permission-trigger, .context-trigger) > svg {
-    width: 14px;
-    height: 14px;
+    width: var(--select-icon-size);
+    height: var(--select-icon-size);
   }
   .model-trigger > svg,
   .permission-trigger > svg,
@@ -1332,9 +1341,9 @@ body {
     width: max-content;
     min-width: 0;
     max-width: min(calc(100vw - 24px), var(--radix-dropdown-menu-content-available-width, 100vw));
-    font-size: 13px;
+    font-size: var(--select-font-size);
     font-weight: 400;
-    line-height: 18px;
+    line-height: var(--select-line-height);
   }
   .permission-menu-heading {
     display: flex;
@@ -2803,8 +2812,8 @@ body {
   gap: 12px;
 }
 .kite-client .right-sidebar-heading {
-  min-height: 52px;
-  padding: 8px 16px;
+  min-height: var(--app-header-height, 48px);
+  padding: 6px 16px;
 }
 .kite-client .right-sidebar-heading h2,
 .kite-client .settings h2 {
@@ -3879,7 +3888,6 @@ body {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 24px;
 }
 .kite-client .new-conversation-welcome h1 {
   margin: 0;
@@ -3887,31 +3895,6 @@ body {
   line-height: 42px;
   font-weight: 400;
   text-align: center;
-}
-.kite-client .task-suggestions {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 12px;
-  width: 100%;
-}
-.kite-client .task-suggestions .button {
-  min-height: 68px;
-  height: auto;
-  padding: 12px 14px;
-  border-radius: var(--button-radius);
-  justify-content: flex-start;
-  align-items: center;
-  gap: 10px;
-  text-align: left;
-}
-.kite-client .task-suggestions .button svg {
-  width: 20px;
-  height: 20px;
-  flex: none;
-  color: var(--muted-foreground);
-}
-.kite-client .task-suggestions .button span {
-  white-space: normal;
 }
 .kite-client .new-conversation-context {
   display: flex;
@@ -3922,54 +3905,20 @@ body {
   border-radius: var(--radius) var(--radius) 0 0;
   background: transparent;
   color: var(--foreground);
-  font-size: 14px;
-  line-height: 18px;
+  font-size: var(--select-font-size);
+  line-height: var(--select-line-height);
 }
 .kite-client .context-selector {
   position: relative;
   min-width: 0;
   max-width: 240px;
 }
-.kite-client .context-trigger {
-  min-height: 28px;
-  padding: 3px 7px;
-  max-width: 100%;
-  gap: 6px;
-  border-radius: var(--button-radius);
-}
-.kite-client .context-trigger span {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.kite-client .context-trigger svg {
-  width: 16px;
-  height: 16px;
-  flex-shrink: 0;
-}
-.kite-client .context-trigger .context-trigger-chevron {
-  width: 16px;
-  height: 16px;
-  margin-left: 1px;
-  color: var(--muted-foreground);
-  transition: transform 120ms ease;
-}
-.kite-client .context-trigger[aria-expanded="true"] .context-trigger-chevron {
-  transform: rotate(180deg);
-}
 .kite-client .context-trigger:disabled {
   opacity: 1;
 }
-.kite-client .context-trigger:hover:not(:disabled) {
-  background: var(--control-hover);
-}
-.kite-client .context-trigger[aria-expanded="true"],
-.kite-client .context-trigger[aria-expanded="true"]:hover:not(:disabled) {
-  background: var(--control-selected);
-}
 .kite-client .context-menu {
-  font-size: 14px;
+  font-size: var(--select-font-size);
+  line-height: var(--select-line-height);
   width: max-content;
   min-width: min(160px, calc(100vw - 32px));
   max-width: min(240px, calc(100vw - 32px));
@@ -3984,12 +3933,13 @@ body {
 }
 .kite-client .context-menu-item {
   font-size: inherit;
+  line-height: inherit;
   display: flex;
   gap: 8px;
   width: 100%;
-  min-height: 36px;
+  min-height: var(--select-min-height);
   height: auto;
-  padding: 6px 8px;
+  padding: var(--select-padding-block) var(--select-padding-inline);
   justify-content: flex-start;
   align-items: center;
   border-radius: var(--button-radius);
@@ -4009,7 +3959,7 @@ body {
   min-width: 0;
   flex: 1;
   font-weight: 500;
-  line-height: 20px;
+  line-height: inherit;
 }
 .kite-client .context-menu small {
   display: block;
@@ -4017,7 +3967,7 @@ body {
   color: var(--muted-foreground);
   font-weight: 400;
   font-size: inherit;
-  line-height: 18px;
+  line-height: var(--select-line-height);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -4036,11 +3986,7 @@ body {
   filter: invert(1);
 }
 @media (max-width: 1000px) {
-  .kite-client .task-suggestions {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
   .kite-client .new-conversation-welcome {
-    gap: 20px;
     justify-content: safe center;
   }
 }
@@ -4546,10 +4492,7 @@ body {
 
 /* Compact shadcn Popover with independent provider/model scroll areas. */
 .kite-client .model-effort-trigger {
-  height: 32px;
-  min-height: 32px;
   max-width: min(280px, 100%);
-  padding: 4px 8px;
 }
 .model-effort-summary {
   flex-shrink: 0;
@@ -4565,9 +4508,9 @@ body {
   background: var(--card);
   color: var(--foreground);
   font-family: var(--font-ui);
-  font-size: 14px;
+  font-size: var(--select-font-size);
   font-weight: 400;
-  line-height: 18px;
+  line-height: var(--select-line-height);
   box-sizing: border-box;
 }
 .model-effort-popover * {
@@ -4580,20 +4523,36 @@ body {
   line-height: inherit;
   color: inherit;
 }
-.model-effort-popover :is(.model-effort-switch, .model-effort-option) > svg {
-  width: 16px;
-  height: 16px;
-}
 .model-effort-popover-models {
-  width: 288px;
-  font-size: 13px;
+  width: 320px;
+  font-size: var(--select-font-size);
 }
 .model-effort-popover-models .model-effort-option > svg {
-  width: 14px;
-  height: 14px;
+  width: var(--select-icon-size);
+  height: var(--select-icon-size);
 }
 .model-effort-panel {
   padding: 12px;
+}
+@keyframes model-effort-view-enter {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+@media (prefers-reduced-motion: no-preference) {
+  .model-effort-popover :is(.model-effort-panel, .model-effort-columns) {
+    animation: model-effort-view-enter 140ms ease-out;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .model-effort-popover {
+    animation: none;
+  }
 }
 .model-effort-popover .effort-value {
   font-size: inherit;
@@ -4613,13 +4572,6 @@ body {
     transition: transform 150ms ease-out;
   }
 }
-.model-effort-popover .model-effort-switch {
-  height: 28px;
-  max-width: 100%;
-  gap: 4px;
-  padding: 4px 8px;
-  font-size: inherit;
-}
 .model-effort-unavailable {
   margin: 8px 0 0;
   color: var(--muted-foreground);
@@ -4629,7 +4581,7 @@ body {
 .model-effort-columns {
   display: grid;
   height: min(288px, calc(var(--radix-popover-content-available-height, 290px) - 2px));
-  grid-template-columns: 96px 1px minmax(0, 1fr);
+  grid-template-columns: 128px 1px minmax(0, 1fr);
   overflow: hidden;
 }
 .model-effort-columns [data-radix-scroll-area-viewport] > div {
@@ -4648,9 +4600,10 @@ body {
   background: transparent;
 }
 .model-effort-popover :is(.model-effort-provider, .model-effort-option) {
-  height: 28px;
+  height: auto;
+  min-height: var(--select-min-height);
   min-width: 0;
-  padding: 4px 8px;
+  padding: var(--select-padding-block) var(--select-padding-inline);
   font-size: inherit;
 }
 .model-effort-popover .model-effort-provider {
@@ -5057,7 +5010,7 @@ body {
   flex-direction: column;
 }
 .kite-client .session-tabs .session-tabs-heading {
-  min-height: 52px;
+  min-height: var(--app-header-height, 48px);
   padding: 6px 8px;
   gap: 4px;
 }
@@ -5204,4 +5157,70 @@ body {
 .kite-client .tool-agent-operation {
   flex: none;
   font-size: inherit;
+}
+
+/* Shared selection entry for page content and body-portalled popovers. */
+.pill-select-trigger,
+.kite-client .pill-select-trigger {
+  --button-radius: var(--select-trigger-radius);
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-start;
+  height: auto;
+  min-height: var(--select-min-height);
+  min-width: 0;
+  gap: var(--select-trigger-gap);
+  padding: var(--select-padding-block) var(--select-padding-inline);
+  border-radius: var(--button-radius);
+  font-family: inherit;
+  font-size: var(--select-font-size);
+  font-weight: 400;
+  line-height: var(--select-line-height);
+}
+.pill-select-trigger {
+  max-width: 100%;
+}
+.pill-select-label {
+  display: block;
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pill-select-leading,
+.pill-select-suffix {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+}
+.pill-select-trigger > .pill-select-chevron {
+  width: var(--select-icon-size);
+  height: var(--select-icon-size);
+  flex: none;
+  transition: transform 120ms ease;
+}
+@media (prefers-reduced-motion: reduce) {
+  .pill-select-trigger > .pill-select-chevron {
+    transition: none;
+  }
+}
+.pill-select-trigger .pill-select-leading > svg {
+  width: var(--select-icon-size);
+  height: var(--select-icon-size);
+  flex: none;
+}
+.pill-select-trigger[aria-expanded="true"] > .pill-select-chevron[data-direction="down"] {
+  transform: rotate(180deg);
+}
+.pill-select-trigger:hover:not(:disabled),
+.pill-select-trigger:focus-visible,
+.kite-client .pill-select-trigger:hover:not(:disabled),
+.kite-client .pill-select-trigger:focus-visible {
+  background: var(--control-hover);
+}
+.pill-select-trigger[aria-expanded="true"],
+.kite-client .pill-select-trigger[aria-expanded="true"] {
+  background: var(--control-selected);
 }

@@ -137,11 +137,9 @@ export function SessionPage({ messages, fileChanges, ...props }: SessionPageProp
   const composerInput = useRef<PromptEditorHandle>(null);
   const headerElement = useRef<HTMLElement>(null);
   const footerElement = useRef<HTMLElement>(null);
-  const focusComposerAfterCommit = useCallback((moveCaretToEnd = false) => {
+  const focusComposerAfterCommit = useCallback(() => {
     const focus = () => {
-      const input = composerInput.current;
-      input?.focus();
-      if (moveCaretToEnd) input?.moveCaretToEnd();
+      composerInput.current?.focus();
     };
     if (typeof requestAnimationFrame === 'function') requestAnimationFrame(focus);
     else queueMicrotask(focus);
@@ -852,16 +850,7 @@ export function SessionPage({ messages, fileChanges, ...props }: SessionPageProp
                         >
                           {historyVisible &&
                             (welcoming ? (
-                              <NewConversationWelcome
-                                onSuggest={(value) => {
-                                  props.composer!.onChange(
-                                    props.composer!.draft
-                                      ? `${props.composer!.draft}\n${value}`
-                                      : value,
-                                  );
-                                  focusComposerAfterCommit(true);
-                                }}
-                              />
+                              <NewConversationWelcome />
                             ) : props.historyError ? (
                               <section className="notice error" role="alert">
                                 <strong>{props.historyError.title}</strong>

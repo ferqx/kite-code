@@ -1,12 +1,4 @@
-import {
-  ArrowDown01Icon,
-  Edit02Icon,
-  FileSearchIcon,
-  Folder01Icon,
-  Folder02Icon,
-  GitBranchIcon,
-  Wrench01Icon,
-} from '@hugeicons/core-free-icons';
+import { Folder01Icon, GitBranchIcon } from '@hugeicons/core-free-icons';
 import { HugeiconsIcon } from '@hugeicons/react';
 import { type ComponentProps, useState } from 'react';
 import {
@@ -19,7 +11,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from './components/ui/dropdown-menu';
-import { Button } from './ui';
+import { PillSelectTrigger } from './components/ui/pill-select-trigger';
 
 export interface NewConversationProps {
   projects: readonly { path: string; label: string }[];
@@ -32,25 +24,10 @@ export interface NewConversationProps {
   onRefreshBranch: () => void;
 }
 
-const suggestions = [
-  { label: '研究与理解资料', icon: FileSearchIcon },
-  { label: '整理与归纳内容', icon: Folder02Icon },
-  { label: '创作可交付成果', icon: Edit02Icon },
-  { label: '分析并解决问题', icon: Wrench01Icon },
-];
-
-export function NewConversationWelcome({ onSuggest }: { onSuggest: (value: string) => void }) {
+export function NewConversationWelcome() {
   return (
     <section className="new-conversation-welcome" aria-label="新对话">
       <h1>今天想在这个空间完成什么？</h1>
-      <div className="task-suggestions">
-        {suggestions.map((suggestion) => (
-          <Button key={suggestion.label} onClick={() => onSuggest(`${suggestion.label}：`)}>
-            <HugeiconsIcon icon={suggestion.icon} aria-hidden="true" />
-            <span>{suggestion.label}</span>
-          </Button>
-        ))}
-      </div>
     </section>
   );
 }
@@ -70,16 +47,15 @@ function ContextMenu(props: {
     <div className="context-selector">
       <DropdownMenu open={open} onOpenChange={setOpen}>
         <DropdownMenuTrigger asChild>
-          <Button
-            className="ghost context-trigger"
+          <PillSelectTrigger
+            className="context-trigger"
             aria-label={props.name}
             title={props.label}
             disabled={props.disabled}
+            leading={<HugeiconsIcon icon={props.icon} />}
           >
-            <HugeiconsIcon icon={props.icon} />
-            <span>{props.label}</span>
-            <HugeiconsIcon className="context-trigger-chevron" icon={ArrowDown01Icon} />
-          </Button>
+            {props.label}
+          </PillSelectTrigger>
         </DropdownMenuTrigger>
         {open && (
           <DropdownMenuContent
@@ -93,25 +69,29 @@ function ContextMenu(props: {
             portalled={false}
             aria-label={props.name}
           >
-            <DropdownMenuRadioGroup value={props.selected}>
-              <DropdownMenuGroup>
-                {props.options.map((option) => (
-                  <DropdownMenuRadioItem
-                    key={option.value}
-                    className="context-menu-item"
-                    value={option.value}
-                    indicatorPosition="end"
-                    onSelect={() => props.onSelect(option.value)}
-                  >
-                    <span className="context-menu-label">
-                      {option.label}
-                      {option.detail && <small>{option.detail}</small>}
-                    </span>
-                  </DropdownMenuRadioItem>
-                ))}
-              </DropdownMenuGroup>
-            </DropdownMenuRadioGroup>
-            <DropdownMenuSeparator />
+            {props.options.length > 0 && (
+              <>
+                <DropdownMenuRadioGroup value={props.selected}>
+                  <DropdownMenuGroup>
+                    {props.options.map((option) => (
+                      <DropdownMenuRadioItem
+                        key={option.value}
+                        className="context-menu-item"
+                        value={option.value}
+                        indicatorPosition="end"
+                        onSelect={() => props.onSelect(option.value)}
+                      >
+                        <span className="context-menu-label">
+                          {option.label}
+                          {option.detail && <small>{option.detail}</small>}
+                        </span>
+                      </DropdownMenuRadioItem>
+                    ))}
+                  </DropdownMenuGroup>
+                </DropdownMenuRadioGroup>
+                <DropdownMenuSeparator />
+              </>
+            )}
             <DropdownMenuGroup>
               <DropdownMenuItem
                 className="context-menu-item context-menu-action"

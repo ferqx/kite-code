@@ -10,7 +10,7 @@ import type {
   NativeResult,
   NativeState,
 } from '../../src/native-bridge';
-import { prepareDesktopDom, promptValue } from '../native-page-dom.fixture';
+import { prepareDesktopDom, promptValue, setPromptText } from '../native-page-dom.fixture';
 
 const bootstrap = new JSDOM('<div></div>', { pretendToBeVisual: true });
 const initialGlobals = {
@@ -387,7 +387,12 @@ test('a mutation transport failure automatically checks the original intent with
     await f.render();
     await f.click('Original A');
     await f.click('在 Workspace 中新建对话');
-    await f.click('研究与理解资料');
+    await act(async () => {
+      await setPromptText(
+        f.dom.window.document.querySelector('[role="textbox"][aria-label="新对话草稿"]')!,
+        'first prepared message',
+      );
+    });
     await f.click('发送首条消息');
     expect(submitted).toBeDefined();
     expect(f.dom.window.document.querySelector('[role="alertdialog"]')).toBeNull();
@@ -542,7 +547,12 @@ test('an already submitted mutation keeps its unknown receipt through quit and c
     await f.render();
     await f.click('Original A');
     await f.click('在 Workspace 中新建对话');
-    await f.click('研究与理解资料');
+    await act(async () => {
+      await setPromptText(
+        f.dom.window.document.querySelector('[role="textbox"][aria-label="新对话草稿"]')!,
+        'first prepared message',
+      );
+    });
     await f.click('发送首条消息');
     expect(submitted).toBeDefined();
     await f.notify({ kind: 'lifecycle', phase: 'quitting' });

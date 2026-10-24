@@ -46,7 +46,7 @@ body,
 }
 
 html[data-platform="macos"] .kite-client.shell {
-  --app-header-height: 52px;
+  --app-header-height: 48px;
   --sidebar: #f5f5f5;
 }
 
@@ -154,8 +154,8 @@ html[data-platform="macos"][data-theme="dark"] .kite-client.shell {
   left: 0;
   top: 0;
   width: 236px;
-  height: 52px;
-  padding: 10px;
+  height: var(--app-header-height, 48px);
+  padding: 8px 10px;
   background: var(--sidebar);
 }
 .kite-client .desktop-settings-header h2 {
@@ -221,8 +221,8 @@ html[data-platform="macos"][data-theme="dark"] .kite-client.shell {
   padding: 0;
 }
 .kite-client .desktop-settings .settings-editor-panel .right-sidebar-heading {
-  min-height: 52px;
-  padding-top: 8px;
+  min-height: var(--app-header-height, 48px);
+  padding-top: 6px;
   -webkit-app-region: no-drag;
 }
 .kite-client .desktop-settings .settings-editor-panel .right-sidebar-close {
@@ -236,7 +236,7 @@ html[data-platform="macos"] .kite-client .desktop-settings-dialog .settings-edit
 }
 .kite-client .settings-sidebar {
   --control-pressed: var(--control-hover);
-  padding: 52px 10px 24px;
+  padding: var(--app-header-height, 48px) 10px 24px;
   background: var(--sidebar);
   overflow-y: auto;
 }
@@ -819,7 +819,7 @@ html[data-native-window] .native-window-content > .kite-client.shell {
 /* macOS window controls share the first row with the navigation and session headers. */
 html[data-native-window][data-platform="macos"] {
   --native-titlebar-height: 0px;
-  --native-macos-header-height: 52px;
+  --native-macos-header-height: 48px;
   --native-window-controls-width: 80px;
   --native-panel-inset: 0px;
 }
@@ -895,6 +895,11 @@ html[data-native-window][data-platform="macos"]
   -webkit-app-region: no-drag;
 }
 
+/* The sidebar control is a sibling of the header; exclude its in-header space too. */
+html[data-native-window][data-platform="macos"] .kite-client .session-sidebar-toggle {
+  -webkit-app-region: no-drag;
+}
+
 html[data-native-window]:is([data-window-material="mica"], [data-window-material="vibrancy"]) {
   background: transparent;
 }
@@ -944,7 +949,7 @@ html[data-native-window][data-platform="windows"] .kite-client.shell {
 
 html[data-native-window][data-platform="windows"] .kite-client .sidebar-header {
   min-height: 0;
-  padding-block: 12px 2px;
+  padding-block: 10px 0;
   padding-inline: 16px var(--sidebar-header-end-padding);
 }
 
@@ -954,7 +959,7 @@ html[data-native-window]:is([data-window-material="mica"], [data-window-material
     var(--session-header-start-padding) +
     var(--native-panel-inset)
   );
-  --sidebar-toggle-top: calc(10px + var(--native-panel-inset));
+  --sidebar-toggle-top: calc(8px + var(--native-panel-inset));
 }
 
 html[data-native-window][data-platform="macos"] .kite-client.shell {

@@ -1,8 +1,9 @@
-import { ArrowDown01Icon, ArrowRight01Icon, Tick02Icon } from '@hugeicons/core-free-icons';
+import { Tick02Icon } from '@hugeicons/core-free-icons';
 import { HugeiconsIcon } from '@hugeicons/react';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { Button } from './components/ui/button';
 import { Command, CommandGroup, CommandItem, CommandList } from './components/ui/command';
+import { PillSelectTrigger } from './components/ui/pill-select-trigger';
 import { Popover, PopoverContent, PopoverTrigger } from './components/ui/popover';
 import { ScrollArea } from './components/ui/scroll-area';
 import { Separator } from './components/ui/separator';
@@ -30,12 +31,22 @@ export interface ModelEffortSelectorProps {
   disabled?: boolean;
 }
 
+function popoverSize(element: HTMLElement) {
+  const style = getComputedStyle(element);
+  return { width: Number.parseFloat(style.width), height: Number.parseFloat(style.height) };
+}
+
 export function ModelEffortSelector(props: ModelEffortSelectorProps) {
   const [open, setOpen] = useState(false);
   const [view, setView] = useState<'effort' | 'models'>('effort');
   const [activeProvider, setActiveProvider] = useState('');
   const modelSwitch = useRef<HTMLButtonElement>(null);
   const modelView = useRef<HTMLDivElement>(null);
+  const popover = useRef<HTMLDivElement>(null);
+  const previousSize = useRef<
+    { width: number; height: number; view: 'effort' | 'models' } | undefined
+  >(undefined);
+  const resizeAnimation = useRef<Animation | null>(null);
   const providers = [...new Set(props.models.map((model) => model.provider))];
   const selected = props.models.find((model) =>
     props.model?.id !== undefined
@@ -59,18 +70,64 @@ export function ModelEffortSelector(props: ModelEffortSelectorProps) {
   const allowedPositions = choices.map((value) => effortValues.indexOf(value));
   const provider = providers.includes(activeProvider) ? activeProvider : providers[0];
 
+  function changeView(next: 'effort' | 'models') {
+    if (next === view) return;
+    const element = popover.current;
+    previousSize.current =
+      element &&
+      typeof element.animate === 'function' &&
+      !window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
+        ? { ...popoverSize(element), view: next }
+        : undefined;
+    resizeAnimation.current?.cancel();
+    setView(next);
+  }
+
+  useLayoutEffect(() => {
+    const from = previousSize.current;
+    previousSize.current = undefined;
+    const element = popover.current;
+    if (!from || from.view !== view || !element) return;
+    const to = popoverSize(element);
+    if (![from.width, from.height, to.width, to.height].every(Number.isFinite)) return;
+    const animation = element.animate(
+      [
+        { width: `${from.width}px`, height: `${from.height}px` },
+        { width: `${to.width}px`, height: `${to.height}px` },
+      ],
+      { duration: 180, easing: 'cubic-bezier(0.2, 0, 0.2, 1)' },
+    );
+    resizeAnimation.current = animation;
+    const release = () => {
+      if (resizeAnimation.current === animation) resizeAnimation.current = null;
+    };
+    animation.onfinish = release;
+    animation.oncancel = release;
+    return () => {
+      animation.cancel();
+      release();
+    };
+  }, [view]);
+
   useEffect(() => {
-    if (view === 'models')
-      modelView.current
-        ?.querySelector<HTMLButtonElement>('[role="tab"][aria-selected="true"]')
-        ?.focus();
+    if (view !== 'models') return;
+    const tab = modelView.current?.querySelector<HTMLButtonElement>(
+      '[role="tab"][aria-selected="true"]',
+    );
+    tab?.focus({ preventScroll: true });
+    const viewport = tab?.closest<HTMLElement>('[data-radix-scroll-area-viewport]');
+    if (!tab || !viewport) return;
+    const item = tab.getBoundingClientRect();
+    const area = viewport.getBoundingClientRect();
+    if (item.top < area.top) viewport.scrollTop += item.top - area.top;
+    else if (item.bottom > area.bottom) viewport.scrollTop += item.bottom - area.bottom;
   }, [view]);
   useEffect(() => {
     if (props.disabled) setOpen(false);
   }, [props.disabled]);
 
   function focusModelSwitch() {
-    requestAnimationFrame(() => modelSwitch.current?.focus());
+    requestAnimationFrame(() => modelSwitch.current?.focus({ preventScroll: true }));
   }
   return (
     <Popover
@@ -85,23 +142,23 @@ export function ModelEffortSelector(props: ModelEffortSelectorProps) {
       }}
     >
       <PopoverTrigger asChild>
-        <Button
-          variant="ghost"
-          size="sm"
+        <PillSelectTrigger
           className="model-trigger model-effort-trigger"
           data-model-trigger
           aria-label={`模型：${props.model?.name ?? '选择模型'}${canAdjustEffort && effortLabel ? `，思考程度：${effortLabel}` : ''}`}
           title={props.model ? `${props.model.provider} / ${props.model.name}` : undefined}
           disabled={props.disabled}
+          suffix={
+            canAdjustEffort && effortLabel ? (
+              <span className="model-effort-summary">{effortLabel}</span>
+            ) : undefined
+          }
         >
-          <span className="truncate">{props.model?.name ?? '选择模型'}</span>
-          {canAdjustEffort && effortLabel && (
-            <span className="model-effort-summary">{effortLabel}</span>
-          )}
-          <HugeiconsIcon data-icon="inline-end" icon={ArrowDown01Icon} />
-        </Button>
+          {props.model?.name ?? '选择模型'}
+        </PillSelectTrigger>
       </PopoverTrigger>
       <PopoverContent
+        ref={popover}
         side="top"
         align="start"
         sideOffset={6}
@@ -110,7 +167,7 @@ export function ModelEffortSelector(props: ModelEffortSelectorProps) {
         onEscapeKeyDown={(event) => {
           if (view === 'models') {
             event.preventDefault();
-            setView('effort');
+            changeView('effort');
             focusModelSwitch();
           }
         }}
@@ -127,21 +184,18 @@ export function ModelEffortSelector(props: ModelEffortSelectorProps) {
                   {effortLabel}
                 </output>
               )}
-              <Button
+              <PillSelectTrigger
                 ref={modelSwitch}
-                variant="ghost"
                 className="model-effort-switch"
+                indicator="right"
                 onClick={() => {
                   setActiveProvider(props.model?.provider ?? providers[0] ?? '');
-                  setView('models');
+                  changeView('models');
                 }}
                 aria-label={`选择模型，当前 ${props.model ? `${props.model.provider} / ${props.model.name}` : '未选择'}`}
               >
-                <span className="truncate">
-                  {props.model ? `${props.model.provider} / ${props.model.name}` : '选择模型'}
-                </span>
-                <HugeiconsIcon data-icon="inline-end" icon={ArrowRight01Icon} />
-              </Button>
+                {props.model ? `${props.model.provider} / ${props.model.name}` : '选择模型'}
+              </PillSelectTrigger>
             </div>
             {canAdjustEffort && (
               <div className="mt-1">
@@ -223,7 +277,7 @@ export function ModelEffortSelector(props: ModelEffortSelectorProps) {
                                 aria-label={model.id ? `选择模型 ${model.id}` : undefined}
                                 onSelect={() => {
                                   props.onModelChange(model.provider, model.name, model.id);
-                                  setView('effort');
+                                  changeView('effort');
                                   focusModelSwitch();
                                 }}
                                 className="model-effort-option"

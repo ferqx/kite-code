@@ -2801,6 +2801,24 @@ test('startup preparation selects the default first space after directory loadin
       expect(f.host.querySelector('[aria-label="项目空间"]')?.textContent).toBe(
         workspaceIds.length ? 'Ordinary directory' : '选择项目',
       );
+      await act(async () => {
+        const project = f.host.querySelector<HTMLButtonElement>('[aria-label="项目空间"]')!;
+        project.focus();
+        project.dispatchEvent(
+          new f.dom.window.KeyboardEvent('keydown', { key: 'Enter', bubbles: true }),
+        );
+      });
+      const menu = f.host.querySelector('[role="menu"][aria-label="项目空间"]')!;
+      expect(menu).not.toBeNull();
+      expect(menu.querySelectorAll('[role="menuitemradio"]')).toHaveLength(workspaceIds.length);
+      expect(menu.querySelectorAll('[role="separator"]')).toHaveLength(workspaceIds.length ? 1 : 0);
+      expect(menu.querySelectorAll('[role="menuitem"]')).toHaveLength(1);
+      expect(menu.querySelector('[role="menuitem"]')?.textContent).toBe('添加项目…');
+      await act(async () => {
+        menu.dispatchEvent(
+          new f.dom.window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }),
+        );
+      });
       await f.edit('new preparation draft');
       expect(promptValue(f.input())).toBe('new preparation draft');
       expect(
@@ -2855,7 +2873,7 @@ test('a pending default first space cannot override a later project entry and th
   }
 });
 
-test('original global/project preparation, suggestions and page navigation retain independent drafts with no empty creation', async () => {
+test('original global/project preparation and page navigation retain independent drafts without suggestion cards or empty creation', async () => {
   const f = fixture();
   try {
     await act(async () => f.root.render(<NativeDesktop />));
@@ -2864,13 +2882,14 @@ test('original global/project preparation, suggestions and page navigation retai
     await f.click('新对话');
     expect(f.host.querySelector('.new-conversation-welcome')).not.toBeNull();
     await f.edit('prepare draft');
-    await f.click('研究与理解资料');
-    await act(async () => new Promise((resolve) => setTimeout(resolve, 20)));
-    expect(promptValue(f.input())).toBe('prepare draft\n研究与理解资料：');
-    expect(f.host.activeElement).toBe(f.input());
-    expect(f.dom.window.getSelection()?.isCollapsed).toBe(true);
+    expect(f.host.querySelector('.new-conversation-welcome h1')?.textContent).toBe(
+      '今天想在这个空间完成什么？',
+    );
+    expect(f.host.querySelector('.new-conversation-welcome button')).toBeNull();
+    expect(f.host.querySelector('.task-suggestions')).toBeNull();
+    expect(promptValue(f.input())).toBe('prepare draft');
     await f.click('新对话');
-    expect(promptValue(f.input())).toBe('prepare draft\n研究与理解资料：');
+    expect(promptValue(f.input())).toBe('prepare draft');
     await f.click('在 Workspace 中新建对话');
     expect(f.host.querySelector('[aria-label="分支"]')?.textContent).toContain('main');
     expect(f.calls.filter((call) => call.method === 'conversation.models.read')).toHaveLength(1);
@@ -2879,7 +2898,7 @@ test('original global/project preparation, suggestions and page navigation retai
     expect(f.calls.filter((call) => call.method === 'conversation.models.read')).toHaveLength(1);
     await f.click('安排任务');
     await f.click('返回新对话');
-    expect(promptValue(f.input())).toBe('prepare draft\n研究与理解资料：');
+    expect(promptValue(f.input())).toBe('prepare draft');
     await f.click('Original A');
     expect(promptValue(f.input('当前会话私有草稿'))).toBe('unsaved A\n雪🙂');
     await f.click('Other B');
@@ -2887,7 +2906,7 @@ test('original global/project preparation, suggestions and page navigation retai
     await f.click('Original A');
     expect(promptValue(f.input('当前会话私有草稿'))).toBe('unsaved A\n雪🙂');
     await f.click('新对话');
-    expect(promptValue(f.input())).toBe('prepare draft\n研究与理解资料：');
+    expect(promptValue(f.input())).toBe('prepare draft');
     const permission = () => f.host.querySelector<HTMLButtonElement>('[data-permission-trigger]')!;
     const chooseFull = async () => {
       await act(async () => {

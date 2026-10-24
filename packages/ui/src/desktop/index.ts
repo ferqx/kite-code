@@ -51,6 +51,10 @@ export {
   DropdownMenuRadioItem,
   DropdownMenuTrigger,
 } from './components/ui/dropdown-menu';
+export {
+  PillSelectTrigger,
+  type PillSelectTriggerProps,
+} from './components/ui/pill-select-trigger';
 export { ScrollArea, ScrollBar } from './components/ui/scroll-area';
 export {
   Sheet,
