@@ -182,7 +182,7 @@ Conversation 的 `systemKind:agent_result` 只消费宿主已确认实际触发�
 
 SessionPage 的可选 `covered` 保留主panel树、尺寸和阅读实例，以opacity0／inert／aria-hidden退出绘制与交互；`overlays` 仍在同级可见层。左侧栏随同一主panel树被覆盖，原开合状态保留，恢复页面时不重新挂载导航。该属性不取消任务或重新选择会话；标签页隐藏网页并卸载当前工具reader，其余宿主reader保持原合同，默认不覆盖页面。原 [DialogContent](src/desktop/components/ui/dialog.tsx)新增可选 `showOverlay`，默认true保旧遮罩；Native全屏设置明确false，仍由原Radix内容保焦点、Escape与模态语义。具体玻璃层和状态恢复由 [Native owner](../../apps/desktop/README.md#windows-原生-mica)维护。
 
-原 [MessageContent](src/desktop/MessageContent.tsx)和 [ToolActivity / ToolRow](src/desktop/ToolActivity.tsx)公开给 Native 复用，文件操作仍只调用显式宿主回调。`ModelOutputMessage.renderText` 可为同一预览或已验证全文提供宿主展示；不改完整读取、身份／字节门禁、关闭与 onContent，未传时继续 SafeMessageMarkdown。`autoRead` 失败保留原文和错误说明，不提供“重新读取”按钮，也不发布未核验的全文复制内容；显式完整 reader 沿用原操作。当前 Native 的消息路径与默认模型摘要归 [Desktop owner](../../apps/desktop/README.md#原消息文件路径与常规摘要)，纯 UI 不取得文件、来源核验或编辑器权限。
+原 [MessageContent](src/desktop/MessageContent.tsx)和 [ToolActivity / ToolRow](src/desktop/ToolActivity.tsx)公开给 Native 复用，文件操作仍只调用显式宿主回调。`ModelOutputMessage.renderText` 可为同一预览或已验证全文提供宿主展示；不改完整读取、身份／字节门禁、关闭与 onContent，未传时继续 SafeMessageMarkdown。`autoRead` 失败保留原文和错误说明，不发布未核验的全文复制内容；缺省不提供“重新读取”按钮，Web 的显式 `autoReadRetry` 差异见下文正文读取契约，Native 保持缺省。显式完整 reader 沿用原操作。当前 Native 的消息路径与默认模型摘要归 [Desktop owner](../../apps/desktop/README.md#原消息文件路径与常规摘要)，纯 UI 不取得文件、来源核验或编辑器权限。
 
 [Code Block](src/desktop/components/ui/code-block.tsx)与[Trace](src/desktop/components/ui/trace.tsx)使用官方 shadcn/ui 的 Radix 源码结构，分别适配现有 Button、Hugeicons 和语义 token。[MarkdownCodeBlock](src/desktop/MarkdownCodeBlock.tsx)只接块级代码，保留原 `pre > code`、语言类、缩进与换行；保持单个代码容器，显式语言按token高亮，不拆行；Mermaid图表使用同一标题与准确源码复制，正文仍走固定Markdown parser与安全规则。语言标题和复制操作由 Code Block parts 组合，行内代码与表格身份保持。[Markdown 回归](test/markdown.test.tsx)和[代码块回归](test/isolated/desktop-code-block.test.tsx)核语言、准确复制、原安全限制与复制资格。
 
@@ -281,7 +281,7 @@ P3 的 `InteractionCard` 直接消费生成的 Interaction：真实来源 Sessio
 
 `onContent` 只通知当前准入视图已显示的完整正文，回到预览、停用或 `readActive=false` 时通知 `undefined`，供宿主准确复制；组件不拥有网络关闭或 Runtime 取消。[Model output DOM 测试](test/model-output.test.tsx) 验证超过 17 MiB 的完整尾部、显式读取、single flight、关闭/身份变化/隐藏的 abort 与 late 隔离、缺 reader、身份冲突和不完整前缀。它建立 React/JSDOM 证据，不代表真实浏览器、Electron 或 TUI 资格。
 
-普通 Native／Web 聊天启用共享 `autoRead`：在当前可读视图内自动沿原 reader 获取已保存完整正文，不显示“回复预览”“完整回复”标题、查看／收起按钮或原始工具调用详情。流式正文与尚未核实的预览原位保留，完整读取及 Store／Session／Run／Execution／字节验证通过后才交付全文复制资格；暂停、切换与晚回包仍受原门禁约束。不完整原输出明确标记“回复未完成”。读取失败保留原文，仅提供“重新读取”的只读重试，不自动重复读取、更换身份或重新提交任务；无 reader 或不支持格式时保留必要不可用说明。专用 reader 不启用此选项时继续保留显式打开／关闭及原门禁，原 reasoning 仍只供明确诊断宿主查看。
+普通 Native／Web 聊天启用共享 `autoRead`：在当前可读视图内自动沿原 reader 获取已保存完整正文，不显示“回复预览”“完整回复”标题、查看／收起按钮或原始工具调用详情。流式正文与尚未核实的预览原位保留，完整读取及 Store／Session／Run／Execution／字节验证通过后才交付全文复制资格；暂停、切换与晚回包仍受原门禁约束。不完整原输出明确标记“回复未完成”。读取失败保留原文和错误说明；缺省不显示重试按钮，Native 沿用缺省。Web 显式启用 `autoReadRetry` 后才提供“重新读取”，仅沿原 reader 和原身份重新核验；暂停时仍受 `readActive`／`suspended` 门禁约束。不自动重复读取、更换身份或重新提交任务；无 reader 或不支持格式时保留必要不可用说明。专用 reader 不启用此选项时继续保留显式打开／关闭及原门禁，原 reasoning 仍只供明确诊断宿主查看。
 
 宿主已经完成公共 Client 的 EOF／SHA／UTF-8 验证时，可直接提供 `verifiedSnapshot`，组件仍核同一 Store／Session／Run／Execution、complete、正文／reasoning字节数和toolCalls，再呈现原正文或已保存的未完成前缀。关闭后可本地重开，不重复下载；宿主替换 snapshot、暂停、身份替换和卸载均撤销旧读取。该 prop 不接受未验证 transport 数据，也不赋予组件网络或执行权。
 

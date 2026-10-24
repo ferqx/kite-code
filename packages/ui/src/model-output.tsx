@@ -8,6 +8,8 @@ export interface ModelOutputMessageProps {
   readonly suspended?: boolean;
   /** Ordinary messages load their verified body without a separate preview/reader UI. */
   readonly autoRead?: boolean;
+  /** Host opt-in to a read-only retry after an automatic body read fails. */
+  readonly autoReadRetry?: boolean;
   /** Paused retained display cannot read or publish current copy content. */
   readonly readActive?: boolean;
   /** Explicit diagnostic host opt-in; ordinary conversation reading excludes raw reasoning. */
@@ -63,6 +65,7 @@ export function ModelOutputMessage({
   storeId,
   suspended = false,
   autoRead = false,
+  autoReadRetry = false,
   readActive = true,
   showReasoning = false,
   canReadRestoredOrigin = false,
@@ -288,7 +291,17 @@ export function ModelOutputMessage({
       {body.readAvailability === 'unsupported' && <p>暂不支持此内容格式，已保留回复预览</p>}
       {error && (
         <div role="alert">
-          <p>{autoRead ? '完整回复读取失败。' : '完整回复读取失败，请重试。'}</p>
+          <p>{autoRead && !autoReadRetry ? '完整回复读取失败。' : '完整回复读取失败，请重试。'}</p>
+          {autoRead && autoReadRetry && (
+            <button
+              type="button"
+              disabled={!onRead || suspended || loading || body.readAvailability === 'unsupported'}
+              aria-disabled={!readActive || undefined}
+              onClick={() => void read()}
+            >
+              重新读取
+            </button>
+          )}
         </div>
       )}
       {showReasoning && full?.output.reasoning && (
