@@ -363,6 +363,65 @@ test('automatic read failures preserve the preview without a retry button or unv
   }
 });
 
+test('opted-in automatic read retry rechecks original ownership and pauses without publishing unverified copy content', async () => {
+  const f = await domFixture(),
+    data = outputFixture('核实后才显示的完整回复'),
+    published: (string | undefined)[] = [],
+    signals: AbortSignal[] = [];
+  let release!: (snapshot: ModelOutputSnapshot) => void;
+  const props: ModelOutputMessageProps = {
+    autoRead: true,
+    autoReadRetry: true,
+    message: data.message,
+    storeId: 'store',
+    onRead: async (input) => {
+      expect(input.sessionId).toBe('a');
+      expect(input.executionId).toBe('model');
+      signals.push(input.signal);
+      if (signals.length === 1) return { ...data.snapshot, runId: 'foreign' };
+      return new Promise((resolve) => {
+        release = resolve;
+      });
+    },
+    onContent: (value) => published.push(value),
+  };
+  try {
+    await f.render(props);
+    expect(signals).toHaveLength(1);
+    expect(signals[0]!.aborted).toBe(true);
+    expect(f.host.querySelector('.message-markdown')!.textContent).toBe('PREVIEW');
+    expect(f.host.querySelector('[role=alert]')!.textContent).toContain(
+      '完整回复读取失败，请重试。',
+    );
+    expect(f.host.textContent).not.toContain('model_output_identity_conflict');
+    expect(published.at(-1)).toBeUndefined();
+    await f.render({ ...props, readActive: false });
+    expect(f.host.querySelector('button')!.getAttribute('aria-disabled')).toBe('true');
+    await f.click('重新读取');
+    expect(signals).toHaveLength(1);
+    await f.render(props);
+    expect(signals).toHaveLength(1);
+    await f.click('重新读取');
+    expect(signals).toHaveLength(2);
+    expect(f.host.querySelector('[aria-busy=true]')).not.toBeNull();
+    expect(f.host.querySelectorAll('button')).toHaveLength(0);
+    expect(f.host.querySelector('.message-markdown')!.textContent).toBe('PREVIEW');
+    expect(published.at(-1)).toBeUndefined();
+    await f.render({ ...props });
+    expect(signals).toHaveLength(2);
+    await act(async () => release(data.snapshot));
+    expect(f.host.querySelector('.message-markdown')!.textContent).toBe(
+      data.snapshot.output.content,
+    );
+    expect(published.at(-1)).toBe(data.snapshot.output.content);
+    expect(f.host.querySelector('[role=alert]')).toBeNull();
+    expect(f.host.querySelectorAll('button')).toHaveLength(0);
+    expect(signals).toHaveLength(2);
+  } finally {
+    await f.close();
+  }
+});
+
 test('automatic replies reject mismatched or unsupported bodies and identify incomplete recorded replies', async () => {
   const f = await domFixture(),
     data = outputFixture(),
