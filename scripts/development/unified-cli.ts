@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import { lstatSync, readFileSync, realpathSync } from 'node:fs';
+import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { CLIHostError, type CLIServiceArtifact, parseCLIServiceArtifact } from '@kite-ai/cli/host';
 import { runCLIProcess } from '@kite-ai/cli/main';
@@ -24,7 +25,7 @@ export function selectDevelopmentCLI(
   const args = parseCLIArguments(argv);
   const selected = {
     argv: Object.freeze([...argv]),
-    dataRoot: join(root, '.kite-code', 'unified-development'),
+    dataRoot: join(homedir(), '.kite-code'),
     profile: 'development' as const,
   };
   if (args.kind === 'server' && ['start', 'restart'].includes(args.action)) {

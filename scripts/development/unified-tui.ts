@@ -1,3 +1,4 @@
+import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { parseTUIArguments, runTUIProcess } from '@kite-ai/cli/tui-main';
 import { selectDevelopmentServiceArtifact } from './unified-cli';
@@ -12,7 +13,7 @@ export function selectDevelopmentTUI(
   const args = parseTUIArguments(argv);
   const selected = {
     argv: Object.freeze([...argv]),
-    dataRoot: join(root, '.kite-code', 'unified-development'),
+    dataRoot: join(homedir(), '.kite-code'),
     profile: 'development' as const,
   };
   return Object.freeze(

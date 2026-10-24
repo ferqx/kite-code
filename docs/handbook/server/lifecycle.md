@@ -41,7 +41,7 @@ restart 先校验资源和可检查的存储格式，再请求停止旧实例。
 
 ## 通用 Agent 开发生命周期
 
-通用 Agent 开发入口已支持 `bun run cli:dev server start/status/stop/restart` 与 `bun run cli:dev web`。启动前显式构建新 Service 和 Web；默认使用独立开发 profile。正式 `kite`、根 `server` 与安装发布入口选择完整候选，开发入口独立选择已构建的 Service 和 profile；不能混用两条入口推断同一实例。
+通用 Agent 开发入口已支持 `bun run cli:dev server start/status/stop/restart` 与 `bun run cli:dev web`。启动前显式构建新 Service 和 Web；默认使用用户目录 `~/.kite-code` 数据根中的 `development` profile，数据库直接位于 `~/.kite-code/development/core.db`，与 CLI/TUI/Desktop/Web 开发入口共用，启动工作目录不改变存储位置。显式 `--data-root` 可选择其他根，旧 checkout 数据的读取方式见[本地开发](../../development/local-development.md)。正式 `kite`、根 `server` 与安装发布入口选择完整候选，开发入口独立选择已构建的 Service 和 profile；不能混用两条入口推断同一实例。
 
 开发命令保留上面的复用、固定工作区、空闲重启和明确取消语义。默认地址按原 profile 选择当前用户私有 Unix socket；`--server` 指定准确本地 socket，不接受 HTTP URL。status/stop/web 在没有实例时不创建目录或启动 Service；web 缺席返回错误。已有兼容实例的 start 复用不要求目标构建存在；真正启动或重启才验证目标文件。普通 start 在 Store 损坏时仍启动安全诊断服务，状态明确为数据不可用，业务读取返回错误而非空列表；restart 则先只读检查目标 Store 格式，失败保留旧实例。
 

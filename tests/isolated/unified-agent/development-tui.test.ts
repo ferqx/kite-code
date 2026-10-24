@@ -1,7 +1,7 @@
 import { expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { selectDevelopmentTUI } from '../../../scripts/development/unified-tui';
 
@@ -32,7 +32,7 @@ test('development terminal selects exact built Service bytes after pure argv and
     argv[1] = '/changed';
     expect(selected.argv[1]).toBe('/original');
     expect(selected).toMatchObject({
-      dataRoot: join(root, '.kite-code', 'unified-development'),
+      dataRoot: join(homedir(), '.kite-code'),
       profile: 'development',
       artifact: {
         entrypoint,

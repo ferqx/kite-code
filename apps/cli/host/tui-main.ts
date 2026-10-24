@@ -1,4 +1,5 @@
 import { readFileSync } from 'node:fs';
+import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { CLIHostError, type CLIServiceArtifact, parseCLIServiceArtifact } from './index';
 import { parseTUIArguments } from './tui-arguments';
@@ -46,10 +47,7 @@ export async function runTUIProcess(
     const { runTUIHost } = await import('./tui');
     return await runTUIHost({
       artifact,
-      dataRoot:
-        args.dataRoot ??
-        input.dataRoot ??
-        join(input.cwd ?? process.cwd(), '.kite-code', 'unified-development'),
+      dataRoot: args.dataRoot ?? input.dataRoot ?? join(homedir(), '.kite-code'),
       ...(input.profile ? { profile: input.profile } : {}),
       ...(args.workspace ? { workspace: args.workspace } : {}),
       ...(args.thread ? { thread: args.thread } : {}),

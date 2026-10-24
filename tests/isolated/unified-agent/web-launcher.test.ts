@@ -1,7 +1,7 @@
 import { expect, test } from 'bun:test';
-import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync } from 'node:fs';
 import { createConnection } from 'node:net';
-import { tmpdir } from 'node:os';
+import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { selectProfile } from '@kite-ai/agent/profile';
@@ -80,7 +80,19 @@ test('pure development selection is separate from old data, closed arguments, fi
     expect(existsSync(join(root, '.kite-code'))).toBe(false);
     const chosen = selectDevelopmentWeb([], join(import.meta.dir, '../../..'));
     expect(chosen.profile.profile).toBe('development');
-    expect(chosen.profile.dataRoot.endsWith('/.kite-code/unified-development')).toBe(true);
+    expect(chosen.profile.dataRoot).toBe(
+      selectProfile({
+        dataRoot: join(homedir(), '.kite-code'),
+        profile: 'development',
+      }).dataRoot,
+    );
+    expect(chosen.profile.databasePath).toBe(
+      join(chosen.profile.dataRoot, 'development', 'core.db'),
+    );
+    const explicitRoot = join(realpathSync(root), 'selected-data');
+    const explicit = selectDevelopmentWeb(['--data-root', explicitRoot]);
+    expect(explicit.profile.dataRoot).toBe(explicitRoot);
+    expect(existsSync(explicit.profile.dataRoot)).toBe(false);
     expect(chosen.buildId).toMatch(/^development-[a-f0-9]{64}$/);
     expect(chosen.requiredCapabilities).toEqual(['sessions', 'history']);
     expect(chosen.entrypoint.endsWith('/apps/service/dist/main.js')).toBe(true);

@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { lstatSync, mkdirSync, mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { createRequire } from 'node:module';
+import { homedir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { privateDirectory } from '@kite-ai/agent/windows-path-security';
 import { releaseErrorCode } from '../release/release-arguments';
@@ -14,7 +15,7 @@ const help = `Kite desktop development
   npm run desktop:dev -- --help
 Uses local Service sources, built workspace assets, and installed Electron.
 UI changes use Vite HMR; Service source changes rebuild and restart the paired Service.
-Development data stays in this checkout's .kite-code/unified-development.
+Development data stays in ~/.kite-code/development.
 `;
 
 /** Create each application's private directory before Native verifies its permissions. */
@@ -108,7 +109,7 @@ export async function runDevelopmentDesktop(
         apiMajor: artifact.apiMajor,
         requiredCapabilities: ['file_recovery'],
         profile: {
-          dataRoot: join(root, '.kite-code', 'unified-development'),
+          dataRoot: join(homedir(), '.kite-code'),
           profile: 'development',
         },
       },

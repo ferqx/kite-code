@@ -83,7 +83,7 @@ bfcache 的 `pagehide.persisted` 保留现有 React document、选择和阅读 m
 
 [scripts/development/unified-web.ts](../../scripts/development/unified-web.ts) 将已构建的 `apps/service/dist/main.js`、公共 paired bootstrap 和本包可信资产组合成前台只读 Browser Gateway。开发入口命令为 `bun run scripts/development/unified-web.ts`；根 `web:dev` 由根集成 owner 指向该命令。启动前须显式构建 Service 和 Web，不在运行时构建、回退源码或发现旧 daemon。
 
-缺省选择独立的 `.kite-code/unified-development` dataRoot 和 `development` profile，不读取旧 profile。唯一可选参数为 `--data-root <absolute-path>`；不接收 token、任意 entrypoint、环境权限或 Provider 配置参数。启动选择先固定 profile/API/capabilities/instance；buildId 是所选 Service entry 文件字节的 SHA256，仅代表开发 entry 身份，不代表完整发行 candidate 身份。Native bearer 只走 paired 私有 bootstrap，stdout 仅一行 Browser endpoint，错误只输出有限错误码；不会打印 token 或 profile 路径。
+缺省选择当前用户目录的 `~/.kite-code` dataRoot 和 `development` profile，数据库直接位于 `~/.kite-code/development/core.db`，与 CLI/TUI/Desktop 开发入口共用，不随 checkout 或工作目录改变。唯一可选参数为 `--data-root <absolute-path>`，显式值优先于默认根；不接收 token、任意 entrypoint、环境权限或 Provider 配置参数。旧 checkout 数据保留原位，目录结构和读取方式见[本地开发](../../docs/development/local-development.md)。启动选择先固定 profile/API/capabilities/instance；buildId 是所选 Service entry 文件字节的 SHA256，仅代表开发 entry 身份，不代表完整发行 candidate 身份。Native bearer 只走 paired 私有 bootstrap，stdout 仅一行 Browser endpoint，错误只输出有限错误码；不会打印 token 或 profile 路径。
 
 浏览器关闭只释放其访问；前台宿主的 stdin EOF、SIGINT 或 SIGTERM 则关闭自己拥有的 Gateway 和 paired Service。stdin 是存活信号，不接受凭据或指令。Service 意外退出也关闭 Gateway，不保留指向旧身份的 listener。这个独立开发前台没有 detach 或正式安装生命周期；正式 `server`／`kite web` 由新 Terminal／Daemon owner维护，TUI／Native与发行各自的完整资格仍独立核实。
 

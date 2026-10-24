@@ -1,5 +1,6 @@
 import { expect, test } from 'bun:test';
 import {
+  existsSync,
   mkdirSync,
   mkdtempSync,
   readdirSync,
@@ -13,6 +14,7 @@ import { tmpdir } from 'node:os';
 import { join, win32 } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { defaultWindowsPathSecurity } from '@kite-ai/agent/windows-path-security';
+import { ownedUserConfiguration } from '../../../apps/service/test/fixtures/user-configuration-fixture';
 import { createDevelopmentDesktopDirectory } from '../../../scripts/development/unified-desktop';
 import {
   initializeDesktopBuildEnvironment,
@@ -240,6 +242,7 @@ test('desktop development pure help and missing built Service never build, launc
     const help = await execute(['--help']);
     expect(help.code).toBe(0);
     expect(help.stdout).toContain('Kite desktop development');
+    expect(help.stdout).toContain('~/.kite-code/development');
     expect(help.stderr).toBe('');
     expect(readdirSync(root)).toEqual([]);
     const missing = await execute([]);
@@ -265,6 +268,7 @@ test.skipIf(process.platform !== 'darwin')(
     const cache = join(repository, '.cache');
     mkdirSync(cache, { recursive: true });
     const root = realpathSync(mkdtempSync(join(cache, 'desktop-startup-')));
+    const userConfiguration = ownedUserConfiguration(join(root, 'home'));
     const source = join(root, 'apps/service/src');
     const desktop = join(root, 'apps/desktop');
     const electronPackage = join(desktop, 'node_modules/electron');
@@ -330,7 +334,11 @@ catch(error){console.error(error);process.exitCode=1;}`,
           stdin: 'ignore',
           stdout: 'pipe',
           stderr: 'pipe',
-          env: { ...process.env, BUN_RUNTIME_TRANSPILER_CACHE_PATH: '0' },
+          env: {
+            ...process.env,
+            ...userConfiguration.homeEnvironment,
+            BUN_RUNTIME_TRANSPILER_CACHE_PATH: '0',
+          },
         });
         let stdout = '';
         let requestedReload = false,
@@ -408,7 +416,14 @@ catch(error){console.error(error);process.exitCode=1;}`,
             expect(oldServiceAlive).toBe(true);
             expect(repaired).toBe(true);
             expect(stdout.match(/Service updated;/g)).toHaveLength(1);
+            expect(existsSync(join(root, 'home', '.kite-code', 'development', 'core.db'))).toBe(
+              true,
+            );
+            expect(
+              existsSync(join(root, 'home', '.kite-code', 'development', 'development', 'core.db')),
+            ).toBe(false);
           }
+          expect(existsSync(join(root, '.kite-code'))).toBe(false);
           expect(readdirSync(join(root, '.cache'))).toEqual([]);
         } finally {
           clearTimeout(timeout);

@@ -26,7 +26,7 @@
 
 `check:runtime-packages` 检查八个工作区的清单、公开 exports、正式脚本和 CI 消费闭包，并调用与 `check:core-boundary` 相同的[依赖边界守卫](../../scripts/check-unified-agent-boundary.ts)。守卫在每次调用内复用已解析的模块依赖图，各入口仍按自己的策略遍历；仅在导入或违规处计算行号。下一次调用重新读取源码和清单。回归覆盖[共享与循环依赖及入口策略](../../tests/isolated/scripts/unified-agent-boundary.test.ts)、[工作区合同](../../tests/integration/scripts/unified-workspaces.test.ts)和[CI 消费闭包](../../tests/integration/scripts/unified-ci.test.ts)。
 
-正式 Terminal 默认使用 `~/.kite-code/unified-agent/default`，开发入口默认使用 checkout 的 `.kite-code/unified-development/development`。可用 `--data-root <绝对路径>` 明确隔离；当前入口不读取旧 Kite Home 配置或数据库，也不自动迁移旧用户数据。测试必须使用所属临时 home/workspace/profile/endpoint，按 harness 清理。
+正式 Terminal 默认使用 `~/.kite-code/unified-agent/default`。CLI、TUI、Desktop 和 Web 开发入口的默认数据根为当前用户的 `~/.kite-code`，与 checkout 和启动工作目录无关；其 `development` profile 位于 `~/.kite-code/development`，数据库直接位于 `~/.kite-code/development/core.db`，会话、制品、草稿和偏好随 profile 保存。CLI/TUI/Web 可用 `--data-root <绝对路径>` 明确选择其他数据根，优先于默认值。原 checkout 的 `.kite-code/unified-development` 数据保持原位，不自动迁移；需要读取时显式选择该旧数据根。模型配置仍统一读取 `~/.kite-code/kite-code.jsonc`。测试必须使用所属临时 home/workspace/profile/endpoint，按 harness 清理。
 
 日常开发可使用 npm 调用同一 Bun 脚本：
 
@@ -37,7 +37,7 @@ npm run tui:dev -- --workspace .
 npm run desktop:dev
 ```
 
-三种开发客户端使用同一 development profile；任务仍需要已配置模型和工作区信任。CLI/TUI 修改代码后退出客户端，重新执行 `npm run build` 并启动。Desktop 每次启动编译 Main/preload，在自己的 `.cache/unified-desktop-*` 目录运行，由本地 Vite 提供 renderer；退出后清理该次应用目录和开发服务器，会话、设置和显式保存的草稿保留在开发 profile。
+四个开发入口使用同一 development profile；任务仍需要已配置模型和工作区信任。CLI/TUI 修改代码后退出客户端，重新执行 `npm run build` 并启动。Desktop 每次启动编译 Main/preload，在 checkout 的 `.cache/unified-desktop-*` 临时应用目录运行，由本地 Vite 提供 renderer；退出后清理该次应用目录和开发服务器，会话、设置和显式保存的草稿保留在用户目录的开发 profile。
 
 `desktop:dev` 在启动 Electron 前，用独立 Bun 进程加载实际 Service 版本及其外部 workspace 导入；不执行入口的 `import.meta.main` 分支，不启动业务服务，不自动安装缺失依赖。缺失导出或模块加载失败会阻止启动，并在终端保留具体加载诊断。Electron 的父控制连接只有在实际 Service 握手、连接及 Native caller 初始化成功后才报告就绪；初次失败返回非零并等待所属进程退出，再清理应用目录。打开窗口或启动 Vite 不表示后台就绪。这不是完整类型检查或任意业务逻辑验证。
 

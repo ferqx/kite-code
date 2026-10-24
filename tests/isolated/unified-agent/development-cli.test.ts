@@ -10,7 +10,7 @@ import {
   symlinkSync,
   writeFileSync,
 } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { selectProfile } from '@kite-ai/agent/profile';
@@ -31,6 +31,8 @@ import { privateDirectory, temporaryDirectory } from '../../fixtures/test-filesy
 const repositoryRoot = realpathSync(join(import.meta.dir, '../../..'));
 test('CLI development selection binds only the exact built entry and executable; read-only argv needs no asset or profile', () => {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-cli-dev-selection-')));
+  const dataRoot = join(homedir(), '.kite-code');
+  const dataExisted = existsSync(dataRoot);
   try {
     for (const argv of [
       ['--help'],
@@ -86,7 +88,8 @@ test('CLI development selection binds only the exact built entry and executable;
     expect(selection.artifact!.executable).toBe(realpathSync(process.execPath));
     expect(Object.isFrozen(selection.artifact)).toBe(true);
     expect(selection.profile).toBe('development');
-    expect(existsSync(selection.dataRoot)).toBe(false);
+    expect(selection.dataRoot).toBe(dataRoot);
+    expect(existsSync(dataRoot)).toBe(dataExisted);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -222,7 +225,7 @@ test('new finite local vocabulary resolves lazily; shared and invalid argv never
   }
 });
 
-test('actual CLI development argv runs one paired built Service with the selected isolated profile and complete answer', async () => {
+test('actual CLI development argv stores complete history in the owned user home and honors an explicit data root', async () => {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-cli-dev-argv-')));
   const userConfiguration = ownedUserConfiguration(join(root, 'home'));
   const workspace = join(root, 'workspace');
@@ -275,8 +278,6 @@ test('actual CLI development argv runs one paired built Service with the selecte
   });
   let child: ReturnType<typeof Bun.spawn> | undefined;
   try {
-    const profile = selectProfile({ dataRoot: join(root, 'data'), profile: 'development' });
-    privateDirectory(profile.profilePath);
     writeFileSync(
       userConfiguration.path,
       JSON.stringify({
@@ -314,51 +315,78 @@ test('actual CLI development argv runs one paired built Service with the selecte
       driver,
       `import { runDevelopmentCLI } from ${JSON.stringify(join(repositoryRoot, 'scripts/development/unified-cli.ts'))};\ntry { process.exitCode = await runDevelopmentCLI({root:${JSON.stringify(root)}}); } catch(error) { process.stderr.write(String(error?.code ?? 'driver_failed')+'\\n'); process.exitCode=1; }\n`,
     );
-    const processChild = Bun.spawn(
-      [
-        process.execPath,
-        driver,
-        'run',
-        '--task',
-        'original development task',
-        '--data-root',
-        profile.dataRoot,
-        '--workspace',
-        workspace,
-        '--full',
-        '--trust-workspace',
-      ],
-      {
-        cwd: workspace,
-        stdin: 'ignore',
-        stdout: 'pipe',
-        stderr: 'pipe',
-        env: {
-          PATH: process.env.PATH ?? '',
-          LANG: 'C.UTF-8',
-          ...userConfiguration.homeEnvironment,
+    const defaultDataRoot = join(root, 'home', '.kite-code');
+    for (const [index, explicit] of [true, false].entries()) {
+      const profile = selectProfile({
+        dataRoot: explicit ? join(root, 'selected-data') : defaultDataRoot,
+        profile: 'development',
+      });
+      const processChild = Bun.spawn(
+        [
+          process.execPath,
+          driver,
+          'run',
+          '--task',
+          'original development task',
+          ...(explicit ? ['--data-root', profile.dataRoot] : []),
+          '--workspace',
+          workspace,
+          '--full',
+          '--trust-workspace',
+        ],
+        {
+          cwd: workspace,
+          stdin: 'ignore',
+          stdout: 'pipe',
+          stderr: 'pipe',
+          env: {
+            PATH: process.env.PATH ?? '',
+            LANG: 'C.UTF-8',
+            ...userConfiguration.homeEnvironment,
+          },
         },
-      },
-    );
-    child = processChild;
-    const [code, stdout, stderr] = await Promise.all([
-      processChild.exited,
-      new Response(processChild.stdout).text(),
-      new Response(processChild.stderr).text(),
-    ]);
-    if (code !== 0) throw Error(`development argv run exit ${code}: ${stderr}\n${stdout}`);
-    expect(code).toBe(0);
-    expect(stderr).toBe('');
-    expect(requests).toBe(1);
-    expect(titleRequests).toBe(1);
-    const answer = stdout.split('\n').find((line) => line.startsWith('answer '));
-    expect(answer).toBeDefined();
-    expect(JSON.parse(answer!.slice(7))).toMatchObject({ complete: true, content: complete });
-    expect(stdout).toContain('terminal');
-    expect(stdout).toContain(
-      "Paired host exit stops only this Service instance's remaining owned work",
-    );
-    expect(existsSync(join(root, '.kite-code', 'unified-development'))).toBe(false);
+      );
+      child = processChild;
+      const [code, stdout, stderr] = await Promise.all([
+        processChild.exited,
+        new Response(processChild.stdout).text(),
+        new Response(processChild.stderr).text(),
+      ]);
+      if (code !== 0) throw Error(`development argv run exit ${code}: ${stderr}\n${stdout}`);
+      expect(code).toBe(0);
+      expect(stderr).toBe('');
+      expect(requests).toBe(index + 1);
+      expect(titleRequests).toBe(index + 1);
+      const answer = stdout.split('\n').find((line) => line.startsWith('answer '));
+      expect(answer).toBeDefined();
+      expect(JSON.parse(answer!.slice(7))).toMatchObject({ complete: true, content: complete });
+      expect(stdout).toContain('terminal');
+      expect(stdout).toContain(
+        "Paired host exit stops only this Service instance's remaining owned work",
+      );
+      expect(existsSync(profile.databasePath)).toBe(true);
+      const reader = await openSqliteStore({ ...profile, mode: 'readonly' });
+      try {
+        const sessions = await reader.listSessions();
+        expect(sessions).toHaveLength(1);
+        const messages = await reader.listMessages(sessions[0]!.id);
+        expect(messages.find((message) => message.role === 'user')?.content).toBe(
+          'original development task',
+        );
+        expect(messages.find((message) => message.role === 'assistant')?.content).toBe(complete);
+      } finally {
+        await reader.close();
+      }
+      if (explicit) expect(existsSync(join(defaultDataRoot, 'development'))).toBe(false);
+      else {
+        expect(profile.databasePath).toBe(join(defaultDataRoot, 'development', 'core.db'));
+        expect(existsSync(join(defaultDataRoot, 'development', 'development', 'core.db'))).toBe(
+          false,
+        );
+      }
+      expect(existsSync(join(root, '.kite-code'))).toBe(false);
+      expect(existsSync(join(workspace, '.kite-code'))).toBe(false);
+    }
   } finally {
     if (child && child.exitCode === null) {
       child.kill('SIGTERM');
@@ -371,6 +399,7 @@ test('actual CLI development argv runs one paired built Service with the selecte
 
 test('daemon asset resolution is lazy and exact; read-only and compatible reuse need no target build', async () => {
   const root = realpathSync(temporaryDirectory('kite-cli-dev-daemon-'));
+  const dataRoot = join(root, 'isolated-data');
   let owner: Awaited<ReturnType<typeof reserveDaemonEndpoint>> | undefined,
     service: Awaited<ReturnType<typeof startService>> | undefined;
   try {
@@ -384,20 +413,36 @@ test('daemon asset resolution is lazy and exact; read-only and compatible reuse 
     expect(selection.resolveArtifact).toBeDefined();
     expect(existsSync(join(root, '.kite-code'))).toBe(false);
     await expect(
-      runDevelopmentCLI({ argv: ['server', 'status'], root, executable: '/missing-executable' }),
+      runDevelopmentCLI({
+        argv: ['server', 'status', '--data-root', dataRoot],
+        root,
+        executable: '/missing-executable',
+      }),
     ).resolves.toBe(0);
     await expect(
-      runDevelopmentCLI({ argv: ['server', 'stop'], root, executable: '/missing-executable' }),
+      runDevelopmentCLI({
+        argv: ['server', 'stop', '--data-root', dataRoot],
+        root,
+        executable: '/missing-executable',
+      }),
     ).resolves.toBe(0);
     await expect(
-      runDevelopmentCLI({ argv: ['web'], root, executable: '/missing-executable' }),
+      runDevelopmentCLI({
+        argv: ['web', '--data-root', dataRoot],
+        root,
+        executable: '/missing-executable',
+      }),
     ).rejects.toMatchObject({ code: 'daemon_web_unavailable' });
     expect(existsSync(join(root, '.kite-code'))).toBe(false);
     await expect(
-      runDevelopmentCLI({ argv: ['server', 'start'], root, executable: '/missing-executable' }),
+      runDevelopmentCLI({
+        argv: ['server', 'start', '--data-root', dataRoot],
+        root,
+        executable: '/missing-executable',
+      }),
     ).rejects.toMatchObject({ code: 'development_service_asset_unavailable' });
     expect(existsSync(join(root, '.kite-code'))).toBe(false);
-    const p = selectProfile({ dataRoot: selection.dataRoot, profile: selection.profile }),
+    const p = selectProfile({ dataRoot, profile: selection.profile }),
       profile = { dataRoot: p.dataRoot, name: p.profile, accessKey: p.profileAccessKey };
     const socket = join(root, 's.sock');
     owner = await reserveDaemonEndpoint(
@@ -417,7 +462,7 @@ test('daemon asset resolution is lazy and exact; read-only and compatible reuse 
     });
     expect(
       await runDevelopmentCLI({
-        argv: ['server', 'start', '--server', socket],
+        argv: ['server', 'start', '--server', socket, '--data-root', dataRoot],
         root,
         executable: '/missing-executable',
       }),
@@ -491,16 +536,19 @@ test('actual development wrapper new argv binds original Work, cold caller, File
       if (user === 'seed actual checkpoint') {
         if (seedStep === 0)
           call = { name: 'read_file', input: { path: 'original.txt', max_lines: 10000 } };
-        if (seedStep === 1)
+        if (seedStep === 1) {
+          const read = body.messages.filter((message) => message.role === 'tool').at(-1)!.content;
+          const baseline = /^baseline=(.*)$/m.exec(read);
+          expect(baseline).not.toBeNull();
           call = {
             name: 'write_file',
             input: {
               path: 'original.txt',
-              base: JSON.parse(body.messages.filter((m) => m.role === 'tool').at(-1)!.content)
-                .baseline,
+              base: JSON.parse(baseline![1]!),
               content: 'actual modified\r\n',
             },
           };
+        }
         seedStep++;
       } else expect(user).toBe('New task: 完整 wrapper work 😀\r\n');
       const frame = (delta: unknown, finish_reason: string | null) =>
@@ -546,7 +594,7 @@ test('actual development wrapper new argv binds original Work, cold caller, File
           },
         ],
         tools: [
-          { id: 'files.read', definitionVersion: '4' },
+          { id: 'files.read', definitionVersion: '5' },
           { id: 'files.write', definitionVersion: '2' },
         ],
       }),
@@ -632,6 +680,7 @@ test('actual development wrapper new argv binds original Work, cold caller, File
           `development_seed_deadline:${JSON.stringify({
             commandId: command.id,
             commandStatus: command.status,
+            receipt: command.receipt,
             run: lastRun ?? null,
           })}`,
         );

@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import { lstatSync, readFileSync } from 'node:fs';
+import { homedir } from 'node:os';
 import { isAbsolute, join, resolve } from 'node:path';
 import type { Json } from '@kite-ai/agent/extensions';
 import { type ProfileSelection, selectProfile } from '@kite-ai/agent/profile';
@@ -30,7 +31,7 @@ export function selectDevelopmentWeb(
   argv: readonly string[],
   root = repositoryRoot,
 ): DevelopmentWebSelection {
-  let dataRoot = join(root, '.kite-code', 'unified-development');
+  let dataRoot = join(homedir(), '.kite-code');
   if (argv.length) {
     if (argv.length !== 2 || argv[0] !== '--data-root' || !argv[1] || !isAbsolute(argv[1]))
       throw new WebLaunchError('invalid_web_development_arguments');
