@@ -746,6 +746,26 @@ export interface Store {
     sessionId: string,
     options?: { limit?: number; afterSeq?: string; upperSeq?: string },
   ): Promise<MessageRecord[]>;
+  /** Durable change cursor, independent of Message.seq (which does not advance for partials). */
+  listMessageChanges(input: {
+    expectedStoreId: string;
+    sessionId: string;
+    afterCursor: string;
+    upperCursor: string;
+    upperSeq?: string;
+    afterSeq?: string;
+    limit?: number;
+  }): Promise<{
+    storeId: string;
+    sessionId: string;
+    afterCursor: string;
+    upperCursor: string;
+    highWaterSeq: string;
+    nextCursor: string;
+    nextAfterSeq: string | null;
+    messages: MessageRecord[];
+    removedIds: string[];
+  }>;
   getView(sessionId: string): Promise<SessionView>;
   getExtensionRecord(input: RecordScope & { key: string }): Promise<ExtensionRecord | null>;
   listExtensionRecords(

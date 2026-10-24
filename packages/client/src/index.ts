@@ -2752,6 +2752,68 @@ export class AgentClient {
       { signal: options.signal },
     );
   }
+  async listMessageChanges(
+    sessionId: string,
+    input: import('./generated/api').MessageChangesQuery,
+    options: { signal?: AbortSignal } = {},
+  ) {
+    this.requireCapability('message_changes');
+    const generation = this.connectionGeneration,
+      frozen = structuredClone(input);
+    validateRequest('MessageChangesQuery', frozen);
+    for (const value of [frozen.afterCursor, frozen.upperCursor, frozen.upperSeq, frozen.afterSeq])
+      if (value !== undefined) parseCursorSequence(value);
+    if (BigInt(frozen.afterCursor) > BigInt(frozen.upperCursor))
+      throw new ClientError('invalid_cursor');
+    if (this.serverInfo?.storeId !== frozen.storeId)
+      throw new ClientError('store_identity_mismatch');
+    const query = new URLSearchParams(
+      Object.entries(frozen)
+        .filter(([, value]) => value !== undefined)
+        .map(([key, value]) => [key, String(value)]),
+    );
+    const page = await this.fetchJSON(
+      `/v1/sessions/${encodeURIComponent(sessionId)}/message-changes?${query}`,
+      'MessageChangesPage',
+      options,
+    );
+    if (generation !== this.connectionGeneration) throw new ClientError('connection_superseded');
+    if (
+      page.storeId !== frozen.storeId ||
+      page.sessionId !== sessionId ||
+      page.afterCursor !== frozen.afterCursor ||
+      page.upperCursor !== frozen.upperCursor ||
+      (frozen.upperSeq !== undefined && page.highWaterSeq !== frozen.upperSeq) ||
+      BigInt(page.nextCursor) < BigInt(frozen.afterCursor) ||
+      BigInt(page.nextCursor) > BigInt(frozen.upperCursor) ||
+      (page.nextCursor === frozen.afterCursor && page.nextCursor !== frozen.upperCursor)
+    )
+      throw new ClientError('history_page_identity_mismatch');
+    let last = BigInt(frozen.afterSeq ?? '0');
+    const ids = new Set<string>();
+    for (const message of page.messages) {
+      if (
+        message.sessionId !== sessionId ||
+        ids.has(message.id) ||
+        BigInt(message.seq) <= last ||
+        BigInt(message.seq) > BigInt(page.highWaterSeq)
+      )
+        throw new ClientError('history_page_sequence_mismatch');
+      ids.add(message.id);
+      last = BigInt(message.seq);
+    }
+    if (
+      page.messages.length + page.removedIds.length > (frozen.limit ?? 100) ||
+      new Set(page.removedIds).size !== page.removedIds.length ||
+      page.removedIds.some((id) => ids.has(id)) ||
+      (page.nextAfterSeq !== null &&
+        (BigInt(page.nextAfterSeq) <= BigInt(frozen.afterSeq ?? '0') ||
+          BigInt(page.nextAfterSeq) < last ||
+          BigInt(page.nextAfterSeq) > BigInt(page.highWaterSeq)))
+    )
+      throw new ClientError('history_page_cursor_mismatch');
+    return page;
+  }
   async listBackgroundExecutions(
     input: import('./generated/api').BackgroundExecutionQuery,
     options: { signal?: AbortSignal } = {},

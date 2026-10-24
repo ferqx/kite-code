@@ -132,6 +132,7 @@ const responseNames = [
   'StreamCheckpoint',
   'ExtensionList',
   'QueryResponse',
+  'MessageChangesPage',
 ];
 const requestNames = [
   'RemoveWorkspaceRequest',
@@ -215,6 +216,7 @@ const requestNames = [
   'CancelExecutionRequest',
   'CancelSessionRequest',
   'ExtensionCommandRequest',
+  'MessageChangesQuery',
 ];
 function allowFutureFields(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(allowFutureFields);

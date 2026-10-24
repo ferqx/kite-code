@@ -124,6 +124,7 @@ export class NativeCaller {
   private selectedEnvironmentRevision = 0;
   private readonly observedMessages = new Map<string, Message>();
   private historyEpoch = 0;
+  private historyHead?: { sessionId: string; selection: number; cursor: string };
   private observationUnavailable = false;
   private resetHistory: { selection: number; sessionId: string; resolve: () => void } | undefined;
   private messageRead:
@@ -794,6 +795,7 @@ export class NativeCaller {
       this.observationUnavailable = true;
       this.permissionUnavailable = true;
       this.historyEpoch++;
+      this.historyHead = undefined;
       this.skills.release();
       this.extensions.release();
       this.jobOutput.release();
@@ -811,10 +813,12 @@ export class NativeCaller {
     };
     this.stream = (async () => {
       let reset = false,
+        readySeen = false,
         startAfter: AppliedCursor | undefined;
       while (!signal.signal.aborted && !this.closed) {
         try {
           if (reset) {
+            readySeen = false;
             if (this.client.serverInfo!.storeId !== originalStore)
               throw new ClientError('store_identity_mismatch');
             const baseline = await this.client.listWorkspaceDirectory(
@@ -849,6 +853,14 @@ export class NativeCaller {
             signal: signal.signal,
             ...(startAfter ? { startAfter } : acknowledged ? { cursor: acknowledged } : {}),
             onReady: async (ready) => {
+              // observe() reconnects internally. A new transport needs a fresh history
+              // baseline even when replay did not expire; ready's head is not an ACK.
+              if (readySeen) {
+                this.historyEpoch++;
+                this.historyHead = undefined;
+                this.messageRead?.abort.abort();
+              }
+              readySeen = true;
               this.environmentRevision++;
               this.selectedEnvironmentRevision++;
               this.observationUnavailable = false;
@@ -875,6 +887,21 @@ export class NativeCaller {
             },
             onChange: (change) => {
               this.environmentRevision++;
+              const historyOnly =
+                !!this.selected &&
+                this.client.serverInfo?.capabilities.includes('message_changes') &&
+                ((change.type === 'message.updated' && change.sessionId === this.selected) ||
+                  (change.type === 'session.renamed' && change.sessionId !== this.selected) ||
+                  (change.type.endsWith('.history_collected') &&
+                    change.sessionId !== this.selected));
+              if (historyOnly) {
+                this.historyHead = {
+                  sessionId: this.selected!,
+                  selection: this.selection,
+                  cursor: change.cursor,
+                };
+                this.changed();
+              }
               this.scheduleDirectoryRefresh();
               // The global cursor is still acknowledged for every change. Only
               // selected facts and their observed root/Workspace controls invalidate metadata.
@@ -894,7 +921,7 @@ export class NativeCaller {
                   this.workspaceAccessPreparations.has(change.objectId)
                 )
                   this.workspaceAccessRefreshRequested = true;
-                else this.scheduleSelectionRefresh(signal.signal);
+                else if (!historyOnly) this.scheduleSelectionRefresh(signal.signal);
               }
               // Creation is conservative: the next exact root directory establishes
               // a new descendant's membership. Known descendants need no foreign View GET.
@@ -987,6 +1014,15 @@ export class NativeCaller {
               this.client.serverInfo!.capabilities.includes('pending_input_queue'),
             viewGeneration: snapshot.generation,
             viewSelection: this.selection,
+            historyCursor: this.client.serverInfo!.capabilities.includes('message_changes')
+              ? snapshot.view.snapshotCursor
+              : undefined,
+            historyTargetCursor:
+              this.historyHead?.sessionId === this.selected &&
+              this.historyHead.selection === this.selection &&
+              BigInt(this.historyHead.cursor) > BigInt(snapshot.view.snapshotCursor)
+                ? this.historyHead.cursor
+                : undefined,
             storeId: snapshot.view.storeId,
             session: snapshot.view.session,
             runs: snapshot.view.runs,
@@ -1953,7 +1989,15 @@ export class NativeCaller {
           throw new ClientError('store_identity_mismatch');
         const upperSeq = request.upperSeq ?? snapshot.view.session.nextSeq,
           selection = this.selection;
-        if (BigInt(upperSeq) > BigInt(snapshot.view.session.nextSeq))
+        if (!request.changes && BigInt(upperSeq) > BigInt(snapshot.view.session.nextSeq))
+          throw new ClientError('history_high_water_unavailable');
+        const historyCursor =
+          this.historyHead?.sessionId === this.selected &&
+          this.historyHead.selection === selection &&
+          BigInt(this.historyHead.cursor) > BigInt(snapshot.view.snapshotCursor)
+            ? this.historyHead.cursor
+            : snapshot.view.snapshotCursor;
+        if (request.changes && BigInt(request.changes.upperCursor) > BigInt(historyCursor))
           throw new ClientError('history_high_water_unavailable');
         const readId = request.readId ?? crypto.randomUUID();
         if (
@@ -1980,14 +2024,40 @@ export class NativeCaller {
         let limit = Math.min(request.limit ?? 100, reading.effectiveLimit ?? Infinity);
         for (;;) {
           let messages: Message[];
+          let changesPage: Awaited<ReturnType<AgentClient['listMessageChanges']>> | undefined;
           try {
-            messages = await this.client.listMessages(request.sessionId, {
-              afterSeq: request.afterSeq,
-              upperSeq,
-              limit,
-              signal: reading.abort.signal,
-            });
+            if (request.changes) {
+              changesPage = await this.client.listMessageChanges(
+                request.sessionId,
+                {
+                  storeId: snapshot.view.storeId,
+                  ...request.changes,
+                  upperSeq: request.upperSeq,
+                  afterSeq: request.afterSeq,
+                  limit,
+                },
+                { signal: reading.abort.signal },
+              );
+              messages = changesPage.messages;
+            } else
+              messages = await this.client.listMessages(request.sessionId, {
+                afterSeq: request.afterSeq,
+                upperSeq,
+                limit,
+                signal: reading.abort.signal,
+              });
           } catch (error) {
+            if (
+              request.changes &&
+              (error as { code?: string }).code === 'cursor_expired' &&
+              selection === this.selection &&
+              request.sessionId === this.selected
+            ) {
+              this.historyEpoch++;
+              this.historyHead = undefined;
+              await this.controller.refreshSession(request.sessionId);
+              this.changed();
+            }
             if ((error as { code?: string }).code !== 'response_too_large' || limit === 1)
               throw error;
             limit = Math.max(1, Math.floor(limit / 2));
@@ -2002,22 +2072,36 @@ export class NativeCaller {
             throw new ClientError('native_selection_changed');
           const page = {
             messages,
-            highWaterSeq: upperSeq,
-            nextAfterSeq:
-              messages.length === limit && messages.at(-1)!.seq !== upperSeq
+            highWaterSeq: changesPage?.highWaterSeq ?? upperSeq,
+            nextAfterSeq: changesPage
+              ? changesPage.nextAfterSeq
+              : messages.length === limit && messages.at(-1)!.seq !== upperSeq
                 ? messages.at(-1)!.seq
                 : null,
+            ...(changesPage
+              ? {
+                  changes: {
+                    afterCursor: changesPage.afterCursor,
+                    upperCursor: changesPage.upperCursor,
+                    nextCursor: changesPage.nextCursor,
+                    removedIds: changesPage.removedIds,
+                  },
+                }
+              : {}),
           };
           if (Buffer.byteLength(JSON.stringify(page)) > 4 * 1048576 - 256) {
             if (limit === 1) throw new ClientError('history_item_unavailable');
             limit = Math.max(1, Math.floor(limit / 2));
             continue;
           }
+          if (changesPage) reading.upperSeq = changesPage.highWaterSeq;
           reading.effectiveLimit = Math.min(reading.effectiveLimit ?? Infinity, limit);
           for (const message of messages)
             this.observedMessages.set(message.id, structuredClone(message));
+          for (const id of changesPage?.removedIds ?? []) this.observedMessages.delete(id);
           if (
             page.nextAfterSeq === null &&
+            !request.changes &&
             this.resetHistory?.selection === selection &&
             this.resetHistory.sessionId === request.sessionId &&
             upperSeq === snapshot.view.session.nextSeq

@@ -14,7 +14,8 @@ import rehypeKatex from 'rehype-katex';
 import remarkGfm from 'remark-gfm';
 import remarkMath from 'remark-math';
 import { useConversationReadActive } from '../conversation-activity';
-import { MarkdownCodeBlock, MarkdownSourceContext } from './MarkdownCodeBlock';
+import { incrementalMarkdown, incrementalMarkdownComponents } from './incremental-markdown';
+import { MarkdownCodeBlock } from './MarkdownCodeBlock';
 import { desktopMarkdownSemantics } from './markdown-extensions';
 import { type PreparedDesktopMarkdown, reuseDesktopMarkdownParse } from './markdown-parse-cache';
 
@@ -24,6 +25,7 @@ type MarkdownNode = {
   value?: string;
   spread?: boolean;
   children?: MarkdownNode[];
+  position?: { start: { offset?: number }; end: { offset?: number } };
 };
 
 /** Preserve paragraph boxes in tight lists, including text after a code block. */
@@ -44,7 +46,7 @@ function segmentLongTextNodes() {
     for (let parent = pending.pop(); parent; parent = pending.pop()) {
       if (!parent.children || parent.tagName === 'code' || parent.tagName === 'pre') continue;
       parent.children = parent.children.flatMap((child) => {
-        if (child.type !== 'text' || !child.value || child.value.length <= 4096) {
+        if (child.type !== 'text' || !child.value || child.value.length <= 2048) {
           if (child.children) pending.push(child);
           return [child];
         }
@@ -59,7 +61,14 @@ function segmentLongTextNodes() {
           if (boundary && boundary.index < end)
             end =
               boundary.index > offset ? boundary.index : boundary.index + boundary.segment.length;
-          parts.push({ type: 'text', value: text.slice(offset, end) });
+          const start = child.position?.start.offset;
+          parts.push({
+            type: 'text',
+            value: text.slice(offset, end),
+            ...(start !== undefined
+              ? { position: { start: { offset: start + offset }, end: { offset: start + end } } }
+              : {}),
+          });
           offset = end;
         }
         return parts;
@@ -143,11 +152,18 @@ export const MessageContent = memo(function MessageContent({
   text,
   openFile,
   prepared,
+  streaming,
+  streamingReveal = true,
 }: {
   text: string;
   openFile?: (path: string) => void;
   prepared?: PreparedDesktopMarkdown;
+  /** true: live preview; false: its settled preview; omitted: static or explicit full-body read. */
+  streaming?: boolean;
+  /** A first automatic body fill stays static while seeding subsequent live appends. */
+  streamingReveal?: boolean;
 }) {
+  const readActive = useConversationReadActive();
   const currentOpenFile = useRef(openFile);
   useLayoutEffect(() => {
     currentOpenFile.current = openFile;
@@ -158,7 +174,13 @@ export const MessageContent = memo(function MessageContent({
   const dispatchOpenFile = useCallback((path: string) => currentOpenFile.current?.(path), []);
   return (
     <FileLinkContext.Provider value={openFile ? dispatchOpenFile : undefined}>
-      <MarkdownContent text={text} prepared={prepared} />
+      <MarkdownContent
+        text={text}
+        prepared={prepared}
+        streaming={streaming}
+        streamingReveal={streamingReveal}
+        readActive={readActive}
+      />
     </FileLinkContext.Provider>
   );
 });
@@ -166,50 +188,96 @@ export const MessageContent = memo(function MessageContent({
 const MarkdownContent = memo(function MarkdownContent({
   text,
   prepared,
+  streaming,
+  streamingReveal,
+  readActive,
 }: {
   text: string;
   prepared?: PreparedDesktopMarkdown;
+  streaming: boolean | undefined;
+  streamingReveal: boolean;
+  readActive: boolean;
 }) {
   const prefix = `md-${useId().replace(/[^a-zA-Z0-9_-]/g, '')}-`;
+  const committed = useRef<{ text: string; streaming?: boolean } | undefined>(undefined);
+  const previous = committed.current;
+  const revealAfter =
+    previous?.streaming &&
+    streaming !== undefined &&
+    streamingReveal &&
+    readActive &&
+    text.startsWith(previous.text)
+      ? previous.text.length
+      : undefined;
+  useLayoutEffect(() => {
+    // Routine IPC history scans temporarily revoke reads without deactivating
+    // the visible stream. Only the current admission gates its next append.
+    committed.current = { text, streaming };
+    return () => {
+      committed.current = undefined;
+    };
+  }, [text, streaming]);
   return (
-    <MarkdownSourceContext.Provider value={text}>
-      <div className="typeset typeset-chat">
-        <Markdown
-          remarkPlugins={[
-            remarkGfm,
-            remarkMath,
-            [reuseDesktopMarkdownParse, prepared],
-            retainListParagraphs,
-          ]}
-          remarkRehypeOptions={{ footnoteLabel: '脚注', footnoteBackLabel: '返回正文' }}
-          rehypePlugins={[
-            [
-              rehypeKatex,
-              {
-                trust: false,
-                strict: 'ignore',
-                maxExpand: 100,
-                maxSize: 20,
-                errorColor: 'var(--foreground)',
-              },
-            ],
-            [desktopMarkdownSemantics, { prefix }],
-            segmentLongTextNodes,
-          ]}
-          skipHtml
-          components={{
-            a: MarkdownLink,
-            pre: MarkdownCodeBlock,
-            table: MarkdownTable,
-            // Message bodies must not fetch remote images or interpret local paths as web assets.
-            img: ({ alt }) => (
-              <span className="image-description">{alt ? `图片：${alt}` : '图片'}</span>
-            ),
-          }}
-        >
-          {text}
-        </Markdown>
-      </div>
-    </MarkdownSourceContext.Provider>
+    <div className="typeset typeset-chat">
+      <MarkdownDocument text={text} prepared={prepared} prefix={prefix} revealAfter={revealAfter} />
+    </div>
   );
 });
+
+const MarkdownDocument = memo(
+  function MarkdownDocument({
+    text,
+    prepared,
+    prefix,
+    revealAfter,
+  }: {
+    text: string;
+    prepared?: PreparedDesktopMarkdown;
+    prefix: string;
+    revealAfter?: number;
+  }) {
+    return (
+      <Markdown
+        remarkPlugins={[
+          remarkGfm,
+          remarkMath,
+          [reuseDesktopMarkdownParse, prepared],
+          retainListParagraphs,
+        ]}
+        remarkRehypeOptions={{ footnoteLabel: '脚注', footnoteBackLabel: '返回正文' }}
+        rehypePlugins={[
+          [
+            rehypeKatex,
+            {
+              trust: false,
+              strict: 'ignore',
+              maxExpand: 100,
+              maxSize: 20,
+              errorColor: 'var(--foreground)',
+            },
+          ],
+          [desktopMarkdownSemantics, { prefix }],
+          segmentLongTextNodes,
+          [incrementalMarkdown, { source: text, revealAfter }],
+        ]}
+        skipHtml
+        components={{
+          ...incrementalMarkdownComponents,
+          a: MarkdownLink,
+          pre: MarkdownCodeBlock,
+          table: MarkdownTable,
+          // Message bodies must not fetch remote images or interpret local paths as web assets.
+          img: ({ alt }) => (
+            <span className="image-description">{alt ? `图片：${alt}` : '图片'}</span>
+          ),
+        }}
+      >
+        {text}
+      </Markdown>
+    );
+  },
+  (previous, next) =>
+    previous.text === next.text &&
+    previous.prepared === next.prepared &&
+    previous.prefix === next.prefix,
+);

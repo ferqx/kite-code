@@ -3422,6 +3422,106 @@ export type MessageList = Array<{
   contextSelectionId?: string;
   inputKind?: 'input.steer' | 'input.follow_up' | 'result.include';
 }>;
+export type MessageChangesQuery = {
+  storeId: string;
+  afterCursor: string;
+  upperCursor: string;
+  upperSeq?: string;
+  afterSeq?: string;
+  limit?: number;
+};
+export type MessageChangesPage = {
+  storeId: string;
+  sessionId: string;
+  afterCursor: string;
+  upperCursor: string;
+  highWaterSeq: string;
+  nextCursor: string;
+  nextAfterSeq: string | null;
+  messages: Array<{
+    id: string;
+    createdAt?: number;
+    sessionId: string;
+    runId: string | null;
+    seq: string;
+    status: 'complete' | 'incomplete';
+    role: 'system' | 'user' | 'assistant' | 'tool';
+    content: string;
+    firstOutput?: 'content' | 'reasoning' | 'tool_calls';
+    images?: Array<{
+      name: string;
+      reference: {
+        id: string;
+        storeId: string;
+        sessionId: string;
+        subjectId: string;
+        scope: { kind: 'session'; id: string };
+        hash: string;
+        size: string;
+        mediaType: 'image/png' | 'image/jpeg' | 'image/webp' | 'image/gif';
+      };
+    }>;
+    files?: Array<{
+      name: string;
+      uri: string;
+      reference?: {
+        id: string;
+        storeId: string;
+        sessionId: string;
+        subjectId: string;
+        scope: { kind: 'session'; id: string };
+        hash: string;
+        size: string;
+        mediaType: string;
+      };
+    }>;
+    humanInput?: {
+      inputCommandId: string;
+      publicCommandId?: string;
+      duplicateOfMessageId?: string;
+    };
+    compression?: {
+      id: string;
+      trigger: 'manual' | 'automatic';
+      status: 'running' | 'completed' | 'failed' | 'cancelled' | 'unpublished';
+    };
+    agentMessage?: {
+      messageId: string;
+      sourceSessionId: string;
+      sourceExecutionId: string;
+      name: string;
+      contentComplete: boolean;
+    };
+    agentResult?: {
+      sourceId: string;
+      executionId: string;
+      resultRevision: string;
+      childSessionId: string;
+      childRunId: string | null;
+      name: string;
+      outcome: 'succeeded' | 'failed' | 'cancelled' | 'outcome_unknown';
+      contentComplete: boolean;
+    };
+    originMessage?: { storeId: string; sessionId: string; messageId: string; runId: string | null };
+    contentFormat?: 'unsupported';
+    outputBody?: {
+      kind: 'model_output';
+      executionId: string;
+      complete: boolean;
+      contentBytes: string;
+      reasoningBytes: string;
+      toolCallCount: number;
+      readAvailability?: 'unsupported';
+    };
+    toolCalls?: Array<{ id: string; name: string; arguments: string }>;
+    toolCallId?: string;
+    sourceIds?: Array<string>;
+    originCommandId?: string;
+    contextSelectionId?: string;
+    inputKind?: 'input.steer' | 'input.follow_up' | 'result.include';
+  }>;
+  removedIds: Array<string>;
+};
 type SessionView___schema0 =
   | string
   | number

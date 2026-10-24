@@ -1,5 +1,9 @@
 # 本机 Agent Service
 
+## 消息历史变更协议
+
+可选能力`message_changes`公开只读`GET /v1/sessions/:id/message-changes`，闭合查询和回应来自[HTTP schema](src/http/schema/index.ts)并生成Client及OpenAPI。原Store与持久变更范围由[Runtime/Store](../../packages/agent/src/storage/README.md#消息历史变更读取)核实，Service沿`messageResponses`保原公开消息、Fork来源及正文引用投影，不从SSE载荷拼装消息，不发起补写或重放执行。首个候选页可取得Store当前序号上界，后续固定该值，回收/过期要求新基线。桌面按能力采用，Web/TUI不切换读取路径；[真实HTTP回归](test/isolated/http.test.ts)覆盖分页、保存消息、闭合查询和Store拒绝，客户端接收边界归[Client owner](../../packages/client/README.md#消息历史增量)。
+
 ## 会话持久文件
 
 `input_files` 能力通过现有受认证 Session 路由提供流式二进制上传、稳定导入查询与释放；参数与响应进入同源 schema／生成 SDK。上传上限 256 MiB，完整 SHA／size 核验后才返回准确原件引用，正式输入绑定仍由原 Command 事务负责。缺失能力不伪装为上传成功，旧 URI 输入继续保持原含义。

@@ -73,6 +73,7 @@ export interface Responses {
   WorkspaceList: API.WorkspaceList;
   SessionList: API.SessionList;
   MessageList: API.MessageList;
+  MessageChangesPage: API.MessageChangesPage;
   StreamReady: API.StreamReady;
   StreamCheckpoint: API.StreamCheckpoint;
   ExtensionList: API.ExtensionList;
@@ -100,6 +101,7 @@ export function decodeResponse<K extends keyof Responses>(name: K, value: unknow
 
 export function validateRequest(
   name:
+    | 'MessageChangesQuery'
     | 'FileCheckpointListQuery'
     | 'SessionLogQuery'
     | 'BrowserSessionLogQuery'

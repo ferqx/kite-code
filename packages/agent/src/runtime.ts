@@ -872,6 +872,7 @@ export class AgentRuntime {
     this.getExecution = this.accountEntry(this.getExecution, 'observation');
     this.listExecutionOutput = this.accountEntry(this.listExecutionOutput, 'observation');
     this.listMessages = this.accountEntry(this.listMessages, 'observation');
+    this.listMessageChanges = this.accountEntry(this.listMessageChanges, 'observation');
     this.getChanges = this.accountEntry(this.getChanges, 'observation');
     this.getView = this.accountEntry(this.getView, 'observation');
     this.getSession = this.accountEntry(this.getSession, 'observation');
@@ -3264,6 +3265,13 @@ export class AgentRuntime {
         this.publicMessage(message),
       ),
     );
+  }
+  async listMessageChanges(input: Parameters<Store['listMessageChanges']>[0]) {
+    const page = await this.options.store.listMessageChanges(input);
+    return {
+      ...page,
+      messages: await Promise.all(page.messages.map((message) => this.publicMessage(message))),
+    };
   }
   private async publicMessage(message: MessageRecord, known?: ExecutionRecord) {
     return this.publicAgentMailMessage(await this.publicHumanInputMessage(message, known));

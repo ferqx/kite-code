@@ -1,8 +1,9 @@
 // Isolated production-renderer experiment. Never imported by application entrypoints.
-import type { Message } from '@kite-ai/client';
+import type { Message, ModelOutputSnapshot } from '@kite-ai/client';
 import { createRoot } from 'react-dom/client';
 import { NativeDesktop } from '../src/native';
 import type { NativeBridge } from '../src/native-bridge';
+import { NativeModelOutputMessage } from '../src/native-model-output-message';
 import { backgroundItem } from './background-item.fixture';
 import { sessionSwitchBridge } from './session-switch-bridge.fixture';
 import '../src/native-tailwind.css';
@@ -16,6 +17,22 @@ const startedAt = Date.now() - count * 5000;
 const settled = new Set<string>();
 const histories = new Map<string, Message[]>();
 let chunk = 0;
+let historyDelay = 0;
+let historyEpoch = 0,
+  metadataRevision = 1;
+const versions = new Map([
+  ['a', 1],
+  ['b', 1],
+]);
+const baselines = new Map(versions);
+const updates: { cursor: number; sessionId: string; id: string }[] = [];
+const reads: { kind: string; sessionId: string; count: number; cursor?: string }[] = [];
+function updated(id: string) {
+  const cursor = versions.get(id)! + 1;
+  versions.set(id, cursor);
+  updates.push({ cursor, sessionId: id, id: histories.get(id)!.at(-1)!.id });
+  control.publish();
+}
 for (const id of ['a', 'b']) {
   const messages: Message[] = [];
   for (let index = 0; index < count; index++) {
@@ -63,6 +80,16 @@ const runs = (id: string) =>
     ...base.run!,
     id: `run-${id}-${index}`,
     sessionId: id,
+    configuration: {
+      modelId: id,
+      snapshot: {
+        version: 1,
+        digest: 'a'.repeat(64),
+        configuration: {
+          models: [{ id, provider: 'compatible', model: id, protocol: 'chat-completions' }],
+        },
+      },
+    },
     originCommandId: `command-${id}-${index}`,
     rootWorkCommandId: `command-${id}-${index}`,
     rootWorkSeq: String(index + 1),
@@ -76,6 +103,12 @@ const runs = (id: string) =>
 const bridge: NativeBridge = {
   ...control.bridge,
   async request(request) {
+    if (request.method === 'select') {
+      baselines.set(request.sessionId, versions.get(request.sessionId)!);
+      metadataRevision++;
+    }
+    if (request.method === 'messages' && historyDelay)
+      await new Promise<void>((resolve) => setTimeout(resolve, historyDelay));
     const result = await control.bridge.request(request);
     if (
       (request.method === 'attach' || request.method === 'state' || request.method === 'select') &&
@@ -86,8 +119,12 @@ const bridge: NativeBridge = {
       const id = result.selection.session.id;
       return structuredClone({
         ...result,
+        historyEpoch,
         selection: {
           ...result.selection,
+          viewGeneration: metadataRevision,
+          historyCursor: String(baselines.get(id)),
+          historyTargetCursor: String(versions.get(id)),
           session: { ...result.selection.session, nextSeq: String(count * 2 + 1) },
           runs: runs(id),
         },
@@ -102,18 +139,46 @@ const bridge: NativeBridge = {
         })),
       };
     if (request.method === 'messages') {
+      const changedIds = request.changes
+        ? new Set(
+            updates
+              .filter(
+                (update) =>
+                  update.sessionId === request.sessionId &&
+                  BigInt(update.cursor) > BigInt(request.changes!.afterCursor) &&
+                  BigInt(update.cursor) <= BigInt(request.changes!.upperCursor),
+              )
+              .map((update) => update.id),
+          )
+        : undefined;
       const remaining = histories
         .get(request.sessionId)!
         .filter(
           (message) =>
             BigInt(message.seq) > BigInt(request.afterSeq ?? '0') &&
-            BigInt(message.seq) <= BigInt(request.upperSeq!),
+            BigInt(message.seq) <= BigInt(request.upperSeq ?? String(count * 2 + 1)) &&
+            (!changedIds || changedIds.has(message.id)),
         );
       const messages = remaining.slice(0, request.limit);
+      reads.push({
+        kind: request.changes ? 'incremental' : 'full',
+        sessionId: request.sessionId,
+        count: messages.length,
+        cursor: request.changes?.afterCursor,
+      });
       return structuredClone({
         messages,
-        highWaterSeq: request.upperSeq!,
+        highWaterSeq: request.upperSeq ?? String(count * 2 + 1),
         nextAfterSeq: remaining.length > messages.length ? messages.at(-1)!.seq : null,
+        ...(request.changes
+          ? {
+              changes: {
+                ...request.changes,
+                nextCursor: request.changes.upperCursor,
+                removedIds: [],
+              },
+            }
+          : {}),
       });
     }
     if (
@@ -133,7 +198,101 @@ const bridge: NativeBridge = {
     return result;
   },
 };
+const automaticFirst = '初始预览，已经保存的完整正文。';
+const automaticSecond = `${automaticFirst}，逐字新增🙂`;
+const automaticBytes = (text: string) => String(new TextEncoder().encode(text).length);
+let automaticMessage: Message;
+let automaticResolve: ((snapshot: ModelOutputSnapshot) => void) | undefined;
+let automaticCopied: string | undefined;
+const automaticSnapshot = (text: string): ModelOutputSnapshot => ({
+  storeId: 'store',
+  sessionId: 'a',
+  rootSessionId: 'a',
+  runId: 'r-auto',
+  executionId: 'model-auto',
+  originCommandId: 'c-auto',
+  rootWorkCommandId: 'c-auto',
+  rootWorkSeq: '1',
+  attempt: 1,
+  status: 'running',
+  bodyHash: 'a'.repeat(64),
+  bodyBytes: '1',
+  contentBytes: automaticBytes(text),
+  reasoningBytes: '0',
+  snapshotCursor: text === automaticFirst ? '1' : '2',
+  output: { content: text, reasoning: '', toolCalls: [], complete: false },
+});
+function renderAutomatic() {
+  root.render(
+    <div className="kite-client">
+      <div className="conversation-viewport" style={{ height: 800, padding: 24 }}>
+        <NativeModelOutputMessage
+          message={automaticMessage}
+          storeId="store"
+          onRead={() =>
+            new Promise((resolve) => {
+              automaticResolve = resolve;
+            })
+          }
+          onContent={(text) => {
+            automaticCopied = text;
+          }}
+        />
+      </div>
+    </div>,
+  );
+}
 const api = {
+  automaticState: () => ({
+    pending: !!automaticResolve,
+    copied: automaticCopied,
+    first: automaticFirst,
+    second: automaticSecond,
+  }),
+  automaticBody(stage: 'mount' | 'first' | 'pending' | 'second') {
+    if (stage === 'first' || stage === 'second') {
+      const resolve = automaticResolve;
+      automaticResolve = undefined;
+      resolve!(automaticSnapshot(stage === 'first' ? automaticFirst : automaticSecond));
+      return;
+    }
+    automaticMessage = {
+      id: 'auto',
+      sessionId: 'a',
+      runId: 'r-auto',
+      seq: '1',
+      role: 'assistant',
+      status: 'incomplete',
+      content: '初始预览',
+      outputBody: {
+        kind: 'model_output',
+        executionId: 'model-auto',
+        complete: false,
+        contentBytes: automaticBytes(stage === 'mount' ? automaticFirst : automaticSecond),
+        reasoningBytes: '0',
+        toolCallCount: 0,
+      },
+    };
+    renderAutomatic();
+  },
+  reads: () => structuredClone(reads),
+  reconnect() {
+    historyEpoch++;
+    for (const [id, version] of versions) baselines.set(id, version);
+    metadataRevision++;
+    control.publish();
+  },
+  delayHistory(milliseconds: number) {
+    historyDelay = milliseconds;
+  },
+  append(text: string, id = 'a') {
+    const messages = histories.get(id)!;
+    messages[messages.length - 1] = {
+      ...messages.at(-1)!,
+      content: messages.at(-1)!.content + text,
+    };
+    updated(id);
+  },
   stream(id = 'a') {
     const messages = histories.get(id)!;
     chunk++;
@@ -141,7 +300,7 @@ const api = {
       ...messages.at(-1)!,
       content: `${messages.at(-1)!.content}\n\n新增流式片段 ${chunk}。TAIL-${id.toUpperCase()}-${chunk}`,
     };
-    control.publish();
+    updated(id);
     return `TAIL-${id.toUpperCase()}-${chunk}`;
   },
   hold: control.hold,
@@ -152,7 +311,7 @@ const api = {
     settled.add(id);
     const messages = histories.get(id)!;
     messages[messages.length - 1] = { ...messages.at(-1)!, status: 'complete' };
-    control.publish();
+    updated(id);
   },
 };
 declare global {
@@ -164,4 +323,5 @@ window.renderPerformanceFixture = api;
 Object.defineProperty(window, 'kiteNative', { value: bridge });
 document.documentElement.dataset.nativeWindow = 'true';
 document.documentElement.dataset.platform = 'windows';
-createRoot(document.getElementById('root')!).render(<NativeDesktop nativeWindow />);
+const root = createRoot(document.getElementById('root')!);
+root.render(<NativeDesktop nativeWindow />);

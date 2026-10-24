@@ -196,7 +196,7 @@ const fields: Record<NativeRequest['method'], readonly string[]> = {
   'workspace.removal.lookup': ['commandId'],
   select: ['sessionId', 'activationId'],
   createSession: ['workspaceId', 'commandId', 'sessionId', 'title', 'expectedStoreId'],
-  messages: ['sessionId', 'expectedStoreId', 'readId', 'afterSeq', 'upperSeq', 'limit'],
+  messages: ['sessionId', 'expectedStoreId', 'readId', 'afterSeq', 'upperSeq', 'limit', 'changes'],
   'messages.close': ['readId'],
   submit: ['sessionId', 'intent', 'draft', 'imageIds', 'fileIds'],
   'caller.prepare': ['sessionId', 'intent', 'draft'],
@@ -781,6 +781,23 @@ export function decodeNativeRequest(value: unknown): NativeRequest {
   )
     throw Error('invalid_native_request');
   if (method === 'messages' || method === 'modelInputs.list' || method === 'grants.read') {
+    if (method === 'messages' && input.changes !== undefined) {
+      const changes = input.changes as Record<string, unknown>;
+      if (
+        !changes ||
+        typeof changes !== 'object' ||
+        Array.isArray(changes) ||
+        Object.keys(changes).some((key) => !['afterCursor', 'upperCursor'].includes(key)) ||
+        !['afterCursor', 'upperCursor'].every(
+          (key) =>
+            typeof changes[key] === 'string' &&
+            /^(0|[1-9][0-9]{0,18})$/.test(changes[key] as string) &&
+            BigInt(changes[key] as string) <= 9223372036854775807n,
+        ) ||
+        BigInt(changes.afterCursor as string) > BigInt(changes.upperCursor as string)
+      )
+        throw Error('invalid_native_request');
+    }
     for (const key of ['afterSeq', 'upperSeq', ...(method === 'grants.read' ? ['revision'] : [])])
       if (
         input[key] !== undefined &&

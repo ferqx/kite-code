@@ -271,6 +271,7 @@ export async function startService(options: ServiceOptions) {
       'commands',
       'events',
       'history',
+      'message_changes',
       'interactions',
       'inputs',
       'context',
@@ -1726,6 +1727,32 @@ export async function startService(options: ServiceOptions) {
       (
         await messageResponses(runtime, messages, (await runtime.getMetadata()).storeId, subjectId)
       ).map((message) => schemas.Message.parse(message)),
+    );
+  });
+  app.get('/v1/sessions/:id/message-changes', async (context) => {
+    const raw = context.req.queries();
+    if (Object.values(raw).some((values) => values.length !== 1))
+      throw new HttpFailure('invalid_request', 400);
+    const query = apiSchemas.MessageChangesQuery.safeParse(
+      Object.fromEntries(
+        Object.entries(raw).map(([key, values]) => [
+          key,
+          key === 'limit' ? Number(values[0]) : values[0],
+        ]),
+      ),
+    );
+    if (!query.success) throw new HttpFailure('invalid_request', 400);
+    const { storeId, ...pagination } = query.data;
+    const page = await runtime.listMessageChanges({
+      expectedStoreId: storeId,
+      sessionId: context.req.param('id'),
+      ...pagination,
+    });
+    return context.json(
+      apiSchemas.MessageChangesPage.parse({
+        ...page,
+        messages: await messageResponses(runtime, page.messages, storeId, subjectId),
+      }),
     );
   });
   app.get('/v1/sessions/:id/context', async (context) => {

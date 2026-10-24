@@ -56,6 +56,18 @@ Composer 的图片卡片保持固定预览区域，接受宿主交付的小尺�
 
 桌面 [MessageContent](src/desktop/MessageContent.tsx) 在 GFM 上支持以下展示；Web 的 `SafeMessageMarkdown` 和独立 TUI renderer 保持各自范围。
 
+[增量展示](src/desktop/incremental-markdown.tsx)保留整条消息的固定GFM／公式解析与语义处理，再为生成元素设置无DOM包装的memo边界；比较实际内容、属性及图表围栏闭合状态，忽略源码位置与一次性渐显提示。未变化的段落、列表项、表格、链接和代码组件跳过渲染；追加中的元素仅更新变化分支，后补引用、脚注与标题目标仍按完整上下文校正。代码围栏闭合状态从当前源码派生到该块，不再通过整条源码Context使所有代码组件重新渲染；操作能力Context仍按当前准入更新。
+
+`MessageContent.streamingReveal:false`只使本次自动全文初次填充静态显示，仍记录`streaming`连续性供后续追加；不改变正文来源、读取或复制资格。Native自动正文版本交接的只读保留归[Desktop owner](../../apps/desktop/README.md#会话消息渲染验证)，共享Web/TUI不新增该保留策略。
+
+`MarkdownDocument`仅随正文、prepared语法树或消息前缀变化重新进入转换管线；读取暂停／恢复与streaming标记变化只更新外层的已提交状态，不使相同正文重新处理。下一次正文变化仍使用当次的渐显资格，memo不冻结权限Context。
+
+普通IPC历史读取会先撤销读取资格、完成后再交付同一消息的新正文。渐显只要求当前读取已准入，连续追加的依据是上一次已显示的同挂载正文，不要求上一次`readActive`也为true；否则实际跨任务读取会把所有追加动画关闭。首次历史、非追加纠正和Activity隐藏／重连仍清除连续性；当前不可读时不播放，不恢复任何读取或操作资格。
+
+宿主以`streaming:true`标记实际Agent流式预览，以`false`交接其完成预览；静态正文及显式完整读取不传此标记。只对前一次已提交的活动正文追加部分创建行内文字run，再按完整字素建立子span；每字使用240ms的浏览器原生透明度0→1动画，普通字间隔18ms，同一批跨强调等行内节点保持次序，较大批次压缩间隔使最大等待180ms、整批最多420ms。`fill:backwards`使尚未开始的字保持透明，内容和排版立即提交，不建立React逐帧状态或累计打字队列。已有run和字节点保留，完成动画释放引用，保留DOM供原选区和缓存复用；更多字节点继续计入原DOM缓存预算。长文字以2048个UTF-16单位为目标在完整字素边界分段，后补组合字符或emoji不拆字。代码、公式及图表沿原组件更新，不添加正文渐显。减少动态效果、隐藏或暂停读取时直接显示；动画完成／取消移除媒体监听，卸载取消所属动画，Activity重连不重播旧run。流式结束的最后追加仍可渐显，非追加纠正和完整历史读取不播放。
+
+[流式回归](test/isolated/desktop-streaming-markdown.test.tsx)核实际React跳过渲染、旧DOM／选区保留、后补语法、末次追加、减少动态效果、缓存Activity重连和Unicode；[代码复制](test/isolated/desktop-code-block.test.tsx)、[正文复制](test/isolated/desktop-message-copy.test.tsx)与[阅读滚动](test/isolated/desktop-conversation-scroll.test.tsx)继续核原边界。生产Native组件的连续帧与交付范围归[Desktop owner](../../apps/desktop/README.md#会话消息渲染验证)。取舍见[增量渲染Note](../../.agents/notes/implemented/architecture/2026-10-24-desktop-incremental-markdown.md)。
+
 | 内容 | 语法与行为 |
 | --- | --- |
 | 图表 | `mermaid` 围栏内支持 `graph`／`flowchart`、`sequenceDiagram`、`classDiagram`、`stateDiagram`／`stateDiagram-v2`、`erDiagram`。围栏闭合后异步绘制，未闭合时显示当前源码；源码开关和复制保留原文，错误或不支持时回退源码。 |

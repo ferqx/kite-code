@@ -81,6 +81,101 @@ async function waitForCallerState(
     await Bun.sleep(1);
   }
 }
+test('Native selected message events wake durable changes directly without View refresh and reconnect revokes the baseline', async () => {
+  const connection = client();
+  connection.serverInfo!.capabilities.push('message_changes');
+  let observe!: Parameters<AgentClient['observe']>[0],
+    views = 0;
+  const getView = connection.getView.bind(connection);
+  connection.getView = async (id) => {
+    views++;
+    const view = await getView(id);
+    return { ...view, snapshotCursor: '5', session: { ...view.session, nextSeq: '2' } };
+  };
+  const changeRequests: unknown[] = [];
+  const changeSignals: AbortSignal[] = [];
+  Object.assign(connection, {
+    async observe(options: Parameters<AgentClient['observe']>[0]) {
+      observe = options;
+      await options.onReady?.({ storeId: 'store', replayFloor: '0', highWaterCursor: '5' });
+      await new Promise<void>((resolve) =>
+        options.signal!.addEventListener('abort', () => resolve(), { once: true }),
+      );
+    },
+    async listMessageChanges(
+      sessionId: string,
+      query: { upperSeq?: string; afterSeq?: string; afterCursor: string; upperCursor: string },
+      options: { signal: AbortSignal },
+    ) {
+      changeRequests.push(query);
+      changeSignals.push(options.signal);
+      return {
+        storeId: 'store',
+        sessionId,
+        ...query,
+        highWaterSeq: '4',
+        nextCursor: query.upperCursor,
+        nextAfterSeq: query.afterSeq === '0' ? '3' : null,
+        messages:
+          query.afterSeq === '0'
+            ? [{ id: 'new', sessionId, seq: '3', content: 'new partial' }]
+            : [],
+        removedIds: [],
+      };
+    },
+  });
+  const caller = new NativeCaller(connection, () => {});
+  try {
+    await caller.invoke({ method: 'attach' });
+    await caller.invoke({ method: 'select', generation: 1, sessionId: 's' });
+    await Bun.sleep(120);
+    const before = caller.state(),
+      reads = views;
+    for (let index = 6; index <= 10; index++)
+      await observe.onChange?.({
+        cursor: String(index),
+        sessionId: 's',
+        objectId: 'new',
+        revision: '0',
+        type: 'message.updated',
+        payload: null,
+      });
+    await Bun.sleep(120);
+    const state = caller.state();
+    expect(views).toBe(reads);
+    expect(state.selection!.viewGeneration).toBe(before.selection!.viewGeneration);
+    expect(state.selection!.historyCursor).toBe('5');
+    expect(state.selection!.historyTargetCursor).toBe('10');
+    const request = {
+      method: 'messages' as const,
+      generation: 1,
+      sessionId: 's',
+      expectedStoreId: 'store',
+      readId: 'incremental',
+      afterSeq: '0',
+      changes: { afterCursor: '5', upperCursor: '10' },
+    };
+    const first = await caller.invoke(request);
+    expect(first).toMatchObject({
+      highWaterSeq: '4',
+      nextAfterSeq: '3',
+      changes: { nextCursor: '10' },
+    });
+    expect(await caller.invoke({ ...request, afterSeq: '3', upperSeq: '4' })).toMatchObject({
+      highWaterSeq: '4',
+      nextAfterSeq: null,
+    });
+    expect(changeRequests).toMatchObject([{ upperSeq: undefined }, { upperSeq: '4' }]);
+    expect(changeSignals[0]).toBe(changeSignals[1]);
+    const epoch = caller.state().historyEpoch!;
+    await observe.onReady?.({ storeId: 'store', replayFloor: '0', highWaterCursor: '10' });
+    expect(caller.state().historyEpoch).toBe(epoch + 1);
+    expect(caller.state().selection!.historyTargetCursor).toBeUndefined();
+    expect(connection.writes).toBe(0);
+  } finally {
+    await caller.close();
+  }
+});
 
 test('Native View hands over compression metadata without exporting summary bytes or body readers', async () => {
   const connection = client();

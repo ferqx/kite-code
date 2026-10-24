@@ -162,6 +162,10 @@ export type NativeSelection = {
   readonly viewLoading?: boolean;
   readonly viewGeneration: number;
   readonly viewSelection?: number;
+  /** Same-View durable history watermark, only when the Service supports message_changes. */
+  readonly historyCursor?: string;
+  /** Wakeup head may lead the metadata View; it is never a baseline or an SSE ACK. */
+  readonly historyTargetCursor?: string;
   readonly storeId: string;
   readonly session: Session;
   readonly runs: readonly Run[];
@@ -720,6 +724,7 @@ export type NativeRequest =
       afterSeq?: string;
       upperSeq?: string;
       limit?: number;
+      changes?: { afterCursor: string; upperCursor: string };
     }
   | { method: 'messages.close'; generation: number; readId: string }
   | {
@@ -833,7 +838,17 @@ export type NativeResult =
   | NativeAttachmentOpen
   | NativeAttachmentChunk
   | NativeDirectory
-  | { messages: Message[]; nextAfterSeq: string | null; highWaterSeq: string }
+  | {
+      messages: Message[];
+      nextAfterSeq: string | null;
+      highWaterSeq: string;
+      changes?: {
+        afterCursor: string;
+        upperCursor: string;
+        nextCursor: string;
+        removedIds: string[];
+      };
+    }
   | NativeDraft
   | NativeCreation
   | { drafts: Omit<NativeDraft, 'content'>[]; nextId: string | null }

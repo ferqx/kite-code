@@ -928,6 +928,7 @@ test('SQL presentation proves one original input across processing and business 
           ?.humanInput,
       ).toEqual({ inputCommandId: input.inputId, publicCommandId: publicId });
       await finishDisplayRun(f, input.run.id);
+      const historyBefore = await f.store.getView('s');
       const applied = await f.store.applyInput({
         expectedStoreId: f.scope.expectedStoreId,
         owner: f.owner,
@@ -938,6 +939,15 @@ test('SQL presentation proves one original input across processing and business 
       const all = await f.store.listMessages('s');
       const processing = all.find((message) => message.id === input.before.id)!;
       const business = all.find((message) => message.id === applied.message.id)!;
+      const historyAfter = await f.store.getView('s');
+      const changes = await f.store.listMessageChanges({
+        expectedStoreId: f.scope.expectedStoreId,
+        sessionId: 's',
+        afterCursor: historyBefore.snapshotCursor,
+        upperCursor: historyAfter.snapshotCursor,
+      });
+      expect(changes.messages.find((message) => message.id === processing.id)).toEqual(processing);
+      expect(changes.messages.find((message) => message.id === business.id)).toEqual(business);
       expect(processing.humanInput).toEqual({
         inputCommandId: input.inputId,
         publicCommandId: publicId,

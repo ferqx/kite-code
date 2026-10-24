@@ -105,7 +105,7 @@ try {
   eq(Number(await (await fetch(`${control}/count`)).text()), 0);
   phase('failed_refresh_begin');
   await app.evaluate(
-    `(()=>{const original=globalThis.fetch;globalThis.__historyOriginal=original;globalThis.__historyFail=true;globalThis.fetch=(input,init)=>{const request=new Request(input,init);if(globalThis.__historyFail&&request.method==='GET'&&new URL(request.url).pathname.endsWith('/sessions/s/messages')){return Promise.reject(new TypeError('owned_history_page_failed'));}return original(input,init);};})()`,
+    `(()=>{const original=globalThis.fetch;globalThis.__historyOriginal=original;globalThis.__historyFail=true;globalThis.fetch=(input,init)=>{const request=new Request(input,init);if(globalThis.__historyFail&&request.method==='GET'&&['/sessions/s/messages','/sessions/s/message-changes'].some(path=>new URL(request.url).pathname.endsWith(path))){return Promise.reject(new TypeError('owned_history_page_failed'));}return original(input,init);};})()`,
   );
   await page.evaluate(async () => {
     const facts = await window.kiteNative!.request({
@@ -158,6 +158,9 @@ try {
       title: 'Native A',
     });
   });
+  // Normal metadata refresh now uses changes. A real transport reconnect still
+  // requires the complete baseline, whose late second page this scenario owns.
+  await app.evaluate('globalThis.__nativeHistoryNetwork.abort.abort()');
   const deadline = Date.now() + 10000;
   while (!(await app.evaluate('globalThis.__historyHeld'))) {
     if (Date.now() >= deadline) throw Error('history_barrier_timeout');

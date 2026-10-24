@@ -16,6 +16,7 @@ import { createRuntime } from '@kite-ai/agent';
 import { defineExtension, type Permissions, type ToolDefinition } from '@kite-ai/agent/extensions';
 import { openSqliteStore, resolveProfile } from '@kite-ai/agent/sqlite';
 import { createFixedModel, type ModelEvent } from '@kite-ai/ai';
+import { createClient } from '@kite-ai/client';
 import { startService } from '../../src';
 
 async function assertDirectInput(
@@ -178,6 +179,78 @@ async function readUntil(
     clearTimeout(timer);
   }
 }
+test('HTTP message change pages and generated SDK reproduce saved public history and reject stale Store/query identities', async () => {
+  const data = await fixture({
+    responses: [[{ type: 'text_delta', text: 'persisted answer' }, finish]],
+  });
+  const client = createClient({
+    endpoint: data.service.endpoint,
+    token: data.service.bootstrap.token,
+    expected: {
+      profile: data.service.bootstrap.profile,
+      apiMajor: 1,
+      requiredCapabilities: ['history', 'message_changes'],
+    },
+  });
+  try {
+    await client.connect();
+    await data.create();
+    const before = await client.getView('session');
+    expect(
+      (
+        await data.post('/v1/sessions/session/commands', {
+          expectedStoreId: data.startup.storeId,
+          commandId: 'delta-work',
+          kind: 'run.start',
+          content: 'work',
+        })
+      ).status,
+    ).toBe(202);
+    const deadline = Date.now() + 5000;
+    let after = await client.getView('session');
+    while (!after.runs.some((run) => run.status === 'completed')) {
+      if (Date.now() > deadline) throw Error('message_change_completion_timeout');
+      await Bun.sleep(5);
+      after = await client.getView('session');
+    }
+    const query = {
+      storeId: before.storeId,
+      afterCursor: before.snapshotCursor,
+      upperCursor: after.snapshotCursor,
+      limit: 1,
+    };
+    let afterSeq = '0';
+    const messages = [];
+    for (;;) {
+      const page = await client.listMessageChanges('session', { ...query, afterSeq });
+      messages.push(...page.messages);
+      expect(page.nextCursor).toBe(after.snapshotCursor);
+      if (page.nextAfterSeq === null) break;
+      afterSeq = page.nextAfterSeq;
+    }
+    expect(messages).toEqual(await client.listMessages('session'));
+    expect(messages.some((message) => message.content === 'persisted answer')).toBe(true);
+    const empty = await client.listMessageChanges('session', {
+      ...query,
+      afterCursor: after.snapshotCursor,
+    });
+    expect(empty.messages).toEqual([]);
+    const wrong = new URLSearchParams({
+      storeId: 'foreign',
+      afterCursor: before.snapshotCursor,
+      upperCursor: after.snapshotCursor,
+    });
+    const conflict = await data.request(`/v1/sessions/session/message-changes?${wrong}`);
+    expect(conflict.status).toBe(409);
+    expect((await conflict.json()).code).toBe('store_identity_mismatch');
+    expect(
+      (await data.request(`/v1/sessions/session/message-changes?${wrong}&limit=201`)).status,
+    ).toBe(400);
+  } finally {
+    client.disposeNetwork();
+    await data.close();
+  }
+});
 
 function rawHostStatus(endpoint: string, token: string): Promise<number> {
   const url = new URL(endpoint);

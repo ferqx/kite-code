@@ -8,7 +8,7 @@ export type HistoryState = {
   highWaterSeq?: string;
   error?: string;
 };
-/** Reading never owns execution. Each scan seals one public high water before publishing its reading snapshot. */
+/** Full baselines seal placement; subsequent reads cover durable changes, including same-seq edits. */
 export class NativeHistory {
   private scope?: {
     generation: number;
@@ -18,7 +18,8 @@ export class NativeHistory {
     epoch: number;
   };
   private run?: { readId: string; canceled: boolean };
-  private wanted?: string;
+  private wanted?: { upperSeq: string; cursor?: string; baselineCursor?: string };
+  private cursor?: string;
   private revision?: number;
   private entries = new Map<string, Message>();
   private cached = new NativeHistoryCache();
@@ -42,6 +43,7 @@ export class NativeHistory {
   close() {
     // Returning to an unchanged selection still requires a fresh reading after a pause.
     this.revision = undefined;
+    this.cursor = undefined;
     if (this.run && this.scope) {
       this.run.canceled = true;
       void this.bridge
@@ -107,6 +109,9 @@ export class NativeHistory {
     if (
       sameScope &&
       this.revision === selection.viewGeneration &&
+      (selection.historyTargetCursor === undefined ||
+        selection.historyTargetCursor === this.cursor ||
+        selection.historyTargetCursor === this.wanted?.cursor) &&
       this.state.phase !== 'unavailable'
     )
       return;
@@ -135,20 +140,33 @@ export class NativeHistory {
       this.publish('loading');
     }
     this.revision = selection.viewGeneration;
-    this.wanted = selection.session.nextSeq;
+    this.wanted = {
+      upperSeq: selection.session.nextSeq,
+      cursor: selection.historyTargetCursor ?? selection.historyCursor,
+      baselineCursor: selection.historyCursor,
+    };
     void this.drain();
   }
   private async drain() {
     if (this.run || !this.scope || !this.wanted) return;
     const scope = this.scope,
-      upperSeq = this.wanted,
+      target = this.wanted,
+      upperSeq = target.upperSeq,
       run = { readId: crypto.randomUUID(), canceled: false };
     this.wanted = undefined;
     this.run = run;
-    this.publish('loading');
+    const incremental =
+      this.cursor !== undefined &&
+      target.cursor !== undefined &&
+      BigInt(this.cursor) <= BigInt(target.cursor);
+    if (!incremental) this.publish('loading');
     const scanned = new Map<string, Message>();
     let afterSeq = '0';
     try {
+      if (incremental) {
+        await this.readChanges(scope, run, target as { upperSeq: string; cursor: string });
+        return;
+      }
       for (;;) {
         const page = await this.bridge.request({
           method: 'messages',
@@ -180,10 +198,23 @@ export class NativeHistory {
         afterSeq = page.nextAfterSeq;
       }
       // EOF proves the complete reading, including removal or replacement of older records.
-      this.entries = scanned;
-      this.publish(this.wanted ? 'loading' : 'complete', upperSeq);
+      this.replace(scanned);
+      this.cursor = target.baselineCursor;
+      if (target.cursor !== target.baselineCursor) this.wanted ??= target;
+      this.publish(this.wanted && target.cursor === undefined ? 'loading' : 'complete', upperSeq);
     } catch (error) {
       if (!run.canceled && this.scope === scope) {
+        this.cursor = undefined;
+        if (
+          incremental &&
+          ((error as { code?: string }).code === 'cursor_expired' ||
+            (error as Error).message === 'cursor_expired')
+        ) {
+          // The retained reading stays visible; only a full baseline may resume coverage.
+          this.wanted ??= target;
+          this.publish('loading', this.state.highWaterSeq);
+          return;
+        }
         // A failed scan proves only its legal prefix; retain the last reading beyond it.
         for (const [id, message] of scanned) this.entries.set(id, message);
         this.publish('unavailable', this.state.highWaterSeq, (error as Error).message);
@@ -194,6 +225,88 @@ export class NativeHistory {
         .request({ method: 'messages.close', generation: scope.generation, readId: run.readId })
         .catch(() => {});
       if (!run.canceled && this.scope === scope && this.wanted) void this.drain();
+    }
+  }
+  private replace(messages: Map<string, Message>) {
+    for (const [id, message] of messages) {
+      const previous = this.entries.get(id);
+      if (previous && previous !== message && JSON.stringify(previous) === JSON.stringify(message))
+        messages.set(id, previous);
+    }
+    this.entries = messages;
+  }
+  private async readChanges(
+    scope: NonNullable<NativeHistory['scope']>,
+    run: NonNullable<NativeHistory['run']>,
+    target: { upperSeq: string; cursor: string },
+  ) {
+    while (this.cursor !== target.cursor) {
+      const afterCursor = this.cursor!;
+      const updates = new Map<string, Message>(),
+        removed = new Set<string>();
+      let afterSeq = '0',
+        nextCursor: string | undefined,
+        upperSeq: string | undefined;
+      for (;;) {
+        const page = await this.bridge.request({
+          method: 'messages',
+          generation: scope.generation,
+          sessionId: scope.sessionId,
+          expectedStoreId: scope.storeId,
+          readId: run.readId,
+          upperSeq,
+          afterSeq,
+          limit: 200,
+          changes: { afterCursor, upperCursor: target.cursor },
+        });
+        if (run.canceled || this.scope !== scope) return;
+        if (
+          !page ||
+          !('messages' in page) ||
+          (upperSeq !== undefined && page.highWaterSeq !== upperSeq) ||
+          !page.changes ||
+          page.changes.afterCursor !== afterCursor ||
+          page.changes.upperCursor !== target.cursor ||
+          BigInt(page.changes.nextCursor) <= BigInt(afterCursor) ||
+          BigInt(page.changes.nextCursor) > BigInt(target.cursor) ||
+          (nextCursor !== undefined && nextCursor !== page.changes.nextCursor)
+        )
+          throw Error('history_page_identity_mismatch');
+        nextCursor = page.changes.nextCursor;
+        upperSeq = page.highWaterSeq;
+        let last = BigInt(afterSeq);
+        for (const message of page.messages) {
+          if (
+            message.sessionId !== scope.sessionId ||
+            updates.has(message.id) ||
+            removed.has(message.id) ||
+            BigInt(message.seq) <= last ||
+            BigInt(message.seq) > BigInt(upperSeq)
+          )
+            throw Error('history_page_sequence_mismatch');
+          last = BigInt(message.seq);
+          updates.set(message.id, message);
+        }
+        for (const id of page.changes.removedIds) {
+          if (updates.has(id) || removed.has(id)) throw Error('history_page_identity_mismatch');
+          removed.add(id);
+        }
+        if (page.nextAfterSeq === null) break;
+        if (
+          BigInt(page.nextAfterSeq) <= BigInt(afterSeq) ||
+          BigInt(page.nextAfterSeq) < last ||
+          BigInt(page.nextAfterSeq) > BigInt(upperSeq)
+        )
+          throw Error('history_page_cursor_mismatch');
+        afterSeq = page.nextAfterSeq;
+      }
+      // Commit one covered cursor batch atomically. Failed/late pages never delete old rows.
+      const merged = new Map(this.entries);
+      for (const id of removed) merged.delete(id);
+      for (const [id, message] of updates) merged.set(id, message);
+      this.replace(merged);
+      this.cursor = nextCursor;
+      this.publish('complete', upperSeq);
     }
   }
 }
