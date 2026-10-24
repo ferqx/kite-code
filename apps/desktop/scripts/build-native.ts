@@ -57,6 +57,7 @@ async function buildNativeApp(
   if (process.platform === 'win32') privateDirectory(outdir);
   else await mkdir(outdir, { recursive: true });
   const root = resolve(import.meta.dir, '..');
+  await writeFile(join(outdir, 'app-icon.ico'), await readFile(join(root, 'app-icon.ico')));
   const windowsAccessAsset = process.platform === 'win32' ? await buildWindowsAccess(outdir) : null;
   const helper = await Bun.build({
     entrypoints: [join(root, 'electron/profile-access-helper.ts')],

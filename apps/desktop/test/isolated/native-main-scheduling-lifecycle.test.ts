@@ -71,7 +71,11 @@ async function mainFixture(
     errors: unknown[] = [];
   const dialogs: unknown[][] = [];
   let windowDestroyed = false;
+  let windowVisible = false;
+  let windowMinimized = false;
   const windows: BrowserWindow[] = [];
+  const trays: FixtureTray[] = [];
+  const appUserModelIds: string[] = [];
   let dockHides = 0;
   let appHides = 0;
   const clocks = new Map<
@@ -96,6 +100,7 @@ async function mainFixture(
   if (!address || typeof address === 'string') throw Error('fixture_control_unavailable');
   const app = Object.assign(new EventEmitter(), {
     setName: () => {},
+    setAppUserModelId: (id: string) => appUserModelIds.push(id),
     getAppPath: () => root,
     getVersion: () => 'fixture',
     setAboutPanelOptions: () => {},
@@ -152,9 +157,19 @@ async function mainFixture(
     }
     show() {
       if (this.isDestroyed()) throw Error('fixture_show_destroyed_window');
+      windowVisible = true;
       trace.push('window:show');
     }
-    hide() {}
+    hide() {
+      windowVisible = false;
+    }
+    isMinimized() {
+      return windowMinimized;
+    }
+    restore() {
+      windowMinimized = false;
+      trace.push('window:restore');
+    }
     focus() {
       if (this.isDestroyed()) throw Error('fixture_focus_destroyed_window');
       trace.push('window:focus');
@@ -176,6 +191,27 @@ async function mainFixture(
       if (holdRendererLoad) await rendererLoad.promise;
     }
   }
+  class FixtureTray extends EventEmitter {
+    readonly icon: string;
+    destroyed = false;
+    tooltip = '';
+    menu: { label?: string; click?: () => void }[] = [];
+    constructor(icon: string) {
+      super();
+      this.icon = icon;
+      trays.push(this);
+    }
+    setToolTip(value: string) {
+      this.tooltip = value;
+    }
+    setContextMenu(menu: typeof this.menu) {
+      this.menu = menu;
+    }
+    destroy() {
+      this.destroyed = true;
+      trace.push('tray:destroy');
+    }
+  }
   const fixture = {
     errors,
     observeConnection: (connection: Socket) => mainConnection.resolve(connection),
@@ -193,8 +229,9 @@ async function mainFixture(
         },
       },
       ipcMain: {},
-      Menu: { buildFromTemplate: () => ({}) },
+      Menu: { buildFromTemplate: (template: unknown) => template },
       nativeTheme: Object.assign(new EventEmitter(), { shouldUseDarkColors: false }),
+      Tray: FixtureTray,
     },
     selectProfile: () => ({ profilePath: join(root, 'profile') }),
     parseNativeAssets: (value: unknown) => value,
@@ -352,7 +389,7 @@ async function mainFixture(
     prefix + names.map((name) => `export const ${name} = ${source}.${name};`).join('\n');
   const mocks: Record<string, string> = {
     electron: exports(
-      ['app', 'BrowserWindow', 'clipboard', 'dialog', 'ipcMain', 'Menu', 'nativeTheme'],
+      ['app', 'BrowserWindow', 'clipboard', 'dialog', 'ipcMain', 'Menu', 'nativeTheme', 'Tray'],
       'f.electron',
     ),
     '@kite-ai/agent/profile': exports(['selectProfile']),
@@ -479,6 +516,15 @@ async function mainFixture(
       windows.at(-1)?.destroy();
     },
     windowCount: () => BrowserWindow.getAllWindows().length,
+    windowVisible: () => windowVisible,
+    windowMinimized: () => windowMinimized,
+    closeWindow: () => windows.at(-1)!.emit('close', { preventDefault() {} }),
+    minimizeWindow: () => {
+      windowMinimized = true;
+    },
+    trays,
+    appUserModelIds,
+    trayQuit: () => trays.at(-1)!.menu.find((item) => item.label === '退出')!.click!(),
     dockHides: () => dockHides,
     appHides: () => appHides,
     activate: () => app.emit('activate'),
@@ -714,6 +760,84 @@ for (const rejectServiceClose of [false, true]) {
       await f.close(exitCode);
     }
   }, 15000);
+}
+
+test.skipIf(process.platform !== 'win32')(
+  'Windows tray restores the original window and idle exit drains its Service',
+  async () => {
+    const f = await mainFixture('none', true);
+    try {
+      await f.open();
+      expect(f.appUserModelIds).toEqual(['dev.kite-code.native']);
+      expect(f.trays).toHaveLength(1);
+      const tray = f.trays[0]!;
+      expect(tray.icon.endsWith('app-icon.ico')).toBe(true);
+      expect(tray.tooltip).toBe('Kite');
+      f.readyToShow();
+      f.closeWindow();
+      expect(f.windowVisible()).toBe(false);
+      expect(tray.destroyed).toBe(false);
+      tray.emit('double-click');
+      expect(f.windowVisible()).toBe(true);
+      expect(f.trace.at(-1)).toBe('window:focus');
+      f.minimizeWindow();
+      tray.emit('double-click');
+      expect(f.windowMinimized()).toBe(false);
+      expect(f.windowCount()).toBe(1);
+      f.trayQuit();
+      await f.serviceClosing;
+      expect(f.dialogs).toEqual([]);
+      expect(tray.destroyed).toBe(true);
+      expect(f.windowCount()).toBe(0);
+      const presentation = [...f.trace];
+      tray.emit('double-click');
+      expect(f.trace).toEqual(presentation);
+      f.releaseServiceClose();
+      expect(await f.exited).toBe(0);
+      expect(f.services[0]!.closed).toBe(true);
+    } finally {
+      await f.close();
+    }
+  },
+  15000,
+);
+
+for (const retain of [true, false]) {
+  test.skipIf(process.platform !== 'win32')(
+    `Windows tray active-work exit ${retain ? 'keeps the tray on cancellation' : 'confirms before removing the tray'}`,
+    async () => {
+      const f = await mainFixture('none', false, true);
+      try {
+        await f.open();
+        const tray = f.trays[0]!;
+        f.trayQuit();
+        await f.menuEntered;
+        f.trayQuit();
+        expect(f.dialogs).toHaveLength(1);
+        expect(tray.destroyed).toBe(false);
+        expect(f.services[0]!.closed).toBe(false);
+        if (retain) {
+          f.retainService();
+          await new Promise<void>((resolve) => setTimeout(resolve, 0));
+          expect(tray.destroyed).toBe(false);
+          f.closeWindow();
+          tray.emit('double-click');
+          expect(f.windowVisible()).toBe(true);
+          expect(f.services[0]!.closed).toBe(false);
+          expect(f.exitCodes).toEqual([]);
+        } else {
+          f.confirmQuit();
+          expect(await f.exited).toBe(0);
+          expect(tray.destroyed).toBe(true);
+          expect(f.services[0]!.closed).toBe(true);
+        }
+        expect(f.errors).toEqual([]);
+      } finally {
+        await f.close();
+      }
+    },
+    15000,
+  );
 }
 
 test('Main idle quit needs no confirmation', async () => {

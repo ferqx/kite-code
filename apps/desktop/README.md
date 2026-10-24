@@ -14,6 +14,14 @@ PDF 工具页图复用 [图片 reader](electron/input-image-reads.ts)及 [Native
 
 产品展示名称统一为 **Kite**：共享侧栏、启动页、页面与窗口标题、关于菜单和原生提示使用相同大小写。原 `kite-native` 运行标识、workspace 包名、IPC 与本机偏好键保持，已有用户数据路径保持。
 
+## Windows 托盘与窗口图标
+
+[Main](electron/main.ts)在 Windows 启动时设置固定应用身份 `dev.kite-code.native`，使用 [Kite 原生图标](app-icon.ico)创建窗口和唯一托盘。双击托盘或选择“打开 Kite”恢复最小化的原窗口并显示、聚焦；普通关窗仍只隐藏。托盘“退出”调用原 `app.quit()`，复用活动工作确认及自有 Service 清理；取消确认保留托盘，确认退出后先移除托盘和窗口，再完成后台清理，退出期间不重新显示窗口。
+
+ICO 沿用 [SVG](app-icon.svg)，包含 16、20、24、32、40、48、64、256px 图像。[构建入口](scripts/build-native.ts)在开发热更新与固定 renderer 两条路径共用的阶段复制图标，正式 Native 的现有完整文件清单自动包含该资源。托盘生命周期与安全退出回归沿用 [Main 夹具](test/isolated/native-main-scheduling-lifecycle.test.ts)；它验证主进程接线，不代替真实 Windows 通知区域操作。
+
+2026-10-24，Windows x64（10.0.26300）／Electron44.3.0／Bun1.4.3：Main 回归30项352断言、Desktop typecheck、定向Biome与文档检查通过。普通 Main／生产 renderer 构建在独立 Profile、真实配套 Service 下正常启动并退出；随后仅在隔离测试制品加入私有观察端口，逐步观察关窗隐藏且托盘保留、投递 Tray 双击事件恢复并聚焦同一窗口、最小化后恢复，以及点击托盘原生菜单“退出”。最终 Main 退出0，准确所属 Service PID 已消失；观察记录在本机 `.cache/native-tray-live-20261024`。双击事件与菜单展开由该测试端口触发，原生菜单退出由实际 Windows UI 点击；没有取得通知区域物理双击／右键或完整安装包资格，不将该端口加入普通开发或正式客户端。
+
 ## Markdown 与附件输入
 
 用户消息的图片和普通文件通过 `SessionPage.renderMessageAttachments` 从正文气泡中分离，由 [NativeUserImages](src/native-user-images.tsx) 接入[共享 Attachment 列表](../../packages/ui/src/desktop/MessageAttachments.tsx)，沿原文件后图片的顺序显示，超宽时横向滚动；正文、时间和复制归原消息。首次发送及已有会话发送冻结附件名称作为占位，接管前不再将图片数量写进正文，也不借用已被草稿释放的 blob URL；历史确认后由原图片 reader／缩略图缓存显示预览。原输入身份、图片暂存、文件引用、读取与失败重试不变。空正文且没有需显示的真实格式／读取状态时不创建正文内容。产品尺寸和操作归[桌面手册](../../docs/handbook/clients/desktop/README.md#提示词与附件)。

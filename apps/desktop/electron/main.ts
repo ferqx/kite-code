@@ -12,7 +12,7 @@ import {
   PairedServiceError,
   type ServiceStartupDiagnostic,
 } from '@kite-ai/service/paired';
-import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeTheme } from 'electron';
+import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeTheme, Tray } from 'electron';
 import { type NativeWindowAppearance, nativeEventChannel } from '../src/native-bridge';
 import { nativeWindowMenuActionChannel } from '../src/native-menu-bridge';
 import { acquireNodeArtifactAccess } from './artifact-access';
@@ -86,6 +86,7 @@ const windowsAsset =
       }
     : undefined);
 app.setName('kite-native');
+if (process.platform === 'win32') app.setAppUserModelId('dev.kite-code.native');
 const mica = process.platform === 'win32' && Number(release().split('.')[2]) >= 22621;
 const windowMaterial: NativeWindowAppearance['backgroundMaterial'] = mica
   ? 'mica'
@@ -93,6 +94,7 @@ const windowMaterial: NativeWindowAppearance['backgroundMaterial'] = mica
     ? 'vibrancy'
     : 'none';
 let window: BrowserWindow | undefined, caller: NativeCaller | undefined;
+let tray: Tray | undefined;
 let opening: Promise<NativeCaller> | undefined;
 let closingNativeResources: Promise<void> | undefined;
 let stoppingNativeProcess: Promise<void> | undefined;
@@ -336,6 +338,8 @@ function stopNativeProcess(code = 0): void {
       // events must not quit Main while it still owns the background drain.
       const closingWindow = window;
       window = undefined;
+      tray?.destroy();
+      tray = undefined;
       if (closingWindow && !closingWindow.isDestroyed()) closingWindow.destroy();
       if (process.platform === 'darwin') {
         app.hide();
@@ -434,6 +438,7 @@ void app
       rendererUrl = development?.rendererUrl ?? pathToFileURL(rendererPath).href;
     window = new BrowserWindow({
       title: 'Kite',
+      ...(process.platform === 'win32' ? { icon: join(app.getAppPath(), 'app-icon.ico') } : {}),
       width: 1100,
       minWidth: 800,
       height: 780,
@@ -467,6 +472,16 @@ void app
       },
     });
     if (process.platform === 'win32') {
+      tray = new Tray(join(app.getAppPath(), 'app-icon.ico'));
+      tray.setToolTip('Kite');
+      tray.on('double-click', showMainWindow);
+      tray.setContextMenu(
+        Menu.buildFromTemplate([
+          { label: '打开 Kite', click: showMainWindow },
+          { type: 'separator' },
+          { label: '退出', click: () => app.quit() },
+        ]),
+      );
       app.setAboutPanelOptions({ applicationName: 'Kite', applicationVersion: app.getVersion() });
       const menuOptions = {
         applicationEnabled: true,
@@ -652,11 +667,13 @@ void app
     dialog.showErrorBox('Kite 无法启动', '原生调用者初始化失败。请核对发行资源。');
     app.exit(1);
   });
-app.on('activate', () => {
-  if (stoppingNativeProcess || exitAllowed) return;
-  window?.show();
-  window?.focus();
-});
+function showMainWindow() {
+  if (quitting || stoppingNativeProcess || exitAllowed || !window || window.isDestroyed()) return;
+  if (window.isMinimized()) window.restore();
+  window.show();
+  window.focus();
+}
+app.on('activate', showMainWindow);
 app.on('window-all-closed', () => {
   if (!stoppingNativeProcess && !quitting) app.quit();
 });
