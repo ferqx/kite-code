@@ -154,17 +154,27 @@ test('ordinary Ink TUI opens the untrusted gate, renders original Markdown and m
       expect(roots).toHaveLength(1);
       const rootSession = roots[0]!;
       expect(rootSession.title).toBe('Ink task');
-      expect(db.query('SELECT parent_id FROM session WHERE parent_id IS NOT NULL').all()).toEqual([
-        { parent_id: rootSession.id },
-      ]);
+      expect(db.query('SELECT parent_id FROM session WHERE parent_id IS NOT NULL').all()).toEqual(
+        [],
+      );
+      const actions = db
+        .query(
+          "SELECT id,adapter_id,kind,state,run_id,origin_command_id,origin_store_id,root_work_command_id,root_work_seq FROM execution WHERE session_id=? AND kind!='model' ORDER BY adapter_id",
+        )
+        .all(rootSession.id) as {
+        id: string;
+        adapter_id: string;
+        kind: string;
+        state: string;
+        run_id: string | null;
+        origin_command_id: string;
+        origin_store_id: string;
+        root_work_command_id: string;
+        root_work_seq: number;
+      }[];
       expect(
-        db
-          .query(
-            "SELECT adapter_id,kind,state,run_id FROM execution WHERE session_id=? AND kind!='model' ORDER BY adapter_id",
-          )
-          .all(rootSession.id),
+        actions.map(({ adapter_id, kind, state, run_id }) => ({ adapter_id, kind, state, run_id })),
       ).toEqual([
-        { adapter_id: 'agent/session-title', kind: 'job', state: 'succeeded', run_id: null },
         {
           adapter_id: 'builtin.session-title/fallback',
           kind: 'job',
@@ -178,14 +188,89 @@ test('ordinary Ink TUI opens the untrusted gate, renders original Markdown and m
           run_id: null,
         },
       ]);
+      const runs = db
+        .query(
+          'SELECT id,origin_command_id,origin_store_id,root_work_command_id,status,is_active FROM run WHERE session_id=?',
+        )
+        .all(rootSession.id) as {
+        id: string;
+        origin_command_id: string;
+        origin_store_id: string;
+        root_work_command_id: string;
+        status: string;
+        is_active: number;
+      }[];
+      expect(runs).toHaveLength(1);
+      const completedRun = runs[0]!;
+      expect(completedRun).toMatchObject({ status: 'completed', is_active: 0 });
+      const generate = actions.find(
+        (action) => action.adapter_id === 'builtin.session-title/generate',
+      )!;
+      expect(generate.origin_store_id).toBe(completedRun.origin_store_id);
+      const generateCommand = db
+        .query(
+          'SELECT kind,request_json FROM command WHERE id=? AND session_id=? AND origin_store_id=?',
+        )
+        .get(generate.origin_command_id, rootSession.id, generate.origin_store_id) as {
+        kind: string;
+        request_json: string;
+      } | null;
+      expect(generateCommand?.kind).toBe('extension.invoke');
+      expect(JSON.parse(generateCommand!.request_json)).toEqual({
+        kind: 'extension.invoke',
+        extensionId: 'builtin.session-title',
+        actionId: 'generate',
+        definitionVersion: '1',
+        input: { commandId: completedRun.origin_command_id, runId: completedRun.id },
+      });
+      const models = db
+        .query(
+          "SELECT e.state,e.run_id,e.origin_command_id,e.origin_store_id,e.root_work_command_id,e.root_work_seq,e.parent_execution_id,e.child_session_id,c.kind AS command_kind FROM execution e JOIN command c ON c.id=e.origin_command_id AND c.session_id=e.session_id AND c.origin_store_id=e.origin_store_id WHERE e.session_id=? AND e.kind='model' ORDER BY c.seq",
+        )
+        .all(rootSession.id) as {
+        state: string;
+        run_id: string | null;
+        origin_command_id: string;
+        origin_store_id: string;
+        root_work_command_id: string;
+        root_work_seq: number;
+        parent_execution_id: string | null;
+        child_session_id: string | null;
+        command_kind: string;
+      }[];
+      expect(models).toHaveLength(2);
+      expect(models.find((model) => model.run_id === completedRun.id)).toMatchObject({
+        state: 'succeeded',
+        origin_command_id: completedRun.origin_command_id,
+        origin_store_id: completedRun.origin_store_id,
+        root_work_command_id: completedRun.root_work_command_id,
+        child_session_id: null,
+      });
+      const titleModel = models.find((model) => model.run_id === null)!;
+      expect(titleModel).toMatchObject({
+        state: 'succeeded',
+        origin_store_id: generate.origin_store_id,
+        root_work_command_id: generate.root_work_command_id,
+        root_work_seq: generate.root_work_seq,
+        parent_execution_id: generate.id,
+        child_session_id: null,
+        command_kind: 'session.title',
+      });
       expect(
         db
-          .query("SELECT state FROM execution WHERE session_id=? AND kind='model'")
-          .all(rootSession.id),
-      ).toEqual([{ state: 'succeeded' }]);
-      expect(
-        db.query('SELECT status,is_active FROM run WHERE session_id=?').all(rootSession.id),
-      ).toEqual([{ status: 'completed', is_active: 0 }]);
+          .query(
+            "SELECT kind,session_id,origin_store_id,root_work_command_id,root_work_seq,json_extract(request_json,'$.kind') AS request_kind,json_extract(request_json,'$.parentExecutionId') AS parent_execution_id FROM command WHERE id=?",
+          )
+          .get(titleModel.origin_command_id),
+      ).toEqual({
+        kind: 'session.title',
+        session_id: rootSession.id,
+        origin_store_id: generate.origin_store_id,
+        root_work_command_id: generate.root_work_command_id,
+        root_work_seq: generate.root_work_seq,
+        request_kind: 'session.title',
+        parent_execution_id: generate.id,
+      });
       const messages = db
         .query(
           "SELECT m.role,p.json FROM message m JOIN message_part p ON p.message_id=m.id WHERE p.kind='text' AND m.session_id=? ORDER BY m.seq,p.ordinal",

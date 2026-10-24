@@ -76,7 +76,29 @@ test('80x24 actual composer edits graphemes and bracketed paste without prematur
     const expected = '首前中🙂改后' + paste;
     writeFileSync(
       runner,
-      `import{appendFileSync}from'node:fs';import{runTUIHost}from${JSON.stringify(pathToFileURL(join(repo, 'apps/cli/host/tui.tsx')).href)};const actual=globalThis.fetch;globalThis.fetch=Object.assign(async(...args:Parameters<typeof fetch>)=>{appendFileSync(${JSON.stringify(network)},JSON.stringify({method:args[1]?.method??'GET',path:new URL(String(args[0])).pathname,body:args[1]?.body?JSON.parse(String(args[1].body)):null})+'\\n');return actual(...args);},{preconnect:actual.preconnect});await runTUIHost({testDiagnostics:true,dataRoot:${JSON.stringify(f.profile.dataRoot)},profile:'owned',thread:'composer',cwd:${JSON.stringify(f.workspace)},artifact:${JSON.stringify(f.artifact)}});`,
+      `import { appendFileSync } from 'node:fs';
+import { runTUIHost } from ${JSON.stringify(pathToFileURL(join(repo, 'apps/cli/host/tui.tsx')).href)};
+const actual = globalThis.fetch;
+const record = (value: unknown) => appendFileSync(${JSON.stringify(network)}, JSON.stringify(value) + '\\n');
+globalThis.fetch = Object.assign(async (...args: Parameters<typeof fetch>) => {
+  const method = args[1]?.method ?? 'GET';
+  const path = new URL(String(args[0])).pathname;
+  record({ method, path, body: args[1]?.body ? JSON.parse(String(args[1].body)) : null });
+  const response = await actual(...args);
+  if (method === 'GET' && ['/v1/sessions/composer/view', '/v1/sessions/s/view'].includes(path) && response.ok) {
+    const view = await response.clone().json();
+    record({ method, path, observedSession: {
+      storeId: view.storeId,
+      id: view.session.id,
+      workspaceId: view.session.workspaceId,
+      parentSessionId: view.session.parentSessionId,
+      rootSessionId: view.session.rootSessionId,
+      ownerGeneration: view.session.ownerGeneration,
+    } });
+  }
+  return response;
+}, { preconnect: actual.preconnect });
+await runTUIHost({ testDiagnostics: true, dataRoot: ${JSON.stringify(f.profile.dataRoot)}, profile: 'owned', thread: 'composer', cwd: ${JSON.stringify(f.workspace)}, artifact: ${JSON.stringify(f.artifact)} });`,
     );
     const built = await compileFileRecoveryTUI(f.root, runner);
     if (!built.success) throw new AggregateError(built.logs, 'composer_tui_compile_failed');
@@ -90,6 +112,7 @@ test('80x24 actual composer edits graphemes and bracketed paste without prematur
           runner: join(f.root, 'composer-runner.js'),
           network,
           profilePath: f.profile.profilePath,
+          storeId: f.storeId,
           paste,
           expected,
           transcript,

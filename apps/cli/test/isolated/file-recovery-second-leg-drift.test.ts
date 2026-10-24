@@ -90,15 +90,19 @@ for (const drift of ['external_edit', 'later_run'] as const)
           () => client.getRun((command.receipt as { runId: string }).runId),
           (r) => !r.isActive,
         );
-        const receipt = command.receipt as {
-          businessCommandId: string;
-          humanInputCommandId: string;
-        };
-        expect((await client.getCommand(receipt.humanInputCommandId)).receipt).toMatchObject({
-          businessCommandId: receipt.businessCommandId,
+        const inputCommand = await client.getCommand(run.originCommandId);
+        expect(inputCommand).toMatchObject({
+          id: command.id,
+          sessionId: 's',
+          kind: 'run.start',
+          originStoreId: storeId,
+          receipt: { runId: run.id },
         });
-        expect(run.originCommandId).toBe(receipt.businessCommandId);
+        expect(run.originCommandId).toBe(command.id);
+        expect(run.rootWorkCommandId).toBe(command.id);
+        expect(run.id).not.toBe(initial.checkpoint.boundary.runId);
         expect(run.status).toBe('completed');
+        expect(readFileSync(f.file, 'utf8')).toBe('later actual Run bytes\r\n');
         expect(f.calls()).toBe(6);
       }
       expect((await client.getView('s')).session.contextSelectionId).toBe(selector);
