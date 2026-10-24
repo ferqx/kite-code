@@ -819,6 +819,15 @@ test('public schema is exactly six closed prompt tools, with optional registered
   expect(spawn.inputSchema.additionalProperties).toBe(false);
   expect(spawn.description).toContain('Default role worker: General child');
   expect(spawn.description).not.toContain('Trusted read-only preset');
+  const followUp = general.tools.find((tool) => tool.id === 'follow_up_agent')!;
+  expect(followUp.description).toContain('owned collaborator');
+  expect(followUp.description).toContain('including from a later parent turn');
+  expect(followUp.description).toContain('current tool authorization');
+  expect(followUp.description).not.toContain('Same-work');
+  expect(followUp.description).not.toContain('Cross-work active guidance is rejected');
+  expect(followUp.description).toContain('The same agent_id spans turns');
+  expect(followUp.description).toContain('at admission, not its completion');
+  expect(followUp.description).toContain('No preset change');
   const preset = surface(['read_only']);
   expect(
     preset.tools.find((tool) => tool.id === 'spawn_agent')!.inputSchema.properties,

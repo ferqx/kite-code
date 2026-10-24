@@ -793,7 +793,7 @@ function collaborationSurface(
       make(
         'task.follow_up',
         'follow_up_agent',
-        'Continue the same collaborator. Same-work running or queued work receives guidance at a safe boundary; idle starts one ordinary new turn in the same Session. The same agent_id spans turns. accepted and state describe this request at admission, not its completion; earlier results or completed events for that agent do not prove this follow-up finished. Cross-work active guidance is rejected. No preset change.',
+        'Continue the same owned collaborator, including from a later parent turn, subject to current tool authorization. Running or queued work receives guidance at a safe boundary; idle starts one ordinary new turn in the same Session. The same agent_id spans turns. accepted and state describe this request at admission, not its completion; earlier results or completed events for that agent do not prove this follow-up finished. No preset change.',
         object({ agentId, content }, ['agentId', 'content']),
         true,
         command('follow_up'),
