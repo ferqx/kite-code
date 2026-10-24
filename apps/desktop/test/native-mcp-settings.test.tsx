@@ -413,3 +413,131 @@ test('an unresolved exact disconnect keeps the unavailable owner stop disabled',
     expect(button(panel, '断开连接').disabled).toBe(true);
     expect(calls.some((call) => call.method === 'settings.userMcp.submit')).toBe(false);
   }));
+
+function deferred<T>() {
+  let resolve!: (value: T) => void, reject!: (error: Error) => void;
+  const promise = new Promise<T>((accept, fail) => {
+    resolve = accept;
+    reject = fail;
+  });
+  return { promise, resolve, reject };
+}
+const toolsResult = (id: string, name: string): NativeUserMcpResult => ({
+  kind: 'settings.userMcp.tools',
+  observationId: 1,
+  page: {
+    scope: 'user',
+    storeId: 'store',
+    serverId: id,
+    generation: 2,
+    entries: [
+      {
+        index: 0,
+        definitionId: 'synthetic-tool',
+        definitionVersion: '1'.repeat(64),
+        descriptor: { name },
+      },
+    ],
+    nextAfterIndex: null,
+    complete: true,
+  },
+});
+
+test.each([
+  'success',
+  'failure',
+] as const)('switching MCP panels discards the previous tool request %s', async (outcome) =>
+  fixture(async ({ host, panel, calls, render }) => {
+    const late = deferred<NativeUserMcpResult>();
+    const secondId = `mcp-${'2'.repeat(64)}`;
+    const controlled = {
+      request: async (input: NativeUserMcpRequest) => {
+        calls.push(input);
+        if (input.method === 'settings.userMcp.read')
+          return {
+            ...facts,
+            sources: [facts.sources[0], { ...facts.sources[0]!, id: secondId, name: 'Second' }],
+          };
+        if (input.method === 'settings.userMcp.tools')
+          return input.serverId === serverId ? late.promise : toolsResult(secondId, 'SECOND_TOOL');
+        return undefined;
+      },
+    } as unknown as NativeBridge;
+    await render({ bridge: controlled });
+    await act(async () => button(host, '管理 Knowledge').click());
+    await act(async () => button(panel, '查看工具').click());
+    expect(button(host, '管理 Second').disabled).toBe(false);
+    await act(async () => button(host, '管理 Second').click());
+    expect(panel.querySelector('aside')?.getAttribute('aria-label')).toBe('Second');
+    await act(async () => {
+      if (outcome === 'success') late.resolve(toolsResult(serverId, 'FIRST_TOOL'));
+      else late.reject(Error('mcp_tools_unavailable'));
+    });
+    expect(panel.textContent).not.toContain('FIRST_TOOL');
+    expect(panel.querySelector('[role="alert"]')).toBeNull();
+    expect(button(panel, '查看工具').disabled).toBe(false);
+    await act(async () => button(panel, '查看工具').click());
+    expect(panel.textContent).toContain('SECOND_TOOL');
+    expect(calls.filter((call) => call.method === 'settings.userMcp.submit')).toHaveLength(0);
+  }));
+
+test.each([
+  'success',
+  'failure',
+] as const)('refresh invalidates an in-flight tool request %s without leaving its loading state behind', async (outcome) =>
+  fixture(async ({ host, panel, calls, render }) => {
+    const late = deferred<NativeUserMcpResult>(),
+      refreshed = deferred<NativeUserMcpResult>();
+    let reads = 0,
+      toolReads = 0;
+    const controlled = {
+      request: async (input: NativeUserMcpRequest) => {
+        calls.push(input);
+        if (input.method === 'settings.userMcp.read')
+          return ++reads === 1 ? facts : refreshed.promise;
+        if (input.method === 'settings.userMcp.tools')
+          return ++toolReads === 1 ? late.promise : toolsResult(serverId, 'CURRENT_TOOL');
+        return undefined;
+      },
+    } as unknown as NativeBridge;
+    await render({ bridge: controlled });
+    await act(async () => button(host, '管理 Knowledge').click());
+    await act(async () => button(panel, '查看工具').click());
+    expect(button(host, 'Refresh MCP settings').disabled).toBe(false);
+    await act(async () => button(host, 'Refresh MCP settings').click());
+    expect(button(panel, '查看工具').disabled).toBe(true);
+    await act(async () => refreshed.resolve({ ...facts, observationId: 2 }));
+    await act(async () => {
+      if (outcome === 'success') late.resolve(toolsResult(serverId, 'STALE_TOOL'));
+      else late.reject(Error('mcp_tools_unavailable'));
+    });
+    expect(panel.textContent).not.toContain('STALE_TOOL');
+    expect(panel.querySelector('[role="alert"]')).toBeNull();
+    expect(button(panel, '查看工具').disabled).toBe(false);
+    await act(async () => button(panel, '查看工具').click());
+    expect(panel.textContent).toContain('CURRENT_TOOL');
+    expect(calls.filter((call) => call.method === 'settings.userMcp.tools').at(-1)).toMatchObject({
+      observationId: 2,
+    });
+    expect(calls.filter((call) => call.method === 'settings.userMcp.submit')).toHaveLength(0);
+  }));
+
+test('closing an MCP panel also retires late tool errors before the same source reopens', async () =>
+  fixture(async ({ host, panel, render }) => {
+    const late = deferred<NativeUserMcpResult>();
+    const controlled = {
+      request: async (input: NativeUserMcpRequest) => {
+        if (input.method === 'settings.userMcp.read') return facts;
+        if (input.method === 'settings.userMcp.tools') return late.promise;
+        return undefined;
+      },
+    } as unknown as NativeBridge;
+    await render({ bridge: controlled });
+    await act(async () => button(host, '管理 Knowledge').click());
+    await act(async () => button(panel, '查看工具').click());
+    await act(async () => button(panel, '关闭').click());
+    await act(async () => button(host, '管理 Knowledge').click());
+    await act(async () => late.reject(Error('mcp_tools_unavailable')));
+    expect(panel.querySelector('[role="alert"]')).toBeNull();
+    expect(button(panel, '查看工具').disabled).toBe(false);
+  }));

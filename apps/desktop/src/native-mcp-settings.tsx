@@ -163,51 +163,56 @@ export function NativeMcpSettings({
 
   const remember = (row: NativeUserMcpSubmission) =>
     setLocal((rows) => [...rows.filter((old) => old.commandId !== row.commandId), row]);
-  async function request(input: NativeUserMcpRequest): Promise<NativeUserMcpResult | undefined> {
+  async function request(
+    input: NativeUserMcpRequest,
+    isCurrent: () => boolean = () => true,
+  ): Promise<NativeUserMcpResult | undefined> {
     const original = identity;
     try {
       const result = await bridge.request(input);
-      if (current.current !== original) return undefined;
+      if (current.current !== original || !isCurrent()) return undefined;
       if (!result || !('kind' in result) || !result.kind.startsWith('settings.userMcp'))
         throw Error('mcp_source_unavailable');
       return result as NativeUserMcpResult;
     } catch (cause) {
-      if (current.current === original) setError(errorCode(cause));
+      if (current.current === original && isCurrent()) setError(errorCode(cause));
     }
     return undefined;
+  }
+  function resetTools() {
+    toolVersion.current++;
+    setTools(undefined);
+    setExpandedTool(undefined);
+    setToolsLoading(false);
   }
   async function read() {
     const original = identity,
       version = ++readVersion.current;
     setReading(true);
     setError('');
+    resetTools();
     const result = await request({ method: 'settings.userMcp.read', generation });
     if (current.current !== original || readVersion.current !== version) return;
     setReading(false);
     if (result?.kind === 'settings.userMcp' && result.storeId === storeId) {
       setFacts(result);
       setReview(undefined);
-      setTools(undefined);
-      toolVersion.current++;
     }
   }
   function closePanel(restore = true) {
-    toolVersion.current++;
+    resetTools();
     setPanel(undefined);
     setReview(undefined);
-    setTools(undefined);
-    setExpandedTool(undefined);
-    setToolsLoading(false);
     setError('');
     restoreFocus.current = restore;
   }
   function openPanel(next: NonNullable<typeof panel>, trigger: HTMLElement) {
+    resetTools();
     origin.current = trigger;
     restoreFocus.current = false;
     setError('');
     setFieldError(undefined);
     setReview(undefined);
-    setTools(undefined);
     setPanel(next);
     if (next.kind === 'add') {
       setName('');
@@ -301,18 +306,22 @@ export function NativeMcpSettings({
     }
   }
   async function loadTools(afterIndex?: number) {
-    if (!facts || !source || source.connection.generation === null || toolsLoading) return;
+    if (!facts || !source || source.connection.generation === null || toolsLoading || reading)
+      return;
     const version = ++toolVersion.current,
       original = identity;
     setToolsLoading(true);
-    const result = await request({
-      method: 'settings.userMcp.tools',
-      generation,
-      observationId: facts.observationId,
-      serverId: source.id,
-      connectionGeneration: source.connection.generation,
-      ...(afterIndex === undefined ? {} : { afterIndex }),
-    });
+    const result = await request(
+      {
+        method: 'settings.userMcp.tools',
+        generation,
+        observationId: facts.observationId,
+        serverId: source.id,
+        connectionGeneration: source.connection.generation,
+        ...(afterIndex === undefined ? {} : { afterIndex }),
+      },
+      () => toolVersion.current === version,
+    );
     if (current.current !== original || toolVersion.current !== version) return;
     setToolsLoading(false);
     if (result?.kind === 'settings.userMcp.tools' && result.page.serverId === source.id) {
@@ -703,7 +712,9 @@ export function NativeMcpSettings({
                           <button
                             type="button"
                             className="provider-button"
-                            disabled={toolsLoading || source.connection.state !== 'ready'}
+                            disabled={
+                              reading || toolsLoading || source.connection.state !== 'ready'
+                            }
                             onClick={() => void loadTools()}
                           >
                             查看工具

@@ -43,6 +43,8 @@ HTTP raw auth 接受 none、有限手工 Bearer credential 或 oauth。OAuth 只
 
 Remove 对准确 owned 域先检查后端可用性，声明发布后才本地清理。文件发布与删除凭据不是事务：`mcp.source.mutation.result` 的 saved 只证明声明发布，独立 credentialCleanup 区分未尝试、无需清理、completed、failed 和 outcome unknown。清理失败保留已删声明与原证明，不回滚文件、不默认 remote revoke。manual shared Bearer 保留；disable、shadow、手工改配置不删除凭据，已有请求和已解析 header 无法撤回。
 
+全局用户 Remove 沿同一原则清理准确 user owned 域，与真实 Run 共用认证串行锁；原 HostMutation 的 `configuration:published` 与操作 `outcome_unknown` 分别保留文件成功和凭据清理未确认事实。旧 ID 只查询原结果，不重做清理；具体用户选择与合成回归归 [Service owner](../../apps/service/README.md#http-oauth-与原认证结果)。
+
 共享 TUI 的 HTTP Source 详情提供 Authentication；四动作先 Review，再独立 Enter Confirm。只显示安全状态和原 IDs，成功提示另行申请重连。原申请复用 `ui/caller-intents.json`，冷列表和选择零 GET，明确 Check 才查原 Caller 与有限结果；未知先核原申请，不重 POST。关闭、Esc、Ctrl+C 和切 Session 仅结束 Reader，取消业务需准确原 execution.cancel 独立申请。
 
 Native MCP 设置通过有限 Main manager封存完整非秘密原申请；四Auth先Review/Confirm再走独立普通Job Ask，原结果沿正式Query核C/E/binding，连接另行申请。冷列表零GET/POST、明确Check只查原ID；未知在当前Store阻止另一次写入。Native来源发表已确认但cleanup失败/未知时保原声明证据和总体unknown。[Desktop owner](../../apps/desktop/README.md#native-mcp-完整设置)负责实际窗口资格，DB7/manifest15原字节备份恢复由独立maintenance codec验证。

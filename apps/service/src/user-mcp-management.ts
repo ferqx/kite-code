@@ -41,6 +41,7 @@ import { createUserMcpHttpTransportPort, type McpHttpPortOptions } from './mcp-h
 import { openMcpOAuthBrowser } from './mcp-oauth-browser';
 import { createMcpOAuthSession, type McpOAuthSessionOptions } from './mcp-oauth-session';
 import { acquireUserMcpOAuth, userMcpOAuthScope } from './user-mcp-credentials';
+import { disabledUserMcpSources } from './user-mcp-selection';
 
 export interface UserMcpIdentity {
   expectedStoreId: string;
@@ -234,12 +235,14 @@ export function createUserMcpManagement(options: UserMcpManagementOptions): User
         user.value.mcp.some((entry) => !obj(entry).id || typeof obj(entry).id !== 'string'))
     )
       throw new AgentError('mcp_configuration_unavailable');
+    disabledUserMcpSources(user.value);
     return { source, state, user, readSet: hash({ source: state.readSet, userEtag: user.etag }) };
   }
   function selected(observed: ReturnType<typeof observe>, entry: McpPrivateSourceEntry) {
     if (!entry.server.enabled) return false;
     const selection = observed.user.value.mcp;
-    if (selection === undefined) return true;
+    if (selection === undefined)
+      return !disabledUserMcpSources(observed.user.value).includes(entry.server.id);
     const chosen = (selection as Json[]).find((item) => obj(item).id === entry.server.id);
     return chosen !== undefined && obj(chosen).enabled !== false;
   }
@@ -425,6 +428,38 @@ export function createUserMcpManagement(options: UserMcpManagementOptions): User
       }
     } finally {
       release();
+    }
+  }
+  async function prepareOAuthRemoval(entry: McpPrivateSourceEntry, signal: AbortSignal) {
+    const scope = userMcpOAuthScope(profile.profileAccessKey, storeId!, entry);
+    const release = await acquireUserMcpOAuth(scope, signal);
+    try {
+      assertEntry(entry, false, signal);
+      const status = await vault.statusOwned(scope);
+      assertEntry(entry, false, signal);
+      if (status !== 'available')
+        throw new AgentError(
+          status === 'locked' ? 'mcp_credential_store_locked' : 'mcp_credential_store_unavailable',
+        );
+      const present = (await vault.readOwned(scope)) !== null;
+      assertEntry(entry, false, signal);
+      return {
+        release,
+        async clear(assertFresh: () => void) {
+          if (!present) return;
+          await createMcpOAuthSession({
+            vault,
+            scope,
+            serverUrl: String(entry.transport!.url),
+            signal,
+            assertFresh,
+            openBrowser: options.oauth?.openBrowser ?? openMcpOAuthBrowser,
+          }).clear();
+        },
+      };
+    } catch (error) {
+      release();
+      throw error;
     }
   }
   async function stop(serverId: string): Promise<void> {
@@ -762,48 +797,84 @@ export function createUserMcpManagement(options: UserMcpManagementOptions): User
         } else if (op.kind === 'remove' || op.kind === 'enabled') {
           await stop(entry!.server.id);
           if (op.kind === 'remove' || (op.enabled && !entry!.server.enabled)) {
-            writeMcpSourceEntry({
-              ...observed.source,
-              expectedReadSet: observed.state.readSet,
-              operationId: input.commandId,
-              mutation:
-                op.kind === 'remove'
-                  ? {
-                      kind: 'remove',
-                      scope: 'user',
-                      serverId: op.serverId,
-                      expectedRawEntryDigest: entry!.server.rawEntryDigest,
-                    }
-                  : {
-                      kind: 'enabled',
-                      scope: 'user',
-                      serverId: op.serverId,
-                      expectedRawEntryDigest: entry!.server.rawEntryDigest,
-                      enabled: op.enabled,
-                    },
-              validatePublication: () => {
-                signal.throwIfAborted();
-                if (observe().readSet !== input.expectedReadSet)
-                  throw new AgentError('configuration_read_set_conflict');
-              },
-            });
-            receipt.configuration = 'published';
+            const cleanup =
+              op.kind === 'remove' && ['oauth', 'auto'].includes(policy(entry!))
+                ? await prepareOAuthRemoval(entry!, signal)
+                : undefined;
+            try {
+              const written = writeMcpSourceEntry({
+                ...observed.source,
+                expectedReadSet: observed.state.readSet,
+                operationId: input.commandId,
+                mutation:
+                  op.kind === 'remove'
+                    ? {
+                        kind: 'remove',
+                        scope: 'user',
+                        serverId: op.serverId,
+                        expectedRawEntryDigest: entry!.server.rawEntryDigest,
+                      }
+                    : {
+                        kind: 'enabled',
+                        scope: 'user',
+                        serverId: op.serverId,
+                        expectedRawEntryDigest: entry!.server.rawEntryDigest,
+                        enabled: op.enabled,
+                      },
+                validatePublication: () => {
+                  signal.throwIfAborted();
+                  if (observe().readSet !== input.expectedReadSet)
+                    throw new AgentError('configuration_read_set_conflict');
+                },
+              });
+              receipt.configuration = 'published';
+              try {
+                await cleanup?.clear(() => {
+                  signal.throwIfAborted();
+                  if (closed) throw new AgentError('mcp_settings_unavailable');
+                  const current = observe();
+                  if (
+                    current.user.etag !== observed.user.etag ||
+                    hash(current.state.readSet) !==
+                      hash({
+                        ...observed.state.readSet,
+                        user: { ...observed.state.readSet.user, etag: written.newEtag },
+                      })
+                  )
+                    throw new AgentError('mcp_source_conflict');
+                });
+              } catch (error) {
+                throw new AgentError(
+                  safeCode(error).endsWith('_unknown')
+                    ? 'mcp_source_removed_credential_cleanup_unknown'
+                    : 'mcp_source_removed_credential_cleanup_failed',
+                );
+              }
+            } finally {
+              cleanup?.release();
+            }
           }
           if (op.kind === 'enabled') {
             const current = observe(),
-              chosen =
-                current.user.value.mcp === undefined
-                  ? current.state.entries
-                      .filter((row) => row.server.enabled)
-                      .map((row) => ({ id: row.server.id, enabled: true }))
-                  : (current.user.value.mcp as Json[]);
-            const next = chosen.filter((row) => obj(row).id !== op.serverId);
-            next.push({ id: op.serverId, enabled: op.enabled });
+              defaults = current.user.value.mcp === undefined;
+            const next: Json[] = defaults
+              ? disabledUserMcpSources(current.user.value).filter((id) => id !== op.serverId)
+              : (current.user.value.mcp as Json[]).filter((row) => obj(row).id !== op.serverId);
+            if (defaults) {
+              if (!op.enabled) next.push(op.serverId);
+              disabledUserMcpSources({ disabledUserMcpSources: next });
+            } else next.push({ id: op.serverId, enabled: op.enabled });
             updateConfigurationFile({
               path: options.userConfigurationPath,
               windowsPathPolicy: 'private',
               ifMatch: observed.user.etag,
-              operations: [{ kind: 'set', path: ['mcp'], value: next }],
+              operations: [
+                {
+                  kind: 'set',
+                  path: [defaults ? 'disabledUserMcpSources' : 'mcp'],
+                  value: next,
+                },
+              ],
               validatePublication: () => {
                 signal.throwIfAborted();
                 if (hash(readMcpSources(current.source).readSet) !== hash(current.state.readSet))

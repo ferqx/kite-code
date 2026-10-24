@@ -124,6 +124,7 @@ import {
 import { createTaskConfiguration, defaultTaskRoles } from './task-configuration';
 import { createUserConfiguration, withoutProjectModels } from './user-configuration';
 import { createUserMcpManagement } from './user-mcp-management';
+import { disabledUserMcpSources } from './user-mcp-selection';
 import {
   createWebFetchConfiguration,
   type WebFetchConfigurationOptions,
@@ -490,6 +491,7 @@ export function createDefaultProcessConfiguration(options: {
       const current = explicitConfiguration(explicit);
       return {
         present: [user, workspace, current].some((layer) => Object.hasOwn(layer, 'mcp')),
+        disabledUserServerIds: disabledUserMcpSources(user),
         configurations:
           resolveConfiguration({
             defaults: configurationDefaults,
@@ -993,6 +995,7 @@ export function createDefaultProcessConfiguration(options: {
       task.validateSelection(toolIds);
       const sourceSelection = {
         present: [user, project, current].some((layer) => Object.hasOwn(layer, 'mcp')),
+        disabledUserServerIds: disabledUserMcpSources(user),
         configurations: effective.mcp ?? [],
         toolIds,
       };
@@ -2141,6 +2144,7 @@ export function createDefaultProcessConfiguration(options: {
             await mcpSources.capture({ command, session, workspace }),
             {
               present: [user, project, current].some((layer) => Object.hasOwn(layer, 'mcp')),
+              disabledUserServerIds: disabledUserMcpSources(user),
               configurations: effective.mcp ?? [],
             },
           );

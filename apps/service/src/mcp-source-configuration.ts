@@ -105,6 +105,8 @@ type Host = Pick<
 export interface McpSourceSelectionInput {
   present: boolean;
   configurations: readonly NamedConfiguration[];
+  /** Only trusted user configuration supplies these default exclusions, never project authority. */
+  disabledUserServerIds?: readonly string[];
   toolIds?: readonly string[];
 }
 export interface McpSourceCapture {
@@ -759,8 +761,14 @@ export function createMcpSourceConfiguration(options: McpSourceConfigurationOpti
     const available = new Map(capture.servers.map((server) => [server.id, server]));
     const chosen = new Map<string, McpSourceCapture['servers'][number]>();
     if (!input.present) {
+      const disabled = new Set(input.disabledUserServerIds ?? []);
       for (const server of capture.servers)
-        if (server.enabled && server.admitted) chosen.set(server.id, server);
+        if (
+          server.enabled &&
+          server.admitted &&
+          !(server.source.kind === 'user' && disabled.has(server.id))
+        )
+          chosen.set(server.id, server);
     } else
       for (const item of input.configurations) {
         if (!available.has(item.id)) continue; // programmatic registrations are selected by their original owner

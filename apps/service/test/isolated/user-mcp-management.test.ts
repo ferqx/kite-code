@@ -17,6 +17,7 @@ import {
   createCredentialVault,
   createTemporaryCredentialBackend,
   mcpCanonical,
+  readConfigurationFile,
   readMcpSources,
 } from '@kite-ai/agent/config';
 import type { Json } from '@kite-ai/agent/extensions';
@@ -35,7 +36,9 @@ import {
   createUserMcpHttpTransportPort,
 } from '../../src/mcp-http-port';
 import { createMcpSourceConfiguration } from '../../src/mcp-source-configuration';
+import { userMcpOAuthScope } from '../../src/user-mcp-credentials';
 import { createUserMcpManagement } from '../../src/user-mcp-management';
+import { disabledUserMcpSources } from '../../src/user-mcp-selection';
 
 const digest = (value: unknown) => createHash('sha256').update(mcpCanonical(value)).digest('hex');
 async function until<T>(read: () => Promise<T | null>): Promise<T> {
@@ -165,11 +168,20 @@ async function fixture(auth: 'none' | 'oauth' | 'credential' = 'none', actualRun
   writeFileSync(userConfigurationPath, '{\n// user selection\n"unknown":42\n}\n', { mode: 0o600 });
   let agentAllowed = false;
   const permissionCalls: string[] = [];
+  const sourceSelection = () => {
+    const user = readConfigurationFile({ path: userConfigurationPath }).value;
+    return {
+      present: Object.hasOwn(user, 'mcp'),
+      configurations: (user.mcp ?? []) as { id: string; enabled?: boolean }[],
+      disabledUserServerIds: disabledUserMcpSources(user),
+    };
+  };
   const sources = actualRuntimeMcp
     ? createMcpSourceConfiguration({
         profile,
         runtime: () => runtime,
         credentialVault: vault,
+        selection: sourceSelection,
         http: { allowLoopbackForTests: true },
       })
     : undefined;
@@ -196,7 +208,7 @@ async function fixture(auth: 'none' | 'oauth' | 'credential' = 'none', actualRun
           modelId: 'fixed',
           resolveRunConfiguration: async (input) => {
             const capture = await sources.capture(input),
-              selection = sources.select(capture, { present: false, configurations: [] });
+              selection = sources.select(capture, sourceSelection());
             return {
               model,
               modelId: 'fixed',
@@ -272,6 +284,8 @@ async function fixture(auth: 'none' | 'oauth' | 'credential' = 'none', actualRun
     final,
     mutate,
     permissionCalls,
+    sources,
+    sourceSelection,
     allowAgent(value: boolean) {
       agentAllowed = value;
     },
@@ -989,3 +1003,279 @@ for (const auth of ['credential', 'oauth'] as const)
       await f.close();
     }
   }, 20000);
+
+test('global Remove clears only the original local OAuth account and never revokes remote or shared credentials', async () => {
+  const f = await fixture('oauth');
+  try {
+    const serverId = (await f.manager().read(f.identity)).sources[0]!.id;
+    expect((await f.mutate('login-remove', { kind: 'login', serverId })).state).toBe('applied');
+    const scope = userMcpOAuthScope(
+      f.profile.profileAccessKey,
+      f.expectedStoreId,
+      readMcpSources({
+        profilePath: f.profile.profilePath,
+        scope: {
+          mode: 'user',
+          profileId: f.profile.profileAccessKey,
+          storeId: f.expectedStoreId,
+          sessionId: null,
+          workspaceId: null,
+        },
+      }).entries[0]!,
+    );
+    const unrelated = { namespace: 'mcp.oauth' as const, ownerDigest: 'f'.repeat(64) };
+    await f.vault.writeOwned(unrelated, 'synthetic-unrelated-account');
+    const originalMaterial = await f.vault.readOwned(scope);
+    expect(originalMaterial).not.toBeNull();
+    const originalSource = readFileSync(f.path, 'utf8');
+    for (const enabled of [false, true]) {
+      expect(
+        (await f.mutate(`toggle-oauth-${enabled}`, { kind: 'enabled', serverId, enabled })).state,
+      ).toBe('applied');
+      expect(readFileSync(f.path, 'utf8')).toBe(originalSource);
+      expect(await f.vault.readOwned(scope)).toBe(originalMaterial);
+    }
+    const beforeWire = [...f.oauthWire];
+    expect((await f.mutate('remove-oauth', { kind: 'remove', serverId })).state).toBe('applied');
+    expect((await f.manager().read(f.identity)).sources).toHaveLength(0);
+    expect(await f.vault.readOwned(scope)).toBeNull();
+    expect(await f.vault.readOwned(unrelated)).toBe('synthetic-unrelated-account');
+    expect(await f.vault.resolve(f.credential)).toBe('synthetic-manual-bearer');
+    expect(f.oauthWire).toEqual(beforeWire);
+  } finally {
+    await f.close();
+  }
+});
+
+test('global Remove checks OAuth availability before source publication and never repeats unknown local cleanup', async () => {
+  const f = await fixture('oauth');
+  try {
+    const serverId = (await f.manager().read(f.identity)).sources[0]!.id;
+    expect((await f.mutate('login-remove-failure', { kind: 'login', serverId })).state).toBe(
+      'applied',
+    );
+    const status = f.vault.statusOwned;
+    f.vault.statusOwned = async () => 'locked';
+    const original = readFileSync(f.path, 'utf8');
+    const locked = await f.mutate('remove-locked', { kind: 'remove', serverId });
+    expect(locked.state).toBe('failed');
+    expect(locked.receipt.configuration).toBe('unchanged');
+    expect(readFileSync(f.path, 'utf8')).toBe(original);
+    f.vault.statusOwned = status;
+    let removals = 0;
+    f.vault.removeOwned = async () => {
+      removals++;
+      throw Error('synthetic-unknown-remove');
+    };
+    const view = await f.manager().read(f.identity);
+    const input = {
+      ...f.identity,
+      commandId: 'remove-unknown',
+      expectedReadSet: view.readSet!,
+      operation: { kind: 'remove' as const, serverId },
+    };
+    const result = await f.manager().mutate(input);
+    expect(result.state).toBe('outcome_unknown');
+    expect(result.receipt.configuration).toBe('published');
+    expect(result.receipt.code).toBe('mcp_source_removed_credential_cleanup_unknown');
+    expect((await f.manager().read(f.identity)).sources).toHaveLength(0);
+    expect(await f.manager().mutate(input)).toEqual(result);
+    expect(await f.manager().lookup({ ...f.identity, commandId: input.commandId })).toEqual(result);
+    expect(removals).toBe(1);
+    expect(f.oauthWire).not.toContain('revoke');
+  } finally {
+    await f.close();
+  }
+});
+
+for (const projectName of ['projectOnly', 'global'])
+  test(`user default toggles preserve approved ${projectName} project sources without selecting unapproved sources`, async () => {
+    const f = await fixture('none', true);
+    try {
+      f.allowAgent(true);
+      const workspace = join(f.root, 'project');
+      privateDirectory(join(workspace, '.kite-code'));
+      writeFileSync(
+        join(workspace, '.kite-code', 'mcp.json'),
+        JSON.stringify({
+          mcpServers: {
+            [projectName]: {
+              type: 'http',
+              url: 'https://project.example.test/mcp',
+              auth: { type: 'none' },
+            },
+            unapproved: {
+              type: 'http',
+              url: 'https://project.example.test/unapproved',
+              auth: { type: 'none' },
+            },
+          },
+        }),
+        { mode: 0o600 },
+      );
+      await f.runtime.createWorkspace({
+        expectedStoreId: f.expectedStoreId,
+        id: 'project',
+        name: 'Project',
+        rootUri: pathToFileURL(workspace).href,
+      });
+      await f.runtime.createSession({
+        ...f.identity,
+        commandId: 'create-toggle-session',
+        sessionId: 'review',
+        workspaceId: 'project',
+        title: 'Review',
+      });
+      const source = readMcpSources({
+        profilePath: f.profile.profilePath,
+        workspacePath: workspace,
+        scope: {
+          profileId: f.profile.profileAccessKey,
+          storeId: f.expectedStoreId,
+          sessionId: 'review',
+          workspaceId: 'project',
+        },
+      });
+      const projectServer = source.entries.find(
+        (entry) => entry.server.name === projectName,
+      )!.server;
+      await f.runtime.submitCommand({
+        ...f.identity,
+        sessionId: 'review',
+        commandId: 'approve-toggle-project',
+        request: {
+          kind: 'extension.invoke',
+          extensionId: 'builtin.mcp.sources',
+          actionId: 'mcp.source.approve',
+          definitionVersion: '1',
+          input: {
+            serverId: projectServer.id,
+            expectedReadSet: source.readSet as unknown as Json,
+          },
+        },
+      });
+      const card = await until(
+        async () =>
+          (
+            await f.store.listInteractions({
+              expectedStoreId: f.expectedStoreId,
+              sessionId: 'review',
+              state: 'pending',
+            })
+          ).interactions[0] ?? null,
+      );
+      await f.runtime.answerInteraction({
+        ...f.identity,
+        commandId: 'answer-toggle-project',
+        presentationSessionId: card.presentationSessionId,
+        interactionId: card.id,
+        expectedRevision: card.revision,
+        answer: { kind: 'question', answers: { decision: 'approved' } },
+      });
+      await f.runtime.waitForCommand('approve-toggle-project', { timeoutMs: 5000 });
+      const command = (await f.runtime.getCommand('approve-toggle-project'))!,
+        session = (await f.runtime.getSession('review'))!,
+        savedWorkspace = (await f.runtime.getWorkspace('project'))!;
+      const capture = () => f.sources!.capture({ command, session, workspace: savedWorkspace });
+      const selected = async () => f.sources!.select(await capture(), f.sourceSelection()).servers;
+      expect((await selected()).some((server) => server.id === projectServer.id)).toBe(true);
+      const before = readFileSync(f.path, 'utf8');
+      const userId = (await f.manager().read(f.identity)).sources[0]!.id;
+      expect(
+        (await f.mutate('disable-default', { kind: 'enabled', serverId: userId, enabled: false }))
+          .state,
+      ).toBe('applied');
+      expect((await f.manager().read(f.identity)).sources[0]!.enabled).toBe(false);
+      expect(f.sourceSelection().present).toBe(false);
+      expect((await selected()).map((server) => server.name)).toEqual([projectName]);
+      const current = await capture();
+      expect(
+        f.sources!.select(current, {
+          present: true,
+          configurations: [],
+          disabledUserServerIds: [userId],
+        }).servers,
+      ).toEqual([]);
+      expect(
+        f
+          .sources!.select(current, {
+            present: true,
+            configurations: [{ id: userId, enabled: true }],
+            disabledUserServerIds: [userId],
+          })
+          .servers.map((server) => server.id),
+      ).toEqual([userId]);
+      expect(
+        (await capture()).servers.find((server) => server.name === 'unapproved')!.admitted,
+      ).toBe(false);
+      expect(readFileSync(f.path, 'utf8')).toBe(before);
+      expect(
+        (
+          await f.mutate('add-after-disable', {
+            kind: 'add',
+            name: 'later',
+            entry: { type: 'http', url: 'https://later.example.test/mcp' },
+          })
+        ).state,
+      ).toBe('applied');
+      expect((await selected()).map((server) => server.name).sort()).toEqual(
+        [projectName, 'later'].sort(),
+      );
+      expect(
+        (await f.mutate('enable-default', { kind: 'enabled', serverId: userId, enabled: true }))
+          .state,
+      ).toBe('applied');
+      expect(
+        (await f.manager().read(f.identity)).sources.find((server) => server.id === userId)!
+          .enabled,
+      ).toBe(true);
+      expect(f.sourceSelection().disabledUserServerIds).toEqual([]);
+      expect(
+        (await selected()).some(
+          (server) => server.source.kind === 'workspace' && server.id === projectServer.id,
+        ),
+      ).toBe(true);
+    } finally {
+      await f.close();
+    }
+  });
+
+test('explicit MCP allowlists override default user exclusions; empty stays empty and invalid defaults fail closed', async () => {
+  const f = await fixture();
+  try {
+    const serverId = (await f.manager().read(f.identity)).sources[0]!.id;
+    expect(
+      (await f.mutate('disable-before-explicit', { kind: 'enabled', serverId, enabled: false }))
+        .state,
+    ).toBe('applied');
+    const raw = readConfigurationFile({ path: f.userConfigurationPath }).value;
+    expect(raw.mcp).toBeUndefined();
+    expect(raw.disabledUserMcpSources).toEqual([serverId]);
+    for (const mcp of [[], [{ id: serverId, enabled: true }]]) {
+      writeFileSync(f.userConfigurationPath, JSON.stringify({ ...raw, mcp }));
+      expect(f.sourceSelection().disabledUserServerIds).toEqual([]);
+      expect(f.sourceSelection().configurations).toEqual(mcp);
+      expect((await f.manager().read(f.identity)).sources[0]!.enabled).toBe(mcp.length > 0);
+    }
+    expect(
+      (await f.mutate('disable-explicit', { kind: 'enabled', serverId, enabled: false })).state,
+    ).toBe('applied');
+    expect(readConfigurationFile({ path: f.userConfigurationPath }).value.mcp).toEqual([
+      { id: serverId, enabled: false },
+    ]);
+    expect(
+      (await f.mutate('enable-explicit', { kind: 'enabled', serverId, enabled: true })).state,
+    ).toBe('applied');
+    expect((await f.manager().read(f.identity)).sources[0]!.enabled).toBe(true);
+    writeFileSync(
+      f.userConfigurationPath,
+      JSON.stringify({ disabledUserMcpSources: [serverId, serverId] }),
+    );
+    expect((await f.manager().read(f.identity)).errors).toEqual(['mcp_configuration_unavailable']);
+    expect(() => disabledUserMcpSources({ disabledUserMcpSources: ['workspace'] })).toThrow(
+      'mcp_configuration_unavailable',
+    );
+  } finally {
+    await f.close();
+  }
+});

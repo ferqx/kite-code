@@ -654,6 +654,10 @@ Native 用户级设置使用独立 [user-mcp-management](src/user-mcp-management
 
 该 owner 管理来源增删／启停、已有引用绑定、认证状态与四项 OAuth 操作，以及设置连接／刷新／重连／断开。全局连接只允许 initialize、工具目录和必要协议控制，不执行 `tools/call`、资源读取或 Task。HTTP 复用正式网络边界，stdio 使用明确 user binding 的原 guardian；不是伪造 Session／Execution。服务结束时等待已启动操作并停止准确所属连接，停止未知保 unknown。设置页关闭仅释放 metadata reader，不停止连接或取消操作。正常有限操作直接返回结算结果，长认证按原 ID 查询与取消。
 
+未显式配置 `mcp` 时，用户启停仅保存 `disabledUserMcpSources` 排除集合，不把自动发现改成只含用户来源的 allowlist。[用户选择解析](src/user-mcp-selection.ts)只读取用户层并校验唯一的有限 Server ID；默认 Run／Action 选择只排除匹配的 user 来源，已批准的项目来源和项目同名遮蔽保持原资格，未批准项目不获准入。任一层显式 `mcp` 仍按原 allowlist 选择，空列表保持零项，用户旧排除集合不覆盖显式选择。重新启用只移除该用户排除；来源原文与认证摘要不因默认启停改变，新来源继续按原默认发现。
+
+用户 Remove 对准确 OAuth owned scope 持有与 Run 共享的认证锁，先核后端可用与本地材料，再发布来源删除，最后只清理该本地账户；不撤销远端、不删除共享手工凭据或其他 owned scope。文件已发布而清理失败时，原 HostMutation 保留 `configuration:published` 与 `outcome_unknown`，原 ID 查询或重提不再次删除。[管理器回归](test/isolated/user-mcp-management.test.ts)覆盖真实项目批准后的默认启停、同名遮蔽、显式空／非空选择、认证材料保持、后端锁定、清理未知和其他账户隔离；合成后端结果不替代真实系统凭据库或跨平台资格。
+
 HTTP／stdio 的公开 Session 与 user 工厂在运行时固定 owner 分支，不能通过传入另一个完整 binding 绕过用户协议白名单。目录发布在 RPC 返回后再核原来源和凭据绑定；当前同名来源漂移时不会把新地址与旧 ready 状态拼接，GET 只投影失效而不执行停止。实际 Run 使用全局用户凭据仍走原独立 Action／Job 权限，两个真实 Workspace 的默认拒绝与明确允许分别由 [manager 测试](test/isolated/user-mcp-management.test.ts)验证。
 
 已持有连接的停止独立于当前来源文件：来源删除、MCP／用户 JSONC 或绑定文件变坏时，GET 仍保该 user owner 的安全行与有限清理观察，普通错误和写入禁用继续保留；只允许明确断开本 owner 持有的准确连接。该操作不要求重新添加来源，不读取或修复配置、不创建新 transport，保原 Store／subject／操作幂等、准确取消及停止证明；GET 本身不停止连接。两个同时 stop 仍互斥，未知停止保原 held owner，不能伪称已释放。

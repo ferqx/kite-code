@@ -12,6 +12,8 @@ Skills 增加独立的 user metadata 接口与 capability，合并 defaults、�
 
 MCP 由 Service 的明确用户级 owner 管理配置、认证和设置连接。请求绑定实际 Store、认证 subject、原 read-set 与 command ID，使用现有 HostMutation 保存操作与闭合结果，不创建隐藏 Session／Workspace，也不通过普通模型工具执行。HTTP 与 stdio 端口采用明确的 user transport binding，保真实进程和连接收尾；设置连接只初始化及读取工具目录，没有工具调用权限。全局用户认证只适用于同一用户来源与准确凭据域，不能扩大项目来源或旧 Workspace 绑定。
 
+默认启停采用用户级 `disabledUserMcpSources` 排除集合，只限制准确 user 来源；显式 `mcp` 仍优先沿原 allowlist 语义。不能把全局设置可见的用户目录物化为完整 allowlist，否则会排除已批准但不在设置页展示的项目来源及后续正常发现；也不通过修改来源原文的 enabled 达成默认启停，否则会漂移原认证绑定摘要。该有限排除不读取、展示或批准项目来源，具体解析及回归归 Service owner。
+
 Native 两页的身份由 Store／连接 generation 决定，会话选择与工作区移除不撤销其读取。关闭、断线或全局身份替换继续隔离迟到结果。MCP 原意图使用 DB7 现有表中的显式 version 2，与 version 1 Session 记录并存，容量与未知保护共享。冷行只按原 ID 显式查询，不重新取得热 POST 权；可确证 user 的旧未决操作仍互斥，项目记录不进入配置列表，来源不明确的历史连接只保原结果查询。
 
 准确停止本 owner 已持有的连接不依赖来源文件继续存在或配置可读。GET 保安全失效行和清理观察，Native 对这种已观察连接只开放 disconnect，普通错误及其他写入门禁保持。原申请的停止须明确记录并等待真实证明，未知仍保 owner；不能把删除来源当作进程已停止，也不能为了停止而重新授予连接／配置权。
