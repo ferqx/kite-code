@@ -18,7 +18,7 @@ An external editor need not respect the lock. A second byte-digest check immedia
 
 `createConfigurationSnapshot` produces a deeply frozen, independently cloned `{version:1,digest,configuration}`. It projects the supported assembly contract, including model/provider identity, endpoint and complete non-secret options; tool definition versions/options; Skill path/digest/options; MCP transport/command/args/endpoint/options; enabled/disabled state; and credential references. The digest covers this full canonical projection, not just selected IDs. Unsupported fields stay in the original/effective configuration but are not invented execution inputs. A host must use this same supported projection for assembly and save it with the Run, rather than copying arbitrary raw config into history. Changing later configuration cannot mutate an old snapshot. There is no Agent category field or extra execution Loop.
 
-模型可选 `models[].protocol` 为 `chat-completions` 或 `responses`，后者仅支持明确的 `openai`／`compatible` family；错误值和不支持的组合在快照封存前拒绝。显式协议完整冻结并参与 digest，缺省仍使用 Chat Completions，快照不补字段以保持既有 hash。协议独立于模型名称和 endpoint，不自动探测或回退。验证见[配置测试](../../test/isolated/config/config.test.ts)。
+模型可选 `models[].protocol` 为 `chat-completions` 或 `responses`，后者支持明确的 `openai`／`compatible`／`codex` family；错误值和不支持的组合在快照封存前拒绝。显式协议完整冻结并参与 digest；普通 family 缺省仍使用 Chat Completions，Codex 来源显式声明固定 Responses，不能封存其它协议。快照不补字段以保持既有 hash。协议独立于模型名称和 endpoint，不自动探测或回退。验证见[配置测试](../../test/isolated/config/config.test.ts)。
 
 模型可选 `models[].modelCapabilities` 是闭合的显式元数据对象，仅允许 `contextWindowTokens` 和 `maxOutputTokens`，每个已提供值必须为正安全整数；未知字段、无效类型或数值在快照封存时拒绝，凭据正文仍先受原过滤约束。实际配置读取、四层合并后，这两字段随所选模型完整克隆、冻结并参与原 canonical digest。未提供该对象时不注入默认字段，原快照与 hash 保持。Service 沿同一 `createConfigurationSnapshot` 封存，TUI 从准确原 Run 的模型配置读取容量；不能因原文件允许保留 unknown 字段就绕过快照白名单。
 
@@ -51,6 +51,8 @@ Evidence: twelve focused tests use actual temporary files, two real Bun processe
 ## Private MCP sources and approval metadata
 
 `readMcpSources({profilePath,workspacePath?,scope,variables?,maxBytes?,now?})` 是独立 host leaf。用户源固定为选定 Profile 的 `mcp.json`，项目源固定为实际 canonical Workspace 的 `.kite-code/mcp.json`；没有 home 发现、旧数据迁移、连接、Model 或 vault 端口。可信宿主提供准确 `scope {profileId,storeId,sessionId,workspaceId}` 和无 symlink 的 canonical 根目录。读取不创建目录、文件或锁。文件实际字节限额默认 1 MiB、最高 8 MiB，JSON 深度有限；没有整个 Server 目录的累计项数限额。
+
+用户级设置另接受闭合 `McpUserSourceScope {mode:user,profileId,storeId,sessionId:null,workspaceId:null}`，不接 Workspace 路径、不读取项目源或项目批准，不借用 Session；读取集和写锁同样排除项目批准文件，损坏、变动或被锁定的项目批准不阻断用户级增删和凭据绑定。`userMcpSourceBinding` 与 `writeUserMcpSourceCredentialBinding` 使用独立 user kind／持久 scope 和真实 HostMutation proof；原 Session／Workspace 绑定不自动扩大。实际 Run 复用全局用户凭据时仍核准确用户源、原 HostMutation 与完整绑定摘要，再执行本次权限检查。原来源读取和修改的非秘密 grammar、路径安全、CAS、未知发布及恢复约束保持。
 
 返回的 `user/workspace/approvals/bindings/entries` 是冻结的私人事实，包含完整 raw entry 与实际解析后的 transport，不能复制进 Query、Model 或普通 Run snapshot。只有 `registry {revision,servers,errors}` 及安全 `readSet` 可投影：Server 包含稳定摘要 ID、有限显示名、transport 类型、source kind/path digest/root identity、raw/transport 摘要、enabled/source-admitted/reason。这里的 admitted 只表示来源声明、项目批准及认证绑定资格，实际网络/guardian availability、当前 Tool 权限和最后派发许可仍由宿主独立检查。URL、command、args、env、authRef 和 secret body 不进入 registry。非法文件的文本不被公开；解析/路径/字节错误局部化。
 

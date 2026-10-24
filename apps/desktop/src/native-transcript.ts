@@ -511,14 +511,12 @@ export function desktopTranscript({
         text:
           run.reason === 'context_source_unavailable'
             ? '无法读取工作区的项目说明。请检查工作区路径及 AGENTS.md、CLAUDE.md 的访问权限后重试。'
-            : (run.reason ?? ''),
+            : '本轮执行未完成。原消息已保留，请核对任务状态后重新发送。',
         settled: true,
         status: 'failed',
         failure: {
           summary:
-            run.reason === 'context_source_unavailable'
-              ? '工作区上下文读取失败'
-              : (run.reason ?? '本轮未完成。'),
+            run.reason === 'context_source_unavailable' ? '工作区上下文读取失败' : '本轮回复未完成',
           ...(run.reason ? { reasonCode: run.reason } : {}),
         },
       });

@@ -52,11 +52,19 @@ export interface McpSourceScope {
   sessionId: string;
   workspaceId: string | null;
 }
+/** Explicit user settings owner. No Session or Workspace is created for this scope. */
+export interface McpUserSourceScope {
+  mode: 'user';
+  profileId: string;
+  storeId: string;
+  sessionId: null;
+  workspaceId: null;
+}
 export interface McpSourceOptions {
   /** Trusted host roots, not client supplied paths. No home discovery. */
   profilePath: string;
   workspacePath?: string;
-  scope: McpSourceScope;
+  scope: McpSourceScope | McpUserSourceScope;
   /** Explicit finite non-secret variable supply; never process.env. */
   variables?: Readonly<Record<string, string>>;
   maxBytes?: number;
@@ -97,6 +105,13 @@ export type McpSourceEntryMutation =
       scope: 'user' | 'workspace';
       serverId: string;
       expectedRawEntryDigest: string;
+    }
+  | {
+      kind: 'enabled';
+      scope: 'user';
+      serverId: string;
+      expectedRawEntryDigest: string;
+      enabled: boolean;
     };
 
 export interface McpSourceEntryDeclaration {
@@ -115,7 +130,7 @@ export interface McpSourceEntryPreview {
 }
 export interface McpSourceEntryReceipt extends McpSourceEntryPreview {
   operationId: string;
-  kind: 'add' | 'remove';
+  kind: 'add' | 'remove' | 'enabled';
   oldEtag: string;
   newEtag: string;
 }
@@ -183,6 +198,22 @@ export interface McpSourceCredentialBinding extends McpSourceBinding {
   revoked: boolean;
   proof: McpSourceDecisionProof;
 }
+export interface McpUserSourceCredentialBinding extends McpSourceBinding {
+  kind: 'mcp_user_credential_binding';
+  authProfile: string;
+  purpose: 'mcp.http';
+  vaultRef: string;
+  expiresAt: number;
+  revoked: boolean;
+  proof: {
+    kind: 'host_mutation';
+    storeId: string;
+    subjectId: string;
+    commandId: string;
+    requestDigest: string;
+    recordedAt: number;
+  };
+}
 export interface McpSourceServer {
   id: string;
   name: string;
@@ -201,6 +232,8 @@ export interface McpPrivateSourceEntry {
   transport: JsonObject | null;
   binding: McpSourceBinding | null;
   credentialBinding: McpSourceCredentialBinding | null;
+  /** Only an explicit user HostMutation can issue this cross-Workspace user grant. */
+  userCredentialBinding?: McpUserSourceCredentialBinding | null;
 }
 
 function root(path: string, security?: WindowsPathSecurity, privateRoot = true) {
@@ -385,6 +418,21 @@ function proof(value: unknown): value is McpSourceDecisionProof {
     value.recordedAt >= 0
   );
 }
+function userProof(value: unknown): value is McpUserSourceCredentialBinding['proof'] {
+  return (
+    record(value) &&
+    closed(value, ['kind', 'storeId', 'subjectId', 'commandId', 'requestDigest', 'recordedAt']) &&
+    value.kind === 'host_mutation' &&
+    [value.storeId, value.subjectId, value.commandId].every(string) &&
+    typeof value.commandId === 'string' &&
+    /^[A-Za-z0-9_-]{1,128}$/.test(value.commandId) &&
+    typeof value.requestDigest === 'string' &&
+    digest.test(value.requestDigest) &&
+    typeof value.recordedAt === 'number' &&
+    Number.isSafeInteger(value.recordedAt) &&
+    value.recordedAt >= 0
+  );
+}
 function binding(value: JsonObject) {
   return (
     ['scopeDigest', 'sourceDigest', 'rawEntryDigest', 'transportDigest'].every(
@@ -397,9 +445,18 @@ function binding(value: JsonObject) {
 function metadata(document: McpSourceDocument, kind: 'approval' | 'binding') {
   const values = document.value?.records;
   if (document.error || !document.value || (values !== undefined && !record(values))) return null;
-  const result: Record<string, McpSourceApproval | McpSourceCredentialBinding> = {};
+  const result: Record<
+    string,
+    McpSourceApproval | McpSourceCredentialBinding | McpUserSourceCredentialBinding
+  > = {};
   for (const [key, value] of Object.entries(values ?? {})) {
-    if (!digest.test(key) || !record(value) || !binding(value) || !proof(value.proof)) return null;
+    if (
+      !digest.test(key) ||
+      !record(value) ||
+      !binding(value) ||
+      !(value.kind === 'mcp_user_credential_binding' ? userProof(value.proof) : proof(value.proof))
+    )
+      return null;
     const base = [
       'kind',
       'scopeDigest',
@@ -418,7 +475,7 @@ function metadata(document: McpSourceDocument, kind: 'approval' | 'binding') {
         return null;
     } else if (
       !closed(value, [...base, 'authProfile', 'purpose', 'vaultRef', 'expiresAt', 'revoked']) ||
-      value.kind !== 'mcp_credential_binding' ||
+      !['mcp_credential_binding', 'mcp_user_credential_binding'].includes(value.kind as string) ||
       !string(value.authProfile) ||
       value.purpose !== 'mcp.http' ||
       typeof value.vaultRef !== 'string' ||
@@ -437,7 +494,10 @@ function metadata(document: McpSourceDocument, kind: 'approval' | 'binding') {
       })
     )
       return null;
-    result[key] = value as unknown as McpSourceApproval | McpSourceCredentialBinding;
+    result[key] = value as unknown as
+      | McpSourceApproval
+      | McpSourceCredentialBinding
+      | McpUserSourceCredentialBinding;
   }
   return result;
 }
@@ -566,16 +626,29 @@ export function readMcpSources(options: McpSourceOptions) {
     ...options,
     windowsPathSecurity: options.windowsPathSecurity ?? defaultWindowsPathSecurity(),
   };
+  const globalUser = 'mode' in options.scope && options.scope.mode === 'user';
   if (
-    !closed(options.scope as unknown as JsonObject, [
-      'profileId',
-      'storeId',
-      'sessionId',
-      'workspaceId',
-    ]) ||
-    ![options.scope.profileId, options.scope.storeId, options.scope.sessionId].every(string) ||
-    (options.scope.workspaceId !== null && !string(options.scope.workspaceId)) ||
-    !!options.workspacePath !== (options.scope.workspaceId !== null)
+    globalUser
+      ? !closed(options.scope as unknown as JsonObject, [
+          'mode',
+          'profileId',
+          'storeId',
+          'sessionId',
+          'workspaceId',
+        ]) ||
+        ![options.scope.profileId, options.scope.storeId].every(string) ||
+        options.scope.sessionId !== null ||
+        options.scope.workspaceId !== null ||
+        options.workspacePath !== undefined
+      : !closed(options.scope as unknown as JsonObject, [
+          'profileId',
+          'storeId',
+          'sessionId',
+          'workspaceId',
+        ]) ||
+        ![options.scope.profileId, options.scope.storeId, options.scope.sessionId].every(string) ||
+        (options.scope.workspaceId !== null && !string(options.scope.workspaceId)) ||
+        !!options.workspacePath !== (options.scope.workspaceId !== null)
   )
     fail('mcp_source_scope_invalid');
   const profile = root(options.profilePath, options.windowsPathSecurity);
@@ -589,7 +662,9 @@ export function readMcpSources(options: McpSourceOptions) {
     profile: profile.identity,
     workspace: workspace?.identity ?? null,
   });
-  const scopeDigest = hash({ persistentScopeDigest, sessionId: options.scope.sessionId });
+  const scopeDigest = globalUser
+    ? hash({ domain: 'kite-user-mcp-source-read-v1', persistentScopeDigest })
+    : hash({ persistentScopeDigest, sessionId: options.scope.sessionId });
   const variables = structuredClone(options.variables ?? {});
   if (Object.keys(variables).length > 128) fail('mcp_variables_invalid');
   for (const [key, value] of Object.entries(variables)) {
@@ -614,11 +689,18 @@ export function readMcpSources(options: McpSourceOptions) {
       : null;
   const approvalPath = join(profile.path, 'mcp-approvals.json');
   const bindingPath = join(profile.path, 'mcp-auth-bindings.json');
-  const approvals = inspect(
-    approvalPath,
-    identity('user', approvalPath, profile.identity),
-    options,
-  );
+  // Project approvals have no authority in the global user owner. Keep the
+  // shared private result shape without opening that file or binding its bytes.
+  const approvals: McpSourceDocument = globalUser
+    ? {
+        path: approvalPath,
+        identity: identity('user', approvalPath, profile.identity),
+        exists: false,
+        etag: null,
+        value: {},
+        error: null,
+      }
+    : inspect(approvalPath, identity('user', approvalPath, profile.identity), options);
   const bindings = inspect(bindingPath, identity('user', bindingPath, profile.identity), options);
   const approvalRecords = metadata(approvals, 'approval');
   const bindingRecords = metadata(bindings, 'binding');
@@ -661,6 +743,7 @@ export function readMcpSources(options: McpSourceOptions) {
     let transport: JsonObject | null = null;
     let exactBinding: McpSourceBinding | null = null;
     let authBinding: McpSourceCredentialBinding | null = null;
+    let userAuthBinding: McpUserSourceCredentialBinding | null = null;
     try {
       if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(name)) fail('mcp_server_invalid');
       transport = normalize(raw, variables);
@@ -685,9 +768,19 @@ export function readMcpSources(options: McpSourceOptions) {
       const auth = transport.auth as JsonObject;
       if (auth.type === 'credential') {
         if (!bindingRecords) fail('mcp_credential_binding_unavailable');
-        const saved = bindingRecords[hash({ ...exactBinding, authProfile: auth.profile })] as
-          | McpSourceCredentialBinding
-          | undefined;
+        const userBinding =
+          document === user
+            ? userMcpSourceBinding(options, { server, binding: exactBinding })
+            : null;
+        const savedUser = userBinding
+          ? bindingRecords[hash({ ...userBinding, authProfile: auth.profile })]
+          : undefined;
+        const saved =
+          (savedUser?.kind === 'mcp_user_credential_binding' ? savedUser : undefined) ??
+          (bindingRecords[hash({ ...exactBinding, authProfile: auth.profile })] as
+            | McpSourceCredentialBinding
+            | McpUserSourceCredentialBinding
+            | undefined);
         if (!saved || saved.vaultRef !== auth.credentialRef)
           fail('mcp_credential_binding_required');
         if (saved.proof.storeId !== options.scope.storeId)
@@ -696,13 +789,21 @@ export function readMcpSources(options: McpSourceOptions) {
         const now = options.now?.() ?? Date.now();
         if (!Number.isSafeInteger(now) || now < 0) fail('mcp_credential_clock_unavailable');
         if (now >= saved.expiresAt) fail('mcp_credential_binding_expired');
-        authBinding = saved;
+        if (saved.kind === 'mcp_user_credential_binding') userAuthBinding = saved;
+        else authBinding = saved;
       }
       server.admitted = true;
     } catch (error) {
       server.reason = error instanceof ConfigurationError ? error.code : 'mcp_server_invalid';
     }
-    entries.push({ server, raw, transport, binding: exactBinding, credentialBinding: authBinding });
+    entries.push({
+      server,
+      raw,
+      transport,
+      binding: exactBinding,
+      credentialBinding: authBinding,
+      userCredentialBinding: userAuthBinding,
+    });
   }
   const servers = entries.map((entry) => entry.server);
   const registry = {
@@ -718,6 +819,23 @@ export function readMcpSources(options: McpSourceOptions) {
   return freeze({ user, workspace: project, approvals, bindings, readSet, registry, entries });
 }
 
+/** Separate user grant domain. Existing Workspace/Interaction bindings keep their original scope. */
+export function userMcpSourceBinding(
+  options: Pick<McpSourceOptions, 'scope'>,
+  entry: Pick<McpPrivateSourceEntry, 'server' | 'binding'>,
+): McpSourceBinding | null {
+  if (entry.server.source.kind !== 'user' || !entry.binding) return null;
+  return {
+    ...entry.binding,
+    scopeDigest: hash({
+      domain: 'kite-user-mcp-credential-v1',
+      profileId: options.scope.profileId,
+      storeId: options.scope.storeId,
+      source: entry.server.source,
+    }),
+  };
+}
+
 /** Exact host-approved metadata only. Never accepts a config ref as credential authority. */
 export function writeMcpSourceMetadata(
   options: McpSourceOptions & {
@@ -726,6 +844,34 @@ export function writeMcpSourceMetadata(
     /** Caller verifies the actual accepted ordinary user decision; policy allow is insufficient. */
     validateDecision: (proof: McpSourceDecisionProof, binding: McpSourceBinding) => boolean;
     /** Host notification after durable publication. Failure is publication_unknown, never retry. */
+    afterPublication?: (receipt: { etag: string; recordKey: string }) => void;
+  },
+) {
+  return writeMcpMetadata(options);
+}
+export function writeUserMcpSourceCredentialBinding(
+  options: McpSourceOptions & {
+    expectedReadSet: McpSourceReadSet;
+    value: McpUserSourceCredentialBinding;
+    validateUserDecision: (
+      proof: McpUserSourceCredentialBinding['proof'],
+      binding: McpSourceBinding,
+    ) => boolean;
+    afterPublication?: (receipt: { etag: string; recordKey: string }) => void;
+  },
+) {
+  if (!('mode' in options.scope) || options.scope.mode !== 'user') fail('mcp_source_scope_invalid');
+  return writeMcpMetadata(options);
+}
+function writeMcpMetadata(
+  options: McpSourceOptions & {
+    expectedReadSet: McpSourceReadSet;
+    value: McpSourceApproval | McpSourceCredentialBinding | McpUserSourceCredentialBinding;
+    validateDecision?: (proof: McpSourceDecisionProof, binding: McpSourceBinding) => boolean;
+    validateUserDecision?: (
+      proof: McpUserSourceCredentialBinding['proof'],
+      binding: McpSourceBinding,
+    ) => boolean;
     afterPublication?: (receipt: { etag: string; recordKey: string }) => void;
   },
 ) {
@@ -740,17 +886,27 @@ export function writeMcpSourceMetadata(
     if (mcpCanonical(current.readSet) !== mcpCanonical(options.expectedReadSet))
       fail('mcp_source_conflict');
     const entry = current.entries.find((candidate) => candidate.server.id === value.serverId);
-    if (!entry?.binding || mcpCanonical(entry.binding) !== mcpCanonical(pickBinding(value)))
+    const selectedBinding =
+      entry && value.kind === 'mcp_user_credential_binding'
+        ? userMcpSourceBinding(options, entry)
+        : entry?.binding;
+    if (
+      !entry ||
+      !selectedBinding ||
+      mcpCanonical(selectedBinding) !== mcpCanonical(pickBinding(value))
+    )
       fail('mcp_source_binding_conflict');
     if (
       value.proof.storeId !== options.scope.storeId ||
-      value.proof.sessionId !== options.scope.sessionId ||
-      options.validateDecision(value.proof, entry.binding) !== true
+      (value.kind === 'mcp_user_credential_binding'
+        ? options.validateUserDecision?.(value.proof, selectedBinding) !== true
+        : value.proof.sessionId !== options.scope.sessionId ||
+          options.validateDecision?.(value.proof, selectedBinding) !== true)
     )
       fail('mcp_source_decision_invalid');
     if (value.kind === 'mcp_source_approval' && entry.server.source.kind !== 'workspace')
       fail('mcp_source_approval_not_required');
-    if (value.kind === 'mcp_credential_binding') {
+    if (value.kind === 'mcp_credential_binding' || value.kind === 'mcp_user_credential_binding') {
       const auth = entry.transport?.auth as JsonObject | undefined;
       if (
         auth?.type !== 'credential' ||
@@ -781,7 +937,9 @@ export function writeMcpSourceMetadata(
       [
         original.user.path,
         original.workspace?.path,
-        original.approvals.path,
+        'mode' in options.scope && options.scope.mode === 'user'
+          ? undefined
+          : original.approvals.path,
         original.bindings.path,
       ].filter((path): path is string => !!path),
     ),
@@ -1026,11 +1184,19 @@ export function writeMcpSourceEntry(
       if (error instanceof ConfigurationError) throw error;
       fail('mcp_server_invalid');
     }
-  } else if (mutation.kind === 'remove') {
-    exact(mutation, ['kind', 'scope', 'serverId', 'expectedRawEntryDigest']);
+  } else if (mutation.kind === 'remove' || mutation.kind === 'enabled') {
+    exact(mutation, [
+      'kind',
+      'scope',
+      'serverId',
+      'expectedRawEntryDigest',
+      ...(mutation.kind === 'enabled' ? ['enabled'] : []),
+    ]);
     if (
       !/^mcp-[a-f0-9]{64}$/.test(mutation.serverId) ||
-      !digest.test(mutation.expectedRawEntryDigest)
+      !digest.test(mutation.expectedRawEntryDigest) ||
+      (mutation.kind === 'enabled' &&
+        (mutation.scope !== 'user' || typeof mutation.enabled !== 'boolean'))
     )
       fail('mcp_source_mutation_invalid');
   } else fail('mcp_source_mutation_invalid');
@@ -1044,7 +1210,7 @@ export function writeMcpSourceEntry(
   const preview = (state: ReturnType<typeof readMcpSources>): McpSourceEntryPreview => {
     const document = mutation.scope === 'user' ? state.user : state.workspace;
     if (!document) fail('mcp_source_scope_invalid');
-    if (mutation.kind === 'remove') {
+    if (mutation.kind !== 'add') {
       const impact = sourceEntryPreview(state, mutation, options.variables ?? {});
       if (impact.target.rawEntryDigest !== mutation.expectedRawEntryDigest)
         fail('mcp_source_entry_conflict');
@@ -1063,7 +1229,9 @@ export function writeMcpSourceEntry(
       [
         original.user.path,
         original.workspace?.path,
-        original.approvals.path,
+        'mode' in options.scope && options.scope.mode === 'user'
+          ? undefined
+          : original.approvals.path,
         original.bindings.path,
       ].filter((v): v is string => !!v),
     ),
@@ -1092,8 +1260,14 @@ export function writeMcpSourceEntry(
       old.text,
       modify(
         old.text,
-        ['mcpServers', editName],
-        mutation.kind === 'add' ? added : undefined,
+        mutation.kind === 'enabled'
+          ? ['mcpServers', editName, 'enabled']
+          : ['mcpServers', editName],
+        mutation.kind === 'add'
+          ? added
+          : mutation.kind === 'enabled'
+            ? mutation.enabled
+            : undefined,
         {}, // Minimal syntax edit: do not reformat unrelated declarations or their raw env.
       ),
     );

@@ -58,6 +58,7 @@ import type { ScheduledTaskRunner } from './scheduled-task-runner';
 import { NativeSessionManagement } from './session-management';
 import { NativeSkillCatalogueReads } from './skill-catalogue-reads';
 import { NativeToolMessages } from './tool-messages';
+import { NativeUserMcpSettings } from './user-mcp-settings';
 import { NativeWorkspaceRemovalPort } from './workspace-removal';
 
 export class NativeCaller {
@@ -110,6 +111,7 @@ export class NativeCaller {
   private readonly inputFiles = new NativeInputFiles();
   private readonly imageReads: NativeInputImageReads;
   private readonly mcp: NativeMcpSettings;
+  private readonly userMcp: NativeUserMcpSettings;
   private readonly skills: NativeSkillCatalogueReads;
   private readonly extensions: NativeExtensions;
   private readonly jobOutput: NativeJobOutputReads;
@@ -438,17 +440,8 @@ export class NativeCaller {
       };
     });
     this.skills = new NativeSkillCatalogueReads(client, () => {
-      const scope = current(),
-        snapshot = this.controller.snapshot;
-      return scope && snapshot?.sessionId === scope.sessionId
-        ? {
-            generation: scope.generation,
-            viewSelection: scope.selection,
-            historyEpoch: this.historyEpoch,
-            storeId: scope.storeId,
-            sessionId: scope.sessionId,
-            workspaceId: snapshot.view.session.workspaceId,
-          }
+      return !this.closed && client.serverInfo?.storeId
+        ? { generation: this.generation, storeId: client.serverInfo.storeId }
         : undefined;
     });
     this.attachmentReads = new NativeInteractionAttachmentReads(
@@ -488,6 +481,18 @@ export class NativeCaller {
     this.providers = new NativeProviderSettings(
       client,
       configurationScope,
+      () => this.changed(),
+      privateData,
+    );
+    this.userMcp = new NativeUserMcpSettings(
+      client,
+      () =>
+        !this.closed && this.client.serverInfo?.storeId
+          ? {
+              generation: this.generation,
+              storeId: this.client.serverInfo.storeId,
+            }
+          : undefined,
       () => this.changed(),
       privateData,
     );
@@ -598,7 +603,7 @@ export class NativeCaller {
       throw new ClientError('child_session_readonly');
     return snapshot;
   }
-  private releaseReads() {
+  private releaseReads(includeGlobalSettings = true) {
     this.inputQueue.release();
     this.environment.release();
     this.controller.cancelInteractionRead();
@@ -607,7 +612,10 @@ export class NativeCaller {
     this.inputConfiguration.release();
     this.providers.release();
     this.mcp.release();
-    this.skills.release();
+    if (includeGlobalSettings) {
+      this.userMcp.release();
+      this.skills.release();
+    }
     this.extensions.release();
     this.jobOutput.release();
     this.fileChanges.release();
@@ -1033,6 +1041,7 @@ export class NativeCaller {
       modelSettingsSubmissions: this.configuration.submissions,
       providerSettingsSubmissions: this.providers.submissions,
       mcpSubmissions: this.mcp.submissions,
+      userMcpSubmissions: this.userMcp.submissions,
       mcpUnavailable: this.mcp.storageUnavailable,
       inputSubmissions: this.input.submissions.map(inputMetadata),
       ...this.callerState(),
@@ -1178,9 +1187,15 @@ export class NativeCaller {
       return this.state();
     }
     if (
+      request.method.startsWith('settings.mcp.') &&
+      !['settings.mcp.lookup', 'settings.mcp.clear', 'settings.mcp.close'].includes(request.method)
+    )
+      throw new ClientError('mcp_user_scope_required');
+    if (
       !request.method.startsWith('background.') &&
       !request.method.startsWith('interactionHistory.') &&
       !request.method.startsWith('extensions.') &&
+      !request.method.startsWith('settings.userMcp.') &&
       ![
         // These reads use the exact retained selection and report unavailable
         // permissions while metadata refreshes; they must not wait for that GET.
@@ -1457,6 +1472,27 @@ export class NativeCaller {
         this.skills.close(request.readId);
         result = null;
         break;
+      case 'settings.userMcp.read':
+        return this.userMcp.read();
+      case 'settings.userMcp.close':
+        this.userMcp.release();
+        return this.state();
+      case 'settings.userMcp.submit':
+        return this.userMcp.submit(request.observationId, request.operation);
+      case 'settings.userMcp.lookup':
+        return this.userMcp.lookup(request.commandId);
+      case 'settings.userMcp.cancel':
+        return this.userMcp.cancel(request.commandId);
+      case 'settings.userMcp.clear':
+        this.userMcp.clear(request.commandId);
+        return this.state();
+      case 'settings.userMcp.tools':
+        return this.userMcp.tools(
+          request.observationId,
+          request.serverId,
+          request.connectionGeneration,
+          request.afterIndex,
+        );
       case 'settings.mcp.read':
         result = await this.mcp.read();
         break;
@@ -1767,7 +1803,7 @@ export class NativeCaller {
           result = this.state();
           break;
         }
-        this.releaseReads();
+        this.releaseReads(false);
         this.lastView = undefined;
         this.contextWorkspace = undefined;
         this.selection++;
@@ -2413,7 +2449,7 @@ export class NativeCaller {
         result.workspaceId ||
       this.lastView?.snapshot.view.session.workspaceId === result.workspaceId
     ) {
-      this.releaseReads();
+      this.releaseReads(false);
       this.selected = undefined;
       this.lastView = undefined;
       this.contextWorkspace = undefined;

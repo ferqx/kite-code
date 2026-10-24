@@ -2232,15 +2232,19 @@ export class SqliteOperations {
           const meta = this.metadata();
           const value = {
             session: this.session(session),
-            // A bounded history must not hide current work after a long conversation.
-            // Union identities once, then preserve chronological display order.
+            // Keep the original protocol anchor as well as current work after a long
+            // conversation. Union identities once in the same reading transaction.
             runs: this.rows(
               `SELECT * FROM run WHERE rowid IN (
                 SELECT rowid FROM run WHERE session_id=? AND is_active=1
                 UNION SELECT rowid FROM (
+                  SELECT rowid FROM run WHERE session_id=? ORDER BY rowid LIMIT 1
+                )
+                UNION SELECT rowid FROM (
                   SELECT rowid FROM run WHERE session_id=? ORDER BY rowid DESC LIMIT 200
                 )
               ) ORDER BY rowid`,
+              id,
               id,
               id,
             ).map((row) => this.runRecord(row)),

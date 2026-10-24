@@ -23,7 +23,7 @@ import {
   nativeWindowAppearanceChannel,
   nativeWindowMaximizeChannel,
 } from '../src/native-bridge';
-import { parseNativeMcpOperation } from './mcp-input';
+import { parseNativeMcpOperation, parseNativeUserMcpOperation } from './mcp-input';
 import type { NativeCaller } from './native-caller';
 import { parseScheduledTaskInput } from './scheduled-tasks';
 import { saveStartupDiagnosticReport } from './startup-report';
@@ -96,12 +96,19 @@ const fields: Record<NativeRequest['method'], readonly string[]> = {
   'background.child.open': ['observationId', 'executionId', 'readId', 'cursor'],
   'background.child.read': ['readId', 'offset', 'limit'],
   'background.child.close': ['readId'],
-  'settings.skills.open': ['readId', 'viewSelection', 'historyEpoch'],
+  'settings.skills.open': ['readId'],
   'settings.skills.next': ['readId'],
   'settings.skills.close': ['readId'],
   'jobOutput.open': ['readId', 'executionId', 'viewSelection', 'historyEpoch'],
   'jobOutput.next': ['readId'],
   'jobOutput.close': ['readId'],
+  'settings.userMcp.read': [],
+  'settings.userMcp.close': [],
+  'settings.userMcp.submit': ['observationId', 'operation'],
+  'settings.userMcp.lookup': ['commandId'],
+  'settings.userMcp.cancel': ['commandId'],
+  'settings.userMcp.clear': ['commandId'],
+  'settings.userMcp.tools': ['observationId', 'serverId', 'connectionGeneration', 'afterIndex'],
   'settings.mcp.read': [],
   'settings.mcp.close': [],
   'settings.mcp.sources': ['observationId', 'afterId'],
@@ -439,6 +446,19 @@ export function decodeNativeRequest(value: unknown): NativeRequest {
     input.surface !== 'environment'
   )
     throw Error('invalid_native_request');
+  if (method === 'settings.userMcp.submit') parseNativeUserMcpOperation(input.operation);
+  if (
+    method === 'settings.userMcp.tools' &&
+    (typeof input.serverId !== 'string' ||
+      !/^mcp-[a-f0-9]{64}$/.test(input.serverId) ||
+      !Number.isSafeInteger(input.connectionGeneration) ||
+      Number(input.connectionGeneration) < 1 ||
+      (input.afterIndex !== undefined &&
+        (!Number.isSafeInteger(input.afterIndex) ||
+          Number(input.afterIndex) < 0 ||
+          Number(input.afterIndex) > 16383)))
+  )
+    throw Error('invalid_native_request');
   if (method.startsWith('settings.mcp.')) {
     if (method === 'settings.mcp.submit') parseNativeMcpOperation(input.operation);
     if (method === 'settings.mcp.removePreview')
@@ -478,7 +498,6 @@ export function decodeNativeRequest(value: unknown): NativeRequest {
   }
   if (
     (method === 'interactionHistory.open' ||
-      method === 'settings.skills.open' ||
       method === 'jobOutput.open' ||
       method === 'fileChanges.list' ||
       method === 'fileTargets.list' ||
@@ -531,13 +550,17 @@ export function decodeNativeRequest(value: unknown): NativeRequest {
           input.secret !== undefined ||
           !Array.isArray(operation.modelNames) ||
           operation.modelNames.length !== 0)) ||
-      !['openai', 'deepseek', 'compatible', 'ollama'].includes(String(operation.provider)) ||
+      !['openai', 'deepseek', 'compatible', 'ollama', 'codex'].includes(
+        String(operation.provider),
+      ) ||
       (operation.protocol !== undefined &&
         operation.protocol !== 'chat-completions' &&
         operation.protocol !== 'responses') ||
       (operation.protocol === 'responses' &&
         operation.provider !== 'openai' &&
-        operation.provider !== 'compatible') ||
+        operation.provider !== 'compatible' &&
+        operation.provider !== 'codex') ||
+      (operation.provider === 'codex' && operation.protocol !== 'responses') ||
       !(
         operation.connectionId === null ||
         (typeof operation.connectionId === 'string' &&

@@ -150,6 +150,7 @@ export function NativeModelSettings({
         submission.workspaceId === facts.workspaceId &&
         ['submitting', 'unknown'].includes(submission.phase),
     );
+  const unresolvedSubmissions = submissions.filter((submission) => submission.phase === 'unknown');
   const groups = new Map<string, NativeModelSettingsFacts['models']>();
   const names = new Map<string, number>();
   for (const model of facts?.models ?? []) {
@@ -347,44 +348,39 @@ export function NativeModelSettings({
               <p className="settings-model-empty">尚无模型配置，请前往“提供商”连接。</p>
             )}
           </div>
-          {!canWrite && (
-            <p role="status">当前观察只读。未决提交先查询原结果，其他情况请重新读取配置。</p>
-          )}
+          {!facts.canWrite &&
+            !pending &&
+            !reading &&
+            !writing &&
+            !error &&
+            !facts.errors.length && <p role="status">当前无法修改，请刷新配置后重试。</p>}
         </>
       )}
-      {!!submissions.length && (
-        <section aria-label="模型设置提交">
-          <h3>原模型设置提交</h3>
-          {submissions.map((submission) => (
+      {!!unresolvedSubmissions.length && (
+        <section aria-label="待确认的模型更改">
+          {unresolvedSubmissions.map((submission) => (
             <article key={submission.commandId}>
-              <p>
-                原 Store {submission.storeId} ·{' '}
-                {submission.scope === 'user' ? '用户配置' : `项目配置 ${submission.workspaceId}`} ·{' '}
-                {submission.operation.modelId} ·{' '}
+              <p role="status">
                 {submission.operation.kind === 'default'
-                  ? '设为默认'
+                  ? '默认模型'
                   : submission.operation.enabled
-                    ? '启用'
-                    : '禁用'}{' '}
-                · {submission.phase}
+                    ? '模型启用'
+                    : '模型禁用'}
+                更改结果待确认。
               </p>
-              <p>原提交 {submission.commandId}</p>
-              {submission.error && <p role="alert">{submission.error}</p>}
-              {submission.phase === 'unknown' && (
-                <button
-                  type="button"
-                  disabled={writing || reading}
-                  onClick={() =>
-                    void write({
-                      method: 'settings.models.lookup',
-                      generation,
-                      commandId: submission.commandId,
-                    })
-                  }
-                >
-                  查询原提交
-                </button>
-              )}
+              <button
+                type="button"
+                disabled={writing || reading}
+                onClick={() =>
+                  void write({
+                    method: 'settings.models.lookup',
+                    generation,
+                    commandId: submission.commandId,
+                  })
+                }
+              >
+                查看结果
+              </button>
             </article>
           ))}
         </section>

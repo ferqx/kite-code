@@ -194,6 +194,23 @@ test('opening model settings loads the retained list once, groups all models and
     expect(f.menuItem('a')!.getAttribute('aria-checked')).toBe('true');
     expect(f.menuItem('c')).toBeNull();
     expect(f.menuItem('broken')).toBeNull();
+    await f.render(
+      undefined,
+      (['applied', 'failed', 'submitting'] as const).map((phase) => ({
+        kind: 'settings.models.submission',
+        commandId: `internal-${phase}-command`,
+        storeId: 'internal-store',
+        scope: 'user',
+        observationId: 7,
+        operation: { kind: 'enabled', modelId: 'internal-model', enabled: false },
+        phase,
+        error: 'internal_history_error',
+      })),
+    );
+    expect(f.element.querySelector('[aria-label="模型设置提交"]')).toBeNull();
+    expect(f.element.querySelector('[aria-label="待确认的模型更改"]')).toBeNull();
+    for (const text of ['原模型设置提交', '原 Store', 'internal-', 'internal_history_error'])
+      expect(f.element.textContent).not.toContain(text);
     expect(f.calls.some((input) => input.method !== 'settings.models.read')).toBe(false);
   } finally {
     await f.close();
@@ -399,7 +416,9 @@ test('unknown submissions retain explicit original lookup across automatic selec
     await act(async () => save.resolve({ ...original, phase: 'applied' }));
     expect(reads).toBe(2);
     expect(f.saved).toBe(0);
-    expect(f.element.textContent).toContain('原提交 original');
+    expect(f.element.textContent).toContain('默认模型更改结果待确认。');
+    expect(f.element.textContent).not.toContain('原提交 original');
+    expect(f.element.textContent).not.toContain('原 Store');
     expect(f.calls.filter((input) => input.method === 'settings.models.lookup')).toHaveLength(0);
     await f.render(selected('old'), [original]);
     await act(async () =>
@@ -412,8 +431,8 @@ test('unknown submissions retain explicit original lookup across automatic selec
     expect(f.element.textContent).not.toContain('stale-new-view');
     expect(f.toggle('b').disabled).toBe(true);
     expect(f.button('默认模型').disabled).toBe(true);
-    expect(f.element.textContent).toContain('未决提交先查询原结果');
-    await act(async () => f.button('查询原提交').click());
+    expect(f.element.textContent).toContain('默认模型更改结果待确认。');
+    await act(async () => f.button('查看结果').click());
     expect(f.calls.filter((input) => input.method === 'settings.models.lookup')).toEqual([
       { method: 'settings.models.lookup', generation: 1, commandId: 'original' },
     ]);

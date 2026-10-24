@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   AgentError,
@@ -24,6 +24,8 @@ import {
   SkillCataloguePageSchema,
   type SkillCatalogueQuerySchema,
   skillUnavailableReasons,
+  UserSkillCataloguePageSchema,
+  type UserSkillCatalogueQuerySchema,
 } from './http/schema/skill-catalogue';
 import type { PermissionManagementPort } from './permission-management';
 import { createConfiguredSkillSource } from './skill-source';
@@ -36,16 +38,23 @@ import { type UserConfiguration, withoutProjectModels } from './user-configurati
 
 type Query = z.infer<typeof SkillCatalogueQuerySchema>;
 export type SkillCataloguePage = z.infer<typeof SkillCataloguePageSchema>;
+export type UserSkillCataloguePage = z.infer<typeof UserSkillCataloguePageSchema>;
 export interface SkillCatalogueContext extends Query {
   runtime: AgentRuntime;
   permissions?: PermissionManagementPort;
   subjectId: string;
   workspaceId: string;
 }
+export interface UserSkillCatalogueContext extends z.infer<typeof UserSkillCatalogueQuerySchema> {
+  runtime: AgentRuntime;
+  subjectId: string;
+}
 export interface SkillCatalogueSource {
   /** This source supplies the separately validated manual Workflow projection. */
   readonly supportsWorkflow?: true;
   list(context: SkillCatalogueContext): Promise<SkillCataloguePage>;
+  /** Global knowledge metadata from trusted user locations, independent of a Workspace or Session. */
+  listUser?(context: UserSkillCatalogueContext): Promise<UserSkillCataloguePage>;
   /** Trusted host lifecycle; omitted by metadata-only sources without owned resources. */
   dispose?(): Promise<void>;
 }
@@ -70,6 +79,56 @@ export function unavailableSkillCatalogue(
     complete: true,
   };
 }
+export function unavailableUserSkillCatalogue(
+  context: z.infer<typeof UserSkillCatalogueQuerySchema>,
+  reason: NonNullable<UserSkillCataloguePage['reason']>,
+): UserSkillCataloguePage {
+  const revision = hash([context.storeId, 'user', reason]);
+  if (context.revision && context.revision !== revision)
+    throw new AgentError('skill_catalogue_changed');
+  if (context.afterId) throw new AgentError('invalid_skill_catalogue_query');
+  return {
+    version: 1,
+    scope: 'user',
+    storeId: context.storeId,
+    revision,
+    availability: 'unavailable',
+    reason,
+    entries: [],
+    nextAfterId: null,
+    complete: true,
+  };
+}
+function paginate<Entry extends SkillCataloguePage['entries'][number]>(
+  context: Query,
+  page: { entries: Entry[]; nextAfterId: string | null; complete: boolean; revision: string },
+  entries: readonly Entry[],
+) {
+  if (context.revision && context.revision !== page.revision)
+    throw new AgentError('skill_catalogue_changed');
+  if (context.afterId && !entries.some((entry) => entry.id === context.afterId))
+    throw new AgentError('invalid_skill_catalogue_query');
+  const pending = entries.filter((entry) => !context.afterId || entry.id > context.afterId);
+  const maximum = context.byteLimit ?? 131072;
+  for (const entry of pending) {
+    if (page.entries.length >= (context.limit ?? Number.MAX_SAFE_INTEGER)) break;
+    const candidate = {
+      ...page,
+      entries: [...page.entries, entry],
+      nextAfterId: entry.id,
+      complete: false,
+    };
+    if (Buffer.byteLength(JSON.stringify(candidate)) > maximum) {
+      if (!page.entries.length) throw new AgentError('skill_catalogue_page_too_small');
+      break;
+    }
+    page.entries.push(entry);
+  }
+  if (page.entries.length < pending.length) {
+    page.nextAfterId = page.entries.at(-1)!.id;
+    page.complete = false;
+  }
+}
 /** Reads configured knowledge only; never resolves a Model, credential or executor. */
 export function createDefaultSkillCatalogueSource(options: {
   defaults?: JsonObject;
@@ -92,13 +151,15 @@ export function createDefaultSkillCatalogueSource(options: {
   const explicit = options.explicit;
   const allowedCapabilities = [...(options.allowedCapabilities ?? [])];
   const knowledgeScope = createKnowledgeReadScope();
-  const pending = new Set<Promise<SkillCataloguePage>>();
+  const pending = new Set<Promise<SkillCataloguePage | UserSkillCataloguePage>>();
   const retainedPreparationFailures = new Set<
     ConfigurationPreparationCleanupError | KnowledgeReadCleanupError
   >();
   let sealed = false;
   let disposal: Promise<void> | undefined;
-  const isCleanupFailure = (error: unknown) =>
+  const isCleanupFailure = (
+    error: unknown,
+  ): error is ConfigurationPreparationCleanupError | KnowledgeReadCleanupError =>
     error instanceof KnowledgeReadCleanupError ||
     error instanceof ConfigurationPreparationCleanupError;
   const list = async (context: SkillCatalogueContext): Promise<SkillCataloguePage> => {
@@ -308,11 +369,6 @@ export function createDefaultSkillCatalogueSource(options: {
       entries,
       ...(context.workflow === 'manual' ? { workflowFacts } : {}),
     });
-    if (context.revision && context.revision !== revision)
-      throw new AgentError('skill_catalogue_changed');
-    if (context.afterId && !entries.some((entry) => entry.id === context.afterId))
-      throw new AgentError('invalid_skill_catalogue_query');
-    const pending = entries.filter((entry) => !context.afterId || entry.id > context.afterId);
     const page: SkillCataloguePage = {
       version: 1,
       storeId: context.storeId,
@@ -324,47 +380,101 @@ export function createDefaultSkillCatalogueSource(options: {
       nextAfterId: null,
       complete: true,
     };
-    const maximum = context.byteLimit ?? 131072;
-    for (const entry of pending) {
-      if (page.entries.length >= (context.limit ?? Number.MAX_SAFE_INTEGER)) break;
-      const candidate = {
-        ...page,
-        entries: [...page.entries, entry],
-        nextAfterId: entry.id,
-        complete: false,
-      };
-      if (Buffer.byteLength(JSON.stringify(candidate)) > maximum) {
-        if (!page.entries.length) throw new AgentError('skill_catalogue_page_too_small');
-        break;
-      }
-      page.entries.push(entry);
-    }
-    if (page.entries.length < pending.length) {
-      page.nextAfterId = page.entries.at(-1)!.id;
-      page.complete = false;
-    }
+    paginate(context, page, entries);
     return SkillCataloguePageSchema.parse(page);
   };
+  const listUser = async (context: UserSkillCatalogueContext): Promise<UserSkillCataloguePage> => {
+    if (context.afterId && !context.revision) throw new AgentError('invalid_skill_catalogue_query');
+    if ((await context.runtime.getMetadata()).storeId !== context.storeId)
+      throw new AgentError('store_identity_mismatch');
+    let effective: ReturnType<typeof resolveConfiguration>;
+    try {
+      effective = resolveConfiguration({
+        defaults: options.defaults ?? defaultConfiguration,
+        user: options.userConfiguration.read().value,
+        explicit: explicit(),
+      });
+    } catch {
+      return unavailableUserSkillCatalogue(context, 'configuration_unavailable');
+    }
+    const toolIds =
+      effective.tools?.filter((tool) => tool.enabled !== false).map((tool) => tool.id) ?? [];
+    const source = createConfiguredSkillSource({
+      knowledgeScope,
+      userRoot: dirname(options.userConfiguration.path),
+      profile,
+      skills: effective.skills,
+      toolIds,
+      allowedCapabilities,
+    });
+    let listed: Awaited<ReturnType<typeof source.list>>;
+    try {
+      listed = await source.list();
+    } catch (error) {
+      if (isCleanupFailure(error)) throw error;
+      return unavailableUserSkillCatalogue(context, 'configuration_unavailable');
+    }
+    const entries: UserSkillCataloguePage['entries'] = listed.states.map((entry) => {
+      if (entry.source?.scope === 'project')
+        throw new AgentError('skill_catalogue_identity_mismatch');
+      return {
+        ...entry,
+        source: entry.source ? { ...entry.source, scope: 'user' as const } : null,
+        reason:
+          entry.reason &&
+          !skillUnavailableReasons.includes(
+            entry.reason as (typeof skillUnavailableReasons)[number],
+          )
+            ? 'skill_unavailable'
+            : (entry.reason as UserSkillCataloguePage['entries'][number]['reason']),
+      };
+    });
+    const page: UserSkillCataloguePage = {
+      version: 1,
+      scope: 'user',
+      storeId: context.storeId,
+      revision: hash({
+        scope: 'user',
+        storeId: context.storeId,
+        subjectId: context.subjectId,
+        skills: effective.skills ?? [],
+        toolIds,
+        allowedCapabilities,
+        entries,
+      }),
+      availability: 'available',
+      reason: null,
+      entries: [],
+      nextAfterId: null,
+      complete: true,
+    };
+    paginate(context, page, entries);
+    return UserSkillCataloguePageSchema.parse(page);
+  };
+  function admit<T extends SkillCataloguePage | UserSkillCataloguePage>(
+    operation: () => Promise<T>,
+  ) {
+    if (sealed) return Promise.reject(new AgentError('knowledge_source_closed'));
+    if (retainedPreparationFailures.size)
+      return Promise.reject(retainedPreparationFailures.values().next().value);
+    const task = operation().catch((error) => {
+      if (isCleanupFailure(error)) retainedPreparationFailures.add(error);
+      throw error;
+    });
+    pending.add(task);
+    void task.then(
+      () => pending.delete(task),
+      () => pending.delete(task),
+    );
+    return task;
+  }
   return Object.freeze({
     ...(options.workflowBindings ? { supportsWorkflow: true as const } : {}),
     list(context: SkillCatalogueContext) {
-      if (sealed) return Promise.reject(new AgentError('knowledge_source_closed'));
-      if (retainedPreparationFailures.size)
-        return Promise.reject(retainedPreparationFailures.values().next().value);
-      const task = list(context).catch((error) => {
-        if (
-          error instanceof ConfigurationPreparationCleanupError ||
-          error instanceof KnowledgeReadCleanupError
-        )
-          retainedPreparationFailures.add(error);
-        throw error;
-      });
-      pending.add(task);
-      void task.then(
-        () => pending.delete(task),
-        () => pending.delete(task),
-      );
-      return task;
+      return admit(() => list(context));
+    },
+    listUser(context: UserSkillCatalogueContext) {
+      return admit(() => listUser(context));
     },
     dispose() {
       if (disposal) return disposal;

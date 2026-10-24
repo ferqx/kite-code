@@ -418,3 +418,49 @@ test('foreign or unfinished observation Models are rejected without publishing a
     }
   }
 });
+
+test('accepted input observes a later pre-Run rejection by its original ID and preserves its safe reason without resubmission', async () => {
+  let sends = 0;
+  const reads: string[] = [];
+  const command: Command = {
+    id: 'prepare-command',
+    sessionId: 'new-session',
+    kind: 'run.start',
+    originStoreId: 'store',
+    status: 'accepted',
+    receipt: null,
+    cancelRequestedAt: null,
+  };
+  const client = {
+    serverInfo: {},
+    async startRun() {
+      sends++;
+      return structuredClone(command);
+    },
+    async getCommand(id: string) {
+      reads.push(id);
+      return structuredClone(command);
+    },
+  } as unknown as AgentClient;
+  const input = new DesktopInput({ admittedClient: client });
+  const intent = {
+    kind: 'run.start' as const,
+    expectedStoreId: 'store',
+    commandId: command.id,
+    content: '你好',
+  };
+  expect((await input.start('new-session', intent)).phase).toBe('accepted');
+  command.status = 'rejected';
+  command.receipt = { reason: 'shell_asset_unavailable' };
+  expect(await input.lookup(command.id)).toMatchObject({
+    phase: 'rejected',
+    error: 'shell_asset_unavailable',
+    command: { status: 'rejected' },
+  });
+  expect(reads).toEqual([command.id]);
+  expect(sends).toBe(1);
+  command.receipt = { reason: '/private/unsafe value' };
+  expect((await input.lookup(command.id)).error).toBe('input_rejected');
+  expect(sends).toBe(1);
+  input.disposeObserver();
+});

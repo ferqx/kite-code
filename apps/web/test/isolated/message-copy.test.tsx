@@ -178,11 +178,9 @@ test('formal Web mount copies each original user message with recoverable clipbo
       });
     });
     await settle(() => !!document.querySelector('[data-message-id="a-3"]'));
-    const outputButton = [...document.querySelectorAll('button')].find(
-      (button) => button.textContent === 'Read complete recorded Model output',
-    )!;
-    await click(outputButton);
     await settle(() => document.body.textContent!.includes(fullModel));
+    expect(document.querySelector('.model-output-message > button')).toBeNull();
+    expect(document.querySelector('.model-output-message > p')).toBeNull();
     const first = copyButton('a-1');
     expect(first).not.toBeNull();
     expect(copyButton('a-2')).not.toBeNull();

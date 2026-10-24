@@ -23,7 +23,7 @@ import type {
   NativeBackgroundChildOpen,
   NativeBackgroundPage,
 } from '../src/background-bridge';
-import { type NativeState, nativeChannel } from '../src/native-bridge';
+import { type NativeRequest, type NativeState, nativeChannel } from '../src/native-bridge';
 import { backgroundItem } from './background-item.fixture';
 import { sessionChange } from './native-change.fixture';
 import { memoryPrivateData } from './private-data.fixture';
@@ -2805,4 +2805,48 @@ test('a stopped-target code during receipt verification GET does not reject an a
   };
   expect(await journal.submit('original').catch((error) => error)).toBe(failure);
   expect(data.callers()[0]!.phase).toBe('unknown');
+});
+
+test('Native settings rejects legacy Session/project MCP management before reading a Session or dispatching effects', async () => {
+  const connection = client(),
+    caller = new NativeCaller(connection, () => {}, memoryPrivateData());
+  let reads = 0;
+  connection.getView = async () => {
+    reads++;
+    throw new ClientError('unexpected_session_read');
+  };
+  try {
+    const { generation } = (await caller.invoke({ method: 'attach' })) as NativeState;
+    const requests: NativeRequest[] = [
+      { method: 'settings.mcp.read', generation },
+      {
+        method: 'settings.mcp.submit',
+        generation,
+        observationId: 1,
+        operation: { kind: 'select', serverId: 'project', enabled: true, scope: 'workspace' },
+      },
+      { method: 'settings.mcp.cancel', generation, commandId: 'old-operation' },
+      { method: 'settings.mcp.auth', generation, observationId: 1, serverId: 'project' },
+      {
+        method: 'settings.mcp.removePreview',
+        generation,
+        observationId: 1,
+        serverId: 'project',
+        scope: 'workspace',
+      },
+    ];
+    for (const request of requests) {
+      let actual: unknown;
+      try {
+        await caller.invoke(request);
+      } catch (error) {
+        actual = error;
+      }
+      expect((actual as ClientError).code).toBe('mcp_user_scope_required');
+    }
+    expect(reads).toBe(0);
+    expect(connection.writes).toBe(0);
+  } finally {
+    await caller.close();
+  }
 });

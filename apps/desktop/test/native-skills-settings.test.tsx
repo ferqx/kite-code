@@ -1,28 +1,17 @@
 import { expect, test } from 'bun:test';
-import type { SkillCataloguePage } from '@kite-ai/client';
+import type { UserSkillCataloguePage } from '@kite-ai/client';
 import { JSDOM } from 'jsdom';
 import { act, type RefObject } from 'react';
 import { createRoot } from 'react-dom/client';
-import type {
-  NativeBridge,
-  NativeSelection,
-  NativeSkillsPage,
-  NativeSkillsRequest,
-} from '../src/native-bridge';
+import type { NativeBridge, NativeSkillsPage, NativeSkillsRequest } from '../src/native-bridge';
 import { NativeSkillsSettings } from '../src/native-skills-settings';
 
-const selected = (id = 'a', workspaceId = 'workspace', viewSelection = 2) =>
-  ({
-    storeId: 'store',
-    session: { id, workspaceId },
-    canReadSkills: true,
-    viewSelection,
-  }) as NativeSelection;
-const entries: SkillCataloguePage['entries'] = Array.from({ length: 303 }, (_, index) => ({
+type GlobalView = { storeId?: string; canRead?: boolean; generation?: number };
+const entries: UserSkillCataloguePage['entries'] = Array.from({ length: 303 }, (_, index) => ({
   id: `skill-${String(index).padStart(3, '0')}`,
   name: `Skill ${index}`,
   description: `摘要 ${index} 保留全文\n尾部🙂`,
-  source: { scope: 'project', origin: '.agents' },
+  source: { scope: 'user', origin: '.agents' },
   version: 'a'.repeat(64),
   enabled: true,
   state: 'available',
@@ -33,23 +22,19 @@ const entries: SkillCataloguePage['entries'] = Array.from({ length: 303 }, (_, i
 function result(
   request: NativeSkillsRequest,
   rows = entries,
-  options: Partial<SkillCataloguePage> = {},
+  options: Partial<UserSkillCataloguePage> = {},
 ): NativeSkillsPage {
   return {
     kind: 'settings.skills.page',
     readId: request.readId,
     scope: {
       generation: request.generation,
-      viewSelection: request.method === 'settings.skills.open' ? request.viewSelection : 2,
-      historyEpoch: request.method === 'settings.skills.open' ? request.historyEpoch : 0,
       storeId: 'store',
-      sessionId: 'a',
-      workspaceId: 'workspace',
     },
     page: {
       version: 1,
       storeId: 'store',
-      workspaceId: 'workspace',
+      scope: 'user',
       revision: 'b'.repeat(64),
       availability: 'available',
       reason: null,
@@ -64,12 +49,7 @@ async function fixture(
   run: (
     host: HTMLElement,
     root: ReturnType<typeof createRoot>,
-    render: (
-      bridge: NativeBridge,
-      selection?: NativeSelection,
-      historyEpoch?: number,
-      generation?: number,
-    ) => Promise<void>,
+    render: (bridge: NativeBridge, view?: GlobalView) => Promise<void>,
     panelHost: HTMLElement,
     editorControl: RefObject<{ close: () => void } | null>,
   ) => Promise<void>,
@@ -96,14 +76,14 @@ async function fixture(
     await run(
       host,
       root,
-      async (bridge, selection = selected(), historyEpoch = 0, generation = 1) => {
+      async (bridge, view = {}) => {
         await act(async () =>
           root.render(
             <NativeSkillsSettings
               bridge={bridge}
-              generation={generation}
-              selection={selection}
-              historyEpoch={historyEpoch}
+              generation={view.generation ?? 1}
+              storeId={view.storeId ?? 'store'}
+              canRead={view.canRead}
               panelHost={panelHost}
               editorControl={editorControl}
             />,
@@ -133,11 +113,11 @@ const openDetail = async (host: HTMLElement, name: string) =>
     host.querySelector<HTMLButtonElement>(`[aria-label="查看 ${name} 详情"]`)!.click(),
   );
 
-test('Skills DOM publishes all fixed-revision pages as readonly rows with full detail metadata', async () =>
+test('Skills DOM publishes all fixed-revision pages with useful details and no internal identifiers', async () =>
   fixture(async (host, _root, render, panelHost) => {
     const rows = structuredClone(entries);
     rows[299]!.source = undefined;
-    rows[300]!.source = { scope: 'project', origin: '.kite-code' };
+    rows[300]!.source = { scope: 'user', origin: '.kite-code' };
     rows[301] = {
       ...rows[301]!,
       enabled: false,
@@ -168,11 +148,15 @@ test('Skills DOM publishes all fixed-revision pages as readonly rows with full d
       });
     });
     await render(bridge);
-    expect(host.textContent).toContain('已完整读取 303 项 Skill。');
+    expect(host.querySelector('.provider-directory-heading span:last-child')?.textContent).toBe(
+      '303',
+    );
+    for (const hidden of ['已完整读取', '工作区：', '可信配置来源', '状态不授予执行权限'])
+      expect(host.textContent).not.toContain(hidden);
     expect(host.querySelectorAll('li')).toHaveLength(303);
     expect(host.textContent).toContain('摘要 302 保留全文\n尾部🙂');
-    expect(host.textContent).toContain('配置来源：项目 · .agents');
-    expect(host.textContent).toContain('配置来源：项目 · .kite-code');
+    expect(host.textContent).toContain('配置来源：用户 · .agents');
+    expect(host.textContent).toContain('配置来源：用户 · .kite-code');
     expect(host.textContent).toContain('配置来源：用户 · Profile Skills');
     expect(host.textContent).toContain('来源无法确定');
     expect(host.textContent).toContain('来源未记录');
@@ -194,15 +178,20 @@ test('Skills DOM publishes all fixed-revision pages as readonly rows with full d
     expect(panelHost.textContent).toContain('缺少能力：files.write');
     expect(panelHost.textContent).toContain('需要能力：files.read、files.write');
     expect(panelHost.textContent).toContain('原因：skill_capability_missing');
-    expect(panelHost.textContent).toContain(`版本：${'a'.repeat(64)}`);
-    const technicalDetails = panelHost.querySelector('details')!;
-    expect(technicalDetails.open).toBe(false);
-    expect(technicalDetails.querySelector('summary')?.textContent).toBe('技术详情');
-    expect(technicalDetails.textContent).toContain('配置 ID：skill-302');
+    expect(panelHost.querySelector('details')).toBeNull();
+    for (const hidden of [
+      '技术详情',
+      '配置 ID',
+      'skill-302',
+      '版本：',
+      'a'.repeat(64),
+      '只读目录信息',
+    ])
+      expect(panelHost.textContent).not.toContain(hidden);
     expect(panelHost.querySelectorAll('input, textarea, select')).toHaveLength(0);
     await openDetail(host, 'skill-301');
     expect(panelHost.textContent).toContain('摘要未记录');
-    expect(panelHost.textContent).toContain('版本：未记录');
+    expect(panelHost.textContent).not.toContain('版本：');
     expect(panelHost.textContent).toContain('来源无法确定');
     expect(calls.filter((call) => call.method === 'settings.skills.next')).toHaveLength(8);
     expect(calls.at(-1)?.method).toBe('settings.skills.close');
@@ -214,7 +203,7 @@ test('Skills DOM publishes all fixed-revision pages as readonly rows with full d
       ),
     ).toBe(true);
     const count = calls.length;
-    await render(bridge, { ...selected(), viewGeneration: 9 });
+    await render(bridge, { storeId: 'store', generation: 1 });
     expect(calls).toHaveLength(count);
   }));
 
@@ -232,15 +221,45 @@ test('same scope refresh failure retains the complete directory and detail witho
       throw Error('skill_catalogue_changed');
     });
     await render(bridge);
-    expect(host.textContent).toContain('已完整读取 1 项 Skill。');
+    expect(host.querySelectorAll('li')).toHaveLength(1);
     await openDetail(host, 'Skill 0');
     await refresh(host);
     expect(host.textContent).toContain('保留上次完整目录，尚未确认最新状态');
     expect(host.querySelector('li button')?.textContent).toContain('Skill 0');
     expect(panelHost.textContent).toContain('详情尚未确认最新状态：skill_catalogue_changed');
-    expect(panelHost.textContent).toContain('配置 ID：skill-000');
+    expect(panelHost.querySelector('h3')?.textContent).toBe('Skill 0');
     expect(host.textContent).not.toContain('摘要 1 保留全文');
     expect(host.querySelector('[role="alert"]')?.textContent).toContain('skill_catalogue_changed');
+  }));
+
+test('malformed user configuration retains the complete directory and selected detail until correction', async () =>
+  fixture(async (host, _root, render, panelHost) => {
+    let pass = 0;
+    const bridge = bridgeOf(async (request) => {
+      if (request.method === 'settings.skills.close') return null;
+      return ++pass === 1
+        ? result(request, entries.slice(0, 1))
+        : pass === 2
+          ? result(request, [], {
+              availability: 'unavailable',
+              reason: 'configuration_unavailable',
+            })
+          : result(request, []);
+    });
+    await render(bridge);
+    await openDetail(host, 'Skill 0');
+    await refresh(host);
+    expect(host.querySelectorAll('li')).toHaveLength(1);
+    expect(host.textContent).toContain('保留上次完整目录，尚未确认最新状态');
+    expect(host.querySelector('[role="alert"]')?.textContent).toContain(
+      'configuration_unavailable',
+    );
+    expect(panelHost.querySelector('h3')?.textContent).toBe('Skill 0');
+    expect(panelHost.textContent).toContain('详情尚未确认最新状态：configuration_unavailable');
+    await refresh(host);
+    expect(host.querySelectorAll('li')).toHaveLength(0);
+    expect(host.textContent).toContain('尚未配置用户 Skill。');
+    expect(host.querySelector('[role="alert"]')).toBeNull();
   }));
 
 test('available empty, unavailable source and missing capability have distinct readonly states', async () =>
@@ -261,14 +280,14 @@ test('available empty, unavailable source and missing capability have distinct r
     expect(host.textContent).not.toContain('没有可发现');
     unavailable = false;
     await refresh(host);
-    expect(host.textContent).toContain('当前工作区没有可发现的 Skill');
+    expect(host.textContent).toContain('尚未配置用户 Skill。');
     expect(host.textContent).not.toContain('目录当前不可用');
-    await render(bridge, { ...selected(), canReadSkills: false });
+    await render(bridge, { canRead: false });
     expect(host.textContent).toContain('当前服务未提供 Skills 目录');
     expect(calls).toBe(2);
   }));
 
-test('switching workspace closes the stalled old reader, ignores its late page and clears old facts immediately', async () =>
+test('switching global Store closes the stalled old reader, ignores its late page and clears old facts immediately', async () =>
   fixture(async (host, root, render) => {
     let resolve!: (value: NativeSkillsPage) => void;
     let old!: NativeSkillsRequest;
@@ -279,25 +298,24 @@ test('switching workspace closes the stalled old reader, ignores its late page a
     const bridge = bridgeOf(async (request) => {
       calls.push(request);
       if (request.method === 'settings.skills.close') return null;
-      if (request.method === 'settings.skills.open' && request.viewSelection === 2) {
+      if (request.method === 'settings.skills.open' && !old) {
         old = request;
         return held;
       }
       const value = result(request, [
-        { ...entries[0]!, name: 'Other workspace', description: 'Other body' },
+        { ...entries[0]!, name: 'Other store', description: 'Other body' },
       ]);
-      value.scope.sessionId = 'other';
-      value.scope.workspaceId = 'other-workspace';
-      value.page.workspaceId = 'other-workspace';
+      value.scope.storeId = 'other-store';
+      value.page.storeId = 'other-store';
       return value;
     });
     await render(bridge);
     expect(host.querySelectorAll('li')).toHaveLength(0);
-    await render(bridge, selected('other', 'other-workspace', 3));
+    await render(bridge, { storeId: 'other-store' });
     expect(
       calls.some((call) => call.method === 'settings.skills.close' && call.readId === old.readId),
     ).toBe(true);
-    expect(host.querySelector('li button')?.textContent).toContain('Other workspace');
+    expect(host.querySelector('li button')?.textContent).toContain('Other store');
     await act(async () => resolve(result(old, entries)));
     expect(host.querySelectorAll('li')).toHaveLength(1);
     expect(host.textContent).not.toContain('摘要 302');
@@ -305,7 +323,7 @@ test('switching workspace closes the stalled old reader, ignores its late page a
     expect(calls.filter((call) => call.method === 'settings.skills.close')).toHaveLength(2);
   }));
 
-test('observation reset cancels a stalled page and an unmounted page never publishes its late reply', async () =>
+test('generation replacement cancels a stalled page and an unmounted page never publishes its late reply', async () =>
   fixture(async (host, root, render) => {
     const held: { request: NativeSkillsRequest; resolve: (value: NativeSkillsPage) => void }[] = [];
     const closed: string[] = [];
@@ -317,7 +335,7 @@ test('observation reset cancels a stalled page and an unmounted page never publi
       return new Promise<NativeSkillsPage>((resolve) => held.push({ request, resolve }));
     });
     await render(bridge);
-    await render(bridge, selected(), 1);
+    await render(bridge, { generation: 2 });
     expect(closed).toEqual([held[0]!.request.readId]);
     await act(async () => held[0]!.resolve(result(held[0]!.request, entries)));
     expect(host.querySelectorAll('li')).toHaveLength(0);
@@ -348,8 +366,8 @@ test('Skill details live only in the far-right host and close controls restore t
     expect(host.ownerDocument.activeElement).toBe(panelHost.querySelector('h3'));
     const count = calls.length;
     await openDetail(host, 'Skill 1');
-    expect(panelHost.textContent).toContain('配置 ID：skill-001');
-    expect(panelHost.textContent).not.toContain('配置 ID：skill-000');
+    expect(panelHost.querySelector('h3')?.textContent).toBe('Skill 1');
+    expect(panelHost.textContent).not.toContain('摘要 0 保留全文');
     expect(first.getAttribute('aria-expanded')).toBe('false');
     expect(second.getAttribute('aria-expanded')).toBe('true');
     await act(async () =>
@@ -400,19 +418,18 @@ test('refresh keeps selected details busy without loading text and removes missi
     expect(host.textContent).not.toContain('正在读取');
     expect(panelHost.textContent).not.toContain('正在刷新');
     expect(panelHost.querySelector('[aria-busy="true"]')).not.toBeNull();
-    expect(panelHost.textContent).toContain('配置 ID：skill-000');
+    expect(panelHost.querySelector('h3')?.textContent).toBe('Skill 0');
     expect(host.querySelector<HTMLButtonElement>('.provider-refresh')!.disabled).toBe(true);
     await act(async () => resolve(result(pending, [])));
-    expect(host.textContent).toContain('当前工作区没有可发现的 Skill');
-    expect(panelHost.textContent).not.toContain('配置 ID：skill-000');
+    expect(host.textContent).toContain('尚未配置用户 Skill。');
+    expect(panelHost.textContent).not.toContain('摘要 0 保留全文');
     expect(panelHost.textContent).toContain('此 Skill 已不在最新目录中');
     await act(async () => editorControl.current!.close());
     expect(host.ownerDocument.activeElement).toBe(host.querySelector('.provider-refresh'));
   }));
 
 test.each([
-  'workspace',
-  'observation',
+  'store',
   'generation',
   'capability',
 ] as const)('%s changes clear open Skill details and reject late refresh responses', async (change) =>
@@ -432,19 +449,12 @@ test.each([
     await openDetail(host, 'Skill 0');
     await refresh(host);
     const old = held[0]!;
-    expect(panelHost.textContent).toContain('配置 ID：skill-000');
-    const nextSelection =
-      change === 'workspace'
-        ? selected('other', 'other-workspace', 3)
-        : change === 'capability'
-          ? { ...selected(), canReadSkills: false }
-          : selected();
-    await render(
-      bridge,
-      nextSelection,
-      change === 'observation' ? 1 : 0,
-      change === 'generation' ? 2 : 1,
-    );
+    expect(panelHost.querySelector('h3')?.textContent).toBe('Skill 0');
+    await render(bridge, {
+      storeId: change === 'store' ? 'other-store' : 'store',
+      generation: change === 'generation' ? 2 : 1,
+      canRead: change !== 'capability',
+    });
     expect(closed).toContain(old.request.readId);
     expect(panelHost.textContent).toBe('');
     expect(editorControl.current).toBeNull();
@@ -455,10 +465,9 @@ test.each([
     if (change !== 'capability') {
       const next = held[1]!;
       const value = result(next.request, [{ ...entries[0]!, description: 'New scope details' }]);
-      if (change === 'workspace') {
-        value.scope.sessionId = 'other';
-        value.scope.workspaceId = 'other-workspace';
-        value.page.workspaceId = 'other-workspace';
+      if (change === 'store') {
+        value.scope.storeId = 'other-store';
+        value.page.storeId = 'other-store';
       }
       await act(async () => next.resolve(value));
       expect(host.querySelectorAll('li')).toHaveLength(1);
@@ -470,29 +479,40 @@ test.each([
     }
   }));
 
-test('no selection keeps the catalogue readonly and does not issue a workspace read', async () =>
+test('global Skills loads without any selection and never shows a Session prerequisite', async () =>
   fixture(async (host, root, _render, panelHost, editorControl) => {
     const calls: NativeSkillsRequest[] = [];
     const bridge = bridgeOf(async (request) => {
       calls.push(request);
-      return null;
+      return request.method === 'settings.skills.close'
+        ? null
+        : result(request, entries.slice(0, 1));
     });
     await act(async () =>
       root.render(
         <NativeSkillsSettings
           bridge={bridge}
           generation={1}
-          historyEpoch={0}
+          storeId="store"
           panelHost={panelHost}
           editorControl={editorControl}
         />,
       ),
     );
-    expect(host.textContent).toContain('选择会话后查看所属工作区的 Skills');
-    expect(host.querySelector<HTMLButtonElement>('.provider-refresh')!.disabled).toBe(true);
-    expect(host.querySelectorAll('li, input, textarea, select')).toHaveLength(0);
+    expect(host.querySelectorAll('li')).toHaveLength(1);
+    expect(host.textContent).toContain('Skill 0');
+    expect(host.textContent).not.toMatch(/选择会话|工作区/);
+    expect(host.querySelector<HTMLButtonElement>('.provider-refresh')!.disabled).toBe(false);
     expect(panelHost.textContent).toBe('');
-    expect(calls).toHaveLength(0);
+    expect(calls.map((request) => request.method)).toEqual([
+      'settings.skills.open',
+      'settings.skills.close',
+    ]);
+    expect(calls[0]).toEqual({
+      method: 'settings.skills.open',
+      generation: 1,
+      readId: expect.any(String),
+    });
   }));
 
 test('initial read failure is distinct from an empty catalogue and hides unsafe error text', async () =>
@@ -514,5 +534,5 @@ test('initial read failure is distinct from an empty catalogue and hides unsafe 
     fail = false;
     await refresh(host);
     expect(host.querySelector('[role="alert"]')).toBeNull();
-    expect(host.textContent).toContain('当前工作区没有可发现的 Skill');
+    expect(host.textContent).toContain('尚未配置用户 Skill。');
   }));

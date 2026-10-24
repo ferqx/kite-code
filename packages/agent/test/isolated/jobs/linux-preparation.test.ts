@@ -1,9 +1,11 @@
 import { expect, test } from 'bun:test';
 import {
+  chmodSync,
   existsSync,
   lstatSync,
   mkdirSync,
   mkdtempSync,
+  readdirSync,
   realpathSync,
   renameSync,
   rmSync,
@@ -55,7 +57,7 @@ function fixture(run: (options: LinuxPaths, shell: string) => void) {
     rmSync(root, { recursive: true, force: true });
   }
 }
-const context = {} as JobContext;
+const context = { signal: new AbortController().signal } as JobContext;
 function mount(launch: LinuxLaunch, flag: string, source: string, destination: string) {
   return launch.bubblewrapArgs.some(
     (arg, index, args) =>
@@ -169,6 +171,128 @@ test('changed binaries and overlapping protected/temp paths reject before alloca
     writeFileSync(shell, 'changed shell');
     expect(() => prepare('unused', shell, context)).toThrow('confined_launch_changed');
   }));
+test('private file requirements preserve readonly Model preparation and use the original private-directory mask', () =>
+  fixture((options, shell) => {
+    const home = join(options.temporaryRoot!, '..', 'codex-home');
+    const auth = join(home, 'auth.json');
+    const protectedFiles = [auth];
+    const before = readdirSync(options.temporaryRoot!);
+    let prepare = captureLinuxLaunch({ ...options, protectedFiles }, [shell]);
+    expect(existsSync(home)).toBe(false);
+    expect(readdirSync(options.temporaryRoot!)).toEqual(before);
+    mkdirSync(home);
+    // Layout tests use an existing directory. The dispatch-only descriptor
+    // mkdir protocol is exercised separately and on the actual Linux kernel.
+    prepare = captureLinuxLaunch({ ...options, protectedFiles }, [shell]);
+    // Mutating the caller array cannot remove the frozen private requirement.
+    protectedFiles.length = 0;
+    const masked = () => {
+      const launch = prepare('unused', shell, context);
+      try {
+        expect(launch.maskedRoots).toContain(home);
+        expect(launch.bubblewrapArgs).toContain('--tmpfs');
+        expect(mount(launch, '--ro-bind', '/', '/')).toBe(true);
+      } finally {
+        launch.cleanup();
+      }
+      expect(readdirSync(options.temporaryRoot!)).toEqual(before);
+    };
+    masked();
+    expect(existsSync(auth)).toBe(false);
+    // A private name is metadata, never a content-hashed executable asset.
+    writeFileSync(auth, 'SYNTHETIC_AUTH_BODY', { mode: 0o000 });
+    masked();
+    const present = captureLinuxLaunch({ ...options, protectedFiles: [auth] }, [shell]);
+    const launch = present('unused', shell, context);
+    expect(launch.maskedRoots).toContain(home);
+    launch.cleanup();
+    expect(readdirSync(options.temporaryRoot!)).toEqual(before);
+    expect(lstatSync(auth).mode & 0o777).toBe(0);
+    const next = join(home, 'next-auth');
+    writeFileSync(next, 'SYNTHETIC_ROTATED_AUTH', { mode: 0o000 });
+    renameSync(next, auth);
+    masked();
+    // Normal file rotation changes no frozen directory identity, and the
+    // original directory mask covers every new credential inode.
+    chmodSync(auth, 0o600);
+    expect(lstatSync(auth).size).toBe('SYNTHETIC_ROTATED_AUTH'.length);
+    expect(() => captureLinuxLaunch({ ...options, protectedRoots: [auth] }, [shell])).toThrow(
+      'invalid_confined_path',
+    );
+  }));
+test('private canonical redirection rejects without allocating a runtime temp', () =>
+  fixture((options, shell) => {
+    const home = join(options.temporaryRoot!, '..', 'codex-home');
+    const auth = join(home, 'auth.json');
+    mkdirSync(home);
+    writeFileSync(auth, 'SYNTHETIC_AUTH_BODY');
+    const prepare = captureLinuxLaunch({ ...options, protectedFiles: [auth] }, [shell]);
+    const before = readdirSync(options.temporaryRoot!);
+    const moved = `${home}-original`;
+    renameSync(home, moved);
+    symlinkSync(moved, home);
+    expect(() => prepare('unused', shell, context)).toThrow('confined_launch_changed');
+    expect(readdirSync(options.temporaryRoot!)).toEqual(before);
+  }));
+test('only broad private layouts reject dispatch while a Workspace private child preserves Full writes', () =>
+  fixture((options, shell) => {
+    const before = readdirSync(options.temporaryRoot!);
+    const configuredHome = join(options.temporaryRoot!, '..', 'host-home');
+    mkdirSync(configuredHome);
+    for (const home of [
+      configuredHome,
+      options.workspaceRoot!,
+      options.cwd,
+      join(options.workspaceRoot!, '..'),
+    ]) {
+      const prepare = captureLinuxLaunch(
+        { ...options, protectedFiles: [join(home, 'auth.json')] },
+        [shell],
+        home,
+      );
+      expect(() => prepare('unused', shell, context)).toThrow(
+        'linux_shell_private_file_layout_invalid',
+      );
+      expect(readdirSync(options.temporaryRoot!)).toEqual(before);
+      expect(existsSync(join(home, 'auth.json'))).toBe(false);
+    }
+    const home = join(options.workspaceRoot!, '.codex');
+    mkdirSync(home, { mode: 0o750 });
+    const launch = captureLinuxLaunch(
+      { ...options, protectedFiles: [join(home, 'auth.json')], filesystemScope: 'full_access' },
+      [shell],
+    )('unused', shell, context);
+    try {
+      expect(launch.mode).toBe('full');
+      expect(mount(launch, '--bind', '/', '/')).toBe(true);
+      expect(mount(launch, '--bind', options.workspaceRoot!, options.workspaceRoot!)).toBe(true);
+      expect(launch.maskedRoots).toContain(home);
+      expect(lstatSync(home).mode & 0o777).toBe(0o750);
+    } finally {
+      launch.cleanup();
+    }
+    const alias = join(options.temporaryRoot!, '..', 'codex-alias');
+    symlinkSync(home, alias);
+    const aliased = captureLinuxLaunch({ ...options, protectedFiles: [join(alias, 'auth.json')] }, [
+      shell,
+    ]);
+    expect(() => aliased('unused', shell, context)).toThrow(
+      'linux_shell_private_file_layout_invalid',
+    );
+    expect(readdirSync(options.temporaryRoot!)).toEqual(before);
+    const protectedAlias = join(options.protectedRoots[0]!, 'codex-alias');
+    symlinkSync(home, protectedAlias);
+    const protectedLaunch = captureLinuxLaunch(
+      { ...options, protectedFiles: [join(protectedAlias, 'auth.json')] },
+      [shell],
+    )('unused', shell, context);
+    try {
+      expect(protectedLaunch.maskedRoots).toContain(home);
+      expect(protectedLaunch.maskedRoots).toContain(options.protectedRoots[0]!);
+    } finally {
+      protectedLaunch.cleanup();
+    }
+  }));
 test('nested Profile coordination and executable aliases share the exact visible native protocol', () =>
   fixture((options, shell) => {
     const nested = join(options.protectedRoots[0]!, '.coordination');
@@ -197,10 +321,40 @@ test('nested Profile coordination and executable aliases share the exact visible
       launch.cleanup();
     }
   }));
+test('deep coordination identities stay frozen while private outer masks omit hidden child binds and seals', () =>
+  fixture((options, shell) => {
+    const profile = options.protectedRoots[0]!;
+    const hiddenParent = join(profile, '.coordination');
+    const control = join(hiddenParent, 'instance');
+    mkdirSync(control, { recursive: true });
+    for (const mode of ['host', 'confined'] as const) {
+      const launch = captureLinuxLaunch(
+        {
+          ...options,
+          cwd: options.workspaceRoot!,
+          mode,
+          controlBase: control,
+          protectedRoots: [profile, control],
+          filesystemScope: 'full_access',
+        },
+        [shell],
+      )('unused', shell, context);
+      try {
+        expect(launch.maskedRoots).toEqual([profile]);
+        expect(launch.identities.some((fact) => fact.path === hiddenParent)).toBe(true);
+        expect(launch.identities.some((fact) => fact.path === control)).toBe(true);
+        expect(mount(launch, '--bind', hiddenParent, hiddenParent)).toBe(false);
+        expect(mount(launch, '--ro-bind', hiddenParent, hiddenParent)).toBe(false);
+        expect(launch.noExecPaths).not.toContain(hiddenParent);
+      } finally {
+        launch.cleanup();
+      }
+    }
+  }));
 test('trusted Profile Skill projection retains canonical cwd while exposing only a private readonly noexec ancestor chain', () =>
   fixture((options, shell) => {
     const profile = join(options.temporaryRoot!, '..', 'outside-profile');
-    const control = join(profile, '.coordination');
+    const control = join(profile, '.coordination', 'instance');
     const skill = join(profile, 'skills', 'original');
     mkdirSync(control, { recursive: true });
     mkdirSync(skill, { recursive: true });

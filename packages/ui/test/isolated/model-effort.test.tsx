@@ -116,7 +116,7 @@ test('same-name models remain distinct by provider and the popup uses two column
   expect(document.querySelector('.model-effort-panel')).not.toBeNull();
 });
 
-test('configured effort stays visible and absent effort does not invent a default label or selection', async () => {
+test('configured effort stays visible and absent effort is labeled unspecified without selecting a default', async () => {
   const changes: string[] = [];
   const props = {
     model: { provider: 'OpenAI', name: 'model' },
@@ -131,13 +131,13 @@ test('configured effort stays visible and absent effort does not invent a defaul
     'legacy-extra',
   );
   await act(() => root!.render(<ModelEffortSelector {...props} reasoningEffort={undefined} />));
-  expect(document.querySelector('.effort-value')).toBeNull();
-  expect(document.querySelector('.model-effort-summary')).toBeNull();
+  expect(document.querySelector('.effort-value')?.textContent).toBe('未指定');
+  expect(document.querySelector('.model-effort-summary')?.textContent).toBe('未指定');
   expect(document.querySelector('[data-model-trigger]')?.getAttribute('aria-label')).toBe(
-    '模型：model',
+    '模型：model，思考程度：未指定',
   );
   expect(document.body.textContent).not.toContain('默认');
-  expect(document.querySelector('[role="slider"]')?.getAttribute('aria-valuetext')).toBe('中');
+  expect(document.querySelector('[role="slider"]')?.getAttribute('aria-valuetext')).toBe('未指定');
   expect(changes).toEqual([]);
   await act(() =>
     root!.render(
@@ -183,4 +183,36 @@ test('every selected model offers effort adjustment without capability metadata;
   await openSelector();
   expect(document.querySelector('[role="slider"]')).toBeNull();
   expect(document.querySelector('.model-effort-unavailable')?.textContent).toBe('请先选择模型');
+});
+
+test('a protocol selection hint stays in the popover while model and effort controls keep their behavior', async () => {
+  const changes: string[] = [];
+  let selectedEffort: string | undefined;
+  await render(
+    <ModelEffortSelector
+      model={{ id: 'current', provider: 'OpenAI', name: 'current-model' }}
+      models={[
+        { id: 'current', provider: 'OpenAI', name: 'current-model' },
+        { id: 'another', provider: 'OpenAI', name: 'another-model' },
+      ]}
+      onModelChange={(_provider, name) => changes.push(name)}
+      onReasoningEffortChange={(effort) => {
+        selectedEffort = effort;
+      }}
+      modelSelectionHint="此会话使用 Responses，切换协议请新建会话。"
+    />,
+  );
+  expect(document.body.textContent).not.toContain('切换协议请新建会话');
+  await openSelector();
+  expect(document.querySelector('.model-effort-popover')?.textContent).toContain(
+    '此会话使用 Responses，切换协议请新建会话。',
+  );
+  const slider = document.querySelector('[role="slider"]')!;
+  await act(() =>
+    slider.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'End', bubbles: true })),
+  );
+  expect(selectedEffort).toBe('ultar');
+  await click(document.querySelector('.model-effort-switch'));
+  await click(document.querySelector('[aria-label="选择模型 another"]'));
+  expect(changes).toEqual(['another-model']);
 });

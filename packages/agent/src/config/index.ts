@@ -42,10 +42,14 @@ export {
   type McpSourceReadSet,
   type McpSourceScope,
   type McpSourceServer,
+  type McpUserSourceCredentialBinding,
+  type McpUserSourceScope,
   readMcpSourceEntryPreview,
   readMcpSources,
+  userMcpSourceBinding,
   writeMcpSourceEntry,
   writeMcpSourceMetadata,
+  writeUserMcpSourceCredentialBinding,
 } from './mcp-sources';
 export {
   createOsCredentialBackend,

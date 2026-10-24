@@ -314,8 +314,8 @@ try {
   await openSessionTools(page);
   await openSettings(page);
   await page
-    .getByRole('region', { name: '模型设置提交', exact: true })
-    .getByRole('button', { name: '查询原提交', exact: true })
+    .getByRole('region', { name: '待确认的模型更改', exact: true })
+    .getByRole('button', { name: '查看结果', exact: true })
     .click();
   step('original-lookup');
   const applied = await waitState(

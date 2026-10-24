@@ -47,7 +47,7 @@ History 为独立滚动区域，首次进入定位最新，向上阅读时刷新
 
 已发送的 complete 用户消息逐条提供共享 [MessageCopyButton](../../packages/ui/src/desktop/MessageCopyButton.tsx)，直接复制原公共 `message.content` 字符串，保留 Unicode、CRLF、Markdown 与脚本字面量，不从渲染 DOM 重建文本。按钮按当前 Store/Session/message ID 挂载，悬停或键盘聚焦可见；成功勾保留两秒，失败可重试，正文变化／隐藏／暂停／换会话清除旧反馈与所属定时器。只调用本页面 `navigator.clipboard.writeText`，不增加 HTTP 写入、模型调用或任务操作；未知格式的原诊断保持，复制不解释或升级其内容。助手整轮复制沿准确 Run metadata 与当前已读完整正文核实，见下一段；不以相邻消息推造回合。
 
-助手复制复用纯 [completeRunReplies](../../packages/ui/src/run-reply-copy.ts) 与正式 Native 的最终回复资格核验：只有当前 Session 未封存消息所属的准确 completed／inactive Run 才可合并，按原 Decimal64 seq 将全部助手正文以空行连接；中间助手的普通正文保留，Tool 参数、工具结果、reasoning、其他 Run 和子／封存消息不加入。最后助手仍须完整、支持格式且无后续 Tool；任一非零 `outputBody` 未经现有 reader 完整验证并显示，整轮按钮不可用，不拿预览补缺段，也不自动读 Model 正文。成功／失败交互继续共用 MessageCopyButton，关闭任一全文、隐藏、暂停、stale 或切换阅读身份撤销相应资格。
+助手复制复用纯 [completeRunReplies](../../packages/ui/src/run-reply-copy.ts) 与正式 Native 的最终回复资格核验：只有当前 Session 未封存消息所属的准确 completed／inactive Run 才可合并，按原 Decimal64 seq 将全部助手正文以空行连接；中间助手的普通正文保留，Tool 参数、工具结果、reasoning、其他 Run 和子／封存消息不加入。最后助手仍须完整、支持格式且无后续 Tool；任一非零 `outputBody` 未经现有 reader 完整验证并显示，整轮按钮不可用，不拿预览补缺段，完整正文由会话 reader 自动读取，复制资格本身不触发业务执行。成功／失败交互继续共用 MessageCopyButton，隐藏、暂停、stale 或切换阅读身份撤销相应资格。
 
 History 每条消息在生产 CSS 中拥有自己的定位容器，复制按钮归所属消息底部；不会把多个助手按钮定位到页面同一角落。阅读间距按准确 final 身份与相邻 role 选择：user／final 后32px，Tool 后紧邻 final 为16px，其他过程间隔8px，顶端不叠加旧通用 padding／分隔线。final 身份取 `completeRunReplies` 的已核 metadata entry，不依赖全文是否已加载；读／Close 只改变复制资格，不重新定义最后回复或移动阅读间距。原 hover、Tab focus-visible 和两秒反馈保持，当前字段仅为 DOM 展示，不增加 Runtime 或来源 authority。
 
@@ -55,7 +55,7 @@ History 每条消息在生产 CSS 中拥有自己的定位容器，复制按钮�
 
 [run-facts](src/run-facts.ts)只为完整已读 History 中准确的未封存 Run 补 metadata。有限 View 已核项优先；超出最近200项时经具名 Browser `getRun(sessionId,runId)` GET 核当前 Store／准确 Run／Session，保合法恢复后的原 originStoreId。cache 只属于当前 Client／Store／Session／controller generation，completed／failed／cancelled 非活动事实可复用，active／interrupted／读取失败在新实际 snapshot 刷新时重核；View 新事实覆盖此前缓存。关闭、隐藏、页面暂停或不可读状态 abort 所属 GET；读取不提供执行、配置或凭据权。错误保原消息并说明整轮范围尚不可核，可沿原 Refresh history 重试。
 
-[整轮页面用例](test/isolated/assistant-copy.test.tsx)覆盖201条完整历史、有限 View 外 Run、中间 Tool call 的普通正文、每段已加载全文与切换迟到隔离；[原真实恢复整例](../../tests/isolated/unified-agent/restored-web-model-output.test.ts)保原完整断言，并核实际 Cookie／Store A→B、原大正文加 inline 最终段的准确整轮复制、sealed 零按钮与关闭撤销。便携 DOM clipboard 使用内存端口，不能替代本机 OS 剪贴板字节或其他平台资格。
+[整轮页面用例](test/isolated/assistant-copy.test.tsx)覆盖201条完整历史、有限 View 外 Run、中间 Tool call 的普通正文、每段已加载全文与切换迟到隔离；[原真实恢复整例](../../tests/isolated/unified-agent/restored-web-model-output.test.ts)保原完整断言，并核实际 Cookie／Store A→B、原大正文加 inline 最终段的准确整轮复制、sealed 零按钮与切换撤销。便携 DOM clipboard 使用内存端口，不能替代本机 OS 剪贴板字节或其他平台资格。
 
 [正式页面复制整例](test/isolated/message-copy.test.tsx)经实际 mount/ReactDOM 核两条原用户全文、重试、两秒反馈、切会话迟到隔离和已读 Model 正文保持；共享 Conversation 的原消费基线与最终 DOM 回归另保原用户／助手完整文本选择和同 ID 换正文隔离。相邻完整组合 13 文件／75 项／724 条 Bun 断言通过，含真实 Web assets 构建，根与八个 workspace 类型检查通过。本机 IAB 实际 Enter 核按钮焦点、24px 控件及 18px 成功图标、两秒复位，读取前后仍为 3 个固定模型调用、4 条消息、2 个 Run、4 个 Execution、cursor 45；工具提供的 clipboard reader 返回空文本，当时未能核实实际 OS 原文。用户随后在本机编辑器粘贴，并确认指定用户消息 `Show the full original Markdown response.` 为准确原文；共享复制控件自该预览至当前代码未变，因此该单条用户消息的实际粘贴事实可复用。此确认不覆盖助手整条回复、其他内容或 Native 剪贴板；这些资格仍按各自证据核定。`data:` 粘贴核对页被浏览器安全策略拒绝后未绕过；原公共 Cookie/正文读取证据按未改范围复用，完整浏览器／平台与阶段门禁保持。当前代码的完整默认回归及精确证据范围见[本轮收束](../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-13当前代码完整默认回归与用户原文粘贴确认)。
 
@@ -99,13 +99,13 @@ bfcache 的 `pagehide.persisted` 保留现有 React document、选择和阅读 m
 
 ## 原 Model 输出全文
 
-History 的公开 `outputBody` 只表示原输出身份与完整性/长度，默认正文明确标为预览。具备 `model_outputs` 能力时可显式读取原 Session/Execution 的完整已记录正文；Browser Client 验证完整传输和正文后，共享 `ModelOutputMessage` 再核对当前消息身份。成功输出显示完整正文；失败或取消的输出只能显示完整已记录的不完整前缀，不能借前缀批准 Tool calls。完整调用放在可展开区域；会话阅读按手册不展示原 reasoning 正文，全文读取仍校验其原长度。
+History 的公开 `outputBody` 只表示原输出身份与完整性／长度。普通会话具备 `model_outputs` 能力时自动只读原 Session／Execution 的完整已记录正文；Browser Client 验证完整传输和正文后，共享 `ModelOutputMessage` 再核对当前消息身份。正文不附预览／全文标题或查看／收起按钮，完整读取通过后才提供全文复制。失败或取消的输出保留已记录的未完成正文及明确提示，不能借此批准 Tool calls；普通会话不展示原始工具调用详情或 reasoning 正文，读取仍核其原长度。
 
 明确 profile restore 后当前 Store B只负责 Cookie/页面准入，原会话及 sealed Fork正文保持 Store A出处。[Core Model snapshot](../../packages/agent/src/storage/sqlite/model-output.ts)在一致读事务核真实 Execution／Run／Command／rootWork、原 Model Message与private output head，再核原 scope完整 Artifact；[Browser reader](../../packages/client/src/browser.ts)核当前 Store、准确 source Session／Execution与完整 EOF/hash。Web只在此 `model_outputs` reader具备时提供共享组件的 `canReadRestoredOrigin`，沿 sealed originMessage原 Session/Run读取，不从有限View目录推导原来源。组件仍核当前 Store、原 Session／Run／Execution、状态、完整性、实际 UTF-8 content/reasoning长度与 Tool数量；未具备该证明的共享宿主缺省拒绝foreign origin。没有新增 Core/API、重标原来源或旧工作的执行权。
 
-关闭、页面隐藏、bfcache 暂停或会话切换释放所属读取与当前视图全文，迟到响应不得覆盖新选择，不关闭 Runtime。全文不进入阅读位置记忆或跨会话缓存；Copy conversation 使用当前已显示的正文，关闭全文后回到明确预览，不将 4096 字符预览冒充全文。缺能力保留可读预览和禁用按钮。[页面 DOM 测试](test/page.test.tsx) 覆盖显式读取、全文复制、关闭与跨会话清除；共享 [Model output 测试](../../packages/ui/test/model-output.test.tsx) 另覆盖超过 17 MiB 正文、迟到/隐藏/身份失败。这些 DOM 证据不替代实际 Browser、Native bridge 或完整发行入口资格。
+关闭页面、隐藏、bfcache 暂停或会话切换释放所属读取与当前视图全文，迟到响应不得覆盖新选择，不关闭 Runtime；恢复可读后沿原身份读取。全文不进入阅读位置记忆或跨会话缓存，Copy conversation 只采用当前已核实显示的正文，不把有限预览当全文。缺能力或格式不支持时保留原文和必要说明，真实失败仅提供“重新读取”的只读重试，不自动重试或提交任务。[页面 DOM 测试](test/page.test.tsx) 覆盖自动读取、全文复制及跨会话清除；共享 [Model output 测试](../../packages/ui/test/model-output.test.tsx) 另覆盖超过 17 MiB 正文、迟到／隐藏／身份失败。这些 DOM 证据不替代实际 Browser、Native bridge 或完整发行入口资格。
 
-[真实恢复页面整例](../../tests/isolated/unified-agent/restored-web-model-output.test.ts)通过公开 Fork、backup/restore A→B、两次全新 Service与实际 Cookie BrowserClient挂载正式 `mountWebPage`。原会话／sealed大正文、inline小回答、原完整 Tool call、全文 Copy／Close／切换与错误源读取分别核实；原 Message/sourceIds/originMessage、Run、Command、Execution与 metadata准确相等，读取全GET、Model保持2次、Tool效果保持1次、cold Model新增0。页面为JSDOM、clipboard为内存端口；实际Core/HTTP与DOM组合不代证新的原生浏览器或installed窗口。准确红绿、22完整文件／122项／1605Bun断言及复用范围归[恢复正文进度](../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-10恢复后-web-完整-model-正文)。
+[真实恢复页面整例](../../tests/isolated/unified-agent/restored-web-model-output.test.ts)通过公开 Fork、backup/restore A→B、两次全新 Service与实际 Cookie BrowserClient挂载正式 `mountWebPage`。原会话／sealed大正文、inline小回答、原完整 Tool call 的读取完整性、全文 Copy／切换与错误源读取分别核实；原 Message/sourceIds/originMessage、Run、Command、Execution与 metadata准确相等，读取全GET、Model保持2次、Tool效果保持1次、cold Model新增0。页面为JSDOM、clipboard为内存端口；实际Core/HTTP与DOM组合不代证新的原生浏览器或installed窗口。准确红绿、22完整文件／122项／1605Bun断言及复用范围归[恢复正文进度](../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-10恢复后-web-完整-model-正文)。
 
 目录读取使用 Browser `listAllWorkspaces/listAllSessionDirectory`，workspace过滤在服务端分页前执行，穷尽固定首分配上界的所有具名页后再发布结果；新增晚项目不混入原上界。Session摘要额外固定原snapshotCursor，变化由SDK丢弃全部前缀并有限重扫，持续变化明确失败。缺activity capability或摘要也明确失败，不降级生成状态。该完整观察不ACK、恢复、取消或授予执行权，Client／Core／HTTP及Store格式没有本轮改动。
 

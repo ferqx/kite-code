@@ -1,4 +1,4 @@
-import { type AgentClient, ClientError, verifySkillCataloguePage } from '@kite-ai/client';
+import { type AgentClient, ClientError, verifyUserSkillCataloguePage } from '@kite-ai/client';
 import type { NativeSkillsPage, NativeSkillsScope } from '../src/skills-bridge';
 
 type Lease = {
@@ -35,19 +35,10 @@ export class NativeSkillCatalogueReads {
       throw new ClientError('skill_catalogue_view_changed');
   }
 
-  async open(input: {
-    readId: string;
-    viewSelection: number;
-    historyEpoch: number;
-  }): Promise<NativeSkillsPage> {
+  async open(input: { readId: string }): Promise<NativeSkillsPage> {
     const scope = this.current();
-    if (
-      !scope ||
-      scope.viewSelection !== input.viewSelection ||
-      scope.historyEpoch !== input.historyEpoch
-    )
-      throw new ClientError('native_selection_changed');
-    if (!this.client.serverInfo?.capabilities.includes('skill_catalogue'))
+    if (!scope) throw new ClientError('native_generation_changed');
+    if (!this.client.serverInfo?.capabilities.includes('user_skill_catalogue'))
       throw new ClientError('capability_unavailable');
     this.release();
     const lease: Lease = {
@@ -81,11 +72,10 @@ export class NativeSkillCatalogueReads {
         byteLimit: 131072,
         signal: lease.abort.signal,
       };
-      const value = await this.client.listSkills(lease.scope.workspaceId, options);
+      const value = await this.client.listUserSkills(options);
       this.check(lease);
-      const page = verifySkillCataloguePage(value, {
+      const page = verifyUserSkillCataloguePage(value, {
         storeId: lease.scope.storeId,
-        workspaceId: lease.scope.workspaceId,
         ...(lease.revision ? { revision: lease.revision, afterId: lease.afterId } : {}),
       });
       this.check(lease);

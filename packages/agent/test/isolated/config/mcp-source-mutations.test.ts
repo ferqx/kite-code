@@ -284,6 +284,62 @@ test('JSONC mutation preserves unrelated raw env, unknown fields, comments and C
   }
 });
 
+test('global user add and remove ignore invalid project approvals and their held lock', () => {
+  const f = fixture();
+  try {
+    f.put(f.user, { mcpServers: {} });
+    f.put(f.project, { mcpServers: { project: http } });
+    const { workspacePath: _workspacePath, ...base } = f.options;
+    const options: McpSourceOptions = {
+      ...base,
+      scope: {
+        mode: 'user',
+        profileId: f.options.scope.profileId,
+        storeId: f.options.scope.storeId,
+        sessionId: null,
+        workspaceId: null,
+      },
+    };
+    const approval = join(f.options.profilePath, 'mcp-approvals.json');
+    const expectedReadSet = readMcpSources(options).readSet;
+    writeFileSync(approval, '{ invalid project approval', { mode: 0o600 });
+    const originalApproval = readFileSync(approval);
+    const originalProject = readFileSync(f.project);
+    const lock = acquireFileLock(`${approval}.lock`, 'exclusive');
+    try {
+      const added = writeMcpSourceEntry({
+        ...options,
+        expectedReadSet,
+        operationId: 'global-add',
+        mutation: { kind: 'add', scope: 'user', name: 'local', entry: http },
+        validatePublication() {},
+      });
+      expect(added.target.name).toBe('local');
+      const current = readMcpSources(options);
+      const removed = writeMcpSourceEntry({
+        ...options,
+        expectedReadSet: current.readSet,
+        operationId: 'global-remove',
+        mutation: {
+          kind: 'remove',
+          scope: 'user',
+          serverId: added.target.serverId,
+          expectedRawEntryDigest: added.target.rawEntryDigest,
+        },
+        validatePublication() {},
+      });
+      expect(removed.target.name).toBe('local');
+      expect(readMcpSources(options).entries).toEqual([]);
+      expect(readFileSync(approval)).toEqual(originalApproval);
+      expect(readFileSync(f.project)).toEqual(originalProject);
+    } finally {
+      lock.release();
+    }
+  } finally {
+    f.close();
+  }
+});
+
 test('all canonical locks and complete read-set drift reject before publication', () => {
   const f = fixture();
   try {

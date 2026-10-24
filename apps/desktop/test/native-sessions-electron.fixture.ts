@@ -115,7 +115,6 @@ try {
   assert.equal(source?.originMessage?.storeId, storeId);
   assert.equal(source?.runId, null);
   phase('full_read_begin');
-  await page.getByRole('button', { name: 'Read complete recorded Model output' }).press('Enter');
   await page.getByText('MODEL OUTPUT COMPLETE TAIL', { exact: true }).waitFor({ timeout: 30000 });
   phase('full_tail_visible');
   assert.ok((await page.locator('main').innerText()).length > 17 * 1048576);
@@ -142,11 +141,8 @@ try {
     await page.getByText('MODEL OUTPUT COMPLETE TAIL', { exact: true }).isVisible(),
     true,
   );
-  phase('full_close_begin');
-  await page.getByRole('button', { name: 'Close full Model output', exact: true }).click();
-  await page.getByText('MODEL OUTPUT COMPLETE TAIL', { exact: true }).waitFor({ state: 'hidden' });
-  await page.getByRole('button', { name: 'Close full Model output' }).waitFor({ state: 'hidden' });
-  phase('full_closed');
+  assert.equal(await page.getByRole('button', { name: '查看完整回复', exact: true }).count(), 0);
+  assert.equal(await page.getByRole('button', { name: '收起完整回复', exact: true }).count(), 0);
   phase('delete_begin');
   await panel.getByRole('button', { name: '读取当前会话管理事实' }).click();
   await app.evaluate(

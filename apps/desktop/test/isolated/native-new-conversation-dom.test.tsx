@@ -2,6 +2,7 @@ import { expect, test } from 'bun:test';
 import { rmSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
 import { createRuntime } from '@kite-ai/agent';
+import { createConfigurationSnapshot } from '@kite-ai/agent/config';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import { createFixedModel, type ModelAdapter } from '@kite-ai/ai';
 import { createClient, type Message, type Run, type Session } from '@kite-ai/client';
@@ -37,6 +38,29 @@ const { createRoot } = await import('react-dom/client');
 const { NativeDesktop } = await import('../../src/native');
 Object.assign(globalThis, originals);
 bootstrap.window.close();
+
+function chatRunConfiguration(modelId = 'model') {
+  return {
+    modelId,
+    snapshot: JSON.parse(
+      JSON.stringify(
+        createConfigurationSnapshot({
+          modelId,
+          tools: [],
+          models: [
+            {
+              id: modelId,
+              provider: 'compatible',
+              model: modelId === 'model' ? 'Model' : modelId,
+              protocol: 'chat-completions',
+              baseURL: 'http://127.0.0.1/v1',
+            },
+          ],
+        }),
+      ),
+    ),
+  };
+}
 
 function fixture(
   withPermissions = false,
@@ -512,6 +536,10 @@ function fixture(
             : send.intent.commandId,
           isActive: false,
           status: 'completed',
+          configuration: chatRunConfiguration(),
+          createdAt: 1,
+          finishedAt: 2,
+          reason: null,
         } as Run);
         messages.push({
           id: `message-${send.intent.commandId}`,
@@ -1132,11 +1160,15 @@ test('ordinary saved input takes over its local user message only with matching 
     };
     const run = {
       id: message.runId,
+      configuration: chatRunConfiguration(),
       sessionId: 'a',
       originStoreId: 'store',
       originCommandId: commandId,
       status: 'completed',
       isActive: false,
+      createdAt: 1,
+      finishedAt: 2,
+      reason: null,
     } as Run;
     // Source IDs on a foreign Session cannot consume A's local projection.
     await f.publishMessages([{ ...message, sessionId: 'b' }], [{ ...run, sessionId: 'b' }]);
@@ -1202,6 +1234,7 @@ test('an original pending input precedes its Run status and reply while saved us
     const commandId = submitted!.intent.commandId;
     const active = {
       id: 'early-observed-run',
+      configuration: chatRunConfiguration(),
       sessionId: 'a',
       originStoreId: 'store',
       originCommandId: commandId,
@@ -1209,6 +1242,7 @@ test('an original pending input precedes its Run status and reply while saved us
       isActive: true,
       createdAt: Date.now(),
       finishedAt: null,
+      reason: null,
     } as Run;
     // Main can observe a Run before either the submit response or user history arrives.
     await f.publishMessages([], [active]);
@@ -1261,6 +1295,7 @@ for (const { persistBetween, attachmentOnly } of [
   test(`explicit steers keep delivery order through delayed history (${attachmentOnly ? 'first steer file only' : persistBetween ? 'prior steer saved' : 'both local'})`, async () => {
     const run = {
       id: 'original-steer-run',
+      configuration: chatRunConfiguration(),
       sessionId: 'a',
       originStoreId: 'store',
       originCommandId: 'original-work',
@@ -1268,6 +1303,7 @@ for (const { persistBetween, attachmentOnly } of [
       isActive: true,
       createdAt: Date.now(),
       finishedAt: null,
+      reason: null,
     } as Run;
     const original: Message[] = [
       {
@@ -1428,6 +1464,7 @@ for (const admission of ['accepted', 'rejected'] as const)
   test(`Composer steer frozen to its original Run stays ${admission} when completion races admission, without implicit follow-up`, async () => {
     const run = {
       id: 'racing-run',
+      configuration: chatRunConfiguration(),
       sessionId: 'a',
       originStoreId: 'store',
       originCommandId: 'original-work',
@@ -1435,6 +1472,7 @@ for (const admission of ['accepted', 'rejected'] as const)
       isActive: true,
       createdAt: 1,
       finishedAt: null,
+      reason: null,
     } as Run;
     const initial: Message = {
       id: 'original',
@@ -1586,6 +1624,14 @@ test('Composer steer lost after HTTP commit survives Session switch, original GE
     model,
     modelId: 'fixed',
     permissions: { authorize: async () => ({ allowed: true, revision: '1' }) },
+    resolveRunConfiguration: async () => ({
+      model,
+      modelId: 'fixed',
+      toolIds: [],
+      extensions: [],
+      permissions: { authorize: async () => ({ allowed: true, revision: '1' }) },
+      snapshot: chatRunConfiguration('fixed').snapshot,
+    }),
   });
   await runtime.createWorkspace({
     expectedStoreId: storeId,
@@ -3832,31 +3878,26 @@ test('MCP and Skills share the far-right settings rail, Escape closes details fi
       const state = result as NativeState;
       return { ...state, selection: { ...state.selection!, canReadSkills: true } };
     }
-    if (input.method === 'settings.mcp.read')
+    if (input.method === 'settings.userMcp.read')
       return {
-        kind: 'settings.mcp',
+        kind: 'settings.userMcp',
         observationId: 1,
         storeId: 'store',
-        sessionId: f.selected(),
-        workspaceId: 'w',
         canWrite: true,
         errors: [],
-        servers: [
+        sources: [
           {
-            id: 'server',
-            configDigest: 'a'.repeat(64),
+            id: `mcp-${'a'.repeat(64)}`,
+            name: 'server',
             transport: 'http',
-            source: { kind: 'programmatic', id: 'fixture', revision: '1' },
-            admitted: true,
-            selected: true,
-            available: true,
-            reason: null,
+            address: 'https://mcp.example.test',
+            enabled: true,
+            configured: true,
+            diagnostics: [],
+            authentication: { policy: 'none', status: 'none', loginAllowed: false },
+            connection: { state: 'disconnected', generation: null, toolCount: null },
           },
         ],
-        sources: [],
-        nextAfterId: null,
-        snapshots: [],
-        nextAfterKey: null,
       };
     if (input.method === 'settings.skills.open')
       return {
@@ -3864,16 +3905,12 @@ test('MCP and Skills share the far-right settings rail, Escape closes details fi
         readId: input.readId,
         scope: {
           generation: input.generation,
-          viewSelection: input.viewSelection,
-          historyEpoch: input.historyEpoch,
           storeId: 'store',
-          sessionId: f.selected(),
-          workspaceId: 'w',
         },
         page: {
           version: 1,
           storeId: 'store',
-          workspaceId: 'w',
+          scope: 'user',
           revision: 'b'.repeat(64),
           availability: 'available',
           reason: null,
@@ -3883,7 +3920,7 @@ test('MCP and Skills share the far-right settings rail, Escape closes details fi
               name: 'Shell Skill',
               description: 'Complete skill summary',
               version: 'c'.repeat(64),
-              source: { scope: 'project', origin: '.agents' },
+              source: { scope: 'user', origin: 'configured' },
               enabled: true,
               state: 'available',
               reason: null,
@@ -3951,7 +3988,7 @@ test('MCP and Skills share the far-right settings rail, Escape closes details fi
     expect(f.host.activeElement?.textContent).toBe('新增 MCP');
     expect(f.host.querySelector('.desktop-settings-dialog')).not.toBeNull();
     await pressEscape();
-    expect(f.host.querySelector('.desktop-settings-dialog')).toBeNull();
+    expect(f.host.querySelector('.desktop-settings-dialog') === null).toBe(true);
     await openSettings();
     await f.click('MCP');
     await f.click('新增 MCP');
@@ -3971,8 +4008,8 @@ test('MCP and Skills share the far-right settings rail, Escape closes details fi
     await f.click('查看 Shell Skill 详情');
     await f.click('MCP');
     expect(rail().childElementCount).toBe(0);
-    await f.click('管理连接 server');
-    expect(rail().querySelector('.right-sidebar[aria-label="MCP 连接详情"]')).not.toBeNull();
+    await f.click('管理 server');
+    expect(rail().querySelector('.right-sidebar[aria-label="server"]')).not.toBeNull();
     await f.click('返回应用');
     expect(f.host.querySelector('.settings-editor-panel')).toBeNull();
     expect(f.input('当前会话私有草稿') === draft).toBe(true);
@@ -3981,13 +4018,375 @@ test('MCP and Skills share the far-right settings rail, Escape closes details fi
     expect(f.selected()).toBe('a');
     expect(
       f.calls.some((input) =>
-        ['settings.mcp.submit', 'settings.mcp.cancel', 'conversation.send'].includes(input.method),
+        ['settings.userMcp.submit', 'settings.userMcp.cancel', 'conversation.send'].includes(
+          input.method,
+        ),
       ),
     ).toBe(false);
-    expect(f.calls.some((input) => input.method === 'settings.mcp.close')).toBe(true);
+    expect(f.calls.some((input) => input.method === 'settings.userMcp.close')).toBe(true);
     expect(f.calls.filter((input) => input.method === 'settings.skills.open')).toHaveLength(1);
     expect(f.calls.filter((input) => input.method === 'settings.skills.close')).toHaveLength(1);
   } finally {
+    await f.close();
+  }
+});
+
+test('first accepted input observes a later rejection before Run creation, keeps failure beside saved text and retries only explicitly', async () => {
+  const f = fixture(false, true, 'accept_edits', { firstHumanInput: true });
+  const bridge = f.dom.window.kiteNative! as NativeBridge,
+    originalRequest = bridge.request.bind(bridge);
+  const inputs = new Map<string, NativeState['inputSubmissions'][number]>();
+  let rejectReady = false;
+  bridge.request = async (input) => {
+    if (input.method === 'conversation.send') {
+      inputs.set(input.intent.commandId, {
+        sessionId: input.creation.sessionId,
+        intent: input.intent,
+        phase: 'accepted',
+        command: {
+          id: input.intent.commandId,
+          sessionId: input.creation.sessionId,
+          kind: 'run.start',
+          originStoreId: 'store',
+          status: 'accepted',
+          receipt: null,
+          cancelRequestedAt: null,
+        },
+      });
+    }
+    if (input.method === 'lookupInput' || input.method === 'conversation.lookup') {
+      f.calls.push(input);
+      const row = inputs.get(input.commandId)!;
+      if (rejectReady)
+        inputs.set(input.commandId, {
+          ...row,
+          phase: 'rejected',
+          error: 'shell_asset_unavailable',
+          command: {
+            ...row.command!,
+            status: 'rejected',
+            receipt: { reason: 'shell_asset_unavailable' },
+          },
+        });
+      const observed = inputs.get(input.commandId)!;
+      if (input.method === 'conversation.lookup') {
+        const send = f.calls.find(
+          (call) =>
+            call.method === 'conversation.send' && call.intent.commandId === input.commandId,
+        ) as Extract<NativeRequest, { method: 'conversation.send' }>;
+        return {
+          kind: 'conversation',
+          commandId: input.commandId,
+          stage: 'input',
+          phase: observed.phase === 'rejected' ? 'failed' : 'accepted',
+          creation: { input: send.creation, phase: 'created' },
+          input: observed,
+          code: observed.error,
+        };
+      }
+      return observed;
+    }
+    const value = await originalRequest(input);
+    return value && 'generation' in value
+      ? { ...value, inputSubmissions: [...inputs.values()] }
+      : value;
+  };
+  try {
+    await act(async () => f.root.render(<NativeDesktop />));
+    await f.click('Original A');
+    await f.click('在 Workspace 中新建对话');
+    await f.edit('你好');
+    await f.click('发送首条消息');
+    const first = await f.resolve('accepted');
+    const saved = f.snapshot();
+    await f.publishMessages(
+      saved.messages.map((message) => ({ ...message, runId: null })),
+      [],
+    );
+    expect(f.host.querySelectorAll('.message.user')).toHaveLength(1);
+    expect(f.host.querySelector('[aria-label="回复失败"]')).toBeNull();
+    rejectReady = true;
+    await f.refreshFacts();
+    await f.until(() => !!f.host.querySelector('[aria-label="回复失败"]'));
+    expect(f.host.querySelector('[aria-label="回复失败"]')?.textContent).toContain(
+      '本地执行环境尚未就绪',
+    );
+    expect(f.host.body.textContent).not.toContain('shell_asset_unavailable');
+    expect(f.host.body.textContent).not.toContain('"reason"');
+    expect(promptValue(f.input('当前会话私有草稿'))).toBe('你好');
+    expect(f.calls.filter((input) => input.method === 'conversation.send')).toHaveLength(1);
+    expect(
+      f.calls.some(
+        (input) =>
+          ['lookupInput', 'conversation.lookup'].includes(input.method) &&
+          'commandId' in input &&
+          input.commandId === first.intent.commandId,
+      ),
+    ).toBe(true);
+    await f.click('Other B');
+    expect(f.host.querySelector('[aria-label="回复失败"]')).toBeNull();
+    expect(promptValue(f.input('当前会话私有草稿'))).toBe('saved B');
+    await act(async () =>
+      [...f.host.querySelectorAll<HTMLButtonElement>('.session-row')]
+        .find((row) => row.textContent?.includes('新对话'))!
+        .click(),
+    );
+    expect(f.host.querySelector('[aria-label="回复失败"]')).not.toBeNull();
+    expect(promptValue(f.input('当前会话私有草稿'))).toBe('你好');
+    rejectReady = false;
+    await f.click('发送明确的新轮次');
+    const retry = [...f.calls]
+      .reverse()
+      .find((input) => input.method === 'conversation.send') as Extract<
+      NativeRequest,
+      { method: 'conversation.send' }
+    >;
+    expect(retry.creation).toEqual(first.creation);
+    expect(retry.intent.commandId).not.toBe(first.intent.commandId);
+    expect(f.calls.filter((input) => input.method === 'conversation.send')).toHaveLength(2);
+    await f.resolve('accepted');
+    expect(f.host.querySelectorAll('[aria-label="回复失败"]')).toHaveLength(1);
+    expect(promptValue(f.input('当前会话私有草稿'))).toBe('');
+    const oldFailure = f.host.querySelector('[aria-label="回复失败"]')!;
+    const latestInput = [...f.host.querySelectorAll('.message.user')].at(-1)!;
+    expect(
+      oldFailure.compareDocumentPosition(latestInput) &
+        f.dom.window.Node.DOCUMENT_POSITION_FOLLOWING,
+    ).not.toBe(0);
+  } finally {
+    await f.close();
+  }
+});
+
+test.each([
+  true,
+  false,
+])('cold accepted caller records converge to a pre-Run rejection without replaying it (persisted input: %s)', async (persistedInput) => {
+  const commandId = 'cold-accepted-original';
+  const f = fixture(false, true, 'accept_edits', {
+    messages: persistedInput
+      ? [
+          {
+            id: 'cold-saved-user',
+            sessionId: 'a',
+            runId: null,
+            seq: '1',
+            role: 'user',
+            status: 'complete',
+            content: '你好',
+            humanInput: { inputCommandId: 'raw-original', publicCommandId: commandId },
+          },
+        ]
+      : [],
+    runs: [],
+  });
+  const record: NativeCallerMetadata = {
+    scope: { storeId: 'store', sessionId: 'a', workspaceId: 'w' },
+    subjectId: 'user',
+    request: { kind: 'run.start', commandId, expectedStoreId: 'store' },
+    target: { kind: 'session', id: 'a' },
+    phase: 'accepted',
+    bodyDigest: 'a'.repeat(64),
+    requestDigest: 'b'.repeat(64),
+  };
+  const bridge = f.dom.window.kiteNative! as NativeBridge,
+    originalRequest = bridge.request.bind(bridge);
+  bridge.request = async (input) => {
+    if (input.method === 'caller.lookup') {
+      f.calls.push(input);
+      expect(input.commandId).toBe(commandId);
+      record.phase = 'rejected';
+      return { ...record };
+    }
+    const value = await originalRequest(input);
+    return value && 'generation' in value
+      ? { ...value, callerSubmissions: [{ ...record }] }
+      : value;
+  };
+  try {
+    await act(async () => f.root.render(<NativeDesktop />));
+    await f.click('Original A');
+    await f.until(() => !!f.host.querySelector('[aria-label="回复失败"]'));
+    expect(f.host.querySelectorAll('.message.user')).toHaveLength(persistedInput ? 1 : 0);
+    expect(f.host.body.textContent).not.toContain('从一个想法开始');
+    expect(f.host.querySelector('[aria-label="回复失败"]')?.textContent).toContain('本轮未能启动');
+    expect(f.host.body.textContent).not.toContain('shell_asset_unavailable');
+    expect(f.calls.filter((input) => input.method === 'caller.lookup')).toHaveLength(1);
+    expect(
+      f.calls.some((input) =>
+        ['conversation.send', 'submit', 'createSession', 'caller.submit'].includes(input.method),
+      ),
+    ).toBe(false);
+    await f.click('Other B');
+    expect(f.host.querySelector('[aria-label="回复失败"]')).toBeNull();
+    expect(promptValue(f.input('当前会话私有草稿'))).toBe('saved B');
+    await f.click('Original A');
+    expect(f.host.querySelectorAll('[aria-label="回复失败"]')).toHaveLength(1);
+    expect(f.calls.filter((input) => input.method === 'caller.lookup')).toHaveLength(1);
+  } finally {
+    await f.close();
+  }
+});
+
+test('cold pre-Run rejection stays after prior successful history and before a later explicit input', async () => {
+  const commandId = 'cold-rejected-with-prior-history';
+  const priorRun = {
+    id: 'prior-successful-run',
+    configuration: chatRunConfiguration(),
+    sessionId: 'a',
+    originStoreId: 'store',
+    originCommandId: 'prior-successful-input',
+    status: 'completed',
+    isActive: false,
+    createdAt: 1,
+    finishedAt: 2,
+    reason: null,
+  } as Run;
+  const priorMessages: Message[] = [
+    {
+      id: 'prior-saved-user',
+      sessionId: 'a',
+      runId: priorRun.id,
+      seq: '1',
+      role: 'user',
+      status: 'complete',
+      content: 'prior successful request',
+      sourceIds: ['prior-successful-input'],
+    },
+    {
+      id: 'prior-saved-reply',
+      sessionId: 'a',
+      runId: priorRun.id,
+      seq: '2',
+      role: 'assistant',
+      status: 'complete',
+      content: 'prior successful reply',
+    },
+  ];
+  const f = fixture(false, true, 'accept_edits', {
+    withoutSelection: true,
+    messages: priorMessages,
+    runs: [priorRun],
+  });
+  const record: NativeCallerMetadata = {
+    scope: { storeId: 'store', sessionId: 'a', workspaceId: 'w' },
+    subjectId: 'user',
+    request: { kind: 'run.start', commandId, expectedStoreId: 'store' },
+    target: { kind: 'session', id: 'a' },
+    phase: 'accepted',
+    bodyDigest: 'a'.repeat(64),
+    requestDigest: 'b'.repeat(64),
+  };
+  const bridge = f.dom.window.kiteNative! as NativeBridge,
+    originalRequest = bridge.request.bind(bridge);
+  let submitted: Extract<NativeRequest, { method: 'submit' }> | undefined;
+  bridge.request = async (input) => {
+    if (input.method === 'caller.lookup') {
+      f.calls.push(input);
+      expect(input.commandId).toBe(commandId);
+      record.phase = 'rejected';
+      return { ...record };
+    }
+    if (input.method === 'submit') {
+      f.calls.push(input);
+      submitted = input;
+      return { sessionId: input.sessionId, intent: input.intent, phase: 'accepted' };
+    }
+    const value = await originalRequest(input);
+    return value && 'generation' in value
+      ? {
+          ...value,
+          callerSubmissions: [
+            { ...record },
+            { ...record, scope: { ...record.scope, storeId: 'another-store' } },
+          ],
+        }
+      : value;
+  };
+  const failure = () => f.host.querySelector('[aria-label="回复失败"]');
+  const expectBefore = (before: Element, after: Element) =>
+    expect(
+      before.compareDocumentPosition(after) & f.dom.window.Node.DOCUMENT_POSITION_FOLLOWING,
+    ).not.toBe(0);
+  try {
+    await act(async () => f.root.render(<NativeDesktop />));
+    f.holdHistory();
+    await f.click('Original A');
+    await f.releaseHistory();
+    await f.until(() => !!failure());
+    expect(f.host.querySelectorAll('[aria-label="回复失败"]')).toHaveLength(1);
+    expect(f.host.querySelectorAll('.message.user')).toHaveLength(1);
+    expect(f.host.querySelector('.message.user')?.textContent).toContain(
+      'prior successful request',
+    );
+    const priorReply = [...f.host.querySelectorAll('.message.assistant')].find((message) =>
+      message.textContent?.includes('prior successful reply'),
+    );
+    expect(priorReply).toBeDefined();
+    expectBefore(priorReply!, failure()!);
+    expect(f.host.body.textContent).not.toContain('从一个想法开始');
+    expect(
+      f.calls.some((input) =>
+        ['conversation.send', 'submit', 'createSession', 'caller.submit'].includes(input.method),
+      ),
+    ).toBe(false);
+    await f.click('Other B');
+    expect(failure()).toBeNull();
+    expect(promptValue(f.input('当前会话私有草稿'))).toBe('saved B');
+    await f.click('Original A');
+    expect(f.host.querySelectorAll('[aria-label="回复失败"]')).toHaveLength(1);
+    const originalFailure = failure();
+    await f.edit('later explicitly submitted request', '当前会话私有草稿');
+    await f.click('发送明确的新轮次');
+    expect(submitted?.intent.kind).toBe('run.start');
+    expect(submitted?.intent.commandId).not.toBe(commandId);
+    expectBefore(failure()!, [...f.host.querySelectorAll('.message.user')].at(-1)!);
+    const laterRun = {
+      ...priorRun,
+      id: 'later-successful-run',
+      originCommandId: submitted!.intent.commandId,
+    } as Run;
+    await f.publishMessages(
+      [
+        ...priorMessages,
+        {
+          ...priorMessages[0]!,
+          id: 'later-saved-user',
+          runId: laterRun.id,
+          seq: '3',
+          content: submitted!.intent.content!,
+          sourceIds: [submitted!.intent.commandId],
+        },
+        {
+          ...priorMessages[1]!,
+          id: 'later-saved-reply',
+          runId: laterRun.id,
+          seq: '4',
+          content: 'later successful reply',
+        },
+      ],
+      [priorRun, laterRun],
+    );
+    const laterInput = [...f.host.querySelectorAll('.message.user')].at(-1)!;
+    expect(laterInput.textContent).toContain('later explicitly submitted request');
+    expect(f.host.querySelectorAll('.message.user')).toHaveLength(2);
+    expect(f.host.querySelectorAll('[aria-label="回复失败"]')).toHaveLength(1);
+    expect(failure()).toBe(originalFailure);
+    expectBefore(failure()!, laterInput);
+    await f.click('Other B');
+    expect(failure()).toBeNull();
+    await f.click('Original A');
+    expect(f.host.querySelectorAll('[aria-label="回复失败"]')).toHaveLength(1);
+    expectBefore(failure()!, [...f.host.querySelectorAll('.message.user')].at(-1)!);
+    expect(f.calls.filter((input) => input.method === 'caller.lookup')).toHaveLength(1);
+    expect(f.calls.filter((input) => input.method === 'submit')).toHaveLength(1);
+    expect(
+      f.calls.some((input) =>
+        ['conversation.send', 'createSession', 'caller.submit'].includes(input.method),
+      ),
+    ).toBe(false);
+  } finally {
+    await f.releaseHistory();
     await f.close();
   }
 });

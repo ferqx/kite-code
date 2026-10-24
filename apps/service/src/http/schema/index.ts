@@ -19,7 +19,21 @@ import {
   SessionLogPageSchema,
   SessionLogQuerySchema,
 } from './session-logs';
-import { SkillCataloguePageSchema, SkillCatalogueQuerySchema } from './skill-catalogue';
+import {
+  SkillCataloguePageSchema,
+  SkillCatalogueQuerySchema,
+  UserSkillCataloguePageSchema,
+  UserSkillCatalogueQuerySchema,
+} from './skill-catalogue';
+import {
+  UserMcpOperationQuerySchema,
+  UserMcpOperationResultSchema,
+  UserMcpSettingsQuerySchema,
+  UserMcpSettingsRequestSchema,
+  UserMcpSettingsViewSchema,
+  UserMcpToolsPageSchema,
+  UserMcpToolsQuerySchema,
+} from './user-mcp';
 
 const id = z
   .string()
@@ -415,7 +429,7 @@ const providerSettingsOperation = z.strictObject({
     // biome-ignore lint/suspicious/noControlCharactersInRegex: Provider labels deliberately exclude ASCII controls.
     .regex(/^[^\x00-\x1f\x7f]+$/)
     .optional(),
-  provider: z.enum(['openai', 'deepseek', 'compatible', 'ollama']),
+  provider: z.enum(['openai', 'deepseek', 'compatible', 'ollama', 'codex']),
   protocol: z.enum(['chat-completions', 'responses']).optional(),
   connectionId: etag.nullable(),
   baseURL: z.string().min(1).max(4096),
@@ -838,7 +852,7 @@ export const schemas = {
     providers: z
       .array(
         z.object({
-          id: z.enum(['openai', 'deepseek', 'compatible', 'ollama']),
+          id: z.enum(['openai', 'deepseek', 'compatible', 'ollama', 'codex']),
           label: z.string(),
           defaultBaseURL: z.string(),
           requiresCredential: z.boolean(),
@@ -857,7 +871,7 @@ export const schemas = {
           ),
         }),
       )
-      .length(4),
+      .length(5),
     errors: z.array(z.string().regex(/^[a-z0-9_]{1,128}$/)),
   }),
   ProviderDiscoveryRequest: z.strictObject({
@@ -1816,6 +1830,15 @@ export const apiSchemas = {
   SessionLogPage: SessionLogPageSchema,
   SkillCatalogueQuery: SkillCatalogueQuerySchema,
   SkillCataloguePage: SkillCataloguePageSchema,
+  UserSkillCatalogueQuery: UserSkillCatalogueQuerySchema,
+  UserSkillCataloguePage: UserSkillCataloguePageSchema,
+  UserMcpSettingsQuery: UserMcpSettingsQuerySchema,
+  UserMcpSettingsRequest: UserMcpSettingsRequestSchema,
+  UserMcpSettingsView: UserMcpSettingsViewSchema,
+  UserMcpOperationQuery: UserMcpOperationQuerySchema,
+  UserMcpOperationResult: UserMcpOperationResultSchema,
+  UserMcpToolsQuery: UserMcpToolsQuerySchema,
+  UserMcpToolsPage: UserMcpToolsPageSchema,
   HostStatusQuery: HostStatusQuerySchema,
   HostStatus: HostStatusSchema,
   ...schemas,
@@ -1929,6 +1952,36 @@ export const apiRoutes = [
     path: '/v1/config/user/providers',
     query: 'HostMutationQuery',
     response: 'ProviderSettingsView',
+  },
+  {
+    method: 'get',
+    path: '/v1/config/user/mcp',
+    query: 'UserMcpSettingsQuery',
+    response: 'UserMcpSettingsView',
+  },
+  {
+    method: 'post',
+    path: '/v1/config/user/mcp',
+    request: 'UserMcpSettingsRequest',
+    response: 'UserMcpOperationResult',
+  },
+  {
+    method: 'get',
+    path: '/v1/config/user/mcp/operations/{commandId}',
+    query: 'UserMcpOperationQuery',
+    response: 'UserMcpOperationResult',
+  },
+  {
+    method: 'post',
+    path: '/v1/config/user/mcp/operations/{commandId}/cancel',
+    request: 'UserMcpOperationQuery',
+    response: 'UserMcpOperationResult',
+  },
+  {
+    method: 'get',
+    path: '/v1/config/user/mcp/tools',
+    query: 'UserMcpToolsQuery',
+    response: 'UserMcpToolsPage',
   },
   {
     method: 'post',
@@ -2205,6 +2258,12 @@ export const apiRoutes = [
     path: '/v1/workspaces/{id}/removals/{commandId}',
     query: 'PermissionControlQuery',
     response: 'WorkspaceRemoval',
+  },
+  {
+    method: 'get',
+    path: '/v1/config/user/skills',
+    query: 'UserSkillCatalogueQuery',
+    response: 'UserSkillCataloguePage',
   },
   {
     method: 'get',

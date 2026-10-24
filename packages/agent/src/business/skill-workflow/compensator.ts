@@ -7,6 +7,7 @@ import {
   type ShellJobOptions,
 } from '@kite-ai/agent/jobs/shell';
 import type { Extension, JobDefinition, JobHandle, Json } from '../../extensions';
+import { captureProtectedFiles } from '../../jobs/protected-files';
 import { canonicalJson } from '../../json';
 import type { KnowledgeReadScope } from '../../platform/knowledge-reads';
 import type { CompiledSkillWorkflow, WorkflowCapability } from '../../skills/workflow-contract';
@@ -27,6 +28,7 @@ export interface SkillWorkflowCompensatorOptions {
   readonly resolveCapability?: (id: string) => WorkflowCapability | undefined;
   readonly shell: ShellJobOptions;
   readonly protectedRoots: readonly string[];
+  readonly protectedFiles?: readonly string[];
   readonly temporaryRoot?: string;
 }
 interface LiveCompensation {
@@ -51,6 +53,7 @@ export function createSkillWorkflowCompensator(options: SkillWorkflowCompensator
   const workspace = directoryIdentity(options.shell.cwd);
   const base = directoryIdentity(options.temporaryRoot ?? tmpdir());
   const protectedPaths = options.protectedRoots.map(directoryIdentity);
+  const privateFiles = captureProtectedFiles(options.protectedFiles ?? []);
   if (
     within(workspace.canonical, base.canonical) ||
     protectedPaths.some((path) => within(path.canonical, base.canonical))
@@ -153,6 +156,7 @@ export function createSkillWorkflowCompensator(options: SkillWorkflowCompensator
       assertDirectory(workspace);
       assertDirectory(base);
       protectedPaths.forEach(assertDirectory);
+      privateFiles.verify();
       const assets = await sealCompensationAssets(
         entry,
         base.canonical,
@@ -182,6 +186,7 @@ export function createSkillWorkflowCompensator(options: SkillWorkflowCompensator
           ...configuration,
           cwd: workspace.canonical,
           protectedRoots: protectedPaths.map((path) => path.canonical),
+          protectedFiles: privateFiles.files.map((file) => file.path),
           runtimeReadOnlyRoots: [assets.root],
           temporaryRoot: base.canonical,
         };

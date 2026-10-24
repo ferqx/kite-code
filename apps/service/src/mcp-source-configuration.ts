@@ -70,6 +70,7 @@ import {
 } from './mcp-oauth-session';
 import { createMcpSourceEntryMutations } from './mcp-source-entry-mutations';
 import { createMcpSourceResultQuery } from './mcp-source-result';
+import { acquireUserMcpOAuth, userMcpOAuthScope } from './user-mcp-credentials';
 
 export const mcpSourcesExtensionId = 'builtin.mcp.sources';
 export const mcpSourcesDirectoryToolId = 'mcp.sources.list';
@@ -502,6 +503,7 @@ export function createMcpSourceConfiguration(options: McpSourceConfigurationOpti
     source: Awaited<ReturnType<typeof scope>>,
     entry: ReturnType<typeof readMcpSources>['entries'][number],
     readSet: McpSourceReadSet,
+    owner: 'workspace' | 'user' = 'workspace',
   ): McpOAuthTarget & {
     ownedScope: OwnedCredentialScope;
     provider(signal: AbortSignal): ReturnType<typeof createMcpOAuthProvider>;
@@ -518,21 +520,25 @@ export function createMcpSourceConfiguration(options: McpSourceConfigurationOpti
     )
       throw new McpOAuthSessionError('mcp_credential_store_unavailable');
     const vault = selectedVault as McpOAuthVault;
-    const ownedScope: OwnedCredentialScope = Object.freeze({
-      namespace: 'mcp.oauth',
-      ownerDigest: hash({
-        domain: 'kite-mcp-oauth-owner-v1',
-        profile: profile.profileAccessKey,
-        originalStoreId: source.sourceScope.storeId,
-        workspaceId: source.workspace.id,
-        workspaceIdentity: source.identity,
-        source: entry.server.source,
-        serverId: entry.server.id,
-        rawEntryDigest: entry.server.rawEntryDigest,
-        transportDigest: entry.server.transportDigest,
-        authProfile: auth.profile ?? 'oauth',
-      }),
-    });
+    const ownedScope: OwnedCredentialScope = Object.freeze(
+      owner === 'user'
+        ? userMcpOAuthScope(profile.profileAccessKey, source.sourceScope.storeId, entry)
+        : {
+            namespace: 'mcp.oauth',
+            ownerDigest: hash({
+              domain: 'kite-mcp-oauth-owner-v1',
+              profile: profile.profileAccessKey,
+              originalStoreId: source.sourceScope.storeId,
+              workspaceId: source.workspace.id,
+              workspaceIdentity: source.identity,
+              source: entry.server.source,
+              serverId: entry.server.id,
+              rawEntryDigest: entry.server.rawEntryDigest,
+              transportDigest: entry.server.transportDigest,
+              authProfile: auth.profile ?? 'oauth',
+            }),
+          },
+    );
     const assertFresh = (signal: AbortSignal) => {
       signal.throwIfAborted();
       const lexical = resolve(fileURLToPath(new URL(source.workspace.rootUri))),
@@ -586,6 +592,16 @@ export function createMcpSourceConfiguration(options: McpSourceConfigurationOpti
       assertFresh,
       async acquire(signal) {
         assertFresh(signal);
+        if (owner === 'user') {
+          const release = await acquireUserMcpOAuth(ownedScope, signal);
+          try {
+            assertFresh(signal);
+            return release;
+          } catch (error) {
+            release();
+            throw error;
+          }
+        }
         const locks = options.oauth?.serialLocks?.();
         if (!locks) throw new McpOAuthSessionError('mcp_oauth_serial_unavailable');
         const release = await locks.acquire(
@@ -711,6 +727,33 @@ export function createMcpSourceConfiguration(options: McpSourceConfigurationOpti
       await verify(saved, 'approval');
     }
     if (entry.credentialBinding) await verify(entry.credentialBinding, 'credential');
+    if (entry.userCredentialBinding) {
+      const saved = entry.userCredentialBinding,
+        proof = saved.proof;
+      const actual = await source.host.getHostMutation({
+        expectedStoreId: source.sourceScope.storeId,
+        subjectId: proof.subjectId,
+        commandId: proof.commandId,
+      });
+      const marker = object(object(actual?.safeRequest).mcpSettings),
+        operation = object(marker.operation);
+      if (
+        entry.server.source.kind !== 'user' ||
+        proof.storeId !== source.sourceScope.storeId ||
+        !actual ||
+        actual.originStoreId !== proof.storeId ||
+        actual.subjectId !== proof.subjectId ||
+        actual.requestDigest !== proof.requestDigest ||
+        actual.kind !== 'config.user.write' ||
+        actual.scope !== 'user' ||
+        actual.state !== 'applied' ||
+        operation.kind !== 'bind' ||
+        operation.serverId !== entry.server.id ||
+        operation.expiresAt !== saved.expiresAt ||
+        object(actual.receipt).credentialBindingDigest !== hash(saved)
+      )
+        throw new McpAdapterError('mcp_source_decision_invalid');
+    }
   }
   function select(capture: McpSourceCapture, input: McpSourceSelectionInput) {
     const available = new Map(capture.servers.map((server) => [server.id, server]));
@@ -1627,12 +1670,27 @@ export function createMcpSourceConfiguration(options: McpSourceConfigurationOpti
     };
     let port: McpLifecycleTransportPort;
     if (transport.type === 'http') {
-      const savedBinding = entry.credentialBinding;
+      const savedBinding = entry.userCredentialBinding ?? entry.credentialBinding;
       const policy = oauthPolicy(entry);
+      let useUserOAuth = false;
+      if (
+        policy &&
+        entry.server.source.kind === 'user' &&
+        typeof options.credentialVault.readOwned === 'function'
+      ) {
+        try {
+          useUserOAuth =
+            (await options.credentialVault.readOwned(
+              userMcpOAuthScope(profile.profileAccessKey, source.sourceScope.storeId, entry),
+            )) !== null;
+        } catch {
+          /* The original target still reports unavailable/locked without widening authority. */
+        }
+      }
       // A temporary/manual-only host cannot silently become an OAuth authority.
       const oauth =
         policy && typeof options.credentialVault.readOwned === 'function'
-          ? oauthTarget(source, entry, expected.readSet!)
+          ? oauthTarget(source, entry, expected.readSet!, useUserOAuth ? 'user' : 'workspace')
           : null;
       port = createMcpHttpTransportPort({
         ...options.http,
@@ -2536,7 +2594,7 @@ export function createMcpSourceConfiguration(options: McpSourceConfigurationOpti
       };
       const current = observe({
         root: sourceScope.workspacePath,
-        sourceScope: sourceOptions.scope,
+        sourceScope: sourceOptions.scope as McpSourceScope,
         sourceOptions,
       });
       return {

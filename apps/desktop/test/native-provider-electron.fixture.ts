@@ -484,7 +484,7 @@ try {
   const before = Number(await (await fetch(`${control}/count`)).text());
   await openSettings(page);
   await page.getByRole('button', { name: '提供商', exact: true }).click();
-  await page.getByRole('button', { name: '查询原提供商提交', exact: true }).click();
+  await page.getByRole('button', { name: '查看结果', exact: true }).click();
   await until(
     state,
     (v) =>

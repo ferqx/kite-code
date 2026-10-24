@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { chmodSync, existsSync, lstatSync, mkdtempSync, realpathSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { dirname, isAbsolute, join, relative, sep } from 'node:path';
+import { homedir, tmpdir } from 'node:os';
+import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import type { JobContext } from '../extensions';
 import {
   type LaunchIdentity,
@@ -9,6 +9,8 @@ import {
   removeRuntimeTemp,
   verifyLaunchIdentities,
 } from './launch-identity';
+import { prepareLinuxPrivateDirectory } from './linux-private-directory';
+import { captureProtectedFiles } from './protected-files';
 import { captureReadOnlySource } from './read-only-source';
 import {
   type HostShellExecutionScope,
@@ -23,6 +25,7 @@ export interface LinuxPaths {
   readonly readOnlySourceRoot?: string;
   readonly bubblewrapPath: string;
   readonly protectedRoots: readonly string[];
+  readonly protectedFiles?: readonly string[];
   readonly readonlyAssets?: readonly string[];
   readonly runtimeReadOnlyRoots?: readonly string[];
   readonly temporaryRoot?: string;
@@ -79,13 +82,18 @@ function ancestors(path: string): string[] {
   return paths;
 }
 /** Trusted namespace layout only. The native init must seal mounts/capabilities and syscall policy before business starts. */
-export function captureLinuxLaunch(options: LinuxPaths, binaries: readonly string[]) {
+export function captureLinuxLaunch(
+  options: LinuxPaths,
+  binaries: readonly string[],
+  hostHome = homedir(),
+) {
   if (process.platform !== 'linux') throw Error('linux_shell_platform_unsupported');
   if (options.mode !== 'host' && options.mode !== 'confined')
     throw Error('linux_shell_mode_invalid');
   if (
     [
       options.protectedRoots,
+      options.protectedFiles ?? [],
       options.readonlyAssets ?? [],
       options.runtimeReadOnlyRoots ?? [],
       binaries,
@@ -101,6 +109,18 @@ export function captureLinuxLaunch(options: LinuxPaths, binaries: readonly strin
   const protectedRoots = [
     ...new Set([...options.protectedRoots, ...(control ? [control.path] : [])]),
   ].map((path) => launchIdentity(path));
+  // Denied private names are not executable assets. Freeze only parent metadata;
+  // missing names must not prevent a Model Run from being prepared.
+  const privateFiles = captureProtectedFiles(options.protectedFiles ?? []);
+  // A final credential symlink may have an independently reachable target.
+  // Freeze every denied alias without opening or hashing its content.
+  const privateAliases = privateFiles.deniedPaths.map((path) => captureProtectedFiles([path]));
+  const privateNames = {
+    files: privateAliases.flatMap((aliases) => aliases.files),
+    verify() {
+      for (const aliases of privateAliases) aliases.verify();
+    },
+  };
   const projection = captureReadOnlySource({
     cwd,
     workspace,
@@ -182,6 +202,12 @@ export function captureLinuxLaunch(options: LinuxPaths, binaries: readonly strin
     ),
   ];
   const parents = parentPaths.map((path) => launchIdentity(path));
+  // An outer private view already removes every descendant from the business
+  // filesystem. Retain their host identities, but never leave hidden child
+  // bind mounts for native init to mistake for visible undeclared submounts.
+  const visibleParents = parents.filter(
+    (fact) => !visibleMasks.some((root) => root !== fact.canonical && within(root, fact.canonical)),
+  );
   const bindings = [
     cwd,
     workspace,
@@ -194,8 +220,103 @@ export function captureLinuxLaunch(options: LinuxPaths, binaries: readonly strin
     ...(projection ? [projection.source, ...projection.ancestors] : []),
   ];
   if (bindings.length > 198) throw Error('linux_shell_paths_invalid');
-  return (_command: string, shell: string, context: JobContext): LinuxLaunch => {
+  const privateOptions: LinuxPaths = {
+    ...options,
+    cwd: cwd.path,
+    workspaceRoot: workspace.path,
+    bubblewrapPath: launcher.path,
+    protectedRoots: protectedRoots.map((fact) => fact.path),
+    protectedFiles: [],
+    readonlyAssets: assets.map((fact) => fact.path),
+    runtimeReadOnlyRoots: readonly.map((fact) => fact.path),
+    temporaryRoot: tempBase.path,
+    ...(control ? { controlBase: control.path } : {}),
+    ...(projection ? { readOnlySourceRoot: projection.source.path } : {}),
+  };
+  const privateBinaries = [...binaries];
+  return (command: string, shell: string, context: JobContext): LinuxLaunch => {
     verifyLaunchIdentities(bindings);
+    if (privateFiles.files.length) {
+      context.signal.throwIfAborted();
+      privateFiles.verify();
+      privateNames.verify();
+      const homes = [...new Set([hostHome, homedir()])].map((home) => {
+        if (!isAbsolute(home) || home.includes('\0'))
+          throw Error('linux_shell_private_file_layout_invalid');
+        try {
+          return realpathSync.native(home);
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code !== 'ENOENT')
+            throw Error('linux_shell_private_file_layout_invalid', { cause: error });
+          return resolve(home);
+        }
+      });
+      const directories = [
+        ...new Map(
+          privateNames.files.map((file) => [dirname(file.canonical), file.parent]),
+        ).entries(),
+      ];
+      // A private subdirectory can live in the Workspace; a broad private root
+      // cannot replace the Workspace, HOME, temp or a fixed executable source.
+      const publicPaths = [
+        ...homes,
+        ...(!projection ? [cwd.canonical] : []),
+        workspace.canonical,
+        tempBase.canonical,
+        ...readonly.map((fact) => fact.canonical),
+        ...assets.map((fact) => fact.canonical),
+        ...system.map((fact) => fact.canonical),
+      ];
+      if (
+        // A canonical directory mask cannot prevent unlinking a separately
+        // writable symlink spelling. Its alias must already be inside an
+        // original protected tree (or its verified readonly source view).
+        privateNames.files.some(
+          (file) =>
+            dirname(file.path) !== dirname(file.canonical) &&
+            !protectedRoots.some((root) => within(root.canonical, dirname(file.path))),
+        ) ||
+        directories.some(
+          ([path]) =>
+            path === '/' ||
+            publicPaths.some((publicPath) => within(path, publicPath)) ||
+            (projection && within(projection.source.canonical, path)),
+        )
+      )
+        throw Error('linux_shell_private_file_layout_invalid');
+      if (
+        new Set([...privateOptions.protectedRoots, ...directories.map(([path]) => path)]).size > 128
+      )
+        throw Error('linux_shell_paths_invalid');
+      const roots = directories.map(([path, parent]) =>
+        prepareLinuxPrivateDirectory(path, parent, context.signal),
+      );
+      context.signal.throwIfAborted();
+      const prepare = captureLinuxLaunch(
+        {
+          ...privateOptions,
+          protectedRoots: [...privateOptions.protectedRoots, ...roots.map((fact) => fact.path)],
+        },
+        privateBinaries,
+        hostHome,
+      );
+      const launch = prepare(command, shell, context);
+      try {
+        verifyLaunchIdentities(bindings);
+        verifyLaunchIdentities(roots);
+        privateFiles.verify();
+        privateNames.verify();
+        context.signal.throwIfAborted();
+        return launch;
+      } catch (error) {
+        try {
+          launch.cleanup();
+        } catch (cleanupError) {
+          throw new LinuxPreparationCleanupError(error, cleanupError, launch);
+        }
+        throw error;
+      }
+    }
     const executable = launchIdentity(shell, true);
     if (
       !assets.some(
@@ -272,9 +393,11 @@ export function captureLinuxLaunch(options: LinuxPaths, binaries: readonly strin
       if (mode !== 'confined') {
         args.push(mode === 'full' ? '--bind' : '--ro-bind', '/', '/');
         // Separate mountpoints prevent deleting/renaming protected ancestors without making sibling trees readonly in Full.
-        for (const fact of [...parents, workspace, tempBase].sort(
-          (a, b) => depth(a.canonical) - depth(b.canonical),
-        ))
+        for (const fact of [
+          ...new Map(
+            [...visibleParents, workspace, tempBase].map((fact) => [fact.canonical, fact]),
+          ).values(),
+        ].sort((a, b) => depth(a.canonical) - depth(b.canonical)))
           args.push(
             mode === 'full' || within(workspace.canonical, fact.canonical) ? '--bind' : '--ro-bind',
             fact.canonical,
@@ -293,7 +416,7 @@ export function captureLinuxLaunch(options: LinuxPaths, binaries: readonly strin
         }
       if (mode === 'confined') {
         args.push('--bind', workspace.canonical, workspace.canonical);
-        for (const fact of parents
+        for (const fact of visibleParents
           .filter((fact) => within(workspace.canonical, fact.canonical))
           .sort((a, b) => depth(a.canonical) - depth(b.canonical)))
           args.push('--bind', fact.canonical, fact.canonical);
@@ -312,7 +435,7 @@ export function captureLinuxLaunch(options: LinuxPaths, binaries: readonly strin
           ...(mode === 'confined'
             ? [
                 workspace.canonical,
-                ...parents
+                ...visibleParents
                   .filter((fact) => within(workspace.canonical, fact.canonical))
                   .map((fact) => fact.canonical),
                 ...[...readonly, ...assets]

@@ -617,7 +617,7 @@ test('a prepared catalogue from another Store cannot qualify the current picker'
         />,
       ),
     );
-    expect(f.element.querySelector('[data-model-trigger]')?.textContent).toBe('remote-b');
+    expect(f.element.querySelector('[data-model-trigger]')?.textContent).toBe('remote-b未指定');
     expect(calls).toEqual([{ method: 'input.models.read', generation: 1 }]);
     expect(ready[0]).toBe(false);
     expect(ready.at(-1)).toBe(true);
@@ -646,13 +646,458 @@ function previousRun(
         version: 1,
         digest: 'f'.repeat(64),
         configuration: {
-          models: [{ id: 'a', options: effort === undefined ? {} : { reasoningEffort: effort } }],
+          models: [
+            {
+              id: 'a',
+              provider: 'compatible',
+              model: 'remote-a',
+              options: effort === undefined ? {} : { reasoningEffort: effort },
+            },
+          ],
         },
       },
     },
     ...overrides,
   } as NativeSelection['runs'][number];
 }
+
+for (const source of [
+  { protocol: 'chat-completions', provider: 'compatible', expected: 'Chat Completions' },
+  { protocol: 'responses', provider: 'openai', expected: 'Responses' },
+  { protocol: undefined, provider: 'codex', expected: 'Responses' },
+] as const)
+  test(`the first actual Run limits only protocol family while same-family model and effort remain selectable (${source.expected}/${source.provider})`, async () => {
+    const f = fixture();
+    const family = source.expected === 'Responses' ? 'responses' : 'chat-completions';
+    const opposite = family === 'responses' ? 'chat-completions' : 'responses';
+    const catalogue: NativeModelSettingsFacts = {
+      ...facts,
+      defaultModelId: 'first',
+      selectedModelId: 'first',
+      models: [
+        {
+          ...facts.models[0]!,
+          id: 'first',
+          provider: source.provider,
+          model: 'first-model',
+          protocol: family,
+        },
+        {
+          ...facts.models[0]!,
+          id: 'same',
+          provider: source.provider,
+          model: 'same-family-model',
+          protocol: family,
+        },
+        { ...facts.models[0]!, id: 'opposite', model: 'opposite-family-model', protocol: opposite },
+      ],
+    };
+    const first = previousRun('high', {
+      id: 'first-actual-run',
+      originStoreId: source.provider === 'codex' ? 'restored-origin-store' : 'store',
+      status: source.provider === 'codex' ? 'cancelled' : 'completed',
+      configuration: {
+        modelId: 'first',
+        snapshot: {
+          version: 1,
+          digest: 'a'.repeat(64),
+          configuration: {
+            models: [
+              {
+                id: 'first',
+                provider: source.provider,
+                model: 'first-model',
+                ...(source.protocol ? { protocol: source.protocol } : {}),
+              },
+            ],
+          },
+        },
+      },
+    });
+    const later = previousRun('low', {
+      id: 'later-different-protocol',
+      createdAt: 30,
+      configuration: {
+        modelId: 'opposite',
+        snapshot: {
+          version: 1,
+          digest: 'b'.repeat(64),
+          configuration: {
+            models: [
+              {
+                id: 'opposite',
+                provider: 'compatible',
+                model: 'opposite-family-model',
+                protocol: opposite,
+              },
+            ],
+          },
+        },
+      },
+    });
+    if (source.provider === 'codex')
+      first.configuration = {
+        modelId: 'first',
+        snapshot: {
+          kind: 'human_input_processing',
+          originalConfiguration: (first.configuration as { snapshot: never }).snapshot,
+        },
+      };
+    const original = structuredClone(first);
+    const calls: NativeRequest[] = [];
+    const bridge: NativeBridge = {
+      watch: () => () => {},
+      request: async (request) => {
+        calls.push(request);
+        return catalogue;
+      },
+    };
+    let observed: NativeModelChoice = {},
+      resolved: NativeModelChoice | undefined;
+    function Host() {
+      const [value, setValue] = useState<NativeModelChoice>({});
+      observed = value;
+      return (
+        <NativeModelPicker
+          bridge={bridge}
+          generation={1}
+          selection={{ ...selected('s'), runs: [first, later] }}
+          value={value}
+          onChange={setValue}
+          onReady={(_ready, choice) => {
+            resolved = choice;
+          }}
+        />
+      );
+    }
+    try {
+      await act(async () => f.root.render(<Host />));
+      expect(resolved).toEqual({ modelId: 'first' });
+      await f.click('模型：first-model，思考程度：轻度');
+      expect(f.element.textContent).toContain(
+        `此会话使用 ${source.expected}，切换协议请新建会话。`,
+      );
+      await f.click(`选择模型，当前 ${source.provider} / first-model`);
+      expect(f.element.querySelector('[aria-label="选择模型 opposite"]')).toBeNull();
+      expect(f.element.querySelector('[aria-label="选择模型 same"]')).not.toBeNull();
+      await f.click('选择模型 same');
+      expect(resolved).toEqual({ modelId: 'same' });
+      const slider = f.element.querySelector<HTMLElement>('[role="slider"]')!;
+      await act(async () =>
+        slider.dispatchEvent(
+          new f.dom.window.KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }),
+        ),
+      );
+      expect(observed).toEqual({ modelId: 'same', reasoningEffort: 'medium' });
+      expect(resolved).toEqual(observed);
+      expect(f.element.querySelector('.model-effort-summary')?.textContent).toBe('中');
+      expect(first).toEqual(original);
+      expect(calls).toEqual([{ method: 'input.models.read', generation: 1 }]);
+    } finally {
+      await f.close();
+    }
+  });
+
+test('an admitted input without an actual Run does not limit protocol choice, including new-conversation preparation', async () => {
+  const f = fixture();
+  const catalogue: NativeModelSettingsFacts = {
+    ...facts,
+    selectedModelId: 'a',
+    models: [
+      { ...facts.models[0]!, protocol: 'chat-completions' },
+      { ...facts.models[1]!, provider: 'compatible', protocol: 'responses' },
+    ],
+  };
+  const bridge: NativeBridge = { watch: () => () => {}, request: async () => catalogue };
+  const render = (preparing = false) =>
+    act(async () =>
+      f.root.render(
+        <NativeModelPicker
+          bridge={bridge}
+          generation={1}
+          selection={{ ...selected('s', preparing ? 2 : 1), runs: [] }}
+          preparing={preparing ? { storeId: 'store' } : undefined}
+          value={{}}
+          onChange={() => {}}
+          onReady={() => {}}
+        />,
+      ),
+    );
+  try {
+    for (const preparing of [false, true]) {
+      await render(preparing);
+      expect(f.element.textContent).not.toContain('切换协议请新建会话');
+      await f.click('模型：remote-a，思考程度：轻度');
+      await f.click('选择模型，当前 openai / remote-a');
+      await f.click('compatible');
+      expect(f.element.querySelector('[aria-label="选择模型 b"]')).not.toBeNull();
+      await f.click('模型：remote-a，思考程度：轻度');
+    }
+  } finally {
+    await f.close();
+  }
+});
+
+test('an existing selected route of the other protocol stays unavailable without using the global default', async () => {
+  const f = fixture();
+  const catalogue: NativeModelSettingsFacts = {
+    ...facts,
+    selectedModelId: 'b',
+    defaultModelId: 'a',
+    models: [
+      { ...facts.models[0]!, protocol: 'chat-completions' },
+      { ...facts.models[1]!, provider: 'compatible', protocol: 'responses' },
+    ],
+  };
+  const bridge: NativeBridge = { watch: () => () => {}, request: async () => catalogue };
+  let ready = true,
+    resolved: NativeModelChoice | undefined;
+  function Host() {
+    const [value, setValue] = useState<NativeModelChoice>({});
+    return (
+      <NativeModelPicker
+        bridge={bridge}
+        generation={1}
+        selection={{ ...selected('s'), runs: [previousRun('low')] }}
+        value={value}
+        onChange={setValue}
+        onReady={(available, choice) => {
+          ready = available;
+          resolved = choice;
+        }}
+      />
+    );
+  }
+  try {
+    await act(async () => f.root.render(<Host />));
+    expect(ready).toBe(false);
+    expect(resolved).toBeUndefined();
+    expect(f.element.textContent).toContain('所选模型 b 当前不可用');
+    await f.click('模型：选择模型');
+    await f.click('选择模型，当前 未选择');
+    expect(f.element.querySelector('[aria-label="选择模型 b"]')).toBeNull();
+    await f.click('选择模型 a');
+    expect(ready).toBe(true);
+    expect(resolved).toEqual({ modelId: 'a', reasoningEffort: 'low' });
+  } finally {
+    await f.close();
+  }
+});
+
+test('an unverified first Run blocks sending and does not infer its protocol from a later Run', async () => {
+  const f = fixture();
+  const bridge: NativeBridge = { watch: () => () => {}, request: async () => facts };
+  const original = previousRun('high');
+  const firstCases = [
+    { ...original, configuration: undefined },
+    { ...original, sessionId: 'another-session' },
+    {
+      ...original,
+      configuration: {
+        modelId: 'a',
+        snapshot: {
+          version: 1,
+          digest: 'a'.repeat(64),
+          configuration: { models: [{ id: 'a', protocol: 'responses' }] },
+        },
+      },
+    },
+    {
+      ...original,
+      configuration: {
+        modelId: 'a',
+        snapshot: {
+          version: 2,
+          digest: 'a',
+          configuration: { models: [{ id: 'a', protocol: 'responses' }] },
+        },
+      },
+    },
+    {
+      ...original,
+      configuration: {
+        modelId: 'a',
+        snapshot: {
+          version: 1,
+          digest: 'a',
+          configuration: {
+            models: [
+              { id: 'a', protocol: 'responses' },
+              { id: 'a', protocol: 'responses' },
+            ],
+          },
+        },
+      },
+    },
+    {
+      ...original,
+      configuration: {
+        modelId: 'a',
+        snapshot: {
+          version: 1,
+          digest: 'a',
+          configuration: { models: [{ id: 'a', protocol: 'unknown-protocol' }] },
+        },
+      },
+    },
+    {
+      ...original,
+      configuration: {
+        modelId: 'a',
+        snapshot: {
+          version: 1,
+          digest: 'a',
+          configuration: { models: [{ id: 'a', provider: 'codex', protocol: 'chat-completions' }] },
+        },
+      },
+    },
+    {
+      ...original,
+      configuration: {
+        modelId: 'a',
+        snapshot: {
+          version: 1,
+          digest: 'a',
+          configuration: { models: [{ id: 'a', provider: 'deepseek', protocol: 'responses' }] },
+        },
+      },
+    },
+  ];
+  let ready = true,
+    resolved: NativeModelChoice | undefined;
+  try {
+    for (const [index, first] of firstCases.entries()) {
+      await act(async () =>
+        f.root.render(
+          <NativeModelPicker
+            bridge={bridge}
+            generation={1}
+            selection={{
+              ...selected('s', index + 1),
+              runs: [first, previousRun('low', { id: 'later' })],
+            }}
+            value={{}}
+            onChange={() => {
+              throw Error('unverified_run_must_not_change_model');
+            }}
+            onReady={(available, choice) => {
+              ready = available;
+              resolved = choice;
+            }}
+          />,
+        ),
+      );
+      expect(ready).toBe(false);
+      expect(resolved).toBeUndefined();
+      expect(f.element.querySelector('[data-model-trigger]')?.textContent).toContain('remote-a');
+      expect(f.element.querySelector<HTMLButtonElement>('[data-model-trigger]')?.disabled).toBe(
+        true,
+      );
+      expect(f.element.querySelector('[role="alert"]')?.textContent).toBe(
+        '无法确认此会话首次运行的模型协议，暂时无法发送。',
+      );
+    }
+  } finally {
+    await f.close();
+  }
+});
+
+test.each([
+  false,
+  true,
+])('an unspecified effort stays out of the next input until the slider is moved (preparing: %s)', async (preparing) => {
+  const f = fixture(),
+    selection = { ...selected('s'), runs: [] },
+    calls: NativeRequest[] = [],
+    changes: NativeModelChoice[] = [];
+  const catalogue: NativeModelSettingsFacts = {
+    ...facts,
+    models: facts.models.map((model) => ({ ...model, reasoningEffort: undefined })),
+  };
+  const bridge: NativeBridge = {
+    watch: () => () => {},
+    request: async (request) => {
+      calls.push(request);
+      return catalogue;
+    },
+  };
+  let resolved: NativeModelChoice | undefined;
+  function Host() {
+    const [value, setValue] = useState<NativeModelChoice>({});
+    return (
+      <NativeModelPicker
+        bridge={bridge}
+        generation={1}
+        selection={selection}
+        preparing={preparing ? { storeId: 'store' } : undefined}
+        value={value}
+        onChange={(choice) => {
+          changes.push(choice);
+          setValue(choice);
+        }}
+        onReady={(_ready, choice) => {
+          resolved = choice;
+        }}
+      />
+    );
+  }
+  try {
+    const { nativeTextIntent } = await import('../../src/native-input');
+    await act(async () => f.root.render(<Host />));
+    expect(f.element.querySelector('.model-effort-summary')?.textContent).toBe('未指定');
+    expect(resolved).toEqual({ modelId: 'a' });
+    expect(
+      nativeTextIntent(selection, 'before-drag', 'first input', false, resolved),
+    ).not.toHaveProperty('reasoningEffort');
+    expect(changes).toEqual([]);
+    await f.click('模型：remote-a，思考程度：未指定');
+    const label = () => f.element.querySelector('.effort-value')?.textContent,
+      slider = f.element.querySelector<HTMLElement>('[role="slider"]')!,
+      rail = f.element.querySelector<HTMLElement>('.gem-slider')!;
+    expect(label()).toBe('未指定');
+    expect(slider.getAttribute('aria-valuetext')).toBe('未指定');
+    rail.getBoundingClientRect = () => new f.dom.window.DOMRect(0, 0, 120, 32);
+    Object.assign(rail, {
+      setPointerCapture() {},
+      hasPointerCapture: () => true,
+      releasePointerCapture() {},
+    });
+    const pointer = (type: string, clientX: number) => {
+      const event = new f.dom.window.MouseEvent(type, {
+        bubbles: true,
+        button: 0,
+        clientX,
+        clientY: 16,
+      });
+      Object.defineProperties(event, {
+        pointerId: { value: 1 },
+        pointerType: { value: 'mouse' },
+      });
+      rail.dispatchEvent(event);
+    };
+    await act(async () => pointer('pointerdown', 24));
+    await act(async () => pointer('pointermove', 48));
+    await act(async () => pointer('pointerup', 48));
+    expect(changes.at(-1)).toEqual({ modelId: 'a', reasoningEffort: 'high' });
+    expect(resolved).toEqual({ modelId: 'a', reasoningEffort: 'high' });
+    expect(label()).toBe('高');
+    expect(f.element.querySelector('.model-effort-summary')?.textContent).toBe('高');
+    expect(slider.getAttribute('aria-valuetext')).toBe('高');
+    expect(nativeTextIntent(selection, 'after-drag', 'next input', false, resolved)).toMatchObject({
+      kind: 'run.start',
+      modelId: 'a',
+      reasoningEffort: 'high',
+    });
+    expect(calls).toEqual([
+      {
+        method: preparing ? 'conversation.models.read' : 'input.models.read',
+        generation: 1,
+      },
+    ]);
+  } finally {
+    await f.close();
+  }
+});
 
 test('the first paint restores the Session effort and hands the same value to the next input before any slider interaction', async () => {
   const f = fixture(),
@@ -762,33 +1207,46 @@ test('new conversations use configured effort while foreign, stale and malformed
       );
     });
   try {
-    const histories = [
-      [],
-      [previousRun('max', { sessionId: 'foreign' })],
-      [previousRun('max', { originStoreId: 'foreign' })],
-      [previousRun('max', { configuration: { modelId: 'b' } })],
-      [previousRun('max', { id: 'older', createdAt: 10 }), previousRun(undefined)],
-      [previousRun('provider-only')],
-      [previousRun('max', { configuration: { modelId: 'a', snapshot: { version: 2 } } })],
-      [
-        previousRun('max', {
-          configuration: {
-            modelId: 'a',
-            snapshot: {
-              version: 1,
-              digest: 'f',
-              configuration: {
-                models: [{ id: 'a', options: { reasoningEffort: 'max' } }, { id: 'a' }],
+    const histories: { runs: NativeSelection['runs']; available: boolean }[] = [
+      { runs: [], available: true },
+      { runs: [previousRun('max', { sessionId: 'foreign' })], available: false },
+      { runs: [previousRun('max', { originStoreId: 'foreign' })], available: true },
+      { runs: [previousRun('max', { configuration: { modelId: 'b' } })], available: false },
+      {
+        runs: [previousRun('max', { id: 'older', createdAt: 10 }), previousRun(undefined)],
+        available: true,
+      },
+      { runs: [previousRun('provider-only')], available: true },
+      {
+        runs: [previousRun('max', { configuration: { modelId: 'a', snapshot: { version: 2 } } })],
+        available: false,
+      },
+      {
+        runs: [
+          previousRun('max', {
+            configuration: {
+              modelId: 'a',
+              snapshot: {
+                version: 1,
+                digest: 'f',
+                configuration: {
+                  models: [{ id: 'a', options: { reasoningEffort: 'max' } }, { id: 'a' }],
+                },
               },
             },
-          },
-        }),
-      ],
+          }),
+        ],
+        available: false,
+      },
     ];
     for (const history of histories) {
-      await render(history);
+      await render(history.runs);
       expect(f.element.querySelector('.model-effort-summary')?.textContent).toBe('轻度');
-      expect(resolved).toEqual({ modelId: 'a' });
+      expect(resolved).toEqual(history.available ? { modelId: 'a' } : undefined);
+      if (!history.available)
+        expect(f.element.querySelector('[role="alert"]')?.textContent).toContain(
+          '无法确认此会话首次运行的模型协议',
+        );
     }
     await render([previousRun('max')]);
     expect(f.element.querySelector('.model-effort-summary')?.textContent).toBe('Max');

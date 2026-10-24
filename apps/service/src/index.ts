@@ -23,7 +23,12 @@ import {
 import { FileCheckpointListQuerySchema } from './http/schema/file-checkpoints';
 import { HostStatusQuerySchema, HostStatusSchema } from './http/schema/host-status';
 import { SessionLogPageSchema, SessionLogQuerySchema } from './http/schema/session-logs';
-import { SkillCataloguePageSchema, SkillCatalogueQuerySchema } from './http/schema/skill-catalogue';
+import {
+  SkillCataloguePageSchema,
+  SkillCatalogueQuerySchema,
+  UserSkillCataloguePageSchema,
+  UserSkillCatalogueQuerySchema,
+} from './http/schema/skill-catalogue';
 import { createHttpLifecycle } from './lifecycle';
 import { executionResponse, messageResponses } from './message-response';
 import { modelInputResponse, modelOutputResponse } from './model-input-response';
@@ -33,7 +38,12 @@ import {
 } from './native-file-checkpoint-response';
 import type { PermissionManagementPort } from './permission-management';
 import type { SessionLogsSource } from './session-logs';
-import { type SkillCatalogueSource, unavailableSkillCatalogue } from './skill-catalogue';
+import {
+  type SkillCatalogueSource,
+  unavailableSkillCatalogue,
+  unavailableUserSkillCatalogue,
+} from './skill-catalogue';
+import type { UserMcpManagementPort } from './user-mcp-management';
 
 export interface ServiceOptions {
   /** Missing only when the explicit host could not open its Store. */
@@ -43,6 +53,7 @@ export interface ServiceOptions {
   /** Trusted host release after confirmed Runtime/resource drain, before the listener closes. */
   afterResourceClose?: () => Promise<void>;
   configurationManagement?: ConfigurationManagementPort;
+  userMcpManagement?: UserMcpManagementPort;
   permissionManagement?: PermissionManagementPort;
   diagnosticSource?: HostStatusSource;
   skillCatalogue?: SkillCatalogueSource;
@@ -230,6 +241,7 @@ export async function startService(options: ServiceOptions) {
   let endpoint = '';
   let closing = false;
   const lifecycle = createHttpLifecycle(options.runtime, async () => {
+    await options.userMcpManagement?.close();
     await options.skillCatalogue?.dispose?.();
     await options.beforeResourceClose?.();
   });
@@ -276,6 +288,8 @@ export async function startService(options: ServiceOptions) {
       ![
         'host_status',
         'skill_catalogue',
+        'user_skill_catalogue',
+        'user_mcp_settings',
         'skill_workflow_catalogue',
         'run_skill_selection',
         'run_extension_inputs',
@@ -311,7 +325,9 @@ export async function startService(options: ServiceOptions) {
   if (options.runtime?.supportsInputFiles) capabilities.push('input_files');
   if (options.runtime?.supportsExtensionInputs) capabilities.push('run_extension_inputs');
   if (options.diagnosticSource) capabilities.push('host_status');
+  if (options.userMcpManagement) capabilities.push('user_mcp_settings');
   if (options.skillCatalogue) capabilities.push('skill_catalogue');
+  if (options.skillCatalogue?.listUser) capabilities.push('user_skill_catalogue');
   if (options.skillCatalogue?.supportsWorkflow) capabilities.push('skill_workflow_catalogue');
   if (sessionLogs) capabilities.push('session_logs');
   if (supportsFileRecovery(options.runtime)) capabilities.push('file_recovery');
@@ -1257,6 +1273,141 @@ export async function startService(options: ServiceOptions) {
   });
   app.get('/health/live', (context) => context.json({ status: closing ? 'draining' : 'live' }));
   app.get('/v1/server', async (context) => context.json(await serverInfo()));
+  const userMcp = () => {
+    if (!options.userMcpManagement) throw new HttpFailure('user_mcp_settings_unavailable', 503);
+    return options.userMcpManagement;
+  };
+  const userMcpIdentity = async (storeId: string) => {
+    if ((await runtime.getMetadata()).storeId !== storeId)
+      throw new HttpFailure('store_identity_mismatch', 409);
+    return { expectedStoreId: storeId, subjectId };
+  };
+  const userMcpCommandId = (commandId: string) => {
+    if (!schemas.Session.shape.id.safeParse(commandId).success)
+      throw new HttpFailure('invalid_request', 400);
+    return commandId;
+  };
+  const userMcpResult = async <T>(work: () => Promise<T>): Promise<T> => {
+    try {
+      return await work();
+    } catch (error) {
+      const code = error instanceof AgentError ? error.code : '';
+      if (
+        [
+          'mcp_tools_snapshot_stale',
+          'mcp_source_conflict',
+          'configuration_read_set_conflict',
+          'store_mismatch',
+          'host_mutation_conflict',
+        ].includes(code)
+      )
+        throw new HttpFailure(code, 409);
+      if (code === 'mcp_operation_not_found') throw new HttpFailure(code, 404);
+      if (
+        [
+          'mcp_tools_cursor_invalid',
+          'mcp_source_mutation_invalid',
+          'mcp_transport_unavailable',
+          'invalid_host_mutation',
+        ].includes(code)
+      )
+        throw new HttpFailure(code, 400);
+      if (code === 'mcp_settings_subject_mismatch') throw new HttpFailure(code, 403);
+      if (code === 'mcp_tools_metadata_limit') throw new HttpFailure(code, 413);
+      throw error;
+    }
+  };
+  app.get('/v1/config/user/mcp', async (context) => {
+    context.header('cache-control', 'no-store');
+    const query = sessionExportQuery(context.req.queries(), apiSchemas.UserMcpSettingsQuery);
+    const identity = await userMcpIdentity(query.storeId);
+    return context.json(
+      apiSchemas.UserMcpSettingsView.parse(await userMcpResult(() => userMcp().read(identity))),
+    );
+  });
+  app.post('/v1/config/user/mcp', async (context) => {
+    const input = await readBody(context.req.raw, apiSchemas.UserMcpSettingsRequest, 16384, {
+      requireStoreId: false,
+      readers: bodyReaders,
+    });
+    const identity = await userMcpIdentity(input.storeId);
+    return context.json(
+      apiSchemas.UserMcpOperationResult.parse(
+        await userMcpResult(() =>
+          userMcp().mutate({
+            ...identity,
+            commandId: input.commandId,
+            expectedReadSet: input.expectedReadSet,
+            operation: input.operation,
+          }),
+        ),
+      ),
+    );
+  });
+  app.get('/v1/config/user/mcp/operations/:commandId', async (context) => {
+    context.header('cache-control', 'no-store');
+    const query = sessionExportQuery(context.req.queries(), apiSchemas.UserMcpOperationQuery);
+    const identity = await userMcpIdentity(query.storeId);
+    const commandId = userMcpCommandId(context.req.param('commandId'));
+    return context.json(
+      apiSchemas.UserMcpOperationResult.parse(
+        await userMcpResult(() => userMcp().lookup({ ...identity, commandId })),
+      ),
+    );
+  });
+  app.post('/v1/config/user/mcp/operations/:commandId/cancel', async (context) => {
+    const input = await readBody(context.req.raw, apiSchemas.UserMcpOperationQuery, 1024, {
+      requireStoreId: false,
+      readers: bodyReaders,
+    });
+    const identity = await userMcpIdentity(input.storeId);
+    const commandId = userMcpCommandId(context.req.param('commandId'));
+    return context.json(
+      apiSchemas.UserMcpOperationResult.parse(
+        await userMcpResult(() => userMcp().cancel({ ...identity, commandId })),
+      ),
+    );
+  });
+  app.get('/v1/config/user/mcp/tools', async (context) => {
+    context.header('cache-control', 'no-store');
+    const query = sessionExportQuery(context.req.queries(), apiSchemas.UserMcpToolsQuery);
+    const identity = await userMcpIdentity(query.storeId);
+    return context.json(
+      apiSchemas.UserMcpToolsPage.parse(
+        await userMcpResult(() =>
+          userMcp().tools({
+            ...identity,
+            serverId: query.serverId,
+            generation: query.generation,
+            ...(query.afterIndex === undefined ? {} : { afterIndex: query.afterIndex }),
+          }),
+        ),
+      ),
+    );
+  });
+  app.get('/v1/config/user/skills', async (context) => {
+    context.header('cache-control', 'no-store');
+    const query = sessionExportQuery(context.req.queries(), UserSkillCatalogueQuerySchema);
+    if ((await runtime.getMetadata()).storeId !== query.storeId)
+      throw new HttpFailure('store_identity_mismatch', 409);
+    if (query.afterId && !query.revision)
+      throw new HttpFailure('invalid_skill_catalogue_query', 400);
+    const page = await (options.skillCatalogue?.listUser
+      ? options.skillCatalogue.listUser({ ...query, subjectId, runtime })
+      : Promise.resolve(unavailableUserSkillCatalogue(query, 'skill_catalogue_source_unavailable'))
+    ).catch((error: unknown) => {
+      const code = error instanceof AgentError ? error.code : '';
+      if (code === 'skill_catalogue_changed') throw new HttpFailure(code, 409);
+      if (code === 'invalid_skill_catalogue_query') throw new HttpFailure(code, 400);
+      if (code === 'skill_catalogue_page_too_small') throw new HttpFailure(code, 413);
+      throw error;
+    });
+    if (page.storeId !== query.storeId || page.scope !== 'user')
+      throw new HttpFailure('skill_catalogue_identity_mismatch', 409);
+    if (query.revision && page.revision !== query.revision)
+      throw new HttpFailure('skill_catalogue_changed', 409);
+    return context.json(UserSkillCataloguePageSchema.parse(page));
+  });
   app.get('/v1/workspaces/:id/skills', async (context) => {
     context.header('cache-control', 'no-store');
     const query = sessionExportQuery(context.req.queries(), SkillCatalogueQuerySchema);

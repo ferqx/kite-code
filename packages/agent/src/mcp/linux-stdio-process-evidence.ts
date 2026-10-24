@@ -1,4 +1,5 @@
 import type { LinuxOwnedProgramEvidence } from '../platform/process/linux-owned-program';
+import { sameMcpTransportEvidenceBinding } from './management-transport';
 import type { McpStdioGuardianServerEvidence } from './stdio-process-evidence';
 
 export interface McpStdioLinuxEvidence {
@@ -40,17 +41,7 @@ export function decodeMcpStdioLinuxEvidence(
       value.coverage !== 'mcp-owned-pid-namespace' ||
       !pid(value.ownerPid) ||
       (ownerPid !== undefined && value.ownerPid !== ownerPid) ||
-      !exact(
-        value.binding,
-        'configDigest,executionId,originalStoreId,scopeId,serverId,sessionId',
-      ) ||
-      Object.entries(value.binding).some(
-        ([key, entry]) =>
-          typeof entry !== 'string' ||
-          !entry ||
-          entry.length > 8192 ||
-          entry !== binding[key as keyof typeof binding],
-      )
+      !sameMcpTransportEvidenceBinding(value.binding, binding)
     )
       return undefined;
     const owner = value.process;

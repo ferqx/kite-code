@@ -2,6 +2,8 @@
 
 Status: implemented
 
+当前 Native 设置的 Session／Workspace 页面绑定由[用户级全局设置](2026-10-24-user-global-extension-settings.md)部分替代。原 Session manager、历史申请恢复、未知不重发及实际业务执行权限的理由继续适用；下面的窗口记录只证明其原范围。
+
 ## Problem
 
 正式 Native 需要在一个设置入口完成 MCP 来源、选择、认证、连接和原工具阅读。既有 Service 已将这些效果分开；renderer 的当前目录与 Command applied 不能替代原执行证明。直接复用旧 AppControl、扩大普通 caller grammar 或保存不完整原 body 都会丢失身份与恢复边界。

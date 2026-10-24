@@ -93,6 +93,12 @@ test('actual restored Web page reads original plain and sealed full Model bodies
   let dom: JSDOM | undefined;
   let handle: Awaited<ReturnType<typeof mountWebPage>> | undefined;
   const originalFetch = globalThis.fetch;
+  let outputBarrier: Promise<void> | undefined, releaseOutput: (() => void) | undefined;
+  const holdOutput = () => {
+    outputBarrier = new Promise<void>((resolve) => {
+      releaseOutput = resolve;
+    });
+  };
   const globals = new Map<string, PropertyDescriptor | undefined>();
   const restoreDOM = () => {
     dom?.window.close();
@@ -237,6 +243,8 @@ test('actual restored Web page reads original plain and sealed full Model bodies
             method: init?.method ?? (url instanceof Request ? url.method : 'GET'),
             url: url instanceof Request ? url.url : String(url),
           });
+          const target = url instanceof Request ? url.url : String(url);
+          if (target.includes('/model-output') && outputBarrier) await outputBarrier;
           return originalFetch(url, init);
         },
         { preconnect: originalFetch.preconnect },
@@ -352,15 +360,14 @@ test('actual restored Web page reads original plain and sealed full Model bodies
           const expected = savedBodies[index]!;
           const before = requests.filter((request) => request.url.includes('/model-output')).length;
           expect(article.textContent).not.toContain(reasoning);
-          expect(article.textContent).toContain('Model output preview');
-          await click(button('Read complete recorded Model output', article));
           await settle(
             () =>
               !!article.querySelector('[role="alert"]') ||
-              !![...article.querySelectorAll('p')].find(
-                (element) => element.textContent === 'Complete Model output',
-              ),
+              article.querySelector('.message-markdown')?.textContent?.trim() ===
+                expected.output.content,
           );
+          expect(article.querySelector('.model-output-message > button')).toBeNull();
+          expect(article.querySelector('.model-output-message > p')).toBeNull();
           console.log('restored-web-model-reader', {
             cold,
             sessionId,
@@ -377,8 +384,7 @@ test('actual restored Web page reads original plain and sealed full Model bodies
             expected.output.content,
           );
           expect(article.textContent).not.toContain(reasoning);
-          if (index === 0)
-            expect(article.textContent).toContain(JSON.stringify([toolCall], null, 2));
+          expect(article.textContent).not.toContain(JSON.stringify([toolCall], null, 2));
           await click(button('Copy conversation'));
           expect(copied).toContain(expected.output.content);
           expect(copied).not.toContain(reasoning);
@@ -398,17 +404,38 @@ test('actual restored Web page reads original plain and sealed full Model bodies
           } else {
             expect(replyCopies()).toHaveLength(0);
           }
-          await click(button('Close full Model output', article));
+          holdOutput();
+          Object.defineProperty(page.document, 'visibilityState', {
+            configurable: true,
+            value: 'hidden',
+          });
+          await act(async () => page.document.dispatchEvent(new page.Event('visibilitychange')));
           expect(replyCopies()).toHaveLength(0);
-          expect(article.textContent).toContain('Model output preview');
+          expect(article.querySelector('.message-markdown')?.textContent).toBe(message.content);
+          Object.defineProperty(page.document, 'visibilityState', {
+            configurable: true,
+            value: 'visible',
+          });
+          await act(async () => page.document.dispatchEvent(new page.Event('visibilitychange')));
+          await settle(
+            () =>
+              article.querySelector('.model-output-message')?.getAttribute('aria-busy') === 'true',
+          );
           await click(button('Copy conversation'));
           if (index === 0) expect(copied).not.toContain('WEB_RESTORED_EXACT_TAIL');
           expect(copied).toContain(message.content);
+          await act(async () => releaseOutput!());
+          outputBarrier = undefined;
+          await settle(
+            () =>
+              article.querySelector('.message-markdown')?.textContent?.trim() ===
+              expected.output.content,
+          );
         }
       }
       const plain = page.document.querySelector(`[data-message-id="${models[0]!.id}"]`)!;
-      await click(button('Read complete recorded Model output', plain));
       await settle(() => plain.textContent!.includes('WEB_RESTORED_EXACT_TAIL'));
+      holdOutput();
       await click(page.document.querySelector('a[href="/sessions/sealed"]')!);
       await settle(
         () => page.document.querySelector('h1')?.textContent === 'Original sealed branch',
@@ -416,6 +443,9 @@ test('actual restored Web page reads original plain and sealed full Model bodies
       expect(page.document.body.textContent).not.toContain('WEB_RESTORED_EXACT_TAIL');
       await click(button('Copy conversation'));
       expect(copied).not.toContain('WEB_RESTORED_EXACT_TAIL');
+      await act(async () => releaseOutput!());
+      outputBarrier = undefined;
+      await settle(() => page.document.body.textContent!.includes('WEB_RESTORED_EXACT_TAIL'));
       expect(await browser.listMessages('source')).toEqual(originalMessages);
       expect(await browser.listMessages('sealed')).toEqual(sealedMessages);
       expect(
@@ -449,6 +479,7 @@ test('actual restored Web page reads original plain and sealed full Model bodies
       globalThis.fetch = originalFetch;
     }
   } finally {
+    releaseOutput?.();
     if (handle) await act(async () => handle!.dispose());
     restoreDOM();
     browser?.disposeNetwork();

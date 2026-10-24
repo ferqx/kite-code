@@ -25,6 +25,24 @@ afterEach(() => {
 const macTest = process.platform === 'darwin' ? test : test.skip;
 
 macTest(
+  'confined private file denials override the normally readable and writable Workspace',
+  async () => {
+    const f = await fixture(),
+      auth = join(f.workspace, 'auth.json');
+    writeFileSync(auth, 'SYNTHETIC_PRIVATE_AUTH_MATERIAL', { mode: 0o600 });
+    const job = createMacosConfinedShellJob({ ...f.options, protectedFiles: [auth] });
+    const read = await run(job, `exec /bin/cat ${quote(auth)}`);
+    expect(read.output).not.toContain('SYNTHETIC_PRIVATE_AUTH_MATERIAL');
+    expect(read.terminal).toMatchObject({ supervision: 'ended', result: { outcome: 'failed' } });
+    expect((await run(job, `printf replaced > ${quote(auth)}`)).terminal).toMatchObject({
+      supervision: 'ended',
+      result: { outcome: 'failed' },
+    });
+    expect(readFileSync(auth, 'utf8')).toBe('SYNTHETIC_PRIVATE_AUTH_MATERIAL');
+  },
+);
+
+macTest(
   'actual allow-fork counterexample leaves setsid descendant alive after original group-ended proof',
   async () => {
     const f = await fixture();

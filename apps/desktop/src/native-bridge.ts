@@ -47,7 +47,14 @@ import type {
   NativeInteractionHistoryRequest,
 } from './interaction-history-bridge';
 import type { NativeJobOutputPage, NativeJobOutputRequest } from './job-output-bridge';
-import type { NativeMcpRequest, NativeMcpResult, NativeMcpSubmission } from './mcp-bridge';
+import type {
+  NativeMcpRequest,
+  NativeMcpResult,
+  NativeMcpSubmission,
+  NativeUserMcpRequest,
+  NativeUserMcpResult,
+  NativeUserMcpSubmission,
+} from './mcp-bridge';
 import type { NativeBrowserBridge } from './native-browser-bridge';
 import type { NativeWindowMenuBridge } from './native-menu-bridge';
 import type { NativeScheduledRequest, NativeScheduledResult } from './scheduled-bridge';
@@ -222,6 +229,7 @@ export type NativeModelSettingsFacts = {
   models: {
     id: string;
     provider?: string;
+    protocol?: 'chat-completions' | 'responses';
     model?: string;
     enabled: boolean;
     configured: boolean;
@@ -239,7 +247,7 @@ export type NativeReasoningEffort =
   | 'xhigh'
   | 'max'
   | 'ultar';
-export type NativeProvider = 'openai' | 'deepseek' | 'compatible' | 'ollama';
+export type NativeProvider = 'openai' | 'deepseek' | 'compatible' | 'ollama' | 'codex';
 export type NativeProviderOperation = {
   kind?: 'upsert' | 'remove';
   name?: string;
@@ -428,6 +436,7 @@ export type NativeState = {
   readonly modelSettingsSubmissions?: readonly NativeModelSettingsSubmission[];
   readonly providerSettingsSubmissions?: readonly NativeProviderSubmission[];
   readonly mcpSubmissions?: readonly NativeMcpSubmission[];
+  readonly userMcpSubmissions?: readonly NativeUserMcpSubmission[];
   readonly mcpUnavailable?: boolean;
   readonly permissionSubmissions: readonly PermissionSubmission[];
   readonly interactionSubmissions: readonly InteractionAnswerSubmission[];
@@ -511,6 +520,7 @@ export type NativeRequest =
   | NativeBackgroundRequest
   | NativeSkillsRequest
   | NativeJobOutputRequest
+  | NativeUserMcpRequest
   | NativeMcpRequest
   | { method: 'interactions.next'; generation: number; viewGeneration: number; afterId: string }
   | { method: 'interactions.close'; generation: number; viewGeneration: number }
@@ -795,6 +805,7 @@ export type NativeResult =
   | NativeBackgroundResult
   | NativeSkillsPage
   | NativeJobOutputPage
+  | NativeUserMcpResult
   | NativeMcpResult
   | FileCheckpointPage
   | FileCheckpointDetail

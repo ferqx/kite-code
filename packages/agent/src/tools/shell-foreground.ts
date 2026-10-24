@@ -29,7 +29,7 @@ async function readForegroundShell(
     try {
       execution = await context.operations.wait(ref, {
         signal: context.signal,
-        timeoutMs: timedOut ? 30000 : Math.min(30000, Math.max(1, remaining)),
+        timeoutMs: timedOut ? 30000 : Math.min(30000, Math.max(1, Math.floor(remaining))),
       });
       break;
     } catch (error) {

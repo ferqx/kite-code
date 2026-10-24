@@ -15,6 +15,8 @@ export function confinedProfile(
   readonlyRoots: readonly string[],
   executables: readonly string[],
   protectedRoots: readonly string[],
+  protectedFiles: readonly string[] = [],
+  missingPrivateParents: readonly string[] = [],
 ): string {
   const system = [
     '/System',
@@ -49,6 +51,30 @@ export function confinedProfile(
     `(deny file-write* file-write-create file-write-unlink file-ioctl ${readonlyRoots.map(subpath).join(' ')} ${executables.map(literal).join(' ')})`,
     protectedRoots.length
       ? `(deny file-read* file-read-metadata file-map-executable file-write* file-write-create file-write-unlink file-ioctl ${protectedRoots.map(subpath).join(' ')})`
+      : '',
+    protectedFiles.length
+      ? `(deny file-read* file-read-metadata process-exec file-map-executable file-write* file-write-create file-write-unlink file-ioctl ${protectedFiles.map(subpath).join(' ')})`
+      : '',
+    missingPrivateParents.length
+      ? `(deny file-write-create ${missingPrivateParents.map(literal).join(' ')})`
+      : '',
+    protectedFiles.length
+      ? `(deny file-write-unlink ${[
+          ...new Set(
+            protectedFiles.flatMap((path) => {
+              const parents: string[] = [];
+              for (
+                let current = dirname(path);
+                dirname(current) !== current;
+                current = dirname(current)
+              )
+                parents.push(current);
+              return parents;
+            }),
+          ),
+        ]
+          .map(literal)
+          .join(' ')})`
       : '',
     `(deny file-map-executable ${subpath(temp)})`,
     `(deny process-exec ${subpath(temp)})`,

@@ -8,6 +8,10 @@ import {
   decodeMcpStdioLinuxEvidence,
   type McpStdioLinuxEvidence,
 } from './linux-stdio-process-evidence';
+import {
+  type McpTransportEvidenceBinding,
+  sameMcpTransportEvidenceBinding,
+} from './management-transport';
 
 export {
   isOwnedProcessIdentity as isMcpStdioIdentity,
@@ -20,14 +24,7 @@ export type McpStdioProcessRecord = OwnedProcessRecord;
 export interface McpStdioGuardianServerEvidence {
   version: 1;
   coverage: 'guardian-and-server-only';
-  binding: {
-    originalStoreId: string;
-    sessionId: string;
-    executionId: string;
-    serverId: string;
-    scopeId: string;
-    configDigest: string;
-  };
+  binding: McpTransportEvidenceBinding;
   ownerPid: number;
   guardian: McpStdioProcessRecord | null;
   server: McpStdioProcessRecord | null;
@@ -101,14 +98,7 @@ function decodeWindowsEvidence(
     !pid(value.ownerPid) ||
     (ownerPid !== undefined && ownerPid !== value.ownerPid) ||
     !value.binding ||
-    !exact(value.binding, 'configDigest,executionId,originalStoreId,scopeId,serverId,sessionId') ||
-    Object.entries(value.binding).some(
-      ([key, entry]) =>
-        typeof entry !== 'string' ||
-        !entry ||
-        entry.length > 8192 ||
-        binding[key as keyof typeof binding] !== entry,
-    ) ||
+    !sameMcpTransportEvidenceBinding(value.binding, binding) ||
     typeof value.closed !== 'boolean' ||
     typeof value.closeUnknown !== 'boolean' ||
     (value.closed && value.closeUnknown) ||
@@ -214,14 +204,7 @@ export function decodeMcpStdioProcessEvidence(
       data.ownerPid < 1 ||
       (ownerPid !== undefined && data.ownerPid !== ownerPid) ||
       !data.binding ||
-      !exact(data.binding, 'configDigest,executionId,originalStoreId,scopeId,serverId,sessionId') ||
-      Object.entries(data.binding).some(
-        ([key, entry]) =>
-          typeof entry !== 'string' ||
-          !entry ||
-          entry.length > 8192 ||
-          binding[key as keyof typeof binding] !== entry,
-      )
+      !sameMcpTransportEvidenceBinding(data.binding, binding)
     )
       return undefined;
     const record = (row: McpStdioProcessRecord | null, parent: number) => {

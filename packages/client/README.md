@@ -139,6 +139,8 @@ Browser 可选 `runs` 提供 `getRun(sessionId,runId,{signal?})`，固定 GET `/
 
 ## 完整目录读取
 
+Native 的用户 MCP 设置使用 `getUserMcpSettings({storeId})`、`updateUserMcpSettings(request)`、`getUserMcpOperation(commandId,{storeId})`、`cancelUserMcpOperation(commandId,{storeId})` 和 `listUserMcpTools({storeId,serverId,generation,afterIndex?})`，均支持取消读取。它们单独要求 `user_mcp_settings`，只接闭合 user DTO，不接受 Session、Workspace 或项目 scope。读写前后核连接 generation 与真实 Store；提交结果还核原 command ID、read-set 和完整 operation，网络或结果验证不确定时只报告 unknown，不自动重试。原 ID 查询／取消不创建替代操作；工具分页核同一 generation、连续 index 和准确下页 cursor。原 Session MCP SDK 方法继续服务实际运行时和历史恢复。
+
 Native `listWorkspaceDirectory({storeId,afterSeq?,upperSeq?,limit?},{signal?})` 与 `listSessionDirectory({storeId,workspaceId?,afterSeq?,upperSeq?,snapshotCursor?,limit?},{signal?})` 返回具名页。Browser 同名方法不接受 Store，使用原文档准入身份。每页最多 200 项，序列保留 Decimal64；每次响应核 Store、冻结 upper、递增且不越界的 seq 和下一游标。未传快照约束时 snapshotCursor 是读时水位，可变化。传 Session 首 snapshotCursor 时须已有 `session_directory_activity`，每页另核相同水位，不将不同观察拼接成完整目录。
 
 `listAllWorkspaces({signal?})`、`listAllSessions({workspaceId?,signal?})` 明确穷尽固定 upper 的所有页，没有任意总项目截断。只有完整成功才返回集合；重复 ID、范围/身份改变、游标冲突或 dispose/迟到页均失败，不发布前缀、不重绑定旧读取。原 `listWorkspaces/listSessions` 保留当前页兼容入口，不能用于完整目录或退出检查。Web 完整目录与 Native 完整退出检查应使用 listAll 方法。目录读取不执行模型、工具、恢复或 mutation，不推进 SSE 游标。
@@ -190,15 +192,17 @@ Settings 模型操作使用 `getModelSettings(scope,{storeId,workspaceId?})` 与
 
 Linux Shell 的准确 `linux_pid_namespace/linux_host_boundary_unqualified` 与 `linux_bubblewrap/host_scope_unqualified` 已进入同一生成 schema。SDK 保留尚未取得原生资格的诊断，不把资产 available 当执行许可；将该 Linux backend 的 qualification 改为已验 host_scope 会被闭合校验拒绝。读取仍绑定原连接与 scope，不推进 SSE 游标或创建业务工作。
 
-`listSkills(workspaceId,{storeId,workflow?,afterId?,revision?,limit?,byteLimit?,signal?})` 读取实际 `skill_catalogue` metadata；`listAllSkills(workspaceId,{storeId,workflow?,signal?})` 在第一份revision下穷尽全部页，返回同一完整page形状（complete=true/nextAfterId=null）。SDK私有复制参数，核原Store/Workspace、state一致性、严格升序和末cursor、revision及原连接代次；失败/变更不重试或重新开始目录，更不创建任务。取消和迟到读取仅影响本调用，SSE和lastAppliedCursor保持。
+`listUserSkills({storeId,afterId?,revision?,limit?,byteLimit?,signal?})` 经 `user_skill_catalogue` 读取 `GET /v1/config/user/skills`，返回独立闭合 `UserSkillCataloguePage`。固定 `scope:user`，无 Session／Workspace 参数或身份，来源仅可为 user，不接受 Workflow 查询或投影。消费者在第一份 revision 下穷尽分页再发布完整目录；用户配置变化、取消或连接身份变化使本次读取失败，不创建隐藏任务或自动重开。默认 Native 全局设置使用此入口，项目 Skill 的实际执行选择仍由原 Run 合同处理。
+
+`listSkills(workspaceId,{storeId,workflow?,afterId?,revision?,limit?,byteLimit?,signal?})` 保留实际 Workspace 的 `skill_catalogue` metadata；`listAllSkills(workspaceId,{storeId,workflow?,signal?})` 在第一份revision下穷尽全部页，返回同一完整page形状（complete=true/nextAfterId=null）。SDK私有复制参数，核原Store/Workspace、state一致性、严格升序和末cursor、revision及原连接代次；失败/变更不重试或重新开始目录，更不创建任务。取消和迟到读取仅影响本调用，SSE和lastAppliedCursor保持。
 
 `SkillCataloguePage` 与HostStatus一样使用专门闭合响应schema，拒绝附加正文/路径/凭据字段；其他公共response的可扩展策略不变。available仅说明当前知识发现，不是Workflow activation、工具权限或未来版本预订；unavailable与有效空目录分别表达。单页字节预算不限制listAll的总条目数。
 
-[verifySkillCataloguePage](src/skill-catalogue.ts) 公开同一纯校验入口，私有克隆输入后使用生成的闭合 schema，核指定 Store/Workspace/revision、升序与页尾游标、state/availability 及 opt-in Workflow 资格；`listSkills` 在原连接前后复核之间复用它。Native 的有限 IPC 页使用同一规则，不建立 renderer 专用宽松 decoder。可选 nullable `source` 仅携 project/user 与 .agents/.kite-code/profile/configured 分类，拒绝附加路径；旧响应省略来源仍可消费，调用者不能补造它。该字段不改变知识选择、权限或目录的总条目范围。
+[verifySkillCataloguePage 与 verifyUserSkillCataloguePage](src/skill-catalogue.ts) 公开对应的纯校验入口，私有克隆输入后使用各自生成的闭合 schema，核指定 Store／revision、升序与页尾游标、state／availability；Workspace verifier 另核 Workspace 与 opt-in Workflow 资格。Native 的有限用户 IPC 页复用用户 verifier，不建立 renderer 专用宽松 decoder。两个入口的可选 nullable `source` 均拒绝附加路径；Workspace 页可携 project/user，用户页仅可携 user，origin 仍为 .agents/.kite-code/profile/configured。旧响应省略来源仍可消费，调用者不能补造它。该字段不改变知识选择、权限或目录的总条目范围。
 
 显式 `workflow:'manual'` 要求原 Service 同时提供 `skill_workflow_catalogue`，字段在所有页保持冻结。仅 opt-in 接受并要求每项闭合 Workflow 投影；普通知识查询拒绝额外投影。SDK核对独立 available 状态与知识可用、manual/空输入资格、准确 `skill:<name>`、compiled revision 和 contextMode，拒绝缺字段、自相矛盾或附加敏感内容。缺能力在目录 GET 前失败，不修改原连接或 SSE 水位；是否提交激活由调用者决定。新增闭合响应不放宽其他 DTO 的校验策略。
 
-每页读取前后通过 `verifyConnection` 核原profile/build/instance与Store；同endpoint被同Store的新实例替换也拒绝，不用原token可用性或未变化的本地generation冒充身份。调用开始即固定Store/参数，取消、身份变化或中途变更只丢本次目录，不替调用者自动重连。[Skill目录Client测试](test/skill-catalogue.test.ts)覆盖严格metadata、完整多页、scope/revision/cursor反例及替换实例零目录GET。
+每页读取前后通过 `verifyConnection` 核原profile/build/instance与Store；同endpoint被同Store的新实例替换也拒绝，不用原token可用性或未变化的本地generation冒充身份。调用开始即固定Store/参数，取消、身份变化或中途变更只丢本次目录，不替调用者自动重连。[Skill目录Client测试](test/skill-catalogue.test.ts)覆盖严格metadata、完整多页、scope/revision/cursor反例及替换实例零目录GET；[用户目录测试](test/user-skill-catalogue.test.ts)另核全局 GET 的完整分页、零观察游标变化，以及项目／Session／Workflow／正文／路径等越权字段的闭合拒绝。
 
 ## 固定上界的会话日志读取
 

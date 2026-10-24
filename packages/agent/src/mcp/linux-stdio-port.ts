@@ -9,6 +9,11 @@ import {
 } from '../platform/process/linux-owned-program';
 import type { McpLifecycleTransportPort } from './lifecycle';
 import { mcpStdioLinuxEvidenceEnded } from './linux-stdio-process-evidence';
+import {
+  type McpHostTransportBinding,
+  mcpTransportEvidenceBinding,
+  userMcpMessageAllowed,
+} from './management-transport';
 import { McpStdioPortError } from './stdio-error';
 import type { McpStdioPortOptions } from './stdio-port';
 import {
@@ -17,16 +22,16 @@ import {
   type McpStdioLinuxEvidence,
 } from './stdio-process-evidence';
 
-type Binding = Parameters<McpLifecycleTransportPort['open']>[0];
+type Binding = McpHostTransportBinding;
 type Configuration = McpStdioPortOptions['servers'][number]['configuration'];
 const unknownOwners = new Set<object>();
 
 /** Direct original command, SDK stdin/stdout and a separate private native control channel. */
-export function openLinuxStdio(
-  binding: Binding,
+export function openLinuxStdio<B extends Binding>(
+  binding: B,
   signal: AbortSignal,
   configuration: Configuration,
-  options: McpStdioPortOptions,
+  options: McpStdioPortOptions<B>,
   limits: { maximum: number; stderrMaximum: number; timeout: number; grace: number },
 ): Awaited<ReturnType<McpLifecycleTransportPort['open']>> {
   if (signal.aborted) throw new McpStdioPortError('mcp_stdio_aborted');
@@ -47,14 +52,7 @@ export function openLinuxStdio(
     if (!(cause instanceof LinuxOwnedProgramStartError)) throw cause;
     owner = cause.cleanup;
   }
-  const originalBinding: McpStdioLinuxEvidence['binding'] = {
-    originalStoreId: binding.originalStoreId,
-    sessionId: binding.sessionId,
-    executionId: binding.executionId,
-    serverId: binding.serverId,
-    scopeId: binding.scopeId,
-    configDigest: binding.configDigest,
-  };
+  const originalBinding = mcpTransportEvidenceBinding(binding);
   const evidence = (): McpStdioLinuxEvidence => ({
     version: 4,
     coverage: 'mcp-owned-pid-namespace',
@@ -142,6 +140,8 @@ export function openLinuxStdio(
       pendingBytes = 0;
     },
     async send(message) {
+      if (!userMcpMessageAllowed(binding, message))
+        throw new McpStdioPortError('mcp_settings_method_denied');
       if (closing || signal.aborted) throw new McpStdioPortError('mcp_stdio_closed');
       options.assertFresh?.(binding, { signal });
       const content = Buffer.from(`${JSON.stringify(message)}\n`);

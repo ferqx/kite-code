@@ -84,6 +84,7 @@ import {
   readSkillSelection,
   type SkillSelection,
 } from './child-configuration';
+import { CODEX_BASE_URL, createCodexLocalSource } from './codex-auth';
 import {
   createSummaryCompressor,
   DEFAULT_CONTEXT_WINDOW_TOKENS,
@@ -108,6 +109,7 @@ import {
   readPlanningIntent,
   readPlanningPermissionState,
 } from './planning-configuration';
+import { assertSessionModelProtocol } from './session-model-protocol';
 import { createDefaultSkillCatalogueSource } from './skill-catalogue';
 import {
   assertWorkflowForkCurrent,
@@ -121,6 +123,7 @@ import {
 } from './skill-workflow-configuration';
 import { createTaskConfiguration, defaultTaskRoles } from './task-configuration';
 import { createUserConfiguration, withoutProjectModels } from './user-configuration';
+import { createUserMcpManagement } from './user-mcp-management';
 import {
   createWebFetchConfiguration,
   type WebFetchConfigurationOptions,
@@ -213,6 +216,8 @@ export function createDefaultProcessConfiguration(options: {
   profile: ProfileSelection;
   /** Explicit owned configuration file for embedded hosts and tests; formal clients use the user directory. */
   userConfigurationPath?: string;
+  /** Trusted local source. Embedded hosts with a custom user file opt in explicitly. */
+  localCodex?: ReturnType<typeof createCodexLocalSource> | false;
   /** Verified host runtime closure deny paths; never supplied by JSONC, Model or public API. */
   runtimeAssets?: readonly string[];
   hostConfiguration?: Json;
@@ -246,7 +251,13 @@ export function createDefaultProcessConfiguration(options: {
   knownToolIds?: readonly string[];
   allowedToolCapabilities?: readonly string[];
 }): ProcessHostConfiguration {
-  const userConfiguration = createUserConfiguration(options.userConfigurationPath);
+  const localCodex =
+    options.localCodex === false
+      ? undefined
+      : (options.localCodex ??
+        (options.userConfigurationPath === undefined ? createCodexLocalSource() : undefined));
+  const userConfiguration = createUserConfiguration(options.userConfigurationPath, localCodex);
+  const codexProtectionPath = localCodex?.protectedAuthPath;
   const externalPermissionAuthority =
     options.permissions !== undefined || options.permissionPolicy !== undefined;
   const explicit = structuredClone(options.hostConfiguration);
@@ -272,6 +283,12 @@ export function createDefaultProcessConfiguration(options: {
         ...shellOptions.host,
         protectedRoots: [
           ...new Set([...shellOptions.host.protectedRoots, dirname(userConfiguration.path)]),
+        ],
+        protectedFiles: [
+          ...new Set([
+            ...(shellOptions.host.protectedFiles ?? []),
+            ...(codexProtectionPath === undefined ? [] : [codexProtectionPath]),
+          ]),
         ],
       },
     };
@@ -390,6 +407,7 @@ export function createDefaultProcessConfiguration(options: {
     const compilers = [mcpSchemaWorkerAssets(), workflowCompilerAssets()];
     return [
       dirname(userConfiguration.path),
+      ...(codexProtectionPath === undefined ? [] : [codexProtectionPath]),
       process.execPath,
       fileURLToPath(import.meta.url),
       ...filesNativeAssets().map((asset) => fileURLToPath(asset)),
@@ -731,6 +749,26 @@ export function createDefaultProcessConfiguration(options: {
       resolveConfigurationBinding(input, { modelId, modelOnly: true }),
   });
   const resolveModel = async (selected: ModelConfiguration) => {
+    if (selected.provider === 'codex') {
+      if (!localCodex) throw new ConfigurationError('codex_auth_required');
+      if (selected.baseURL !== CODEX_BASE_URL || typeof selected.providerName !== 'string')
+        throw new ConfigurationError('invalid_model_configuration');
+      const preset = parseModelPreset(selected.options);
+      if (preset.maxOutputTokens !== undefined)
+        throw new ConfigurationError('codex_model_options_unsupported');
+      const credentials = await localCodex.binding(selected.providerName);
+      const binding = createCompatibleModelBinding({
+        name: 'codex',
+        protocol: modelProtocol(selected.provider, selected.protocol),
+        baseURL: CODEX_BASE_URL,
+        modelId: selected.model,
+        ...credentials,
+      });
+      return createSdkModelAdapter({
+        models: new Map([[selected.id, binding]]),
+        presets: new Map([[selected.id, preset]]),
+      });
+    }
     const apiKey =
       selected.credentialRef === undefined
         ? undefined
@@ -818,6 +856,12 @@ export function createDefaultProcessConfiguration(options: {
         throw new ConfigurationError('model_provider_unsupported');
       if (!selected.baseURL || !selected.model)
         throw new ConfigurationError('invalid_model_configuration');
+      if (!selection || (recovery && !selection.modelOnly))
+        await assertSessionModelProtocol(
+          policyRuntime,
+          session.id,
+          modelProtocol(selected.provider, selected.protocol),
+        );
       // A root command owns its temporary effort. Apply it before snapshot sealing;
       // a child selection uses its configured preset, while recovery reproduces
       // the original root request rather than inheriting the current default.
@@ -2014,6 +2058,17 @@ export function createDefaultProcessConfiguration(options: {
     ...(options.authorizationCheck ? { authorizationCheck: options.authorizationCheck } : {}),
     resolveRunConfiguration,
     resolveRecoveryRunConfiguration,
+    userMcpManagement: (runtime) =>
+      runtime
+        ? createUserMcpManagement({
+            profile: options.profile,
+            runtime: () => runtime,
+            credentialVault: vault,
+            ...(options.observerSubjectId ? { subjectId: options.observerSubjectId } : {}),
+            userConfigurationPath: userConfiguration.path,
+            ...options.mcpSources,
+          })
+        : undefined,
     configurationManagement: (runtime) =>
       createConfigurationManagement({
         userConfiguration,

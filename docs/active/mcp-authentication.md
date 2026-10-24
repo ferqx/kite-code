@@ -7,6 +7,8 @@
 
 ## 一个 Vault 与准确 owned 域
 
+Native 全局设置是独立的用户请求路径：[user-mcp-management](../../apps/service/src/user-mcp-management.ts)以真实 Store／认证 subject／HostMutation 管理认证与设置连接，零 Session／Workspace。其[用户凭据域](../../apps/service/src/user-mcp-credentials.ts)从 Profile、Store、准确用户来源 identity／raw／transport／server／auth-profile 派生，不含当前 Workspace；后续真实任务只在匹配的 user source 下复用它。手工引用的用户批准有独立 closed kind 和 HostMutation proof；consumer 再核准确原操作与绑定摘要。旧 Workspace binding 和项目来源不能自动转成此全局域，用户设置 ready 也不能授予 Tool 权限。以下 Session Action 合同仍适用于实际 Run、TUI 和历史请求。
+
 Run 中的 Login 仍是同一个普通 Action：Agent 的 nested Action 端口在 Store 事务核父 Tool、Actor、root work 与活动 Run，并记录父取消边；Service 只装配 HTTP／OAuth port。保存准入不表示认证完成，冷记录缺原热 binding 时仅可观察，不能按当前默认配置重新派发。[真实 nested 验证](../../packages/agent/test/isolated/extensions/nested-actions.test.ts)与[原完整认证终端场景](../../tests/tui-system/scenarios/mcp-authentication.test.ts)覆盖该调用者路径。
 
 生产沿默认 Service 的同一个 [CredentialVault](../../packages/agent/src/config/credentials.ts) 与 [native backend](../../packages/agent/src/config/os-credentials.ts)，只用 `@napi-rs/keyring`，没有 CLI、明文文件或自建加密 fallback。backend 的 available、locked、unavailable 来自实际操作；不可用时 OAuth 依赖局部拒绝，不阻断无关普通任务和 SQL 历史读取。factory/import 不读取保险库。

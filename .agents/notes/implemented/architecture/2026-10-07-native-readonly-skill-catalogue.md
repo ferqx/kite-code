@@ -2,6 +2,8 @@
 
 Status: implemented
 
+当前 Native 页面改为[用户级全局目录](2026-10-24-user-global-extension-settings.md)，不再依赖当前 Session／Workspace 或显示项目条目。原 Workspace API、路径与信任边界、完整目录与只读契约继续用于原消费者；本文历史窗口证据保留其原范围。
+
 ## Problem
 
 旧 Desktop 的 Skills 分类有名称、描述、来源和可用状态，迁移前正式 Native 缺少这一目录消费者。公共 Service 已提供可信配置目录和同 revision 分页；把完整集合塞入单次有限 IPC 会让传输预算限制完整目录，页面自行扫描文件又会复制可信来源规则。产品依据是[Desktop 手册](../../../../docs/handbook/clients/desktop/README.md)，当前实施范围见 [P5 方案](../../../../docs/plans/unified-agent-refactor-v1.md#3021-当前-native-skills-消费者迁移)。

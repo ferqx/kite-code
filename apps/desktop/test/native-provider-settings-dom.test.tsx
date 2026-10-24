@@ -128,8 +128,74 @@ const facts: NativeProviderSettingsFacts = {
       requiresCredential: false,
       connections: [],
     },
+    {
+      id: 'codex',
+      label: 'ChatGPT / Codex',
+      defaultBaseURL: 'https://chatgpt.com/backend-api/codex',
+      requiresCredential: false,
+      connections: [],
+    },
   ],
 };
+
+test('Provider settings show the automatic local Codex source without manual connection controls or a Codex preset', async () => {
+  const f = fixture(),
+    calls: NativeRequest[] = [];
+  const state = structuredClone(facts);
+  const codex = state.providers.find((provider) => provider.id === 'codex')!;
+  codex.connections = [
+    {
+      id: 'local-codex',
+      name: 'ChatGPT / Codex（本机）',
+      baseURL: codex.defaultBaseURL,
+      protocol: 'responses',
+      hasCredential: true,
+      modelNames: ['fixture-codex-model'],
+      canWrite: false,
+    },
+  ];
+  // Source order cannot turn the automatic connection into the default manual template.
+  state.providers = [codex, ...state.providers.filter((provider) => provider.id !== 'codex')];
+  const bridge: NativeBridge = {
+    watch: () => () => {},
+    request: async (input) => {
+      calls.push(input);
+      return input.method === 'settings.providers.read' ? structuredClone(state) : null;
+    },
+  };
+  try {
+    await act(async () =>
+      f.root.render(
+        <NativeProviderSettings
+          bridge={bridge}
+          generation={1}
+          submissions={[]}
+          panelHost={f.panelHost}
+        />,
+      ),
+    );
+    const row = [...f.element.querySelectorAll('.provider-instance')].find((element) =>
+      element.textContent?.includes('ChatGPT / Codex（本机）'),
+    )!;
+    expect(row).toBeDefined();
+    expect(row.textContent).toContain('Responses');
+    expect(row.textContent).toContain('自动接入');
+    expect(row.textContent).toContain('由本机 Codex 登录管理');
+    expect(row.querySelector('button')).toBeNull();
+    expect(f.field('API key')).toBeNull();
+    expect(f.field('服务地址')).toBeNull();
+    await f.click('刷新提供商配置');
+    expect(f.element.contains(row)).toBe(true);
+    await f.click('新增提供商');
+    expect(f.field<HTMLSelectElement>('服务商预设').value).toBe('openai');
+    expect(
+      [...f.field<HTMLSelectElement>('服务商预设').options].map((option) => option.value),
+    ).toEqual(['openai', 'deepseek', 'compatible', 'ollama']);
+    expect(calls.some((input) => input.method === 'settings.providers.save')).toBe(false);
+  } finally {
+    await f.close();
+  }
+});
 
 test('Provider form validates inline with focus, clears switched drafts and sends secret once; unknown locks across close and refresh', async () => {
   const f = fixture(),
@@ -230,7 +296,7 @@ test('Provider form validates inline with focus, clears switched drafts and send
     expect(f.element.textContent).not.toContain('save-one');
     expect(f.element.textContent).not.toContain('API key 保存结果待核实');
     expect(f.element.textContent).not.toContain('模型配置未保存；凭证保存结果单独显示');
-    await f.click('查询原提供商提交');
+    await f.click('查看结果');
     expect(calls.filter((input) => input.method === 'settings.providers.lookup')).toEqual([
       { method: 'settings.providers.lookup', generation: 1, commandId: 'save-one' },
     ]);
@@ -376,7 +442,7 @@ test('late Provider reads cannot replace the selected Store and only its unknown
     expect(f.panelHost.textContent).not.toContain('原提交 old');
     expect(f.panelHost.textContent).toContain('OpenAI：保存结果待确认。');
     expect(f.panelHost.textContent).toContain('此更改来自先前的数据源。');
-    expect(f.button('查询原提供商提交').disabled).toBe(false);
+    expect(f.button('查看结果').disabled).toBe(false);
     await f.click('关闭');
     expect(f.element.textContent).not.toContain('原提交 old');
     expect(f.main.textContent).toContain('OpenAI：保存结果待确认。');
@@ -1051,8 +1117,8 @@ test('Provider hides submission history and technical identities, but unknown st
     expect(notice).not.toBeNull();
     expect(notice.textContent).toContain('Pending OpenAI service：保存结果待确认。');
     expect(notice.querySelectorAll('button')).toHaveLength(1);
-    expect(notice.querySelector('button')!.textContent).toBe('查询原提供商提交');
-    expect(f.button('查询原提供商提交').disabled).toBe(false);
+    expect(notice.querySelector('button')!.textContent).toBe('查看结果');
+    expect(f.button('查看结果').disabled).toBe(false);
     assertNoHistory();
   };
   try {
@@ -1081,7 +1147,7 @@ test('Provider hides submission history and technical identities, but unknown st
     await f.click('关闭');
     assertUnknown(f.main);
     await f.addPreset('DeepSeek');
-    await f.click('查询原提供商提交');
+    await f.click('查看结果');
     expect(calls.filter((call) => call.method === 'settings.providers.lookup')).toEqual([
       { method: 'settings.providers.lookup', generation: 1, commandId: unknown.commandId },
     ]);
@@ -2010,14 +2076,14 @@ test('Original unknown deletion confirmed by Main refreshes facts, closes its pa
   try {
     await f.render();
     await f.remove();
-    await f.click('查询原提供商提交');
+    await f.click('查看结果');
     expect(f.manager.submissions[0]!.phase).toBe('applied');
     expect(f.counts()).toEqual({ reads: 2, posts: 1, saved: 1 });
     expect(f.main.querySelectorAll('.provider-instance')).toHaveLength(1);
     expect(f.main.textContent).not.toContain('Deleted connection');
     expect(f.panelHost.childElementCount).toBe(0);
     expect(f.button('确认删除提供商')).toBeUndefined();
-    expect(f.button('查询原提供商提交')).toBeUndefined();
+    expect(f.button('查看结果')).toBeUndefined();
     expect(f.dom.window.document.activeElement).toBe(f.button('新增提供商'));
   } finally {
     await f.close();
@@ -2034,7 +2100,7 @@ test('Confirmed unknown deletion keeps a refresh failure read-only and allows an
   try {
     await f.render();
     await f.remove();
-    await f.click('查询原提供商提交');
+    await f.click('查看结果');
     expect(f.manager.submissions[0]!.phase).toBe('applied');
     expect(f.panelHost.textContent).toContain('已删除，刷新配置失败；请刷新列表，无需重复删除。');
     expect(f.button('确认删除提供商').disabled).toBe(true);
@@ -2072,7 +2138,7 @@ for (const stage of ['lookup', 'after-lookup read'] as const) {
       try {
         await f.render();
         await f.remove();
-        await f.click('查询原提供商提交');
+        await f.click('查看结果');
         expect(f.counts().reads).toBe(stage === 'lookup' ? 1 : 2);
         if (next === 'unmount') await act(async () => f.root.render(null));
         else if (next === 'generation') await f.render(2);
@@ -2112,7 +2178,7 @@ test('Querying an original deletion from another instance refreshes the list wit
     await f.remove();
     await f.click('编辑 Other connection');
     await f.edit('提供商名称', 'Keep other draft');
-    await f.click('查询原提供商提交');
+    await f.click('查看结果');
     expect(f.main.querySelectorAll('.provider-instance')).toHaveLength(1);
     expect(f.field('提供商名称').value).toBe('Keep other draft');
     expect(f.panelHost.querySelector('form')).not.toBeNull();
@@ -2128,7 +2194,7 @@ test('Querying an unknown deletion from the closed list refreshes it without reo
     await f.render();
     await f.remove();
     await f.click('关闭');
-    await f.click('查询原提供商提交');
+    await f.click('查看结果');
     expect(f.main.querySelectorAll('.provider-instance')).toHaveLength(1);
     expect(f.panelHost.childElementCount).toBe(0);
     expect(f.main.textContent).toContain('已删除提供商。');

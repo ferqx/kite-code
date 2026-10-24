@@ -317,7 +317,7 @@ test('Responses restored continuation re-encodes original call IDs when the wire
       }),
     ).rejects.toThrow('invalid_tool_history');
     expect(data.bodies).toHaveLength(before);
-    expect(restored.describeRequest?.(next).transformation.version).toBe('5');
+    expect(restored.describeRequest?.(next).transformation.version).toBe('6');
   } finally {
     data.close();
   }
@@ -508,6 +508,127 @@ test('Responses opaque state is isolated from other endpoints and model routes',
     a.close();
     b.close();
   }
+});
+
+test('trusted Codex identity preserves opaque history across rotated bindings while ordinary credentials and source boundaries stay isolated', async () => {
+  const bodies: Array<{ input: Record<string, unknown>[] }> = [];
+  const base = {
+    protocol: 'responses' as const,
+    name: 'codex',
+    baseURL: 'https://codex-fixture.invalid/responses-api',
+    modelId: 'fixture-codex',
+    apiKey: 'fixture-token-original',
+    headers: { 'chatgpt-account-id': 'fixture-account' },
+    continuationIdentity: { kind: 'codex-local-auth' as const, value: 'a'.repeat(64) },
+    fetch: Object.assign(
+      async (_input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => {
+        bodies.push(JSON.parse(String(init?.body)));
+        return sse(output());
+      },
+      { preconnect: fetch.preconnect },
+    ),
+  };
+  const adapter = (change: Partial<Parameters<typeof createCompatibleModelBinding>[0]> = {}) =>
+    createSdkModelAdapter({
+      models: new Map([['bound', createCompatibleModelBinding({ ...base, ...change })]]),
+    });
+  const initial = adapter();
+  const finish = (await collect(initial)).at(-1)!;
+  if (finish.type !== 'finish') throw Error('finish missing');
+  const history: ModelRequest = {
+    ...request,
+    messages: [
+      ...request.messages,
+      { role: 'assistant', content: 'Done', continuation: finish.continuation },
+    ],
+  };
+  await collect(adapter({ apiKey: 'fixture-token-rotated' }), history);
+  expect(bodies.at(-1)!.input).toContainEqual(
+    expect.objectContaining({
+      type: 'reasoning',
+      encrypted_content: 'encrypted-complete',
+    }),
+  );
+  for (const change of [
+    { baseURL: 'https://other-codex-fixture.invalid/responses-api' },
+    { modelId: 'other-codex-model' },
+    { continuationIdentity: { kind: 'codex-local-auth' as const, value: 'b'.repeat(64) } },
+    { headers: { 'chatgpt-account-id': 'other-account' } },
+    { continuationIdentity: undefined },
+  ]) {
+    await collect(adapter(change), history);
+    expect(bodies.at(-1)!.input.some((item) => item.type === 'reasoning')).toBe(false);
+  }
+  for (const name of ['openai', 'codex']) {
+    const original = adapter({ name, continuationIdentity: undefined });
+    const event = (await collect(original)).at(-1)!;
+    if (event.type !== 'finish') throw Error('finish missing');
+    const ordinaryHistory: ModelRequest = {
+      ...request,
+      messages: [
+        ...request.messages,
+        { role: 'assistant', content: 'Done', continuation: event.continuation },
+      ],
+    };
+    await collect(adapter({ name, continuationIdentity: undefined }), ordinaryHistory);
+    expect(bodies.at(-1)!.input.some((item) => item.type === 'reasoning')).toBe(true);
+    await collect(
+      adapter({ name, continuationIdentity: undefined, apiKey: 'fixture-token-rotated' }),
+      ordinaryHistory,
+    );
+    expect(bodies.at(-1)!.input.some((item) => item.type === 'reasoning')).toBe(false);
+  }
+  for (const privateValue of [
+    base.continuationIdentity.value,
+    base.apiKey,
+    base.baseURL,
+    'fixture-account',
+  ]) {
+    expect(JSON.stringify(initial.describeRequest!(request))).not.toContain(privateValue);
+    expect(JSON.stringify(finish.continuation)).not.toContain(privateValue);
+  }
+});
+
+test('Codex continuation identity rejects invalid values and injection into ordinary providers before transport', () => {
+  let calls = 0;
+  const base = {
+    protocol: 'responses' as const,
+    name: 'codex',
+    baseURL: 'https://codex-fixture.invalid/responses-api',
+    modelId: 'fixture-codex',
+    continuationIdentity: { kind: 'codex-local-auth' as const, value: 'a'.repeat(64) },
+    fetch: Object.assign(
+      async () => {
+        calls++;
+        return sse(output());
+      },
+      { preconnect: fetch.preconnect },
+    ),
+  };
+  for (const identity of [
+    null,
+    '',
+    {},
+    { kind: 'other', value: 'a'.repeat(64) },
+    { kind: 'codex-local-auth', value: '' },
+    { kind: 'codex-local-auth', value: 'g'.repeat(64) },
+    { kind: 'codex-local-auth', value: 'a'.repeat(65) },
+  ])
+    expect(() =>
+      createCompatibleModelBinding({
+        ...base,
+        continuationIdentity: identity as typeof base.continuationIdentity,
+      }),
+    ).toThrow('model_continuation_identity_unsupported');
+  for (const change of [
+    { name: 'openai' },
+    { name: 'compatible' },
+    { protocol: 'chat-completions' as const },
+  ])
+    expect(() => createCompatibleModelBinding({ ...base, ...change })).toThrow(
+      'model_continuation_identity_unsupported',
+    );
+  expect(calls).toBe(0);
 });
 
 test('Responses preserves encrypted reasoning without a visible summary', async () => {

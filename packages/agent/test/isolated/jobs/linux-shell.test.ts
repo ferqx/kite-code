@@ -2,6 +2,66 @@ import { expect, test } from 'bun:test';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
+test('Linux private directories are prepared only at authorized dispatch and retain the original namespace owner', () => {
+  const jobPath = fileURLToPath(new URL('../../../src/jobs/shell.ts', import.meta.url));
+  const ownerPath = fileURLToPath(
+    new URL('../../../src/platform/process/linux-owned-shell.ts', import.meta.url),
+  );
+  const source = `
+import assert from 'node:assert/strict';
+import {mock} from 'bun:test';
+import * as actualFS from 'node:fs';
+import {mkdtempSync,mkdirSync,writeFileSync,realpathSync,existsSync,readdirSync,renameSync,rmSync} from 'node:fs';
+import {tmpdir} from 'node:os';
+import {join} from 'node:path';
+const actualOwner=await import(${JSON.stringify(ownerPath)});
+const originalOpen=actualFS.openSync,originalClose=actualFS.closeSync,originalMkdir=actualFS.mkdirSync;
+const descriptorPaths=new Map();
+let privateMkdirs=0;
+const descriptorPath=path=>{const match=/^\\/proc\\/self\\/fd\\/(\\d+)\\/(.+)$/.exec(String(path));if(!match)return path;const parent=descriptorPaths.get(Number(match[1]));assert.ok(parent);return join(parent,match[2]);};
+mock.module('node:fs',()=>({...actualFS,openSync(path,flags){const target=descriptorPath(path);const fd=originalOpen(target,flags);descriptorPaths.set(fd,target);return fd;},closeSync(fd){descriptorPaths.delete(fd);return originalClose(fd);},mkdirSync(path,options){if(String(path).startsWith('/proc/self/fd/'))privateMkdirs++;return originalMkdir(descriptorPath(path),options);}}));
+let ownerCalls=0,expectedPrivate;
+mock.module(${JSON.stringify(ownerPath)},()=>({...actualOwner,startLinuxOwnedShell(options){ownerCalls++;assert.equal(options.maskedRoots.includes(expectedPrivate),Boolean(expectedPrivate));assert.ok(options.bubblewrapArgs.includes('--bind'));throw Error('test_original_owner_reached');}}));
+Object.defineProperty(process,'platform',{value:'linux'});
+const {createLinuxHostShellJob}=await import(${JSON.stringify(jobPath)});
+const root=realpathSync(mkdtempSync(join(tmpdir(),'kite-linux-private-job-')));
+try {
+ const workspace=join(root,'workspace'),tempBase=join(root,'temp'),assets=join(root,'assets'),profile=join(root,'profile'),home=join(root,'codex-home'),auth=join(home,'auth.json');
+ for(const path of [workspace,tempBase,assets,profile])mkdirSync(path);
+ const init=join(assets,'init'),bwrap=join(assets,'bwrap'),bun=join(assets,'bun'),shell=join(assets,'shell');
+ for(const path of [init,bwrap,bun,shell])writeFileSync(path,'fixed test asset');
+ const options={cwd:workspace,env:{PATH:'/usr/bin:/bin'},linux:{bubblewrapPath:bwrap,initExecutable:init},bubblewrapPath:bwrap,bunExecutable:bun,shellExecutable:shell,protectedRoots:[profile],readonlyAssets:[assets],temporaryRoot:tempBase,filesystemScope:'full_access'};
+ const job=createLinuxHostShellJob({...options,protectedFiles:[auth]});
+ assert.equal(job.id,'shell.command');assert.equal(ownerCalls,0);assert.equal(existsSync(home),false);
+ const before=readdirSync(tempBase);
+ const start=()=>job.start({command:'cat '+auth},{sessionId:'synthetic',executionId:crypto.randomUUID(),signal:new AbortController().signal});
+ expectedPrivate=home;
+ let expectedCalls=0;
+ const reached=async()=>{await assert.rejects(start(),/test_original_owner_reached/);assert.equal(ownerCalls,++expectedCalls);assert.deepEqual(readdirSync(tempBase),before);};
+ await reached();assert.equal(existsSync(home),true);assert.equal(actualFS.statSync(home).mode&0o777,0o700);assert.equal(existsSync(auth),false);
+ writeFileSync(auth,'SYNTHETIC_AUTH_BODY',{mode:0o000});await reached();
+ const next=join(home,'next');writeFileSync(next,'SYNTHETIC_ROTATED_BODY',{mode:0o000});renameSync(next,auth);await reached();
+ const alias=join(root,'codex-alias');actualFS.symlinkSync(home,alias);const aliasJob=createLinuxHostShellJob({...options,protectedFiles:[join(alias,'auth.json')]});const mkdirsBeforeAlias=privateMkdirs;
+ await assert.rejects(aliasJob.start({command:'unlink '+alias},{sessionId:'synthetic',executionId:crypto.randomUUID(),signal:new AbortController().signal}),/linux_shell_private_file_layout_invalid/);
+ assert.equal(privateMkdirs,mkdirsBeforeAlias);assert.equal(ownerCalls,expectedCalls);assert.deepEqual(readdirSync(tempBase),before);
+ // The pre-existing Shell path remains registered and reaches its original
+ // owner when the trusted host has no private-file requirement.
+ const ordinary=createLinuxHostShellJob(options);
+ expectedPrivate=undefined;
+ await assert.rejects(ordinary.start({command:'unchanged'},{sessionId:'synthetic',executionId:crypto.randomUUID(),signal:new AbortController().signal}),/test_original_owner_reached/);
+ assert.equal(ownerCalls,expectedCalls+1);assert.deepEqual(readdirSync(tempBase),before);assert.equal(descriptorPaths.size,0);
+} finally {rmSync(root,{recursive:true,force:true});}
+`;
+  const result = spawnSync(process.execPath, ['--eval', source], {
+    timeout: 4000,
+    encoding: 'utf8',
+  });
+  if (result.status !== 0) console.error(result.stderr);
+  expect(result.error).toBeUndefined();
+  expect(result.signal).toBeNull();
+  expect(result.status).toBe(0);
+});
+
 test('Linux ordinary Job preserves the full output, cancellation and retained unknown lifecycle', () => {
   const jobPath = fileURLToPath(new URL('../../../src/jobs/shell.ts', import.meta.url));
   const ownerPath = fileURLToPath(

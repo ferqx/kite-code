@@ -616,3 +616,37 @@ test('migrated Git leaf reads real branches and switches only at first send with
     await f.close();
   }
 });
+
+test('a first accepted command can resolve to a pre-Run rejection and an explicit retry reuses only its created Session', async () => {
+  const f = fixture();
+  let reject = false;
+  const get = f.port.getCommand.bind(f.port);
+  f.port.getCommand = async (id, options) => {
+    const command = await get(id, options);
+    return reject && id === f.request.intent.commandId
+      ? { ...command, status: 'rejected', receipt: { reason: 'shell_asset_unavailable' } }
+      : command;
+  };
+  try {
+    await f.ready();
+    expect(await f.caller.invoke(f.request)).toMatchObject({ phase: 'accepted' });
+    reject = true;
+    expect(
+      await f.caller.invoke({
+        method: 'conversation.lookup',
+        generation: 1,
+        commandId: f.request.intent.commandId,
+      }),
+    ).toMatchObject({
+      phase: 'failed',
+      code: 'shell_asset_unavailable',
+      input: { phase: 'rejected' },
+    });
+    expect(f.counts()).toMatchObject({ creates: 1, starts: 1 });
+    const retry = { ...f.request, intent: { ...f.request.intent, commandId: 'explicit-retry' } };
+    expect(await f.caller.invoke(retry)).toMatchObject({ phase: 'accepted' });
+    expect(f.counts()).toMatchObject({ creates: 1, starts: 2 });
+  } finally {
+    await f.close();
+  }
+});

@@ -65,6 +65,10 @@ const responseNames = [
   'FileCheckpointRecoveryBoundary',
   'SessionLogPage',
   'SkillCataloguePage',
+  'UserSkillCataloguePage',
+  'UserMcpSettingsView',
+  'UserMcpOperationResult',
+  'UserMcpToolsPage',
   'HostStatus',
   'ServiceLifecycle',
   'ShutdownServiceResponse',
@@ -135,6 +139,11 @@ const requestNames = [
   'SessionLogQuery',
   'BrowserSessionLogQuery',
   'SkillCatalogueQuery',
+  'UserSkillCatalogueQuery',
+  'UserMcpSettingsQuery',
+  'UserMcpSettingsRequest',
+  'UserMcpOperationQuery',
+  'UserMcpToolsQuery',
   'HostStatusQuery',
   'ResumeRunRequest',
   'ResumeRunTarget',
@@ -236,6 +245,10 @@ for (const [prefix, names] of [
       name !== 'WorkspaceRemoval' &&
       name !== 'HostStatus' &&
       name !== 'SkillCataloguePage' &&
+      name !== 'UserSkillCataloguePage' &&
+      name !== 'UserMcpSettingsView' &&
+      name !== 'UserMcpOperationResult' &&
+      name !== 'UserMcpToolsPage' &&
       name !== 'SessionLogPage' &&
       name !== 'BackgroundExecutionPage' &&
       name !== 'FileCheckpointPage' &&

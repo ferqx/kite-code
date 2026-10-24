@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import type { Message, ModelOutputSnapshot } from '@kite-ai/client';
+import { ClientError, type Message, type ModelOutputSnapshot } from '@kite-ai/client';
 import { JSDOM } from 'jsdom';
 import { act } from 'react';
 import { createRoot } from 'react-dom/client';
@@ -64,16 +64,18 @@ test('host verified snapshots render immediately, suspend safely, and reject mis
   try {
     await f.render(props);
     expect(f.host.querySelector('.message-markdown')!.textContent).toBe('Verified child tail🙂');
-    expect(f.host.textContent).not.toContain('Read complete recorded Model output');
+    expect(f.host.querySelector('.model-output-message > p')!.textContent).toBe('完整回复');
+    expect(f.host.textContent).not.toContain('Model output');
+    expect(f.host.textContent).not.toContain('查看完整回复');
     expect(content.at(-1)).toBe('Verified child tail🙂');
     await f.render({ ...props, suspended: true });
     expect(f.host.querySelector('.message-markdown')!.textContent).toBe('PREVIEW');
     expect(content.at(-1)).toBeUndefined();
     await f.render(props);
     expect(f.host.querySelector('.message-markdown')!.textContent).toBe('Verified child tail🙂');
-    await f.click('Close full Model output');
+    await f.click('收起完整回复');
     expect(f.host.querySelector('.message-markdown')!.textContent).toBe('PREVIEW');
-    await f.click('Read complete recorded Model output');
+    await f.click('查看完整回复');
     expect(f.host.querySelector('.message-markdown')!.textContent).toBe('Verified child tail🙂');
     for (const snapshot of [
       { ...data.snapshot, sessionId: 'other' },
@@ -119,7 +121,7 @@ test('Fork full reader uses the proved original Session/Run; foreign origin and 
   try {
     await f.render({ message, storeId: 'store', onRead });
     expect(scopes).toHaveLength(0);
-    await f.click('Read complete recorded Model output');
+    await f.click('查看完整回复');
     expect(scopes).toEqual(['a']);
     expect(f.host.querySelector('.message-markdown')!.textContent).toBe(
       data.snapshot.output.content,
@@ -129,7 +131,7 @@ test('Fork full reader uses the proved original Session/Run; foreign origin and 
       storeId: 'store',
       onRead,
     });
-    await f.click('Read complete recorded Model output');
+    await f.click('查看完整回复');
     expect(scopes).toEqual(['a']);
     expect(f.host.querySelector('.message-markdown')!.textContent).toBe('PREVIEW');
     await f.render({
@@ -142,10 +144,10 @@ test('Fork full reader uses the proved original Session/Run; foreign origin and 
     });
     expect(
       [...f.host.querySelectorAll('button')].find(
-        (button) => button.textContent === 'Read complete recorded Model output',
+        (button) => button.textContent === '查看完整回复',
       )!.disabled,
     ).toBe(true);
-    expect(f.host.textContent).toContain('unsupported original content format');
+    expect(f.host.textContent).toContain('暂不支持此内容格式，已保留回复预览');
     expect(scopes).toEqual(['a']);
   } finally {
     await f.close();
@@ -180,12 +182,12 @@ test('a qualified host can read the restored sealed origin using the current sna
         return data.snapshot;
       },
     });
-    await f.click('Read complete recorded Model output');
+    await f.click('查看完整回复');
     expect(reads).toBe(1);
-    expect(f.host.textContent).toContain('Complete Model output');
+    expect(f.host.textContent).toContain('完整回复');
     expect(content.at(-1)).toBe(data.snapshot.output.content);
     expect(message.originMessage!.storeId).toBe('original-store');
-    await f.click('Close full Model output');
+    await f.click('收起完整回复');
     expect(f.host.querySelector('.message-markdown')!.textContent).toBe('PREVIEW');
     expect(content.at(-1)).toBeUndefined();
     expect(reads).toBe(1);
@@ -236,6 +238,179 @@ async function domFixture() {
     },
   };
 }
+test('ordinary reply automatically loads the verified >17MiB body once without preview headings or reader buttons', async () => {
+  const f = await domFixture(),
+    data = outputFixture(`${'x'.repeat(17 * 1024 * 1024 + 1)} 自动正文尾部🙂`),
+    published: (string | undefined)[] = [];
+  let reads = 0;
+  const props: ModelOutputMessageProps = {
+    autoRead: true,
+    message: data.message,
+    storeId: 'store',
+    onRead: async (input) => {
+      expect(input.sessionId).toBe('a');
+      expect(input.executionId).toBe('model');
+      reads++;
+      return data.snapshot;
+    },
+    onContent: (value) => published.push(value),
+  };
+  try {
+    await f.render(props);
+    expect(reads).toBe(1);
+    expect(f.host.querySelector('.message-markdown')!.textContent).toBe(
+      data.snapshot.output.content,
+    );
+    expect(published.at(-1)).toBe(data.snapshot.output.content);
+    expect(f.host.querySelector('.model-output-message > p')).toBeNull();
+    expect(f.host.querySelectorAll('button')).toHaveLength(0);
+    await f.render({ ...props, message: { ...data.message } });
+    expect(reads).toBe(1);
+    expect(published.at(-1)).toBe(data.snapshot.output.content);
+  } finally {
+    await f.close();
+  }
+});
+
+test('ordinary automatic body aborts paused reads, isolates late replies and resumes only the current identity', async () => {
+  const f = await domFixture(),
+    data = outputFixture('旧会话秘密尾部'),
+    next = outputFixture('当前会话完整尾部'),
+    published: (string | undefined)[] = [];
+  let reads = 0,
+    signal: AbortSignal | undefined,
+    release: ((snapshot: ModelOutputSnapshot) => void) | undefined;
+  next.message = { ...next.message, id: 'next', sessionId: 'b', runId: 'run-b' };
+  next.snapshot = { ...next.snapshot, sessionId: 'b', runId: 'run-b' };
+  const props: ModelOutputMessageProps = {
+    autoRead: true,
+    message: data.message,
+    storeId: 'store',
+    onRead: async (input) => {
+      reads++;
+      signal = input.signal;
+      return new Promise((resolve) => {
+        release = resolve;
+      });
+    },
+    onContent: (value) => published.push(value),
+  };
+  try {
+    await f.render(props);
+    expect(reads).toBe(1);
+    expect(f.host.querySelector('.message-markdown')!.textContent).toBe('PREVIEW');
+    expect(f.host.querySelectorAll('button')).toHaveLength(0);
+    await f.render({ ...props, readActive: false });
+    expect(signal?.aborted).toBe(true);
+    expect(published.at(-1)).toBeUndefined();
+    await f.render({
+      ...props,
+      message: next.message,
+      onRead: async (input) => {
+        expect(input.sessionId).toBe('b');
+        reads++;
+        return next.snapshot;
+      },
+    });
+    await act(async () => release?.(data.snapshot));
+    expect(reads).toBe(2);
+    expect(f.host.querySelector('.message-markdown')!.textContent).toBe(
+      next.snapshot.output.content,
+    );
+    expect(published.at(-1)).toBe(next.snapshot.output.content);
+    expect(f.host.textContent).not.toContain(data.snapshot.output.content);
+  } finally {
+    await f.close();
+  }
+});
+
+test('automatic read failures preserve the preview and require an explicit read retry without leaking internal errors', async () => {
+  const f = await domFixture(),
+    data = outputFixture('核实后才显示的完整回复'),
+    published: (string | undefined)[] = [];
+  let reads = 0;
+  const props: ModelOutputMessageProps = {
+    autoRead: true,
+    message: data.message,
+    storeId: 'store',
+    onRead: async () => {
+      reads++;
+      if (reads === 1) throw new ClientError('fixture_private_failure');
+      return data.snapshot;
+    },
+    onContent: (value) => published.push(value),
+  };
+  try {
+    await f.render(props);
+    expect(reads).toBe(1);
+    expect(f.host.querySelector('.message-markdown')!.textContent).toBe('PREVIEW');
+    expect(f.host.querySelector('[role=alert]')!.textContent).toContain('完整回复读取失败');
+    expect(f.host.textContent).not.toContain('fixture_private_failure');
+    expect(published.at(-1)).toBeUndefined();
+    await f.render({ ...props });
+    expect(reads).toBe(1);
+    await f.click('重新读取');
+    expect(reads).toBe(2);
+    expect(f.host.querySelector('.message-markdown')!.textContent).toBe(
+      data.snapshot.output.content,
+    );
+    expect(published.at(-1)).toBe(data.snapshot.output.content);
+    expect(f.host.querySelectorAll('button')).toHaveLength(0);
+  } finally {
+    await f.close();
+  }
+});
+
+test('automatic replies reject mismatched or unsupported bodies and identify incomplete recorded replies', async () => {
+  const f = await domFixture(),
+    data = outputFixture(),
+    partial = outputFixture('实际保存的未完成正文', false),
+    published: (string | undefined)[] = [];
+  let reads = 0;
+  const props: ModelOutputMessageProps = {
+    autoRead: true,
+    message: data.message,
+    storeId: 'store',
+    onRead: async () => {
+      reads++;
+      return { ...data.snapshot, runId: 'foreign' };
+    },
+    onContent: (value) => published.push(value),
+  };
+  try {
+    await f.render(props);
+    expect(reads).toBe(1);
+    expect(f.host.querySelector('.message-markdown')!.textContent).toBe('PREVIEW');
+    expect(published.at(-1)).toBeUndefined();
+    expect(f.host.textContent).not.toContain('identity_conflict');
+    await f.render({
+      ...props,
+      message: {
+        ...data.message,
+        outputBody: { ...data.message.outputBody!, readAvailability: 'unsupported' },
+      },
+    });
+    expect(reads).toBe(1);
+    expect(f.host.querySelectorAll('button')).toHaveLength(0);
+    await f.render({
+      ...props,
+      message: { ...partial.message, id: 'partial' },
+      onRead: async () => {
+        reads++;
+        return partial.snapshot;
+      },
+    });
+    expect(reads).toBe(2);
+    expect(f.host.textContent).toContain('回复未完成');
+    expect(f.host.querySelector('.message-markdown')!.textContent).toBe(
+      partial.snapshot.output.content,
+    );
+    expect(f.host.querySelectorAll('button')).toHaveLength(0);
+  } finally {
+    await f.close();
+  }
+});
+
 test('explicit full reader renders >17MiB exact tail and copies only currently loaded body; close restores labeled preview', async () => {
   const f = await domFixture(),
     data = outputFixture(`${'x'.repeat(17 * 1024 * 1024 + 1)} EXACT TAIL`),
@@ -252,14 +427,14 @@ test('explicit full reader renders >17MiB exact tail and copies only currently l
       onContent: (value) => copies.push(value),
     });
     expect(reads).toBe(0);
-    expect(f.host.textContent).toContain('full body not loaded');
-    await f.click('Read complete recorded Model output');
+    expect(f.host.textContent).toContain('回复预览');
+    await f.click('查看完整回复');
     expect(reads).toBe(1);
     expect(f.host.querySelector('.message-markdown')!.textContent).toBe(
       data.snapshot.output.content,
     );
     expect(copies.at(-1)).toBe(data.snapshot.output.content);
-    await f.click('Close full Model output');
+    await f.click('收起完整回复');
     expect(copies.at(-1)).toBeUndefined();
     expect(f.host.querySelector('.message-markdown')!.textContent).toBe('PREVIEW');
   } finally {
@@ -279,21 +454,21 @@ test('single-flight close, identity replacement and suspension abort view reads;
   };
   try {
     await f.render({ message: data.message, storeId: 'store', onRead });
-    await f.click('Read complete recorded Model output');
-    await f.click('Read complete recorded Model output');
+    await f.click('查看完整回复');
+    await f.click('查看完整回复');
     expect(reads).toBe(1);
-    await f.click('Close full Model output');
+    await f.click('收起完整回复');
     expect(signal.aborted).toBe(true);
     release(data.snapshot);
     await act(async () => await Bun.sleep(1));
     expect(f.host.textContent).not.toContain('Full answer tail');
-    await f.click('Read complete recorded Model output');
+    await f.click('查看完整回复');
     await f.render({ message: { ...data.message, id: 'new' }, storeId: 'store', onRead });
     expect(signal.aborted).toBe(true);
     release(data.snapshot);
     await act(async () => await Bun.sleep(1));
     expect(f.host.textContent).not.toContain('Full answer tail');
-    await f.click('Read complete recorded Model output');
+    await f.click('查看完整回复');
     await f.render({
       message: { ...data.message, id: 'new' },
       storeId: 'store',
@@ -317,14 +492,66 @@ test('missing capability keeps preview; wrong identity fails without full body; 
       storeId: 'store',
       onRead: async () => ({ ...data.snapshot, storeId: 'foreign' }),
     });
-    await f.click('Read complete recorded Model output');
-    expect(f.host.querySelector('[role=alert]')!.textContent).toContain('identity_conflict');
+    await f.click('查看完整回复');
+    expect(f.host.querySelector('[role=alert]')!.textContent).toBe('完整回复读取失败，请重试。');
+    expect(f.host.textContent).not.toContain('identity_conflict');
     expect(f.host.querySelector('.message-markdown')!.textContent).toBe('PREVIEW');
     await f.render({ message: data.message, storeId: 'store', onRead: async () => data.snapshot });
-    await f.click('Read complete recorded Model output');
-    expect(f.host.textContent).toContain('Complete recorded incomplete prefix');
+    await f.click('查看完整回复');
+    expect(f.host.textContent).toContain('已记录的回复内容（回复未完成）');
     expect(f.host.querySelector('.message-markdown')!.textContent).toBe('PREFIX');
     expect(f.host.querySelector('details')).toBeNull();
+  } finally {
+    await f.close();
+  }
+});
+
+test('ordinary preview and unavailable readers use concise copy without exposing errors or dropping preview content', async () => {
+  const f = await domFixture(),
+    data = outputFixture(),
+    preview = `${'原始回复预览🙂'.repeat(900)}完整预览尾部`,
+    published: (string | undefined)[] = [];
+  data.message.content = preview;
+  let reads = 0;
+  try {
+    for (const cause of [
+      new ClientError('fixture_private_error_token'),
+      new Error('private fixture failure details'),
+    ]) {
+      await f.render({
+        message: data.message,
+        storeId: 'store',
+        onContent: (content) => published.push(content),
+        onRead: async () => {
+          reads++;
+          throw cause;
+        },
+      });
+      expect(f.host.querySelector('.message-markdown')!.textContent).toBe(preview);
+      expect(f.host.querySelector('.model-output-message > p')!.textContent).toBe('回复预览');
+      await f.click('查看完整回复');
+      expect(f.host.querySelector('[role=alert]')!.textContent).toBe('完整回复读取失败，请重试。');
+      expect(f.host.querySelector('.message-markdown')!.textContent).toBe(preview);
+      expect(f.host.textContent).not.toMatch(
+        /Model output|fixture_private_error_token|private fixture failure details|model_output_unavailable/,
+      );
+      expect(published.at(-1)).toBeUndefined();
+    }
+    expect(reads).toBe(2);
+    await f.render({
+      message: data.message,
+      storeId: 'store',
+    });
+    expect(f.host.querySelector('button')!.disabled).toBe(true);
+    expect(f.host.textContent).toContain('暂时无法查看完整回复');
+    expect(f.host.querySelector('.message-markdown')!.textContent).toBe(preview);
+    await f.render({
+      message: { ...data.message, outputBody: undefined, contentFormat: 'unsupported' },
+      storeId: 'store',
+    });
+    expect(f.host.textContent).toContain('暂不支持此内容格式，已保留原始预览');
+    expect(f.host.querySelector('.message-markdown')!.textContent).toBe(preview);
+    expect(reads).toBe(2);
   } finally {
     await f.close();
   }
@@ -339,7 +566,7 @@ test('ordinary conversation excludes raw reasoning; only explicit diagnostic hos
   const props = { message: data.message, storeId: 'store', onRead: async () => data.snapshot };
   try {
     await f.render(props);
-    await f.click('Read complete recorded Model output');
+    await f.click('查看完整回复');
     expect(f.host.textContent).not.toContain('PRIVATE THOUGHTS');
     expect(f.host.querySelector('details')).toBeNull();
     await f.render({ ...props, showReasoning: true });
@@ -368,7 +595,7 @@ test('KeepAlive retains the verified full body and exact Markdown DOM while reti
   };
   try {
     await f.renderCached(props);
-    await f.click('Read complete recorded Model output');
+    await f.click('查看完整回复');
     const body = f.host.querySelector('.message-markdown')!;
     const paragraph = body.querySelector('p')!;
     expect(body.textContent).toBe(data.snapshot.output.content);
@@ -411,13 +638,13 @@ test('KeepAlive aborts a pending full read on deactivation and permits a fresh r
   };
   try {
     await f.renderCached(props);
-    await f.click('Read complete recorded Model output');
+    await f.click('查看完整回复');
     await f.renderCached(props, 'b');
     expect(signal?.aborted).toBe(true);
     await f.renderCached({ ...props, onRead: async () => data.snapshot });
     await act(async () => release?.(data.snapshot));
     expect(f.host.querySelector('.message-markdown')?.textContent).toBe('PREVIEW');
-    await f.click('Read complete recorded Model output');
+    await f.click('查看完整回复');
     expect(f.host.querySelector('.message-markdown')?.textContent).toBe(
       data.snapshot.output.content,
     );

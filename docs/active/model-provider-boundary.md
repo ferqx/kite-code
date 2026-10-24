@@ -10,9 +10,15 @@
 
 ## 规则
 
-Kite Code 是 provider-neutral 系统。当前默认 Service 的模型只来自 ~/.kite-code/kite-code.jsonc，不按 Profile/Workspace 分层，也不读取旧 Profile config.jsonc。Service 私有适配既有 provider/model/disabledModels，路由和参数结构仍按实际 SDK/配置验证；客户端无文件路径和凭据 authority。所有配置可用模型都可选择思考程度，当前四类 Provider 统一发送所选 `reasoning_effort`，不以名称或旧能力标记拒绝；是否接受或生效由模型服务决定。非法档位仍本地拒绝，远端拒绝保留真实失败，不切换路由或去参数重发。决定及验证见[思考程度参数 Note](../../.agents/notes/implemented/architecture/2026-10-16-model-effort-pass-through.md)。已有 inline key 只用于宿主解析，新增替换 key 存用户级 OS vault，原 key 不进入 DTO/snapshot/日志。配置源的决定及代价见[单用户配置 Note](../../.agents/notes/implemented/architecture/2026-10-15-single-user-configuration.md)。下文描述的旧 Runtime Model Surface 约束在其原体系适用，当前源码定位归 Service/AI owner。
+Kite Code 是 provider-neutral 系统。当前默认 Service 的手动模型来自 ~/.kite-code/kite-code.jsonc，正式宿主另发现本机 Codex 登录和实际本地模型元数据；不按 Profile/Workspace 分层，也不读取旧 Profile config.jsonc。Service 私有适配既有 provider/model/disabledModels，路由和参数结构仍按实际 SDK/配置验证；客户端无文件路径和凭据 authority。所有配置可用模型都可选择思考程度，四类手动 Provider 与 Codex 都按实际协议传递所选思考程度，不以名称或旧能力标记拒绝；是否接受或生效由模型服务决定。非法档位仍本地拒绝，远端拒绝保留真实失败，不切换路由或去参数重发。决定及验证见[思考程度参数 Note](../../.agents/notes/implemented/architecture/2026-10-16-model-effort-pass-through.md)。已有 inline key 只用于宿主解析，新增替换 key 存用户级 OS vault，原 key 不进入 DTO/snapshot/日志。配置源的决定及代价见[单用户配置 Note](../../.agents/notes/implemented/architecture/2026-10-15-single-user-configuration.md)。下文描述的旧 Runtime Model Surface 约束在其原体系适用，当前源码定位归 Service/AI owner。
 
 当前 SDK 适配器在 transport 边界将 namespaced Tool ID 转为符合 compatible 函数名语法的无碰撞名称，并用同一请求映射还原返回调用。Core ID、权限和持久历史不重命名，实际转换版本与严格端点证据归[AI owner](../../packages/ai/README.md)；下文旧 Model Surface 的序列化身份不因当前 SDK 编码变化而改写。
+
+当前默认 Service 以同 Session 首个实际 Run 的封存模型协议约束后续根运行，Responses 与 Chat Completions 不在一个会话内互换；同协议模型、连接与下一轮 effort 仍可调整。校验在凭据／模型绑定前独立执行，Native 只过滤另一协议候选，不能以客户端缓存授权跨协议。原有界 View 保留真正最早 Run，冷重建和恢复不以最新记录或当前默认替代；无 Run 的准备拒绝不提前绑定。准确决定与测试入口见[会话协议 Note](../../.agents/notes/implemented/architecture/2026-10-24-session-model-protocol.md)。
+
+本机 Codex 的凭据读取由 [Service 私有来源](../../apps/service/src/codex-auth.ts)负责，不能通过 JSONC/HTTP/renderer 指定认证路径或更改请求目标。只读虚拟连接不物化 token；账户摘要绑定 route 和每次实际派发，token 轮换不等同账户切换。私有 continuation 按认证来源及完整账户／主体身份绑定，同账户 token 更新不丢已保存的 encrypted reasoning；其他 Provider 的原凭据隔离保持。无效可选目录不进入普通工具资产保护，合法但暂缺文件的绝对路径仍受保护。固定 Codex Responses endpoint、拒绝 redirect、请求时重读、认证过期明确失败及无隐式刷新/回写的边界见 [Service owner](../../apps/service/README.md#本机-codex-来源)。原有 Provider 中立模型流、工具授权和取消仍由原 owner 负责，自动接入不授予外部工具或新账户 fallback。文件模式外的登录缓存未取得支持资格。
+
+Codex 认证文件由 Service 以独立可信私有文件路径交给 Files／Shell／Workflow 保护，不能作为目录或可执行资产读取／hash。macOS 保准确名称及轮换后的访问拒绝；Linux 保正常 Shell，以原 namespace 保护专用物理认证目录，缺失目录仅在已授权 Job 派发时受控预留。无效宽根／可重定向布局只拒绝原 Job，不以接入 Codex 为由禁用普通工具；准确边界与实际环境归[Jobs owner](../../packages/agent/src/jobs/README.md#linux-宿主与严格补偿源码)。paired launcher 只沿有限可信环境白名单传递代理和 CODEX_HOME，秘密与运行时注入继续过滤，具体合同归[Service owner](../../apps/service/README.md)。
 
 ## Model Surface V1 与唯一 Gateway
 

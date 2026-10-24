@@ -4,6 +4,7 @@ import { createHmac, randomBytes } from 'node:crypto';
 import { appendFileSync, chmodSync, readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { temporaryDirectory } from '../../../../../tests/fixtures/test-filesystem';
+import type { Json } from '../../../src/extensions';
 import { canonicalJson } from '../../../src/json';
 import { openSqliteStore } from '../../../src/sqlite';
 
@@ -806,6 +807,84 @@ test('named Responses and remove markers keep exact durable identity and reject 
       ).toBeNull();
     }
     expect(f.db.query('SELECT count(*) AS n FROM host_mutation').get()).toEqual({ n: 2 });
+  } finally {
+    await f.close();
+  }
+});
+
+test('user MCP intents and receipts remain closed and cannot gain Workspace or credential authority', async () => {
+  const f = await fixture();
+  try {
+    const readSet = 'a'.repeat(64),
+      serverId = `mcp-${'b'.repeat(64)}`;
+    const marker = { expectedReadSet: readSet, operation: { kind: 'connect', serverId } };
+    const original = {
+      expectedStoreId: f.expectedStoreId,
+      subjectId: 'owner',
+      commandId: 'user-mcp',
+      kind: 'config.user.write' as const,
+      scope: 'user',
+      requestDigest: 'c'.repeat(64),
+      safeRequest: { scope: 'user', ifMatch: readSet, operationCount: 1, mcpSettings: marker },
+    };
+    const invalidRequests: Json[] = [
+      { ...original.safeRequest, workspaceId: 'project' },
+      { ...original.safeRequest, operationCount: 2 },
+      { ...original.safeRequest, ifMatch: 'd'.repeat(64) },
+      { ...original.safeRequest, providerSettings: marker },
+      { ...original.safeRequest, mcpSettings: { ...marker, sessionId: 'hidden' } },
+      {
+        ...original.safeRequest,
+        mcpSettings: {
+          ...marker,
+          operation: { kind: 'connect', serverId, workspaceId: 'project' },
+        },
+      },
+      {
+        ...original.safeRequest,
+        mcpSettings: {
+          ...marker,
+          operation: {
+            kind: 'add',
+            name: 'secret',
+            entry: { type: 'http', url: 'https://example.test/mcp?token=secret' },
+          },
+        },
+      },
+    ];
+    for (const safeRequest of invalidRequests)
+      await rejected(
+        f.store.beginHostMutation({ ...original, safeRequest }),
+        'invalid_host_mutation',
+      );
+    expect((await f.store.beginHostMutation(original)).created).toBe(true);
+    const complete = {
+      code: null,
+      cancelled: false,
+      configuration: 'unchanged',
+      revocation: null,
+      authentication: { policy: 'none', status: 'none', loginAllowed: false },
+      connection: { state: 'ready', generation: 1, toolCount: 2 },
+    };
+    const invalidReceipts: Json[] = [
+      { ...complete, token: 'secret' },
+      { ...complete, credentialBindingDigest: 'not-a-digest' },
+      { ...complete, connection: { ...complete.connection, sessionId: 'hidden' } },
+      { ...complete, authentication: { ...complete.authentication, credentialRef: 'secret' } },
+    ];
+    for (const receipt of invalidReceipts)
+      await rejected(
+        f.store.finishHostMutation({ ...original, state: 'applied', receipt }),
+        'invalid_host_mutation',
+      );
+    const applied = await f.store.finishHostMutation({
+      ...original,
+      state: 'applied',
+      receipt: complete,
+    });
+    expect(applied.state).toBe('applied');
+    expect(applied.receipt).toEqual(complete);
+    expect(f.db.query('SELECT count(*) AS n FROM session').get()).toEqual({ n: 0 });
   } finally {
     await f.close();
   }

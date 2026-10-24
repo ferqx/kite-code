@@ -12,6 +12,10 @@ export interface Responses {
   FileCheckpointRecoveryBoundary: API.FileCheckpointRecoveryBoundary;
   SessionLogPage: API.SessionLogPage;
   SkillCataloguePage: API.SkillCataloguePage;
+  UserSkillCataloguePage: API.UserSkillCataloguePage;
+  UserMcpSettingsView: API.UserMcpSettingsView;
+  UserMcpOperationResult: API.UserMcpOperationResult;
+  UserMcpToolsPage: API.UserMcpToolsPage;
   HostStatus: API.HostStatus;
   ServiceLifecycle: API.ServiceLifecycle;
   ShutdownServiceResponse: API.ShutdownServiceResponse;
@@ -100,6 +104,11 @@ export function validateRequest(
     | 'SessionLogQuery'
     | 'BrowserSessionLogQuery'
     | 'SkillCatalogueQuery'
+    | 'UserSkillCatalogueQuery'
+    | 'UserMcpSettingsQuery'
+    | 'UserMcpSettingsRequest'
+    | 'UserMcpOperationQuery'
+    | 'UserMcpToolsQuery'
     | 'HostStatusQuery'
     | 'ShutdownServiceRequest'
     | 'ModelSettingsRequest'

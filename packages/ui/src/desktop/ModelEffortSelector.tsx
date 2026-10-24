@@ -26,6 +26,7 @@ export interface ModelEffortSelectorProps {
   onModelChange: (provider: string, name: string, id?: string) => void;
   reasoningEffort?: string;
   onReasoningEffortChange?: (effort: ThinkingEffort) => void;
+  modelSelectionHint?: string;
   disabled?: boolean;
 }
 
@@ -49,7 +50,7 @@ export function ModelEffortSelector(props: ModelEffortSelectorProps) {
       ? effortNames[effortIndex]
       : configuredEffort === 'none'
         ? '关闭'
-        : configuredEffort || undefined;
+        : configuredEffort || '未指定';
   const choices = effortValues.filter(
     (value) =>
       selected?.reasoningEffortChoices === undefined ||
@@ -168,6 +169,9 @@ export function ModelEffortSelector(props: ModelEffortSelectorProps) {
               </div>
             )}
             {!selected && <p className="model-effort-unavailable">请先选择模型</p>}
+            {props.modelSelectionHint && (
+              <p className="model-effort-unavailable">{props.modelSelectionHint}</p>
+            )}
           </div>
         ) : (
           <Tabs

@@ -1,6 +1,5 @@
 import { expect, test } from 'bun:test';
 import type { Message, ModelOutputSnapshot } from '@kite-ai/client';
-import { ModelOutputMessage } from '@kite-ai/ui';
 import { MessageContent } from '@kite-ai/ui/desktop';
 import { JSDOM } from 'jsdom';
 import { act } from 'react';
@@ -12,6 +11,7 @@ import type {
   NativeSelection,
 } from '../../src/native-bridge';
 import { NativeGeneralSettings } from '../../src/native-general-settings';
+import { NativeModelOutputMessage } from '../../src/native-model-output-message';
 
 function fixture() {
   const dom = new JSDOM('<div id="root"></div>', { url: 'http://localhost' });
@@ -143,7 +143,7 @@ test('retained General card reads the accurate configuration default and never s
   }
 });
 
-test('original Markdown path callbacks apply to the displayed preview and verified full body while unsafe schemes, images and closed bodies remain inert', async () => {
+test('original Markdown path callbacks apply only to the automatic verified body while unsafe schemes, images and paused bodies remain inert', async () => {
   const f = fixture(),
     opened: string[] = [];
   const content =
@@ -184,15 +184,19 @@ test('original Markdown path callbacks apply to the displayed preview and verifi
     output: { content, reasoning: '', toolCalls: [], complete: true },
   };
   let reads = 0;
-  const render = (readOnly = false) =>
+  let completeRead!: (value: ModelOutputSnapshot) => void;
+  const render = (readOnly = false, suspended = false) =>
     act(async () =>
       f.root.render(
-        <ModelOutputMessage
+        <NativeModelOutputMessage
           message={message}
           storeId="store"
-          onRead={async () => {
+          suspended={suspended}
+          onRead={() => {
             reads++;
-            return snapshot;
+            return new Promise((resolve) => {
+              completeRead = resolve;
+            });
           }}
           renderText={(text) => (
             <MessageContent
@@ -209,9 +213,10 @@ test('original Markdown path callbacks apply to the displayed preview and verifi
     );
   try {
     await render();
-    expect(reads).toBe(0);
+    expect(reads).toBe(1);
     expect(f.host.querySelector('.file-link')).toBeNull();
-    await click('Read complete recorded Model output');
+    expect(f.host.querySelector('.model-output-message > button')).toBeNull();
+    await act(async () => completeRead(snapshot));
     expect(reads).toBe(1);
     expect(f.host.querySelectorAll('.file-link')).toHaveLength(1);
     await click('原文件');
@@ -220,7 +225,7 @@ test('original Markdown path callbacks apply to the displayed preview and verifi
     expect(f.host.querySelector('a')!.getAttribute('href')).toBe('https://example.com');
     await render(true);
     expect(f.host.querySelector('.file-link')).toBeNull();
-    await click('Close full Model output');
+    await render(true, true);
     expect(f.host.querySelector('.message-markdown')!.textContent).toBe('PREVIEW');
     expect(reads).toBe(1);
     expect(opened).toHaveLength(1);

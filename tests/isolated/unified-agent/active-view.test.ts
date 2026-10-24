@@ -37,7 +37,7 @@ async function bounded<T>(promise: Promise<T>) {
   }
 }
 
-test('public view keeps the current Run and an old live Job after 205 real completed turns', async () => {
+test('public view keeps the first and current Runs plus an old live Job after 205 real completed turns', async () => {
   const root = mkdtempSync(join(tmpdir(), 'kite-active-view-')),
     dataRoot = join(root, 'data'),
     profileOptions = { dataRoot, profile: 'disposable' },
@@ -213,14 +213,17 @@ test('public view keeps the current Run and an old live Job after 205 real compl
       before = await store.getMetadata(),
       view = await client.getView('s');
     expect(view.runs.find((run) => run.isActive)?.id).toBe(runId);
-    expect(view.runs).toHaveLength(200);
-    expect(view.runs[0]?.originCommandId).toBe(historyOrigins[6]);
-    expect(view.runs[0]?.rootWorkCommandId).toBe('history-6');
+    expect(view.runs).toHaveLength(201);
+    expect(view.runs[0]?.id).toBe(firstRun);
+    expect(view.runs[0]?.originCommandId).toBe(historyOrigins[0]);
+    expect(view.runs[0]?.rootWorkCommandId).toBe('history-0');
+    expect(view.runs[1]?.rootWorkCommandId).toBe('history-6');
     expect(view.runs.at(-1)?.originCommandId).toBe(
-      (original.receipt as { businessCommandId: string }).businessCommandId,
+      (original.receipt as { businessCommandId?: string }).businessCommandId ?? original.id,
     );
     expect(view.runs.at(-1)?.rootWorkCommandId).toBe('active-late');
-    expect(view.runs.some((run) => run.id === firstRun)).toBe(false);
+    expect(view.runs.filter((run) => run.id === firstRun)).toHaveLength(1);
+    expect(view.runs.filter((run) => run.id === runId)).toHaveLength(1);
     expect((await client.getRun(firstRun)).status).toBe('completed');
     expect(view.executions).toHaveLength(201);
     expect(view.executions[0]).toMatchObject({ id: oldJob, kind: 'job', status: 'running' });

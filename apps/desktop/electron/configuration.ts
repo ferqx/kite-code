@@ -109,6 +109,7 @@ export class NativeConfiguration {
           enabled: model.enabled,
           configured: model.configured,
           ...(model.provider === undefined ? {} : { provider: model.provider }),
+          ...(model.protocol === undefined ? {} : { protocol: model.protocol }),
           ...(model.model === undefined ? {} : { model: model.model }),
           ...(model.reasoningEffort === undefined
             ? {}

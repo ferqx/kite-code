@@ -1,6 +1,7 @@
-import { expect, test } from 'bun:test';
+import { expect, spyOn, test } from 'bun:test';
 import type { OperationRef, PublicExecution, ToolContext } from '@kite-ai/agent/extensions';
 import { completeForegroundTask } from '../../../../src/extensions/task/foreground';
+import { AgentError } from '../../../../src/storage/types';
 import { completeForegroundShell } from '../../../../src/tools/shell-foreground';
 
 const ref: OperationRef = {
@@ -62,6 +63,46 @@ function context(controller: AbortController, get: () => Promise<PublicExecution
   } as unknown as ToolContext;
   return { value, waits: () => waits, dispatches: () => dispatches };
 }
+
+test('a finite foreground deadline uses a bounded integer wait and keeps the original successful Job', async () => {
+  const clock = spyOn(performance, 'now');
+  try {
+    for (const [deadline, elapsed, expected] of [
+      [4000, 0.25, 3999],
+      [1, 0.75, 1],
+      [600000, 0.25, 30000],
+    ] as const) {
+      clock.mockReturnValueOnce(100).mockReturnValueOnce(100 + elapsed);
+      const c = context(new AbortController(), async () => execution('succeeded'));
+      const waits: number[] = [];
+      c.value.operations.wait = async (original, options) => {
+        expect(original).toEqual(ref);
+        const timeout = options?.timeoutMs;
+        if (
+          typeof timeout !== 'number' ||
+          !Number.isSafeInteger(timeout) ||
+          timeout < 0 ||
+          timeout > 30000
+        )
+          throw new AgentError('invalid_wait_timeout');
+        waits.push(timeout);
+        return execution('succeeded');
+      };
+      c.value.operations.readOutput = async () => ({
+        items: [],
+        highWaterSeq: '0',
+        nextAfterSeq: null,
+      });
+      const result = await completeForegroundShell(ref, c.value, deadline, 'standalone');
+      expect(waits).toEqual([expected]);
+      expect(result.outcome).toBe('succeeded');
+      expect(result.details).toMatchObject({ timedOut: false, ref });
+      expect(c.dispatches()).toBe(0);
+    }
+  } finally {
+    clock.mockRestore();
+  }
+});
 
 for (const timeoutMs of [600000, undefined])
   test(`foreground Shell abort with timeout=${timeoutMs ?? 'none'} waits for the exact owned stop`, async () => {

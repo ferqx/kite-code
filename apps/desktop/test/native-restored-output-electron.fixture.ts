@@ -105,11 +105,9 @@ async function history(page: import('playwright').Page, sessionId: string) {
   }, sessionId) as Promise<Message[]>;
 }
 async function readFull(page: import('playwright').Page, storeId: string, sealed: boolean) {
-  await page
-    .getByRole('button', { name: 'Read complete recorded Model output', exact: true })
-    .click();
-  await page.getByText('Complete Model output', { exact: true }).waitFor();
   await page.getByText('RESTORED ORIGINAL COMPLETE TAIL', { exact: false }).waitFor();
+  assert.equal(await page.getByRole('button', { name: '查看完整回复', exact: true }).count(), 0);
+  assert.equal(await page.getByRole('button', { name: '收起完整回复', exact: true }).count(), 0);
   const audit = (await app!.evaluate('globalThis.__outputAudit')) as {
     requests: string[];
     outputs: ModelOutputSnapshot[];
@@ -166,7 +164,6 @@ try {
   await page.getByRole('button', { name: '发送明确的新轮次', exact: true }).click();
   await page.locator('.agent-turn-final').waitFor();
   await readFull(page, originalStoreId, false);
-  await page.getByRole('button', { name: 'Close full Model output', exact: true }).click();
   const toggle = page.getByRole('button', { name: '会话工具', exact: true });
   if ((await toggle.getAttribute('aria-expanded')) !== 'true') await toggle.click();
   const panel = page.getByRole('region', { name: '会话管理', exact: true });
@@ -203,20 +200,19 @@ try {
     assert.equal(copy.originMessage!.runId, message.originMessage!.runId);
     assert.equal(copy.outputBody!.executionId, message.outputBody!.executionId);
     await readFull(page, restored.storeId, true);
-    await page.getByRole('button', { name: 'Close full Model output', exact: true }).click();
-    await page.getByText('Model output preview · full body not loaded', { exact: true }).waitFor();
     await select(page, 'Other original');
-    await select(page, 'Sealed Fork');
     assert.equal(
-      await page.getByRole('button', { name: 'Close full Model output', exact: true }).count(),
+      await page.getByText('RESTORED ORIGINAL COMPLETE TAIL', { exact: false }).count(),
       0,
     );
+    await select(page, 'Sealed Fork');
+    await readFull(page, restored.storeId, true);
     if (cold) {
       await select(page, 'Source original');
       await readFull(page, restored.storeId, false);
       const copy = page.getByRole('button', { name: '复制本轮Agent回复', exact: true });
       assert.equal(await copy.isDisabled(), false);
-      await page.getByRole('button', { name: 'Close full Model output', exact: true }).click();
+      await select(page, 'Other original');
       assert.equal(await copy.count(), 0);
     }
     await noWrites();

@@ -176,6 +176,16 @@ export class DesktopInput {
       ...entry.state,
       command,
       phase: command.status === 'needs_review' ? 'unknown' : command.status,
+      error:
+        command.status === 'rejected'
+          ? command.receipt &&
+            typeof command.receipt === 'object' &&
+            !Array.isArray(command.receipt) &&
+            typeof command.receipt.reason === 'string' &&
+            /^[a-z][a-z0-9_]{0,80}$/.test(command.receipt.reason)
+            ? command.receipt.reason
+            : 'input_rejected'
+          : undefined,
     });
   }
   start(sessionId: string, input: StartCommandRequest) {

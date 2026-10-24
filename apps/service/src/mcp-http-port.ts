@@ -4,13 +4,20 @@ import { Agent as HttpsAgent, request as httpsRequest } from 'node:https';
 import { isIP, type Socket } from 'node:net';
 import {
   createMcpAdapter,
+  isUserMcpTransportBinding,
   McpAdapterError,
   type McpCredentialBroker,
   McpCredentialError,
   type McpCredentialIdentity,
   type McpCredentialRef,
+  type McpHostTransportBinding,
+  type McpHostTransportPort,
   McpHttpAuthRejection,
   type McpLifecycleTransportPort,
+  type McpSessionTransportBinding,
+  type McpUserTransportBinding,
+  userMcpMessageAllowed,
+  validMcpTransportOwner,
 } from '@kite-ai/agent/mcp';
 import { extractWWWAuthenticateParams } from '@modelcontextprotocol/sdk/client/auth.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
@@ -25,8 +32,8 @@ export class McpHttpPortError extends Error {
     this.name = 'McpHttpPortError';
   }
 }
-type Binding = Parameters<McpLifecycleTransportPort['open']>[0];
-export interface McpHttpPortOptions {
+type Binding = McpHostTransportBinding;
+export interface McpHttpPortOptions<B extends Binding = McpSessionTransportBinding> {
   servers: readonly {
     id: string;
     url: string;
@@ -37,7 +44,7 @@ export interface McpHttpPortOptions {
       /** Private owned OAuth resume may publish tokens; never detach it on a read timeout. */
       canWriteOwned?: true;
       bind(
-        binding: Binding,
+        binding: B,
         options: { signal: AbortSignal },
       ): Promise<{
         ref: McpCredentialRef;
@@ -47,7 +54,7 @@ export interface McpHttpPortOptions {
     };
     /** Actual 401 only; observes the failed request and never grants a retry. */
     onUnauthorized?(
-      binding: Binding,
+      binding: B,
       options: {
         signal: AbortSignal;
         authenticated: boolean;
@@ -55,11 +62,13 @@ export interface McpHttpPortOptions {
         scopes?: readonly string[];
       },
     ): void;
+    /** Only an explicit user HostMutation owner may use this private, per-request material. */
+    managementCredential?: (binding: B, options: { signal: AbortSignal }) => Promise<string | null>;
   }[];
   /** Actual host checks the original durable Job/Store identity; never remote self-report. */
-  admit(binding: Binding, options: { signal: AbortSignal }): Promise<void>;
+  admit(binding: B, options: { signal: AbortSignal }): Promise<void>;
   /** Host-only synchronous check after async admission/lookup and immediately before socket IO. */
-  assertFresh?(binding: Binding, options: { signal: AbortSignal }): void;
+  assertFresh?(binding: B, options: { signal: AbortSignal }): void;
   resolveAddresses?: (hostname: string) => Promise<readonly { address: string; family: 4 | 6 }[]>;
   /** Explicit localhost test qualification, never read from configuration/environment. */
   allowLoopbackForTests?: boolean;
@@ -110,6 +119,17 @@ function allowedAddress(address: string, allowLoopback: boolean) {
 }
 /** Explicit host port. Factory/import does no DNS/network; owned Job open is the only admission point. */
 export function createMcpHttpTransportPort(options: McpHttpPortOptions): McpLifecycleTransportPort {
+  return createHostMcpHttpTransportPort(options, 'session');
+}
+export function createUserMcpHttpTransportPort(
+  options: McpHttpPortOptions<McpUserTransportBinding>,
+): McpHostTransportPort<McpUserTransportBinding> {
+  return createHostMcpHttpTransportPort(options, 'user');
+}
+function createHostMcpHttpTransportPort<B extends Binding>(
+  options: McpHttpPortOptions<B>,
+  owner: 'session' | 'user',
+): McpHostTransportPort<B> {
   const assertFresh = options.assertFresh;
   const requestLimit = options.limits?.requestBytes ?? 1024 * 1024,
     responseLimit = options.limits?.responseBytes ?? 1024 * 1024,
@@ -189,6 +209,7 @@ export function createMcpHttpTransportPort(options: McpHttpPortOptions): McpLife
               }
             : undefined,
           onUnauthorized: server.onUnauthorized,
+          managementCredential: server.managementCredential,
         },
       ];
     }),
@@ -229,7 +250,7 @@ export function createMcpHttpTransportPort(options: McpHttpPortOptions): McpLife
       binding = Object.freeze({
         ...binding,
         configuration: Object.freeze(structuredClone(binding.configuration)),
-      });
+      }) as B;
       const server = servers.get(binding.serverId);
       if (
         !server ||
@@ -237,26 +258,14 @@ export function createMcpHttpTransportPort(options: McpHttpPortOptions): McpLife
         binding.configuration.url !== server.rawUrl ||
         Object.keys(binding.configuration).some((k) => !['type', 'url'].includes(k)) ||
         binding.configDigest !== server.configDigest ||
-        !binding.originalStoreId ||
-        !binding.sessionId ||
-        !binding.executionId ||
-        binding.scopeId !==
-          JSON.stringify([binding.originalStoreId, binding.sessionId, binding.serverId])
+        isUserMcpTransportBinding(binding) !== (owner === 'user') ||
+        !validMcpTransportOwner(binding) ||
+        (isUserMcpTransportBinding(binding) ? !!server.credential : !!server.managementCredential)
       )
         throw new McpHttpPortError('mcp_http_binding_invalid');
       if (signal.aborted) throw new McpHttpPortError('mcp_http_request_aborted');
       try {
-        await bounded(
-          () =>
-            admit(
-              Object.freeze({
-                ...binding,
-                configuration: Object.freeze(structuredClone(binding.configuration)),
-              }),
-              { signal },
-            ),
-          signal,
-        );
+        await bounded(() => admit(binding, { signal }), signal);
       } catch {
         throw new McpHttpPortError('mcp_http_admission_denied');
       }
@@ -316,6 +325,7 @@ export function createMcpHttpTransportPort(options: McpHttpPortOptions): McpLife
           const identity = credential.identity;
           if (
             identity.originalStoreId !== binding.originalStoreId ||
+            isUserMcpTransportBinding(binding) ||
             identity.sessionId !== binding.sessionId ||
             identity.connectionExecutionId !== binding.executionId ||
             identity.serverId !== binding.serverId ||
@@ -385,6 +395,16 @@ export function createMcpHttpTransportPort(options: McpHttpPortOptions): McpLife
           else throw new McpHttpPortError('mcp_http_body_unsupported');
           if (bytes.byteLength > requestLimit)
             throw new McpHttpPortError('mcp_http_request_too_large');
+          if (isUserMcpTransportBinding(binding)) {
+            let rpc: unknown;
+            try {
+              rpc = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes));
+            } catch {
+              throw new McpHttpPortError('mcp_http_body_unsupported');
+            }
+            if (!userMcpMessageAllowed(binding, rpc))
+              throw new McpHttpPortError('mcp_settings_method_denied');
+          }
         }
         const headers = new Headers(init?.headers);
         for (const name of [
@@ -400,7 +420,8 @@ export function createMcpHttpTransportPort(options: McpHttpPortOptions): McpLife
           headers.delete(name);
         for (const [name, value] of server.headers) headers.set(name, value);
         headers.set('host', server.url.host);
-        let authorizationFailure: string | undefined;
+        let authorizationFailure: string | undefined,
+          managementAuthenticated = false;
         const send = () =>
           new Promise<Response>((resolve, reject) => {
             assertFresh?.(binding, { signal: requestSignal });
@@ -425,7 +446,10 @@ export function createMcpHttpTransportPort(options: McpHttpPortOptions): McpLife
               },
               (incoming) => {
                 if (incoming.statusCode === 401 && server.onUnauthorized) {
-                  let code = credential ? 'mcp_oauth_reauth_required' : 'mcp_oauth_login_required';
+                  let code =
+                    credential || managementAuthenticated
+                      ? 'mcp_oauth_reauth_required'
+                      : 'mcp_oauth_login_required';
                   try {
                     assertFresh?.(binding, { signal: requestSignal });
                     const header = String(incoming.headers['www-authenticate'] ?? '');
@@ -447,7 +471,7 @@ export function createMcpHttpTransportPort(options: McpHttpPortOptions): McpLife
                       );
                     server.onUnauthorized(binding, {
                       signal: requestSignal,
-                      authenticated: !!credential,
+                      authenticated: !!credential || managementAuthenticated,
                       ...(challenge.resourceMetadataUrl
                         ? { resourceMetadataUrl: challenge.resourceMetadataUrl.href }
                         : {}),
@@ -466,6 +490,7 @@ export function createMcpHttpTransportPort(options: McpHttpPortOptions): McpLife
                     /* No qualified RPC identity: preserve ordinary uncertainty. */
                   }
                   const negative =
+                    !isUserMcpTransportBinding(binding) &&
                     code !== 'mcp_oauth_scope_changed' &&
                     init?.method === 'POST' &&
                     rpc?.jsonrpc === '2.0' &&
@@ -481,9 +506,10 @@ export function createMcpHttpTransportPort(options: McpHttpPortOptions): McpLife
                             rpcMethod: 'tools/call',
                             requestId: rpc!.id as string | number,
                             serverId: binding.serverId,
-                            connectionExecutionId: binding.executionId,
+                            connectionExecutionId: (binding as McpSessionTransportBinding)
+                              .executionId,
                             originalStoreId: binding.originalStoreId,
-                            sessionId: binding.sessionId,
+                            sessionId: (binding as McpSessionTransportBinding).sessionId,
                             configDigest: binding.configDigest,
                           },
                         )
@@ -580,6 +606,25 @@ export function createMcpHttpTransportPort(options: McpHttpPortOptions): McpLife
             if (closed || requestSignal?.aborted) abort();
             else request.end(bytes);
           });
+        if (server.managementCredential) {
+          if (!isUserMcpTransportBinding(binding))
+            throw new McpHttpPortError('mcp_http_binding_invalid');
+          const secret = await server.managementCredential(binding, { signal: requestSignal });
+          if (secret !== null) {
+            if (
+              !secret ||
+              secret.length > 65536 ||
+              Array.from(secret).some(
+                (character) => character.charCodeAt(0) < 32 || character.charCodeAt(0) === 127,
+              )
+            )
+              throw new McpHttpPortError('mcp_http_credential_unavailable');
+            headers.set('authorization', `Bearer ${secret}`);
+            managementAuthenticated = true;
+          }
+          assertFresh?.(binding, { signal: requestSignal });
+          return send();
+        }
         if (credential && server.credential) {
           try {
             assertFresh?.(binding, { signal: requestSignal });

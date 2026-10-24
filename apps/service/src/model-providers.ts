@@ -23,6 +23,12 @@ export const modelProviders = [
     defaultBaseURL: 'http://localhost:11434/v1',
     requiresCredential: false,
   },
+  {
+    id: 'codex',
+    label: 'ChatGPT / Codex',
+    defaultBaseURL: 'https://chatgpt.com/backend-api/codex',
+    requiresCredential: false,
+  },
 ] as const;
 export type ModelProvider = (typeof modelProviders)[number]['id'];
 export function isSupportedModelProvider(value: unknown): value is ModelProvider {
@@ -30,6 +36,11 @@ export function isSupportedModelProvider(value: unknown): value is ModelProvider
 }
 export type ModelProtocol = 'chat-completions' | 'responses';
 export function modelProtocol(provider: unknown, protocol: unknown): ModelProtocol {
+  if (provider === 'codex') {
+    if (protocol !== undefined && protocol !== 'responses')
+      throw new AgentError('model_protocol_unsupported');
+    return 'responses';
+  }
   if (protocol === undefined) return 'chat-completions';
   if (protocol !== 'chat-completions' && protocol !== 'responses')
     throw new AgentError('invalid_model_protocol');
@@ -128,6 +139,7 @@ export function providerSettingsFacts(
       let baseURL = '',
         protocol: ModelProtocol = 'chat-completions',
         canWrite =
+          model.provider !== 'codex' &&
           !conflicting.has(id) &&
           isSupportedModelProvider(model.provider) &&
           (model.credentialRef === undefined ||
@@ -152,7 +164,7 @@ export function providerSettingsFacts(
         name,
         protocol,
         baseURL,
-        hasCredential: typeof model.credentialRef === 'string',
+        hasCredential: model.provider === 'codex' || typeof model.credentialRef === 'string',
         modelNames: [],
         modelIds: [],
         defaultModelIds: [],

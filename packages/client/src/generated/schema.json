@@ -2650,6 +2650,1214 @@
     ],
     "additionalProperties": false
   },
+  "UserSkillCatalogueQuery": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "storeId": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 128
+      },
+      "afterId": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 128
+      },
+      "revision": {
+        "type": "string",
+        "pattern": "^[a-f0-9]{64}$"
+      },
+      "limit": {
+        "type": "integer",
+        "exclusiveMinimum": 0,
+        "maximum": 9007199254740991
+      },
+      "byteLimit": {
+        "type": "integer",
+        "exclusiveMinimum": 0,
+        "maximum": 1048576
+      }
+    },
+    "required": ["storeId"],
+    "additionalProperties": false
+  },
+  "UserSkillCataloguePage": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "version": {
+        "type": "number",
+        "const": 1
+      },
+      "storeId": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 128
+      },
+      "revision": {
+        "type": "string",
+        "pattern": "^[a-f0-9]{64}$"
+      },
+      "availability": {
+        "type": "string",
+        "enum": ["available", "unavailable"]
+      },
+      "reason": {
+        "anyOf": [
+          {
+            "type": "string",
+            "enum": ["configuration_unavailable", "skill_catalogue_source_unavailable"]
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "entries": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            },
+            "name": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 256
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "description": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 4096
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "version": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{64}$"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "enabled": {
+              "type": "boolean"
+            },
+            "state": {
+              "type": "string",
+              "enum": ["available", "disabled", "unavailable"]
+            },
+            "reason": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "enum": [
+                    "invalid_skill_configuration",
+                    "skill_path_denied",
+                    "unsupported_skill_options",
+                    "skill_unavailable",
+                    "skill_version_changed",
+                    "duplicate_skill_location",
+                    "skill_capability_missing",
+                    "skill_metadata_limit",
+                    "skill_text_limit",
+                    "skill_text_invalid",
+                    "skill_path_changed"
+                  ]
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "requiredCapabilities": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256
+              }
+            },
+            "missingCapabilities": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256
+              }
+            },
+            "source": {
+              "anyOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "scope": {
+                      "type": "string",
+                      "const": "user"
+                    },
+                    "origin": {
+                      "type": "string",
+                      "enum": [".agents", ".kite-code", "profile", "configured"]
+                    }
+                  },
+                  "required": ["scope", "origin"],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "id",
+            "name",
+            "description",
+            "version",
+            "enabled",
+            "state",
+            "reason",
+            "requiredCapabilities",
+            "missingCapabilities"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "nextAfterId": {
+        "anyOf": [
+          {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "complete": {
+        "type": "boolean"
+      },
+      "scope": {
+        "type": "string",
+        "const": "user"
+      }
+    },
+    "required": [
+      "version",
+      "storeId",
+      "revision",
+      "availability",
+      "reason",
+      "entries",
+      "nextAfterId",
+      "complete",
+      "scope"
+    ],
+    "additionalProperties": false
+  },
+  "UserMcpSettingsQuery": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "storeId": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 128,
+        "pattern": "^[A-Za-z0-9_-]+$"
+      }
+    },
+    "required": ["storeId"],
+    "additionalProperties": false
+  },
+  "UserMcpSettingsRequest": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "commandId": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 128,
+        "pattern": "^[A-Za-z0-9_-]+$"
+      },
+      "storeId": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 128,
+        "pattern": "^[A-Za-z0-9_-]+$"
+      },
+      "expectedReadSet": {
+        "type": "string",
+        "pattern": "^[a-f0-9]{64}$"
+      },
+      "operation": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "const": "add"
+              },
+              "name": {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+              },
+              "entry": {
+                "oneOf": [
+                  {
+                    "type": "object",
+                    "properties": {
+                      "type": {
+                        "type": "string",
+                        "const": "http"
+                      },
+                      "url": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 8192
+                      }
+                    },
+                    "required": ["type", "url"],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "type": {
+                        "type": "string",
+                        "const": "stdio"
+                      },
+                      "command": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 4096
+                      }
+                    },
+                    "required": ["type", "command"],
+                    "additionalProperties": false
+                  }
+                ]
+              }
+            },
+            "required": ["kind", "name", "entry"],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "const": "remove"
+              },
+              "serverId": {
+                "type": "string",
+                "pattern": "^mcp-[a-f0-9]{64}$"
+              }
+            },
+            "required": ["kind", "serverId"],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "const": "enabled"
+              },
+              "serverId": {
+                "type": "string",
+                "pattern": "^mcp-[a-f0-9]{64}$"
+              },
+              "enabled": {
+                "type": "boolean"
+              }
+            },
+            "required": ["kind", "serverId", "enabled"],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "const": "authStatus"
+              },
+              "serverId": {
+                "type": "string",
+                "pattern": "^mcp-[a-f0-9]{64}$"
+              }
+            },
+            "required": ["kind", "serverId"],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "const": "login"
+              },
+              "serverId": {
+                "type": "string",
+                "pattern": "^mcp-[a-f0-9]{64}$"
+              }
+            },
+            "required": ["kind", "serverId"],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "const": "authRefresh"
+              },
+              "serverId": {
+                "type": "string",
+                "pattern": "^mcp-[a-f0-9]{64}$"
+              }
+            },
+            "required": ["kind", "serverId"],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "const": "clear"
+              },
+              "serverId": {
+                "type": "string",
+                "pattern": "^mcp-[a-f0-9]{64}$"
+              }
+            },
+            "required": ["kind", "serverId"],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "const": "revoke"
+              },
+              "serverId": {
+                "type": "string",
+                "pattern": "^mcp-[a-f0-9]{64}$"
+              }
+            },
+            "required": ["kind", "serverId"],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "const": "bind"
+              },
+              "serverId": {
+                "type": "string",
+                "pattern": "^mcp-[a-f0-9]{64}$"
+              },
+              "expiresAt": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              }
+            },
+            "required": ["kind", "serverId", "expiresAt"],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "const": "connect"
+              },
+              "serverId": {
+                "type": "string",
+                "pattern": "^mcp-[a-f0-9]{64}$"
+              }
+            },
+            "required": ["kind", "serverId"],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "const": "refresh"
+              },
+              "serverId": {
+                "type": "string",
+                "pattern": "^mcp-[a-f0-9]{64}$"
+              }
+            },
+            "required": ["kind", "serverId"],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "const": "reconnect"
+              },
+              "serverId": {
+                "type": "string",
+                "pattern": "^mcp-[a-f0-9]{64}$"
+              }
+            },
+            "required": ["kind", "serverId"],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "const": "disconnect"
+              },
+              "serverId": {
+                "type": "string",
+                "pattern": "^mcp-[a-f0-9]{64}$"
+              }
+            },
+            "required": ["kind", "serverId"],
+            "additionalProperties": false
+          }
+        ]
+      }
+    },
+    "required": ["commandId", "storeId", "expectedReadSet", "operation"],
+    "additionalProperties": false
+  },
+  "UserMcpSettingsView": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "scope": {
+        "type": "string",
+        "const": "user"
+      },
+      "storeId": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 128,
+        "pattern": "^[A-Za-z0-9_-]+$"
+      },
+      "readSet": {
+        "anyOf": [
+          {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "sources": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string",
+              "pattern": "^mcp-[a-f0-9]{64}$"
+            },
+            "name": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            },
+            "transport": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "enum": ["http", "stdio"]
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "address": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 8192
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "enabled": {
+              "type": "boolean"
+            },
+            "configured": {
+              "type": "boolean"
+            },
+            "diagnostics": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128,
+                "pattern": "^[a-z0-9_]+$"
+              }
+            },
+            "authentication": {
+              "type": "object",
+              "properties": {
+                "policy": {
+                  "type": "string",
+                  "enum": ["none", "credential", "oauth", "auto"]
+                },
+                "status": {
+                  "type": "string",
+                  "enum": ["none", "missing", "present", "locked", "unavailable", "unknown"]
+                },
+                "loginAllowed": {
+                  "type": "boolean"
+                }
+              },
+              "required": ["policy", "status", "loginAllowed"],
+              "additionalProperties": false
+            },
+            "connection": {
+              "type": "object",
+              "properties": {
+                "state": {
+                  "type": "string",
+                  "enum": ["disconnected", "connecting", "ready", "failed", "outcome_unknown"]
+                },
+                "generation": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "exclusiveMinimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "toolCount": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              },
+              "required": ["state", "generation", "toolCount"],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "id",
+            "name",
+            "transport",
+            "address",
+            "enabled",
+            "configured",
+            "diagnostics",
+            "authentication",
+            "connection"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "errors": {
+        "type": "array",
+        "items": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-z0-9_]+$"
+        }
+      }
+    },
+    "required": ["scope", "storeId", "readSet", "sources", "errors"],
+    "additionalProperties": false
+  },
+  "UserMcpOperationQuery": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "storeId": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 128,
+        "pattern": "^[A-Za-z0-9_-]+$"
+      }
+    },
+    "required": ["storeId"],
+    "additionalProperties": false
+  },
+  "UserMcpOperationResult": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "scope": {
+        "type": "string",
+        "const": "user"
+      },
+      "storeId": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 128,
+        "pattern": "^[A-Za-z0-9_-]+$"
+      },
+      "commandId": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 128,
+        "pattern": "^[A-Za-z0-9_-]+$"
+      },
+      "expectedReadSet": {
+        "type": "string",
+        "pattern": "^[a-f0-9]{64}$"
+      },
+      "operation": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "const": "add"
+              },
+              "name": {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+              },
+              "entry": {
+                "oneOf": [
+                  {
+                    "type": "object",
+                    "properties": {
+                      "type": {
+                        "type": "string",
+                        "const": "http"
+                      },
+                      "url": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 8192
+                      }
+                    },
+                    "required": ["type", "url"],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "type": {
+                        "type": "string",
+                        "const": "stdio"
+                      },
+                      "command": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 4096
+                      }
+                    },
+                    "required": ["type", "command"],
+                    "additionalProperties": false
+                  }
+                ]
+              }
+            },
+            "required": ["kind", "name", "entry"],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "const": "remove"
+              },
+              "serverId": {
+                "type": "string",
+                "pattern": "^mcp-[a-f0-9]{64}$"
+              }
+            },
+            "required": ["kind", "serverId"],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "const": "enabled"
+              },
+              "serverId": {
+                "type": "string",
+                "pattern": "^mcp-[a-f0-9]{64}$"
+              },
+              "enabled": {
+                "type": "boolean"
+              }
+            },
+            "required": ["kind", "serverId", "enabled"],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "const": "authStatus"
+              },
+              "serverId": {
+                "type": "string",
+                "pattern": "^mcp-[a-f0-9]{64}$"
+              }
+            },
+            "required": ["kind", "serverId"],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "const": "login"
+              },
+              "serverId": {
+                "type": "string",
+                "pattern": "^mcp-[a-f0-9]{64}$"
+              }
+            },
+            "required": ["kind", "serverId"],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "const": "authRefresh"
+              },
+              "serverId": {
+                "type": "string",
+                "pattern": "^mcp-[a-f0-9]{64}$"
+              }
+            },
+            "required": ["kind", "serverId"],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "const": "clear"
+              },
+              "serverId": {
+                "type": "string",
+                "pattern": "^mcp-[a-f0-9]{64}$"
+              }
+            },
+            "required": ["kind", "serverId"],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "const": "revoke"
+              },
+              "serverId": {
+                "type": "string",
+                "pattern": "^mcp-[a-f0-9]{64}$"
+              }
+            },
+            "required": ["kind", "serverId"],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "const": "bind"
+              },
+              "serverId": {
+                "type": "string",
+                "pattern": "^mcp-[a-f0-9]{64}$"
+              },
+              "expiresAt": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              }
+            },
+            "required": ["kind", "serverId", "expiresAt"],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "const": "connect"
+              },
+              "serverId": {
+                "type": "string",
+                "pattern": "^mcp-[a-f0-9]{64}$"
+              }
+            },
+            "required": ["kind", "serverId"],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "const": "refresh"
+              },
+              "serverId": {
+                "type": "string",
+                "pattern": "^mcp-[a-f0-9]{64}$"
+              }
+            },
+            "required": ["kind", "serverId"],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "const": "reconnect"
+              },
+              "serverId": {
+                "type": "string",
+                "pattern": "^mcp-[a-f0-9]{64}$"
+              }
+            },
+            "required": ["kind", "serverId"],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "const": "disconnect"
+              },
+              "serverId": {
+                "type": "string",
+                "pattern": "^mcp-[a-f0-9]{64}$"
+              }
+            },
+            "required": ["kind", "serverId"],
+            "additionalProperties": false
+          }
+        ]
+      },
+      "state": {
+        "type": "string",
+        "enum": ["pending", "applied", "failed", "outcome_unknown"]
+      },
+      "receipt": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128,
+                "pattern": "^[a-z0-9_]+$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "cancelled": {
+            "type": "boolean"
+          },
+          "configuration": {
+            "type": "string",
+            "enum": ["unchanged", "published", "outcome_unknown"]
+          },
+          "authentication": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "policy": {
+                    "type": "string",
+                    "enum": ["none", "credential", "oauth", "auto"]
+                  },
+                  "status": {
+                    "type": "string",
+                    "enum": ["none", "missing", "present", "locked", "unavailable", "unknown"]
+                  },
+                  "loginAllowed": {
+                    "type": "boolean"
+                  }
+                },
+                "required": ["policy", "status", "loginAllowed"],
+                "additionalProperties": false
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "connection": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "state": {
+                    "type": "string",
+                    "enum": ["disconnected", "connecting", "ready", "failed", "outcome_unknown"]
+                  },
+                  "generation": {
+                    "anyOf": [
+                      {
+                        "type": "integer",
+                        "exclusiveMinimum": 0,
+                        "maximum": 9007199254740991
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "toolCount": {
+                    "anyOf": [
+                      {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 9007199254740991
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  }
+                },
+                "required": ["state", "generation", "toolCount"],
+                "additionalProperties": false
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "revocation": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": ["completed", "not_supported"]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "code",
+          "cancelled",
+          "configuration",
+          "authentication",
+          "connection",
+          "revocation"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "required": [
+      "scope",
+      "storeId",
+      "commandId",
+      "expectedReadSet",
+      "operation",
+      "state",
+      "receipt"
+    ],
+    "additionalProperties": false
+  },
+  "UserMcpToolsQuery": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "storeId": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 128,
+        "pattern": "^[A-Za-z0-9_-]+$"
+      },
+      "serverId": {
+        "type": "string",
+        "pattern": "^mcp-[a-f0-9]{64}$"
+      },
+      "generation": {
+        "type": "integer",
+        "exclusiveMinimum": 0,
+        "maximum": 9007199254740991
+      },
+      "afterIndex": {
+        "type": "integer",
+        "minimum": 0,
+        "maximum": 9007199254740991
+      }
+    },
+    "required": ["storeId", "serverId", "generation"],
+    "additionalProperties": false
+  },
+  "UserMcpToolsPage": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "scope": {
+        "type": "string",
+        "const": "user"
+      },
+      "storeId": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 128,
+        "pattern": "^[A-Za-z0-9_-]+$"
+      },
+      "serverId": {
+        "type": "string",
+        "pattern": "^mcp-[a-f0-9]{64}$"
+      },
+      "generation": {
+        "type": "integer",
+        "exclusiveMinimum": 0,
+        "maximum": 9007199254740991
+      },
+      "entries": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "index": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "definitionId": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            },
+            "definitionVersion": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            },
+            "descriptor": {
+              "$ref": "#/$defs/__schema0"
+            }
+          },
+          "required": ["index", "definitionId", "definitionVersion", "descriptor"],
+          "additionalProperties": false
+        }
+      },
+      "nextAfterIndex": {
+        "anyOf": [
+          {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "complete": {
+        "type": "boolean"
+      }
+    },
+    "required": [
+      "scope",
+      "storeId",
+      "serverId",
+      "generation",
+      "entries",
+      "nextAfterIndex",
+      "complete"
+    ],
+    "additionalProperties": false,
+    "$defs": {
+      "__schema0": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "number"
+          },
+          {
+            "type": "boolean"
+          },
+          {
+            "type": "null"
+          },
+          {
+            "type": "array",
+            "items": {
+              "$ref": "#/$defs/__schema0"
+            }
+          },
+          {
+            "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
+            "additionalProperties": {
+              "$ref": "#/$defs/__schema0"
+            }
+          }
+        ]
+      }
+    }
+  },
   "HostStatusQuery": {
     "$schema": "https://json-schema.org/draft/2020-12/schema",
     "type": "object",
@@ -8260,15 +9468,15 @@
         ]
       },
       "providers": {
-        "minItems": 4,
-        "maxItems": 4,
+        "minItems": 5,
+        "maxItems": 5,
         "type": "array",
         "items": {
           "type": "object",
           "properties": {
             "id": {
               "type": "string",
-              "enum": ["openai", "deepseek", "compatible", "ollama"]
+              "enum": ["openai", "deepseek", "compatible", "ollama", "codex"]
             },
             "label": {
               "type": "string"
@@ -8407,7 +9615,7 @@
           },
           "provider": {
             "type": "string",
-            "enum": ["openai", "deepseek", "compatible", "ollama"]
+            "enum": ["openai", "deepseek", "compatible", "ollama", "codex"]
           },
           "protocol": {
             "type": "string",
@@ -8497,7 +9705,7 @@
           },
           "provider": {
             "type": "string",
-            "enum": ["openai", "deepseek", "compatible", "ollama"]
+            "enum": ["openai", "deepseek", "compatible", "ollama", "codex"]
           },
           "protocol": {
             "type": "string",
@@ -8601,7 +9809,7 @@
           },
           "provider": {
             "type": "string",
-            "enum": ["openai", "deepseek", "compatible", "ollama"]
+            "enum": ["openai", "deepseek", "compatible", "ollama", "codex"]
           },
           "protocol": {
             "type": "string",
@@ -9237,7 +10445,7 @@
               },
               "provider": {
                 "type": "string",
-                "enum": ["openai", "deepseek", "compatible", "ollama"]
+                "enum": ["openai", "deepseek", "compatible", "ollama", "codex"]
               },
               "protocol": {
                 "type": "string",

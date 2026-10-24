@@ -5,7 +5,7 @@ import type { CaseEvidence } from './unified-soak-cases';
 export interface McpStdioJobHandoff {
   version: 1;
   coverage: 'original-mcp-stdio-job';
-  binding: McpStdioProcessEvidence['binding'];
+  binding: Extract<McpStdioProcessEvidence['binding'], { sessionId: string }>;
   ownerPid: number;
   connectionCommandId: string;
   runCommandId: string;

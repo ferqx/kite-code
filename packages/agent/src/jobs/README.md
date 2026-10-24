@@ -50,6 +50,8 @@ Store output paging preserves the one MiB JSON/row-overhead budget independently
 
 [真实 host 测试](../../test/isolated/jobs/macos-host-shell.test.ts)11项/65断言已在 macOS26.7.1 arm64/Bun1.4.2 运行通过：宿主工具/fork/HOME/广泛读取、两种写范围、IP与带无沙箱正例的Unix拒绝、实际 Full 父目录 rename/hardlink拒绝、自然根退出后的 setsid/grandchildren、重复取消/无关存活、长控制路径、输出gap和父 EOF/SIGKILL及准确标签已撤销后的清理。夹具先完整关闭 PID 记录，再原子发布就绪路径；父退出场景核三项均为正整数后才观察实际后代。原清理断言和观察期限保持。默认消费者、最终 Ask/Full 快照、源码树外/持久输出及持续负载分别归[Service owner](../../../../apps/service/README.md#默认-shell-装配)和[韧性 owner](../../../../docs/active/runtime-resilience-qualification.md)。这些不等于跨平台、全部原生资源指标或完整发布 qualification。
 
+普通 host 与 confined 工厂另接可信 `protectedFiles`，与必须存在且为目录的 `protectedRoots` 分开。[私有文件准备](protected-files.ts)只观察路径及最近存在父目录的 metadata，不读认证正文或计算文件摘要；派发前核父目录和 canonical 名称，允许原文件缺失、稍后创建或正常原子轮换。macOS 规则拒绝原路径／canonical 名称的读取、写入与映射，并保护祖先改名及尚不存在父目录的重定向；Workflow verifier 和声明补偿复用相同边界。认证位于授权 Workspace 内也不取得读取资格。[实际私有文件回归](../../test/isolated/jobs/protected-files.test.ts)覆盖默认 host、Workspace／Full、缺失路径、轮换及 confined／补偿拒绝，普通 Workspace 写入继续可用。
+
 ## Profile Skill 的准确只读来源
 
 [read-only-source](read-only-source.ts)只接可信verifier在原来源复核后提供的准确canonical Skill cwd。来源必须是保护根的严格子树，不能包含原Workspace或其他保护根，与control双向不重叠；原Workspace仍不能位于保护根内，confined拒绝此选项。全部原目录和祖先身份仍在派发前复验；不是模型参数、通用文件grant或新的恢复控制权。
@@ -71,6 +73,14 @@ macOS host在读取deny中精确减去该子树及必要祖先metadata，单独�
 [真实 confined 测试](../../test/isolated/jobs/confined-shell.test.ts)覆盖原 allow-fork 逃逸反例、固定 fork/daemon/setsid/foreign signal 拒绝，Workspace/temp 写与 readonly/protected/外部/symlink 拒绝，TCP+Unix 零接收、temp native exec 拒绝、factory/guardian root/profile 漂移零启动、TERM 忽略强停、父 EOF/SIGKILL 与私有 temp 清理、完整公开 manifest 源码树外 guardian 定位及缺资产拒绝。普通 Shell 原后代/自然退出/输出预算测试同时复验。当前实际资格仅为 macOS；Linux 的独立 confined factory 已接源码但未执行原生资格，原 macOS factory 在其他平台仍拒绝，Windows 未提供后端。普通 Shell 的平台资格不因此改变。该基础不等于所有补偿脚本都可运行。
 
 ## Linux 宿主与严格补偿源码
+
+Linux `protectedFiles` 复用既有目录 mask，普通 host／confined Shell 不再因认证来源而统一拒绝。默认 `.codex`、独立自定义目录及 Workspace 内私有子目录保持正常执行与真实 Workspace／Full 写入；长任务期间宿主原子轮换认证叶仍由父目录 mask 持续保护。工厂与 Run 准备只捕获 metadata；仅在已授权 Job 派发时，[私有目录准备](linux-private-directory.ts)沿最近存在父目录的原 FD 逐级 mkdir／no-follow，创建0700缺失目录，不打开认证、不改既有 mode、不删除共享目录。重叠 HOME／Workspace／资产／temp 的宽根及可被业务重定向的别名仅使原 Job 以 `linux_shell_private_file_layout_invalid` 失败；正常专用目录不受影响。原已核实 Skill 来源仍只能走准确只读投影，原生挂载检查不放宽。决定和代价见[认证目录隔离](../../../../.agents/notes/implemented/architecture/2026-10-24-linux-codex-shell-isolation.md)。
+
+2026-10-24 在 Linux6.12.69-linuxkit arm64／Bun1.4.2／Bubblewrap0.12.0 的隔离容器中，12个准确整文件69项／782断言、零跳过／失败通过；包含6项真实 native namespace、正式 Service／SDK／Shell／Files 工具循环、深 coordination、缺失认证目录、Workspace／Full 新建读写、长任务四次认证原子轮换及准确 Skill 只读投影。仅测试副本补建原 Rust Files／Workflow worker 资产，network=none，只挂隔离源码副本，没有挂真实 HOME／凭据或主工作树。exact命令、环境和测试时源码摘要在 `dist/unified-evidence/linux-codex-shell-20261024.json`，原日志在同目录 `.log`；本轮证据不扩为安装发行、其他架构或全部 Linux 内核资格。
+
+随后默认 HOME 来源仅补只读物理路径归一，防止系统 HOME 别名误触专用目录规则；显式 `codexHome` 及原 namespace 执行叶未变，原真实 Linux 夹具使用的分支可复用该证据。新增来源分支由 macOS 上的 Source／Codex Connection／User Configuration 三文件38项／327断言、1项 Linux 跳过补验，覆盖合成 HOME 别名、缺失／相对路径、无目录或认证写入；原 Linux 日志和源码摘要保留测试时事实，不改写为后来代码的执行证明。
+
+正式深 coordination 的原祖先 self-bind 若位于外层私有 mask 内，会成为不可见子挂载并被 native 严格检查拒绝。布局仅剔除这些无用途的隐藏父挂载，全部原宿主身份仍复核，准确来源 scaffold 保留，native 检查没有放宽。对应正式深路径已加入原[实际 native 夹具](../../test/isolated/jobs/linux-native-shell.test.ts)。
 
 [linux-preparation](linux-preparation.ts)捕获实际 cwd 与独立授权 Workspace、全部原保护根、固定解释器／Bun／init／Bubblewrap、runtimeAssets、运行根和 temp 的身份。host 保广泛读取、宿主 HOME 和最终派发的独立 filesystem/network 范围；confined 只暴露固定系统根、只读资产、Workspace 与私有 temp，拒网络及非线程 fork，要求 cwd 等于 Workspace。外层保护 mask 覆盖嵌套 coordination，原子目录身份仍逐项复验；实际 mount 与 native 协议共用可见最外层 mask。可执行证明只收已绑定的 canonical regular file，原 `/bin/sh` 等别名仍参与身份漂移检查。保护祖先自绑定阻止改名；未知子 mount 不猜成许可。confined 的 Workspace、私有 temp、只读数据目录及相关子挂载由 init 核 NOEXEC／NOSUID／NODEV，保留原只读 flags。
 

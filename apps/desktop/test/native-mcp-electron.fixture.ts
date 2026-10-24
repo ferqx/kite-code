@@ -1,91 +1,71 @@
 import { strict as assert } from 'node:assert';
 import { execFileSync } from 'node:child_process';
-import { readFileSync, writeFileSync } from 'node:fs';
+import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import type { Command, Interaction } from '@kite-ai/client';
 import { _electron } from 'playwright';
-import type {
-  NativeMcpSubmission,
-  NativeModelSettingsFacts,
-  NativeState,
-} from '../src/native-bridge';
-
-async function openSettings(page: import('playwright').Page) {
-  if (!(await page.locator('.desktop-settings-dialog').isVisible()))
-    await page
-      .locator('.session-header')
-      .getByRole('button', { name: '设置', exact: true })
-      .click();
-}
-async function closeSettings(page: import('playwright').Page) {
-  if (await page.locator('.desktop-settings-dialog').isVisible())
-    await page.getByRole('button', { name: '返回应用', exact: true }).click();
-}
-
-async function openSessionTools(page: import('playwright').Page) {
-  const toggle = page.getByRole('button', { name: '会话工具', exact: true });
-  if ((await toggle.getAttribute('aria-expanded')) !== 'true') await toggle.click();
-}
+import type { NativeState, NativeUserMcpSubmission } from '../src/native-bridge';
 
 type Physical = { path: string; method: string };
-type FixtureGlobals = typeof globalThis & { mcpPhysical: Physical[] };
-const [candidate, home, control, storeId, _userConfiguration] = process.argv.slice(2) as [
-  string,
+type FixtureGlobals = typeof globalThis & { mcpPhysical: Physical[]; mcpDropNext?: boolean };
+const [candidate, home, control, storeId] = process.argv.slice(2) as [
   string,
   string,
   string,
   string,
 ];
-const started = Date.now(),
-  pids: number[] = [],
-  submissions: NativeMcpSubmission[] = [];
-let app: Awaited<ReturnType<typeof _electron.launch>> | undefined, childPid: number | undefined;
-const stage = (name: string, facts = {}) =>
-  console.log(JSON.stringify({ stage: name, elapsedMs: Date.now() - started, ...facts }));
+const submissions: NativeUserMcpSubmission[] = [],
+  pids: number[] = [];
+let app: Awaited<ReturnType<typeof _electron.launch>> | undefined, servicePid: number | undefined;
+const stage = (name: string, facts = {}) => console.log(JSON.stringify({ stage: name, ...facts }));
 async function launch() {
   app = await _electron.launch({
-    executablePath: join(candidate!, 'electron/Electron.app/Contents/MacOS/Electron'),
-    args: [join(candidate!, 'app'), `--user-data-dir=${join(home!, 'electron-data')}`],
+    executablePath: join(candidate, 'electron/Electron.app/Contents/MacOS/Electron'),
+    args: [join(candidate, 'app'), `--user-data-dir=${join(home, 'electron-data')}`],
     cwd: home,
-    env: { HOME: home!, PATH: '/usr/bin:/bin', LANG: 'C.UTF-8' },
+    env: { HOME: home, PATH: '/usr/bin:/bin', LANG: 'C.UTF-8' },
     timeout: 15000,
   });
   const page = await app.firstWindow();
   page.setDefaultTimeout(15000);
   await page.getByRole('button', { name: 'MCP Window', exact: true }).waitFor();
-  await openSessionTools(page);
-  childPid = Number(
+  servicePid = Number(
     String(execFileSync('/bin/ps', ['-axo', 'pid=,ppid=,comm=']))
       .trim()
       .split('\n')
-      .map((value) => value.trim().split(/\s+/))
+      .map((line) => line.trim().split(/\s+/))
       .find(
-        (value) =>
-          Number(value[1]) === app!.process().pid &&
-          value.slice(2).join(' ') === join(candidate!, 'terminal/runtime/bun'),
+        (parts) =>
+          Number(parts[1]) === app!.process().pid &&
+          parts.slice(2).join(' ') === join(candidate, 'terminal/runtime/bun'),
       )?.[0],
   );
-  assert.ok(childPid);
-  pids.push(childPid);
-  stage('owned_service', { childPid, electronPid: app.process().pid });
+  assert.ok(servicePid);
+  pids.push(servicePid);
   await page.context().tracing.start({ screenshots: true, snapshots: true });
   await app.evaluate(() => {
-    const t = globalThis as FixtureGlobals;
+    const t = globalThis as FixtureGlobals,
+      original = globalThis.fetch;
     t.mcpPhysical = [];
-    const original = globalThis.fetch;
     globalThis.fetch = Object.assign(
       async (...args: Parameters<typeof fetch>) => {
-        const url = new URL(String(args[0]));
-        t.mcpPhysical.push({ path: url.pathname, method: args[1]?.method ?? 'GET' });
-        return original(...args);
+        const url = new URL(String(args[0])),
+          method = args[1]?.method ?? 'GET';
+        t.mcpPhysical.push({ path: url.pathname, method });
+        const response = await original(...args);
+        if (t.mcpDropNext && method === 'POST' && url.pathname === '/v1/config/user/mcp') {
+          t.mcpDropNext = false;
+          throw Error('owned_reply_lost');
+        }
+        return response;
       },
       { preconnect: original.preconnect },
     );
   });
   return page;
 }
-async function close() {
+async function close(trace: string) {
   if (!app) return;
+  await (await app.firstWindow()).context().tracing.stop({ path: join(home, trace) });
   const owned = app,
     exit = new Promise<void>((resolve) => owned.process().once('exit', () => resolve()));
   await owned.evaluate(({ dialog }) => {
@@ -94,9 +74,8 @@ async function close() {
   await owned.evaluate(({ app }) => app.quit());
   await exit;
   app = undefined;
-  assert.throws(() => process.kill(childPid!, 0));
-  stage('owned_service_dead', { childPid });
-  childPid = undefined;
+  assert.throws(() => process.kill(servicePid!, 0));
+  servicePid = undefined;
 }
 try {
   let page = await launch();
@@ -105,445 +84,187 @@ try {
       async () =>
         (await window.kiteNative!.request({ method: 'state', generation: 1 })) as NativeState,
     );
-  async function select() {
-    await closeSettings(page);
-    await page.getByRole('button', { name: 'MCP Window', exact: true }).click();
-    await page
-      .getByText('历史已完整读取至固定高水位；当前执行事实仍须核实。', { exact: true })
-      .waitFor();
-    assert.equal((await state()).selection?.storeId, storeId);
-  }
-  await select();
-  await page
-    .getByRole('checkbox', { name: '我已核对所显示的工作区与读取范围', exact: true })
-    .check();
-  await page.getByRole('button', { name: '信任所显示的范围', exact: true }).click();
-  await page.getByText(/^工作区：w；信任状态：trusted；版本：/).waitFor();
-  await page.locator('input[type=radio][value=accept_edits]').check();
-  await page.getByRole('button', { name: '保存模式选择', exact: true }).click();
-  await page.getByText('当前模式：accept_edits；默认模式：auto', { exact: true }).waitFor();
-  await openSettings(page);
-  await page.getByRole('button', { name: '提供商', exact: true }).click();
-  await page.getByRole('button', { name: '新增提供商', exact: true }).click();
-  await page.getByRole('combobox', { name: '服务商预设', exact: true }).selectOption('compatible');
-  await page.getByRole('textbox', { name: '服务地址', exact: true }).fill(`${control}/model/v1`);
-  await page.getByRole('combobox', { name: '凭据处理', exact: true }).selectOption('none');
-  await page.getByRole('textbox', { name: '模型名称', exact: true }).fill('owned-mcp-model');
-  await page.getByRole('button', { name: '保存提供商配置', exact: true }).click();
-  await page
-    .getByRole('region', { name: '提供商设置', exact: true })
-    .getByText('已保存提供商配置。', { exact: true })
-    .waitFor();
-  await page.locator('.settings-editor-panel .right-sidebar').waitFor({ state: 'detached' });
-  const modelConfiguration = (await page.evaluate(
-    async () =>
-      await window.kiteNative!.request({
-        method: 'settings.models.read',
-        generation: 1,
-        scope: 'user',
-      }),
-  )) as NativeModelSettingsFacts;
-  const model = modelConfiguration.models.find((value) => value.model === 'owned-mcp-model');
-  assert.ok(model);
-  await openSettings(page);
-  await page.getByRole('button', { name: '模型', exact: true }).click();
-  await page.getByRole('switch', { name: `启用模型 ${model.id}`, exact: true }).check();
-  await page.getByRole('button', { name: '默认模型', exact: true }).click();
-  const defaultChoice = page.getByRole('menuitemradio', {
-    name: `设为默认 ${model.id}`,
-    exact: true,
-  });
-  if ((await defaultChoice.getAttribute('aria-checked')) === 'true')
-    await page.keyboard.press('Escape');
-  else await defaultChoice.click();
-  await page.waitForFunction(() => {
-    const panel = document.querySelector('section[aria-label="模型设置"]');
-    const refresh = [...(panel?.querySelectorAll('button') ?? [])].find(
-      (button) => button.textContent === '刷新配置',
-    );
-    const choice = panel?.querySelector<HTMLButtonElement>('button[aria-label="默认模型"]');
-    return refresh && choice && !refresh.disabled && !choice.disabled;
-  });
-  const configured = (await page.evaluate(
-    async () =>
-      await window.kiteNative!.request({
-        method: 'settings.models.read',
-        generation: 1,
-        scope: 'user',
-      }),
-  )) as NativeModelSettingsFacts;
-  assert.equal(configured.defaultModelId, model.id);
-  await openSettings(page);
-  await page.getByRole('button', { name: 'MCP', exact: true }).click();
   const panel = () => page.getByRole('region', { name: 'MCP settings', exact: true });
   const editor = () => page.locator('.settings-editor-panel').getByRole('complementary');
-  async function manageServer(id: string) {
-    await panel()
-      .getByRole('button', { name: `管理连接 ${id}`, exact: true })
-      .click();
-    await editor().getByRole('heading', { name: 'MCP 连接详情', exact: true }).waitFor();
-  }
-  async function manageSource(id: string, scope: 'user' | 'workspace') {
-    await panel()
-      .getByRole('button', { name: `管理来源 ${scope} ${id}`, exact: true })
-      .click();
-    await editor().getByRole('heading', { name: '管理 MCP 来源', exact: true }).waitFor();
-  }
-  await panel().getByRole('heading', { name: 'Safe directory', exact: true }).waitFor();
-  async function refresh() {
-    await openSettings(page);
+  async function settings() {
+    if (!(await page.locator('.desktop-settings-dialog').isVisible()))
+      await page
+        .locator('.session-header')
+        .getByRole('button', { name: '设置', exact: true })
+        .click();
     await page.getByRole('button', { name: 'MCP', exact: true }).click();
-    await panel().getByRole('button', { name: 'Refresh MCP settings', exact: true }).click();
-    await panel().getByRole('heading', { name: 'Safe directory', exact: true }).waitFor();
+    await panel().getByRole('heading', { name: '我的 MCP', exact: true }).waitFor();
+    await panel()
+      .getByRole('button', { name: '新增 MCP', exact: true })
+      .waitFor({ state: 'visible' });
   }
-  async function settle(actionId: string, decision?: 'approved' | 'bind' | 'revoke') {
+  async function ready() {
+    await panel().getByRole('button', { name: 'Refresh MCP settings', exact: true }).waitFor();
+    await page.waitForFunction(
+      () =>
+        !document.querySelector<HTMLButtonElement>('[aria-label="Refresh MCP settings"]')?.disabled,
+    );
+  }
+  async function refresh() {
+    await ready();
+    await panel().getByRole('button', { name: 'Refresh MCP settings', exact: true }).click();
+    await ready();
+  }
+  async function manage(name: string) {
+    if (await editor().count())
+      await editor().getByRole('button', { name: '关闭', exact: true }).click();
+    await panel()
+      .getByRole('button', { name: `管理 ${name}`, exact: true })
+      .click();
+  }
+  async function settle(kind: NativeUserMcpSubmission['operation']['kind'], phase = 'completed') {
     const deadline = Date.now() + 20000;
-    let original: NativeMcpSubmission | undefined;
     for (;;) {
-      const facts = await state();
-      original = facts.mcpSubmissions
+      const row = (await state()).userMcpSubmissions
         ?.filter(
           (value) =>
-            value.actionId === actionId &&
+            value.operation.kind === kind &&
             !submissions.some((old) => old.commandId === value.commandId),
         )
         .at(-1);
-      for (const card of facts.selection?.interactions ?? []) {
-        if (card.state !== 'pending') continue;
-        if (card.kind === 'question' && decision) {
-          await closeSettings(page);
-          const review = page.getByRole('region', { name: 'MCP Source Review', exact: true });
-          await review.waitFor();
-          await review.getByRole('button', { name: decision, exact: true }).click();
-          stage('exact_source_review', {
-            definitionId: card.definitionId,
-            revision: card.revision,
-            decision,
-          });
-        } else if (card.kind === 'approval') {
-          await closeSettings(page);
-          const approval = page.getByRole('article', { name: `approval ${card.id}`, exact: true });
-          await approval.waitFor();
-          if (await approval.count()) {
-            assert.equal(
-              await approval.getByRole('button', { name: '批准一次', exact: true }).count(),
-              1,
-            );
-            await approval.getByRole('button', { name: '批准一次', exact: true }).click();
-            stage('independent_job_approval', {
-              definitionId: card.definitionId,
-              revision: card.revision,
-            });
-          }
-        } else continue;
-        await openSettings(page);
-        await page.getByRole('button', { name: 'MCP', exact: true }).click();
-        await panel().getByRole('heading', { name: 'Safe directory', exact: true }).waitFor();
+      if (row && !['pending', 'submitting', 'outcome_unknown'].includes(row.phase)) {
+        assert.equal(row.phase, phase, JSON.stringify(row));
+        submissions.push(row);
+        await ready();
+        return row;
       }
-      if (original && !['submitting', 'pending', 'outcome_unknown'].includes(original.phase)) {
-        submissions.push(original);
-        stage('original_result', {
-          actionId,
-          commandId: original.commandId,
-          phase: original.phase,
-          error: original.error,
-          fact: original.fact,
-        });
-        assert.equal(original.phase, 'completed', JSON.stringify(original));
-        return original;
+      if (row) {
+        const button = panel().getByRole('button', { name: '查看结果', exact: true }).last();
+        if (await button.count()) await button.click({ timeout: 500 }).catch(() => {});
       }
-      if (original) {
-        const check = panel().getByRole('button', {
-          name: `Check original ${original.commandId}`,
-          exact: true,
-        });
-        if ((await check.count()) && (await check.isEnabled())) await check.click();
-      }
-      assert.ok(
-        Date.now() < deadline,
-        `original not settled: ${JSON.stringify({ actionId, original, interactions: facts.selection?.interactions })}`,
-      );
+      assert.ok(Date.now() < deadline, `global operation did not settle: ${JSON.stringify(row)}`);
       await page.waitForTimeout(80);
     }
   }
-  async function confirm() {
+  async function add(name: string, transport: 'http' | 'stdio', address: string) {
+    await refresh();
+    await panel().getByRole('button', { name: '新增 MCP', exact: true }).click();
+    assert.equal(await editor().getByRole('combobox', { name: 'Scope', exact: true }).count(), 0);
+    await editor().getByRole('textbox', { name: 'Name', exact: true }).fill(name);
+    await editor()
+      .getByRole('combobox', { name: 'Transport', exact: true })
+      .selectOption(transport);
+    await editor().getByRole('textbox', { name: 'URL or command', exact: true }).fill(address);
+    await editor().getByRole('button', { name: '添加', exact: true }).click();
     await editor()
       .getByRole('button', { name: 'Confirm exact MCP operation', exact: true })
       .click();
+    await settle('add');
+    await refresh();
   }
-  async function add(
+  async function operation(
     name: string,
-    scope: 'user' | 'workspace',
-    transport: 'http' | 'stdio',
-    address: string,
+    label: string,
+    kind: NativeUserMcpSubmission['operation']['kind'],
+    confirm = false,
   ) {
     await refresh();
-    await panel().getByRole('button', { name: '新增 MCP', exact: true }).click();
-    const form = editor().getByRole('form', { name: 'Add MCP source', exact: true });
-    await form.getByRole('textbox', { name: 'Name', exact: true }).fill(name);
-    await form.getByRole('combobox', { name: 'Scope', exact: true }).selectOption(scope);
-    await form.getByRole('combobox', { name: 'Transport', exact: true }).selectOption(transport);
-    await form.getByRole('textbox', { name: 'URL or command', exact: true }).fill(address);
-    await editor().getByRole('button', { name: 'Review add source', exact: true }).click();
-    await confirm();
-    await settle('mcp.source.add');
-    await refresh();
-    const source = panel()
-      .getByRole('region', { name: 'MCP sources', exact: true })
-      .getByRole('article')
-      .filter({ has: page.getByRole('heading', { name, exact: true }) });
-    const sourceAction = await source
-      .getByRole('button', { name: new RegExp(`^管理来源 ${scope} `) })
-      .getAttribute('aria-label');
-    const id = sourceAction?.match(/mcp-[a-f0-9]{64}$/)?.[0];
-    assert.ok(id);
-    return id;
+    await manage(name);
+    await editor().getByRole('button', { name: label, exact: true }).click();
+    if (confirm)
+      await editor()
+        .getByRole('button', { name: 'Confirm exact MCP operation', exact: true })
+        .click();
+    return settle(kind);
   }
-  async function selectServer(id: string, scope: 'user' | 'workspace') {
-    await refresh();
-    await manageServer(id);
-    await editor()
-      .getByRole('button', { name: `Select ${scope} ${id}: enable`, exact: true })
-      .click();
-    await confirm();
-    await settle('mcp.server.select');
-  }
-  const manual = panel()
-    .getByRole('region', { name: 'MCP sources', exact: true })
-    .getByRole('article')
-    .filter({ has: page.getByRole('heading', { name: 'window-manual', exact: true }) });
-  const manualAction = await manual
-    .getByRole('button', { name: /^管理来源 user / })
-    .getAttribute('aria-label');
-  const manualId = manualAction?.match(/mcp-[a-f0-9]{64}$/)?.[0];
-  assert.ok(manualId);
-  const beforeBinding = Number(await (await fetch(`${control}/count`)).text());
-  for (const decision of ['bind', 'revoke'] as const) {
-    await refresh();
-    await manageSource(manualId, 'user');
-    await editor()
-      .getByRole('textbox', { name: 'Binding expiry (Unix milliseconds)', exact: true })
-      .fill(String(Date.now() + 3600000));
-    await editor()
-      .getByRole('button', { name: `Review existing credential binding ${manualId}`, exact: true })
-      .click();
-    await confirm();
-    const bound = await settle('mcp.credential.bind', decision);
-    const execution = (await state()).selection?.executions.find(
-      (value) => value.id === bound.executionId,
-    );
-    assert.equal(execution?.status, 'succeeded');
-    const details = (
-      execution?.result as {
-        details?: {
-          decision?: string;
-          credentialLookupAttempted?: boolean;
-          connectionAttempted?: boolean;
-        };
-      }
-    )?.details;
-    assert.equal(details?.decision, decision);
-    assert.equal(details?.credentialLookupAttempted, false);
-    assert.equal(details?.connectionAttempted, false);
-  }
-  assert.equal(Number(await (await fetch(`${control}/count`)).text()), beforeBinding);
-  stage('existing_default_os_credential_binding', {
-    decisions: ['bind', 'revoke'],
-    transportCalls: 0,
-  });
-  const stdioId = await add('window-stdio', 'user', 'stdio', join(home!, 'mcp-stdio'));
-  await selectServer(stdioId, 'user');
+  assert.equal((await state()).selection, undefined);
+  await settings();
+  await ready();
+  assert.ok(!(await panel().innerText()).includes('选择会话'));
+  assert.ok(!(await panel().innerText()).includes('window-project'));
+  await page.screenshot({ path: join(home, 'global-no-session.png'), fullPage: true });
+  stage('global_without_session');
+  await add('window-http', 'http', `${control}/mcp`);
+  await operation('window-http', '停用', 'enabled');
+  await operation('window-http', '启用', 'enabled');
+  await operation('window-http', '建立连接', 'connect');
   await refresh();
-  await manageServer(stdioId);
-  await editor()
-    .getByRole('button', { name: `Connect ${stdioId}`, exact: true })
-    .click();
-  const connected = await settle('mcp.connect');
-  assert.ok(connected.fact && 'ready' in connected.fact && connected.fact.ready);
+  await manage('window-http');
+  await editor().getByRole('button', { name: '查看工具', exact: true }).click();
+  await editor().getByText('owned_effect', { exact: true }).waitFor();
+  assert.ok((await editor().innerText()).includes('UNICODE_FULL_TAIL'));
+  await editor().getByRole('button', { name: '查看参数', exact: true }).first().click();
+  const schema = JSON.parse(await editor().locator('[data-mcp-schema="input"]').innerText());
+  assert.equal(schema.properties.value.type, 'string');
+  assert.deepEqual(schema.required, ['value']);
+  await editor().locator('[data-mcp-schema="input"]').scrollIntoViewIfNeeded();
+  await page.screenshot({ path: join(home, 'global-tools-schema.png'), fullPage: true });
+  await editor().getByRole('button', { name: '下一页', exact: true }).click();
+  await editor().getByText('owned_tool_33', { exact: true }).waitFor();
+  assert.ok((await editor().innerText()).includes('owned_effect'));
+  await page.screenshot({ path: join(home, 'global-tools-pages.png'), fullPage: true });
+  stage('global_tools_schema_and_continuous_pages');
+  await operation('window-http', '刷新工具', 'refresh');
+  await operation('window-http', '重新连接', 'reconnect', true);
+  await operation('window-http', '断开连接', 'disconnect');
+  await add('window-stdio', 'stdio', join(home, 'mcp-stdio'));
+  await manage('window-stdio');
+  if (await editor().getByRole('button', { name: '启用', exact: true }).count())
+    await operation('window-stdio', '启用', 'enabled');
+  await operation('window-stdio', '建立连接', 'connect');
+  await operation('window-stdio', '重新连接', 'reconnect', true);
+  await operation('window-stdio', '断开连接', 'disconnect');
+  await operation('window-stdio', '删除 MCP', 'remove', true);
   await refresh();
-  const beforeDescriptorWire = readFileSync(join(home!, 'stdio-wire.jsonl'), 'utf8');
-  const open = panel()
-    .getByRole('button', { name: /^Open tools / })
-    .first();
-  await open.click();
-  await editor().getByRole('button', { name: 'Read full descriptor 0', exact: true }).click();
-  const full = editor().locator('[data-mcp-descriptor="verified"]');
-  await full.waitFor();
-  const descriptor = await full.innerText();
-  assert.ok(new TextEncoder().encode(descriptor).length > 65536);
-  assert.ok(descriptor.includes('UNICODE_FULL_TAIL'));
-  assert.equal(readFileSync(join(home!, 'stdio-effects'), 'utf8'), '');
-  assert.equal(readFileSync(join(home!, 'stdio-wire.jsonl'), 'utf8'), beforeDescriptorWire);
-  stage('full_descriptor', {
-    bytes: new TextEncoder().encode(descriptor).length,
-    additionalRpc: 0,
-  });
-  await manageServer(stdioId);
-  await editor()
-    .getByRole('button', { name: `Refresh catalogue from ${connected.commandId}`, exact: true })
-    .click();
-  await settle('mcp.catalogue.refresh');
-  await refresh();
-  await manageServer(stdioId);
-  await editor()
-    .getByRole('button', { name: `Strong reconnect from ${connected.commandId}`, exact: true })
-    .click();
-  await confirm();
-  const replacement = await settle('mcp.reconnect');
-  assert.ok(
-    replacement.fact && 'oldStop' in replacement.fact && replacement.fact.oldStop.confirmed,
+  if (await editor().count())
+    await editor().getByRole('button', { name: '关闭', exact: true }).click();
+  await panel().getByRole('button', { name: '新增 MCP', exact: true }).click();
+  await editor().getByRole('textbox', { name: 'Name', exact: true }).fill('unsaved-preserved');
+  const beforeSelection = await app!.evaluate(
+    () =>
+      (globalThis as FixtureGlobals).mcpPhysical.filter(
+        (r) => r.path === '/v1/config/user/mcp' && r.method === 'GET',
+      ).length,
   );
-  stage('strong_reconnect', { commandId: replacement.commandId });
-  await closeSettings(page);
-  await page
-    .getByRole('textbox', { name: '当前会话私有草稿', exact: true })
-    .fill('NATIVE_MCP_OWNED_EFFECT');
-  await page.getByRole('button', { name: '发送明确的新轮次', exact: true }).click();
-  const toolDeadline = Date.now() + 25000;
-  let ordinaryToolApproval = false;
-  const remoteApprovals = new Map<string, { card: Interaction; commandId?: string }>();
-  const approvalKey = (card: Interaction) =>
-    JSON.stringify([card.originStoreId, card.presentationSessionId, card.id, card.revision]);
-  let completedToolRun: string | undefined;
-  for (;;) {
-    const observed = await state();
-    for (const card of observed.selection?.interactions ?? []) {
-      if (card.state !== 'pending' || card.kind !== 'approval') continue;
-      assert.notEqual(card.definitionId, 'builtin.mcp.sources/mcp.source.approve');
-      const key = approvalKey(card);
-      // Pending View snapshots can outlive the exact answer's accepted receipt.
-      // A new revision has a new key and still requires its own real approval.
-      if (remoteApprovals.has(key)) continue;
-      const saved = observed.answerSubmissions?.find(
-        (answer) =>
-          answer.scope.storeId === card.originStoreId &&
-          answer.scope.sessionId === card.presentationSessionId &&
-          answer.interaction.id === card.id &&
-          answer.interaction.revision === card.revision,
-      );
-      if (saved) {
-        assert.notEqual(saved.phase, 'failed');
-        remoteApprovals.set(key, { card, commandId: saved.request.commandId });
-        continue;
-      }
-      const approval = page.getByRole('article', { name: `approval ${card.id}`, exact: true });
-      if (await approval.count()) {
-        ordinaryToolApproval = true;
-        await approval.getByRole('button', { name: '批准一次', exact: true }).click();
-        remoteApprovals.set(key, { card });
-        stage('independent_remote_tool_approval', {
-          definitionId: card.definitionId,
-          revision: card.revision,
-        });
-      }
-    }
-    const run = observed.selection?.runs.find((value) => value.status === 'completed');
-    if (run) {
-      assert.ok(ordinaryToolApproval, 'remote Tool must retain independent Ask');
-      completedToolRun = run.id;
-      break;
-    }
-    assert.ok(Date.now() < toolDeadline, 'Model remote Tool effect incomplete');
-    await page.waitForTimeout(80);
-  }
-  assert.ok(completedToolRun);
-  assert.ok(remoteApprovals.size > 0);
-  const remoteAnswers: { card: Interaction; command: Command }[] = [];
-  const afterTool = await state();
-  const runExecutions = afterTool.selection!.executions.filter(
-    (execution) => execution.runId === completedToolRun,
+  await page.evaluate(
+    async () =>
+      await window.kiteNative!.request({
+        method: 'select',
+        generation: 1,
+        sessionId: 'mcp-window',
+      }),
+  );
+  await page.waitForTimeout(150);
+  assert.equal(
+    await editor().getByRole('textbox', { name: 'Name', exact: true }).inputValue(),
+    'unsaved-preserved',
   );
   assert.equal(
-    runExecutions.filter(
-      (execution) => execution.kind === 'model' && execution.status === 'succeeded',
-    ).length,
-    2,
+    await app!.evaluate(
+      () =>
+        (globalThis as FixtureGlobals).mcpPhysical.filter(
+          (r) => r.path === '/v1/config/user/mcp' && r.method === 'GET',
+        ).length,
+    ),
+    beforeSelection,
   );
-  const tools = runExecutions.filter((execution) => execution.kind === 'tool');
-  assert.equal(tools.length, 1);
-  assert.equal(tools[0]!.status, 'succeeded');
-  for (const { card, commandId } of remoteApprovals.values()) {
-    assert.equal(card.originStoreId, storeId);
-    assert.equal(card.runId, completedToolRun);
-    assert.equal(card.executionId, tools[0]!.id);
-    const saved = afterTool.answerSubmissions!.filter(
-      (answer) =>
-        answer.scope.storeId === card.originStoreId &&
-        answer.scope.sessionId === card.presentationSessionId &&
-        answer.interaction.id === card.id &&
-        answer.interaction.revision === card.revision,
-    );
-    assert.equal(saved.length, 1);
-    const originalCommandId = commandId ?? saved[0]!.request.commandId;
-    assert.equal(saved[0]!.request.commandId, originalCommandId);
-    // Query only the original answer when its first response is not yet settled.
-    const command = (await page.evaluate(
-      async (commandId) =>
-        await window.kiteNative!.request({ method: 'lookupInteraction', generation: 1, commandId }),
-      originalCommandId,
-    )) as Command;
-    assert.equal(command.id, originalCommandId);
-    assert.equal(command.kind, 'interaction.answer');
-    assert.equal(command.status, 'applied');
-    assert.equal(command.originStoreId, card.originStoreId);
-    assert.equal(command.sessionId, card.presentationSessionId);
-    assert.ok(
-      command.receipt && typeof command.receipt === 'object' && !Array.isArray(command.receipt),
-    );
-    assert.equal(command.receipt.interactionId, card.id);
-    assert.equal(command.receipt.outcome, 'answer_saved');
-    assert.equal(command.receipt.decisionRevision, String(BigInt(card.revision) + 1n));
-    remoteAnswers.push({ card, command });
-  }
-  assert.equal(readFileSync(join(home!, 'stdio-effects'), 'utf8').trim().split('\n').length, 1);
-  stage('one_remote_effect', {
-    runId: completedToolRun,
-    models: 2,
-    tools: 1,
-    answers: remoteAnswers.length,
+  assert.ok(!(await panel().innerText()).includes('window-project'));
+  await page.screenshot({ path: join(home, 'global-selection-stable.png'), fullPage: true });
+  await page.keyboard.press('Escape');
+  await editor().waitFor({ state: 'detached' });
+  await page.keyboard.press('Escape');
+  await page.locator('.desktop-settings-dialog').waitFor({ state: 'hidden' });
+  await settings();
+  await refresh();
+  await manage('window-http');
+  await app!.evaluate(() => {
+    (globalThis as FixtureGlobals).mcpDropNext = true;
   });
-  const projectId = await add('window-project', 'workspace', 'http', `${control}/mcp`);
-  await refresh();
-  await manageSource(projectId, 'workspace');
-  await editor()
-    .getByRole('button', { name: `Request project approval ${projectId}`, exact: true })
-    .click();
-  await settle('mcp.source.approve', 'approved');
-  await selectServer(projectId, 'workspace');
-  await refresh();
-  await manageServer(projectId);
-  await editor()
-    .getByRole('button', { name: `Connect ${projectId}`, exact: true })
-    .click();
-  await settle('mcp.connect');
-  // This controlled HTTP peer uses the baked trusted-loopback test candidate; productionDefaultNetwork is false.
-  await refresh();
-  await manageSource(projectId, 'workspace');
-  await editor()
-    .getByRole('button', { name: `Remove exact workspace source ${projectId}`, exact: true })
-    .click();
-  await editor()
-    .getByRole('region', { name: 'Exact source removal preview', exact: true })
-    .waitFor();
-  await confirm();
-  await settle('mcp.source.remove');
-  await refresh();
-  await manageSource(stdioId, 'user');
-  await editor()
-    .getByRole('button', { name: `Remove exact user source ${stdioId}`, exact: true })
-    .click();
-  await editor()
-    .getByRole('region', { name: 'Exact source removal preview', exact: true })
-    .waitFor();
-  await confirm();
-  await settle('mcp.source.remove');
+  await editor().getByRole('button', { name: '建立连接', exact: true }).click();
+  const lost = await settle('connect');
+  for (const row of submissions) assert.equal(row.storeId, storeId);
   const physical = await app!.evaluate(() => (globalThis as FixtureGlobals).mcpPhysical);
-  const persisted = await app!.evaluate((_, home) => {
+  const persisted = await app!.evaluate((_, root) => {
     const { DatabaseSync } = process.getBuiltinModule(
       'node:sqlite',
     ) as typeof import('node:sqlite');
     const db = new DatabaseSync(
-      `${home}/.kite-code/unified-agent/default/desktop-private/data.sqlite`,
+      `${root}/.kite-code/unified-agent/default/desktop-private/data.sqlite`,
       { readOnly: true },
     );
     try {
@@ -554,75 +275,56 @@ try {
     } finally {
       db.close();
     }
-  }, home!);
+  }, home);
   assert.equal(persisted.version, 7);
-  await page.context().tracing.stop({ path: join(home!, 'window-trace.zip') });
-  await close();
+  for (const row of persisted.rows) {
+    const value = JSON.parse(String(row.state));
+    assert.equal(value.version, 2);
+    assert.equal(value.scope, 'user');
+    assert.ok(!('sessionId' in value));
+  }
+  await close('global-window-trace.zip');
   page = await launch();
-  await select();
-  await openSettings(page);
-  await page.getByRole('button', { name: 'MCP', exact: true }).click();
-  await panel().getByRole('region', { name: 'Original MCP submissions', exact: true }).waitFor();
+  await settings();
+  await page.screenshot({ path: join(home, 'global-cold-originals.png'), fullPage: true });
+  assert.equal(await panel().getByText('操作结果待确认。', { exact: false }).count(), 0);
   const before = await app!.evaluate(() => (globalThis as FixtureGlobals).mcpPhysical);
-  assert.equal(before.filter((value: Physical) => value.method === 'POST').length, 0);
-  const commandId = submissions[0]!.commandId;
-  await panel()
-    .getByRole('button', { name: `Check original ${commandId}`, exact: true })
-    .click();
-  const after = await app!.evaluate(() => (globalThis as FixtureGlobals).mcpPhysical);
-  assert.equal(after.filter((value: Physical) => value.method === 'POST').length, 0);
-  assert.equal(
-    after.filter((value: Physical) => value.path === `/v1/commands/${commandId}`).length,
-    1,
+  assert.equal(before.filter((r) => r.method === 'POST').length, 0);
+  assert.equal(before.filter((r) => /\/operations\//.test(r.path)).length, 0);
+  // Cold verification is explicit and reads the original global ID only.
+  await page.evaluate(
+    async (commandId) =>
+      await window.kiteNative!.request({
+        method: 'settings.userMcp.lookup',
+        generation: 1,
+        commandId,
+      }),
+    lost.commandId,
   );
-  await page.context().tracing.stop({ path: join(home!, 'cold-trace.zip') });
-  await close();
+  const after = await app!.evaluate(() => (globalThis as FixtureGlobals).mcpPhysical);
+  assert.equal(after.filter((r) => r.method === 'POST').length, 0);
+  assert.equal(after.filter((r) => r.path.endsWith(`/operations/${lost.commandId}`)).length, 1);
+  await close('global-cold-trace.zip');
   writeFileSync(
-    join(home!, 'mcp-report.json'),
+    join(home, 'mcp-report.json'),
     JSON.stringify({
       pids,
       submissions,
       physical,
       persisted,
-      before,
       after,
-      remoteAnswers,
-      completedToolRun,
+      noSession: true,
+      stableSelection: true,
+      schema,
+      continuousTools: true,
     }),
   );
-  stage('complete', { originals: submissions.length, coldGets: 1 });
 } catch (error) {
   if (app) {
-    try {
-      const page = app.windows()[0]!;
-      writeFileSync(join(home!, 'window-failure.txt'), await page.locator('body').innerText());
-      await page.screenshot({ path: join(home!, 'window-failure.png'), fullPage: true });
-      await page.context().tracing.stop({ path: join(home!, 'window-failure-trace.zip') });
-      stage('failure', {
-        error: String(error),
-        state: await page.evaluate(
-          async () => await window.kiteNative!.request({ method: 'state', generation: 1 }),
-        ),
-      });
-    } catch {}
-    try {
-      await close();
-    } catch {}
+    const page = await app.firstWindow();
+    writeFileSync(join(home, 'global-window-failure.txt'), await page.locator('body').innerText());
+    await page.screenshot({ path: join(home, 'global-window-failure.png'), fullPage: true });
+    await close('global-failure-trace.zip').catch(() => {});
   }
   throw error;
-} finally {
-  writeFileSync(join(home!, 'mcp-owned-pids.json'), JSON.stringify(pids));
-  if (childPid)
-    try {
-      process.kill(childPid, 'SIGKILL');
-    } catch {}
-  if (app) {
-    const owned = app;
-    const timer = setTimeout(() => owned.process().kill('SIGKILL'), 2000);
-    try {
-      await owned.close();
-    } finally {
-      clearTimeout(timer);
-    }
-  }
 }

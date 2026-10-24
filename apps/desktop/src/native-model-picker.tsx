@@ -17,6 +17,54 @@ function object(value: unknown): Record<string, unknown> | undefined {
     : undefined;
 }
 
+type ModelProtocol = 'chat-completions' | 'responses';
+function modelProtocol(model: {
+  provider?: unknown;
+  protocol?: unknown;
+}): ModelProtocol | undefined {
+  if (model.protocol === undefined)
+    return model.provider === 'codex' ? 'responses' : 'chat-completions';
+  if (model.protocol !== 'responses' && model.protocol !== 'chat-completions') return;
+  if (model.provider === 'codex' && model.protocol !== 'responses') return;
+  if (
+    (model.provider === 'deepseek' || model.provider === 'ollama') &&
+    model.protocol !== 'chat-completions'
+  )
+    return;
+  return model.protocol;
+}
+
+/** The Core view keeps its first actual Run even when recent history is bounded. */
+function sessionProtocol(selection?: NativeSelection): {
+  protocol?: ModelProtocol;
+  unavailable: boolean;
+} {
+  const first = selection?.runs?.[0];
+  if (!first) return { unavailable: false };
+  if (first.sessionId !== selection?.session.id) return { unavailable: true };
+  const manifest = object(first.configuration);
+  let snapshot = object(manifest?.snapshot);
+  if (snapshot?.kind === 'human_input_processing')
+    snapshot = object(snapshot.originalConfiguration);
+  const models = object(snapshot?.configuration)?.models;
+  if (
+    typeof manifest?.modelId !== 'string' ||
+    snapshot?.version !== 1 ||
+    typeof snapshot.digest !== 'string' ||
+    !Array.isArray(models)
+  )
+    return { unavailable: true };
+  const matches = models.filter((model) => object(model)?.id === manifest.modelId);
+  const model = matches.length === 1 ? object(matches[0]) : undefined;
+  const protocol =
+    model &&
+    typeof model.provider === 'string' &&
+    ['openai', 'deepseek', 'compatible', 'ollama', 'codex'].includes(model.provider)
+      ? modelProtocol(model)
+      : undefined;
+  return protocol ? { protocol, unavailable: false } : { unavailable: true };
+}
+
 /** Restore only the current Session's latest frozen model choice. */
 function previousSessionEffort(
   selection: NativeSelection | undefined,
@@ -176,7 +224,14 @@ export function NativeModelPicker({
   const sequence = useRef(0),
     readyCallback = useRef(onReady);
   readyCallback.current = onReady;
-  const models = facts?.models.filter((model) => model.enabled && model.configured) ?? [];
+  const protocol = preparing ? { unavailable: false } : sessionProtocol(selection);
+  const models =
+    facts?.models.filter(
+      (model) =>
+        model.enabled &&
+        model.configured &&
+        (!protocol.protocol || modelProtocol(model) === protocol.protocol),
+    ) ?? [];
   const requestedId = value.modelId ?? facts?.selectedModelId;
   const selectedId = requestedId ?? facts?.defaultModelId;
   const selected = models.find((model) => model.id === selectedId);
@@ -189,7 +244,8 @@ export function NativeModelPicker({
     supported.includes(requestEffort) ||
     (value.reasoningEffort === undefined &&
       (previousEffort === 'none' || previousEffort === 'minimal'));
-  const ready = !!selected && allowedEffort && !reading && !error && !disabled;
+  const ready =
+    !!selected && allowedEffort && !protocol.unavailable && !reading && !error && !disabled;
   const readyId = ready ? selected?.id : undefined;
   useEffect(() => {
     if (current.current !== readKey) return;
@@ -229,11 +285,25 @@ export function NativeModelPicker({
     };
   }, [readKey, bridge, prepared]);
   function choose(modelId: string) {
-    if (!reading && !error && !disabled && models.some((model) => model.id === modelId))
+    if (
+      !reading &&
+      !error &&
+      !disabled &&
+      !protocol.unavailable &&
+      models.some((model) => model.id === modelId)
+    )
       onChange({ modelId });
   }
   function setEffort(reasoningEffort: NativeReasoningEffort) {
-    if (reading || error || disabled || !selected || !supported.includes(reasoningEffort)) return;
+    if (
+      reading ||
+      error ||
+      disabled ||
+      protocol.unavailable ||
+      !selected ||
+      !supported.includes(reasoningEffort)
+    )
+      return;
     onChange({
       ...value,
       ...(value.modelId === undefined ? { modelId: selected.id } : {}),
@@ -263,13 +333,19 @@ export function NativeModelPicker({
           reasoningEffort: model.reasoningEffort ?? undefined,
           reasoningEffortChoices: model.reasoningEffortChoices ?? [],
         }))}
-        disabled={reading || disabled}
+        disabled={reading || disabled || protocol.unavailable}
         reasoningEffort={effort ?? undefined}
         onModelChange={(_provider, _name, id) => {
           if (id !== undefined) choose(id);
         }}
         onReasoningEffortChange={(effort) => setEffort(effort)}
+        modelSelectionHint={
+          protocol.protocol
+            ? `此会话使用 ${protocol.protocol === 'responses' ? 'Responses' : 'Chat Completions'}，切换协议请新建会话。`
+            : undefined
+        }
       />
+      {protocol.unavailable && <p role="alert">无法确认此会话首次运行的模型协议，暂时无法发送。</p>}
       {error && <p role="alert">模型目录不可用：{error}</p>}
       {!reading && !error && !selected && (requestedId || diagnostics) && (
         <p role="alert">

@@ -22,6 +22,7 @@ import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import { createClient } from '@kite-ai/client';
 import { privateDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { startService } from '../../src';
+import { createCodexLocalSource } from '../../src/codex-auth';
 import { createDefaultProcessConfiguration } from '../../src/configuration';
 import { initializeLivePermissionFixture } from '../fixtures/live-permission-fixture';
 
@@ -64,7 +65,7 @@ function endpoint(
           const parsed = JSON.parse(
             messages.filter((row) => row.role === 'user').at(-1)?.content ?? '',
           ) as Record<string, unknown>;
-          if (parsed.purpose === 'authorization_review') {
+          if (parsed.purpose === 'authorization_check') {
             reviewPayload = parsed;
             reviews.push(parsed);
           }
@@ -173,6 +174,7 @@ async function fixture(
     persistentPermissions?: boolean;
     hostBoundary?: boolean;
     child?: boolean;
+    codexHome?: 'missing' | 'present' | 'relative' | 'empty' | 'nul';
   } = {},
 ) {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-default-shell-')));
@@ -213,9 +215,23 @@ async function fixture(
     })),
   };
   writeFileSync(configPath, JSON.stringify(configuration));
+  const codexHome = join(root, 'codex-home');
+  const sourceHome =
+    options.codexHome === 'relative'
+      ? 'relative-codex-home'
+      : options.codexHome === 'empty'
+        ? ''
+        : options.codexHome === 'nul'
+          ? join(root, 'invalid\0home')
+          : codexHome;
+  if (options.codexHome === 'present') {
+    privateDirectory(codexHome);
+    writeFileSync(join(codexHome, 'auth.json'), 'SYNTHETIC_PRIVATE_AUTH_MATERIAL', { mode: 0o600 });
+  }
   const host = createDefaultProcessConfiguration({
     userConfigurationPath: profile.profilePath + '/config.jsonc',
     profile,
+    ...(options.codexHome ? { localCodex: createCodexLocalSource({ codexHome: sourceHome }) } : {}),
     ...(!options.missing
       ? {
           shell: {
@@ -298,6 +314,8 @@ async function fixture(
       ...base,
       workspaceId: 'w',
       mode: options.mode ?? 'full',
+      trusted: true,
+      nativeShellRead: true,
     });
   if (options.persistentPermissions) {
     const initial = await permissionManagement.readMode(base);
@@ -330,6 +348,7 @@ async function fixture(
     runtime,
     store,
     profile,
+    codexHome,
     permissionManagement,
     base,
     submit: (id = 'work') =>
@@ -378,6 +397,86 @@ async function fixture(
     },
   };
 }
+nativeTest(
+  'an invalid optional Codex path does not block an ordinary manual Provider Run or its actual Host Shell',
+  async () => {
+    for (const codexHome of ['relative', 'empty', 'nul'] as const) {
+      const f = await fixture({
+        hostBoundary: true,
+        codexHome,
+        command: 'printf manual-provider-shell > effect',
+      });
+      try {
+        await f.submit();
+        expect((await f.done()).status).toBe('applied');
+        expect((await f.store.getView('s')).runs.at(-1)?.status).toBe('completed');
+        expect(
+          (await f.store.listExecutions('s')).find((row) => row.definitionId === 'shell.command'),
+        ).toMatchObject({ status: 'succeeded', result: { details: { processTreeStopped: true } } });
+        expect(readFileSync(join(f.workspace, 'effect'), 'utf8')).toBe('manual-provider-shell');
+        expect(existsSync(f.codexHome)).toBe(false);
+      } finally {
+        await f.close();
+      }
+    }
+  },
+  20000,
+);
+nativeTest(
+  'default Host Model and Shell start before and after an absent Codex Home appears without exposing its private file',
+  async () => {
+    const f = await fixture({
+      hostBoundary: true,
+      codexHome: 'missing',
+      command: 'printf ordinary',
+    });
+    try {
+      await f.submit('work');
+      const first = await f.done('work');
+      expect(first.status).toBe('applied');
+      expect(await f.runtime.getRun((first.receipt as { runId: string }).runId)).toMatchObject({
+        status: 'completed',
+        reason: null,
+      });
+      privateDirectory(f.codexHome);
+      const auth = join(f.codexHome, 'auth.json');
+      writeFileSync(auth, 'SYNTHETIC_PRIVATE_AUTH_MATERIAL', { mode: 0o600 });
+      f.a.command(
+        `if /bin/cat '${auth}' 2>/dev/null; then printf leaked; else printf read-denied; fi; if (printf stolen > '${auth}') 2>/dev/null; then printf wrote; else printf write-denied; fi; printf ordinary`,
+      );
+      await f.submit('next');
+      const next = await f.done('next');
+      expect(next.status).toBe('applied');
+      expect(await f.runtime.getRun((next.receipt as { runId: string }).runId)).toMatchObject({
+        status: 'completed',
+        reason: null,
+      });
+      const executions = await f.store.listExecutions('s');
+      expect(executions.filter((execution) => execution.kind === 'model').length).toBeGreaterThan(
+        1,
+      );
+      const jobs = executions.filter((execution) => execution.definitionId === 'shell.command');
+      expect(jobs).toHaveLength(2);
+      expect(jobs.map((execution) => execution.status)).toEqual(['succeeded', 'succeeded']);
+      const output = await f.store.listExecutionOutput({
+        executionId: jobs[1]!.id,
+        afterSeq: '0',
+        limit: 200,
+      });
+      expect(
+        output.items
+          .filter((row) => row.stream === 'stdout')
+          .map((row) => row.content)
+          .join(''),
+      ).toBe('read-deniedwrite-deniedordinary');
+      expect(JSON.stringify(executions)).not.toContain('SYNTHETIC_PRIVATE_AUTH_MATERIAL');
+      expect(readFileSync(auth, 'utf8')).toBe('SYNTHETIC_PRIVATE_AUTH_MATERIAL');
+    } finally {
+      await f.close();
+    }
+  },
+  30000,
+);
 nativeTest(
   'default delegated Shell preserves accepted parent/child policy snapshots for Full and Auto human fallback',
   async () => {
@@ -1340,6 +1439,8 @@ nativeTest(
         sessionId: 'other',
         workspaceId: 'w',
         mode: 'full',
+        trusted: true,
+        nativeShellRead: true,
       });
       await f.runtime.submitCommand({
         ...f.base,

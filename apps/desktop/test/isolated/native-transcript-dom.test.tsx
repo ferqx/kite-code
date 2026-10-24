@@ -1,6 +1,5 @@
 import { expect, test } from 'bun:test';
 import type { Message, ModelOutputSnapshot } from '@kite-ai/client';
-import { ModelOutputMessage } from '@kite-ai/ui';
 import {
   Conversation,
   type Message as DesktopMessage,
@@ -335,7 +334,7 @@ test('the original Conversation owns collapsed Run history, adjacent exploration
         { ...message('new-user', 'user', '6', '下一轮'), runId: 'r2' },
         { ...message('new-final', 'assistant', '7', '下一轮最终'), runId: 'r2' },
       ],
-      runs: [{ ...run(), status: 'failed', reason: '真实原因' }, run('r2')],
+      runs: [{ ...run(), status: 'failed', reason: 'execution_failed' }, run('r2')],
       tools: [],
       storeId: 'store',
       sessionId: 's',
@@ -344,6 +343,10 @@ test('the original Conversation owns collapsed Run history, adjacent exploration
       failed.messages.findIndex((model) => model.id === 'new-user'),
     );
     expect(failed.messages.find((model) => model.id === 'before')!.finalReply).toBeUndefined();
+    const failure = failed.messages.find((model) => model.systemKind === 'turn_failure')!;
+    expect(failure.failure?.reasonCode).toBe('execution_failed');
+    expect(failure.failure?.summary).toBe('本轮回复未完成');
+    expect(failure.text).not.toContain('execution_failed');
     const sealed = desktopTranscript({
       messages: [
         {
@@ -718,7 +721,7 @@ test('a host-confirmed standalone message preserves process boundaries and one f
   }
 });
 
-test('the original final reply copy becomes available only for the displayed complete body and disappears when that reader closes', async () => {
+test('the original final reply copies only the automatically verified body and a paused body revokes that copy', async () => {
   const f = fixture(),
     copied: string[] = [],
     content = '完整最终正文 雪🙂\r\nEND',
@@ -754,7 +757,8 @@ test('the original final reply copy becomes available only for the displayed com
     output: { content, reasoning: '', toolCalls: [], complete: true },
   };
   let reads = 0;
-  function Harness() {
+  let completeRead!: (value: ModelOutputSnapshot) => void;
+  function Harness({ paused = false }: { paused?: boolean }) {
     const [full, setFull] = useState<string>();
     const transcript = desktopTranscript({
       messages: [message('u', 'user', '1', 'user'), final],
@@ -779,13 +783,16 @@ test('the original final reply copy becomes available only for the displayed com
         }}
         renderMessageContent={(model) =>
           model.id === 'final' ? (
-            <ModelOutputMessage
+            <NativeModelOutputMessage
               message={final}
               storeId="store"
+              suspended={paused}
               onContent={setFull}
-              onRead={async () => {
+              onRead={() => {
                 reads++;
-                return snapshot;
+                return new Promise((resolve) => {
+                  completeRead = resolve;
+                });
               }}
             />
           ) : (
@@ -798,19 +805,16 @@ test('the original final reply copy becomes available only for the displayed com
   try {
     await act(async () => f.root.render(<Harness />));
     expect(f.host.querySelector('[aria-label="复制本轮Agent回复"]')).toBeNull();
-    const read = [...f.host.querySelectorAll<HTMLButtonElement>('button')].find(
-      (button) => button.textContent === 'Read complete recorded Model output',
-    )!;
-    await act(async () => read.click());
+    expect(reads).toBe(1);
+    expect(f.host.querySelector('.model-output-message > button')).toBeNull();
+    expect(f.host.querySelector('.model-output-message > p')).toBeNull();
+    await act(async () => completeRead(snapshot));
     expect(f.host.textContent).toContain('END');
     const copy = f.host.querySelector<HTMLButtonElement>('[aria-label="复制本轮Agent回复"]')!;
     expect(copy).not.toBeNull();
     await act(async () => copy.click());
     expect(copied).toEqual([content]);
-    const close = [...f.host.querySelectorAll<HTMLButtonElement>('button')].find((button) =>
-      button.textContent?.startsWith('Close'),
-    )!;
-    await act(async () => close.click());
+    await act(async () => f.root.render(<Harness paused />));
     expect(f.host.querySelector('[aria-label="复制本轮Agent回复"]')).toBeNull();
     expect(f.host.textContent).toContain('PREVIEW');
     expect(reads).toBe(1);

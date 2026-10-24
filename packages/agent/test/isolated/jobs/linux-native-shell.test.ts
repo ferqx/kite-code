@@ -1,11 +1,15 @@
 import { expect, test } from 'bun:test';
 import { spawnSync } from 'node:child_process';
 import {
+  chmodSync,
   existsSync,
+  lstatSync,
+  mkdirSync,
   mkdtempSync,
   readdirSync,
   readFileSync,
   realpathSync,
+  renameSync,
   rmSync,
   writeFileSync,
 } from 'node:fs';
@@ -71,7 +75,7 @@ function setup() {
   const workspace = join(root, 'workspace'),
     assets = join(root, 'assets'),
     profile = join(root, 'profile'),
-    control = join(profile, '.coordination'),
+    control = join(profile, '.coordination', 'instance'),
     temporaryRoot = join(root, 'temp');
   for (const path of [workspace, assets, control, temporaryRoot]) privateDirectory(path);
   const init = join(assets, 'init'),
@@ -169,6 +173,106 @@ async function run(job: JobDefinition, command: string) {
     await job.dispose(handle);
   }
 }
+linuxTest(
+  'private Codex directories preserve real Workspace and Full effects while auth rotates outside the running namespace',
+  () =>
+    fixture(async (f) => {
+      for (const [index, home] of [
+        join(f.root, 'missing-parent', 'codex-home'),
+        join(f.workspace, '.codex'),
+      ].entries()) {
+        const auth = join(home, 'auth.json');
+        for (const scope of ['workspace_write', 'full_access'] as const) {
+          const existed = existsSync(home);
+          if (existed) chmodSync(home, 0o750);
+          const job = createLinuxHostShellJob({
+            ...f.options,
+            protectedFiles: [auth],
+            filesystemScope: scope,
+          });
+          // Factory/Run preparation is readonly, including absent parents.
+          expect(existsSync(home)).toBe(existed);
+          const marker = `${index}-${scope}`;
+          const ready = join(f.workspace, `${marker}-ready`);
+          const release = join(f.workspace, `${marker}-release`);
+          const written = join(f.workspace, `${marker}-written`);
+          const external = join(f.root, `${marker}-external`);
+          const handle = await start(
+            job,
+            `printf ready > ${quote(ready)}; while [ ! -f ${quote(release)} ]; do if cat ${quote(auth)} 2>/dev/null; then exit 31; fi; sleep 0.01; done; if printf overwrite > ${quote(auth)}; then exit 32; fi; if mv ${quote(home)} ${quote(`${home}-moved`)}; then exit 33; fi; printf WORKSPACE_OK > ${quote(written)}; if printf FULL_OK > ${quote(external)}; then printf EXTERNAL_ALLOWED; else printf EXTERNAL_DENIED; fi; printf PRIVATE_DIRECTORY_OK`,
+          );
+          const events: JobEvent[] = [];
+          let finished = false;
+          try {
+            expect(lstatSync(home).mode & 0o777).toBe(existed ? 0o750 : 0o700);
+            expect(existsSync(auth)).toBe(existed);
+            const deadline = Date.now() + 5000;
+            while (!existsSync(ready) && Date.now() < deadline) await Bun.sleep(10);
+            expect(existsSync(ready)).toBe(true);
+            for (let rotation = 0; rotation < 4; rotation++) {
+              const next = join(home, 'next-auth');
+              writeFileSync(next, `SYNTHETIC_AUTH_ROTATION_${rotation}`, { mode: 0o600 });
+              renameSync(next, auth);
+              await Bun.sleep(25);
+            }
+            writeFileSync(release, 'continue');
+            for await (const event of job.observe(handle)) events.push(event);
+            finished = true;
+            ended(events, handle, 'succeeded');
+            expect(content(events)).toContain('PRIVATE_DIRECTORY_OK');
+            expect(content(events)).not.toContain('SYNTHETIC_AUTH');
+            expect(content(events)).toContain(
+              scope === 'full_access' ? 'EXTERNAL_ALLOWED' : 'EXTERNAL_DENIED',
+            );
+            expect(readFileSync(written, 'utf8')).toBe('WORKSPACE_OK');
+            expect(existsSync(external)).toBe(scope === 'full_access');
+            if (scope === 'full_access') expect(readFileSync(external, 'utf8')).toBe('FULL_OK');
+            expect(readFileSync(auth, 'utf8')).toBe('SYNTHETIC_AUTH_ROTATION_3');
+            expect(lstatSync(home).mode & 0o777).toBe(existed ? 0o750 : 0o700);
+            expect(readdirSync(f.temporaryRoot)).toEqual([]);
+          } finally {
+            if (!finished) await job.cancel(handle);
+            await job.dispose(handle);
+          }
+        }
+      }
+    }),
+  45000,
+);
+linuxTest(
+  'a verified readonly Skill projection inside the private directory exposes its original source while credentials stay masked',
+  () =>
+    fixture(async (f) => {
+      const home = join(f.profile, 'codex-home');
+      const source = join(home, 'skills', 'original');
+      mkdirSync(source, { recursive: true, mode: 0o700 });
+      const auth = join(home, 'auth.json');
+      const original = join(source, 'source.txt');
+      writeFileSync(auth, 'SYNTHETIC_PROJECTED_AUTH');
+      writeFileSync(original, 'VERIFIED_SOURCE');
+      const result = await run(
+        createLinuxHostShellJob({
+          ...f.options,
+          cwd: source,
+          workspaceRoot: f.workspace,
+          controlBase: f.control,
+          readOnlySourceRoot: source,
+          protectedFiles: [auth],
+          filesystemScope: 'full_access',
+        }),
+        `cat ${quote(original)}; if cat ${quote(auth)} ${quote(join(f.profile, 'secret'))}; then exit 31; fi; if printf changed > ${quote(original)}; then exit 32; fi; printf WORKSPACE_OK > ${quote(join(f.workspace, 'projection-written'))}; printf VERIFIED_PROJECTION_OK`,
+      );
+      ended(result.events, result.handle, 'succeeded');
+      expect(content(result.events)).toContain('VERIFIED_SOURCE');
+      expect(content(result.events)).toContain('VERIFIED_PROJECTION_OK');
+      expect(content(result.events)).not.toContain('SYNTHETIC_PROJECTED_AUTH');
+      expect(content(result.events)).not.toContain('PROFILE_SECRET');
+      expect(readFileSync(original, 'utf8')).toBe('VERIFIED_SOURCE');
+      expect(readFileSync(join(f.workspace, 'projection-written'), 'utf8')).toBe('WORKSPACE_OK');
+      expect(readdirSync(f.temporaryRoot)).toEqual([]);
+    }),
+  45000,
+);
 linuxTest(
   'installed-style host scopes protect Profile and nested coordination while preserving Full/Workspace and natural escaped-child cleanup',
   () =>

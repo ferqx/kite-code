@@ -46,7 +46,7 @@ const makeAsset=name=>{const path=join(assetsRoot,name);writeFileSync(path,'orig
 const options={platform:'linux',configurationId:'linux-fixture',env:{PATH:'/usr/bin:/bin',FIXED_VALUE:'original'},
  supervisorPath:makeAsset('linux-shell-init'),bunExecutable:makeAsset('bun'),shellExecutable:makeAsset('sh'),
  linux:{bubblewrapPath:makeAsset('bwrap')},graceMs:20,maxQueuedBytes:4096,
- host:{controlBase:control,protectedRoots:[profile.dataRoot,profile.coordinationPath],readonlyAssets:[assetsRoot],runtimeReadOnlyRoots:[assetsRoot]}};
+ host:{controlBase:control,protectedRoots:[profile.dataRoot,profile.coordinationPath],protectedFiles:[join(root,'codex','auth.json')],readonlyAssets:[assetsRoot],runtimeReadOnlyRoots:[assetsRoot]}};
 const leaf=(mode,id='shell.command')=>({namespace:'builtin.permissions',version:'1',data:{workspaceTrust:true,mode,capability:{kind:'job',definitionId:id,definitionVersion:'1',hardAllowed:true}}});
 const intersection=(left,right)=>({namespace:'agent.permission-intersection',version:'1',data:{policies:[{scope:'parent',revision:'p',allowed:true,snapshot:left},{scope:'child',revision:'c',allowed:true,snapshot:right}]}});
 const context=(snapshot,id='execution')=>({sessionId:'s',executionId:id,signal:new AbortController().signal,dispatchAuthorization:{revision:'accepted',snapshot}});
@@ -62,12 +62,14 @@ try {
  assert.equal(status.release.production,null);assert.equal(status.release.active,false);assert.equal(calls.length,0);assert.equal(starts.length,0);assert.equal(ffiCalls,0);
  const binding=await createShellConfiguration({workspaceRoot:workspace,toolIds:['shell.launch','shell.read'],options});
  assert.equal(calls.length,1);assert.equal(calls[0].kind,'linux-host');
- assert.equal(binding.snapshot.qualification,'linux_owned_pid_namespace_bubblewrap');
+ assert.equal(binding.snapshot.qualification,'linux_owned_pid_namespace_bubblewrap_private_directories');
  assert.equal(binding.snapshot.scope,'final_dispatch_authorization');
  assert.deepEqual(binding.snapshot.assets.bubblewrap,original[3]);
  assert.deepEqual(calls[0].options.linux,{bubblewrapPath:options.linux.bubblewrapPath,initExecutable:options.supervisorPath});
  assert.equal(calls[0].options.cwd,workspace);
  assert.deepEqual(calls[0].options.protectedRoots,options.host.protectedRoots);
+ assert.deepEqual(calls[0].options.protectedFiles,options.host.protectedFiles);
+ assert.deepEqual(binding.snapshot.host.protectedFiles,options.host.protectedFiles);
  const scope=calls[0].options.filesystemScope;
  assert.equal(scope(context(leaf('full'))),'full_access');
  assert.equal(scope(context(intersection(leaf('full'),leaf('full')))),'full_access');
@@ -107,6 +109,7 @@ try {
  assert.equal(verifyCall.options.cwd,skill);assert.notEqual(verifyCall.options.cwd,workspace);
  assert.equal(verifyCall.options.workspaceRoot,workspace);
  assert.deepEqual(verifyCall.options.protectedRoots,options.host.protectedRoots);
+ assert.deepEqual(verifyCall.options.protectedFiles,options.host.protectedFiles);
  assert.equal(verifyCall.options.filesystemScope(context(intersection(leaf('full','skill.workflow.verify'),leaf('accept_edits','skill.workflow.verify')))),'workspace_write');
  assert.equal(verifyCall.options.filesystemScope(context(leaf('full','skill.workflow.verify'))),'full_access');
  assert.throws(()=>verifyCall.options.filesystemScope(context(leaf('full'))),/shell_dispatch_scope_unavailable/);
@@ -117,6 +120,7 @@ try {
  const compensateCall=calls.at(-1);assert.equal(compensateCall.kind,'linux-confined');
  assert.equal(compensateCall.options.cwd,workspace);
  assert.deepEqual(compensateCall.options.protectedRoots,[profile.dataRoot,profile.coordinationPath]);
+ assert.deepEqual(compensateCall.options.protectedFiles,options.host.protectedFiles);
  assert.equal(compensateCall.options.bubblewrapPath,options.linux.bubblewrapPath);
  assert.deepEqual(compensateCall.options.linux,{bubblewrapPath:options.linux.bubblewrapPath,initExecutable:options.supervisorPath});
  const sealed=compensateCall.options.runtimeReadOnlyRoots[0];

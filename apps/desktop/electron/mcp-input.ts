@@ -1,5 +1,5 @@
-import { validateMcpCommandRequest } from '@kite-ai/client';
-import type { NativeMcpOperation } from '../src/mcp-bridge';
+import { validateMcpCommandRequest, validateRequest } from '@kite-ai/client';
+import type { NativeMcpOperation, NativeUserMcpOperation } from '../src/mcp-bridge';
 
 export function parseNativeMcpOperation(value: unknown): NativeMcpOperation {
   const fail = (): never => {
@@ -76,4 +76,25 @@ export function parseNativeMcpOperation(value: unknown): NativeMcpOperation {
     });
   }
   return structuredClone(row);
+}
+
+export function parseNativeUserMcpOperation(value: unknown): NativeUserMcpOperation {
+  const request = {
+    storeId: 'validation',
+    commandId: 'validation',
+    expectedReadSet: '0'.repeat(64),
+    operation: value,
+  };
+  validateRequest('UserMcpSettingsRequest', request);
+  const operation = value as NativeUserMcpOperation;
+  if (operation.kind === 'add') {
+    // Apply the existing finite nonsecret entry grammar before persisting an intent.
+    parseNativeMcpOperation({
+      kind: 'add',
+      scope: 'user',
+      name: operation.name,
+      entry: operation.entry,
+    });
+  }
+  return structuredClone(operation);
 }

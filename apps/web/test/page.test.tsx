@@ -117,6 +117,7 @@ async function fixture(
     extra: false,
     copied: '',
     outputReads: 0,
+    outputHold: undefined as Promise<void> | undefined,
     outputRequest: undefined as { sessionId: string; executionId: string } | undefined,
     outputBody: 'FULL RECORDED ANSWER exact tail',
     wrongOutputSession: false,
@@ -202,6 +203,7 @@ async function fixture(
     async getModelOutput(id: string, executionId: string) {
       state.outputReads++;
       state.outputRequest = { sessionId: id, executionId };
+      if (state.outputHold) await state.outputHold;
       return {
         storeId: options.restoredOutput ? 'restored-store' : 'store',
         sessionId: state.wrongOutputSession ? 'foreign-session' : id,
@@ -558,63 +560,76 @@ test('bfcache restore identity failure preserves original document paused, issue
   }
 });
 
-test('Web copies loaded full Model output only while visible, closes to preview and does not retain body across session selection', async () => {
+test('Web automatically copies only the verified visible body and does not retain it across Session selection', async () => {
   const f = await fixture({ modelOutput: true });
+  let release!: () => void, releaseReturn!: () => void;
+  f.state.outputHold = new Promise<void>((resolve) => {
+    release = resolve;
+  });
   try {
     await f.click(f.button('Workspace'));
     await settle(() => !!f.dom.window.document.querySelector('a[href="/sessions/a"]'));
     await f.choose('a');
     await settle(() => f.dom.window.document.querySelectorAll('[data-message-id]').length === 201);
-    expect(f.state.outputReads).toBe(0);
-    await f.click(f.button('Read complete recorded Model output'));
+    await settle(() => f.state.outputReads === 1);
+    expect(f.dom.window.document.querySelector('.model-output-message > button')).toBeNull();
+    await f.click(f.button('Copy conversation'));
+    expect(f.state.copied).toContain('OUTPUT PREVIEW');
+    expect(f.state.copied).not.toContain(f.state.outputBody);
+    await act(async () => release());
     await settle(() => f.dom.window.document.body.textContent!.includes(f.state.outputBody));
     await f.click(f.button('Copy conversation'));
     expect(f.state.copied).toContain(f.state.outputBody);
     expect(f.state.copied).not.toContain('OUTPUT PREVIEW');
-    await f.click(f.button('Close full Model output'));
-    await f.click(f.button('Copy conversation'));
-    expect(f.state.copied).toContain('OUTPUT PREVIEW');
-    expect(f.state.copied).not.toContain(f.state.outputBody);
-    await f.click(f.button('Read complete recorded Model output'));
     await f.choose('b');
     await settle(() => f.dom.window.document.querySelector('h1')?.textContent === 'Session b');
+    f.state.outputHold = new Promise<void>((resolve) => {
+      releaseReturn = resolve;
+    });
     await f.choose('a');
     await settle(() => f.dom.window.document.querySelector('h1')?.textContent === 'Session a');
+    await settle(() => f.state.outputReads === 3);
     expect(f.dom.window.document.body.textContent).not.toContain(f.state.outputBody);
     expect(f.state.closed).toBe(0);
   } finally {
+    release?.();
+    releaseReturn?.();
     await f.close();
   }
 });
 
-test('Web restored Fork Model body uses admitted Store and original source; Copy and Close follow only the visible verified body', async () => {
+test('Web restored Fork automatically reads the admitted original body and rejected ownership can only retry its read', async () => {
   const f = await fixture({ modelOutput: true, restoredOutput: true });
   try {
     await f.click(f.button('Workspace'));
     await settle(() => !!f.dom.window.document.querySelector('a[href="/sessions/a"]'));
     await f.choose('a');
     await settle(() => f.dom.window.document.querySelectorAll('[data-message-id]').length === 201);
-    expect(f.dom.window.document.body.textContent).toContain('OUTPUT PREVIEW');
-    expect(f.state.outputReads).toBe(0);
-    await f.click(f.button('Read complete recorded Model output'));
     await settle(() => f.dom.window.document.body.textContent!.includes(f.state.outputBody));
+    expect(f.state.outputReads).toBe(1);
+    expect(f.dom.window.document.querySelector('.model-output-message > button')).toBeNull();
     expect(f.state.outputRequest).toEqual({ sessionId: 'source-session', executionId: 'model' });
     await f.click(f.button('Copy conversation'));
     expect(f.state.copied).toContain(f.state.outputBody);
     expect(f.state.copied).not.toContain('OUTPUT PREVIEW');
-    await f.click(f.button('Close full Model output'));
-    await f.click(f.button('Copy conversation'));
-    expect(f.state.copied).toContain('OUTPUT PREVIEW');
-    expect(f.state.copied).not.toContain(f.state.outputBody);
     f.state.wrongOutputSession = true;
-    await f.click(f.button('Read complete recorded Model output'));
+    await f.choose('b');
+    await settle(() => f.dom.window.document.querySelector('h1')?.textContent === 'Session b');
+    await f.choose('a');
+    await settle(() => f.dom.window.document.querySelector('h1')?.textContent === 'Session a');
     await settle(() =>
-      f.dom.window.document.body.textContent!.includes('model_output_identity_conflict'),
+      f.dom.window.document.body.textContent!.includes('完整回复读取失败，请重试。'),
     );
+    expect(f.dom.window.document.body.textContent).not.toContain('model_output_identity_conflict');
     expect(f.dom.window.document.body.textContent).not.toContain(f.state.outputBody);
     await f.click(f.button('Copy conversation'));
     expect(f.state.copied).toContain('OUTPUT PREVIEW');
     expect(f.state.copied).not.toContain(f.state.outputBody);
+    const beforeRetry = f.state.outputReads;
+    f.state.wrongOutputSession = false;
+    await f.click(f.button('重新读取'));
+    await settle(() => f.dom.window.document.body.textContent!.includes(f.state.outputBody));
+    expect(f.state.outputReads).toBe(beforeRetry + 1);
   } finally {
     await f.close();
   }

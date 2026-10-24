@@ -299,6 +299,7 @@ export async function createWorkflowConfiguration(options: {
                 ...(options.shell.host?.protectedRoots ?? []),
               ]),
             ],
+            protectedFiles: options.shell.host?.protectedFiles ?? [],
           })
         : undefined;
     const rejectedStarts = new WeakSet<JobHandle>();

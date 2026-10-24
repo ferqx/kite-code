@@ -179,3 +179,53 @@ export type NativeMcpResult =
   | NativeMcpTools
   | NativeMcpDescriptorOpen
   | NativeMcpDescriptorChunk;
+
+/** User settings have one Store identity and never acquire Session or Workspace authority. */
+export type NativeUserMcpOperation = import('@kite-ai/client').UserMcpSettingsRequest['operation'];
+export type NativeUserMcpFacts = {
+  kind: 'settings.userMcp';
+  observationId: number;
+  storeId: string;
+  canWrite: boolean;
+  errors: string[];
+  sources: import('@kite-ai/client').UserMcpSettingsView['sources'];
+};
+export type NativeUserMcpSubmission = {
+  kind: 'settings.userMcp.submission';
+  commandId: string;
+  storeId: string;
+  operation: NativeUserMcpOperation;
+  phase: NativeMcpPhase;
+  association: 'current' | 'unavailable';
+  /** Legacy rows retain their exact original read path and grant no new Session authority. */
+  legacy?: true;
+  legacyUser?: true;
+  error?: string;
+};
+export type NativeUserMcpTools = {
+  kind: 'settings.userMcp.tools';
+  observationId: number;
+  page: import('@kite-ai/client').UserMcpToolsPage;
+};
+export type NativeUserMcpRequest =
+  | { method: 'settings.userMcp.read' | 'settings.userMcp.close'; generation: number }
+  | {
+      method: 'settings.userMcp.submit';
+      generation: number;
+      observationId: number;
+      operation: NativeUserMcpOperation;
+    }
+  | {
+      method: 'settings.userMcp.lookup' | 'settings.userMcp.cancel' | 'settings.userMcp.clear';
+      generation: number;
+      commandId: string;
+    }
+  | {
+      method: 'settings.userMcp.tools';
+      generation: number;
+      observationId: number;
+      serverId: string;
+      connectionGeneration: number;
+      afterIndex?: number;
+    };
+export type NativeUserMcpResult = NativeUserMcpFacts | NativeUserMcpSubmission | NativeUserMcpTools;

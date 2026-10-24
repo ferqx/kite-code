@@ -67,6 +67,16 @@ export interface McpAdapterOptions {
   };
 }
 export { McpAdapterError } from './errors';
+export {
+  isUserMcpTransportBinding,
+  type McpHostTransportBinding,
+  type McpHostTransportPort,
+  type McpSessionTransportBinding,
+  type McpUserTransportBinding,
+  mcpTransportEvidenceBinding,
+  userMcpMessageAllowed,
+  validMcpTransportOwner,
+} from './management-transport';
 export { mcpSchemaWorkerAssets } from './schema-validation';
 /** A trusted HTTP transport's exact negative authentication response to this RPC. */
 export class McpHttpAuthRejection extends McpAdapterError {
@@ -1141,6 +1151,7 @@ export type {
 export { createMcpResourceModelSource, mcpResourceModelToolIds } from './resource-model-source';
 export {
   createMcpStdioTransportPort,
+  createUserMcpStdioTransportPort,
   McpStdioPortError,
   type McpStdioPortOptions,
   mcpStdioGuardianAsset,

@@ -1,5 +1,6 @@
 import { expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
+import { createConfigurationSnapshot } from '@kite-ai/agent/config';
 import type { Message, ModelOutputSnapshot } from '@kite-ai/client';
 import { JSDOM } from 'jsdom';
 import { act, useLayoutEffect } from 'react';
@@ -63,7 +64,33 @@ function fixture(
     navigator: dom.window.navigator,
     IS_REACT_ACT_ENVIRONMENT: true,
   });
-  const item = backgroundItem(1, true);
+  const source = backgroundItem(1, true);
+  const item = {
+    ...source,
+    run: {
+      ...source.run!,
+      configuration: {
+        modelId: 'model',
+        snapshot: JSON.parse(
+          JSON.stringify(
+            createConfigurationSnapshot({
+              modelId: 'model',
+              tools: [],
+              models: [
+                {
+                  id: 'model',
+                  provider: 'compatible',
+                  model: 'Model',
+                  protocol: 'chat-completions',
+                  baseURL: 'http://127.0.0.1/v1',
+                },
+              ],
+            }),
+          ),
+        ),
+      },
+    },
+  };
   item.rootSession.nextSeq = pendingToolMetadata ? '3' : '1';
   item.childSession!.title = 'Live child';
   item.childSession!.nextSeq = '1';

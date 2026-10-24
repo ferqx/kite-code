@@ -156,6 +156,23 @@ function record(index: number, storeId = 'store') {
     phase: 'outcome_unknown',
   };
 }
+function userRecord(
+  operation: Record<string, unknown>,
+  commandId = 'global-original',
+  storeId = 'store',
+) {
+  const request = { storeId, commandId, expectedReadSet: hash, operation };
+  const { storeId: _store, commandId: _command, ...body } = request;
+  return {
+    version: 2,
+    scope: 'user',
+    subjectId: 'subject',
+    request,
+    bodySha256: sha(request),
+    requestSha256: sha(body),
+    phase: 'outcome_unknown',
+  };
+}
 function dbRows(records: unknown[]) {
   const db = new Database(':memory:');
   db.run('CREATE TABLE mcp_intents(command_id TEXT PRIMARY KEY,state TEXT NOT NULL)');
@@ -253,6 +270,55 @@ test('Native MCP refuses row and byte limits without evicting unknown original r
     big.close();
   }
 });
+test('global DB7 v2 records remain closed and coexist with legacy Session records', () => {
+  const operations = [
+    { kind: 'add', name: 'global-server', entry: { type: 'http', url: 'https://example.com/mcp' } },
+    { kind: 'remove', serverId },
+    { kind: 'enabled', serverId, enabled: false },
+    { kind: 'authStatus', serverId },
+    { kind: 'login', serverId },
+    { kind: 'authRefresh', serverId },
+    { kind: 'clear', serverId },
+    { kind: 'revoke', serverId },
+    { kind: 'bind', serverId, expiresAt: 1234 },
+    { kind: 'connect', serverId },
+    { kind: 'refresh', serverId },
+    { kind: 'reconnect', serverId },
+    { kind: 'disconnect', serverId },
+  ];
+  for (const operation of operations)
+    expect(() => verifyDesktopMcpRecord(userRecord(operation), 'global-original')).not.toThrow();
+  const global = userRecord({ kind: 'connect', serverId }, 'original-1');
+  const db = dbRows([record(0), global]);
+  try {
+    expect(() => verifyDesktopMcpRows(db)).not.toThrow();
+    expect(
+      db.query<{ count: number }, []>('SELECT count(*) AS count FROM mcp_intents').get()?.count,
+    ).toBe(2);
+  } finally {
+    db.close();
+  }
+  const forged = [
+    { ...global, sessionId: 'placeholder' },
+    { ...global, workspaceId: 'workspace' },
+    { ...global, scope: 'workspace' },
+    { ...global, version: 3 },
+    { ...global, subjectId: '' },
+    { ...global, requestSha256: '0'.repeat(64) },
+    { ...global, request: { ...global.request, secret: 'private' } },
+    {
+      ...global,
+      request: { ...global.request, operation: { kind: 'remove', serverId, scope: 'workspace' } },
+    },
+    userRecord({
+      kind: 'add',
+      name: 'global',
+      entry: { type: 'http', url: 'https://example.com/?token=secret' },
+    }),
+  ];
+  for (const row of forged)
+    expect(() => verifyDesktopMcpRecord(row, row.request.commandId)).toThrow();
+});
 test('actual Node DB7 backup v15 inspect and restore preserve all original requests and reject relabeling or damaged bytes', async () => {
   const root = temporaryDirectory('kite-db7-maintenance-');
   const profile = { dataRoot: join(root, 'data'), profile: 'owned' };
@@ -262,7 +328,10 @@ test('actual Node DB7 backup v15 inspect and restore preserve all original reque
     await store.close();
     await nodeConfigurationAssets(root, profile, storeId);
     const path = join(selectProfile(profile).profilePath, 'desktop-private/data.sqlite');
-    const original = actions.map((_, i) => record(i, storeId));
+    const original = [
+      ...actions.map((_, i) => record(i, storeId)),
+      userRecord({ kind: 'enabled', serverId, enabled: false }, 'global-original', storeId),
+    ];
     const node = Bun.which('node');
     if (!node) throw Error('owned_node_unavailable');
     const repository = fileURLToPath(new URL('../../../../../', import.meta.url));
@@ -282,8 +351,8 @@ globalThis.fetch=async()=>denied();for(const protocol of [http,https])for(const 
 const lease=await acquireDesktopProfileAccess(input.access);let data;
 try {data=openPrivateData(input.profilePath,lease);
  if(input.action==='seed')for(const record of input.records){
-  data.beginMcp({...record,phase:'submitting'});
-  data.finishMcp(record.request.commandId,record.phase);
+  if(record.version===2){data.beginUserMcp({...record,phase:'submitting'});data.finishUserMcp(record.request.commandId,record.phase);}
+  else {data.beginMcp({...record,phase:'submitting'});data.finishMcp(record.request.commandId,record.phase);}
  }
  let terminalChecks;
  if(input.action==='terminal'){
@@ -308,7 +377,7 @@ try {data=openPrivateData(input.profilePath,lease);
   const raw=new DatabaseSync(input.profilePath+'/desktop-private/data.sqlite',{readOnly:true});
   try {capacity={rejected,...raw.prepare('SELECT count(*) AS count,sum(length(CAST(state AS BLOB))) AS bytes FROM mcp_intents').get()};}finally{raw.close();}
  }
- console.log(JSON.stringify({records:data.mcps(),httpRequests,...(terminalChecks?{terminalChecks}:{}),...(capacity?{capacity}: {})}));
+ console.log(JSON.stringify({records:[...data.mcps(),...data.userMcps()].sort((a,b)=>a.request.commandId.localeCompare(b.request.commandId)),httpRequests,...(terminalChecks?{terminalChecks}:{}),...(capacity?{capacity}: {})}));
 }finally{if(data)data.close();else lease.close();}
 `,
       { mode: 0o600 },
@@ -356,7 +425,7 @@ try {data=openPrivateData(input.profilePath,lease);
       ]);
       if (exit !== 0) throw Error(stderr);
       return JSON.parse(stdout) as {
-        records: ReturnType<typeof record>[];
+        records: (ReturnType<typeof record> | ReturnType<typeof userRecord>)[];
         httpRequests: number;
         terminalChecks?: {
           phase: string;
@@ -416,7 +485,7 @@ try {
     const full = await owner('capacity');
     expect(full.capacity).toEqual({
       rejected: 'mcp_capacity_exceeded',
-      count: 12,
+      count: 13,
       bytes: 16777216,
     });
     expect(rawState()).toEqual(padded);

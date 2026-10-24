@@ -132,7 +132,7 @@ for (const mode of ['inline', 'artifact', 'legacy-artifact'] as const)
       expect(host.querySelector('.response-status')?.textContent).toBe('正在思考…');
       expect(host.querySelector('.agent-turn-summary')).toBeNull();
       const response = host.querySelector('.response-status');
-      expect(host.textContent).not.toContain('Read complete recorded Model output');
+      expect(host.textContent).not.toContain('查看完整回复');
       expect(reads).toBe(0);
 
       current = {

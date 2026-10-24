@@ -23,12 +23,13 @@ import { buildNativeCandidate } from '../../scripts/build-native';
 
 const require = createRequire(import.meta.url);
 test.skipIf(process.platform !== 'darwin')(
-  'source-free relocated default Native Skills window reads complete byte-paged metadata, refreshes owned files, switches scopes and cold DB7 with zero execution',
+  'source-free relocated default Native Skills window reads global user byte-paged metadata without selection, ignores project scopes and cold DB7 with zero execution',
   async () => {
     const root = realpathSync(temporaryDirectory('kite-native-skills-bundle-')),
       home = join(root, 'home'),
       moved = join(root, 'relocated');
     privateDirectory(home);
+    const userRoot = dirname(userConfigurationPath(home));
     const workspace = join(home, 'workspace'),
       secondWorkspace = join(home, 'workspace-two');
     mkdirSync(workspace);
@@ -116,21 +117,21 @@ test.skipIf(process.platform !== 'darwin')(
         // Each description fits one bounded response, while the aggregate requires
         // many real byte-budget pages as well as exceeding the 256 item boundary.
         metadata(
-          join(workspace, path),
+          join(userRoot, path),
           `Skill ${number}`,
           `${'完整Unicode目录摘要'.repeat(250)}LONG_DESCRIPTION_TAIL_${number}`,
         );
         skills.push({ id, path });
       }
-      metadata(join(workspace, '.kite-code/skills/kite'), 'Kite metadata', 'KITE_SOURCE_TAIL');
-      metadata(join(workspace, 'configured'), 'Configured metadata', 'CONFIGURED_SOURCE_TAIL');
+      metadata(join(userRoot, '.kite-code/skills/kite'), 'Kite metadata', 'KITE_SOURCE_TAIL');
+      metadata(join(userRoot, 'configured'), 'Configured metadata', 'CONFIGURED_SOURCE_TAIL');
       metadata(
         join(profile.profilePath, 'skills/profile'),
         'Profile metadata',
         'PROFILE_SOURCE_TAIL',
       );
       metadata(
-        join(workspace, '.agents/skills/disabled'),
+        join(userRoot, '.agents/skills/disabled'),
         'Disabled metadata must not be read',
         'DISABLED_METADATA_PRIVATE',
       );
@@ -149,13 +150,20 @@ test.skipIf(process.platform !== 'darwin')(
         userConfigurationPath(home),
         JSON.stringify({
           models: [],
-          skills: [{ id: 'profile', path: join(profile.profilePath, 'skills/profile') }],
+          skills: [...skills, { id: 'profile', path: join(profile.profilePath, 'skills/profile') }],
         }),
         { mode: 0o600 },
       );
-      writeFileSync(join(workspace, 'kite-agent.jsonc'), JSON.stringify({ models: [], skills }), {
-        mode: 0o600,
-      });
+      writeFileSync(
+        join(workspace, 'kite-agent.jsonc'),
+        JSON.stringify({
+          models: [],
+          skills: [{ id: 'project-only', path: 'private-project-skill' }],
+        }),
+        {
+          mode: 0o600,
+        },
+      );
       writeFileSync(
         join(secondWorkspace, 'kite-agent.jsonc'),
         JSON.stringify({
@@ -297,11 +305,10 @@ test.skipIf(process.platform !== 'darwin')(
       expect(report.bytePages.length).toBeGreaterThan(2);
       expect(report.bytePages.reduce((sum, page) => sum + page.entries, 0)).toBe(306);
       expect(new Set(report.bytePages.map((page) => page.revision)).size).toBe(1);
-      expect(
-        report.physical.filter(
-          (row) => row.method !== 'GET' && !(row.method === 'POST' && /\/trust$/.test(row.path)),
-        ),
-      ).toHaveLength(0);
+      expect(report.physical.filter((row) => row.method !== 'GET')).toMatchObject([
+        { method: 'POST', path: '/v1/sessions/second-skills-window/reconcile' },
+        { method: 'POST', path: '/v1/sessions/skills-window/reconcile' },
+      ]);
       expect(report.coldPhysical.filter((row) => row.method !== 'GET')).toHaveLength(0);
       console.log(
         JSON.stringify({

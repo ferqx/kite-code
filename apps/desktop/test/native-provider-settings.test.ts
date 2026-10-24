@@ -49,6 +49,13 @@ const view: ProviderSettingsView = {
       requiresCredential: false,
       connections: [],
     },
+    {
+      id: 'codex',
+      label: 'ChatGPT / Codex',
+      defaultBaseURL: 'https://chatgpt.com/backend-api/codex',
+      requiresCredential: false,
+      connections: [],
+    },
   ],
 };
 const operation: ProviderSettingsRequest['operation'] = {
@@ -103,7 +110,7 @@ test('Native Provider exposes only safe facts and its closed IPC cannot inject v
     () => {},
   );
   const facts = await reader.read();
-  expect(facts.providers).toHaveLength(4);
+  expect(facts.providers).toHaveLength(5);
   expect(
     decodeNativeRequest({
       method: 'settings.providers.save',
@@ -177,6 +184,78 @@ test('Native Provider exposes only safe facts and its closed IPC cannot inject v
       'hot-key',
     ),
   ).toThrow('invalid_provider_endpoint');
+});
+
+test('Native local Codex facts stay read-only and cannot submit a manual credential or endpoint', async () => {
+  const source = structuredClone(view);
+  source.providers.find((provider) => provider.id === 'codex')!.connections = [
+    {
+      id: 'e'.repeat(64),
+      name: 'ChatGPT / Codex（本机）',
+      baseURL: 'https://chatgpt.com/backend-api/codex',
+      protocol: 'responses',
+      hasCredential: true,
+      modelNames: ['fixture-codex-model'],
+      modelIds: ['local-codex-model'],
+      defaultModelIds: [],
+      // Main enforces source ownership even if malformed facts claim the source is writable.
+      canWrite: true,
+    },
+  ];
+  let writes = 0;
+  const reader = new NativeProviderSettings(
+    {
+      getProviderSettings: async () => structuredClone(source),
+      updateProviderSettings: async () => {
+        writes++;
+        throw Error('unexpected_codex_write');
+      },
+    } as unknown as AgentClient,
+    () => ({ generation: 1, selection: 1, storeId: 'store', sessionId: 's' }),
+    () => {},
+  );
+  const facts = await reader.read();
+  const codex = facts.providers.find((provider) => provider.id === 'codex')!;
+  expect(codex.connections[0]).toMatchObject({
+    protocol: 'responses',
+    canWrite: false,
+    modelNames: ['fixture-codex-model'],
+  });
+  const intent: ProviderSettingsRequest['operation'] = {
+    provider: 'codex',
+    protocol: 'responses',
+    connectionId: codex.connections[0]!.id,
+    baseURL: 'https://chatgpt.com/backend-api/codex',
+    modelNames: ['fixture-codex-model'],
+    credential: 'none',
+  };
+  expect(
+    decodeNativeRequest({
+      method: 'settings.providers.save',
+      generation: 1,
+      observationId: facts.observationId,
+      operation: intent,
+    }),
+  ).toMatchObject({ operation: { provider: 'codex', protocol: 'responses' } });
+  for (const protocol of [undefined, 'chat-completions'])
+    expect(() =>
+      decodeNativeRequest({
+        method: 'settings.providers.save',
+        generation: 1,
+        observationId: facts.observationId,
+        operation: { ...intent, protocol },
+      }),
+    ).toThrow('invalid_native_request');
+  for (const edit of [
+    intent,
+    { ...intent, baseURL: 'https://other.invalid/v1' },
+    { ...intent, kind: 'remove' as const, modelNames: [] },
+  ])
+    expect(() => reader.submit(facts.observationId, edit)).toThrow('provider_settings_override');
+  expect(() =>
+    reader.submit(facts.observationId, { ...intent, credential: 'replace' }, 'fixture-private'),
+  ).toThrow('provider_settings_override');
+  expect(writes).toBe(0);
 });
 
 test('Native one hot Provider POST persists non-secret original intent first; cold recovery only GETs it and blocks competing model saves', async () => {

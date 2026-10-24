@@ -2,6 +2,92 @@ import { expect, test } from 'bun:test';
 import { createClient, type HostMutation } from '../../src';
 import { createBrowserClient } from '../../src/browser';
 
+test('Provider settings admit the local Codex family and reject missing or duplicate families', async () => {
+  const profile = { dataRoot: '/private-fixture', name: 'new', accessKey: 'fixed' };
+  const providers = ['openai', 'deepseek', 'compatible', 'ollama', 'codex'].map((id) => ({
+    id,
+    label: id === 'codex' ? 'ChatGPT / Codex' : id,
+    defaultBaseURL: id === 'codex' ? 'https://chatgpt.com/backend-api/codex' : '',
+    requiresCredential: id === 'openai' || id === 'deepseek',
+    connections:
+      id === 'codex'
+        ? [
+            {
+              id: 'd'.repeat(64),
+              name: 'ChatGPT / Codex（本机）',
+              baseURL: 'https://chatgpt.com/backend-api/codex',
+              protocol: 'responses',
+              hasCredential: true,
+              modelNames: ['fixture-codex-model'],
+              canWrite: false,
+            },
+          ]
+        : [],
+  }));
+  let current = structuredClone(providers),
+    writes = 0;
+  const server = Bun.serve({
+    hostname: '127.0.0.1',
+    port: 0,
+    fetch(request) {
+      const url = new URL(request.url);
+      if (request.method !== 'GET') writes++;
+      if (url.pathname === '/v1/server')
+        return Response.json({
+          instanceId: 'fixture',
+          buildId: 'fixture',
+          apiMajor: 1,
+          profile,
+          capabilities: ['configuration_management'],
+          dataAvailability: 'available',
+          storeId: 'store',
+        });
+      expect(url.pathname).toBe('/v1/config/user/providers');
+      expect(url.searchParams.get('storeId')).toBe('store');
+      return Response.json({
+        storeId: 'store',
+        readSet: {
+          userEtag: 'a'.repeat(64),
+          workspaceEtag: null,
+          explicitDigest: 'b'.repeat(64),
+          effectiveDigest: 'c'.repeat(64),
+        },
+        providers: current,
+        errors: [],
+      });
+    },
+  });
+  const client = createClient({
+    endpoint: server.url.href,
+    token: 'private',
+    expected: { profile, apiMajor: 1, requiredCapabilities: [] },
+  });
+  try {
+    await client.connect();
+    const result = await client.getProviderSettings({ storeId: 'store' });
+    expect(result.providers.map((provider) => provider.id)).toEqual([
+      'openai',
+      'deepseek',
+      'compatible',
+      'ollama',
+      'codex',
+    ]);
+    expect(result.providers.at(-1)!.connections[0]).toMatchObject({
+      protocol: 'responses',
+      canWrite: false,
+    });
+    for (const invalid of [providers.slice(0, 4), [...providers.slice(0, 4), providers[0]!]]) {
+      current = structuredClone(invalid);
+      const error = await client.getProviderSettings({ storeId: 'store' }).catch((cause) => cause);
+      expect(error).toMatchObject({ code: 'invalid_response' });
+    }
+    expect(writes).toBe(0);
+  } finally {
+    client.disposeNetwork();
+    server.stop(true);
+  }
+});
+
 test('Native configuration capability, diagnostic read and closed intent never invent authority; bad receipts remain original lookup only', async () => {
   const profile = { dataRoot: '/private-fixture', name: 'new', accessKey: 'fixed' };
   let available = true,

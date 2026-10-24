@@ -1,7 +1,13 @@
 import type { Interaction, InteractionPage } from '@kite-ai/client';
-import type { NativeSkillsScope } from './skills-bridge';
-
-export type NativeInteractionHistoryScope = NativeSkillsScope;
+/** Interaction records remain bound to the retained Session observation. */
+export type NativeInteractionHistoryScope = {
+  generation: number;
+  viewSelection: number;
+  historyEpoch: number;
+  storeId: string;
+  sessionId: string;
+  workspaceId: string;
+};
 export type NativeInteractionHistoryPage = {
   kind: 'interactionHistory.page';
   readId: string;

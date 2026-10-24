@@ -68,7 +68,7 @@ export function createLinuxShellJob(
     Object.values(configuration.env).some((value) => typeof value !== 'string')
   )
     throw Error('invalid_shell_configuration');
-  const prepare = captureLinuxLaunch(configuration, binaries);
+  const prepare = captureLinuxLaunch(configuration, binaries, configuration.env.HOME);
   const states = new WeakMap<JobHandle, State>();
   const get = (handle: JobHandle) => {
     const state = states.get(handle);

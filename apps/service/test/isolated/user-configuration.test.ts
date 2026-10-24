@@ -7,8 +7,180 @@ import type { CompressionInput } from '@kite-ai/agent';
 import { createConfigurationSnapshot, type JsonObject } from '@kite-ai/agent/config';
 import { privateDirectory } from '@kite-ai/agent/windows-path-security';
 import { createSummaryCompressor } from '../../src/compression-configuration';
+import { providerSettingsFacts } from '../../src/model-providers';
 import { createUserConfiguration } from '../../src/user-configuration';
 import { ownedUserConfiguration } from '../fixtures/user-configuration-fixture';
+
+function localCodex(alias = 'codex-local-owned-account') {
+  return {
+    discover: () => ({
+      alias,
+      name: 'ChatGPT / Codex（本机）',
+      models: [
+        { name: 'actual-codex-first', contextWindowTokens: 500000 },
+        { name: 'actual-codex-second' },
+      ],
+      defaultModel: 'actual-codex-second',
+    }),
+  };
+}
+
+test('Codex discovery adds a read-only local connection without creating or copying configuration', () => {
+  const root = mkdtempSync(join(tmpdir(), 'kite-codex-configuration-'));
+  try {
+    const { path } = ownedUserConfiguration(root);
+    const source = createUserConfiguration(path, localCodex());
+    const read = source.read();
+    const models = read.value.models as JsonObject[];
+    expect(read.exists).toBe(false);
+    expect(models.map((model) => model.model)).toEqual([
+      'actual-codex-first',
+      'actual-codex-second',
+    ]);
+    expect(read.value.modelId).toBe(models[1]!.id);
+    expect(models[0]).toMatchObject({
+      provider: 'codex',
+      protocol: 'responses',
+      baseURL: 'https://chatgpt.com/backend-api/codex',
+      enabled: true,
+      modelCapabilities: { contextWindowTokens: 500000 },
+    });
+    const sealed = createConfigurationSnapshot(read.value);
+    expect(sealed.configuration.models).toHaveLength(2);
+    const facts = providerSettingsFacts(read.value, sealed.configuration.models!);
+    expect(facts.find((provider) => provider.id === 'codex')!.connections).toMatchObject([
+      { canWrite: false, hasCredential: true, protocol: 'responses' },
+    ]);
+    expect(() => readFileSync(path)).toThrow();
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('Codex preferences use the existing fields without materializing its provider or replacing a user default', () => {
+  const f = fixture();
+  try {
+    const source = createUserConfiguration(f.path, localCodex());
+    const original = source.read();
+    expect(original.value.modelId).toBe(f.source.read().value.modelId);
+    const models = original.value.models as JsonObject[];
+    const first = models.findIndex((model) => model.model === 'actual-codex-first');
+    const second = models.find((model) => model.model === 'actual-codex-second')!;
+    source.update({
+      ifMatch: original.etag,
+      operations: [
+        { kind: 'set', path: ['models', first, 'enabled'], value: false },
+        { kind: 'set', path: ['models', first, 'options'], value: { reasoningEffort: 'high' } },
+        { kind: 'set', path: ['modelId'], value: second.id! },
+      ],
+    });
+    const savedText = readFileSync(f.path, 'utf8');
+    const saved = JSON.parse(savedText.slice(savedText.indexOf('{')));
+    expect(Object.keys(saved.provider)).toEqual(['deepseek', 'qwen']);
+    expect(saved.model).toBe('codex-local-owned-account:actual-codex-second');
+    expect(saved.disabledModels).toContainEqual({
+      provider: 'codex-local-owned-account',
+      name: 'actual-codex-first',
+    });
+    expect(saved.modelOptions[String(models[first]!.id)]).toEqual({ reasoningEffort: 'high' });
+    expect(saved.provider.deepseek.apiKey).toBe('OWNED_PRIVATE_KEY');
+    expect(savedText.startsWith('// keep user comment')).toBe(true);
+    const after = source.read().value;
+    expect((after.models as JsonObject[])[first]).toMatchObject({
+      enabled: false,
+      options: { reasoningEffort: 'high' },
+    });
+    expect(after.modelId).toBe(second.id);
+  } finally {
+    f.close();
+  }
+});
+
+test('local Codex effort enters the existing preference layer and an explicit model override takes precedence', () => {
+  const root = mkdtempSync(join(tmpdir(), 'kite-codex-effort-'));
+  try {
+    const { path } = ownedUserConfiguration(root);
+    const local = localCodex();
+    const source = createUserConfiguration(path, {
+      discover: () => ({ ...local.discover(), reasoningEffort: 'high' as const }),
+    });
+    const before = source.read();
+    const models = before.value.models as JsonObject[];
+    expect(models.map((model) => model.options)).toEqual([
+      { reasoningEffort: 'high' },
+      { reasoningEffort: 'high' },
+    ]);
+    expect(before.value.modelId).toBe(models[1]!.id);
+    expect(() => readFileSync(path)).toThrow();
+    source.update({
+      ifMatch: before.etag,
+      operations: [
+        { kind: 'set', path: ['models', 1, 'options'], value: { reasoningEffort: 'low' } },
+      ],
+    });
+    const after = source.read().value.models as JsonObject[];
+    expect(after.map((model) => model.options)).toEqual([
+      { reasoningEffort: 'high' },
+      { reasoningEffort: 'low' },
+    ]);
+    const saved = readFileSync(path, 'utf8');
+    expect(JSON.parse(saved).provider).toBeUndefined();
+    expect(JSON.parse(saved).modelOptions[String(models[1]!.id)]).toEqual({
+      reasoningEffort: 'low',
+    });
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('Codex account changes produce distinct routes and preserve an explicit old account selection', () => {
+  const f = fixture();
+  try {
+    let current = localCodex('codex-account-a').discover();
+    const source = createUserConfiguration(f.path, { discover: () => current });
+    const before = source.read();
+    const selected = (before.value.models as JsonObject[]).find(
+      (model) => model.provider === 'codex',
+    )!;
+    source.update({
+      ifMatch: before.etag,
+      operations: [{ kind: 'set', path: ['modelId'], value: selected.id! }],
+    });
+    const old = source.read();
+    current = localCodex('codex-account-b').discover();
+    const next = source.read();
+    expect(next.etag).toBe(old.etag);
+    expect(createConfigurationSnapshot(next.value).digest).not.toBe(
+      createConfigurationSnapshot(old.value).digest,
+    );
+    expect(next.value.modelId).toBe(selected.id);
+    expect((next.value.models as JsonObject[]).some((model) => model.id === selected.id)).toBe(
+      false,
+    );
+  } finally {
+    f.close();
+  }
+});
+
+test('a hand-written Codex protocol cannot seal a different protocol from its actual binding', () => {
+  const source = createUserConfiguration();
+  for (const protocol of ['chat-completions', 'unexpected']) {
+    expect(() =>
+      createConfigurationSnapshot(
+        source.normalize({
+          provider: {
+            'codex-owned-account': {
+              type: 'codex',
+              protocol,
+              baseURL: 'https://chatgpt.com/backend-api/codex',
+              models: ['actual-codex-model'],
+            },
+          },
+        }),
+      ),
+    ).toThrow('model_protocol_unsupported');
+  }
+});
 
 function fixture() {
   const root = mkdtempSync(join(tmpdir(), 'kite-user-configuration-'));

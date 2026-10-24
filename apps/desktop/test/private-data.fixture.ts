@@ -20,10 +20,13 @@ import {
   fileRecoveryIntentId,
 } from '../electron/file-recovery-journal';
 import {
-  finishNativeMcpRecord,
+  finishNativeStoredMcpRecord,
   type NativeMcpRecord,
-  nativeMcpIdentity,
+  type NativeStoredMcpRecord,
+  type NativeUserMcpRecord,
+  nativeStoredMcpIdentity,
   parseNativeMcpRecord,
+  parseNativeUserMcpRecord,
 } from '../electron/mcp-journal';
 import {
   assertQueueRecordTransition,
@@ -49,7 +52,7 @@ export function memoryPrivateData(): PrivateData {
   const files = new Map<string, FileRecoveryIntent>();
   const inputQueue = new Map<string, NativeQueueRecord>();
   const removals = new Map<string, WorkspaceRemovalIntent>();
-  const mcps = new Map<string, NativeMcpRecord>();
+  const mcps = new Map<string, NativeStoredMcpRecord>();
   const configurations = new Map<string, NativeConfigurationRecord>();
   const routes = new Map<string, string>();
   const answers = new Map<string, NativeAnswerRecord>();
@@ -57,6 +60,30 @@ export function memoryPrivateData(): PrivateData {
     creations = new Map<string, NativeCreation>(),
     recoveries = new Map<string, NativeRecoveryIntent>(),
     callers = new Map<string, NativeCallerRecord>();
+  function beginStoredMcp<T extends NativeStoredMcpRecord>(
+    value: T,
+  ): { created: boolean; value: T } {
+    const old = mcps.get(value.request.commandId);
+    if (old) {
+      if (nativeStoredMcpIdentity(old) !== nativeStoredMcpIdentity(value))
+        throw Error('mcp_intent_conflict');
+      return { created: false, value: structuredClone(old) as T };
+    }
+    if (value.phase !== 'submitting' || mcps.size >= 128) throw Error('mcp_intent_conflict');
+    mcps.set(value.request.commandId, value);
+    return { created: true, value: structuredClone(value) };
+  }
+  function finishStoredMcp(
+    commandId: string,
+    phase: NativeStoredMcpRecord['phase'],
+    version: 1 | 2,
+  ): NativeStoredMcpRecord {
+    const old = mcps.get(commandId);
+    if (!old || old.version !== version) throw Error('mcp_intent_missing');
+    const value = finishNativeStoredMcpRecord(old, phase);
+    mcps.set(commandId, value);
+    return structuredClone(value);
+  }
   const read = (scope: DraftScope) =>
     drafts.get(JSON.stringify(scope)) ?? {
       id: JSON.stringify(scope),
@@ -82,24 +109,25 @@ export function memoryPrivateData(): PrivateData {
     clearWorkspaceRemoval(id) {
       removals.delete(id);
     },
-    mcps: () => [...mcps.values()].map((row) => structuredClone(row)),
+    mcps: () =>
+      [...mcps.values()]
+        .filter((row): row is NativeMcpRecord => row.version === 1)
+        .map((row) => structuredClone(row)),
+    userMcps: () =>
+      [...mcps.values()]
+        .filter((row): row is NativeUserMcpRecord => row.version === 2)
+        .map((row) => structuredClone(row)),
     beginMcp(raw) {
-      const value = parseNativeMcpRecord(raw),
-        old = mcps.get(value.request.commandId);
-      if (old) {
-        if (nativeMcpIdentity(old) !== nativeMcpIdentity(value)) throw Error('mcp_intent_conflict');
-        return { created: false, value: structuredClone(old) };
-      }
-      if (value.phase !== 'submitting' || mcps.size >= 128) throw Error('mcp_intent_conflict');
-      mcps.set(value.request.commandId, value);
-      return { created: true, value: structuredClone(value) };
+      return beginStoredMcp(parseNativeMcpRecord(raw));
+    },
+    beginUserMcp(raw) {
+      return beginStoredMcp(parseNativeUserMcpRecord(raw));
     },
     finishMcp(commandId, phase) {
-      const old = mcps.get(commandId);
-      if (!old) throw Error('mcp_intent_missing');
-      const value = finishNativeMcpRecord(old, phase);
-      mcps.set(commandId, value);
-      return structuredClone(value);
+      return finishStoredMcp(commandId, phase, 1) as NativeMcpRecord;
+    },
+    finishUserMcp(commandId, phase) {
+      return finishStoredMcp(commandId, phase, 2) as NativeUserMcpRecord;
     },
     clearMcp(commandId) {
       const old = mcps.get(commandId);

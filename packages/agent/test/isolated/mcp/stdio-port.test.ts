@@ -16,7 +16,10 @@ import { createFixedModel } from '@kite-ai/ai';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { launchIdentity } from '../../../src/jobs/launch-identity';
 import { createMcpAdapter, createMcpLifecycle } from '../../../src/mcp';
-import { createMcpStdioTransportPort } from '../../../src/mcp/stdio-port';
+import {
+  createMcpStdioTransportPort,
+  createUserMcpStdioTransportPort,
+} from '../../../src/mcp/stdio-port';
 import {
   decodeMcpStdioProcessEvidence,
   observeMcpStdioIdentity,
@@ -327,6 +330,85 @@ macTest(
     }
   },
   15000,
+);
+
+macTest(
+  'explicit user settings owner uses the same guardian tree proof and rejects tools/call before wire',
+  async () => {
+    const f = await fixture(),
+      controller = new AbortController();
+    const original = f.binding();
+    const binding = {
+      owner: 'user' as const,
+      originalStoreId: 'store',
+      subjectId: 'owner',
+      commandId: 'global-connect',
+      requestDigest: 'a'.repeat(64),
+      serverId: 'local',
+      scopeId: JSON.stringify(['user', 'store', 'owner', 'local']),
+      configDigest: original.configDigest,
+      configuration: f.configuration,
+    };
+    let admissions = 0;
+    const port = createUserMcpStdioTransportPort({
+      servers: [{ id: 'local', configuration: f.configuration }],
+      guardianPath: join(f.root, 'stdio-guardian.js'),
+      controlBase: f.root,
+      bunExecutable: process.execPath,
+      allowedEnvNames: ['LEDGER', 'MODE', 'FIXTURE_VISIBLE'],
+      async admit(actual) {
+        admissions++;
+        expect(actual).toEqual(binding);
+      },
+    });
+    expect(
+      await port
+        .open(original as unknown as typeof binding, { signal: controller.signal })
+        .catch((error: unknown) => error),
+    ).toMatchObject({ code: 'mcp_stdio_binding_invalid' });
+    const sessionPort = f.makePort(async () => {
+      admissions++;
+    });
+    expect(
+      await sessionPort
+        .open(binding as unknown as typeof original, { signal: controller.signal })
+        .catch((error: unknown) => error),
+    ).toMatchObject({ code: 'mcp_stdio_binding_invalid' });
+    expect(admissions).toBe(0);
+    expect(f.states()).toEqual([]);
+    const owned = await port.open(binding, { signal: controller.signal }),
+      client = new Client({ name: 'global catalogue fixture', version: '1' });
+    try {
+      await client.connect(owned.transport);
+      expect((await client.listTools()).tools[0]!.name).toBe('effect');
+      const evidence = owned.readProcessEvidence!();
+      const { configuration: _configuration, ...expected } = binding;
+      expect(evidence.binding).toEqual(expected);
+      expect(decodeMcpStdioProcessEvidence(evidence, expected, process.pid)).toEqual(evidence);
+      const denied = await owned.transport
+        .send({
+          jsonrpc: '2.0',
+          id: 999,
+          method: 'tools/call',
+          params: { name: 'effect', arguments: {} },
+        })
+        .catch((error: unknown) => error);
+      expect(denied).toMatchObject({ code: 'mcp_settings_method_denied' });
+      expect(f.states().every((state) => !existsSync(join(f.root, `${state.leader}.called`)))).toBe(
+        true,
+      );
+      expect((await owned.stop()).status).toBe('stopped');
+      expect(await owned.stopped).toEqual({ supervision: 'ended' });
+      const state = f.states()[0]!,
+        tree = f.tree(state);
+      expect([state.leader, state.guardian, tree.child, tree.grand].some(alive)).toBe(false);
+    } finally {
+      await owned.stop();
+      await client.close();
+      await f.close();
+    }
+  },
+  20000,
 );
 
 macTest(

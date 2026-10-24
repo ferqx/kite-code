@@ -1,12 +1,8 @@
-import type { SkillCataloguePage } from '@kite-ai/client';
+import type { UserSkillCataloguePage } from '@kite-ai/client';
 
 export type NativeSkillsScope = {
   generation: number;
-  viewSelection: number;
-  historyEpoch: number;
   storeId: string;
-  sessionId: string;
-  workspaceId: string;
 };
 
 export type NativeSkillsRequest =
@@ -14,8 +10,6 @@ export type NativeSkillsRequest =
       method: 'settings.skills.open';
       generation: number;
       readId: string;
-      viewSelection: number;
-      historyEpoch: number;
     }
   | {
       method: 'settings.skills.next' | 'settings.skills.close';
@@ -27,5 +21,5 @@ export type NativeSkillsPage = {
   kind: 'settings.skills.page';
   readId: string;
   scope: NativeSkillsScope;
-  page: SkillCataloguePage;
+  page: UserSkillCataloguePage;
 };

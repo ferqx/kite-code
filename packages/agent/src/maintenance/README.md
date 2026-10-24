@@ -221,6 +221,8 @@ Desktop Native MCP 的原请求现在是私有 DB7 的独立 `mcp_intents(comman
 
 每条 state 精确为 `{version:1,sessionId,workspaceId,workspaceIdentity,subjectId,request,targetRequest,bodySha256,requestSha256,phase}`。身份为闭合 opaque ID，workspaceIdentity 与摘要为 SHA-256；phase 仅 `submitting|pending|completed|failed|cancelled|outcome_unknown`。完整 request 保留原 Store 与 Command，仅接纳十二类闭合 MCP 动作：选择、连接、目录刷新、重连、来源批准、凭据绑定、来源增加/删除及四类 Auth。bodySha256 对完整请求 canonical JSON，requestSha256 仅排除 expectedStoreId/commandId；对象递归排序，数组顺序保留。targetRequest 仅重连存在，保存先前连接或重连请求；核原 Store、Session、Server 与 carrierKey，禁止嵌套历史；先前 carrier Command 不要求等于初始 operationRef Command。
 
+同表另接受显式全局 `{version:2,scope:user,subjectId,request,bodySha256,requestSha256,phase}`，request 恰 `{storeId,commandId,expectedReadSet,operation}`，不含 Session／Workspace。read-set 为 SHA-256，operation 使用用户 MCP 有限闭合 grammar，秘密、URL 认证参数和任意原 JSON 拒绝；body 摘要覆盖完整请求，request 摘要仅排除 storeId／commandId。两个版本共享原 128 行／16MiB 总额，manifest 仍按实际资产使用 v15／v16，创建／inspect／restore 保同一版本与原字节。Native v2 冷行保持已严格保存的 completed／failed／cancelled，未决行只投影 unknown；恢复不自动 GET／POST，查回必须使用原 ID。原 v1 请求与恢复规则保持，项目记录不因出现在同表而成为全局配置或取得新 authority。
+
 DB7 维护核 SQL PK、精确字段、类型、枚举、摘要、重复 Command、最多 128 行/16MiB，以及原 SQL TEXT 的 BLOB hex 与 UTF8 全字节一致性。未知状态、损坏字节或秘密字段拒绝整份备份，不删除或修复。创建、检查与恢复核同一 grammar 并保原 state 字节；恢复后的旧 Store 请求只供冷读事实，不构成当前 Service receipt、POST 权限或自动重放。历史 Node fixture 仅在 owner 关闭、取得排他 profile 权且新表确认为空后物理降版，不删除真实新资产。独立 [DB7 验证](../../test/isolated/maintenance/desktop-mcp.test.ts) 覆盖十二动作、原请求与前 carrier、损坏枚举/secret/UTF8，以及实际 Node DB7 的 v15 backup/inspect/新 Store restore。
 
 

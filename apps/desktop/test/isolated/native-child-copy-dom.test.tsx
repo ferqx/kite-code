@@ -167,7 +167,7 @@ async function fixture(
   }
 }
 
-test('child full reader close revokes message and code copy instead of copying a truncated preview, and reopen restores exact text', async () =>
+test('child automatically shows the verified body and rejected replacement revokes copy until a valid body returns', async () =>
   fixture(async (f) => {
     const facts = childFacts();
     await f.render(facts);
@@ -176,19 +176,23 @@ test('child full reader close revokes message and code copy instead of copying a
     )!;
     await f.click('复制代码');
     expect(f.writes).toEqual([code]);
-    await f.click('Close full Model output');
+    expect(f.host.querySelector('.model-output-message > button')).toBeNull();
+    expect(f.host.querySelector('.model-output-message > p')).toBeNull();
+    const rejected = childFacts();
+    rejected.modelOutputs[0]!.snapshot.executionId = 'wrong-execution';
+    await f.render(rejected);
     expect(f.host.querySelector('pre code')?.textContent).toBe('const complete = tr\n');
     expect(f.host.querySelector('[data-slot="code-block-copy-button"]') === null).toBe(true);
     expect(f.host.querySelector('.message-copy') === null).toBe(true);
     await act(async () => oldCode.click());
     expect(f.writes).toEqual([code]);
-    await f.click('Read complete recorded Model output');
+    await f.render(facts);
     await f.click('复制代码');
     await f.click('复制本轮Agent回复');
     expect(f.writes).toEqual([code, code, content]);
   }));
 
-test('child pause preserves disabled copy feedback and code DOM, while explicit close revokes even during pause', async () =>
+test('child pause preserves disabled copy feedback and code DOM, and resuming keeps automatic body copy accurate', async () =>
   fixture(async (f) => {
     const facts = childFacts();
     await f.render(facts);
@@ -207,13 +211,14 @@ test('child pause preserves disabled copy feedback and code DOM, while explicit 
     expect(f.host.querySelector('[data-slot="code-block-copy-button"]') === button).toBe(true);
     expect(button.getAttribute('data-copy-state')).toBe('copied');
     await f.render(facts, { readActive: false });
-    await f.click('Close full Model output');
-    expect(f.host.querySelector('[data-slot="code-block-copy-button"]') === null).toBe(true);
-    expect(f.host.querySelector('.message-copy') === null).toBe(true);
+    expect(f.host.querySelector('[data-slot="code-block-copy-button"]') === button).toBe(true);
+    expect(button.getAttribute('aria-disabled')).toBe('true');
+    await act(async () => button.click());
+    expect(f.writes).toEqual([code]);
+    expect(f.host.querySelector('.model-output-message > button')).toBeNull();
     await f.render(facts);
-    expect(f.host.querySelector('[data-slot="code-block-copy-button"]') === null).toBe(true);
-    await f.click('Read complete recorded Model output');
-    await f.click('复制代码');
+    expect(f.host.querySelector('[data-slot="code-block-copy-button"]') === button).toBe(true);
+    await act(async () => button.click());
     expect(f.writes).toEqual([code, code]);
   }));
 

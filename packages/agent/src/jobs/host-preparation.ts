@@ -5,6 +5,7 @@ import { dirname, isAbsolute, join, relative, sep } from 'node:path';
 import type { JobContext } from '../extensions';
 import type { ConfinedLaunch } from './confined-preparation';
 import { launchIdentity, removeRuntimeTemp, verifyLaunchIdentities } from './launch-identity';
+import { captureProtectedFiles } from './protected-files';
 import { captureReadOnlySource } from './read-only-source';
 import { SEATBELT_BASE_POLICY } from './seatbelt';
 import {
@@ -20,6 +21,7 @@ export interface MacosHostPaths {
   readonly readOnlySourceRoot?: string;
   readonly controlBase: string;
   readonly protectedRoots: readonly string[];
+  readonly protectedFiles?: readonly string[];
   readonly readonlyAssets?: readonly string[];
   readonly runtimeReadOnlyRoots?: readonly string[];
   readonly temporaryRoot?: string;
@@ -48,9 +50,12 @@ function ancestors(path: string) {
 export function captureMacosHostLaunch(options: MacosHostPaths, binaries: readonly string[]) {
   if (process.platform !== 'darwin') throw Error('host_shell_platform_unsupported');
   if (
-    [options.protectedRoots, options.readonlyAssets ?? [], options.runtimeReadOnlyRoots ?? []].some(
-      (paths) => paths.length > 128,
-    )
+    [
+      options.protectedRoots,
+      options.protectedFiles ?? [],
+      options.readonlyAssets ?? [],
+      options.runtimeReadOnlyRoots ?? [],
+    ].some((paths) => paths.length > 128)
   )
     throw Error('host_shell_paths_invalid');
   const cwd = launchIdentity(options.cwd);
@@ -60,6 +65,7 @@ export function captureMacosHostLaunch(options: MacosHostPaths, binaries: readon
     (path) => launchIdentity(path),
   );
   const tempBase = launchIdentity(options.temporaryRoot ?? tmpdir());
+  const privateFiles = captureProtectedFiles(options.protectedFiles ?? []);
   const sourceProjection = captureReadOnlySource({
     cwd,
     workspace,
@@ -88,6 +94,7 @@ export function captureMacosHostLaunch(options: MacosHostPaths, binaries: readon
     ...protectedRoots,
     ...readonly,
     ...assets,
+    ...privateFiles.files.map((file) => file.parent),
     ...(sourceProjection ? [sourceProjection.source, ...sourceProjection.ancestors] : []),
   ];
   if (bindings.length > 190) throw Error('host_shell_paths_invalid');
@@ -102,9 +109,11 @@ export function captureMacosHostLaunch(options: MacosHostPaths, binaries: readon
         ...readonly,
         ...assets,
         ...(sourceProjection ? [sourceProjection.source] : []),
-      ].flatMap((fact) =>
-        ancestors(fact.digest === null ? fact.canonical : dirname(fact.canonical)),
-      ),
+      ]
+        .flatMap((fact) =>
+          ancestors(fact.digest === null ? fact.canonical : dirname(fact.canonical)),
+        )
+        .concat(privateFiles.deniedPaths.flatMap((path) => ancestors(dirname(path)))),
     ),
   ];
   const system = [
@@ -130,6 +139,7 @@ export function captureMacosHostLaunch(options: MacosHostPaths, binaries: readon
     .map((path) => realpathSync.native(path));
   return (command: string, shell: string, context: JobContext): ConfinedLaunch => {
     verifyLaunchIdentities(bindings);
+    privateFiles.verify();
     const scope = resolveHostShellExecutionScope(
       options.executionScope,
       options.filesystemScope,
@@ -157,6 +167,7 @@ export function captureMacosHostLaunch(options: MacosHostPaths, binaries: readon
           ? `(require-all ${subpath(root.canonical)} (require-not (require-any ${subpath(sourceProjection.source.canonical)} ${sourceAncestors.join(' ')})))`
           : subpath(root.canonical),
       );
+      const privateFileFilters = privateFiles.deniedPaths.map(subpath);
       const profile = [
         SEATBELT_BASE_POLICY.replace('(deny process-fork)', '(allow process-fork)'),
         '(allow file-read* file-read-metadata)',
@@ -168,6 +179,15 @@ export function captureMacosHostLaunch(options: MacosHostPaths, binaries: readon
           : `(allow file-write* file-write-create file-write-unlink file-ioctl ${[workspace.canonical, temp].map(subpath).join(' ')})`,
         `(deny file-write* file-write-create file-write-unlink file-ioctl ${assetFilters.join(' ')} ${readonly.map((root) => subpath(root.canonical)).join(' ')})`,
         `(deny file-read* file-read-metadata ${privateReadFilters.join(' ')})`,
+        ...(privateFileFilters.length
+          ? [
+              `(deny file-read* file-read-metadata process-exec file-map-executable file-write* file-write-create file-write-unlink file-ioctl ${privateFileFilters.join(' ')})`,
+            ]
+          : []),
+        // A child cannot redirect a missing private parent before credentials appear.
+        ...(privateFiles.missingParents.length
+          ? [`(deny file-write-create ${privateFiles.missingParents.map(literal).join(' ')})`]
+          : []),
         ...(sourceAncestors.length
           ? [`(deny file-read-data file-read-xattr ${sourceAncestors.join(' ')})`]
           : []),

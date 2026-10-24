@@ -1,7 +1,15 @@
 import { constants, Database } from 'bun:sqlite';
 import { expect, test } from 'bun:test';
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  copyFileSync,
+  mkdirSync,
+  readFileSync,
+  realpathSync,
+  renameSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { createRequire } from 'node:module';
 import { dirname, join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -9,17 +17,16 @@ import { acquireArtifactAccess } from '@kite-ai/agent/artifact-access';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import { initializeSqliteEngine } from '@kite-ai/agent/sqlite-engine';
-import type { Command, Interaction } from '@kite-ai/client';
 import { verifyNativeRuntimeBundle } from '@kite-ai/service/native-runtime-assets';
 import { privateDirectory, temporaryDirectory } from '../../../../tests/fixtures/test-filesystem';
 import { userConfigurationPath } from '../../../service/test/fixtures/user-configuration-fixture';
 import { buildNativeCandidate } from '../../scripts/build-native';
-import type { NativeMcpSubmission } from '../../src/native-bridge';
+import type { NativeUserMcpSubmission } from '../../src/native-bridge';
 import { linkOwnedDefaultKeychain } from '../owned-default-keychain';
 
 const require = createRequire(import.meta.url);
 test.skipIf(process.platform !== 'darwin')(
-  'source-free relocated trusted-loopback Native MCP formal window source operations, independent reviews, immutable tools and cold original GET',
+  'source-free relocated Native global user MCP without Session, stable selection, continuous tools schema and cold original GET',
   async () => {
     const root = realpathSync(temporaryDirectory('kite-native-mcp-bundle-')),
       home = join(root, 'home'),
@@ -156,6 +163,11 @@ else throw Error('owned_credential_operation_invalid');
               required: ['value'],
             },
           },
+          ...Array.from({ length: 33 }, (_, index) => ({
+            name: `owned_tool_${index + 1}`,
+            description: `Tool ${index + 1}`,
+            inputSchema: { type: 'object', additionalProperties: false },
+          })),
         ];
       writeFileSync(join(home, 'stdio-effects'), '');
       writeFileSync(
@@ -256,7 +268,15 @@ else throw Error('owned_credential_operation_invalid');
       );
       writeFileSync(
         join(home, 'workspace', '.kite-code', 'mcp.json'),
-        JSON.stringify({ mcpServers: {} }),
+        JSON.stringify({
+          mcpServers: {
+            'window-project': {
+              type: 'http',
+              url: `${server.url.href.replace(/\/$/, '')}/mcp`,
+              auth: { type: 'none' },
+            },
+          },
+        }),
         { mode: 0o600 },
       );
       const fixture = join(root, 'driver.ts');
@@ -328,109 +348,72 @@ else throw Error('owned_credential_operation_invalid');
       }
       const report = JSON.parse(readFileSync(join(home, 'mcp-report.json'), 'utf8')) as {
         pids: number[];
-        persisted: { version: number };
-        submissions: NativeMcpSubmission[];
-        after: { method: string }[];
-        remoteAnswers: { card: Interaction; command: Command }[];
-        completedToolRun: string;
+        persisted: { version: number; rows: { command_id: string; state: string }[] };
+        submissions: NativeUserMcpSubmission[];
+        after: { path: string; method: string }[];
+        noSession: boolean;
+        stableSelection: boolean;
+        continuousTools: boolean;
       };
       for (const pid of report.pids) expect(() => process.kill(pid, 0)).toThrow();
+      expect(report.noSession).toBe(true);
+      expect(report.stableSelection).toBe(true);
+      expect(report.continuousTools).toBe(true);
       const database = new Database(
         profile.databasePath,
         constants.SQLITE_OPEN_READONLY | constants.SQLITE_OPEN_NOFOLLOW,
       );
       try {
         database.run('PRAGMA query_only=ON');
-        expect(report.remoteAnswers.length).toBeGreaterThan(0);
-        for (const { card, command } of report.remoteAnswers) {
-          const answers = database
-            .query(
-              "SELECT id,status,request_digest,request_json,receipt_json FROM command WHERE kind='interaction.answer' AND session_id=? AND json_extract(request_json,'$.interactionId')=? AND json_extract(request_json,'$.expectedRevision')=?",
+        expect(
+          database.query<{ count: number }, []>('SELECT count(*) AS count FROM run').get()?.count,
+        ).toBe(0);
+        expect(
+          database
+            .query<{ count: number }, []>(
+              "SELECT count(*) AS count FROM command WHERE kind='extension.invoke'",
             )
-            .all(card.presentationSessionId, card.id, card.revision) as {
-            id: string;
-            status: string;
-            request_digest: string;
-            request_json: string;
-            receipt_json: string;
-          }[];
-          expect(answers).toHaveLength(1);
-          const answer = answers[0]!;
-          expect(answer.id).toBe(command.id);
-          expect(answer.status).toBe('applied');
-          expect(answer.request_digest).toBe(command.requestDigest!);
-          expect(JSON.parse(answer.request_json)).toMatchObject({
-            interactionId: card.id,
-            expectedRevision: card.revision,
-            answer: { kind: 'approval', decision: 'approve', grant: 'approve_once' },
+            .get()?.count,
+        ).toBe(0);
+        const mutations = database
+          .query<
+            { id: string; kind: string; scope: string; state: string; safe_request_json: string },
+            []
+          >('SELECT id,kind,scope,state,safe_request_json FROM host_mutation')
+          .all();
+        for (const submission of report.submissions) {
+          const matches = mutations.filter((row) => row.id === submission.commandId);
+          expect(matches).toHaveLength(1);
+          expect(matches[0]).toMatchObject({
+            kind: 'config.user.write',
+            scope: 'user',
+            state: 'applied',
           });
-          expect(JSON.parse(answer.receipt_json)).toEqual(command.receipt);
-          expect(command.receipt).toMatchObject({
-            interactionId: card.id,
-            outcome: 'answer_saved',
-            decisionRevision: String(BigInt(card.revision) + 1n),
-          });
-          const original = database
-            .query(
-              'SELECT execution_id,run_id,revision,accepted_decision_revision,state FROM interaction WHERE id=?',
-            )
-            .get(card.id);
-          expect(original).toMatchObject({
-            execution_id: card.executionId,
-            run_id: report.completedToolRun,
-            revision: Number(BigInt(card.revision) + 1n),
-            accepted_decision_revision: Number(BigInt(card.revision) + 1n),
-            state: 'answered',
-          });
+          const safe = JSON.parse(matches[0]!.safe_request_json);
+          expect(safe.mcpSettings.operation).toEqual(submission.operation);
+          expect(safe).not.toHaveProperty('sessionId');
+          expect(safe).not.toHaveProperty('workspaceId');
         }
-        expect(
-          database
-            .query('SELECT status,is_active FROM run WHERE id=?')
-            .get(report.completedToolRun),
-        ).toEqual({ status: 'completed', is_active: 0 });
-        expect(
-          database
-            .query('SELECT kind,state,dispatched FROM execution WHERE run_id=? ORDER BY kind,id')
-            .all(report.completedToolRun),
-        ).toEqual([
-          { kind: 'model', state: 'succeeded', dispatched: 1 },
-          { kind: 'model', state: 'succeeded', dispatched: 1 },
-          { kind: 'tool', state: 'succeeded', dispatched: 1 },
-        ]);
       } finally {
         database.close();
       }
       expect(report.persisted.version).toBe(7);
-      expect(
-        report.submissions.some(
-          (row) =>
-            row.actionId === 'mcp.reconnect' &&
-            row.fact &&
-            'oldStop' in row.fact &&
-            row.fact.oldStop.confirmed,
-        ),
-      ).toBe(true);
+      expect(report.persisted.rows.length).toBeGreaterThan(0);
+      for (const row of report.persisted.rows)
+        expect(JSON.parse(row.state)).toMatchObject({ version: 2, scope: 'user' });
+      for (const kind of [
+        'add',
+        'enabled',
+        'connect',
+        'refresh',
+        'reconnect',
+        'disconnect',
+        'remove',
+      ])
+        expect(report.submissions.some((row) => row.operation.kind === kind)).toBe(true);
       expect(report.after.filter((row) => row.method === 'POST')).toHaveLength(0);
       expect(wire.some((row) => row.method === 'initialize')).toBe(true);
-      const models = wire.filter((value) => value.kind === 'model') as {
-        body: {
-          tools: {
-            function: {
-              name: string;
-              parameters: { required?: string[]; properties?: { value?: { type?: string } } };
-            };
-          }[];
-        };
-      }[];
-      expect(models).toHaveLength(2);
-      for (const model of models)
-        expect(
-          model.body.tools.find(
-            (value) =>
-              /^mcp_mcp_[a-f0-9]{16}_owned_effect_[a-f0-9]{8}$/.test(value.function.name) &&
-              value.function.parameters.properties?.value?.type === 'string',
-          )?.function.parameters.required,
-        ).toEqual(['value']);
+      expect(wire.some((row) => row.kind === 'model' || row.method === 'tools/call')).toBe(false);
       const stdioWire = readFileSync(join(home, 'stdio-wire.jsonl'), 'utf8')
         .trim()
         .split('\n')
@@ -439,15 +422,25 @@ else throw Error('owned_credential_operation_invalid');
         2,
       );
       expect(stdioWire.some((row) => row.method === 'tools/list')).toBe(true);
-      const effects = readFileSync(join(home, 'stdio-effects'), 'utf8')
-        .trim()
-        .split('\n')
-        .map((line) => JSON.parse(line));
-      expect(effects).toHaveLength(1);
-      expect(effects[0].params).toEqual({
-        name: 'owned_effect',
-        arguments: { value: 'EXACT_OWNED_EFFECT' },
-      });
+      expect(readFileSync(join(home, 'stdio-effects'), 'utf8')).toBe('');
+      expect(
+        JSON.parse(readFileSync(join(home, 'workspace/.kite-code/mcp.json'), 'utf8')).mcpServers[
+          'window-project'
+        ],
+      ).toBeDefined();
+      const evidence = `${root}-evidence`;
+      mkdirSync(evidence);
+      for (const file of [
+        'global-no-session.png',
+        'global-tools-schema.png',
+        'global-tools-pages.png',
+        'global-selection-stable.png',
+        'global-cold-originals.png',
+        'global-window-trace.zip',
+        'global-cold-trace.zip',
+      ])
+        copyFileSync(join(home, file), join(evidence, file));
+      console.log(JSON.stringify({ stage: 'global_user_mcp_visual_evidence', evidence }));
       console.log(
         JSON.stringify({
           root,

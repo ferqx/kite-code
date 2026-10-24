@@ -7,6 +7,16 @@ import { fileURLToPath } from 'node:url';
 import type { Transport } from '@modelcontextprotocol/sdk/shared/transport.js';
 import { type JSONRPCMessage, JSONRPCMessageSchema } from '@modelcontextprotocol/sdk/types.js';
 import { createMcpAdapter, type McpLifecycleTransportPort } from './index';
+import {
+  isUserMcpTransportBinding,
+  type McpHostTransportBinding,
+  type McpHostTransportPort,
+  type McpSessionTransportBinding,
+  type McpUserTransportBinding,
+  mcpTransportEvidenceBinding,
+  userMcpMessageAllowed,
+  validMcpTransportOwner,
+} from './management-transport';
 import { McpStdioPortError } from './stdio-error';
 import {
   copyMcpStdioEvidence,
@@ -40,7 +50,7 @@ export function mcpStdioLinuxAssets(): { initExecutable: string; bubblewrapPath:
     throw new McpStdioPortError('mcp_stdio_asset_unavailable');
   return { initExecutable, bubblewrapPath: realpathSync.native(bubblewrap) };
 }
-type Binding = Parameters<McpLifecycleTransportPort['open']>[0];
+type Binding = McpHostTransportBinding;
 type Configuration = {
   type: 'stdio';
   command: string;
@@ -48,7 +58,7 @@ type Configuration = {
   cwd: string;
   env: Record<string, string>;
 };
-export interface McpStdioPortOptions {
+export interface McpStdioPortOptions<B extends Binding = McpSessionTransportBinding> {
   servers: readonly { id: string; configuration: Configuration }[];
   guardianPath: string;
   bunExecutable: string;
@@ -57,15 +67,26 @@ export interface McpStdioPortOptions {
   /** Trusted private host base; the broker creates and removes its own 0700 directory. */
   controlBase?: string;
   allowedEnvNames: readonly string[];
-  admit(binding: Binding, options: { signal: AbortSignal }): Promise<void>;
+  admit(binding: B, options: { signal: AbortSignal }): Promise<void>;
   /** Host-only source fence; cancellation/cleanup itself never depends on this check. */
-  assertFresh?(binding: Binding, options: { signal: AbortSignal }): void;
+  assertFresh?(binding: B, options: { signal: AbortSignal }): void;
   limits?: { frameBytes?: number; stderrBytes?: number; timeoutMs?: number; graceMs?: number };
 }
 /** Trusted platform supervision of this connection's owned process resources. */
 export function createMcpStdioTransportPort(
   options: McpStdioPortOptions,
 ): McpLifecycleTransportPort {
+  return createHostMcpStdioTransportPort(options, 'session');
+}
+export function createUserMcpStdioTransportPort(
+  options: McpStdioPortOptions<McpUserTransportBinding>,
+): McpHostTransportPort<McpUserTransportBinding> {
+  return createHostMcpStdioTransportPort(options, 'user');
+}
+function createHostMcpStdioTransportPort<B extends Binding>(
+  options: McpStdioPortOptions<B>,
+  owner: 'session' | 'user',
+): McpHostTransportPort<B> {
   const guardianPath = options.guardianPath,
     bun = options.bunExecutable,
     maximum = options.limits?.frameBytes ?? 1024 * 1024,
@@ -137,11 +158,8 @@ export function createMcpStdioTransportPort(
         binding.configDigest !== server.configDigest ||
         createMcpAdapter({ id: binding.serverId, transport: binding.configuration }).getCatalogue()
           .configDigest !== server.configDigest ||
-        binding.scopeId !==
-          JSON.stringify([binding.originalStoreId, binding.sessionId, binding.serverId]) ||
-        !binding.executionId ||
-        !binding.originalStoreId ||
-        !binding.sessionId
+        isUserMcpTransportBinding(binding) !== (owner === 'user') ||
+        !validMcpTransportOwner(binding)
       )
         throw new McpStdioPortError('mcp_stdio_binding_invalid');
       if (signal.aborted) throw new McpStdioPortError('mcp_stdio_aborted');
@@ -209,14 +227,7 @@ export function createMcpStdioTransportPort(
         version: 2,
         coverage: 'mcp-owned-coalition',
         ownerPid: process.pid,
-        binding: {
-          originalStoreId: binding.originalStoreId,
-          sessionId: binding.sessionId,
-          executionId: binding.executionId,
-          serverId: binding.serverId,
-          scopeId: binding.scopeId,
-          configDigest: binding.configDigest,
-        },
+        binding: mcpTransportEvidenceBinding(binding),
         broker: broker.pid
           ? {
               pid: broker.pid,
@@ -267,6 +278,8 @@ export function createMcpStdioTransportPort(
           pendingBytes = 0;
         },
         async send(message) {
+          if (!userMcpMessageAllowed(binding, message))
+            throw new McpStdioPortError('mcp_settings_method_denied');
           if (closing || !broker.stdin?.writable) throw new McpStdioPortError('mcp_stdio_closed');
           assertFresh?.(binding, { signal });
           const content = `${JSON.stringify(message)}\n`;
@@ -525,11 +538,11 @@ export function createMcpStdioTransportPort(
 
 // Unknown native closes retain the original ChildProcess and original observation HANDLE.
 const windowsUnknownOwners = new Set<object>();
-async function openWindowsStdio(
-  binding: Binding,
+async function openWindowsStdio<B extends Binding>(
+  binding: B,
   signal: AbortSignal,
   configuration: Configuration,
-  options: McpStdioPortOptions,
+  options: McpStdioPortOptions<B>,
   limits: { maximum: number; stderrMaximum: number; timeout: number; grace: number },
 ): Promise<Awaited<ReturnType<McpLifecycleTransportPort['open']>>> {
   const { retainWindowsOwnedProcessObservation } =
@@ -545,14 +558,7 @@ async function openWindowsStdio(
     version: 3,
     coverage: 'windows-job-members',
     ownerPid: process.pid,
-    binding: {
-      originalStoreId: binding.originalStoreId,
-      sessionId: binding.sessionId,
-      executionId: binding.executionId,
-      serverId: binding.serverId,
-      scopeId: binding.scopeId,
-      configDigest: binding.configDigest,
-    },
+    binding: mcpTransportEvidenceBinding(binding),
     guardian: null,
     server: null,
     job: null,
@@ -638,6 +644,8 @@ async function openWindowsStdio(
       pendingBytes = 0;
     },
     async send(message) {
+      if (!userMcpMessageAllowed(binding, message))
+        throw new McpStdioPortError('mcp_settings_method_denied');
       if (closing || !child.stdin?.writable) throw new McpStdioPortError('mcp_stdio_closed');
       options.assertFresh?.(binding, { signal });
       const content = `${JSON.stringify(message)}\n`;

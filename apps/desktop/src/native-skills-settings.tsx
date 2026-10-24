@@ -1,8 +1,8 @@
-import type { SkillCataloguePage } from '@kite-ai/client';
+import type { UserSkillCataloguePage } from '@kite-ai/client';
 import { RightSidebar } from '@kite-ai/ui/desktop';
 import { type RefObject, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import type { NativeBridge, NativeSelection, NativeSkillsScope } from './native-bridge';
+import type { NativeBridge, NativeSkillsScope } from './native-bridge';
 import { readNativeSkillCatalogue } from './native-skills';
 
 const safeError = (cause: unknown) => {
@@ -12,47 +12,38 @@ const safeError = (cause: unknown) => {
     : 'skill_catalogue_unavailable';
 };
 const stateLabel = { available: '可用', disabled: '已禁用', unavailable: '不可用' } as const;
-const sourceLabel = (source: SkillCataloguePage['entries'][number]['source']) =>
+const sourceLabel = (source: UserSkillCataloguePage['entries'][number]['source']) =>
   source === undefined
     ? '来源未记录'
     : source === null
       ? '来源无法确定'
-      : `${source.scope === 'project' ? '项目' : '用户'} · ${source.origin === 'profile' ? 'Profile Skills' : source.origin === 'configured' ? '配置位置' : source.origin}`;
+      : `用户 · ${source.origin === 'profile' ? 'Profile Skills' : source.origin === 'configured' ? '配置位置' : source.origin}`;
 
 export function NativeSkillsSettings({
   bridge,
   generation,
-  selection,
-  historyEpoch,
+  storeId,
+  canRead: available = true,
   panelHost,
   editorControl,
 }: {
   bridge: NativeBridge;
   generation: number;
-  selection?: NativeSelection;
-  historyEpoch: number;
+  storeId?: string;
+  canRead?: boolean;
   panelHost: HTMLElement | null;
   editorControl?: RefObject<{ close: () => void } | null>;
 }) {
   const panelId = useId();
-  const storeId = selection?.storeId,
-    sessionId = selection?.session.id,
-    workspaceId = selection?.session.workspaceId,
-    viewSelection = selection?.viewSelection ?? 0;
   const scope: NativeSkillsScope | undefined = useMemo(
-    () =>
-      storeId && sessionId && workspaceId
-        ? { generation, viewSelection, historyEpoch, storeId, sessionId, workspaceId }
-        : undefined,
-    [generation, viewSelection, historyEpoch, storeId, sessionId, workspaceId],
+    () => (storeId ? { generation, storeId } : undefined),
+    [generation, storeId],
   );
-  const identity = scope
-    ? `${scope.generation}/${scope.viewSelection}/${scope.historyEpoch}/${scope.storeId}/${scope.sessionId}/${scope.workspaceId}`
-    : '';
+  const identity = scope ? `${scope.generation}/${scope.storeId}` : '';
   const [refresh, setRefresh] = useState(0),
     [view, setView] = useState<{
       identity: string;
-      facts?: SkillCataloguePage;
+      facts?: UserSkillCataloguePage;
       error?: string;
       busy: boolean;
     }>({ identity, busy: false });
@@ -67,7 +58,7 @@ export function NativeSkillsSettings({
   const facts = view.identity === identity ? view.facts : undefined;
   const error = view.identity === identity ? view.error : undefined;
   const busy = view.identity === identity && view.busy;
-  const canRead = !!scope && selection?.canReadSkills === true;
+  const canRead = !!scope && available;
   const detailId = canRead && detail?.identity === identity ? detail.id : undefined;
   const entry =
     facts?.availability === 'available'
@@ -93,7 +84,18 @@ export function NativeSkillsSettings({
     })
       .then((value) => {
         if (!abort.signal.aborted && current.current === readIdentity)
-          setView({ identity, facts: value, busy: false });
+          setView((old) =>
+            value.availability === 'unavailable' &&
+            old.identity === identity &&
+            old.facts?.availability === 'available'
+              ? {
+                  identity,
+                  facts: old.facts,
+                  error: value.reason ?? 'skill_catalogue_unavailable',
+                  busy: false,
+                }
+              : { identity, facts: value, busy: false },
+          );
       })
       .catch((cause) => {
         if (!abort.signal.aborted && current.current === readIdentity)
@@ -143,7 +145,7 @@ export function NativeSkillsSettings({
       <header className="provider-page-heading">
         <div>
           <h2>Skills</h2>
-          <p>查看当前工作区自动发现的 Skills，以及它们的来源与可用状态。</p>
+          <p>查看用户 Skills，以及它们的来源与可用状态。</p>
         </div>
         <button
           ref={refreshButton}
@@ -155,12 +157,7 @@ export function NativeSkillsSettings({
           刷新 Skills 目录
         </button>
       </header>
-      {!selection ? (
-        <div className="provider-empty">
-          <h3>尚未选择工作区</h3>
-          <p>选择会话后查看所属工作区的 Skills。</p>
-        </div>
-      ) : !canRead ? (
+      {!available ? (
         <p className="provider-notice" role="status">
           当前服务未提供 Skills 目录。
         </p>
@@ -221,13 +218,9 @@ export function NativeSkillsSettings({
                     {!facts.entries.length && (
                       <div className="provider-empty">
                         <h3>暂无 Skills</h3>
-                        <p>当前工作区没有可发现的 Skill。</p>
+                        <p>尚未配置用户 Skill。</p>
                       </div>
                     )}
-                    <p className="provider-page-note">
-                      <span>已完整读取 {facts.entries.length} 项 Skill。</span>工作区：
-                      {selection.session.workspaceId}
-                    </p>
                   </>
                 )}
               </div>
@@ -235,9 +228,6 @@ export function NativeSkillsSettings({
           )}
         </>
       )}
-      <p className="provider-directory-note">
-        Skills 由可信配置来源自动发现，此处仅展示只读目录。目录可用状态不授予执行权限。
-      </p>
       {detailId &&
         panelHost &&
         createPortal(
@@ -257,7 +247,6 @@ export function NativeSkillsSettings({
                     <h3 ref={detailHeading} tabIndex={-1}>
                       {entry?.name || entry?.id || 'Skill 详情'}
                     </h3>
-                    <p>只读目录信息</p>
                   </div>
                   {entry && (
                     <span
@@ -286,11 +275,6 @@ export function NativeSkillsSettings({
                         <h4>目录信息</h4>
                         <p>配置来源：{sourceLabel(entry.source)}</p>
                         {entry.reason && <p>原因：{entry.reason}</p>}
-                        <details>
-                          <summary>技术详情</summary>
-                          <p>配置 ID：{entry.id}</p>
-                          <p>版本：{entry.version ?? '未记录'}</p>
-                        </details>
                       </section>
                       {(!!entry.requiredCapabilities.length ||
                         !!entry.missingCapabilities.length) && (

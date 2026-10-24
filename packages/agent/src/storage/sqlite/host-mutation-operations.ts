@@ -37,6 +37,76 @@ function identity(input: { commandId: string; subjectId: string }): void {
 }
 const controlKinds = new Set(['permission.mode', 'workspace.trust']);
 const modes = new Set(['accept_edits', 'auto', 'full']);
+/** Closed user settings intent, independently validated at the durable Store boundary. */
+function validMcpSettingsOperation(value: Json | undefined): boolean {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const keys = Object.keys(value).sort().join(',');
+  if (value.kind === 'add') {
+    if (
+      keys !== 'entry,kind,name' ||
+      typeof value.name !== 'string' ||
+      !/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(value.name)
+    )
+      return false;
+    const entry = value.entry;
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return false;
+    if (entry.type === 'stdio')
+      return (
+        Object.keys(entry).sort().join(',') === 'command,type' &&
+        typeof entry.command === 'string' &&
+        entry.command.length > 0 &&
+        entry.command.length <= 4096 &&
+        !/[\0\r\n]/.test(entry.command)
+      );
+    if (
+      entry.type !== 'http' ||
+      Object.keys(entry).sort().join(',') !== 'type,url' ||
+      typeof entry.url !== 'string' ||
+      !entry.url ||
+      entry.url.length > 8192
+    )
+      return false;
+    try {
+      const url = new URL(entry.url);
+      return (
+        ['http:', 'https:'].includes(url.protocol) &&
+        !url.username &&
+        !url.password &&
+        !url.search &&
+        !url.hash
+      );
+    } catch {
+      return false;
+    }
+  }
+  if (typeof value.serverId !== 'string' || !/^mcp-[a-f0-9]{64}$/.test(value.serverId))
+    return false;
+  if (value.kind === 'enabled')
+    return keys === 'enabled,kind,serverId' && typeof value.enabled === 'boolean';
+  if (value.kind === 'bind')
+    return (
+      keys === 'expiresAt,kind,serverId' &&
+      typeof value.expiresAt === 'number' &&
+      Number.isSafeInteger(value.expiresAt) &&
+      value.expiresAt >= 0
+    );
+  return (
+    keys === 'kind,serverId' &&
+    typeof value.kind === 'string' &&
+    [
+      'remove',
+      'authStatus',
+      'login',
+      'authRefresh',
+      'clear',
+      'revoke',
+      'connect',
+      'refresh',
+      'reconnect',
+      'disconnect',
+    ].includes(value.kind)
+  );
+}
 function sequence(value: unknown): value is string {
   return (
     typeof value === 'string' &&
@@ -159,6 +229,7 @@ function safe(db: SqliteOperations, input: Parameters<Store['beginHostMutation']
             'operationCount',
             'modelSettings',
             'providerSettings',
+            'mcpSettings',
           ];
     if (
       typeof value.ifMatch !== 'string' ||
@@ -170,6 +241,26 @@ function safe(db: SqliteOperations, input: Parameters<Store['beginHostMutation']
           value.operationCount > 128))
     )
       throw new AgentError('invalid_host_mutation');
+    if (value.mcpSettings !== undefined) {
+      const marker = value.mcpSettings;
+      if (
+        input.kind !== 'config.user.write' ||
+        input.scope !== 'user' ||
+        value.scope !== 'user' ||
+        value.operationCount !== 1 ||
+        value.modelSettings !== undefined ||
+        value.providerSettings !== undefined ||
+        !marker ||
+        typeof marker !== 'object' ||
+        Array.isArray(marker) ||
+        Object.keys(marker).sort().join(',') !== 'expectedReadSet,operation' ||
+        typeof marker.expectedReadSet !== 'string' ||
+        !/^[a-f0-9]{64}$/.test(marker.expectedReadSet) ||
+        value.ifMatch !== marker.expectedReadSet ||
+        !validMcpSettingsOperation(marker.operation)
+      )
+        throw new AgentError('invalid_host_mutation');
+    }
     if (value.modelSettings !== undefined || value.providerSettings !== undefined) {
       if (value.operationCount !== 1) throw new AgentError('invalid_host_mutation');
       if (
@@ -245,7 +336,7 @@ function safe(db: SqliteOperations, input: Parameters<Store['beginHostMutation']
             operation.protocol !== 'chat-completions' &&
             operation.protocol !== 'responses') ||
           typeof operation.provider !== 'string' ||
-          !['openai', 'deepseek', 'compatible', 'ollama'].includes(operation.provider) ||
+          !['openai', 'deepseek', 'compatible', 'ollama', 'codex'].includes(operation.provider) ||
           !(
             operation.connectionId === null ||
             (typeof operation.connectionId === 'string' &&
@@ -375,9 +466,60 @@ function receipt(
   state: string,
   value: Json,
   provider = false,
+  mcp = false,
 ): void {
   if (!value || typeof value !== 'object' || Array.isArray(value))
     throw new AgentError('invalid_host_mutation');
+  if (mcp) {
+    const authentication = value.authentication,
+      connection = value.connection;
+    const exact = (row: Record<string, Json>, keys: string) =>
+      Object.keys(row).sort().join(',') === keys;
+    const object = (row: Json | undefined): row is Record<string, Json> =>
+      !!row && typeof row === 'object' && !Array.isArray(row);
+    const nonnegative = (row: Json | undefined) =>
+      typeof row === 'number' && Number.isSafeInteger(row) && row >= 0;
+    if (
+      kind !== 'config.user.write' ||
+      !exact(
+        value,
+        value.credentialBindingDigest === undefined
+          ? 'authentication,cancelled,code,configuration,connection,revocation'
+          : 'authentication,cancelled,code,configuration,connection,credentialBindingDigest,revocation',
+      ) ||
+      (value.code !== null &&
+        (typeof value.code !== 'string' || !/^[a-z0-9_]{1,128}$/.test(value.code))) ||
+      (state === 'applied' ? value.code !== null : typeof value.code !== 'string') ||
+      typeof value.cancelled !== 'boolean' ||
+      !['unchanged', 'published', 'outcome_unknown'].includes(String(value.configuration)) ||
+      (value.revocation !== null &&
+        !['completed', 'not_supported'].includes(String(value.revocation))) ||
+      (value.credentialBindingDigest !== undefined &&
+        (typeof value.credentialBindingDigest !== 'string' ||
+          !/^[a-f0-9]{64}$/.test(value.credentialBindingDigest))) ||
+      (authentication !== null &&
+        (!object(authentication) ||
+          !exact(authentication, 'loginAllowed,policy,status') ||
+          !['none', 'credential', 'oauth', 'auto'].includes(String(authentication.policy)) ||
+          !['none', 'missing', 'present', 'locked', 'unavailable', 'unknown'].includes(
+            String(authentication.status),
+          ) ||
+          typeof authentication.loginAllowed !== 'boolean')) ||
+      (connection !== null &&
+        (!object(connection) ||
+          !exact(connection, 'generation,state,toolCount') ||
+          !['disconnected', 'connecting', 'ready', 'failed', 'outcome_unknown'].includes(
+            String(connection.state),
+          ) ||
+          (connection.generation !== null &&
+            (!nonnegative(connection.generation) || connection.generation === 0)) ||
+          (connection.toolCount !== null && !nonnegative(connection.toolCount)) ||
+          (connection.state === 'ready' &&
+            (connection.generation === null || connection.toolCount === null))))
+    )
+      throw new AgentError('invalid_host_mutation');
+    return;
+  }
   const keys = provider
     ? ['status', 'code', 'etag', 'credentialState', 'configurationState', 'opaqueRef']
     : kind.startsWith('credential.')
@@ -591,6 +733,8 @@ export function callHostMutation(
         input.state,
         input.receipt,
         (JSON.parse(String(row.safe_request_json)) as Record<string, Json>).providerSettings !==
+          undefined,
+        (JSON.parse(String(row.safe_request_json)) as Record<string, Json>).mcpSettings !==
           undefined,
       );
     if (row.state !== 'pending') {

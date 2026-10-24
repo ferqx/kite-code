@@ -158,6 +158,8 @@ heap／external／ArrayBuffer明显回落，但RSS仍较高，不能仅据此判
 
 `@kite-ai/service/paired` 提供 `launchPairedService`。调用者启动前通过只读 `@kite-ai/agent/profile` API 选定 profile，并传入选定 entrypoint、instance/build 身份、API major 和必要 capabilities。launcher 发送一行私有 startup JSON（最多 64 KiB），保持 stdin 作为独立父进程存活通道，并读取一行 bootstrap JSON（最多 16 KiB）。凭据和 token 不进入 argv、URL 或继承的模型凭据环境变量。Client 准入将 bootstrap 与认证 HTTP 身份和启动前选择逐项比较，不从响应推导预期 profile；启动失败只清理本次建立的 child。
 
+paired 环境在原 PATH／LANG／HOME（Windows另含USERPROFILE）之外，只继承可信父进程的大小写 `HTTP_PROXY`、`HTTPS_PROXY`、`NO_PROXY` 和 `CODEX_HOME`，保留原值、空值和大小写，由 Bun 解释代理优先级、Codex owner 校验路径。模型 key／token、任意秘密和 NODE_OPTIONS／BUN_OPTIONS 等运行注入仍不继承，代理凭据不进入 bootstrap、serverInfo 或诊断。[实际代理回归](test/isolated/paired-proxy.test.ts)分别经默认 child 与显式 spawn port 验证 HTTP、HTTPS CONNECT、NO_PROXY 绕过、含空格的 Codex 路径与秘密过滤；只使用 loopback 和合成凭据。
+
 可信 Native main 可显式提供中立 `spawnChild` port，用 Node 的进程/stream 能力启动已选定的 Bun 制品；省略时保留 Bun 宿主实现。port 不改变 bootstrap、准入、父存活或所属关闭协议，也不增加默认 PATH/源码回退。Electron main 只持有自己启动的 PID 和 handle；[paired 测试](test/isolated/paired.test.ts)及 Native 实际窗口证据分别证明 launcher 与 Node 调用者的边界。
 
 默认 Bun launcher 在 Windows 用 `windowsHide:true` 启动所属 Service，使其不继承 TUI 的控制台 Ctrl+C／ConPTY 关闭事件；不使用 detached，stdin 父存活通道、所属 child 与真实 exited 等待保持。2026-10-23 Windows x64／Bun1.4.3 的 [实际 TUI Host](../cli/test/isolated/tui-host.test.ts)完整4项54断言通过，核大文件完整读写、取消、冷重开零重放以及真实 ConPTY 关闭后 waiting Run／Service 仍保所属，随后显式正常停止并确认准确进程退出。PTY EOF 不冒充业务取消，独立安装资格不由开发 Host 测试推定。 同版 `paired.test.ts` 与 `paired-shutdown.test.ts` 合计7项88断言通过；两份 Service 的网络断开、所属 stdin EOF、真实退出和另一 Service 继续存活保持。原4项 POSIX 信号用例在 Windows 继续跳过，不以模拟信号补造通过。
@@ -207,13 +209,13 @@ paired 测试使用真实 Bun child、固定 Model、显式外部效果 ledger �
 通用命令入口还接纳准确 `run.cancel`、`execution.cancel` 与 `session.cancel`，将显式目标和原 expected Store 传给对应公开 Runtime 方法，由宿主填主体并返回持久控制回执；不会替 Execution 请求选择当前活动 Run。draining 期间四种取消仍可用。跨 Service 测试证明：取消普通 Tool 后其 Run 可继续下一 Model Step，detached sibling 仍运行；明确 Run 取消保留 detached 后台工作；`session.cancel` 的 `includeBackground: true` 停止选中旧工作，并阻止已取消旧 Tool 接纳未来 child。后续明确新用户工作仍可用。拒绝的主体/Store 控制不创建命令或持久变更。
 
 
-默认装配通过 `@kite-ai/service/configuration` 导出 `createDefaultProcessConfiguration({profile,hostConfiguration?,credentialBackend?,userConfigurationPath?})`。[用户配置源](src/user-configuration.ts)默认只读写 `~/.kite-code/kite-code.jsonc`，完整移除 Profile `config.jsonc` 的运行配置定位、创建和回退。`userConfigurationPath` 仅供可信嵌入宿主和自有测试夹具指定文件，不接受 HTTP、renderer 或 startup JSON 的路径输入。项目 `kite-agent.jsonc` 继续提供工具和扩展；默认 resolver 剔除其 `models/modelId/provider/model`。可信显式 startup 装配和 command 的准确模型选择仍受原验证。坏 JSONC 或不可用凭据仅拒绝相关 Run，bootstrap、History、Query 和取消保持可用；禁用、未知或不支持模型不回退其他 route。宿主追加 Extension 必须保留工厂返回的全局 registrations。
+默认装配通过 `@kite-ai/service/configuration` 导出 `createDefaultProcessConfiguration({profile,hostConfiguration?,credentialBackend?,userConfigurationPath?,localCodex?})`。[用户配置源](src/user-configuration.ts)默认只读写 `~/.kite-code/kite-code.jsonc`，完整移除 Profile `config.jsonc` 的运行配置定位、创建和回退。`userConfigurationPath` 仅供可信嵌入宿主和自有测试夹具指定文件，不接受 HTTP、renderer 或 startup JSON 的路径输入。项目 `kite-agent.jsonc` 继续提供工具和扩展；默认 resolver 剔除其 `models/modelId/provider/model`。可信显式 startup 装配和 command 的准确模型选择仍受原验证。坏 JSONC 或不可用凭据仅拒绝相关 Run，bootstrap、History、Query 和取消保持可用；禁用、未知或不支持模型不回退其他 route。宿主追加 Extension 必须保留工厂返回的全局 registrations。
 
 用户配置父目录加入默认 Files 的读写保护、宿主 Shell 和 Workflow verifier 的 protected roots；即使 Workspace 包含用户目录，也不能经普通模型工具读取配置明文或修改配置。用户设置 API 仍按独立读取集与原意图发布。
 
 默认装配只创建一个用户配置适配器，配置管理与 Skills 目录复用该实例。Provider 保存按本批新增名称一次读取原格式和分配稳定路由，不为每个模型重复读取文件；目标字节 ETag、完整 read-set、凭据存储与最终发布检查保持原顺序。用户文件路径只由[纯路径函数](src/user-configuration-path.ts) `userConfigurationPath(home)` 构造，默认用户源明确传入宿主 homedir，测试必须传入自有 HOME。跨 workspace 的 HOME、路径函数和配对子进程环境通过相对导入 Service 所属的[单一测试辅助](test/fixtures/user-configuration-fixture.ts)提供；源码外 Node 窗口 driver 接收调用方已经算好的同一路径，不引入 Service 测试包。测试辅助不进入产品装配或发行构建。直接指定文件的测试仍显式注入 `userConfigurationPath`，避免测试读取开发者的真实用户配置。
 
-用户配置源将现有 `provider.<alias>.models/type/protocol/baseURL/apiKey`、`model`（紧凑或嵌套 default route）、`disabledModels` 投影成 `{id,provider,providerName,protocol?,model,baseURL,credentialRef?,enabled?,options?}`。route ID 由原 alias/name 稳定生成，展示沿用 alias，协议 family 由显式 type 或已知 family 确定；自定义 alias 缺少 type 时使用 compatible。缺文件无内置模型目录。受支持的 provider effort、modelKwargs 的 temperature/topP/maxTokens/maxOutputTokens 与模型 metadata 参与 options；模型设置修改按准确字节 ETag 和完整 read-set CAS 转回原文件格式，保留注释、原模型 metadata、其他字段和未改 key。显式 `protocol` 支持 `chat-completions`／`responses`，缺省沿用 Chat Completions，Responses 仅允许 openai／compatible；模型名称和 URL 不选择协议，失败不跨协议回退。提供商设置读取返回有效协议，保存意图保留协议并通过原 CAS 写回 alias；连接身份区分 Responses 与 Chat Completions，既有 Chat Completions 连接 ID 保持。同一文件也支持可信宿主使用中立 models/modelId 形状，不引入另一配置路径。支持的运行 options 为 temperature（0–2）、topP（0–1）、maxOutputTokens（整数 1–1,000,000）和支持该 wire 的 reasoningEffort 闭集；配置可编码不表示远端模型可用。活动 Run 冻结已选路由与 options，后续 Run 重读。
+用户配置源将现有 `provider.<alias>.models/type/protocol/baseURL/apiKey`、`model`（紧凑或嵌套 default route）、`disabledModels` 投影成 `{id,provider,providerName,protocol?,model,baseURL,credentialRef?,enabled?,options?}`。route ID 由原 alias/name 稳定生成，展示沿用 alias，协议 family 由显式 type 或已知 family 确定；自定义 alias 缺少 type 时使用 compatible。缺文件无内置模型目录；正式宿主另以本机 Codex 的实际登录与模型元数据补充只读来源。受支持的 provider effort、modelKwargs 的 temperature/topP/maxTokens/maxOutputTokens 与模型 metadata 参与 options；模型设置修改按准确字节 ETag 和完整 read-set CAS 转回原文件格式，保留注释、原模型 metadata、其他字段和未改 key。显式 `protocol` 支持 `chat-completions`／`responses`，缺省沿用 Chat Completions，Responses 允许 openai／compatible 及固定协议的 codex；模型名称和 URL 不选择协议，失败不跨协议回退。提供商设置读取返回有效协议，保存意图保留协议并通过原 CAS 写回 alias；连接身份区分 Responses 与 Chat Completions，既有 Chat Completions 连接 ID 保持。同一文件也支持可信宿主使用中立 models/modelId 形状，不引入另一配置路径。支持的运行 options 为 temperature（0–2）、topP（0–1）、maxOutputTokens（整数 1–1,000,000）和支持该 wire 的 reasoningEffort 闭集；配置可编码不表示远端模型可用。活动 Run 冻结已选路由与 options，后续 Run 重读。
 
 模型凭据使用惰性 OS 后端 `service:kite-agent/accountNamespace:user-models`，与用户配置同为跨 Profile 用户级。已有 inline apiKey 仅由该私有源解析成瞬时 key，公开 DTO 与 Run snapshot 只含 opaque reference；读取列表不解析 key 或访问 vault。替换 key 时才保存 OS 引用并移除该 provider 的旧明文，不自动重写其他凭据。MCP 保持原 `profile-<profileAccessKey>` namespace。临时后端只可由可信宿主显式注入，不成为生产缺省；真实 OS 后端及平台资格单独验证。
 
@@ -596,11 +598,15 @@ macOS／Linux正式verifier均使用原host后端，原Skill cwd与授权Workspa
 
 默认装配提供 [skillCatalogue source](src/skill-catalogue.ts)，Service 仅在实际 source 存在时发布 `skill_catalogue`。`GET /v1/workspaces/:id/skills?storeId=&afterId=&revision=&limit=&byteLimit=` 在原 Store、实际 Workspace 和持久信任范围下返回闭合 `SkillCataloguePage`：可用性、revision、metadata/status entries、nextAfterId 与 complete。没有source明确unavailable；坏配置不是空目录。响应没有正文、路径、凭据、任意宿主配置或 Workflow 契约，不构造 Run 或调用 Model/vault/Shell/MCP。
 
-该任务外目录实例保有独立知识作用域；`dispose()` 封新调用，等待本实例已进入的普通／手动 Workflow list，然后结算同一 owner，失败不随后续请求重建而丢失。`startService` 将其接到原 `beforeResourceClose`；HTTP 读取尚在途时也不能先扫描一次失败集合就释放 Store／Profile。目录关闭未确认不会返回普通 unavailable 来表示收尾成功，服务关闭失败与维护锁保留。关闭前的临时 Workflow 装配同时保原工作错误和清理错误。知识作用域与目录保留集合报告同一错误对象时，目录dispose按对象身份去重并原样抛出，保留原unknown错误码；不同错误仍以Aggregate保全部原因，不合并独立失败或释放未确认的资源。
+Native 全局设置使用同一 source 的独立 `listUser(context)` 与 `user_skill_catalogue` capability。`GET /v1/config/user/skills?storeId=&afterId=&revision=&limit=&byteLimit=` 返回闭合 `UserSkillCataloguePage`：固定 `scope:user`，不含 Session／Workspace 身份或 Workflow 投影，`source.scope` 也只接受 user。它仅合并 defaults、同一用户配置适配器与可信宿主 explicit，读取用户配置文件所在根及已有 Profile `skills` root 中明确配置的位置；不读取项目 JSONC、Workspace、trust 或项目指令，不扫描 home，也不创建隐藏 Session／Workspace。相对路径按用户配置目录解析，越界或 symlink 目标局部不可用。缺少配置且无 Skill 项时返回可用空目录，不创建目录；坏用户 JSONC 明确 unavailable。原 Workspace API 与 Run 的项目 Skill 选择、可信来源和执行规则保持。
+
+该任务外目录实例保有独立知识作用域；`dispose()` 封新调用，等待本实例已进入的用户／Workspace／手动 Workflow list，然后结算同一 owner，失败不随后续请求重建而丢失。`startService` 将其接到原 `beforeResourceClose`；HTTP 读取尚在途时也不能先扫描一次失败集合就释放 Store／Profile。目录关闭未确认不会返回普通 unavailable 来表示收尾成功，服务关闭失败与维护锁保留。关闭前的临时 Workflow 装配同时保原工作错误和清理错误。知识作用域与目录保留集合报告同一错误对象时，目录dispose按对象身份去重并原样抛出，保留原unknown错误码；不同错误仍以Aggregate保全部原因，不合并独立失败或释放未确认的资源。
 
 默认每项另返回有限 `source` 或 null：配置位置在工作区 `.agents/skills`、`.kite-code/skills` 或其他位置分别为 project/.agents、project/.kite-code、project/configured；已准入的 profile Skills 为 user/profile。来源只描述配置位置，不证明安装、物理目标或执行许可，禁用项不会因此读文件。越界、非法或不能确定的位置为 null；旧 producer 可省略新字段，消费者明确显示来源未记录。该信息参与原目录 revision，不增加发现路径或改变实际 Run 的知识选择。
 
 目录按配置ID排序，默认128KiB单页字节预算、可选正安全整数limit与不超过1MiB的byteLimit；预算只分页，不截总目录或单项字段，单项放不下明确413。revision涵盖原主体/Store/Workspace、信任身份与revision、Skill配置、能力及完整目录版本状态；后续页必须携原revision，实际变化（包括配置变坏）409，不将新目录拼进旧页。未见afterId拒绝，不猜下一位置。读取不提供与外部文件写者的原子事务，也不预订未来执行版本。
+
+用户目录复用相同排序、revision／cursor 和字节分页合同；其 revision 仅含用户主体、Store、用户 Skill 配置、能力及完整目录版本状态，不绑定当前 Session、Workspace 或信任观察。用户来源分类沿用户根的 `.agents/skills`、`.kite-code/skills`、其他配置位置与 Profile 分别返回 user/.agents、user/.kite-code、user/configured、user/profile，绝不输出项目行。[用户源反例](test/isolated/user-skill-catalogue.test.ts)核无 Workspace／permission 访问、306 条完整分页、项目路径和 symlink 越界、零正文／路径泄漏、坏用户配置恢复及关闭后拒绝；[全局设置 HTTP](test/isolated/user-settings-global.test.ts)核默认 Service／Client 在无 Workspace／Session 时读取同一用户目录。
 
 目录的 `workflow=manual` 查询是独立 opt-in：只有实际 source 声明 `supportsWorkflow:true` 才发布 `skill_workflow_catalogue`，配置中的同名 capability 不能替代实现；不支持时该查询返回404。普通请求保留原闭合知识 shape、revision 与读取路径。显式请求的每项附带闭合 `workflow`：固定扩展身份、实际 compiled Skill ID/name/revision、独立 state/reason、manualAllowed、emptyInputValid 与 contextMode。可用只表示该次读取确认手动空对象输入可以准入，不是执行授权。
 
@@ -643,6 +649,16 @@ Native `file_recovery` 仅在实际唯一 `builtin.files` 登记 `files.checkpoi
 [实际默认Native资格](test/isolated/file-recovery-native.test.ts)通过普通两Run Files writes、两层Fork、原point与当前别名、完整原媒体scope拒绝、保留/排除trigger的新selector、外部postimage冲突、真实foreign creator Session、冷读取与非法HTTP参数验证接口。[SDK契约资格](../../packages/client/test/isolated/file-recovery.test.ts)另核closedDTO、64位序列、能力拒绝、准确目标、取消及连接代次。这里没有two-leg执行Endpoint；恢复仍经现有普通Action/Fork和独立授权，Native持久三范围消费者另行实施。Browser仍只提供原三个Cookie GET与`file_checkpoints`，不获得新boundary或恢复写入入口。
 
 ## HTTP OAuth 与原认证结果
+
+Native 用户级设置使用独立 [user-mcp-management](src/user-mcp-management.ts) owner 与 `user_mcp_settings` capability。`GET/POST /v1/config/user/mcp` 读取和管理用户来源；`GET /v1/config/user/mcp/operations/:commandId` 只查原操作，`POST .../:commandId/cancel` 取消准确原操作；`GET /v1/config/user/mcp/tools` 读取当前用户连接的固定 generation 工具 metadata。闭合 schema 拒绝 Session、Workspace、范围切换及秘密。请求绑定真实 Store／认证 subject，来源固定 user，不读取项目配置、Workspace 或 trust，也不创建隐式实体。原 Session MCP Actions 与运行时项目来源保留。
+
+该 owner 管理来源增删／启停、已有引用绑定、认证状态与四项 OAuth 操作，以及设置连接／刷新／重连／断开。全局连接只允许 initialize、工具目录和必要协议控制，不执行 `tools/call`、资源读取或 Task。HTTP 复用正式网络边界，stdio 使用明确 user binding 的原 guardian；不是伪造 Session／Execution。服务结束时等待已启动操作并停止准确所属连接，停止未知保 unknown。设置页关闭仅释放 metadata reader，不停止连接或取消操作。正常有限操作直接返回结算结果，长认证按原 ID 查询与取消。
+
+HTTP／stdio 的公开 Session 与 user 工厂在运行时固定 owner 分支，不能通过传入另一个完整 binding 绕过用户协议白名单。目录发布在 RPC 返回后再核原来源和凭据绑定；当前同名来源漂移时不会把新地址与旧 ready 状态拼接，GET 只投影失效而不执行停止。实际 Run 使用全局用户凭据仍走原独立 Action／Job 权限，两个真实 Workspace 的默认拒绝与明确允许分别由 [manager 测试](test/isolated/user-mcp-management.test.ts)验证。
+
+已持有连接的停止独立于当前来源文件：来源删除、MCP／用户 JSONC 或绑定文件变坏时，GET 仍保该 user owner 的安全行与有限清理观察，普通错误和写入禁用继续保留；只允许明确断开本 owner 持有的准确连接。该操作不要求重新添加来源，不读取或修复配置、不创建新 transport，保原 Store／subject／操作幂等、准确取消及停止证明；GET 本身不停止连接。两个同时 stop 仍互斥，未知停止保原 held owner，不能伪称已释放。
+
+原意图和最终结果使用现有 HostMutation 的闭合 `mcpSettings` marker；固定 command ID、Store、subject、read-set 和操作摘要。首次保存前验证非秘密请求，旧 ID 不获得重放权。没有活 owner 的 pending 只读投影为 outcome_unknown，GET 不写文件、访问 Vault、连接远端或补做效果。用户级凭据绑定与 OAuth owned scope 由准确 Profile／Store／user source／server／transport／auth 域派生；后续真实 Workspace 中匹配的用户来源可复用，项目批准、旧 Workspace 身份和工具权限不被扩大。详细身份及历史边界归[认证合同](../../docs/active/mcp-authentication.md)。[真实 HTTP](test/isolated/user-settings-global.test.ts)核空 Store 读写、项目同名隔离和零隐式 Session；具体资源、认证与取消测试归 [manager 测试](test/isolated/user-mcp-management.test.ts)。
 
 [Source factory](src/mcp-source-configuration.ts)沿默认一个CredentialVault/Broker的owned scope，身份绑定Profile、原Store、Workspace physical identity、Source、Server、raw/transport digest和auth profile。显式oauth可申请Login，省略auth的auto只在当前进程该域观察真实401后可Login；none/manual不升级。401 metadata URL/scopes只供私有协议，目录不公开。
 
@@ -702,11 +718,29 @@ leaf 的 `mcp_source_publication_unknown`只在 rename 后产生，包含 direct
 
 saved 要求 Command applied、准确原 Execution 状态、非准备下一 attempt、完整 finalizationDigest、closed result/details/binding、真实 applied HostMutation/safeRequest/receipt、leaf 原/新 ETag、marker-derived Add raw digest 或准确 Remove 原 digest 全部一致。Remove 的 owned 清理失败或未知可使 Execution 为 outcome_unknown；只有完整声明发布证明与闭合 partial cleanup 结果同时匹配时，Source phase 仍为 saved，credentialCleanup 单独报告，不能把该 phase 当作完整认证清理成功。pending、文件当前存在条目、部分 succeeded 或单 applied mutation 均不能代证。普通许可未进 adapter 的明确拒绝/持久取消，以及 producer 完整证明的发布前 failed/cancelled，分别核真实零效果；任何不完整原证明保 outcome_unknown。当前实际局部/统一资格由[阶段进度](../../docs/plans/unified-agent-refactor-v1-progress.md)记录，接口接线本身不证明完整管理或三平台已交付。
 
+## 本机 Codex 来源
+
+[Codex 私有适配](src/codex-auth.ts)只读绝对 `CODEX_HOME` 或 `~/.codex` 内的 ChatGPT `auth.json`、`models_cache.json` 与 `config.toml`，Codex 根配置的有效 `model_reasoning_effort` 经原 Model preset 校验后进入既有 provider effort 层，用户 `modelOptions` 继续覆盖；以账户和主体摘要生成稳定 alias；同账户 token 轮换不改变 route，账户切换使旧 route 与设置 read-set 失效。目录只采用可见本地 cache 和明确 OpenAI 模型，不调用远端发现、不猜名称。认证读取使用有界 regular-file descriptor 与严格 UTF-8，原 token、id/refresh token、账户原文和 auth 文件内容不进入配置、DTO、快照或日志。来源统一提供合法的私有保护路径：相对、空或含 NUL 的可选目录不进入 Files/Shell 资产边界，也不阻断手动 Provider；合法绝对目录即使尚无认证文件仍受保护。
+
+Shell 的目录保护与私有文件保护分开：`auth.json` 经可信宿主 `protectedFiles` 传入普通 Shell、Workflow verifier 与声明补偿，不进入只接受存在目录的 `protectedRoots`，也不作为可执行资产读取或计算摘要。macOS 沿原 Seatbelt 保护准确名称；Linux 将专用物理认证目录交给既有 namespace mask，保正常 Workspace／Full 执行与原宿主写入，认证叶原子刷新仍不可读写。仅在实际 Shell Job 派发时通过原父 FD／no-follow 受控预留缺失0700目录，不在发现或 Run 准备写文件，不修改或删除既有认证内容。HOME／Workspace／资产祖先重叠或可被业务重定向的别名作为该 Job 的无效布局拒绝；不再因存在本机认证而整体禁用 Linux Shell。具体边界与实际 Linux 证据归[Jobs owner](../../packages/agent/src/jobs/README.md#linux-宿主与严格补偿源码)。
+
+未指定 `userConfigurationPath` 的正式默认宿主启用该来源；可信嵌入宿主使用自有文件时，通过 `localCodex` 显式注入或关闭。中立 assembly 格式由嵌入宿主控制，不注入本机目录；用户 provider/model 格式通过[用户源](src/user-configuration.ts)投影虚拟只读连接，偏好写回跳过来源物化，只保存原模型/default/effort 字段。已有默认保持，缺少手动模型时使用可核实的本机选择。坏用户 JSONC 保留原字节并拒绝模型配置，不能借自动来源回退掩盖错误。
+
+私有 binding 复用 AI SDK Responses，将 system/developer 指令合并到 Codex `instructions`，固定 POST `https://chatgpt.com/backend-api/codex/responses` 与 manual redirect，每次派发重新核验同一账户再设置 bearer/account header，保留原 AbortSignal。Codex 私有 continuation 以认证来源和完整账户／主体身份绑定，而非易轮换的 bearer；同来源同账户的新 token 在新 Run 与冷重建后继续携带原 encrypted reasoning，切换来源、账户、模型或 endpoint 不回放旧状态。普通 Provider 继续按原凭据隔离。显式输出 cap 不受服务支持时本地拒绝；不重试登录、不刷新/回写共享 auth、不切模型或协议。Codex 负责登录刷新；文件缺失、格式错误、过期和无法读取保留有限公开错误。文件模式以外的 OS keyring/ephemeral 登录不在本轮接入范围。
+
+[认证与传输回归](test/isolated/codex-auth.test.ts)、[用户源偏好](test/isolated/user-configuration.test.ts)与[真实 Service/Client/SQLite 集成](test/isolated/codex-connection.test.ts)分别验证文件/账户/endpoint 边界、无写入发现、多轮工具链，以及 token 轮换和冷重建后的原私有推理状态。无效可选路径另经[默认 Host 与原生 Shell](test/isolated/shell-configuration.test.ts)验证普通手动 Provider 仍可执行工具。受控传输不外推真实账户或跨平台发布资格。
+
+## 会话模型协议
+
+默认根 resolver 在模型与凭据绑定前，通过[首 Run 协议校验](src/session-model-protocol.ts)读取当前 Store 的原 Session 视图。首个实际 Run 的 `manifest.modelId` 必须唯一对应其封存配置内的模型，version 与配置 digest 均须核实；显式 Responses 与缺省 Chat Completions 沿原 Provider 规则解释，Codex 固定 Responses。后续 `run.start`／`input.follow_up` 不得换另一协议，明确拒绝为 `session_model_protocol_locked`；首配置无法核实为 `session_model_protocol_unavailable`，不从当前默认补旧事实。没有实际 Run 的准备拒绝不锁协议，失败或取消的实际 Run 仍计入。
+
+同协议内仍可换模型、连接和默认，思考程度从下一轮生效，活动 Run 保持原绑定。child 与 modelOnly 不借父 Session 的协议限制自己的模型；恢复沿原封存快照完整校验，并核同一 Session 的首协议。首 Run 经[原有界 View](../../packages/agent/src/storage/README.md#有界视图中的首次-run)持续保留，不新增 SQL 字段、协议 journal 或 API。恢复后的原 Store 出处保持，只验证当前准入 View 和准确 Session，不要求旧 Run 冒充当前 Store。[协议集成测试](test/isolated/session-model-protocol.test.ts)验证双向跨协议拒绝、同协议选择、冷重建与恢复；对应取舍见[协议决定](../../.agents/notes/implemented/architecture/2026-10-24-session-model-protocol.md)。
+
 ## Native Provider 与下一次模型绑定
 
-Provider 设置保留四个明确协议族，连接事实只包含实际声明/模型连接。用户格式以原 provider alias 生成稳定 SHA-256 connection ID，显示名独立存 provider.name；既有模型路由 ID 不变。全新用户实例采用不复用随机 alias，删除后同名重建也不会复活旧路由。Assembly格式第一次编辑时为组内模型保存 connectionId/providerLabel，新增连接使用随机64位十六进制身份，同地址可多实例。空声明仅做内存安全投影，未知/不安全声明可见只读，读取不迁移文件。可选 kind=upsert/remove 与 name 经现有 provider_settings.update 原意图链闭合校验，旧无kind操作仍为保存。删除核完整read-set、准确原连接与默认模型，移除该alias/模型及对应本地元数据，保留无关JSONC字节和Vault秘密；不自动重选默认、不撤销外部凭据。Desktop本机定时引用保护归Desktop owner，Service未读取桌面私有库。
+Provider 设置保留四个手动协议族和自动发现的 codex family，连接事实只包含实际声明/模型连接及本机来源。用户格式以原 provider alias 生成稳定 SHA-256 connection ID，显示名独立存 provider.name；既有模型路由 ID 不变。全新用户实例采用不复用随机 alias，删除后同名重建也不会复活旧路由。Assembly格式第一次编辑时为组内模型保存 connectionId/providerLabel，新增连接使用随机64位十六进制身份，同地址可多实例。空声明仅做内存安全投影，未知/不安全声明可见只读，读取不迁移文件。可选 kind=upsert/remove 与 name 经现有 provider_settings.update 原意图链闭合校验，旧无kind操作仍为保存。删除核完整read-set、准确原连接与默认模型，移除该alias/模型及对应本地元数据，保留无关JSONC字节和Vault秘密；不自动重选默认、不撤销外部凭据。Desktop本机定时引用保护归Desktop owner，Service未读取桌面私有库。
 
-[Provider owner](src/model-providers.ts)声明四类准确协议、默认 endpoint 和必需凭据；OpenAI/DeepSeek 要求 key，compatible/Ollama 允许明确无 key。认证 `GET/POST /v1/config/user/providers` 复用 `configuration_management`，保存只接受原 Store/command/readSet 与闭合 Provider 操作，不接受路径、主体或 Workspace authority。用户范围连接按稳定 alias/connectionId 分组，旧 Assembly 未持久化身份时才沿 protocol/endpoint/credential reference 摘要分组；保留其他连接、模型 options、enabled 和无关注释。既有用户格式的新模型采用稳定 alias/name route ID（显式中立格式保留随机 ID）、默认 disabled；完整候选仍核默认模型有效性。手动名称不访问模型列表，留空只在这次显式保存调用该 endpoint 的 `/models`，严格 EOF/UTF8/结构与 2MiB 响应边界，完整保存超过512模型的目录。
+[Provider owner](src/model-providers.ts)声明五类准确协议、默认 endpoint 和必需凭据；OpenAI/DeepSeek 要求 key，compatible/Ollama 允许明确无 key。认证 `GET/POST /v1/config/user/providers` 复用 `configuration_management`，保存只接受原 Store/command/readSet 与闭合 Provider 操作，不接受路径、主体或 Workspace authority。用户范围连接按稳定 alias/connectionId 分组，旧 Assembly 未持久化身份时才沿 protocol/endpoint/credential reference 摘要分组；保留其他连接、模型 options、enabled 和无关注释。既有用户格式的新模型采用稳定 alias/name route ID（显式中立格式保留随机 ID）、默认 disabled；完整候选仍核默认模型有效性。手动名称不访问模型列表，留空只在这次显式保存调用该 endpoint 的 `/models`，严格 EOF/UTF8/结构与 2MiB 响应边界，完整保存超过512模型的目录。
 
 [Responses 完整 wire](test/isolated/responses-loop.test.ts)沿真实 Client/Service/SQLite 验证三轮并行工具、精确 call ID 与输出配对、私有 encrypted reasoning 冷恢复和绑定隔离、人工批准及 unknown 零重放。新增合法名称与原命名空间工具碰撞后，真实 SQLite 冷历史按原 call ID 重新编码，只执行原内部工具，Inspector 仍不公开密文。失败尝试沿 Core 原资格继续，不恢复旧五次上限；六次物理断流后第七次成功、永久断流的明确取消，以及纯文本 length 的封存续接分别核验。截断工具批次和失败 opaque state 不进入下一请求，已有成功工具不会因后继模型重试再次执行。这些都是本机模拟 Provider 证据，不代证真实账户或付费模型。
 

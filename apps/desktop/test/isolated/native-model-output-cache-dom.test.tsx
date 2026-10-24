@@ -7,9 +7,11 @@ import { Conversation } from '../../../../packages/ui/src/desktop/Conversation';
 import { ConversationCache } from '../../../../packages/ui/src/desktop/ConversationCache';
 import { MessageContent } from '../../../../packages/ui/src/desktop/MessageContent';
 import { NativeModelOutputMessage } from '../../src/native-model-output-message';
+import { prepareDesktopDom } from '../native-page-dom.fixture';
 
-test('Native retains verified reply copy DOM through paused calibration and revokes display on close and cache disposal', async () => {
+test('Native automatically renders the verified reply and retains exact copy DOM through paused calibration until cache disposal', async () => {
   const dom = new JSDOM('<div id="root"></div>', { pretendToBeVisual: true });
+  const restoreLayout = prepareDesktopDom(dom);
   const keys = ['window', 'document', 'IS_REACT_ACT_ENVIRONMENT'] as const;
   const previous = keys.map(
     (key) => [key, Object.getOwnPropertyDescriptor(globalThis, key)] as const,
@@ -113,6 +115,8 @@ test('Native retains verified reply copy DOM through paused calibration and revo
     );
   try {
     await render();
+    expect(host.querySelector('.model-output-message > button')).toBeNull();
+    expect(host.querySelector('.model-output-message > p')).toBeNull();
     const button = host.querySelector<HTMLButtonElement>('.message-copy')!;
     const codeButton = host.querySelector<HTMLButtonElement>(
       '[data-slot="code-block-copy-button"]',
@@ -141,29 +145,17 @@ test('Native retains verified reply copy DOM through paused calibration and revo
     expect(writes).toEqual([content]);
     await render();
     expect(host.querySelector('.message-copy') === button).toBe(true);
-    const close = [...host.querySelectorAll('button')].find(
-      (node) => node.textContent === 'Close full Model output',
-    )!;
-    await act(async () => close.click());
-    expect(published.at(-1)).toBeUndefined();
-    expect(host.querySelector('.message-copy') === null).toBe(true);
-    expect(host.querySelector('[data-slot="code-block-copy-button"]')).toBeNull();
-    expect(host.querySelector('[data-slot="code-block-code"]')?.textContent).toBe('PREVIEW\n');
-    const open = [...host.querySelectorAll('button')].find(
-      (node) => node.textContent === 'Read complete recorded Model output',
-    )!;
-    await act(async () => open.click());
     expect(published.at(-1)).toBe(content);
-    const reopenedCode = host.querySelector<HTMLButtonElement>(
-      '[data-slot="code-block-copy-button"]',
-    )!;
-    await act(async () => reopenedCode.click());
+    await act(async () => codeButton.click());
     expect(writes).toEqual([content, code]);
     await render('b');
     await render('b', true, 'other-store');
     expect(published.at(-1)).toBeUndefined();
+    await act(async () => codeButton.click());
+    expect(writes).toEqual([content, code]);
   } finally {
     await act(async () => root.unmount());
+    restoreLayout();
     dom.window.close();
     for (const [key, descriptor] of previous) {
       if (descriptor) Object.defineProperty(globalThis, key, descriptor);

@@ -25,7 +25,7 @@ afterEach(() => {
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
 });
 const mac = process.platform === 'darwin' ? test : test.skip;
-async function fixture(script: string, timeoutMs = 5000) {
+async function fixture(script: string, timeoutMs = 5000, protectFile = false) {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-workflow-compensator-')));
   roots.push(root);
   const workspace = join(root, 'workspace'),
@@ -63,10 +63,13 @@ async function fixture(script: string, timeoutMs = 5000) {
     naming: 'shell-supervisor.js',
   });
   expect(built.success).toBe(true);
+  const authFile = join(workspace, 'auth.json');
+  if (protectFile) writeFileSync(authFile, 'SYNTHETIC_PRIVATE_AUTH_MATERIAL', { mode: 0o600 });
   const create = (cwd = workspace) =>
     createSkillWorkflowCompensator({
       entries: [entry],
       protectedRoots: [profile],
+      protectedFiles: protectFile ? [authFile] : [],
       temporaryRoot: runtimeRoot,
       shell: {
         cwd,
@@ -96,6 +99,7 @@ async function fixture(script: string, timeoutMs = 5000) {
   };
   return {
     root,
+    authFile,
     workspace,
     skillDir,
     runtimeRoot,
@@ -109,6 +113,31 @@ async function fixture(script: string, timeoutMs = 5000) {
     collect,
   };
 }
+mac(
+  'compensation keeps the trusted private file denied inside the otherwise writable Workspace',
+  async () => {
+    const f = await fixture(
+      `import{readFileSync,writeFileSync}from'node:fs';let read='allowed',write='allowed';try{readFileSync('auth.json')}catch{read='denied'}try{writeFileSync('auth.json','replaced')}catch{write='denied'}writeFileSync('private-denials',JSON.stringify({read,write}));`,
+      5000,
+      true,
+    );
+    const handle = await f.start();
+    try {
+      expect((await f.collect(handle)).at(-1)).toMatchObject({
+        type: 'terminal',
+        supervision: 'ended',
+        result: { outcome: 'succeeded' },
+      });
+      expect(JSON.parse(readFileSync(join(f.workspace, 'private-denials'), 'utf8'))).toEqual({
+        read: 'denied',
+        write: 'denied',
+      });
+      expect(readFileSync(f.authFile, 'utf8')).toBe('SYNTHETIC_PRIVATE_AUTH_MATERIAL');
+    } finally {
+      await f.job.dispose(handle);
+    }
+  },
+);
 mac(
   'declared compensation executes complete original bytes and binary assets in the Workspace with no secret environment',
   async () => {

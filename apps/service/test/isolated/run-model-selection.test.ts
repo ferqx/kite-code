@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { createRuntime } from '@kite-ai/agent';
+import { createArtifactStore } from '@kite-ai/agent/artifacts';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import type { CommandRequest } from '@kite-ai/agent/storage';
@@ -16,6 +17,7 @@ import {
 import { createDefaultProcessConfiguration } from '../../src/configuration';
 import { startService } from '../../src/index';
 import { createPermissionManagement } from '../../src/permission-management';
+import { encodeFrames, responseFrames } from '../fixtures/responses-wire';
 import { userConfigurationPath } from '../fixtures/user-configuration-fixture';
 
 async function until<T>(read: () => Promise<T>, ready: (value: T) => boolean): Promise<T> {
@@ -40,6 +42,7 @@ async function fixture(
   delegateChild = false,
   readUserConfiguration = false,
   rejectReasoningEffort = false,
+  childResponses = false,
 ) {
   const root = mkdtempSync(join(tmpdir(), 'kite-run-model-selection-'));
   const workspace = readUserConfiguration ? root : join(root, 'workspace');
@@ -62,6 +65,17 @@ async function fixture(
         return Response.json(
           { error: { message: 'fixture rejects reasoning_effort' } },
           { status: 400 },
+        );
+      if (new URL(request.url).pathname.endsWith('/responses'))
+        return new Response(
+          encodeFrames(
+            responseFrames({
+              id: 'child-response',
+              model: String(body.model),
+              text: ['child done'],
+            }),
+          ),
+          { headers: { 'content-type': 'text/event-stream' } },
         );
       const chunk = (delta: unknown, finish_reason: string | null = null) =>
         `data: ${JSON.stringify({ id: 'fixture', object: 'chat.completion.chunk', created: 1, model: body.model, choices: [{ index: 0, delta, finish_reason }] })}\n\n`;
@@ -126,6 +140,7 @@ async function fixture(
     provider: family,
     model: `actual-${family}`,
     baseURL: `http://127.0.0.1:${provider.port}/${family}/v1`,
+    ...(family === 'openai' && childResponses ? { protocol: 'responses' } : {}),
     ...(family === 'openai' ? { options: { reasoningEffort: 'low' } } : {}),
   }));
   const config = {
@@ -184,6 +199,7 @@ async function fixture(
   const runtime = createRuntime({
     ...host,
     store,
+    ...(childResponses ? { artifacts: createArtifactStore({ profile, store }) } : {}),
     permissions: host.permissions!,
   });
   host.permissionManagement?.(runtime);
@@ -688,6 +704,52 @@ test('public spawn selects the trusted default child model without inheriting th
     });
     expect(f.requests[0]!.body.reasoning_effort).toBe('high');
     expect(f.requests.some((request) => request.body.reasoning_effort === 'low')).toBe(true);
+  } finally {
+    await f.close();
+  }
+}, 20000);
+
+test('a Chat parent keeps its protocol while its independent child uses a trusted Responses model', async () => {
+  const f = await fixture(true, false, false, true);
+  try {
+    const view = await f.submit('parent-chat-child-responses', {
+      kind: 'run.start',
+      content: 'New task: hello',
+      modelId: 'a',
+      reasoningEffort: 'high',
+    });
+    expect(view.commandRun.status).toBe('completed');
+    const carrier = (await f.store.listExecutions('s')).find(
+      (execution) => execution.childSessionId !== null,
+    )!;
+    const child = await until(
+      () => f.store.getView(carrier.childSessionId!),
+      (view) => view.runs.some((run) => !run.isActive),
+    );
+    const childRun = child.runs[0]!;
+    expect(childRun.status, childRun.reason ?? undefined).toBe('completed');
+    expect(childRun.configuration).toMatchObject({
+      modelId: 'openai',
+      snapshot: {
+        configuration: {
+          configuration: {
+            models: expect.arrayContaining([
+              expect.objectContaining({ id: 'openai', protocol: 'responses' }),
+            ]),
+          },
+        },
+      },
+    });
+    expect(
+      f.requests
+        .filter((request) => request.body.model === 'actual-compatible')
+        .every((request) => request.path === '/compatible/v1/chat/completions'),
+    ).toBe(true);
+    const childWire = f.requests.find((request) => request.body.model === 'actual-openai')!;
+    expect(childWire).toMatchObject({
+      path: '/openai/v1/responses',
+      body: { reasoning: { effort: 'low' } },
+    });
   } finally {
     await f.close();
   }

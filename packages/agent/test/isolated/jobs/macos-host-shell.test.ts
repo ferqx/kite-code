@@ -180,6 +180,69 @@ function options(full = false) {
     filesystemScope: full ? ('full_access' as const) : ('workspace_write' as const),
   };
 }
+for (const full of [false, true])
+  macTest(
+    `private credential files remain unreadable and unwritable after missing Home appears in ${full ? 'Full' : 'workspace'} scope`,
+    async () => {
+      const codex = join(root, 'home', `codex-${randomUUID()}`),
+        auth = join(codex, 'auth.json');
+      const job = createMacosHostShellJob({ ...options(full), protectedFiles: [auth] });
+      privateDirectory(codex);
+      writeFileSync(auth, 'SYNTHETIC_PRIVATE_AUTH_MATERIAL', { mode: 0o600 });
+      const renamed = `${codex}-renamed`;
+      const events = await run(
+        job,
+        `/bin/cat ${quote(auth)}; printf stolen > ${quote(auth)}; /bin/mv ${quote(codex)} ${quote(renamed)}; printf ordinary > ${quote(join(workspace, 'ordinary-private-file-probe'))}`,
+      );
+      terminal(events);
+      const output = events
+        .filter((event) => event.type === 'output')
+        .map((event) => event.content)
+        .join('');
+      expect(output).not.toContain('SYNTHETIC_PRIVATE_AUTH_MATERIAL');
+      expect(readFileSync(auth, 'utf8')).toBe('SYNTHETIC_PRIVATE_AUTH_MATERIAL');
+      expect(existsSync(renamed)).toBe(false);
+      expect(readFileSync(join(workspace, 'ordinary-private-file-probe'), 'utf8')).toBe('ordinary');
+      rmSync(codex, { recursive: true });
+    },
+    20000,
+  );
+macTest(
+  'a Full Shell cannot redirect an absent private parent before its owner creates credentials',
+  async () => {
+    const codex = join(root, 'home', `future-codex-${randomUUID()}`),
+      auth = join(codex, 'auth.json');
+    const target = join(root, 'home', `other-codex-${randomUUID()}`);
+    privateDirectory(target);
+    writeFileSync(join(target, 'auth.json'), 'SYNTHETIC_PRIVATE_TARGET');
+    const job = createMacosHostShellJob({ ...options(true), protectedFiles: [auth] });
+    const redirected = await run(
+      job,
+      `/bin/ln -s ${quote(target)} ${quote(codex)}; /bin/cat ${quote(auth)}; printf ordinary`,
+    );
+    terminal(redirected);
+    expect(existsSync(codex)).toBe(false);
+    expect(
+      redirected
+        .filter((event) => event.type === 'output')
+        .map((event) => event.content)
+        .join(''),
+    ).not.toContain('SYNTHETIC_PRIVATE_TARGET');
+    privateDirectory(codex);
+    writeFileSync(auth, 'SYNTHETIC_PRIVATE_LATE');
+    const later = await run(job, `/bin/cat ${quote(auth)}; printf ordinary`);
+    terminal(later);
+    expect(
+      later
+        .filter((event) => event.type === 'output')
+        .map((event) => event.content)
+        .join(''),
+    ).not.toContain('SYNTHETIC_PRIVATE_LATE');
+    rmSync(codex, { recursive: true });
+    rmSync(target, { recursive: true });
+  },
+  20000,
+);
 async function start(job: JobDefinition, command: string) {
   const executionId = crypto.randomUUID();
   const handle = await job.start(

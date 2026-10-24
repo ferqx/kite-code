@@ -24,6 +24,10 @@ Status: implemented
 
 ## Consequences
 
+会话内的协议切换另受[会话协议决定](2026-10-24-session-model-protocol.md)约束：首次实际 Run 后保持 Responses 或 Chat Completions，同协议仍可更换模型；本篇传输、私有 continuation 与不同绑定的隔离理由保持。
+
+本机 ChatGPT 登录来源已由[Codex 认证决定](2026-10-24-local-codex-authentication.md)扩展；本篇普通 OpenAI/compatible 连接的 API 凭据、显式协议、唯一工具循环与私有 continuation 理由继续适用。
+
 自定义 Runtime 使用 Responses 时必须提供 Artifact port；普通 Service 已提供。协议与转换版本成为可审计的非秘密 metadata，私有绑定哈希不携带原始连接数据。Responses SDK warning details 可能包含历史正文，因此输出前替换成通用诊断。
 
 实现与测试入口见 [AI owner](../../../../packages/ai/README.md)、[模型配置手册](../../../../docs/handbook/features/models-and-configuration.md)、[输出存储](../../../../packages/agent/src/model-output/README.md)。本地 HTTP mock 覆盖真实 Responses wire、工具循环和定时任务；不构成生产付费模型或第三方 provider 兼容性认证。没有增加 OAuth 或 ChatGPT 账号登录。

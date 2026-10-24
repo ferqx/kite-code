@@ -8,6 +8,7 @@ import { schemas } from './http/schema';
 import type { PermissionManagementPort } from './permission-management';
 import { parseRuntimeProtection } from './runtime-protection';
 import type { SkillCatalogueSource } from './skill-catalogue';
+import type { UserMcpManagementPort } from './user-mcp-management';
 
 export const startupLimitBytes = 64 * 1024;
 export const bootstrapLimitBytes = 16 * 1024;
@@ -42,6 +43,7 @@ export type SelectedProfile = Pick<ProfileSelection, 'dataRoot' | 'profile' | 'p
 export interface ProcessHostConfiguration {
   diagnosticSource?: HostStatusSource;
   skillCatalogue?: SkillCatalogueSource;
+  userMcpManagement?: (runtime?: AgentRuntime) => UserMcpManagementPort | undefined;
   configurationManagement?: (runtime?: AgentRuntime) => ConfigurationManagementPort;
   permissionManagement?: (runtime?: AgentRuntime) => PermissionManagementPort;
   model?: RuntimeOptions['model'];

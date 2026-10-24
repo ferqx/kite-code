@@ -269,24 +269,14 @@ try {
   phase('provider_released');
   await page.getByText('轮次：completed', { exact: true }).waitFor();
   phase('run_completed');
-  // Full body stays absent until an explicit user read. The current view keeps only a preview.
-  expect(await page.getByText('MODEL OUTPUT COMPLETE TAIL', { exact: true }).count()).toBe(0);
-  const fullButton = page.getByRole('button', {
-    name: 'Read complete recorded Model output',
-    exact: true,
-  });
-  await fullButton.waitFor();
-  phase('full_read_ready');
-  await fullButton.focus();
-  await page.keyboard.press('Enter');
-  phase('full_read_begin');
+  // Ordinary messages load the same verified full body without a separate reader action.
+  phase('automatic_full_read_begin');
   await page.getByText('MODEL OUTPUT COMPLETE TAIL', { exact: true }).waitFor({ timeout: 30000 });
   phase('full_tail_visible');
   expect(await count()).toBe(1);
   process.kill(servicePid, 0);
-  await page.getByRole('button', { name: 'Close full Model output', exact: true }).click();
-  phase('full_closed');
-  expect(await page.getByText('MODEL OUTPUT COMPLETE TAIL', { exact: true }).count()).toBe(0);
+  expect(await page.getByRole('button', { name: '查看完整回复', exact: true }).count()).toBe(0);
+  expect(await page.getByRole('button', { name: '收起完整回复', exact: true }).count()).toBe(0);
   // Exercise the actual closed IPC parser and exact sequential offsets, then release this read.
   phase('protocol_begin');
   const protocol = await page.evaluate(async (storeId) => {
@@ -379,10 +369,9 @@ try {
   await page.getByRole('button', { name: 'Native A', exact: true }).click();
   await page.locator('.session-header').getByTitle('Native A', { exact: true }).waitFor();
   await openSessionTools(page);
-  expect(await page.getByText('MODEL OUTPUT COMPLETE TAIL', { exact: true }).count()).toBe(0);
-  await page
-    .getByRole('button', { name: 'Read complete recorded Model output', exact: true })
-    .waitFor();
+  await page.getByText('MODEL OUTPUT COMPLETE TAIL', { exact: true }).waitFor({ timeout: 30000 });
+  expect(await page.getByRole('button', { name: '查看完整回复', exact: true }).count()).toBe(0);
+  expect(await page.getByRole('button', { name: '收起完整回复', exact: true }).count()).toBe(0);
   expect(await count()).toBe(1);
   process.kill(servicePid, 0);
   phase('final_reload_ready');

@@ -131,7 +131,7 @@ test('four explicit provider families save actual names, protect default and ret
       (await f.client.getProviderSettings({ storeId: f.storeId })).providers.map(
         (provider) => provider.id,
       ),
-    ).toEqual(['openai', 'deepseek', 'compatible', 'ollama']);
+    ).toEqual(['openai', 'deepseek', 'compatible', 'ollama', 'codex']);
     for (const provider of ['openai', 'deepseek', 'compatible', 'ollama'] as const) {
       const request = await f.input(
         `save-${provider}`,

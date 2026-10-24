@@ -497,6 +497,167 @@ export type SkillCataloguePage = {
   nextAfterId: string | null;
   complete: boolean;
 };
+export type UserSkillCatalogueQuery = {
+  storeId: string;
+  afterId?: string;
+  revision?: string;
+  limit?: number;
+  byteLimit?: number;
+};
+export type UserSkillCataloguePage = {
+  version: 1;
+  storeId: string;
+  revision: string;
+  availability: 'available' | 'unavailable';
+  reason: ('configuration_unavailable' | 'skill_catalogue_source_unavailable') | null;
+  entries: Array<{
+    id: string;
+    name: string | null;
+    description: string | null;
+    version: string | null;
+    enabled: boolean;
+    state: 'available' | 'disabled' | 'unavailable';
+    reason:
+      | (
+          | 'invalid_skill_configuration'
+          | 'skill_path_denied'
+          | 'unsupported_skill_options'
+          | 'skill_unavailable'
+          | 'skill_version_changed'
+          | 'duplicate_skill_location'
+          | 'skill_capability_missing'
+          | 'skill_metadata_limit'
+          | 'skill_text_limit'
+          | 'skill_text_invalid'
+          | 'skill_path_changed'
+        )
+      | null;
+    requiredCapabilities: Array<string>;
+    missingCapabilities: Array<string>;
+    source?: { scope: 'user'; origin: '.agents' | '.kite-code' | 'profile' | 'configured' } | null;
+  }>;
+  nextAfterId: string | null;
+  complete: boolean;
+  scope: 'user';
+};
+export type UserMcpSettingsQuery = { storeId: string };
+export type UserMcpSettingsRequest = {
+  commandId: string;
+  storeId: string;
+  expectedReadSet: string;
+  operation:
+    | {
+        kind: 'add';
+        name: string;
+        entry: { type: 'http'; url: string } | { type: 'stdio'; command: string };
+      }
+    | { kind: 'remove'; serverId: string }
+    | { kind: 'enabled'; serverId: string; enabled: boolean }
+    | { kind: 'authStatus'; serverId: string }
+    | { kind: 'login'; serverId: string }
+    | { kind: 'authRefresh'; serverId: string }
+    | { kind: 'clear'; serverId: string }
+    | { kind: 'revoke'; serverId: string }
+    | { kind: 'bind'; serverId: string; expiresAt: number }
+    | { kind: 'connect'; serverId: string }
+    | { kind: 'refresh'; serverId: string }
+    | { kind: 'reconnect'; serverId: string }
+    | { kind: 'disconnect'; serverId: string };
+};
+export type UserMcpSettingsView = {
+  scope: 'user';
+  storeId: string;
+  readSet: string | null;
+  sources: Array<{
+    id: string;
+    name: string;
+    transport: ('http' | 'stdio') | null;
+    address: string | null;
+    enabled: boolean;
+    configured: boolean;
+    diagnostics: Array<string>;
+    authentication: {
+      policy: 'none' | 'credential' | 'oauth' | 'auto';
+      status: 'none' | 'missing' | 'present' | 'locked' | 'unavailable' | 'unknown';
+      loginAllowed: boolean;
+    };
+    connection: {
+      state: 'disconnected' | 'connecting' | 'ready' | 'failed' | 'outcome_unknown';
+      generation: number | null;
+      toolCount: number | null;
+    };
+  }>;
+  errors: Array<string>;
+};
+export type UserMcpOperationQuery = { storeId: string };
+export type UserMcpOperationResult = {
+  scope: 'user';
+  storeId: string;
+  commandId: string;
+  expectedReadSet: string;
+  operation:
+    | {
+        kind: 'add';
+        name: string;
+        entry: { type: 'http'; url: string } | { type: 'stdio'; command: string };
+      }
+    | { kind: 'remove'; serverId: string }
+    | { kind: 'enabled'; serverId: string; enabled: boolean }
+    | { kind: 'authStatus'; serverId: string }
+    | { kind: 'login'; serverId: string }
+    | { kind: 'authRefresh'; serverId: string }
+    | { kind: 'clear'; serverId: string }
+    | { kind: 'revoke'; serverId: string }
+    | { kind: 'bind'; serverId: string; expiresAt: number }
+    | { kind: 'connect'; serverId: string }
+    | { kind: 'refresh'; serverId: string }
+    | { kind: 'reconnect'; serverId: string }
+    | { kind: 'disconnect'; serverId: string };
+  state: 'pending' | 'applied' | 'failed' | 'outcome_unknown';
+  receipt: {
+    code: string | null;
+    cancelled: boolean;
+    configuration: 'unchanged' | 'published' | 'outcome_unknown';
+    authentication: {
+      policy: 'none' | 'credential' | 'oauth' | 'auto';
+      status: 'none' | 'missing' | 'present' | 'locked' | 'unavailable' | 'unknown';
+      loginAllowed: boolean;
+    } | null;
+    connection: {
+      state: 'disconnected' | 'connecting' | 'ready' | 'failed' | 'outcome_unknown';
+      generation: number | null;
+      toolCount: number | null;
+    } | null;
+    revocation: ('completed' | 'not_supported') | null;
+  };
+};
+export type UserMcpToolsQuery = {
+  storeId: string;
+  serverId: string;
+  generation: number;
+  afterIndex?: number;
+};
+type UserMcpToolsPage___schema0 =
+  | string
+  | number
+  | boolean
+  | null
+  | Array<UserMcpToolsPage___schema0>
+  | { [key: string]: UserMcpToolsPage___schema0 };
+export type UserMcpToolsPage = {
+  scope: 'user';
+  storeId: string;
+  serverId: string;
+  generation: number;
+  entries: Array<{
+    index: number;
+    definitionId: string;
+    definitionVersion: string;
+    descriptor: UserMcpToolsPage___schema0;
+  }>;
+  nextAfterIndex: number | null;
+  complete: boolean;
+};
 export type HostStatusQuery = { workspaceId?: string; sessionId?: string };
 export type HostStatus = {
   version: 1;
@@ -1507,7 +1668,7 @@ export type ProviderSettingsView = {
     effectiveDigest: string;
   } | null;
   providers: Array<{
-    id: 'openai' | 'deepseek' | 'compatible' | 'ollama';
+    id: 'openai' | 'deepseek' | 'compatible' | 'ollama' | 'codex';
     label: string;
     defaultBaseURL: string;
     requiresCredential: boolean;
@@ -1535,7 +1696,7 @@ export type ProviderDiscoveryRequest = {
   };
   operation: {
     name?: string;
-    provider: 'openai' | 'deepseek' | 'compatible' | 'ollama';
+    provider: 'openai' | 'deepseek' | 'compatible' | 'ollama' | 'codex';
     protocol?: 'chat-completions' | 'responses';
     connectionId: string | null;
     baseURL: string;
@@ -1553,7 +1714,7 @@ export type ProviderDiscoveryView = {
   };
   operation: {
     name?: string;
-    provider: 'openai' | 'deepseek' | 'compatible' | 'ollama';
+    provider: 'openai' | 'deepseek' | 'compatible' | 'ollama' | 'codex';
     protocol?: 'chat-completions' | 'responses';
     connectionId: string | null;
     baseURL: string;
@@ -1573,7 +1734,7 @@ export type ProviderSettingsRequest = {
   operation: {
     kind?: 'upsert' | 'remove';
     name?: string;
-    provider: 'openai' | 'deepseek' | 'compatible' | 'ollama';
+    provider: 'openai' | 'deepseek' | 'compatible' | 'ollama' | 'codex';
     protocol?: 'chat-completions' | 'responses';
     connectionId: string | null;
     baseURL: string;
@@ -1675,7 +1836,7 @@ export type HostMutation = {
     operation: {
       kind?: 'upsert' | 'remove';
       name?: string;
-      provider: 'openai' | 'deepseek' | 'compatible' | 'ollama';
+      provider: 'openai' | 'deepseek' | 'compatible' | 'ollama' | 'codex';
       protocol?: 'chat-completions' | 'responses';
       connectionId: string | null;
       baseURL: string;

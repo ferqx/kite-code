@@ -3,7 +3,6 @@ import { execFileSync } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
 import {
   existsSync,
-  lstatSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -18,7 +17,6 @@ import { acquireArtifactAccess } from '@kite-ai/agent/artifact-access';
 import {
   createCredentialVault,
   createOsCredentialBackend,
-  mcpCanonical,
   type OwnedCredentialScope,
   readMcpSources,
 } from '@kite-ai/agent/config';
@@ -26,6 +24,7 @@ import { selectProfile } from '@kite-ai/agent/profile';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import { initializeSqliteEngine } from '@kite-ai/agent/sqlite-engine';
 import { verifyNativeRuntimeBundle } from '@kite-ai/service/native-runtime-assets';
+import { userMcpOAuthScope } from '../../service/src/user-mcp-credentials';
 import { buildNativeCandidate } from './build-native';
 
 /** Explicit local qualification, outside automated default: the human handles any browser TLS warning. */
@@ -71,7 +70,6 @@ const backendOptions = {
     accountNamespace: `profile-${profile.profileAccessKey}`,
   },
   vault = () => createCredentialVault({ backend: createOsCredentialBackend(backendOptions) });
-const hash = (value: unknown) => createHash('sha256').update(mcpCanonical(value)).digest('hex');
 const emit = (stage: string, facts = {}) => console.log(JSON.stringify({ stage, root, ...facts }));
 async function ownedCleanup() {
   const rows = () =>
@@ -388,35 +386,16 @@ try {
   );
   const entry = readMcpSources({
     profilePath: profile.profilePath,
-    workspacePath: join(home, 'workspace'),
     scope: {
+      mode: 'user',
       profileId: profile.profileAccessKey,
       storeId: storeId!,
-      sessionId: 'mcp-browser',
-      workspaceId: 'w',
+      sessionId: null,
+      workspaceId: null,
     },
   }).entries.find((value) => value.server.name === 'window-oauth');
   assert.ok(entry);
-  const stat = lstatSync(join(home, 'workspace'));
-  ownedScope = {
-    namespace: 'mcp.oauth',
-    ownerDigest: hash({
-      domain: 'kite-mcp-oauth-owner-v1',
-      profile: profile.profileAccessKey,
-      originalStoreId: storeId!,
-      workspaceId: 'w',
-      workspaceIdentity: hash({
-        root: realpathSync(join(home, 'workspace')),
-        dev: stat.dev,
-        ino: stat.ino,
-      }),
-      source: entry.server.source,
-      serverId: entry.server.id,
-      rawEntryDigest: entry.server.rawEntryDigest,
-      transportDigest: entry.server.transportDigest,
-      authProfile: 'owned-native-browser',
-    }),
-  };
+  ownedScope = userMcpOAuthScope(profile.profileAccessKey, storeId!, entry);
   assert.equal(await vault().readOwned(ownedScope), null);
   const fixture = join(root, 'driver.ts');
   writeFileSync(

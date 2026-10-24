@@ -11,6 +11,7 @@ export const SkillCatalogueQuerySchema = z.strictObject({
   limit: positive.optional(),
   byteLimit: positive.max(1048576).optional(),
 });
+export const UserSkillCatalogueQuerySchema = SkillCatalogueQuerySchema.omit({ workflow: true });
 export const skillUnavailableReasons = [
   'invalid_skill_configuration',
   'skill_path_denied',
@@ -84,4 +85,21 @@ export const SkillCataloguePageSchema = z.strictObject({
   entries: z.array(SkillCatalogueEntrySchema),
   nextAfterId: id.nullable(),
   complete: z.boolean(),
+});
+export const UserSkillCataloguePageSchema = SkillCataloguePageSchema.omit({
+  workspaceId: true,
+}).extend({
+  scope: z.literal('user'),
+  reason: z.enum(['configuration_unavailable', 'skill_catalogue_source_unavailable']).nullable(),
+  entries: z.array(
+    SkillCatalogueEntrySchema.omit({ workflow: true, source: true }).extend({
+      source: z
+        .strictObject({
+          scope: z.literal('user'),
+          origin: z.enum(['.agents', '.kite-code', 'profile', 'configured']),
+        })
+        .nullable()
+        .optional(),
+    }),
+  ),
 });

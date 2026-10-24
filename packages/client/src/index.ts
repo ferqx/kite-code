@@ -74,6 +74,9 @@ import type {
   SteerCommandRequest,
   StreamCheckpoint,
   StreamReady,
+  UserMcpOperationResult,
+  UserMcpSettingsRequest,
+  UserSkillCataloguePage,
   VerifySessionExportQuery,
   WithdrawPendingInputRequest,
   WorkspaceRemoval,
@@ -98,7 +101,7 @@ import {
   validateSessionLogTarget,
   verifySessionLogPage,
 } from './session-logs';
-import { verifySkillCataloguePage } from './skill-catalogue';
+import { verifySkillCataloguePage, verifyUserSkillCataloguePage } from './skill-catalogue';
 import {
   parseCursorSequence,
   readSSE,
@@ -145,6 +148,7 @@ export { verifyModelOutputSnapshot } from './model-output';
 export {
   type SkillCatalogueVerificationOptions,
   verifySkillCataloguePage,
+  verifyUserSkillCataloguePage,
 } from './skill-catalogue';
 export type Json = ExtensionCommandRequest['input'];
 export type { SessionExportFrame, SessionExportSection } from './session-export';
@@ -709,6 +713,153 @@ export class AgentClient {
       options.signal,
     );
   }
+  private userMcpStore(storeId: string): void {
+    this.requireCapability('user_mcp_settings');
+    validateRequest('UserMcpSettingsQuery', { storeId });
+    if (storeId !== this.lastServer!.storeId) throw new ClientError('store_identity_mismatch');
+  }
+  async getUserMcpSettings(options: { storeId: string; signal?: AbortSignal }) {
+    const { signal, ...query } = options;
+    validateRequest('UserMcpSettingsQuery', query);
+    this.userMcpStore(query.storeId);
+    const generation = this.connectionGeneration;
+    await this.verifyConnection({ signal });
+    const result = await this.fetchJSON(
+      `/v1/config/user/mcp?${new URLSearchParams(query)}`,
+      'UserMcpSettingsView',
+      { signal },
+    );
+    if (
+      result.storeId !== query.storeId ||
+      result.scope !== 'user' ||
+      new Set(result.sources.map((source) => source.id)).size !== result.sources.length
+    )
+      throw new ClientError('configuration_scope_mismatch');
+    await this.verifyConnection({ signal });
+    if (generation !== this.connectionGeneration) throw new ClientError('connection_superseded');
+    return result;
+  }
+  private verifyUserMcpOperation(
+    result: UserMcpOperationResult,
+    storeId: string,
+    commandId: string,
+  ): void {
+    if (result.scope !== 'user' || result.storeId !== storeId || result.commandId !== commandId)
+      throw new ClientError('host_mutation_scope_mismatch');
+  }
+  async updateUserMcpSettings(
+    input: UserMcpSettingsRequest,
+    options: { signal?: AbortSignal } = {},
+  ) {
+    const intent = structuredClone(input);
+    validateRequest('UserMcpSettingsRequest', intent);
+    this.userMcpStore(intent.storeId);
+    const generation = this.connectionGeneration;
+    await this.verifyConnection(options);
+    let result: UserMcpOperationResult;
+    try {
+      result = await this.fetchJSON('/v1/config/user/mcp', 'UserMcpOperationResult', {
+        method: 'POST',
+        body: intent,
+        signal: options.signal,
+      });
+    } catch (error) {
+      if (!(error instanceof ClientError) || error.status === undefined)
+        throw new ClientError('network_outcome_unknown');
+      throw error;
+    }
+    try {
+      this.verifyUserMcpOperation(result, intent.storeId, intent.commandId);
+      if (
+        result.expectedReadSet !== intent.expectedReadSet ||
+        canonicalModelBody(result.operation) !== canonicalModelBody(intent.operation)
+      )
+        throw new ClientError('host_mutation_scope_mismatch');
+      await this.verifyConnection(options);
+      if (generation !== this.connectionGeneration) throw new ClientError('connection_superseded');
+    } catch {
+      throw new ClientError('network_outcome_unknown');
+    }
+    return result;
+  }
+  async getUserMcpOperation(commandId: string, options: { storeId: string; signal?: AbortSignal }) {
+    const { signal, ...query } = options;
+    validateRequest('UserMcpOperationQuery', query);
+    validateRequest('CredentialRevokeRequest', { commandId, expectedStoreId: query.storeId });
+    this.userMcpStore(query.storeId);
+    const generation = this.connectionGeneration;
+    await this.verifyConnection({ signal });
+    const result = await this.fetchJSON(
+      `/v1/config/user/mcp/operations/${encodeURIComponent(commandId)}?${new URLSearchParams(query)}`,
+      'UserMcpOperationResult',
+      { signal },
+    );
+    this.verifyUserMcpOperation(result, query.storeId, commandId);
+    await this.verifyConnection({ signal });
+    if (generation !== this.connectionGeneration) throw new ClientError('connection_superseded');
+    return result;
+  }
+  async cancelUserMcpOperation(
+    commandId: string,
+    options: { storeId: string; signal?: AbortSignal },
+  ) {
+    const { signal, ...intent } = options;
+    validateRequest('UserMcpOperationQuery', intent);
+    validateRequest('CredentialRevokeRequest', { commandId, expectedStoreId: intent.storeId });
+    this.userMcpStore(intent.storeId);
+    const generation = this.connectionGeneration;
+    await this.verifyConnection({ signal });
+    try {
+      const result = await this.fetchJSON(
+        `/v1/config/user/mcp/operations/${encodeURIComponent(commandId)}/cancel`,
+        'UserMcpOperationResult',
+        { method: 'POST', body: intent, signal },
+      );
+      this.verifyUserMcpOperation(result, intent.storeId, commandId);
+      await this.verifyConnection({ signal });
+      if (generation !== this.connectionGeneration) throw new ClientError('connection_superseded');
+      return result;
+    } catch (error) {
+      if (!(error instanceof ClientError) || error.status === undefined)
+        throw new ClientError('network_outcome_unknown');
+      throw error;
+    }
+  }
+  async listUserMcpTools(
+    input: {
+      storeId: string;
+      serverId: string;
+      generation: number;
+      afterIndex?: number;
+    },
+    options: { signal?: AbortSignal } = {},
+  ) {
+    const query = structuredClone(input);
+    validateRequest('UserMcpToolsQuery', query);
+    this.userMcpStore(query.storeId);
+    const generation = this.connectionGeneration;
+    await this.verifyConnection(options);
+    const result = await this.fetchJSON(
+      `/v1/config/user/mcp/tools?${new URLSearchParams(Object.entries(query).map(([key, value]) => [key, String(value)]))}`,
+      'UserMcpToolsPage',
+      options,
+    );
+    if (
+      result.scope !== 'user' ||
+      result.storeId !== query.storeId ||
+      result.serverId !== query.serverId ||
+      result.generation !== query.generation ||
+      result.complete !== (result.nextAfterIndex === null) ||
+      result.entries.length > 128 ||
+      result.entries.some((entry, index) => entry.index !== (query.afterIndex ?? -1) + index + 1) ||
+      (result.nextAfterIndex !== null &&
+        (!result.entries.length || result.nextAfterIndex !== result.entries.at(-1)!.index))
+    )
+      throw new ClientError('invalid_response');
+    await this.verifyConnection(options);
+    if (generation !== this.connectionGeneration) throw new ClientError('connection_superseded');
+    return result;
+  }
   async getProviderSettings(options: { storeId: string; signal?: AbortSignal }) {
     const { signal, storeId } = options;
     this.managementStore(storeId);
@@ -721,7 +872,7 @@ export class AgentClient {
     );
     if (result.storeId !== storeId) throw new ClientError('configuration_scope_mismatch');
     if (
-      new Set(result.providers.map((provider) => provider.id)).size !== 4 ||
+      new Set(result.providers.map((provider) => provider.id)).size !== 5 ||
       result.readSet?.workspaceEtag != null ||
       result.providers.some(
         (provider) =>
@@ -1660,6 +1811,41 @@ export class AgentClient {
       'SessionView',
       options,
     );
+  }
+  /** Read knowledge and optional manual Workflow metadata; never activates or authorizes a Skill. */
+  async listUserSkills(options: {
+    storeId: string;
+    afterId?: string;
+    revision?: string;
+    limit?: number;
+    byteLimit?: number;
+    signal?: AbortSignal;
+  }): Promise<UserSkillCataloguePage> {
+    this.requireCapability('user_skill_catalogue');
+    const { signal, ...input } = options;
+    const frozen = structuredClone(input);
+    validateRequest('UserSkillCatalogueQuery', frozen);
+    if (frozen.afterId && !frozen.revision) throw new ClientError('invalid_skill_catalogue_query');
+    if (this.lastServer!.storeId !== frozen.storeId)
+      throw new ClientError('store_identity_mismatch');
+    const generation = this.connectionGeneration;
+    signal?.throwIfAborted();
+    await this.verifyConnection({ signal });
+    if (generation !== this.connectionGeneration) throw new ClientError('connection_superseded');
+    const query = new URLSearchParams(
+      Object.entries(frozen)
+        .filter(([, value]) => value !== undefined)
+        .map(([key, value]) => [key, String(value)]),
+    );
+    const page = await this.fetchJSON(`/v1/config/user/skills?${query}`, 'UserSkillCataloguePage', {
+      signal,
+    });
+    if (generation !== this.connectionGeneration) throw new ClientError('connection_superseded');
+    const verified = verifyUserSkillCataloguePage(page, frozen);
+    await this.verifyConnection({ signal });
+    signal?.throwIfAborted();
+    if (generation !== this.connectionGeneration) throw new ClientError('connection_superseded');
+    return verified;
   }
   /** Read knowledge and optional manual Workflow metadata; never activates or authorizes a Skill. */
   async listSkills(

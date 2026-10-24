@@ -149,11 +149,13 @@ export function createConfigurationSnapshot(
         endpoint(projected.url);
         if (projected.options !== undefined) object(projected.options);
         if (key === 'models' && projected.protocol !== undefined) {
+          if (projected.provider === 'codex' && projected.protocol !== 'responses')
+            throw new ConfigurationError('model_protocol_unsupported');
           if (projected.protocol !== 'chat-completions' && projected.protocol !== 'responses')
             throw new ConfigurationError('invalid_model_protocol');
           if (
             projected.protocol === 'responses' &&
-            !['openai', 'compatible'].includes(String(projected.provider))
+            !['openai', 'compatible', 'codex'].includes(String(projected.provider))
           )
             throw new ConfigurationError('model_protocol_unsupported');
         }

@@ -87,6 +87,7 @@ async function fixture(bodyMode = false) {
     unsupported: false,
     incomplete: false,
     hold: undefined as Promise<void> | undefined,
+    outputHolds: new Map<string, Promise<void>>(),
   };
   const messages = (id: string): Message[] => {
     const rows: Message[] = Array.from({ length: 201 }, (_, index) => ({
@@ -197,6 +198,8 @@ async function fixture(bodyMode = false) {
     async getModelOutput(sessionId: string, executionId: string) {
       state.outputReads.push(executionId);
       if (state.hold) await state.hold;
+      const held = state.outputHolds.get(executionId);
+      if (held) await held;
       const index = executionId === 'model-0' ? 0 : 1,
         content = index === 0 ? first : last;
       return {
@@ -220,7 +223,7 @@ async function fixture(bodyMode = false) {
           reasoning: 'DO_NOT_COPY_REASONING',
           complete: !state.incomplete,
           toolCalls:
-            index === 0
+            index === 0 && !state.incomplete
               ? [{ id: 'call', name: 'fixture.tool', arguments: 'DO_NOT_COPY_TOOL_ARGUMENTS' }]
               : [],
         },
@@ -317,49 +320,66 @@ test('Web copies the exact completed historical Run across all message pages inc
 
 test('Web requires every exact original Model body and retires a late read when its Session closes', async () => {
   const f = await fixture(true);
+  let releaseFirst!: () => void,
+    releaseLast!: () => void,
+    releaseB!: () => void,
+    releaseA!: () => void;
+  f.state.outputHolds.set(
+    'model-0',
+    new Promise<void>((resolve) => {
+      releaseFirst = resolve;
+    }),
+  );
+  f.state.outputHolds.set(
+    'model-1',
+    new Promise<void>((resolve) => {
+      releaseLast = resolve;
+    }),
+  );
   try {
     await open(f);
     expect(assistantButtons(f)).toHaveLength(0);
-    expect(f.state.outputReads).toHaveLength(0);
-    const read = (id: string) =>
-      f.dom.window.document.querySelector(`[data-message-id="${id}"] button`) as HTMLButtonElement;
+    await settle(() => f.state.outputReads.length === 2);
+    expect(f.dom.window.document.querySelector('.model-output-message > button')).toBeNull();
     const finalArticle = () => f.dom.window.document.querySelector('[data-message-id="a-last"]')!;
     await settle(() => finalArticle().getAttribute('data-final-reply') === 'true');
     expect(f.dom.window.getComputedStyle(finalArticle()).paddingBottom).toBe('32px');
-    await f.click(read('a-first'));
-    await settle(() => f.state.outputReads.length === 1);
+    await act(async () => releaseFirst());
     expect(assistantButtons(f)).toHaveLength(0);
-    await f.click(read('a-last'));
+    await act(async () => releaseLast());
     await settle(() => assistantButtons(f).length === 1);
     expect(f.state.outputReads).toEqual(['model-0', 'model-1']);
     await f.click(assistantButtons(f)[0]!);
     expect(f.state.copied).toBe(`${first}\n\n${last}`);
     expect(f.state.copied).not.toContain('DO_NOT_COPY_REASONING');
     expect(finalArticle().getAttribute('data-final-reply')).toBe('true');
-    const closeFirst = [
-      ...f.dom.window.document.querySelectorAll<HTMLButtonElement>(
-        '[data-message-id="a-first"] button',
-      ),
-    ].find((button) => button.textContent === 'Close full Model output')!;
-    await f.click(closeFirst);
-    await settle(() => assistantButtons(f).length === 0);
     expect(finalArticle().getAttribute('data-final-reply')).toBe('true');
     expect(f.dom.window.getComputedStyle(finalArticle()).paddingBottom).toBe('32px');
+    f.state.hold = new Promise<void>((resolve) => {
+      releaseB = resolve;
+    });
     await f.choose('b');
     await settle(() => !!f.dom.window.document.querySelector('[data-message-id="b-last"]'));
+    await settle(() => f.state.outputReads.length === 4);
     expect(assistantButtons(f)).toHaveLength(0);
-    let release!: () => void;
     f.state.hold = new Promise<void>((resolve) => {
-      release = resolve;
+      releaseA = resolve;
     });
-    await f.click(read('b-first'));
-    await settle(() => f.state.outputReads.length === 3);
     await f.choose('a');
     await settle(() => !!f.dom.window.document.querySelector('[data-message-id="a-last"]'));
-    await act(async () => release());
+    await settle(() => f.state.outputReads.length === 6);
+    await act(async () => releaseB());
     expect(assistantButtons(f)).toHaveLength(0);
     expect(f.dom.window.document.querySelector('[data-message-id="b-last"]')).toBeNull();
+    await act(async () => releaseA());
+    await settle(() => assistantButtons(f).length === 1);
+    await f.click(assistantButtons(f)[0]!);
+    expect(f.state.copied).toBe(`${first}\n\n${last}`);
   } finally {
+    releaseFirst?.();
+    releaseLast?.();
+    releaseB?.();
+    releaseA?.();
     await f.close();
   }
 }, 10000);
@@ -385,7 +405,7 @@ test('Web never labels unfinished, unsuccessful, sealed, unsupported or incomple
         await Bun.sleep(20);
       });
       expect(assistantButtons(f)).toHaveLength(0);
-      expect(f.state.outputReads).toHaveLength(0);
+      expect(f.state.outputReads).toHaveLength(boundary === 'incomplete' ? 2 : 0);
       expect(f.state.copied).toBe('');
     } finally {
       await f.close();
@@ -393,8 +413,12 @@ test('Web never labels unfinished, unsuccessful, sealed, unsupported or incomple
   }
 }, 10000);
 
-test('Web production CSS keeps process, tool-to-final and turn gaps through explicit full-body reading', async () => {
+test('Web production CSS keeps process, tool-to-final and turn gaps through automatic body reading and visibility pause', async () => {
   const f = await fixture(true);
+  let release!: () => void;
+  f.state.hold = new Promise<void>((resolve) => {
+    release = resolve;
+  });
   try {
     f.state.compact = true;
     await f.click(f.button('Workspace'));
@@ -408,21 +432,31 @@ test('Web production CSS keeps process, tool-to-final and turn gaps through expl
     expect(f.dom.window.getComputedStyle(article('tool')).paddingBottom).toBe('16px');
     expect(f.dom.window.getComputedStyle(article('last')).paddingBottom).toBe('32px');
     expect(assistantButtons(f)).toHaveLength(0);
-    for (const part of ['first', 'last']) {
-      const read = article(part).querySelector('button')!;
-      await f.click(read);
-    }
+    expect(f.dom.window.document.querySelector('.model-output-message > button')).toBeNull();
+    await act(async () => release());
     await settle(() => assistantButtons(f).length === 1);
     expect(article('last').getAttribute('data-final-reply')).toBe('true');
     expect(f.dom.window.getComputedStyle(article('last')).paddingBottom).toBe('32px');
-    const close = [...article('last').querySelectorAll('button')].find(
-      (button) => button.textContent === 'Close full Model output',
-    )!;
-    await f.click(close);
+    Object.defineProperty(f.dom.window.document, 'visibilityState', {
+      configurable: true,
+      value: 'hidden',
+    });
+    await act(async () =>
+      f.dom.window.document.dispatchEvent(new f.dom.window.Event('visibilitychange')),
+    );
     await settle(() => assistantButtons(f).length === 0);
+    Object.defineProperty(f.dom.window.document, 'visibilityState', {
+      configurable: true,
+      value: 'visible',
+    });
+    await act(async () =>
+      f.dom.window.document.dispatchEvent(new f.dom.window.Event('visibilitychange')),
+    );
+    await settle(() => article('last').getAttribute('data-final-reply') === 'true');
     expect(article('last').getAttribute('data-final-reply')).toBe('true');
     expect(f.dom.window.getComputedStyle(article('tool')).paddingBottom).toBe('16px');
   } finally {
+    release?.();
     await f.close();
   }
 }, 10000);

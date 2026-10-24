@@ -207,6 +207,7 @@ export async function assembleProcessService(
     permissionManagement,
     diagnosticSource,
     skillCatalogue,
+    userMcpManagement,
     bindWorkspaceSerialLocks,
     ...runtimeConfiguration
   } = configuration;
@@ -286,6 +287,7 @@ export async function assembleProcessService(
       permissionManagement: permissionManagement?.(runtime),
       diagnosticSource,
       skillCatalogue,
+      userMcpManagement: userMcpManagement?.(runtime),
       sessionLogs: store
         ? (query, observer) => readSessionLogs(store!, query, observer)
         : undefined,

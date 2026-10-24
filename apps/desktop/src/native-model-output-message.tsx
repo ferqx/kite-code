@@ -46,6 +46,7 @@ export function NativeModelOutputMessage({
   return (
     <ModelOutputMessage
       {...props}
+      autoRead
       renderText={
         props.message.contentFormat === 'unsupported'
           ? undefined

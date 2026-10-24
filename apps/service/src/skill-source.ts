@@ -31,17 +31,28 @@ function inside(root: string, path: string) {
   return part === '' || (!isAbsolute(part) && part !== '..' && !part.startsWith(`..${sep}`));
 }
 /** Shared metadata/body binding. Disabled locations are never read; failures belong to their configured ID. */
-export function createConfiguredSkillSource(options: {
-  workspaceRoot: string;
-  profile: ProfileSelection;
-  skills?: readonly JsonObject[];
-  toolIds: readonly string[];
-  allowedCapabilities?: readonly string[];
-  /** One trusted owner, independent of the replaceable catalogue metadata. */
-  knowledgeScope?: KnowledgeReadScope;
-}) {
+export function createConfiguredSkillSource(
+  options: (
+    | {
+        workspaceRoot: string;
+        userRoot?: never;
+      }
+    | {
+        userRoot: string;
+        workspaceRoot?: never;
+      }
+  ) & {
+    profile: ProfileSelection;
+    skills?: readonly JsonObject[];
+    toolIds: readonly string[];
+    allowedCapabilities?: readonly string[];
+    /** One trusted owner, independent of the replaceable catalogue metadata. */
+    knowledgeScope?: KnowledgeReadScope;
+  },
+) {
   const configured = structuredClone(options.skills ?? []);
-  const workspaceRoot = options.workspaceRoot;
+  const configurationRoot = options.userRoot ?? options.workspaceRoot;
+  const userScope = options.userRoot !== undefined;
   const profileRoot = join(options.profile.profilePath, 'skills');
   const allowed = [...(options.allowedCapabilities ?? [])].filter((id) =>
     options.toolIds.includes(id),
@@ -76,10 +87,17 @@ export function createConfiguredSkillSource(options: {
     },
     list() {
       return admitted(async () => {
-        const root = await realpath(workspaceRoot);
-        const stat = await lstat(workspaceRoot);
+        if (userScope && configured.length === 0) {
+          sources = new Map();
+          configuredIds = new Map();
+          return { entries: [], states: [] };
+        }
+        const root = await realpath(configurationRoot);
+        const stat = await lstat(configurationRoot);
         if (!stat.isDirectory() || stat.isSymbolicLink())
-          throw new AgentError('workspace_configuration_unavailable');
+          throw new AgentError(
+            userScope ? 'configuration_unavailable' : 'workspace_configuration_unavailable',
+          );
         let profileRootAvailable = false;
         try {
           const entry = await lstat(profileRoot);
@@ -125,7 +143,7 @@ export function createConfiguredSkillSource(options: {
               profileRootAvailable && inside(profileRoot, path)
                 ? { scope: 'user', origin: 'profile' }
                 : {
-                    scope: 'project',
+                    scope: userScope ? 'user' : 'project',
                     origin: inside(join(root, '.agents', 'skills'), path)
                       ? '.agents'
                       : inside(join(root, '.kite-code', 'skills'), path)

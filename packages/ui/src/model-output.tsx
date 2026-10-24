@@ -1,11 +1,13 @@
 import { ClientError, type Message, type ModelOutputSnapshot } from '@kite-ai/client';
-import { type ReactNode, useEffect, useMemo, useRef, useState } from 'react';
+import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { SafeMessageMarkdown } from './markdown';
 
 export interface ModelOutputMessageProps {
   readonly message: Message;
   readonly storeId: string;
   readonly suspended?: boolean;
+  /** Ordinary messages load their verified body without a separate preview/reader UI. */
+  readonly autoRead?: boolean;
   /** Paused retained display cannot read or publish current copy content. */
   readonly readActive?: boolean;
   /** Explicit diagnostic host opt-in; ordinary conversation reading excludes raw reasoning. */
@@ -19,7 +21,7 @@ export interface ModelOutputMessageProps {
     executionId: string;
     signal: AbortSignal;
   }) => Promise<ModelOutputSnapshot>;
-  /** Current rendered full content only; undefined means the original explicitly labeled preview. */
+  /** Current rendered verified content only; undefined revokes full-body copy eligibility. */
   readonly onContent?: (content: string | undefined) => void;
   /** Explicit reader dismissal, including while reading is temporarily paused. */
   readonly onClose?: () => void;
@@ -60,6 +62,7 @@ export function ModelOutputMessage({
   message,
   storeId,
   suspended = false,
+  autoRead = false,
   readActive = true,
   showReasoning = false,
   canReadRestoredOrigin = false,
@@ -163,7 +166,7 @@ export function ModelOutputMessage({
     setLoading(false);
     setError(undefined);
   }
-  async function read() {
+  const read = useCallback(async () => {
     if (
       !body ||
       body.readAvailability === 'unsupported' ||
@@ -220,7 +223,19 @@ export function ModelOutputMessage({
         setLoading(false);
       }
     }
-  }
+  }, [
+    body,
+    admittedSnapshot,
+    suspended,
+    readActive,
+    message,
+    storeId,
+    canReadRestoredOrigin,
+    identity,
+  ]);
+  useEffect(() => {
+    if (autoRead && !full && !error) void read();
+  }, [autoRead, full, error, read]);
   const render = (content: string) =>
     renderText ? (
       <div className="message-markdown">{renderText(content, full)}</div>
@@ -230,25 +245,26 @@ export function ModelOutputMessage({
   if (!body)
     return (
       <>
-        {message.contentFormat === 'unsupported' && (
-          <p>Unsupported content format · original preview preserved</p>
-        )}
+        {message.contentFormat === 'unsupported' && <p>暂不支持此内容格式，已保留原始预览</p>}
         {render(message.content)}
       </>
     );
   return (
     <div className="model-output-message" aria-busy={loading || undefined}>
-      <p>
-        {full
-          ? full.output.complete
-            ? 'Complete Model output'
-            : 'Complete recorded incomplete prefix'
-          : body.complete
-            ? 'Model output preview · full body not loaded'
-            : 'Incomplete Model output preview · recorded prefix not loaded'}
-      </p>
+      {!autoRead && (
+        <p>
+          {full
+            ? full.output.complete
+              ? '完整回复'
+              : '已记录的回复内容（回复未完成）'
+            : body.complete
+              ? '回复预览'
+              : '回复预览（回复未完成）'}
+        </p>
+      )}
+      {autoRead && !body.complete && <p>回复未完成</p>}
       {render(full?.output.content ?? message.content)}
-      {!full && (
+      {!autoRead && !full && (
         <button
           type="button"
           disabled={
@@ -260,28 +276,39 @@ export function ModelOutputMessage({
           aria-disabled={!readActive || undefined}
           onClick={() => void read()}
         >
-          Read complete recorded Model output
+          查看完整回复
         </button>
       )}
-      {(full || loading) && (
+      {!autoRead && (full || loading) && (
         <button type="button" onClick={close}>
-          Close full Model output
+          收起完整回复
         </button>
       )}
-      {!onRead && !full && <p>Full Model output reader unavailable</p>}
-      {body.readAvailability === 'unsupported' && (
-        <p>Full body unavailable · unsupported original content format</p>
+      {!onRead && !full && <p>暂时无法查看完整回复</p>}
+      {body.readAvailability === 'unsupported' && <p>暂不支持此内容格式，已保留回复预览</p>}
+      {error && (
+        <div role="alert">
+          <p>完整回复读取失败，请重试。</p>
+          {autoRead && (
+            <button
+              type="button"
+              disabled={!readActive || suspended || loading}
+              onClick={() => void read()}
+            >
+              重新读取
+            </button>
+          )}
+        </div>
       )}
-      {error && <p role="alert">Full Model output unavailable · {error}</p>}
       {showReasoning && full?.output.reasoning && (
         <details>
-          <summary>Recorded reasoning</summary>
+          <summary>思考记录</summary>
           <pre>{full.output.reasoning}</pre>
         </details>
       )}
-      {full?.output.complete && full.output.toolCalls.length > 0 && (
+      {!autoRead && full?.output.complete && full.output.toolCalls.length > 0 && (
         <details>
-          <summary>Original complete Tool calls</summary>
+          <summary>完整工具调用记录</summary>
           <pre>{JSON.stringify(full.output.toolCalls, null, 2)}</pre>
         </details>
       )}

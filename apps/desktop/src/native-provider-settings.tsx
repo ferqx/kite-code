@@ -39,6 +39,7 @@ const providerPresentation: Record<NativeProvider, { mark: string; description: 
   deepseek: { mark: 'D', description: '连接 DeepSeek 官方模型服务' },
   compatible: { mark: '</>', description: '使用兼容 OpenAI 协议的自定义服务' },
   ollama: { mark: '◉', description: '连接本机或自托管的 Ollama 模型' },
+  codex: { mark: 'C', description: '自动复用本机 Codex 的 ChatGPT 登录' },
 };
 function ProviderMark({ provider }: { provider: NativeProvider }) {
   return (
@@ -191,6 +192,7 @@ export function NativeProviderSettings({
     !!connection?.defaultModelIds?.length || !!connection?.scheduledTaskNames?.length;
   const writable =
     facts?.canWrite &&
+    provider?.id !== 'codex' &&
     (panelMode === 'add' || !!connection) &&
     (!connection || connection.canWrite) &&
     !pending &&
@@ -303,7 +305,7 @@ export function NativeProviderSettings({
     setSaved(undefined);
   }
   function add(button: HTMLButtonElement) {
-    const preset = facts?.providers[0];
+    const preset = facts?.providers.find((entry) => entry.id !== 'codex');
     if (preset) choose(preset, undefined, 'add', button);
   }
   function close() {
@@ -437,13 +439,13 @@ export function NativeProviderSettings({
         await refreshApplied(operation, editing);
       } else if (response.phase !== 'unknown' && response.error)
         setError(`${action}失败：${response.error}`);
-    } catch (cause) {
+    } catch {
       if (
         current.current === original &&
         sequence.current === request &&
         editorVersion.current === editing
       )
-        setError(`${action}结果未确认：${safeError(cause)}。请核对原提交。`);
+        setError(`${action}结果未确认，请查看结果。`);
     } finally {
       if (mounted.current && current.current === original) {
         flight.current = false;
@@ -501,9 +503,9 @@ export function NativeProviderSettings({
               (panelMode === 'remove') === (response.operation.kind === 'remove'),
           );
       }
-    } catch (cause) {
+    } catch {
       if (mounted.current && current.current === original && editing === editorVersion.current)
-        setError(`原提交查询失败：${safeError(cause)}`);
+        setError('暂时无法查看结果，请稍后重试。');
     } finally {
       if (mounted.current && current.current === original) {
         flight.current = false;
@@ -529,7 +531,7 @@ export function NativeProviderSettings({
             disabled={reading || writing}
             onClick={() => void lookup(submission)}
           >
-            查询原提供商提交
+            查看结果
           </button>
         </div>
       ))}
@@ -601,33 +603,38 @@ export function NativeProviderSettings({
                       {presetLabel(entry)} · {protocolLabel(item.protocol)} ·{' '}
                       {item.modelNames.length} 个模型
                     </span>
+                    {entry.id === 'codex' && (
+                      <span>由本机 Codex 登录管理，自动复用认证；模型可在模型设置中选择。</span>
+                    )}
                   </div>
                   <span className={`provider-badge${item.canWrite ? ' is-configured' : ''}`}>
                     <span className="provider-status-dot" />
-                    {item.canWrite ? '已配置' : '只读'}
+                    {entry.id === 'codex' ? '自动接入' : item.canWrite ? '已配置' : '只读'}
                   </span>
-                  <div className="provider-instance-actions">
-                    <button
-                      className="provider-button"
-                      type="button"
-                      aria-label={`编辑 ${label}`}
-                      aria-expanded={selected && panelMode === 'edit'}
-                      aria-controls={selected ? `${fieldId}-editor` : undefined}
-                      onClick={(event) => choose(entry, item, 'edit', event.currentTarget)}
-                    >
-                      编辑
-                    </button>
-                    <button
-                      className="provider-button provider-delete-link"
-                      type="button"
-                      aria-label={`删除 ${label}`}
-                      aria-expanded={selected && panelMode === 'remove'}
-                      aria-controls={selected ? `${fieldId}-editor` : undefined}
-                      onClick={(event) => choose(entry, item, 'remove', event.currentTarget)}
-                    >
-                      删除
-                    </button>
-                  </div>
+                  {entry.id !== 'codex' && (
+                    <div className="provider-instance-actions">
+                      <button
+                        className="provider-button"
+                        type="button"
+                        aria-label={`编辑 ${label}`}
+                        aria-expanded={selected && panelMode === 'edit'}
+                        aria-controls={selected ? `${fieldId}-editor` : undefined}
+                        onClick={(event) => choose(entry, item, 'edit', event.currentTarget)}
+                      >
+                        编辑
+                      </button>
+                      <button
+                        className="provider-button provider-delete-link"
+                        type="button"
+                        aria-label={`删除 ${label}`}
+                        aria-expanded={selected && panelMode === 'remove'}
+                        aria-controls={selected ? `${fieldId}-editor` : undefined}
+                        onClick={(event) => choose(entry, item, 'remove', event.currentTarget)}
+                      >
+                        删除
+                      </button>
+                    </div>
+                  )}
                 </li>
               );
             })}
@@ -646,10 +653,6 @@ export function NativeProviderSettings({
               </button>
             </div>
           )}
-          <p className="provider-directory-note">
-            <ProviderIcon name="shield" />
-            <span>新保存的 API key 存入系统凭证库，已保存的密钥不会在此显示。</span>
-          </p>
         </div>
         {panelMode &&
           panelHost &&
@@ -824,16 +827,20 @@ export function NativeProviderSettings({
                                 disabled={writing}
                                 onChange={(event) => {
                                   const preset = facts?.providers.find(
-                                    (entry) => entry.id === event.currentTarget.value,
+                                    (entry) =>
+                                      entry.id !== 'codex' &&
+                                      entry.id === event.currentTarget.value,
                                   );
                                   if (preset) choose(preset);
                                 }}
                               >
-                                {facts?.providers.map((entry) => (
-                                  <option key={entry.id} value={entry.id}>
-                                    {presetLabel(entry)}
-                                  </option>
-                                ))}
+                                {facts?.providers
+                                  .filter((entry) => entry.id !== 'codex')
+                                  .map((entry) => (
+                                    <option key={entry.id} value={entry.id}>
+                                      {presetLabel(entry)}
+                                    </option>
+                                  ))}
                               </select>
                             </label>
                           )}
@@ -1029,7 +1036,7 @@ export function NativeProviderSettings({
                       </section>
                       {writing && (
                         <p className="provider-notice" role="status">
-                          正在提交原提供商配置。
+                          正在保存提供商配置。
                         </p>
                       )}
                       {pending && !unresolvedSubmissions.length && (
@@ -1063,7 +1070,6 @@ export function NativeProviderSettings({
             panelHost,
           )}
       </div>
-      <p className="provider-page-note">配置可用表示结构已保存，远端连接与执行仍需实际核实。</p>
       {facts?.errors.map((code) => (
         <p className="provider-notice provider-notice-error" role="alert" key={code}>
           {code}

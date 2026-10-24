@@ -321,7 +321,90 @@ const sha = (value: Record<string, unknown>) =>
   createHash('sha256')
     .update(canonicalJson(value as Json))
     .digest('hex');
+/** Frozen user-only global request grammar; no Session, Workspace or secret fields. */
+function userMcpRequest(value: unknown): Record<string, unknown> {
+  const r = sourceClosed(value, ['storeId', 'commandId', 'expectedReadSet', 'operation']);
+  if (![r.storeId, r.commandId].every(sourceId) || !sourceSha(r.expectedReadSet)) throw invalid();
+  if (!r.operation || typeof r.operation !== 'object' || Array.isArray(r.operation))
+    throw invalid();
+  const kind = (r.operation as Record<string, unknown>).kind;
+  let operation: Record<string, unknown>;
+  if (kind === 'add') {
+    operation = sourceClosed(r.operation, ['kind', 'name', 'entry']);
+    if (
+      typeof operation.name !== 'string' ||
+      !/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(operation.name)
+    )
+      throw invalid();
+    sourceEntry(operation.entry);
+  } else {
+    const keys =
+      kind === 'enabled'
+        ? ['kind', 'serverId', 'enabled']
+        : kind === 'bind'
+          ? ['kind', 'serverId', 'expiresAt']
+          : ['kind', 'serverId'];
+    operation = sourceClosed(r.operation, keys);
+    if (
+      typeof kind !== 'string' ||
+      ![
+        'remove',
+        'enabled',
+        'authStatus',
+        'login',
+        'authRefresh',
+        'clear',
+        'revoke',
+        'bind',
+        'connect',
+        'refresh',
+        'reconnect',
+        'disconnect',
+      ].includes(kind) ||
+      !sourceServerId(operation.serverId)
+    )
+      throw invalid();
+    if (kind === 'enabled' && typeof operation.enabled !== 'boolean') throw invalid();
+    if (
+      kind === 'bind' &&
+      (!Number.isSafeInteger(operation.expiresAt) || Number(operation.expiresAt) < 0)
+    )
+      throw invalid();
+  }
+  return structuredClone(r);
+}
+function verifyDesktopUserMcpRecord(value: unknown, commandId: string): void {
+  const row = sourceClosed(value, [
+    'version',
+    'scope',
+    'subjectId',
+    'request',
+    'bodySha256',
+    'requestSha256',
+    'phase',
+  ]);
+  const request = userMcpRequest(row.request);
+  const { storeId: _store, commandId: originalCommand, ...body } = request;
+  if (
+    row.version !== 2 ||
+    row.scope !== 'user' ||
+    !sourceId(row.subjectId) ||
+    !sourceId(commandId) ||
+    originalCommand !== commandId ||
+    row.bodySha256 !== sha(request) ||
+    row.requestSha256 !== sha(body) ||
+    typeof row.phase !== 'string' ||
+    !['submitting', 'pending', 'completed', 'failed', 'cancelled', 'outcome_unknown'].includes(
+      row.phase,
+    )
+  )
+    throw invalid();
+}
 export function verifyDesktopMcpRecord(value: unknown, commandId: string): void {
+  if (value && typeof value === 'object' && (value as { version?: unknown }).version === 2) {
+    verifyDesktopUserMcpRecord(value, commandId);
+    return;
+  }
   const row = sourceClosed(value, [
     'version',
     'sessionId',

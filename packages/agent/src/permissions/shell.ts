@@ -32,6 +32,8 @@ export interface ShellConfigurationOptions {
   readonly host?: {
     readonly controlBase: string;
     readonly protectedRoots: readonly string[];
+    /** Trusted private names may be absent or rotate. These are never read as executable assets. */
+    readonly protectedFiles?: readonly string[];
     readonly readonlyAssets: readonly string[];
     readonly runtimeReadOnlyRoots: readonly string[];
   };
@@ -354,7 +356,9 @@ export async function createShellConfiguration(input: {
         platform: options.platform,
         qualification:
           options.platform === 'linux'
-            ? 'linux_owned_pid_namespace_bubblewrap'
+            ? options.host?.protectedFiles?.length
+              ? 'linux_owned_pid_namespace_bubblewrap_private_directories'
+              : 'linux_owned_pid_namespace_bubblewrap'
             : host
               ? 'macos_launchd_coalition_seatbelt'
               : 'posix_group_supervision_only',

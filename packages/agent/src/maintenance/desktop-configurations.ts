@@ -72,7 +72,7 @@ function validate(raw: unknown, commandId: string): void {
           operation.credential !== 'none' ||
           !Array.isArray(operation.modelNames) ||
           operation.modelNames.length !== 0)) ||
-      !oneOf(operation.provider, ['openai', 'deepseek', 'compatible', 'ollama']) ||
+      !oneOf(operation.provider, ['openai', 'deepseek', 'compatible', 'ollama', 'codex']) ||
       (operation.protocol !== undefined &&
         !oneOf(operation.protocol, ['chat-completions', 'responses'])) ||
       (operation.connectionId !== null && !hash(operation.connectionId)) ||

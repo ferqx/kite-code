@@ -504,6 +504,8 @@ export function createCompatibleModelBinding(options: {
   apiKey?: string;
   headers?: Record<string, string>;
   fetch?: OpenAICompatibleProviderSettings['fetch'];
+  /** Trusted Codex source/account/subject digest; never supplied by ModelRequest or config. */
+  continuationIdentity?: { readonly kind: 'codex-local-auth'; readonly value: string };
 }): LanguageModel {
   let url: URL;
   try {
@@ -518,6 +520,18 @@ export function createCompatibleModelBinding(options: {
     throw new Error('invalid_model_protocol');
   if (protocol === 'responses' && ['deepseek', 'ollama'].includes(options.name ?? ''))
     throw new Error('model_protocol_unsupported');
+  const identity = options.continuationIdentity;
+  if (
+    identity !== undefined &&
+    (options.name !== 'codex' ||
+      protocol !== 'responses' ||
+      identity === null ||
+      typeof identity !== 'object' ||
+      identity.kind !== 'codex-local-auth' ||
+      typeof identity.value !== 'string' ||
+      !/^[a-f0-9]{64}$/.test(identity.value))
+  )
+    throw new Error('model_continuation_identity_unsupported');
   const transportFetch = options.fetch ?? globalThis.fetch;
   const omitAuthorization =
     !options.apiKey &&
@@ -608,7 +622,7 @@ export function createCompatibleModelBinding(options: {
         options.baseURL.replace(/\/$/, ''),
         options.name ?? 'compatible',
         options.modelId,
-        options.apiKey ?? '',
+        identity === undefined ? (options.apiKey ?? '') : ['codex-local-auth-v1', identity.value],
         Object.entries(options.headers ?? {}).sort(([a], [b]) => a.localeCompare(b)),
       ]),
     );
@@ -616,7 +630,7 @@ export function createCompatibleModelBinding(options: {
     model,
     Object.freeze({
       family:
-        options.name && ['openai', 'deepseek', 'ollama'].includes(options.name)
+        options.name && ['openai', 'deepseek', 'ollama', 'codex'].includes(options.name)
           ? options.name
           : 'openai-compatible',
       modelId: options.modelId,

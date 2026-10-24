@@ -1,5 +1,5 @@
 import { ClientError, decodeResponse } from './decode';
-import type { SkillCataloguePage } from './generated/api';
+import type { SkillCataloguePage, UserSkillCataloguePage } from './generated/api';
 
 export interface SkillCatalogueVerificationOptions {
   readonly storeId?: string;
@@ -27,6 +27,40 @@ export function verifySkillCataloguePage(
     (options.workspaceId !== undefined && page.workspaceId !== options.workspaceId)
   )
     throw new ClientError('skill_catalogue_identity_mismatch');
+  verifyMetadata(page, options);
+  return page;
+}
+
+export type UserSkillCatalogueVerificationOptions = Omit<
+  SkillCatalogueVerificationOptions,
+  'workspaceId' | 'workflow'
+>;
+
+/** The global directory never accepts project identity, paths or Workflow activation metadata. */
+export function verifyUserSkillCataloguePage(
+  value: unknown,
+  options: UserSkillCatalogueVerificationOptions = {},
+): UserSkillCataloguePage {
+  let copy: unknown;
+  try {
+    copy = structuredClone(value);
+  } catch {
+    throw new ClientError('invalid_response');
+  }
+  const page = decodeResponse('UserSkillCataloguePage', copy);
+  if (options.storeId !== undefined && page.storeId !== options.storeId)
+    throw new ClientError('skill_catalogue_identity_mismatch');
+  verifyMetadata(page, options);
+  return page;
+}
+
+function verifyMetadata(
+  page: Pick<
+    SkillCataloguePage,
+    'revision' | 'entries' | 'complete' | 'nextAfterId' | 'availability' | 'reason'
+  >,
+  options: Omit<SkillCatalogueVerificationOptions, 'workspaceId' | 'storeId'>,
+) {
   if (options.revision !== undefined && page.revision !== options.revision)
     throw new ClientError('skill_catalogue_changed');
   if (options.limit !== undefined && page.entries.length > options.limit)
@@ -72,5 +106,4 @@ export function verifySkillCataloguePage(
       (page.reason === null || page.entries.length || !page.complete))
   )
     throw new ClientError('invalid_response');
-  return page;
 }

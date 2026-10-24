@@ -918,9 +918,9 @@ test('old Run source capture refuses local directory drift; next Run captures ch
       request: { kind: 'run.start', content: '新任务：Read new source' },
     });
     const applied = await f.runtime.waitForCommand('new-source-run', { timeoutMs: 5000 });
-    const receipt = applied.receipt as { runId: string; businessCommandId: string };
+    const receipt = applied.receipt as { runId: string };
     const appliedRun = (await f.runtime.getRun(receipt.runId))!;
-    expect(appliedRun.originCommandId).toBe(receipt.businessCommandId);
+    expect(appliedRun.originCommandId).toBe(applied.id);
     expect(appliedRun.rootWorkCommandId).toBe('new-source-run');
     const next = (await f.store.listExecutions('a')).find(
       (e) => e.definitionId === 'mcp.sources.list' && e.rootWorkCommandId === 'new-source-run',

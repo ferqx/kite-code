@@ -9,6 +9,7 @@ import {
   updateConfigurationFile,
 } from '@kite-ai/agent/config';
 import type { Json } from '@kite-ai/agent/extensions';
+import type { createCodexLocalSource } from './codex-auth';
 import { providerConnectionId } from './model-providers';
 import { userConfigurationPath } from './user-configuration-path';
 
@@ -49,8 +50,28 @@ function route(value: Json | undefined): { provider: string; name: string } | un
   throw new ConfigurationError('invalid_user_model_selection');
 }
 /** One user document. Raw keys stay private; callers receive the neutral assembly shape. */
-export function createUserConfiguration(path = userConfigurationPath(homedir())) {
+export function createUserConfiguration(
+  path = userConfigurationPath(homedir()),
+  codex?: Pick<ReturnType<typeof createCodexLocalSource>, 'discover'>,
+) {
   const readRaw = () => readConfigurationFile({ path, windowsPathPolicy: 'private' });
+  function localProviders(raw: JsonObject): JsonObject {
+    const providers = raw.provider === undefined ? {} : object(raw.provider);
+    const local = codex?.discover();
+    if (!local || Object.hasOwn(providers, local.alias)) return providers;
+    return {
+      ...providers,
+      [local.alias]: {
+        type: 'codex',
+        name: local.name,
+        protocol: 'responses',
+        baseURL: 'https://chatgpt.com/backend-api/codex',
+        models: local.models.map((model) => ({ ...model })),
+        ...(local.defaultModel ? { model: local.defaultModel } : {}),
+        ...(local.reasoningEffort === undefined ? {} : { effort: local.reasoningEffort }),
+      },
+    };
+  }
   function connection(alias: string, provider: JsonObject): JsonObject {
     const family =
       provider.type === 'openai-compatible' ||
@@ -82,7 +103,7 @@ export function createUserConfiguration(path = userConfigurationPath(homedir()))
   function readProviderConnections(): JsonObject[] {
     const raw = readRaw().value;
     if (assemblyForm(raw)) return [];
-    const providers = raw.provider === undefined ? {} : object(raw.provider);
+    const providers = localProviders(raw);
     return Object.entries(providers).map(([alias, value]) =>
       connection(
         alias,
@@ -95,13 +116,14 @@ export function createUserConfiguration(path = userConfigurationPath(homedir()))
   function normalize(raw: JsonObject): JsonObject {
     // The assembly form remains valid in this same file for explicitly configured hosts.
     if (assemblyForm(raw)) return { ...structuredClone(raw), _providerConnections: [] };
-    const providers = raw.provider === undefined ? {} : object(raw.provider);
+    const providers = localProviders(raw);
     const disabled = raw.disabledModels ?? [];
     if (!Array.isArray(disabled)) throw new ConfigurationError('invalid_user_configuration');
     const overrides = raw.modelOptions === undefined ? {} : object(raw.modelOptions);
     const models: JsonObject[] = [];
     const connections: JsonObject[] = [];
     let preferred: string | undefined;
+    let localPreferred: string | undefined;
     for (const [alias, value] of Object.entries(providers)) {
       const provider = object(value);
       const metadataConnection = connection(alias, provider);
@@ -156,7 +178,10 @@ export function createUserConfiguration(path = userConfigurationPath(homedir()))
             : {}),
           ...(Object.keys(options).length ? { options } : {}),
         });
-        if (enabled && (provider.model === name || metadata.default === true)) preferred ??= id;
+        if (enabled && (provider.model === name || metadata.default === true)) {
+          if (metadataConnection.provider === 'codex') localPreferred ??= id;
+          else preferred ??= id;
+        }
       }
     }
     const selection = route(raw.model);
@@ -168,7 +193,11 @@ export function createUserConfiguration(path = userConfigurationPath(homedir()))
       _providerConnections: connections,
       modelId: selection
         ? routeId(selection.provider, selection.name)
-        : (preferred ?? models.find((model) => model.enabled)?.id ?? null),
+        : (preferred ??
+          models.find((model) => model.enabled && model.provider !== 'codex')?.id ??
+          localPreferred ??
+          models.find((model) => model.enabled)?.id ??
+          null),
     };
   }
   const read = (): ConfigurationDocument => {
@@ -278,6 +307,23 @@ export function createUserConfiguration(path = userConfigurationPath(homedir()))
         }
       }
       for (const [alias, entries] of grouped) {
+        // Local Codex owns its account, endpoint and catalogue. Only the ordinary
+        // model/default/effort preferences below are written to the user document.
+        if (entries[0]?.provider === 'codex') {
+          const before = (original.models as JsonObject[]).filter(
+            (item) => item.providerName === alias,
+          );
+          if (
+            entries.length !== before.length ||
+            entries.some((entry, index) =>
+              ['id', 'provider', 'providerName', 'model', 'baseURL', 'protocol'].some(
+                (key) => entry[key] !== before[index]?.[key],
+              ),
+            )
+          )
+            throw new ConfigurationError('provider_settings_override');
+          continue;
+        }
         const originalModels = (original.models as JsonObject[]).filter(
           (item) => item.providerName === alias,
         );

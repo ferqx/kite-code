@@ -261,34 +261,58 @@ async function read(page: Page, count: number) {
   assert.equal(before.providerCalls, count);
   assert.equal(before.runs.length, count);
   assert.ok(before.runs.every((run) => run.status === 'completed'));
-  await app!.evaluate(() => {
-    (globalThis as Globals).versionPhysical = [];
-  });
   const outputs = page
     .getByRole('region', { name: '会话消息', exact: true })
     .getByRole('article', { name: /^(assistant 消息|助手消息)$/ });
   if (count) await outputs.nth(count - 1).waitFor();
   assert.equal(await outputs.count(), count);
+  // Wait for ordinary automatic body reads before observing the independent
+  // Main protocol proof below. Neither path can start Model or Tool work.
   for (let index = 0; index < count; index++) {
     const panel = outputs.nth(index);
-    if (await panel.locator('.model-output-message').count()) {
-      const close = panel.getByRole('button', { name: 'Close full Model output', exact: true });
-      if (await close.count()) await close.click();
-      await panel
-        .getByRole('button', { name: 'Read complete recorded Model output', exact: true })
-        .click();
-      await panel.getByText('Complete Model output', { exact: true }).waitFor();
-    } else {
-      // Small original outputs render their complete inline body. Read their same original
-      // Model through the Main boundary too, without inventing a missing UI button.
+    await page.waitForFunction(
+      ({ index, body }) => {
+        const panels = document.querySelectorAll(
+          '[aria-label="会话消息"] article[aria-label="助手消息"], [aria-label="会话消息"] article[aria-label="assistant 消息"]',
+        );
+        return panels[index]?.querySelector('.message-markdown')?.textContent === body;
+      },
+      { index, body: expected.bodies[index]! },
+    );
+    assert.equal(await panel.getByRole('button', { name: '查看完整回复', exact: true }).count(), 0);
+    assert.equal(await panel.getByRole('button', { name: '收起完整回复', exact: true }).count(), 0);
+  }
+  await app!.evaluate(() => {
+    (globalThis as Globals).versionPhysical = [];
+  });
+  for (let index = 0; index < count; index++) {
+    const panel = outputs.nth(index);
+    {
+      // Reuse the existing explicit Main reader proof for both inline and
+      // body-backed replies after their automatic UI read has completed.
       const current = await state(page);
+      const messageId = await panel.getAttribute('data-message-id');
+      const original = await page.evaluate(
+        async ({ generation, sessionId, messageId }) => {
+          const result = await window.kiteNative!.request({
+            method: 'messages',
+            generation,
+            sessionId,
+            limit: 200,
+          });
+          if (!result || !('messages' in result)) throw Error('native_version_history_missing');
+          return result.messages.find((message) => message.id === messageId);
+        },
+        { generation: current.generation, sessionId: expected.sessionId, messageId },
+      );
       const execution = current.selection!.executions.find(
         (value) =>
           value.kind === 'model' &&
-          value.result &&
-          typeof value.result === 'object' &&
-          !Array.isArray(value.result) &&
-          value.result.content === expected.bodies[index],
+          (value.id === original?.outputBody?.executionId ||
+            (value.result &&
+              typeof value.result === 'object' &&
+              !Array.isArray(value.result) &&
+              value.result.content === expected.bodies[index])),
       );
       assert.ok(execution);
       const snapshot = await readNativeModelOutput({

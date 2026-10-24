@@ -17,7 +17,7 @@ const { root, guardian, initExecutable, bubblewrapPath, proof, binding } = JSON.
   initExecutable: string;
   bubblewrapPath: string;
   proof: McpStdioLinuxEvidence;
-  binding: McpStdioLinuxEvidence['binding'];
+  binding: Extract<McpStdioLinuxEvidence['binding'], { sessionId: string }>;
 };
 Object.defineProperty(process, 'platform', { value: 'linux' });
 let current!: {

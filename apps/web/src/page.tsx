@@ -739,6 +739,7 @@ export function WebPage({
                           <>
                             {message.status !== 'complete' && <small>{message.status}</small>}
                             <ModelOutputMessage
+                              autoRead
                               message={message}
                               storeId={snapshot.view.storeId}
                               suspended={suspended || !pageVisible}

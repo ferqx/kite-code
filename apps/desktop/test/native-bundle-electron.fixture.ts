@@ -68,11 +68,16 @@ async function readOriginalFileChanges(page: import('playwright').Page) {
       },
     });
   });
-  const read = final.getByRole('button', {
-    name: 'Read complete recorded Model output',
-    exact: true,
-  });
-  if ((await read.count()) > 0) await read.click();
+  assert.equal(
+    await final
+      .getByRole('button', {
+        name: '查看完整回复',
+        exact: true,
+      })
+      .count(),
+    0,
+  );
+  assert.equal(await final.getByRole('button', { name: '收起完整回复', exact: true }).count(), 0);
   const copy = final.getByRole('button', { name: '复制本轮Agent回复', exact: true });
   await copy.waitFor();
   assert.equal(

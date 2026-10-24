@@ -23,6 +23,7 @@ const base: ModelSettingsView = {
     {
       id: 'model-a',
       provider: 'compatible',
+      protocol: 'chat-completions',
       model: 'A',
       enabled: true,
       configured: true,
@@ -31,6 +32,7 @@ const base: ModelSettingsView = {
     {
       id: 'model-b',
       provider: 'compatible',
+      protocol: 'responses',
       model: 'B',
       enabled: true,
       configured: true,

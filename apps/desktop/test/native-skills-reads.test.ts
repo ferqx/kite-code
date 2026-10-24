@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import type { AgentClient, SkillCataloguePage } from '@kite-ai/client';
+import type { AgentClient, UserSkillCataloguePage } from '@kite-ai/client';
 import { NativeCaller } from '../electron/native-caller';
 import { decodeNativeRequest } from '../electron/native-ipc';
 import { NativeSkillCatalogueReads } from '../electron/skill-catalogue-reads';
@@ -8,17 +8,13 @@ import { readNativeSkillCatalogue } from '../src/native-skills';
 
 const originalScope: NativeSkillsScope = {
   generation: 1,
-  viewSelection: 2,
-  historyEpoch: 0,
   storeId: 'store',
-  sessionId: 'session',
-  workspaceId: 'workspace',
 };
-const entries: SkillCataloguePage['entries'] = Array.from({ length: 301 }, (_, index) => ({
+const entries: UserSkillCataloguePage['entries'] = Array.from({ length: 301 }, (_, index) => ({
   id: `skill-${String(index).padStart(3, '0')}`,
   name: `Skill ${index}`,
   description: `原摘要 ${index}`,
-  source: { scope: 'project', origin: '.agents' },
+  source: { scope: 'user', origin: 'configured' },
   version: 'a'.repeat(64),
   enabled: true,
   state: 'available',
@@ -26,10 +22,13 @@ const entries: SkillCataloguePage['entries'] = Array.from({ length: 301 }, (_, i
   requiredCapabilities: [],
   missingCapabilities: [],
 }));
-const page = (rows: SkillCataloguePage['entries'], complete = true): SkillCataloguePage => ({
+const page = (
+  rows: UserSkillCataloguePage['entries'],
+  complete = true,
+): UserSkillCataloguePage => ({
   version: 1,
   storeId: 'store',
-  workspaceId: 'workspace',
+  scope: 'user',
   revision: 'b'.repeat(64),
   availability: 'available',
   reason: null,
@@ -37,8 +36,11 @@ const page = (rows: SkillCataloguePage['entries'], complete = true): SkillCatalo
   complete,
   nextAfterId: complete ? null : rows.at(-1)!.id,
 });
-const client = (listSkills: AgentClient['listSkills']) =>
-  ({ serverInfo: { capabilities: ['skill_catalogue'] }, listSkills }) as unknown as AgentClient;
+const client = (listUserSkills: AgentClient['listUserSkills']) =>
+  ({
+    serverInfo: { capabilities: ['user_skill_catalogue'] },
+    listUserSkills,
+  }) as unknown as AgentClient;
 function deferred<T>() {
   let resolve!: (value: T) => void;
   const promise = new Promise<T>((done) => {
@@ -47,11 +49,11 @@ function deferred<T>() {
   return { promise, resolve };
 }
 
-test('Main owns the fixed-revision pagination and renderer exhausts the original workspace without a total cap', async () => {
-  const calls: { workspaceId: string; options: Parameters<AgentClient['listSkills']>[1] }[] = [];
+test('Main owns fixed-revision user pagination without a Session, Workspace or total cap', async () => {
+  const calls: Parameters<AgentClient['listUserSkills']>[0][] = [];
   const reads = new NativeSkillCatalogueReads(
-    client(async (workspaceId, options) => {
-      calls.push({ workspaceId, options });
+    client(async (options) => {
+      calls.push(options);
       const start = options.afterId
         ? entries.findIndex((item) => item.id === options.afterId) + 1
         : 0;
@@ -85,30 +87,23 @@ test('Main owns the fixed-revision pagination and renderer exhausts the original
   expect(all.nextAfterId).toBeNull();
   expect(calls).toHaveLength(9);
   expect(
-    calls.every(
-      (call) =>
-        call.workspaceId === originalScope.workspaceId &&
-        call.options.storeId === originalScope.storeId &&
-        call.options.byteLimit === 131072,
-    ),
+    calls.every((call) => call.storeId === originalScope.storeId && call.byteLimit === 131072),
   ).toBe(true);
-  expect(
-    calls.slice(1).every((call) => call.options.revision === all.revision && call.options.afterId),
-  ).toBe(true);
-  expect(calls.every((call) => call.options.signal?.aborted)).toBe(true);
+  expect(calls.slice(1).every((call) => call.revision === all.revision && call.afterId)).toBe(true);
+  expect(calls.every((call) => call.signal?.aborted)).toBe(true);
   await expect(reads.next('expired')).rejects.toMatchObject({
     code: 'skill_catalogue_read_missing',
   });
 });
 
-test('close during a pending controller refresh aborts the already admitted read and no late open can bind a new selection', async () => {
+test('close during a pending controller refresh aborts the user read and stale generations cannot reopen', async () => {
   const refresh = deferred<void>(),
-    response = deferred<SkillCataloguePage>();
+    response = deferred<UserSkillCataloguePage>();
   let scope = { ...originalScope },
     signal: AbortSignal | undefined,
     getCount = 0;
   const reads = new NativeSkillCatalogueReads(
-    client(async (_workspace, options) => {
+    client(async (options) => {
       getCount++;
       signal = options.signal;
       return response.promise;
@@ -125,8 +120,6 @@ test('close during a pending controller refresh aborts the already admitted read
     method: 'settings.skills.open',
     generation: 1,
     readId: 'original',
-    viewSelection: 2,
-    historyEpoch: 0,
   });
   const rejected = opened.then(
     () => undefined,
@@ -135,7 +128,8 @@ test('close during a pending controller refresh aborts the already admitted read
   expect(getCount).toBe(1);
   await caller.invoke({ method: 'settings.skills.close', generation: 1, readId: 'original' });
   expect(signal?.aborted).toBe(true);
-  scope = { ...scope, viewSelection: 3, sessionId: 'other' };
+  scope = { ...scope, generation: 2, storeId: 'other' };
+  Object.assign(caller, { generation: 2 });
   refresh.resolve();
   response.resolve(page(entries.slice(0, 1)));
   expect(await rejected).toMatchObject({ code: 'skill_catalogue_view_changed' });
@@ -145,31 +139,29 @@ test('close during a pending controller refresh aborts the already admitted read
       method: 'settings.skills.open',
       generation: 1,
       readId: 'late',
-      viewSelection: 2,
-      historyEpoch: 0,
     }),
-  ).rejects.toMatchObject({ code: 'native_selection_changed' });
+  ).rejects.toMatchObject({ code: 'native_generation_changed' });
   expect(getCount).toBe(1);
 });
 
 test('refresh replaces only its own lease; old close and a late page cannot change the new facts', async () => {
-  const late = deferred<SkillCataloguePage>();
+  const late = deferred<UserSkillCataloguePage>();
   let request = 0;
   const signals: AbortSignal[] = [];
   const reads = new NativeSkillCatalogueReads(
-    client(async (_workspace, options) => {
+    client(async (options) => {
       signals.push(options.signal!);
       request++;
       return request === 1 ? late.promise : page(entries.slice(0, 1));
     }),
     () => originalScope,
   );
-  const first = reads.open({ readId: 'old', viewSelection: 2, historyEpoch: 0 });
+  const first = reads.open({ readId: 'old' });
   const rejected = first.then(
     () => undefined,
     (error: unknown) => error,
   );
-  const next = await reads.open({ readId: 'new', viewSelection: 2, historyEpoch: 0 });
+  const next = await reads.open({ readId: 'new' });
   reads.close('old');
   expect(signals[0]?.aborted).toBe(true);
   expect(signals[1]?.aborted).toBe(false);
@@ -181,7 +173,7 @@ test('refresh replaces only its own lease; old close and a late page cannot chan
   expect(signals[1]?.aborted).toBe(true);
 });
 
-test('view reset, wrong revision and an oversized public page reject locally instead of publishing a prefix', async () => {
+test('store replacement, wrong revision and an oversized public page reject locally instead of publishing a prefix', async () => {
   let scope = { ...originalScope },
     count = 0;
   const reads = new NativeSkillCatalogueReads(
@@ -193,14 +185,15 @@ test('view reset, wrong revision and an oversized public page reject locally ins
     }),
     () => scope,
   );
-  await reads.open({ readId: 'reset', viewSelection: 2, historyEpoch: 0 });
-  scope = { ...scope, historyEpoch: 1 };
+  await reads.open({ readId: 'reset' });
+  scope = { ...scope, storeId: 'replacement' };
   await expect(reads.next('reset')).rejects.toMatchObject({ code: 'skill_catalogue_view_changed' });
   expect(count).toBe(1);
-  await reads.open({ readId: 'revision', viewSelection: 2, historyEpoch: 1 });
+  scope = { ...originalScope };
+  await reads.open({ readId: 'revision' });
   // A separate fixed-revision lease receives two individually valid public pages.
   count = 0;
-  await reads.open({ readId: 'changed', viewSelection: 2, historyEpoch: 1 });
+  await reads.open({ readId: 'changed' });
   await expect(reads.next('changed')).rejects.toMatchObject({ code: 'skill_catalogue_changed' });
   const large = new NativeSkillCatalogueReads(
     client(async () =>
@@ -208,22 +201,22 @@ test('view reset, wrong revision and an oversized public page reject locally ins
     ),
     () => originalScope,
   );
-  await expect(
-    large.open({ readId: 'large', viewSelection: 2, historyEpoch: 0 }),
-  ).rejects.toMatchObject({ code: 'skill_catalogue_page_too_large' });
+  await expect(large.open({ readId: 'large' })).rejects.toMatchObject({
+    code: 'skill_catalogue_page_too_large',
+  });
 });
 
-test('closed Skills IPC accepts read handles and original observations, never caller supplied authority or paths', () => {
+test('closed global Skills IPC accepts read handles, never Session, Workspace, workflow or filesystem authority', () => {
   const open = {
     method: 'settings.skills.open' as const,
     generation: 1,
     readId: 'read',
-    viewSelection: 2,
-    historyEpoch: 0,
   };
   expect(decodeNativeRequest(open)).toEqual(open);
   for (const patch of [
     { workspaceId: 'other' },
+    { sessionId: 'other' },
+    { workflow: 'manual' },
     { storeId: 'other' },
     { path: '/private' },
     { viewSelection: '2' },

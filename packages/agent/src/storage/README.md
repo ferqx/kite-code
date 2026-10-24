@@ -1,5 +1,9 @@
 # Store 边界
 
+## 有界视图中的首次 Run
+
+`getView` 在同一只读事务返回该 Session 最早 Run、最近200项 Run 与活动 Run 的去重并集，按原 rowid 排序。首项因此保持实际首次运行，不能以时间戳、最近记录或当前配置替代；超过200轮后仍可据其封存配置核会话协议。没有新表、写入或累计历史物化，当前 Run、旧活动 Execution 与原消息读取范围保持。[公开 Service／Client／Desktop 回归](../../../../tests/isolated/unified-agent/active-view.test.ts)覆盖205轮后的首 Run、活动 Run、旧 Job、准确原 Command、去重和读取零变更。
+
 ## 消息首次记录时间
 
 `MessageRecord.createdAt` 是可选的首次发布毫秒时间，由 [appendMessage](sqlite/operations.ts)在原消息事务内写入 `source_json` 和初始 `message_part`；调用者的同名值不能覆盖新记录时间。Model 流式追加与最终正文接管保留原字段，Fork 原样复制来源 JSON，冷重开沿原记录读取；不增加 DDL、迁移、格式版本或读取写入副作用。

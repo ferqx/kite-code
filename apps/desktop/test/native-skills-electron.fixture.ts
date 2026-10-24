@@ -1,7 +1,7 @@
 import { strict as assert } from 'node:assert';
 import { execFileSync } from 'node:child_process';
 import { readFileSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { _electron } from 'playwright';
 import type { NativeState } from '../src/native-bridge';
 
@@ -45,6 +45,7 @@ let app: Awaited<ReturnType<typeof _electron.launch>> | undefined, childPid: num
 const stage = (name: string, facts = {}) =>
   console.log(JSON.stringify({ stage: name, elapsedMs: Date.now() - started, ...facts }));
 const workspace = join(home!, 'workspace');
+const userRoot = dirname(userConfiguration);
 const originalUser = readFileSync(userConfiguration, 'utf8');
 const originalProject = readFileSync(join(workspace, 'kite-agent.jsonc'), 'utf8');
 async function launch() {
@@ -139,23 +140,19 @@ try {
     assert.equal(observed.selection?.runs.length, 0);
     assert.equal(observed.selection?.executions.length, 0);
   }
-  async function trust(workspaceId: string) {
-    await closeSettings(page);
-    await page
-      .getByRole('checkbox', { name: '我已核对所显示的工作区与读取范围', exact: true })
-      .check();
-    await page.getByRole('button', { name: '信任所显示的范围', exact: true }).click();
-    await page
-      .getByText(new RegExp(`^工作区：${workspaceId}；信任状态：trusted；版本：`))
-      .waitFor();
-  }
   async function skills() {
     await openSettings(page);
     await page.getByRole('button', { name: 'Skills', exact: true }).click();
   }
   async function complete(count: number) {
-    await panel().getByText(`已完整读取 ${count} 项 Skill。`, { exact: true }).waitFor();
-    await page.locator('[aria-label="Skills 目录"]:not([aria-busy="true"])').waitFor();
+    await page.waitForFunction((expected) => {
+      const catalogue = document.querySelector('[aria-label="Skills 目录"]');
+      return (
+        catalogue &&
+        catalogue.getAttribute('aria-busy') !== 'true' &&
+        catalogue.querySelectorAll('li').length === expected
+      );
+    }, count);
     assert.equal(await panel().locator('li').count(), count);
   }
   async function refresh(count: number) {
@@ -174,42 +171,33 @@ try {
       .locator('.settings-editor-panel')
       .getByRole('complementary', { name: `${name} 详情`, exact: true });
     await entry.waitFor();
-    await entry.locator('details').locator('summary').click();
+    assert.equal(await entry.locator('details').count(), 0);
     const text = await entry.innerText();
     for (const value of expected)
       assert.ok(text.includes(value), JSON.stringify({ summary, value, text }));
+    for (const hidden of ['技术详情', '配置 ID：', '版本：', '只读目录信息'])
+      assert.ok(!text.includes(hidden), JSON.stringify({ summary, hidden, text }));
     assert.ok(!text.includes(home!));
     assert.ok(!text.includes('PRIVATE_SKILL_BODY'));
     await entry.getByRole('button', { name: '返回列表', exact: true }).click();
     await entry.waitFor({ state: 'hidden' });
   }
-  await select('Skills Window', 'w');
-  await skills();
-  await panel().getByRole('alert').filter({ hasText: 'workspace_untrusted' }).waitFor();
-  assert.equal(await panel().locator('li').count(), 0);
-  stage('untrusted_read_rejected');
-  await openSettings(page);
-  await page.getByRole('button', { name: '模型', exact: true }).click();
-  await trust('w');
+  assert.equal((await state()).selection, undefined);
   await skills();
   await complete(306);
   await details('Skill 000 · 可用', [
-    '配置 ID：skill-000',
+    'Skill 000',
     'LONG_DESCRIPTION_TAIL_000',
-    '配置来源：项目 · .agents',
+    '配置来源：用户 · .agents',
   ]);
-  await details('Kite metadata · 可用', ['配置 ID：kite', '配置来源：项目 · .kite-code']);
-  await details('Profile metadata · 可用', ['配置 ID：profile', '配置来源：用户 · Profile Skills']);
-  await details('Configured metadata · 可用', ['配置 ID：configured', '配置来源：项目 · 配置位置']);
-  await details('disabled · 已禁用', [
-    '配置 ID：disabled',
-    '摘要未记录',
-    '配置来源：项目 · .agents',
-  ]);
-  await details('missing · 不可用', ['配置 ID：missing', '配置来源：项目 · 配置位置', '原因：']);
+  await details('Kite metadata · 可用', ['Kite metadata', '配置来源：用户 · .kite-code']);
+  await details('Profile metadata · 可用', ['Profile metadata', '配置来源：用户 · Profile Skills']);
+  await details('Configured metadata · 可用', ['Configured metadata', '配置来源：用户 · 配置位置']);
+  await details('disabled · 已禁用', ['disabled', '摘要未记录', '配置来源：用户 · .agents']);
+  await details('missing · 不可用', ['missing', '配置来源：用户 · 配置位置', '原因：']);
   const first = await app!.evaluate(() =>
     (globalThis as FixtureGlobals).skillsPhysical.filter(
-      (row) => row.path === '/v1/workspaces/w/skills' && row.bytes !== undefined,
+      (row) => row.path === '/v1/config/user/skills' && row.bytes !== undefined,
     ),
   );
   assert.ok(first.length > 2, JSON.stringify(first));
@@ -229,7 +217,7 @@ try {
   );
   stage('complete_byte_paged_directory', { count: 306, pages: first.length, pagesEvidence: first });
   writeFileSync(
-    join(workspace, '.agents/skills/skill-000/SKILL.md'),
+    join(userRoot, '.agents/skills/skill-000/SKILL.md'),
     '---\nname: Refreshed metadata\ndescription: OWNED_FILE_REFRESH_TAIL\n---\nPRIVATE_SKILL_BODY',
   );
   await refresh(306);
@@ -237,23 +225,21 @@ try {
     .getByRole('button', { name: '查看 Refreshed metadata 详情', exact: true })
     .waitFor();
   await details('Refreshed metadata · 可用', ['OWNED_FILE_REFRESH_TAIL']);
-  const edited = JSON.parse(originalProject);
+  const edited = JSON.parse(originalUser);
   edited.skills.push({ id: 'config-refresh', path: 'absent-refresh' });
-  writeFileSync(join(workspace, 'kite-agent.jsonc'), JSON.stringify(edited));
+  writeFileSync(userConfiguration, JSON.stringify(edited));
   await refresh(307);
-  await details('config-refresh · 不可用', ['配置 ID：config-refresh']);
+  await details('config-refresh · 不可用', ['config-refresh']);
   stage('owned_file_and_configuration_refresh');
-  writeFileSync(join(workspace, 'kite-agent.jsonc'), '{ malformed');
+  writeFileSync(userConfiguration, '{ malformed');
   await panel().getByRole('button', { name: '刷新 Skills 目录', exact: true }).click();
-  await panel()
-    .getByRole('status')
-    .filter({ hasText: 'Skills 目录当前不可用：configuration_unavailable' })
-    .waitFor();
-  assert.equal(await panel().locator('li').count(), 0);
+  await panel().getByRole('alert').filter({ hasText: 'configuration_unavailable' }).waitFor();
+  assert.equal(await panel().locator('li').count(), 307);
+  assert.ok((await panel().innerText()).includes('保留上次完整目录，尚未确认最新状态'));
   writeFileSync(join(workspace, 'kite-agent.jsonc'), JSON.stringify({ models: [], skills: [] }));
   writeFileSync(userConfiguration, JSON.stringify({ models: [], skills: [] }));
   await refresh(0);
-  await panel().getByText('当前工作区没有可发现的 Skill。', { exact: true }).waitFor();
+  await panel().getByText('尚未配置用户 Skill。', { exact: true }).waitFor();
   assert.equal(
     await panel()
       .getByText(/Skills 目录当前不可用/)
@@ -264,48 +250,48 @@ try {
   writeFileSync(join(workspace, 'kite-agent.jsonc'), originalProject);
   writeFileSync(userConfiguration, originalUser);
   await refresh(306);
-  await openSettings(page);
-  await page.getByRole('button', { name: '模型', exact: true }).click();
+  // Project JSONC is deliberately broken while the user directory stays readable.
+  writeFileSync(join(workspace, 'kite-agent.jsonc'), '{ malformed project config');
+  await refresh(306);
+  const beforeSelection = await app!.evaluate(() => (globalThis as FixtureGlobals).skillsPhysical);
+  assert.ok(
+    beforeSelection.every((row) => row.method === 'GET'),
+    JSON.stringify(beforeSelection),
+  );
+  stage('global_settings_gets_only', { requests: beforeSelection.length });
   await select('Second Skills Window', 'w2');
-  await trust('w2');
   await skills();
-  await complete(2);
-  await details('Second workspace · 可用', [
-    '配置 ID：second',
-    'SECOND_SCOPE_TAIL',
-    '配置来源：项目 · .kite-code',
-  ]);
+  await complete(306);
+  await details('Refreshed metadata · 可用', ['OWNED_FILE_REFRESH_TAIL']);
   assert.equal(
-    await panel()
-      .getByRole('button', { name: '查看 Refreshed metadata 详情', exact: true })
-      .count(),
+    await panel().getByRole('button', { name: '查看 Second workspace 详情', exact: true }).count(),
     0,
   );
-  await openSettings(page);
-  await page.getByRole('button', { name: '模型', exact: true }).click();
   await select('Skills Window', 'w');
   await skills();
   await complete(306);
   await panel()
     .getByRole('button', { name: '查看 Refreshed metadata 详情', exact: true })
     .waitFor();
-  await openSettings(page);
   await page.getByRole('button', { name: '模型', exact: true }).click();
   assert.equal(await panel().count(), 0);
   await skills();
   await complete(306);
-  stage('two_workspace_scopes_and_page_reopen');
+  stage('user_scope_survives_session_and_workspace_switches');
   physical.push(...(await app!.evaluate(() => (globalThis as FixtureGlobals).skillsPhysical)));
   assert.ok(
     physical.every(
-      (row) => row.method === 'GET' || (row.method === 'POST' && /\/trust$/.test(row.path)),
+      (row) =>
+        row.method === 'GET' ||
+        (row.method === 'POST' &&
+          /^\/v1\/sessions\/(skills-window|second-skills-window)\/reconcile$/.test(row.path)),
     ),
     JSON.stringify(physical.filter((row) => row.method !== 'GET')),
   );
+  assert.equal(physical.filter((row) => row.method === 'POST').length, 2);
   await page.context().tracing.stop({ path: join(home!, 'window-trace.zip') });
   await close();
   page = await launch();
-  await select('Skills Window', 'w');
   await skills();
   await complete(306);
   await panel()
@@ -356,7 +342,8 @@ try {
   stage('complete', {
     coldDatabase: persisted,
     ordinaryServiceExits: pids.length,
-    businessPosts: 0,
+    skillCataloguePosts: 0,
+    sessionReconciliations: 2,
   });
 } catch (error) {
   if (app) {

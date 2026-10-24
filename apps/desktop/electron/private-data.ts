@@ -34,11 +34,15 @@ import {
   parseFileRecoveryRow,
 } from './file-recovery-journal';
 import {
-  finishNativeMcpRecord,
-  type NativeMcpData,
+  finishNativeStoredMcpRecord,
   type NativeMcpRecord,
-  nativeMcpIdentity,
+  type NativeStoredMcpRecord,
+  type NativeUserMcpData,
+  type NativeUserMcpRecord,
+  nativeStoredMcpIdentity,
   parseNativeMcpRecord,
+  parseNativeStoredMcpRecord,
+  parseNativeUserMcpRecord,
 } from './mcp-journal';
 import {
   assertQueueRecordTransition,
@@ -91,7 +95,7 @@ export type PrivateData = NativeScheduledTaskData &
     clearCaller(commandId: string): void;
     close(): void;
   } & NativeConfigurationData &
-  NativeMcpData;
+  NativeUserMcpData;
 const require = createRequire(import.meta.url);
 const identity = (scope: DraftScope) =>
   createHash('sha256').update(JSON.stringify(scope)).digest('hex');
@@ -330,8 +334,8 @@ export function openPrivateData(profilePath: string, access: DesktopProfileAcces
     }
     return records;
   }
-  function mcpRows(): NativeMcpRecord[] {
-    const result: NativeMcpRecord[] = [];
+  function mcpRows(): NativeStoredMcpRecord[] {
+    const result: NativeStoredMcpRecord[] = [];
     let bytes = 0;
     for (const row of database()
       .prepare(
@@ -350,11 +354,65 @@ export function openPrivateData(profilePath: string, access: DesktopProfileAcces
         result.length >= 128
       )
         throw Error('mcp_storage_unavailable');
-      const value = parseNativeMcpRecord(JSON.parse(text));
+      const value = parseNativeStoredMcpRecord(JSON.parse(text));
       if (value.request.commandId !== row.command_id) throw Error('mcp_storage_unavailable');
       result.push(value);
     }
     return result;
+  }
+  function beginMcpStored<T extends NativeStoredMcpRecord>(
+    value: T,
+  ): { created: boolean; value: T } {
+    if (value.phase !== 'submitting') throw Error('mcp_intent_conflict');
+    return transaction(() => {
+      const rows = mcpRows(),
+        old = rows.find((row) => row.request.commandId === value.request.commandId);
+      if (old) {
+        if (nativeStoredMcpIdentity(old) !== nativeStoredMcpIdentity(value))
+          throw Error('mcp_intent_conflict');
+        return { created: false, value: old as T };
+      }
+      const bytes = database()
+        .prepare('SELECT coalesce(sum(length(CAST(state AS BLOB))),0) AS total FROM mcp_intents')
+        .get()?.total;
+      if (
+        rows.length >= 128 ||
+        typeof bytes !== 'number' ||
+        bytes + Buffer.byteLength(JSON.stringify(value)) > 16777216
+      )
+        throw Error('mcp_capacity_exceeded');
+      database()
+        .prepare('INSERT INTO mcp_intents VALUES(?,?)')
+        .run(value.request.commandId, JSON.stringify(value));
+      return { created: true, value };
+    });
+  }
+  function finishMcpStored(
+    commandId: string,
+    phase: NativeStoredMcpRecord['phase'],
+    version: 1 | 2,
+  ): NativeStoredMcpRecord {
+    return transaction(() => {
+      const old = mcpRows().find((row) => row.request.commandId === commandId);
+      if (!old || old.version !== version) throw Error('mcp_intent_missing');
+      const value = finishNativeStoredMcpRecord(old, phase);
+      const size = database()
+        .prepare('SELECT coalesce(sum(length(CAST(state AS BLOB))),0) AS total FROM mcp_intents')
+        .get()?.total;
+      const previousSize = database()
+        .prepare('SELECT length(CAST(state AS BLOB)) AS bytes FROM mcp_intents WHERE command_id=?')
+        .get(commandId)?.bytes;
+      if (
+        typeof size !== 'number' ||
+        typeof previousSize !== 'number' ||
+        size - previousSize + Buffer.byteLength(JSON.stringify(value)) > 16777216
+      )
+        throw Error('mcp_capacity_exceeded');
+      database()
+        .prepare('UPDATE mcp_intents SET state=? WHERE command_id=?')
+        .run(JSON.stringify(value), commandId);
+      return value;
+    });
   }
   function configurationRows(): NativeConfigurationRecord[] {
     const result: NativeConfigurationRecord[] = [];
@@ -1009,58 +1067,22 @@ export function openPrivateData(profilePath: string, access: DesktopProfileAcces
       return callerRows();
     },
     mcps() {
-      return mcpRows();
+      return mcpRows().filter((row): row is NativeMcpRecord => row.version === 1);
+    },
+    userMcps() {
+      return mcpRows().filter((row): row is NativeUserMcpRecord => row.version === 2);
     },
     beginMcp(input) {
-      const value = parseNativeMcpRecord(input);
-      if (value.phase !== 'submitting') throw Error('mcp_intent_conflict');
-      return transaction(() => {
-        const rows = mcpRows(),
-          old = rows.find((row) => row.request.commandId === value.request.commandId);
-        if (old) {
-          if (nativeMcpIdentity(old) !== nativeMcpIdentity(value))
-            throw Error('mcp_intent_conflict');
-          return { created: false, value: old };
-        }
-        const bytes = database()
-          .prepare('SELECT coalesce(sum(length(CAST(state AS BLOB))),0) AS total FROM mcp_intents')
-          .get()?.total;
-        if (
-          rows.length >= 128 ||
-          typeof bytes !== 'number' ||
-          bytes + Buffer.byteLength(JSON.stringify(value)) > 16777216
-        )
-          throw Error('mcp_capacity_exceeded');
-        database()
-          .prepare('INSERT INTO mcp_intents VALUES(?,?)')
-          .run(value.request.commandId, JSON.stringify(value));
-        return { created: true, value };
-      });
+      return beginMcpStored(parseNativeMcpRecord(input));
+    },
+    beginUserMcp(input) {
+      return beginMcpStored(parseNativeUserMcpRecord(input));
     },
     finishMcp(commandId, phase) {
-      return transaction(() => {
-        const old = mcpRows().find((row) => row.request.commandId === commandId);
-        if (!old) throw Error('mcp_intent_missing');
-        const value = finishNativeMcpRecord(old, phase);
-        const size = database()
-          .prepare('SELECT coalesce(sum(length(CAST(state AS BLOB))),0) AS total FROM mcp_intents')
-          .get()?.total;
-        const previousSize = database()
-          .prepare(
-            'SELECT length(CAST(state AS BLOB)) AS bytes FROM mcp_intents WHERE command_id=?',
-          )
-          .get(commandId)?.bytes;
-        if (
-          typeof size !== 'number' ||
-          typeof previousSize !== 'number' ||
-          size - previousSize + Buffer.byteLength(JSON.stringify(value)) > 16777216
-        )
-          throw Error('mcp_capacity_exceeded');
-        database()
-          .prepare('UPDATE mcp_intents SET state=? WHERE command_id=?')
-          .run(JSON.stringify(value), commandId);
-        return value;
-      });
+      return finishMcpStored(commandId, phase, 1) as NativeMcpRecord;
+    },
+    finishUserMcp(commandId, phase) {
+      return finishMcpStored(commandId, phase, 2) as NativeUserMcpRecord;
     },
     clearMcp(commandId) {
       transaction(() => {

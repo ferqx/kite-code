@@ -3,12 +3,14 @@ import { chmodSync, mkdtempSync, realpathSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { isAbsolute, join, relative, sep } from 'node:path';
 import { launchIdentity, removeRuntimeTemp, verifyLaunchIdentities } from './launch-identity';
+import { captureProtectedFiles } from './protected-files';
 import { confinedProfile } from './seatbelt';
 
 export interface ConfinedPaths {
   readonly cwd: string;
   readonly runtimeReadOnlyRoots?: readonly string[];
   readonly protectedRoots: readonly string[];
+  readonly protectedFiles?: readonly string[];
   readonly temporaryRoot?: string;
 }
 export interface ConfinedLaunch {
@@ -27,21 +29,32 @@ export function captureConfinedLaunch(options: ConfinedPaths, binaries: readonly
   if (process.platform !== 'darwin') throw Error('confined_shell_platform_unsupported');
   if (
     (options.runtimeReadOnlyRoots && options.runtimeReadOnlyRoots.length > 64) ||
-    options.protectedRoots.length > 64
+    options.protectedRoots.length > 64 ||
+    (options.protectedFiles?.length ?? 0) > 64
   )
     throw Error('invalid_confined_path');
   const workspace = launchIdentity(options.cwd);
   const readonly = (options.runtimeReadOnlyRoots ?? []).map((path) => launchIdentity(path));
   const protectedPaths = options.protectedRoots.map((path) => launchIdentity(path));
+  const privateFiles = captureProtectedFiles(options.protectedFiles ?? []);
   const tempBase = launchIdentity(options.temporaryRoot ?? tmpdir());
   const tempScope = relative(workspace.canonical, tempBase.canonical);
   if (!isAbsolute(tempScope) && tempScope !== '..' && !tempScope.startsWith(`..${sep}`))
     throw Error('confined_temp_overlaps_workspace');
   const executable = binaries.map((path) => launchIdentity(path, true));
   const launcher = launchIdentity('/usr/bin/sandbox-exec', true);
-  const bindings = [workspace, ...readonly, ...protectedPaths, tempBase, ...executable, launcher];
+  const bindings = [
+    workspace,
+    ...readonly,
+    ...protectedPaths,
+    tempBase,
+    ...executable,
+    launcher,
+    ...privateFiles.files.map((file) => file.parent),
+  ];
   return (command: string, shell: string) => {
     verifyLaunchIdentities(bindings);
+    privateFiles.verify();
     const temp = realpathSync.native(mkdtempSync(join(tempBase.canonical, 'kite-confined-job-')));
     chmodSync(temp, 0o700);
     const runtimeTemp = launchIdentity(temp);
@@ -53,6 +66,8 @@ export function captureConfinedLaunch(options: ConfinedPaths, binaries: readonly
         readonly.map((path) => path.canonical),
         executable.map((path) => path.canonical),
         protectedPaths.map((path) => path.canonical),
+        privateFiles.deniedPaths,
+        privateFiles.missingParents,
       );
       if (Buffer.byteLength(profile) > 128 * 1024) throw Error('confined_profile_too_large');
       return {

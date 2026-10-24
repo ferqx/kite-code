@@ -284,13 +284,15 @@ try {
     'parent composer remains available beside readonly child',
   );
   const childDetail = page.locator('.session-tab-child');
-  // The complete child snapshot is already displayed; close and reopen its verified body.
-  await childDetail.getByText('Complete Model output', { exact: true }).waitFor();
-  await childDetail.getByRole('button', { name: 'Close full Model output', exact: true }).click();
-  await childDetail
-    .getByRole('button', { name: 'Read complete recorded Model output', exact: true })
-    .click();
-  await childDetail.getByText('Complete Model output', { exact: true }).waitFor();
+  await childDetail.locator('.model-output-message .message-markdown').first().waitFor();
+  assert.equal(
+    await childDetail.getByRole('button', { name: '查看完整回复', exact: true }).count(),
+    0,
+  );
+  assert.equal(
+    await childDetail.getByRole('button', { name: '收起完整回复', exact: true }).count(),
+    0,
+  );
   assert.ok(
     (await childDetail.locator('.model-output-message').allTextContents()).some((text) =>
       text.includes(unicode.trimEnd()),

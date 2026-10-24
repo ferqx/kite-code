@@ -1,4 +1,8 @@
-import { ClientError, type SkillCataloguePage, verifySkillCataloguePage } from '@kite-ai/client';
+import {
+  ClientError,
+  type UserSkillCataloguePage,
+  verifyUserSkillCataloguePage,
+} from '@kite-ai/client';
 import type { NativeBridge } from './native-bridge';
 import type { NativeSkillsPage, NativeSkillsScope } from './skills-bridge';
 
@@ -7,7 +11,7 @@ export async function readNativeSkillCatalogue(input: {
   scope: NativeSkillsScope;
   signal: AbortSignal;
   isCurrent: () => boolean;
-}): Promise<SkillCataloguePage> {
+}): Promise<UserSkillCataloguePage> {
   const scope = { ...input.scope },
     readId = crypto.randomUUID();
   let closed = false;
@@ -37,17 +41,7 @@ export async function readNativeSkillCatalogue(input: {
   ) => {
     check();
     const result = await Promise.race([
-      input.bridge.request(
-        method === 'settings.skills.open'
-          ? {
-              method,
-              generation: scope.generation,
-              readId,
-              viewSelection: scope.viewSelection,
-              historyEpoch: scope.historyEpoch,
-            }
-          : { method, generation: scope.generation, readId },
-      ),
+      input.bridge.request({ method, generation: scope.generation, readId }),
       cancelled,
     ]);
     check();
@@ -63,9 +57,8 @@ export async function readNativeSkillCatalogue(input: {
       )
     )
       throw new ClientError('skill_catalogue_identity_mismatch');
-    return verifySkillCataloguePage(value.page, {
+    return verifyUserSkillCataloguePage(value.page, {
       storeId: scope.storeId,
-      workspaceId: scope.workspaceId,
       ...(revision ? { revision, afterId } : {}),
     });
   };

@@ -181,6 +181,7 @@ function publicMutation(
   record: NonNullable<Awaited<ReturnType<AgentRuntime['getHostMutation']>>>,
 ): ManagementMutation {
   const request = record.safeRequest as JsonObject;
+  if (request.mcpSettings !== undefined) throw new AgentError('mutation_unavailable');
   const kind =
     request.providerSettings !== undefined
       ? 'provider_settings.update'
@@ -397,7 +398,9 @@ export function createConfigurationManagement(options: {
       )
         throw new ConfigurationError('invalid_model_configuration');
       createConfigurationSnapshot(resolveConfiguration({ defaults: { models: [model] } }));
-      parseModelPreset(model.options);
+      const preset = parseModelPreset(model.options);
+      if (model.provider === 'codex' && preset.maxOutputTokens !== undefined)
+        throw new ConfigurationError('codex_model_options_unsupported');
       return [];
     } catch (error) {
       return [publicError(error).code];
@@ -436,6 +439,7 @@ export function createConfigurationManagement(options: {
     const provider = modelProviders.find((entry) => entry.id === operation.provider);
     if (!provider || input.expectedReadSet.workspaceEtag !== null)
       throw new AgentError('invalid_request');
+    if (provider.id === 'codex') throw new AgentError('provider_settings_override');
     if (operation.name !== undefined) providerConnectionName(operation.name);
     modelProtocol(operation.provider, operation.protocol);
     const baseURL = safeProviderEndpoint(operation.baseURL);

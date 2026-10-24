@@ -143,7 +143,7 @@ export class NativeProviderSettings {
             protocol: connection.protocol,
             hasCredential: connection.hasCredential,
             modelNames: [...connection.modelNames],
-            canWrite: connection.canWrite,
+            canWrite: provider.id !== 'codex' && connection.canWrite,
           })),
         })),
       };
@@ -164,6 +164,7 @@ export class NativeProviderSettings {
       throw new ClientError('configuration_observation_changed');
     if (!observed.view.readSet || !observed.facts.canWrite)
       throw new ClientError('configuration_unavailable');
+    if (operation.provider === 'codex') throw new ClientError('provider_settings_override');
     if (operation.kind !== undefined && operation.kind !== 'upsert' && operation.kind !== 'remove')
       throw new ClientError('invalid_request');
     if (

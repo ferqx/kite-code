@@ -113,6 +113,45 @@ test('no sources creates no files/locks, registry is safe and private captures i
   }
 });
 
+test('global user observations exclude project approvals while Session observations retain them', () => {
+  const f = fixture();
+  try {
+    f.put(f.user, { mcpServers: { local: source } });
+    f.put(f.project, { mcpServers: { project: source } });
+    const { workspacePath: _workspacePath, ...base } = f.options;
+    const options: McpSourceOptions = {
+      ...base,
+      scope: {
+        mode: 'user',
+        profileId: f.options.scope.profileId,
+        storeId: f.options.scope.storeId,
+        sessionId: null,
+        workspaceId: null,
+      },
+    };
+    const original = readMcpSources(options);
+    const session = readMcpSources(f.options);
+    const path = join(f.options.profilePath, 'mcp-approvals.json');
+    f.put(path, { records: {}, unrelated: 'project-approval-body' });
+    expect(readMcpSources(options).readSet).toEqual(original.readSet);
+    expect(readMcpSources(f.options).readSet).not.toEqual(session.readSet);
+    writeFileSync(path, '{ invalid project approval', { mode: 0o600 });
+    const invalid = readMcpSources(options);
+    expect(invalid.readSet).toEqual(original.readSet);
+    expect(invalid.readSet.approvalEtag).toBeNull();
+    expect(invalid.registry.errors.approval).toBeNull();
+    expect(invalid.registry.servers.map((server) => server.name)).toEqual(['local']);
+    expect(invalid.registry.servers[0]!.admitted).toBe(true);
+    expect(readMcpSources(f.options).registry.errors.approval).toBe('mcp_approval_unavailable');
+    rmSync(path);
+    symlinkSync(f.project, path);
+    expect(readMcpSources(options).readSet).toEqual(original.readSet);
+    expect(readMcpSources(f.options).approvals.error).toBe('mcp_source_path_unsafe');
+  } finally {
+    f.close();
+  }
+});
+
 test('every project entry shadows user; approval does not connect and preserves comments/unknown', () => {
   const f = fixture();
   try {

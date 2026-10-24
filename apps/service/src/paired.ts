@@ -160,12 +160,26 @@ export async function launchPairedService(options: PairedServiceOptions) {
   // Private startup configuration is sent only through stdin, never inherited
   // from model credential environment variables or an endpoint query string.
   const home = homedir();
-  const env = {
+  const env: Record<string, string> = {
     PATH: process.env.PATH ?? '',
     LANG: 'C.UTF-8',
     HOME: home,
     ...(process.platform === 'win32' ? { USERPROFILE: home } : {}),
   };
+  // Preserve the trusted host's proxy policy and explicit Codex auth directory.
+  // Keep raw values for the owning readers; inherit no other host inputs.
+  for (const key of [
+    'HTTP_PROXY',
+    'http_proxy',
+    'HTTPS_PROXY',
+    'https_proxy',
+    'NO_PROXY',
+    'no_proxy',
+    'CODEX_HOME',
+  ]) {
+    const value = process.env[key];
+    if (value !== undefined) env[key] = value;
+  }
   let child: PairedServiceChild;
   try {
     child = options.spawnChild
