@@ -288,16 +288,7 @@ export function ModelOutputMessage({
       {body.readAvailability === 'unsupported' && <p>暂不支持此内容格式，已保留回复预览</p>}
       {error && (
         <div role="alert">
-          <p>完整回复读取失败，请重试。</p>
-          {autoRead && (
-            <button
-              type="button"
-              disabled={!readActive || suspended || loading}
-              onClick={() => void read()}
-            >
-              重新读取
-            </button>
-          )}
+          <p>{autoRead ? '完整回复读取失败。' : '完整回复读取失败，请重试。'}</p>
         </div>
       )}
       {showReasoning && full?.output.reasoning && (

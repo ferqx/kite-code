@@ -26,7 +26,9 @@
 
 测试使用带测试凭据的本地模拟 HTTP endpoint，证明传输映射与每次流尝试只发一个网络请求；不建立生产 Provider 兼容性、可用性或付费模型行为资格。
 
-SDK 的 `kite.sdk.messages` 转换版本在 Chat Completions 为5、Responses 为6：内部 `files.read` 等 Tool ID 在发送前转为最多64字符的 ASCII 函数名，只含字母、数字、下划线与连字符。合法原名保持；其他名称替换非法字符并在截短后分配不碰撞的后缀，先保留当前声明及完整历史中的合法名称。声明、assistant 历史调用与配对结果使用同一请求内映射，完成的 Provider 调用还原原 ID 后才交给 Core；不改写原请求、ModelInput 或持久历史。转换由 [sdk.ts](src/sdk.ts)负责，不依赖模型名称推测能力。范围及不重命名 Core ID 的取舍见[工具名决定](../../.agents/notes/implemented/bug-fix/2026-10-16-compatible-tool-names.md)。
+SDK 的 `kite.sdk.messages` 转换版本在 Chat Completions 为5、Responses 为7：内部 `files.read` 等 Tool ID 在发送前转为最多64字符的 ASCII 函数名，只含字母、数字、下划线与连字符。合法原名保持；其他名称替换非法字符并在截短后分配不碰撞的后缀，先保留当前声明及完整历史中的合法名称。声明、assistant 历史调用与配对结果使用同一请求内映射，完成的 Provider 调用还原原 ID 后才交给 Core；不改写原请求、ModelInput 或持久历史。转换由 [sdk.ts](src/sdk.ts)负责，不依赖模型名称推测能力。范围及不重命名 Core ID 的取舍见[工具名决定](../../.agents/notes/implemented/bug-fix/2026-10-16-compatible-tool-names.md)。
+
+可信 Responses binding 的函数工具显式发送 `strict:false`，原 schema 的 `required` 和非 nullable 可选字段保持。按 [OpenAI function calling 合同](https://developers.openai.com/api/docs/guides/function-calling#strict-mode)，省略该值会尝试把 schema 归一化为严格模式；这可能使条件性可选参数被要求补齐。SDK 保留已有工具的可选、互斥和分支语义，Agent 仍按原公开 schema 验证参数并执行原权限检查。Chat Completions 的 wire 和私有 continuation envelope 版本保持。原 [Responses 回归](test/responses.test.ts)经实际 SDK 和合成 fetch 核 OpenAI／compatible／Codex 三族的 `strict:false`、原 schema 及省略 PDF 字段的两轮调用；真实 Native 文件读取证据归 [Desktop owner](../../apps/desktop/README.md#native-provider-与下一次模型选择)。
 
 上述为任意中立调用者的协议编码规则；当前 Agent 内置工具在交给任意 Adapter 前，已由 [Agent 工具表面](../agent/src/model-tools.README.md)转换为 `read_file` 等公开名称和参数。Agent 的公开 ModelInput/历史重建归该 owner；AI 不重复维护内置工具的语义命名表。
 

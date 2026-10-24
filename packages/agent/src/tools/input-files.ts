@@ -11,6 +11,15 @@ import { pdfRecipe, readCachedPdf } from './documents/pdf';
 import { createWorkspaceFiles, type WorkspaceFiles } from './files';
 import { createFileTools } from './files-tools';
 
+const pdfReadRecovery: Readonly<Record<string, string>> = {
+  pdf_options_require_saved_attachment:
+    'pages and mode apply only to saved PDF attachments. Retry read_file for this workspace file with path and optional start_line/max_lines; omit pages and mode.',
+  pdf_options_require_pdf:
+    'This saved attachment is not a PDF. Retry read_file with path and optional start_line/max_lines; omit pages and mode.',
+  pdf_requires_page_range:
+    'This saved attachment is a PDF. Retry read_file with path and optional pages/mode; omit start_line and max_lines.',
+};
+
 /** Trusted exact-target adapter. It grants no directory capability to ordinary file tools. */
 export function withInputFileReads(options: {
   profilePath: string;
@@ -127,13 +136,23 @@ export function withInputFileReads(options: {
           : {
               ...tool,
               version: '5',
-              description: `${tool.description} Saved attachments are immutable. For PDF attachments, use pages="1-3" and mode="text" or "image"; default is physical page 1 as text. Up to 20 text pages or 4 images per call. Empty extracted text does not mean the page is blank.`,
+              description: `${tool.description} Saved attachments are immutable. For workspace files and non-PDF attachments, omit pages and mode; use start_line/max_lines for text lines. For saved PDF attachments, omit start_line/max_lines and use pages="1-3" and mode="text" or "image"; default is physical page 1 as text. Up to 20 text pages or 4 images per call. Empty extracted text does not mean the page is blank.`,
               inputSchema: {
                 ...tool.inputSchema,
                 properties: {
                   ...(tool.inputSchema.properties as Record<string, Json>),
-                  pages: { type: 'string', pattern: '^[1-9][0-9]*(-[1-9][0-9]*)?$', maxLength: 32 },
-                  mode: { enum: ['text', 'image'] },
+                  pages: {
+                    type: 'string',
+                    pattern: '^[1-9][0-9]*(-[1-9][0-9]*)?$',
+                    maxLength: 32,
+                    description:
+                      'Saved PDF attachments only: physical page range, starting at 1. Omit for workspace files and non-PDF attachments.',
+                  },
+                  mode: {
+                    enum: ['text', 'image'],
+                    description:
+                      'Saved PDF attachments only: extract text or render page images. Omit for workspace files and non-PDF attachments.',
+                  },
                   path: {
                     type: 'string',
                     maxLength: 4096,
@@ -275,9 +294,12 @@ export function withInputFileReads(options: {
                     .find((definition) => definition.id === 'files.read')!
                     .execute(input, context);
                 } catch (error) {
+                  const code = error instanceof AgentError ? error.code : 'file_target_unavailable';
+                  const recovery = context.signal.aborted ? undefined : pdfReadRecovery[code];
                   return {
                     outcome: context.signal.aborted ? 'cancelled' : 'failed',
-                    content: error instanceof AgentError ? error.code : 'file_target_unavailable',
+                    content: recovery ? `${code}: ${recovery}` : code,
+                    ...(recovery ? { details: { code } } : {}),
                   };
                 } finally {
                   await files?.close();

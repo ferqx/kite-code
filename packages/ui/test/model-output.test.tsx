@@ -324,7 +324,7 @@ test('ordinary automatic body aborts paused reads, isolates late replies and res
   }
 });
 
-test('automatic read failures preserve the preview and require an explicit read retry without leaking internal errors', async () => {
+test('automatic read failures preserve the preview without a retry button or unverified copy content', async () => {
   const f = await domFixture(),
     data = outputFixture('核实后才显示的完整回复'),
     published: (string | undefined)[] = [];
@@ -347,9 +347,11 @@ test('automatic read failures preserve the preview and require an explicit read 
     expect(f.host.querySelector('[role=alert]')!.textContent).toContain('完整回复读取失败');
     expect(f.host.textContent).not.toContain('fixture_private_failure');
     expect(published.at(-1)).toBeUndefined();
+    expect(f.host.querySelectorAll('button')).toHaveLength(0);
+    expect(f.host.querySelector('[role=alert]')!.textContent).toBe('完整回复读取失败。');
     await f.render({ ...props });
     expect(reads).toBe(1);
-    await f.click('重新读取');
+    await f.render({ ...props, message: { ...data.message, id: 'reloaded' } });
     expect(reads).toBe(2);
     expect(f.host.querySelector('.message-markdown')!.textContent).toBe(
       data.snapshot.output.content,

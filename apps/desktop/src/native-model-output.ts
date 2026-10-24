@@ -15,6 +15,46 @@ export type NativeModelBodyRead = {
   signal: AbortSignal;
   isCurrent: () => boolean;
 };
+type NativeModelBodyKind = 'modelOutput' | 'modelInput';
+const bodyReadQueues = new WeakMap<NativeBridge, Map<NativeModelBodyKind, Promise<void>>>();
+
+/** Match Main's single body lease without retaining completed snapshots in the queue. */
+async function acquireBodyRead(input: NativeModelBodyRead, kind: NativeModelBodyKind) {
+  input.signal.throwIfAborted();
+  let queue = bodyReadQueues.get(input.bridge);
+  if (!queue) {
+    queue = new Map();
+    bodyReadQueues.set(input.bridge, queue);
+  }
+  const previous = queue.get(kind) ?? Promise.resolve();
+  let complete!: () => void;
+  const released = new Promise<void>((resolve) => {
+    complete = resolve;
+  });
+  const tail = previous.then(() => released);
+  queue.set(kind, tail);
+  const release = () => {
+    complete();
+    void tail.then(() => {
+      if (queue.get(kind) === tail) queue.delete(kind);
+    });
+  };
+  let abort: (() => void) | undefined;
+  try {
+    await new Promise<void>((resolve, reject) => {
+      abort = () => reject(input.signal.reason);
+      input.signal.addEventListener('abort', abort, { once: true });
+      previous.then(resolve);
+    });
+    input.signal.throwIfAborted();
+    return release;
+  } catch (cause) {
+    release();
+    throw cause;
+  } finally {
+    if (abort) input.signal.removeEventListener('abort', abort);
+  }
+}
 export async function readNativeModelOutput(
   input: NativeModelBodyRead,
 ): Promise<ModelOutputSnapshot> {
@@ -40,7 +80,7 @@ export async function readNativeModelBody<
   },
 >(
   input: NativeModelBodyRead,
-  kind: 'modelOutput' | 'modelInput',
+  kind: NativeModelBodyKind,
   verify: (value: unknown, signal: AbortSignal) => Promise<S>,
 ): Promise<S> {
   const code = (value: string) =>
@@ -50,6 +90,8 @@ export async function readNativeModelBody<
     input.signal.throwIfAborted();
     if (!input.isCurrent()) throw new ClientError(code('model_output_view_changed'));
   };
+  check();
+  const release = await acquireBodyRead(input, kind);
   const close = () =>
     input.bridge
       .request({ method: `${kind}.close`, generation: input.generation, readId })
@@ -122,5 +164,6 @@ export async function readNativeModelBody<
   } finally {
     input.signal.removeEventListener('abort', abort);
     await close();
+    release();
   }
 }

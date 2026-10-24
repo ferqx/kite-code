@@ -36,7 +36,7 @@ async function errorCode(promise: Promise<unknown>) {
     return (error as { code?: string }).code ?? (error as Error).message;
   }
 }
-function fixture(value: ModelOutputSnapshot) {
+function fixture(value: ModelOutputSnapshot, beforeRead?: () => Promise<void>) {
   let scope: ModelOutputViewScope | undefined = {
     generation: 1,
     selection: 1,
@@ -53,6 +53,7 @@ function fixture(value: ModelOutputSnapshot) {
     ) {
       reads++;
       expect([sessionId, executionId, options.expectedStoreId]).toEqual(['s', 'e', 'store']);
+      await beforeRead?.();
       return value;
     },
   } as unknown as AgentClient;
@@ -82,6 +83,157 @@ function fixture(value: ModelOutputSnapshot) {
     },
   };
 }
+function readInput(bridge: NativeBridge, signal = new AbortController().signal) {
+  return {
+    bridge,
+    generation: 1,
+    expectedStoreId: 'store',
+    sessionId: 's',
+    executionId: 'e',
+    signal,
+    isCurrent: () => true,
+  };
+}
+function readBarrier() {
+  let enter!: () => void, release!: () => void;
+  const entered = new Promise<void>((resolve) => {
+    enter = resolve;
+  });
+  const waiting = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  return {
+    entered,
+    release,
+    async wait() {
+      enter();
+      await waiting;
+    },
+  };
+}
+test('concurrent full replies share the finite Main lease and all finish with verified content', async () => {
+  const value = snapshot('complete shared reply λ'),
+    barrier = readBarrier(),
+    f = fixture(value, () => barrier.wait()),
+    requests: NativeRequest[] = [];
+  const bridge: NativeBridge = {
+    watch: f.bridge.watch,
+    async request(input) {
+      requests.push(input);
+      return f.bridge.request(input);
+    },
+  };
+  const reads = Array.from({ length: 3 }, () => readNativeModelOutput(readInput(bridge)));
+  try {
+    await barrier.entered;
+    expect(requests.filter((request) => request.method === 'modelOutput.open')).toHaveLength(1);
+    expect(f.reads).toBe(1);
+    expect(
+      await errorCode(
+        f.main.open({
+          readId: 'overlap',
+          expectedStoreId: 'store',
+          sessionId: 's',
+          executionId: 'e',
+        }),
+      ),
+    ).toBe('model_output_read_busy');
+  } finally {
+    barrier.release();
+  }
+  const results = await Promise.all(reads);
+  expect(results.map((result) => result.output.content)).toEqual(
+    Array(3).fill(value.output.content),
+  );
+  expect(results.map((result) => result.bodyHash)).toEqual(Array(3).fill(value.bodyHash));
+  const opens = requests.filter((request) => request.method === 'modelOutput.open');
+  expect(opens).toHaveLength(3);
+  expect(new Set(opens.map((request) => request.readId)).size).toBe(3);
+  expect(requests.filter((request) => request.method === 'modelOutput.close')).toHaveLength(3);
+  expect(f.reads).toBe(3);
+});
+test('aborting a queued reply rejects promptly without opening or closing it or disturbing other replies', async () => {
+  const barrier = readBarrier(),
+    f = fixture(snapshot('still available'), () => barrier.wait()),
+    requests: NativeRequest[] = [],
+    cancelled = new AbortController();
+  const bridge: NativeBridge = {
+    watch: f.bridge.watch,
+    async request(input) {
+      requests.push(input);
+      return f.bridge.request(input);
+    },
+  };
+  const first = readNativeModelOutput(readInput(bridge));
+  await barrier.entered;
+  const aborted = errorCode(readNativeModelOutput(readInput(bridge, cancelled.signal))),
+    following = readNativeModelOutput(readInput(bridge));
+  cancelled.abort(new Error('queued_reply_cancelled'));
+  try {
+    expect(
+      await Promise.race([aborted, Bun.sleep(1000).then(() => 'queued_reply_abort_timeout')]),
+    ).toBe('queued_reply_cancelled');
+    expect(requests.map((request) => request.method)).toEqual(['modelOutput.open']);
+    expect(f.reads).toBe(1);
+    expect(
+      await errorCode(
+        f.main.open({
+          readId: 'still-held',
+          expectedStoreId: 'store',
+          sessionId: 's',
+          executionId: 'e',
+        }),
+      ),
+    ).toBe('model_output_read_busy');
+  } finally {
+    barrier.release();
+  }
+  expect((await first).output.content).toBe('still available');
+  expect((await following).output.content).toBe('still available');
+  const opens = requests.filter((request) => request.method === 'modelOutput.open'),
+    closes = requests.filter((request) => request.method === 'modelOutput.close');
+  expect(opens).toHaveLength(2);
+  expect(closes.map((request) => request.readId)).toEqual(opens.map((request) => request.readId));
+  expect(f.reads).toBe(2);
+});
+test('a failed full-reply read closes its lease and does not prevent the next queued reply', async () => {
+  const barrier = readBarrier(),
+    f = fixture(snapshot('verified after failed read'), () => barrier.wait()),
+    requests: NativeRequest[] = [];
+  let firstReadId: string | undefined;
+  const bridge: NativeBridge = {
+    watch: f.bridge.watch,
+    async request(input) {
+      requests.push(input);
+      if (input.method === 'modelOutput.open') firstReadId ??= input.readId;
+      const result = await f.bridge.request(input);
+      if (
+        result &&
+        'readId' in result &&
+        result.kind === 'modelOutput.chunk' &&
+        result.readId === firstReadId
+      )
+        return { ...result, eof: false };
+      return result;
+    },
+  };
+  const failed = errorCode(readNativeModelOutput(readInput(bridge))),
+    following = readNativeModelOutput(readInput(bridge));
+  await barrier.entered;
+  barrier.release();
+  expect(await failed).toBe('model_output_chunk_invalid');
+  expect((await following).output.content).toBe('verified after failed read');
+  const opens = requests.filter((request) => request.method === 'modelOutput.open'),
+    closes = requests.filter((request) => request.method === 'modelOutput.close');
+  expect(opens).toHaveLength(2);
+  expect(closes.map((request) => request.readId)).toEqual(opens.map((request) => request.readId));
+  const firstClose = requests.findIndex(
+    (request) => request.method === 'modelOutput.close' && request.readId === firstReadId,
+  );
+  expect(firstClose).toBeGreaterThan(0);
+  expect(requests.indexOf(opens[1]!)).toBeGreaterThan(firstClose);
+  expect(f.reads).toBe(2);
+});
 test('finite main lease transfers a verified >17MiB UTF-8 snapshot through at-most64KiB chunks and releases only the view', async () => {
   const full = `${'large λ '.repeat(2300000)}COMPLETE TAIL`;
   expect(Buffer.byteLength(full)).toBeGreaterThan(17 * 1048576);

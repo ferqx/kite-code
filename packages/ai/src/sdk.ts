@@ -270,7 +270,7 @@ export function createSdkModelAdapter(options: {
       },
       transformation: {
         id: 'kite.sdk.messages',
-        version: provider?.protocol === 'responses' ? '6' : '5',
+        version: provider?.protocol === 'responses' ? '7' : '5',
       },
     };
   };
@@ -299,6 +299,9 @@ export function createSdkModelAdapter(options: {
         tools[name] = tool({
           description: definition.description,
           inputSchema: jsonSchema(definition.inputSchema),
+          // Responses normalizes omitted strict into required properties. Preserve
+          // optional arguments; the Agent still validates and authorizes each call.
+          ...(rawBinding === undefined ? {} : { strict: false }),
         });
       }
       let finished = false;

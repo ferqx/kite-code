@@ -18,7 +18,7 @@
 
 不支持视觉的端点明确失败、不改为纯文本或切换协议；两协议受控 HTTP 400 的准确请求与错误证据归 [AI 图片消息](../../../../ai/README.md#图片消息)。
 
-[输入文件](../input-files.ts)只接受所选消息有效原件的准确绝对路径，核完整 hash／size、引用与派发快照；私有目录的其他路径仍拒绝。上传原件只读。普通文件继续沿严格 UTF-8、完整 baseline 和范围读取。`read_file` 对 PDF 附件新增 `pages` 与 `mode=text|image`，默认第 1 页；每次最多 20 页文字或 4 张页图，返回物理页码、标签、总页数和 nextPage。页图每边最多 2048 像素，单批结果最多 16 MiB，源文件最多 256 MiB，不进行 OCR。
+[输入文件](../input-files.ts)只接受所选消息有效原件的准确绝对路径，核完整 hash／size、引用与派发快照；私有目录的其他路径仍拒绝。上传原件只读。普通文件继续沿严格 UTF-8、完整 baseline 和范围读取。`read_file` 的 `pages` 与 `mode=text|image` 只适用于保存的 PDF 附件，默认第 1 页；每次最多 20 页文字或 4 张页图，返回物理页码、标签、总页数和 nextPage。工作区文件和非 PDF 附件按 `start_line/max_lines` 读取，省略上述两个 PDF 参数；PDF 附件省略行范围。不匹配的参数组合仍失败，结果保留 `details.code` 并给出明确的省略／重选参数方法，取消不提供重试指示。公开说明与各字段描述保持一致，实际 schema 的可选语义由 [AI Responses adapter](../../../../ai/README.md)保留。页图每边最多 2048 像素，单批结果最多 16 MiB，源文件最多 256 MiB，不进行 OCR。
 
 [PDF Worker](../documents/pdf-worker.ts)使用固定 PDF.js 6.4.299、本地字体／CMap／WASM 与 Canvas；禁用文档网络、XFA 和系统字体回退。解析在独立可取消 Worker 执行，同时最多两次，单次 60 秒；Worker 不是 OS 沙箱，仍需安装制品及平台资源资格。原提取顺序不保证复杂多栏／表格语义。缓存键含完整源 hash、Store、配方、页范围、模式和 Worker 摘要，命中前仍核原件权限和全字节。缓存不进入历史：实际交给模型的正文及页图分别保存为准确 Tool Execution 的 Artifact。中立 `tool` 消息保存视觉结果来源；Responses 使用原工具结果的图像部分，Chat Completions 保留原工具配对并追加明确标记为工具数据的视觉载体，不产生人类输入或批准。
 

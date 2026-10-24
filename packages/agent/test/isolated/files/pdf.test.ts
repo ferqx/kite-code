@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
-import { readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { createCanvas, loadImage } from '@napi-rs/canvas';
@@ -15,7 +15,131 @@ import { temporaryDirectory } from '../../../../../tests/fixtures/test-filesyste
 import type { ArtifactWriter, AuthorizationRequest, ToolContext } from '../../../src/extensions';
 import { createFileTools, createWorkspaceFiles, withInputFileReads } from '../../../src/files';
 import type { InputFileImport } from '../../../src/storage/input-file-imports';
+import type { Json } from '../../../src/storage/types';
 import { readCachedPdf, readPdf } from '../../../src/tools/documents/pdf';
+
+test('text reads omit PDF-only options and invalid combinations explain recovery without bypassing attachment scope', async () => {
+  const root = temporaryDirectory('kite-pdf-text-contract-'),
+    workspace = join(root, 'workspace'),
+    profilePath = join(root, 'profile');
+  mkdirSync(workspace);
+  mkdirSync(profilePath);
+  const text = 'first\nWORKSPACE_TOKEN\nthird\n',
+    path = join(profilePath, 'saved.txt');
+  writeFileSync(join(workspace, 'note.txt'), text);
+  writeFileSync(path, text);
+  const files = createWorkspaceFiles({ root: workspace });
+  const imported: InputFileImport = {
+    id: 'saved-text',
+    sessionId: 'session',
+    subjectId: 'owner',
+    originStoreId: 'store',
+    name: 'saved.txt',
+    uri: pathToFileURL(path).href,
+    state: 'bound',
+    boundCommandId: 'original',
+    createdAt: 1,
+    reference: {
+      id: 'original-text',
+      storeId: 'store',
+      sessionId: 'session',
+      subjectId: 'owner',
+      scope: { kind: 'session', id: 'session' },
+      hash: createHash('sha256').update(text).digest('hex'),
+      size: String(Buffer.byteLength(text)),
+      mediaType: 'text/plain',
+    },
+  };
+  const adapter = withInputFileReads({
+    profilePath,
+    tools: createFileTools(files),
+    async resolve(request, uri) {
+      return request.sessionId === imported.sessionId && uri === imported.uri ? imported : null;
+    },
+  });
+  const read = adapter.tools.find((tool) => tool.id === 'files.read')!;
+  const context = {
+    sessionId: 'session',
+    executionId: 'read-text',
+    signal: new AbortController().signal,
+  } as ToolContext;
+  try {
+    const ordinary = await read.execute({ path: 'note.txt', offset: 2, limit: 1 }, context);
+    expect(ordinary.outcome).toBe('succeeded');
+    expect(ordinary.content).toContain('WORKSPACE_TOKEN');
+    expect(ordinary.content).not.toContain('first');
+    const invalid = await read.execute({ path: 'note.txt', pages: '1', mode: 'text' }, context);
+    expect(invalid).toMatchObject({
+      outcome: 'failed',
+      details: { code: 'pdf_options_require_saved_attachment' },
+    });
+    expect(invalid.content).toContain('omit pages and mode');
+    expect(invalid.content).not.toContain('WORKSPACE_TOKEN');
+    const request: AuthorizationRequest = {
+      kind: 'tool',
+      definitionId: 'files.read',
+      definitionVersion: '5',
+      sessionId: 'session',
+      runId: 'run',
+      executionId: 'read-text',
+      signal: context.signal,
+      input: { path },
+    };
+    const capability = await adapter.describeRequest(request);
+    const saved = await read.execute(request.input, {
+      ...context,
+      dispatchAuthorization: {
+        revision: 'saved-text-read',
+        snapshot: {
+          namespace: 'builtin.permissions',
+          version: '1',
+          data: { capability: capability as unknown as Json },
+        },
+      },
+    });
+    expect(saved.outcome).toBe('succeeded');
+    expect(saved.content).toContain('WORKSPACE_TOKEN');
+    const invalidRequest = { ...request, input: { path, mode: 'text' } };
+    const invalidCapability = await adapter.describeRequest(invalidRequest);
+    const invalidSaved = await read.execute(invalidRequest.input, {
+      ...context,
+      dispatchAuthorization: {
+        revision: 'saved-text-invalid-options',
+        snapshot: {
+          namespace: 'builtin.permissions',
+          version: '1',
+          data: { capability: invalidCapability as unknown as Json },
+        },
+      },
+    });
+    expect(invalidSaved).toMatchObject({
+      outcome: 'failed',
+      details: { code: 'pdf_options_require_pdf' },
+    });
+    expect(invalidSaved.content).toContain('omit pages and mode');
+    const foreign = await read.execute({ path }, { ...context, sessionId: 'other' });
+    expect(foreign).toMatchObject({ outcome: 'failed', content: 'input_file_scope_denied' });
+    writeFileSync(path, 'changed saved attachment');
+    const changed = await read.execute(
+      { path },
+      {
+        ...context,
+        dispatchAuthorization: {
+          revision: 'saved-text-read',
+          snapshot: {
+            namespace: 'builtin.permissions',
+            version: '1',
+            data: { capability: capability as unknown as Json },
+          },
+        },
+      },
+    );
+    expect(changed).toMatchObject({ outcome: 'failed', content: 'artifact_content_mismatch' });
+  } finally {
+    await files.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
 
 test('public Files preserves the fixed column-major and table-row text while publishing the actual page image', async () => {
   const profilePath = temporaryDirectory('kite-pdf-layout-');

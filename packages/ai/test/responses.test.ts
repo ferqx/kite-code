@@ -17,7 +17,7 @@ const completed = () =>
       },
     },
   });
-function output(tool = false, toolName = 'count') {
+function output(tool = false, toolName = 'count', toolArguments = '{"value":2}') {
   const reasoning = {
     type: 'reasoning',
     id: 'rs_fixture',
@@ -29,7 +29,7 @@ function output(tool = false, toolName = 'count') {
     id: 'fc_item',
     call_id: 'call_wire',
     name: toolName,
-    arguments: '{"value":2}',
+    arguments: toolArguments,
     status: 'completed',
   };
   return (
@@ -49,12 +49,12 @@ function output(tool = false, toolName = 'count') {
         event('response.function_call_arguments.delta', {
           output_index: 1,
           item_id: call.id,
-          delta: '{"value":',
+          delta: toolArguments.slice(0, 9),
         }) +
         event('response.function_call_arguments.delta', {
           output_index: 1,
           item_id: call.id,
-          delta: '2}',
+          delta: toolArguments.slice(9),
         }) +
         event('response.output_item.done', { output_index: 1, item: call })
       : event('response.output_item.added', { output_index: 1, item: text }) +
@@ -131,6 +131,123 @@ async function collect(
   const events: ModelEvent[] = [];
   for await (const part of adapter.stream(value, { signal })) events.push(part);
   return events;
+}
+
+for (const family of ['openai', 'compatible', 'codex'] as const) {
+  test(`Responses ${family} keeps optional file parameters optional and round-trips a path-only call`, async () => {
+    const input: ModelRequest = {
+      ...request,
+      tools: [
+        {
+          id: 'read_file',
+          definitionVersion: '5',
+          description: 'Read workspace text or a saved PDF attachment.',
+          inputSchema: {
+            type: 'object',
+            additionalProperties: false,
+            required: ['path'],
+            properties: {
+              path: { type: 'string' },
+              start_line: { type: 'integer', minimum: 1 },
+              max_lines: { type: 'integer', minimum: 1, default: 200 },
+              pages: { type: 'string', pattern: '^[1-9][0-9]*(-[1-9][0-9]*)?$' },
+              mode: { enum: ['text', 'image'] },
+            },
+          },
+        },
+      ],
+    };
+    const original = structuredClone(input),
+      argumentsText = '{"path":"read-fixture.txt"}',
+      baseURL =
+        family === 'codex'
+          ? 'https://chatgpt.com/backend-api/codex'
+          : 'https://responses-fixture.invalid/v1';
+    const bodies: Array<{ input: Record<string, unknown>[]; tools: unknown[] }> = [],
+      urls: string[] = [];
+    const adapter = createSdkModelAdapter({
+      models: new Map([
+        [
+          'bound',
+          createCompatibleModelBinding({
+            name: family,
+            protocol: 'responses',
+            modelId: 'fixture-model',
+            baseURL,
+            apiKey: 'fixture-token',
+            ...(family === 'codex'
+              ? {
+                  headers: { 'chatgpt-account-id': 'fixture-account' },
+                  continuationIdentity: {
+                    kind: 'codex-local-auth' as const,
+                    value: 'a'.repeat(64),
+                  },
+                }
+              : {}),
+            fetch: Object.assign(
+              async (url: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => {
+                urls.push(url instanceof Request ? url.url : String(url));
+                bodies.push(JSON.parse(String(init?.body)));
+                return sse(output(bodies.length === 1, 'read_file', argumentsText));
+              },
+              { preconnect: fetch.preconnect },
+            ),
+          }),
+        ],
+      ]),
+    });
+    const first = await collect(adapter, input);
+    expect(first).toContainEqual({
+      type: 'tool_call',
+      id: 'call_wire',
+      name: 'read_file',
+      arguments: argumentsText,
+    });
+    const finish = first.at(-1)!;
+    expect(finish).toMatchObject({ type: 'finish', reason: 'tool_calls' });
+    if (finish.type !== 'finish') throw Error('finish missing');
+    const second = await collect(adapter, {
+      ...input,
+      messages: [
+        ...input.messages,
+        {
+          role: 'assistant',
+          content: '',
+          continuation: finish.continuation,
+          toolCalls: [{ id: 'call_wire', name: 'read_file', arguments: argumentsText }],
+        },
+        { role: 'tool', toolCallId: 'call_wire', content: 'WORKSPACE_FILE_BYTES' },
+      ],
+    });
+    expect(second).toContainEqual({ type: 'text_delta', text: 'Done' });
+    expect(urls).toEqual([`${baseURL}/responses`, `${baseURL}/responses`]);
+    for (const body of bodies)
+      expect(body.tools).toEqual([
+        {
+          type: 'function',
+          name: 'read_file',
+          description: input.tools[0]!.description,
+          parameters: input.tools[0]!.inputSchema,
+          strict: false,
+        },
+      ]);
+    expect(bodies[1]!.input).toContainEqual({
+      type: 'function_call',
+      call_id: 'call_wire',
+      name: 'read_file',
+      arguments: argumentsText,
+    });
+    expect(bodies[1]!.input).toContainEqual({
+      type: 'function_call_output',
+      call_id: 'call_wire',
+      output: 'WORKSPACE_FILE_BYTES',
+    });
+    expect(input).toEqual(original);
+    expect(adapter.describeRequest!(input).transformation).toEqual({
+      id: 'kite.sdk.messages',
+      version: '7',
+    });
+  });
 }
 
 test('Responses HTTP preserves streaming, tool call IDs, encrypted reasoning and stateless multi-turn history', async () => {
@@ -317,7 +434,7 @@ test('Responses restored continuation re-encodes original call IDs when the wire
       }),
     ).rejects.toThrow('invalid_tool_history');
     expect(data.bodies).toHaveLength(before);
-    expect(restored.describeRequest?.(next).transformation.version).toBe('6');
+    expect(restored.describeRequest?.(next).transformation.version).toBe('7');
   } finally {
     data.close();
   }
