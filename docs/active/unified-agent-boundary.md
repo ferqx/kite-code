@@ -2,6 +2,8 @@
 
 Native MCP／Skills 全局设置沿[独立用户 API](../../apps/service/README.md#http-oauth-与原认证结果)读取用户配置，不获取当前 Session／Workspace、扫描项目或创建隐藏实体。Skills 只读 metadata；MCP 使用现有 HostMutation 的闭合 user marker 与明确 user transport owner 管理认证和设置连接，协议白名单不执行工具。原 Session Action、来源批准与实际 Tool／Job 权限保持，DB7 以显式记录版本保原 ID 的只读恢复，冷启动不重 POST。当前产品范围归[桌面手册](../handbook/clients/desktop/README.md)，长期理由归[用户级设置决定](../../.agents/notes/implemented/architecture/2026-10-24-user-global-extension-settings.md)。
 
+Native消息历史在完整基线之后，可按`message_changes`能力用持久`change_event`游标接续，`Message.seq`不成为正文版本。SSE只唤醒读取，领先View的目标游标不能冒充同View基线或ACK；每批候选页完成后按原ID原子合并，失败、回收、重连和冷重开保原失效/恢复边界。正常正文事件跳过View全读，Run/权限/执行事实仍独立核验；稳定历史不重传，元数据变化仍覆盖展示依赖。新协议不增加执行authority，不改变Web/TUI读取路径，完整合同和实际证据归[Store](../../packages/agent/src/storage/README.md#消息历史变更读取)、[Client](../../packages/client/README.md#消息历史增量)及[Native owner](../../apps/desktop/README.md)。
+
 工具反馈不成为执行权威：[Shell leaf](../../packages/agent/src/tools/shell.README.md)仅在可确定的本地引用缺失预查返回 failed，Store 读取异常及派发后未知仍保守结算。`files.search@3` 的过滤、预览与当前页跳过范围归 [Files owner](../../packages/agent/src/tools/files/README.md)，其描述和结果不能放宽原路径、权限及恢复约束。公开预设说明来自实际注册目录，准确只读 definition/version 白名单与父能力交集保持；[行为合同](../../packages/agent/src/model-context.ts)只指导推进、取证和交付，不新增完成状态、自动重放或额外审批。Runtime 仍以原 Command/Run、真实派发和必要条件作为权威。
 
 Files 的 observation 沿原 Tool 结果交给 [Agent 子取证预览](../../packages/agent/README.md)。child 结果预览核准确 Run／Session／Store 与配对 Tool 原执行身份，保完整原记录、正文及显式遗漏，不跨后续 Run 借证据。工具数据和预览不能证明语义正确、全局不存在、实际调用可达或新增授权，不参与完成条件、重复失败计数或派发控制。Core 不识别具体文件工具 ID，不按搜索／读取次数注入收束提醒，不新增业务表、第二个 Loop 或完成评审模型。

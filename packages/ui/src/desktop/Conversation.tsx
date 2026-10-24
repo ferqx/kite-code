@@ -386,7 +386,13 @@ const MessageItem = memo(function MessageItem({
         ) : renderContent ? (
           renderContent(message)
         ) : message.role === 'assistant' || agentResult || agentMessage ? (
-          message.text && <MessageContent text={message.text} openFile={openFile} />
+          message.text && (
+            <MessageContent
+              text={message.text}
+              openFile={openFile}
+              streaming={message.role === 'assistant' ? !message.settled : undefined}
+            />
+          )
         ) : (
           <>
             <p className="user-text">{message.text}</p>

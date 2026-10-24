@@ -10,6 +10,11 @@ const selection = (id = 's', upper = '5001') =>
     viewSelection: 1,
     viewGeneration: 1,
   }) as unknown as NativeSelection;
+const incrementalSelection = (cursor: number, upper = '2') => ({
+  ...selection('s', upper),
+  viewGeneration: cursor,
+  historyCursor: String(cursor),
+});
 function until(predicate: () => boolean) {
   return new Promise<void>((resolve, reject) => {
     const deadline = Date.now() + 5000;
@@ -21,6 +26,262 @@ function until(predicate: () => boolean) {
     poll();
   });
 }
+test('Native normal streaming merges same-seq changes without rescanning, loading flashes or replacing stable message objects', async () => {
+  const saved = { id: 'saved', sessionId: 's', seq: '1', content: 'saved' } as Message;
+  const active = { id: 'active', sessionId: 's', seq: '2', content: 'first' } as Message;
+  const calls: Parameters<NativeBridge['request']>[0][] = [],
+    states: HistoryState[] = [];
+  let release!: () => void;
+  const bridge = {
+    async request(request) {
+      if (request.method === 'messages.close') return null;
+      if (request.method !== 'messages') throw Error('unexpected');
+      calls.push(request);
+      if (!request.changes)
+        return {
+          messages: [structuredClone(saved), active],
+          highWaterSeq: request.upperSeq!,
+          nextAfterSeq: null,
+        };
+      if (request.changes.upperCursor === '2')
+        await new Promise<void>((resolve) => {
+          release = resolve;
+        });
+      return {
+        messages: [{ ...active, content: `revision ${request.changes.upperCursor}` }],
+        highWaterSeq: request.upperSeq ?? '2',
+        nextAfterSeq: null,
+        changes: { ...request.changes, nextCursor: request.changes.upperCursor, removedIds: [] },
+      };
+    },
+  } as NativeBridge;
+  const reader = new NativeHistory(bridge, (state) => states.push(state));
+  try {
+    reader.select(1, incrementalSelection(1));
+    await until(() => reader.state.phase === 'complete');
+    const original = reader.state.messages[0];
+    const start = states.length;
+    reader.select(1, incrementalSelection(2));
+    await until(() => !!release);
+    expect(reader.state.phase).toBe('complete');
+    reader.select(1, incrementalSelection(3));
+    release();
+    await until(() => reader.state.messages.at(-1)?.content === 'revision 3');
+    expect(reader.state.messages.map((message) => message.id)).toEqual(['saved', 'active']);
+    expect(reader.state.messages[0]).toBe(original);
+    expect(states.slice(start).every((state) => state.phase === 'complete')).toBe(true);
+    const reads = calls.filter((request) => request.method === 'messages');
+    expect(reads.filter((request) => !request.changes)).toHaveLength(1);
+    expect(reads.map((request) => request.changes?.afterCursor)).toEqual([undefined, '1', '2']);
+    reader.select(1, { ...incrementalSelection(3), viewGeneration: 4 });
+    await Bun.sleep(5);
+    expect(calls).toHaveLength(3);
+  } finally {
+    reader.dispose();
+    release?.();
+  }
+});
+
+test('Native commits paginated cursor batches atomically, retains old rows on failure and retries from a full baseline', async () => {
+  const saved = { id: 'old', sessionId: 's', seq: '1', content: 'saved' } as Message;
+  const reads: Parameters<NativeBridge['request']>[0][] = [];
+  let baseline = [saved],
+    fail = true;
+  const bridge = {
+    async request(request) {
+      if (request.method === 'messages.close') return null;
+      if (request.method !== 'messages') throw Error('unexpected');
+      reads.push(request);
+      if (!request.changes)
+        return { messages: baseline, highWaterSeq: request.upperSeq!, nextAfterSeq: null };
+      if (request.afterSeq === '0')
+        return {
+          messages: [{ ...saved, content: 'not yet committed' }],
+          highWaterSeq: request.upperSeq ?? '2',
+          nextAfterSeq: '1',
+          changes: { ...request.changes, nextCursor: '2', removedIds: [] },
+        };
+      if (fail) throw Error('owned_delta_page_failed');
+      return {
+        messages: [],
+        highWaterSeq: request.upperSeq!,
+        nextAfterSeq: null,
+        changes: { ...request.changes, nextCursor: '2', removedIds: [] },
+      };
+    },
+  } as NativeBridge;
+  const reader = new NativeHistory(bridge, () => {});
+  try {
+    reader.select(1, incrementalSelection(1));
+    await until(() => reader.state.phase === 'complete');
+    reader.select(1, incrementalSelection(2));
+    await until(() => reader.state.phase === 'unavailable');
+    expect(reader.state.messages).toEqual([saved]);
+    baseline = [{ ...saved, content: 'recovered' }];
+    fail = false;
+    reader.select(1, incrementalSelection(2));
+    await until(() => reader.state.phase === 'complete');
+    expect(reader.state.messages[0]?.content).toBe('recovered');
+    expect(reads.at(-1)).toMatchObject({ method: 'messages', afterSeq: '0' });
+    expect('changes' in reads.at(-1)!).toBe(false);
+  } finally {
+    reader.dispose();
+  }
+});
+
+test('Native expired change cursors rebase automatically and an epoch change rejects a late incremental response', async () => {
+  let content = 'baseline',
+    expire = true,
+    release!: () => void;
+  const reads: Parameters<NativeBridge['request']>[0][] = [];
+  const bridge = {
+    async request(request) {
+      if (request.method === 'messages.close') return null;
+      if (request.method !== 'messages') throw Error('unexpected');
+      reads.push(request);
+      if (request.changes) {
+        if (expire) {
+          expire = false;
+          throw Error('cursor_expired');
+        }
+        await new Promise<void>((resolve) => {
+          release = resolve;
+        });
+      }
+      return {
+        messages: [
+          {
+            id: 'm',
+            sessionId: 's',
+            seq: '1',
+            content: request.changes ? 'late old epoch' : content,
+          } as Message,
+        ],
+        highWaterSeq: request.upperSeq ?? '2',
+        nextAfterSeq: null,
+        ...(request.changes
+          ? {
+              changes: {
+                ...request.changes,
+                nextCursor: request.changes.upperCursor,
+                removedIds: [],
+              },
+            }
+          : {}),
+      };
+    },
+  } as NativeBridge;
+  const reader = new NativeHistory(bridge, () => {});
+  try {
+    reader.select(1, incrementalSelection(1));
+    await until(() => reader.state.phase === 'complete');
+    content = 'rebased';
+    reader.select(1, incrementalSelection(2));
+    await until(() => reader.state.messages[0]?.content === 'rebased');
+    expect(
+      reads.filter((request) => request.method === 'messages' && !request.changes),
+    ).toHaveLength(2);
+    reader.select(1, incrementalSelection(3));
+    await until(() => !!release);
+    content = 'new epoch';
+    reader.select(1, incrementalSelection(4), 1);
+    await until(() => reader.state.phase === 'complete');
+    release();
+    await Bun.sleep(5);
+    expect(reader.state.messages[0]?.content).toBe('new epoch');
+    reader.preview('other');
+    reader.select(1, incrementalSelection(5), 1);
+    await until(() => reader.state.phase === 'complete');
+    expect(
+      reads.filter((request) => request.method === 'messages' && !request.changes),
+    ).toHaveLength(4);
+  } finally {
+    reader.dispose();
+    release?.();
+  }
+});
+
+test('Native incremental removal uses original IDs and never merges distinct messages with equal content', async () => {
+  const original = ['a', 'b'].map(
+    (id, index) =>
+      ({ id, sessionId: 's', seq: String(index + 1), content: 'same text' }) as Message,
+  );
+  const bridge = {
+    async request(request) {
+      if (request.method === 'messages.close') return null;
+      if (request.method !== 'messages') throw Error('unexpected');
+      return {
+        messages: request.changes ? [{ ...original[1]!, content: 'changed' }] : original,
+        highWaterSeq: request.upperSeq ?? '2',
+        nextAfterSeq: null,
+        ...(request.changes
+          ? {
+              changes: {
+                ...request.changes,
+                nextCursor: request.changes.upperCursor,
+                removedIds: ['a'],
+              },
+            }
+          : {}),
+      };
+    },
+  } as NativeBridge;
+  const reader = new NativeHistory(bridge, () => {});
+  try {
+    reader.select(1, incrementalSelection(1));
+    await until(() => reader.state.phase === 'complete');
+    expect(reader.state.messages).toHaveLength(2);
+    reader.select(1, incrementalSelection(2));
+    await until(() => reader.state.messages.length === 1);
+    expect(reader.state.messages).toEqual([{ ...original[1]!, content: 'changed' }]);
+  } finally {
+    reader.dispose();
+  }
+});
+test('Native a streaming wakeup ahead of metadata cannot become a baseline or omit a newly allocated message', async () => {
+  const calls: Parameters<NativeBridge['request']>[0][] = [];
+  const bridge = {
+    async request(request) {
+      if (request.method === 'messages.close') return null;
+      if (request.method !== 'messages') throw Error('unexpected');
+      calls.push(request);
+      return {
+        messages: request.changes
+          ? [{ id: 'new', sessionId: 's', seq: '3', content: 'new message' } as Message]
+          : [],
+        highWaterSeq: request.changes ? '4' : '2',
+        nextAfterSeq: null,
+        ...(request.changes
+          ? {
+              changes: {
+                ...request.changes,
+                nextCursor: request.changes.upperCursor,
+                removedIds: [],
+              },
+            }
+          : {}),
+      };
+    },
+  } as NativeBridge;
+  const reader = new NativeHistory(bridge, () => {});
+  try {
+    reader.select(1, { ...incrementalSelection(1), historyTargetCursor: '2' });
+    await until(() => reader.state.messages.length === 1);
+    expect(reader.state.highWaterSeq).toBe('4');
+    expect(calls).toHaveLength(2);
+    expect(calls[1]).toMatchObject({
+      changes: { afterCursor: '1', upperCursor: '2' },
+      upperSeq: undefined,
+    });
+    reader.select(1, { ...incrementalSelection(1), historyTargetCursor: '3' });
+    await until(() => calls.length === 3);
+    expect(calls[2]).toMatchObject({ changes: { afterCursor: '2', upperCursor: '3' } });
+    await until(() => reader.state.phase === 'complete');
+    expect(reader.state.messages).toHaveLength(1);
+  } finally {
+    reader.dispose();
+  }
+});
 test('Native automatically reads >4096 observed records and >8MiB multi-message history at one fixed high water without dropping the first page', async () => {
   const records = Array.from({ length: 5001 }, (_, i) => ({
     id: `m-${i + 1}`,

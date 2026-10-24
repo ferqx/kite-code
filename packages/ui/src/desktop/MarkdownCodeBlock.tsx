@@ -1,11 +1,4 @@
-import {
-  createContext,
-  isValidElement,
-  type ReactNode,
-  useContext,
-  useMemo,
-  useState,
-} from 'react';
+import { isValidElement, type ReactNode, useContext, useMemo, useState } from 'react';
 import type { ExtraProps } from 'react-markdown';
 import { useConversationReadActive } from '../conversation-activity';
 import { CodeCopyEligibilityContext } from './clipboard';
@@ -18,15 +11,11 @@ import {
   CodeBlockTitle,
 } from './components/ui/code-block';
 import { MarkdownDiagram } from './MarkdownDiagram';
-import { isClosedDiagramFence } from './markdown-diagram';
 import { highlightMarkdownCode } from './markdown-highlight';
 
 /** Adapt only block code; inline code keeps the Markdown renderer's original semantics. */
-export const MarkdownSourceContext = createContext('');
-
 export function MarkdownCodeBlock({ children, node }: { children?: ReactNode } & ExtraProps) {
   const canCopy = useContext(CodeCopyEligibilityContext);
-  const source = useContext(MarkdownSourceContext);
   const readActive = useConversationReadActive();
   const [sourceVisible, setSourceVisible] = useState(false);
   if (!isValidElement<{ className?: string; children?: ReactNode }>(children))
@@ -61,7 +50,7 @@ export function MarkdownCodeBlock({ children, node }: { children?: ReactNode } &
       {diagram ? (
         <MarkdownDiagram
           code={code}
-          complete={isClosedDiagramFence(source, node?.position)}
+          complete={(node?.data as { closedFence?: boolean } | undefined)?.closedFence === true}
           sourceVisible={sourceVisible}
         />
       ) : (

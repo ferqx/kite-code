@@ -74,6 +74,7 @@ export declare function response_StreamReady(value: unknown): boolean;
 export declare function response_StreamCheckpoint(value: unknown): boolean;
 export declare function response_ExtensionList(value: unknown): boolean;
 export declare function response_QueryResponse(value: unknown): boolean;
+export declare function response_MessageChangesPage(value: unknown): boolean;
 export declare function request_RemoveWorkspaceRequest(value: unknown): boolean;
 export declare function request_FileCheckpointListQuery(value: unknown): boolean;
 export declare function request_SessionLogQuery(value: unknown): boolean;
@@ -155,6 +156,7 @@ export declare function request_CancelRunRequest(value: unknown): boolean;
 export declare function request_CancelExecutionRequest(value: unknown): boolean;
 export declare function request_CancelSessionRequest(value: unknown): boolean;
 export declare function request_ExtensionCommandRequest(value: unknown): boolean;
+export declare function request_MessageChangesQuery(value: unknown): boolean;
 export declare function queryInput(value: unknown): boolean;
 export declare const responseValidators: {
   ContextEstimate: (value: unknown) => boolean;
@@ -232,6 +234,7 @@ export declare const responseValidators: {
   StreamCheckpoint: (value: unknown) => boolean;
   ExtensionList: (value: unknown) => boolean;
   QueryResponse: (value: unknown) => boolean;
+  MessageChangesPage: (value: unknown) => boolean;
 };
 export declare const requestValidators: {
   RemoveWorkspaceRequest: (value: unknown) => boolean;
@@ -315,4 +318,5 @@ export declare const requestValidators: {
   CancelExecutionRequest: (value: unknown) => boolean;
   CancelSessionRequest: (value: unknown) => boolean;
   ExtensionCommandRequest: (value: unknown) => boolean;
+  MessageChangesQuery: (value: unknown) => boolean;
 };

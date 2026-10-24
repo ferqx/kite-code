@@ -10,6 +10,7 @@ export function readPublicMessages(
   afterSeq: string,
   upperSeq: string,
   limit: number,
+  ids?: string[],
 ): MessageRecord[] {
   // Proof rows can be damaged independently of ordinary transcript messages.
   // Guard each JSON operation itself: SQL predicate evaluation order is not a
@@ -75,15 +76,17 @@ export function readPublicMessages(
         AND json_type(${executionResult},'$.content')='text'
         AND json_extract(${executionResult},'$.outcome')=e.state
     ) SELECT id,seq,'message' AS display_kind FROM message
-      WHERE session_id=? AND seq>? AND seq<=?
-    UNION ALL SELECT id,seq,'agent_result' AS display_kind FROM accepted WHERE seq>? AND seq<=?
+      WHERE session_id=? AND seq>? AND seq<=?${ids ? ` AND id IN (${ids.map(() => '?').join(',') || 'NULL'})` : ''}
+    UNION ALL SELECT id,seq,'agent_result' AS display_kind FROM accepted WHERE seq>? AND seq<=?${ids ? ` AND id IN (${ids.map(() => '?').join(',') || 'NULL'})` : ''}
     ORDER BY seq LIMIT ?`,
     sessionId,
     sessionId,
     afterSeq,
     upperSeq,
+    ...(ids ?? []),
     afterSeq,
     upperSeq,
+    ...(ids ?? []),
     limit,
   );
   const messages = new Map(

@@ -138,6 +138,7 @@ import {
   runnableCommandPredicate,
   verifyJobReportRecovery,
 } from './job-report-operations';
+import { readMessageChanges } from './message-changes';
 import { verifyModelBody } from './model-body';
 import { modelFirstOutput } from './model-first-output';
 import { getModelInputSnapshot, listModelInputs } from './model-input-operations';
@@ -2198,6 +2199,19 @@ export class SqliteOperations {
             this.event(String(execution.session_id), id, 'message.updated');
           }
         });
+      case 'listMessageChanges': {
+        this.db.run('BEGIN');
+        try {
+          const page = readMessageChanges(
+            this,
+            args[0] as Parameters<Store['listMessageChanges']>[0],
+          );
+          this.db.run('COMMIT');
+          return page;
+        } catch (error) {
+          return this.rollback(error);
+        }
+      }
       case 'listMessages': {
         this.db.run('BEGIN');
         try {

@@ -2,6 +2,8 @@
 
 Status: implemented
 
+2026-10-24：[持久历史游标](../architecture/2026-10-24-native-history-change-cursor.md)仅替代同scope普通修订每次完整扫描的策略；完整基线、页预算、已发布快照、失败和迟到隔离，以及本文全文读取保留和安全回调的理由继续适用。
+
 ## Problem
 
 真实 macOS PC 窗口的一次兼容 Model 产生超过17MiB正文时，原10秒等待内 Core Run仍为running，稍后的只读选读才看到completed。原诊断记录两个目录各605次GET、所选View139次GET。输出按不可变片段持续持久化，每个变化驱动Main立即再次读目录；所选View的后继调度还会额外读取目录。合并这些重复读取后，原完整窗口进一步暴露重命名刷新会卸载原消息组件，从而丢失已经验证并展开的全文。

@@ -4,13 +4,14 @@ import {
   useConversationReadActive,
   useConversationResourceRetention,
 } from '@kite-ai/ui/desktop';
-import { useCallback, useEffect, useRef } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef } from 'react';
 import { useNativeDiagnostics } from './native-diagnostics';
 import { nativePreparedMarkdown } from './native-markdown';
 
 /** Keep verified copy display with its cached DOM; current activity still gates every action. */
 export function NativeModelOutputMessage({
   openFile,
+  autoRead = true,
   ...props
 }: ModelOutputMessageProps & { openFile?: (path: string) => void }) {
   const diagnostics = useNativeDiagnostics();
@@ -46,15 +47,19 @@ export function NativeModelOutputMessage({
   return (
     <ModelOutputMessage
       {...props}
-      autoRead
+      autoRead={autoRead}
       renderText={
         props.message.contentFormat === 'unsupported'
           ? undefined
           : (props.renderText ??
             ((text, verified) => (
-              <MessageContent
+              <NativeMarkdownBody
                 text={text}
-                prepared={nativePreparedMarkdown(verified, text)}
+                verified={verified}
+                message={props.message}
+                storeId={props.storeId}
+                autoRead={autoRead}
+                suspended={props.suspended}
                 openFile={openFile}
               />
             )))
@@ -62,6 +67,75 @@ export function NativeModelOutputMessage({
       showReasoning={diagnostics && props.showReasoning === true}
       onContent={publishDisplay}
       readActive={readActive}
+    />
+  );
+}
+
+/** Keep a verified reading visible while the next automatic body revision is in flight. */
+function NativeMarkdownBody({
+  text,
+  verified,
+  message,
+  storeId,
+  autoRead,
+  suspended,
+  openFile,
+}: {
+  text: string;
+  verified?: ModelOutputMessageProps['verifiedSnapshot'];
+  message: ModelOutputMessageProps['message'];
+  storeId: string;
+  autoRead: boolean;
+  suspended?: boolean;
+  openFile?: (path: string) => void;
+}) {
+  const scope = JSON.stringify([
+    storeId,
+    message.sessionId,
+    message.id,
+    message.runId,
+    message.originMessage,
+    message.outputBody?.executionId,
+  ]);
+  const committed = useRef<
+    | {
+        scope: string;
+        text: string;
+        hasVerified: boolean;
+        prepared: ReturnType<typeof nativePreparedMarkdown>;
+      }
+    | undefined
+  >(undefined);
+  const previous = committed.current?.scope === scope ? committed.current : undefined;
+  const retained = autoRead && !verified && previous?.hasVerified && previous.text.startsWith(text);
+  const displayed = retained ? previous.text : text;
+  const prepared = retained ? previous.prepared : nativePreparedMarkdown(verified, displayed);
+  useLayoutEffect(() => {
+    committed.current = {
+      scope,
+      text: displayed,
+      prepared,
+      hasVerified: !!verified || !!previous?.hasVerified,
+    };
+  }, [scope, displayed, prepared, verified, previous?.hasVerified]);
+  useLayoutEffect(
+    () => () => {
+      committed.current = undefined;
+    },
+    [],
+  );
+  return (
+    <MessageContent
+      key={scope}
+      text={displayed}
+      prepared={prepared}
+      openFile={retained ? undefined : openFile}
+      streaming={
+        !suspended && message.role === 'assistant' && (autoRead || !verified)
+          ? message.status === 'incomplete'
+          : undefined
+      }
+      streamingReveal={!(autoRead && verified && !previous?.hasVerified)}
     />
   );
 }

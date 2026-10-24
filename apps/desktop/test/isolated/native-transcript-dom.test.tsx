@@ -823,6 +823,178 @@ test('the original final reply copies only the automatically verified body and a
   }
 });
 
+test('Native reveals live preview appends but an explicit incomplete full-body read stays static', async () => {
+  const f = fixture();
+  const animations: string[] = [];
+  Object.defineProperty(HTMLElement.prototype, 'animate', {
+    configurable: true,
+    value(this: HTMLElement) {
+      animations.push(this.textContent!);
+      return { cancel() {}, onfinish: null, oncancel: null };
+    },
+  });
+  const content = '原预览，流式新增，显式读取的完整已保存前缀';
+  const contentBytes = String(new TextEncoder().encode(content).length);
+  let preview: Message = {
+    ...message('stream', 'assistant', '2', '原预览'),
+    status: 'incomplete',
+    outputBody: {
+      kind: 'model_output',
+      executionId: 'model',
+      complete: false,
+      contentBytes,
+      reasoningBytes: '0',
+      toolCallCount: 0,
+    },
+  };
+  const snapshot: ModelOutputSnapshot = {
+    storeId: 'store',
+    sessionId: 's',
+    rootSessionId: 's',
+    runId: 'r',
+    executionId: 'model',
+    originCommandId: 'c',
+    rootWorkCommandId: 'c',
+    rootWorkSeq: '1',
+    attempt: 1,
+    status: 'cancelled',
+    bodyHash: 'a'.repeat(64),
+    bodyBytes: '1',
+    contentBytes,
+    reasoningBytes: '0',
+    snapshotCursor: '1',
+    output: { content, reasoning: '', toolCalls: [], complete: false },
+  };
+  const render = () =>
+    act(async () =>
+      f.root.render(
+        <NativeModelOutputMessage
+          message={preview}
+          storeId="store"
+          autoRead={false}
+          onRead={async () => snapshot}
+        />,
+      ),
+    );
+  try {
+    await render();
+    expect(animations).toEqual([]);
+    preview = { ...preview, content: '原预览，流式新增' };
+    await render();
+    expect(animations).toEqual([...'，流式新增']);
+    const read = [...f.host.querySelectorAll<HTMLButtonElement>('button')].find(
+      (button) => button.textContent === '查看完整回复',
+    )!;
+    await act(async () => read.click());
+    expect(f.host.querySelector('.typeset-chat')?.textContent).toBe(content);
+    expect(animations).toEqual([...'，流式新增']);
+    const close = [...f.host.querySelectorAll<HTMLButtonElement>('button')].find(
+      (button) => button.textContent === '收起完整回复',
+    )!;
+    await act(async () => close.click());
+    expect(f.host.querySelector('.typeset-chat')?.textContent).toBe(preview.content);
+    expect(animations).toEqual([...'，流式新增']);
+  } finally {
+    await f.close();
+  }
+});
+
+test('Native automatic body fills stay static initially, retain verified text during the next read and reveal only new graphemes', async () => {
+  const f = fixture(),
+    animations: string[] = [],
+    copied: (string | undefined)[] = [];
+  Object.defineProperty(HTMLElement.prototype, 'animate', {
+    configurable: true,
+    value(this: HTMLElement) {
+      animations.push(this.textContent!);
+      return { cancel() {}, onfinish: null, oncancel: null };
+    },
+  });
+  const first = '原预览，已经保存的完整前缀';
+  const bytes = (text: string) => String(new TextEncoder().encode(text).length);
+  let preview: Message = {
+    ...message('stream-auto', 'assistant', '2', '原预览'),
+    status: 'incomplete',
+    outputBody: {
+      kind: 'model_output',
+      executionId: 'model',
+      complete: false,
+      contentBytes: bytes(first),
+      reasoningBytes: '0',
+      toolCallCount: 0,
+    },
+  };
+  const snapshot = (text: string, cursor: string): ModelOutputSnapshot => ({
+    storeId: 'store',
+    sessionId: 's',
+    rootSessionId: 's',
+    runId: 'r',
+    executionId: 'model',
+    originCommandId: 'c',
+    rootWorkCommandId: 'c',
+    rootWorkSeq: '1',
+    attempt: 1,
+    status: 'running',
+    bodyHash: 'a'.repeat(64),
+    bodyBytes: '1',
+    contentBytes: bytes(text),
+    reasoningBytes: '0',
+    snapshotCursor: cursor,
+    output: { content: text, reasoning: '', toolCalls: [], complete: false },
+  });
+  let verified: ModelOutputSnapshot | undefined;
+  const render = () =>
+    act(async () =>
+      f.root.render(
+        <NativeModelOutputMessage
+          message={preview}
+          storeId="store"
+          verifiedSnapshot={verified}
+          onContent={(content) => copied.push(content)}
+        />,
+      ),
+    );
+  try {
+    await render();
+    verified = snapshot(first, '1');
+    await render();
+    expect(f.host.querySelector('.typeset-chat')?.textContent).toBe(first);
+    expect(animations).toEqual([]);
+    const paragraph = f.host.querySelector('.typeset-chat p');
+    const second = `${first}，又新增🙂`;
+    preview = { ...preview, outputBody: { ...preview.outputBody!, contentBytes: bytes(second) } };
+    verified = undefined;
+    await render();
+    expect(f.host.querySelector('.typeset-chat')?.textContent).toBe(first);
+    expect(f.host.querySelector('.typeset-chat p')).toBe(paragraph);
+    expect(copied.at(-1)).toBeUndefined();
+    expect(animations).toEqual([]);
+    verified = snapshot(second, '2');
+    await render();
+    expect(f.host.querySelector('.typeset-chat')?.textContent).toBe(second);
+    expect(animations).toEqual([...'，又新增🙂']);
+    expect(copied.at(-1)).toBe(second);
+    const third = `${second}末批`;
+    preview = {
+      ...preview,
+      content: third,
+      outputBody: { ...preview.outputBody!, contentBytes: bytes(third) },
+    };
+    verified = undefined;
+    await render();
+    expect(animations).toEqual([...'，又新增🙂末批']);
+    verified = snapshot(third, '3');
+    await render();
+    expect(animations).toEqual([...'，又新增🙂末批']);
+    preview = { ...preview, id: 'different-message', outputBody: undefined };
+    verified = undefined;
+    await render();
+    expect(animations).toEqual([...'，又新增🙂末批']);
+  } finally {
+    await f.close();
+  }
+});
+
 test('all historical Run batches stay in the selected read scope; late metadata only closes its own read and cannot replace the next Session', async () => {
   const f = fixture(),
     requests: NativeRequest[] = [];

@@ -4,6 +4,14 @@
 
 `getView` 在同一只读事务返回该 Session 最早 Run、最近200项 Run 与活动 Run 的去重并集，按原 rowid 排序。首项因此保持实际首次运行，不能以时间戳、最近记录或当前配置替代；超过200轮后仍可据其封存配置核会话协议。没有新表、写入或累计历史物化，当前 Run、旧活动 Execution 与原消息读取范围保持。[公开 Service／Client／Desktop 回归](../../../../tests/isolated/unified-agent/active-view.test.ts)覆盖205轮后的首 Run、活动 Run、旧 Job、准确原 Command、去重和读取零变更。
 
+## 消息历史变更读取
+
+[listMessageChanges](port.ts)由Worker在单个只读事务调用[持久变更读取](sqlite/message-changes.ts)。它固定原Store、Session和`(afterCursor,upperCursor]`，每批最多扫描200个全局`change_event`；`Message.seq`只负责候选分页和历史位置，不能作为内容版本。普通`message.updated`按原ID定位消息，同一序号的partial会返回新正文；全局非正文事件保守重投影具有展示依赖的原用户消息、解释/压缩Model消息及result_ref来源，覆盖原输入接管、外来名称、压缩结果与虚拟子结果的变化。候选按seq分页，公开可见消息复用原[结果展示证明](sqlite/agent-result-display.ts)，不可见候选返回`removedIds`；批次空页仍沿准确`nextCursor`前进。
+
+首个候选页可取得同事务Session.nextSeq，后续固定`upperSeq`；它约束读取位置而非承诺可变正文快照，当前正文可领先事件上界，后续事件按原ID重放仍幂等。Runtime继续执行原公开普通输入/Agent邮件投影，Service继续生成原回应元数据。游标ahead、Store错配拒绝；低于replayFloor或范围含历史回收事件返回`cursor_expired`，由客户端建立完整基线，不能用缓存冒充覆盖。没有新增数据表、业务事件或写authority。元数据路径会重读可能受影响的依赖候选，可能仍较大；普通流式快路径不重传稳定历史。
+
+[真实Store回归](../../test/isolated/storage/message-changes.test.ts)核5001条后同seq更新、重放、新reader、依赖分页、无可见行的全局事件及失效；[输入接管](../../test/isolated/storage/human-work-control.test.ts)核旧处理记录在业务消息保存后沿增量取得准确替换证明。桌面基线、原子合并与恢复归[Native owner](../../../../apps/desktop/README.md)。
+
 ## 消息首次记录时间
 
 `MessageRecord.createdAt` 是可选的首次发布毫秒时间，由 [appendMessage](sqlite/operations.ts)在原消息事务内写入 `source_json` 和初始 `message_part`；调用者的同名值不能覆盖新记录时间。Model 流式追加与最终正文接管保留原字段，Fork 原样复制来源 JSON，冷重开沿原记录读取；不增加 DDL、迁移、格式版本或读取写入副作用。

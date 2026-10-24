@@ -1,5 +1,11 @@
 # Client
 
+## 消息历史增量
+
+[AgentClient.listMessageChanges](src/index.ts)要求`message_changes`能力，GET `/v1/sessions/:id/message-changes`，查询`storeId/afterCursor/upperCursor/upperSeq?/afterSeq?/limit?`。首个候选页省略`upperSeq`时由Store只读事务取得当前序号上界，后页传回该`highWaterSeq`；`nextAfterSeq`按候选行推进，可能含已移除的ID，不能假定总等于最后一条可见消息。穷尽候选页面后才沿`nextCursor`读取下一批事件，达到`upperCursor`表示覆盖该持久事件范围，不表示SSE ACK或执行准入。
+
+生成schema校验之外，SDK核连接代次、原Store/Session、两个请求游标、返回上界、游标前进、消息严格序号、ID去重和移除冲突；十进制游标不用Number。正文追加复用消息原`id/seq`，不能用`afterSeq`替代变更游标。协议和回收后的重建归[Store owner](../agent/src/storage/README.md#消息历史变更读取)，桌面消费与连续性归[Desktop](../../apps/desktop/README.md)。旧历史API及其他客户端路径不变。[SDK回归](test/client.test.ts)覆盖错配、分页和不推进ACK，[真实HTTP](../../apps/service/test/isolated/http.test.ts)核公开消息和分页。
+
 ## 文件上传
 
 `uploadInputFile/getInputFileImport/releaseInputFileImport` 复用当前连接与 `input_files` 能力，上传传送二进制流，不将普通文件全文塞入 JSON。查回核对稳定导入 ID、Session、原 Store、subject 与完整引用；异步返回必须仍属于原连接代次。释放只作用于原准备项，不隐式取消消息或 Run。消息 `files` 的新完整引用与旧 `{name,uri}` 均由生成协议保存，SDK 不从 URI 推定权限或偷偷读取本机路径。实际持久关系归 [Agent](../agent/README.md#用户图片输入)，公开路由归 [Service](../../apps/service/README.md#会话持久文件)。

@@ -1492,6 +1492,25 @@ export const PendingInputQueueSchema = z.object({
   revision: z.string().regex(/^[a-f0-9]{64}$/),
   snapshotCursor: sequence,
 });
+export const MessageChangesQuerySchema = z.strictObject({
+  storeId: id,
+  afterCursor: sequence,
+  upperCursor: sequence,
+  upperSeq: sequence.optional(),
+  afterSeq: sequence.optional(),
+  limit: z.number().int().min(1).max(200).optional(),
+});
+export const MessageChangesPageSchema = z.object({
+  storeId: id,
+  sessionId: id,
+  afterCursor: sequence,
+  upperCursor: sequence,
+  highWaterSeq: sequence,
+  nextCursor: sequence,
+  nextAfterSeq: sequence.nullable(),
+  messages: z.array(schemas.Message),
+  removedIds: z.array(id),
+});
 export const SessionViewSchema = z.object({
   session: schemas.Session.extend({
     /** Read-only ownership facts from the same fixed Store view; never a recovery grant. */
@@ -1898,6 +1917,8 @@ export const apiSchemas = {
   WorkspaceList: z.array(schemas.Workspace),
   SessionList: z.array(schemas.Session),
   MessageList: z.array(schemas.Message),
+  MessageChangesQuery: MessageChangesQuerySchema,
+  MessageChangesPage: MessageChangesPageSchema,
   SessionView: SessionViewSchema,
   CommandRequest: CommandRequestSchema,
   ResumeJobReportResponse: ResumeJobReportResponseSchema,
@@ -2287,6 +2308,12 @@ export const apiRoutes = [
   },
   { method: 'get', path: '/v1/sessions', response: 'SessionList' },
   { method: 'get', path: '/v1/sessions/{id}/messages', response: 'MessageList' },
+  {
+    method: 'get',
+    path: '/v1/sessions/{id}/message-changes',
+    query: 'MessageChangesQuery',
+    response: 'MessageChangesPage',
+  },
   { method: 'get', path: '/v1/sessions/{id}/view', response: 'SessionView' },
   {
     method: 'post',

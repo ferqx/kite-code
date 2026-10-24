@@ -56,6 +56,70 @@ function fixture(handler: (request: Request) => Response | Promise<Response>) {
   };
 }
 const json = (value: unknown, status = 200) => Response.json(value, { status });
+test('durable message changes bind Store, Session, both cursors and pagination without treating ready as applied history', async () => {
+  const query = {
+    storeId: identity.storeId!,
+    afterCursor: '9007199254740993',
+    upperCursor: '9007199254740994',
+  };
+  const valid = {
+    ...query,
+    sessionId: 's',
+    highWaterSeq: '12',
+    nextCursor: query.upperCursor,
+    nextAfterSeq: '10',
+    messages: [
+      {
+        id: 'm',
+        sessionId: 's',
+        runId: null,
+        seq: '10',
+        status: 'incomplete' as const,
+        role: 'assistant' as const,
+        content: 'latest partial',
+      },
+    ],
+    removedIds: ['removed'],
+  };
+  let page: unknown = valid;
+  const f = fixture((request) =>
+    new URL(request.url).pathname === '/v1/server'
+      ? json({ ...identity, capabilities: [...identity.capabilities, 'message_changes'] })
+      : json(page),
+  );
+  const rejects = async (promise: Promise<unknown>) => {
+    let failure: unknown;
+    try {
+      await promise;
+    } catch (error) {
+      failure = error;
+    }
+    expect(failure).toMatchObject({ code: expect.stringMatching(/^history_page_/) });
+  };
+  try {
+    await f.client.connect();
+    expect(await f.client.listMessageChanges('s', query)).toEqual(valid);
+    expect(f.requests.at(-1)!.url.searchParams.get('upperSeq')).toBeNull();
+    expect(f.requests.at(-1)!.url.searchParams.get('afterCursor')).toBe(query.afterCursor);
+    for (const invalid of [
+      { storeId: 'foreign' },
+      { sessionId: 'foreign' },
+      { afterCursor: '0' },
+      { upperCursor: '9007199254740995' },
+      { nextCursor: query.afterCursor },
+      { nextAfterSeq: '9' },
+      { removedIds: ['m'] },
+      { messages: [{ ...valid.messages[0], sessionId: 'foreign' }] },
+      { messages: [valid.messages[0], valid.messages[0]] },
+    ]) {
+      page = { ...valid, ...invalid };
+      await rejects(f.client.listMessageChanges('s', query));
+    }
+    expect(f.client.lastAppliedCursor).toBeUndefined();
+  } finally {
+    f.stop();
+  }
+});
 const problem = (code: string) => ({
   code,
   message: code,

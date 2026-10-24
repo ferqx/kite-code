@@ -109,6 +109,7 @@ export const storeMethods: readonly (keyof Store)[] = [
   'getSessionTokenUsage',
   'persistModelPartial',
   'listMessages',
+  'listMessageChanges',
   'getView',
   'getExtensionRecord',
   'listExtensionRecords',

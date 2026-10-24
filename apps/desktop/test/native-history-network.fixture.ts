@@ -6,6 +6,7 @@ const network = {
   changes: 0,
   posts: [] as string[],
   messages: [] as {
+    kind: 'full' | 'changes';
     session: string;
     after: string;
     upper: string;
@@ -29,8 +30,9 @@ const instrumented: (input: RequestInfo | URL, init?: RequestInit) => Promise<Re
   const request = new Request(input, init),
     url = new URL(request.url);
   if (request.method === 'POST') network.posts.push(url.pathname);
-  if (url.pathname.endsWith('/messages')) {
+  if (url.pathname.endsWith('/messages') || url.pathname.endsWith('/message-changes')) {
     const reading = {
+      kind: url.pathname.endsWith('/messages') ? ('full' as const) : ('changes' as const),
       session: url.pathname.split('/').at(-2)!,
       after: url.searchParams.get('afterSeq') ?? '0',
       upper: url.searchParams.get('upperSeq') ?? '',
