@@ -333,3 +333,25 @@ test('growing Unicode text preserves completed segments across the long-node bou
     await f.close();
   }
 });
+
+test('long entity and escaped text preserves source offsets for later live suffixes', async () => {
+  const f = await fixture();
+  try {
+    for (const [encoded, decoded] of [
+      ['&amp;', '&'],
+      ['\\*', '*'],
+    ]) {
+      const body = 'x'.repeat(2050);
+      const source = encoded + body;
+      await f.render(source, false);
+      expect(f.host.textContent).toBe(decoded + body);
+      await f.render(source, true);
+      const count = f.animations.length;
+      await f.render(`${source}NEW`);
+      expect(f.host.textContent).toBe(`${decoded}${body}NEW`);
+      expect(f.animations.slice(count).map((animation) => animation.text)).toEqual(['N', 'E', 'W']);
+    }
+  } finally {
+    await f.close();
+  }
+});

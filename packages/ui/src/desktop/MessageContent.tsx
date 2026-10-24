@@ -40,7 +40,7 @@ function retainListParagraphs() {
 }
 
 /** Keep long text nodes small without omitting text or changing its normal inline flow. */
-function segmentLongTextNodes() {
+function segmentLongTextNodes({ source }: { source: string }) {
   return (tree: MarkdownNode) => {
     const pending = [tree];
     for (let parent = pending.pop(); parent; parent = pending.pop()) {
@@ -50,6 +50,12 @@ function segmentLongTextNodes() {
           if (child.children) pending.push(child);
           return [child];
         }
+        // Decoded entities and escapes do not have one-to-one source offsets.
+        // Keep their original positions instead of inventing chunk boundaries.
+        const start = child.position?.start.offset;
+        const end = child.position?.end.offset;
+        if (start === undefined || end === undefined || source.slice(start, end) !== child.value)
+          return [child];
         const text = child.value,
           segments = /[^\p{ASCII}]/u.test(text)
             ? new Intl.Segmenter(undefined, { granularity: 'grapheme' }).segment(text)
@@ -61,7 +67,6 @@ function segmentLongTextNodes() {
           if (boundary && boundary.index < end)
             end =
               boundary.index > offset ? boundary.index : boundary.index + boundary.segment.length;
-          const start = child.position?.start.offset;
           parts.push({
             type: 'text',
             value: text.slice(offset, end),
@@ -257,7 +262,7 @@ const MarkdownDocument = memo(
             },
           ],
           [desktopMarkdownSemantics, { prefix }],
-          segmentLongTextNodes,
+          [segmentLongTextNodes, { source: text }],
           [incrementalMarkdown, { source: text, revealAfter }],
         ]}
         skipHtml
