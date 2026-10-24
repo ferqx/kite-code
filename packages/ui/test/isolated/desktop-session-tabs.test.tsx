@@ -222,20 +222,59 @@ test('responsive resize retains tabs; switching session releases their native re
   expect(browserIds()).toHaveLength(1);
   expect(ids).not.toContain(browserIds()[0]);
 });
-test('tab cap and closing the final tab leave a usable new page', async () => {
+test('closing the final browser tab collapses the sidebar and reopening leaves a usable new page', async () => {
   released.length = 0;
   await render();
   await click('标签页');
   const first = browserIds()[0]!;
   await click('关闭标签页：新标签页');
   expect(released).toContain(first);
+  expect(document.querySelector('#session-tabs')!.getAttribute('aria-hidden')).toBe('true');
+  expect(
+    document.querySelector('[aria-controls="session-tabs"]')!.getAttribute('aria-expanded'),
+  ).toBe('false');
+  expect(document.activeElement?.getAttribute('aria-label')).toBe('标签页');
+  expect(document.querySelectorAll('[data-browser-id][data-visible="true"]')).toHaveLength(0);
+  await click('标签页');
+  expect(document.querySelector('#session-tabs')!.getAttribute('aria-hidden')).toBe('false');
   expect(browserIds()).toHaveLength(1);
+  expect(browserIds()[0]).not.toBe(first);
   for (let i = 0; i < 7; i++) await click('新建标签页');
   expect(document.querySelectorAll('[role="tab"]')).toHaveLength(8);
   expect(
     document.querySelector<HTMLButtonElement>('button[aria-label="新建标签页"]')!.disabled,
   ).toBe(true);
   expect(document.querySelector<HTMLButtonElement>('.session-browser-tool')!.disabled).toBe(true);
+});
+
+test.each([
+  'changes',
+  'child',
+] as const)('closing the final %s tab collapses the sidebar and releases its reader', async (kind) => {
+  mounted = closed = childMounted = childClosed = 0;
+  childChanges.length = 0;
+  await render();
+  await click('标签页');
+  if (kind === 'changes') await changes();
+  else
+    await render('s', false, false, {
+      requestId: 1,
+      sessionId: 'child',
+      executionId: 'task',
+      title: 'Child task',
+    });
+  await click('关闭标签页：新标签页');
+  expect(document.querySelector('#session-tabs')!.getAttribute('aria-hidden')).toBe('false');
+  expect(document.querySelectorAll('[role="tab"]')).toHaveLength(1);
+  expect(mounted - closed + childMounted - childClosed).toBe(1);
+  await click(`关闭标签页：${kind === 'changes' ? '变更' : 'Child task'}`);
+  expect(document.querySelector('#session-tabs')!.getAttribute('aria-hidden')).toBe('true');
+  expect(mounted - closed + childMounted - childClosed).toBe(0);
+  expect(childChanges.at(-1)).toBeUndefined();
+  expect(document.activeElement?.getAttribute('aria-label')).toBe('标签页');
+  await click('标签页');
+  expect(document.querySelectorAll('[role="tab"]')).toHaveLength(1);
+  expect(document.querySelector('[role="tab"]')!.textContent).toBe('新标签页');
 });
 
 test('another host panel or covered page hides the tab shell without retaining its reader', async () => {

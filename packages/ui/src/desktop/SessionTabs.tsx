@@ -317,7 +317,10 @@ export function SessionTabs({
                   size="icon-xs"
                   aria-label={`关闭标签页：${tab.title}`}
                   title={`关闭标签页：${tab.title}`}
-                  onClick={() => closeTab(tab.id)}
+                  onClick={() => {
+                    closeTab(tab.id);
+                    if (tabs.length === 1) onClose();
+                  }}
                 >
                   <HugeiconsIcon icon={Cancel01Icon} />
                 </Button>
