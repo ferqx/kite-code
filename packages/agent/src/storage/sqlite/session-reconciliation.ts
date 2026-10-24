@@ -547,3 +547,29 @@ export function withReconciledFrontier<T>(
     throw error;
   }
 }
+
+/** Called only after Rewind has proved the whole execution group is settled. */
+export function retireReconciliationForRewind(
+  db: SqliteOperations,
+  input: Pick<Parameters<Store['selectContext']>[0], 'expectedStoreId' | 'sessionId' | 'subjectId'>,
+): void {
+  const saved = db.row(
+    'SELECT * FROM session_reconciliation WHERE root_session_id=?',
+    input.sessionId,
+  );
+  if (!saved) return;
+  const root = db.row('SELECT owner_instance FROM session WHERE id=?', input.sessionId);
+  // A prepared resume owns the original frontier even while public Runs remain
+  // interrupted. Rewind cannot retire its proof underneath that recovery lease.
+  if (root?.owner_instance !== null) throw new AgentError('owner_busy');
+  // Verify the exact original proof, then roll the overlay back. Rewind retires
+  // recovery eligibility; it never restores old active state or tool effects.
+  withReconciledFrontier(db, input, () => undefined);
+  db.run(
+    'DELETE FROM session_reconciliation WHERE root_session_id=? AND command_id=? AND store_id=? AND generation=?',
+    input.sessionId,
+    saved.command_id!,
+    input.expectedStoreId,
+    saved.generation!,
+  );
+}

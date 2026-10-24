@@ -291,5 +291,7 @@ Host 自动封存 prepare 中 session namespace 的 `records.get/list` 完整原
 
 [session-reconciliation](sqlite/session-reconciliation.ts)是 `reconcileSession` 的事务 owner，按准确 OS 锁、主体和 generation 结算整个主／子组。0003 只新增私有 `session_reconciliation`，原 checksum 不变，Worker protocol／包内资产同步迁移链。公开历史读保存的中断／未执行／未知事实，显式接续通过 savepoint 叠加与最终 CAS 还原原边界；详细合同和验证归[冷恢复 owner](sqlite/run-resume.README.md#会话恢复时的状态核实)。
 
+原主体成功 Rewind 时，在同一事务先核当前 selection、完整执行组已结算且没有未知 Tool／Job，再由 [retireReconciliationForRewind](sqlite/session-reconciliation.ts) 完整验证旧 checkpoint 的来源、generation、组与原行读集，并与新 selection／Command 一起退休该准确边界。准备中的恢复 owner 仍拒绝 Rewind；校验仅临时叠加并回滚原 frontier，不恢复旧活动状态或执行。退休后的新明确 start／follow-up 可以正常开始，旧 Run 仍为 interrupted 且不可 resume；错误主体／Store／selection、损坏证明、未知效果及后续 SQL 失败均保原 checkpoint。[真实强杀与事务回归](../../test/isolated/recovery/reconciled-rewind-runtime.test.ts)覆盖新输入、旧恢复拒绝、子组未知效果、恢复 lease、双 Worker 选择 CAS 与整体回滚。
+
 
 内部 Model 与通用子 Agent 分开建模：`authorization.check` 和 `session.title` 仅保存原 Session 的准确 Command／无 Run Model，分别由[权限检查](sqlite/authorization-check.ts)与[标题内部模型](sqlite/internal-model.ts)封闭写入。通用 planExecution 仍拒绝任意 runless Model。DB5 的[增量迁移](migrations/0005-authorization-check.sql)事务重建原 execution 约束、复制原行及重建索引／触发器，提交前核外键，失败回滚；不删除或重标旧审核历史。

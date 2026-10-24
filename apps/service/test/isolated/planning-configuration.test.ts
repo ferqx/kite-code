@@ -1454,10 +1454,144 @@ test('new Store restore projects registered files and fresh ordinary tools edit 
       scope: firstRef.scope,
     });
     expect(Buffer.from(saved.content).toString('utf8')).toBe('Original delivered report');
+    for (const [planId, expectedVersion, body] of [
+      ['other-restored-plan', 2, 'An intervening plan'],
+      ['restored-plan', 3, 'Reused after restore plan'],
+    ] as const) {
+      const commandId = `restore-switch-${expectedVersion}`;
+      await f.runtime.submitCommand({
+        ...f.base,
+        commandId,
+        request: {
+          kind: 'extension.invoke',
+          extensionId: planningExtensionId,
+          actionId: 'planning.write',
+          definitionVersion: '1',
+          input: {
+            planId,
+            expectedVersion,
+            title: planId,
+            body,
+            steps: [{ id: 'a', title: 'Keep the real file' }],
+          },
+        },
+      });
+      const command = await f.runtime.waitForCommand(commandId, { timeoutMs: 5000 });
+      const execution = await f.store.getExecution(
+        String((command.receipt as Record<string, Json>).executionId),
+      );
+      expect({ status: execution?.status, result: execution?.result }).toMatchObject({
+        status: 'succeeded',
+      });
+    }
+    expect(readFileSync(planPath, 'utf8')).toBe('Reused after restore plan');
+    expect((await f.record('plan/restored-plan/4'))!.value).toMatchObject({
+      file: { path: (plan.file as Record<string, Json>).path },
+      body: 'Reused after restore plan',
+    });
   } finally {
     await f.close();
   }
 }, 30000);
+
+test('reusing an earlier Plan ID keeps old reviews historical and requires a new exact approval before effects', async () => {
+  const f = await fixture(
+    { requirePlan: true },
+    ['planning.write', 'planning.review', 'planning.update', 'files.write'],
+    async (step, f): Promise<Call> => {
+      if ([0, 2, 3].includes(step)) {
+        const planId = step === 2 ? 'B' : 'A';
+        return {
+          name: 'write_plan',
+          input: {
+            plan_id: planId,
+            expected_version: step === 0 ? null : step - 1,
+            title: `Plan ${planId}`,
+            body: step === 3 ? 'Reused A requires a new review' : `Original ${planId}`,
+            steps: [{ id: 'a', title: 'One precise workspace write' }],
+          },
+        };
+      }
+      const current = (await f.record('plan.current'))!.value as Record<string, Json>;
+      if (step === 1 || step === 5)
+        return {
+          name: 'request_plan_review',
+          input: { plan_id: current.planId!, version: current.version!, digest: current.digest! },
+        };
+      if (step === 4 || step === 6)
+        return {
+          name: 'write_file',
+          input: {
+            path: step === 4 ? 'old-a-approval.txt' : 'new-a-approval.txt',
+            base: null,
+            content: 'Exact A version only',
+          },
+        };
+      if (step === 7) {
+        const written = (await f.store.listExecutions('s')).find(
+          (execution) =>
+            execution.definitionId === 'files.write' && execution.status === 'succeeded',
+        )!;
+        return {
+          name: 'update_plan_progress',
+          input: {
+            run_id: await f.runId(),
+            plan_id: current.planId!,
+            version: current.version!,
+            digest: current.digest!,
+            expected_progress_revision: null,
+            step_id: 'a',
+            status: 'completed',
+            execution_id: written.id,
+            complete_plan: true,
+          },
+        };
+      }
+      return null;
+    },
+    { mode: 'full' },
+  );
+  try {
+    await f.submit();
+    const old = await f.answer('plan_review');
+    expect(old.request).toMatchObject({
+      version: '1',
+      content: expect.stringContaining('Original A'),
+    });
+    const reviewed = await f.answer('plan_review');
+    expect(reviewed.request).toMatchObject({
+      version: '3',
+      content: expect.stringContaining('Reused A requires a new review'),
+    });
+    expect((await f.done()).run?.status).toBe('completed');
+    expect((await f.record('plan.current'))!.value).toMatchObject({ planId: 'A', version: 3 });
+    expect((await f.record('plan/A/1'))!.value).toMatchObject({ body: 'Original A' });
+    expect((await f.record('plan/B/2'))!.value).toMatchObject({ body: 'Original B' });
+    const oldInteraction = (
+      await f.store.listInteractions({ ...f.base, state: 'answered' })
+    ).interactions.find((interaction) => interaction.id === old.id);
+    expect(oldInteraction?.request).toEqual(old.request);
+    expect(await f.record(`run/${await f.runId()}/approval/A/1`)).not.toBeNull();
+    expect(await f.record(`run/${await f.runId()}/approval/A/3`)).not.toBeNull();
+    const writes = (await f.store.listExecutions('s')).filter(
+      (execution) => execution.definitionId === 'files.write',
+    );
+    expect(writes.map((execution) => execution.status)).toEqual(['failed', 'succeeded']);
+    expect(writes[0]!.result).toMatchObject({
+      details: {
+        adapterAttempted: false,
+        dispatchCommitted: false,
+        reason: 'plan_approval_required',
+      },
+    });
+    expect(existsSync(join(f.workspace, 'old-a-approval.txt'))).toBe(false);
+    expect(readFileSync(join(f.workspace, 'new-a-approval.txt'), 'utf8')).toBe(
+      'Exact A version only',
+    );
+  } finally {
+    await f.close();
+  }
+}, 20000);
 
 test('ordinary Plan file edit after approval creates v2 and cannot spend the original approval on workspace effects', async () => {
   let planPath = '';

@@ -9,6 +9,7 @@ import { activeCompression, historyOnlyCompression } from './compression-operati
 import { continuationReportProof } from './job-report-continuation';
 import type { SqliteOperations } from './operations';
 import { contextSnapshots } from './schema';
+import { retireReconciliationForRewind } from './session-reconciliation';
 
 type Row = Record<string, string | number | bigint | null>;
 const hash = (value: Json) => createHash('sha256').update(canonicalJson(value)).digest('hex');
@@ -825,6 +826,7 @@ export function callContextSelection(
         tailFromSeq: String(current.next_seq),
         ranges,
       };
+      retireReconciliationForRewind(db, input);
       db.run(
         "INSERT INTO context_snapshot(id,session_id,selection_id,sources_json,request_json,kind) VALUES(?,?,?,'[]',?,'selection')",
         next.id,

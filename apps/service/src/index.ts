@@ -924,29 +924,34 @@ export async function startService(options: ServiceOptions) {
     )
       throw new HttpFailure('invalid_request', 400);
     const input = query.data;
-    const body = context.req.raw.body;
+    const reader = context.req.raw.body.getReader();
+    bodyReaders.add(reader);
     async function* chunks() {
-      const reader = body.getReader();
-      try {
-        for (;;) {
-          const next = await reader.read();
-          if (next.done) return;
-          yield next.value;
-        }
-      } finally {
-        await reader.cancel().catch(() => {});
-        reader.releaseLock();
+      for (;;) {
+        if (closing) throw new HttpFailure('service_draining', 503);
+        const next = await reader.read();
+        // Service cancellation can resolve a pending read as done. It is not the
+        // request's EOF, even when the received bytes match the declared digest.
+        if (closing) throw new HttpFailure('service_draining', 503);
+        if (next.done) return;
+        yield next.value;
       }
     }
-    const file = await runtime.uploadInputFile({
-      ...input,
-      sessionId: context.req.param('id'),
-      subjectId,
-      content: chunks(),
-      expectedContent: { size: input.size, hash: input.hash },
-      signal: context.req.raw.signal,
-    });
-    return context.json(schemas.InputFileReference.parse(file), 201);
+    try {
+      const file = await runtime.uploadInputFile({
+        ...input,
+        sessionId: context.req.param('id'),
+        subjectId,
+        content: chunks(),
+        expectedContent: { size: input.size, hash: input.hash },
+        signal: context.req.raw.signal,
+      });
+      return context.json(schemas.InputFileReference.parse(file), 201);
+    } finally {
+      bodyReaders.delete(reader);
+      await reader.cancel().catch(() => {});
+      reader.releaseLock();
+    }
   });
   app.get('/v1/sessions/:id/input-files/:importId', async (context) => {
     const query = schemas.HostMutationQuery.safeParse(

@@ -171,6 +171,7 @@ const knownPreflight = new Set([
   'plan_version_conflict',
   'plan_file_changed',
   'plan_file_missing',
+  'plan_file_invalid',
   'plan_file_recovery_required',
   'file_baseline_conflict',
   'plan_steps_invalid',
@@ -598,6 +599,52 @@ export function createPlanningValidation(
     },
     ['planId', 'expectedVersion', 'title', 'body', 'steps'],
   );
+  async function latestPlanDocument(context: ActionContext, planId: string, upperVersion: number) {
+    let afterKey: string | undefined;
+    let latest: Record<string, Json> | null = null;
+    for (;;) {
+      const page = await context.records.list({
+        contentType,
+        limit: 200,
+        ...(afterKey ? { afterKey } : {}),
+      });
+      for (const record of page) {
+        if (!record.key.startsWith(`plan/${encodeURIComponent(planId)}/`)) continue;
+        const plan = decode(record)!;
+        if (
+          record.extensionId !== planningExtensionId ||
+          record.sessionId !== context.sessionId ||
+          !record.originStoreId ||
+          plan.kind !== 'plan_document' ||
+          plan.planId !== planId ||
+          !Number.isSafeInteger(plan.version) ||
+          Number(plan.version) < 1 ||
+          record.key !== `plan/${encodeURIComponent(planId)}/${plan.version}`
+        )
+          throw new Error('planning_invalid_record');
+        if (
+          Number(plan.version) <= upperVersion &&
+          (!latest || Number(plan.version) > Number(latest.version))
+        )
+          latest = plan;
+      }
+      if (page.length < 200) break;
+      afterKey = page.at(-1)!.key;
+    }
+    if (
+      latest &&
+      latest.digest !==
+        (await digest({
+          planId: latest.planId!,
+          version: latest.version!,
+          title: latest.title!,
+          body: latest.body!,
+          steps: latest.steps!,
+        }))
+    )
+      throw new Error('planning_invalid_record');
+    return latest;
+  }
   const reviewInput = schema({
     planId: text,
     version: { type: 'integer', minimum: 1 },
@@ -783,6 +830,10 @@ export function createPlanningValidation(
           if (!own?.originStoreId || own.sessionId !== context.sessionId)
             throw new Error('planning_run_mismatch');
           const priorPlan = current ? decode(await context.records.get(string(current.key))) : null;
+          const previousPlan =
+            priorPlan?.planId === plan.planId
+              ? priorPlan
+              : await latestPlanDocument(context, plan.planId, Number(current?.version ?? 0));
           const pendingRecord = await context.records.get('plan.file.publication');
           const pending = decode(pendingRecord);
           const recovering = pending?.state === 'pending';
@@ -791,10 +842,7 @@ export function createPlanningValidation(
             sessionId: context.sessionId,
             planId: plan.planId,
             body: plan.body,
-            previous:
-              priorPlan?.planId === plan.planId && priorPlan.file
-                ? (priorPlan.file as unknown as PlanFile)
-                : null,
+            previous: previousPlan?.file ? (previousPlan.file as unknown as PlanFile) : null,
             ...(value.fileBase !== undefined
               ? {
                   fileBase: value.fileBase as unknown as
@@ -805,9 +853,15 @@ export function createPlanningValidation(
           };
           if (recovering && (pending.digest !== hash || pending.key !== key))
             throw new Error('plan_file_recovery_required');
+          const described = planFiles.describe(publication);
           if (!recovering) {
             if (priorPlan?.file && value.fileBase === undefined)
               await planFiles.verify(priorPlan.file as unknown as PlanFile, string(priorPlan.body));
+            if (previousPlan?.file && previousPlan !== priorPlan && value.fileBase === undefined)
+              await planFiles.verify(
+                previousPlan.file as unknown as PlanFile,
+                string(previousPlan.body),
+              );
             await writeAt(
               context,
               'plan.file.publication',
@@ -816,7 +870,7 @@ export function createPlanningValidation(
                 state: 'pending',
                 key,
                 digest: hash,
-                file: planFiles.describe(publication) as unknown as Json,
+                file: described as unknown as Json,
               },
               pendingRecord,
             );

@@ -46,13 +46,26 @@ export function createPlanFiles(profilePath: string): PlanFiles {
       throw new AgentError('plan_file_invalid');
     return join(root, ...file.path.split('/'));
   }
+  function relative(input: {
+    storeId: string;
+    sessionId: string;
+    planId: string;
+    previous: PlanFile | null;
+  }) {
+    if (!input.previous)
+      return `files/${hash(input.storeId)}/${hash(input.sessionId)}/plans/${hash(input.planId)}/plan.md`;
+    path(input.previous);
+    const parts = input.previous.path.split('/');
+    if (parts[2] !== hash(input.sessionId) || parts[4] !== hash(input.planId))
+      throw new AgentError('plan_file_invalid');
+    // A restored record keeps its original Store directory, within this admitted Session.
+    return input.previous.path;
+  }
   return {
     path,
     describe(input) {
       return {
-        path:
-          input.previous?.path ??
-          `files/${hash(input.storeId)}/${hash(input.sessionId)}/plans/${hash(input.planId)}/plan.md`,
+        path: relative(input),
         hash: hash(input.body),
         size: Buffer.byteLength(input.body),
       };
@@ -73,10 +86,11 @@ export function createPlanFiles(profilePath: string): PlanFiles {
       }
     },
     async publish(input) {
-      const relative =
-        input.previous?.path ??
-        `files/${hash(input.storeId)}/${hash(input.sessionId)}/plans/${hash(input.planId)}/plan.md`;
-      const next = { path: relative, hash: hash(input.body), size: Buffer.byteLength(input.body) };
+      const next = {
+        path: relative(input),
+        hash: hash(input.body),
+        size: Buffer.byteLength(input.body),
+      };
       const target = path(next);
       // Creation runs only inside the already-authorized Planning mutation, never during a query.
       privateDirectory(dirname(target), true);

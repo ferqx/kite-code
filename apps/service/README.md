@@ -482,13 +482,15 @@ Settings 模型业务端口为 `GET /v1/config/user/models?storeId=...` 和 `POS
 
 关闭请求固定原 profile、instance 和 `if_idle/cancel`，不携业务 storeId。`if_idle` 同步重核已接纳 HTTP mutation 与 Runtime 工作后封门，竞争时返回 409 并保持接纳；普通 View/body GET 与 SSE 观察本身不算活动工作，但其资源使用仍延迟 Artifact/Store 关闭。慢请求正文和异步配置写入受 HTTP 接纳与解析后重核约束，不能穿过 drain 产生新修改。前期 drain 保留原读取/准确 cancel；Runtime 本地清理成功、关闭资源之前的唯一可信 callback 先封住最后业务资源入口，再调用装配时固定的宿主 `beforeResourceClose`；宿主可在此关闭 Gateway、abort 并排空其所属读取，随后 Service 等待原 Native HTTP 资源使用清零，最后才释放 Runtime Artifact/Store。先等待 Native HTTP 再关闭依赖它的 Gateway 可能循环等待，因此该顺序由真实 Gateway→Native held GET 的 abort barrier 验证。生命周期诊断仍可达，宿主回调失败进入 `drain_failed`，保留 HTTP、原 Store 和 profile-use 锁；重复关闭不替换或再次执行首次回调。
 
+流式 `input-files` 上传的 reader 与普通 JSON 正文共用所属 `bodyReaders` 取消链，HTTP admission 持续到原上传调用结算。取消关闭会打断仍在等待正文的上传；由取消产生的 `done` 不作为请求正常 EOF，即使已收到的字节恰好匹配声明的 size/hash，也不能返回成功或登记 prepared/bound 导入。已正常读到 EOF、进入原发布流程的上传则继续在原 admission 内结算，关闭等待其原引用及导入记录完成；客户端断线和内容校验失败释放读取与 admission，不改变原 Store/Session/subject 绑定。上传保持分块传递，不新增完整正文缓存、关闭期限或强制回收。
+
 202 仅表示关闭受理。首次关闭缓存同一 completion，失败进入 `drain_failed` 并保持 cleanup busy、HTTP 诊断和未确认资源；不得在 finally 强制停止 listener 伪装完成。成功关闭后 runner 取消自己的父管道读取并真实退出，即使父管道仍打开；网络断开不代表父进程死亡。丢回复属于原实例未知结果，只能再次观察该实例，不自动重发 shutdown。当前仅有限接口与所属 runner，不代表正式 CLI 停机或 daemon 发现完成。
 
 底层 Store strict-close 未获成功 ACK 时，[原 Store owner](../../packages/agent/src/storage/README.md#store-关闭未确认时的锁归属)保留 Session／恢复／Profile 使用锁，Service 的 `drain_failed` 不能让维护提前接管。[真实共用装配／Client 回归](test/isolated/store-close-ownership.test.ts)保原完成任务和全文，核关闭原错误与同一 completion、存活进程期间维护 `owner_busy`，原 child 实际退出后才允许备份和完整冷读，零新增 Model。该 fixture 的进程退出是测试收尾，不宣称失败关闭已成功或 Worker 线程的完整资格。
 
 [默认Web清理所有权回归](test/isolated/web-fetch-cleanup-ownership.test.ts)使用正式装配、Client、本地固定Provider和实际默认parser；只让所属child的parser JavaScript terminate失败，保原Tool未知及Model恰一次。Service／Runtime均拒绝关闭并保 `drain_failed`、活进程期间维护 `owner_busy`；显式结束该测试child并核实际0及stdout／stderr EOF后，公开备份和只读冷查询保完整原metadata／Command／View／Message／Execution、Model零重放。此可三端运行的源码测试不增加skip，不冒称真实OS API失败；本机结果仍只授macOS实际范围。
 
-[实际 HTTP 与 runner 生命周期测试](test/isolated/lifecycle.test.ts)使用临时 profile/SQLite 和固定本地配置，覆盖闭合身份、空/同源 Origin、Browser 拒绝、慢正文、原配置 mutation 发布、慢纯 GET 排空、真实 Store metadata 故障、父管道仍打开时原 PID 退出与同 profile peer 存活、诊断无 Store 退出，以及未确认清理后原进程/HTTP 保留且维护仍 `owner_busy`。这些测试没有调用 Provider/Tool；失败 fixture 最终由测试的所属子进程清理回收，不把 SIGKILL 作为成功停机证据。
+[实际 HTTP 与 runner 生命周期测试](test/isolated/lifecycle.test.ts)使用临时 profile/SQLite 和固定本地配置，覆盖闭合身份、空/同源 Origin、Browser 拒绝、慢 JSON 正文、匹配 size/hash 但尚无 EOF 的 chunked 上传取消、完整上传进入发布后的关闭等待、正常/断线/内容不匹配上传、原配置 mutation 发布、慢纯 GET 排空、真实 Store metadata 故障、父管道仍打开时原 PID 退出与同 profile peer 存活、诊断无 Store 退出，以及未确认清理后原进程/HTTP 保留且维护仍 `owner_busy`。上传取消用例保持客户端 socket 打开直到 `closedPromise` 真正完成，再从冷 SQLite 核零导入；这些测试没有调用 Provider/Tool。失败 fixture 最终由测试的所属子进程清理回收，不把 SIGKILL 作为成功停机证据。
 
 [共用进程装配测试](test/isolated/process-service.test.ts)覆盖原 profile 身份、装配过程中迟到的宿主回调替换、冷 Store 零模型执行和损坏 Store 的只读诊断；[Gateway 测试](test/isolated/development-web.test.ts)覆盖重复关闭同一 completion 与 abort 后真实慢读取排空及完整 17 MiB Model 正文的读取/传输中断，[生命周期测试](test/isolated/lifecycle.test.ts)同时保留配对父 EOF/管道存活验证，并通过真实失败宿主 child 证明诊断、Store 和维护锁保留。此共用装配不代表 daemon main 或正式 CLI 命令已经完成。
 

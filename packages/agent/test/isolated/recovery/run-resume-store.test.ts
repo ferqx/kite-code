@@ -1159,8 +1159,12 @@ for (const change of ['stop', 'selection', 'other_control', 'untrusted_rename'] 
           ...f.input,
           expectedOwnerGeneration: reconciled.report!.generation,
         }),
-        'run_resume_checkpoint_changed',
+        change === 'selection' ? 'run_not_active' : 'run_resume_checkpoint_changed',
       );
+      if (change === 'selection')
+        expect(f.db.query('SELECT count(*) AS n FROM session_reconciliation').get()).toEqual({
+          n: 0,
+        });
       expect(await f.store.getView('s')).toEqual(before);
     } finally {
       await f.close();

@@ -6,6 +6,8 @@ Files 的 observation 沿原 Tool 结果交给 [Agent 子取证预览](../../pac
 
 会话文件沿 Native 字节准备 → Service 流式导入 → Store 原消息事务绑定 → Files 精确对象权限 → Artifact／模型结果交接。Blob、可变工作文件和可重建缓存职责分开；会话路径不扩大 Shell／普通外部文件工具的 Profile 权限。Plan 文件编辑经原 Planning Action 保存新版本，文件事实不能替代原 Run／版本批准。PDF 页图由准确 Tool Execution 的不可变 Artifact 进入中立 tool 消息，协议视觉载体不产生人类授权。跨介质发布保留 pending／unknown；备份 v20 保存最新实际工作文件和明确缺失，恢复生成新 Store。详细合同分别归 [Files](../../packages/agent/src/tools/files/README.md)、[Planning](../../packages/agent/src/business/planning/README.md)、[维护](../../packages/agent/src/maintenance/README.md)和 [AI](../../packages/ai/README.md#图片消息)。
 
+Plan 切回先前 ID 时仅从同 Session 已封存版本解析该目标文件，核原登记、摘要与实际基线，再沿原 publication／current CAS 保存新版本；不因文件存在而覆盖或恢复旧批准。Service 上传正文 reader 归现有 HTTP 关闭取消域，原 admission 持有至调用结算；关闭触发的提前结束不构成完整上传，已进入发布的原调用不因关闭重放。准确失败窗口与回归分别归上述 Planning owner 及 [Service owner](../../apps/service/README.md)。
+
 消息的可选 `createdAt` 沿 [Store](../../packages/agent/src/storage/README.md#消息首次记录时间) → [Service 同源 schema](../../apps/service/src/http/schema/index.ts) → 生成 Client → [Native](../../apps/desktop/src/native-presentation.ts) → 共享 UI 传递，只表达原消息首次记录时间。流式与 Fork 保留来源，旧历史缺少可靠原时间时保持未知；该元数据不进入模型内容，不授权读取、写入或恢复，也不改变原 Command／Run 身份与消息次序。
 
 新普通输入沿原 Command 直接进入当前主 Agent，不创建分类 Run、判定回复或派生输入；`input.steer/input.follow_up` 保持准确目标与队列规则。旧历史消息的 `humanInput` 只读证明沿 [SQL 输入 owner](../../packages/agent/src/storage/sqlite/inputs/README.md) → Service 同源 schema／生成 Client → [Native](../../apps/desktop/README.md#真实输入消息的唯一展示)交接。原 public/raw/processing/decision/business 与准确已应用 Message／Run 共同证明同一次输入，不以相同正文或 ID 前缀猜测；消息分页保原行和原序号。Native 仅在当前读取存在准确替代消息时合并处理副本，首次占位沿原公开提交 ID 交接，独立同文和未决输入保留。呈现证明不参与权限、业务准入或恢复授权。
@@ -207,6 +209,8 @@ Interaction 只有实际发起 Session 的权威请求，父展示与回答引�
 [完整 Model 正文](../../packages/agent/src/model-body/README.md)把 Tool summary 和原 Artifact 全文一起交给实际 Model；大请求、来源与 Auto 审核使用准确原 scope 的不可变正文和有限持久 header。Provider 前完整核实并展开，成功 Model 保存实际 inputBodyHash。最终 SQL 事务仅核 metadata/原绑定与真实执行 proof，不读取正文或调用 Provider。64KiB 路由阈值不裁剪任务或来源；Worker 有限队列和控制预留保持。Auto 专用 carrier 的 planned-parent 准入只能由具名 Store 方法提供，公开 snapshot 不生成豁免；审查是同 Loop 的一个无 Tool Model，文本自报引用不授予权限。审核历史只包含明确的语义消息字段，Provider 私有 continuation 不进入审核普通正文、后续审核历史或公开 Inspector；原私有请求仍在原 scope 完整验证，投影不替代原 carrier／payload 绑定证明。大请求的人工回退附件需要客户端实际完整加载资格，不能把引用展示当作已经审阅全文。
 
 steer 定位原活动 Run 的安全检查点，follow-up 保留独立命令及原前驱；已派发调用不会因新输入而改写原决策。模型输入取当前上下文选择，分别穷尽消息与结果引用的固定上界分页。合法 pending delivery 仅由原执行 owner 在准备模型请求时消费，完成游标保存在执行事实中，不依赖可裁剪通知。idle 或只读查询不创建模型请求。Rewind 核实整个执行组，原子隔离旧 pending 并保留历史；显式 include 只增加准确原来源，不重跑、不恢复旧交付。子内部结果与父 carrier 结果保持各自 Session 范围，实际模型请求记录准确 source IDs。
+
+孤儿执行已核实结算后的 Rewind，在同一事务核准确 checkpoint、owner／generation 与全组已结算事实后退休旧接续边界，保留已结算历史并保存新选择。新普通输入继续经过当前权限与 unknown fence；旧 Run 不因 checkpoint 退休取得恢复资格。任一校验或事务失败保持原 checkpoint 和选择，具体实现与强杀回归归 [Store owner](../../packages/agent/src/storage/README.md)。
 
 Context 只读准入核当前 Store，`resultSources.originStoreId` 则保留真实原 Execution 的出处，离线恢复后两者可以不同。Core 在同一读事务核当前 Session／selection／高水位，再核来源的准确 Execution／revision／origin；TUI 与 Web 聚合沿这个合同保留完整结果，不重标来源或扩大执行权。原双游标、其他 Session、重复记录和选择／上界漂移守卫保持，真实恢复与消费者范围见 [CLI owner](../../apps/cli/README.md)和[Web owner](../../apps/web/README.md#按需只读诊断)。
 

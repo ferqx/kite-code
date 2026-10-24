@@ -1,9 +1,12 @@
 import { Database } from 'bun:sqlite';
 import { expect, test } from 'bun:test';
+import { createHash } from 'node:crypto';
 import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createConnection } from 'node:net';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { createRuntime } from '@kite-ai/agent';
+import { createArtifactStore } from '@kite-ai/agent/artifacts';
 import { createProfileBackup } from '@kite-ai/agent/maintenance';
 import { selectProfile } from '@kite-ai/agent/profile';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
@@ -33,13 +36,14 @@ async function until<T>(read: () => Promise<T> | T, check: (v: T) => boolean) {
     await Bun.sleep(5);
   }
 }
-async function fixture(beforeResourceClose?: () => Promise<void>) {
+async function fixture(beforeResourceClose?: () => Promise<void>, inputFiles = false) {
   const root = temporaryDirectory('kite-http-lifecycle-'),
     profile = selectProfile({ dataRoot: join(root, 'data'), profile: 'test' }),
     store = await openSqliteStore(profile);
   const metadata = await store.getMetadata(),
     runtime = createRuntime({
       store,
+      ...(inputFiles ? { artifacts: createArtifactStore({ profile, store }) } : {}),
       modelId: 'fixed',
       model: createFixedModel([
         [{ type: 'finish', reason: 'stop', usage: { inputTokens: 1, outputTokens: 1 } }],
@@ -111,6 +115,46 @@ async function fixture(beforeResourceClose?: () => Promise<void>) {
       rmSync(root, { recursive: true, force: true });
     },
   };
+}
+async function uploadFixture() {
+  const f = await fixture(undefined, true);
+  const scope = {
+    expectedStoreId: f.metadata.storeId,
+    sessionId: 'upload-session',
+    subjectId: 'local-user',
+  };
+  try {
+    await f.runtime.createWorkspace({
+      expectedStoreId: scope.expectedStoreId,
+      id: 'upload-workspace',
+      name: 'upload',
+      rootUri: pathToFileURL(f.root).href,
+    });
+    await f.runtime.createSession({
+      ...scope,
+      commandId: 'create-upload-session',
+      workspaceId: 'upload-workspace',
+      title: 'upload',
+    });
+    return {
+      ...f,
+      scope,
+      uploadPath(id: string, bytes: Uint8Array) {
+        const query = new URLSearchParams({
+          expectedStoreId: scope.expectedStoreId,
+          id,
+          name: `${id}.txt`,
+          mediaType: 'text/plain',
+          size: String(bytes.length),
+          hash: createHash('sha256').update(bytes).digest('hex'),
+        });
+        return `/v1/sessions/${scope.sessionId}/input-files?${query}`;
+      },
+    };
+  } catch (error) {
+    await f.cleanup();
+    throw error;
+  }
 }
 test('authenticated lifecycle is independent and closed; wrong instance/profile/Origin/query and Browser cannot cancel', async () => {
   const f = await fixture();
@@ -199,6 +243,184 @@ test('HTTP slow body makes idle shutdown busy; accepted cancel seals and rejects
     await f.cleanup();
   }
 });
+test('cancel shutdown interrupts a chunked upload before EOF even when received bytes match its declared size and hash', async () => {
+  const f = await uploadFixture();
+  const bytes = Buffer.from('matching bytes without the terminating HTTP chunk');
+  const received = gate();
+  const upload = f.runtime.uploadInputFile.bind(f.runtime);
+  f.runtime.uploadInputFile = (input) =>
+    upload({
+      ...input,
+      content: (async function* () {
+        let count = 0;
+        for await (const chunk of input.content) {
+          count += chunk.length;
+          if (count === bytes.length) received.enter();
+          yield chunk;
+        }
+      })(),
+    });
+  const url = new URL(f.service.endpoint);
+  const socket = createConnection({ host: url.hostname, port: Number(url.port) });
+  let response = '',
+    closed = false;
+  socket.on('data', (value) => (response += String(value)));
+  void f.service.closedPromise.then(() => {
+    closed = true;
+  });
+  try {
+    await new Promise<void>((resolve) => socket.once('connect', resolve));
+    socket.write(
+      `POST ${f.uploadPath('cancelled-upload', bytes)} HTTP/1.1\r\nHost: ${url.host}\r\nAuthorization: Bearer ${f.service.bootstrap.token}\r\nContent-Type: application/octet-stream\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n${bytes.length.toString(16)}\r\n`,
+    );
+    socket.write(bytes);
+    socket.write('\r\n');
+    await received.entered;
+    expect((await f.shutdown('if_idle')).status).toBe(409);
+    expect((await f.shutdown('cancel')).status).toBe(202);
+    await until(() => closed, Boolean);
+    expect(response.includes('201 Created')).toBe(false);
+    const db = new Database(f.profile.databasePath, { readonly: true });
+    try {
+      expect(db.query('SELECT COUNT(*) AS n FROM input_file_import').get()).toEqual({ n: 0 });
+    } finally {
+      db.close();
+    }
+  } finally {
+    socket.destroy();
+    await f.cleanup();
+  }
+}, 15000);
+test('shutdown waits for an admitted upload publication after normal HTTP EOF and preserves its original prepared import', async () => {
+  const f = await uploadFixture();
+  const bytes = Buffer.from('a complete upload already passed normal HTTP EOF');
+  const publishing = gate();
+  const register = f.store.registerInputFileImport.bind(f.store);
+  f.store.registerInputFileImport = async (input) => {
+    if (input.id === 'complete-upload') {
+      publishing.enter();
+      await publishing.waiting;
+    }
+    return register(input);
+  };
+  let closed = false;
+  void f.service.closedPromise.then(() => {
+    closed = true;
+  });
+  try {
+    const pending = f.request(f.uploadPath('complete-upload', bytes), {
+      method: 'POST',
+      headers: { 'content-type': 'application/octet-stream' },
+      body: bytes,
+    });
+    await publishing.entered;
+    expect((await f.shutdown('if_idle')).status).toBe(409);
+    expect((await f.shutdown('cancel')).status).toBe(202);
+    expect(closed).toBe(false);
+    publishing.release();
+    const response = await pending;
+    expect(response.status).toBe(201);
+    const file = await response.json();
+    expect(file).toMatchObject({
+      name: 'complete-upload.txt',
+      reference: {
+        hash: createHash('sha256').update(bytes).digest('hex'),
+        size: String(bytes.length),
+      },
+    });
+    await f.service.closedPromise;
+    const db = new Database(f.profile.databasePath, { readonly: true });
+    try {
+      expect(
+        db
+          .query(
+            'SELECT id,session_id,subject_id,origin_store_id,state,bound_command_id FROM input_file_import',
+          )
+          .all(),
+      ).toEqual([
+        {
+          id: 'complete-upload',
+          session_id: f.scope.sessionId,
+          subject_id: f.scope.subjectId,
+          origin_store_id: f.scope.expectedStoreId,
+          state: 'prepared',
+          bound_command_id: null,
+        },
+      ]);
+    } finally {
+      db.close();
+    }
+  } finally {
+    publishing.release();
+    await f.cleanup();
+  }
+}, 15000);
+test('upload failure and client abort release HTTP admission while a normal upload retains its original import', async () => {
+  const f = await uploadFixture();
+  const bytes = Buffer.from('normal streamed input file');
+  let socket: ReturnType<typeof createConnection> | undefined;
+  try {
+    const response = await f.request(f.uploadPath('normal-upload', bytes), {
+      method: 'POST',
+      headers: { 'content-type': 'application/octet-stream' },
+      body: bytes,
+    });
+    expect(response.status).toBe(201);
+    expect(await f.runtime.getInputFileImport({ ...f.scope, id: 'normal-upload' })).toMatchObject({
+      state: 'prepared',
+      reference: {
+        hash: createHash('sha256').update(bytes).digest('hex'),
+        size: String(bytes.length),
+      },
+    });
+    const invalid = new URL(f.uploadPath('bad-upload', bytes), f.service.endpoint);
+    invalid.searchParams.set('hash', '0'.repeat(64));
+    const failed = await f.request(invalid.pathname + invalid.search, {
+      method: 'POST',
+      headers: { 'content-type': 'application/octet-stream' },
+      body: bytes,
+    });
+    expect(failed.status).not.toBe(201);
+    expect(await failed.json()).toMatchObject({ code: 'input_file_content_mismatch' });
+    expect(await f.runtime.getInputFileImport({ ...f.scope, id: 'bad-upload' })).toBeNull();
+    const received = gate();
+    const upload = f.runtime.uploadInputFile.bind(f.runtime);
+    f.runtime.uploadInputFile = (input) =>
+      upload({
+        ...input,
+        content: (async function* () {
+          for await (const chunk of input.content) {
+            received.enter();
+            yield chunk;
+          }
+        })(),
+      });
+    const url = new URL(f.service.endpoint);
+    socket = createConnection({ host: url.hostname, port: Number(url.port) });
+    socket.on('error', () => {});
+    await new Promise<void>((resolve) => socket!.once('connect', resolve));
+    socket.write(
+      `POST ${f.uploadPath('aborted-upload', bytes)} HTTP/1.1\r\nHost: ${url.host}\r\nAuthorization: Bearer ${f.service.bootstrap.token}\r\nContent-Type: application/octet-stream\r\nContent-Length: ${bytes.length}\r\nConnection: close\r\n\r\n${bytes.subarray(0, 5).toString()}`,
+    );
+    await received.entered;
+    socket.destroy();
+    await until(f.lifecycle, (value) => !value.reasons.includes('admission'));
+    expect(await f.runtime.getInputFileImport({ ...f.scope, id: 'aborted-upload' })).toBeNull();
+    expect((await f.shutdown('if_idle')).status).toBe(202);
+    await f.service.closedPromise;
+    const db = new Database(f.profile.databasePath, { readonly: true });
+    try {
+      expect(db.query('SELECT id,state FROM input_file_import').all()).toEqual([
+        { id: 'normal-upload', state: 'prepared' },
+      ]);
+    } finally {
+      db.close();
+    }
+  } finally {
+    socket?.destroy();
+    await f.cleanup();
+  }
+}, 15000);
 test('an admitted configuration file mutation completes original receipt before final resource close; later reads and writes cannot enter', async () => {
   const f = await fixture(),
     held = gate();
