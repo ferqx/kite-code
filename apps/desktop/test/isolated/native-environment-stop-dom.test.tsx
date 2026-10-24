@@ -3,8 +3,9 @@ import type { BackgroundExecutionSummary } from '@kite-ai/ui/desktop';
 import { JSDOM } from 'jsdom';
 import { act } from 'react';
 import type { NativeBridge, NativeSelection } from '../../src/native-bridge';
+import { NativeDiagnosticsProvider } from '../../src/native-diagnostics';
 import { useNativeEnvironment } from '../../src/native-environment';
-import { backgroundShellItem } from '../background-item.fixture';
+import { backgroundItem, backgroundShellItem } from '../background-item.fixture';
 
 const bootstrap = new JSDOM('<div/>');
 const prior = {
@@ -27,7 +28,7 @@ function deferred() {
   });
   return { promise, resolve };
 }
-function fixture() {
+function fixture(options: { diagnostics?: boolean; childTitle?: string } = {}) {
   const dom = new JSDOM('<div id="root"/>');
   const before = {
     window: globalThis.window,
@@ -41,7 +42,14 @@ function fixture() {
     IS_REACT_ACT_ENVIRONMENT: true,
   });
   const root = createRoot(dom.window.document.getElementById('root')!);
-  const item = backgroundShellItem(1);
+  const source =
+    options.childTitle === undefined ? backgroundShellItem(1) : backgroundItem(1, true);
+  const item = {
+    ...source,
+    childSession: source.childSession
+      ? { ...source.childSession, title: options.childTitle! }
+      : null,
+  };
   let observation = 0,
     opens = 0,
     stops = 0,
@@ -51,6 +59,7 @@ function fixture() {
     heldStop: ReturnType<typeof deferred> | undefined;
   let unavailable = false,
     controlUnavailable = false,
+    executionUnconfirmed = false,
     directoryFailed = false,
     empty = false;
   let stopObservation: number | undefined;
@@ -109,6 +118,7 @@ function fixture() {
       revision,
       unavailable,
       controlUnavailable,
+      executionUnconfirmed,
       onChanged: async () => {},
     });
     // Retain the previously actionable event handler, exercising an event accepted
@@ -160,6 +170,9 @@ function fixture() {
     controlUnavailable(value: boolean) {
       controlUnavailable = value;
     },
+    unconfirmed(value: boolean) {
+      executionUnconfirmed = value;
+    },
     failDirectory(value: boolean) {
       directoryFailed = value;
     },
@@ -169,7 +182,13 @@ function fixture() {
     async render(nextRoot = sessionId) {
       sessionId = nextRoot;
       revision++;
-      await act(async () => root.render(<Harness />));
+      await act(async () =>
+        root.render(
+          <NativeDiagnosticsProvider enabled={options.diagnostics}>
+            <Harness />
+          </NativeDiagnosticsProvider>,
+        ),
+      );
     },
     async close() {
       await act(async () => root.unmount());
@@ -178,6 +197,38 @@ function fixture() {
     },
   };
 }
+test('environment names hide internal IDs outside diagnostics and keep unconfirmed controls blocked without extra copy', async () => {
+  for (const diagnostics of [false, true]) {
+    for (const entry of [
+      { childTitle: undefined, name: 'Shell' },
+      { childTitle: '', name: '子 Agent' },
+      { childTitle: '整理依赖', name: '整理依赖' },
+    ]) {
+      const f = fixture({ diagnostics, childTitle: entry.childTitle });
+      try {
+        await f.render();
+        const identity = f.host.querySelector('.background-execution-identity')!;
+        const name = diagnostics && !entry.childTitle ? 'job-1' : entry.name;
+        expect(identity.textContent).toBe(name);
+        const detail = identity.querySelector('button');
+        if (entry.childTitle !== undefined) {
+          expect(detail?.getAttribute('title')).toBe(name);
+          expect(detail?.getAttribute('aria-label')).toBe(`查看子 Agent 详情：${name}`);
+        }
+        if (!diagnostics) expect(f.text).not.toContain('job-1');
+        expect(f.host.querySelector('.background-execution-stop')).not.toBeNull();
+        f.unconfirmed(true);
+        await f.render();
+        expect(f.text?.includes('执行状态待核实')).toBe(diagnostics);
+        expect(f.host.querySelector('.background-execution-stop')).toBeNull();
+        expect(f.stops).toBe(0);
+      } finally {
+        await f.close();
+      }
+    }
+  }
+});
+
 test('routine environment refresh retains card text and controls while blocking writes; read failures recover silently', async () => {
   const f = fixture();
   let held: ReturnType<typeof deferred> | undefined;

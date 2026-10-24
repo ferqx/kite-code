@@ -19,6 +19,7 @@ import type {
   NativeRequest,
   NativeResult,
   NativeState,
+  NativeWorkspaceRemoval,
 } from '../../src/native-bridge';
 import { desktopConversationMessages } from '../../src/native-presentation';
 import { prepareDesktopDom, promptValue, setPromptText } from '../native-page-dom.fixture';
@@ -151,6 +152,9 @@ function fixture(
   let holdModels = false,
     releaseModels: (() => void) | undefined;
   const permissionSubmissions: NativeState['permissionSubmissions'][number][] = [];
+  let workspaceRemovalSubmissions: NativeWorkspaceRemoval[] = [];
+  let workspaceRemovalUnavailable = false;
+  let releaseWorkspaceRemoval: ((result: NativeWorkspaceRemoval) => void) | undefined;
   let viewGeneration = 1;
   const state = (): NativeState => ({
     generation: 1,
@@ -158,6 +162,8 @@ function fixture(
     inputSubmissions: [],
     permissionSubmissions,
     interactionSubmissions: [],
+    workspaceRemovalSubmissions,
+    workspaceRemovalUnavailable,
     ...(publishDirectory ? { directory: directoryFacts() } : {}),
     selection: selectionPresent
       ? {
@@ -224,6 +230,37 @@ function fixture(
             releaseDirectory = resolve;
           });
         }
+        return result;
+      }
+      if (input.method === 'workspace.remove') {
+        workspaceRemovalSubmissions = [
+          {
+            kind: 'workspace.removal',
+            storeId: fixtureStoreId,
+            workspaceId: input.workspaceId,
+            label: 'Workspace',
+            commandId: 'remove-workspace',
+            phase: 'submitting',
+          },
+        ];
+        watcher?.({ kind: 'changed', generation: 1 });
+        return new Promise<NativeWorkspaceRemoval>((resolve) => {
+          releaseWorkspaceRemoval = resolve;
+        });
+      }
+      if (input.method === 'workspace.removal.lookup') {
+        const result: NativeWorkspaceRemoval = {
+          ...workspaceRemovalSubmissions[0]!,
+          phase: 'applied',
+        };
+        workspaceRemovalSubmissions = [result];
+        workspaceIds = workspaceIds.filter((id) => id !== result.workspaceId);
+        sessions.splice(
+          0,
+          sessions.length,
+          ...sessions.filter((session) => session.workspaceId !== result.workspaceId),
+        );
+        publishDirectory = true;
         return result;
       }
       if (input.method === 'select') {
@@ -449,6 +486,16 @@ function fixture(
     root,
     host,
     calls,
+    publishWorkspaceRemovals: async (next: NativeWorkspaceRemoval[], unavailable = false) => {
+      workspaceRemovalSubmissions = next;
+      workspaceRemovalUnavailable = unavailable;
+      await act(async () => watcher?.({ kind: 'changed', generation: 1 }));
+    },
+    finishWorkspaceRemoval: async (phase: NativeWorkspaceRemoval['phase']) => {
+      const result: NativeWorkspaceRemoval = { ...workspaceRemovalSubmissions[0]!, phase };
+      workspaceRemovalSubmissions = [result];
+      await act(async () => releaseWorkspaceRemoval?.(result));
+    },
     until: async (ready: () => boolean) => {
       for (let i = 0; i < 1500 && !ready(); i++)
         await act(async () => {
@@ -4406,6 +4453,77 @@ test('cold pre-Run rejection stays after prior successful history and before a l
     ).toBe(false);
   } finally {
     await f.releaseHistory();
+    await f.close();
+  }
+});
+
+test('workspace removal keeps normal progress silent and retains original unknown-result lookup', async () => {
+  const f = fixture(false, true, 'auto', { withoutSelection: true });
+  try {
+    await act(async () => f.root.render(<NativeDesktop />));
+    await f.edit('保留草稿 雪🙂');
+    const editor = f.input()!;
+    const row = f.host.querySelector('.workspace-group')!;
+    const remove = row.querySelector<HTMLButtonElement>('.space-remove')!;
+    const notices = () => f.host.querySelectorAll('main > [role="status"], main > [role="alert"]');
+    const text = () => f.host.body.textContent ?? '';
+    await act(async () => remove.click());
+    await f.until(() => f.calls.some((call) => call.method === 'state'));
+    expect(remove.disabled).toBe(true);
+    expect(text()).not.toContain('正在移除');
+    expect(notices()).toHaveLength(0);
+    expect(f.input()).toBe(editor);
+    expect(promptValue(editor)).toBe('保留草稿 雪🙂');
+    await f.refreshFacts();
+    expect(text()).not.toContain('正在移除');
+    expect(notices()).toHaveLength(0);
+    expect(f.calls.filter((call) => call.method === 'workspace.remove')).toHaveLength(1);
+
+    await f.finishWorkspaceRemoval('unknown');
+    await f.until(() => text().includes('移除结果待确认'));
+    expect(f.input()).toBe(editor);
+    expect(promptValue(editor)).toBe('保留草稿 雪🙂');
+    expect(f.calls.filter((call) => call.method === 'workspace.removal.lookup')).toHaveLength(0);
+    await f.click('查看结果');
+    await f.until(() => !text().includes('移除结果待确认'));
+    expect(f.calls.filter((call) => call.method === 'workspace.remove')).toHaveLength(1);
+    expect(f.calls.filter((call) => call.method === 'workspace.removal.lookup')).toEqual([
+      { method: 'workspace.removal.lookup', generation: 1, commandId: 'remove-workspace' },
+    ]);
+    await f.until(() => f.host.querySelectorAll('.workspace-group').length === 1);
+  } finally {
+    await f.close();
+  }
+});
+
+test('workspace removal shows actionable failures without normal or completed-operation notices', async () => {
+  const f = fixture(false, true, 'auto', { withoutSelection: true });
+  const removal: NativeWorkspaceRemoval = {
+    kind: 'workspace.removal',
+    storeId: 'store',
+    workspaceId: 'w',
+    label: 'Workspace',
+    commandId: 'remove-workspace',
+    phase: 'submitting',
+  };
+  const text = () => f.host.body.textContent ?? '';
+  try {
+    await act(async () => f.root.render(<NativeDesktop />));
+    for (const phase of ['submitting', 'cancelled', 'applied'] as const) {
+      await f.publishWorkspaceRemovals([{ ...removal, phase }]);
+      expect(text()).not.toContain('正在移除');
+      expect(f.host.querySelectorAll('main > [role="status"], main > [role="alert"]')).toHaveLength(
+        0,
+      );
+    }
+    await f.publishWorkspaceRemovals([{ ...removal, phase: 'failed', error: 'permission_denied' }]);
+    await f.until(() => text().includes('当前用户无权移除此空间'));
+    expect(text()).toContain('未移除');
+    expect(text()).not.toContain('查看结果');
+    await f.publishWorkspaceRemovals([], true);
+    await f.until(() => text().includes('暂时无法确认空间移除结果'));
+    expect(f.calls.some((call) => call.method === 'workspace.remove')).toBe(false);
+  } finally {
     await f.close();
   }
 });

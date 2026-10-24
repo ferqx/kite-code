@@ -37,6 +37,17 @@ export interface ScheduledTaskSummary {
   readonly runs?: readonly ScheduledTaskRunSummary[];
 }
 type Mutation = void | Promise<void>;
+const runStatusLabels: Readonly<Record<string, string>> = {
+  queued: '排队中',
+  creating: '创建会话中',
+  starting: '启动中',
+  running: '运行中',
+  waiting: '等待中',
+  completed: '已完成',
+  failed: '运行失败',
+  unknown: '结果未知',
+  cancelled: '已停止',
+};
 export interface ScheduledTasksProps {
   readonly tasks: readonly ScheduledTaskSummary[];
   readonly workspaces: readonly WorkspaceSummary[];
@@ -377,7 +388,7 @@ function ScheduledTaskCard({
         {task.runs?.map((run) => (
           <div className="scheduled-history-row" key={run.id}>
             <span>
-              {run.startedAt ?? '等待运行'} · {run.status}
+              {run.startedAt ?? '等待运行'} · {runStatusLabels[run.status] ?? '状态未知'}
               {run.finishedAt ? ` · 结束 ${run.finishedAt}` : ''}
             </span>
             {run.error && <span>{run.error}</span>}

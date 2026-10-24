@@ -812,7 +812,9 @@ export function useNativeEnvironment({
               ...row,
               ...(executionUnconfirmed &&
               ['queued', 'starting', 'running', 'stopping'].includes(row.status)
-                ? { activity: '执行状态待核实' }
+                ? diagnostics
+                  ? { activity: '执行状态待核实' }
+                  : {}
                 : visibleChild?.facts?.item.execution.id === row.executionId &&
                     !visibleChild.loading &&
                     !visibleChild.error

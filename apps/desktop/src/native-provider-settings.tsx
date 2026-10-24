@@ -148,8 +148,7 @@ export function NativeProviderSettings({
   }>();
   const [error, setError] = useState(''),
     [reading, setReading] = useState(false),
-    [writing, setWriting] = useState(false),
-    [saved, setSaved] = useState<'upsert' | 'remove'>();
+    [writing, setWriting] = useState(false);
   const [local, setLocal] = useState<NativeProviderSubmission[]>([]);
   const identity = `${generation}/${selection?.storeId}/${selection?.session.id}/${selection?.viewSelection}`;
   const mounted = useRef(true);
@@ -264,7 +263,6 @@ export function NativeProviderSettings({
     setBaseURL('');
     setModelNames('');
     setError('');
-    setSaved(undefined);
     setWriting(false);
     flight.current = false;
     void read();
@@ -302,7 +300,6 @@ export function NativeProviderSettings({
     setCredential(existing?.hasCredential ? 'keep' : entry.requiresCredential ? 'replace' : 'none');
     setFieldError(undefined);
     setError('');
-    setSaved(undefined);
   }
   function add(button: HTMLButtonElement) {
     const preset = facts?.providers.find((entry) => entry.id !== 'codex');
@@ -406,7 +403,6 @@ export function NativeProviderSettings({
     setSecret('');
     setFieldError(undefined);
     setError('');
-    setSaved(undefined);
     setWriting(true);
     flight.current = true;
     try {
@@ -458,7 +454,6 @@ export function NativeProviderSettings({
     editing: number,
     closeEditor = true,
   ) {
-    setSaved(operation.kind ?? 'upsert');
     if (
       (await read(operation.kind ?? 'upsert')) &&
       editorVersion.current === editing &&
@@ -572,11 +567,6 @@ export function NativeProviderSettings({
       {!panelMode && error && (
         <p className="provider-notice provider-notice-error" role="alert">
           {error}
-        </p>
-      )}
-      {!panelMode && saved && !error && (
-        <p className="provider-notice provider-notice-success" role="status">
-          {saved === 'remove' ? '已删除提供商。' : '已保存提供商配置。'}
         </p>
       )}
       <div className="provider-workspace">
@@ -803,11 +793,6 @@ export function NativeProviderSettings({
                           {error}
                         </p>
                       )}
-                      {saved && !error && (
-                        <p className="provider-notice provider-notice-success" role="status">
-                          {saved === 'remove' ? '已删除提供商。' : '已保存提供商配置。'}
-                        </p>
-                      )}
                       <section
                         className="provider-form-section"
                         aria-labelledby={`${fieldId}-connection-heading`}
@@ -881,7 +866,6 @@ export function NativeProviderSettings({
                                 disabled={writing}
                                 onChange={(event) => {
                                   setProtocol(event.currentTarget.value as Protocol);
-                                  setSaved(undefined);
                                 }}
                               >
                                 <option value="chat-completions">Chat Completions</option>
@@ -1034,11 +1018,6 @@ export function NativeProviderSettings({
                           每行一个准确模型名称；留空时保存会查询该连接的模型目录。
                         </p>
                       </section>
-                      {writing && (
-                        <p className="provider-notice" role="status">
-                          正在保存提供商配置。
-                        </p>
-                      )}
                       {pending && !unresolvedSubmissions.length && (
                         <p className="provider-notice" role="status">
                           有提供商更改尚未确认，暂时无法保存。

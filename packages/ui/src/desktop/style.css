@@ -476,7 +476,7 @@ body {
     align-items: center;
     justify-content: space-between;
     min-height: 24px;
-    padding-inline: 10px;
+    padding-inline: 10px 0;
     color: var(--muted-foreground);
     font-size: inherit;
   }

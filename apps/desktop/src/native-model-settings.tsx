@@ -254,7 +254,6 @@ export function NativeModelSettings({
           </DropdownMenu>
         </div>
       </div>
-      {writing && <p role="status">正在保存模型配置。</p>}
       {error && <p role="alert">模型配置不可用：{error}</p>}
       <div className="settings-model-section-heading">
         <h3>模型列表</h3>

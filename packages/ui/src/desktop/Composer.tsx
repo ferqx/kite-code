@@ -574,9 +574,9 @@ export function Composer(props: ComposerProps) {
           <div
             className="flex items-center gap-2 px-3 py-1 text-sm text-muted-foreground"
             role="status"
+            aria-label="正在添加附件"
           >
             <HugeiconsIcon icon={Loading03Icon} size={16} className="animate-spin" />
-            <span>正在保存附件…</span>
             <Button
               variant="ghost"
               size="sm"

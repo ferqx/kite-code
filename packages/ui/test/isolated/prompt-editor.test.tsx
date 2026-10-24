@@ -239,7 +239,7 @@ test('file picker keeps references separate from text, discards late selections 
   expect(document.querySelector('[role="textbox"]')?.textContent).toBe('');
 });
 
-test('ordinary file preparation is visible and cancellable without accepting a late result', async () => {
+test('ordinary file preparation keeps cancellation and send blocking without progress copy or accepting a late result', async () => {
   const signals: AbortSignal[] = [];
   let resolve!: (files: { name: string; uri: string }[]) => void;
   let accepted: readonly { name: string; uri: string }[] = [];
@@ -250,6 +250,7 @@ test('ordinary file preparation is visible and cancellable without accepting a l
     active: false,
     stopping: false,
     onChange: () => {},
+    onSend: () => {},
     onFilesSelected: (files: readonly { name: string; uri: string }[]) => {
       accepted = files;
     },
@@ -264,7 +265,11 @@ test('ordinary file preparation is visible and cancellable without accepting a l
   await render(<Composer {...props} />);
   await chooseAttachment('添加文件');
   await selectFiles([file]);
-  expect(document.querySelector('[role="status"]')?.textContent).toContain('正在保存附件');
+  const preparation = document.querySelector('[role="status"]')!;
+  expect(preparation.getAttribute('aria-label')).toBe('正在添加附件');
+  expect(preparation.textContent).toBe('取消添加');
+  expect(preparation.querySelector('.animate-spin')).not.toBeNull();
+  expect(document.querySelector<HTMLButtonElement>('[aria-label="发送消息"]')?.disabled).toBe(true);
   const cancel = [...document.querySelectorAll('button')].find(
     (button) => button.textContent === '取消添加',
   )!;

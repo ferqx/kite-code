@@ -159,6 +159,7 @@ function ExecutionGroup({
   readonly subagentDetails?: BackgroundExecutionsProps['subagentDetails'];
   readonly busy: boolean;
 }) {
+  const diagnostics = useDesktopDiagnostics();
   return (
     <section
       className="background-execution-group"
@@ -182,6 +183,9 @@ function ExecutionGroup({
             const childSessionId = subagentDetails?.sessionIdsByExecutionId.get(
               execution.executionId,
             );
+            const name =
+              execution.displayName ??
+              (diagnostics ? execution.executionId : kindLabel(execution.kind));
             return (
               <li key={execution.executionId} data-execution-id={execution.executionId}>
                 <span className="background-execution-identity">
@@ -189,15 +193,15 @@ function ExecutionGroup({
                     <button
                       type="button"
                       className="background-execution-detail"
-                      title={execution.displayName ?? execution.executionId}
-                      aria-label={`查看子 Agent 详情：${execution.displayName ?? execution.executionId}`}
+                      title={name}
+                      aria-label={`查看子 Agent 详情：${name}`}
                       onClick={() => subagentDetails?.onOpen(childSessionId, execution.executionId)}
                     >
-                      <span>{execution.displayName ?? execution.executionId}</span>
+                      <span>{name}</span>
                       <HugeiconsIcon icon={ArrowRight01Icon} aria-hidden="true" />
                     </button>
-                  ) : execution.displayName ? (
-                    <span className="background-execution-name">{execution.displayName}</span>
+                  ) : execution.displayName || !diagnostics ? (
+                    <span className="background-execution-name">{name}</span>
                   ) : (
                     <code>{execution.executionId}</code>
                   )}

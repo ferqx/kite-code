@@ -3671,26 +3671,12 @@ function NativeDesktopContent({
               <DesktopButton onClick={toolMessages.retry}>重新核对工具状态</DesktopButton>
             </p>
           )}
-          {removingWorkspace &&
-            state?.workspaceRemovalSubmissions?.some(
-              (r) => r.phase === 'submitting' && r.label === removingWorkspace,
-            ) && <p role="status">正在移除空间“{removingWorkspace}”…</p>}
-          {state?.workspaceRemovalUnavailable && (
-            <p role="alert">空间移除记录不可用，无法确认原操作。</p>
-          )}
+          {state?.workspaceRemovalUnavailable && <p role="alert">暂时无法确认空间移除结果。</p>}
           {state?.workspaceRemovalSubmissions
-            ?.filter(
-              (r) => r.phase === 'unknown' || r.phase === 'submitting' || r.phase === 'failed',
-            )
+            ?.filter((r) => r.phase === 'unknown' || r.phase === 'failed')
             .map((r) => (
               <p role="status" key={r.commandId}>
-                空间“{r.label}”
-                {r.phase === 'submitting'
-                  ? '正在移除'
-                  : r.phase === 'failed'
-                    ? '未移除'
-                    : '移除结果待确认'}
-                。
+                空间“{r.label}”{r.phase === 'failed' ? '未移除' : '移除结果待确认'}。
                 {r.phase === 'failed' &&
                   (r.error === 'permission_denied'
                     ? '当前用户无权移除此空间。'
@@ -3701,7 +3687,7 @@ function NativeDesktopContent({
                       void report(() => lookupWorkspaceRemoval(r.commandId!), true, true)
                     }
                   >
-                    查询原移除
+                    查看结果
                   </DesktopButton>
                 )}
               </p>

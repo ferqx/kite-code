@@ -50,7 +50,7 @@ async function launch(removalPending = false) {
   });
   const page = await app.firstWindow();
   page.setDefaultTimeout(15000);
-  if (removalPending) await page.getByRole('button', { name: '查询原移除', exact: true }).waitFor();
+  if (removalPending) await page.getByRole('button', { name: '查看结果', exact: true }).waitFor();
   else {
     await page.getByRole('button', { name: 'Original Background', exact: true }).waitFor();
     await openSessionTools(page);
@@ -629,7 +629,7 @@ try {
     .locator('..')
     .hover();
   await page.getByRole('button', { name: `移除 ${workspace.name}`, exact: true }).click();
-  await page.getByRole('button', { name: '查询原移除', exact: true }).waitFor();
+  await page.getByRole('button', { name: '查看结果', exact: true }).waitFor();
   const unknown = (await state()).workspaceRemovalSubmissions!.find(
     (r) => r.workspaceId === workspace.id,
   )!;
@@ -658,7 +658,7 @@ try {
     ).length,
     0,
   );
-  await page.getByRole('button', { name: '查询原移除', exact: true }).click();
+  await page.getByRole('button', { name: '查看结果', exact: true }).click();
   await until(
     state,
     (value) =>

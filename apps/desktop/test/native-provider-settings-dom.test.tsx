@@ -304,7 +304,7 @@ test('Provider form validates inline with focus, clears switched drafts and send
     expect(f.element.textContent).not.toContain('API key 已存入凭证库');
     expect(f.element.textContent).not.toContain('模型配置已保存，用于下一次新运行');
     expect(f.element.querySelector('[aria-label="待确认的提供商更改"]')).toBeNull();
-    expect(f.element.textContent).toContain('已保存提供商配置。');
+    expect(f.element.textContent).not.toContain('已保存提供商配置。');
     expect(calls.filter((input) => input.method === 'settings.providers.save')).toHaveLength(1);
   } finally {
     await f.close();
@@ -808,7 +808,7 @@ test('Provider successful save refreshes the list, closes the rail and restores 
       '1 个模型',
     );
     expect(f.dom.window.document.activeElement).toBe(origin);
-    expect(f.main.textContent).toContain('已保存提供商配置。');
+    expect(f.main.textContent).not.toContain('已保存提供商配置。');
     expect(f.main.textContent).not.toContain('applied-save');
     await f.click('编辑 OpenAI');
     expect(f.field('凭据处理').value).toBe('keep');
@@ -1469,7 +1469,7 @@ test('Delete requires explicit confirmation, submits once without secret, refres
     expect(f.main.querySelector('[aria-label="提供商列表"]')!.textContent).not.toContain(
       '可删除服务',
     );
-    expect(f.main.textContent).toContain('已删除提供商。');
+    expect(f.main.textContent).not.toContain('已删除提供商。');
     expect(f.main.textContent).not.toContain('连接及其模型配置已删除，凭证库中的密钥保留。');
     expect(f.dom.window.document.activeElement === f.button('新增提供商')).toBe(true);
     expect(calls.filter((call) => call.method === 'settings.providers.read')).toHaveLength(2);
@@ -1718,7 +1718,10 @@ test('Repeated Add submission is synchronously blocked while its original reques
       f.button('保存提供商配置').click();
     });
     expect(calls.filter((call) => call.method === 'settings.providers.save')).toHaveLength(1);
+    expect(f.button('正在保存…').disabled).toBe(true);
+    expect(f.panelHost.textContent).not.toContain('正在保存提供商配置。');
     await act(async () => release());
+    expect(f.panelHost.textContent).toContain('保存失败：configuration_conflict');
     expect(f.button('保存提供商配置').disabled).toBe(false);
     expect(f.field('模型名称').value).toBe('fixture-model');
   } finally {
@@ -2197,7 +2200,7 @@ test('Querying an unknown deletion from the closed list refreshes it without reo
     await f.click('查看结果');
     expect(f.main.querySelectorAll('.provider-instance')).toHaveLength(1);
     expect(f.panelHost.childElementCount).toBe(0);
-    expect(f.main.textContent).toContain('已删除提供商。');
+    expect(f.main.textContent).not.toContain('已删除提供商。');
     expect(f.counts()).toEqual({ reads: 2, posts: 1, saved: 1 });
   } finally {
     await f.close();

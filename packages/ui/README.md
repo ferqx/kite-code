@@ -124,11 +124,11 @@ Conversation 的 `systemKind:agent_result` 只消费宿主已确认实际触发�
 
 [Sidebar](src/desktop/Sidebar.tsx) 的会话悬浮提示只显示完整名称与 `updatedAt` 的本地化时间；缺失或非法时间只保留名称。状态仍供列表标记与 `aria-description` 使用，不重复写入悬浮内容。
 
-环境卡 [BackgroundExecutions](src/desktop/BackgroundExecutions.tsx)以可选 `busy` 表示短时校准：保留正文和停止按钮，沿 `disabled` 禁止停止并提供 `aria-busy`；`stale` 继续表示实际不可用／失败。首次子 Agent 读取同样只标记忙碌，不插入加载文字或提前显示空列表；真实 stale 仍撤销停止资格，以 `data-stale` 保留观察事实；“上次状态 · 待核实”等附加文案只在显式测试诊断中显示。环境卡忙碌时保留禁用按钮的原透明度和悬停外观，原 disabled、事件和真实异常显示保持；其他消费者默认透明度与行为不变。
+环境卡 [BackgroundExecutions](src/desktop/BackgroundExecutions.tsx)有业务名称时保留原名，无名称时普通环境信息显示“Shell”／“子 Agent”，仅诊断模式显示内部执行 ID；tooltip 和可访问名称遵循相同展示规则，操作仍传递原 ID。以可选 `busy` 表示短时校准：保留正文和停止按钮，沿 `disabled` 禁止停止并提供 `aria-busy`；`stale` 继续表示实际不可用／失败。首次子 Agent 读取同样只标记忙碌，不插入加载文字或提前显示空列表；真实 stale 仍撤销停止资格，以 `data-stale` 保留观察事实；“上次状态 · 待核实”等附加文案只在显式测试诊断中显示。环境卡忙碌时保留禁用按钮的原透明度和悬停外观，原 disabled、事件和真实异常显示保持；其他消费者默认透明度与行为不变。
 
 共享 [Composer](src/desktop/Composer.tsx)用 `sessionLoading` 区分普通读取等待与真实不可用。按 `scopeKey` 有界保存最近12项已启用的控件外观，临时只读保留输入、发送／停止及附件的透明度；空草稿等原本禁用的发送仍保持原样。已知审核标签与模型在校准中保持原节点和悬停，未知审核方式使用静态“审核方式”／“Approval mode”标签；原生 disabled、事件捕获和当前回调门禁继续阻止操作。会话／确认范围变化或权限暂不可操作时关闭旧审核菜单和 Full 确认，模型弹层同样拒绝禁用状态下打开。
 
-目录、[安排任务](src/desktop/ScheduledTasks.tsx)、[文件操作](src/desktop/FileChanges.tsx)及共享[模型输入](src/model-input.tsx)／[输出](src/model-output.tsx)读取不显示临时加载文案，忙碌由区域的 `aria-busy` 和原控件状态表达。安排任务与文件操作只在读取完成后展示空状态，已有内容仍可保留；附件准备期间保持原文件名和预览占位，不插入准备提示，失败仍可见。会话原转圈及其无障碍名称保留。
+目录、[安排任务](src/desktop/ScheduledTasks.tsx)、[文件操作](src/desktop/FileChanges.tsx)及共享[模型输入](src/model-input.tsx)／[输出](src/model-output.tsx)读取不显示临时加载文案，忙碌由区域的 `aria-busy` 和原控件状态表达。安排任务与文件操作只在读取完成后展示空状态，已有内容仍可保留；附件准备期间保持原文件名和预览占位，不插入准备提示；普通文件的在途准备仅保留忙碌图标、无障碍名称与“取消添加”，发送门禁和取消信号保持，失败仍可见。会话原转圈及其无障碍名称保留。
 
 共享 [Composer](src/desktop/Composer.tsx)把内嵌菜单的鼠标事件留给菜单自身处理，菜单项及其文字不触发输入区空白处的 输入框聚焦逻辑。审批触发器以原 `permissionPending` 提供 `aria-busy` 和切换中标签，原禁用门禁保持；会话权限状态是否需要占据主区由 Native 宿主负责。
 
@@ -248,7 +248,7 @@ SessionPage／Conversation 的 `renderMessageContent` 和 `renderToolActivity` �
 
 [Desktop 构建](scripts/build-desktop.ts)在普通 workspace 与源码外候选中均输出实际 desktop/index.js 和原样 desktop/style.css，补齐新增 exports；Native renderer 编译 CSS/字体并纳入原递归 manifest。[原页面测试](test/desktop-page.test.tsx)迁回原 12 项展示断言。正式 macOS 窗口、原身份读写和剩余旧页面迁移范围由 Desktop owner 维护。
 
-[ScheduledTasks/ScheduledTaskEditor](src/desktop/ScheduledTasks.tsx)由正式 Native 消费，支持本地任务创建／编辑、项目与模型选择、日／工作日／周频率、时间和时区，以及启禁、立即运行、删除确认、运行记录与原会话入口。事实和行为均来自宿主参数，UI不调度或调用模型；异步失败保留字段，pending阻止重复点击，缺宿主保存回调仍禁用。SessionPage 每次打开编辑器绑定独立代次，关闭后再打开同一或其他任务时，旧保存结果不能关闭后来面板。工作树只显示禁用选项。验证见[DOM测试](test/isolated/scheduled-tasks.test.tsx)，真实持久化与权限归[Desktop owner](../../apps/desktop/README.md#native-安排任务草稿)。
+[ScheduledTasks/ScheduledTaskEditor](src/desktop/ScheduledTasks.tsx)由正式 Native 消费，支持本地任务创建／编辑、项目与模型选择、日／工作日／周频率、时间和时区，以及启禁、立即运行、删除确认、运行记录与原会话入口。运行记录将排队、创建、启动、运行、等待、完成、失败、未知与停止状态映射为中文标签，保留失败详情，未识别的状态显示“状态未知”，不展示原始枚举。事实和行为均来自宿主参数，UI不调度或调用模型；异步失败保留字段，pending阻止重复点击，缺宿主保存回调仍禁用。SessionPage 每次打开编辑器绑定独立代次，关闭后再打开同一或其他任务时，旧保存结果不能关闭后来面板。工作树只显示禁用选项。验证见[DOM测试](test/isolated/scheduled-tasks.test.tsx)，真实持久化与权限归[Desktop owner](../../apps/desktop/README.md#native-安排任务草稿)。
 
 原 SessionPage 欢迎区仅显示标题，项目／分支菜单与 Composer 继续承载正式 Native 新对话准备，不展示任务建议卡片。纯 UI 只编辑／聚焦草稿和回调宿主选择，项目字段承载宿主 ID，不据此读取目录或执行 Git。创建、权限、实际模型及首次消息接管归 [Desktop owner](../../apps/desktop/README.md#native-新对话准备与首次发送)；不将准备页状态转为 Session 或执行 authority。
 

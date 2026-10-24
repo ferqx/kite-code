@@ -211,6 +211,47 @@ test('task card edit, pause, run now, exact history session and explicit delete 
   await click('确认删除');
   expect(actions).toEqual(['edit:t', 'toggle:t:false', 'run:t', 'open:t:r', 'delete:t']);
 });
+test('run history labels every scheduler state and preserves failed and unknown outcomes', async () => {
+  const states = [
+    ['queued', '排队中'],
+    ['creating', '创建会话中'],
+    ['starting', '启动中'],
+    ['running', '运行中'],
+    ['waiting', '等待中'],
+    ['completed', '已完成'],
+    ['failed', '运行失败'],
+    ['unknown', '结果未知'],
+    ['cancelled', '已停止'],
+    ['future-status', '状态未知'],
+  ] as const;
+  await render(
+    <ScheduledTasks
+      {...base}
+      tasks={[
+        {
+          ...task,
+          runs: states.map(([status]) => ({
+            id: status,
+            status,
+            startedAt: '10:00',
+            ...(status === 'failed' ? { error: '模型服务不可用' } : {}),
+            ...(status === 'unknown' ? { error: '运行结果尚未确认' } : {}),
+          })),
+        },
+      ]}
+      onNewTask={() => {}}
+    />,
+  );
+  const rows = document.querySelectorAll('.scheduled-history-row');
+  expect(rows).toHaveLength(states.length);
+  for (const [index, [status, label]] of states.entries()) {
+    expect(rows[index]!.textContent).toContain(`10:00 · ${label}`);
+    expect(rows[index]!.textContent).not.toContain(status);
+  }
+  expect(rows[6]!.textContent).toContain('模型服务不可用');
+  expect(rows[7]!.textContent).toContain('运行结果尚未确认');
+  expect(rows[7]!.textContent).not.toContain('运行失败');
+});
 test('local environment only; a removed project or missing model cannot save', async () => {
   await render(
     <ScheduledTaskEditor
@@ -256,7 +297,7 @@ test('card pending prevents repeat run and a failed action is visible without lo
   expect(calls).toBe(1);
   await act(async () => reject(new Error('service unavailable')));
   expect(document.querySelector('[role="alert"]')!.textContent).toContain('service unavailable');
-  expect(document.querySelector('.scheduled-history')!.textContent).toContain('completed');
+  expect(document.querySelector('.scheduled-history')!.textContent).toContain('已完成');
   expect(
     [...document.querySelectorAll('button')].find((item) => item.textContent === '立即运行')!
       .disabled,

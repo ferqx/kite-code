@@ -250,6 +250,7 @@ test('switches and the default dropdown save one exact intent, retain rows and r
     });
     expect(f.toggle('c').checked).toBe(true);
     expect(f.toggle('c').disabled).toBe(true);
+    expect(f.element.textContent).not.toContain('正在保存模型配置');
     expect(f.toggle('c').closest('label')).toBe(row);
     expect(f.calls.filter((input) => input.method === 'settings.models.enabled')).toEqual([
       {
@@ -282,6 +283,7 @@ test('switches and the default dropdown save one exact intent, retain rows and r
     expect(f.button('默认模型').textContent).toContain('deepseek · disabled-c');
     expect(f.button('默认模型').disabled).toBe(true);
     expect(f.button('刷新配置').disabled).toBe(true);
+    expect(f.element.textContent).not.toContain('正在保存模型配置');
     expect(f.toggle('a').disabled).toBe(true);
     await act(async () => savedRefresh.resolve(structuredClone(current)));
     expect(f.button('默认模型').disabled).toBe(false);
