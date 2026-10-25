@@ -1,5 +1,9 @@
 # Desktop 与 Native 制品
 
+[Controller](src/controller.ts)在核实所选 View 后，并行读取独立的扩展展示、待处理交互、Context、权限模式、工作区信任及活动原 Command，减少会话切换的串行请求等待。全部读取仍绑定同一 activation signal；必要事实完整核实后才发布快照，取消、迟到结果、原命令身份与写资格检查保持。[Controller 回归](test/controller.test.ts)覆盖并行启动、等待完整事实、100次快速选择及旧权限读取消；[刷新回归](test/native-refresh.test.ts)继续覆盖通知积压和读取期间撤销写资格。模型目录加载与切换期间的控件稳定显示合同保持。
+
+2026-10-25，Windows x64／Bun1.4.3，`aefb47472` 加本次读取 diff：上述两份完整回归13项81断言通过，Desktop／Agent typecheck通过。由[会话文件浏览器夹具](test/session-files-browser-runner.fixture.ts)派生的本机隔离入口 `.cache/session-switch-live.ts` 使用真实 NativeCaller／HTTP／SQLite、两个会话及受控分段模型，实际观察发送接管、会话切换、长回复上滚、草稿往返及页面重载后完整尾段；用户和Agent消息各保一份，切到其他会话没有旧正文或草稿。证据目录为 `.cache/session-files-browser-5ca00750-91c7-4e02-a403-651c05d15a66`，冷读截图为 `.cache/session-switch-final.png`。本次未量化真实安装窗口的切换延迟或复验原1.1GiB内存峰值。额外[导航DOM](test/isolated/native-session-navigation-dom.test.tsx)为27通过／3项执行状态断言失败；[会话外壳浏览器夹具](test/session-shell-browser-runner.fixture.ts)在“上次状态”文案断言失败，均未计为通过，也未改其断言。它们的模拟桥不经过本次Controller读取实现；原完整UI／安装资格不由本轮定向结果取得。
+
 普通 Workspace／明确外部路径写入的完整快照同样复用消息内交付卡。外部文件只提供原交付的阅读，不借用 Workspace 的编辑器打开权限。2026-10-23 最新 Main／交付 DOM 两文件12项118断言通过；工作文件删除、改动不改变原快照，中文跨页仍完整。受控浏览器中 Plan 修订为版本2后，选择 Auto 并批准，原待审卡退出、原轮次继续结束；此结果不外推 TUI／安装版资格。
 
 会话文件已接入 Main 字节准备、稳定导入、原消息绑定及后续 [Files 读取](../../packages/agent/src/tools/files/README.md)；输出和 Plan 的准确会话文件可由现有文件入口打开。下述受控页面、IPC 合同与真实 Node 冷查分别证明其覆盖的路径，不替代完整 Electron 安装制品或其他平台资格。

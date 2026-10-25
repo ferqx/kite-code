@@ -98,10 +98,13 @@ test('root ignore, nested negation and explicit scope priorities are visible and
   ).toHaveLength(1);
   expect(
     (await files.search({ path: 'dist', text: 'needle', respectIgnore: true })).matches,
-  ).toHaveLength(1);
+  ).toHaveLength(0);
   expect(
     (await files.search({ path: 'src', text: 'needle', respectIgnore: true })).matches,
-  ).toHaveLength(2);
+  ).toHaveLength(1);
+  expect(
+    (await files.search({ path: 'dist', text: 'needle', respectIgnore: false })).matches,
+  ).toHaveLength(1);
   expect((await files.search({ text: 'needle', respectIgnore: false })).matches).toHaveLength(3);
 });
 
@@ -128,11 +131,63 @@ test('glob includes root/deep matches, explicit file filtering and context previ
   expect((await files.search({ text: 'needle', path: 'a.ts', glob: '*.js' })).matches).toEqual([]);
 });
 
-test('model search v4 content mode bounds results/line previews by default and exposes recoverable path errors', async () => {
+test('scoped discovery inherits ancestor ignores without reopening excluded parents', async () => {
+  const { files, put, dir } = fixture();
+  dir('packages/app/dist');
+  dir('packages/hidden/nested');
+  put('.gitignore', 'dist/\npackages/hidden/\n*.txt\n');
+  put('packages/.gitignore', '!keep.txt\n');
+  put('packages/app/a.ts', 'needle');
+  put('packages/app/keep.txt', 'needle');
+  put('packages/app/drop.txt', 'needle');
+  put('packages/app/dist/b.ts', 'needle');
+  put('packages/hidden/nested/.gitignore', '!a.ts\n');
+  put('packages/hidden/nested/a.ts', 'needle');
+  const result = await files.search({ path: 'packages/app', text: 'needle', respectIgnore: true });
+  expect(result.matches.map((match) => match.path)).toEqual([
+    'packages/app/a.ts',
+    'packages/app/keep.txt',
+  ]);
+  const first = await files.glob({
+    path: 'packages/app',
+    pattern: '*',
+    respectIgnore: true,
+    limit: 1,
+  });
+  const next = await files.glob({
+    path: 'packages/app',
+    pattern: '*',
+    respectIgnore: true,
+    after: first.next!,
+    limit: 1,
+  });
+  expect([...first.paths, ...next.paths]).toEqual(['packages/app/a.ts', 'packages/app/keep.txt']);
+  expect(next.next).toBeNull();
+  expect(
+    (await files.glob({ path: 'packages/hidden/nested', pattern: '*', respectIgnore: true })).paths,
+  ).toEqual([]);
+  const excluded = await files.search({
+    path: 'packages/hidden/nested',
+    text: 'needle',
+    respectIgnore: true,
+  });
+  expect(excluded.matches).toEqual([]);
+  expect(excluded.scope).toMatchObject({ complete: false, skipped: { ignored: 1 } });
+  expect(
+    (await files.search({ path: 'packages/app/dist/b.ts', text: 'needle', respectIgnore: true }))
+      .matches,
+  ).toHaveLength(1);
+  expect(
+    (await files.glob({ path: 'packages/hidden/nested', pattern: '*.ts', respectIgnore: false }))
+      .paths,
+  ).toEqual(['packages/hidden/nested/a.ts']);
+});
+
+test('model search v5 content mode bounds results/line previews by default and exposes recoverable path errors', async () => {
   const { files, put } = fixture();
   put('a', Array.from({ length: 120 }, () => `needle${'x'.repeat(2100)}`).join('\n'));
   const tool = createFileTools(files).find((t) => t.id === 'files.search')!;
-  expect(tool.version).toBe('4');
+  expect(tool.version).toBe('5');
   const result = await tool.execute({ text: 'needle', mode: 'content' }, context());
   expect(result.outcome).toBe('succeeded');
   const body = JSON.parse(result.content);
@@ -154,7 +209,11 @@ test('ignore options cannot grant access to protected files or follow links', as
   dir('private');
   put('private/key', 'needle');
   put('a', 'needle');
-  symlinkSync(join(root, 'a'), join(root, 'alias'));
+  symlinkSync(
+    join(root, process.platform === 'win32' ? 'private' : 'a'),
+    join(root, 'alias'),
+    process.platform === 'win32' ? 'junction' : 'file',
+  );
   const result = await files.search({ text: 'needle', respectIgnore: false });
   expect(result.matches.map((m) => m.path)).toEqual(['a']);
   expect(result.scope?.skipped.links).toBe(1);
@@ -169,11 +228,16 @@ test('ignore options cannot grant access to protected files or follow links', as
   });
 });
 
-test('symlink ignore files are never read and skipped diagnostics are bounded', async () => {
-  const { files, root, put } = fixture();
+test('linked ignore entries are never read and skipped diagnostics are bounded', async () => {
+  const { files, root, put, dir } = fixture();
   put('rules', 'a\n');
   put('a', 'needle');
-  symlinkSync(join(root, 'rules'), join(root, '.gitignore'));
+  if (process.platform === 'win32') dir('rule-directory');
+  symlinkSync(
+    join(root, process.platform === 'win32' ? 'rule-directory' : 'rules'),
+    join(root, '.gitignore'),
+    process.platform === 'win32' ? 'junction' : 'file',
+  );
   for (let i = 0; i < 30; i++) put(`bad${i}`, Buffer.from([0xff]));
   const result = await files.search({ text: 'needle', respectIgnore: true });
   expect(result.matches.map((m) => m.path)).toEqual(['a']);
@@ -516,7 +580,7 @@ test('actual projected declarations and formatted continuation values drive read
   expect(p2.raw.files[0].path).toBe('b');
   expect(p2.raw.next).toBeNull();
   expect(read.model?.resultVersion).toBe('1');
-  expect(search.version).toBe('4');
+  expect(search.version).toBe('5');
 });
 
 test('search continuation uses the normalized scope for trailing and repeated separators', async () => {

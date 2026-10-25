@@ -320,8 +320,11 @@ export class DesktopController {
         previous.scope.session.contextSelectionId === view.session.contextSelectionId
           ? previous.afterId
           : undefined;
-      const publicViews = (
-        await Promise.all(
+      const activeRun = view.runs.find((run) => run.isActive);
+      // These reads depend on the verified View, not on one another. Keep the
+      // same activation signal and publish only after every required fact settles.
+      const [publicViewPages, page, context, permissionFacts, activeCommand] = await Promise.all([
+        Promise.all(
           selection.queries.map((query) =>
             this.client.queryExtension(
               selection.sessionId,
@@ -331,55 +334,50 @@ export class DesktopController {
               { signal },
             ),
           ),
-        )
-      ).flat();
-      check();
-      const page = this.client.serverInfo?.capabilities?.includes('interactions')
-        ? await this.client.listInteractions(
-            selection.sessionId,
-            {
-              storeId: view.storeId,
-              state: 'pending',
-              limit: 20,
-              ...(afterId ? { afterId } : {}),
-            },
-            { signal },
-          )
-        : { interactions: [], nextAfterId: null };
+        ),
+        this.client.serverInfo?.capabilities?.includes('interactions')
+          ? this.client.listInteractions(
+              selection.sessionId,
+              {
+                storeId: view.storeId,
+                state: 'pending',
+                limit: 20,
+                ...(afterId ? { afterId } : {}),
+              },
+              { signal },
+            )
+          : { interactions: [], nextAfterId: null },
+        this.options.readContextOnSelect !== false &&
+        this.client.serverInfo?.capabilities?.includes('context')
+          ? this.client.getContext(
+              selection.sessionId,
+              { storeId: view.storeId, messageLimit: 200, sourceLimit: 100 },
+              { signal },
+            )
+          : undefined,
+        this.client.serverInfo?.capabilities?.includes('permission_controls')
+          ? Promise.all([
+              this.client.getPermissionMode(selection.sessionId, { storeId: view.storeId, signal }),
+              this.client.getWorkspaceTrust(view.session.workspaceId, {
+                storeId: view.storeId,
+                signal,
+              }),
+            ])
+          : undefined,
+        this.options.readActiveCommandOnSelect && activeRun
+          ? this.client.getCommand(activeRun.originCommandId, { signal })
+          : undefined,
+      ]);
+      const publicViews = publicViewPages.flat();
       check();
       this.validateInteractionPage(page, view, afterId);
       if (afterId && 'snapshotCursor' in page && page.snapshotCursor !== view.snapshotCursor)
         throw new ClientError('interaction_page_observation_changed');
-      const context =
-        this.options.readContextOnSelect !== false &&
-        this.client.serverInfo?.capabilities?.includes('context')
-          ? await this.client.getContext(
-              selection.sessionId,
-              {
-                storeId: view.storeId,
-                messageLimit: 200,
-                sourceLimit: 100,
-              },
-              { signal },
-            )
-          : undefined;
-      check();
-      const permissions = this.client.serverInfo?.capabilities?.includes('permission_controls')
+      const permissions = permissionFacts
         ? {
             observationId: ++this.permissionObservation,
-            mode: await this.client
-              .getPermissionMode(selection.sessionId, {
-                storeId: view.storeId,
-                signal,
-              })
-              .then((mode) => {
-                check();
-                return mode;
-              }),
-            trust: await this.client.getWorkspaceTrust(view.session.workspaceId, {
-              storeId: view.storeId,
-              signal,
-            }),
+            mode: permissionFacts[0],
+            trust: permissionFacts[1],
           }
         : undefined;
       check();
@@ -390,12 +388,6 @@ export class DesktopController {
         Object.freeze(permissions.trust);
         Object.freeze(permissions);
       }
-      const activeRun = view.runs.find((run) => run.isActive);
-      const activeCommand =
-        this.options.readActiveCommandOnSelect && activeRun
-          ? await this.client.getCommand(activeRun.originCommandId, { signal })
-          : undefined;
-      check();
       if (
         activeCommand &&
         (activeCommand.id !== activeRun!.originCommandId ||

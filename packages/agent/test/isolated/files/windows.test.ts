@@ -54,8 +54,8 @@ nativeTest(
         ['files.write', '3'],
         ['files.edit', '2'],
         ['files.list', '1'],
-        ['files.glob', '2'],
-        ['files.search', '4'],
+        ['files.glob', '3'],
+        ['files.search', '5'],
       ]);
       const text = '\uFEFF第一行 α\r\nsecond second\r\n末行\n';
       const first = await f.files.write({ path: 'Exact.txt', content: text, base: null });

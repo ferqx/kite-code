@@ -251,11 +251,18 @@ export function createFileTools(
         path: directoryPath,
         after: { type: 'string', maxLength: 4096 },
         limit: { type: 'integer', minimum: 1, maximum: 200 },
+        respectIgnore: {
+          type: 'boolean',
+          default: true,
+          description:
+            'Apply .gitignore from the workspace root through the selected tree. false includes ordinarily ignored files; safety restrictions always apply.',
+        },
       },
       call: (i, context) =>
         files.glob(
           {
             pattern: string(i.pattern),
+            respectIgnore: i.respectIgnore === undefined ? true : (i.respectIgnore as boolean),
             ...(i.path === undefined ? {} : { path: string(i.path) }),
             ...(i.after === undefined ? {} : { after: string(i.after) }),
             ...(i.limit === undefined ? {} : { limit: Number(i.limit) }),
@@ -269,7 +276,7 @@ export function createFileTools(
       properties: {
         path: {
           ...directoryPath,
-          description: `${directoryPath.description} Search one file or a directory tree. Explicit files bypass ordinary ignore rules; explicit directories start their own ignore scope.`,
+          description: `${directoryPath.description} Search one file or a directory tree. Explicit files bypass ordinary ignore rules; directory searches inherit .gitignore from the workspace root.`,
         },
         text: { type: 'string', minLength: 1, maxLength: 1024 },
         mode: {
@@ -312,7 +319,7 @@ export function createFileTools(
           type: 'boolean',
           default: true,
           description:
-            'Apply .gitignore inside the selected directory tree. false includes ordinarily ignored files; safety restrictions always apply.',
+            'Apply .gitignore from the workspace root through the selected tree. false includes ordinarily ignored files; safety restrictions always apply.',
         },
       },
       call: (i, context) =>
@@ -357,9 +364,9 @@ export function createFileTools(
       'Create or replace a complete UTF-8 file. Pass base=null only to create a new file; missing workspace parent directories are created through the same protected no-follow boundary. Replacing a file requires its exact complete-file baseline and existing parents. Supply exactly one of content or content_artifact. If a call fails, correct the reported cause before another attempt; repeating the same path and input does not fix it. A failure may leave newly created empty parent directories. Each invocation has its own outcome; a baseline conflict does not report current file content or roll back other successful operations.',
     edit: 'Replace exact, non-overlapping literal text in a UTF-8 file using its complete-file baseline. expected_matches must equal the actual number of matches. Supply old_text and new_text, or the corresponding immutable Artifact references. Each invocation has its own outcome; a baseline conflict does not report current file content or roll back other successful operations.',
     list: 'List immediate directory entries, with name-based pagination. Defaults to the workspace root and 100 entries; limit is 1–200. Continue using the returned name cursor.',
-    glob: 'Find file paths matching a glob, including **/ for zero or more directory levels. Defaults to the workspace root and 100 paths; limit is 1–200. Continue using the returned path cursor.',
+    glob: 'Find file paths matching a glob, including **/ for zero or more directory levels. Defaults to the workspace root and 100 paths; limit is 1–200. Respects .gitignore from the workspace root by default; respect_ignore=false includes ordinarily ignored files. Continue using the returned path cursor with the same scope, pattern and ignore option.',
     search:
-      'Search literal text in one file or a directory tree. Defaults to mode=files, returning at most 100 matching files with their first matching line number and complete-file baseline, without body text. Use mode=content for matching line previews and optional context (default 2000 characters per line). limit counts files in files mode or matches in content mode. Continue by passing next_cursor as cursor (raw JSON fallback: next), keeping mode, query, scope and filters unchanged; truncated lines require read_file for full content. Binary and non-UTF-8 files are skipped with current-page scope diagnostics; no matches does not prove complete coverage when scope.complete is false. Root searches respect .gitignore; explicit files bypass ordinary ignore and explicit directories do not inherit ancestor ignore rules. Filtering never grants access.',
+      'Search literal text in one file or a directory tree. Defaults to mode=files, returning at most 100 matching files with their first matching line number and complete-file baseline, without body text. Use mode=content for matching line previews and optional context (default 2000 characters per line). limit counts files in files mode or matches in content mode. Continue by passing next_cursor as cursor (raw JSON fallback: next), keeping mode, query, scope and filters unchanged; truncated lines require read_file for full content. Binary and non-UTF-8 files are skipped with current-page scope diagnostics; no matches does not prove complete coverage when scope.complete is false. Directory searches inherit .gitignore from the workspace root; explicit files bypass ordinary ignore. Filtering never grants access.',
   };
   return definitions.map((d) => ({
     id: `files.${d.name}`,
@@ -383,12 +390,14 @@ export function createFileTools(
       d.name === 'read'
         ? '4'
         : d.name === 'search'
-          ? '4'
-          : d.name === 'write'
+          ? '5'
+          : d.name === 'glob'
             ? '3'
-            : ['edit', 'glob'].includes(d.name)
-              ? '2'
-              : '1',
+            : d.name === 'write'
+              ? '3'
+              : d.name === 'edit'
+                ? '2'
+                : '1',
     description: `${descriptions[d.name]} Paths are relative to the fixed workspace root or absolute inside it, never relative to Shell cwd.`,
     inputSchema: {
       type: 'object',

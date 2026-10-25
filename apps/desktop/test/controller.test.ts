@@ -293,11 +293,12 @@ test('100 rapid selections cancel retired pure GET chains and disposal aborts th
   expect(signals).toHaveLength(101);
 });
 
-test('a retired held permission GET cannot continue to trust reads or replace the newer permission proof', async () => {
+test('retired parallel permission reads share cancellation and cannot replace the newer proof', async () => {
   let release!: (value: unknown) => void;
   const trustReads: string[] = [],
     errors: unknown[] = [];
   const signals: AbortSignal[] = [];
+  const trustSignals: AbortSignal[] = [];
   const client = {
     serverInfo: { storeId: 'store', capabilities: ['permission_controls'] },
     async getView(id: string) {
@@ -311,8 +312,9 @@ test('a retired held permission GET cannot continue to trust reads or replace th
           })
         : Promise.resolve({ mode: 'auto', revision: 'new' });
     },
-    async getWorkspaceTrust(id: string) {
+    async getWorkspaceTrust(id: string, { signal }: { signal: AbortSignal }) {
       trustReads.push(id);
+      trustSignals.push(signal);
       return { readScopes: [] };
     },
   } as unknown as AgentClient;
@@ -325,12 +327,63 @@ test('a retired held permission GET cannot continue to trust reads or replace th
   await new Promise<void>((resolve) => setTimeout(resolve, 0));
   await controller.selectSession('new');
   expect(signals[0]!.aborted).toBe(true);
+  expect(trustSignals[0]).toBe(signals[0]);
+  expect(trustSignals[0]!.aborted).toBe(true);
+  const readsBeforeRelease = [...trustReads];
   release({ mode: 'full', revision: 'old' });
   await old;
-  expect(trustReads).toEqual(['w-new']);
+  expect(trustReads).toEqual(['w-old', 'w-new']);
+  expect(trustReads).toEqual(readsBeforeRelease);
   expect(controller.snapshot?.permissions?.mode.revision).toBe('new');
   expect(controller.cachedObjectCount).toBe(1);
   expect(errors).toEqual([]);
+});
+
+test('selection starts independent metadata reads together and waits for all before publishing', async () => {
+  const started: string[] = [],
+    published: string[] = [];
+  let release!: () => void;
+  const held = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const read = async <T>(name: string, value: T) => {
+    started.push(name);
+    await held;
+    return value;
+  };
+  const client = {
+    serverInfo: {
+      storeId: 'store',
+      capabilities: ['interactions', 'context', 'permission_controls'],
+    },
+    async getView(id: string) {
+      return view(id);
+    },
+    queryExtension: () => read('extension', []),
+    listInteractions: () => read('interactions', { interactions: [], nextAfterId: null }),
+    getContext: () => read('context', { messages: [], resultSources: [] }),
+    getPermissionMode: () => read('mode', { mode: 'auto' }),
+    getWorkspaceTrust: () => read('trust', { readScopes: [] }),
+    disposeNetwork() {},
+  } as unknown as AgentClient;
+  const controller = createDesktopController({
+    admittedClient: client,
+    onSnapshot: (snapshot) => published.push(snapshot.sessionId),
+  });
+  const selection = controller.selectSession('s', [
+    { extensionId: 'fixture', queryId: 'read', input: {} },
+  ]);
+  try {
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    expect(started).toEqual(['extension', 'interactions', 'context', 'mode', 'trust']);
+    expect(published).toEqual([]);
+    expect(controller.snapshot).toBeUndefined();
+  } finally {
+    release();
+  }
+  await selection;
+  expect(published).toEqual(['s']);
+  controller.disposeNetwork();
 });
 
 test('lost answer response retains exact pending child source and reconciles original command without replay', async () => {

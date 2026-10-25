@@ -126,6 +126,26 @@ test('glob Tool cancellation from a macrotask stops actual traversal before the 
   expect(enumerations).toBeLessThan(129);
 });
 
+test('model glob prunes ignored trees before enumeration and opt-out retains full discovery', async () => {
+  const { root, files } = tree();
+  writeFileSync(join(root, '.gitignore'), 'dir-*/\n!dir-000/\n');
+  const tool = createFileTools(files).find((definition) => definition.id === 'files.glob')!;
+  const result = await tool.execute({ pattern: '**/*.ts' }, {
+    signal: new AbortController().signal,
+  } as ToolContext);
+  expect(result.outcome).toBe('succeeded');
+  expect(JSON.parse(result.content).paths).toEqual(['dir-000/a.ts', 'dir-000/b.ts']);
+  expect(enumerations).toBe(2);
+  enumerations = 0;
+  const scoped = await files.glob({ pattern: '*.ts', path: 'dir-001', respectIgnore: true });
+  expect(scoped.paths).toEqual([]);
+  const all = await tool.execute({ pattern: '*.ts', respectIgnore: false, limit: 200 }, {
+    signal: new AbortController().signal,
+  } as ToolContext);
+  expect(JSON.parse(all.content).paths).toHaveLength(200);
+  expect(JSON.parse(all.content).next).not.toBeNull();
+});
+
 test('search yields to a real macrotask and an independent file read before settling', async () => {
   const { files } = tree();
   let settled = false;
@@ -194,7 +214,11 @@ test('responsive glob retains sorted keyset pages, root ** matches, protected ro
   writeFileSync(join(root, 'nested', 'b.ts'), 'b');
   writeFileSync(join(root, 'z.ts'), 'z');
   writeFileSync(join(root, 'private', 'secret.ts'), 'protected');
-  symlinkSync(join(root, 'private'), join(root, 'alias'));
+  symlinkSync(
+    join(root, 'private'),
+    join(root, 'alias'),
+    process.platform === 'win32' ? 'junction' : 'dir',
+  );
   const files = createWorkspaceFiles({ root, protectedPaths: ['private'], protectReads: true });
   handles.push(files);
   const first = await files.glob({ pattern: '**/*.ts', limit: 2 });
@@ -225,7 +249,11 @@ test('glob pages preserve complete path ordering across file and directory name 
   const visible = ['a.ts', 'a-1.ts', 'a/child.ts', 'a/b.ts', 'a/b/child.ts'];
   for (const path of visible) writeFileSync(join(root, path), path);
   writeFileSync(join(root, 'a', 'private', 'secret.ts'), 'protected');
-  symlinkSync(join(root, 'a'), join(root, 'alias'));
+  symlinkSync(
+    join(root, 'a'),
+    join(root, 'alias'),
+    process.platform === 'win32' ? 'junction' : 'dir',
+  );
   const files = createWorkspaceFiles({
     root,
     protectedPaths: ['a/private'],

@@ -51,6 +51,7 @@ export interface FileEntry {
   name: string;
   kind: 'file' | 'directory' | 'symlink' | 'other';
 }
+type IgnoreScope = { base: string; matcher: Ignore };
 export interface FileSearchInput {
   mode?: 'files' | 'content';
   text: string;
@@ -121,7 +122,13 @@ export interface WorkspaceFiles {
     options?: { offset?: number; limit?: number; signal?: AbortSignal },
   ): Promise<FileSnapshot>;
   glob(
-    input: { pattern: string; path?: string; after?: string; limit?: number },
+    input: {
+      pattern: string;
+      path?: string;
+      after?: string;
+      limit?: number;
+      respectIgnore?: boolean;
+    },
     options?: { signal?: AbortSignal },
   ): Promise<{ paths: string[]; next: string | null }>;
   write(input: { path: string; content: string; base: FileBaseline | null }): Promise<FileSnapshot>;
@@ -825,6 +832,51 @@ export function createWorkspaceFiles(options: {
       });
     };
   }
+  async function ignoreScope(
+    path: string,
+    all: FileEntry[],
+    parents: IgnoreScope[],
+    read: (path: string) => Promise<FileSnapshot>,
+    unreadable: (path: string, reason: 'binary' | 'encoding') => void,
+  ): Promise<IgnoreScope[]> {
+    if (!all.some((entry) => entry.name === '.gitignore' && entry.kind === 'file')) return parents;
+    const file = path ? `${path}/.gitignore` : '.gitignore';
+    try {
+      return [...parents, { base: path, matcher: ignore().add((await read(file)).content) }];
+    } catch (error) {
+      if (
+        !(error instanceof AgentError) ||
+        !['file_binary', 'file_encoding_invalid'].includes(error.code)
+      )
+        throw error;
+      unreadable(file, error.code === 'file_binary' ? 'binary' : 'encoding');
+      return parents;
+    }
+  }
+  async function ancestorIgnoreScopes(
+    scope: string,
+    read: (path: string) => Promise<FileSnapshot>,
+    unreadable: (path: string, reason: 'binary' | 'encoding') => void,
+  ) {
+    const parts = scope.split('/');
+    let rules: IgnoreScope[] = [];
+    for (let index = 0; scope && index < parts.length; index++) {
+      const path = parts.slice(0, index).join('/');
+      if (path && ignored(path, true, rules)) return { rules, excluded: true };
+      rules = await ignoreScope(path, entries(path), rules, read, unreadable);
+    }
+    return { rules, excluded: !!scope && ignored(scope, true, rules) };
+  }
+  function ignored(path: string, directory: boolean, rules: IgnoreScope[]) {
+    let excluded = false;
+    for (const rule of rules) {
+      const local = (rule.base ? path.slice(rule.base.length + 1) : path) + (directory ? '/' : '');
+      const verdict = rule.matcher.test(local);
+      if (verdict.ignored) excluded = true;
+      else if (verdict.unignored) excluded = false;
+    }
+    return excluded;
+  }
   return {
     relativePath(path) {
       if (
@@ -913,7 +965,10 @@ export function createWorkspaceFiles(options: {
     },
     async glob(input, options) {
       options?.signal?.throwIfAborted();
+      if (input.respectIgnore !== undefined && typeof input.respectIgnore !== 'boolean')
+        fail('file_search_filter_invalid');
       const scope = segments(input.path ?? '').join('/');
+      if (protectReads && scope && isProtected(scope)) fail('file_path_protected');
       const matcher = compileFileGlob(input.pattern);
       if (input.after !== undefined) {
         const cursor = segments(input.after).join('/');
@@ -932,7 +987,12 @@ export function createWorkspaceFiles(options: {
       }
       const checkpoint = queryCheckpoint(options?.signal);
       const matches: string[] = [];
-      async function walk(path: string): Promise<boolean> {
+      const read = (path: string) =>
+        trackRead(() =>
+          withReadParent(path, (parent, name) => readAtAsync(parent, name, path, options?.signal)),
+        );
+      const unreadable = () => {};
+      async function walk(path: string, parents: IgnoreScope[]): Promise<boolean> {
         // A directory's descendants begin with "name/", not "name". This order
         // makes DFS equal complete-path order (including a.ts before a/child.ts).
         const ordered = entries(path).sort((a, b) => {
@@ -940,15 +1000,19 @@ export function createWorkspaceFiles(options: {
             bk = b.name + (b.kind === 'directory' ? '/' : '');
           return ak < bk ? -1 : ak > bk ? 1 : 0;
         });
+        const rules = input.respectIgnore
+          ? await ignoreScope(path, ordered, parents, read, unreadable)
+          : parents;
         for (const entry of ordered) {
           await checkpoint();
           const child = path ? `${path}/${entry.name}` : entry.name;
           const local = scope ? child.slice(scope.length + 1) : child;
+          if (ignored(child, entry.kind === 'directory', rules)) continue;
           if (entry.kind === 'directory') {
             const parts = local.split('/');
             if (prefix.some((part, index) => index < parts.length && parts[index] !== part))
               continue;
-            if (await walk(child)) return true;
+            if (await walk(child, rules)) return true;
           } else if (entry.kind === 'file') {
             if (
               matcher.match(input.pattern.includes('/') ? local : entry.name) &&
@@ -961,7 +1025,10 @@ export function createWorkspaceFiles(options: {
         }
         return false;
       }
-      await walk(scope);
+      const inherited = input.respectIgnore
+        ? await ancestorIgnoreScopes(scope, read, unreadable)
+        : { rules: [], excluded: false };
+      if (!inherited.excluded) await walk(scope, inherited.rules);
       options?.signal?.throwIfAborted();
       check();
       return {
@@ -1037,6 +1104,7 @@ export function createWorkspaceFiles(options: {
       const binding = createHash('sha256')
         .update(
           JSON.stringify({
+            ignoreVersion: 2,
             mode,
             path: scope,
             text: input.text,
@@ -1172,28 +1240,15 @@ export function createWorkspaceFiles(options: {
         }
         return false;
       }
-      type IgnoreScope = { base: string; matcher: Ignore };
       async function walk(path: string, parents: IgnoreScope[]): Promise<boolean> {
         const all = entries(path);
-        let rules = parents;
         let unreadableIgnore = false;
-        if (
-          input.respectIgnore &&
-          all.some((entry) => entry.name === '.gitignore' && entry.kind === 'file')
-        ) {
-          const file = path ? `${path}/.gitignore` : '.gitignore';
-          try {
-            rules = [...parents, { base: path, matcher: ignore().add((await read(file)).content) }];
-          } catch (error) {
-            if (
-              !(error instanceof AgentError) ||
-              !['file_binary', 'file_encoding_invalid'].includes(error.code)
-            )
-              throw error;
-            skip(file, error.code === 'file_binary' ? 'binary' : 'encoding');
-            unreadableIgnore = true;
-          }
-        }
+        const rules = input.respectIgnore
+          ? await ignoreScope(path, all, parents, read, (file, reason) => {
+              skip(file, reason);
+              unreadableIgnore = true;
+            })
+          : parents;
         const ordered = all.sort((a, b) => {
           const ak = a.name + (a.kind === 'directory' ? '/' : '');
           const bk = b.name + (b.kind === 'directory' ? '/' : '');
@@ -1207,16 +1262,7 @@ export function createWorkspaceFiles(options: {
             skip(child, 'links');
             continue;
           }
-          let excluded = false;
-          for (const rule of rules) {
-            const local =
-              (rule.base ? child.slice(rule.base.length + 1) : child) +
-              (entry.kind === 'directory' ? '/' : '');
-            const verdict = rule.matcher.test(local);
-            if (verdict.ignored) excluded = true;
-            else if (verdict.unignored) excluded = false;
-          }
-          if (excluded) {
+          if (ignored(child, entry.kind === 'directory', rules)) {
             skip(child, 'ignored');
             continue;
           }
@@ -1251,8 +1297,13 @@ export function createWorkspaceFiles(options: {
               )?.kind,
         );
         if (!kind) fail('ENOENT');
-        if (kind === 'directory') await walk(scope, []);
-        else if (kind === 'file') {
+        if (kind === 'directory') {
+          const inherited = input.respectIgnore
+            ? await ancestorIgnoreScopes(scope, read, skip)
+            : { rules: [], excluded: false };
+          if (inherited.excluded) skip(scope, 'ignored');
+          else await walk(scope, inherited.rules);
+        } else if (kind === 'file') {
           const name = scope.split('/').at(-1)!;
           if (
             (!after || mode !== 'files' || scope > after.split('\0')[0]!) &&
