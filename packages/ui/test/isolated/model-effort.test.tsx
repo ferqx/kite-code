@@ -185,7 +185,7 @@ test('every selected model offers effort adjustment without capability metadata;
   expect(document.querySelector('.model-effort-unavailable')?.textContent).toBe('请先选择模型');
 });
 
-test('a protocol selection hint stays in the popover while model and effort controls keep their behavior', async () => {
+test('model availability hints appear only in the model list and preserve selection and effort controls', async () => {
   const changes: string[] = [];
   let selectedEffort: string | undefined;
   await render(
@@ -199,20 +199,22 @@ test('a protocol selection hint stays in the popover while model and effort cont
       onReasoningEffortChange={(effort) => {
         selectedEffort = effort;
       }}
-      modelSelectionHint="此会话使用 Responses，切换协议请新建会话。"
+      modelSelectionHint="仅显示当前对话可用的模型"
     />,
   );
-  expect(document.body.textContent).not.toContain('切换协议请新建会话');
+  expect(document.body.textContent).not.toContain('仅显示当前对话可用的模型');
   await openSelector();
-  expect(document.querySelector('.model-effort-popover')?.textContent).toContain(
-    '此会话使用 Responses，切换协议请新建会话。',
-  );
+  expect(document.querySelector('.model-selection-hint')).toBeNull();
   const slider = document.querySelector('[role="slider"]')!;
   await act(() =>
     slider.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'End', bubbles: true })),
   );
   expect(selectedEffort).toBe('ultar');
   await click(document.querySelector('.model-effort-switch'));
+  expect(document.querySelector('.model-selection-hint')?.textContent).toBe(
+    '仅显示当前对话可用的模型',
+  );
   await click(document.querySelector('[aria-label="选择模型 another"]'));
   expect(changes).toEqual(['another-model']);
+  expect(document.querySelector('.model-selection-hint')).toBeNull();
 });

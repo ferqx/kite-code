@@ -774,10 +774,12 @@ for (const source of [
       await act(async () => f.root.render(<Host />));
       expect(resolved).toEqual({ modelId: 'first' });
       await f.click('模型：first-model，思考程度：轻度');
-      expect(f.element.textContent).toContain(
-        `此会话使用 ${source.expected}，切换协议请新建会话。`,
-      );
+      expect(f.element.querySelector('.model-selection-hint')).toBeNull();
+      expect(f.element.textContent).not.toContain('切换协议请新建会话');
       await f.click(`选择模型，当前 ${source.provider} / first-model`);
+      expect(f.element.querySelector('.model-selection-hint')?.textContent).toBe(
+        '仅显示当前对话可用的模型',
+      );
       expect(f.element.querySelector('[aria-label="选择模型 opposite"]')).toBeNull();
       expect(f.element.querySelector('[aria-label="选择模型 same"]')).not.toBeNull();
       await f.click('选择模型 same');

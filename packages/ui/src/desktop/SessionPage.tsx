@@ -45,7 +45,9 @@ const SESSION_HEADER_LABEL_LIMIT = 10;
 const NAVIGATION_MIN_WIDTH = 200;
 const NAVIGATION_MAX_WIDTH = 420;
 const NAVIGATION_WIDTH_STORAGE_KEY = 'kite.client.navigationWidth';
-const ENVIRONMENT_INFORMATION_MIN_WIDTH = 720 + 344 + 28;
+// Match the centered column and gutters in the docked safe-area CSS. Automatic
+// opening must fit in the right gutter without narrowing or shifting the input.
+const ENVIRONMENT_INFORMATION_MIN_WIDTH = 844 + 2 * 344 + 28;
 
 function savedNavigationWidth(): number {
   try {
@@ -597,12 +599,6 @@ export function SessionPage({ messages, fileChanges, ...props }: SessionPageProp
         '--conversation-footer-height',
         `${footer?.getBoundingClientRect().height ?? 0}px`,
       );
-      const viewport = panel.querySelector<HTMLElement>('.conversation-viewport');
-      if (viewport)
-        panel.style.setProperty(
-          '--conversation-scrollbar-gutter',
-          `${viewport.offsetWidth - viewport.clientWidth}px`,
-        );
     };
     measure();
     if (typeof ResizeObserver === 'undefined') return;

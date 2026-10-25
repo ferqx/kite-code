@@ -92,6 +92,8 @@ body {
   --attention-background: #f5e6c8;
   --attention-foreground: #714700;
   --conversation-text-size: var(--ui-text-size);
+  --conversation-inline-padding: 28px;
+  --conversation-scrollbar-width: 10px;
   --scrollbar-thumb: #b8b8b8;
   --scrollbar-thumb-hover: #999;
   --navigation-foreground: #484848;
@@ -749,18 +751,24 @@ body {
     height: 100%;
     overflow-y: auto;
     overflow-x: hidden;
-    padding: 24px 28px 16px;
+    padding: 24px var(--conversation-inline-padding) 16px;
     overflow-anchor: none;
     scrollbar-gutter: stable;
   }
   .conversation > [data-slot="scroll-area-scrollbar"] {
-    width: 10px;
+    width: var(--conversation-scrollbar-width);
     z-index: 3;
     -webkit-app-region: no-drag;
   }
   .conversation-viewport[data-radix-scroll-area-viewport] {
     scrollbar-gutter: auto;
-    border-right: 10px solid transparent;
+    border-right: var(--conversation-scrollbar-width) solid transparent;
+  }
+  /* Keep the reading column's track space before its viewport is mounted. */
+  .conversation-footer,
+  .new-conversation-welcome,
+  .conversation-jump {
+    border-right: var(--conversation-scrollbar-width) solid transparent;
   }
   .conversation-viewport > div {
     display: block;
@@ -1003,6 +1011,8 @@ body {
     align-items: flex-end;
     justify-content: center;
     pointer-events: none;
+    overflow: hidden;
+    scrollbar-gutter: auto;
   }
   .jump-latest {
     --button-radius: 50%;
@@ -1040,7 +1050,7 @@ body {
     }
   }
   .conversation-footer {
-    padding: 0 28px 24px;
+    padding: 0 var(--conversation-inline-padding) 24px;
     flex-shrink: 0;
   }
   .composer {
@@ -1877,6 +1887,7 @@ body {
     color: var(--diff-removed-foreground);
   }
   @media (max-width: 900px) {
+    --conversation-inline-padding: 20px;
     :is(.conversation-viewport, .conversation-jump) {
       padding: 24px 20px 16px;
     }
@@ -1891,6 +1902,7 @@ body {
     }
   }
   @media (max-width: 600px) {
+    --conversation-inline-padding: 12px;
     .session-header {
       flex-wrap: wrap;
     }
@@ -2000,7 +2012,8 @@ body {
 .kite-client :where(.space-new-session, .space-more) {
   flex: none;
 }
-.kite-client .space-heading :is(.space-new-session, .space-more) > svg {
+.kite-client .space-heading :is(.space-new-session, .space-more) > svg,
+.kite-client .session-row > svg[role="status"] {
   width: 14px;
   height: 14px;
 }
@@ -2720,7 +2733,7 @@ body {
   .conversation-footer {
     position: absolute;
     z-index: 1;
-    inset: auto var(--conversation-scrollbar-gutter, 0px) 0 0;
+    inset: auto 0 0;
     background: linear-gradient(to bottom, transparent, var(--page-background) 16px);
     pointer-events: none;
   }
@@ -3949,7 +3962,7 @@ body {
   width: 100%;
   max-width: 836px;
   margin-inline: auto;
-  padding: 24px 28px;
+  padding: 24px var(--conversation-inline-padding);
   flex: 1;
   min-height: 0;
   overflow: auto;
@@ -4189,7 +4202,7 @@ body {
     visibility 0s linear var(--sidebar-motion-duration);
 }
 .kite-client .session-view:has(> .environment-information) {
-  --environment-information-safe-area: 28px;
+  --environment-information-safe-area: var(--conversation-inline-padding);
   overflow-x: clip;
 }
 .kite-client .session-view.environment-information-docked {
@@ -4651,7 +4664,16 @@ body {
   display: grid;
   height: min(288px, calc(var(--radix-popover-content-available-height, 290px) - 2px));
   grid-template-columns: 128px 1px minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr) auto;
   overflow: hidden;
+}
+.model-selection-hint {
+  grid-column: 1 / -1;
+  margin: 0;
+  padding: 6px 12px;
+  color: var(--muted-foreground);
+  font-size: 12px;
+  line-height: 18px;
 }
 .model-effort-columns [data-radix-scroll-area-viewport] > div {
   width: 100%;

@@ -1266,7 +1266,7 @@ Native 提供“下一页待决请求（替换当前窗口）”与“停止读�
 
 ## Native Provider 与下一次模型选择
 
-会话首次实际 Run 后，[模型选择器](src/native-model-picker.tsx)从原有序 View 的首 Run 封存配置读取 Responses／Chat Completions 协议，只在原列表提供同协议候选；浮层内说明切换协议须新建会话。同协议模型与连接仍可选择，effort 从下一轮生效，活动 Run 保持原值。首次实际 Run 前不限制协议，准备拒绝没有 Run 时也不提前绑定；首配置无法核实或原所选路由协议已变时保留当前标签并明确不可用，不跳到晚 Run、不静默回退另一协议。Core 视图额外保留最早实际 Run，超过200轮及冷重建同样有效；恢复后的旧 Store 出处由原准入 View 保留。服务端独立校验归[Service owner](../service/README.md#会话模型协议)，不以客户端过滤代替准备守卫。
+会话首次实际 Run 后，[模型选择器](src/native-model-picker.tsx)从原有序 View 的首 Run 封存配置读取 Responses／Chat Completions 协议，只在原列表提供同协议候选；思考面板不显示协议提示；仅在模型列表底部以12px辅助文字显示“仅显示当前对话可用的模型”。同协议模型与连接仍可选择，effort 从下一轮生效，活动 Run 保持原值。首次实际 Run 前不限制协议，准备拒绝没有 Run 时也不提前绑定；首配置无法核实或原所选路由协议已变时保留当前标签并明确不可用，不跳到晚 Run、不静默回退另一协议。Core 视图额外保留最早实际 Run，超过200轮及冷重建同样有效；恢复后的旧 Store 出处由原准入 View 保留。服务端独立校验归[Service owner](../service/README.md#会话模型协议)，不以客户端过滤代替准备守卫。
 
 2026-10-24，macOS arm64 的独立合成 HOME／Profile，普通 development Main、真实配套 Service 和生产 renderer（`testDiagnostics:false`）完成协议实际窗口验证：首 Run 前可选 chat-a／chat-b／responses-a，Chat 首 Run 后仅两个 Chat 候选；明确选择 chat-b 和 high 后，第二次实际请求仍走 `/chat/completions`，wire 采用 chat-b／high。新对话再次提供三项，实际选中 responses-a，未发送该准备输入。125个连续过程帧保留两轮用户／回复顺序及实际档位，Renderer 零页面错误；没有外部 Provider 或真实凭据。证据为 `.cache/codex-review-20261024/protocol-live-verified/` 的 report、frames 和 trace，原夹具初始化失败的独立目录保留。直接 API 的双向拒绝与冷重建由上述 Service 回归负责，不把此窗口证据外推安装包或其他平台。
 

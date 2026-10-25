@@ -339,11 +339,7 @@ export function NativeModelPicker({
           if (id !== undefined) choose(id);
         }}
         onReasoningEffortChange={(effort) => setEffort(effort)}
-        modelSelectionHint={
-          protocol.protocol
-            ? `此会话使用 ${protocol.protocol === 'responses' ? 'Responses' : 'Chat Completions'}，切换协议请新建会话。`
-            : undefined
-        }
+        modelSelectionHint={protocol.protocol ? '仅显示当前对话可用的模型' : undefined}
       />
       {protocol.unavailable && <p role="alert">无法确认此会话首次运行的模型协议，暂时无法发送。</p>}
       {error && <p role="alert">模型目录不可用：{error}</p>}
