@@ -103,7 +103,8 @@ try {
   );
   for (const theme of ['light', 'dark'] as const) {
     const page = await browser.newPage({
-      viewport: { width: 1440, height: 1000 },
+      // This segment exercises the docked environment controls; narrow layouts are covered above.
+      viewport: { width: 1920, height: 1000 },
       colorScheme: theme,
       reducedMotion: 'no-preference',
       locale: 'zh-CN',
