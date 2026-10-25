@@ -437,7 +437,10 @@ test('retained environment card separates Shell and named children, exact stop, 
       expect(children.textContent).toContain('运行中');
       expect(children.querySelector('.background-execution-stop')).not.toBeNull();
       expect(region.querySelectorAll('.background-execution-stop')).toHaveLength(2);
-      expect(region.textContent).toContain(shell.execution.id);
+      const shellRow = region.querySelector(`[data-execution-id="${shell.execution.id}"]`)!;
+      expect(shellRow).not.toBeNull();
+      expect(shellRow.querySelector('.background-execution-name')?.textContent).toBe('Shell');
+      expect(region.textContent).not.toContain(shell.execution.id);
       expect(region.textContent).toContain('原子智能体');
       expect(region.textContent).not.toContain(other.execution.id);
       expect(region.textContent).not.toContain(foreground.execution.id);
@@ -465,7 +468,8 @@ test('retained environment card separates Shell and named children, exact stop, 
       expect(host.textContent).toContain('正在停止');
       failed = true;
       revision++;
-      await render(port);
+      // Stale technical details and retry controls belong to the diagnostic fixture.
+      await render(port, undefined, true);
       expect(host.textContent).toContain('上次状态 · 待核实');
       expect(host.textContent).toContain('原子智能体');
       expect(host.textContent).toContain('directory_changed');

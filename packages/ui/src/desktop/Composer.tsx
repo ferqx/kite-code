@@ -3,16 +3,17 @@ import {
   ArrowDown01Icon,
   ArrowUp02Icon,
   Attachment01Icon,
-  BotIcon,
   Cancel01Icon,
-  FlashIcon,
+  HandIcon,
   Loading03Icon,
+  Shield01Icon,
+  ShieldAlertIcon,
   StopIcon,
   TriangleAlertIcon,
-  UserQuestion01Icon,
 } from '@hugeicons/core-free-icons';
 import { HugeiconsIcon } from '@hugeicons/react';
 import {
+  type ComponentProps,
   Fragment,
   type ReactNode,
   type Ref,
@@ -56,10 +57,25 @@ const contextTokenFormat = new Intl.NumberFormat('en-US', {
   maximumFractionDigits: 1,
 });
 
+const ShieldTerminalIcon: ComponentProps<typeof HugeiconsIcon>['icon'] = [
+  ...Shield01Icon,
+  [
+    'path',
+    {
+      d: 'M8 9.5L10.5 12L8 14.5M13 14.5H16',
+      stroke: 'currentColor',
+      strokeWidth: 1.5,
+      strokeLinecap: 'round',
+      strokeLinejoin: 'round',
+      key: 'terminal',
+    },
+  ],
+];
+
 const permissionModes = [
-  { value: 'accept_edits', icon: UserQuestion01Icon },
-  { value: 'auto', icon: BotIcon },
-  { value: 'full', icon: FlashIcon },
+  { value: 'accept_edits', icon: HandIcon },
+  { value: 'auto', icon: ShieldTerminalIcon },
+  { value: 'full', icon: ShieldAlertIcon },
 ] as const;
 
 const permissionCopy = {
@@ -84,12 +100,9 @@ const permissionCopy = {
       detail: '允许外部写入和联网；极危险操作仍拒绝',
     },
     fullWarning: {
-      title: '要开启完全权限吗？',
-      description:
-        '开启后，代理无需逐项征得你的同意，就能在当前环境允许的范围内运行命令、读取或修改文件，以及访问互联网。',
-      riskTitle: '请留意这些风险',
-      impact: '文件可能被覆盖或删除；命令和联网操作可能接触、传输敏感数据，造成难以撤销的损失。',
-      limit: '你可以随时切回其他审批方式；系统限制仍然有效。',
+      title: '开启完全权限？',
+      description: '执行命令、读写文件和联网时，将不再逐项询问。',
+      risks: ['文件可能被覆盖或删除', '敏感数据可能外泄，后果难以撤销'],
       cancel: '取消',
       confirm: '启用完全权限',
     },
@@ -117,11 +130,11 @@ const permissionCopy = {
     fullWarning: {
       title: 'Enable Full permission?',
       description:
-        'The agent can act without asking for each approval. Within the capabilities available in this environment, it can run commands, read or change files, and access the internet.',
-      riskTitle: 'Risks to consider',
-      impact:
-        'Files could be overwritten or deleted. Commands and network access could expose or transmit sensitive data and cause changes that are hard to undo.',
-      limit: 'You can switch back to another approval mode at any time. System limits still apply.',
+        'Commands, file access and internet use will no longer require individual approval.',
+      risks: [
+        'Files may be overwritten or deleted',
+        'Sensitive data may be exposed, with consequences that are hard to undo',
+      ],
       cancel: 'Cancel',
       confirm: 'Enable Full',
     },
@@ -669,7 +682,7 @@ export function Composer(props: ComposerProps) {
                     size="sm"
                     className={cn(
                       'permission-trigger',
-                      props.permission === 'full' && 'permission-trigger-danger',
+                      props.permission === 'full' && 'permission-trigger-full',
                     )}
                     data-permission-trigger
                     data-preserve-enabled={previousPresentation?.permission || undefined}
@@ -728,7 +741,7 @@ export function Composer(props: ComposerProps) {
                             indicatorPosition="end"
                             className={cn(
                               'permission-menu-item',
-                              mode.value === 'full' && 'permission-menu-item-danger',
+                              mode.value === 'full' && 'permission-menu-item-full',
                             )}
                           >
                             <HugeiconsIcon icon={mode.icon} aria-hidden="true" />
@@ -876,7 +889,7 @@ export function Composer(props: ComposerProps) {
         }}
       >
         <AlertDialogContent className="full-permission-dialog">
-          <AlertDialogHeader>
+          <AlertDialogHeader className="full-permission-header">
             <AlertDialogTitle className="full-permission-title">
               <HugeiconsIcon
                 className="full-permission-title-icon"
@@ -888,17 +901,15 @@ export function Composer(props: ComposerProps) {
             <AlertDialogDescription asChild className="full-permission-description">
               <div>
                 <p className="full-permission-intro">{permissionText.fullWarning.description}</p>
-                <div className="full-permission-risk-notice">
-                  <strong className="full-permission-risk-heading">
-                    {permissionText.fullWarning.riskTitle}
-                  </strong>
-                  <p className="full-permission-risk-copy">{permissionText.fullWarning.impact}</p>
-                </div>
-                <p className="full-permission-limit">{permissionText.fullWarning.limit}</p>
+                <ul className="full-permission-risks">
+                  {permissionText.fullWarning.risks.map((risk) => (
+                    <li key={risk}>{risk}</li>
+                  ))}
+                </ul>
               </div>
             </AlertDialogDescription>
           </AlertDialogHeader>
-          <AlertDialogFooter>
+          <AlertDialogFooter className="full-permission-footer">
             <AlertDialogCancel>{permissionText.fullWarning.cancel}</AlertDialogCancel>
             <AlertDialogAction
               variant="destructive"
@@ -912,7 +923,6 @@ export function Composer(props: ComposerProps) {
                 props.onPermissionChange?.('full');
               }}
             >
-              <HugeiconsIcon data-icon="inline-start" icon={TriangleAlertIcon} aria-hidden="true" />
               {permissionText.fullWarning.confirm}
             </AlertDialogAction>
           </AlertDialogFooter>

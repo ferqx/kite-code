@@ -581,10 +581,11 @@ try {
     };
   });
   await page
-    .getByRole('button', { name: `移除 ${workspace.name}`, exact: true })
+    .getByRole('button', { name: `${workspace.name} 更多操作`, exact: true })
     .locator('..')
     .hover();
-  await page.getByRole('button', { name: `移除 ${workspace.name}`, exact: true }).click();
+  await page.getByRole('button', { name: `${workspace.name} 更多操作`, exact: true }).click();
+  await page.getByRole('menuitem', { name: `移除 ${workspace.name}`, exact: true }).click();
   await until(
     async () =>
       app!.evaluate(
@@ -625,10 +626,11 @@ try {
     );
   });
   await page
-    .getByRole('button', { name: `移除 ${workspace.name}`, exact: true })
+    .getByRole('button', { name: `${workspace.name} 更多操作`, exact: true })
     .locator('..')
     .hover();
-  await page.getByRole('button', { name: `移除 ${workspace.name}`, exact: true }).click();
+  await page.getByRole('button', { name: `${workspace.name} 更多操作`, exact: true }).click();
+  await page.getByRole('menuitem', { name: `移除 ${workspace.name}`, exact: true }).click();
   await page.getByRole('button', { name: '查看结果', exact: true }).waitFor();
   const unknown = (await state()).workspaceRemovalSubmissions!.find(
     (r) => r.workspaceId === workspace.id,

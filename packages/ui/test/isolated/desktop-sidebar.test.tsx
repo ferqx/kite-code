@@ -65,6 +65,7 @@ const globals = {
   HTMLElement: dom.window.HTMLElement,
   HTMLFormElement: dom.window.HTMLFormElement,
   HTMLInputElement: dom.window.HTMLInputElement,
+  HTMLIFrameElement: dom.window.HTMLIFrameElement,
   Node: dom.window.Node,
   NodeFilter: dom.window.NodeFilter,
   Element: dom.window.Element,
@@ -188,30 +189,46 @@ test('sidebar selection follows the visible page without highlighting a retained
         sessionCount: 1,
         sessions: [{ sessionId: 's', displayName: '已有会话', status: 'idle' }],
       },
+      { id: 'other', label: '另一空间', state: 'loaded', sessionCount: 0, sessions: [] },
     ],
     selected: 's',
     onOpen: () => {},
     actions: { newSession: () => {}, scheduledTasks: () => {}, workbench: () => {} },
+  };
+  const newConversation = {
+    projects: [
+      { path: 'w', label: '工作区' },
+      { path: 'other', label: '另一空间' },
+    ],
+    workspace: '',
+    busy: false,
+    onProject: () => {},
+    onAddProject: () => {},
+    onBranch: () => {},
+    onRefreshBranch: () => {},
   };
   const pages: { label: string; props: Partial<SessionPageProps> }[] = [
     { label: '已有会话', props: {} },
     {
       label: '新对话',
       props: {
-        newConversation: {
-          projects: [],
-          workspace: '',
-          busy: false,
-          onProject: () => {},
-          onAddProject: () => {},
-          onBranch: () => {},
-          onRefreshBranch: () => {},
-        },
+        newConversation,
       },
     },
+    { label: '工作区', props: { newConversation: { ...newConversation, workspace: 'w' } } },
+    { label: '另一空间', props: { newConversation: { ...newConversation, workspace: 'other' } } },
+    {
+      label: '工作区',
+      props: { newConversation: { ...newConversation, workspace: 'w', busy: true } },
+    },
+    { label: '新对话', props: { newConversation: { ...newConversation, workspace: 'removed' } } },
+    { label: '新对话', props: { newConversation } },
     {
       label: '安排任务',
-      props: { scheduledTasks: { tasks: [], workspaces: shared.workspaces! } },
+      props: {
+        newConversation: { ...newConversation, workspace: 'w' },
+        scheduledTasks: { tasks: [], workspaces: shared.workspaces! },
+      },
     },
     { label: '工作台', props: { workbench: true } },
     { label: '已有会话', props: {} },
@@ -221,9 +238,141 @@ test('sidebar selection follows the visible page without highlighting a retained
     const current = document.querySelectorAll('.sidebar [aria-current="page"]');
     expect(current).toHaveLength(1);
     expect(current[0]!.textContent).toBe(page.label);
-    expect(current[0]!.classList.contains('selected')).toBe(true);
+    expect(current[0]!.closest('.selected')).not.toBeNull();
     expect(document.querySelectorAll('.sidebar .selected')).toHaveLength(1);
   }
+});
+
+test('workspace removal is only selected through More, respects busy state and keeps its workspace identity', async () => {
+  const removed: string[] = [];
+  const props: Partial<SessionPageProps> = {
+    workspaces: [
+      { id: 'w', label: '工作区', state: 'loaded', sessionCount: 0, sessions: [] },
+      { id: 'other', label: '另一空间', state: 'loaded', sessionCount: 0, sessions: [] },
+    ],
+    actions: { newWorkspaceSession: () => {}, removeWorkspace: (id) => removed.push(id) },
+  };
+  const openMenu = async (label: string) => {
+    const trigger = document.querySelector<HTMLButtonElement>(`[aria-label="${label} 更多操作"]`)!;
+    await act(() => {
+      trigger.dispatchEvent(
+        new dom.window.KeyboardEvent('keydown', { key: 'Enter', bubbles: true }),
+      );
+    });
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    return trigger;
+  };
+  const dismissMenu = async () => {
+    const trigger = document.querySelector<HTMLButtonElement>('.space-more[data-state="open"]')!;
+    const heading = trigger.closest('.space-heading')!;
+    let restoredFocus = 0;
+    const observeFocus = () => restoredFocus++;
+    trigger.addEventListener('focus', observeFocus);
+    await act(async () => {
+      document.querySelector('[role="menu"]')!.dispatchEvent(
+        new dom.window.KeyboardEvent('keydown', {
+          key: 'Escape',
+          bubbles: true,
+          cancelable: true,
+        }),
+      );
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    trigger.removeEventListener('focus', observeFocus);
+    expect(trigger.getAttribute('data-state')).toBe('closed');
+    expect(restoredFocus).toBe(0);
+    expect(heading.contains(document.activeElement)).toBe(false);
+    expect(heading.hasAttribute('data-menu-active')).toBe(false);
+  };
+  await render(props);
+  expect(document.querySelector('.space-heading .space-remove')).toBeNull();
+  await act(() => {
+    document.querySelector<HTMLButtonElement>('[aria-label="工作区 更多操作"]')!.focus();
+  });
+  expect(document.querySelector('[data-slot="tooltip-content"]') !== null).toBe(true);
+  const trigger = await openMenu('工作区');
+  expect(trigger.getAttribute('data-state')).toBe('open');
+  expect(document.querySelector('[data-slot="tooltip-content"]') === null).toBe(true);
+  expect(document.querySelector('[role="menuitem"][aria-label="移除 工作区"]')).not.toBeNull();
+  expect(removed).toEqual([]);
+  await render({ ...props, mutationBusy: true });
+  const item = document.querySelector<HTMLElement>('[role="menuitem"][aria-label="移除 工作区"]')!;
+  expect(trigger.disabled).toBe(true);
+  expect(item.getAttribute('aria-disabled')).toBe('true');
+  await act(() => item.click());
+  expect(removed).toEqual([]);
+  await dismissMenu();
+  expect(document.querySelector('[role="menu"]') === null).toBe(true);
+  await render(props);
+  await act(() => trigger.focus());
+  await openMenu('工作区');
+  await dismissMenu();
+  expect(document.activeElement === trigger).toBe(false);
+  expect(document.querySelector('[data-slot="tooltip-content"]') === null).toBe(true);
+  const heading = trigger.closest('.space-heading')!;
+  const edit = heading.querySelector('.space-new-session');
+  await openMenu('工作区');
+  await act(async () => {
+    document.body.dispatchEvent(
+      new dom.window.PointerEvent('pointerdown', {
+        bubbles: true,
+        cancelable: true,
+        pointerType: 'mouse',
+        button: 0,
+      }),
+    );
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  });
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  });
+  expect(document.querySelector('[role="menu"]') === null).toBe(true);
+  expect(heading.hasAttribute('data-menu-active')).toBe(false);
+  expect(heading.contains(document.activeElement)).toBe(false);
+  expect(heading.querySelector('.space-new-session') === edit).toBe(true);
+  expect(heading.querySelector('.space-more') === trigger).toBe(true);
+  expect(document.querySelector('[data-slot="tooltip-content"]') === null).toBe(true);
+  expect(removed).toEqual([]);
+  const movePointer = () =>
+    act(async () => {
+      trigger.dispatchEvent(
+        new dom.window.PointerEvent('pointermove', { bubbles: true, pointerType: 'mouse' }),
+      );
+      await new Promise((resolve) => setTimeout(resolve, 550));
+    });
+  await movePointer();
+  expect(document.querySelector('[data-slot="tooltip-content"]') === null).toBe(true);
+  await act(() => {
+    heading.dispatchEvent(
+      new dom.window.PointerEvent('pointerout', { bubbles: true, relatedTarget: document.body }),
+    );
+    document.body.dispatchEvent(
+      new dom.window.PointerEvent('pointerout', { bubbles: true, relatedTarget: heading }),
+    );
+  });
+  await movePointer();
+  expect(document.querySelector('[data-slot="tooltip-content"]') !== null).toBe(true);
+  await openMenu('另一空间');
+  await act(async () => {
+    const item = document.querySelector<HTMLElement>(
+      '[role="menuitem"][aria-label="移除 另一空间"]',
+    )!;
+    item.dispatchEvent(
+      new dom.window.PointerEvent('pointerdown', { bubbles: true, pointerType: 'mouse' }),
+    );
+    item.click();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  });
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  });
+  expect(removed).toEqual(['other']);
+  expect(document.querySelector('[role="menu"]') === null).toBe(true);
 });
 
 test('resizing across the old narrow breakpoint keeps the open sidebar and content mounted', async () => {
