@@ -882,9 +882,14 @@ body {
     white-space: normal;
   }
   .response-status {
-    display: block;
-    margin-top: 2px;
+    display: flex;
+    align-items: center;
+    height: var(--icon-button-size-sm);
+    margin-top: var(--message-meta-offset);
     white-space: nowrap;
+  }
+  .message-meta > .response-status {
+    margin-top: 0;
   }
   .message-meta {
     position: absolute;
@@ -917,7 +922,8 @@ body {
     margin-bottom: calc(var(--icon-button-size-sm) + var(--message-meta-offset) + 8px);
   }
   .message:hover .message-meta,
-  .message:focus-within .message-meta {
+  .message:focus-within .message-meta,
+  .message-meta-responding {
     opacity: 1;
   }
   .message-meta::before {
@@ -2973,6 +2979,25 @@ body {
 .kite-client .agent-turn > .response-status {
   margin-top: var(--conversation-block-gap);
   line-height: 24px;
+}
+.kite-client
+  .agent-turn:has(
+    > .agent-turn-process[data-state="open"]
+      .agent-turn-process-messages
+      > .message-group:last-child
+      > .message.assistant
+  )
+  > .response-status {
+  margin-top: var(--message-meta-offset);
+}
+.kite-client
+  .agent-turn:has(> .response-status):has(
+    > .agent-turn-process[data-state="open"]
+      .agent-turn-process-messages
+      > .message-group:last-child
+      > .message.assistant
+  ) {
+  margin-bottom: 8px;
 }
 .kite-client .agent-turn > .response-status:first-child {
   margin-top: 0;

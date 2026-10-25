@@ -52,7 +52,7 @@ Composer 在原停止按钮内使用 Hugeicons `StopIcon` 的实心方块，填�
 
 [SessionPage](src/desktop/SessionPage.tsx)在 layout effect 中取得首个正宽度并直接确定环境卡占位，首次测量不启动 padding 过渡，防止已绘制正文／Composer 再横移及换行。后续实际尺寸跨阈值和用户开合仍使用原动画；Native环境卡从scope建立就保留原节点，业务内容晚到不新增占位。[侧栏回归](test/isolated/desktop-sidebar.test.tsx)核初始占位、晚填内容、窗口阈值和窄窗浮层。
 
-同一组件的 `.response-status` 沿[共享 CSS](src/desktop/style.css)正常参与轮次底部排版，为“正在回复…”保留24px行高，位于处理过程折叠区外。轮次提示的上方留白使用正文块间距；上方为展开工具时使用原混合间距，抵消工具控件自身留白。显示提示时过程区不再叠加底部 padding，收起过程或尚无正文时仍保留完整块间距。底部跟随继续由阅读内容高度驱动；浏览器回归核状态文字完整位于viewport与各级裁剪容器内。
+同一组件的 `.response-status` 与 `.message-meta` 沿[共享 CSS](src/desktop/style.css)共用28px信息行高度并垂直居中。独立流式消息直接在原 `.message-meta` 中显示提示，完成后替换为原时间与具备资格的复制控件；回复期间不叠加第二行时间或额外占位。准确轮次的提示继续位于处理过程折叠区外；上方为展开过程的最后一条Agent正文时，与完成后的工具栏同样距正文2px，轮次底部保留8px，避免原24px轮次留白造成完成时下一条消息上移16px。上方为展开工具时仍使用原混合间距，收起过程或尚无正文时保留原正文块间距。显示提示时过程区不叠加底部padding。底部跟随继续由阅读内容高度驱动，复制资格、过程内无信息栏与活动状态的来源规则保持。
 
 “正在回复…”与工具消息共用字号、字体及文字颜色规则，使用 `--conversation-text-size`（默认14px）和 `--muted-foreground`。思考／回复标签直接使用宿主已引入的 [shadcn shimmer utility](https://ui.shadcn.com/docs/utils/shimmer)，以行内块将流光范围限制在标签文字，使用语义前景色作为高光以跟随应用主题；通过库内置 `shimmer-spread-[16px]` 和 `shimmer-duration-1500` 将高光收窄为16px、每1.5秒扫过一次，避免默认宽光带在短状态文字上仅呈现整句轻微变色；沿库内置的减少动态效果规则恢复静态文字，不新增动画实现或依赖。读取与业务交互门禁保持。
 
@@ -74,7 +74,9 @@ Composer 的图片卡片保持固定预览区域，接受宿主交付的小尺�
 
 普通IPC历史读取会先撤销读取资格、完成后再交付同一消息的新正文。渐显只要求当前读取已准入，连续追加的依据是上一次已显示的同挂载正文，不要求上一次`readActive`也为true；否则实际跨任务读取会把所有追加动画关闭。首次历史、非追加纠正和Activity隐藏／重连仍清除连续性；当前不可读时不播放，不恢复任何读取或操作资格。
 
-宿主以`streaming:true`标记实际Agent流式预览，以`false`交接其完成预览；静态正文及显式完整读取不传此标记。只对前一次已提交的活动正文追加部分创建行内文字run，再按完整字素建立子span；每字使用240ms的浏览器原生透明度0→1动画，普通字间隔18ms，同一批跨强调等行内节点保持次序，较大批次压缩间隔使最大等待180ms、整批最多420ms。`fill:backwards`使尚未开始的字保持透明，内容和排版立即提交，不建立React逐帧状态或累计打字队列。已有run和字节点保留，完成动画释放引用，保留DOM供原选区和缓存复用；更多字节点继续计入原DOM缓存预算。长文字仅在原文与解码后的文字位置一一对应时，以2048个UTF-16单位为目标在完整字素边界分段；含实体或转义等位置转换的节点保留原节点与准确源码范围，避免后续追加失去渐显。后补组合字符或emoji不拆字。代码、公式及图表沿原组件更新，不添加正文渐显。减少动态效果、隐藏或暂停读取时直接显示；动画完成／取消移除媒体监听，卸载取消所属动画，Activity重连不重播旧run。流式结束的最后追加仍可渐显，非追加纠正和完整历史读取不播放。
+宿主以`streaming:true`标记实际Agent流式预览，以`false`交接其完成预览；静态正文及显式完整读取不传此标记。[绘制层渐显](src/desktop/streaming-text-reveal.ts)为每个Markdown文字节点保留一个连续Text节点，使用`appendData`追加以保留旧选区，React保留固定种子内容、由layout effect同步本次完整正文。普通格式空白保持原文本，避免向table／list等结构容器插入非法span。新增完整字素通过CSS Custom Highlight的Range绘制颜色渐变，不建立逐字DOM、不改变字距／连字，也不建立React逐帧状态。每个文字节点只保有一个原生动画时钟；各字240ms、普通间隔18ms，跨行内Markdown节点保序，较大批次最多等待180ms、整批最多420ms。新的追加沿同一绝对时钟接续，旧字不重新变透明；Range按当前Text节点重核，完成、减少动态效果或卸载释放原highlight、动态样式和媒体监听。颜色从文字来源元素取得，避免`currentColor`沿highlight继承链读到透明值。缺少Highlight、注册属性或原生动画接口时直接显示正文。
+
+长文字仍只在原文与解码位置一一对应时，以2048个UTF-16单位为目标在完整字素边界分段；含实体或转义的位置转换保留原节点与准确源码范围。后补组合字符或emoji直接采用完整字素，不保留半字绘制范围。代码、公式及图表沿原组件更新；隐藏、暂停读取、首次历史、非追加纠正与Activity重连不重播旧字，末次流式追加仍可渐显。DOM缓存沿原文字／节点预算保留，不积累字素包装节点；绘制记录仅保留未完成的短时动画。原整文解析、当前读取准入和完整正文复制资格保持。取舍与被替代的逐字span方案见[绘制层决定](../../.agents/notes/implemented/bug-fix/2026-10-25-streaming-text-paint.md)。
 
 [流式回归](test/isolated/desktop-streaming-markdown.test.tsx)核实际React跳过渲染、旧DOM／选区保留、后补语法、末次追加、减少动态效果、缓存Activity重连和Unicode；[代码复制](test/isolated/desktop-code-block.test.tsx)、[正文复制](test/isolated/desktop-message-copy.test.tsx)与[阅读滚动](test/isolated/desktop-conversation-scroll.test.tsx)继续核原边界。生产Native组件的连续帧与交付范围归[Desktop owner](../../apps/desktop/README.md#会话消息渲染验证)。取舍见[增量渲染Note](../../.agents/notes/implemented/architecture/2026-10-24-desktop-incremental-markdown.md)。
 
@@ -335,7 +337,7 @@ P3 的 `InteractionCard` 直接消费生成的 Interaction：真实来源 Sessio
 
 `onContent` 只通知当前准入视图已显示的完整正文，回到预览、停用或 `readActive=false` 时通知 `undefined`，供宿主准确复制；组件不拥有网络关闭或 Runtime 取消。[Model output DOM 测试](test/model-output.test.tsx) 验证超过 17 MiB 的完整尾部、显式读取、single flight、关闭/身份变化/隐藏的 abort 与 late 隔离、缺 reader、身份冲突和不完整前缀。它建立 React/JSDOM 证据，不代表真实浏览器、Electron 或 TUI 资格。
 
-普通 Native／Web 聊天启用共享 `autoRead`：在当前可读视图内自动沿原 reader 获取已保存完整正文，不显示“回复预览”“完整回复”标题、查看／收起按钮或原始工具调用详情。流式正文与尚未核实的预览原位保留，完整读取及 Store／Session／Run／Execution／字节验证通过后才交付全文复制资格；暂停、切换与晚回包仍受原门禁约束。不完整原输出明确标记“回复未完成”。读取失败保留原文和错误说明；缺省不显示重试按钮，Native 沿用缺省。Web 显式启用 `autoReadRetry` 后才提供“重新读取”，仅沿原 reader 和原身份重新核验；暂停时仍受 `readActive`／`suspended` 门禁约束。不自动重复读取、更换身份或重新提交任务；无 reader 或不支持格式时保留必要不可用说明。专用 reader 不启用此选项时继续保留显式打开／关闭及原门禁，原 reasoning 仍只供明确诊断宿主查看。
+普通 Native／Web 聊天启用共享 `autoRead`：在当前可读视图内自动沿原 reader 获取已保存完整正文，不显示“回复预览”“完整回复”标题、查看／收起按钮或原始工具调用详情。流式正文与尚未核实的预览原位保留，完整读取及 Store／Session／Run／Execution／字节验证通过后才交付全文复制资格；暂停、切换与晚回包仍受原门禁约束。“回复未完成”须由当前身份已核实的终态snapshot与不完整输出共同支持；planned／dispatching／running的流式前缀和读取中间状态不插入此提示，避免首段出现后再移除提示造成上下跳动。failed／cancelled／outcome_unknown及已终止但输出仍不完整的记录保留该提示。读取失败保留原文和错误说明；缺省不显示重试按钮，Native 沿用缺省。Web 显式启用 `autoReadRetry` 后才提供“重新读取”，仅沿原 reader 和原身份重新核验；暂停时仍受 `readActive`／`suspended` 门禁约束。不自动重复读取、更换身份或重新提交任务；无 reader 或不支持格式时保留必要不可用说明。专用 reader 不启用此选项时继续保留显式打开／关闭及原门禁，原 reasoning 仍只供明确诊断宿主查看。
 
 宿主已经完成公共 Client 的 EOF／SHA／UTF-8 验证时，可直接提供 `verifiedSnapshot`，组件仍核同一 Store／Session／Run／Execution、complete、正文／reasoning字节数和toolCalls，再呈现原正文或已保存的未完成前缀。关闭后可本地重开，不重复下载；宿主替换 snapshot、暂停、身份替换和卸载均撤销旧读取。该 prop 不接受未验证 transport 数据，也不赋予组件网络或执行权。
 

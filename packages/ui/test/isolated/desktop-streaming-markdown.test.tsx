@@ -32,6 +32,37 @@ async function fixture() {
     addEventListener: (_: string, listener: () => void) => motionListeners.add(listener),
     removeEventListener: (_: string, listener: () => void) => motionListeners.delete(listener),
   })) as unknown as typeof window.matchMedia;
+  const reveals: { text: string; delay: number }[] = [];
+  class TextHighlight {
+    readonly range: Range;
+    constructor(range: Range) {
+      this.range = range;
+    }
+  }
+  const highlights = new Map<string, TextHighlight>();
+  const originalSet = highlights.set;
+  highlights.set = function (name, highlight) {
+    if (!this.has(name)) {
+      const rule = dom.window.document.head.textContent
+        ?.split('\n')
+        .find((line) => line.includes(`::highlight(${name})`));
+      const at = Number(
+        rule
+          ?.slice(rule.indexOf(`::highlight(${name})`))
+          .match(/--kite-reveal-time\) - ([\d.]+)/)?.[1],
+      );
+      const now = Number(
+        highlight.range.startContainer.parentElement?.style.getPropertyValue('--kite-reveal-time'),
+      );
+      reveals.push({ text: highlight.range.toString(), delay: at - now });
+    }
+    return originalSet.call(this, name, highlight);
+  };
+  Object.defineProperty(dom.window, 'Highlight', { value: TextHighlight, configurable: true });
+  Object.defineProperty(dom.window, 'CSS', {
+    value: { highlights, registerProperty() {} },
+    configurable: true,
+  });
   const animations: {
     text: string;
     delay: number;
@@ -99,6 +130,8 @@ async function fixture() {
     host,
     render,
     animations,
+    reveals,
+    highlights,
     textProps,
     reduce(value: boolean) {
       reduced = value;
@@ -126,7 +159,7 @@ test('stream appends bail out at unchanged elements, preserve selection and only
     await f.render(source, true, true, (path) => {
       opened = `first:${path}`;
     });
-    expect(f.animations).toHaveLength(0);
+    expect(f.reveals).toHaveLength(0);
     const props = f.textProps();
     expect(props.has('固定标题')).toBe(true);
     const heading = f.host.querySelector('h1')!;
@@ -142,9 +175,9 @@ test('stream appends bail out at unchanged elements, preserve selection and only
     await f.render(source, true, true, (path) => {
       opened = `current:${path}`;
     });
-    expect(f.animations.map((animation) => animation.text)).toEqual([...'，新增文字🙂']);
-    expect(f.animations.map((animation) => animation.delay)).toEqual([0, 18, 36, 54, 72, 90]);
-    expect(f.animations.every((animation) => animation.fill === 'backwards')).toBe(true);
+    expect(f.reveals.map((animation) => animation.text)).toEqual([...'，新增文字🙂']);
+    expect(f.reveals.map((animation) => animation.delay)).toEqual([0, 18, 36, 54, 72, 90]);
+    expect(f.animations.every((animation) => animation.fill === 'both')).toBe(true);
     expect(tail.firstChild).toBe(originalText);
     expect(f.host.querySelector('h1')).toBe(heading);
     expect(f.host.querySelector('li')).toBe(listItem);
@@ -159,17 +192,17 @@ test('stream appends bail out at unchanged elements, preserve selection and only
     await f.render(source, true, true);
     expect(f.textProps().get('$document')).toBe(documentProps);
     const span = tail.querySelector('span');
-    const beforeParagraph = f.animations.length;
+    const beforeParagraph = f.reveals.length;
     source += '\n\n下一段 **强调**';
     await f.render(source);
     expect(tail.querySelector('span')).toBe(span);
     expect(
-      f.animations
+      f.reveals
         .slice(beforeParagraph)
         .map((animation) => animation.text)
         .join(''),
     ).toBe('下一段 强调');
-    const delays = f.animations.slice(beforeParagraph).map((animation) => animation.delay);
+    const delays = f.reveals.slice(beforeParagraph).map((animation) => animation.delay);
     expect(delays.every((delay, index) => index === 0 || delay > delays[index - 1]!)).toBe(true);
     // An open list grows in place; its completed items do not render again.
     source += '\n\n- 完成项\n- 活动';
@@ -182,14 +215,14 @@ test('stream appends bail out at unchanged elements, preserve selection and only
     source += '，最后一批';
     await f.render(source, false);
     expect(
-      f.animations
+      f.reveals
         .slice(-5)
         .map((animation) => animation.text)
         .join(''),
     ).toBe('，最后一批');
-    const count = f.animations.length;
+    const count = f.reveals.length;
     await f.render(source, false);
-    expect(f.animations).toHaveLength(count);
+    expect(f.reveals).toHaveLength(count);
     for (const animation of f.animations) animation.onfinish?.();
     expect(f.listeners.size).toBe(0);
   } finally {
@@ -203,7 +236,46 @@ test('ordinary asynchronous history calibration still reveals the next live appe
     await f.render('已经显示的正文');
     await f.render('已经显示的正文', true, false);
     await f.render('已经显示的正文，跨进程读取后新增', true, true);
-    expect(f.animations.map((animation) => animation.text)).toEqual([...'，跨进程读取后新增']);
+    expect(f.reveals.map((animation) => animation.text)).toEqual([...'，跨进程读取后新增']);
+  } finally {
+    await f.close();
+  }
+});
+
+test('paint reveal keeps a single continuous text node and preserves a selection in the live prefix', async () => {
+  const f = await fixture();
+  try {
+    await f.render('AVATAR office 中文旧正文');
+    const span = f.host.querySelector('p > span')!,
+      node = span.firstChild!;
+    const selection = f.dom.window.getSelection()!,
+      range = f.dom.window.document.createRange();
+    range.setStart(node, 7);
+    range.setEnd(node, 13);
+    selection.addRange(range);
+    await f.render('AVATAR office 中文旧正文，再追加一段正文。');
+    expect(span.childNodes).toHaveLength(1);
+    expect(span.firstChild).toBe(node);
+    expect(selection.toString()).toBe('office');
+    expect(f.highlights.size).toBeGreaterThan(0);
+    for (const animation of f.animations) animation.onfinish?.();
+    expect(f.highlights.size).toBe(0);
+    expect(f.dom.window.document.head.querySelectorAll('style')).toHaveLength(0);
+  } finally {
+    await f.close();
+  }
+});
+
+test('unsupported paint APIs retain complete plain text without per-character wrappers or animation', async () => {
+  const f = await fixture();
+  try {
+    Object.defineProperty(f.dom.window, 'Highlight', { value: undefined });
+    await f.render('原文');
+    await f.render('原文，完整新文字');
+    expect(f.host.textContent).toBe('原文，完整新文字');
+    expect(f.host.querySelector('p > span')?.childNodes).toHaveLength(1);
+    expect(f.animations).toHaveLength(0);
+    expect(f.highlights.size).toBe(0);
   } finally {
     await f.close();
   }
@@ -214,19 +286,19 @@ test('a large append reveals whole graphemes individually in bounded source orde
     await f.render('历史正文');
     const appended = '雪👩🏽‍💻e\u0301'.repeat(100);
     await f.render(`历史正文${appended} **结束**`);
-    expect(f.animations.map((animation) => animation.text)).toEqual([
+    expect(f.reveals.map((animation) => animation.text)).toEqual([
       ...Array.from({ length: 100 }, () => ['雪', '👩🏽‍💻', 'e\u0301']).flat(),
       ' ',
       '结',
       '束',
     ]);
-    expect(f.animations[0]!.delay).toBe(0);
+    expect(f.reveals[0]!.delay).toBe(0);
     expect(
-      f.animations.every(
-        (animation, index) => index === 0 || animation.delay > f.animations[index - 1]!.delay,
+      f.reveals.filter(
+        (animation, index) => index > 0 && animation.delay <= f.reveals[index - 1]!.delay,
       ),
-    ).toBe(true);
-    expect(f.animations.at(-1)!.delay).toBeLessThanOrEqual(180);
+    ).toEqual([]);
+    expect(f.reveals.at(-1)!.delay).toBeLessThanOrEqual(180.000001);
     expect(f.host.textContent).toBe(`历史正文${appended} 结束`);
   } finally {
     await f.close();
@@ -243,10 +315,11 @@ test('history, cache resume, corrections and reduced motion never replay old tex
     await f.render(source, true);
     source += '实时新增';
     await f.render(source, true);
-    expect(f.animations.map((animation) => animation.text)).toEqual([...'实时新增']);
-    const originalCount = f.animations.length;
+    expect(f.reveals.map((animation) => animation.text)).toEqual([...'实时新增']);
+    const originalCount = f.reveals.length;
     f.reduce(true);
-    expect(f.animations[0]?.cancelled).toBe(true);
+    expect(f.highlights.size).toBe(0);
+    expect(f.animations.some((animation) => animation.cancelled)).toBe(true);
     expect(f.listeners.size).toBe(0);
     source += '减少动态效果';
     await f.render(source);
@@ -254,29 +327,29 @@ test('history, cache resume, corrections and reduced motion never replay old tex
     source += '暂停时的内容';
     await f.render(source, true, false);
     await f.render(source, true, true);
-    expect(f.animations).toHaveLength(originalCount);
+    expect(f.reveals).toHaveLength(originalCount);
     source += '恢复后新增';
     await f.render(source);
     expect(
-      f.animations
+      f.reveals
         .slice(originalCount)
         .map((animation) => animation.text)
         .join(''),
     ).toBe('恢复后新增');
-    const resumedCount = f.animations.length;
+    const resumedCount = f.reveals.length;
     source += '显式读取的完整正文';
     await f.render(source, 'static');
-    expect(f.animations).toHaveLength(resumedCount);
+    expect(f.reveals).toHaveLength(resumedCount);
     await f.render(source);
     await f.render(source, true, false, undefined, true);
     source += '后台积累';
     await f.render(source, true, false, undefined, true);
     await f.render(source, true, true);
-    expect(f.animations).toHaveLength(resumedCount);
+    expect(f.reveals).toHaveLength(resumedCount);
     await f.render('纠正后的正文');
-    expect(f.animations).toHaveLength(resumedCount);
+    expect(f.reveals).toHaveLength(resumedCount);
     expect(f.host.textContent).toBe('纠正后的正文');
-    expect(f.animations.every((animation) => animation.cancelled)).toBe(true);
+    expect(f.highlights.size).toBe(0);
   } finally {
     await f.close();
   }
@@ -290,12 +363,12 @@ test('late references and inline syntax correct existing semantics without fadin
     source += '** 新增';
     await f.render(source);
     expect(f.host.querySelector('strong')?.textContent).toBe('强调');
-    expect(f.animations.map((animation) => animation.text)).toEqual([...' 新增']);
-    const count = f.animations.length;
+    expect(f.reveals.map((animation) => animation.text)).toEqual([...' 新增']);
+    const count = f.reveals.length;
     source += '\n\n[target]: https://example.com';
     await f.render(source);
     expect(f.host.querySelector('a')?.getAttribute('href')).toBe('https://example.com');
-    expect(f.animations).toHaveLength(count);
+    expect(f.reveals).toHaveLength(count);
     source += '\n\n正文[^a]\n\n[^a]: 脚注';
     await f.render(source);
     const link = f.host.querySelector('[data-footnote-ref]')!;
@@ -319,14 +392,14 @@ test('growing Unicode text preserves completed segments across the long-node bou
     expect(paragraph.textContent).toBe(text);
     expect(paragraph.firstChild).toBe(first);
     expect(f.textProps().get(first?.textContent ?? '')).toBe(props.get(first?.textContent ?? ''));
-    expect(f.animations.every((animation) => !/^[\uDC00-\uDFFF]/u.test(animation.text))).toBe(true);
+    expect(f.reveals.every((animation) => !/^[\uDC00-\uDFFF]/u.test(animation.text))).toBe(true);
     await f.render('e');
     await f.render('e\u0301');
     expect(f.host.querySelector('p')?.childNodes).toHaveLength(1);
     await f.render('e\u0301👩');
-    const beforeEmojiCompletion = f.animations.length;
+    const beforeEmojiCompletion = f.reveals.length;
     await f.render('e\u0301👩🏽‍💻');
-    expect(f.animations).toHaveLength(beforeEmojiCompletion);
+    expect(f.reveals).toHaveLength(beforeEmojiCompletion);
     expect(f.host.querySelector('p')?.childNodes).toHaveLength(1);
     expect(f.host.textContent).toBe('e\u0301👩🏽‍💻');
   } finally {
@@ -346,10 +419,10 @@ test('long entity and escaped text preserves source offsets for later live suffi
       await f.render(source, false);
       expect(f.host.textContent).toBe(decoded + body);
       await f.render(source, true);
-      const count = f.animations.length;
+      const count = f.reveals.length;
       await f.render(`${source}NEW`);
       expect(f.host.textContent).toBe(`${decoded}${body}NEW`);
-      expect(f.animations.slice(count).map((animation) => animation.text)).toEqual(['N', 'E', 'W']);
+      expect(f.reveals.slice(count).map((animation) => animation.text)).toEqual(['N', 'E', 'W']);
     }
   } finally {
     await f.close();

@@ -8,6 +8,10 @@ import type {
   NativeSelection,
 } from '../../src/native-bridge';
 import type { NativeModelChoice } from '../../src/native-model-picker';
+import {
+  readNativeRecommendedModel,
+  rememberNativeRecommendedModel,
+} from '../../src/native-model-preference';
 import { prepareDesktopDom } from '../native-page-dom.fixture';
 
 // Radix selects its layout effect at module load. Install a browser before loading the widget.
@@ -23,7 +27,9 @@ Object.assign(globalThis, {
   navigator: bootstrap.window.navigator,
 });
 const { createRoot } = await import('react-dom/client');
-const { NativeModelPicker, nativeModelScope } = await import('../../src/native-model-picker');
+const { NativeModelPicker, NativeModelSnapshots, nativeModelScope } = await import(
+  '../../src/native-model-picker'
+);
 Object.assign(globalThis, priorBootstrap);
 bootstrap.window.close();
 
@@ -132,6 +138,193 @@ const facts: NativeModelSettingsFacts = {
 const selected = (id: string, viewSelection = 1) =>
   ({ storeId: 'store', session: { id }, viewSelection }) as NativeSelection;
 
+test('browser preference storage keeps model and effort together, isolates Stores, and leaves invalid bytes untouched', async () => {
+  const f = fixture();
+  try {
+    expect(readNativeRecommendedModel('store')).toBeUndefined();
+    rememberNativeRecommendedModel('store', { modelId: 'a', reasoningEffort: 'high' });
+    const storage = f.dom.window.localStorage,
+      key = storage.key(0)!;
+    expect(readNativeRecommendedModel('store')).toEqual({ modelId: 'a', reasoningEffort: 'high' });
+    expect(readNativeRecommendedModel('other')).toBeUndefined();
+    rememberNativeRecommendedModel('other', { modelId: 'b', reasoningEffort: 'low' });
+    expect(readNativeRecommendedModel('store')).toEqual({ modelId: 'a', reasoningEffort: 'high' });
+    for (const raw of [
+      'broken',
+      '{"modelId":"a","reasoningEffort":"invalid"}',
+      '{"modelId":"a","extra":true}',
+      'x'.repeat(1025),
+    ]) {
+      storage.setItem(key, raw);
+      expect(readNativeRecommendedModel('store')).toBeUndefined();
+      expect(storage.getItem(key)).toBe(raw);
+    }
+    rememberNativeRecommendedModel('store', { modelId: 'a' });
+    expect(readNativeRecommendedModel('store')).toEqual({ modelId: 'a' });
+  } finally {
+    await f.close();
+  }
+});
+
+test('unavailable browser storage still permits a current choice and reports that remembering failed', async () => {
+  const f = fixture();
+  let resolved: NativeModelChoice | undefined;
+  Object.defineProperty(f.dom.window, 'localStorage', {
+    get() {
+      throw Error('storage_denied');
+    },
+  });
+  const bridge: NativeBridge = { watch: () => () => {}, request: async () => facts };
+  function Host() {
+    const [value, setValue] = useState<NativeModelChoice>({});
+    return (
+      <NativeModelPicker
+        bridge={bridge}
+        generation={1}
+        preparing={{ storeId: 'store' }}
+        value={value}
+        onChange={setValue}
+        onReady={(_ready, choice) => {
+          resolved = choice;
+        }}
+      />
+    );
+  }
+  try {
+    await act(async () => f.root.render(<Host />));
+    expect(resolved).toEqual({ modelId: 'a' });
+    await f.click('模型：remote-a，思考程度：轻度');
+    const slider = f.element.querySelector<HTMLElement>('[role="slider"]')!;
+    await act(async () => {
+      slider.dispatchEvent(
+        new f.dom.window.KeyboardEvent('keydown', { key: 'End', bubbles: true }),
+      );
+    });
+    expect(resolved).toEqual({ modelId: 'a', reasoningEffort: 'ultar' });
+    expect(f.element.querySelector('[role="alert"]')?.textContent).toBe(
+      '未能记住推荐模型与思考程度，请重新选择。',
+    );
+  } finally {
+    await f.close();
+  }
+});
+
+test('remembered recommendations update cached new-conversation labels while fresh reads still qualify sending', () => {
+  const snapshots = new NativeModelSnapshots();
+  const preparing = nativeModelScope(1, undefined, { storeId: 'store' });
+  snapshots.set(preparing, {
+    ...facts,
+    recommendedModel: { modelId: 'a', reasoningEffort: 'low' },
+  });
+  snapshots.recommend(nativeModelScope(1, selected('existing')), {
+    modelId: 'b',
+    reasoningEffort: 'high',
+  });
+  expect(snapshots.get(preparing)?.recommendedModel).toEqual({
+    modelId: 'b',
+    reasoningEffort: 'high',
+  });
+  snapshots.recommend(nativeModelScope(2, selected('existing')), { modelId: 'a' });
+  expect(snapshots.get(preparing)?.recommendedModel).toEqual({
+    modelId: 'b',
+    reasoningEffort: 'high',
+  });
+});
+
+test.each([
+  [undefined, 'a', undefined],
+  [{ modelId: 'b', reasoningEffort: 'high' }, 'b', 'high'],
+  [{ modelId: 'disabled', reasoningEffort: 'high' }, 'a', undefined],
+  [{ modelId: 'missing', reasoningEffort: 'high' }, 'a', undefined],
+] as const)('new conversations resolve the global recommendation before the first enabled route: %j', async (recommendedModel, modelId, reasoningEffort) => {
+  const f = fixture(),
+    calls: NativeRequest[] = [];
+  let resolved: NativeModelChoice | undefined;
+  const bridge: NativeBridge = {
+    watch: () => () => {},
+    request: async (request) => {
+      calls.push(request);
+      return { ...facts, defaultModelId: 'b', recommendedModel } as NativeModelSettingsFacts;
+    },
+  };
+  try {
+    if (recommendedModel) rememberNativeRecommendedModel('store', recommendedModel);
+    await act(async () =>
+      f.root.render(
+        <NativeModelPicker
+          bridge={bridge}
+          generation={1}
+          preparing={{ storeId: 'store' }}
+          value={{}}
+          onChange={() => {}}
+          onReady={(_ready, choice) => {
+            resolved = choice;
+          }}
+        />,
+      ),
+    );
+    expect(resolved).toEqual({ modelId, ...(reasoningEffort ? { reasoningEffort } : {}) });
+    expect(calls).toEqual([{ method: 'conversation.models.read', generation: 1 }]);
+    expect(f.element.querySelector('.model-effort-summary')?.textContent).toBe(
+      reasoningEffort ? '高' : '轻度',
+    );
+  } finally {
+    await f.close();
+  }
+});
+
+test('a global recommendation is saved before sending, restored on a new conversation, and never overrides an existing Session', async () => {
+  const f = fixture(),
+    calls: NativeRequest[] = [];
+  let resolved: NativeModelChoice | undefined;
+  const bridge: NativeBridge = {
+    watch: () => () => {},
+    request: async (request) => {
+      calls.push(request);
+      return { ...facts, selectedModelId: 'a' };
+    },
+  };
+  function Host({ fresh, identity }: { fresh: boolean; identity: string }) {
+    const [value, setValue] = useState<NativeModelChoice>({});
+    return (
+      <NativeModelPicker
+        bridge={bridge}
+        generation={1}
+        preparing={fresh ? { storeId: 'store' } : undefined}
+        selection={fresh ? undefined : selected(identity)}
+        value={value}
+        onChange={setValue}
+        onReady={(_ready, choice) => {
+          resolved = choice;
+        }}
+      />
+    );
+  }
+  try {
+    await act(async () => f.root.render(<Host key="old" fresh={false} identity="old" />));
+    await f.click('模型：remote-a，思考程度：轻度');
+    await f.click('选择模型，当前 openai / remote-a');
+    await f.click('deepseek');
+    await f.click('选择模型 b');
+    const slider = f.element.querySelector<HTMLElement>('[role="slider"]')!;
+    await act(async () => {
+      slider.dispatchEvent(
+        new f.dom.window.KeyboardEvent('keydown', { key: 'End', bubbles: true }),
+      );
+    });
+    const recommendation = readNativeRecommendedModel('store');
+    expect(recommendation).toEqual({ modelId: 'b', reasoningEffort: 'ultar' });
+    await act(async () => f.root.render(<Host key="new" fresh={true} identity="project-b" />));
+    expect(resolved).toEqual(recommendation);
+    expect(f.element.querySelector('.model-effort-summary')?.textContent).toBe('Ultar');
+    await act(async () => f.root.render(<Host key="existing" fresh={false} identity="existing" />));
+    expect(resolved).toEqual({ modelId: 'a' });
+    expect(calls.every((call) => call.method.endsWith('.models.read'))).toBe(true);
+  } finally {
+    await f.close();
+  }
+});
+
 test('picker filters disabled routes, preserves transient effort through observer rerenders, and model change clears it', async () => {
   const f = fixture(),
     calls: NativeRequest[] = [],
@@ -193,6 +386,7 @@ test('picker filters disabled routes, preserves transient effort through observe
     await act(async () => f.root.render(<Host />));
     expect(observed.reasoningEffort).toBe('high');
     expect(calls).toHaveLength(1);
+    expect(readNativeRecommendedModel('store')).toEqual({ modelId: 'a', reasoningEffort: 'high' });
     await f.click('选择模型，当前 openai / remote-a');
     expect(f.element.querySelector('[aria-label="选择模型 disabled"]')).toBeNull();
     expect(f.element.querySelector('[aria-label="选择模型 broken"]')).toBeNull();
@@ -201,6 +395,7 @@ test('picker filters disabled routes, preserves transient effort through observe
     await f.click('deepseek');
     await f.click('选择模型 b');
     expect(observed).toEqual({ modelId: 'b' });
+    expect(readNativeRecommendedModel('store')).toEqual({ modelId: 'b' });
     expect(resolved.at(-1)).toEqual({ modelId: 'b' });
     const deepseekEffort = f.element.querySelector<HTMLElement>('[role="slider"]')!;
     expect(deepseekEffort).not.toBeNull();

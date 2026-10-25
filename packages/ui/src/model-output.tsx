@@ -265,7 +265,10 @@ export function ModelOutputMessage({
               : '回复预览（回复未完成）'}
         </p>
       )}
-      {autoRead && !body.complete && <p>回复未完成</p>}
+      {autoRead &&
+        !body.complete &&
+        full &&
+        !['planned', 'dispatching', 'running'].includes(full.status) && <p>回复未完成</p>}
       {render(full?.output.content ?? message.content)}
       {!autoRead && !full && (
         <button

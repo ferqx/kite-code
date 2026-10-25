@@ -233,6 +233,7 @@ function NativeDesktopContent({
   const [newPermission, setNewPermission] = useState<'accept_edits' | 'auto' | 'full'>();
   const [newPlanMode, setNewPlanMode] = useState(false);
   const [newChoice, setNewChoice] = useState<NativeModelChoice>({});
+  const [newModelRevision, setNewModelRevision] = useState(0);
   const [newModelReady, setNewModelReady] = useState<{
     ready: boolean;
     choice?: NativeModelChoice;
@@ -1535,6 +1536,9 @@ function NativeDesktopContent({
     }
   }
   function prepareConversation(workspaceId?: string) {
+    setNewChoice({});
+    setNewModelReady({ ready: false });
+    setNewModelRevision((value) => value + 1);
     rememberDraft();
     pageIntent.current++;
     setScheduledTasksView(false);
@@ -3997,6 +4001,7 @@ function NativeDesktopContent({
               options: (
                 <>
                   <NativeModelPicker
+                    key={JSON.stringify([directory.storeId, newModelRevision])}
                     snapshots={modelSnapshots.current}
                     bridge={bridge}
                     generation={state.generation}

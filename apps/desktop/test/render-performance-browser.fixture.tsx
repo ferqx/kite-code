@@ -1,6 +1,7 @@
 // Isolated production-renderer experiment. Never imported by application entrypoints.
 import type { Message, ModelOutputSnapshot } from '@kite-ai/client';
 import { createRoot } from 'react-dom/client';
+import { Conversation } from '../../../packages/ui/src/desktop/Conversation';
 import { NativeDesktop } from '../src/native';
 import type { NativeBridge } from '../src/native-bridge';
 import { NativeModelOutputMessage } from '../src/native-model-output-message';
@@ -243,13 +244,71 @@ function renderAutomatic() {
   );
 }
 const api = {
+  firstReply(stage: 'thinking' | 'body') {
+    root.render(
+      <div
+        className="kite-client"
+        style={{ height: 680, display: 'flex', flexDirection: 'column' }}
+      >
+        <Conversation
+          selected
+          connected
+          loading={false}
+          saveReading={() => {}}
+          turnActivity={{ turnId: 'first-reply', status: 'running' }}
+          messages={[
+            {
+              id: 'old',
+              role: 'assistant',
+              text: 'Earlier conversation.\n\n'.repeat(60),
+              settled: true,
+            },
+            {
+              id: 'input',
+              role: 'user',
+              text: 'Ordinary conversation without tools.',
+              settled: true,
+            },
+            stage === 'thinking'
+              ? {
+                  id: 'thinking',
+                  turnId: 'first-reply',
+                  role: 'thinking',
+                  text: '',
+                  settled: false,
+                }
+              : {
+                  id: 'first-body',
+                  turnId: 'first-reply',
+                  role: 'assistant',
+                  settled: false,
+                  text: 'Weekend coffee feels like a quiet hug after a busy week at the office. '.repeat(
+                    4,
+                  ),
+                },
+          ]}
+        />
+      </div>,
+    );
+  },
   automaticState: () => ({
     pending: !!automaticResolve,
     copied: automaticCopied,
     first: automaticFirst,
     second: automaticSecond,
   }),
-  automaticBody(stage: 'mount' | 'first' | 'pending' | 'second') {
+  automaticBody(stage: 'mount' | 'first' | 'pending' | 'second' | 'seal' | 'sealed') {
+    if (stage === 'sealed') {
+      const resolve = automaticResolve;
+      automaticResolve = undefined;
+      const snapshot = automaticSnapshot(automaticSecond);
+      resolve!({
+        ...snapshot,
+        status: 'succeeded',
+        output: { ...snapshot.output, complete: true },
+      });
+      return;
+    }
     if (stage === 'first' || stage === 'second') {
       const resolve = automaticResolve;
       automaticResolve = undefined;
@@ -262,12 +321,12 @@ const api = {
       runId: 'r-auto',
       seq: '1',
       role: 'assistant',
-      status: 'incomplete',
-      content: '初始预览',
+      status: stage === 'seal' ? 'complete' : 'incomplete',
+      content: stage === 'seal' ? automaticSecond : '初始预览',
       outputBody: {
         kind: 'model_output',
         executionId: 'model-auto',
-        complete: false,
+        complete: stage === 'seal',
         contentBytes: automaticBytes(stage === 'mount' ? automaticFirst : automaticSecond),
         reasoningBytes: '0',
         toolCallCount: 0,

@@ -422,6 +422,40 @@ test('opted-in automatic read retry rechecks original ownership and pauses witho
   }
 });
 
+test('automatic replies reserve incomplete warnings for verified terminal output, never a live prefix or pending read', async () => {
+  const f = await domFixture(),
+    partial = outputFixture('首批已经显示的正文。', false),
+    complete = outputFixture('首批已经显示的正文。');
+  try {
+    const props: ModelOutputMessageProps = {
+      autoRead: true,
+      message: partial.message,
+      storeId: 'store',
+      onRead: () => new Promise(() => {}),
+    };
+    await f.render(props);
+    expect(f.host.textContent).not.toContain('回复未完成');
+    for (const status of ['planned', 'dispatching', 'running'] as const) {
+      await f.render({ ...props, verifiedSnapshot: { ...partial.snapshot, status } });
+      expect(f.host.textContent).not.toContain('回复未完成');
+      expect(f.host.querySelector('.message-markdown')!.textContent).toBe(
+        partial.snapshot.output.content,
+      );
+    }
+    for (const status of ['failed', 'cancelled', 'outcome_unknown', 'succeeded'] as const) {
+      await f.render({ ...props, verifiedSnapshot: { ...partial.snapshot, status } });
+      expect(f.host.textContent).toContain('回复未完成');
+    }
+    await f.render({ ...props, message: complete.message, verifiedSnapshot: complete.snapshot });
+    expect(f.host.textContent).not.toContain('回复未完成');
+    expect(f.host.querySelector('.message-markdown')!.textContent).toBe(
+      complete.snapshot.output.content,
+    );
+  } finally {
+    await f.close();
+  }
+});
+
 test('automatic replies reject mismatched or unsupported bodies and identify incomplete recorded replies', async () => {
   const f = await domFixture(),
     data = outputFixture(),
