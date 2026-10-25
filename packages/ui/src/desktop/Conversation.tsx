@@ -38,6 +38,7 @@ export interface ReadingState {
 }
 
 export interface ToolActivityState {
+  aggregate?: boolean;
   expanded?: boolean;
   activityId: string;
   restoredExpanded: ReadonlySet<string>;
@@ -231,16 +232,20 @@ const MessageItem = memo(function MessageItem({
       />
     ));
     const process = (
-      <section
+      <ScrollArea
         key={message.id}
-        // biome-ignore lint/a11y/noNoninteractiveTabindex: allow keyboard scrolling of the bounded tool list.
-        tabIndex={0}
         className="subagent-process"
-        aria-label={`${message.title || '子 Agent'}的工具步骤`}
+        fade="y"
+        viewportClassName="subagent-process-viewport"
+        viewportProps={{
+          role: 'region',
+          tabIndex: 0,
+          'aria-label': `${message.title || '子 Agent'}的工具步骤`,
+        }}
       >
         {steps}
         {tools}
-      </section>
+      </ScrollArea>
     );
     // Child prose/results belong to the task result; the parent transcript shows tool activity only.
     if (inlineProcess) return process;
@@ -698,6 +703,7 @@ export function Conversation({
   const visible = new Set(
     messages.filter((message) => {
       if (structural(message)) return false;
+      if (message.role !== 'tool' && message.presentation === 'hidden') return false;
       if (renderMessage) return true;
       if (message.role === 'tool' && askToolIds.has(message.id.slice(5))) return false;
       if (message.role === 'system')
@@ -796,21 +802,16 @@ export function Conversation({
       message.copyText === null ? undefined : (message.copyText ?? message.text),
     ]),
   );
-  // Contiguous exploration calls in one explicit Turn share a visual activity,
-  // even when separate model responses supplied different presentation groups.
-  // Unscoped history still needs the exact presentation group to merge.
+  // Contiguous tools share one activity regardless of definition or result
+  // metadata. A readable message or different Turn starts another activity.
   const groups: Message[][] = [];
   for (const message of shown) {
     const previous = groups.at(-1);
     if (
+      !renderMessage &&
       message.role === 'tool' &&
-      message.presentation === 'exploration' &&
-      message.presentationGroupId &&
       previous?.[0]?.role === 'tool' &&
-      previous[0].presentation === 'exploration' &&
-      previous[0].presentationGroupId &&
-      previous[0].turnId === message.turnId &&
-      (previous[0].presentationGroupId === message.presentationGroupId || !!message.turnId)
+      previous[0].turnId === message.turnId
     )
       previous.push(message);
     else groups.push([message]);
@@ -887,16 +888,17 @@ export function Conversation({
           </article>
         </div>
       );
-    // A newly formed aggregate must not inherit a single receipt's open reader.
-    // Keep its identity stable as more tools join the same aggregate.
-    const activityKey =
-      group.length > 1
-        ? `activity-group:${message.presentationGroupId ?? message.id}`
-        : `activity:${message.id}`;
+    // A host-provided group starts with its first tool, before metadata arrives.
+    // Its disclosure and DOM survive subsequent receipts and additional tools.
+    const aggregate = group.length > 1 || !!message.presentationGroupId;
+    const activityKey = aggregate
+      ? `activity-group:${message.presentationGroupId ?? message.presentationKey ?? message.id}`
+      : `activity:${message.presentationKey ?? message.id}`;
     if (message.role === 'tool' && renderToolActivity)
       return (
         <Fragment key={activityKey}>
           {renderToolActivity(group, {
+            aggregate,
             expanded: expanded[activityKey],
             activityId: activityKey,
             restoredExpanded: restoredExpanded.current,
@@ -910,6 +912,7 @@ export function Conversation({
       <ToolActivity
         key={activityKey}
         messages={group}
+        aggregate={aggregate}
         suppressGenericFailure={
           message.toolName === 'task' &&
           (children.get(message.id.slice(5)) ?? []).some(
@@ -927,6 +930,7 @@ export function Conversation({
         onToggle={(open) => onToggle(activityKey, open)}
         openFile={openFile}
         childDetail={parentTaskDetail(message, group.length)}
+        childDetailForMessage={(item) => parentTaskDetail(item, 1)}
         renderChildren={(toolCallId, taskExpanded) =>
           children
             .get(toolCallId)

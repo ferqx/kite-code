@@ -181,10 +181,25 @@ export function desktopMessages(
           message.outputBody !== undefined &&
           message.outputBody.reasoningBytes !== '0' &&
           message.outputBody.toolCallCount === 0));
+    // A streamed tool declaration can remain incomplete in history after its
+    // tools are already visible in the View. It has no readable body and must
+    // not split that activity until the history reader catches up. An empty
+    // preview with nonzero body bytes still needs its original body reader.
+    const toolDeclaration =
+      message.role === 'assistant' &&
+      !message.compression &&
+      message.firstOutput === 'tool_calls' &&
+      message.content.length === 0 &&
+      (!message.outputBody || message.outputBody.contentBytes === '0') &&
+      message.contentFormat !== 'unsupported' &&
+      message.outputBody?.readAvailability !== 'unsupported' &&
+      !message.files?.length &&
+      !message.images?.length;
     return {
       id: message.id,
       ...(message.createdAt === undefined ? {} : { createdAtMs: message.createdAt }),
       role: message.compression ? 'system' : thinking ? 'thinking' : message.role,
+      ...(toolDeclaration ? { presentation: 'hidden' as const } : {}),
       ...(message.compression
         ? {
             systemKind: 'compaction' as const,

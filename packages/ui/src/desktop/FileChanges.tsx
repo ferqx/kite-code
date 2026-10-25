@@ -1,4 +1,5 @@
 import { type ReactNode, useState } from 'react';
+import { ScrollArea } from './components/ui/scroll-area';
 import type { Message } from './types';
 import { Button } from './ui';
 
@@ -71,25 +72,32 @@ export function FileChanges({
 /** Tool-reported diff only; no reconstruction from current workspace contents. */
 export function FileDiff({ message }: { message: Message }) {
   return (
-    // biome-ignore lint/a11y/noNoninteractiveTabindex lint/a11y/useSemanticElements: the preformatted diff is a named keyboard-scrollable region.
-    <pre role="region" className="diff-output" tabIndex={0} aria-label="文件差异">
-      {(message.toolResult?.stdout || message.toolResult?.stderr || '工具没有返回可读差异。')
-        .split('\n')
-        .map((line, index) => (
-          <span
-            key={`${index}:${line}`}
-            className={
-              /^\s*\d+ \+/.test(line) || /^\+(?!\+\+)/.test(line)
-                ? 'diff-added'
-                : /^\s*\d+ -/.test(line) || /^-(?!--)/.test(line)
-                  ? 'diff-removed'
-                  : undefined
-            }
-          >
-            {line}
-            {'\n'}
-          </span>
-        ))}
-    </pre>
+    <ScrollArea
+      orientation="both"
+      fade="y"
+      className="tool-diff-scroll"
+      viewportClassName="tool-diff-viewport"
+      viewportProps={{ role: 'region', 'aria-label': '文件差异', tabIndex: 0 }}
+    >
+      <pre className="diff-output">
+        {(message.toolResult?.stdout || message.toolResult?.stderr || '工具没有返回可读差异。')
+          .split('\n')
+          .map((line, index) => (
+            <span
+              key={`${index}:${line}`}
+              className={
+                /^\s*\d+ \+/.test(line) || /^\+(?!\+\+)/.test(line)
+                  ? 'diff-added'
+                  : /^\s*\d+ -/.test(line) || /^-(?!--)/.test(line)
+                    ? 'diff-removed'
+                    : undefined
+              }
+            >
+              {line}
+              {'\n'}
+            </span>
+          ))}
+      </pre>
+    </ScrollArea>
   );
 }

@@ -1267,3 +1267,235 @@ for (const scenario of [
     }
   });
 }
+
+test('exact child snapshots collect live Shell command fragments within the added budget without directory or control payloads', async () => {
+  const item = backgroundItem(1, true);
+  const f = fixture([item]);
+  const command = `printf '%s' '${'雪🙂"\\\n'.repeat(16000)}'\n# ORIGINAL_COMMAND_TAIL`;
+  const executions = Array.from({ length: 3 }, (_, index) => ({
+    ...item.execution,
+    id: `live-shell-${index}`,
+    kind: 'tool',
+    sessionId: 'child',
+    runId: item.childRun!.id,
+    definitionId: 'shell.execute',
+    toolCallId: `live-call-${index}`,
+    toolInput: { command, key: `shell-${index}` },
+    result: null,
+  })) as Execution[];
+  executions.push(
+    { ...executions[0]!, id: 'future', definitionVersion: '2' },
+    { ...executions[0]!, id: 'foreign', sessionId: 'other-child' },
+    { ...executions[0]!, id: 'legacy-no-call', toolCallId: undefined },
+  );
+  const rows: Message[] = [];
+  f.port.getView = async () =>
+    ({
+      storeId: 'store',
+      session: { ...item.childSession!, nextSeq: rows.at(-1)?.seq ?? '0' },
+      runs: [item.childRun!],
+      executions,
+    }) as never;
+  f.port.listMessages = async () => structuredClone(rows);
+  const chunks: { offset: number; limit: number }[] = [];
+  const bridge: NativeBridge = {
+    watch: f.bridge.watch,
+    async request(input) {
+      if (input.method === 'background.child.read') chunks.push(input);
+      return f.bridge.request(input);
+    },
+  };
+  try {
+    const page = await f.environment.open('live-shell-directory');
+    expect(page.entries).toEqual([item]);
+    f.environment.close(page.readId);
+    const body = await readNativeBackgroundChild({
+      bridge,
+      generation: 1,
+      storeId: 'store',
+      observationId: page.observationId,
+      item,
+      signal: new AbortController().signal,
+      isCurrent: () => true,
+      environment: { rootSessionId: 'root', viewSelection: 1 },
+    });
+    expect(body.presentation!.liveTools).toHaveLength(3);
+    const [first, second, preview] = body.presentation!.liveTools!;
+    expect(first!.shellInput).toEqual({
+      operation: 'execute',
+      shellId: 'shell-0',
+      command,
+      commandOffset: 0,
+      commandNextOffset: null,
+    });
+    expect(second!.shellInput!.command).toBe(command);
+    expect(first!.inputSource).toEqual({
+      storeId: 'store',
+      sessionId: 'child',
+      runId: item.childRun!.id,
+      toolCallId: 'live-call-0',
+    });
+    expect(preview!.target).toEndWith('…');
+    expect(preview!.shellInput).toEqual({ operation: 'execute', shellId: 'shell-2' });
+    expect(preview!.shellInput).not.toHaveProperty('command');
+    expect(
+      Buffer.byteLength(JSON.stringify(first!.shellInput!.command)) +
+        Buffer.byteLength(JSON.stringify(second!.shellInput!.command)),
+    ).toBeLessThanOrEqual(524288);
+    expect(chunks.length).toBeGreaterThan(2);
+    expect(chunks.every((chunk) => chunk.limit === 65536)).toBe(true);
+    expect(chunks.map((chunk) => chunk.offset)).toEqual(chunks.map((_, index) => index * 65536));
+    expect(body.presentation!.executions.every((entry) => !('toolInput' in entry))).toBe(true);
+    expect(
+      body.control!.executions.every((entry) => !('toolInput' in entry) && !('command' in entry)),
+    ).toBe(true);
+    expect(f.calls.some((call) => call.startsWith('POST') || call.startsWith('PREPARE'))).toBe(
+      false,
+    );
+    const receipt: Message = {
+      id: 'saved-live-receipt',
+      sessionId: 'child',
+      runId: item.childRun!.id,
+      seq: '1',
+      role: 'tool',
+      status: 'complete',
+      content: 'saved Shell output',
+      sourceIds: ['live-shell-0'],
+      toolCallId: 'live-call-0',
+    };
+    const saved = {
+      ...executions[0]!,
+      status: 'succeeded' as const,
+      resultRevision: '1',
+      result: { outcome: 'succeeded' as const, content: receipt.content },
+    };
+    executions.splice(0, executions.length, saved);
+    rows.push(receipt);
+    const getExecution = f.port.getExecution;
+    f.port.getExecution = async (id, options) =>
+      id === saved.id ? structuredClone(saved) : getExecution(id, options);
+    const updated = await readNativeBackgroundChild({
+      bridge,
+      generation: 1,
+      storeId: 'store',
+      observationId: page.observationId,
+      item,
+      previous: body,
+      incremental: true,
+      signal: new AbortController().signal,
+      isCurrent: () => true,
+      environment: { rootSessionId: 'root', viewSelection: 1 },
+    });
+    expect(updated.presentation!.liveTools).toEqual([]);
+    expect(updated.presentation!.tools[0]!.shellInput).toEqual({
+      operation: 'execute',
+      shellId: 'shell-0',
+      command,
+      commandOffset: 0,
+      commandNextOffset: null,
+    });
+    expect(updated.messages.map((entry) => entry.id)).toEqual([receipt.id]);
+    expect(body.presentation!.liveTools).toHaveLength(3);
+  } finally {
+    f.main.release();
+    f.environment.release();
+  }
+});
+
+for (const corruption of ['foreign', 'future', 'budget', 'partial', 'authority'] as const) {
+  test(`child live Shell facts reject ${corruption} input without relaxing the verified child binding`, async () => {
+    const item = backgroundItem(1, true);
+    const execution = {
+      ...item.execution,
+      id: 'live-shell',
+      kind: 'tool',
+      sessionId: 'child',
+      runId: item.childRun!.id,
+      definitionId: 'shell.execute',
+    };
+    const fact = {
+      messageId: 'native-execution:live-shell',
+      executionId: execution.id,
+      definitionId: 'shell.execute',
+      definitionVersion: '1',
+      status: execution.status,
+      resultRevision: execution.resultRevision,
+      inputSource: {
+        storeId: 'store',
+        sessionId: corruption === 'foreign' ? 'other-child' : 'child',
+        runId: item.childRun!.id,
+        toolCallId: 'original-call',
+      },
+      shellInput: {
+        operation: 'execute',
+        command: corruption === 'budget' ? '雪'.repeat(180000) : 'pwd',
+        commandOffset: 0,
+        commandNextOffset: corruption === 'partial' ? 3 : null,
+      },
+      ...(corruption === 'authority' ? { shellResultVerified: true } : {}),
+    };
+    if (corruption === 'future') fact.definitionVersion = '2';
+    const bytes = Buffer.from(
+      JSON.stringify({
+        item,
+        session: item.childSession!,
+        upperSeq: '0',
+        messages: [],
+        modelOutputs: [],
+        presentation: {
+          runs: [item.childRun!],
+          tools: [],
+          executions: [execution],
+          liveTools: [fact],
+        },
+      }),
+    );
+    const closed: string[] = [];
+    const bridge: NativeBridge = {
+      watch: () => () => {},
+      async request(input) {
+        if (input.method === 'background.child.open')
+          return {
+            kind: 'background.child.opened',
+            viewGeneration: 1,
+            rootSessionId: 'root',
+            viewSelection: 1,
+            storeId: 'store',
+            observationId: 1,
+            readId: input.readId,
+            executionId: item.execution.id,
+            childSessionId: 'child',
+            childRunId: item.childRun!.id,
+            wireBytes: String(bytes.length),
+            wireHash: createHash('sha256').update(bytes).digest('hex'),
+          };
+        if (input.method === 'background.child.read') {
+          const chunk = bytes.subarray(input.offset, input.offset + input.limit);
+          return {
+            kind: 'background.child.chunk',
+            readId: input.readId,
+            offset: input.offset,
+            nextOffset: input.offset + chunk.length,
+            eof: input.offset + chunk.length === bytes.length,
+            data: chunk.toString('base64'),
+          };
+        }
+        if (input.method === 'background.child.close') closed.push(input.readId);
+        return null;
+      },
+    };
+    await expect(
+      readNativeBackgroundChild({
+        bridge,
+        generation: 1,
+        storeId: 'store',
+        observationId: 1,
+        item,
+        signal: new AbortController().signal,
+        isCurrent: () => true,
+        environment: { rootSessionId: 'root', viewSelection: 1 },
+      }),
+    ).rejects.toMatchObject({ code: 'background_child_history_mismatch' });
+    expect(closed).toHaveLength(1);
+  });
+}

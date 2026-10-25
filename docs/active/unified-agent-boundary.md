@@ -74,6 +74,8 @@ Native 消息路径仍受当前已读 Message／viewSelection／history epoch �
 
 Native 普通工具 metadata 由已读 Message 的唯一 source Execution 沿生成 Client GET 核原身份、tool kind、终态、outcome 与准确 content，不借 Message complete 或重复 callId 判成功。当前活动工具只取同 Store／会话／活动 Run 的已观察 Execution；停止申请与终态分开。请求目标仅作文本，不取得 Files receipt 或宿主动作；未知名称／版本不借旧 UI 分类解释。同一阅读身份的普通事件刷新沿 Main 已验证原视图保留 metadata／消息文件读取，明确选择、reset或Store变化仍撤销。所有所属读取沿当前 generation／viewSelection／history epoch 释放，限定产品行为与证据归 [Native owner](../../apps/desktop/README.md#原工具过程与结果阅读)。
 
+Native Shell卡片沿既有metadata读取有界命令分片，完整拼齐并核准确Tool输入后才作为原命令展示；运行中读取仅接受当前Main已观察、同Store／Session活动Run的Tool ID，不能用renderer自报ID跨范围读取。原Tool输入不以Model或receipt完成为前置，可见原调用冲突仍撤销展示资格；准确Job引用与原结果证明后才投影真实输出和完成状态。子详情仅在现有exact-child快照与原分页内提供相同输入展示，不扩主会话读取scope或后台目录／控制DTO。live与当前原receipt的presentationKey仅保持DOM及阅读选择，原消息ID仍负责读取与操作，不从展示别名取得执行、停止或文件权限。分片失败、未知版本及无法核实结果保原文，受理、等待超时和停止请求不解释为Job成功；具体来源、预算和验证由上述Native owner维护。
+
 Native 的原轮次 UI 消费准确公共 Run，不从 Message complete 推最终回复或终态。超出有界 View 的 Run metadata 只由当前已观察、未封存的 Message ID 分批32项经当前 Client GET，核原 Run／Session、Store 连接和阅读scope；已恢复在当前 Store 的 foreign terminal 保原出处仅供展示，foreign active 不取得活动或控制权。Fork／Include 的 `originMessage` 不查询来源 Run 后来的状态。默认 ask_user v1 回执须核原成功 Execution／准确结果，问题仅来自唯一原 Model call；信息取消独立于 Run。原 UI slots 只提供布局、聚合和阅读控制，完整回复复制只接受原 reader 当前已验证并显示的正文，不引入新 Core／HTTP／SQL／持久 UI 格式。实际范围归 [Native owner](../../apps/desktop/README.md#原轮次阅读聚合与问答回执)。
 
 Web 与 Native 共用 UI 纯回复资格投影，沿完整已读、同准确 Run／Session 的未封存助手消息核最终回复。Web 显式整轮正文范围按原 seq 合并普通正文，Native 显式最终段范围保桌面手册、排除同轮工具前说明；各自复制范围内非零 body-backed 段须由当前完整 reader 提供，不从预览、Tool 参数／结果或 child 补齐。Web 的有限 View 外 Run 仅经固定 Cookie GET `/browser/v1/sessions/:sessionId/runs/:runId` 和 `runs` capability 读取同 View 的安全 metadata，核 Session／Run／当前 Store，保合法恢复 origin；配置／token 不公开。关闭／隐藏／暂停／stale 撤销读取或复制资格，Fork／Include 不借来源 Run 后来的状态；没有新增 Core／SQL／执行权限或持久正文缓存。当前边界分别归 [Web owner](../../apps/web/README.md)与 [Native owner](../../apps/desktop/README.md#原轮次阅读聚合与问答回执)。
@@ -88,7 +90,7 @@ Native 原大Model正文将当前连接Store与封存出处分别核实。Servic
 
 总体设计按[V1.3](../plans/unified-agent-refactor-v1.md)实施。当前根 formal/default/CI 调度已使用精确八个新 workspace；新链路不包装旧 Host/Kernel/State，不双写旧数据、不自动 fallback。旧源码与历史测试保留作参考，不进入正式产物或默认调度。各能力完整保真、平台与 §35 最终退役仍须实际证据，静态退出不代表总体完成。
 
-单一 Loop 的完整 Model 工具批次沿现有资源并行调度，每项原输入、权限与决策来源独立核实。Run 结束与 lease release 等待全部已启动调用；后发持久化失败保原错误。显式接续复用非前缀的已结算结果，只有已声明的内部 continuation 可恢复监督，普通未知效果仍拒绝。当前实现与验证归[Agent owner](../../packages/agent/README.md#同一-step-的并行工具批次)。
+单一 Loop 的完整 Model 工具批次沿现有资源并行调度，每项原输入、权限与决策来源独立核实。人工明确拒绝沿原Command取消本轮；自动审核拒绝仅保存准确目标的未派发失败与原因，交回后续Model继续原授权工作，不产生grant、不重投原工具，后续调用仍独立核验。取消、unknown和保存失败仍禁止推进。Run 结束与 lease release 等待全部已启动调用；后发持久化失败保原错误。显式接续复用非前缀的已结算结果，只有已声明的内部 continuation 可恢复监督，普通未知效果仍拒绝。当前实现与验证归[Agent owner](../../packages/agent/README.md#同一-step-的并行工具批次)。
 
 [`ai`](../../packages/ai/README.md)拥有中立模型协议与独立 SDK 适配 leaf；[`agent`](../../packages/agent/README.md)拥有单一 Loop、具名 Store 操作、执行意图/派发/回执、精确取消与显式本地中断。普通扩展只得到受范围限制的调用身份、自有记录和有限 operations，不能写 SQL、owner 或 Runtime 完成事实。Store 是宿主边界，不能作为便利对象传入扩展。Action 不虚构模型 Run，Query 不触发模型、工具或恢复。
 

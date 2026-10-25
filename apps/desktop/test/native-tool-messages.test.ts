@@ -1,9 +1,14 @@
 import { expect, test } from 'bun:test';
 import type { AgentClient, Execution, Message, Run } from '@kite-ai/client';
 import { decodeNativeRequest } from '../electron/native-ipc';
+import { nativeLiveShellInputFact } from '../electron/tool-message-fact';
 import { NativeToolMessages } from '../electron/tool-messages';
-import { authorizationApproval } from '../src/native-tool-messages';
-import type { NativeToolMessageScope } from '../src/tool-messages-bridge';
+import { authorizationApproval, desktopToolMessage } from '../src/native-tool-messages';
+import {
+  type NativeToolMessageScope,
+  nativeShellCommandChunkBytes,
+  nativeToolMessagePageBytes,
+} from '../src/tool-messages-bridge';
 
 function fixture() {
   let scope: NativeToolMessageScope = {
@@ -367,6 +372,32 @@ test('tool receipts outside the bounded View retain exact outcomes and only uniq
     await expect(f.list(['unobserved'])).rejects.toMatchObject({
       code: 'tool_message_unavailable',
     });
+  } finally {
+    f.manager.release();
+  }
+});
+
+test('incomplete or unsupported matching calls remain conflicts before original call readiness is checked', async () => {
+  const f = fixture();
+  f.add('command', 'succeeded', 'run', 'shell.execute');
+  const original = f.messages.get('call-command')!;
+  const duplicate: Message = { ...original, id: 'duplicate-call' };
+  try {
+    expect((await f.list(['command'])).entries[0]!.shellInput?.command).toBe('command 雪🙂');
+    for (const state of [
+      { status: 'incomplete' as const },
+      { contentFormat: 'unsupported' as const },
+    ]) {
+      f.messages.set(duplicate.id, { ...duplicate, ...state });
+      const fact = (await f.list(['command'])).entries[0]!;
+      expect(fact.target).toBeUndefined();
+      expect(fact.shellInput?.command).toBeUndefined();
+      f.messages.delete(duplicate.id);
+      expect((await f.list(['command'])).entries[0]!.shellInput?.command).toBe('command 雪🙂');
+      f.messages.set(original.id, { ...original, ...state });
+      expect((await f.list(['command'])).entries[0]!.shellInput?.command).toBeUndefined();
+      f.messages.set(original.id, original);
+    }
   } finally {
     f.manager.release();
   }
@@ -1085,4 +1116,595 @@ test('new check fact takes precedence over a conflicting legacy review observati
       },
     }),
   ).toMatchObject({ state: 'checking', reason: 'current checker' });
+});
+
+test('known Shell commands use Unicode-safe bounded metadata fragments without changing other metadata budgets', async () => {
+  const f = fixture();
+  const commands = new Map<string, string>();
+  for (let index = 0; index < 32; index++) {
+    const id = `command-${index}`;
+    f.add(id, 'succeeded', id, index % 2 ? 'shell.execute' : 'shell.launch');
+    const command = `printf '\\n'\n${'雪🙂\n\t'.repeat(3000)}\necho ${index}`;
+    commands.set(id, command);
+    const input = { key: id, command };
+    f.messages.get(`call-${id}`)!.toolCalls![0]!.arguments = JSON.stringify(input);
+    f.executions.get(`execution-${id}`)!.toolInput = input;
+  }
+  let offsets: Record<string, number> = {},
+    rounds = 0;
+  const complete = new Map<string, string>();
+  let ids = [...commands.keys()];
+  try {
+    while (ids.length) {
+      const page = await f.manager.list({
+        method: 'toolMessages.list',
+        generation: 1,
+        viewSelection: 2,
+        historyEpoch: 0,
+        readId: crypto.randomUUID(),
+        messageIds: ids,
+        commandOffsets: offsets,
+      });
+      expect(
+        Buffer.byteLength(JSON.stringify(page.entries.map((entry) => entry.shellInput?.command))),
+      ).toBeLessThan(nativeToolMessagePageBytes);
+      expect(Buffer.byteLength(JSON.stringify(page))).toBeLessThan(4 * 1048576);
+      const next: Record<string, number> = {};
+      for (const fact of page.entries) {
+        const input = fact.shellInput!;
+        expect(input.commandOffset).toBe(offsets[fact.messageId] ?? 0);
+        expect(Buffer.byteLength(input.command!)).toBeLessThanOrEqual(nativeShellCommandChunkBytes);
+        expect(Buffer.byteLength(JSON.stringify(input.command!)) - 2).toBeLessThanOrEqual(
+          nativeShellCommandChunkBytes,
+        );
+        expect(input.command).not.toContain('\uFFFD');
+        complete.set(fact.messageId, (complete.get(fact.messageId) ?? '') + input.command!);
+        if (input.commandNextOffset !== null) next[fact.messageId] = input.commandNextOffset!;
+        expect(fact.target).toEndWith('…');
+      }
+      offsets = next;
+      ids = Object.keys(next);
+      expect(++rounds).toBeLessThan(20);
+    }
+    expect(rounds).toBeGreaterThan(1);
+    expect(complete).toEqual(commands);
+
+    f.add('large-ask', 'succeeded', 'large-ask', 'ask_user');
+    const input = { questions: [{ question: 'Question?' }] };
+    f.messages.get('call-large-ask')!.toolCalls![0]!.arguments = JSON.stringify(input);
+    const content = JSON.stringify({ answer: 'a'.repeat(600000), answers: { q1: 'yes' } });
+    f.messages.get('large-ask')!.content = content;
+    f.executions.get('execution-large-ask')!.result = { outcome: 'succeeded', content };
+    const askPage = await f.list(['large-ask']);
+    expect(Buffer.byteLength(JSON.stringify(askPage))).toBeGreaterThan(nativeToolMessagePageBytes);
+    expect(askPage.entries[0]?.ask?.summary).toHaveLength(600000);
+
+    const request = {
+      method: 'toolMessages.list' as const,
+      generation: 1,
+      viewSelection: 2,
+      historyEpoch: 0,
+      readId: 'owned',
+      messageIds: ['command-0'],
+      commandOffsets: { 'command-0': 1 },
+    };
+    expect(decodeNativeRequest(request)).toEqual(request);
+    for (const commandOffsets of [
+      null,
+      [],
+      { other: 0 },
+      { 'command-0': -1 },
+      { 'command-0': 0.5 },
+      { 'command-0': 524289 },
+    ]) {
+      expect(() => decodeNativeRequest({ ...request, commandOffsets })).toThrow(
+        'invalid_native_request',
+      );
+      await expect(f.manager.list({ ...request, commandOffsets } as never)).rejects.toMatchObject({
+        code: 'invalid_native_request',
+      });
+    }
+    await expect(
+      f.manager.list({ ...request, commandOffsets: { 'command-0': 99999 } }),
+    ).rejects.toMatchObject({ code: 'tool_message_command_offset_invalid' });
+    await expect(f.manager.list({ ...request, generation: 2 })).rejects.toMatchObject({
+      code: 'native_selection_changed',
+    });
+    // A rejected read released its lease; the same ID remains reusable.
+    expect(
+      (await f.manager.list({ ...request, commandOffsets: { 'command-0': 0 } })).entries,
+    ).toHaveLength(1);
+  } finally {
+    f.manager.release();
+  }
+});
+
+test('Native Shell facts separate Tool acceptance, exact Job state, ordered output, stop requests and unverified original records', async () => {
+  const f = fixture();
+  const receipt = (
+    operation: string,
+    status: Execution['status'],
+    extra: Record<string, unknown> = {},
+  ) => {
+    const id = `shell-${operation}-${f.executions.size}`;
+    f.add(id, status, id, `shell.${operation}`);
+    const input: Record<string, string> = ['execute', 'launch'].includes(operation)
+      ? { key: id, command: 'printf first\nprintf second\n' }
+      : { shellId: id };
+    f.messages.get(`call-${id}`)!.toolCalls![0]!.arguments = JSON.stringify(input);
+    const execution = f.executions.get(`execution-${id}`)!;
+    execution.toolInput = input;
+    const ref = {
+      key: id,
+      extensionId: 'builtin.shell',
+      sessionId: 's',
+      originStoreId: 'store',
+      commandId: `cmd-${id}`,
+      executionId: `job-${id}`,
+    };
+    const job = {
+      id: ref.executionId,
+      sessionId: 's',
+      originStoreId: 'store',
+      kind: 'job',
+      definitionId: 'shell.command',
+      definitionVersion: '1',
+      status: 'succeeded',
+      result: { outcome: 'succeeded', content: 'Shell succeeded', details: { exitCode: 0 } },
+    };
+    const details: Record<string, unknown> = { ref, execution: job, ...extra };
+    const save = () => {
+      const content = JSON.stringify(details);
+      f.messages.get(id)!.content = content;
+      execution.result = { outcome: status, content, details } as Execution['result'];
+    };
+    save();
+    const read = async () => {
+      const fact = (await f.list([id])).entries[0]!;
+      return { fact, message: desktopToolMessage(fact, id, f.messages.get(id)!.content) };
+    };
+    return { id, execution, details, ref, job, save, read };
+  };
+  try {
+    const foreground = receipt('execute', 'succeeded', {
+      stdout: 'first\nsecond\n',
+      stderr: 'warning\n',
+      stdoutBytes: '13',
+      stderrBytes: '8',
+      droppedBytes: '0',
+      truncated: false,
+      timedOut: false,
+    });
+    expect((await foreground.read()).message).toMatchObject({
+      toolName: 'shell_execute',
+      status: 'completed',
+      shell: {
+        operation: 'execute',
+        command: 'printf first\nprintf second\n',
+        jobStatus: 'succeeded',
+        exitCode: 0,
+        stdout: 'first\nsecond\n',
+        stderr: 'warning\n',
+        outputComplete: true,
+      },
+    });
+    foreground.details.droppedBytes = '2';
+    foreground.save();
+    expect((await foreground.read()).message.shell).toMatchObject({
+      truncated: true,
+      outputComplete: false,
+    });
+
+    const launch = receipt('launch', 'succeeded', { accepted: true, presentation: 'standalone' });
+    launch.details.shellId = launch.id;
+    delete (launch.details as Record<string, unknown>).execution;
+    launch.save();
+    expect((await launch.read()).message.shell).toEqual({
+      operation: 'launch',
+      accepted: true,
+      shellId: launch.id,
+      command: 'printf first\nprintf second\n',
+    });
+
+    const read = receipt('read', 'succeeded');
+    read.job.status = 'running';
+    read.job.result = null as never;
+    read.details.output = {
+      highWaterSeq: '4',
+      items: [
+        {
+          executionId: read.ref.executionId,
+          seq: '1',
+          throughSeq: '1',
+          stream: 'stdout',
+          content: 'one\n',
+          droppedBytes: null,
+        },
+        {
+          executionId: read.ref.executionId,
+          seq: '2',
+          throughSeq: '2',
+          stream: 'stderr',
+          content: 'two\n',
+          droppedBytes: null,
+        },
+        {
+          executionId: read.ref.executionId,
+          seq: '3',
+          throughSeq: '3',
+          stream: 'stdout',
+          content: 'three\n',
+          droppedBytes: null,
+        },
+      ],
+    };
+    read.save();
+    expect((await read.read()).message).toMatchObject({
+      status: 'completed',
+      shell: {
+        operation: 'read',
+        jobStatus: 'running',
+        stdout: 'one\nthree\n',
+        stderr: 'two\n',
+        output: 'one\ntwo\nthree\n',
+        outputComplete: false,
+      },
+    });
+    const wait = receipt('wait', 'succeeded', { timedOut: true });
+    wait.job.status = 'running';
+    wait.job.result = null as never;
+    wait.save();
+    expect((await wait.read()).message.shell).toMatchObject({
+      operation: 'wait',
+      jobStatus: 'running',
+      timedOut: true,
+      outputComplete: false,
+    });
+    const stop = receipt('stop', 'succeeded', { cancelRequested: true });
+    stop.job.status = 'running';
+    stop.job.result = null as never;
+    stop.save();
+    expect((await stop.read()).message.shell).toMatchObject({
+      operation: 'stop',
+      jobStatus: 'running',
+      cancelRequested: true,
+    });
+
+    const timeout = receipt('execute', 'failed', {
+      timedOut: true,
+      stdout: '',
+      stderr: 'deadline',
+      stdoutBytes: '0',
+      stderrBytes: '8',
+      droppedBytes: '0',
+      truncated: false,
+    });
+    timeout.job.status = 'cancelled';
+    timeout.job.result = {
+      outcome: 'cancelled',
+      content: 'Shell cancelled',
+      details: { exitCode: 143 },
+    };
+    timeout.save();
+    expect((await timeout.read()).message).toMatchObject({
+      status: 'failed',
+      shell: { jobStatus: 'cancelled', timedOut: true, exitCode: 143 },
+    });
+    const observed = receipt('execute', 'cancelled', { cancellationObserved: true });
+    observed.job.status = 'cancelled';
+    observed.job.result = {
+      outcome: 'cancelled',
+      content: 'Shell cancelled',
+      details: { exitCode: 143 },
+    };
+    observed.save();
+    expect((await observed.read()).message.shell).toMatchObject({
+      jobStatus: 'cancelled',
+      outputComplete: false,
+    });
+    expect((await observed.read()).message.shell?.stdout).toBeUndefined();
+
+    const unknown = receipt('execute', 'outcome_unknown', {
+      stdout: 'partial\n',
+      stderr: '',
+      stdoutBytes: '8',
+      stderrBytes: '0',
+      droppedBytes: '0',
+      truncated: false,
+      timedOut: false,
+    });
+    unknown.job.status = 'outcome_unknown';
+    unknown.job.result = {
+      outcome: 'outcome_unknown',
+      content: 'stop unconfirmed',
+      details: { exitCode: 0 },
+    };
+    unknown.save();
+    expect((await unknown.read()).message).toMatchObject({
+      status: 'unknown',
+      shell: { jobStatus: 'outcome_unknown', stdout: 'partial\n' },
+    });
+    const malformed = receipt('execute', 'succeeded', {
+      stdout: '',
+      stderr: '',
+      stdoutBytes: '100',
+      stderrBytes: '0',
+      droppedBytes: '0',
+      truncated: false,
+      timedOut: false,
+    });
+    const invalid = await malformed.read();
+    expect(invalid.message.shell?.jobStatus).toBeUndefined();
+    expect(invalid.message.shell?.outputComplete).toBeUndefined();
+    expect(invalid.message.text).toBe(f.messages.get(malformed.id)!.content);
+    (malformed.execution.result as { details: unknown }).details = { different: true };
+    expect((await malformed.read()).fact.shellResultVerified).toBeUndefined();
+
+    for (const mutate of [
+      () => {
+        foreground.ref.originStoreId = 'foreign';
+      },
+      () => {
+        foreground.ref.originStoreId = 'store';
+        foreground.job.id = 'other-job';
+      },
+      () => {
+        foreground.job.id = foreground.ref.executionId;
+        foreground.job.definitionVersion = '9';
+      },
+      () => {
+        foreground.job.definitionVersion = '1';
+        foreground.job.result.outcome = 'failed';
+      },
+    ]) {
+      mutate();
+      foreground.save();
+      const result = await foreground.read();
+      expect(result.message.shell?.operation).toBe('execute');
+      expect(result.message.shell?.jobStatus).toBeUndefined();
+      expect(result.message.text).toBe(f.messages.get(foreground.id)!.content);
+    }
+    foreground.execution.definitionVersion = '9';
+    foreground.save();
+    expect((await foreground.read()).message.shell).toBeUndefined();
+    expect((await foreground.read()).message.toolName).toBeUndefined();
+  } finally {
+    f.manager.release();
+  }
+});
+
+test('large Shell input belongs to the exact saved Tool even before Model history completes; visible conflicts remain disqualifying', async () => {
+  const f = fixture();
+  const id = 'large-original';
+  f.add(id, 'succeeded', id, 'shell.execute');
+  const call = f.messages.get(`call-${id}`)!,
+    execution = f.executions.get(`execution-${id}`)!;
+  const command = `echo start\n${'雪🙂'.repeat(40000)}\necho end`;
+  expect(Buffer.byteLength(command)).toBeGreaterThan(65536);
+  call.toolCalls = [];
+  call.sourceIds = ['model-original'];
+  call.outputBody = {
+    kind: 'model_output',
+    executionId: 'model-original',
+    complete: true,
+    contentBytes: '0',
+    reasoningBytes: '0',
+    toolCallCount: 1,
+  };
+  // Ordinary Run Tools have no source-Model parentExecutionId.
+  execution.parentExecutionId = null;
+  execution.toolCallId = 'repeated';
+  execution.toolInput = { key: id, command };
+  const request = {
+    method: 'toolMessages.list' as const,
+    generation: 1,
+    viewSelection: 2,
+    historyEpoch: 0,
+    readId: 'large',
+    messageIds: [id],
+  };
+  try {
+    let content = '',
+      offset = 0;
+    do {
+      const fact = (await f.manager.list({ ...request, commandOffsets: { [id]: offset } }))
+        .entries[0]!;
+      expect(fact.shellInput?.commandOffset).toBe(offset);
+      expect(fact.shellInput?.command).not.toContain('\uFFFD');
+      content += fact.shellInput!.command;
+      if (fact.shellInput!.commandNextOffset === null) break;
+      offset = fact.shellInput!.commandNextOffset!;
+    } while (offset < command.length);
+    expect(content).toBe(command);
+    const baseline = structuredClone({ call, execution });
+    for (const mutate of [
+      () => {
+        call.outputBody!.complete = false;
+      },
+      () => {
+        call.outputBody!.toolCallCount = 0;
+      },
+      () => {
+        call.outputBody!.readAvailability = 'unsupported';
+      },
+      () => {
+        call.outputBody!.executionId = 'another-model';
+      },
+      () => {
+        call.status = 'incomplete';
+      },
+      () => {
+        delete call.outputBody;
+      },
+    ]) {
+      Object.assign(call, structuredClone(baseline.call));
+      Object.assign(execution, structuredClone(baseline.execution));
+      mutate();
+      expect((await f.manager.list(request)).entries[0]!.shellInput?.command).toBeDefined();
+    }
+    for (const mutate of [
+      () => {
+        execution.toolCallId = 'another-call';
+      },
+      () => {
+        call.toolCalls = [
+          {
+            id: 'repeated',
+            name: 'shell.execute',
+            arguments: JSON.stringify({ key: id, command: 'different' }),
+          },
+        ];
+      },
+      () => {
+        call.toolCalls = [
+          { id: 'repeated', name: 'shell.launch', arguments: JSON.stringify({ key: id, command }) },
+        ];
+      },
+      () => {
+        execution.definitionVersion = '9';
+      },
+    ]) {
+      Object.assign(call, structuredClone(baseline.call));
+      Object.assign(execution, structuredClone(baseline.execution));
+      mutate();
+      const fact = (await f.manager.list(request)).entries[0]!;
+      expect(fact.shellInput?.command).toBeUndefined();
+    }
+    Object.assign(call, structuredClone(baseline.call));
+    Object.assign(execution, structuredClone(baseline.execution));
+    execution.parentExecutionId = 'child-job-carrier';
+    expect((await f.manager.list(request)).entries[0]!.shellInput?.command).toBeDefined();
+    f.messages.get(id)!.seq = '100';
+    f.messages.set('later-model', {
+      id: 'later-model',
+      seq: '50',
+      role: 'assistant',
+      status: 'complete',
+      sessionId: 's',
+      runId: id,
+      content: 'ordinary later prose',
+    });
+    expect((await f.manager.list(request)).entries[0]!.shellInput?.command).toBeDefined();
+    f.messages.delete('later-model');
+    const prefix = command.indexOf('🙂');
+    await expect(
+      f.manager.list({ ...request, commandOffsets: { [id]: prefix + 1 } }),
+    ).rejects.toMatchObject({ code: 'tool_message_command_offset_invalid' });
+  } finally {
+    f.manager.release();
+  }
+});
+
+test('live Shell request reads use only exact observed Tools and bounded command pages without outcome or authority projection', async () => {
+  const f = fixture();
+  f.add('live-input', 'planned', 'active-run', 'shell.execute');
+  const execution = f.executions.get('execution-live-input')!;
+  const command = `printf start\n${'雪🙂\n'.repeat(7000)}\nprintf end`;
+  execution.toolCallId = 'actual-live-call';
+  execution.toolInput = { command, key: 'work' };
+  let observed: Execution[] = [execution];
+  const manager = new NativeToolMessages(
+    f.client,
+    () => f.scope,
+    () => f.messages,
+    () => observed,
+  );
+  const request = {
+    method: 'toolMessages.list' as const,
+    generation: 1,
+    viewSelection: 2,
+    historyEpoch: 0,
+    readId: 'live-read',
+    messageIds: [],
+    executionIds: [execution.id],
+  };
+  try {
+    let text = '',
+      offset = 0,
+      pages = 0;
+    do {
+      const page = await manager.list({
+        ...request,
+        commandOffsets: { [`native-execution:${execution.id}`]: offset },
+      });
+      const fact = page.entries[0]!;
+      expect(Buffer.byteLength(JSON.stringify(page))).toBeLessThan(524288);
+      expect(fact.messageId).toBe(`native-execution:${execution.id}`);
+      expect(fact.inputSource).toEqual({
+        storeId: 'store',
+        sessionId: 's',
+        runId: 'active-run',
+        toolCallId: 'actual-live-call',
+      });
+      expect(fact.status).toBe('planned');
+      expect(fact.authorization).toBeUndefined();
+      expect(fact.shellResultVerified).toBeUndefined();
+      expect(fact.shellInput?.commandOffset).toBe(offset);
+      expect(fact.shellInput?.command).not.toContain('\uFFFD');
+      expect(Buffer.byteLength(fact.shellInput!.command!)).toBeLessThanOrEqual(8192);
+      text += fact.shellInput!.command;
+      pages++;
+      if (fact.shellInput!.commandNextOffset === null) break;
+      offset = fact.shellInput!.commandNextOffset!;
+    } while (pages < 20);
+    expect(text).toBe(command);
+    expect(pages).toBeGreaterThan(1);
+    execution.status = 'running';
+    execution.authorization = {
+      dispatched: false,
+      check: {
+        executionId: 'check',
+        status: 'running',
+        decision: 'unavailable',
+        reason: 'checking',
+        requireApproval: true,
+      },
+    };
+    expect((await manager.list(request)).entries[0]!.shellInput?.command).toBeDefined();
+    expect((await manager.list(request)).entries[0]!.authorization).toBeUndefined();
+    expect(decodeNativeRequest(request)).toEqual(request);
+    for (const change of [
+      { messageIds: ['receipt'] },
+      { executionIds: [] },
+      { executionIds: [execution.id, execution.id] },
+      { executionIds: Array(33).fill('tool') },
+      { commandOffsets: { [execution.id]: 0 } },
+    ])
+      expect(() => decodeNativeRequest({ ...request, ...change })).toThrow(
+        'invalid_native_request',
+      );
+    const reads = f.reads.length;
+    await expect(manager.list({ ...request, executionIds: ['foreign'] })).rejects.toMatchObject({
+      code: 'tool_message_unavailable',
+    });
+    expect(f.reads).toHaveLength(reads);
+    observed = [{ ...execution, definitionVersion: '9' }];
+    expect((await manager.list(request)).entries).toEqual([]);
+    expect(f.reads).toHaveLength(reads);
+    expect(nativeLiveShellInputFact({ ...execution, kind: 'job' })).toBeUndefined();
+    observed = [{ ...execution }];
+    f.executions.set(execution.id, { ...execution, originStoreId: 'foreign' });
+    await expect(manager.list(request)).rejects.toMatchObject({
+      code: 'tool_message_identity_mismatch',
+    });
+    f.executions.set(execution.id, execution);
+    let finish!: (value: Execution) => void, signal: AbortSignal | undefined;
+    f.client.getExecution = async (_id, options) => {
+      signal = options?.signal;
+      return new Promise<Execution>((resolve) => {
+        finish = resolve;
+      });
+    };
+    const pending = manager.list({ ...request, readId: 'cancel-input' });
+    const rejected = pending.catch((error: unknown) => error);
+    await Promise.resolve();
+    await Promise.resolve();
+    manager.close('cancel-input');
+    expect(signal?.aborted).toBe(true);
+    finish(execution);
+    expect(await rejected).toMatchObject({ code: 'native_selection_changed' });
+  } finally {
+    manager.release();
+    f.manager.release();
+  }
 });

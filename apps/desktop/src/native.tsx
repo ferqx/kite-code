@@ -1164,8 +1164,9 @@ function NativeDesktopContent({
         readingParent ? state?.selection : undefined,
         displayMessages,
         executionUnconfirmed,
+        toolMessages.entries,
       ),
-    [readingParent, state?.selection, displayMessages, executionUnconfirmed],
+    [readingParent, state?.selection, displayMessages, executionUnconfirmed, toolMessages.entries],
   );
   const runMessages = useNativeRuns({
     bridge,
@@ -3319,8 +3320,48 @@ function NativeDesktopContent({
     group,
     controls,
   ) => {
+    const aggregate = !!group[0]?.presentationGroupId || group.length > 1;
     const displayTools = toolMessages.entries;
     const displayTargets = fileTargets.entries;
+    const agentProps = (model: (typeof group)[number]) => {
+      const activity = nativeAgentActivityForTool(
+        environment.agentActivities,
+        messages.find((message) => message.id === model.id),
+        displayTools.find((entry) => entry.messageId === model.id),
+      );
+      return {
+        childAgent: activity?.childAgent,
+        childDetail:
+          activity && childReadAvailable
+            ? {
+                label: activity.childAgent.name,
+                onOpen: () =>
+                  setChildTabRequest({
+                    parent: childParent,
+                    requestId: ++childTabSequence.current,
+                    sessionId: activity.sessionId,
+                    executionId: activity.executionId,
+                    title: activity.childAgent.name,
+                  }),
+              }
+            : undefined,
+      };
+    };
+    const agentTool = (model: (typeof group)[number]) => {
+      const props = agentProps(model);
+      return props.childAgent ? (
+        <ToolActivity
+          {...props}
+          aggregate={false}
+          messages={[model]}
+          expanded={controls.expandedItems[model.presentationKey ?? model.id]}
+          onToggle={(open) => controls.onToggleItem(model.presentationKey ?? model.id, open)}
+          activityId={model.presentationKey ?? model.id}
+          restoredExpanded={controls.restoredExpanded}
+          renderChildren={() => null}
+        />
+      ) : undefined;
+    };
     const unverified = new Set(
       group
         .filter(
@@ -3347,62 +3388,33 @@ function NativeDesktopContent({
         </p>
       ) : null;
     });
-    if (unverified.size) {
-      // A receipt can arrive before its presentation metadata. Keep the
-      // original reader behind an explicit expansion instead of briefly
-      // publishing its result JSON as ordinary conversation text.
-      const originalTool = (
-        model: (typeof group)[number],
-        expanded: boolean | undefined,
-        onToggle: (open: boolean) => void,
-      ) => (
-        <ToolActivity
-          unverified
-          messages={[{ ...model, toolName: undefined, title: model.title ?? '工具结果', text: '' }]}
-          expanded={expanded}
-          onToggle={onToggle}
-          activityId={group.length === 1 ? controls.activityId : model.id}
-          restoredExpanded={controls.restoredExpanded}
-          renderChildren={() => renderNativeMessage(model)}
-        />
-      );
-      if (group.length === 1)
-        return (
-          <>
-            {originalTool(group[0]!, controls.expanded, controls.onToggle)}
-            {liveNotices}
-          </>
-        );
-      return (
-        <>
-          <ToolActivity
-            {...controls}
-            unverified
-            messages={group.map((model) =>
-              unverified.has(model.id)
-                ? {
-                    ...model,
-                    title: model.title ?? '工具结果',
-                    text: '',
-                  }
-                : model,
-            )}
-            renderItem={(model) =>
-              unverified.has(model.id)
-                ? originalTool(
-                    group.find((original) => original.id === model.id)!,
-                    controls.expandedItems[model.id],
-                    (open) => controls.onToggleItem(model.id, open),
-                  )
-                : undefined
-            }
-            renderChildren={() => null}
-          />
-          {liveNotices}
-        </>
-      );
-    }
+    // Each receipt owns its verification and reader independently. An unknown
+    // sibling must not withdraw another tool's verified file actions or output.
+    const originalTool = (
+      model: (typeof group)[number],
+      expanded: boolean | undefined,
+      onToggle: (open: boolean) => void,
+    ) => (
+      <ToolActivity
+        aggregate={false}
+        unverified
+        metadataPending={toolMessages.pendingMessageIds.has(model.id)}
+        messages={[{ ...model, toolName: undefined, title: model.title ?? '工具结果', text: '' }]}
+        expanded={expanded}
+        onToggle={onToggle}
+        activityId={
+          !aggregate && group.length === 1
+            ? controls.activityId
+            : (model.presentationKey ?? model.id)
+        }
+        restoredExpanded={controls.restoredExpanded}
+        renderChildren={() => renderNativeMessage(model)}
+      />
+    );
+    if (!aggregate && group.length === 1 && unverified.has(group[0]!.id))
+      return originalTool(group[0]!, controls.expanded, controls.onToggle);
     const models = group.map((model) => {
+      if (unverified.has(model.id)) return { ...model, title: model.title ?? '工具结果', text: '' };
       const target = displayTargets.find((entry) => entry.messageId === model.id);
       return target?.path && target.operation
         ? {
@@ -3417,32 +3429,22 @@ function NativeDesktopContent({
           }
         : model;
     });
-    const agentModel = group.length === 1 ? group[0] : undefined;
-    const agentActivity = nativeAgentActivityForTool(
-      environment.agentActivities,
-      messages.find((message) => message.id === agentModel?.id),
-      displayTools.find((entry) => entry.messageId === agentModel?.id),
-    );
     return (
       <>
         <ToolActivity
           {...controls}
+          {...(!aggregate && group[0] ? agentProps(group[0]) : {})}
+          aggregate={aggregate}
+          unverified={unverified.size > 0}
           messages={models}
-          childAgent={agentActivity?.childAgent}
-          childDetail={
-            agentActivity && childReadAvailable
-              ? {
-                  label: agentActivity.childAgent.name,
-                  onOpen: () =>
-                    setChildTabRequest({
-                      parent: childParent,
-                      requestId: ++childTabSequence.current,
-                      sessionId: agentActivity.sessionId,
-                      executionId: agentActivity.executionId,
-                      title: agentActivity.childAgent.name,
-                    }),
-                }
-              : undefined
+          renderItem={(model) =>
+            unverified.has(model.id)
+              ? originalTool(
+                  group.find((original) => original.id === model.id)!,
+                  controls.expandedItems[model.presentationKey ?? model.id],
+                  (open) => controls.onToggleItem(model.presentationKey ?? model.id, open),
+                )
+              : agentTool(model)
           }
           renderChildren={() => null}
           openFileForMessage={(model) => {

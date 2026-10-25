@@ -164,7 +164,7 @@ Job.start 的可选只读 `dispatchAuthorization` 来自资源等待后的最终
 
 child 在实际激活时持久保存 `deadlineAt=startedAt+1_800_000`，根 Run 的 `deadlineAt=null`。Runtime 计时器与 SQL 最后派发使用同一固定期限，到期按真实 Run 提交取消并停止 attached 域；已激活独立 child 与 detached Job 保持自己的适用域。迟到 partial、终态或 unknown 可以保存，不能启动新工作。没有公开短期限或累计 token/Tool/attempt 额度。期限 owner 与真实持续等待证据见[child README](test/isolated/child/README.md)。
 
-审批与问题的权威事实由[Interaction 事务](src/storage/sqlite/interactions/README.md)保存。宿主权限判断可返回 `approval`，Core 在获取 Tool/Job 资源前登记准确参数、定义版本、policy revision、来源和必要 refs；等待不持有该执行资源。超过有限卡预算的完整人工请求由可信 sealer 发布到准确原 Execution scope Artifact，有限卡复用 `policy.review` 完整附件协议；接受及最终授权均核原内容与当前准确 policy/input，卡预算不扩大，正文不截断。根入口回答保存同一请求的答案，实际 owner 复核当前权限和新鲜度后接纳，`markDispatching` 还要求准确决定引用。子请求从真实 ancestry 派生根展示投影，公开 child 入口不能直接回答。拒绝只取消该请求的原工作身份；批准、接纳和执行是不同事实。`ToolContext.requestInput` 登记当前已派发 attempt 的有界问题，使用实际每 Run permission binding 与 control-read stamp，schema 校验和接纳后返回信息，不获得其他执行权限；等待期间 stamp 漂移拒绝接受，迟到答案保留历史而不复活取消的工作。
+审批与问题的权威事实由[Interaction 事务](src/storage/sqlite/interactions/README.md)保存。宿主权限判断可返回 `approval`，Core 在获取 Tool/Job 资源前登记准确参数、定义版本、policy revision、来源和必要 refs；等待不持有该执行资源。超过有限卡预算的完整人工请求由可信 sealer 发布到准确原 Execution scope Artifact，有限卡复用 `policy.review` 完整附件协议；接受及最终授权均核原内容与当前准确 policy/input，卡预算不扩大，正文不截断。根入口回答保存同一请求的答案，实际 owner 复核当前权限和新鲜度后接纳，`markDispatching` 还要求准确决定引用。子请求从真实 ancestry 派生根展示投影，公开 child 入口不能直接回答。人工明确拒绝只取消该请求的原工作身份；批准、接纳和执行是不同事实。`ToolContext.requestInput` 登记当前已派发 attempt 的有界问题，使用实际每 Run permission binding 与 control-read stamp，schema 校验和接纳后返回信息，不获得其他执行权限；等待期间 stamp 漂移拒绝接受，迟到答案保留历史而不复活取消的工作。
 
 纯 [ask_user](src/tools/ask-user/index.ts) 区分准确执行取消与整 Run 取消：只认相同本执行 signal.reason 的已定义取消代码，或 [InteractionGate](src/execution/interactions.ts) 从已保存、准确同 Scope 的 cancelled Question 生成的类型化证据。该叶返回真实取消信息并让同 Run 继续；空答案取消和整 Run Ctrl+C 保原行为，foreign／错误 kind／未确认的 abort 不借此变成成功。Core 通用已尝试适配器的 unknown 分类不变，不能将无副作用问答的有限证据推广到文件、Shell 或网络效果。
 
@@ -273,9 +273,9 @@ Runtime 公开 `listMessages/getView` 对已接收普通邮件只读验证原 Co
 
 ## 同一 Step 的并行工具批次
 
-默认产品权限使用可信 `toolDispatchOrder: model`：同一 Model 批次按声明顺序完成准入，前项等待人工决定时后项不派发；实际准入后各 Tool 的执行仍并发，拒绝终止未准入兄弟而不伪造其效果。策略进入原冻结 Run 配置并参与恢复核对，Model 输入不能选择该标记。自定义 Permissions 未声明它时保持下述独立并行行为与已开始调用的清理约束；真实乱序、接续及 T048 能力不由 TUI 推造。
+默认产品权限使用可信 `toolDispatchOrder: model`：同一 Model 批次按声明顺序完成准入，前项等待人工决定时后项不派发；实际准入后各 Tool 的执行仍并发，人工明确拒绝终止未准入兄弟而不伪造其效果。策略进入原冻结 Run 配置并参与恢复核对，Model 输入不能选择该标记。自定义 Permissions 未声明它时保持下述独立并行行为与已开始调用的清理约束；真实乱序、接续及 T048 能力不由 TUI 推造。
 
-[唯一 Loop](src/loop.ts)在完整 Model 回复后并行推进该批工具。Runtime 在任何工具派发前按原声明顺序登记全部 source requests，各调用冻结自己的完整输入、来源和 bindings，再沿现有权限、freshness、串行键与槽位检查执行；没有新增工具数量或累计预算。拒绝或未知结果停止该批，已启动的调用全部结束后才允许 Run 终结和 binding release。独立的后发持久化失败保留真实错误，不能被首个业务失败覆盖；同一 abort reason 的传播不虚构第二次独立失败。
+[唯一 Loop](src/loop.ts)在完整 Model 回复后并行推进该批工具。Runtime 在任何工具派发前按原声明顺序登记全部 source requests，各调用冻结自己的完整输入、来源和 bindings，再沿现有权限、freshness、串行键与槽位检查执行；没有新增工具数量或累计预算。人工明确拒绝或未知结果停止该批，已启动的调用全部结束后才允许 Run 终结和 binding release。自动审核拒绝保为目标工具未派发的权限失败，不取消原任务；原拒绝原因随配对结果交回模型，后续工具继续各自核权限，不能绕过拒绝。独立的后发持久化失败保留真实错误，不能被首个业务失败覆盖；同一 abort reason 的传播不虚构第二次独立失败。
 
 Message 和 Execution 保留实际保存顺序。modelMessages 排除未完成 Model 消息，只在同一 assistant 的结果位置按原 call ID 配对完整 Tool 结果。恢复保 planned A 与 settled B 的混合边界；B 不重放，A 保原身份与审批。提前封存的可信 continuation 可接回仍在监督的内部操作；普通有副作用 Tool、外部 Job 和 unknown 不能由此自动重试。
 
@@ -296,6 +296,8 @@ Operation 等待共享持久变化水位，最多 64 个活动 wake registration
 [真实两进程闭环](../../tests/isolated/unified-agent/persistence.test.ts)将外部计数工具编译到临时独立目录，执行后关闭进程，新进程只读查同一结果且计数不增。固定模型与无害计数器不调用付费 Provider。存储测试位于[test](test)，架构检查通过 `bun run check:unified-agent-boundary`。
 
 [独立未见 label-station](../../tests/isolated/unified-agent/evolution-unseen-sample.test.ts)以公开 `extensions`、Runtime、SQLite/Store 入口注册普通 Tool/Action/Query，自有 resource 和 namespace CAS 回执，不修改 Loop/Session/schema/router。源码外真实通用 UI 点击、HTTP、受控 Tool 两次效果、读回与再次操作1项67断言通过，Action/Tool 拒绝均零效果、Model/Run为零；12个列明核心/公开基线 hash 保持原值。独立包声明依赖，测试使用已安装 npm 模块而非新 npm 安装；本机有限 E01/E02/E03/E14 的 Evolution Record、原 ID 和未验证范围归[当前进度](../../docs/plans/unified-agent-refactor-v1-progress.md#2026-10-04mcp-冷原申请备份-v8-与未见扩展样本)，不把它作为全部演进或发行资格。
+
+[自动拒绝分流决定](../../.agents/notes/implemented/bug-fix/2026-10-25-automatic-rejection-preserves-authorized-work.md)说明自动审核与人工拒绝的不同边界。`agentContractSource`另要求只读分析不制造项目占位或报告，拒绝不授权更换工具／路径重试同一效果；该指引不授派发权限，也不保证模型永不误调用。
 
 [授权审查回归](test/isolated/execution/authorization-check.test.ts)使用真实 SQLite 与固定模型核实单次批准、无效输出/失败人工回退、策略及来源变化零效果、精准取消、资源内禁止等待、单子 Agent 槽位内审查和冷 planned 事实只读；冷读取证明不自动派发，不代替真实进程强杀恢复资格。
 

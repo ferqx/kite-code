@@ -1,4 +1,4 @@
-import { type AgentClient, ClientError, type Message } from '@kite-ai/client';
+import { type AgentClient, ClientError, type Execution, type Message } from '@kite-ai/client';
 import {
   modelUsageMessageKey,
   type NativeContextUsagePage,
@@ -7,9 +7,14 @@ import {
   type NativeToolMessageRequest,
   type NativeToolMessageScope,
   type NativeToolRunPage,
+  nativeToolMessagePageBytes,
   presentableRun,
 } from '../src/tool-messages-bridge';
-import { nativeToolMessageEligible, nativeToolMessageFact } from './tool-message-fact';
+import {
+  nativeLiveShellInputFact,
+  nativeToolMessageEligible,
+  nativeToolMessageFact,
+} from './tool-message-fact';
 
 type Lease = { readId: string; scope: NativeToolMessageScope; abort: AbortController };
 const object = (value: unknown): Record<string, unknown> | undefined =>
@@ -27,14 +32,17 @@ export class NativeToolMessages {
   private readonly client: AgentClient;
   private readonly current: () => NativeToolMessageScope | undefined;
   private readonly messages: () => ReadonlyMap<string, Message>;
+  private readonly liveExecutions: () => readonly Execution[];
   constructor(
     client: AgentClient,
     current: () => NativeToolMessageScope | undefined,
     messages: () => ReadonlyMap<string, Message>,
+    liveExecutions: () => readonly Execution[] = () => [],
   ) {
     this.client = client;
     this.current = current;
     this.messages = messages;
+    this.liveExecutions = liveExecutions;
   }
   private check(lease: Lease) {
     const now = this.current();
@@ -51,15 +59,21 @@ export class NativeToolMessages {
       throw new ClientError('native_selection_changed');
   }
   private open(input: Extract<NativeToolMessageRequest, { messageIds: string[] }>): Lease {
+    const ids =
+      'executionIds' in input && input.executionIds !== undefined
+        ? input.executionIds
+        : input.messageIds;
     if (
-      input.messageIds.length < 1 ||
-      input.messageIds.length > 32 ||
-      new Set(input.messageIds).size !== input.messageIds.length
+      ids.length < 1 ||
+      ids.length > 32 ||
+      new Set(ids).size !== ids.length ||
+      ('executionIds' in input && input.executionIds !== undefined && input.messageIds.length !== 0)
     )
       throw new ClientError('invalid_native_request');
     const scope = this.current();
     if (
       !scope ||
+      scope.generation !== input.generation ||
       scope.viewSelection !== input.viewSelection ||
       scope.historyEpoch !== input.historyEpoch
     )
@@ -313,12 +327,80 @@ export class NativeToolMessages {
   async list(
     input: Extract<NativeToolMessageRequest, { method: 'toolMessages.list' }>,
   ): Promise<NativeToolMessagePage> {
+    if (
+      input.executionIds !== undefined &&
+      (!Array.isArray(input.executionIds) ||
+        input.executionIds.length < 1 ||
+        input.executionIds.length > 32 ||
+        input.messageIds.length !== 0 ||
+        new Set(input.executionIds).size !== input.executionIds.length)
+    )
+      throw new ClientError('invalid_native_request');
+    const commandIds =
+      input.executionIds?.map((id) => `native-execution:${id}`) ?? input.messageIds;
+    if (
+      input.commandOffsets !== undefined &&
+      (!input.commandOffsets ||
+        typeof input.commandOffsets !== 'object' ||
+        Array.isArray(input.commandOffsets) ||
+        Object.entries(input.commandOffsets).some(
+          ([id, offset]) =>
+            !commandIds.includes(id) ||
+            !Number.isSafeInteger(offset) ||
+            offset < 0 ||
+            offset > 524288,
+        ))
+    )
+      throw new ClientError('invalid_native_request');
     const lease = this.open(input),
       { scope } = lease;
     try {
       await this.client.verifyConnection({ signal: lease.abort.signal });
       this.check(lease);
       const entries: NativeToolMessagePage['entries'] = [];
+      for (const id of input.executionIds ?? []) {
+        const observed = this.liveExecutions().find((execution) => execution.id === id);
+        if (
+          observed?.kind !== 'tool' ||
+          observed.originStoreId !== scope.storeId ||
+          observed.sessionId !== scope.sessionId ||
+          !observed.runId
+        )
+          throw new ClientError('tool_message_unavailable');
+        if (
+          observed.definitionVersion !== '1' ||
+          !['shell.execute', 'shell.launch', 'shell.read', 'shell.wait', 'shell.stop'].includes(
+            observed.definitionId,
+          )
+        )
+          continue;
+        const execution = await this.client.getExecution(id, { signal: lease.abort.signal });
+        this.check(lease);
+        const current = this.liveExecutions().find((item) => item.id === id);
+        if (
+          !current ||
+          [
+            'id',
+            'kind',
+            'originStoreId',
+            'sessionId',
+            'runId',
+            'definitionId',
+            'definitionVersion',
+            'toolCallId',
+          ].some(
+            (key) =>
+              execution[key as keyof Execution] !== observed[key as keyof Execution] ||
+              current[key as keyof Execution] !== observed[key as keyof Execution],
+          )
+        )
+          throw new ClientError('tool_message_identity_mismatch');
+        const fact = nativeLiveShellInputFact(
+          execution,
+          input.commandOffsets?.[`native-execution:${id}`] ?? 0,
+        );
+        if (fact) entries.push(fact);
+      }
       for (const id of input.messageIds) {
         const message = this.messages().get(id);
         if (!message || message.sessionId !== scope.sessionId)
@@ -333,12 +415,26 @@ export class NativeToolMessages {
           message,
           messages: this.messages().values(),
           sessionId: scope.sessionId,
+          commandOffset: input.commandOffsets?.[id] ?? 0,
         });
         if (fact) entries.push(fact);
       }
       await this.client.verifyConnection({ signal: lease.abort.signal });
       this.check(lease);
-      return { kind: 'toolMessages.page', readId: input.readId, scope: { ...scope }, entries };
+      const page: NativeToolMessagePage = {
+        kind: 'toolMessages.page',
+        readId: input.readId,
+        scope: { ...scope },
+        entries,
+      };
+      // Only the newly added command transport gets this stricter budget. Existing
+      // ask/image metadata retains the IPC response limit it already had.
+      if (
+        Buffer.byteLength(JSON.stringify(entries.map((entry) => entry.shellInput?.command))) >
+        nativeToolMessagePageBytes
+      )
+        throw new ClientError('tool_message_page_too_large');
+      return page;
     } finally {
       this.close(input.readId);
     }

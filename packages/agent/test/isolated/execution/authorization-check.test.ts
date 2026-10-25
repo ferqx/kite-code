@@ -338,6 +338,7 @@ async function fixture(
   return {
     store,
     runtime,
+    model,
     expectedStoreId,
     effects: () => effects,
     async close() {
@@ -561,7 +562,7 @@ test('policy revision changes while the actual checker is running cannot grant t
   }
 });
 
-test('reject cancels the original work without target I/O or human fabrication', async () => {
+test('a checker rejection refuses its Tool without cancelling authorized work or fabricating human approval', async () => {
   const f = await fixture({
     async *stream() {
       yield { type: 'text_delta', text: '{"decision":"reject","reason":"bounded check rejects"}' };
@@ -576,7 +577,25 @@ test('reject cancels the original work without target I/O or human fabrication',
         .interactions,
     ).toHaveLength(0);
     const target = (await f.store.listExecutions('s')).find((value) => value.kind === 'tool')!;
-    expect((await f.runtime.getRun(target.runId!))?.status).toBe('cancelled');
+    expect((await f.runtime.getRun(target.runId!))?.status).toBe('completed');
+    expect(target.status).toBe('failed');
+    expect(target.result).toMatchObject({
+      outcome: 'failed',
+      details: {
+        code: 'permission_denied',
+        reason: 'bounded check rejects',
+        adapterAttempted: false,
+        dispatchCommitted: false,
+      },
+    });
+    expect(f.model.requests).toHaveLength(2);
+    const feedback = f.model.requests[1]!.messages.find((message) => message.role === 'tool');
+    expect(feedback?.toolCallId).toBe('call');
+    expect(feedback?.sourceIds).toEqual([target.id]);
+    expect(feedback?.content).toContain('Automatic approval did not authorize this tool');
+    expect(feedback?.content).toContain('it was not executed');
+    expect(feedback?.content).toContain('bounded check rejects');
+    expect(feedback?.content).toContain('Do not bypass this refusal through another tool or path');
     expect(target.authorization).toMatchObject({
       dispatched: false,
       check: { decision: 'reject', reason: 'bounded check rejects' },
@@ -584,20 +603,234 @@ test('reject cancels the original work without target I/O or human fabrication',
     const carrier = (await f.store.listExecutions('s')).find(
       (item) => item.kind === 'model' && item.runId === null,
     )!;
-    let stoppedGrant: unknown;
-    try {
-      await f.store.getAuthorizationCheck({
-        expectedStoreId: f.expectedStoreId,
-        targetExecutionId: target.id,
-        checkExecutionId: carrier.id,
-        policyRevision: 'p1',
-        request: { task: 'exact harmless effect', parameters: { value: 'exact' } },
-        checker: { id: 'checker', version: '1', modelId: 'check-model' },
+    expect(await f.store.getCommand(`authorization-check-decline-${carrier.id}`)).toBeNull();
+    const rejectedCheck = await f.store.getAuthorizationCheck({
+      expectedStoreId: f.expectedStoreId,
+      targetExecutionId: target.id,
+      checkExecutionId: carrier.id,
+      policyRevision: 'p1',
+      request: { task: 'exact harmless effect', parameters: { value: 'exact' } },
+      checker: { id: 'checker', version: '1', modelId: 'check-model' },
+    });
+    expect(rejectedCheck).toMatchObject({ decision: 'reject', reason: 'bounded check rejects' });
+    await f.runtime.submitCommand({
+      expectedStoreId: f.expectedStoreId,
+      commandId: 'work',
+      sessionId: 's',
+      subjectId: 'owner',
+      request: { kind: 'run.start', content: 'perform exact harmless effect' },
+    });
+    await f.runtime.waitForCommand('work');
+    expect(f.effects()).toBe(0);
+    expect(f.model.requests).toHaveLength(2);
+    expect(
+      (await f.store.listExecutions('s')).filter((entry) => entry.kind === 'tool'),
+    ).toHaveLength(1);
+    expect(
+      (await f.store.listExecutions('s')).filter(
+        (entry) => entry.kind === 'model' && entry.runId === null,
+      ),
+    ).toHaveLength(1);
+  } finally {
+    await f.close();
+  }
+});
+
+test('later Tool calls still require their own checker after a refusal and receive no grant from it', async () => {
+  const ordinary = createFixedModel([
+    ...['first', 'second'].map((id): ModelEvent[] => [
+      {
+        type: 'tool_call' as const,
+        id,
+        name: 'fixture.effect',
+        arguments: JSON.stringify({ value: id }),
+      },
+      { ...finish, type: 'finish' as const, reason: 'tool_calls' },
+    ]),
+    [{ type: 'text_delta', text: 'Only authorized work remains.' }, finish],
+  ]);
+  let checks = 0;
+  const f = await fixture(
+    {
+      async *stream() {
+        checks++;
+        yield {
+          type: 'text_delta',
+          text: JSON.stringify({ decision: 'reject', reason: `refusal ${checks}` }),
+        };
+        yield finish;
+      },
+    },
+    undefined,
+    { model: ordinary },
+  );
+  try {
+    await f.runtime.waitForCommand('work');
+    expect(checks).toBe(2);
+    expect(f.effects()).toBe(0);
+    expect(ordinary.requests).toHaveLength(3);
+    const tools = (await f.store.listExecutions('s')).filter((entry) => entry.kind === 'tool');
+    expect(tools).toHaveLength(2);
+    for (const target of tools) {
+      expect(target.status).toBe('failed');
+      expect(target.authorization).toMatchObject({
+        dispatched: false,
+        check: { decision: 'reject' },
       });
-    } catch (error) {
-      stoppedGrant = error;
+      expect((await f.runtime.getRun(target.runId!))?.status).toBe('completed');
     }
-    expect(stoppedGrant).toMatchObject({ code: 'authorization_check_unverifiable' });
+    expect(
+      (await f.runtime.listInteractions({ expectedStoreId: f.expectedStoreId, sessionId: 's' }))
+        .interactions,
+    ).toHaveLength(0);
+    expect(
+      ordinary.requests[1]!.messages.find((entry) => entry.role === 'tool')?.content,
+    ).toContain('refusal 1');
+    expect(
+      ordinary.requests[2]!.messages.filter((entry) => entry.role === 'tool')
+        .map((entry) => entry.content)
+        .join('\n'),
+    ).toContain('refusal 2');
+  } finally {
+    await f.close();
+  }
+});
+
+test('an automatic refusal settles ordered admission before an authorized read sibling proceeds', async () => {
+  const ordinary = createFixedModel([
+    [
+      { type: 'tool_call', id: 'write', name: 'fixture.effect', arguments: '{}' },
+      { type: 'tool_call', id: 'read', name: 'fixture.read', arguments: '{}' },
+      { ...finish, type: 'finish', reason: 'tool_calls' } as ModelEvent,
+    ],
+    [{ type: 'text_delta', text: 'Project understood without writing.' }, finish],
+  ]);
+  const effects: string[] = [];
+  let checking = false;
+  let release!: () => void;
+  const held = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const f = await fixture(
+    {
+      async *stream() {
+        checking = true;
+        await held;
+        yield {
+          type: 'text_delta',
+          text: '{"decision":"reject","reason":"The user requested read-only exploration."}',
+        };
+        yield finish;
+      },
+    },
+    {
+      toolDispatchOrder: 'model',
+      async authorize(request) {
+        return request.definitionId === 'fixture.effect'
+          ? {
+              allowed: false,
+              revision: 'p1',
+              check: { request: { task: 'read-only exploration', parameters: request.input } },
+            }
+          : { allowed: true, revision: 'p1' };
+      },
+    },
+    {
+      model: ordinary,
+      extensions: [
+        {
+          id: 'fixture',
+          version: '1',
+          apiMajor: 1,
+          tools: ['effect', 'read'].map((name) => ({
+            id: `fixture.${name}`,
+            version: '1',
+            description: name,
+            inputSchema: { type: 'object' },
+            async execute() {
+              effects.push(name);
+              return { outcome: 'succeeded' as const, content: name };
+            },
+          })),
+        },
+      ],
+    },
+  );
+  try {
+    await eventually(async () => (checking ? true : null));
+    const sibling = await eventually(
+      async () =>
+        (await f.store.listExecutions('s')).find(
+          (entry) => entry.kind === 'tool' && entry.callId === 'read',
+        ) ?? null,
+    );
+    expect(sibling.status).toBe('planned');
+    expect(effects).toEqual([]);
+    expect(ordinary.requests).toHaveLength(1);
+    release();
+    await f.runtime.waitForCommand('work');
+    expect(effects).toEqual(['read']);
+    expect(ordinary.requests).toHaveLength(2);
+    const tools = (await f.store.listExecutions('s')).filter((entry) => entry.kind === 'tool');
+    expect(tools.find((entry) => entry.callId === 'write')).toMatchObject({
+      status: 'failed',
+      authorization: { dispatched: false, check: { decision: 'reject' } },
+    });
+    expect(tools.find((entry) => entry.callId === 'read')).toMatchObject({
+      status: 'succeeded',
+      authorization: { dispatched: true },
+    });
+    expect((await f.runtime.getRun(sibling.runId!))?.status).toBe('completed');
+    const results = ordinary.requests[1]!.messages.filter((entry) => entry.role === 'tool');
+    expect(results.map((entry) => entry.toolCallId)).toEqual(['write', 'read']);
+    expect(results[0]?.content).toContain('it was not executed');
+    expect(results[0]?.content).toContain('read-only exploration');
+  } finally {
+    release();
+    await f.close();
+  }
+});
+
+test('repeated identical checker refusals retain the existing bounded Tool failure limit without I/O', async () => {
+  const ordinary = createFixedModel(
+    Array.from({ length: 5 }, (_, index) => [
+      {
+        type: 'tool_call' as const,
+        id: `refused-${index}`,
+        name: 'fixture.effect',
+        arguments: '{"value":"exact"}',
+      },
+      { ...finish, type: 'finish' as const, reason: 'tool_calls' },
+    ]),
+  );
+  let checks = 0;
+  const f = await fixture(
+    {
+      async *stream() {
+        checks++;
+        yield { type: 'text_delta', text: '{"decision":"reject","reason":"read-only task"}' };
+        yield finish;
+      },
+    },
+    undefined,
+    { model: ordinary },
+  );
+  try {
+    await f.runtime.waitForCommand('work');
+    expect(f.effects()).toBe(0);
+    expect(checks).toBe(5);
+    expect(ordinary.requests).toHaveLength(5);
+    const targets = (await f.store.listExecutions('s')).filter((entry) => entry.kind === 'tool');
+    expect(targets).toHaveLength(5);
+    expect(await f.runtime.getRun(targets[0]!.runId!)).toMatchObject({
+      status: 'cancelled',
+      reason: 'repeated_tool_failure',
+    });
+    expect(
+      targets.every(
+        (entry) => entry.status === 'failed' && entry.authorization?.dispatched === false,
+      ),
+    ).toBe(true);
   } finally {
     await f.close();
   }

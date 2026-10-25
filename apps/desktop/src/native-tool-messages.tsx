@@ -12,6 +12,9 @@ import type {
   NativeToolExecution,
   NativeToolMessageFact,
 } from './tool-messages-bridge';
+import { nativeShellCommandChunkBytes } from './tool-messages-bridge';
+
+const emptyToolFacts: NativeToolMessageFact[] = [];
 
 const labels: Record<string, readonly [readonly string[], string]> = {
   'files.read': [['2', '3', '4', '5'], '读取'],
@@ -22,6 +25,7 @@ const labels: Record<string, readonly [readonly string[], string]> = {
   'files.search': [['2', '3', '4'], '搜索内容'],
   'files.list': [['1'], '列出目录'],
   'shell.launch': [['1'], '启动后台 Shell'],
+  'shell.execute': [['1'], '运行命令'],
   'shell.read': [['1'], '读取后台 Shell'],
   'shell.wait': [['1'], '等待后台 Shell'],
   'shell.stop': [['1'], '请求停止后台 Shell'],
@@ -44,7 +48,7 @@ const exploration = new Set([
 /** Classification is display-only and requires an exact supported definition version. */
 export function desktopToolPresentation(
   fact: Pick<NativeToolMessageFact, 'definitionId' | 'definitionVersion'>,
-): Pick<DesktopMessage, 'toolName' | 'title' | 'presentation'> {
+): Pick<DesktopMessage, 'toolName' | 'title' | 'presentation' | 'shell'> {
   const label = labels[fact.definitionId];
   const known = label?.[0].includes(fact.definitionVersion);
   return {
@@ -56,6 +60,7 @@ export function desktopToolPresentation(
             'files.search': 'search_content',
             'files.write': 'write_file',
             'files.edit': 'edit_file',
+            'shell.execute': 'shell_execute',
             'task.spawn': 'spawn_agent',
             'task.follow_up': 'follow_up_agent',
             'task.message': 'send_agent_message',
@@ -66,20 +71,39 @@ export function desktopToolPresentation(
         )[fact.definitionId] ?? fact.definitionId)
       : undefined,
     title: known ? label![1] : `${fact.definitionId} · ${fact.definitionVersion}`,
+    ...(known && fact.definitionId.startsWith('shell.')
+      ? {
+          shell: {
+            operation: fact.definitionId.slice('shell.'.length) as NonNullable<
+              DesktopMessage['shell']
+            >['operation'],
+          },
+        }
+      : {}),
     ...(known && exploration.has(fact.definitionId)
       ? { presentation: 'exploration' as const }
       : {}),
   };
 }
 
-/** A readable boundary, rather than the first arriving receipt, owns an exploration block. */
+/** Reading identity only; receipts keep their original IDs for metadata and I/O. */
+export function nativeToolPresentationKey(
+  storeId: string,
+  sessionId: string,
+  runId: string,
+  executionId: string,
+) {
+  return JSON.stringify(['native-tool', storeId, sessionId, runId, executionId]);
+}
+
+/** Tool identity and readable boundaries own a block before receipt metadata arrives. */
 export function groupNativeToolMessages(messages: readonly DesktopMessage[]): DesktopMessage[] {
   let boundary: string | undefined;
   return messages.map((message) => {
-    if (message.role === 'tool' && message.presentation === 'exploration' && message.turnId)
+    if (message.role === 'tool' && message.turnId)
       return {
         ...message,
-        presentationGroupId: JSON.stringify(['native-exploration', message.turnId, boundary]),
+        presentationGroupId: JSON.stringify(['native-tools', message.turnId, boundary]),
       };
     if (
       message.role !== 'thinking' &&
@@ -103,6 +127,113 @@ const sameReceipt = (left: Message, right: Message) =>
   left.sourceIds?.[0] === right.sourceIds?.[0] &&
   left.sourceIds?.length === right.sourceIds?.length &&
   JSON.stringify(left.originMessage) === JSON.stringify(right.originMessage);
+
+function shellInputMissing(fact: NativeToolMessageFact | undefined) {
+  const input = fact?.definitionVersion === '1' ? fact.shellInput : undefined;
+  return (
+    !!input &&
+    (!input.shellId ||
+      (['execute', 'launch'].includes(input.operation) && input.command === undefined))
+  );
+}
+function withoutShellInput(fact: NativeToolMessageFact): NativeToolMessageFact {
+  return fact.shellInput
+    ? {
+        ...fact,
+        target: undefined,
+        inputSource: undefined,
+        shellInput: { operation: fact.shellInput.operation },
+        shellResultVerified: undefined,
+      }
+    : fact;
+}
+function shellCallCompatible(
+  message: Message,
+  messages: readonly Message[],
+  fact: NativeToolMessageFact,
+) {
+  if (!fact.inputSource || fact.inputSource.toolCallId !== message.toolCallId) return false;
+  const origin = message.originMessage ?? message;
+  const matches = messages.flatMap((candidate) => {
+    const source = candidate.originMessage ?? candidate;
+    return candidate.role === 'assistant' &&
+      candidate.sessionId === message.sessionId &&
+      candidate.originMessage?.storeId === message.originMessage?.storeId &&
+      source.sessionId === origin.sessionId &&
+      source.runId === origin.runId &&
+      BigInt(candidate.seq) < BigInt(message.seq)
+      ? (candidate.toolCalls ?? [])
+          .filter((call) => call.id === message.toolCallId)
+          .map((call) => ({ candidate, call }))
+      : [];
+  });
+  if (!matches.length) return true;
+  if (
+    matches.length !== 1 ||
+    matches[0]!.candidate.status !== 'complete' ||
+    matches[0]!.candidate.contentFormat === 'unsupported' ||
+    matches[0]!.call.name !== fact.definitionId
+  )
+    return false;
+  try {
+    const args = JSON.parse(matches[0]!.call.arguments);
+    return ['execute', 'launch'].includes(fact.shellInput?.operation ?? '')
+      ? fact.shellInput?.command !== undefined &&
+          args.command === fact.shellInput.command &&
+          args.key === fact.shellInput.shellId
+      : args.shellId === fact.shellInput?.shellId;
+  } catch {
+    return false;
+  }
+}
+
+/** Track only the Model facts Main needs to resolve this original call, never growing prose. */
+function toolInputRevision(message: Message, messages: readonly Message[]) {
+  if (!message.toolCallId) return { call: undefined, omission: undefined };
+  const source = message.originMessage ?? message;
+  const candidates = messages.filter((candidate) => {
+    const origin = candidate.originMessage ?? candidate;
+    return (
+      candidate.role === 'assistant' &&
+      candidate.sessionId === message.sessionId &&
+      candidate.originMessage?.storeId === message.originMessage?.storeId &&
+      origin.sessionId === source.sessionId &&
+      origin.runId === source.runId &&
+      BigInt(candidate.seq) < BigInt(message.seq)
+    );
+  });
+  const latest = candidates.reduce<Message | undefined>(
+    (previous, candidate) =>
+      !previous || BigInt(candidate.seq) > BigInt(previous.seq) ? candidate : previous,
+    undefined,
+  );
+  return {
+    call: JSON.stringify(
+      candidates.flatMap((candidate) => {
+        const calls = candidate.toolCalls?.filter((call) => call.id === message.toolCallId);
+        return calls?.length
+          ? [[candidate.id, candidate.seq, candidate.status, candidate.contentFormat, calls]]
+          : [];
+      }),
+    ),
+    omission: JSON.stringify(
+      latest && [
+        latest.id,
+        latest.seq,
+        latest.status,
+        latest.contentFormat,
+        latest.sourceIds,
+        latest.toolCalls?.length ?? 0,
+        latest.outputBody && [
+          latest.outputBody.executionId,
+          latest.outputBody.complete,
+          latest.outputBody.toolCallCount,
+          latest.outputBody.readAvailability,
+        ],
+      ],
+    ),
+  };
+}
 export function authorizationApproval(
   authorization: Execution['authorization'],
 ): DesktopMessage['approval'] {
@@ -150,10 +281,14 @@ export function authorizationApproval(
 
 export function desktopToolMessage(
   fact: Pick<NativeToolMessageFact, 'definitionId' | 'definitionVersion' | 'status' | 'target'> &
-    Pick<Partial<NativeToolMessageFact>, 'ask' | 'authorization' | 'decisionRefresh'>,
+    Pick<
+      Partial<NativeToolMessageFact>,
+      'ask' | 'authorization' | 'decisionRefresh' | 'shellInput' | 'shellResultVerified'
+    >,
   id: string,
   text: string,
 ): DesktopMessage {
+  const shell = desktopShell(fact, text);
   return {
     id,
     role: 'tool',
@@ -161,6 +296,7 @@ export function desktopToolMessage(
     settled: !['planned', 'dispatching', 'running'].includes(fact.status),
     ...desktopToolPresentation(fact),
     target: fact.target,
+    ...(shell ? { shell } : {}),
     ...(fact.ask ? { ask: fact.ask } : {}),
     ...(fact.status === 'failed' && fact.decisionRefresh
       ? { decisionRefresh: fact.decisionRefresh }
@@ -185,6 +321,162 @@ export function desktopToolMessage(
                 : fact.status,
   };
 }
+
+const record = (value: unknown): Record<string, unknown> | undefined =>
+  value && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : undefined;
+const decimal = (value: unknown): value is string =>
+  typeof value === 'string' && /^(0|[1-9][0-9]*)$/.test(value);
+
+/** Display only: a Tool receipt never promotes acceptance to a completed Shell Job. */
+function desktopShell(
+  fact: Pick<NativeToolMessageFact, 'definitionId' | 'definitionVersion' | 'status'> &
+    Pick<Partial<NativeToolMessageFact>, 'shellInput' | 'shellResultVerified' | 'target'>,
+  text: string,
+): DesktopMessage['shell'] {
+  const operation = fact.definitionId.slice('shell.'.length);
+  if (
+    fact.definitionVersion !== '1' ||
+    !fact.definitionId.startsWith('shell.') ||
+    !['execute', 'launch', 'read', 'wait', 'stop'].includes(operation)
+  )
+    return;
+  const input = fact.shellInput;
+  const shell: NonNullable<DesktopMessage['shell']> = {
+    operation: operation as NonNullable<DesktopMessage['shell']>['operation'],
+    ...(input?.shellId ? { shellId: input.shellId } : {}),
+    ...(input?.command === undefined && fact.target && ['execute', 'launch'].includes(operation)
+      ? { commandPreview: fact.target }
+      : {}),
+    ...(input?.command !== undefined &&
+    input.commandOffset === 0 &&
+    input.commandNextOffset === null
+      ? { command: input.command }
+      : {}),
+  };
+  if (!fact.shellResultVerified) return shell;
+  let result: Record<string, unknown> | undefined;
+  try {
+    result = record(JSON.parse(text));
+  } catch {
+    return shell;
+  }
+  if (!result) return shell;
+  const ref = record(result.ref);
+  if (ref?.extensionId !== 'builtin.shell' || ref.key !== shell.shellId) return shell;
+  if (operation === 'launch')
+    return result.accepted === true && result.shellId === shell.shellId
+      ? { ...shell, accepted: true }
+      : shell;
+  const job = record(result.execution);
+  if (
+    !job ||
+    job.id !== ref.executionId ||
+    job.sessionId !== ref.sessionId ||
+    job.originStoreId !== ref.originStoreId ||
+    job.kind !== 'job' ||
+    job.definitionId !== 'shell.command' ||
+    job.definitionVersion !== '1' ||
+    ![
+      'planned',
+      'dispatching',
+      'running',
+      'succeeded',
+      'failed',
+      'cancelled',
+      'outcome_unknown',
+    ].includes(String(job.status))
+  )
+    return shell;
+  const terminal = ['succeeded', 'failed', 'cancelled', 'outcome_unknown'].includes(
+    String(job.status),
+  );
+  const jobResult = record(job.result);
+  if (
+    terminal &&
+    (!jobResult || jobResult.outcome !== job.status || typeof jobResult.content !== 'string')
+  )
+    return shell;
+  if (
+    operation === 'execute' &&
+    (!terminal ||
+      fact.status !==
+        (result.timedOut === true && job.status === 'cancelled' ? 'failed' : job.status))
+  )
+    return shell;
+  const details = record(jobResult?.details);
+  const status = job.status as NonNullable<DesktopMessage['shell']>['jobStatus'];
+  const verified = {
+    ...shell,
+    jobStatus: status,
+    ...(Number.isSafeInteger(details?.exitCode) ? { exitCode: details!.exitCode as number } : {}),
+    ...(typeof result.timedOut === 'boolean' ? { timedOut: result.timedOut } : {}),
+    ...(operation === 'stop' && result.cancelRequested === true ? { cancelRequested: true } : {}),
+  };
+  if (operation === 'execute') {
+    if (
+      typeof result.stdout !== 'string' ||
+      typeof result.stderr !== 'string' ||
+      typeof result.truncated !== 'boolean' ||
+      !decimal(result.droppedBytes) ||
+      !decimal(result.stdoutBytes) ||
+      !decimal(result.stderrBytes) ||
+      (!result.truncated &&
+        (BigInt(result.stdoutBytes) !== BigInt(new TextEncoder().encode(result.stdout).length) ||
+          BigInt(result.stderrBytes) !== BigInt(new TextEncoder().encode(result.stderr).length)))
+    )
+      return result.cancellationObserved === true ? { ...verified, outputComplete: false } : shell;
+    const truncated = result.truncated || BigInt(result.droppedBytes) > 0n;
+    return {
+      ...verified,
+      stdout: result.stdout,
+      stderr: result.stderr,
+      truncated,
+      outputComplete: !truncated,
+    };
+  }
+  if (operation !== 'read') return { ...verified, outputComplete: false };
+  const output = record(result.output);
+  if (!output || !decimal(output.highWaterSeq) || !Array.isArray(output.items)) return shell;
+  let cursor = -1n,
+    orderedOutput = '',
+    stdout = '',
+    stderr = '',
+    dropped = false;
+  for (const value of output.items) {
+    const item = record(value);
+    if (
+      !item ||
+      item.executionId !== ref.executionId ||
+      !decimal(item.seq) ||
+      !decimal(item.throughSeq) ||
+      BigInt(item.seq) <= cursor ||
+      BigInt(item.throughSeq) < BigInt(item.seq) ||
+      BigInt(item.throughSeq) > BigInt(output.highWaterSeq) ||
+      !['stdout', 'stderr', 'progress'].includes(String(item.stream)) ||
+      typeof item.content !== 'string' ||
+      (item.droppedBytes !== null && !decimal(item.droppedBytes))
+    )
+      return shell;
+    cursor = BigInt(item.throughSeq);
+    if (item.stream === 'stdout') stdout += item.content;
+    if (item.stream === 'stderr') stderr += item.content;
+    if (item.stream === 'stdout' || item.stream === 'stderr') orderedOutput += item.content;
+    if (decimal(item.droppedBytes) && BigInt(item.droppedBytes) > 0n) dropped = true;
+  }
+  return {
+    ...verified,
+    stdout,
+    stderr,
+    output: orderedOutput,
+    truncated: dropped,
+    outputComplete: false,
+  };
+}
+export function nativeShellInputPresentation(fact: NativeToolMessageFact) {
+  return desktopShell({ ...fact, shellResultVerified: false }, '');
+}
 export function NativeToolMessage({ message }: { message: DesktopMessage }) {
   const [expanded, setExpanded] = useState(false);
   return (
@@ -208,6 +500,7 @@ export function liveToolMessages(
     | undefined,
   messages: readonly Message[],
   executionUnconfirmed = false,
+  inputFacts: readonly NativeToolMessageFact[] = [],
 ): { message: DesktopMessage; execution: NativeToolExecution }[] {
   if (!selection) return [];
   const runIds = new Set(selection.runs.filter((run) => run.isActive).map((run) => run.id));
@@ -239,6 +532,16 @@ export function liveToolMessages(
         !results.has(JSON.stringify([execution.id, execution.runId])),
     )
     .map((execution) => {
+      const input = inputFacts.find(
+        (fact) =>
+          fact.messageId === `native-execution:${execution.id}` &&
+          fact.executionId === execution.id &&
+          fact.definitionId === execution.definitionId &&
+          fact.definitionVersion === execution.definitionVersion &&
+          fact.inputSource?.storeId === selection.storeId &&
+          fact.inputSource.sessionId === selection.session.id &&
+          fact.inputSource.runId === execution.runId,
+      );
       const run = selection.runs.find(
         (run) =>
           run.id === execution.runId &&
@@ -262,6 +565,13 @@ export function liveToolMessages(
         execution,
         message: {
           ...desktopToolMessage(execution, `native-execution:${execution.id}`, ''),
+          ...(input ? { shell: nativeShellInputPresentation(input) } : {}),
+          presentationKey: nativeToolPresentationKey(
+            selection.storeId,
+            selection.session.id,
+            execution.runId!,
+            execution.id,
+          ),
           executionUnconfirmed,
           ...(run
             ? {
@@ -311,6 +621,206 @@ export function NativeLiveToolMessage({
   );
 }
 
+function useNativeLiveShellInputs({
+  bridge,
+  generation,
+  selection,
+  messages,
+  historyEpoch,
+  retryRevision,
+  suspended,
+}: {
+  bridge?: NativeBridge;
+  generation: number;
+  selection?: NativeSelection;
+  messages: readonly Message[];
+  historyEpoch: number;
+  retryRevision: number;
+  suspended: boolean;
+}) {
+  const scope = JSON.stringify([
+    generation,
+    selection?.storeId,
+    selection?.session.id,
+    selection?.viewSelection ?? selection?.viewGeneration,
+    historyEpoch,
+  ]);
+  const targets = liveToolMessages(selection, messages).filter((item) => !!item.message.shell);
+  const identity = JSON.stringify(
+    targets.map(({ execution }) => [
+      execution.id,
+      execution.runId,
+      execution.originStoreId,
+      execution.sessionId,
+      execution.definitionId,
+      execution.definitionVersion,
+      selection?.executions.find((item) => item.id === execution.id)?.toolCallId,
+    ]),
+  );
+  const cache = useRef({
+    scope,
+    retryRevision,
+    failed: false,
+    facts: new Map<string, NativeToolMessageFact | undefined>(),
+    keys: new Map<string, string>(),
+  });
+  const [state, setState] = useState<{
+    scope: string;
+    facts: NativeToolMessageFact[];
+    error?: string;
+  }>({
+    scope,
+    facts: [],
+  });
+  const available = !!selection && !suspended && !selection.permissionUnavailable;
+  const latest = useRef({ selection, targets, generation, historyEpoch });
+  latest.current = { selection, targets, generation, historyEpoch };
+  useEffect(() => {
+    const { selection, targets, generation, historyEpoch } = latest.current;
+    if (cache.current.scope !== scope || cache.current.retryRevision !== retryRevision)
+      cache.current = { scope, retryRevision, failed: false, facts: new Map(), keys: new Map() };
+    const current = cache.current;
+    const publish = () =>
+      setState({
+        scope,
+        facts: [...current.facts.values()].flatMap((fact) => (fact ? [fact] : [])),
+        error: current.failed ? '部分工具状态尚无法核实，保留原始结果。' : undefined,
+      });
+    if (!bridge || !selection || !available) return;
+    if (identity === '[]') {
+      publish();
+      return;
+    }
+    let active = true,
+      readId: string | undefined;
+    const { storeId, session } = selection;
+    const viewSelection = selection.viewSelection ?? selection.viewGeneration;
+    const key = (execution: NativeToolExecution) =>
+      JSON.stringify([
+        execution.id,
+        execution.originStoreId,
+        execution.sessionId,
+        execution.runId,
+        execution.definitionId,
+        execution.definitionVersion,
+        selection.executions.find((item) => item.id === execution.id)?.toolCallId,
+      ]);
+    const pending = targets.filter(
+      (target) =>
+        !current.facts.has(target.execution.id) ||
+        current.keys.get(target.execution.id) !== key(target.execution),
+    );
+    void (async () => {
+      for (let index = 0; index < pending.length; index += 32) {
+        let batch = pending.slice(index, index + 32);
+        const commands = new Map<string, string>();
+        let commandOffsets: Record<string, number> | undefined;
+        try {
+          do {
+            readId = crypto.randomUUID();
+            const page = await bridge.request({
+              method: 'toolMessages.list',
+              generation,
+              viewSelection,
+              historyEpoch,
+              readId,
+              messageIds: [],
+              executionIds: batch.map((item) => item.execution.id),
+              ...(commandOffsets ? { commandOffsets } : {}),
+            });
+            if (!active) return;
+            if (
+              !page ||
+              !('kind' in page) ||
+              !('entries' in page) ||
+              page.kind !== 'toolMessages.page' ||
+              page.readId !== readId ||
+              page.scope.generation !== generation ||
+              page.scope.storeId !== storeId ||
+              page.scope.sessionId !== session.id ||
+              page.scope.workspaceId !== session.workspaceId ||
+              page.scope.viewSelection !== viewSelection ||
+              page.scope.historyEpoch !== historyEpoch ||
+              new Set(page.entries.map((fact) => fact.executionId)).size !== page.entries.length ||
+              page.entries.some(
+                (fact) =>
+                  !batch.some(
+                    ({ execution }) =>
+                      fact.executionId === execution.id &&
+                      fact.messageId === `native-execution:${execution.id}` &&
+                      fact.definitionId === execution.definitionId &&
+                      fact.definitionVersion === execution.definitionVersion &&
+                      fact.inputSource?.storeId === storeId &&
+                      fact.inputSource.sessionId === session.id &&
+                      fact.inputSource.runId === execution.runId,
+                  ),
+              )
+            )
+              throw Error('tool_message_identity_mismatch');
+            const next: Record<string, number> = {};
+            for (const item of batch) {
+              const id = item.execution.id;
+              let fact = page.entries.find((entry) => entry.executionId === id);
+              const input = fact?.shellInput;
+              if (input?.command !== undefined) {
+                const offset = commandOffsets?.[fact!.messageId] ?? 0;
+                if (
+                  input.commandOffset !== offset ||
+                  new TextEncoder().encode(JSON.stringify(input.command)).length >
+                    nativeShellCommandChunkBytes + 2 ||
+                  (input.commandNextOffset !== null &&
+                    (input.commandNextOffset !== offset + input.command.length ||
+                      !input.command.length))
+                )
+                  throw Error('tool_message_command_offset_invalid');
+                const command = (commands.get(id) ?? '') + input.command;
+                if (command.length > 524288) throw Error('tool_message_command_offset_invalid');
+                commands.set(id, command);
+                if (input.commandNextOffset !== null) {
+                  next[fact!.messageId] = input.commandNextOffset!;
+                  fact = {
+                    ...fact!,
+                    shellInput: { operation: input.operation, shellId: input.shellId },
+                  };
+                } else fact = { ...fact!, shellInput: { ...input, command, commandOffset: 0 } };
+              } else if (commandOffsets?.[`native-execution:${id}`] !== undefined)
+                throw Error('tool_message_command_offset_invalid');
+              current.facts.set(id, fact);
+              current.keys.set(id, key(item.execution));
+            }
+            publish();
+            commandOffsets = next;
+            batch = batch.filter((item) =>
+              Object.hasOwn(next, `native-execution:${item.execution.id}`),
+            );
+          } while (batch.length && active);
+        } catch {
+          if (!active) return;
+          current.failed = true;
+          for (const item of batch) {
+            if (
+              !current.facts.has(item.execution.id) ||
+              current.keys.get(item.execution.id) !== key(item.execution)
+            )
+              current.facts.set(item.execution.id, undefined);
+            current.keys.set(item.execution.id, key(item.execution));
+          }
+          publish();
+        }
+      }
+    })();
+    publish();
+    return () => {
+      active = false;
+      if (readId)
+        void bridge.request({ method: 'toolMessages.close', generation, readId }).catch(() => {});
+    };
+  }, [bridge, scope, identity, retryRevision, available]);
+  return state.scope === scope
+    ? { facts: state.facts, error: state.error }
+    : { facts: emptyToolFacts };
+}
+
 /** Exact history metadata, including receipts beyond the bounded current View. */
 export function useNativeToolMessages({
   bridge,
@@ -336,24 +846,45 @@ export function useNativeToolMessages({
   const scope = JSON.stringify([generation, storeId, sessionId, viewSelection, historyEpoch]);
   const unavailable =
     suspended || !selection || selection.viewLoading || selection.permissionUnavailable;
-  const eligible = useMemo(
-    () =>
-      messages.filter(
-        (message) =>
-          message.role === 'tool' &&
-          message.status === 'complete' &&
-          message.sourceIds?.length === 1 &&
-          message.contentFormat !== 'unsupported',
-      ),
-    [messages],
+  const candidates = messages.filter(
+    (message) =>
+      message.role === 'tool' &&
+      message.status === 'complete' &&
+      message.sourceIds?.length === 1 &&
+      message.contentFormat !== 'unsupported',
   );
+  const receiptCache = useRef(candidates);
+  if (
+    receiptCache.current.length !== candidates.length ||
+    candidates.some((message, index) => !sameReceipt(message, receiptCache.current[index]!))
+  )
+    receiptCache.current = candidates;
+  const eligible = receiptCache.current;
   const [retryRevision, setRetryRevision] = useState(0);
+  const liveRead = useNativeLiveShellInputs({
+    bridge,
+    generation,
+    selection,
+    messages,
+    historyEpoch,
+    retryRevision,
+    suspended,
+  });
+  const liveInputs = liveRead.facts;
   const cache = useRef({
     scope,
     retryRevision,
     read: new Map<
       string,
-      { message: Message; fact?: NativeToolMessageFact; observationRevision: number }
+      {
+        message: Message;
+        fact?: NativeToolMessageFact;
+        observationRevision: number;
+        commandPending?: boolean;
+        inputRevision?: string;
+        callRevision?: string;
+        inputReadFailed?: boolean;
+      }
     >(),
   });
   const [state, setState] = useState<{
@@ -361,6 +892,35 @@ export function useNativeToolMessages({
     entries: NativeToolMessageFact[];
     error?: string;
   }>({ scope, entries: [] });
+  const revisions = new Map(
+    eligible.map((message) => {
+      const previous =
+        cache.current.scope === scope ? cache.current.read.get(message.id) : undefined;
+      const live = liveInputs.find(
+        (entry) =>
+          entry.executionId === message.sourceIds?.[0] &&
+          entry.inputSource?.toolCallId === message.toolCallId &&
+          entry.shellInput?.command !== undefined,
+      );
+      const fact = previous?.fact;
+      const proof = fact?.inputSource
+        ? fact.shellInput?.command !== undefined
+          ? fact
+          : (live ?? fact)
+        : undefined;
+      return [
+        message.id,
+        proof && previous && shellCallCompatible(message, messages, proof)
+          ? { call: previous.callRevision, omission: previous.inputRevision }
+          : toolInputRevision(message, messages),
+      ] as const;
+    }),
+  );
+  const revisionIdentity = JSON.stringify([...revisions]);
+  const revisionCache = useRef({ identity: revisionIdentity, revisions });
+  if (revisionCache.current.identity !== revisionIdentity)
+    revisionCache.current = { identity: revisionIdentity, revisions };
+  const inputRevisions = revisionCache.current.revisions;
   useEffect(() => {
     if (cache.current.scope !== scope || cache.current.retryRevision !== retryRevision)
       cache.current = { scope, retryRevision, read: new Map() };
@@ -371,7 +931,11 @@ export function useNativeToolMessages({
       setState({
         scope,
         entries: [...current.read.values()].flatMap((item) => (item.fact ? [item.fact] : [])),
-        error,
+        error:
+          error ??
+          ([...current.read.values()].some((item) => item.inputReadFailed)
+            ? '部分工具状态尚无法核实，保留原始结果。'
+            : undefined),
       });
     if (
       !bridge ||
@@ -382,11 +946,20 @@ export function useNativeToolMessages({
       unavailable
     )
       return;
-    // A terminal receipt is immutable. An unknown result is rechecked on a new observation.
+    // A terminal receipt is immutable; its input presentation also depends on
+    // independently streamed Model declarations. Recheck only changed call proof,
+    // or a changed omission boundary when the exact Shell input is still missing.
+    // Unknown results retain their existing observation-based recalibration.
     const pending = eligible.filter((message) => {
       const previous = current.read.get(message.id);
       return (
         !previous ||
+        previous.commandPending ||
+        (!previous.inputReadFailed &&
+          previous.fact?.shellInput &&
+          (previous.callRevision !== inputRevisions.get(message.id)?.call ||
+            (shellInputMissing(previous.fact) &&
+              previous.inputRevision !== inputRevisions.get(message.id)?.omission))) ||
         (previous.fact?.status === 'outcome_unknown' &&
           previous.observationRevision !== observationRevision) ||
         !sameReceipt(previous.message, message)
@@ -396,47 +969,144 @@ export function useNativeToolMessages({
     // loading=false and let background recovery restart this in-flight request.
     publish();
     void (async () => {
+      let readError = false;
       for (let index = 0; index < pending.length; index += 32) {
-        const batch = pending.slice(index, index + 32);
-        readId = crypto.randomUUID();
-        const page = await bridge.request({
-          method: 'toolMessages.list',
-          generation,
-          viewSelection,
-          historyEpoch,
-          readId,
-          messageIds: batch.map((message) => message.id),
-        });
-        if (!active) return;
-        if (
-          !page ||
-          !('entries' in page) ||
-          !('kind' in page) ||
-          page.kind !== 'toolMessages.page' ||
-          page.readId !== readId ||
-          page.scope.generation !== generation ||
-          page.scope.storeId !== storeId ||
-          page.scope.sessionId !== sessionId ||
-          page.scope.workspaceId !== workspaceId ||
-          page.scope.viewSelection !== viewSelection ||
-          page.scope.historyEpoch !== historyEpoch ||
-          page.entries.some(
-            (entry) =>
-              !batch.some(
-                (message) =>
-                  message.id === entry.messageId && message.sourceIds?.[0] === entry.executionId,
-              ),
-          )
-        )
-          throw Error('tool_message_identity_mismatch');
-        for (const message of batch)
-          current.read.set(message.id, {
-            message,
-            fact: page.entries.find((entry) => entry.messageId === message.id),
-            observationRevision,
-          });
-        publish();
+        let batch = pending.slice(index, index + 32);
+        const assembled = new Map<string, { command: string; fact: NativeToolMessageFact }>();
+        let commandOffsets: Record<string, number> | undefined;
+        try {
+          do {
+            readId = crypto.randomUUID();
+            const page = await bridge.request({
+              method: 'toolMessages.list',
+              generation,
+              viewSelection,
+              historyEpoch,
+              readId,
+              messageIds: batch.map((message) => message.id),
+              ...(commandOffsets ? { commandOffsets } : {}),
+            });
+            if (!active) return;
+            if (
+              !page ||
+              !('entries' in page) ||
+              !('kind' in page) ||
+              page.kind !== 'toolMessages.page' ||
+              page.readId !== readId ||
+              page.scope.generation !== generation ||
+              page.scope.storeId !== storeId ||
+              page.scope.sessionId !== sessionId ||
+              page.scope.workspaceId !== workspaceId ||
+              page.scope.viewSelection !== viewSelection ||
+              page.scope.historyEpoch !== historyEpoch ||
+              new Set(page.entries.map((entry) => entry.messageId)).size !== page.entries.length ||
+              page.entries.some(
+                (entry) =>
+                  !batch.some(
+                    (message) =>
+                      message.id === entry.messageId &&
+                      message.sourceIds?.[0] === entry.executionId,
+                  ),
+              )
+            )
+              throw Error('tool_message_identity_mismatch');
+            const next: Record<string, number> = {};
+            for (const message of batch) {
+              let fact = page.entries.find((entry) => entry.messageId === message.id);
+              const input = fact?.shellInput;
+              let inputReadFailed = false;
+              try {
+                if (input?.command !== undefined) {
+                  const offset = commandOffsets?.[message.id] ?? 0;
+                  const previous = assembled.get(message.id);
+                  if (
+                    input.commandOffset !== offset ||
+                    new TextEncoder().encode(JSON.stringify(input.command)).length >
+                      nativeShellCommandChunkBytes + 2 ||
+                    (input.commandNextOffset !== null &&
+                      (input.commandNextOffset !== offset + input.command.length ||
+                        !input.command.length)) ||
+                    (previous &&
+                      (previous.fact.executionId !== fact!.executionId ||
+                        previous.fact.status !== fact!.status ||
+                        previous.fact.resultRevision !== fact!.resultRevision ||
+                        previous.fact.definitionId !== fact!.definitionId ||
+                        previous.fact.definitionVersion !== fact!.definitionVersion ||
+                        previous.fact.shellInput?.shellId !== input.shellId ||
+                        previous.fact.shellInput?.operation !== input.operation))
+                  )
+                    throw Error('tool_message_command_offset_invalid');
+                  const command = (previous?.command ?? '') + input.command;
+                  if (command.length > 524288) throw Error('tool_message_command_offset_invalid');
+                  assembled.set(message.id, { command, fact: fact! });
+                  if (input.commandNextOffset !== null) {
+                    next[message.id] = input.commandNextOffset!;
+                    fact = {
+                      ...fact!,
+                      shellInput: { operation: input.operation, shellId: input.shellId },
+                    };
+                  } else fact = { ...fact!, shellInput: { ...input, command, commandOffset: 0 } };
+                } else if (commandOffsets?.[message.id] !== undefined) {
+                  throw Error('tool_message_command_offset_invalid');
+                }
+              } catch {
+                readError = true;
+                inputReadFailed = true;
+                delete next[message.id];
+                const previous = current.read.get(message.id);
+                fact =
+                  previous && sameReceipt(previous.message, message)
+                    ? previous.fact &&
+                      (previous.callRevision !== inputRevisions.get(message.id)?.call
+                        ? withoutShellInput(previous.fact)
+                        : previous.fact)
+                    : fact && {
+                        ...fact,
+                        ...(input
+                          ? { shellInput: { operation: input.operation, shellId: input.shellId } }
+                          : {}),
+                      };
+              }
+              current.read.set(message.id, {
+                message,
+                fact,
+                observationRevision,
+                commandPending: Object.hasOwn(next, message.id),
+                inputRevision: inputRevisions.get(message.id)?.omission,
+                callRevision: inputRevisions.get(message.id)?.call,
+                inputReadFailed,
+              });
+            }
+            publish(readError ? '部分工具状态尚无法核实，保留原始结果。' : undefined);
+            commandOffsets = next;
+            batch = batch.filter((message) => Object.hasOwn(next, message.id));
+          } while (batch.length && active);
+        } catch {
+          if (!active) return;
+          readError = true;
+          // A command continuation cannot invalidate metadata already checked on its first page.
+          for (const message of batch) {
+            const previous = current.read.get(message.id);
+            current.read.set(message.id, {
+              message,
+              fact:
+                previous && sameReceipt(previous.message, message)
+                  ? previous.fact &&
+                    (previous.callRevision !== inputRevisions.get(message.id)?.call
+                      ? withoutShellInput(previous.fact)
+                      : previous.fact)
+                  : undefined,
+              observationRevision,
+              commandPending: false,
+              inputRevision: inputRevisions.get(message.id)?.omission,
+              callRevision: inputRevisions.get(message.id)?.call,
+              inputReadFailed: true,
+            });
+          }
+          publish('部分工具状态尚无法核实，保留原始结果。');
+        }
       }
+      if (active) publish(readError ? '部分工具状态尚无法核实，保留原始结果。' : undefined);
     })().catch(() => {
       if (active) publish('部分工具状态尚无法核实，保留原始结果。');
     });
@@ -458,27 +1128,43 @@ export function useNativeToolMessages({
     unavailable,
     observationRevision,
     eligible,
+    inputRevisions,
   ]);
   const error = state.scope === scope ? state.error : undefined;
+  const pendingMessageIds = new Set(
+    error
+      ? []
+      : eligible
+          .filter((message) => {
+            if (cache.current.scope !== scope || cache.current.retryRevision !== retryRevision)
+              return true;
+            const previous = cache.current.read.get(message.id);
+            return !previous || previous.commandPending || !sameReceipt(previous.message, message);
+          })
+          .map((message) => message.id),
+  );
   return {
+    pendingMessageIds,
     entries: useMemo(() => {
-      if (state.scope !== scope) return [];
+      if (state.scope !== scope) return liveInputs;
       const messagesById = new Map(messages.map((message) => [message.id, message]));
-      return state.entries.filter((fact) => {
-        const original = cache.current.read.get(fact.messageId)?.message;
-        const current = messagesById.get(fact.messageId);
-        return original && current && sameReceipt(original, current);
-      });
-    }, [state, scope, messages]),
-    loading:
-      !error &&
-      eligible.some((message) => {
-        if (cache.current.scope !== scope || cache.current.retryRevision !== retryRevision)
-          return true;
-        const previous = cache.current.read.get(message.id);
-        return !previous || !sameReceipt(previous.message, message);
-      }),
-    error,
+      return [
+        ...liveInputs,
+        ...state.entries.flatMap((fact) => {
+          const record = cache.current.read.get(fact.messageId);
+          const original = record?.message;
+          const current = messagesById.get(fact.messageId);
+          if (!original || !current || !sameReceipt(original, current)) return [];
+          return [
+            fact.shellInput && record.callRevision !== inputRevisions.get(fact.messageId)?.call
+              ? withoutShellInput(fact)
+              : fact,
+          ];
+        }),
+      ];
+    }, [state, scope, messages, inputRevisions, liveInputs]),
+    loading: pendingMessageIds.size > 0,
+    error: error ?? liveRead.error,
     retry: () => setRetryRevision((value) => value + 1),
   };
 }

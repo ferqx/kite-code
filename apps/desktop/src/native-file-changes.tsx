@@ -1,5 +1,11 @@
 import type { Message } from '@kite-ai/client';
-import { Button, type Message as DesktopMessage, FileChanges, FileDiff } from '@kite-ai/ui/desktop';
+import {
+  Button,
+  type Message as DesktopMessage,
+  FileChanges,
+  FileDiff,
+  ScrollArea,
+} from '@kite-ai/ui/desktop';
 import { useEffect, useState } from 'react';
 import type {
   DesktopEditor,
@@ -108,16 +114,19 @@ function ChangeDetail({
           {body.snapshot ? (
             <>
               <p>本次交付的历史版本；后续编辑不会改变此内容。</p>
-              <pre
-                style={{
-                  whiteSpace: 'pre-wrap',
-                  overflowWrap: 'anywhere',
-                  maxHeight: 480,
-                  overflow: 'auto',
-                }}
+              <ScrollArea
+                className="tool-snapshot-scroll"
+                fade="y"
+                viewportClassName="tool-detail-viewport"
+                viewportProps={{ role: 'region', 'aria-label': '交付文件历史内容', tabIndex: 0 }}
               >
-                {body.text}
-              </pre>
+                <pre
+                  className="tool-file-snapshot"
+                  style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}
+                >
+                  {body.text}
+                </pre>
+              </ScrollArea>
               {offset > 0 && <Button onClick={() => setOffset(0)}>回到开头</Button>}
               {body.nextOffset != null && (
                 <Button onClick={() => setOffset(body.nextOffset!)}>读取下一段</Button>

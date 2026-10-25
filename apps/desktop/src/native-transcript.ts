@@ -4,7 +4,12 @@ import type { Message as DesktopMessage, TurnActivity } from '@kite-ai/ui/deskto
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { NativeBridge, NativeSelection } from './native-bridge';
 import { desktopMessages } from './native-presentation';
-import { desktopToolMessage, desktopToolPresentation } from './native-tool-messages';
+import {
+  desktopToolMessage,
+  desktopToolPresentation,
+  nativeShellInputPresentation,
+  nativeToolPresentationKey,
+} from './native-tool-messages';
 import {
   type NativeRunFact,
   type NativeToolExecution,
@@ -401,10 +406,90 @@ export function desktopTranscript({
               entry.runId === run.id,
           )
         : undefined;
+    const liveInput =
+      run && message.role === 'tool' && message.sourceIds?.length === 1
+        ? tools.find(
+            (entry) =>
+              entry.messageId === `native-execution:${message.sourceIds![0]}` &&
+              entry.executionId === message.sourceIds![0] &&
+              entry.inputSource?.storeId === storeId &&
+              entry.inputSource.sessionId === sessionId &&
+              entry.inputSource.runId === run.id &&
+              entry.inputSource.toolCallId === message.toolCallId &&
+              (!execution ||
+                (execution.definitionId === entry.definitionId &&
+                  execution.definitionVersion === entry.definitionVersion)) &&
+              (!fact ||
+                (fact.definitionId === entry.definitionId &&
+                  fact.definitionVersion === entry.definitionVersion)),
+          )
+        : undefined;
+    const originalCalls = liveInput
+      ? messages.flatMap((candidate) =>
+          candidate.role === 'assistant' &&
+          candidate.sessionId === sessionId &&
+          candidate.runId === run?.id &&
+          BigInt(candidate.seq) < BigInt(message.seq)
+            ? (candidate.toolCalls?.filter((call) => call.id === message.toolCallId) ?? [])
+            : [],
+        )
+      : [];
+    const readableCalls = liveInput
+      ? messages
+          .filter(
+            (candidate) =>
+              candidate.role === 'assistant' &&
+              candidate.sessionId === sessionId &&
+              candidate.runId === run?.id &&
+              BigInt(candidate.seq) < BigInt(message.seq) &&
+              candidate.status === 'complete' &&
+              candidate.contentFormat !== 'unsupported',
+          )
+          .flatMap(
+            (candidate) =>
+              candidate.toolCalls?.filter((call) => call.id === message.toolCallId) ?? [],
+          )
+      : [];
+    let inputCompatible = originalCalls.length === 0;
+    const inputPresentation = liveInput ? nativeShellInputPresentation(liveInput) : undefined;
+    if (
+      originalCalls.length === 1 &&
+      readableCalls.length === 1 &&
+      originalCalls[0]!.name === liveInput?.definitionId
+    ) {
+      try {
+        const args = JSON.parse(originalCalls[0]!.arguments);
+        const input = liveInput!.shellInput;
+        inputCompatible =
+          input?.command !== undefined
+            ? args.command === input.command && args.key === input.shellId
+            : args.shellId === input?.shellId;
+      } catch {
+        /* Preserve the original unverified record on a conflicting call. */
+      }
+    }
     const result: DesktopMessage = {
       ...(fact ? desktopToolMessage(fact, message.id, message.content) : model),
       ...(execution ? desktopToolPresentation(execution) : {}),
+      ...(inputPresentation && inputCompatible && (!fact || fact.shellInput?.command === undefined)
+        ? {
+            shell: {
+              ...(fact ? desktopToolMessage(fact, message.id, message.content).shell : {}),
+              ...inputPresentation,
+            },
+          }
+        : {}),
       ...(run && !model.agentResult ? { turnId: identity(run.id) } : {}),
+      ...(run && message.role === 'tool' && message.sourceIds?.length === 1
+        ? {
+            presentationKey: nativeToolPresentationKey(
+              storeId,
+              sessionId,
+              run.id,
+              message.sourceIds[0]!,
+            ),
+          }
+        : {}),
       ...(run && message.compression && message.sourceIds?.length === 1
         ? { presentationKey: compressionIdentity(run.id, message.sourceIds[0]!) }
         : {}),
@@ -421,10 +506,9 @@ export function desktopTranscript({
           }
         : {}),
     };
-    if (run && result.presentation === 'exploration')
+    if (run && result.role === 'tool')
       return {
         ...result,
-        presentation: 'exploration' as const,
         presentationGroupId: identity(run.id),
       };
     return result;

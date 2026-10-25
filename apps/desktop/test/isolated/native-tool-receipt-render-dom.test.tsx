@@ -35,7 +35,7 @@ const original = JSON.stringify({
   outcome: 'succeeded',
   nested: { preserved: true },
 });
-type Mode = 'known' | 'empty' | 'failed' | 'future' | 'future-unknown' | 'unsupported';
+type Mode = 'known' | 'empty' | 'failed' | 'future' | 'future-unknown' | 'unsupported' | 'mixed';
 function fixture(mode: Mode, testDiagnostics = false) {
   const dom = new JSDOM('<div id="root"></div>', {
     url: 'http://localhost',
@@ -53,13 +53,14 @@ function fixture(mode: Mode, testDiagnostics = false) {
     navigator: dom.window.navigator,
     IS_REACT_ACT_ENVIRONMENT: true,
   });
-  const session = { ...backgroundItem().rootSession, nextSeq: '3' };
+  const session = { ...backgroundItem().rootSession, nextSeq: mode === 'mixed' ? '5' : '3' };
   let selected = 'root',
     revision = 1,
     published = false;
   const listeners = new Set<(event: NativeEvent) => void>();
   const requests: NativeRequest[] = [];
   const pending: (() => void)[] = [];
+  const pendingTargets: (() => void)[] = [];
   const state = (): NativeState => ({
     generation: 1,
     creationSubmissions: [],
@@ -126,6 +127,30 @@ function fixture(mode: Mode, testDiagnostics = false) {
             content: original,
             ...(mode === 'unsupported' ? { contentFormat: 'unsupported' as const } : {}),
           },
+          ...(mode === 'mixed'
+            ? ([
+                {
+                  id: 'failed-read',
+                  sessionId: 'root',
+                  seq: '3',
+                  role: 'tool',
+                  status: 'complete',
+                  runId: null,
+                  sourceIds: ['failed-execution'],
+                  content: JSON.stringify({ path: 'failed.txt', error: 'file_not_found' }),
+                },
+                {
+                  id: 'unverified',
+                  sessionId: 'root',
+                  seq: '4',
+                  role: 'tool',
+                  status: 'complete',
+                  runId: null,
+                  sourceIds: ['unknown-execution'],
+                  content: 'PERMANENTLY_UNVERIFIED_ORIGINAL',
+                },
+              ] satisfies Message[])
+            : []),
         ];
   const bridge: NativeBridge = {
     watch(listener) {
@@ -193,29 +218,67 @@ function fixture(mode: Mode, testDiagnostics = false) {
         case 'fileChanges.list': {
           const captured = selected;
           return new Promise<NativeResult>((resolve, reject) =>
-            pending.push(() => {
+            (mode === 'mixed' && request.method === 'fileTargets.list'
+              ? pendingTargets
+              : pending
+            ).push(() => {
               if (request.method === 'toolMessages.list' && mode === 'failed') {
                 reject(Error('tool_metadata_unavailable'));
                 return;
               }
               const entries =
-                request.method === 'toolMessages.list' &&
-                ['known', 'future', 'future-unknown'].includes(mode)
-                  ? [
-                      {
-                        messageId: 'receipt',
-                        executionId: 'execution',
-                        definitionId: mode === 'known' ? 'files.read' : 'future.tool',
-                        definitionVersion: mode === 'known' ? '4' : '99',
-                        status:
-                          mode === 'future-unknown'
-                            ? ('outcome_unknown' as const)
-                            : ('succeeded' as const),
-                        resultRevision: '1',
-                        target: 'README.md',
-                      },
-                    ]
-                  : [];
+                mode === 'mixed'
+                  ? request.method === 'fileTargets.list'
+                    ? [
+                        {
+                          changeId: 'verified-output',
+                          messageId: 'receipt',
+                          path: 'delivered.txt',
+                          preview: 'available',
+                          openable: true,
+                          operation: 'write',
+                          snapshot: true,
+                        },
+                      ]
+                    : request.method === 'toolMessages.list'
+                      ? [
+                          {
+                            messageId: 'receipt',
+                            executionId: 'execution',
+                            definitionId: 'files.write',
+                            definitionVersion: '2',
+                            status: 'succeeded',
+                            resultRevision: '1',
+                            target: 'delivered.txt',
+                          },
+                          {
+                            messageId: 'failed-read',
+                            executionId: 'failed-execution',
+                            definitionId: 'files.read',
+                            definitionVersion: '4',
+                            status: 'failed',
+                            resultRevision: '1',
+                            target: 'failed.txt',
+                          },
+                        ]
+                      : []
+                  : request.method === 'toolMessages.list' &&
+                      ['known', 'future', 'future-unknown'].includes(mode)
+                    ? [
+                        {
+                          messageId: 'receipt',
+                          executionId: 'execution',
+                          definitionId: mode === 'known' ? 'files.read' : 'future.tool',
+                          definitionVersion: mode === 'known' ? '4' : '99',
+                          status:
+                            mode === 'future-unknown'
+                              ? ('outcome_unknown' as const)
+                              : ('succeeded' as const),
+                          resultRevision: '1',
+                          target: 'README.md',
+                        },
+                      ]
+                    : [];
               resolve({
                 kind:
                   request.method === 'toolMessages.list'
@@ -237,6 +300,14 @@ function fixture(mode: Mode, testDiagnostics = false) {
             }),
           );
         }
+        case 'fileChanges.detail':
+          return {
+            kind: 'fileChanges.detail',
+            changeId: request.changeId,
+            text: 'SAVED_DELIVERY_BYTES',
+            snapshot: true,
+            nextOffset: null,
+          };
         default:
           return null;
       }
@@ -284,7 +355,11 @@ function fixture(mode: Mode, testDiagnostics = false) {
     },
     flush: () =>
       act(async () => {
-        for (const release of pending.splice(0)) release();
+        for (const release of [...pending.splice(0), ...pendingTargets.splice(0)]) release();
+      }),
+    flushTargets: () =>
+      act(async () => {
+        for (const release of pendingTargets.splice(0)) release();
       }),
     toggle: () =>
       act(async () => {
@@ -306,7 +381,7 @@ function fixture(mode: Mode, testDiagnostics = false) {
       );
     },
     async close() {
-      for (const release of pending.splice(0)) release();
+      for (const release of [...pending.splice(0), ...pendingTargets.splice(0)]) release();
       await act(async () => root.unmount());
       await new Promise((resolve) => setTimeout(resolve, 0));
       dom.window.close();
@@ -397,6 +472,59 @@ test('isolated Native diagnostics may show an unverified metadata hint without c
     expect(f.host.textContent).not.toContain('状态待核对');
     expect(f.host.querySelector('.tool-activity')?.getAttribute('aria-label')).toBe('读取 · 成功');
     expect(f.host.textContent).not.toContain(sentinel);
+  } finally {
+    await f.close();
+  }
+});
+
+test('a permanently unverified mixed tool preserves its verified sibling file action and mounted delivery', async () => {
+  const f = fixture('mixed');
+  try {
+    await f.render();
+    const aggregate = f.host.querySelector<HTMLButtonElement>('.tool-activity-summary')!;
+    expect(aggregate.textContent).toContain('使用工具');
+    await f.toggle();
+    await f.flushTargets();
+    expect(f.host.querySelector('.tool-activity-summary')).toBe(aggregate);
+    const file = f.host.querySelector<HTMLButtonElement>('.tool-activity-steps button.file-link')!;
+    expect(file.textContent).toBe('delivered.txt');
+    const delivery = [...f.host.querySelectorAll<HTMLDetailsElement>('details')].find(
+      (element) => element.querySelector('summary')?.textContent === '查看本次交付的文件',
+    )!;
+    expect(delivery).toBeDefined();
+    await act(async () => {
+      delivery.open = true;
+      delivery.dispatchEvent(new f.host.ownerDocument.defaultView!.Event('toggle'));
+    });
+    expect(delivery.textContent).toContain('SAVED_DELIVERY_BYTES');
+    const body = delivery.querySelector('pre');
+    expect(body).not.toBeNull();
+    await f.flush();
+    expect(f.host.querySelector('.tool-activity-summary')).toBe(aggregate);
+    expect(f.host.querySelector('.tool-activity-steps button.file-link')).toBe(file);
+    expect(delivery.isConnected).toBe(true);
+    expect(delivery.querySelector('pre')).toBe(body);
+    expect(delivery.open).toBe(true);
+    expect(f.host.querySelectorAll('.tool-activity-steps button.file-link')).toHaveLength(1);
+    const failed = [...f.host.querySelectorAll('.tool-activity-steps > .tool-activity')].find(
+      (node) => node.textContent?.includes('failed.txt'),
+    );
+    expect(failed?.textContent).toContain('failed.txt');
+    expect(failed?.querySelector('button.file-link')).toBeNull();
+    expect(f.host.textContent).not.toContain('PERMANENTLY_UNVERIFIED_ORIGINAL');
+    const originalReader = [
+      ...f.host.querySelectorAll<HTMLButtonElement>(
+        '.tool-activity-steps button.tool-activity-summary',
+      ),
+    ].find((button) => button.textContent?.includes('工具结果'))!;
+    expect(originalReader).toBeDefined();
+    await act(async () => originalReader.click());
+    expect(f.host.textContent).toContain('PERMANENTLY_UNVERIFIED_ORIGINAL');
+    expect(delivery.querySelector('pre')).toBe(body);
+    await act(async () => file.click());
+    expect(f.requests.filter((request) => request.method === 'fileChanges.open')).toEqual([
+      { method: 'fileChanges.open', generation: 1, changeId: 'verified-output', editor: 'vscode' },
+    ]);
   } finally {
     await f.close();
   }

@@ -121,15 +121,41 @@ export interface Message {
     readonly stdoutLines?: number;
     readonly stderrLines?: number;
   };
+  /** Host-verified Shell receipt facts; Tool acceptance is independent of Job completion. */
+  readonly shell?: {
+    readonly operation: 'execute' | 'launch' | 'read' | 'wait' | 'stop';
+    readonly command?: string;
+    /** Bounded display preview while the exact original command is being read. */
+    readonly commandPreview?: string;
+    readonly shellId?: string;
+    readonly jobStatus?:
+      | 'planned'
+      | 'dispatching'
+      | 'running'
+      | 'succeeded'
+      | 'failed'
+      | 'cancelled'
+      | 'outcome_unknown';
+    /** Original ordered output when a Shell read provides sequenced chunks. */
+    readonly output?: string;
+    readonly stdout?: string;
+    readonly stderr?: string;
+    readonly exitCode?: number;
+    readonly timedOut?: boolean;
+    readonly truncated?: boolean;
+    readonly outputComplete?: boolean;
+    readonly accepted?: boolean;
+    readonly cancelRequested?: boolean;
+  };
   readonly toolName?: string;
-  /** Host-confirmed display classification; missing values remain standalone. */
+  /** Host-confirmed display classification; tool aggregation does not require it. */
   readonly presentation?: 'exploration' | 'standalone' | 'hidden';
   /** Exact child-task owner for internal tool presentation. */
   readonly presentationOwner?: {
     readonly subagentId: string;
     readonly parentToolCallId: string;
   };
-  /** Opaque Runtime grouping identity used only for adjacent exploration calls. */
+  /** Opaque host identity for a contiguous tool activity, including its first item. */
   readonly presentationGroupId?: string;
   readonly title?: string;
   /** Host-confirmed display text; this does not grant a file or execution action. */

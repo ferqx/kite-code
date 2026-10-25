@@ -13,9 +13,19 @@ import {
   nativeBackgroundPageBytes,
 } from '../src/background-bridge';
 import type { NativeJobOutputScope } from '../src/job-output-bridge';
-import { nativeRunFact, nativeToolExecution, presentableRun } from '../src/tool-messages-bridge';
+import {
+  type NativeToolMessageFact,
+  nativeRunFact,
+  nativeToolExecution,
+  nativeToolMessagePageBytes,
+  presentableRun,
+} from '../src/tool-messages-bridge';
 import { NativeJobOutputReads } from './job-output-reads';
-import { nativeToolMessageEligible, nativeToolMessageFact } from './tool-message-fact';
+import {
+  nativeLiveShellInputFact,
+  nativeToolMessageEligible,
+  nativeToolMessageFact,
+} from './tool-message-fact';
 
 type Scope = {
   generation: number;
@@ -78,6 +88,37 @@ export function backgroundIdentity(item: BackgroundExecutionItem) {
     item.childRun?.id ?? null,
     item.childRun?.originCommandId ?? null,
   ]);
+}
+
+/** Keep command completeness independent of the snapshot transport's byte chunks. */
+function completeShellCommand(
+  fact: NativeToolMessageFact,
+  nextFact: (offset: number) => NativeToolMessageFact | undefined,
+  remainingBytes: number,
+) {
+  const input = fact.shellInput;
+  if (input?.command === undefined) return 0;
+  let command = input.command;
+  let encodedBytes = Buffer.byteLength(JSON.stringify(command));
+  let nextOffset = input.commandNextOffset;
+  while (nextOffset != null && encodedBytes <= remainingBytes) {
+    const next = nextFact(nextOffset)?.shellInput;
+    if (!next?.command || next.commandOffset !== nextOffset)
+      throw new ClientError('tool_message_command_offset_invalid');
+    command += next.command;
+    encodedBytes += Buffer.byteLength(JSON.stringify(next.command)) - 2;
+    nextOffset = next.commandNextOffset;
+  }
+  if (nextOffset == null && encodedBytes <= remainingBytes) {
+    fact.shellInput = { ...input, command, commandOffset: 0, commandNextOffset: null };
+    return encodedBytes;
+  }
+  // An original target preview is display only, without a partial command/copy action.
+  fact.shellInput = {
+    operation: input.operation,
+    ...(input.shellId ? { shellId: input.shellId } : {}),
+  };
+  return 0;
 }
 
 /** Each Main-owned scope has its own complete authenticated observation and detail readers. */
@@ -529,6 +570,7 @@ export class NativeBackground {
             .map((run) => [run.id, nativeRunFact(run)]),
         );
         const tools: NonNullable<NativeBackgroundChild['presentation']>['tools'] = [];
+        let commandBytes = 0;
         let unavailable: true | undefined;
         try {
           for (const message of messages) {
@@ -550,7 +592,21 @@ export class NativeBackground {
               messages,
               sessionId: childId,
             });
-            if (fact) tools.push(fact);
+            if (fact) {
+              commandBytes += completeShellCommand(
+                fact,
+                (commandOffset) =>
+                  nativeToolMessageFact({
+                    execution,
+                    message,
+                    messages,
+                    sessionId: childId,
+                    commandOffset,
+                  }),
+                nativeToolMessagePageBytes - commandBytes,
+              );
+              tools.push(fact);
+            }
           }
         } catch (cause) {
           this.check(lease);
@@ -564,10 +620,47 @@ export class NativeBackground {
           // Optional presentation failure must not hide the independently verified transcript.
           unavailable = true;
         }
+        const liveTools: NonNullable<NativeBackgroundChild['presentation']>['tools'] = [];
+        const receipts = new Set(
+          messages
+            .filter(
+              (message) =>
+                message.role === 'tool' &&
+                message.status === 'complete' &&
+                message.sourceIds?.length === 1 &&
+                (!message.originMessage || message.originMessage.storeId === lease.scope.storeId),
+            )
+            .map((message) =>
+              JSON.stringify([
+                message.sourceIds![0],
+                message.originMessage ? message.originMessage.runId : message.runId,
+              ]),
+            ),
+        );
+        for (const execution of final.executions) {
+          if (
+            execution.kind !== 'tool' ||
+            execution.sessionId !== childId ||
+            execution.originStoreId !== lease.scope.storeId ||
+            !execution.runId ||
+            !runs.get(execution.runId)?.isActive ||
+            receipts.has(JSON.stringify([execution.id, execution.runId]))
+          )
+            continue;
+          const fact = nativeLiveShellInputFact(execution);
+          if (!fact) continue;
+          commandBytes += completeShellCommand(
+            fact,
+            (offset) => nativeLiveShellInputFact(execution, offset),
+            nativeToolMessagePageBytes - commandBytes,
+          );
+          liveTools.push(fact);
+        }
         presentation = {
           ...(unavailable ? { unavailable } : {}),
           runs: [...runs.values()],
           tools,
+          liveTools,
           executions: final.executions
             .filter(
               (execution) =>

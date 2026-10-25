@@ -90,6 +90,37 @@ test('active reasoning is an activity marker and never calls the host body rende
   expect(inferred.document.querySelector('.agent-turn button')).toBeNull();
 });
 
+test('host-confirmed hidden non-tool records never create a row or invoke the body renderer', () => {
+  const { calls, document } = render(
+    [
+      user('first'),
+      {
+        id: 'tool-model',
+        role: 'assistant',
+        turnId: 'run',
+        text: '',
+        settled: false,
+        presentation: 'hidden',
+      },
+      {
+        id: 'tool:failure',
+        role: 'tool',
+        turnId: 'run',
+        text: 'Real failure',
+        settled: true,
+        presentation: 'hidden',
+        status: 'failed',
+      },
+    ],
+    true,
+    true,
+  );
+  expect(calls).toEqual(['first', 'tool:failure']);
+  expect(document.querySelector('.message.assistant')).toBeNull();
+  expect(document.body.textContent).toContain('Real failure');
+  expect(document.querySelectorAll('.response-status')).toHaveLength(1);
+});
+
 test('timing-only completed turns keep exact identities and never render private markers through the host', () => {
   const timing: Message = {
     id: 'timing:first',

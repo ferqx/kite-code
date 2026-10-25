@@ -299,7 +299,7 @@ test('scheduled tasks is a first-class page below workbench without inventing sa
   expect(html).not.toContain('conversation-footer');
 });
 
-test('tool groups count freshness reevaluations separately from actual reads and retain real failures', async () => {
+test('tool groups keep their heading plain while individual rows retain freshness and failure facts', async () => {
   const { ToolActivity } = await import('../src/desktop/ToolActivity');
   const deferred = Array.from({ length: 4 }, (_, index) => ({
     id: `deferred-${index}`,
@@ -328,10 +328,10 @@ test('tool groups count freshness reevaluations separately from actual reads and
       renderChildren={() => null}
     />,
   );
-  expect(closed).toContain('读取 1 次');
-  expect(closed).toContain('重新评估 4 项');
-  expect(closed).toContain('失败 1 项');
-  expect(closed).not.toContain('失败 5 项');
+  expect(closed).toContain('读取文件');
+  expect(closed).not.toContain('已完成');
+  expect(closed).not.toContain('重新评估');
+  expect(closed).not.toContain('失败');
   const open = renderToStaticMarkup(
     <ToolActivity
       onToggle={() => {}}
@@ -342,12 +342,13 @@ test('tool groups count freshness reevaluations separately from actual reads and
   );
   expect(open.match(/上下文已更新，此次未执行/g)).toHaveLength(2);
   expect(open.match(/工具信息已更新，此次未执行/g)).toHaveLength(2);
-  expect(open.match(/data-status="failed"/g)).toHaveLength(1);
+  expect(open).toContain('失败');
+  expect(open).not.toContain('permission_denied');
   expect(open).not.toContain('context_refresh_required');
   const neutral = renderToStaticMarkup(
     <ToolActivity onToggle={() => {}} messages={deferred} renderChildren={() => null} />,
   );
-  expect(neutral).toContain('重新评估 4 项');
+  expect(neutral).not.toContain('重新评估');
   expect(neutral).not.toContain('读取 4 次');
   expect(neutral).not.toContain('data-status="issue"');
   const single = renderToStaticMarkup(

@@ -39,18 +39,34 @@ async function fixture(
   explicit = false,
   afterFinalToolAuthorization?: () => Promise<void>,
   injectedToolDecision?: PermissionDecision,
+  scenario?: 'readonly-auto-reject',
 ) {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-default-permission-')));
   const workspace = join(root, 'workspace');
   mkdirSync(workspace);
+  const projectFile = 'packages/protocol/package.json';
+  const projectBytes = '{"name":"xplatform-protocol","description":"Low-code protocol"}\n';
+  const rejectionReason =
+    'The user only asked to understand the project. Keep this task read-only; do not write placeholder configuration.';
+  if (scenario) {
+    mkdirSync(join(workspace, 'packages/protocol'), { recursive: true });
+    writeFileSync(join(workspace, projectFile), projectBytes);
+  }
   const profile = selectProfile({ dataRoot: join(root, 'data'), profile: 'new' });
   privateDirectory(profile.profilePath);
   const requests: Record<string, unknown>[] = [];
   const authReviews: Record<string, unknown>[] = [];
-  const calls: ({ name: string; input: unknown } | undefined)[] = [
-    { name: 'write_file', input: { path: 'output.txt', content: 'exact first', base: null } },
-    undefined,
-  ];
+  const calls: ({ name: string; input: unknown } | undefined)[] = scenario
+    ? [
+        { name: 'read_file', input: { path: projectFile } },
+        { name: 'write_file', input: { path: projectFile, base: null, content: 'placeholder' } },
+        { name: 'read_file', input: { path: projectFile } },
+        undefined,
+      ]
+    : [
+        { name: 'write_file', input: { path: 'output.txt', content: 'exact first', base: null } },
+        undefined,
+      ];
   const provider = Bun.serve({
     hostname: '127.0.0.1',
     port: 0,
@@ -92,10 +108,14 @@ async function fixture(
               : {
                   content: reviewing
                     ? JSON.stringify({
-                        decision: 'ask_user',
-                        reason: 'Human confirmation required for this exact file edit',
+                        decision: scenario ? 'reject' : 'ask_user',
+                        reason: scenario
+                          ? rejectionReason
+                          : 'Human confirmation required for this exact file edit',
                       })
-                    : 'done',
+                    : scenario
+                      ? '这是 xplatform 的低代码协议包，项目配置保持原样。'
+                      : 'done',
                 },
             finish_reason: null,
           },
@@ -122,7 +142,7 @@ async function fixture(
         baseURL: `http://127.0.0.1:${provider.port}/v1`,
       },
     ],
-    tools: [{ id: 'files.write' }],
+    tools: scenario ? [{ id: 'files.read' }, { id: 'files.write' }] : [{ id: 'files.write' }],
   };
   writeFileSync(configurationPath, JSON.stringify(configuration));
   let policy: PermissionPolicySnapshot = {
@@ -261,6 +281,9 @@ async function fixture(
     requests,
     authReviews,
     calls,
+    projectFile,
+    projectBytes,
+    rejectionReason,
     management,
     get policy() {
       return policy;
@@ -304,6 +327,72 @@ async function fixture(
     },
   };
 }
+
+test('a rejected placeholder write during project research stays undispatched while the real SDK continues read-only to its answer', async () => {
+  const f = await fixture('auto', true, false, undefined, undefined, 'readonly-auto-reject');
+  try {
+    await f.run('work', '了解下这个项目');
+    const command = await f.runtime.waitForCommand('work', { timeoutMs: 5000 });
+    expect(command.status).toBe('applied');
+    const view = await f.client.getView('s');
+    expect(view.runs.find((run) => run.rootWorkCommandId === 'work')?.status).toBe('completed');
+    const tools = view.executions.filter((row) => row.kind === 'tool');
+    expect(tools.map((row) => row.definitionId)).toEqual([
+      'files.read',
+      'files.write',
+      'files.read',
+    ]);
+    const write = tools.find((row) => row.definitionId === 'files.write')!;
+    expect(write.status).toBe('failed');
+    expect(write.authorization).toMatchObject({
+      dispatched: false,
+      check: { decision: 'reject', reason: f.rejectionReason },
+    });
+    expect(write.result).toMatchObject({
+      outcome: 'failed',
+      details: {
+        code: 'permission_denied',
+        reason: f.rejectionReason,
+        adapterAttempted: false,
+        dispatchCommitted: false,
+      },
+    });
+    expect(
+      tools.filter((row) => row.definitionId === 'files.read').map((row) => row.status),
+    ).toEqual(['succeeded', 'succeeded']);
+    expect(readFileSync(join(f.workspace, f.projectFile), 'utf8')).toBe(f.projectBytes);
+    expect(f.authReviews).toHaveLength(1);
+    expect(f.requests).toHaveLength(4);
+    const recovery = f.requests[2]!.messages as {
+      role: string;
+      content: string;
+      tool_call_id?: string;
+    }[];
+    expect(
+      recovery.find((message) => message.role === 'tool' && message.tool_call_id === 'call-2')
+        ?.content,
+    ).toContain(f.rejectionReason);
+    expect(
+      recovery.find((message) => message.role === 'tool' && message.tool_call_id === 'call-2')
+        ?.content,
+    ).toContain('not executed');
+    expect(
+      (await f.client.listInteractions('s', { storeId: f.expectedStoreId })).interactions,
+    ).toHaveLength(0);
+    expect(
+      await f.store.getCommand(
+        `authorization-check-decline-${write.authorization!.check!.executionId}`,
+      ),
+    ).toBeNull();
+    expect(
+      view.messages.some(
+        (message) => message.role === 'assistant' && message.content.includes('低代码协议包'),
+      ),
+    ).toBe(true);
+  } finally {
+    await f.close();
+  }
+});
 
 test('actual default-compatible Model file call uses actual Auto ask_user exact card/once or trusted Accept Edits; Full/default untrusted cannot be approved past trust', async () => {
   for (const mode of ['auto', 'accept_edits', 'full', null] as const) {

@@ -35,6 +35,8 @@ Status: implemented
 
 V1.3 的当前并行推进、真实清理等待和后发失败保存见[并行工具批次决定](../architecture/2026-10-11-parallel-tool-batches-and-result-order.md)。本记录的拒绝终止本轮语义继续适用；旧日志事务与 TUI 类型不作为新 Store 实现依据。
 
+该停止语义限于人工明确拒绝。自动审核拒绝保存为目标的未派发权限失败，原授权任务可继续，见[自动审核拒绝分流](2026-10-25-automatic-rejection-preserves-authorized-work.md)；本记录的人类拒绝、未开始兄弟停止与实际清理要求保持。
+
 决策者：用户直接指令
 
 取代：[Agent Note 0137](2026-08-25-shell-sandbox-durable-approval-queue.md) 关于 Approval Esc 只拒绝 focused target 并继续 sibling 的局部结论

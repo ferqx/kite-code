@@ -6,7 +6,7 @@ import {
 import { type NativeBackgroundChild, nativeBackgroundPageBytes } from './background-bridge';
 import { readNativeBodyChunks } from './native-body-chunks';
 import type { NativeBridge } from './native-bridge';
-import { presentableRun } from './tool-messages-bridge';
+import { nativeToolMessagePageBytes, presentableRun } from './tool-messages-bridge';
 
 const decimal = (value: string) => {
   if (!/^(0|[1-9][0-9]*)$/.test(value) || BigInt(value) > 9223372036854775807n)
@@ -357,6 +357,85 @@ export async function readNativeBackgroundChild(
         )
       )
         throw new ClientError('background_child_history_mismatch');
+      const liveTools = body.presentation.liveTools;
+      if (liveTools !== undefined) {
+        if (
+          !Array.isArray(liveTools) ||
+          liveTools.some((fact) => !fact || typeof fact !== 'object') ||
+          new Set(liveTools.map((fact) => fact.executionId)).size !== liveTools.length
+        )
+          throw new ClientError('background_child_history_mismatch');
+        let commandBytes = tools.reduce(
+          (bytes, fact) =>
+            bytes +
+            (fact.shellInput?.command === undefined
+              ? 0
+              : new TextEncoder().encode(JSON.stringify(fact.shellInput.command)).byteLength),
+          0,
+        );
+        for (const fact of liveTools) {
+          const execution = executions.find((entry) => entry.id === fact.executionId);
+          const shell = fact.shellInput;
+          const source = fact.inputSource;
+          if (
+            !execution ||
+            !runs.some((run) => run.id === execution.runId && run.isActive) ||
+            fact.messageId !== `native-execution:${execution.id}` ||
+            fact.definitionVersion !== '1' ||
+            !['shell.execute', 'shell.launch', 'shell.read', 'shell.wait', 'shell.stop'].includes(
+              fact.definitionId,
+            ) ||
+            fact.definitionId !== execution.definitionId ||
+            fact.definitionVersion !== execution.definitionVersion ||
+            fact.status !== execution.status ||
+            fact.resultRevision !== execution.resultRevision ||
+            !source ||
+            source.storeId !== input.storeId ||
+            source.sessionId !== childId ||
+            source.runId !== execution.runId ||
+            typeof source.toolCallId !== 'string' ||
+            !source.toolCallId ||
+            Object.keys(fact).some(
+              (key) =>
+                ![
+                  'messageId',
+                  'executionId',
+                  'definitionId',
+                  'definitionVersion',
+                  'status',
+                  'resultRevision',
+                  'target',
+                  'shellInput',
+                  'inputSource',
+                ].includes(key),
+            ) ||
+            (fact.target !== undefined &&
+              (typeof fact.target !== 'string' || [...fact.target].length > 4097)) ||
+            !shell ||
+            Object.keys(shell).some(
+              (key) =>
+                !['operation', 'shellId', 'command', 'commandOffset', 'commandNextOffset'].includes(
+                  key,
+                ),
+            ) ||
+            shell.operation !== fact.definitionId.slice('shell.'.length) ||
+            (shell.shellId !== undefined && typeof shell.shellId !== 'string') ||
+            (shell.command === undefined
+              ? shell.commandOffset !== undefined || shell.commandNextOffset !== undefined
+              : typeof shell.command !== 'string' ||
+                !shell.command ||
+                [...shell.command].length > 262144 ||
+                !['execute', 'launch'].includes(shell.operation) ||
+                shell.commandOffset !== 0 ||
+                shell.commandNextOffset !== null)
+          )
+            throw new ClientError('background_child_history_mismatch');
+          if (shell.command !== undefined)
+            commandBytes += new TextEncoder().encode(JSON.stringify(shell.command)).byteLength;
+        }
+        if (commandBytes > nativeToolMessagePageBytes)
+          throw new ClientError('background_child_history_mismatch');
+      }
     }
     const outputs = new Set<string>();
     for (const entry of body.modelOutputs) {
