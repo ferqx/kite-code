@@ -42,6 +42,74 @@ async function openSettings(page: import('playwright').Page) {
       .getByRole('button', { name: '设置', exact: true })
       .click();
 }
+async function openConnectionModels(page: import('playwright').Page, label: string) {
+  const catalog = page.getByRole('button', { name: `管理 ${label} 的模型`, exact: true });
+  await catalog.waitFor();
+  if ((await catalog.getAttribute('aria-expanded')) !== 'true') await catalog.click();
+}
+
+/** Exercise the retained default-settings IPC contract without restoring a removed product control. */
+async function setDefaultModel(page: import('playwright').Page, modelId: string, label: string) {
+  await openConnectionModels(page, label);
+  await page
+    .getByRole('dialog', { name: `${label} 的模型管理`, exact: true })
+    .locator('.settings-model-options[aria-busy="false"]')
+    .waitFor();
+  await page.evaluate(
+    async ({ modelId, storeId }) => {
+      const state = (await window.kiteNative!.request({
+        method: 'state',
+        generation: 1,
+      })) as NativeState;
+      const facts = await window.kiteNative!.request({
+        method: 'settings.models.read',
+        generation: state.generation,
+        scope: 'user',
+      });
+      if (
+        !facts ||
+        !('kind' in facts) ||
+        !('models' in facts) ||
+        facts.kind !== 'settings.models' ||
+        facts.storeId !== storeId ||
+        facts.scope !== 'user' ||
+        !facts.canWrite ||
+        !facts.models.some((model) => model.id === modelId && model.enabled && model.configured)
+      )
+        throw Error('fixture_default_observation_unavailable');
+      const result = await window.kiteNative!.request({
+        method: 'settings.models.default',
+        generation: state.generation,
+        observationId: facts.observationId,
+        modelId,
+      });
+      if (
+        !result ||
+        !('kind' in result) ||
+        !('phase' in result) ||
+        result.kind !== 'settings.models.submission' ||
+        result.phase !== 'applied' ||
+        result.storeId !== storeId ||
+        result.operation.kind !== 'default' ||
+        result.operation.modelId !== modelId
+      )
+        throw Error('fixture_default_not_applied');
+    },
+    { modelId, storeId },
+  );
+  // Direct fixture IPC has no component onSaved callback; reopening owns fresh UI observations.
+  await closeSettings(page);
+  await openSettings(page);
+  await page.getByRole('button', { name: '提供商与模型', exact: true }).click();
+  await openConnectionModels(page, label);
+  await page
+    .getByRole('dialog', { name: `${label} 的模型管理`, exact: true })
+    .getByRole('switch', { name: `启用模型 ${modelId}`, exact: true })
+    .locator('..')
+    .getByText('默认', { exact: true })
+    .waitFor();
+}
+
 async function closeSettings(page: import('playwright').Page) {
   if (await page.locator('.desktop-settings-dialog').isVisible())
     await page.getByRole('button', { name: '返回应用', exact: true }).click();
@@ -175,7 +243,7 @@ try {
   await page.getByRole('button', { name: '信任所显示的范围', exact: true }).click();
   await page.getByText(/^工作区：w；信任状态：trusted；版本：/).waitFor();
   await openSettings(page);
-  await page.getByRole('button', { name: '提供商', exact: true }).click();
+  await page.getByRole('button', { name: '提供商与模型', exact: true }).click();
   const aliases = [
     ['compatible', 'OpenAI-compatible', 'model-a'],
     ['ollama', 'Ollama', ''],
@@ -231,19 +299,18 @@ try {
   assert.equal(models.length, 4);
   assert.ok(models.every((m) => m.enabled === false));
   const id = (alias: string) => models.find((m) => m.provider === alias)!.id;
+  // The old category switch remounted readers; reopen to observe the saved routes.
+  await closeSettings(page);
   await openSettings(page);
-  await page.getByRole('button', { name: '模型', exact: true }).click();
+  await page.getByRole('button', { name: '提供商与模型', exact: true }).click();
   for (const m of models) {
-    const trigger = page.getByRole('button', { name: '默认模型', exact: true });
+    await openConnectionModels(page, aliases.find(([alias]) => alias === m.provider)![1]);
     await page.getByRole('switch', { name: `启用模型 ${m.id}`, exact: true }).waitFor();
-    if (await trigger.isEnabled()) {
-      await trigger.click();
-      assert.equal(
-        await page.getByRole('menuitemradio', { name: `设为默认 ${m.id}`, exact: true }).count(),
-        0,
-      );
-      await page.keyboard.press('Escape');
-    } else assert.equal(await trigger.isDisabled(), true);
+    assert.equal(await page.getByRole('button', { name: '默认模型', exact: true }).count(), 0);
+    assert.equal(
+      await page.getByRole('menuitemradio', { name: `设为默认 ${m.id}`, exact: true }).count(),
+      0,
+    );
     await page.getByRole('switch', { name: `启用模型 ${m.id}`, exact: true }).check();
     await until(
       async () => page.getByRole('switch', { name: `启用模型 ${m.id}`, exact: true }).isDisabled(),
@@ -251,10 +318,7 @@ try {
       'enabled model refresh incomplete',
     );
   }
-  await page.getByRole('button', { name: '默认模型', exact: true }).click();
-  await page
-    .getByRole('menuitemradio', { name: `设为默认 ${id('compatible')}`, exact: true })
-    .click();
+  await setDefaultModel(page, id('compatible'), 'OpenAI-compatible');
   await until(
     async () => readConfiguration().modelId,
     (v) => v === id('compatible'),
@@ -357,9 +421,8 @@ try {
   await choose('openai');
   await effort('high');
   await openSettings(page);
-  await page.getByRole('button', { name: '模型', exact: true }).click();
-  await page.getByRole('button', { name: '默认模型', exact: true }).click();
-  await page.getByRole('menuitemradio', { name: `设为默认 ${id('openai')}`, exact: true }).click();
+  await page.getByRole('button', { name: '提供商与模型', exact: true }).click();
+  await setDefaultModel(page, id('openai'), 'OpenAI');
   await until(
     async () => readConfiguration().modelId,
     (v) => v === id('openai'),
@@ -391,11 +454,8 @@ try {
   });
   await send('NATIVE_openai_next');
   await openSettings(page);
-  await page.getByRole('button', { name: '模型', exact: true }).click();
-  await page.getByRole('button', { name: '默认模型', exact: true }).click();
-  await page
-    .getByRole('menuitemradio', { name: `设为默认 ${id('compatible')}`, exact: true })
-    .click();
+  await page.getByRole('button', { name: '提供商与模型', exact: true }).click();
+  await setDefaultModel(page, id('compatible'), 'OpenAI-compatible');
   await until(
     async () => readConfiguration().modelId,
     (v) => v === id('compatible'),
@@ -424,7 +484,7 @@ try {
   await select('a');
   // Drop exactly the first completed physical save response; never replace its Service result.
   await openSettings(page);
-  await page.getByRole('button', { name: '提供商', exact: true }).click();
+  await page.getByRole('button', { name: '提供商与模型', exact: true }).click();
   await page.getByRole('button', { name: '编辑 OpenAI-compatible', exact: true }).click();
   await page.getByRole('textbox', { name: '模型名称', exact: true }).fill('model-a');
   await app!.evaluate(() => {
@@ -483,7 +543,7 @@ try {
   assert.equal(readConfiguration().modelId, id('compatible'));
   const before = Number(await (await fetch(`${control}/count`)).text());
   await openSettings(page);
-  await page.getByRole('button', { name: '提供商', exact: true }).click();
+  await page.getByRole('button', { name: '提供商与模型', exact: true }).click();
   await page.getByRole('button', { name: '查看结果', exact: true }).click();
   await until(
     state,
@@ -530,9 +590,8 @@ try {
     t.cleanupTransport = () => transport;
   });
   await openSettings(page);
-  await page.getByRole('button', { name: '提供商', exact: true }).click();
-  await page.getByRole('button', { name: '刷新提供商配置', exact: true }).click();
-  await page.waitForTimeout(100);
+  await page.getByRole('button', { name: '提供商与模型', exact: true }).click();
+  await page.getByRole('button', { name: '编辑 OpenAI-compatible', exact: true }).waitFor();
   await app!.evaluate(
     async (_, { refs, storeId }) => {
       const t = (globalThis as ProviderFixtureGlobal).cleanupTransport();

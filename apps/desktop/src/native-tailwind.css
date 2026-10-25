@@ -155,7 +155,7 @@ html[data-platform="macos"][data-theme="dark"] .kite-client.shell {
   top: 0;
   width: 236px;
   height: var(--app-header-height, 48px);
-  padding: 8px 10px;
+  padding: 0;
   background: var(--sidebar);
 }
 .kite-client .desktop-settings-header h2 {
@@ -165,7 +165,7 @@ html[data-platform="macos"][data-theme="dark"] .kite-client.shell {
   overflow: hidden;
   clip: rect(0, 0, 0, 0);
 }
-.kite-client .desktop-settings-header button {
+.kite-client .settings-sidebar nav .settings-back {
   display: inline-flex;
   align-items: center;
   justify-content: flex-start;
@@ -176,16 +176,14 @@ html[data-platform="macos"][data-theme="dark"] .kite-client.shell {
   padding: 6px 10px;
   border: 0;
   background: transparent;
-  color: var(--foreground);
+  color: var(--navigation-foreground);
   font-size: 14px;
+  font-weight: 400;
   cursor: pointer;
+  transition: none;
 }
-.kite-client .desktop-settings-header button:hover:not(:disabled) {
+.kite-client .settings-sidebar nav .settings-back:hover:not(:disabled) {
   background: var(--control-hover);
-}
-.kite-client .desktop-settings-header button svg {
-  width: 16px;
-  height: 16px;
 }
 .kite-client .desktop-settings.settings-layout {
   display: grid;
@@ -236,7 +234,7 @@ html[data-platform="macos"] .kite-client .desktop-settings-dialog .settings-edit
 }
 .kite-client .settings-sidebar {
   --control-pressed: var(--control-hover);
-  padding: var(--app-header-height, 48px) 10px 24px;
+  padding: calc(var(--app-header-height, 48px) + 8px) 10px 24px;
   background: var(--sidebar);
   overflow-y: auto;
 }
@@ -261,11 +259,12 @@ html[data-platform="macos"] .kite-client .desktop-settings-dialog .settings-edit
   background: transparent;
   color: var(--foreground);
   font-size: 14px;
-  gap: 9px;
+  gap: 10px;
+  padding-inline: 10px;
 }
 .kite-client .settings-sidebar nav button svg {
-  width: 16px;
-  height: 16px;
+  width: var(--ui-icon-size, 14px);
+  height: var(--ui-icon-size, 14px);
   flex-shrink: 0;
 }
 .kite-client .settings-sidebar nav button:hover:not(:disabled) {
@@ -388,7 +387,7 @@ html[data-platform="macos"] .kite-client .desktop-settings-dialog .settings-edit
   background: var(--control-pressed);
 }
 /* Model configuration uses compact horizontal rows, independent of form labels. */
-.kite-client .desktop-settings .settings-content:has(.settings-models) {
+.kite-client .desktop-settings .settings-content:has(> .settings-models) {
   padding-inline: clamp(24px, 5vw, 80px);
 }
 .kite-client .desktop-settings .settings-content > .settings-models {
@@ -584,14 +583,6 @@ html[data-platform="macos"] .kite-client .desktop-settings-dialog .settings-edit
 .kite-client .desktop-settings .settings-model-option[data-enabled="false"] strong {
   color: var(--muted-foreground);
 }
-.kite-client .desktop-settings .settings-model-default-badge {
-  padding: 1px 7px;
-  border-radius: var(--radius);
-  background: var(--accent);
-  color: var(--muted-foreground);
-  font-size: 10px;
-  font-weight: 500;
-}
 .kite-client .desktop-settings .settings-model-option input[role="switch"] {
   appearance: none;
   position: relative;
@@ -761,14 +752,6 @@ html[data-platform="macos"] .kite-client .desktop-settings-dialog .settings-edit
   .kite-client .desktop-settings .settings-content {
     padding: 72px 24px;
   }
-  .kite-client .settings-sidebar nav button {
-    gap: 7px;
-    padding-inline: 8px;
-  }
-  .kite-client .settings-sidebar nav button svg {
-    width: 17px;
-    height: 17px;
-  }
   .kite-client .desktop-settings .settings-row {
     flex-wrap: wrap;
     padding: 14px 0;
@@ -875,10 +858,6 @@ html[data-native-window][data-platform="macos"]
   .kite-client.shell:not(.sidebar-visible)
   .session-header {
   padding-left: calc(var(--native-window-controls-width) + 8px);
-}
-
-html[data-native-window][data-platform="macos"] .kite-client .desktop-settings-header {
-  padding-left: var(--native-window-controls-width);
 }
 
 html[data-native-window][data-platform="macos"]

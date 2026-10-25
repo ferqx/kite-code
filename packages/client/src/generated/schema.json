@@ -10243,369 +10243,585 @@
   },
   "HostMutation": {
     "$schema": "https://json-schema.org/draft/2020-12/schema",
-    "type": "object",
-    "properties": {
-      "commandId": {
-        "type": "string",
-        "minLength": 1,
-        "maxLength": 128,
-        "pattern": "^[A-Za-z0-9_-]+$"
-      },
-      "originStoreId": {
-        "type": "string",
-        "minLength": 1,
-        "maxLength": 128,
-        "pattern": "^[A-Za-z0-9_-]+$"
-      },
-      "scope": {
-        "type": "string",
-        "enum": ["user", "workspace"]
-      },
-      "workspaceId": {
-        "type": "string",
-        "minLength": 1,
-        "maxLength": 128,
-        "pattern": "^[A-Za-z0-9_-]+$"
-      },
-      "ifMatch": {
-        "type": "string",
-        "pattern": "^[a-f0-9]{64}$"
-      },
-      "kind": {
-        "type": "string",
-        "enum": [
-          "config.patch",
-          "config.repair",
-          "credential.put",
-          "credential.revoke",
-          "model_settings.update",
-          "provider_settings.update"
-        ]
-      },
-      "modelSettings": {
+    "anyOf": [
+      {
         "type": "object",
         "properties": {
-          "expectedReadSet": {
+          "commandId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "pattern": "^[A-Za-z0-9_-]+$"
+          },
+          "originStoreId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "pattern": "^[A-Za-z0-9_-]+$"
+          },
+          "scope": {
+            "type": "string",
+            "enum": ["user", "workspace"]
+          },
+          "workspaceId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "pattern": "^[A-Za-z0-9_-]+$"
+          },
+          "ifMatch": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "config.patch",
+              "config.repair",
+              "credential.put",
+              "credential.revoke",
+              "model_settings.update",
+              "provider_settings.update"
+            ]
+          },
+          "modelSettings": {
             "type": "object",
             "properties": {
-              "userEtag": {
-                "type": "string",
-                "pattern": "^[a-f0-9]{64}$"
-              },
-              "workspaceEtag": {
-                "anyOf": [
-                  {
+              "expectedReadSet": {
+                "type": "object",
+                "properties": {
+                  "userEtag": {
                     "type": "string",
                     "pattern": "^[a-f0-9]{64}$"
                   },
-                  {
-                    "type": "null"
-                  }
-                ]
-              },
-              "explicitDigest": {
-                "type": "string",
-                "pattern": "^[a-f0-9]{64}$"
-              },
-              "effectiveDigest": {
-                "type": "string",
-                "pattern": "^[a-f0-9]{64}$"
-              }
-            },
-            "required": ["userEtag", "workspaceEtag", "explicitDigest", "effectiveDigest"],
-            "additionalProperties": false
-          },
-          "operation": {
-            "oneOf": [
-              {
-                "type": "object",
-                "properties": {
-                  "kind": {
-                    "type": "string",
-                    "const": "enabled"
-                  },
-                  "modelId": {
-                    "type": "string",
-                    "minLength": 1,
-                    "maxLength": 128,
-                    "pattern": "^[A-Za-z0-9_.-]+$"
-                  },
-                  "enabled": {
-                    "type": "boolean"
-                  }
-                },
-                "required": ["kind", "modelId", "enabled"],
-                "additionalProperties": false
-              },
-              {
-                "type": "object",
-                "properties": {
-                  "kind": {
-                    "type": "string",
-                    "const": "default"
-                  },
-                  "modelId": {
-                    "type": "string",
-                    "minLength": 1,
-                    "maxLength": 128,
-                    "pattern": "^[A-Za-z0-9_.-]+$"
-                  }
-                },
-                "required": ["kind", "modelId"],
-                "additionalProperties": false
-              },
-              {
-                "type": "object",
-                "properties": {
-                  "kind": {
-                    "type": "string",
-                    "const": "effort"
-                  },
-                  "modelId": {
-                    "type": "string",
-                    "minLength": 1,
-                    "maxLength": 128,
-                    "pattern": "^[A-Za-z0-9_.-]+$"
-                  },
-                  "reasoningEffort": {
+                  "workspaceEtag": {
                     "anyOf": [
                       {
                         "type": "string",
-                        "enum": [
-                          "none",
-                          "minimal",
-                          "low",
-                          "medium",
-                          "high",
-                          "xhigh",
-                          "max",
-                          "ultar"
-                        ]
+                        "pattern": "^[a-f0-9]{64}$"
                       },
                       {
                         "type": "null"
                       }
                     ]
+                  },
+                  "explicitDigest": {
+                    "type": "string",
+                    "pattern": "^[a-f0-9]{64}$"
+                  },
+                  "effectiveDigest": {
+                    "type": "string",
+                    "pattern": "^[a-f0-9]{64}$"
                   }
                 },
-                "required": ["kind", "modelId", "reasoningEffort"],
+                "required": ["userEtag", "workspaceEtag", "explicitDigest", "effectiveDigest"],
+                "additionalProperties": false
+              },
+              "operation": {
+                "oneOf": [
+                  {
+                    "type": "object",
+                    "properties": {
+                      "kind": {
+                        "type": "string",
+                        "const": "enabled"
+                      },
+                      "modelId": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 128,
+                        "pattern": "^[A-Za-z0-9_.-]+$"
+                      },
+                      "enabled": {
+                        "type": "boolean"
+                      }
+                    },
+                    "required": ["kind", "modelId", "enabled"],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "kind": {
+                        "type": "string",
+                        "const": "default"
+                      },
+                      "modelId": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 128,
+                        "pattern": "^[A-Za-z0-9_.-]+$"
+                      }
+                    },
+                    "required": ["kind", "modelId"],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "kind": {
+                        "type": "string",
+                        "const": "effort"
+                      },
+                      "modelId": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 128,
+                        "pattern": "^[A-Za-z0-9_.-]+$"
+                      },
+                      "reasoningEffort": {
+                        "anyOf": [
+                          {
+                            "type": "string",
+                            "enum": [
+                              "none",
+                              "minimal",
+                              "low",
+                              "medium",
+                              "high",
+                              "xhigh",
+                              "max",
+                              "ultar"
+                            ]
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      }
+                    },
+                    "required": ["kind", "modelId", "reasoningEffort"],
+                    "additionalProperties": false
+                  }
+                ]
+              }
+            },
+            "required": ["expectedReadSet", "operation"],
+            "additionalProperties": false
+          },
+          "providerSettings": {
+            "type": "object",
+            "properties": {
+              "expectedReadSet": {
+                "type": "object",
+                "properties": {
+                  "userEtag": {
+                    "type": "string",
+                    "pattern": "^[a-f0-9]{64}$"
+                  },
+                  "workspaceEtag": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "pattern": "^[a-f0-9]{64}$"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "explicitDigest": {
+                    "type": "string",
+                    "pattern": "^[a-f0-9]{64}$"
+                  },
+                  "effectiveDigest": {
+                    "type": "string",
+                    "pattern": "^[a-f0-9]{64}$"
+                  }
+                },
+                "required": ["userEtag", "workspaceEtag", "explicitDigest", "effectiveDigest"],
+                "additionalProperties": false
+              },
+              "operation": {
+                "type": "object",
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "enum": ["upsert", "remove"]
+                  },
+                  "name": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 120,
+                    "pattern": "^[^\\x00-\\x1f\\x7f]+$"
+                  },
+                  "provider": {
+                    "type": "string",
+                    "enum": ["openai", "deepseek", "compatible", "ollama", "codex"]
+                  },
+                  "protocol": {
+                    "type": "string",
+                    "enum": ["chat-completions", "responses"]
+                  },
+                  "connectionId": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "pattern": "^[a-f0-9]{64}$"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "baseURL": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 4096
+                  },
+                  "modelNames": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 256
+                    }
+                  },
+                  "credential": {
+                    "type": "string",
+                    "enum": ["keep", "replace", "none"]
+                  }
+                },
+                "required": ["provider", "connectionId", "baseURL", "modelNames", "credential"],
+                "additionalProperties": false
+              }
+            },
+            "required": ["expectedReadSet", "operation"],
+            "additionalProperties": false
+          },
+          "state": {
+            "type": "string",
+            "enum": ["pending", "applied", "failed", "outcome_unknown"]
+          },
+          "receipt": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {},
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "status": {
+                    "type": "string",
+                    "const": "applied"
+                  },
+                  "etag": {
+                    "type": "string",
+                    "pattern": "^[a-f0-9]{64}$"
+                  }
+                },
+                "required": ["status", "etag"],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "status": {
+                    "type": "string",
+                    "const": "applied"
+                  },
+                  "etag": {
+                    "type": "string",
+                    "pattern": "^[a-f0-9]{64}$"
+                  },
+                  "credentialState": {
+                    "type": "string",
+                    "enum": ["unchanged", "stored"]
+                  },
+                  "configurationState": {
+                    "type": "string",
+                    "const": "published"
+                  },
+                  "opaqueRef": {
+                    "type": "string",
+                    "pattern": "^credential:[0-9a-f-]{36}$"
+                  }
+                },
+                "required": ["status", "etag", "credentialState", "configurationState"],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "status": {
+                    "type": "string",
+                    "const": "applied"
+                  },
+                  "opaqueRef": {
+                    "type": "string",
+                    "pattern": "^credential:[0-9a-f-]{36}$"
+                  },
+                  "persistence": {
+                    "type": "string",
+                    "enum": ["os", "temporary"]
+                  }
+                },
+                "required": ["status", "opaqueRef", "persistence"],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "status": {
+                    "type": "string",
+                    "enum": ["failed", "outcome_unknown"]
+                  },
+                  "code": {
+                    "type": "string",
+                    "pattern": "^[a-z0-9_]{1,128}$"
+                  }
+                },
+                "required": ["status", "code"],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "status": {
+                    "type": "string",
+                    "enum": ["failed", "outcome_unknown"]
+                  },
+                  "code": {
+                    "type": "string",
+                    "pattern": "^[a-z0-9_]{1,128}$"
+                  },
+                  "credentialState": {
+                    "type": "string",
+                    "enum": ["unchanged", "stored", "outcome_unknown"]
+                  },
+                  "configurationState": {
+                    "type": "string",
+                    "enum": ["not_attempted", "outcome_unknown"]
+                  },
+                  "opaqueRef": {
+                    "type": "string",
+                    "pattern": "^credential:[0-9a-f-]{36}$"
+                  }
+                },
+                "required": ["status", "code", "credentialState", "configurationState"],
                 "additionalProperties": false
               }
             ]
           }
         },
-        "required": ["expectedReadSet", "operation"],
+        "required": ["commandId", "originStoreId", "scope", "kind", "state", "receipt"],
         "additionalProperties": false
       },
-      "providerSettings": {
+      {
         "type": "object",
         "properties": {
-          "expectedReadSet": {
+          "commandId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "pattern": "^[A-Za-z0-9_-]+$"
+          },
+          "originStoreId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "pattern": "^[A-Za-z0-9_-]+$"
+          },
+          "scope": {
+            "type": "string",
+            "enum": ["user", "workspace"]
+          },
+          "workspaceId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "pattern": "^[A-Za-z0-9_-]+$"
+          },
+          "ifMatch": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "kind": {
+            "type": "string",
+            "const": "model_settings.update"
+          },
+          "modelSettings": {
             "type": "object",
             "properties": {
-              "userEtag": {
-                "type": "string",
-                "pattern": "^[a-f0-9]{64}$"
-              },
-              "workspaceEtag": {
-                "anyOf": [
-                  {
+              "expectedReadSet": {
+                "type": "object",
+                "properties": {
+                  "userEtag": {
                     "type": "string",
                     "pattern": "^[a-f0-9]{64}$"
                   },
+                  "workspaceEtag": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "pattern": "^[a-f0-9]{64}$"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "explicitDigest": {
+                    "type": "string",
+                    "pattern": "^[a-f0-9]{64}$"
+                  },
+                  "effectiveDigest": {
+                    "type": "string",
+                    "pattern": "^[a-f0-9]{64}$"
+                  }
+                },
+                "required": ["userEtag", "workspaceEtag", "explicitDigest", "effectiveDigest"],
+                "additionalProperties": false
+              },
+              "operation": {
+                "oneOf": [
                   {
-                    "type": "null"
+                    "type": "object",
+                    "properties": {
+                      "kind": {
+                        "type": "string",
+                        "const": "enabled"
+                      },
+                      "modelId": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 128,
+                        "pattern": "^[A-Za-z0-9_.-]+$"
+                      },
+                      "enabled": {
+                        "type": "boolean"
+                      }
+                    },
+                    "required": ["kind", "modelId", "enabled"],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "kind": {
+                        "type": "string",
+                        "const": "default"
+                      },
+                      "modelId": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 128,
+                        "pattern": "^[A-Za-z0-9_.-]+$"
+                      }
+                    },
+                    "required": ["kind", "modelId"],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "kind": {
+                        "type": "string",
+                        "const": "effort"
+                      },
+                      "modelId": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 128,
+                        "pattern": "^[A-Za-z0-9_.-]+$"
+                      },
+                      "reasoningEffort": {
+                        "anyOf": [
+                          {
+                            "type": "string",
+                            "enum": [
+                              "none",
+                              "minimal",
+                              "low",
+                              "medium",
+                              "high",
+                              "xhigh",
+                              "max",
+                              "ultar"
+                            ]
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      }
+                    },
+                    "required": ["kind", "modelId", "reasoningEffort"],
+                    "additionalProperties": false
                   }
                 ]
-              },
-              "explicitDigest": {
-                "type": "string",
-                "pattern": "^[a-f0-9]{64}$"
-              },
-              "effectiveDigest": {
-                "type": "string",
-                "pattern": "^[a-f0-9]{64}$"
               }
             },
-            "required": ["userEtag", "workspaceEtag", "explicitDigest", "effectiveDigest"],
+            "required": ["expectedReadSet", "operation"],
             "additionalProperties": false
           },
-          "operation": {
+          "providerSettings": {
+            "not": {}
+          },
+          "state": {
+            "type": "string",
+            "const": "applied"
+          },
+          "receipt": {
             "type": "object",
             "properties": {
-              "kind": {
+              "status": {
                 "type": "string",
-                "enum": ["upsert", "remove"]
+                "const": "applied"
               },
-              "name": {
+              "etag": {
                 "type": "string",
-                "minLength": 1,
-                "maxLength": 120,
-                "pattern": "^[^\\x00-\\x1f\\x7f]+$"
+                "pattern": "^[a-f0-9]{64}$"
               },
-              "provider": {
-                "type": "string",
-                "enum": ["openai", "deepseek", "compatible", "ollama", "codex"]
-              },
-              "protocol": {
-                "type": "string",
-                "enum": ["chat-completions", "responses"]
-              },
-              "connectionId": {
-                "anyOf": [
-                  {
+              "postReadSet": {
+                "type": "object",
+                "properties": {
+                  "userEtag": {
                     "type": "string",
                     "pattern": "^[a-f0-9]{64}$"
                   },
-                  {
-                    "type": "null"
+                  "workspaceEtag": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "pattern": "^[a-f0-9]{64}$"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "explicitDigest": {
+                    "type": "string",
+                    "pattern": "^[a-f0-9]{64}$"
+                  },
+                  "effectiveDigest": {
+                    "type": "string",
+                    "pattern": "^[a-f0-9]{64}$"
                   }
-                ]
-              },
-              "baseURL": {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 4096
-              },
-              "modelNames": {
-                "type": "array",
-                "items": {
-                  "type": "string",
-                  "minLength": 1,
-                  "maxLength": 256
-                }
-              },
-              "credential": {
-                "type": "string",
-                "enum": ["keep", "replace", "none"]
+                },
+                "required": ["userEtag", "workspaceEtag", "explicitDigest", "effectiveDigest"],
+                "additionalProperties": false
               }
             },
-            "required": ["provider", "connectionId", "baseURL", "modelNames", "credential"],
+            "required": ["status", "etag", "postReadSet"],
             "additionalProperties": false
           }
         },
-        "required": ["expectedReadSet", "operation"],
+        "required": [
+          "commandId",
+          "originStoreId",
+          "scope",
+          "kind",
+          "modelSettings",
+          "state",
+          "receipt"
+        ],
         "additionalProperties": false
-      },
-      "state": {
-        "type": "string",
-        "enum": ["pending", "applied", "failed", "outcome_unknown"]
-      },
-      "receipt": {
-        "anyOf": [
-          {
-            "type": "object",
-            "properties": {},
-            "additionalProperties": false
-          },
-          {
-            "type": "object",
-            "properties": {
-              "status": {
-                "type": "string",
-                "const": "applied"
-              },
-              "etag": {
-                "type": "string",
-                "pattern": "^[a-f0-9]{64}$"
-              }
-            },
-            "required": ["status", "etag"],
-            "additionalProperties": false
-          },
-          {
-            "type": "object",
-            "properties": {
-              "status": {
-                "type": "string",
-                "const": "applied"
-              },
-              "etag": {
-                "type": "string",
-                "pattern": "^[a-f0-9]{64}$"
-              },
-              "credentialState": {
-                "type": "string",
-                "enum": ["unchanged", "stored"]
-              },
-              "configurationState": {
-                "type": "string",
-                "const": "published"
-              },
-              "opaqueRef": {
-                "type": "string",
-                "pattern": "^credential:[0-9a-f-]{36}$"
-              }
-            },
-            "required": ["status", "etag", "credentialState", "configurationState"],
-            "additionalProperties": false
-          },
-          {
-            "type": "object",
-            "properties": {
-              "status": {
-                "type": "string",
-                "const": "applied"
-              },
-              "opaqueRef": {
-                "type": "string",
-                "pattern": "^credential:[0-9a-f-]{36}$"
-              },
-              "persistence": {
-                "type": "string",
-                "enum": ["os", "temporary"]
-              }
-            },
-            "required": ["status", "opaqueRef", "persistence"],
-            "additionalProperties": false
-          },
-          {
-            "type": "object",
-            "properties": {
-              "status": {
-                "type": "string",
-                "enum": ["failed", "outcome_unknown"]
-              },
-              "code": {
-                "type": "string",
-                "pattern": "^[a-z0-9_]{1,128}$"
-              }
-            },
-            "required": ["status", "code"],
-            "additionalProperties": false
-          },
-          {
-            "type": "object",
-            "properties": {
-              "status": {
-                "type": "string",
-                "enum": ["failed", "outcome_unknown"]
-              },
-              "code": {
-                "type": "string",
-                "pattern": "^[a-z0-9_]{1,128}$"
-              },
-              "credentialState": {
-                "type": "string",
-                "enum": ["unchanged", "stored", "outcome_unknown"]
-              },
-              "configurationState": {
-                "type": "string",
-                "enum": ["not_attempted", "outcome_unknown"]
-              },
-              "opaqueRef": {
-                "type": "string",
-                "pattern": "^credential:[0-9a-f-]{36}$"
-              }
-            },
-            "required": ["status", "code", "credentialState", "configurationState"],
-            "additionalProperties": false
-          }
-        ]
       }
-    },
-    "required": ["commandId", "originStoreId", "scope", "kind", "state", "receipt"],
-    "additionalProperties": false
+    ]
   },
   "ServiceLifecycle": {
     "$schema": "https://json-schema.org/draft/2020-12/schema",

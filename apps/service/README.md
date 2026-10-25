@@ -474,14 +474,14 @@ Cookie Gateway 对应两个 `/browser/v1/*-directory` 只读路径，由原准�
 
 Settings 模型业务端口为 `GET /v1/config/user/models?storeId=...` 和 `POST /v1/config/user/models`，Native Client 对应 getModelSettings/updateModelSettings。workspace 模型 GET/POST 明确返回 model_settings_user_scope_required；user 不接受 workspaceId。观察返回原 Store、user scope、读取集 `{userEtag,workspaceEtag:null,explicitDigest,effectiveDigest}`、默认模型与安全事实。configured 只表示当前 SDK binding 的结构/endpoint/options/reference 合法，不证明 key 或远端模型可用；错误保留 readSet:null，不伪造写资格。
 
-模型业务请求冻结原 command/Store、user scope、expectedReadSet 和单一 enabled/default/effort 操作。服务核完整用户模型候选：默认模型不能直接禁用，默认只能选择启用且 configured 的 route，其他条目/注释/未知字段保持。没有项目模型层；可信宿主覆盖导致操作不能生效时明确拒绝，普通 JSONC 不可路由期望值仍与模型设置业务约束分开。
+模型业务请求冻结原 command/Store、user scope、expectedReadSet 和单一 enabled/default/effort 操作。服务核完整用户模型候选：所有模型都可启停，包括当前默认模型，也允许全部禁用；启停不清空或替换默认ID。显式设置默认仍只能选择启用且 configured 的route，已有默认引用继续校验存在与配置可用，但其disabled状态不会阻止模型偏好修改或其他提供商配置维护。其他条目/注释/未知字段保持。没有项目模型层；可信宿主覆盖导致操作不能生效时明确拒绝，普通 JSONC 不可路由期望值仍与模型设置业务约束分开。
 
 模型目录为所有配置可用的模型投影六档 `low/medium/high/xhigh/max/ultar` choices、当前 reasoningEffort 和只读原因；不按 Provider family、名称或 `reasoningSupported` 标记过滤。完整请求、配置、快照与 mutation 枚举另保留已有 none/minimal。`compatible_wire` 表示当前统一适配器可编码，远端接受情况由实际请求决定；ultar 不改写为 ultra 或 max。配置不完整和可信宿主 options 覆盖仍保原写入门禁。effort 保存保留其他 options，null 清除该模型的用户级 override；既有 provider effort 可重新成为有效值，结果以重读为准，不涉及项目继承。活动 Run 保持封存值，后续 Run 使用新配置。
 
 
 目标配置原 ETag 和完整读取集合在真实目标文件短锁内重核，候选通过结构/default 规则后，发布前再核非目标文件与宿主 explicit/effective digest。读取集合竞争返回 `configuration_read_set_conflict`，不会覆盖竞争编辑。锁约束合作宿主对同一目标文件的写入；不同文件或不合作外部编辑在最终核查之后仍有跨文件竞态，文件/vault/SQLite 不是一个事务。没有向 HTTP 开放验证回调或路径。
 
-新模型 mutation 使用 config.user.write journal 与有限安全 modelSettings marker，公开投影为 model_settings.update、原 scope/ifMatch/readSet/operation 与 ETag。历史 workspace marker 仅用于原结果查询，不再接纳项目模型新写。断线或坏回执只沿原 ID/Store GET，不重放。真实 paired HTTP 回归覆盖默认约束、用户文件竞争、冷原回执与物理丢失响应；held Run 保持 A，新 Run 使用 B，保存/读取不制造 Provider 请求。
+新模型 mutation 使用 config.user.write journal 与有限安全 modelSettings marker，公开投影为 model_settings.update、原 scope/ifMatch/readSet/operation 与 ETag。applied 回执可携完整四字段 `postReadSet`：在原文件锁内通过候选/default 校验时捕获该候选 effective snapshot digest，发布后仅以本次结果 ETag 和原 explicitDigest 组合，不通过发布后重读动态 Codex 等来源计算。该有限后继事实沿原 journal 和 HostMutation GET 保存；客户端只有在后续完整 read-set 与其一致时才可证明来源是自身已知保存的后继，不能用新 GET 自动重授权旧意图。缺少候选证明仍保持 applied 但省略此字段，旧回执继续兼容且不能用于续写；failed/unknown、provider 与普通配置操作不携该字段。[后继证明回归](test/isolated/model-settings-continuation.test.ts)使用真实 HTTP/SDK、用户文件与 Store，覆盖本次候选精确匹配、发布后本机来源变化仍保留原候选摘要、旧 ID 零重放和缺失/失败边界。历史 workspace marker 仅用于原结果查询，不再接纳项目模型新写。断线或坏回执只沿原 ID/Store GET，不重放。真实 paired HTTP 回归覆盖默认约束、用户文件竞争、冷原回执与物理丢失响应；held Run 保持 A，新 Run 使用 B，保存/读取不制造 Provider 请求。[配置集成回归](test/isolated/configuration-management.test.ts)另核默认 B、活动非默认 A 被禁用后，同一 Run 的两次真实模型请求仍为 A，运行完成且无取消；新显式 A 被拒绝，新默认 Run 使用 B，实际 wire 为 A、A、B。同一回归也覆盖A本身为全局默认的场景：禁用后当前Run的后续请求仍为A且正常完成、取消次数为零；新的显式A与缺省A均拒绝、SDK调用不增加。全部模型禁用后仍可编辑提供商配置，重新启用A／B后新运行正常，默认引用始终不改写；不自动选用替代模型。
 
 
 二进制 Artifact 响应以 `x-artifact-store-id` 返回实际不可变 reference 的原 Store。请求 `storeId` 校验当前已准入 Store，恢复媒体的原引用不重标成当前 Store；准入与原内容授权仍由 Runtime 实际 Session/owner 链完成，HTTP没有按 hash 另开访问路径。

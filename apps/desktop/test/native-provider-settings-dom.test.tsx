@@ -371,7 +371,7 @@ test('Provider keeps distinct endpoint connection intent, discovery uses empty n
         },
       },
     ]);
-    expect(f.element.textContent).toContain('已保存，刷新配置失败');
+    expect(f.element.textContent).toContain('已保存，正在后台同步配置');
     expect(f.element.textContent).toContain('无需重复保存');
     expect(f.element.textContent).not.toContain('applied');
   } finally {
@@ -736,9 +736,9 @@ test('Provider save failure stays in the rail with its non-secret draft and acti
     expect(f.field('服务地址').value).toBe('https://failed.invalid/v1');
     expect(f.field('模型名称').value).toBe('draft-model');
     expect(f.field('API key').value).toBe('');
-    expect(f.button('保存提供商配置').disabled).toBe(false);
+    expect(f.button('保存提供商配置').disabled).toBe(true);
     await f.click('保存提供商配置');
-    expect(f.dom.window.document.activeElement).toBe(f.field('API key'));
+    expect(f.field('API key').value).toBe('');
     expect(saves).toHaveLength(1);
     expect(saves[0]!.secret).toBe('one-attempt-secret');
   } finally {
@@ -1018,7 +1018,7 @@ test('Provider closing an active refresh cannot restore the old write observatio
     expect(reads).toBe(2);
     expect(f.button('刷新提供商配置').disabled).toBe(false);
     expect(f.button('保存提供商配置').disabled).toBe(true);
-    expect(f.panelHost.textContent).toContain('当前配置只读，请刷新');
+    expect(f.panelHost.textContent).toContain('当前配置不可写，请检查配置诊断。');
     await f.click('保存提供商配置');
     expect(calls.some((call) => call.method === 'settings.providers.save')).toBe(false);
     await act(async () => release(structuredClone(facts)));
@@ -1026,7 +1026,7 @@ test('Provider closing an active refresh cannot restore the old write observatio
     await f.click('刷新提供商配置');
     expect(reads).toBe(3);
     expect(f.button('保存提供商配置').disabled).toBe(false);
-    expect(f.panelHost.textContent).not.toContain('当前配置只读，请刷新');
+    expect(f.panelHost.textContent).not.toContain('当前配置不可写，请检查配置诊断。');
   } finally {
     await f.close();
   }
@@ -1367,7 +1367,7 @@ for (const impact of ['default', 'schedule', 'both'] as const) {
       expect(f.panelHost.textContent).not.toContain('private-model');
       expect(f.dom.window.document.activeElement).toBe(f.button('取消'));
       if (impact !== 'schedule')
-        expect(f.panelHost.textContent).toContain('请先在“模型”设置中选择其他默认模型');
+        expect(f.panelHost.textContent).toContain('此提供商包含当前全局默认模型，暂时无法删除。');
       if (impact !== 'default') {
         expect(f.panelHost.textContent).toContain('每日报告');
         expect(f.panelHost.textContent).toContain('每周总结');
@@ -1520,7 +1520,7 @@ for (const outcome of ['failed', 'unknown'] as const) {
       expect(f.panelHost.textContent).toContain(
         outcome === 'failed' ? '删除失败：configuration_conflict' : '删除结果待确认',
       );
-      expect(f.button('确认删除提供商').disabled).toBe(outcome === 'unknown');
+      expect(f.button('确认删除提供商').disabled).toBe(true);
       expect(calls.filter((call) => call.method === 'settings.providers.save')).toHaveLength(1);
       expect(calls.every((call) => call.method.startsWith('settings.providers.'))).toBe(true);
     } finally {
@@ -1578,7 +1578,10 @@ for (const outcome of ['applied', 'failed', 'unknown', 'throw'] as const) {
       expect(f.panelHost.textContent).not.toContain('late_delete_failed');
       expect(f.panelHost.textContent).not.toContain('late-delete');
       expect(f.panelHost.textContent).not.toContain('已删除提供商');
-      expect(f.button('保存提供商配置').disabled).toBe(outcome === 'unknown');
+      // A lost RPC result also protects later editors until its original intent is identified.
+      expect(f.button('保存提供商配置').disabled).toBe(
+        outcome === 'unknown' || outcome === 'throw',
+      );
     } finally {
       await f.close();
     }
@@ -1722,7 +1725,7 @@ test('Repeated Add submission is synchronously blocked while its original reques
     expect(f.panelHost.textContent).not.toContain('正在保存提供商配置。');
     await act(async () => release());
     expect(f.panelHost.textContent).toContain('保存失败：configuration_conflict');
-    expect(f.button('保存提供商配置').disabled).toBe(false);
+    expect(f.button('保存提供商配置').disabled).toBe(true);
     expect(f.field('模型名称').value).toBe('fixture-model');
   } finally {
     await f.close();
@@ -1960,7 +1963,11 @@ test('A refreshed deletion confirmation requires reopening and always shows curr
 });
 
 function unknownDeletionFixture(
-  options: { beforeLookup?: () => Promise<void>; beforeReread?: () => Promise<void> } = {},
+  options: {
+    beforeLookup?: () => Promise<void>;
+    beforeReread?: () => Promise<void>;
+    dropSubmitReply?: boolean;
+  } = {},
 ) {
   const f = fixture(),
     calls: NativeRequest[] = [];
@@ -2034,8 +2041,21 @@ function unknownDeletionFixture(
     request: async (input) => {
       calls.push(input);
       if (input.method === 'settings.providers.read') return manager.read();
-      if (input.method === 'settings.providers.save')
-        return manager.submit(input.observationId, input.operation, input.secret);
+      if (input.method === 'settings.providers.save') {
+        const result = await manager.submit(input.observationId, input.operation, input.secret);
+        if (options.dropSubmitReply) throw Error('network_outcome_unknown');
+        return result;
+      }
+      if (input.method === 'state')
+        return {
+          generation: 1,
+          directory: { storeId: 'store', sessions: [], workspaces: [] },
+          creationSubmissions: [],
+          inputSubmissions: [],
+          permissionSubmissions: [],
+          interactionSubmissions: [],
+          providerSettingsSubmissions: manager.submissions,
+        };
       if (input.method === 'settings.providers.lookup') return manager.lookup(input.commandId);
       if (input.method === 'settings.providers.close') manager.cancelRead();
       return null;
@@ -2105,7 +2125,7 @@ test('Confirmed unknown deletion keeps a refresh failure read-only and allows an
     await f.remove();
     await f.click('查看结果');
     expect(f.manager.submissions[0]!.phase).toBe('applied');
-    expect(f.panelHost.textContent).toContain('已删除，刷新配置失败；请刷新列表，无需重复删除。');
+    expect(f.panelHost.textContent).toContain('已删除，正在后台同步配置，无需重复删除。');
     expect(f.button('确认删除提供商').disabled).toBe(true);
     await f.click('确认删除提供商');
     fail = false;
@@ -2206,3 +2226,585 @@ test('Querying an unknown deletion from the closed list refreshes it without reo
     await f.close();
   }
 });
+
+function providerRecoveryClock() {
+  const originalSet = globalThis.setTimeout;
+  const originalClear = globalThis.clearTimeout;
+  let serial = 500000;
+  const timers = new Map<ReturnType<typeof setTimeout>, { delay: number; callback: () => void }>();
+  globalThis.setTimeout = ((
+    callback: (...args: unknown[]) => void,
+    delay?: number,
+    ...args: unknown[]
+  ) => {
+    if ([250, 1000, 3000, 10000].includes(delay ?? 0)) {
+      const id = ++serial as unknown as ReturnType<typeof setTimeout>;
+      timers.set(id, { delay: delay!, callback: () => callback(...args) });
+      return id;
+    }
+    return originalSet(callback, delay, ...args);
+  }) as typeof setTimeout;
+  globalThis.clearTimeout = ((id: ReturnType<typeof setTimeout>) => {
+    if (!timers.delete(id)) originalClear(id);
+  }) as typeof clearTimeout;
+  return {
+    get delays() {
+      return [...timers.values()].map((timer) => timer.delay);
+    },
+    async fire() {
+      const first = timers.entries().next().value;
+      expect(first).not.toBeUndefined();
+      timers.delete(first![0]);
+      await act(async () => {
+        first![1].callback();
+        await Promise.resolve();
+      });
+    },
+    close() {
+      globalThis.setTimeout = originalSet;
+      globalThis.clearTimeout = originalClear;
+      timers.clear();
+    },
+  };
+}
+function recoveryProvider(
+  request: NativeBridge['request'],
+  initial: NativeProviderSubmission[] = [],
+) {
+  const f = fixture();
+  const calls: NativeRequest[] = [];
+  let saved = 0,
+    recovered = 0;
+  const bridge: NativeBridge = {
+    watch: () => () => {},
+    request: async (input) => {
+      calls.push(input);
+      return request(input);
+    },
+  };
+  const selection = {
+    storeId: 'store',
+    session: { id: 'current' },
+    viewSelection: 1,
+  } as NativeSelection;
+  return {
+    ...f,
+    calls,
+    get saved() {
+      return saved;
+    },
+    get recovered() {
+      return recovered;
+    },
+    render: (selected = selection, submissions = initial) =>
+      act(async () =>
+        f.root.render(
+          <NativeProviderSettings
+            bridge={bridge}
+            generation={1}
+            selection={selected}
+            submissions={submissions}
+            panelHost={f.panelHost}
+            onSaved={() => saved++}
+            onRecovered={() => recovered++}
+          />,
+        ),
+      ),
+  };
+}
+
+test('Provider recovery backs off one GET at a time, preserves the visible error during retry and clears it only after fresh facts', async () => {
+  const clock = providerRecoveryClock();
+  let reads = 0,
+    reject!: (cause: unknown) => void;
+  const held = new Promise<NativeProviderSettingsFacts>((_resolve, fail) => {
+    reject = fail;
+  });
+  const f = recoveryProvider(async (input) => {
+    if (input.method !== 'settings.providers.read') return null;
+    if (++reads === 1) throw Error('network_unavailable');
+    if (reads === 2) return held;
+    return { ...facts, observationId: 8 };
+  });
+  try {
+    await f.render();
+    expect(clock.delays).toEqual([250]);
+    expect(f.main.textContent).toContain('network_unavailable');
+    const error = f.main.querySelector('[role="alert"]')!.textContent;
+    await clock.fire();
+    expect(clock.delays).toEqual([]);
+    expect(reads).toBe(2);
+    expect(f.main.querySelector('[role="alert"]')!.textContent).toBe(error);
+    await f.render();
+    expect(reads).toBe(2);
+    await act(async () => reject(Error('network_unavailable')));
+    expect(clock.delays).toEqual([1000]);
+    await clock.fire();
+    expect(reads).toBe(3);
+    expect(f.main.querySelector('[role="alert"]')).toBeNull();
+    expect(f.main.querySelectorAll('.provider-instance')).toHaveLength(2);
+    expect(f.recovered).toBe(1);
+    expect(f.saved).toBe(0);
+    expect(clock.delays).toEqual([]);
+    expect(f.calls.every((input) => input.method === 'settings.providers.read')).toBe(true);
+  } finally {
+    await f.close();
+    clock.close();
+  }
+});
+
+test('Provider diagnostic recovery caps polling while accurate readonly and authority failures never manufacture write eligibility', async () => {
+  const clock = providerRecoveryClock();
+  let fixed = false,
+    reads = 0;
+  const f = recoveryProvider(async (input) => {
+    if (input.method !== 'settings.providers.read') return null;
+    reads++;
+    return fixed
+      ? { ...facts, observationId: 9 }
+      : { ...facts, canWrite: false, errors: ['invalid_jsonc'] };
+  });
+  try {
+    await f.render();
+    for (const delay of [250, 1000, 3000, 10000, 10000]) {
+      expect(clock.delays).toEqual([delay]);
+      await clock.fire();
+      expect(f.main.textContent).toContain('invalid_jsonc');
+      expect(f.recovered).toBe(0);
+    }
+    fixed = true;
+    await clock.fire();
+    expect(reads).toBe(7);
+    expect(f.recovered).toBe(1);
+    expect(clock.delays).toEqual([]);
+  } finally {
+    await f.close();
+    clock.close();
+  }
+  for (const result of [
+    'readonly',
+    'configuration_storage_unavailable',
+    'capability_unavailable',
+    'permission_denied',
+    'authorization_denied',
+    'connection_not_admitted',
+    'connection_identity_mismatch',
+    'connection_superseded',
+  ]) {
+    const timer = providerRecoveryClock();
+    const page = recoveryProvider(async (input) => {
+      if (input.method !== 'settings.providers.read') return null;
+      if (result !== 'readonly') throw Error(result);
+      return { ...facts, canWrite: false };
+    });
+    try {
+      await page.render();
+      expect(timer.delays).toEqual([]);
+      expect(page.calls).toHaveLength(1);
+      if (result === 'readonly') {
+        await page.click('编辑 OpenAI-compatible 1');
+        expect(page.button('保存提供商配置').disabled).toBe(true);
+      } else expect(page.main.querySelectorAll('.provider-instance')).toHaveLength(0);
+      expect(page.calls.filter((input) => input.method === 'settings.providers.save')).toHaveLength(
+        0,
+      );
+    } finally {
+      await page.close();
+      timer.close();
+    }
+  }
+});
+
+for (const terminal of ['applied', 'failed'] as const) {
+  test(`cold Provider ${terminal} is automatically checked only by original ID and fresh GET without closing or rebasing a newer editor`, async () => {
+    const clock = providerRecoveryClock();
+    const original: NativeProviderSubmission = {
+      kind: 'settings.providers.submission',
+      commandId: 'cold-original',
+      storeId: 'store',
+      observationId: 4,
+      operation: {
+        kind: 'upsert',
+        provider: 'compatible',
+        connectionId: 'one',
+        baseURL: 'https://one.invalid/v1',
+        modelNames: ['remote-one'],
+        credential: 'keep',
+      },
+      phase: 'unknown',
+    };
+    let reads = 0,
+      lookups = 0;
+    const f = recoveryProvider(
+      async (input) => {
+        if (input.method === 'settings.providers.read') {
+          reads++;
+          // Peer observations expire when the original receipt settles, before
+          // this directory reread can finish (or fail).
+          if (reads > 1) expect(f.saved).toBe(terminal === 'applied' ? 1 : 0);
+          return { ...facts, observationId: reads === 1 ? 7 : 8 };
+        }
+        if (input.method === 'settings.providers.lookup') {
+          lookups++;
+          expect(input.commandId).toBe('cold-original');
+          return {
+            ...original,
+            phase: terminal,
+            ...(terminal === 'failed' ? { error: 'configuration_conflict' } : {}),
+          };
+        }
+        return null;
+      },
+      [original, { ...original, commandId: 'foreign', storeId: 'foreign' }],
+    );
+    try {
+      await f.render();
+      await f.click('编辑 OpenAI-compatible 1');
+      await f.edit('提供商名称', 'Keep newer draft');
+      await f.edit('凭据处理', 'replace');
+      await f.edit('API key', 'never-resubmit-this');
+      const form = f.panelHost.querySelector('form');
+      const focus = f.field('提供商名称');
+      focus.focus();
+      expect(clock.delays).toEqual([250]);
+      await clock.fire();
+      expect(lookups).toBe(1);
+      expect(reads).toBe(2);
+      expect(f.panelHost.querySelector('form') === form).toBe(true);
+      expect(f.field('提供商名称').value).toBe('Keep newer draft');
+      expect(f.field('API key').value).toBe('never-resubmit-this');
+      expect(f.dom.window.document.activeElement === focus).toBe(true);
+      expect(f.button('保存提供商配置').disabled).toBe(true);
+      expect(f.panelHost.textContent).toContain('当前草稿已保留');
+      expect(f.saved).toBe(terminal === 'applied' ? 1 : 0);
+      expect(f.recovered).toBe(terminal === 'failed' ? 1 : 0);
+      expect(clock.delays).toEqual([]);
+      expect(f.calls.filter((input) => input.method === 'settings.providers.save')).toHaveLength(0);
+      await f.render();
+      expect(lookups).toBe(1);
+      expect(f.saved).toBe(terminal === 'applied' ? 1 : 0);
+    } finally {
+      await f.close();
+      clock.close();
+    }
+  });
+}
+
+test('a rejected Provider save recovers fresh facts without replay, changing its old draft basis or emitting saved', async () => {
+  const clock = providerRecoveryClock();
+  let reads = 0;
+  const f = recoveryProvider(async (input) => {
+    if (input.method === 'settings.providers.read')
+      return { ...facts, observationId: ++reads === 1 ? 7 : 8 };
+    if (input.method === 'settings.providers.save')
+      return {
+        kind: 'settings.providers.submission',
+        commandId: 'failed-once',
+        storeId: 'store',
+        observationId: input.observationId,
+        operation: input.operation,
+        phase: 'failed',
+        error: 'configuration_conflict',
+      };
+    return null;
+  });
+  try {
+    await f.render();
+    await f.click('编辑 OpenAI-compatible 1');
+    await f.edit('提供商名称', 'Keep failed draft');
+    await f.click('保存提供商配置');
+    expect(f.button('保存提供商配置').disabled).toBe(true);
+    expect(f.panelHost.textContent).toContain('configuration_conflict');
+    await clock.fire();
+    expect(f.saved).toBe(0);
+    expect(f.recovered).toBe(1);
+    expect(f.button('保存提供商配置').disabled).toBe(true);
+    expect(f.field('提供商名称').value).toBe('Keep failed draft');
+    expect(f.panelHost.textContent).toContain('当前草稿已保留');
+    expect(f.calls.filter((input) => input.method === 'settings.providers.save')).toHaveLength(1);
+    await f.click('关闭');
+    await f.click('编辑 OpenAI-compatible 1');
+    expect(f.button('保存提供商配置').disabled).toBe(false);
+  } finally {
+    await f.close();
+    clock.close();
+  }
+});
+
+test('Provider automatic work is cancelled across scope changes and unmount, including a delayed retry response', async () => {
+  const clock = providerRecoveryClock();
+  let reads = 0,
+    resolve!: (value: NativeProviderSettingsFacts) => void;
+  const late = new Promise<NativeProviderSettingsFacts>((done) => {
+    resolve = done;
+  });
+  const changed = { ...structuredClone(facts), observationId: 20, storeId: 'other' };
+  changed.providers[2]!.connections = [
+    { ...changed.providers[2]!.connections[0]!, name: 'Other store source' },
+  ];
+  const f = recoveryProvider(async (input) => {
+    if (input.method !== 'settings.providers.read') return null;
+    if (++reads === 1) throw Error('network_unavailable');
+    return reads === 2 ? late : changed;
+  });
+  try {
+    await f.render();
+    await clock.fire();
+    await f.render({
+      storeId: 'other',
+      session: { id: 'other' },
+      viewSelection: 2,
+    } as NativeSelection);
+    expect(f.main.textContent).toContain('Other store source');
+    await act(async () => resolve(facts));
+    expect(f.main.querySelectorAll('.provider-instance')).toHaveLength(1);
+    expect(f.main.textContent).toContain('Other store source');
+    expect(f.recovered).toBe(0);
+    expect(clock.delays).toEqual([]);
+    expect(reads).toBe(3);
+  } finally {
+    await f.close();
+    clock.close();
+  }
+  const timer = providerRecoveryClock();
+  const page = recoveryProvider(async () => {
+    throw Error('network_unavailable');
+  });
+  try {
+    await page.render();
+    expect(timer.delays).toEqual([250]);
+    await act(async () => page.root.render(null));
+    expect(timer.delays).toEqual([]);
+    expect(page.calls.filter((input) => input.method === 'settings.providers.read')).toHaveLength(
+      1,
+    );
+  } finally {
+    await page.close();
+    timer.close();
+  }
+});
+
+test('automatic original-ID lookup settles the actual Main unknown deletion without redoing any mutation or closing its panel', async () => {
+  const clock = providerRecoveryClock();
+  const f = unknownDeletionFixture();
+  try {
+    await f.render();
+    await f.remove();
+    const original = f.manager.submissions[0]!.commandId;
+    expect(clock.delays).toEqual([250]);
+    await clock.fire();
+    expect(f.manager.submissions[0]!.phase).toBe('applied');
+    expect(f.counts()).toEqual({ reads: 2, posts: 1, saved: 1 });
+    expect(f.calls.filter((input) => input.method === 'settings.providers.lookup')).toEqual([
+      { method: 'settings.providers.lookup', generation: 1, commandId: original },
+    ]);
+    expect(f.main.querySelectorAll('.provider-instance')).toHaveLength(1);
+    expect(f.panelHost.textContent).toContain('此提供商已不在最新配置中');
+    expect(clock.delays).toEqual([]);
+  } finally {
+    await f.close();
+    clock.close();
+  }
+});
+
+test('a lost Provider RPC result with no watcher discovers only its actual Main intent and looks up its original ID without replay', async () => {
+  const clock = providerRecoveryClock();
+  const f = unknownDeletionFixture({ dropSubmitReply: true });
+  try {
+    await f.render();
+    await f.remove();
+    const original = f.manager.submissions[0]!;
+    expect(f.calls.some((call) => call.method === 'settings.providers.lookup')).toBe(false);
+    expect(f.button('确认删除提供商').disabled).toBe(true);
+    await clock.fire();
+    expect(f.calls.filter((call) => call.method === 'state')).toEqual([
+      { method: 'state', generation: 1 },
+    ]);
+    expect(f.calls.filter((call) => call.method === 'settings.providers.lookup')).toEqual([
+      { method: 'settings.providers.lookup', generation: 1, commandId: original.commandId },
+    ]);
+    expect(f.counts()).toEqual({ reads: 2, posts: 1, saved: 1 });
+    expect(f.manager.submissions[0]!.phase).toBe('applied');
+    expect(f.panelHost.textContent).toContain('此提供商已不在最新配置中');
+    expect(clock.delays).toEqual([]);
+  } finally {
+    await f.close();
+    clock.close();
+  }
+});
+
+for (const mismatch of [
+  'absent',
+  'foreign',
+  'operation',
+  'observation',
+  'no-id',
+  'ambiguous',
+] as const) {
+  test(`a lost Provider RPC cannot unlock from a fresh ordinary GET or a ${mismatch} state record`, async () => {
+    const clock = providerRecoveryClock();
+    let sent: NativeProviderSubmission | undefined;
+    let reads = 0;
+    const f = recoveryProvider(async (input) => {
+      if (input.method === 'settings.providers.read') {
+        reads++;
+        return structuredClone(facts);
+      }
+      if (input.method === 'settings.providers.save') {
+        sent = {
+          kind: 'settings.providers.submission',
+          commandId: 'actual-original',
+          storeId: 'store',
+          observationId: input.observationId,
+          operation: structuredClone(input.operation),
+          phase: 'applied',
+        };
+        throw Error('network_outcome_unknown');
+      }
+      if (input.method === 'state') {
+        const entry = structuredClone(sent!);
+        if (mismatch === 'foreign') entry.storeId = 'other-store';
+        if (mismatch === 'operation') entry.operation.credential = 'none';
+        if (mismatch === 'observation') entry.observationId++;
+        if (mismatch === 'no-id') entry.commandId = '';
+        return {
+          generation: 1,
+          directory: { storeId: 'store', workspaces: [], sessions: [] },
+          creationSubmissions: [],
+          inputSubmissions: [],
+          permissionSubmissions: [],
+          interactionSubmissions: [],
+          providerSettingsSubmissions:
+            mismatch === 'absent'
+              ? []
+              : mismatch === 'ambiguous'
+                ? [entry, { ...entry, commandId: 'other-original' }]
+                : [entry],
+        };
+      }
+      return null;
+    });
+    try {
+      await f.render();
+      await f.click('编辑 OpenAI-compatible 1');
+      await f.edit('提供商名称', 'Unconfirmed original');
+      await f.click('保存提供商配置');
+      expect(f.button('保存提供商配置').disabled).toBe(true);
+      await f.click('刷新提供商配置');
+      expect(reads).toBe(2);
+      expect(f.button('保存提供商配置').disabled).toBe(true);
+      expect(f.element.textContent).toContain('结果未确认');
+      await clock.fire();
+      expect(reads).toBe(2);
+      expect(f.calls.filter((call) => call.method === 'state')).toHaveLength(1);
+      expect(f.calls.filter((call) => call.method === 'settings.providers.lookup')).toHaveLength(0);
+      expect(f.calls.filter((call) => call.method === 'settings.providers.save')).toHaveLength(1);
+      expect(f.button('保存提供商配置').disabled).toBe(true);
+      expect(f.saved).toBe(0);
+      expect(f.recovered).toBe(0);
+      expect(clock.delays).toEqual([1000]);
+    } finally {
+      await f.close();
+      clock.close();
+    }
+  });
+}
+
+test('a definite Main pre-dispatch rejection recovers by ordinary GET without waiting for an intent that was never created', async () => {
+  const clock = providerRecoveryClock();
+  let reads = 0;
+  const f = recoveryProvider(async (input) => {
+    if (input.method === 'settings.providers.read')
+      return { ...facts, observationId: ++reads === 1 ? 7 : 8 };
+    if (input.method === 'settings.providers.save')
+      throw Object.assign(Error('configuration_observation_changed'), {
+        code: 'configuration_observation_changed',
+      });
+    return null;
+  });
+  try {
+    await f.render();
+    await f.click('编辑 OpenAI-compatible 1');
+    await f.edit('提供商名称', 'Original stale draft');
+    await f.click('保存提供商配置');
+    await clock.fire();
+    expect(reads).toBe(2);
+    expect(f.calls.filter((call) => call.method === 'state')).toHaveLength(0);
+    expect(f.calls.filter((call) => call.method === 'settings.providers.lookup')).toHaveLength(0);
+    expect(f.recovered).toBe(1);
+    expect(f.saved).toBe(0);
+    expect(f.button('保存提供商配置').disabled).toBe(true);
+    await f.click('关闭');
+    await f.click('编辑 OpenAI-compatible 1');
+    expect(f.button('保存提供商配置').disabled).toBe(false);
+    expect(f.calls.filter((call) => call.method === 'settings.providers.save')).toHaveLength(1);
+  } finally {
+    await f.close();
+    clock.close();
+  }
+});
+
+for (const closeBeforeReply of [false, true]) {
+  test(`a Provider RPC with no watcher retains only its original correlation across settings close ${closeBeforeReply ? 'before' : 'after'} the lost reply`, async () => {
+    const clock = providerRecoveryClock();
+    let original: NativeProviderSubmission | undefined;
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    const f = recoveryProvider(async (input) => {
+      if (input.method === 'settings.providers.read') return structuredClone(facts);
+      if (input.method === 'settings.providers.save') {
+        original = {
+          kind: 'settings.providers.submission',
+          commandId: 'closed-original',
+          storeId: 'store',
+          observationId: input.observationId,
+          operation: structuredClone(input.operation),
+          phase: 'unknown',
+        };
+        if (closeBeforeReply) await gate;
+        throw Error('network_outcome_unknown');
+      }
+      if (input.method === 'state')
+        return {
+          generation: 1,
+          directory: { storeId: 'store', workspaces: [], sessions: [] },
+          creationSubmissions: [],
+          inputSubmissions: [],
+          permissionSubmissions: [],
+          interactionSubmissions: [],
+          providerSettingsSubmissions: [original!],
+        };
+      if (input.method === 'settings.providers.lookup') return { ...original!, phase: 'applied' };
+      return null;
+    });
+    try {
+      await f.render();
+      await f.click('编辑 OpenAI-compatible 1');
+      await f.edit('提供商名称', 'Original sent name');
+      await f.edit('凭据处理', 'replace');
+      await f.edit('API key', 'never-retain-this-key');
+      await f.click('保存提供商配置');
+      await act(async () => f.root.render(null));
+      await act(async () => release());
+      expect(clock.delays).toEqual([]);
+      await f.render();
+      await f.click('编辑 OpenAI-compatible 1');
+      await f.edit('凭据处理', 'replace');
+      expect(f.field('API key').value).toBe('');
+      expect(f.field('提供商名称').value).toBe('OpenAI-compatible 1');
+      expect(f.button('保存提供商配置').disabled).toBe(true);
+      await clock.fire();
+      expect(f.calls.filter((call) => call.method === 'settings.providers.lookup')).toEqual([
+        { method: 'settings.providers.lookup', generation: 1, commandId: 'closed-original' },
+      ]);
+      expect(f.calls.filter((call) => call.method === 'settings.providers.save')).toHaveLength(1);
+      expect(f.saved).toBe(1);
+      expect(clock.delays).toEqual([]);
+      expect(f.field('API key').value).toBe('');
+    } finally {
+      release();
+      await f.close();
+      clock.close();
+    }
+  });
+}

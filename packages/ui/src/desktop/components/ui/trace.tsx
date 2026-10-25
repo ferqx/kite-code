@@ -37,7 +37,7 @@ function TraceIcon({ className, ...props }: React.ComponentProps<'span'>) {
       data-slot="trace-icon"
       aria-hidden="true"
       className={cn(
-        'flex size-4 shrink-0 items-center justify-center [&_svg]:pointer-events-none [&_svg:not([class*="size-"])]:size-4',
+        'flex size-4 shrink-0 items-center justify-center [&_svg]:pointer-events-none [&_svg:not([class*="size-"])]:size-[var(--ui-icon-size,14px)]',
         className,
       )}
       {...props}

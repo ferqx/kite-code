@@ -13,6 +13,8 @@ type Entry = {
   state: NativeModelSettingsSubmission;
   input: ModelSettingsRequest;
   promise?: Promise<NativeModelSettingsSubmission>;
+  scope?: Scope;
+  postReadSet?: NonNullable<ModelSettingsView['readSet']>;
 };
 const code = (error: unknown) => {
   const value = (error as { code?: string })?.code;
@@ -32,17 +34,20 @@ export class NativeConfiguration {
   private readonly current: () => Scope | undefined;
   private readonly notify: () => void;
   private readonly data?: NativeConfigurationData;
+  private readonly readOnly: boolean;
   private unavailable = false;
   constructor(
     client: AgentClient,
     current: () => Scope | undefined,
     notify: () => void = () => {},
     data?: NativeConfigurationData,
+    readOnly = false,
   ) {
     this.client = client;
     this.current = current;
     this.notify = notify;
     this.data = data;
+    this.readOnly = readOnly;
     try {
       for (const row of data?.configurations() ?? []) {
         if (row.kind !== 'model') continue;
@@ -70,10 +75,32 @@ export class NativeConfiguration {
   }
   private same(scope: Scope) {
     const now = this.current();
-    return !!now && (Object.keys(scope) as (keyof Scope)[]).every((key) => scope[key] === now[key]);
+    return (
+      !!now &&
+      scope.generation === now.generation &&
+      scope.selection === now.selection &&
+      scope.storeId === now.storeId &&
+      scope.sessionId === now.sessionId
+    );
   }
-  async read(): Promise<NativeModelSettingsFacts> {
+  async read(afterCommandId?: string): Promise<NativeModelSettingsFacts> {
     if (this.unavailable) throw new ClientError('configuration_storage_unavailable');
+    let continuation: NonNullable<ModelSettingsView['readSet']> | undefined;
+    if (afterCommandId !== undefined) {
+      const entry = [...this.entries.values()].find(
+        ({ state }) => state.commandId === afterCommandId,
+      );
+      // Reject before releasing a newer observation or aborting its active reader.
+      if (
+        entry?.state.phase !== 'applied' ||
+        entry.promise ||
+        !entry.scope ||
+        !this.same(entry.scope) ||
+        !entry.postReadSet
+      )
+        throw new ClientError('configuration_continuation_changed');
+      continuation = structuredClone(entry.postReadSet);
+    }
     this.release();
     const current = this.current();
     if (!current) throw new ClientError('native_generation_changed');
@@ -96,12 +123,25 @@ export class NativeConfiguration {
         configuration.workspaceId !== undefined
       )
         throw new ClientError('configuration_scope_mismatch');
+      if (
+        continuation &&
+        (!configuration.readSet ||
+          configuration.errors.length ||
+          Object.keys(configuration.readSet).length !== 4 ||
+          Object.keys(continuation).some(
+            (key) =>
+              configuration.readSet![key as keyof typeof continuation] !==
+              continuation[key as keyof typeof continuation],
+          ))
+      )
+        throw new ClientError('configuration_continuation_changed');
       const facts: NativeModelSettingsFacts = {
         kind: 'settings.models',
         observationId: ++this.sequence,
         storeId: scope.storeId,
         scope: 'user',
-        canWrite: configuration.readSet !== null && configuration.errors.length === 0,
+        canWrite:
+          !this.readOnly && configuration.readSet !== null && configuration.errors.length === 0,
         errors: [...configuration.errors],
         defaultModelId: configuration.defaultModelId,
         models: configuration.models.map((model) => ({
@@ -131,6 +171,7 @@ export class NativeConfiguration {
     }
   }
   submit(observationId: number, operation: NativeModelSettingsSubmission['operation']) {
+    if (this.readOnly) throw new ClientError('configuration_unavailable');
     if (this.unavailable) throw new ClientError('configuration_storage_unavailable');
     const observed = this.observed;
     if (!observed || observed.facts.observationId !== observationId || !this.same(observed.scope))
@@ -139,12 +180,6 @@ export class NativeConfiguration {
       throw new ClientError('configuration_unavailable');
     const model = observed.facts.models.find((model) => model.id === operation.modelId);
     if (!model) throw new ClientError('model_settings_model_missing');
-    if (
-      operation.kind === 'enabled' &&
-      !operation.enabled &&
-      observed.facts.defaultModelId === model.id
-    )
-      throw new ClientError('model_settings_default_disable_denied');
     if (operation.kind === 'default' && (!model.enabled || !model.configured))
       throw new ClientError('model_settings_model_unconfigured');
     const key = JSON.stringify([
@@ -186,6 +221,7 @@ export class NativeConfiguration {
     };
     const entry: Entry = {
       input,
+      scope: { ...observed.scope },
       state: {
         kind: 'settings.models.submission',
         commandId: input.commandId,
@@ -247,6 +283,34 @@ export class NativeConfiguration {
           marker.operation.enabled !== input.operation.enabled))
     )
       throw new ClientError('network_outcome_unknown');
+    const status = receipt.receipt as Record<string, unknown>;
+    const proof = status.postReadSet;
+    if (proof !== undefined) {
+      if (
+        receipt.state !== 'applied' ||
+        status.status !== 'applied' ||
+        !proof ||
+        typeof proof !== 'object' ||
+        Array.isArray(proof)
+      )
+        throw new ClientError('network_outcome_unknown');
+      const fields = proof as Record<string, unknown>;
+      if (
+        Object.keys(fields).sort().join(',') !==
+          'effectiveDigest,explicitDigest,userEtag,workspaceEtag' ||
+        ['effectiveDigest', 'explicitDigest', 'userEtag'].some(
+          (key) => typeof fields[key] !== 'string' || !/^[a-f0-9]{64}$/.test(fields[key] as string),
+        ) ||
+        fields.userEtag !== status.etag ||
+        fields.explicitDigest !== input.expectedReadSet.explicitDigest ||
+        (state.scope === 'user'
+          ? fields.workspaceEtag !== null
+          : typeof fields.workspaceEtag !== 'string' ||
+            !/^[a-f0-9]{64}$/.test(fields.workspaceEtag))
+      )
+        throw new ClientError('network_outcome_unknown');
+      entry.postReadSet = structuredClone(fields) as NonNullable<ModelSettingsView['readSet']>;
+    } else entry.postReadSet = undefined;
     state.phase =
       receipt.state === 'applied' ? 'applied' : receipt.state === 'failed' ? 'failed' : 'unknown';
     state.error = receipt.state === 'failed' ? code(receipt.receipt) : undefined;

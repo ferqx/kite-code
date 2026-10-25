@@ -1,5 +1,5 @@
 import { RightSidebar } from '@kite-ai/ui/desktop';
-import { type RefObject, useEffect, useId, useRef, useState } from 'react';
+import { type RefObject, useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import type {
   NativeBridge,
@@ -9,6 +9,18 @@ import type {
   NativeProviderSubmission,
   NativeSelection,
 } from './native-bridge';
+import { NativeConnectionModels } from './native-connection-models';
+import {
+  NativeModelSettingsFeedback,
+  type NativeModelSettingsState,
+} from './native-model-settings';
+
+export type NativeProviderSettingsActivity = {
+  busy: boolean;
+  writing: boolean;
+  pending: boolean;
+  storeId?: string;
+};
 
 type ProviderIconName = 'refresh' | 'plus' | 'connection' | 'shield' | 'models';
 function ProviderIcon({ name }: { name: ProviderIconName }) {
@@ -59,6 +71,55 @@ function supportsResponses(provider: NativeProvider) {
 type Provider = NativeProviderSettingsFacts['providers'][number];
 type Connection = Provider['connections'][number];
 type PanelMode = 'add' | 'edit' | 'remove';
+type SentProviderChange = {
+  storeId: string;
+  observationId: number;
+  operation: NativeProviderOperation;
+};
+// Closing settings cancels readers and timers, not an already sent intent. Retain
+// only its non-secret correlation facts so reopening the same view can query Main.
+const sentProviderChanges = new WeakMap<NativeBridge, Map<string, SentProviderChange>>();
+function matchesProviderChange(sent: SentProviderChange, entry: NativeProviderSubmission) {
+  const operation = (value: NativeProviderOperation) =>
+    JSON.stringify([
+      value.kind,
+      value.provider,
+      value.connectionId,
+      value.name,
+      value.baseURL,
+      value.protocol,
+      value.modelNames,
+      value.credential,
+    ]);
+  return (
+    entry.kind === 'settings.providers.submission' &&
+    typeof entry.commandId === 'string' &&
+    entry.commandId.length > 0 &&
+    ['submitting', 'unknown', 'applied', 'failed'].includes(entry.phase) &&
+    entry.storeId === sent.storeId &&
+    entry.observationId === sent.observationId &&
+    operation(entry.operation) === operation(sent.operation)
+  );
+}
+// These Main errors occur before creating an intent or attempting its mutation.
+// An unavailable/invalid response is deliberately not evidence of non-dispatch.
+function rejectedBeforeProviderDispatch(code: string) {
+  return [
+    'configuration_observation_changed',
+    'configuration_mutation_pending',
+    'configuration_intent_consumed',
+    'configuration_intent_limit',
+    'provider_settings_override',
+    'invalid_request',
+    'invalid_provider_name',
+    'invalid_provider_endpoint',
+    'invalid_model_protocol',
+    'model_protocol_unsupported',
+    'provider_default_model_in_use',
+    'provider_scheduled_model_in_use',
+    'provider_credential_required',
+  ].includes(code);
+}
 function connectionLabel(provider: Provider, connection: Connection) {
   return (
     connection.name?.trim() || `${provider.label} ${provider.connections.indexOf(connection) + 1}`
@@ -112,16 +173,28 @@ export function NativeProviderSettings({
   selection,
   submissions,
   onSaved,
+  onRecovered,
   panelHost,
   editorControl,
+  refreshControl,
+  models,
+  revision = 0,
+  onActivityChange,
+  acquireWrite,
 }: {
   bridge: NativeBridge;
   generation: number;
   selection?: NativeSelection;
   submissions: readonly NativeProviderSubmission[];
   onSaved?: () => void;
+  onRecovered?: () => void;
   panelHost: HTMLElement | null;
   editorControl?: RefObject<{ close: () => void } | null>;
+  refreshControl?: RefObject<(() => Promise<boolean>) | null>;
+  models?: NativeModelSettingsState;
+  revision?: number;
+  onActivityChange?: (activity: NativeProviderSettingsActivity) => void;
+  acquireWrite?: () => (() => void) | undefined;
 }) {
   const fieldId = useId();
   const [facts, setFacts] = useState<NativeProviderSettingsFacts>();
@@ -151,11 +224,33 @@ export function NativeProviderSettings({
     [writing, setWriting] = useState(false);
   const [local, setLocal] = useState<NativeProviderSubmission[]>([]);
   const identity = `${generation}/${selection?.storeId}/${selection?.session.id}/${selection?.viewSelection}`;
+  const awaitingOriginal = useRef<SentProviderChange | undefined>(
+    sentProviderChanges.get(bridge)?.get(identity),
+  );
+  const [awaitingOriginalRecord, setAwaitingOriginalRecord] = useState(!!awaitingOriginal.current);
   const mounted = useRef(true);
   const current = useRef(identity);
   current.current = identity;
   const sequence = useRef(0),
     flight = useRef(false);
+  const readFlight = useRef<{ request: number; promise: Promise<boolean> } | undefined>(undefined);
+  const recovery = useRef({
+    timer: undefined as ReturnType<typeof setTimeout> | undefined,
+    attempt: 0,
+    needsRead: false,
+    notify: false,
+    cause: '',
+    running: false,
+    pendingSaved: undefined as NativeProviderSubmission | undefined,
+  });
+  const notified = useRef(new Set<string>());
+  const recoveryAction = useRef<() => Promise<void>>(async () => {});
+  const recoveryContext = useRef<{ originals: NativeProviderSubmission[]; storeId?: string }>({
+    originals: [],
+  });
+  const recoveredCallback = useRef(onRecovered);
+  recoveredCallback.current = onRecovered;
+
   const nameField = useRef<HTMLInputElement>(null),
     presetField = useRef<HTMLSelectElement>(null),
     cancelField = useRef<HTMLButtonElement>(null),
@@ -165,15 +260,32 @@ export function NativeProviderSettings({
   const origin = useRef<HTMLButtonElement | null>(null);
   const restoreFocus = useRef(false);
   const all = new Map(submissions.map((submission) => [submission.commandId, submission]));
-  for (const submission of local) all.set(submission.commandId, submission);
+  for (const submission of local) {
+    const observed = all.get(submission.commandId);
+    if (
+      observed &&
+      ['applied', 'failed'].includes(observed.phase) &&
+      submission.phase === 'unknown'
+    )
+      continue;
+    all.set(submission.commandId, submission);
+  }
   const originals = [...all.values()];
+  recoveryContext.current = {
+    originals,
+    storeId: facts?.storeId ?? selection?.storeId ?? models?.facts?.storeId,
+  };
+  const recoveryKey = JSON.stringify(
+    originals.map((entry) => [entry.commandId, entry.storeId, entry.phase]),
+  );
   const pending =
-    facts &&
-    originals.some(
-      (submission) =>
-        submission.storeId === facts.storeId &&
-        ['submitting', 'unknown'].includes(submission.phase),
-    );
+    awaitingOriginalRecord ||
+    (facts &&
+      originals.some(
+        (submission) =>
+          submission.storeId === facts.storeId &&
+          ['submitting', 'unknown'].includes(submission.phase),
+      ));
   const provider = facts?.providers.find((entry) => entry.id === providerId);
   const connection = provider?.connections.find((entry) => entry.id === connectionId);
   const entries =
@@ -197,7 +309,38 @@ export function NativeProviderSettings({
     !pending &&
     !draftStale &&
     !reading &&
-    !writing;
+    !writing &&
+    !models?.reading &&
+    !models?.writing &&
+    !models?.pending;
+  const previousRevision = useRef(revision);
+  const activityStoreId = facts?.storeId ?? awaitingOriginal.current?.storeId;
+  useEffect(() => {
+    onActivityChange?.({
+      busy: reading || writing,
+      writing,
+      pending: !!pending,
+      storeId: activityStoreId,
+    });
+  }, [reading, writing, pending, activityStoreId, onActivityChange]);
+  const assignedModelIds = new Set<string>();
+  const connectionModels = new Map<string, string[]>();
+  for (const { provider: entry, connection: item } of entries) {
+    const ids = (item.modelIds ?? []).filter((id) => {
+      if (assignedModelIds.has(id)) return false;
+      assignedModelIds.add(id);
+      return true;
+    });
+    connectionModels.set(JSON.stringify([entry.id, item.id]), ids);
+  }
+  // Await the initial connection facts before deciding that a model is unassigned.
+  // Retained facts keep existing rows in place during subsequent refreshes.
+  const unassignedModels =
+    facts || !reading
+      ? models?.facts?.models
+          .filter((model) => !assignedModelIds.has(model.id))
+          .map((model) => model.id)
+      : undefined;
   const panelTitle =
     panelMode === 'remove' ? '删除提供商' : panelMode === 'edit' ? '编辑提供商' : '新增提供商';
   const editingLabel =
@@ -207,52 +350,188 @@ export function NativeProviderSettings({
         ? presetLabel(provider)
         : '选择服务商预设';
   function remember(submission: NativeProviderSubmission) {
+    settleSent(submission);
     setLocal((values) => [
       ...values.filter((entry) => entry.commandId !== submission.commandId),
       submission,
     ]);
   }
-  async function read(afterSave?: 'upsert' | 'remove') {
+  function settleSent(submission: NativeProviderSubmission) {
+    const retained = sentProviderChanges.get(bridge)?.get(identity);
+    if (
+      retained &&
+      ['applied', 'failed'].includes(submission.phase) &&
+      matchesProviderChange(retained, submission)
+    )
+      sentProviderChanges.get(bridge)?.delete(identity);
+  }
+  function cancelRecovery() {
+    clearTimeout(recovery.current.timer);
+    recovery.current.timer = undefined;
+  }
+  function persistentFailure(code: string) {
+    return [
+      'native_generation_changed',
+      'native_selection_changed',
+      'store_identity_mismatch',
+      'store_mismatch',
+      'configuration_scope_mismatch',
+      'host_mutation_scope_mismatch',
+      'capability_unavailable',
+      'required_capability_missing',
+      'permission_denied',
+      'authorization_denied',
+      'connection_not_admitted',
+      'connection_identity_mismatch',
+      'connection_superseded',
+      'configuration_storage_unavailable',
+      'configuration_intent_missing',
+    ].includes(code);
+  }
+  function pendingOriginal() {
+    const context = recoveryContext.current;
+    return context.originals.find(
+      (entry) =>
+        entry.storeId === context.storeId && ['submitting', 'unknown'].includes(entry.phase),
+    );
+  }
+  function scheduleRecovery() {
+    const state = recovery.current;
+    if (
+      !mounted.current ||
+      current.current !== identity ||
+      state.running ||
+      flight.current ||
+      readFlight.current
+    )
+      return;
+    if (!awaitingOriginal.current && !pendingOriginal() && !state.needsRead) {
+      cancelRecovery();
+      state.attempt = 0;
+      return;
+    }
+    if (state.timer !== undefined || persistentFailure(state.cause)) return;
+    const original = identity;
+    const delays = [250, 1000, 3000, 10000];
+    state.timer = setTimeout(
+      () => {
+        state.timer = undefined;
+        if (
+          !mounted.current ||
+          current.current !== original ||
+          flight.current ||
+          readFlight.current
+        )
+          return;
+        state.running = true;
+        state.attempt++;
+        void recoveryAction.current().finally(() => {
+          state.running = false;
+          scheduleRecovery();
+        });
+      },
+      delays[Math.min(state.attempt, delays.length - 1)],
+    );
+  }
+  function requireRecovery(cause = '', notify = true) {
+    recovery.current.needsRead = true;
+    recovery.current.notify ||= notify;
+    recovery.current.cause = cause;
+  }
+  function notifyApplied(submission: NativeProviderSubmission) {
+    const key = JSON.stringify([submission.storeId, submission.commandId]);
+    if (submission.phase !== 'applied' || notified.current.has(key)) return;
+    notified.current.add(key);
+    onSaved?.();
+  }
+  async function read(afterSave?: 'upsert' | 'remove', force = false) {
+    if (!force && readFlight.current?.request === sequence.current)
+      return readFlight.current.promise;
+    cancelRecovery();
     const editing = editorVersion.current;
     const original = identity,
       request = ++sequence.current;
     setReading(true);
-    // Main releases the previous observation before reading; closing cannot restore it.
+    // A recovery observes new facts; it never rebinds the editor's original draft basis.
     setFacts((previous) => (previous ? { ...previous, canWrite: false } : undefined));
-    setError('');
-    try {
-      const response = await bridge.request({ method: 'settings.providers.read', generation });
-      if (current.current !== original || sequence.current !== request) return false;
-      if (
-        !response ||
-        !('providers' in response) ||
-        !('kind' in response) ||
-        response.kind !== 'settings.providers'
-      )
-        throw Error('configuration_unavailable');
-      if (selection && response.storeId !== selection.storeId)
-        throw Error('store_identity_mismatch');
-      setFacts(response);
-      return true;
-    } catch (cause) {
-      if (
-        current.current === original &&
-        sequence.current === request &&
-        (!afterSave || editing === editorVersion.current)
-      ) {
-        setFacts((previous) => (previous ? { ...previous, canWrite: false } : undefined));
-        setError(
-          `${afterSave === 'remove' ? '已删除，刷新配置失败；请刷新列表，无需重复删除。' : afterSave ? '已保存，刷新配置失败；请刷新后选择模型，无需重复保存。' : '提供商配置读取失败：'}${safeError(cause)}`,
-        );
+    if (!recovery.current.running && !awaitingOriginal.current) setError('');
+    const promise = (async () => {
+      await Promise.resolve();
+      try {
+        const response = await bridge.request({ method: 'settings.providers.read', generation });
+        if (!mounted.current || current.current !== original || sequence.current !== request)
+          return false;
+        if (
+          !response ||
+          !('providers' in response) ||
+          !('kind' in response) ||
+          response.kind !== 'settings.providers'
+        )
+          throw Error('configuration_unavailable');
+        if (selection && response.storeId !== selection.storeId)
+          throw Error('store_identity_mismatch');
+        setFacts(response);
+        const valid = !response.errors.length;
+        if (valid && !awaitingOriginal.current) {
+          const state = recovery.current;
+          state.needsRead = false;
+          state.cause = '';
+          state.attempt = 0;
+          const applied = state.pendingSaved;
+          state.pendingSaved = undefined;
+          if (applied) notifyApplied(applied);
+          else if (state.notify) recoveredCallback.current?.();
+          state.notify = false;
+          setError('');
+        } else if (!valid) requireRecovery(response.errors[0] ?? 'configuration_unavailable');
+        return valid;
+      } catch (cause) {
+        if (mounted.current && current.current === original && sequence.current === request) {
+          requireRecovery(safeError(cause));
+          setFacts((previous) => (previous ? { ...previous, canWrite: false } : undefined));
+          if (!afterSave || editing === editorVersion.current)
+            setError(
+              `${persistentFailure(safeError(cause)) ? (afterSave ? '已保存，当前配置不可读：' : '提供商配置不可用：') : afterSave === 'remove' ? '已删除，正在后台同步配置，无需重复删除。' : afterSave ? '已保存，正在后台同步配置，无需重复保存。' : '提供商配置正在后台同步：'}${safeError(cause)}`,
+            );
+        }
+        return false;
+      } finally {
+        if (readFlight.current?.request === request) readFlight.current = undefined;
+        if (mounted.current && current.current === original && sequence.current === request) {
+          setReading(false);
+          scheduleRecovery();
+        }
       }
-      return false;
-    } finally {
-      if (current.current === original && sequence.current === request) setReading(false);
-    }
+    })();
+    readFlight.current = { request, promise };
+    return promise;
   }
+  const readCurrent = useRef(read);
+  readCurrent.current = read;
+  useLayoutEffect(() => {
+    if (refreshControl) refreshControl.current = () => readCurrent.current(undefined, true);
+    return () => {
+      if (refreshControl) refreshControl.current = null;
+    };
+  }, [refreshControl]);
   // biome-ignore lint/correctness/useExhaustiveDependencies: The host selection seals the read identity.
   useEffect(() => {
     mounted.current = true;
+    cancelRecovery();
+    readFlight.current = undefined;
+    recovery.current = {
+      timer: undefined,
+      attempt: 0,
+      needsRead: false,
+      notify: false,
+      cause: '',
+      running: false,
+      pendingSaved: undefined,
+    };
+    awaitingOriginal.current = sentProviderChanges.get(bridge)?.get(identity);
+    setAwaitingOriginalRecord(!!awaitingOriginal.current);
+    if (awaitingOriginal.current) requireRecovery('network_outcome_unknown');
+    previousRevision.current = revision;
     sequence.current++;
     setFacts(undefined);
     setProviderId(undefined);
@@ -268,10 +547,24 @@ export function NativeProviderSettings({
     void read();
     return () => {
       mounted.current = false;
+      cancelRecovery();
+      readFlight.current = undefined;
       sequence.current++;
       void bridge.request({ method: 'settings.providers.close', generation }).catch(() => {});
     };
   }, [identity, bridge]);
+  // Only a confirmed model mutation invalidates the connection observation.
+  // Preserve the editor's original basis; read() never reauthorizes its draft.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: revision is the explicit sibling invalidation signal.
+  useEffect(() => {
+    if (previousRevision.current === revision) return;
+    previousRevision.current = revision;
+    void read();
+  }, [revision]);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: A single timer reads the latest current-scope originals, never frozen watcher props.
+  useEffect(() => {
+    scheduleRecovery();
+  }, [identity, recoveryKey, reading, writing, facts?.observationId]);
   function choose(
     entry: Provider,
     existing?: Connection,
@@ -308,6 +601,10 @@ export function NativeProviderSettings({
   function close() {
     restoreFocus.current = true;
     editorVersion.current++;
+    if (readFlight.current) {
+      readFlight.current = undefined;
+      requireRecovery();
+    }
     sequence.current++;
     setReading(false);
     setProviderId(undefined);
@@ -395,11 +692,24 @@ export function NativeProviderSettings({
     await submit(operation, credential === 'replace' ? secret : undefined);
   }
   async function submit(operation: NativeProviderOperation, key?: string) {
-    if (!facts || flight.current) return;
+    if (!facts || flight.current || models?.reading || models?.writing || models?.pending) return;
+    const release = acquireWrite?.();
+    if (acquireWrite && !release) return;
     const original = identity,
       request = ++sequence.current,
       editing = editorVersion.current;
     const action = operation.kind === 'remove' ? '删除' : '保存';
+    const sent: SentProviderChange = {
+      storeId: facts.storeId,
+      observationId: facts.observationId,
+      operation: structuredClone(operation),
+    };
+    let retained = sentProviderChanges.get(bridge);
+    if (!retained) {
+      retained = new Map();
+      sentProviderChanges.set(bridge, retained);
+    }
+    retained.set(original, sent);
     setSecret('');
     setFieldError(undefined);
     setError('');
@@ -420,9 +730,10 @@ export function NativeProviderSettings({
         response.kind !== 'settings.providers.submission'
       )
         throw Error('configuration_unavailable');
+      settleSent(response);
       if (!mounted.current) return;
       remember(response);
-      if (current.current === original && response.phase === 'applied') onSaved?.();
+      if (current.current === original && response.phase === 'applied') notifyApplied(response);
       if (
         current.current !== original ||
         sequence.current !== request ||
@@ -433,19 +744,30 @@ export function NativeProviderSettings({
         if (editorVersion.current !== editing || panelCurrent.current !== operation.provider)
           return;
         await refreshApplied(operation, editing);
-      } else if (response.phase !== 'unknown' && response.error)
-        setError(`${action}失败：${response.error}`);
-    } catch {
-      if (
-        current.current === original &&
-        sequence.current === request &&
-        editorVersion.current === editing
-      )
-        setError(`${action}结果未确认，请查看结果。`);
+      } else if (response.phase !== 'unknown') {
+        requireRecovery(response.error ?? 'configuration_unavailable');
+        setFacts((previous) => (previous ? { ...previous, canWrite: false } : undefined));
+        if (response.error) setError(`${action}失败：${response.error}`);
+      }
+    } catch (cause) {
+      if (rejectedBeforeProviderDispatch(safeError(cause)) && retained.get(original) === sent)
+        retained.delete(original);
+      if (mounted.current && current.current === original) {
+        // IPC failure does not prove the Main intent was never created. Keep the
+        // exact non-secret request locked until an authoritative original is found.
+        if (!rejectedBeforeProviderDispatch(safeError(cause))) {
+          awaitingOriginal.current = sent;
+          setAwaitingOriginalRecord(true);
+        }
+        requireRecovery(safeError(cause));
+        if (editorVersion.current === editing) setError(`${action}结果未确认，正在后台核对。`);
+      }
     } finally {
+      release?.();
       if (mounted.current && current.current === original) {
         flight.current = false;
         setWriting(false);
+        scheduleRecovery();
       }
     }
   }
@@ -482,13 +804,17 @@ export function NativeProviderSettings({
         throw Error('configuration_unavailable');
       if (!mounted.current) return;
       remember(response);
-      if (response.phase === 'applied' && current.current === original) onSaved?.();
+      if (response.phase === 'applied' && current.current === original) notifyApplied(response);
       if (current.current === original && editing === editorVersion.current) {
         setError(
           response.phase === 'failed'
             ? `更改失败：${response.error ?? 'configuration_unavailable'}`
             : '',
         );
+        if (response.phase === 'failed') {
+          requireRecovery(response.error ?? 'configuration_unavailable');
+          setFacts((previous) => (previous ? { ...previous, canWrite: false } : undefined));
+        }
         if (response.phase === 'applied')
           await refreshApplied(
             response.operation,
@@ -499,15 +825,104 @@ export function NativeProviderSettings({
           );
       }
     } catch {
-      if (mounted.current && current.current === original && editing === editorVersion.current)
-        setError('暂时无法查看结果，请稍后重试。');
+      if (mounted.current && current.current === original && editing === editorVersion.current) {
+        recovery.current.cause = 'network_outcome_unknown';
+        setError('暂时无法核对结果，正在后台重试。');
+      }
     } finally {
       if (mounted.current && current.current === original) {
         flight.current = false;
         setWriting(false);
+        scheduleRecovery();
       }
     }
   }
+  recoveryAction.current = async () => {
+    const original = identity;
+    let submission = pendingOriginal();
+    const sent = awaitingOriginal.current;
+    if (sent) {
+      try {
+        let candidates = recoveryContext.current.originals.filter((entry) =>
+          matchesProviderChange(sent, entry),
+        );
+        if (candidates.length !== 1) {
+          const state = await bridge.request({ method: 'state', generation });
+          if (!mounted.current || current.current !== original) return;
+          if (!state || !('creationSubmissions' in state)) throw Error('configuration_unavailable');
+          if (state.generation !== generation) throw Error('native_generation_changed');
+          const store = state.selection?.storeId ?? state.directory?.storeId;
+          if (!store) return;
+          if (
+            (store && store !== sent.storeId) ||
+            (state.directory && state.directory.storeId !== sent.storeId)
+          )
+            throw Error('store_identity_mismatch');
+          const entries = state.providerSettingsSubmissions ?? [];
+          for (const entry of entries)
+            if (entry.storeId === sent.storeId && ['submitting', 'unknown'].includes(entry.phase))
+              remember(entry);
+          candidates = entries.filter((entry) => matchesProviderChange(sent, entry));
+        }
+        if (candidates.length !== 1) return;
+        submission = candidates[0]!;
+        if (submission.phase === 'applied') notifyApplied(submission);
+        awaitingOriginal.current = undefined;
+        setAwaitingOriginalRecord(false);
+        remember(submission);
+        if (['applied', 'failed'].includes(submission.phase)) {
+          if (submission.phase === 'applied') recovery.current.pendingSaved = submission;
+          requireRecovery();
+          await read();
+          return;
+        }
+      } catch (cause) {
+        if (mounted.current && current.current === original) {
+          recovery.current.cause = safeError(cause);
+          setError(`提供商更改正在后台核对：${safeError(cause)}`);
+        }
+        return;
+      }
+    }
+    if (submission) {
+      flight.current = true;
+      try {
+        const response = await bridge.request({
+          method: 'settings.providers.lookup',
+          generation,
+          commandId: submission.commandId,
+        });
+        if (!mounted.current || current.current !== original) return;
+        if (
+          !response ||
+          !('kind' in response) ||
+          response.kind !== 'settings.providers.submission' ||
+          !('phase' in response) ||
+          response.commandId !== submission.commandId ||
+          response.storeId !== submission.storeId
+        )
+          throw Error('configuration_scope_mismatch');
+        if (['applied', 'failed'].includes(response.phase)) {
+          // Publish a confirmed mutation before clearing its pending lock. Peer
+          // model observations must expire even if this directory GET then fails.
+          if (response.phase === 'applied') notifyApplied(response);
+          setFacts((previous) => (previous ? { ...previous, canWrite: false } : undefined));
+          requireRecovery();
+          if (response.phase === 'applied') recovery.current.pendingSaved = response;
+        }
+        remember(response);
+        recovery.current.cause = '';
+        if (['applied', 'failed'].includes(response.phase)) await read();
+      } catch (cause) {
+        if (mounted.current && current.current === original) {
+          recovery.current.cause = safeError(cause);
+          setError(`提供商更改正在后台核对：${safeError(cause)}`);
+        }
+      } finally {
+        if (mounted.current && current.current === original) flight.current = false;
+      }
+    } else if (recovery.current.needsRead) await read();
+  };
   const unresolvedSubmissions = originals.filter((submission) => submission.phase === 'unknown');
   const unresolvedNotice = unresolvedSubmissions.length > 0 && (
     <section className="provider-pending" aria-label="待确认的提供商更改">
@@ -533,23 +948,31 @@ export function NativeProviderSettings({
     </section>
   );
   return (
-    <section aria-label="提供商设置" className="provider-settings" aria-busy={reading || undefined}>
+    <section
+      aria-label={models ? '提供商与模型设置' : '提供商设置'}
+      className={`provider-settings${models ? ' provider-model-settings' : ''}`}
+      aria-busy={reading || models?.reading || undefined}
+    >
       <header className="provider-page-heading">
         <div>
-          <h2>提供商</h2>
-          <p>连接你的模型服务，按需配置接口与模型。</p>
+          <h2>{models ? '提供商与模型' : '提供商'}</h2>
+          <p>
+            {models ? '连接模型服务，管理可用模型。' : '连接你的模型服务，按需配置接口与模型。'}
+          </p>
         </div>
         <div className="provider-page-actions">
-          <button
-            className="provider-button provider-refresh"
-            type="button"
-            aria-label="刷新提供商配置"
-            disabled={reading || writing}
-            onClick={() => void read()}
-          >
-            <ProviderIcon name="refresh" />
-            <span>刷新配置</span>
-          </button>
+          {!models && (
+            <button
+              className="provider-button provider-refresh"
+              type="button"
+              aria-label="刷新提供商配置"
+              disabled={reading || writing}
+              onClick={() => void read()}
+            >
+              <ProviderIcon name="refresh" />
+              <span>刷新配置</span>
+            </button>
+          )}
           <button
             ref={addButton}
             aria-expanded={panelMode === 'add'}
@@ -569,6 +992,11 @@ export function NativeProviderSettings({
           {error}
         </p>
       )}
+      {models && (
+        <div className="settings-models provider-model-feedback">
+          <NativeModelSettingsFeedback state={models} />
+        </div>
+      )}
       <div className="provider-workspace">
         <div className="provider-directory">
           <div className="provider-directory-heading">
@@ -586,49 +1014,68 @@ export function NativeProviderSettings({
                   key={`${entry.id}/${item.id}`}
                   data-selected={selected || undefined}
                 >
-                  <ProviderMark provider={entry.id} />
-                  <div className="provider-instance-info">
-                    <strong>{label}</strong>
-                    <span>
-                      {presetLabel(entry)} · {protocolLabel(item.protocol)} ·{' '}
-                      {item.modelNames.length} 个模型
+                  <div className="provider-connection-heading">
+                    <ProviderMark provider={entry.id} />
+                    <div className="provider-instance-info">
+                      <strong>{label}</strong>
+                      <span>
+                        {presetLabel(entry)} · {protocolLabel(item.protocol)}
+                        {!models && ` · ${item.modelNames.length} 个模型`}
+                      </span>
+                      {entry.id === 'codex' && <span>由本机 Codex 登录管理，自动复用认证。</span>}
+                    </div>
+                    <span className={`provider-badge${item.canWrite ? ' is-configured' : ''}`}>
+                      <span className="provider-status-dot" />
+                      {entry.id === 'codex' ? '自动接入' : item.canWrite ? '已配置' : '只读'}
                     </span>
-                    {entry.id === 'codex' && (
-                      <span>由本机 Codex 登录管理，自动复用认证；模型可在模型设置中选择。</span>
+                    {entry.id !== 'codex' && (
+                      <div className="provider-instance-actions">
+                        <button
+                          className="provider-button"
+                          type="button"
+                          aria-label={`编辑 ${label}`}
+                          aria-expanded={selected && panelMode === 'edit'}
+                          aria-controls={selected ? `${fieldId}-editor` : undefined}
+                          onClick={(event) => choose(entry, item, 'edit', event.currentTarget)}
+                        >
+                          编辑
+                        </button>
+                        <button
+                          className="provider-button provider-delete-link"
+                          type="button"
+                          aria-label={`删除 ${label}`}
+                          aria-expanded={selected && panelMode === 'remove'}
+                          aria-controls={selected ? `${fieldId}-editor` : undefined}
+                          onClick={(event) => choose(entry, item, 'remove', event.currentTarget)}
+                        >
+                          删除
+                        </button>
+                      </div>
                     )}
                   </div>
-                  <span className={`provider-badge${item.canWrite ? ' is-configured' : ''}`}>
-                    <span className="provider-status-dot" />
-                    {entry.id === 'codex' ? '自动接入' : item.canWrite ? '已配置' : '只读'}
-                  </span>
-                  {entry.id !== 'codex' && (
-                    <div className="provider-instance-actions">
-                      <button
-                        className="provider-button"
-                        type="button"
-                        aria-label={`编辑 ${label}`}
-                        aria-expanded={selected && panelMode === 'edit'}
-                        aria-controls={selected ? `${fieldId}-editor` : undefined}
-                        onClick={(event) => choose(entry, item, 'edit', event.currentTarget)}
-                      >
-                        编辑
-                      </button>
-                      <button
-                        className="provider-button provider-delete-link"
-                        type="button"
-                        aria-label={`删除 ${label}`}
-                        aria-expanded={selected && panelMode === 'remove'}
-                        aria-controls={selected ? `${fieldId}-editor` : undefined}
-                        onClick={(event) => choose(entry, item, 'remove', event.currentTarget)}
-                      >
-                        删除
-                      </button>
-                    </div>
+                  {models && (
+                    <section
+                      className="provider-connection-models settings-models"
+                      aria-label={`${label} 的模型`}
+                    >
+                      <NativeConnectionModels
+                        state={models}
+                        label={label}
+                        modelIds={connectionModels.get(JSON.stringify([entry.id, item.id])) ?? []}
+                      />
+                    </section>
                   )}
                 </li>
               );
             })}
           </ul>
+          {models && !!unassignedModels?.length && (
+            <section className="provider-other-models settings-models" aria-label="其他模型">
+              <h3>其他模型</h3>
+              <p>尚未关联连接的模型。</p>
+              <NativeConnectionModels state={models} label="其他模型" modelIds={unassignedModels} />
+            </section>
+          )}
           {facts && !entries.length && (
             <div className="provider-empty">
               <ProviderIcon name="connection" />
@@ -656,7 +1103,7 @@ export function NativeProviderSettings({
               <div className="provider-settings provider-panel-content">
                 {!provider ? (
                   <p className="provider-notice" role="status">
-                    请刷新配置后重试。
+                    正在后台读取提供商配置。
                   </p>
                 ) : panelMode !== 'add' && !connection ? (
                   <div className="provider-editor">
@@ -715,7 +1162,7 @@ export function NativeProviderSettings({
                         <p>不会自动选择替代模型，也不会修改已经开始的运行。</p>
                         {connection.defaultModelIds?.length ? (
                           <p className="provider-notice provider-notice-error" role="alert">
-                            此提供商包含当前全局默认模型。请先在“模型”设置中选择其他默认模型，再删除。
+                            此提供商包含当前全局默认模型，暂时无法删除。
                           </p>
                         ) : (
                           <p>不影响当前全局默认模型。</p>
@@ -740,7 +1187,7 @@ export function NativeProviderSettings({
                       )}
                       {facts && !facts.canWrite && !pending && !reading && (
                         <p className="provider-notice" role="status">
-                          当前配置只读，请刷新并检查配置错误后重试。
+                          当前配置不可写，请检查配置诊断。
                         </p>
                       )}
                       {unresolvedNotice}
@@ -997,7 +1444,7 @@ export function NativeProviderSettings({
                       >
                         <h4 id={`${fieldId}-models-heading`}>
                           <ProviderIcon name="models" />
-                          模型
+                          连接模型目录
                         </h4>
                         <label className="provider-field">
                           <span>
@@ -1025,7 +1472,7 @@ export function NativeProviderSettings({
                       )}
                       {facts && !facts.canWrite && !pending && !reading && (
                         <p className="provider-notice" role="status">
-                          当前配置只读，请刷新并检查配置错误后重试。
+                          当前配置不可写，请检查配置诊断。
                         </p>
                       )}
                       {unresolvedNotice}

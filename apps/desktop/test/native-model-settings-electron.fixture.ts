@@ -13,9 +13,15 @@ async function openSettings(page: import('playwright').Page) {
       .click();
   const category = page
     .getByRole('navigation', { name: '设置分类', exact: true })
-    .getByRole('button', { name: '模型', exact: true });
+    .getByRole('button', { name: '提供商与模型', exact: true });
   if ((await category.getAttribute('aria-pressed')) !== 'true') await category.click();
 }
+async function openConnectionModels(page: import('playwright').Page, label: string) {
+  const catalog = page.getByRole('button', { name: `管理 ${label} 的模型`, exact: true });
+  await catalog.waitFor();
+  if ((await catalog.getAttribute('aria-expanded')) !== 'true') await catalog.click();
+}
+
 async function closeSettings(page: import('playwright').Page) {
   if (await page.locator('.desktop-settings-dialog').isVisible())
     await page.getByRole('button', { name: '返回应用', exact: true }).click();
@@ -282,16 +288,69 @@ try {
   const oldRun = held.selection!.runs.find((r) => r.isActive)!.id;
   eq(await count(), 1);
   await openSettings(page);
-  let panel = page.getByRole('region', { name: '模型设置', exact: true });
+  let panel = page.getByRole('region', { name: '提供商与模型设置', exact: true });
   await openSettings(page);
-  await panel.getByRole('button', { name: '默认模型', exact: true }).click();
-  await panel.getByRole('menuitemradio', { name: '设为默认 B', exact: true }).waitFor();
+  eq(await panel.locator('.settings-model-current').count(), 0);
+  eq(await panel.getByRole('button', { name: '默认模型', exact: true }).count(), 0);
+  await openConnectionModels(page, 'OpenAI-compatible');
+  await page
+    .getByRole('dialog', { name: 'OpenAI-compatible 的模型管理', exact: true })
+    .locator('[role="switch"][aria-label="启用模型 B"]:not(:disabled)')
+    .waitFor();
+  // The removed picker no longer drives this retained backend/held-Run contract.
+  const defaultObservation = await page.evaluate(async (storeId) => {
+    const state = (await window.kiteNative!.request({
+      method: 'state',
+      generation: 1,
+    })) as NativeState;
+    const facts = await window.kiteNative!.request({
+      method: 'settings.models.read',
+      generation: state.generation,
+      scope: 'user',
+    });
+    if (
+      !facts ||
+      !('kind' in facts) ||
+      !('models' in facts) ||
+      facts.kind !== 'settings.models' ||
+      facts.storeId !== storeId ||
+      facts.scope !== 'user' ||
+      !facts.canWrite ||
+      !facts.models.some((model) => model.id === 'B' && model.enabled && model.configured)
+    )
+      throw Error('fixture_default_observation_unavailable');
+    return { generation: state.generation, observationId: facts.observationId };
+  }, storeId);
   // Replace only the owned main-process fetch. Read the physically committed response fully,
   // destroy that socket, and discard its receipt; the Service is not mocked.
   await app.evaluate(
     `(()=>{const original=globalThis.fetch;globalThis.__settingsOriginal=original;globalThis.__settingsPosts=0;globalThis.__settingsGets=0;globalThis.fetch=async(input,init)=>{const request=new Request(input,init);const path=new URL(request.url).pathname;if(request.method==='GET'&&path.includes('/host-mutations/'))globalThis.__settingsGets++;if(request.method!=='POST'||!path.endsWith('/config/user/models'))return original(input,init);globalThis.__settingsPosts++;const body=Buffer.from(await request.arrayBuffer());const http=process.getBuiltinModule('node:http');return await new Promise((resolve,reject)=>{const outgoing=http.request(request.url,{method:'POST',headers:Object.fromEntries(request.headers)},response=>{response.on('data',()=>{});response.on('end',()=>{response.destroy();outgoing.destroy();reject(new TypeError('owned_settings_response_lost'));});});outgoing.on('error',reject);outgoing.end(body);});};})()`,
   );
-  await panel.getByRole('menuitemradio', { name: '设为默认 B', exact: true }).click();
+  await page.evaluate(async ({ generation, observationId }) => {
+    try {
+      await window.kiteNative!.request({
+        method: 'settings.models.default',
+        generation,
+        observationId,
+        modelId: 'B',
+      });
+    } catch (cause) {
+      const state = (await window.kiteNative!.request({
+        method: 'state',
+        generation,
+      })) as NativeState;
+      if (
+        !state.modelSettingsSubmissions?.some(
+          (entry) =>
+            entry.observationId === observationId &&
+            entry.phase === 'unknown' &&
+            entry.operation.kind === 'default' &&
+            entry.operation.modelId === 'B',
+        )
+      )
+        throw cause;
+    }
+  }, defaultObservation);
   step('default-dispatched');
   const unknown = await waitState(
     page,
@@ -338,12 +397,20 @@ try {
   await page.locator('.session-header').getByTitle('Native A', { exact: true }).waitFor();
   await openSessionTools(page);
   await openSettings(page);
-  panel = page.getByRole('region', { name: '模型设置', exact: true });
+  panel = page.getByRole('region', { name: '提供商与模型设置', exact: true });
   await openSettings(page);
-  await panel.getByRole('switch', { name: '启用模型 A', exact: true }).waitFor();
+  await openConnectionModels(page, 'OpenAI-compatible');
+  await page
+    .getByRole('dialog', { name: 'OpenAI-compatible 的模型管理', exact: true })
+    .getByRole('switch', { name: '启用模型 A', exact: true })
+    .waitFor();
   await controlFetch('edit');
   await openSettings(page);
-  await panel.getByRole('switch', { name: '启用模型 A', exact: true }).uncheck();
+  await openConnectionModels(page, 'OpenAI-compatible');
+  await page
+    .getByRole('dialog', { name: 'OpenAI-compatible 的模型管理', exact: true })
+    .getByRole('switch', { name: '启用模型 A', exact: true })
+    .uncheck();
   step('stale-dispatched');
   const failed = await waitState(
     page,
@@ -450,11 +517,16 @@ try {
   await page.locator('.session-header').getByTitle('Native A', { exact: true }).waitFor();
   await openSessionTools(page);
   await openSettings(page);
-  panel = page.getByRole('region', { name: '模型设置', exact: true });
+  panel = page.getByRole('region', { name: '提供商与模型设置', exact: true });
   await openSettings(page);
-  await panel
-    .getByRole('button', { name: '默认模型', exact: true })
-    .filter({ hasText: 'fixed-B' })
+  eq(await panel.locator('.settings-model-current').count(), 0);
+  eq(await panel.getByRole('button', { name: '默认模型', exact: true }).count(), 0);
+  await openConnectionModels(page, 'OpenAI-compatible');
+  await page
+    .getByRole('dialog', { name: 'OpenAI-compatible 的模型管理', exact: true })
+    .getByRole('switch', { name: '启用模型 B', exact: true })
+    .locator('..')
+    .getByText('默认', { exact: true })
     .waitFor();
   eq(await count(), 2);
   eq((await state(page)).selection!.runs.length, 2);

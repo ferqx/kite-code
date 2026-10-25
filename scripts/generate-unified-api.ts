@@ -14,12 +14,14 @@ interface Schema {
   anyOf?: Schema[];
   oneOf?: Schema[];
   allOf?: Schema[];
+  not?: Schema;
   items?: Schema;
   properties?: Record<string, Schema>;
   required?: string[];
   additionalProperties?: boolean | Schema;
 }
 function type(schema: Schema, root: string): string {
+  if (schema.not && Object.keys(schema.not).length === 0) return 'never';
   if (schema.$ref) {
     if (schema.$ref === '#') return root;
     if (schema.$ref.startsWith('#/$defs/'))

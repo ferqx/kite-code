@@ -38,9 +38,8 @@ export function NativeGeneralSettings({
     setState({ identity });
     void bridge
       .request({
-        method: 'settings.models.read',
+        method: 'settings.general.models.read',
         generation,
-        scope: 'user',
       })
       .then((value) => {
         if (!active) return;
@@ -61,7 +60,7 @@ export function NativeGeneralSettings({
       });
     return () => {
       active = false;
-      void bridge.request({ method: 'settings.models.close', generation }).catch(() => {});
+      void bridge.request({ method: 'settings.general.models.close', generation }).catch(() => {});
     };
   }, [bridge, identity, generation, storeId]);
   const facts = state.identity === identity ? state.facts : undefined;

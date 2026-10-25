@@ -7,8 +7,8 @@
   max-width: 1080px;
 }
 .kite-client .desktop-settings :is(.provider-settings, .catalogue-settings) svg {
-  width: 16px;
-  height: 16px;
+  width: var(--ui-icon-size, 14px);
+  height: var(--ui-icon-size, 14px);
   flex: 0 0 auto;
 }
 .kite-client .desktop-settings :is(.provider-settings, .catalogue-settings) .provider-page-heading {
@@ -517,6 +517,9 @@
   padding: 17px 4px;
   border-bottom: 1px solid var(--border);
 }
+.kite-client .desktop-settings .provider-connection-heading {
+  display: contents;
+}
 .kite-client
   .desktop-settings
   :is(.provider-settings, .catalogue-settings)
@@ -855,4 +858,214 @@
   .provider-instance
   > .provider-badge {
   margin-left: 0;
+}
+
+/* A connection stays compact regardless of the size of its model catalogue. */
+.kite-client .desktop-settings .provider-model-feedback:empty {
+  display: none;
+}
+.kite-client .desktop-settings .provider-model-settings .provider-instance-list {
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr));
+  align-items: start;
+  gap: 12px;
+  border: 0;
+}
+.kite-client .desktop-settings .provider-model-settings .provider-instance {
+  container: provider-card / inline-size;
+  display: block;
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--card);
+}
+.kite-client .desktop-settings .provider-model-settings .provider-connection-heading {
+  display: grid;
+  grid-template-columns: 36px minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 10px 12px;
+  min-width: 0;
+}
+.kite-client .desktop-settings .provider-model-settings .provider-instance-actions {
+  flex-basis: auto;
+  justify-content: flex-end;
+}
+.kite-client .desktop-settings .provider-model-settings .provider-connection-models {
+  min-width: 0;
+  margin: 12px 0 0;
+}
+.kite-client .desktop-settings .provider-model-settings .provider-other-models {
+  margin-top: 16px;
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--card);
+}
+.kite-client .desktop-settings .provider-model-settings .provider-other-models h3 {
+  margin: 0 0 4px;
+  font-size: var(--ui-text-size);
+}
+.kite-client .desktop-settings .provider-model-settings .provider-other-models > p {
+  margin: 0 0 12px;
+  color: var(--muted-foreground);
+  font-size: 12px;
+}
+.kite-client .desktop-settings .settings-content .connection-models {
+  min-width: 0;
+}
+.kite-client .desktop-settings .settings-content .connection-models-trigger {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  min-height: 32px;
+  padding: 4px 10px;
+  border: 0;
+  border-radius: var(--button-radius);
+  color: var(--muted-foreground);
+  background: transparent;
+  font-size: 12px;
+}
+.kite-client .desktop-settings .settings-content .connection-models-trigger:hover {
+  color: var(--foreground);
+}
+.kite-client .desktop-settings .provider-model-settings .connection-models-trigger > span {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.kite-client .desktop-settings .settings-content .settings-model-search {
+  min-height: 34px;
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--button-radius);
+  color: var(--foreground);
+  background: var(--background);
+  padding: 6px 10px;
+  font: inherit;
+  font-size: 12px;
+}
+.kite-client .desktop-settings .connection-models-popover .connection-models-scroll {
+  min-height: 0;
+  max-height: var(--connection-models-list-height);
+}
+.kite-client .desktop-settings .connection-models-popover .connection-models-viewport {
+  height: auto;
+  max-height: var(--connection-models-list-height);
+  overscroll-behavior-y: contain;
+  scrollbar-gutter: stable;
+}
+.kite-client .desktop-settings .connection-models-popover .settings-model-options {
+  border: 0;
+  padding: 0;
+}
+.kite-client .desktop-settings .connection-models-popover .settings-model-option {
+  min-height: 44px;
+  gap: 12px;
+  padding: 9px 12px;
+  font-size: 13px;
+}
+.kite-client .desktop-settings .connection-models-empty,
+.kite-client .desktop-settings .settings-content .settings-model-search-empty {
+  margin: 0;
+  padding: 24px 8px;
+  color: var(--muted-foreground);
+  font-size: 12px;
+  text-align: center;
+}
+.kite-client .desktop-settings .settings-content .settings-model-menu {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.kite-client .desktop-settings .settings-content .settings-model-search-toolbar {
+  flex: 0 0 auto;
+  padding: 3px 3px 8px;
+}
+.kite-client .desktop-settings .settings-content .settings-model-search {
+  width: 100%;
+}
+.kite-client .desktop-settings .settings-content .settings-model-menu-scroll {
+  min-height: 0;
+  max-height: min(320px, calc(var(--radix-dropdown-menu-content-available-height, 400px) - 60px));
+}
+.kite-client .desktop-settings .settings-content .settings-model-menu-viewport {
+  height: auto;
+  max-height: min(320px, calc(var(--radix-dropdown-menu-content-available-height, 400px) - 60px));
+  overscroll-behavior-y: contain;
+}
+@container provider-card (max-width: 420px) {
+  .kite-client .desktop-settings .provider-model-settings .provider-connection-heading {
+    grid-template-columns: 36px minmax(0, 1fr) auto;
+  }
+  .kite-client
+    .desktop-settings
+    .provider-model-settings
+    .provider-connection-heading
+    > .provider-badge {
+    grid-column: 2 / -1;
+    grid-row: 2;
+    justify-self: start;
+  }
+  .kite-client .desktop-settings .provider-model-settings .provider-instance-actions {
+    grid-column: 3;
+    grid-row: 1;
+    gap: 0;
+  }
+  .kite-client
+    .desktop-settings
+    .provider-model-settings
+    .provider-instance-actions
+    .provider-button {
+    padding-inline: 6px;
+  }
+}
+.kite-client .desktop-settings .settings-content .connection-models-action {
+  flex: 0 0 auto;
+  color: var(--foreground);
+}
+.kite-client .desktop-settings .settings-content .connection-models-action svg {
+  transition: transform 120ms;
+}
+.kite-client
+  .desktop-settings
+  .connection-models-trigger[data-state="open"]
+  .connection-models-action
+  svg {
+  transform: rotate(180deg);
+}
+@media (prefers-reduced-motion: reduce) {
+  .kite-client .desktop-settings .settings-content .connection-models-action svg {
+    transition: none;
+  }
+}
+
+.kite-client
+  .desktop-settings
+  .connection-models-popover
+  .connection-models-viewport:focus-visible {
+  outline: 2px solid var(--foreground);
+  outline-offset: -2px;
+}
+
+.kite-client .desktop-settings .connection-models-popover {
+  -webkit-app-region: no-drag;
+  --connection-models-list-height: min(
+    320px,
+    max(0px, calc(var(--radix-popover-content-available-height, 420px) - 10px))
+  );
+  display: flex;
+  flex-direction: column;
+  width: var(--radix-popover-trigger-width);
+  max-width: min(calc(100vw - 24px), var(--radix-popover-content-available-width, 420px));
+  max-height: var(--radix-popover-content-available-height, calc(100vh - 24px));
+  overflow: hidden;
+  padding: 4px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--foreground);
+  background: var(--card);
+  font: inherit;
 }

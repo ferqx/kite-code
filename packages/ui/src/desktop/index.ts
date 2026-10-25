@@ -55,6 +55,7 @@ export {
   PillSelectTrigger,
   type PillSelectTriggerProps,
 } from './components/ui/pill-select-trigger';
+export { Popover, PopoverContent, PopoverTrigger } from './components/ui/popover';
 export { ScrollArea, ScrollBar } from './components/ui/scroll-area';
 export {
   Sheet,
@@ -114,6 +115,7 @@ export {
   type SessionTabsModel,
   useSessionTabs,
 } from './SessionTabs';
+export { SettingsNavigationIcon } from './SettingsNavigationIcon';
 export { type DirectoryProps, type PageActions, Sidebar } from './Sidebar';
 export { statusLabel } from './status';
 export { ToolActivity, ToolRow } from './ToolActivity';

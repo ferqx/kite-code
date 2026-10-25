@@ -944,15 +944,18 @@ test('Settings model mutations enforce effective default and exact full read-set
         (model) => model.id === 'a',
       )?.reasoningEffort,
     ).toBe('high');
-    const base = { expectedStoreId: f.storeId, expectedReadSet: view.readSet! };
-    await failure(
-      client.updateModelSettings('user', {
-        ...base,
-        commandId: 'disable-default',
-        operation: { kind: 'enabled', modelId: 'a', enabled: false },
-      }),
-      'model_settings_default_disable_denied',
-    );
+    let base = { expectedStoreId: f.storeId, expectedReadSet: view.readSet! };
+    const disabledDefault = await client.updateModelSettings('user', {
+      ...base,
+      commandId: 'disable-default',
+      operation: { kind: 'enabled', modelId: 'a', enabled: false },
+    });
+    expect(disabledDefault.state).toBe('applied');
+    view = await client.getModelSettings('user', { storeId: f.storeId });
+    expect(view.defaultModelId).toBe('a');
+    expect(view.models.find((model) => model.id === 'a')?.enabled).toBe(false);
+    expect(disabledDefault.receipt).toHaveProperty('postReadSet', view.readSet);
+    base = { expectedStoreId: f.storeId, expectedReadSet: view.readSet! };
     await failure(
       client.updateModelSettings('user', {
         ...base,
@@ -1217,10 +1220,15 @@ for (const mode of ['default', 'effort'] as const)
         );
       });
       const publicCommand = await f.handle.client.getCommand('run-b');
-      const business = publicCommand.receipt as { runId: string; businessCommandId: string };
-      const next = await f.handle.client.getRun(business.runId);
+      const receiptRun = publicCommand.receipt as { runId: string };
+      const next = await f.handle.client.getRun(receiptRun.runId);
       expect(publicCommand.kind).toBe('run.start');
-      expect(next.originCommandId).toBe(business.businessCommandId);
+      expect(publicCommand.originStoreId).toBe(f.storeId);
+      expect(publicCommand.subjectId).toBe('local-user');
+      expect(publicCommand.receipt).not.toHaveProperty('businessCommandId');
+      expect(next.originStoreId).toBe(f.storeId);
+      expect(next.sessionId).toBe(publicCommand.sessionId);
+      expect(next.originCommandId).toBe(publicCommand.id);
       expect(next.rootWorkCommandId).toBe('run-b');
       expect(next.id).not.toBe(old.id);
       expect(next.status).toBe('completed');
@@ -1265,6 +1273,336 @@ for (const mode of ['default', 'effort'] as const)
       await new Promise<void>((resolve) => relay.close(() => resolve()));
       provider.stop(true);
       await cold?.close();
+      await f.close();
+    }
+  }, 15000);
+
+for (const initialDefault of ['b', 'a'] as const)
+  test(`disabling ${initialDefault === 'a' ? 'default' : 'non-default'} A preserves its active Run and never silently replaces disabled routes`, async () => {
+    const f = await setup();
+    const requests: { model: string }[] = [];
+    let release: (() => void) | undefined;
+    const chunk = (content: string, finish: string | null) =>
+      `data: ${JSON.stringify({ id: 'fixture', object: 'chat.completion.chunk', model: 'fixture', choices: [{ index: 0, delta: content ? { content } : {}, finish_reason: finish }] })}\n\n`;
+    const provider = Bun.serve({
+      hostname: '127.0.0.1',
+      port: 0,
+      async fetch(request) {
+        const body = (await request.json()) as { model: string };
+        requests.push(body);
+        const first = requests.length === 1;
+        return new Response(
+          new ReadableStream<Uint8Array>({
+            start(controller) {
+              const encode = (value: string) => controller.enqueue(new TextEncoder().encode(value));
+              encode(chunk(first ? 'Partial response' : 'Completed response', null));
+              const end = () => {
+                encode(chunk('', first ? 'length' : 'stop'));
+                encode('data: [DONE]\n\n');
+                controller.close();
+              };
+              if (first) release = end;
+              else end();
+            },
+          }),
+          { headers: { 'content-type': 'text/event-stream' } },
+        );
+      },
+    });
+    const until = async (predicate: () => Promise<boolean>) => {
+      const deadline = Date.now() + 5000;
+      while (!(await predicate())) {
+        if (Date.now() > deadline) throw Error('active_disabled_model_deadline');
+        await Bun.sleep(5);
+      }
+    };
+    const finishedRun = async (commandId: string) => {
+      await until(async () => {
+        const command = await f.handle.client.getCommand(commandId);
+        const receipt = command.receipt as { runId?: string } | null;
+        return (
+          command.status === 'applied' &&
+          typeof receipt?.runId === 'string' &&
+          !(await f.handle.client.getRun(receipt.runId)).isActive
+        );
+      });
+      const command = await f.handle.client.getCommand(commandId);
+      return f.handle.client.getRun((command.receipt as { runId: string }).runId);
+    };
+    try {
+      writeFileSync(
+        f.userConfiguration.path,
+        JSON.stringify({
+          modelId: initialDefault,
+          models: ['a', 'b'].map((id) => ({
+            id,
+            provider: 'compatible',
+            model: `actual-model-${id}`,
+            baseURL: `${provider.url.href}v1`,
+          })),
+        }),
+      );
+      await f.handle.client.createSession({
+        expectedStoreId: f.storeId,
+        commandId: 'create-disable-held',
+        sessionId: 'disable-held',
+        workspaceId: 'workspace',
+        title: 'Disable active model',
+      });
+      await f.handle.client.startRun('disable-held', {
+        expectedStoreId: f.storeId,
+        commandId: 'run-explicit-a',
+        kind: 'run.start',
+        modelId: 'a',
+        content: 'New task: Continue the partial response to completion',
+      });
+      await until(async () => requests.length === 1 && release !== undefined);
+      const originalCommand = await f.handle.client.getCommand('run-explicit-a');
+      const original = await f.handle.client.getRun(
+        (originalCommand.receipt as { runId: string }).runId,
+      );
+      expect(original).toMatchObject({
+        originStoreId: f.storeId,
+        sessionId: 'disable-held',
+        isActive: true,
+        status: 'running',
+      });
+      expect(originalCommand.subjectId).toBe('local-user');
+      const settings = await f.handle.client.getModelSettings('user', { storeId: f.storeId });
+      expect(settings.defaultModelId).toBe(initialDefault);
+      const intent = {
+        expectedStoreId: f.storeId,
+        commandId: 'disable-active-a',
+        expectedReadSet: settings.readSet!,
+        operation: { kind: 'enabled' as const, modelId: 'a', enabled: false },
+      };
+      const applied = await f.handle.client.updateModelSettings('user', intent);
+      expect(applied).toMatchObject({
+        commandId: intent.commandId,
+        originStoreId: f.storeId,
+        scope: 'user',
+        kind: 'model_settings.update',
+        state: 'applied',
+        modelSettings: { expectedReadSet: intent.expectedReadSet, operation: intent.operation },
+      });
+      const disabled = await f.handle.client.getModelSettings('user', { storeId: f.storeId });
+      expect(applied.receipt).toHaveProperty('postReadSet', {
+        userEtag: disabled.readSet!.userEtag,
+        workspaceEtag: disabled.readSet!.workspaceEtag,
+        explicitDigest: disabled.readSet!.explicitDigest,
+        effectiveDigest: disabled.readSet!.effectiveDigest,
+      });
+      expect(disabled.defaultModelId).toBe(initialDefault);
+      expect(disabled.models.find((model) => model.id === 'a')?.enabled).toBe(false);
+      expect(disabled.models.filter((model) => model.enabled).map((model) => model.id)).toEqual([
+        'b',
+      ]);
+      expect(requests.map((request) => request.model)).toEqual(['actual-model-a']);
+      expect(await f.handle.client.getRun(original.id)).toEqual(original);
+      release!();
+      release = undefined;
+      const completed = await finishedRun('run-explicit-a');
+      expect(completed).toEqual({
+        ...original,
+        status: 'completed',
+        isActive: false,
+        finishedAt: expect.any(Number),
+      });
+      expect(await f.handle.client.getCommand('run-explicit-a')).toEqual(originalCommand);
+      expect(requests.map((request) => request.model)).toEqual([
+        'actual-model-a',
+        'actual-model-a',
+      ]);
+      const activeInputs = await f.handle.client.listModelInputs('disable-held');
+      expect(activeInputs.items).toHaveLength(2);
+      for (const item of activeInputs.items) {
+        expect(item).toMatchObject({
+          runId: original.id,
+          originCommandId: original.originCommandId,
+          rootWorkCommandId: original.rootWorkCommandId,
+          rootWorkSeq: original.rootWorkSeq,
+          modelId: 'a',
+          status: 'succeeded',
+          confirmation: 'succeeded',
+        });
+        const input = await f.handle.client.getModelInput('disable-held', item.executionId);
+        expect(input.request.modelId).toBe('a');
+        expect(await f.handle.client.getExecution(item.executionId)).toMatchObject({
+          originStoreId: f.storeId,
+          sessionId: original.sessionId,
+          runId: original.id,
+          definitionId: 'a',
+          status: 'succeeded',
+          cancelRequestedAt: null,
+        });
+      }
+      await f.handle.client.startRun('disable-held', {
+        expectedStoreId: f.storeId,
+        commandId: 'new-disabled-a',
+        kind: 'run.start',
+        modelId: 'a',
+        content: 'New task: Explicit disabled model must be rejected',
+      });
+      await until(
+        async () => (await f.handle.client.getCommand('new-disabled-a')).status === 'rejected',
+      );
+      expect(await f.handle.client.getCommand('new-disabled-a')).toMatchObject({
+        originStoreId: f.storeId,
+        subjectId: originalCommand.subjectId,
+        status: 'rejected',
+        receipt: { reason: 'model_unavailable' },
+        cancelRequestedAt: null,
+      });
+      expect(requests).toHaveLength(2);
+      expect((await f.handle.client.getView('disable-held')).runs).toHaveLength(1);
+      if (initialDefault === 'a') {
+        const reject = async (commandId: string, modelId?: string) => {
+          const count = requests.length;
+          await f.handle.client.startRun('disable-held', {
+            expectedStoreId: f.storeId,
+            commandId,
+            kind: 'run.start',
+            content: 'New task: A disabled route must not be substituted',
+            ...(modelId ? { modelId } : {}),
+          });
+          await until(
+            async () => (await f.handle.client.getCommand(commandId)).status === 'rejected',
+          );
+          expect(await f.handle.client.getCommand(commandId)).toMatchObject({
+            originStoreId: f.storeId,
+            subjectId: originalCommand.subjectId,
+            status: 'rejected',
+            receipt: { reason: 'model_unavailable' },
+            cancelRequestedAt: null,
+          });
+          expect(requests).toHaveLength(count);
+        };
+        const toggle = async (modelId: string, enabled: boolean) => {
+          const before = await f.handle.client.getModelSettings('user', { storeId: f.storeId });
+          const result = await f.handle.client.updateModelSettings('user', {
+            expectedStoreId: f.storeId,
+            commandId: `${modelId}-${enabled}`,
+            expectedReadSet: before.readSet!,
+            operation: { kind: 'enabled', modelId, enabled },
+          });
+          const after = await f.handle.client.getModelSettings('user', { storeId: f.storeId });
+          expect(result.state).toBe('applied');
+          expect(result.receipt).toHaveProperty('postReadSet', after.readSet);
+          expect(after.defaultModelId).toBe('a');
+          return after;
+        };
+        // B is still usable, but an omitted model must not silently replace disabled default A.
+        await reject('new-disabled-default-a');
+        const allDisabled = await toggle('b', false);
+        expect(allDisabled.models.every((model) => !model.enabled)).toBe(true);
+        await reject('all-disabled-default-a');
+        await reject('all-disabled-explicit-b', 'b');
+        await expect(
+          f.handle.client.updateModelSettings('user', {
+            expectedStoreId: f.storeId,
+            commandId: 'disabled-b-cannot-be-default',
+            expectedReadSet: allDisabled.readSet!,
+            operation: { kind: 'default', modelId: 'b' },
+          }),
+        ).rejects.toMatchObject({ code: 'model_settings_model_disabled' });
+        // Editing a connection preserves both disabled routes and the exact default identity.
+        const providers = await f.handle.client.getProviderSettings({ storeId: f.storeId });
+        const connection = providers.providers.find((entry) => entry.id === 'compatible')!
+          .connections[0]!;
+        const edit = {
+          expectedStoreId: f.storeId,
+          commandId: 'edit-connection-with-disabled-default',
+          expectedReadSet: providers.readSet!,
+          operation: {
+            provider: 'compatible' as const,
+            connectionId: connection.id,
+            name: 'Still disabled',
+            baseURL: `${provider.url.href}v1`,
+            protocol: 'chat-completions' as const,
+            modelNames: ['actual-model-a', 'actual-model-b'],
+            credential: 'none' as const,
+          },
+        };
+        const edited = await f.handle.client.updateProviderSettings(edit);
+        expect(edited).toMatchObject({
+          state: 'applied',
+          receipt: {
+            status: 'applied',
+            credentialState: 'unchanged',
+            configurationState: 'published',
+          },
+        });
+        expect(await f.handle.client.updateProviderSettings(edit)).toEqual(edited);
+        const retained = await f.handle.client.getModelSettings('user', { storeId: f.storeId });
+        expect(retained.defaultModelId).toBe('a');
+        expect(retained.models.map((model) => [model.id, model.enabled])).toEqual([
+          ['a', false],
+          ['b', false],
+        ]);
+        expect(requests).toHaveLength(2);
+        await toggle('a', true);
+        await f.handle.client.startRun('disable-held', {
+          expectedStoreId: f.storeId,
+          commandId: 're-enabled-default-a',
+          kind: 'run.start',
+          content: 'New task: Re-enabled default A is available again',
+        });
+        const restoredA = await finishedRun('re-enabled-default-a');
+        expect(restoredA.status).toBe('completed');
+        await toggle('b', true);
+        await f.handle.client.startRun('disable-held', {
+          expectedStoreId: f.storeId,
+          commandId: 're-enabled-explicit-b',
+          kind: 'run.start',
+          modelId: 'b',
+          content: 'New task: Re-enabled B is available without replacing default A',
+        });
+        const restoredB = await finishedRun('re-enabled-explicit-b');
+        expect(restoredB.status).toBe('completed');
+        expect(requests.map((request) => request.model)).toEqual([
+          'actual-model-a',
+          'actual-model-a',
+          'actual-model-a',
+          'actual-model-b',
+        ]);
+        const inputs = await f.handle.client.listModelInputs('disable-held');
+        expect(inputs.items.map((item) => [item.runId, item.modelId, item.status])).toEqual([
+          [original.id, 'a', 'succeeded'],
+          [original.id, 'a', 'succeeded'],
+          [restoredA.id, 'a', 'succeeded'],
+          [restoredB.id, 'b', 'succeeded'],
+        ]);
+        expect((await f.handle.client.getRun(original.id)).configuration).toEqual(
+          original.configuration,
+        );
+        return;
+      }
+      await f.handle.client.startRun('disable-held', {
+        expectedStoreId: f.storeId,
+        commandId: 'new-default-b',
+        kind: 'run.start',
+        content: 'New task: Use the enabled default model',
+      });
+      const next = await finishedRun('new-default-b');
+      expect(next.id).not.toBe(original.id);
+      expect(next.status).toBe('completed');
+      expect(requests.map((request) => request.model)).toEqual([
+        'actual-model-a',
+        'actual-model-a',
+        'actual-model-b',
+      ]);
+      const inputs = await f.handle.client.listModelInputs('disable-held');
+      expect(inputs.items.map((item) => [item.runId, item.modelId, item.status])).toEqual([
+        [original.id, 'a', 'succeeded'],
+        [original.id, 'a', 'succeeded'],
+        [next.id, 'b', 'succeeded'],
+      ]);
+      expect((await f.handle.client.getRun(original.id)).configuration).toEqual(
+        original.configuration,
+      );
+    } finally {
+      release?.();
+      provider.stop(true);
       await f.close();
     }
   }, 15000);

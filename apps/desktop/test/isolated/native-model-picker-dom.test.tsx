@@ -132,6 +132,167 @@ const facts: NativeModelSettingsFacts = {
 const selected = (id: string, viewSelection = 1) =>
   ({ storeId: 'store', session: { id }, viewSelection }) as NativeSelection;
 
+test('an unselected picker stays at its placeholder across configuration default changes until the user chooses an exact route', async () => {
+  const f = fixture(),
+    changes: NativeModelChoice[] = [],
+    ready: [boolean, NativeModelChoice | undefined][] = [];
+  let defaultModelId = 'a';
+  const calls: NativeRequest[] = [];
+  const bridge: NativeBridge = {
+    watch: () => () => {},
+    request: async (input) => {
+      calls.push(input);
+      return { ...facts, defaultModelId };
+    },
+  };
+  function Host({ revision }: { revision: string }) {
+    const [value, setValue] = useState<NativeModelChoice>({});
+    return (
+      <NativeModelPicker
+        bridge={bridge}
+        generation={1}
+        selection={selected('fresh')}
+        revision={revision}
+        value={value}
+        onChange={(choice) => {
+          changes.push(choice);
+          setValue(choice);
+        }}
+        onReady={(available, choice) => ready.push([available, choice])}
+      />
+    );
+  }
+  try {
+    await act(async () => f.root.render(<Host revision="one" />));
+    const trigger = f.element.querySelector('[data-model-trigger]');
+    expect(trigger?.textContent).toBe('选择模型');
+    expect(ready.at(-1)).toEqual([false, undefined]);
+    expect(f.element.querySelector('.model-effort-summary')).toBeNull();
+    expect(f.element.querySelector('[role="alert"]')).toBeNull();
+    defaultModelId = 'b';
+    await act(async () => f.root.render(<Host revision="two" />));
+    expect(f.element.querySelector('[data-model-trigger]')).toBe(trigger);
+    expect(trigger?.textContent).toBe('选择模型');
+    expect(ready.at(-1)).toEqual([false, undefined]);
+    expect(changes).toEqual([]);
+    await f.click('模型：选择模型');
+    await f.click('选择模型，当前 未选择');
+    await f.click('deepseek');
+    await f.click('选择模型 b');
+    expect(changes).toEqual([{ modelId: 'b' }]);
+    expect(ready.at(-1)).toEqual([true, { modelId: 'b' }]);
+    defaultModelId = 'a';
+    await act(async () => f.root.render(<Host revision="three" />));
+    expect(ready.at(-1)).toEqual([true, { modelId: 'b' }]);
+    expect(changes).toHaveLength(1);
+    expect(calls).toEqual(
+      Array.from({ length: 3 }, () => ({ method: 'input.models.read', generation: 1 })),
+    );
+  } finally {
+    await f.close();
+  }
+});
+
+test('a prepared new-conversation picker ignores the old Session route and configuration default until explicitly selected', async () => {
+  const f = fixture(),
+    changes: NativeModelChoice[] = [],
+    ready: [boolean, NativeModelChoice | undefined][] = [],
+    calls: NativeRequest[] = [];
+  const selection = { ...selected('old'), runs: [previousRun('max')] },
+    preparing = { storeId: 'store' },
+    scope = nativeModelScope(1, selection, preparing);
+  const bridge: NativeBridge = {
+    watch: () => () => {},
+    request: async (input) => {
+      calls.push(input);
+      return null;
+    },
+  };
+  function Host() {
+    const [value, setValue] = useState<NativeModelChoice>({});
+    return (
+      <NativeModelPicker
+        bridge={bridge}
+        generation={1}
+        selection={selection}
+        preparing={preparing}
+        prepared={{ key: scope.readKey, facts: { ...facts, selectedModelId: 'b' }, error: '' }}
+        value={value}
+        onChange={(choice) => {
+          changes.push(choice);
+          setValue(choice);
+        }}
+        onReady={(available, choice) => ready.push([available, choice])}
+      />
+    );
+  }
+  try {
+    await act(async () => f.root.render(<Host />));
+    expect(f.element.querySelector('[data-model-trigger]')?.textContent).toBe('选择模型');
+    expect(f.element.querySelector('.model-effort-summary')).toBeNull();
+    expect(ready.at(-1)).toEqual([false, undefined]);
+    expect(changes).toEqual([]);
+    expect(calls).toEqual([]);
+    await f.click('模型：选择模型');
+    await f.click('选择模型，当前 未选择');
+    await f.click('选择模型 a');
+    expect(changes).toEqual([{ modelId: 'a' }]);
+    expect(ready.at(-1)).toEqual([true, { modelId: 'a' }]);
+    expect(calls).toEqual([]);
+  } finally {
+    await f.close();
+  }
+});
+
+test('saved Session routes remain isolated while old Runs without a saved route keep the placeholder', async () => {
+  const f = fixture(),
+    ready: [boolean, NativeModelChoice | undefined][] = [];
+  let target = 'saved';
+  const bridge: NativeBridge = {
+    watch: () => () => {},
+    request: async () => ({
+      ...facts,
+      defaultModelId: target === 'fresh' ? 'a' : 'b',
+      selectedModelId: target === 'saved' ? 'b' : undefined,
+    }),
+  };
+  const render = async (id: string, view: number) => {
+    target = id;
+    await act(async () =>
+      f.root.render(
+        <NativeModelPicker
+          bridge={bridge}
+          generation={1}
+          selection={{
+            ...selected(id, view),
+            runs: id === 'legacy' ? [previousRun('max', { sessionId: id })] : [],
+          }}
+          value={{}}
+          onChange={() => {
+            throw Error('unexpected_automatic_choice');
+          }}
+          onReady={(available, choice) => ready.push([available, choice])}
+        />,
+      ),
+    );
+  };
+  try {
+    await render('saved', 1);
+    expect(ready.at(-1)).toEqual([true, { modelId: 'b' }]);
+    await render('legacy', 2);
+    expect(f.element.querySelector('[data-model-trigger]')?.textContent).toBe('选择模型');
+    expect(ready.at(-1)).toEqual([false, undefined]);
+    await render('fresh', 3);
+    expect(f.element.querySelector('[data-model-trigger]')?.textContent).toBe('选择模型');
+    expect(ready.at(-1)).toEqual([false, undefined]);
+    await render('saved', 4);
+    expect(f.element.querySelector('[data-model-trigger]')?.textContent).toBe('remote-b未指定');
+    expect(ready.at(-1)).toEqual([true, { modelId: 'b' }]);
+  } finally {
+    await f.close();
+  }
+});
+
 test('picker filters disabled routes, preserves transient effort through observer rerenders, and model change clears it', async () => {
   const f = fixture(),
     calls: NativeRequest[] = [],
@@ -141,7 +302,7 @@ test('picker filters disabled routes, preserves transient effort through observe
     watch: () => () => {},
     request: async (input) => {
       calls.push(input);
-      return facts;
+      return { ...facts, selectedModelId: 'a' };
     },
   };
   const resolved: (NativeModelChoice | undefined)[] = [];
@@ -382,6 +543,7 @@ test('picker rejects late scope facts and preserves configured none without extr
         });
       return {
         ...facts,
+        selectedModelId: 'a',
         models: [
           {
             ...facts.models[0]!,
@@ -564,7 +726,7 @@ test('prepared scopes paint their final route immediately and publish readiness 
           selection={selection}
           revision="settings"
           value={{}}
-          prepared={{ key: scope.readKey, facts, error: '' }}
+          prepared={{ key: scope.readKey, facts: { ...facts, selectedModelId: 'a' }, error: '' }}
           onChange={() => {
             throw Error('unexpected choice');
           }}
@@ -827,11 +989,12 @@ test('an admitted input without an actual Run does not limit protocol choice, in
     for (const preparing of [false, true]) {
       await render(preparing);
       expect(f.element.textContent).not.toContain('切换协议请新建会话');
-      await f.click('模型：remote-a，思考程度：轻度');
-      await f.click('选择模型，当前 openai / remote-a');
+      const trigger = preparing ? '模型：选择模型' : '模型：remote-a，思考程度：轻度';
+      await f.click(trigger);
+      await f.click(preparing ? '选择模型，当前 未选择' : '选择模型，当前 openai / remote-a');
       await f.click('compatible');
       expect(f.element.querySelector('[aria-label="选择模型 b"]')).not.toBeNull();
-      await f.click('模型：remote-a，思考程度：轻度');
+      await f.click(trigger);
     }
   } finally {
     await f.close();
@@ -976,7 +1139,7 @@ test('an unverified first Run blocks sending and does not infer its protocol fro
               ...selected('s', index + 1),
               runs: [first, previousRun('low', { id: 'later' })],
             }}
-            value={{}}
+            value={{ modelId: 'a' }}
             onChange={() => {
               throw Error('unverified_run_must_not_change_model');
             }}
@@ -1023,7 +1186,7 @@ test.each([
   };
   let resolved: NativeModelChoice | undefined;
   function Host() {
-    const [value, setValue] = useState<NativeModelChoice>({});
+    const [value, setValue] = useState<NativeModelChoice>({ modelId: 'a' });
     return (
       <NativeModelPicker
         bridge={bridge}
@@ -1116,7 +1279,7 @@ test('the first paint restores the Session effort and hands the same value to th
     watch: () => () => {},
     request: async (request) => {
       calls.push(request);
-      return facts;
+      return { ...facts, selectedModelId: 'a' };
     },
   };
   let observed: NativeModelChoice = {},
@@ -1177,7 +1340,7 @@ test('the first paint restores the Session effort and hands the same value to th
   }
 });
 
-test('new conversations use configured effort while foreign, stale and malformed history cannot supply a Session choice', async () => {
+test('selected routes use configured effort while foreign, stale and malformed history cannot supply Session effort', async () => {
   const f = fixture(),
     calls: NativeRequest[] = [],
     changes: NativeModelChoice[] = [];
@@ -1185,7 +1348,7 @@ test('new conversations use configured effort while foreign, stale and malformed
     watch: () => () => {},
     request: async (request) => {
       calls.push(request);
-      return facts;
+      return { ...facts, selectedModelId: 'a' };
     },
   };
   let view = 0,
@@ -1198,7 +1361,7 @@ test('new conversations use configured effort while foreign, stale and malformed
           generation={1}
           selection={{ ...selected('s', ++view), runs }}
           preparing={preparing ? { storeId: 'store' } : undefined}
-          value={{}}
+          value={preparing ? { modelId: 'a' } : {}}
           onChange={(value) => changes.push(value)}
           onReady={(_ready, value) => {
             resolved = value;
@@ -1270,6 +1433,7 @@ test('restored legacy effort remains usable and an unavailable saved level requi
     watch: () => () => {},
     request: async () => ({
       ...facts,
+      selectedModelId: 'a',
       models: [{ ...facts.models[0]!, reasoningEffortChoices: ['low', 'high'] }],
     }),
   };

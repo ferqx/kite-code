@@ -589,7 +589,10 @@ export function Composer(props: ComposerProps) {
             role="status"
             aria-label="正在添加附件"
           >
-            <HugeiconsIcon icon={Loading03Icon} size={16} className="animate-spin" />
+            <HugeiconsIcon
+              icon={Loading03Icon}
+              className="size-[var(--ui-icon-size,14px)] animate-spin"
+            />
             <Button
               variant="ghost"
               size="sm"

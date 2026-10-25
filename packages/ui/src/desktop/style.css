@@ -27,13 +27,14 @@ body {
     "Geist Variable", -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
     "Microsoft YaHei UI", "Microsoft YaHei", sans-serif;
   --ui-text-size: 14px;
+  --ui-icon-size: 14px;
   /* Compact selectors share metrics across triggers, menus, and body portals. */
   --select-font-size: 13px;
   --select-line-height: 18px;
   --select-min-height: 28px;
   --select-padding-block: 4px;
   --select-padding-inline: 8px;
-  --select-icon-size: 14px;
+  --select-icon-size: var(--ui-icon-size);
   --select-trigger-gap: 6px;
   --select-trigger-radius: 9999px;
   --font-weight-semibold: 500;
@@ -1246,8 +1247,8 @@ body {
   .model-trigger > svg,
   .permission-trigger > svg,
   .composer-action > svg {
-    width: 16px;
-    height: 16px;
+    width: var(--ui-icon-size);
+    height: var(--ui-icon-size);
   }
   .model-trigger {
     max-width: min(220px, 100%);
@@ -1383,8 +1384,8 @@ body {
     line-height: inherit;
   }
   .permission-menu-item svg {
-    width: 16px;
-    height: 16px;
+    width: var(--ui-icon-size);
+    height: var(--ui-icon-size);
     flex: none;
   }
   .permission-menu-divider {
@@ -3012,8 +3013,8 @@ body {
   color: var(--destructive);
 }
 .kite-client .agent-turn-chevron {
-  width: 16px;
-  height: 16px;
+  width: var(--ui-icon-size);
+  height: var(--ui-icon-size);
   flex: none;
 }
 .kite-client .agent-turn-process-messages {
@@ -3147,10 +3148,10 @@ body {
   outline-offset: 2px;
 }
 .kite-client .tool-activity-chevron {
-  width: 16px;
-  height: 16px;
+  width: var(--ui-icon-size);
+  height: var(--ui-icon-size);
   flex-shrink: 0;
-  /* A rotating 16px square needs space beyond its resting bounds. */
+  /* A rotating icon needs space beyond its resting bounds. */
   margin-inline: 4px;
   color: inherit;
 }
@@ -3213,24 +3214,29 @@ body {
   line-height: 18px;
   color: var(--muted-foreground);
 }
-.kite-client .tool-approval-approved {
+.kite-client .tool-approval-icon {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   width: 16px;
   height: 18px;
-  opacity: 0.65;
   border-radius: var(--button-radius);
 }
-.kite-client .tool-approval-approved svg {
+.kite-client .tool-approval-approved {
+  opacity: 0.65;
+}
+.kite-client .tool-approval-rejected {
+  color: var(--attention-foreground);
+}
+.kite-client .tool-approval-icon svg {
   width: 14px;
   height: 14px;
 }
-.kite-client .tool-approval-approved:hover,
-.kite-client .tool-approval-approved:focus-visible {
+.kite-client .tool-approval-icon:hover,
+.kite-client .tool-approval-icon:focus-visible {
   opacity: 1;
 }
-.kite-client .tool-approval-approved:focus-visible {
+.kite-client .tool-approval-icon:focus-visible {
   outline: 2px solid var(--ring);
   outline-offset: 2px;
 }
@@ -4166,8 +4172,8 @@ body {
   white-space: normal;
 }
 .kite-client .context-menu-item svg {
-  width: 16px;
-  height: 16px;
+  width: var(--ui-icon-size);
+  height: var(--ui-icon-size);
   flex: none;
 }
 .kite-client .context-menu-item[role="menuitemradio"] {
@@ -5006,8 +5012,8 @@ body {
   color: var(--foreground);
 }
 .kite-client .composer-attach > svg {
-  width: 16px;
-  height: 16px;
+  width: var(--ui-icon-size);
+  height: var(--ui-icon-size);
 }
 .kite-client .composer-attach-menu {
   box-sizing: border-box;
@@ -5039,8 +5045,8 @@ body {
   line-height: inherit;
 }
 .kite-client .composer-attach-menu [role="menuitem"] > svg {
-  width: 16px;
-  height: 16px;
+  width: var(--ui-icon-size);
+  height: var(--ui-icon-size);
   color: var(--muted-foreground);
 }
 .kite-client .composer-attach-menu [role="menuitem"]:is(:hover, [data-highlighted]) {

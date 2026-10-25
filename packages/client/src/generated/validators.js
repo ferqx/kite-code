@@ -41655,206 +41655,365 @@ validate40.evaluated = { props: true, dynamicProps: false, dynamicItems: false }
 var response_HostMutation = validate45;
 var schema52 = {
   $schema: 'https://json-schema.org/draft/2020-12/schema',
-  type: 'object',
-  properties: {
-    commandId: { type: 'string', minLength: 1, maxLength: 128, pattern: '^[A-Za-z0-9_-]+$' },
-    originStoreId: { type: 'string', minLength: 1, maxLength: 128, pattern: '^[A-Za-z0-9_-]+$' },
-    scope: { type: 'string', enum: ['user', 'workspace'] },
-    workspaceId: { type: 'string', minLength: 1, maxLength: 128, pattern: '^[A-Za-z0-9_-]+$' },
-    ifMatch: { type: 'string', pattern: '^[a-f0-9]{64}$' },
-    kind: {
-      type: 'string',
-      enum: [
-        'config.patch',
-        'config.repair',
-        'credential.put',
-        'credential.revoke',
-        'model_settings.update',
-        'provider_settings.update',
-      ],
-    },
-    modelSettings: {
+  anyOf: [
+    {
       type: 'object',
       properties: {
-        expectedReadSet: {
+        commandId: { type: 'string', minLength: 1, maxLength: 128, pattern: '^[A-Za-z0-9_-]+$' },
+        originStoreId: {
+          type: 'string',
+          minLength: 1,
+          maxLength: 128,
+          pattern: '^[A-Za-z0-9_-]+$',
+        },
+        scope: { type: 'string', enum: ['user', 'workspace'] },
+        workspaceId: { type: 'string', minLength: 1, maxLength: 128, pattern: '^[A-Za-z0-9_-]+$' },
+        ifMatch: { type: 'string', pattern: '^[a-f0-9]{64}$' },
+        kind: {
+          type: 'string',
+          enum: [
+            'config.patch',
+            'config.repair',
+            'credential.put',
+            'credential.revoke',
+            'model_settings.update',
+            'provider_settings.update',
+          ],
+        },
+        modelSettings: {
           type: 'object',
           properties: {
-            userEtag: { type: 'string', pattern: '^[a-f0-9]{64}$' },
-            workspaceEtag: {
-              anyOf: [{ type: 'string', pattern: '^[a-f0-9]{64}$' }, { type: 'null' }],
+            expectedReadSet: {
+              type: 'object',
+              properties: {
+                userEtag: { type: 'string', pattern: '^[a-f0-9]{64}$' },
+                workspaceEtag: {
+                  anyOf: [{ type: 'string', pattern: '^[a-f0-9]{64}$' }, { type: 'null' }],
+                },
+                explicitDigest: { type: 'string', pattern: '^[a-f0-9]{64}$' },
+                effectiveDigest: { type: 'string', pattern: '^[a-f0-9]{64}$' },
+              },
+              required: ['userEtag', 'workspaceEtag', 'explicitDigest', 'effectiveDigest'],
+              additionalProperties: true,
             },
-            explicitDigest: { type: 'string', pattern: '^[a-f0-9]{64}$' },
-            effectiveDigest: { type: 'string', pattern: '^[a-f0-9]{64}$' },
+            operation: {
+              oneOf: [
+                {
+                  type: 'object',
+                  properties: {
+                    kind: { type: 'string', const: 'enabled' },
+                    modelId: {
+                      type: 'string',
+                      minLength: 1,
+                      maxLength: 128,
+                      pattern: '^[A-Za-z0-9_.-]+$',
+                    },
+                    enabled: { type: 'boolean' },
+                  },
+                  required: ['kind', 'modelId', 'enabled'],
+                  additionalProperties: true,
+                },
+                {
+                  type: 'object',
+                  properties: {
+                    kind: { type: 'string', const: 'default' },
+                    modelId: {
+                      type: 'string',
+                      minLength: 1,
+                      maxLength: 128,
+                      pattern: '^[A-Za-z0-9_.-]+$',
+                    },
+                  },
+                  required: ['kind', 'modelId'],
+                  additionalProperties: true,
+                },
+                {
+                  type: 'object',
+                  properties: {
+                    kind: { type: 'string', const: 'effort' },
+                    modelId: {
+                      type: 'string',
+                      minLength: 1,
+                      maxLength: 128,
+                      pattern: '^[A-Za-z0-9_.-]+$',
+                    },
+                    reasoningEffort: {
+                      anyOf: [
+                        {
+                          type: 'string',
+                          enum: [
+                            'none',
+                            'minimal',
+                            'low',
+                            'medium',
+                            'high',
+                            'xhigh',
+                            'max',
+                            'ultar',
+                          ],
+                        },
+                        { type: 'null' },
+                      ],
+                    },
+                  },
+                  required: ['kind', 'modelId', 'reasoningEffort'],
+                  additionalProperties: true,
+                },
+              ],
+            },
           },
-          required: ['userEtag', 'workspaceEtag', 'explicitDigest', 'effectiveDigest'],
+          required: ['expectedReadSet', 'operation'],
           additionalProperties: true,
         },
-        operation: {
-          oneOf: [
+        providerSettings: {
+          type: 'object',
+          properties: {
+            expectedReadSet: {
+              type: 'object',
+              properties: {
+                userEtag: { type: 'string', pattern: '^[a-f0-9]{64}$' },
+                workspaceEtag: {
+                  anyOf: [{ type: 'string', pattern: '^[a-f0-9]{64}$' }, { type: 'null' }],
+                },
+                explicitDigest: { type: 'string', pattern: '^[a-f0-9]{64}$' },
+                effectiveDigest: { type: 'string', pattern: '^[a-f0-9]{64}$' },
+              },
+              required: ['userEtag', 'workspaceEtag', 'explicitDigest', 'effectiveDigest'],
+              additionalProperties: true,
+            },
+            operation: {
+              type: 'object',
+              properties: {
+                kind: { type: 'string', enum: ['upsert', 'remove'] },
+                name: {
+                  type: 'string',
+                  minLength: 1,
+                  maxLength: 120,
+                  pattern: '^[^\\x00-\\x1f\\x7f]+$',
+                },
+                provider: {
+                  type: 'string',
+                  enum: ['openai', 'deepseek', 'compatible', 'ollama', 'codex'],
+                },
+                protocol: { type: 'string', enum: ['chat-completions', 'responses'] },
+                connectionId: {
+                  anyOf: [{ type: 'string', pattern: '^[a-f0-9]{64}$' }, { type: 'null' }],
+                },
+                baseURL: { type: 'string', minLength: 1, maxLength: 4096 },
+                modelNames: {
+                  type: 'array',
+                  items: { type: 'string', minLength: 1, maxLength: 256 },
+                },
+                credential: { type: 'string', enum: ['keep', 'replace', 'none'] },
+              },
+              required: ['provider', 'connectionId', 'baseURL', 'modelNames', 'credential'],
+              additionalProperties: true,
+            },
+          },
+          required: ['expectedReadSet', 'operation'],
+          additionalProperties: true,
+        },
+        state: { type: 'string', enum: ['pending', 'applied', 'failed', 'outcome_unknown'] },
+        receipt: {
+          anyOf: [
+            { type: 'object', properties: {}, additionalProperties: true },
             {
               type: 'object',
               properties: {
-                kind: { type: 'string', const: 'enabled' },
-                modelId: {
-                  type: 'string',
-                  minLength: 1,
-                  maxLength: 128,
-                  pattern: '^[A-Za-z0-9_.-]+$',
-                },
-                enabled: { type: 'boolean' },
+                status: { type: 'string', const: 'applied' },
+                etag: { type: 'string', pattern: '^[a-f0-9]{64}$' },
               },
-              required: ['kind', 'modelId', 'enabled'],
+              required: ['status', 'etag'],
               additionalProperties: true,
             },
             {
               type: 'object',
               properties: {
-                kind: { type: 'string', const: 'default' },
-                modelId: {
-                  type: 'string',
-                  minLength: 1,
-                  maxLength: 128,
-                  pattern: '^[A-Za-z0-9_.-]+$',
-                },
+                status: { type: 'string', const: 'applied' },
+                etag: { type: 'string', pattern: '^[a-f0-9]{64}$' },
+                credentialState: { type: 'string', enum: ['unchanged', 'stored'] },
+                configurationState: { type: 'string', const: 'published' },
+                opaqueRef: { type: 'string', pattern: '^credential:[0-9a-f-]{36}$' },
               },
-              required: ['kind', 'modelId'],
+              required: ['status', 'etag', 'credentialState', 'configurationState'],
               additionalProperties: true,
             },
             {
               type: 'object',
               properties: {
-                kind: { type: 'string', const: 'effort' },
-                modelId: {
-                  type: 'string',
-                  minLength: 1,
-                  maxLength: 128,
-                  pattern: '^[A-Za-z0-9_.-]+$',
-                },
-                reasoningEffort: {
-                  anyOf: [
-                    {
-                      type: 'string',
-                      enum: ['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'ultar'],
-                    },
-                    { type: 'null' },
-                  ],
-                },
+                status: { type: 'string', const: 'applied' },
+                opaqueRef: { type: 'string', pattern: '^credential:[0-9a-f-]{36}$' },
+                persistence: { type: 'string', enum: ['os', 'temporary'] },
               },
-              required: ['kind', 'modelId', 'reasoningEffort'],
+              required: ['status', 'opaqueRef', 'persistence'],
+              additionalProperties: true,
+            },
+            {
+              type: 'object',
+              properties: {
+                status: { type: 'string', enum: ['failed', 'outcome_unknown'] },
+                code: { type: 'string', pattern: '^[a-z0-9_]{1,128}$' },
+              },
+              required: ['status', 'code'],
+              additionalProperties: true,
+            },
+            {
+              type: 'object',
+              properties: {
+                status: { type: 'string', enum: ['failed', 'outcome_unknown'] },
+                code: { type: 'string', pattern: '^[a-z0-9_]{1,128}$' },
+                credentialState: {
+                  type: 'string',
+                  enum: ['unchanged', 'stored', 'outcome_unknown'],
+                },
+                configurationState: { type: 'string', enum: ['not_attempted', 'outcome_unknown'] },
+                opaqueRef: { type: 'string', pattern: '^credential:[0-9a-f-]{36}$' },
+              },
+              required: ['status', 'code', 'credentialState', 'configurationState'],
               additionalProperties: true,
             },
           ],
         },
       },
-      required: ['expectedReadSet', 'operation'],
+      required: ['commandId', 'originStoreId', 'scope', 'kind', 'state', 'receipt'],
       additionalProperties: true,
     },
-    providerSettings: {
+    {
       type: 'object',
       properties: {
-        expectedReadSet: {
+        commandId: { type: 'string', minLength: 1, maxLength: 128, pattern: '^[A-Za-z0-9_-]+$' },
+        originStoreId: {
+          type: 'string',
+          minLength: 1,
+          maxLength: 128,
+          pattern: '^[A-Za-z0-9_-]+$',
+        },
+        scope: { type: 'string', enum: ['user', 'workspace'] },
+        workspaceId: { type: 'string', minLength: 1, maxLength: 128, pattern: '^[A-Za-z0-9_-]+$' },
+        ifMatch: { type: 'string', pattern: '^[a-f0-9]{64}$' },
+        kind: { type: 'string', const: 'model_settings.update' },
+        modelSettings: {
           type: 'object',
           properties: {
-            userEtag: { type: 'string', pattern: '^[a-f0-9]{64}$' },
-            workspaceEtag: {
-              anyOf: [{ type: 'string', pattern: '^[a-f0-9]{64}$' }, { type: 'null' }],
+            expectedReadSet: {
+              type: 'object',
+              properties: {
+                userEtag: { type: 'string', pattern: '^[a-f0-9]{64}$' },
+                workspaceEtag: {
+                  anyOf: [{ type: 'string', pattern: '^[a-f0-9]{64}$' }, { type: 'null' }],
+                },
+                explicitDigest: { type: 'string', pattern: '^[a-f0-9]{64}$' },
+                effectiveDigest: { type: 'string', pattern: '^[a-f0-9]{64}$' },
+              },
+              required: ['userEtag', 'workspaceEtag', 'explicitDigest', 'effectiveDigest'],
+              additionalProperties: true,
             },
-            explicitDigest: { type: 'string', pattern: '^[a-f0-9]{64}$' },
-            effectiveDigest: { type: 'string', pattern: '^[a-f0-9]{64}$' },
+            operation: {
+              oneOf: [
+                {
+                  type: 'object',
+                  properties: {
+                    kind: { type: 'string', const: 'enabled' },
+                    modelId: {
+                      type: 'string',
+                      minLength: 1,
+                      maxLength: 128,
+                      pattern: '^[A-Za-z0-9_.-]+$',
+                    },
+                    enabled: { type: 'boolean' },
+                  },
+                  required: ['kind', 'modelId', 'enabled'],
+                  additionalProperties: true,
+                },
+                {
+                  type: 'object',
+                  properties: {
+                    kind: { type: 'string', const: 'default' },
+                    modelId: {
+                      type: 'string',
+                      minLength: 1,
+                      maxLength: 128,
+                      pattern: '^[A-Za-z0-9_.-]+$',
+                    },
+                  },
+                  required: ['kind', 'modelId'],
+                  additionalProperties: true,
+                },
+                {
+                  type: 'object',
+                  properties: {
+                    kind: { type: 'string', const: 'effort' },
+                    modelId: {
+                      type: 'string',
+                      minLength: 1,
+                      maxLength: 128,
+                      pattern: '^[A-Za-z0-9_.-]+$',
+                    },
+                    reasoningEffort: {
+                      anyOf: [
+                        {
+                          type: 'string',
+                          enum: [
+                            'none',
+                            'minimal',
+                            'low',
+                            'medium',
+                            'high',
+                            'xhigh',
+                            'max',
+                            'ultar',
+                          ],
+                        },
+                        { type: 'null' },
+                      ],
+                    },
+                  },
+                  required: ['kind', 'modelId', 'reasoningEffort'],
+                  additionalProperties: true,
+                },
+              ],
+            },
           },
-          required: ['userEtag', 'workspaceEtag', 'explicitDigest', 'effectiveDigest'],
+          required: ['expectedReadSet', 'operation'],
           additionalProperties: true,
         },
-        operation: {
+        providerSettings: { not: {} },
+        state: { type: 'string', const: 'applied' },
+        receipt: {
           type: 'object',
           properties: {
-            kind: { type: 'string', enum: ['upsert', 'remove'] },
-            name: {
-              type: 'string',
-              minLength: 1,
-              maxLength: 120,
-              pattern: '^[^\\x00-\\x1f\\x7f]+$',
+            status: { type: 'string', const: 'applied' },
+            etag: { type: 'string', pattern: '^[a-f0-9]{64}$' },
+            postReadSet: {
+              type: 'object',
+              properties: {
+                userEtag: { type: 'string', pattern: '^[a-f0-9]{64}$' },
+                workspaceEtag: {
+                  anyOf: [{ type: 'string', pattern: '^[a-f0-9]{64}$' }, { type: 'null' }],
+                },
+                explicitDigest: { type: 'string', pattern: '^[a-f0-9]{64}$' },
+                effectiveDigest: { type: 'string', pattern: '^[a-f0-9]{64}$' },
+              },
+              required: ['userEtag', 'workspaceEtag', 'explicitDigest', 'effectiveDigest'],
+              additionalProperties: true,
             },
-            provider: {
-              type: 'string',
-              enum: ['openai', 'deepseek', 'compatible', 'ollama', 'codex'],
-            },
-            protocol: { type: 'string', enum: ['chat-completions', 'responses'] },
-            connectionId: {
-              anyOf: [{ type: 'string', pattern: '^[a-f0-9]{64}$' }, { type: 'null' }],
-            },
-            baseURL: { type: 'string', minLength: 1, maxLength: 4096 },
-            modelNames: { type: 'array', items: { type: 'string', minLength: 1, maxLength: 256 } },
-            credential: { type: 'string', enum: ['keep', 'replace', 'none'] },
           },
-          required: ['provider', 'connectionId', 'baseURL', 'modelNames', 'credential'],
+          required: ['status', 'etag', 'postReadSet'],
           additionalProperties: true,
         },
       },
-      required: ['expectedReadSet', 'operation'],
+      required: [
+        'commandId',
+        'originStoreId',
+        'scope',
+        'kind',
+        'modelSettings',
+        'state',
+        'receipt',
+      ],
       additionalProperties: true,
     },
-    state: { type: 'string', enum: ['pending', 'applied', 'failed', 'outcome_unknown'] },
-    receipt: {
-      anyOf: [
-        { type: 'object', properties: {}, additionalProperties: true },
-        {
-          type: 'object',
-          properties: {
-            status: { type: 'string', const: 'applied' },
-            etag: { type: 'string', pattern: '^[a-f0-9]{64}$' },
-          },
-          required: ['status', 'etag'],
-          additionalProperties: true,
-        },
-        {
-          type: 'object',
-          properties: {
-            status: { type: 'string', const: 'applied' },
-            etag: { type: 'string', pattern: '^[a-f0-9]{64}$' },
-            credentialState: { type: 'string', enum: ['unchanged', 'stored'] },
-            configurationState: { type: 'string', const: 'published' },
-            opaqueRef: { type: 'string', pattern: '^credential:[0-9a-f-]{36}$' },
-          },
-          required: ['status', 'etag', 'credentialState', 'configurationState'],
-          additionalProperties: true,
-        },
-        {
-          type: 'object',
-          properties: {
-            status: { type: 'string', const: 'applied' },
-            opaqueRef: { type: 'string', pattern: '^credential:[0-9a-f-]{36}$' },
-            persistence: { type: 'string', enum: ['os', 'temporary'] },
-          },
-          required: ['status', 'opaqueRef', 'persistence'],
-          additionalProperties: true,
-        },
-        {
-          type: 'object',
-          properties: {
-            status: { type: 'string', enum: ['failed', 'outcome_unknown'] },
-            code: { type: 'string', pattern: '^[a-z0-9_]{1,128}$' },
-          },
-          required: ['status', 'code'],
-          additionalProperties: true,
-        },
-        {
-          type: 'object',
-          properties: {
-            status: { type: 'string', enum: ['failed', 'outcome_unknown'] },
-            code: { type: 'string', pattern: '^[a-z0-9_]{1,128}$' },
-            credentialState: { type: 'string', enum: ['unchanged', 'stored', 'outcome_unknown'] },
-            configurationState: { type: 'string', enum: ['not_attempted', 'outcome_unknown'] },
-            opaqueRef: { type: 'string', pattern: '^credential:[0-9a-f-]{36}$' },
-          },
-          required: ['status', 'code', 'credentialState', 'configurationState'],
-          additionalProperties: true,
-        },
-      ],
-    },
-  },
-  required: ['commandId', 'originStoreId', 'scope', 'kind', 'state', 'receipt'],
-  additionalProperties: true,
+  ],
 };
 var pattern216 = new RegExp('^credential:[0-9a-f-]{36}$', 'u');
 function validate45(
@@ -41870,7 +42029,10 @@ function validate45(
   if (evaluated0.dynamicItems) {
     evaluated0.items = undefined;
   }
-  if (errors === 0) {
+  const _errs0 = errors;
+  let valid0 = false;
+  const _errs1 = errors;
+  if (errors === _errs1) {
     if (data && typeof data == 'object' && !Array.isArray(data)) {
       let missing0;
       if (
@@ -41881,281 +42043,335 @@ function validate45(
         (data.state === undefined && (missing0 = 'state')) ||
         (data.receipt === undefined && (missing0 = 'receipt'))
       ) {
-        validate45.errors = [
-          {
-            instancePath,
-            schemaPath: '#/required',
-            keyword: 'required',
-            params: { missingProperty: missing0 },
-            message: "must have required property '" + missing0 + "'",
-          },
-        ];
-        return false;
+        const err0 = {
+          instancePath,
+          schemaPath: '#/anyOf/0/required',
+          keyword: 'required',
+          params: { missingProperty: missing0 },
+          message: "must have required property '" + missing0 + "'",
+        };
+        if (vErrors === null) {
+          vErrors = [err0];
+        } else {
+          vErrors.push(err0);
+        }
+        errors++;
       } else {
         if (data.commandId !== undefined) {
           let data0 = data.commandId;
-          const _errs2 = errors;
-          if (errors === _errs2) {
+          const _errs4 = errors;
+          if (errors === _errs4) {
             if (typeof data0 === 'string') {
               if (func1(data0) > 128) {
-                validate45.errors = [
-                  {
-                    instancePath: instancePath + '/commandId',
-                    schemaPath: '#/properties/commandId/maxLength',
-                    keyword: 'maxLength',
-                    params: { limit: 128 },
-                    message: 'must NOT have more than 128 characters',
-                  },
-                ];
-                return false;
+                const err1 = {
+                  instancePath: instancePath + '/commandId',
+                  schemaPath: '#/anyOf/0/properties/commandId/maxLength',
+                  keyword: 'maxLength',
+                  params: { limit: 128 },
+                  message: 'must NOT have more than 128 characters',
+                };
+                if (vErrors === null) {
+                  vErrors = [err1];
+                } else {
+                  vErrors.push(err1);
+                }
+                errors++;
               } else {
                 if (func1(data0) < 1) {
-                  validate45.errors = [
-                    {
-                      instancePath: instancePath + '/commandId',
-                      schemaPath: '#/properties/commandId/minLength',
-                      keyword: 'minLength',
-                      params: { limit: 1 },
-                      message: 'must NOT have fewer than 1 characters',
-                    },
-                  ];
-                  return false;
+                  const err2 = {
+                    instancePath: instancePath + '/commandId',
+                    schemaPath: '#/anyOf/0/properties/commandId/minLength',
+                    keyword: 'minLength',
+                    params: { limit: 1 },
+                    message: 'must NOT have fewer than 1 characters',
+                  };
+                  if (vErrors === null) {
+                    vErrors = [err2];
+                  } else {
+                    vErrors.push(err2);
+                  }
+                  errors++;
                 } else {
                   if (!pattern4.test(data0)) {
-                    validate45.errors = [
-                      {
-                        instancePath: instancePath + '/commandId',
-                        schemaPath: '#/properties/commandId/pattern',
-                        keyword: 'pattern',
-                        params: { pattern: '^[A-Za-z0-9_-]+$' },
-                        message: 'must match pattern "' + '^[A-Za-z0-9_-]+$' + '"',
-                      },
-                    ];
-                    return false;
+                    const err3 = {
+                      instancePath: instancePath + '/commandId',
+                      schemaPath: '#/anyOf/0/properties/commandId/pattern',
+                      keyword: 'pattern',
+                      params: { pattern: '^[A-Za-z0-9_-]+$' },
+                      message: 'must match pattern "' + '^[A-Za-z0-9_-]+$' + '"',
+                    };
+                    if (vErrors === null) {
+                      vErrors = [err3];
+                    } else {
+                      vErrors.push(err3);
+                    }
+                    errors++;
                   }
                 }
               }
             } else {
-              validate45.errors = [
-                {
-                  instancePath: instancePath + '/commandId',
-                  schemaPath: '#/properties/commandId/type',
-                  keyword: 'type',
-                  params: { type: 'string' },
-                  message: 'must be string',
-                },
-              ];
-              return false;
+              const err4 = {
+                instancePath: instancePath + '/commandId',
+                schemaPath: '#/anyOf/0/properties/commandId/type',
+                keyword: 'type',
+                params: { type: 'string' },
+                message: 'must be string',
+              };
+              if (vErrors === null) {
+                vErrors = [err4];
+              } else {
+                vErrors.push(err4);
+              }
+              errors++;
             }
           }
-          var valid0 = _errs2 === errors;
+          var valid1 = _errs4 === errors;
         } else {
-          var valid0 = true;
+          var valid1 = true;
         }
-        if (valid0) {
+        if (valid1) {
           if (data.originStoreId !== undefined) {
             let data1 = data.originStoreId;
-            const _errs4 = errors;
-            if (errors === _errs4) {
+            const _errs6 = errors;
+            if (errors === _errs6) {
               if (typeof data1 === 'string') {
                 if (func1(data1) > 128) {
-                  validate45.errors = [
-                    {
-                      instancePath: instancePath + '/originStoreId',
-                      schemaPath: '#/properties/originStoreId/maxLength',
-                      keyword: 'maxLength',
-                      params: { limit: 128 },
-                      message: 'must NOT have more than 128 characters',
-                    },
-                  ];
-                  return false;
+                  const err5 = {
+                    instancePath: instancePath + '/originStoreId',
+                    schemaPath: '#/anyOf/0/properties/originStoreId/maxLength',
+                    keyword: 'maxLength',
+                    params: { limit: 128 },
+                    message: 'must NOT have more than 128 characters',
+                  };
+                  if (vErrors === null) {
+                    vErrors = [err5];
+                  } else {
+                    vErrors.push(err5);
+                  }
+                  errors++;
                 } else {
                   if (func1(data1) < 1) {
-                    validate45.errors = [
-                      {
-                        instancePath: instancePath + '/originStoreId',
-                        schemaPath: '#/properties/originStoreId/minLength',
-                        keyword: 'minLength',
-                        params: { limit: 1 },
-                        message: 'must NOT have fewer than 1 characters',
-                      },
-                    ];
-                    return false;
+                    const err6 = {
+                      instancePath: instancePath + '/originStoreId',
+                      schemaPath: '#/anyOf/0/properties/originStoreId/minLength',
+                      keyword: 'minLength',
+                      params: { limit: 1 },
+                      message: 'must NOT have fewer than 1 characters',
+                    };
+                    if (vErrors === null) {
+                      vErrors = [err6];
+                    } else {
+                      vErrors.push(err6);
+                    }
+                    errors++;
                   } else {
                     if (!pattern4.test(data1)) {
-                      validate45.errors = [
-                        {
-                          instancePath: instancePath + '/originStoreId',
-                          schemaPath: '#/properties/originStoreId/pattern',
-                          keyword: 'pattern',
-                          params: { pattern: '^[A-Za-z0-9_-]+$' },
-                          message: 'must match pattern "' + '^[A-Za-z0-9_-]+$' + '"',
-                        },
-                      ];
-                      return false;
+                      const err7 = {
+                        instancePath: instancePath + '/originStoreId',
+                        schemaPath: '#/anyOf/0/properties/originStoreId/pattern',
+                        keyword: 'pattern',
+                        params: { pattern: '^[A-Za-z0-9_-]+$' },
+                        message: 'must match pattern "' + '^[A-Za-z0-9_-]+$' + '"',
+                      };
+                      if (vErrors === null) {
+                        vErrors = [err7];
+                      } else {
+                        vErrors.push(err7);
+                      }
+                      errors++;
                     }
                   }
                 }
               } else {
-                validate45.errors = [
-                  {
-                    instancePath: instancePath + '/originStoreId',
-                    schemaPath: '#/properties/originStoreId/type',
-                    keyword: 'type',
-                    params: { type: 'string' },
-                    message: 'must be string',
-                  },
-                ];
-                return false;
+                const err8 = {
+                  instancePath: instancePath + '/originStoreId',
+                  schemaPath: '#/anyOf/0/properties/originStoreId/type',
+                  keyword: 'type',
+                  params: { type: 'string' },
+                  message: 'must be string',
+                };
+                if (vErrors === null) {
+                  vErrors = [err8];
+                } else {
+                  vErrors.push(err8);
+                }
+                errors++;
               }
             }
-            var valid0 = _errs4 === errors;
+            var valid1 = _errs6 === errors;
           } else {
-            var valid0 = true;
+            var valid1 = true;
           }
-          if (valid0) {
+          if (valid1) {
             if (data.scope !== undefined) {
               let data2 = data.scope;
-              const _errs6 = errors;
+              const _errs8 = errors;
               if (typeof data2 !== 'string') {
-                validate45.errors = [
-                  {
-                    instancePath: instancePath + '/scope',
-                    schemaPath: '#/properties/scope/type',
-                    keyword: 'type',
-                    params: { type: 'string' },
-                    message: 'must be string',
-                  },
-                ];
-                return false;
+                const err9 = {
+                  instancePath: instancePath + '/scope',
+                  schemaPath: '#/anyOf/0/properties/scope/type',
+                  keyword: 'type',
+                  params: { type: 'string' },
+                  message: 'must be string',
+                };
+                if (vErrors === null) {
+                  vErrors = [err9];
+                } else {
+                  vErrors.push(err9);
+                }
+                errors++;
               }
               if (!(data2 === 'user' || data2 === 'workspace')) {
-                validate45.errors = [
-                  {
-                    instancePath: instancePath + '/scope',
-                    schemaPath: '#/properties/scope/enum',
-                    keyword: 'enum',
-                    params: { allowedValues: schema52.properties.scope.enum },
-                    message: 'must be equal to one of the allowed values',
-                  },
-                ];
-                return false;
+                const err10 = {
+                  instancePath: instancePath + '/scope',
+                  schemaPath: '#/anyOf/0/properties/scope/enum',
+                  keyword: 'enum',
+                  params: { allowedValues: schema52.anyOf[0].properties.scope.enum },
+                  message: 'must be equal to one of the allowed values',
+                };
+                if (vErrors === null) {
+                  vErrors = [err10];
+                } else {
+                  vErrors.push(err10);
+                }
+                errors++;
               }
-              var valid0 = _errs6 === errors;
+              var valid1 = _errs8 === errors;
             } else {
-              var valid0 = true;
+              var valid1 = true;
             }
-            if (valid0) {
+            if (valid1) {
               if (data.workspaceId !== undefined) {
                 let data3 = data.workspaceId;
-                const _errs8 = errors;
-                if (errors === _errs8) {
+                const _errs10 = errors;
+                if (errors === _errs10) {
                   if (typeof data3 === 'string') {
                     if (func1(data3) > 128) {
-                      validate45.errors = [
-                        {
-                          instancePath: instancePath + '/workspaceId',
-                          schemaPath: '#/properties/workspaceId/maxLength',
-                          keyword: 'maxLength',
-                          params: { limit: 128 },
-                          message: 'must NOT have more than 128 characters',
-                        },
-                      ];
-                      return false;
+                      const err11 = {
+                        instancePath: instancePath + '/workspaceId',
+                        schemaPath: '#/anyOf/0/properties/workspaceId/maxLength',
+                        keyword: 'maxLength',
+                        params: { limit: 128 },
+                        message: 'must NOT have more than 128 characters',
+                      };
+                      if (vErrors === null) {
+                        vErrors = [err11];
+                      } else {
+                        vErrors.push(err11);
+                      }
+                      errors++;
                     } else {
                       if (func1(data3) < 1) {
-                        validate45.errors = [
-                          {
-                            instancePath: instancePath + '/workspaceId',
-                            schemaPath: '#/properties/workspaceId/minLength',
-                            keyword: 'minLength',
-                            params: { limit: 1 },
-                            message: 'must NOT have fewer than 1 characters',
-                          },
-                        ];
-                        return false;
+                        const err12 = {
+                          instancePath: instancePath + '/workspaceId',
+                          schemaPath: '#/anyOf/0/properties/workspaceId/minLength',
+                          keyword: 'minLength',
+                          params: { limit: 1 },
+                          message: 'must NOT have fewer than 1 characters',
+                        };
+                        if (vErrors === null) {
+                          vErrors = [err12];
+                        } else {
+                          vErrors.push(err12);
+                        }
+                        errors++;
                       } else {
                         if (!pattern4.test(data3)) {
-                          validate45.errors = [
-                            {
-                              instancePath: instancePath + '/workspaceId',
-                              schemaPath: '#/properties/workspaceId/pattern',
-                              keyword: 'pattern',
-                              params: { pattern: '^[A-Za-z0-9_-]+$' },
-                              message: 'must match pattern "' + '^[A-Za-z0-9_-]+$' + '"',
-                            },
-                          ];
-                          return false;
+                          const err13 = {
+                            instancePath: instancePath + '/workspaceId',
+                            schemaPath: '#/anyOf/0/properties/workspaceId/pattern',
+                            keyword: 'pattern',
+                            params: { pattern: '^[A-Za-z0-9_-]+$' },
+                            message: 'must match pattern "' + '^[A-Za-z0-9_-]+$' + '"',
+                          };
+                          if (vErrors === null) {
+                            vErrors = [err13];
+                          } else {
+                            vErrors.push(err13);
+                          }
+                          errors++;
                         }
                       }
                     }
                   } else {
-                    validate45.errors = [
-                      {
-                        instancePath: instancePath + '/workspaceId',
-                        schemaPath: '#/properties/workspaceId/type',
+                    const err14 = {
+                      instancePath: instancePath + '/workspaceId',
+                      schemaPath: '#/anyOf/0/properties/workspaceId/type',
+                      keyword: 'type',
+                      params: { type: 'string' },
+                      message: 'must be string',
+                    };
+                    if (vErrors === null) {
+                      vErrors = [err14];
+                    } else {
+                      vErrors.push(err14);
+                    }
+                    errors++;
+                  }
+                }
+                var valid1 = _errs10 === errors;
+              } else {
+                var valid1 = true;
+              }
+              if (valid1) {
+                if (data.ifMatch !== undefined) {
+                  let data4 = data.ifMatch;
+                  const _errs12 = errors;
+                  if (errors === _errs12) {
+                    if (typeof data4 === 'string') {
+                      if (!pattern15.test(data4)) {
+                        const err15 = {
+                          instancePath: instancePath + '/ifMatch',
+                          schemaPath: '#/anyOf/0/properties/ifMatch/pattern',
+                          keyword: 'pattern',
+                          params: { pattern: '^[a-f0-9]{64}$' },
+                          message: 'must match pattern "' + '^[a-f0-9]{64}$' + '"',
+                        };
+                        if (vErrors === null) {
+                          vErrors = [err15];
+                        } else {
+                          vErrors.push(err15);
+                        }
+                        errors++;
+                      }
+                    } else {
+                      const err16 = {
+                        instancePath: instancePath + '/ifMatch',
+                        schemaPath: '#/anyOf/0/properties/ifMatch/type',
                         keyword: 'type',
                         params: { type: 'string' },
                         message: 'must be string',
-                      },
-                    ];
-                    return false;
-                  }
-                }
-                var valid0 = _errs8 === errors;
-              } else {
-                var valid0 = true;
-              }
-              if (valid0) {
-                if (data.ifMatch !== undefined) {
-                  let data4 = data.ifMatch;
-                  const _errs10 = errors;
-                  if (errors === _errs10) {
-                    if (typeof data4 === 'string') {
-                      if (!pattern15.test(data4)) {
-                        validate45.errors = [
-                          {
-                            instancePath: instancePath + '/ifMatch',
-                            schemaPath: '#/properties/ifMatch/pattern',
-                            keyword: 'pattern',
-                            params: { pattern: '^[a-f0-9]{64}$' },
-                            message: 'must match pattern "' + '^[a-f0-9]{64}$' + '"',
-                          },
-                        ];
-                        return false;
+                      };
+                      if (vErrors === null) {
+                        vErrors = [err16];
+                      } else {
+                        vErrors.push(err16);
                       }
-                    } else {
-                      validate45.errors = [
-                        {
-                          instancePath: instancePath + '/ifMatch',
-                          schemaPath: '#/properties/ifMatch/type',
-                          keyword: 'type',
-                          params: { type: 'string' },
-                          message: 'must be string',
-                        },
-                      ];
-                      return false;
+                      errors++;
                     }
                   }
-                  var valid0 = _errs10 === errors;
+                  var valid1 = _errs12 === errors;
                 } else {
-                  var valid0 = true;
+                  var valid1 = true;
                 }
-                if (valid0) {
+                if (valid1) {
                   if (data.kind !== undefined) {
                     let data5 = data.kind;
-                    const _errs12 = errors;
+                    const _errs14 = errors;
                     if (typeof data5 !== 'string') {
-                      validate45.errors = [
-                        {
-                          instancePath: instancePath + '/kind',
-                          schemaPath: '#/properties/kind/type',
-                          keyword: 'type',
-                          params: { type: 'string' },
-                          message: 'must be string',
-                        },
-                      ];
-                      return false;
+                      const err17 = {
+                        instancePath: instancePath + '/kind',
+                        schemaPath: '#/anyOf/0/properties/kind/type',
+                        keyword: 'type',
+                        params: { type: 'string' },
+                        message: 'must be string',
+                      };
+                      if (vErrors === null) {
+                        vErrors = [err17];
+                      } else {
+                        vErrors.push(err17);
+                      }
+                      errors++;
                     }
                     if (
                       !(
@@ -42167,26 +42383,29 @@ function validate45(
                         data5 === 'provider_settings.update'
                       )
                     ) {
-                      validate45.errors = [
-                        {
-                          instancePath: instancePath + '/kind',
-                          schemaPath: '#/properties/kind/enum',
-                          keyword: 'enum',
-                          params: { allowedValues: schema52.properties.kind.enum },
-                          message: 'must be equal to one of the allowed values',
-                        },
-                      ];
-                      return false;
+                      const err18 = {
+                        instancePath: instancePath + '/kind',
+                        schemaPath: '#/anyOf/0/properties/kind/enum',
+                        keyword: 'enum',
+                        params: { allowedValues: schema52.anyOf[0].properties.kind.enum },
+                        message: 'must be equal to one of the allowed values',
+                      };
+                      if (vErrors === null) {
+                        vErrors = [err18];
+                      } else {
+                        vErrors.push(err18);
+                      }
+                      errors++;
                     }
-                    var valid0 = _errs12 === errors;
+                    var valid1 = _errs14 === errors;
                   } else {
-                    var valid0 = true;
+                    var valid1 = true;
                   }
-                  if (valid0) {
+                  if (valid1) {
                     if (data.modelSettings !== undefined) {
                       let data6 = data.modelSettings;
-                      const _errs14 = errors;
-                      if (errors === _errs14) {
+                      const _errs16 = errors;
+                      if (errors === _errs16) {
                         if (data6 && typeof data6 == 'object' && !Array.isArray(data6)) {
                           let missing1;
                           if (
@@ -42194,21 +42413,24 @@ function validate45(
                               (missing1 = 'expectedReadSet')) ||
                             (data6.operation === undefined && (missing1 = 'operation'))
                           ) {
-                            validate45.errors = [
-                              {
-                                instancePath: instancePath + '/modelSettings',
-                                schemaPath: '#/properties/modelSettings/required',
-                                keyword: 'required',
-                                params: { missingProperty: missing1 },
-                                message: "must have required property '" + missing1 + "'",
-                              },
-                            ];
-                            return false;
+                            const err19 = {
+                              instancePath: instancePath + '/modelSettings',
+                              schemaPath: '#/anyOf/0/properties/modelSettings/required',
+                              keyword: 'required',
+                              params: { missingProperty: missing1 },
+                              message: "must have required property '" + missing1 + "'",
+                            };
+                            if (vErrors === null) {
+                              vErrors = [err19];
+                            } else {
+                              vErrors.push(err19);
+                            }
+                            errors++;
                           } else {
                             if (data6.expectedReadSet !== undefined) {
                               let data7 = data6.expectedReadSet;
-                              const _errs17 = errors;
-                              if (errors === _errs17) {
+                              const _errs19 = errors;
+                              if (errors === _errs19) {
                                 if (data7 && typeof data7 == 'object' && !Array.isArray(data7)) {
                                   let missing2;
                                   if (
@@ -42220,282 +42442,301 @@ function validate45(
                                     (data7.effectiveDigest === undefined &&
                                       (missing2 = 'effectiveDigest'))
                                   ) {
-                                    validate45.errors = [
-                                      {
-                                        instancePath:
-                                          instancePath + '/modelSettings/expectedReadSet',
-                                        schemaPath:
-                                          '#/properties/modelSettings/properties/expectedReadSet/required',
-                                        keyword: 'required',
-                                        params: { missingProperty: missing2 },
-                                        message: "must have required property '" + missing2 + "'",
-                                      },
-                                    ];
-                                    return false;
+                                    const err20 = {
+                                      instancePath: instancePath + '/modelSettings/expectedReadSet',
+                                      schemaPath:
+                                        '#/anyOf/0/properties/modelSettings/properties/expectedReadSet/required',
+                                      keyword: 'required',
+                                      params: { missingProperty: missing2 },
+                                      message: "must have required property '" + missing2 + "'",
+                                    };
+                                    if (vErrors === null) {
+                                      vErrors = [err20];
+                                    } else {
+                                      vErrors.push(err20);
+                                    }
+                                    errors++;
                                   } else {
                                     if (data7.userEtag !== undefined) {
                                       let data8 = data7.userEtag;
-                                      const _errs20 = errors;
-                                      if (errors === _errs20) {
+                                      const _errs22 = errors;
+                                      if (errors === _errs22) {
                                         if (typeof data8 === 'string') {
                                           if (!pattern15.test(data8)) {
-                                            validate45.errors = [
-                                              {
-                                                instancePath:
-                                                  instancePath +
-                                                  '/modelSettings/expectedReadSet/userEtag',
-                                                schemaPath:
-                                                  '#/properties/modelSettings/properties/expectedReadSet/properties/userEtag/pattern',
-                                                keyword: 'pattern',
-                                                params: { pattern: '^[a-f0-9]{64}$' },
-                                                message:
-                                                  'must match pattern "' + '^[a-f0-9]{64}$' + '"',
-                                              },
-                                            ];
-                                            return false;
-                                          }
-                                        } else {
-                                          validate45.errors = [
-                                            {
+                                            const err21 = {
                                               instancePath:
                                                 instancePath +
                                                 '/modelSettings/expectedReadSet/userEtag',
                                               schemaPath:
-                                                '#/properties/modelSettings/properties/expectedReadSet/properties/userEtag/type',
-                                              keyword: 'type',
-                                              params: { type: 'string' },
-                                              message: 'must be string',
-                                            },
-                                          ];
-                                          return false;
+                                                '#/anyOf/0/properties/modelSettings/properties/expectedReadSet/properties/userEtag/pattern',
+                                              keyword: 'pattern',
+                                              params: { pattern: '^[a-f0-9]{64}$' },
+                                              message:
+                                                'must match pattern "' + '^[a-f0-9]{64}$' + '"',
+                                            };
+                                            if (vErrors === null) {
+                                              vErrors = [err21];
+                                            } else {
+                                              vErrors.push(err21);
+                                            }
+                                            errors++;
+                                          }
+                                        } else {
+                                          const err22 = {
+                                            instancePath:
+                                              instancePath +
+                                              '/modelSettings/expectedReadSet/userEtag',
+                                            schemaPath:
+                                              '#/anyOf/0/properties/modelSettings/properties/expectedReadSet/properties/userEtag/type',
+                                            keyword: 'type',
+                                            params: { type: 'string' },
+                                            message: 'must be string',
+                                          };
+                                          if (vErrors === null) {
+                                            vErrors = [err22];
+                                          } else {
+                                            vErrors.push(err22);
+                                          }
+                                          errors++;
                                         }
                                       }
-                                      var valid2 = _errs20 === errors;
+                                      var valid3 = _errs22 === errors;
                                     } else {
-                                      var valid2 = true;
+                                      var valid3 = true;
                                     }
-                                    if (valid2) {
+                                    if (valid3) {
                                       if (data7.workspaceEtag !== undefined) {
                                         let data9 = data7.workspaceEtag;
-                                        const _errs22 = errors;
-                                        const _errs23 = errors;
-                                        let valid3 = false;
                                         const _errs24 = errors;
-                                        if (errors === _errs24) {
+                                        const _errs25 = errors;
+                                        let valid4 = false;
+                                        const _errs26 = errors;
+                                        if (errors === _errs26) {
                                           if (typeof data9 === 'string') {
                                             if (!pattern15.test(data9)) {
-                                              const err0 = {
+                                              const err23 = {
                                                 instancePath:
                                                   instancePath +
                                                   '/modelSettings/expectedReadSet/workspaceEtag',
                                                 schemaPath:
-                                                  '#/properties/modelSettings/properties/expectedReadSet/properties/workspaceEtag/anyOf/0/pattern',
+                                                  '#/anyOf/0/properties/modelSettings/properties/expectedReadSet/properties/workspaceEtag/anyOf/0/pattern',
                                                 keyword: 'pattern',
                                                 params: { pattern: '^[a-f0-9]{64}$' },
                                                 message:
                                                   'must match pattern "' + '^[a-f0-9]{64}$' + '"',
                                               };
                                               if (vErrors === null) {
-                                                vErrors = [err0];
+                                                vErrors = [err23];
                                               } else {
-                                                vErrors.push(err0);
+                                                vErrors.push(err23);
                                               }
                                               errors++;
                                             }
                                           } else {
-                                            const err1 = {
+                                            const err24 = {
                                               instancePath:
                                                 instancePath +
                                                 '/modelSettings/expectedReadSet/workspaceEtag',
                                               schemaPath:
-                                                '#/properties/modelSettings/properties/expectedReadSet/properties/workspaceEtag/anyOf/0/type',
+                                                '#/anyOf/0/properties/modelSettings/properties/expectedReadSet/properties/workspaceEtag/anyOf/0/type',
                                               keyword: 'type',
                                               params: { type: 'string' },
                                               message: 'must be string',
                                             };
                                             if (vErrors === null) {
-                                              vErrors = [err1];
+                                              vErrors = [err24];
                                             } else {
-                                              vErrors.push(err1);
+                                              vErrors.push(err24);
                                             }
                                             errors++;
                                           }
                                         }
-                                        var _valid0 = _errs24 === errors;
-                                        valid3 = valid3 || _valid0;
-                                        const _errs26 = errors;
+                                        var _valid1 = _errs26 === errors;
+                                        valid4 = valid4 || _valid1;
+                                        const _errs28 = errors;
                                         if (data9 !== null) {
-                                          const err2 = {
+                                          const err25 = {
                                             instancePath:
                                               instancePath +
                                               '/modelSettings/expectedReadSet/workspaceEtag',
                                             schemaPath:
-                                              '#/properties/modelSettings/properties/expectedReadSet/properties/workspaceEtag/anyOf/1/type',
+                                              '#/anyOf/0/properties/modelSettings/properties/expectedReadSet/properties/workspaceEtag/anyOf/1/type',
                                             keyword: 'type',
                                             params: { type: 'null' },
                                             message: 'must be null',
                                           };
                                           if (vErrors === null) {
-                                            vErrors = [err2];
+                                            vErrors = [err25];
                                           } else {
-                                            vErrors.push(err2);
+                                            vErrors.push(err25);
                                           }
                                           errors++;
                                         }
-                                        var _valid0 = _errs26 === errors;
-                                        valid3 = valid3 || _valid0;
-                                        if (!valid3) {
-                                          const err3 = {
+                                        var _valid1 = _errs28 === errors;
+                                        valid4 = valid4 || _valid1;
+                                        if (!valid4) {
+                                          const err26 = {
                                             instancePath:
                                               instancePath +
                                               '/modelSettings/expectedReadSet/workspaceEtag',
                                             schemaPath:
-                                              '#/properties/modelSettings/properties/expectedReadSet/properties/workspaceEtag/anyOf',
+                                              '#/anyOf/0/properties/modelSettings/properties/expectedReadSet/properties/workspaceEtag/anyOf',
                                             keyword: 'anyOf',
                                             params: {},
                                             message: 'must match a schema in anyOf',
                                           };
                                           if (vErrors === null) {
-                                            vErrors = [err3];
+                                            vErrors = [err26];
                                           } else {
-                                            vErrors.push(err3);
+                                            vErrors.push(err26);
                                           }
                                           errors++;
-                                          validate45.errors = vErrors;
-                                          return false;
                                         } else {
-                                          errors = _errs23;
+                                          errors = _errs25;
                                           if (vErrors !== null) {
-                                            if (_errs23) {
-                                              vErrors.length = _errs23;
+                                            if (_errs25) {
+                                              vErrors.length = _errs25;
                                             } else {
                                               vErrors = null;
                                             }
                                           }
                                         }
-                                        var valid2 = _errs22 === errors;
+                                        var valid3 = _errs24 === errors;
                                       } else {
-                                        var valid2 = true;
+                                        var valid3 = true;
                                       }
-                                      if (valid2) {
+                                      if (valid3) {
                                         if (data7.explicitDigest !== undefined) {
                                           let data10 = data7.explicitDigest;
-                                          const _errs28 = errors;
-                                          if (errors === _errs28) {
+                                          const _errs30 = errors;
+                                          if (errors === _errs30) {
                                             if (typeof data10 === 'string') {
                                               if (!pattern15.test(data10)) {
-                                                validate45.errors = [
-                                                  {
+                                                const err27 = {
+                                                  instancePath:
+                                                    instancePath +
+                                                    '/modelSettings/expectedReadSet/explicitDigest',
+                                                  schemaPath:
+                                                    '#/anyOf/0/properties/modelSettings/properties/expectedReadSet/properties/explicitDigest/pattern',
+                                                  keyword: 'pattern',
+                                                  params: { pattern: '^[a-f0-9]{64}$' },
+                                                  message:
+                                                    'must match pattern "' + '^[a-f0-9]{64}$' + '"',
+                                                };
+                                                if (vErrors === null) {
+                                                  vErrors = [err27];
+                                                } else {
+                                                  vErrors.push(err27);
+                                                }
+                                                errors++;
+                                              }
+                                            } else {
+                                              const err28 = {
+                                                instancePath:
+                                                  instancePath +
+                                                  '/modelSettings/expectedReadSet/explicitDigest',
+                                                schemaPath:
+                                                  '#/anyOf/0/properties/modelSettings/properties/expectedReadSet/properties/explicitDigest/type',
+                                                keyword: 'type',
+                                                params: { type: 'string' },
+                                                message: 'must be string',
+                                              };
+                                              if (vErrors === null) {
+                                                vErrors = [err28];
+                                              } else {
+                                                vErrors.push(err28);
+                                              }
+                                              errors++;
+                                            }
+                                          }
+                                          var valid3 = _errs30 === errors;
+                                        } else {
+                                          var valid3 = true;
+                                        }
+                                        if (valid3) {
+                                          if (data7.effectiveDigest !== undefined) {
+                                            let data11 = data7.effectiveDigest;
+                                            const _errs32 = errors;
+                                            if (errors === _errs32) {
+                                              if (typeof data11 === 'string') {
+                                                if (!pattern15.test(data11)) {
+                                                  const err29 = {
                                                     instancePath:
                                                       instancePath +
-                                                      '/modelSettings/expectedReadSet/explicitDigest',
+                                                      '/modelSettings/expectedReadSet/effectiveDigest',
                                                     schemaPath:
-                                                      '#/properties/modelSettings/properties/expectedReadSet/properties/explicitDigest/pattern',
+                                                      '#/anyOf/0/properties/modelSettings/properties/expectedReadSet/properties/effectiveDigest/pattern',
                                                     keyword: 'pattern',
                                                     params: { pattern: '^[a-f0-9]{64}$' },
                                                     message:
                                                       'must match pattern "' +
                                                       '^[a-f0-9]{64}$' +
                                                       '"',
-                                                  },
-                                                ];
-                                                return false;
-                                              }
-                                            } else {
-                                              validate45.errors = [
-                                                {
+                                                  };
+                                                  if (vErrors === null) {
+                                                    vErrors = [err29];
+                                                  } else {
+                                                    vErrors.push(err29);
+                                                  }
+                                                  errors++;
+                                                }
+                                              } else {
+                                                const err30 = {
                                                   instancePath:
                                                     instancePath +
-                                                    '/modelSettings/expectedReadSet/explicitDigest',
+                                                    '/modelSettings/expectedReadSet/effectiveDigest',
                                                   schemaPath:
-                                                    '#/properties/modelSettings/properties/expectedReadSet/properties/explicitDigest/type',
+                                                    '#/anyOf/0/properties/modelSettings/properties/expectedReadSet/properties/effectiveDigest/type',
                                                   keyword: 'type',
                                                   params: { type: 'string' },
                                                   message: 'must be string',
-                                                },
-                                              ];
-                                              return false;
-                                            }
-                                          }
-                                          var valid2 = _errs28 === errors;
-                                        } else {
-                                          var valid2 = true;
-                                        }
-                                        if (valid2) {
-                                          if (data7.effectiveDigest !== undefined) {
-                                            let data11 = data7.effectiveDigest;
-                                            const _errs30 = errors;
-                                            if (errors === _errs30) {
-                                              if (typeof data11 === 'string') {
-                                                if (!pattern15.test(data11)) {
-                                                  validate45.errors = [
-                                                    {
-                                                      instancePath:
-                                                        instancePath +
-                                                        '/modelSettings/expectedReadSet/effectiveDigest',
-                                                      schemaPath:
-                                                        '#/properties/modelSettings/properties/expectedReadSet/properties/effectiveDigest/pattern',
-                                                      keyword: 'pattern',
-                                                      params: { pattern: '^[a-f0-9]{64}$' },
-                                                      message:
-                                                        'must match pattern "' +
-                                                        '^[a-f0-9]{64}$' +
-                                                        '"',
-                                                    },
-                                                  ];
-                                                  return false;
+                                                };
+                                                if (vErrors === null) {
+                                                  vErrors = [err30];
+                                                } else {
+                                                  vErrors.push(err30);
                                                 }
-                                              } else {
-                                                validate45.errors = [
-                                                  {
-                                                    instancePath:
-                                                      instancePath +
-                                                      '/modelSettings/expectedReadSet/effectiveDigest',
-                                                    schemaPath:
-                                                      '#/properties/modelSettings/properties/expectedReadSet/properties/effectiveDigest/type',
-                                                    keyword: 'type',
-                                                    params: { type: 'string' },
-                                                    message: 'must be string',
-                                                  },
-                                                ];
-                                                return false;
+                                                errors++;
                                               }
                                             }
-                                            var valid2 = _errs30 === errors;
+                                            var valid3 = _errs32 === errors;
                                           } else {
-                                            var valid2 = true;
+                                            var valid3 = true;
                                           }
                                         }
                                       }
                                     }
                                   }
                                 } else {
-                                  validate45.errors = [
-                                    {
-                                      instancePath: instancePath + '/modelSettings/expectedReadSet',
-                                      schemaPath:
-                                        '#/properties/modelSettings/properties/expectedReadSet/type',
-                                      keyword: 'type',
-                                      params: { type: 'object' },
-                                      message: 'must be object',
-                                    },
-                                  ];
-                                  return false;
+                                  const err31 = {
+                                    instancePath: instancePath + '/modelSettings/expectedReadSet',
+                                    schemaPath:
+                                      '#/anyOf/0/properties/modelSettings/properties/expectedReadSet/type',
+                                    keyword: 'type',
+                                    params: { type: 'object' },
+                                    message: 'must be object',
+                                  };
+                                  if (vErrors === null) {
+                                    vErrors = [err31];
+                                  } else {
+                                    vErrors.push(err31);
+                                  }
+                                  errors++;
                                 }
                               }
-                              var valid1 = _errs17 === errors;
+                              var valid2 = _errs19 === errors;
                             } else {
-                              var valid1 = true;
+                              var valid2 = true;
                             }
-                            if (valid1) {
+                            if (valid2) {
                               if (data6.operation !== undefined) {
                                 let data12 = data6.operation;
-                                const _errs32 = errors;
-                                const _errs33 = errors;
-                                let valid4 = false;
-                                let passing0 = null;
                                 const _errs34 = errors;
-                                if (errors === _errs34) {
+                                const _errs35 = errors;
+                                let valid5 = false;
+                                let passing0 = null;
+                                const _errs36 = errors;
+                                if (errors === _errs36) {
                                   if (
                                     data12 &&
                                     typeof data12 == 'object' &&
@@ -42507,112 +42748,112 @@ function validate45(
                                       (data12.modelId === undefined && (missing3 = 'modelId')) ||
                                       (data12.enabled === undefined && (missing3 = 'enabled'))
                                     ) {
-                                      const err4 = {
+                                      const err32 = {
                                         instancePath: instancePath + '/modelSettings/operation',
                                         schemaPath:
-                                          '#/properties/modelSettings/properties/operation/oneOf/0/required',
+                                          '#/anyOf/0/properties/modelSettings/properties/operation/oneOf/0/required',
                                         keyword: 'required',
                                         params: { missingProperty: missing3 },
                                         message: "must have required property '" + missing3 + "'",
                                       };
                                       if (vErrors === null) {
-                                        vErrors = [err4];
+                                        vErrors = [err32];
                                       } else {
-                                        vErrors.push(err4);
+                                        vErrors.push(err32);
                                       }
                                       errors++;
                                     } else {
                                       if (data12.kind !== undefined) {
                                         let data13 = data12.kind;
-                                        const _errs37 = errors;
+                                        const _errs39 = errors;
                                         if (typeof data13 !== 'string') {
-                                          const err5 = {
+                                          const err33 = {
                                             instancePath:
                                               instancePath + '/modelSettings/operation/kind',
                                             schemaPath:
-                                              '#/properties/modelSettings/properties/operation/oneOf/0/properties/kind/type',
+                                              '#/anyOf/0/properties/modelSettings/properties/operation/oneOf/0/properties/kind/type',
                                             keyword: 'type',
                                             params: { type: 'string' },
                                             message: 'must be string',
                                           };
                                           if (vErrors === null) {
-                                            vErrors = [err5];
+                                            vErrors = [err33];
                                           } else {
-                                            vErrors.push(err5);
+                                            vErrors.push(err33);
                                           }
                                           errors++;
                                         }
                                         if (data13 !== 'enabled') {
-                                          const err6 = {
+                                          const err34 = {
                                             instancePath:
                                               instancePath + '/modelSettings/operation/kind',
                                             schemaPath:
-                                              '#/properties/modelSettings/properties/operation/oneOf/0/properties/kind/const',
+                                              '#/anyOf/0/properties/modelSettings/properties/operation/oneOf/0/properties/kind/const',
                                             keyword: 'const',
                                             params: { allowedValue: 'enabled' },
                                             message: 'must be equal to constant',
                                           };
                                           if (vErrors === null) {
-                                            vErrors = [err6];
+                                            vErrors = [err34];
                                           } else {
-                                            vErrors.push(err6);
+                                            vErrors.push(err34);
                                           }
                                           errors++;
                                         }
-                                        var valid5 = _errs37 === errors;
+                                        var valid6 = _errs39 === errors;
                                       } else {
-                                        var valid5 = true;
+                                        var valid6 = true;
                                       }
-                                      if (valid5) {
+                                      if (valid6) {
                                         if (data12.modelId !== undefined) {
                                           let data14 = data12.modelId;
-                                          const _errs39 = errors;
-                                          if (errors === _errs39) {
+                                          const _errs41 = errors;
+                                          if (errors === _errs41) {
                                             if (typeof data14 === 'string') {
                                               if (func1(data14) > 128) {
-                                                const err7 = {
+                                                const err35 = {
                                                   instancePath:
                                                     instancePath +
                                                     '/modelSettings/operation/modelId',
                                                   schemaPath:
-                                                    '#/properties/modelSettings/properties/operation/oneOf/0/properties/modelId/maxLength',
+                                                    '#/anyOf/0/properties/modelSettings/properties/operation/oneOf/0/properties/modelId/maxLength',
                                                   keyword: 'maxLength',
                                                   params: { limit: 128 },
                                                   message: 'must NOT have more than 128 characters',
                                                 };
                                                 if (vErrors === null) {
-                                                  vErrors = [err7];
+                                                  vErrors = [err35];
                                                 } else {
-                                                  vErrors.push(err7);
+                                                  vErrors.push(err35);
                                                 }
                                                 errors++;
                                               } else {
                                                 if (func1(data14) < 1) {
-                                                  const err8 = {
+                                                  const err36 = {
                                                     instancePath:
                                                       instancePath +
                                                       '/modelSettings/operation/modelId',
                                                     schemaPath:
-                                                      '#/properties/modelSettings/properties/operation/oneOf/0/properties/modelId/minLength',
+                                                      '#/anyOf/0/properties/modelSettings/properties/operation/oneOf/0/properties/modelId/minLength',
                                                     keyword: 'minLength',
                                                     params: { limit: 1 },
                                                     message:
                                                       'must NOT have fewer than 1 characters',
                                                   };
                                                   if (vErrors === null) {
-                                                    vErrors = [err8];
+                                                    vErrors = [err36];
                                                   } else {
-                                                    vErrors.push(err8);
+                                                    vErrors.push(err36);
                                                   }
                                                   errors++;
                                                 } else {
                                                   if (!pattern173.test(data14)) {
-                                                    const err9 = {
+                                                    const err37 = {
                                                       instancePath:
                                                         instancePath +
                                                         '/modelSettings/operation/modelId',
                                                       schemaPath:
-                                                        '#/properties/modelSettings/properties/operation/oneOf/0/properties/modelId/pattern',
+                                                        '#/anyOf/0/properties/modelSettings/properties/operation/oneOf/0/properties/modelId/pattern',
                                                       keyword: 'pattern',
                                                       params: { pattern: '^[A-Za-z0-9_.-]+$' },
                                                       message:
@@ -42621,88 +42862,88 @@ function validate45(
                                                         '"',
                                                     };
                                                     if (vErrors === null) {
-                                                      vErrors = [err9];
+                                                      vErrors = [err37];
                                                     } else {
-                                                      vErrors.push(err9);
+                                                      vErrors.push(err37);
                                                     }
                                                     errors++;
                                                   }
                                                 }
                                               }
                                             } else {
-                                              const err10 = {
+                                              const err38 = {
                                                 instancePath:
                                                   instancePath + '/modelSettings/operation/modelId',
                                                 schemaPath:
-                                                  '#/properties/modelSettings/properties/operation/oneOf/0/properties/modelId/type',
+                                                  '#/anyOf/0/properties/modelSettings/properties/operation/oneOf/0/properties/modelId/type',
                                                 keyword: 'type',
                                                 params: { type: 'string' },
                                                 message: 'must be string',
                                               };
                                               if (vErrors === null) {
-                                                vErrors = [err10];
+                                                vErrors = [err38];
                                               } else {
-                                                vErrors.push(err10);
+                                                vErrors.push(err38);
                                               }
                                               errors++;
                                             }
                                           }
-                                          var valid5 = _errs39 === errors;
+                                          var valid6 = _errs41 === errors;
                                         } else {
-                                          var valid5 = true;
+                                          var valid6 = true;
                                         }
-                                        if (valid5) {
+                                        if (valid6) {
                                           if (data12.enabled !== undefined) {
-                                            const _errs41 = errors;
+                                            const _errs43 = errors;
                                             if (typeof data12.enabled !== 'boolean') {
-                                              const err11 = {
+                                              const err39 = {
                                                 instancePath:
                                                   instancePath + '/modelSettings/operation/enabled',
                                                 schemaPath:
-                                                  '#/properties/modelSettings/properties/operation/oneOf/0/properties/enabled/type',
+                                                  '#/anyOf/0/properties/modelSettings/properties/operation/oneOf/0/properties/enabled/type',
                                                 keyword: 'type',
                                                 params: { type: 'boolean' },
                                                 message: 'must be boolean',
                                               };
                                               if (vErrors === null) {
-                                                vErrors = [err11];
+                                                vErrors = [err39];
                                               } else {
-                                                vErrors.push(err11);
+                                                vErrors.push(err39);
                                               }
                                               errors++;
                                             }
-                                            var valid5 = _errs41 === errors;
+                                            var valid6 = _errs43 === errors;
                                           } else {
-                                            var valid5 = true;
+                                            var valid6 = true;
                                           }
                                         }
                                       }
                                     }
                                   } else {
-                                    const err12 = {
+                                    const err40 = {
                                       instancePath: instancePath + '/modelSettings/operation',
                                       schemaPath:
-                                        '#/properties/modelSettings/properties/operation/oneOf/0/type',
+                                        '#/anyOf/0/properties/modelSettings/properties/operation/oneOf/0/type',
                                       keyword: 'type',
                                       params: { type: 'object' },
                                       message: 'must be object',
                                     };
                                     if (vErrors === null) {
-                                      vErrors = [err12];
+                                      vErrors = [err40];
                                     } else {
-                                      vErrors.push(err12);
+                                      vErrors.push(err40);
                                     }
                                     errors++;
                                   }
                                 }
-                                var _valid1 = _errs34 === errors;
-                                if (_valid1) {
-                                  valid4 = true;
+                                var _valid2 = _errs36 === errors;
+                                if (_valid2) {
+                                  valid5 = true;
                                   passing0 = 0;
                                   var props0 = true;
                                 }
-                                const _errs43 = errors;
-                                if (errors === _errs43) {
+                                const _errs45 = errors;
+                                if (errors === _errs45) {
                                   if (
                                     data12 &&
                                     typeof data12 == 'object' &&
@@ -42713,112 +42954,112 @@ function validate45(
                                       (data12.kind === undefined && (missing4 = 'kind')) ||
                                       (data12.modelId === undefined && (missing4 = 'modelId'))
                                     ) {
-                                      const err13 = {
+                                      const err41 = {
                                         instancePath: instancePath + '/modelSettings/operation',
                                         schemaPath:
-                                          '#/properties/modelSettings/properties/operation/oneOf/1/required',
+                                          '#/anyOf/0/properties/modelSettings/properties/operation/oneOf/1/required',
                                         keyword: 'required',
                                         params: { missingProperty: missing4 },
                                         message: "must have required property '" + missing4 + "'",
                                       };
                                       if (vErrors === null) {
-                                        vErrors = [err13];
+                                        vErrors = [err41];
                                       } else {
-                                        vErrors.push(err13);
+                                        vErrors.push(err41);
                                       }
                                       errors++;
                                     } else {
                                       if (data12.kind !== undefined) {
                                         let data16 = data12.kind;
-                                        const _errs46 = errors;
+                                        const _errs48 = errors;
                                         if (typeof data16 !== 'string') {
-                                          const err14 = {
+                                          const err42 = {
                                             instancePath:
                                               instancePath + '/modelSettings/operation/kind',
                                             schemaPath:
-                                              '#/properties/modelSettings/properties/operation/oneOf/1/properties/kind/type',
+                                              '#/anyOf/0/properties/modelSettings/properties/operation/oneOf/1/properties/kind/type',
                                             keyword: 'type',
                                             params: { type: 'string' },
                                             message: 'must be string',
                                           };
                                           if (vErrors === null) {
-                                            vErrors = [err14];
+                                            vErrors = [err42];
                                           } else {
-                                            vErrors.push(err14);
+                                            vErrors.push(err42);
                                           }
                                           errors++;
                                         }
                                         if (data16 !== 'default') {
-                                          const err15 = {
+                                          const err43 = {
                                             instancePath:
                                               instancePath + '/modelSettings/operation/kind',
                                             schemaPath:
-                                              '#/properties/modelSettings/properties/operation/oneOf/1/properties/kind/const',
+                                              '#/anyOf/0/properties/modelSettings/properties/operation/oneOf/1/properties/kind/const',
                                             keyword: 'const',
                                             params: { allowedValue: 'default' },
                                             message: 'must be equal to constant',
                                           };
                                           if (vErrors === null) {
-                                            vErrors = [err15];
+                                            vErrors = [err43];
                                           } else {
-                                            vErrors.push(err15);
+                                            vErrors.push(err43);
                                           }
                                           errors++;
                                         }
-                                        var valid6 = _errs46 === errors;
+                                        var valid7 = _errs48 === errors;
                                       } else {
-                                        var valid6 = true;
+                                        var valid7 = true;
                                       }
-                                      if (valid6) {
+                                      if (valid7) {
                                         if (data12.modelId !== undefined) {
                                           let data17 = data12.modelId;
-                                          const _errs48 = errors;
-                                          if (errors === _errs48) {
+                                          const _errs50 = errors;
+                                          if (errors === _errs50) {
                                             if (typeof data17 === 'string') {
                                               if (func1(data17) > 128) {
-                                                const err16 = {
+                                                const err44 = {
                                                   instancePath:
                                                     instancePath +
                                                     '/modelSettings/operation/modelId',
                                                   schemaPath:
-                                                    '#/properties/modelSettings/properties/operation/oneOf/1/properties/modelId/maxLength',
+                                                    '#/anyOf/0/properties/modelSettings/properties/operation/oneOf/1/properties/modelId/maxLength',
                                                   keyword: 'maxLength',
                                                   params: { limit: 128 },
                                                   message: 'must NOT have more than 128 characters',
                                                 };
                                                 if (vErrors === null) {
-                                                  vErrors = [err16];
+                                                  vErrors = [err44];
                                                 } else {
-                                                  vErrors.push(err16);
+                                                  vErrors.push(err44);
                                                 }
                                                 errors++;
                                               } else {
                                                 if (func1(data17) < 1) {
-                                                  const err17 = {
+                                                  const err45 = {
                                                     instancePath:
                                                       instancePath +
                                                       '/modelSettings/operation/modelId',
                                                     schemaPath:
-                                                      '#/properties/modelSettings/properties/operation/oneOf/1/properties/modelId/minLength',
+                                                      '#/anyOf/0/properties/modelSettings/properties/operation/oneOf/1/properties/modelId/minLength',
                                                     keyword: 'minLength',
                                                     params: { limit: 1 },
                                                     message:
                                                       'must NOT have fewer than 1 characters',
                                                   };
                                                   if (vErrors === null) {
-                                                    vErrors = [err17];
+                                                    vErrors = [err45];
                                                   } else {
-                                                    vErrors.push(err17);
+                                                    vErrors.push(err45);
                                                   }
                                                   errors++;
                                                 } else {
                                                   if (!pattern173.test(data17)) {
-                                                    const err18 = {
+                                                    const err46 = {
                                                       instancePath:
                                                         instancePath +
                                                         '/modelSettings/operation/modelId',
                                                       schemaPath:
-                                                        '#/properties/modelSettings/properties/operation/oneOf/1/properties/modelId/pattern',
+                                                        '#/anyOf/0/properties/modelSettings/properties/operation/oneOf/1/properties/modelId/pattern',
                                                       keyword: 'pattern',
                                                       params: { pattern: '^[A-Za-z0-9_.-]+$' },
                                                       message:
@@ -42827,69 +43068,69 @@ function validate45(
                                                         '"',
                                                     };
                                                     if (vErrors === null) {
-                                                      vErrors = [err18];
+                                                      vErrors = [err46];
                                                     } else {
-                                                      vErrors.push(err18);
+                                                      vErrors.push(err46);
                                                     }
                                                     errors++;
                                                   }
                                                 }
                                               }
                                             } else {
-                                              const err19 = {
+                                              const err47 = {
                                                 instancePath:
                                                   instancePath + '/modelSettings/operation/modelId',
                                                 schemaPath:
-                                                  '#/properties/modelSettings/properties/operation/oneOf/1/properties/modelId/type',
+                                                  '#/anyOf/0/properties/modelSettings/properties/operation/oneOf/1/properties/modelId/type',
                                                 keyword: 'type',
                                                 params: { type: 'string' },
                                                 message: 'must be string',
                                               };
                                               if (vErrors === null) {
-                                                vErrors = [err19];
+                                                vErrors = [err47];
                                               } else {
-                                                vErrors.push(err19);
+                                                vErrors.push(err47);
                                               }
                                               errors++;
                                             }
                                           }
-                                          var valid6 = _errs48 === errors;
+                                          var valid7 = _errs50 === errors;
                                         } else {
-                                          var valid6 = true;
+                                          var valid7 = true;
                                         }
                                       }
                                     }
                                   } else {
-                                    const err20 = {
+                                    const err48 = {
                                       instancePath: instancePath + '/modelSettings/operation',
                                       schemaPath:
-                                        '#/properties/modelSettings/properties/operation/oneOf/1/type',
+                                        '#/anyOf/0/properties/modelSettings/properties/operation/oneOf/1/type',
                                       keyword: 'type',
                                       params: { type: 'object' },
                                       message: 'must be object',
                                     };
                                     if (vErrors === null) {
-                                      vErrors = [err20];
+                                      vErrors = [err48];
                                     } else {
-                                      vErrors.push(err20);
+                                      vErrors.push(err48);
                                     }
                                     errors++;
                                   }
                                 }
-                                var _valid1 = _errs43 === errors;
-                                if (_valid1 && valid4) {
-                                  valid4 = false;
+                                var _valid2 = _errs45 === errors;
+                                if (_valid2 && valid5) {
+                                  valid5 = false;
                                   passing0 = [passing0, 1];
                                 } else {
-                                  if (_valid1) {
-                                    valid4 = true;
+                                  if (_valid2) {
+                                    valid5 = true;
                                     passing0 = 1;
                                     if (props0 !== true) {
                                       props0 = true;
                                     }
                                   }
-                                  const _errs50 = errors;
-                                  if (errors === _errs50) {
+                                  const _errs52 = errors;
+                                  if (errors === _errs52) {
                                     if (
                                       data12 &&
                                       typeof data12 == 'object' &&
@@ -42902,113 +43143,113 @@ function validate45(
                                         (data12.reasoningEffort === undefined &&
                                           (missing5 = 'reasoningEffort'))
                                       ) {
-                                        const err21 = {
+                                        const err49 = {
                                           instancePath: instancePath + '/modelSettings/operation',
                                           schemaPath:
-                                            '#/properties/modelSettings/properties/operation/oneOf/2/required',
+                                            '#/anyOf/0/properties/modelSettings/properties/operation/oneOf/2/required',
                                           keyword: 'required',
                                           params: { missingProperty: missing5 },
                                           message: "must have required property '" + missing5 + "'",
                                         };
                                         if (vErrors === null) {
-                                          vErrors = [err21];
+                                          vErrors = [err49];
                                         } else {
-                                          vErrors.push(err21);
+                                          vErrors.push(err49);
                                         }
                                         errors++;
                                       } else {
                                         if (data12.kind !== undefined) {
                                           let data18 = data12.kind;
-                                          const _errs53 = errors;
+                                          const _errs55 = errors;
                                           if (typeof data18 !== 'string') {
-                                            const err22 = {
+                                            const err50 = {
                                               instancePath:
                                                 instancePath + '/modelSettings/operation/kind',
                                               schemaPath:
-                                                '#/properties/modelSettings/properties/operation/oneOf/2/properties/kind/type',
+                                                '#/anyOf/0/properties/modelSettings/properties/operation/oneOf/2/properties/kind/type',
                                               keyword: 'type',
                                               params: { type: 'string' },
                                               message: 'must be string',
                                             };
                                             if (vErrors === null) {
-                                              vErrors = [err22];
+                                              vErrors = [err50];
                                             } else {
-                                              vErrors.push(err22);
+                                              vErrors.push(err50);
                                             }
                                             errors++;
                                           }
                                           if (data18 !== 'effort') {
-                                            const err23 = {
+                                            const err51 = {
                                               instancePath:
                                                 instancePath + '/modelSettings/operation/kind',
                                               schemaPath:
-                                                '#/properties/modelSettings/properties/operation/oneOf/2/properties/kind/const',
+                                                '#/anyOf/0/properties/modelSettings/properties/operation/oneOf/2/properties/kind/const',
                                               keyword: 'const',
                                               params: { allowedValue: 'effort' },
                                               message: 'must be equal to constant',
                                             };
                                             if (vErrors === null) {
-                                              vErrors = [err23];
+                                              vErrors = [err51];
                                             } else {
-                                              vErrors.push(err23);
+                                              vErrors.push(err51);
                                             }
                                             errors++;
                                           }
-                                          var valid7 = _errs53 === errors;
+                                          var valid8 = _errs55 === errors;
                                         } else {
-                                          var valid7 = true;
+                                          var valid8 = true;
                                         }
-                                        if (valid7) {
+                                        if (valid8) {
                                           if (data12.modelId !== undefined) {
                                             let data19 = data12.modelId;
-                                            const _errs55 = errors;
-                                            if (errors === _errs55) {
+                                            const _errs57 = errors;
+                                            if (errors === _errs57) {
                                               if (typeof data19 === 'string') {
                                                 if (func1(data19) > 128) {
-                                                  const err24 = {
+                                                  const err52 = {
                                                     instancePath:
                                                       instancePath +
                                                       '/modelSettings/operation/modelId',
                                                     schemaPath:
-                                                      '#/properties/modelSettings/properties/operation/oneOf/2/properties/modelId/maxLength',
+                                                      '#/anyOf/0/properties/modelSettings/properties/operation/oneOf/2/properties/modelId/maxLength',
                                                     keyword: 'maxLength',
                                                     params: { limit: 128 },
                                                     message:
                                                       'must NOT have more than 128 characters',
                                                   };
                                                   if (vErrors === null) {
-                                                    vErrors = [err24];
+                                                    vErrors = [err52];
                                                   } else {
-                                                    vErrors.push(err24);
+                                                    vErrors.push(err52);
                                                   }
                                                   errors++;
                                                 } else {
                                                   if (func1(data19) < 1) {
-                                                    const err25 = {
+                                                    const err53 = {
                                                       instancePath:
                                                         instancePath +
                                                         '/modelSettings/operation/modelId',
                                                       schemaPath:
-                                                        '#/properties/modelSettings/properties/operation/oneOf/2/properties/modelId/minLength',
+                                                        '#/anyOf/0/properties/modelSettings/properties/operation/oneOf/2/properties/modelId/minLength',
                                                       keyword: 'minLength',
                                                       params: { limit: 1 },
                                                       message:
                                                         'must NOT have fewer than 1 characters',
                                                     };
                                                     if (vErrors === null) {
-                                                      vErrors = [err25];
+                                                      vErrors = [err53];
                                                     } else {
-                                                      vErrors.push(err25);
+                                                      vErrors.push(err53);
                                                     }
                                                     errors++;
                                                   } else {
                                                     if (!pattern173.test(data19)) {
-                                                      const err26 = {
+                                                      const err54 = {
                                                         instancePath:
                                                           instancePath +
                                                           '/modelSettings/operation/modelId',
                                                         schemaPath:
-                                                          '#/properties/modelSettings/properties/operation/oneOf/2/properties/modelId/pattern',
+                                                          '#/anyOf/0/properties/modelSettings/properties/operation/oneOf/2/properties/modelId/pattern',
                                                         keyword: 'pattern',
                                                         params: { pattern: '^[A-Za-z0-9_.-]+$' },
                                                         message:
@@ -43017,59 +43258,59 @@ function validate45(
                                                           '"',
                                                       };
                                                       if (vErrors === null) {
-                                                        vErrors = [err26];
+                                                        vErrors = [err54];
                                                       } else {
-                                                        vErrors.push(err26);
+                                                        vErrors.push(err54);
                                                       }
                                                       errors++;
                                                     }
                                                   }
                                                 }
                                               } else {
-                                                const err27 = {
+                                                const err55 = {
                                                   instancePath:
                                                     instancePath +
                                                     '/modelSettings/operation/modelId',
                                                   schemaPath:
-                                                    '#/properties/modelSettings/properties/operation/oneOf/2/properties/modelId/type',
+                                                    '#/anyOf/0/properties/modelSettings/properties/operation/oneOf/2/properties/modelId/type',
                                                   keyword: 'type',
                                                   params: { type: 'string' },
                                                   message: 'must be string',
                                                 };
                                                 if (vErrors === null) {
-                                                  vErrors = [err27];
+                                                  vErrors = [err55];
                                                 } else {
-                                                  vErrors.push(err27);
+                                                  vErrors.push(err55);
                                                 }
                                                 errors++;
                                               }
                                             }
-                                            var valid7 = _errs55 === errors;
+                                            var valid8 = _errs57 === errors;
                                           } else {
-                                            var valid7 = true;
+                                            var valid8 = true;
                                           }
-                                          if (valid7) {
+                                          if (valid8) {
                                             if (data12.reasoningEffort !== undefined) {
                                               let data20 = data12.reasoningEffort;
-                                              const _errs57 = errors;
-                                              const _errs58 = errors;
-                                              let valid8 = false;
                                               const _errs59 = errors;
+                                              const _errs60 = errors;
+                                              let valid9 = false;
+                                              const _errs61 = errors;
                                               if (typeof data20 !== 'string') {
-                                                const err28 = {
+                                                const err56 = {
                                                   instancePath:
                                                     instancePath +
                                                     '/modelSettings/operation/reasoningEffort',
                                                   schemaPath:
-                                                    '#/properties/modelSettings/properties/operation/oneOf/2/properties/reasoningEffort/anyOf/0/type',
+                                                    '#/anyOf/0/properties/modelSettings/properties/operation/oneOf/2/properties/reasoningEffort/anyOf/0/type',
                                                   keyword: 'type',
                                                   params: { type: 'string' },
                                                   message: 'must be string',
                                                 };
                                                 if (vErrors === null) {
-                                                  vErrors = [err28];
+                                                  vErrors = [err56];
                                                 } else {
-                                                  vErrors.push(err28);
+                                                  vErrors.push(err56);
                                                 }
                                                 errors++;
                                               }
@@ -43085,110 +43326,110 @@ function validate45(
                                                   data20 === 'ultar'
                                                 )
                                               ) {
-                                                const err29 = {
+                                                const err57 = {
                                                   instancePath:
                                                     instancePath +
                                                     '/modelSettings/operation/reasoningEffort',
                                                   schemaPath:
-                                                    '#/properties/modelSettings/properties/operation/oneOf/2/properties/reasoningEffort/anyOf/0/enum',
+                                                    '#/anyOf/0/properties/modelSettings/properties/operation/oneOf/2/properties/reasoningEffort/anyOf/0/enum',
                                                   keyword: 'enum',
                                                   params: {
                                                     allowedValues:
-                                                      schema52.properties.modelSettings.properties
-                                                        .operation.oneOf[2].properties
+                                                      schema52.anyOf[0].properties.modelSettings
+                                                        .properties.operation.oneOf[2].properties
                                                         .reasoningEffort.anyOf[0].enum,
                                                   },
                                                   message:
                                                     'must be equal to one of the allowed values',
                                                 };
                                                 if (vErrors === null) {
-                                                  vErrors = [err29];
+                                                  vErrors = [err57];
                                                 } else {
-                                                  vErrors.push(err29);
+                                                  vErrors.push(err57);
                                                 }
                                                 errors++;
                                               }
-                                              var _valid2 = _errs59 === errors;
-                                              valid8 = valid8 || _valid2;
-                                              const _errs61 = errors;
+                                              var _valid3 = _errs61 === errors;
+                                              valid9 = valid9 || _valid3;
+                                              const _errs63 = errors;
                                               if (data20 !== null) {
-                                                const err30 = {
+                                                const err58 = {
                                                   instancePath:
                                                     instancePath +
                                                     '/modelSettings/operation/reasoningEffort',
                                                   schemaPath:
-                                                    '#/properties/modelSettings/properties/operation/oneOf/2/properties/reasoningEffort/anyOf/1/type',
+                                                    '#/anyOf/0/properties/modelSettings/properties/operation/oneOf/2/properties/reasoningEffort/anyOf/1/type',
                                                   keyword: 'type',
                                                   params: { type: 'null' },
                                                   message: 'must be null',
                                                 };
                                                 if (vErrors === null) {
-                                                  vErrors = [err30];
+                                                  vErrors = [err58];
                                                 } else {
-                                                  vErrors.push(err30);
+                                                  vErrors.push(err58);
                                                 }
                                                 errors++;
                                               }
-                                              var _valid2 = _errs61 === errors;
-                                              valid8 = valid8 || _valid2;
-                                              if (!valid8) {
-                                                const err31 = {
+                                              var _valid3 = _errs63 === errors;
+                                              valid9 = valid9 || _valid3;
+                                              if (!valid9) {
+                                                const err59 = {
                                                   instancePath:
                                                     instancePath +
                                                     '/modelSettings/operation/reasoningEffort',
                                                   schemaPath:
-                                                    '#/properties/modelSettings/properties/operation/oneOf/2/properties/reasoningEffort/anyOf',
+                                                    '#/anyOf/0/properties/modelSettings/properties/operation/oneOf/2/properties/reasoningEffort/anyOf',
                                                   keyword: 'anyOf',
                                                   params: {},
                                                   message: 'must match a schema in anyOf',
                                                 };
                                                 if (vErrors === null) {
-                                                  vErrors = [err31];
+                                                  vErrors = [err59];
                                                 } else {
-                                                  vErrors.push(err31);
+                                                  vErrors.push(err59);
                                                 }
                                                 errors++;
                                               } else {
-                                                errors = _errs58;
+                                                errors = _errs60;
                                                 if (vErrors !== null) {
-                                                  if (_errs58) {
-                                                    vErrors.length = _errs58;
+                                                  if (_errs60) {
+                                                    vErrors.length = _errs60;
                                                   } else {
                                                     vErrors = null;
                                                   }
                                                 }
                                               }
-                                              var valid7 = _errs57 === errors;
+                                              var valid8 = _errs59 === errors;
                                             } else {
-                                              var valid7 = true;
+                                              var valid8 = true;
                                             }
                                           }
                                         }
                                       }
                                     } else {
-                                      const err32 = {
+                                      const err60 = {
                                         instancePath: instancePath + '/modelSettings/operation',
                                         schemaPath:
-                                          '#/properties/modelSettings/properties/operation/oneOf/2/type',
+                                          '#/anyOf/0/properties/modelSettings/properties/operation/oneOf/2/type',
                                         keyword: 'type',
                                         params: { type: 'object' },
                                         message: 'must be object',
                                       };
                                       if (vErrors === null) {
-                                        vErrors = [err32];
+                                        vErrors = [err60];
                                       } else {
-                                        vErrors.push(err32);
+                                        vErrors.push(err60);
                                       }
                                       errors++;
                                     }
                                   }
-                                  var _valid1 = _errs50 === errors;
-                                  if (_valid1 && valid4) {
-                                    valid4 = false;
+                                  var _valid2 = _errs52 === errors;
+                                  if (_valid2 && valid5) {
+                                    valid5 = false;
                                     passing0 = [passing0, 2];
                                   } else {
-                                    if (_valid1) {
-                                      valid4 = true;
+                                    if (_valid2) {
+                                      valid5 = true;
                                       passing0 = 2;
                                       if (props0 !== true) {
                                         props0 = true;
@@ -43196,61 +43437,62 @@ function validate45(
                                     }
                                   }
                                 }
-                                if (!valid4) {
-                                  const err33 = {
+                                if (!valid5) {
+                                  const err61 = {
                                     instancePath: instancePath + '/modelSettings/operation',
                                     schemaPath:
-                                      '#/properties/modelSettings/properties/operation/oneOf',
+                                      '#/anyOf/0/properties/modelSettings/properties/operation/oneOf',
                                     keyword: 'oneOf',
                                     params: { passingSchemas: passing0 },
                                     message: 'must match exactly one schema in oneOf',
                                   };
                                   if (vErrors === null) {
-                                    vErrors = [err33];
+                                    vErrors = [err61];
                                   } else {
-                                    vErrors.push(err33);
+                                    vErrors.push(err61);
                                   }
                                   errors++;
-                                  validate45.errors = vErrors;
-                                  return false;
                                 } else {
-                                  errors = _errs33;
+                                  errors = _errs35;
                                   if (vErrors !== null) {
-                                    if (_errs33) {
-                                      vErrors.length = _errs33;
+                                    if (_errs35) {
+                                      vErrors.length = _errs35;
                                     } else {
                                       vErrors = null;
                                     }
                                   }
                                 }
-                                var valid1 = _errs32 === errors;
+                                var valid2 = _errs34 === errors;
                               } else {
-                                var valid1 = true;
+                                var valid2 = true;
                               }
                             }
                           }
                         } else {
-                          validate45.errors = [
-                            {
-                              instancePath: instancePath + '/modelSettings',
-                              schemaPath: '#/properties/modelSettings/type',
-                              keyword: 'type',
-                              params: { type: 'object' },
-                              message: 'must be object',
-                            },
-                          ];
-                          return false;
+                          const err62 = {
+                            instancePath: instancePath + '/modelSettings',
+                            schemaPath: '#/anyOf/0/properties/modelSettings/type',
+                            keyword: 'type',
+                            params: { type: 'object' },
+                            message: 'must be object',
+                          };
+                          if (vErrors === null) {
+                            vErrors = [err62];
+                          } else {
+                            vErrors.push(err62);
+                          }
+                          errors++;
                         }
                       }
-                      var valid0 = _errs14 === errors;
+                      var valid1 = _errs16 === errors;
                     } else {
-                      var valid0 = true;
+                      var valid1 = true;
                     }
-                    if (valid0) {
+                    if (valid1) {
                       if (data.providerSettings !== undefined) {
                         let data21 = data.providerSettings;
-                        const _errs63 = errors;
-                        if (errors === _errs63) {
+                        const _errs65 = errors;
+                        if (errors === _errs65) {
                           if (data21 && typeof data21 == 'object' && !Array.isArray(data21)) {
                             let missing6;
                             if (
@@ -43258,21 +43500,24 @@ function validate45(
                                 (missing6 = 'expectedReadSet')) ||
                               (data21.operation === undefined && (missing6 = 'operation'))
                             ) {
-                              validate45.errors = [
-                                {
-                                  instancePath: instancePath + '/providerSettings',
-                                  schemaPath: '#/properties/providerSettings/required',
-                                  keyword: 'required',
-                                  params: { missingProperty: missing6 },
-                                  message: "must have required property '" + missing6 + "'",
-                                },
-                              ];
-                              return false;
+                              const err63 = {
+                                instancePath: instancePath + '/providerSettings',
+                                schemaPath: '#/anyOf/0/properties/providerSettings/required',
+                                keyword: 'required',
+                                params: { missingProperty: missing6 },
+                                message: "must have required property '" + missing6 + "'",
+                              };
+                              if (vErrors === null) {
+                                vErrors = [err63];
+                              } else {
+                                vErrors.push(err63);
+                              }
+                              errors++;
                             } else {
                               if (data21.expectedReadSet !== undefined) {
                                 let data22 = data21.expectedReadSet;
-                                const _errs66 = errors;
-                                if (errors === _errs66) {
+                                const _errs68 = errors;
+                                if (errors === _errs68) {
                                   if (
                                     data22 &&
                                     typeof data22 == 'object' &&
@@ -43288,279 +43533,301 @@ function validate45(
                                       (data22.effectiveDigest === undefined &&
                                         (missing7 = 'effectiveDigest'))
                                     ) {
-                                      validate45.errors = [
-                                        {
-                                          instancePath:
-                                            instancePath + '/providerSettings/expectedReadSet',
-                                          schemaPath:
-                                            '#/properties/providerSettings/properties/expectedReadSet/required',
-                                          keyword: 'required',
-                                          params: { missingProperty: missing7 },
-                                          message: "must have required property '" + missing7 + "'",
-                                        },
-                                      ];
-                                      return false;
+                                      const err64 = {
+                                        instancePath:
+                                          instancePath + '/providerSettings/expectedReadSet',
+                                        schemaPath:
+                                          '#/anyOf/0/properties/providerSettings/properties/expectedReadSet/required',
+                                        keyword: 'required',
+                                        params: { missingProperty: missing7 },
+                                        message: "must have required property '" + missing7 + "'",
+                                      };
+                                      if (vErrors === null) {
+                                        vErrors = [err64];
+                                      } else {
+                                        vErrors.push(err64);
+                                      }
+                                      errors++;
                                     } else {
                                       if (data22.userEtag !== undefined) {
                                         let data23 = data22.userEtag;
-                                        const _errs69 = errors;
-                                        if (errors === _errs69) {
+                                        const _errs71 = errors;
+                                        if (errors === _errs71) {
                                           if (typeof data23 === 'string') {
                                             if (!pattern15.test(data23)) {
-                                              validate45.errors = [
-                                                {
-                                                  instancePath:
-                                                    instancePath +
-                                                    '/providerSettings/expectedReadSet/userEtag',
-                                                  schemaPath:
-                                                    '#/properties/providerSettings/properties/expectedReadSet/properties/userEtag/pattern',
-                                                  keyword: 'pattern',
-                                                  params: { pattern: '^[a-f0-9]{64}$' },
-                                                  message:
-                                                    'must match pattern "' + '^[a-f0-9]{64}$' + '"',
-                                                },
-                                              ];
-                                              return false;
-                                            }
-                                          } else {
-                                            validate45.errors = [
-                                              {
+                                              const err65 = {
                                                 instancePath:
                                                   instancePath +
                                                   '/providerSettings/expectedReadSet/userEtag',
                                                 schemaPath:
-                                                  '#/properties/providerSettings/properties/expectedReadSet/properties/userEtag/type',
-                                                keyword: 'type',
-                                                params: { type: 'string' },
-                                                message: 'must be string',
-                                              },
-                                            ];
-                                            return false;
+                                                  '#/anyOf/0/properties/providerSettings/properties/expectedReadSet/properties/userEtag/pattern',
+                                                keyword: 'pattern',
+                                                params: { pattern: '^[a-f0-9]{64}$' },
+                                                message:
+                                                  'must match pattern "' + '^[a-f0-9]{64}$' + '"',
+                                              };
+                                              if (vErrors === null) {
+                                                vErrors = [err65];
+                                              } else {
+                                                vErrors.push(err65);
+                                              }
+                                              errors++;
+                                            }
+                                          } else {
+                                            const err66 = {
+                                              instancePath:
+                                                instancePath +
+                                                '/providerSettings/expectedReadSet/userEtag',
+                                              schemaPath:
+                                                '#/anyOf/0/properties/providerSettings/properties/expectedReadSet/properties/userEtag/type',
+                                              keyword: 'type',
+                                              params: { type: 'string' },
+                                              message: 'must be string',
+                                            };
+                                            if (vErrors === null) {
+                                              vErrors = [err66];
+                                            } else {
+                                              vErrors.push(err66);
+                                            }
+                                            errors++;
                                           }
                                         }
-                                        var valid10 = _errs69 === errors;
+                                        var valid11 = _errs71 === errors;
                                       } else {
-                                        var valid10 = true;
+                                        var valid11 = true;
                                       }
-                                      if (valid10) {
+                                      if (valid11) {
                                         if (data22.workspaceEtag !== undefined) {
                                           let data24 = data22.workspaceEtag;
-                                          const _errs71 = errors;
-                                          const _errs72 = errors;
-                                          let valid11 = false;
                                           const _errs73 = errors;
-                                          if (errors === _errs73) {
+                                          const _errs74 = errors;
+                                          let valid12 = false;
+                                          const _errs75 = errors;
+                                          if (errors === _errs75) {
                                             if (typeof data24 === 'string') {
                                               if (!pattern15.test(data24)) {
-                                                const err34 = {
+                                                const err67 = {
                                                   instancePath:
                                                     instancePath +
                                                     '/providerSettings/expectedReadSet/workspaceEtag',
                                                   schemaPath:
-                                                    '#/properties/providerSettings/properties/expectedReadSet/properties/workspaceEtag/anyOf/0/pattern',
+                                                    '#/anyOf/0/properties/providerSettings/properties/expectedReadSet/properties/workspaceEtag/anyOf/0/pattern',
                                                   keyword: 'pattern',
                                                   params: { pattern: '^[a-f0-9]{64}$' },
                                                   message:
                                                     'must match pattern "' + '^[a-f0-9]{64}$' + '"',
                                                 };
                                                 if (vErrors === null) {
-                                                  vErrors = [err34];
+                                                  vErrors = [err67];
                                                 } else {
-                                                  vErrors.push(err34);
+                                                  vErrors.push(err67);
                                                 }
                                                 errors++;
                                               }
                                             } else {
-                                              const err35 = {
+                                              const err68 = {
                                                 instancePath:
                                                   instancePath +
                                                   '/providerSettings/expectedReadSet/workspaceEtag',
                                                 schemaPath:
-                                                  '#/properties/providerSettings/properties/expectedReadSet/properties/workspaceEtag/anyOf/0/type',
+                                                  '#/anyOf/0/properties/providerSettings/properties/expectedReadSet/properties/workspaceEtag/anyOf/0/type',
                                                 keyword: 'type',
                                                 params: { type: 'string' },
                                                 message: 'must be string',
                                               };
                                               if (vErrors === null) {
-                                                vErrors = [err35];
+                                                vErrors = [err68];
                                               } else {
-                                                vErrors.push(err35);
+                                                vErrors.push(err68);
                                               }
                                               errors++;
                                             }
                                           }
-                                          var _valid3 = _errs73 === errors;
-                                          valid11 = valid11 || _valid3;
-                                          const _errs75 = errors;
+                                          var _valid4 = _errs75 === errors;
+                                          valid12 = valid12 || _valid4;
+                                          const _errs77 = errors;
                                           if (data24 !== null) {
-                                            const err36 = {
+                                            const err69 = {
                                               instancePath:
                                                 instancePath +
                                                 '/providerSettings/expectedReadSet/workspaceEtag',
                                               schemaPath:
-                                                '#/properties/providerSettings/properties/expectedReadSet/properties/workspaceEtag/anyOf/1/type',
+                                                '#/anyOf/0/properties/providerSettings/properties/expectedReadSet/properties/workspaceEtag/anyOf/1/type',
                                               keyword: 'type',
                                               params: { type: 'null' },
                                               message: 'must be null',
                                             };
                                             if (vErrors === null) {
-                                              vErrors = [err36];
+                                              vErrors = [err69];
                                             } else {
-                                              vErrors.push(err36);
+                                              vErrors.push(err69);
                                             }
                                             errors++;
                                           }
-                                          var _valid3 = _errs75 === errors;
-                                          valid11 = valid11 || _valid3;
-                                          if (!valid11) {
-                                            const err37 = {
+                                          var _valid4 = _errs77 === errors;
+                                          valid12 = valid12 || _valid4;
+                                          if (!valid12) {
+                                            const err70 = {
                                               instancePath:
                                                 instancePath +
                                                 '/providerSettings/expectedReadSet/workspaceEtag',
                                               schemaPath:
-                                                '#/properties/providerSettings/properties/expectedReadSet/properties/workspaceEtag/anyOf',
+                                                '#/anyOf/0/properties/providerSettings/properties/expectedReadSet/properties/workspaceEtag/anyOf',
                                               keyword: 'anyOf',
                                               params: {},
                                               message: 'must match a schema in anyOf',
                                             };
                                             if (vErrors === null) {
-                                              vErrors = [err37];
+                                              vErrors = [err70];
                                             } else {
-                                              vErrors.push(err37);
+                                              vErrors.push(err70);
                                             }
                                             errors++;
-                                            validate45.errors = vErrors;
-                                            return false;
                                           } else {
-                                            errors = _errs72;
+                                            errors = _errs74;
                                             if (vErrors !== null) {
-                                              if (_errs72) {
-                                                vErrors.length = _errs72;
+                                              if (_errs74) {
+                                                vErrors.length = _errs74;
                                               } else {
                                                 vErrors = null;
                                               }
                                             }
                                           }
-                                          var valid10 = _errs71 === errors;
+                                          var valid11 = _errs73 === errors;
                                         } else {
-                                          var valid10 = true;
+                                          var valid11 = true;
                                         }
-                                        if (valid10) {
+                                        if (valid11) {
                                           if (data22.explicitDigest !== undefined) {
                                             let data25 = data22.explicitDigest;
-                                            const _errs77 = errors;
-                                            if (errors === _errs77) {
+                                            const _errs79 = errors;
+                                            if (errors === _errs79) {
                                               if (typeof data25 === 'string') {
                                                 if (!pattern15.test(data25)) {
-                                                  validate45.errors = [
-                                                    {
+                                                  const err71 = {
+                                                    instancePath:
+                                                      instancePath +
+                                                      '/providerSettings/expectedReadSet/explicitDigest',
+                                                    schemaPath:
+                                                      '#/anyOf/0/properties/providerSettings/properties/expectedReadSet/properties/explicitDigest/pattern',
+                                                    keyword: 'pattern',
+                                                    params: { pattern: '^[a-f0-9]{64}$' },
+                                                    message:
+                                                      'must match pattern "' +
+                                                      '^[a-f0-9]{64}$' +
+                                                      '"',
+                                                  };
+                                                  if (vErrors === null) {
+                                                    vErrors = [err71];
+                                                  } else {
+                                                    vErrors.push(err71);
+                                                  }
+                                                  errors++;
+                                                }
+                                              } else {
+                                                const err72 = {
+                                                  instancePath:
+                                                    instancePath +
+                                                    '/providerSettings/expectedReadSet/explicitDigest',
+                                                  schemaPath:
+                                                    '#/anyOf/0/properties/providerSettings/properties/expectedReadSet/properties/explicitDigest/type',
+                                                  keyword: 'type',
+                                                  params: { type: 'string' },
+                                                  message: 'must be string',
+                                                };
+                                                if (vErrors === null) {
+                                                  vErrors = [err72];
+                                                } else {
+                                                  vErrors.push(err72);
+                                                }
+                                                errors++;
+                                              }
+                                            }
+                                            var valid11 = _errs79 === errors;
+                                          } else {
+                                            var valid11 = true;
+                                          }
+                                          if (valid11) {
+                                            if (data22.effectiveDigest !== undefined) {
+                                              let data26 = data22.effectiveDigest;
+                                              const _errs81 = errors;
+                                              if (errors === _errs81) {
+                                                if (typeof data26 === 'string') {
+                                                  if (!pattern15.test(data26)) {
+                                                    const err73 = {
                                                       instancePath:
                                                         instancePath +
-                                                        '/providerSettings/expectedReadSet/explicitDigest',
+                                                        '/providerSettings/expectedReadSet/effectiveDigest',
                                                       schemaPath:
-                                                        '#/properties/providerSettings/properties/expectedReadSet/properties/explicitDigest/pattern',
+                                                        '#/anyOf/0/properties/providerSettings/properties/expectedReadSet/properties/effectiveDigest/pattern',
                                                       keyword: 'pattern',
                                                       params: { pattern: '^[a-f0-9]{64}$' },
                                                       message:
                                                         'must match pattern "' +
                                                         '^[a-f0-9]{64}$' +
                                                         '"',
-                                                    },
-                                                  ];
-                                                  return false;
-                                                }
-                                              } else {
-                                                validate45.errors = [
-                                                  {
+                                                    };
+                                                    if (vErrors === null) {
+                                                      vErrors = [err73];
+                                                    } else {
+                                                      vErrors.push(err73);
+                                                    }
+                                                    errors++;
+                                                  }
+                                                } else {
+                                                  const err74 = {
                                                     instancePath:
                                                       instancePath +
-                                                      '/providerSettings/expectedReadSet/explicitDigest',
+                                                      '/providerSettings/expectedReadSet/effectiveDigest',
                                                     schemaPath:
-                                                      '#/properties/providerSettings/properties/expectedReadSet/properties/explicitDigest/type',
+                                                      '#/anyOf/0/properties/providerSettings/properties/expectedReadSet/properties/effectiveDigest/type',
                                                     keyword: 'type',
                                                     params: { type: 'string' },
                                                     message: 'must be string',
-                                                  },
-                                                ];
-                                                return false;
-                                              }
-                                            }
-                                            var valid10 = _errs77 === errors;
-                                          } else {
-                                            var valid10 = true;
-                                          }
-                                          if (valid10) {
-                                            if (data22.effectiveDigest !== undefined) {
-                                              let data26 = data22.effectiveDigest;
-                                              const _errs79 = errors;
-                                              if (errors === _errs79) {
-                                                if (typeof data26 === 'string') {
-                                                  if (!pattern15.test(data26)) {
-                                                    validate45.errors = [
-                                                      {
-                                                        instancePath:
-                                                          instancePath +
-                                                          '/providerSettings/expectedReadSet/effectiveDigest',
-                                                        schemaPath:
-                                                          '#/properties/providerSettings/properties/expectedReadSet/properties/effectiveDigest/pattern',
-                                                        keyword: 'pattern',
-                                                        params: { pattern: '^[a-f0-9]{64}$' },
-                                                        message:
-                                                          'must match pattern "' +
-                                                          '^[a-f0-9]{64}$' +
-                                                          '"',
-                                                      },
-                                                    ];
-                                                    return false;
+                                                  };
+                                                  if (vErrors === null) {
+                                                    vErrors = [err74];
+                                                  } else {
+                                                    vErrors.push(err74);
                                                   }
-                                                } else {
-                                                  validate45.errors = [
-                                                    {
-                                                      instancePath:
-                                                        instancePath +
-                                                        '/providerSettings/expectedReadSet/effectiveDigest',
-                                                      schemaPath:
-                                                        '#/properties/providerSettings/properties/expectedReadSet/properties/effectiveDigest/type',
-                                                      keyword: 'type',
-                                                      params: { type: 'string' },
-                                                      message: 'must be string',
-                                                    },
-                                                  ];
-                                                  return false;
+                                                  errors++;
                                                 }
                                               }
-                                              var valid10 = _errs79 === errors;
+                                              var valid11 = _errs81 === errors;
                                             } else {
-                                              var valid10 = true;
+                                              var valid11 = true;
                                             }
                                           }
                                         }
                                       }
                                     }
                                   } else {
-                                    validate45.errors = [
-                                      {
-                                        instancePath:
-                                          instancePath + '/providerSettings/expectedReadSet',
-                                        schemaPath:
-                                          '#/properties/providerSettings/properties/expectedReadSet/type',
-                                        keyword: 'type',
-                                        params: { type: 'object' },
-                                        message: 'must be object',
-                                      },
-                                    ];
-                                    return false;
+                                    const err75 = {
+                                      instancePath:
+                                        instancePath + '/providerSettings/expectedReadSet',
+                                      schemaPath:
+                                        '#/anyOf/0/properties/providerSettings/properties/expectedReadSet/type',
+                                      keyword: 'type',
+                                      params: { type: 'object' },
+                                      message: 'must be object',
+                                    };
+                                    if (vErrors === null) {
+                                      vErrors = [err75];
+                                    } else {
+                                      vErrors.push(err75);
+                                    }
+                                    errors++;
                                   }
                                 }
-                                var valid9 = _errs66 === errors;
+                                var valid10 = _errs68 === errors;
                               } else {
-                                var valid9 = true;
+                                var valid10 = true;
                               }
-                              if (valid9) {
+                              if (valid10) {
                                 if (data21.operation !== undefined) {
                                   let data27 = data21.operation;
-                                  const _errs81 = errors;
-                                  if (errors === _errs81) {
+                                  const _errs83 = errors;
+                                  if (errors === _errs83) {
                                     if (
                                       data27 &&
                                       typeof data27 == 'object' &&
@@ -43578,158 +43845,180 @@ function validate45(
                                         (data27.credential === undefined &&
                                           (missing8 = 'credential'))
                                       ) {
-                                        validate45.errors = [
-                                          {
-                                            instancePath:
-                                              instancePath + '/providerSettings/operation',
-                                            schemaPath:
-                                              '#/properties/providerSettings/properties/operation/required',
-                                            keyword: 'required',
-                                            params: { missingProperty: missing8 },
-                                            message:
-                                              "must have required property '" + missing8 + "'",
-                                          },
-                                        ];
-                                        return false;
+                                        const err76 = {
+                                          instancePath:
+                                            instancePath + '/providerSettings/operation',
+                                          schemaPath:
+                                            '#/anyOf/0/properties/providerSettings/properties/operation/required',
+                                          keyword: 'required',
+                                          params: { missingProperty: missing8 },
+                                          message: "must have required property '" + missing8 + "'",
+                                        };
+                                        if (vErrors === null) {
+                                          vErrors = [err76];
+                                        } else {
+                                          vErrors.push(err76);
+                                        }
+                                        errors++;
                                       } else {
                                         if (data27.kind !== undefined) {
                                           let data28 = data27.kind;
-                                          const _errs84 = errors;
+                                          const _errs86 = errors;
                                           if (typeof data28 !== 'string') {
-                                            validate45.errors = [
-                                              {
-                                                instancePath:
-                                                  instancePath + '/providerSettings/operation/kind',
-                                                schemaPath:
-                                                  '#/properties/providerSettings/properties/operation/properties/kind/type',
-                                                keyword: 'type',
-                                                params: { type: 'string' },
-                                                message: 'must be string',
-                                              },
-                                            ];
-                                            return false;
+                                            const err77 = {
+                                              instancePath:
+                                                instancePath + '/providerSettings/operation/kind',
+                                              schemaPath:
+                                                '#/anyOf/0/properties/providerSettings/properties/operation/properties/kind/type',
+                                              keyword: 'type',
+                                              params: { type: 'string' },
+                                              message: 'must be string',
+                                            };
+                                            if (vErrors === null) {
+                                              vErrors = [err77];
+                                            } else {
+                                              vErrors.push(err77);
+                                            }
+                                            errors++;
                                           }
                                           if (!(data28 === 'upsert' || data28 === 'remove')) {
-                                            validate45.errors = [
-                                              {
-                                                instancePath:
-                                                  instancePath + '/providerSettings/operation/kind',
-                                                schemaPath:
-                                                  '#/properties/providerSettings/properties/operation/properties/kind/enum',
-                                                keyword: 'enum',
-                                                params: {
-                                                  allowedValues:
-                                                    schema52.properties.providerSettings.properties
-                                                      .operation.properties.kind.enum,
-                                                },
-                                                message:
-                                                  'must be equal to one of the allowed values',
+                                            const err78 = {
+                                              instancePath:
+                                                instancePath + '/providerSettings/operation/kind',
+                                              schemaPath:
+                                                '#/anyOf/0/properties/providerSettings/properties/operation/properties/kind/enum',
+                                              keyword: 'enum',
+                                              params: {
+                                                allowedValues:
+                                                  schema52.anyOf[0].properties.providerSettings
+                                                    .properties.operation.properties.kind.enum,
                                               },
-                                            ];
-                                            return false;
+                                              message: 'must be equal to one of the allowed values',
+                                            };
+                                            if (vErrors === null) {
+                                              vErrors = [err78];
+                                            } else {
+                                              vErrors.push(err78);
+                                            }
+                                            errors++;
                                           }
-                                          var valid12 = _errs84 === errors;
+                                          var valid13 = _errs86 === errors;
                                         } else {
-                                          var valid12 = true;
+                                          var valid13 = true;
                                         }
-                                        if (valid12) {
+                                        if (valid13) {
                                           if (data27.name !== undefined) {
                                             let data29 = data27.name;
-                                            const _errs86 = errors;
-                                            if (errors === _errs86) {
+                                            const _errs88 = errors;
+                                            if (errors === _errs88) {
                                               if (typeof data29 === 'string') {
                                                 if (func1(data29) > 120) {
-                                                  validate45.errors = [
-                                                    {
-                                                      instancePath:
-                                                        instancePath +
-                                                        '/providerSettings/operation/name',
-                                                      schemaPath:
-                                                        '#/properties/providerSettings/properties/operation/properties/name/maxLength',
-                                                      keyword: 'maxLength',
-                                                      params: { limit: 120 },
-                                                      message:
-                                                        'must NOT have more than 120 characters',
-                                                    },
-                                                  ];
-                                                  return false;
-                                                } else {
-                                                  if (func1(data29) < 1) {
-                                                    validate45.errors = [
-                                                      {
-                                                        instancePath:
-                                                          instancePath +
-                                                          '/providerSettings/operation/name',
-                                                        schemaPath:
-                                                          '#/properties/providerSettings/properties/operation/properties/name/minLength',
-                                                        keyword: 'minLength',
-                                                        params: { limit: 1 },
-                                                        message:
-                                                          'must NOT have fewer than 1 characters',
-                                                      },
-                                                    ];
-                                                    return false;
-                                                  } else {
-                                                    if (!pattern192.test(data29)) {
-                                                      validate45.errors = [
-                                                        {
-                                                          instancePath:
-                                                            instancePath +
-                                                            '/providerSettings/operation/name',
-                                                          schemaPath:
-                                                            '#/properties/providerSettings/properties/operation/properties/name/pattern',
-                                                          keyword: 'pattern',
-                                                          params: {
-                                                            pattern: '^[^\\x00-\\x1f\\x7f]+$',
-                                                          },
-                                                          message:
-                                                            'must match pattern "' +
-                                                            '^[^\\x00-\\x1f\\x7f]+$' +
-                                                            '"',
-                                                        },
-                                                      ];
-                                                      return false;
-                                                    }
-                                                  }
-                                                }
-                                              } else {
-                                                validate45.errors = [
-                                                  {
+                                                  const err79 = {
                                                     instancePath:
                                                       instancePath +
                                                       '/providerSettings/operation/name',
                                                     schemaPath:
-                                                      '#/properties/providerSettings/properties/operation/properties/name/type',
-                                                    keyword: 'type',
-                                                    params: { type: 'string' },
-                                                    message: 'must be string',
-                                                  },
-                                                ];
-                                                return false;
+                                                      '#/anyOf/0/properties/providerSettings/properties/operation/properties/name/maxLength',
+                                                    keyword: 'maxLength',
+                                                    params: { limit: 120 },
+                                                    message:
+                                                      'must NOT have more than 120 characters',
+                                                  };
+                                                  if (vErrors === null) {
+                                                    vErrors = [err79];
+                                                  } else {
+                                                    vErrors.push(err79);
+                                                  }
+                                                  errors++;
+                                                } else {
+                                                  if (func1(data29) < 1) {
+                                                    const err80 = {
+                                                      instancePath:
+                                                        instancePath +
+                                                        '/providerSettings/operation/name',
+                                                      schemaPath:
+                                                        '#/anyOf/0/properties/providerSettings/properties/operation/properties/name/minLength',
+                                                      keyword: 'minLength',
+                                                      params: { limit: 1 },
+                                                      message:
+                                                        'must NOT have fewer than 1 characters',
+                                                    };
+                                                    if (vErrors === null) {
+                                                      vErrors = [err80];
+                                                    } else {
+                                                      vErrors.push(err80);
+                                                    }
+                                                    errors++;
+                                                  } else {
+                                                    if (!pattern192.test(data29)) {
+                                                      const err81 = {
+                                                        instancePath:
+                                                          instancePath +
+                                                          '/providerSettings/operation/name',
+                                                        schemaPath:
+                                                          '#/anyOf/0/properties/providerSettings/properties/operation/properties/name/pattern',
+                                                        keyword: 'pattern',
+                                                        params: {
+                                                          pattern: '^[^\\x00-\\x1f\\x7f]+$',
+                                                        },
+                                                        message:
+                                                          'must match pattern "' +
+                                                          '^[^\\x00-\\x1f\\x7f]+$' +
+                                                          '"',
+                                                      };
+                                                      if (vErrors === null) {
+                                                        vErrors = [err81];
+                                                      } else {
+                                                        vErrors.push(err81);
+                                                      }
+                                                      errors++;
+                                                    }
+                                                  }
+                                                }
+                                              } else {
+                                                const err82 = {
+                                                  instancePath:
+                                                    instancePath +
+                                                    '/providerSettings/operation/name',
+                                                  schemaPath:
+                                                    '#/anyOf/0/properties/providerSettings/properties/operation/properties/name/type',
+                                                  keyword: 'type',
+                                                  params: { type: 'string' },
+                                                  message: 'must be string',
+                                                };
+                                                if (vErrors === null) {
+                                                  vErrors = [err82];
+                                                } else {
+                                                  vErrors.push(err82);
+                                                }
+                                                errors++;
                                               }
                                             }
-                                            var valid12 = _errs86 === errors;
+                                            var valid13 = _errs88 === errors;
                                           } else {
-                                            var valid12 = true;
+                                            var valid13 = true;
                                           }
-                                          if (valid12) {
+                                          if (valid13) {
                                             if (data27.provider !== undefined) {
                                               let data30 = data27.provider;
-                                              const _errs88 = errors;
+                                              const _errs90 = errors;
                                               if (typeof data30 !== 'string') {
-                                                validate45.errors = [
-                                                  {
-                                                    instancePath:
-                                                      instancePath +
-                                                      '/providerSettings/operation/provider',
-                                                    schemaPath:
-                                                      '#/properties/providerSettings/properties/operation/properties/provider/type',
-                                                    keyword: 'type',
-                                                    params: { type: 'string' },
-                                                    message: 'must be string',
-                                                  },
-                                                ];
-                                                return false;
+                                                const err83 = {
+                                                  instancePath:
+                                                    instancePath +
+                                                    '/providerSettings/operation/provider',
+                                                  schemaPath:
+                                                    '#/anyOf/0/properties/providerSettings/properties/operation/properties/provider/type',
+                                                  keyword: 'type',
+                                                  params: { type: 'string' },
+                                                  message: 'must be string',
+                                                };
+                                                if (vErrors === null) {
+                                                  vErrors = [err83];
+                                                } else {
+                                                  vErrors.push(err83);
+                                                }
+                                                errors++;
                                               }
                                               if (
                                                 !(
@@ -43740,48 +44029,54 @@ function validate45(
                                                   data30 === 'codex'
                                                 )
                                               ) {
-                                                validate45.errors = [
-                                                  {
-                                                    instancePath:
-                                                      instancePath +
-                                                      '/providerSettings/operation/provider',
-                                                    schemaPath:
-                                                      '#/properties/providerSettings/properties/operation/properties/provider/enum',
-                                                    keyword: 'enum',
-                                                    params: {
-                                                      allowedValues:
-                                                        schema52.properties.providerSettings
-                                                          .properties.operation.properties.provider
-                                                          .enum,
-                                                    },
-                                                    message:
-                                                      'must be equal to one of the allowed values',
+                                                const err84 = {
+                                                  instancePath:
+                                                    instancePath +
+                                                    '/providerSettings/operation/provider',
+                                                  schemaPath:
+                                                    '#/anyOf/0/properties/providerSettings/properties/operation/properties/provider/enum',
+                                                  keyword: 'enum',
+                                                  params: {
+                                                    allowedValues:
+                                                      schema52.anyOf[0].properties.providerSettings
+                                                        .properties.operation.properties.provider
+                                                        .enum,
                                                   },
-                                                ];
-                                                return false;
+                                                  message:
+                                                    'must be equal to one of the allowed values',
+                                                };
+                                                if (vErrors === null) {
+                                                  vErrors = [err84];
+                                                } else {
+                                                  vErrors.push(err84);
+                                                }
+                                                errors++;
                                               }
-                                              var valid12 = _errs88 === errors;
+                                              var valid13 = _errs90 === errors;
                                             } else {
-                                              var valid12 = true;
+                                              var valid13 = true;
                                             }
-                                            if (valid12) {
+                                            if (valid13) {
                                               if (data27.protocol !== undefined) {
                                                 let data31 = data27.protocol;
-                                                const _errs90 = errors;
+                                                const _errs92 = errors;
                                                 if (typeof data31 !== 'string') {
-                                                  validate45.errors = [
-                                                    {
-                                                      instancePath:
-                                                        instancePath +
-                                                        '/providerSettings/operation/protocol',
-                                                      schemaPath:
-                                                        '#/properties/providerSettings/properties/operation/properties/protocol/type',
-                                                      keyword: 'type',
-                                                      params: { type: 'string' },
-                                                      message: 'must be string',
-                                                    },
-                                                  ];
-                                                  return false;
+                                                  const err85 = {
+                                                    instancePath:
+                                                      instancePath +
+                                                      '/providerSettings/operation/protocol',
+                                                    schemaPath:
+                                                      '#/anyOf/0/properties/providerSettings/properties/operation/properties/protocol/type',
+                                                    keyword: 'type',
+                                                    params: { type: 'string' },
+                                                    message: 'must be string',
+                                                  };
+                                                  if (vErrors === null) {
+                                                    vErrors = [err85];
+                                                  } else {
+                                                    vErrors.push(err85);
+                                                  }
+                                                  errors++;
                                                 }
                                                 if (
                                                   !(
@@ -43789,46 +44084,49 @@ function validate45(
                                                     data31 === 'responses'
                                                   )
                                                 ) {
-                                                  validate45.errors = [
-                                                    {
-                                                      instancePath:
-                                                        instancePath +
-                                                        '/providerSettings/operation/protocol',
-                                                      schemaPath:
-                                                        '#/properties/providerSettings/properties/operation/properties/protocol/enum',
-                                                      keyword: 'enum',
-                                                      params: {
-                                                        allowedValues:
-                                                          schema52.properties.providerSettings
-                                                            .properties.operation.properties
-                                                            .protocol.enum,
-                                                      },
-                                                      message:
-                                                        'must be equal to one of the allowed values',
+                                                  const err86 = {
+                                                    instancePath:
+                                                      instancePath +
+                                                      '/providerSettings/operation/protocol',
+                                                    schemaPath:
+                                                      '#/anyOf/0/properties/providerSettings/properties/operation/properties/protocol/enum',
+                                                    keyword: 'enum',
+                                                    params: {
+                                                      allowedValues:
+                                                        schema52.anyOf[0].properties
+                                                          .providerSettings.properties.operation
+                                                          .properties.protocol.enum,
                                                     },
-                                                  ];
-                                                  return false;
+                                                    message:
+                                                      'must be equal to one of the allowed values',
+                                                  };
+                                                  if (vErrors === null) {
+                                                    vErrors = [err86];
+                                                  } else {
+                                                    vErrors.push(err86);
+                                                  }
+                                                  errors++;
                                                 }
-                                                var valid12 = _errs90 === errors;
+                                                var valid13 = _errs92 === errors;
                                               } else {
-                                                var valid12 = true;
+                                                var valid13 = true;
                                               }
-                                              if (valid12) {
+                                              if (valid13) {
                                                 if (data27.connectionId !== undefined) {
                                                   let data32 = data27.connectionId;
-                                                  const _errs92 = errors;
-                                                  const _errs93 = errors;
-                                                  let valid13 = false;
                                                   const _errs94 = errors;
-                                                  if (errors === _errs94) {
+                                                  const _errs95 = errors;
+                                                  let valid14 = false;
+                                                  const _errs96 = errors;
+                                                  if (errors === _errs96) {
                                                     if (typeof data32 === 'string') {
                                                       if (!pattern15.test(data32)) {
-                                                        const err38 = {
+                                                        const err87 = {
                                                           instancePath:
                                                             instancePath +
                                                             '/providerSettings/operation/connectionId',
                                                           schemaPath:
-                                                            '#/properties/providerSettings/properties/operation/properties/connectionId/anyOf/0/pattern',
+                                                            '#/anyOf/0/properties/providerSettings/properties/operation/properties/connectionId/anyOf/0/pattern',
                                                           keyword: 'pattern',
                                                           params: { pattern: '^[a-f0-9]{64}$' },
                                                           message:
@@ -43837,254 +44135,276 @@ function validate45(
                                                             '"',
                                                         };
                                                         if (vErrors === null) {
-                                                          vErrors = [err38];
+                                                          vErrors = [err87];
                                                         } else {
-                                                          vErrors.push(err38);
+                                                          vErrors.push(err87);
                                                         }
                                                         errors++;
                                                       }
                                                     } else {
-                                                      const err39 = {
+                                                      const err88 = {
                                                         instancePath:
                                                           instancePath +
                                                           '/providerSettings/operation/connectionId',
                                                         schemaPath:
-                                                          '#/properties/providerSettings/properties/operation/properties/connectionId/anyOf/0/type',
+                                                          '#/anyOf/0/properties/providerSettings/properties/operation/properties/connectionId/anyOf/0/type',
                                                         keyword: 'type',
                                                         params: { type: 'string' },
                                                         message: 'must be string',
                                                       };
                                                       if (vErrors === null) {
-                                                        vErrors = [err39];
+                                                        vErrors = [err88];
                                                       } else {
-                                                        vErrors.push(err39);
+                                                        vErrors.push(err88);
                                                       }
                                                       errors++;
                                                     }
                                                   }
-                                                  var _valid4 = _errs94 === errors;
-                                                  valid13 = valid13 || _valid4;
-                                                  const _errs96 = errors;
+                                                  var _valid5 = _errs96 === errors;
+                                                  valid14 = valid14 || _valid5;
+                                                  const _errs98 = errors;
                                                   if (data32 !== null) {
-                                                    const err40 = {
+                                                    const err89 = {
                                                       instancePath:
                                                         instancePath +
                                                         '/providerSettings/operation/connectionId',
                                                       schemaPath:
-                                                        '#/properties/providerSettings/properties/operation/properties/connectionId/anyOf/1/type',
+                                                        '#/anyOf/0/properties/providerSettings/properties/operation/properties/connectionId/anyOf/1/type',
                                                       keyword: 'type',
                                                       params: { type: 'null' },
                                                       message: 'must be null',
                                                     };
                                                     if (vErrors === null) {
-                                                      vErrors = [err40];
+                                                      vErrors = [err89];
                                                     } else {
-                                                      vErrors.push(err40);
+                                                      vErrors.push(err89);
                                                     }
                                                     errors++;
                                                   }
-                                                  var _valid4 = _errs96 === errors;
-                                                  valid13 = valid13 || _valid4;
-                                                  if (!valid13) {
-                                                    const err41 = {
+                                                  var _valid5 = _errs98 === errors;
+                                                  valid14 = valid14 || _valid5;
+                                                  if (!valid14) {
+                                                    const err90 = {
                                                       instancePath:
                                                         instancePath +
                                                         '/providerSettings/operation/connectionId',
                                                       schemaPath:
-                                                        '#/properties/providerSettings/properties/operation/properties/connectionId/anyOf',
+                                                        '#/anyOf/0/properties/providerSettings/properties/operation/properties/connectionId/anyOf',
                                                       keyword: 'anyOf',
                                                       params: {},
                                                       message: 'must match a schema in anyOf',
                                                     };
                                                     if (vErrors === null) {
-                                                      vErrors = [err41];
+                                                      vErrors = [err90];
                                                     } else {
-                                                      vErrors.push(err41);
+                                                      vErrors.push(err90);
                                                     }
                                                     errors++;
-                                                    validate45.errors = vErrors;
-                                                    return false;
                                                   } else {
-                                                    errors = _errs93;
+                                                    errors = _errs95;
                                                     if (vErrors !== null) {
-                                                      if (_errs93) {
-                                                        vErrors.length = _errs93;
+                                                      if (_errs95) {
+                                                        vErrors.length = _errs95;
                                                       } else {
                                                         vErrors = null;
                                                       }
                                                     }
                                                   }
-                                                  var valid12 = _errs92 === errors;
+                                                  var valid13 = _errs94 === errors;
                                                 } else {
-                                                  var valid12 = true;
+                                                  var valid13 = true;
                                                 }
-                                                if (valid12) {
+                                                if (valid13) {
                                                   if (data27.baseURL !== undefined) {
                                                     let data33 = data27.baseURL;
-                                                    const _errs98 = errors;
-                                                    if (errors === _errs98) {
+                                                    const _errs100 = errors;
+                                                    if (errors === _errs100) {
                                                       if (typeof data33 === 'string') {
                                                         if (func1(data33) > 4096) {
-                                                          validate45.errors = [
-                                                            {
-                                                              instancePath:
-                                                                instancePath +
-                                                                '/providerSettings/operation/baseURL',
-                                                              schemaPath:
-                                                                '#/properties/providerSettings/properties/operation/properties/baseURL/maxLength',
-                                                              keyword: 'maxLength',
-                                                              params: { limit: 4096 },
-                                                              message:
-                                                                'must NOT have more than 4096 characters',
-                                                            },
-                                                          ];
-                                                          return false;
-                                                        } else {
-                                                          if (func1(data33) < 1) {
-                                                            validate45.errors = [
-                                                              {
-                                                                instancePath:
-                                                                  instancePath +
-                                                                  '/providerSettings/operation/baseURL',
-                                                                schemaPath:
-                                                                  '#/properties/providerSettings/properties/operation/properties/baseURL/minLength',
-                                                                keyword: 'minLength',
-                                                                params: { limit: 1 },
-                                                                message:
-                                                                  'must NOT have fewer than 1 characters',
-                                                              },
-                                                            ];
-                                                            return false;
-                                                          }
-                                                        }
-                                                      } else {
-                                                        validate45.errors = [
-                                                          {
+                                                          const err91 = {
                                                             instancePath:
                                                               instancePath +
                                                               '/providerSettings/operation/baseURL',
                                                             schemaPath:
-                                                              '#/properties/providerSettings/properties/operation/properties/baseURL/type',
-                                                            keyword: 'type',
-                                                            params: { type: 'string' },
-                                                            message: 'must be string',
-                                                          },
-                                                        ];
-                                                        return false;
+                                                              '#/anyOf/0/properties/providerSettings/properties/operation/properties/baseURL/maxLength',
+                                                            keyword: 'maxLength',
+                                                            params: { limit: 4096 },
+                                                            message:
+                                                              'must NOT have more than 4096 characters',
+                                                          };
+                                                          if (vErrors === null) {
+                                                            vErrors = [err91];
+                                                          } else {
+                                                            vErrors.push(err91);
+                                                          }
+                                                          errors++;
+                                                        } else {
+                                                          if (func1(data33) < 1) {
+                                                            const err92 = {
+                                                              instancePath:
+                                                                instancePath +
+                                                                '/providerSettings/operation/baseURL',
+                                                              schemaPath:
+                                                                '#/anyOf/0/properties/providerSettings/properties/operation/properties/baseURL/minLength',
+                                                              keyword: 'minLength',
+                                                              params: { limit: 1 },
+                                                              message:
+                                                                'must NOT have fewer than 1 characters',
+                                                            };
+                                                            if (vErrors === null) {
+                                                              vErrors = [err92];
+                                                            } else {
+                                                              vErrors.push(err92);
+                                                            }
+                                                            errors++;
+                                                          }
+                                                        }
+                                                      } else {
+                                                        const err93 = {
+                                                          instancePath:
+                                                            instancePath +
+                                                            '/providerSettings/operation/baseURL',
+                                                          schemaPath:
+                                                            '#/anyOf/0/properties/providerSettings/properties/operation/properties/baseURL/type',
+                                                          keyword: 'type',
+                                                          params: { type: 'string' },
+                                                          message: 'must be string',
+                                                        };
+                                                        if (vErrors === null) {
+                                                          vErrors = [err93];
+                                                        } else {
+                                                          vErrors.push(err93);
+                                                        }
+                                                        errors++;
                                                       }
                                                     }
-                                                    var valid12 = _errs98 === errors;
+                                                    var valid13 = _errs100 === errors;
                                                   } else {
-                                                    var valid12 = true;
+                                                    var valid13 = true;
                                                   }
-                                                  if (valid12) {
+                                                  if (valid13) {
                                                     if (data27.modelNames !== undefined) {
                                                       let data34 = data27.modelNames;
-                                                      const _errs100 = errors;
-                                                      if (errors === _errs100) {
+                                                      const _errs102 = errors;
+                                                      if (errors === _errs102) {
                                                         if (Array.isArray(data34)) {
-                                                          var valid14 = true;
+                                                          var valid15 = true;
                                                           const len0 = data34.length;
                                                           for (let i0 = 0; i0 < len0; i0++) {
                                                             let data35 = data34[i0];
-                                                            const _errs102 = errors;
-                                                            if (errors === _errs102) {
+                                                            const _errs104 = errors;
+                                                            if (errors === _errs104) {
                                                               if (typeof data35 === 'string') {
                                                                 if (func1(data35) > 256) {
-                                                                  validate45.errors = [
-                                                                    {
-                                                                      instancePath:
-                                                                        instancePath +
-                                                                        '/providerSettings/operation/modelNames/' +
-                                                                        i0,
-                                                                      schemaPath:
-                                                                        '#/properties/providerSettings/properties/operation/properties/modelNames/items/maxLength',
-                                                                      keyword: 'maxLength',
-                                                                      params: { limit: 256 },
-                                                                      message:
-                                                                        'must NOT have more than 256 characters',
-                                                                    },
-                                                                  ];
-                                                                  return false;
-                                                                } else {
-                                                                  if (func1(data35) < 1) {
-                                                                    validate45.errors = [
-                                                                      {
-                                                                        instancePath:
-                                                                          instancePath +
-                                                                          '/providerSettings/operation/modelNames/' +
-                                                                          i0,
-                                                                        schemaPath:
-                                                                          '#/properties/providerSettings/properties/operation/properties/modelNames/items/minLength',
-                                                                        keyword: 'minLength',
-                                                                        params: { limit: 1 },
-                                                                        message:
-                                                                          'must NOT have fewer than 1 characters',
-                                                                      },
-                                                                    ];
-                                                                    return false;
-                                                                  }
-                                                                }
-                                                              } else {
-                                                                validate45.errors = [
-                                                                  {
+                                                                  const err94 = {
                                                                     instancePath:
                                                                       instancePath +
                                                                       '/providerSettings/operation/modelNames/' +
                                                                       i0,
                                                                     schemaPath:
-                                                                      '#/properties/providerSettings/properties/operation/properties/modelNames/items/type',
-                                                                    keyword: 'type',
-                                                                    params: { type: 'string' },
-                                                                    message: 'must be string',
-                                                                  },
-                                                                ];
-                                                                return false;
+                                                                      '#/anyOf/0/properties/providerSettings/properties/operation/properties/modelNames/items/maxLength',
+                                                                    keyword: 'maxLength',
+                                                                    params: { limit: 256 },
+                                                                    message:
+                                                                      'must NOT have more than 256 characters',
+                                                                  };
+                                                                  if (vErrors === null) {
+                                                                    vErrors = [err94];
+                                                                  } else {
+                                                                    vErrors.push(err94);
+                                                                  }
+                                                                  errors++;
+                                                                } else {
+                                                                  if (func1(data35) < 1) {
+                                                                    const err95 = {
+                                                                      instancePath:
+                                                                        instancePath +
+                                                                        '/providerSettings/operation/modelNames/' +
+                                                                        i0,
+                                                                      schemaPath:
+                                                                        '#/anyOf/0/properties/providerSettings/properties/operation/properties/modelNames/items/minLength',
+                                                                      keyword: 'minLength',
+                                                                      params: { limit: 1 },
+                                                                      message:
+                                                                        'must NOT have fewer than 1 characters',
+                                                                    };
+                                                                    if (vErrors === null) {
+                                                                      vErrors = [err95];
+                                                                    } else {
+                                                                      vErrors.push(err95);
+                                                                    }
+                                                                    errors++;
+                                                                  }
+                                                                }
+                                                              } else {
+                                                                const err96 = {
+                                                                  instancePath:
+                                                                    instancePath +
+                                                                    '/providerSettings/operation/modelNames/' +
+                                                                    i0,
+                                                                  schemaPath:
+                                                                    '#/anyOf/0/properties/providerSettings/properties/operation/properties/modelNames/items/type',
+                                                                  keyword: 'type',
+                                                                  params: { type: 'string' },
+                                                                  message: 'must be string',
+                                                                };
+                                                                if (vErrors === null) {
+                                                                  vErrors = [err96];
+                                                                } else {
+                                                                  vErrors.push(err96);
+                                                                }
+                                                                errors++;
                                                               }
                                                             }
-                                                            var valid14 = _errs102 === errors;
-                                                            if (!valid14) {
+                                                            var valid15 = _errs104 === errors;
+                                                            if (!valid15) {
                                                               break;
                                                             }
                                                           }
                                                         } else {
-                                                          validate45.errors = [
-                                                            {
-                                                              instancePath:
-                                                                instancePath +
-                                                                '/providerSettings/operation/modelNames',
-                                                              schemaPath:
-                                                                '#/properties/providerSettings/properties/operation/properties/modelNames/type',
-                                                              keyword: 'type',
-                                                              params: { type: 'array' },
-                                                              message: 'must be array',
-                                                            },
-                                                          ];
-                                                          return false;
+                                                          const err97 = {
+                                                            instancePath:
+                                                              instancePath +
+                                                              '/providerSettings/operation/modelNames',
+                                                            schemaPath:
+                                                              '#/anyOf/0/properties/providerSettings/properties/operation/properties/modelNames/type',
+                                                            keyword: 'type',
+                                                            params: { type: 'array' },
+                                                            message: 'must be array',
+                                                          };
+                                                          if (vErrors === null) {
+                                                            vErrors = [err97];
+                                                          } else {
+                                                            vErrors.push(err97);
+                                                          }
+                                                          errors++;
                                                         }
                                                       }
-                                                      var valid12 = _errs100 === errors;
+                                                      var valid13 = _errs102 === errors;
                                                     } else {
-                                                      var valid12 = true;
+                                                      var valid13 = true;
                                                     }
-                                                    if (valid12) {
+                                                    if (valid13) {
                                                       if (data27.credential !== undefined) {
                                                         let data36 = data27.credential;
-                                                        const _errs104 = errors;
+                                                        const _errs106 = errors;
                                                         if (typeof data36 !== 'string') {
-                                                          validate45.errors = [
-                                                            {
-                                                              instancePath:
-                                                                instancePath +
-                                                                '/providerSettings/operation/credential',
-                                                              schemaPath:
-                                                                '#/properties/providerSettings/properties/operation/properties/credential/type',
-                                                              keyword: 'type',
-                                                              params: { type: 'string' },
-                                                              message: 'must be string',
-                                                            },
-                                                          ];
-                                                          return false;
+                                                          const err98 = {
+                                                            instancePath:
+                                                              instancePath +
+                                                              '/providerSettings/operation/credential',
+                                                            schemaPath:
+                                                              '#/anyOf/0/properties/providerSettings/properties/operation/properties/credential/type',
+                                                            keyword: 'type',
+                                                            params: { type: 'string' },
+                                                            message: 'must be string',
+                                                          };
+                                                          if (vErrors === null) {
+                                                            vErrors = [err98];
+                                                          } else {
+                                                            vErrors.push(err98);
+                                                          }
+                                                          errors++;
                                                         }
                                                         if (
                                                           !(
@@ -44093,30 +44413,33 @@ function validate45(
                                                             data36 === 'none'
                                                           )
                                                         ) {
-                                                          validate45.errors = [
-                                                            {
-                                                              instancePath:
-                                                                instancePath +
-                                                                '/providerSettings/operation/credential',
-                                                              schemaPath:
-                                                                '#/properties/providerSettings/properties/operation/properties/credential/enum',
-                                                              keyword: 'enum',
-                                                              params: {
-                                                                allowedValues:
-                                                                  schema52.properties
-                                                                    .providerSettings.properties
-                                                                    .operation.properties.credential
-                                                                    .enum,
-                                                              },
-                                                              message:
-                                                                'must be equal to one of the allowed values',
+                                                          const err99 = {
+                                                            instancePath:
+                                                              instancePath +
+                                                              '/providerSettings/operation/credential',
+                                                            schemaPath:
+                                                              '#/anyOf/0/properties/providerSettings/properties/operation/properties/credential/enum',
+                                                            keyword: 'enum',
+                                                            params: {
+                                                              allowedValues:
+                                                                schema52.anyOf[0].properties
+                                                                  .providerSettings.properties
+                                                                  .operation.properties.credential
+                                                                  .enum,
                                                             },
-                                                          ];
-                                                          return false;
+                                                            message:
+                                                              'must be equal to one of the allowed values',
+                                                          };
+                                                          if (vErrors === null) {
+                                                            vErrors = [err99];
+                                                          } else {
+                                                            vErrors.push(err99);
+                                                          }
+                                                          errors++;
                                                         }
-                                                        var valid12 = _errs104 === errors;
+                                                        var valid13 = _errs106 === errors;
                                                       } else {
-                                                        var valid12 = true;
+                                                        var valid13 = true;
                                                       }
                                                     }
                                                   }
@@ -44127,58 +44450,66 @@ function validate45(
                                         }
                                       }
                                     } else {
-                                      validate45.errors = [
-                                        {
-                                          instancePath:
-                                            instancePath + '/providerSettings/operation',
-                                          schemaPath:
-                                            '#/properties/providerSettings/properties/operation/type',
-                                          keyword: 'type',
-                                          params: { type: 'object' },
-                                          message: 'must be object',
-                                        },
-                                      ];
-                                      return false;
+                                      const err100 = {
+                                        instancePath: instancePath + '/providerSettings/operation',
+                                        schemaPath:
+                                          '#/anyOf/0/properties/providerSettings/properties/operation/type',
+                                        keyword: 'type',
+                                        params: { type: 'object' },
+                                        message: 'must be object',
+                                      };
+                                      if (vErrors === null) {
+                                        vErrors = [err100];
+                                      } else {
+                                        vErrors.push(err100);
+                                      }
+                                      errors++;
                                     }
                                   }
-                                  var valid9 = _errs81 === errors;
+                                  var valid10 = _errs83 === errors;
                                 } else {
-                                  var valid9 = true;
+                                  var valid10 = true;
                                 }
                               }
                             }
                           } else {
-                            validate45.errors = [
-                              {
-                                instancePath: instancePath + '/providerSettings',
-                                schemaPath: '#/properties/providerSettings/type',
-                                keyword: 'type',
-                                params: { type: 'object' },
-                                message: 'must be object',
-                              },
-                            ];
-                            return false;
+                            const err101 = {
+                              instancePath: instancePath + '/providerSettings',
+                              schemaPath: '#/anyOf/0/properties/providerSettings/type',
+                              keyword: 'type',
+                              params: { type: 'object' },
+                              message: 'must be object',
+                            };
+                            if (vErrors === null) {
+                              vErrors = [err101];
+                            } else {
+                              vErrors.push(err101);
+                            }
+                            errors++;
                           }
                         }
-                        var valid0 = _errs63 === errors;
+                        var valid1 = _errs65 === errors;
                       } else {
-                        var valid0 = true;
+                        var valid1 = true;
                       }
-                      if (valid0) {
+                      if (valid1) {
                         if (data.state !== undefined) {
                           let data37 = data.state;
-                          const _errs106 = errors;
+                          const _errs108 = errors;
                           if (typeof data37 !== 'string') {
-                            validate45.errors = [
-                              {
-                                instancePath: instancePath + '/state',
-                                schemaPath: '#/properties/state/type',
-                                keyword: 'type',
-                                params: { type: 'string' },
-                                message: 'must be string',
-                              },
-                            ];
-                            return false;
+                            const err102 = {
+                              instancePath: instancePath + '/state',
+                              schemaPath: '#/anyOf/0/properties/state/type',
+                              keyword: 'type',
+                              params: { type: 'string' },
+                              message: 'must be string',
+                            };
+                            if (vErrors === null) {
+                              vErrors = [err102];
+                            } else {
+                              vErrors.push(err102);
+                            }
+                            errors++;
                           }
                           if (
                             !(
@@ -44188,183 +44519,186 @@ function validate45(
                               data37 === 'outcome_unknown'
                             )
                           ) {
-                            validate45.errors = [
-                              {
-                                instancePath: instancePath + '/state',
-                                schemaPath: '#/properties/state/enum',
-                                keyword: 'enum',
-                                params: { allowedValues: schema52.properties.state.enum },
-                                message: 'must be equal to one of the allowed values',
-                              },
-                            ];
-                            return false;
+                            const err103 = {
+                              instancePath: instancePath + '/state',
+                              schemaPath: '#/anyOf/0/properties/state/enum',
+                              keyword: 'enum',
+                              params: { allowedValues: schema52.anyOf[0].properties.state.enum },
+                              message: 'must be equal to one of the allowed values',
+                            };
+                            if (vErrors === null) {
+                              vErrors = [err103];
+                            } else {
+                              vErrors.push(err103);
+                            }
+                            errors++;
                           }
-                          var valid0 = _errs106 === errors;
+                          var valid1 = _errs108 === errors;
                         } else {
-                          var valid0 = true;
+                          var valid1 = true;
                         }
-                        if (valid0) {
+                        if (valid1) {
                           if (data.receipt !== undefined) {
                             let data38 = data.receipt;
-                            const _errs108 = errors;
-                            const _errs109 = errors;
-                            let valid15 = false;
                             const _errs110 = errors;
-                            if (errors === _errs110) {
+                            const _errs111 = errors;
+                            let valid16 = false;
+                            const _errs112 = errors;
+                            if (errors === _errs112) {
                               if (data38 && typeof data38 == 'object' && !Array.isArray(data38)) {
                               } else {
-                                const err42 = {
+                                const err104 = {
                                   instancePath: instancePath + '/receipt',
-                                  schemaPath: '#/properties/receipt/anyOf/0/type',
+                                  schemaPath: '#/anyOf/0/properties/receipt/anyOf/0/type',
                                   keyword: 'type',
                                   params: { type: 'object' },
                                   message: 'must be object',
                                 };
                                 if (vErrors === null) {
-                                  vErrors = [err42];
+                                  vErrors = [err104];
                                 } else {
-                                  vErrors.push(err42);
+                                  vErrors.push(err104);
                                 }
                                 errors++;
                               }
                             }
-                            var _valid5 = _errs110 === errors;
-                            valid15 = valid15 || _valid5;
-                            if (_valid5) {
+                            var _valid6 = _errs112 === errors;
+                            valid16 = valid16 || _valid6;
+                            if (_valid6) {
                               var props1 = true;
                             }
-                            const _errs113 = errors;
-                            if (errors === _errs113) {
+                            const _errs115 = errors;
+                            if (errors === _errs115) {
                               if (data38 && typeof data38 == 'object' && !Array.isArray(data38)) {
                                 let missing9;
                                 if (
                                   (data38.status === undefined && (missing9 = 'status')) ||
                                   (data38.etag === undefined && (missing9 = 'etag'))
                                 ) {
-                                  const err43 = {
+                                  const err105 = {
                                     instancePath: instancePath + '/receipt',
-                                    schemaPath: '#/properties/receipt/anyOf/1/required',
+                                    schemaPath: '#/anyOf/0/properties/receipt/anyOf/1/required',
                                     keyword: 'required',
                                     params: { missingProperty: missing9 },
                                     message: "must have required property '" + missing9 + "'",
                                   };
                                   if (vErrors === null) {
-                                    vErrors = [err43];
+                                    vErrors = [err105];
                                   } else {
-                                    vErrors.push(err43);
+                                    vErrors.push(err105);
                                   }
                                   errors++;
                                 } else {
                                   if (data38.status !== undefined) {
                                     let data39 = data38.status;
-                                    const _errs116 = errors;
+                                    const _errs118 = errors;
                                     if (typeof data39 !== 'string') {
-                                      const err44 = {
+                                      const err106 = {
                                         instancePath: instancePath + '/receipt/status',
                                         schemaPath:
-                                          '#/properties/receipt/anyOf/1/properties/status/type',
+                                          '#/anyOf/0/properties/receipt/anyOf/1/properties/status/type',
                                         keyword: 'type',
                                         params: { type: 'string' },
                                         message: 'must be string',
                                       };
                                       if (vErrors === null) {
-                                        vErrors = [err44];
+                                        vErrors = [err106];
                                       } else {
-                                        vErrors.push(err44);
+                                        vErrors.push(err106);
                                       }
                                       errors++;
                                     }
                                     if (data39 !== 'applied') {
-                                      const err45 = {
+                                      const err107 = {
                                         instancePath: instancePath + '/receipt/status',
                                         schemaPath:
-                                          '#/properties/receipt/anyOf/1/properties/status/const',
+                                          '#/anyOf/0/properties/receipt/anyOf/1/properties/status/const',
                                         keyword: 'const',
                                         params: { allowedValue: 'applied' },
                                         message: 'must be equal to constant',
                                       };
                                       if (vErrors === null) {
-                                        vErrors = [err45];
+                                        vErrors = [err107];
                                       } else {
-                                        vErrors.push(err45);
+                                        vErrors.push(err107);
                                       }
                                       errors++;
                                     }
-                                    var valid16 = _errs116 === errors;
+                                    var valid17 = _errs118 === errors;
                                   } else {
-                                    var valid16 = true;
+                                    var valid17 = true;
                                   }
-                                  if (valid16) {
+                                  if (valid17) {
                                     if (data38.etag !== undefined) {
                                       let data40 = data38.etag;
-                                      const _errs118 = errors;
-                                      if (errors === _errs118) {
+                                      const _errs120 = errors;
+                                      if (errors === _errs120) {
                                         if (typeof data40 === 'string') {
                                           if (!pattern15.test(data40)) {
-                                            const err46 = {
+                                            const err108 = {
                                               instancePath: instancePath + '/receipt/etag',
                                               schemaPath:
-                                                '#/properties/receipt/anyOf/1/properties/etag/pattern',
+                                                '#/anyOf/0/properties/receipt/anyOf/1/properties/etag/pattern',
                                               keyword: 'pattern',
                                               params: { pattern: '^[a-f0-9]{64}$' },
                                               message:
                                                 'must match pattern "' + '^[a-f0-9]{64}$' + '"',
                                             };
                                             if (vErrors === null) {
-                                              vErrors = [err46];
+                                              vErrors = [err108];
                                             } else {
-                                              vErrors.push(err46);
+                                              vErrors.push(err108);
                                             }
                                             errors++;
                                           }
                                         } else {
-                                          const err47 = {
+                                          const err109 = {
                                             instancePath: instancePath + '/receipt/etag',
                                             schemaPath:
-                                              '#/properties/receipt/anyOf/1/properties/etag/type',
+                                              '#/anyOf/0/properties/receipt/anyOf/1/properties/etag/type',
                                             keyword: 'type',
                                             params: { type: 'string' },
                                             message: 'must be string',
                                           };
                                           if (vErrors === null) {
-                                            vErrors = [err47];
+                                            vErrors = [err109];
                                           } else {
-                                            vErrors.push(err47);
+                                            vErrors.push(err109);
                                           }
                                           errors++;
                                         }
                                       }
-                                      var valid16 = _errs118 === errors;
+                                      var valid17 = _errs120 === errors;
                                     } else {
-                                      var valid16 = true;
+                                      var valid17 = true;
                                     }
                                   }
                                 }
                               } else {
-                                const err48 = {
+                                const err110 = {
                                   instancePath: instancePath + '/receipt',
-                                  schemaPath: '#/properties/receipt/anyOf/1/type',
+                                  schemaPath: '#/anyOf/0/properties/receipt/anyOf/1/type',
                                   keyword: 'type',
                                   params: { type: 'object' },
                                   message: 'must be object',
                                 };
                                 if (vErrors === null) {
-                                  vErrors = [err48];
+                                  vErrors = [err110];
                                 } else {
-                                  vErrors.push(err48);
+                                  vErrors.push(err110);
                                 }
                                 errors++;
                               }
                             }
-                            var _valid5 = _errs113 === errors;
-                            valid15 = valid15 || _valid5;
-                            if (_valid5) {
+                            var _valid6 = _errs115 === errors;
+                            valid16 = valid16 || _valid6;
+                            if (_valid6) {
                               if (props1 !== true) {
                                 props1 = true;
                               }
                             }
-                            const _errs120 = errors;
-                            if (errors === _errs120) {
+                            const _errs122 = errors;
+                            if (errors === _errs122) {
                               if (data38 && typeof data38 == 'object' && !Array.isArray(data38)) {
                                 let missing10;
                                 if (
@@ -44375,201 +44709,201 @@ function validate45(
                                   (data38.configurationState === undefined &&
                                     (missing10 = 'configurationState'))
                                 ) {
-                                  const err49 = {
+                                  const err111 = {
                                     instancePath: instancePath + '/receipt',
-                                    schemaPath: '#/properties/receipt/anyOf/2/required',
+                                    schemaPath: '#/anyOf/0/properties/receipt/anyOf/2/required',
                                     keyword: 'required',
                                     params: { missingProperty: missing10 },
                                     message: "must have required property '" + missing10 + "'",
                                   };
                                   if (vErrors === null) {
-                                    vErrors = [err49];
+                                    vErrors = [err111];
                                   } else {
-                                    vErrors.push(err49);
+                                    vErrors.push(err111);
                                   }
                                   errors++;
                                 } else {
                                   if (data38.status !== undefined) {
                                     let data41 = data38.status;
-                                    const _errs123 = errors;
+                                    const _errs125 = errors;
                                     if (typeof data41 !== 'string') {
-                                      const err50 = {
+                                      const err112 = {
                                         instancePath: instancePath + '/receipt/status',
                                         schemaPath:
-                                          '#/properties/receipt/anyOf/2/properties/status/type',
+                                          '#/anyOf/0/properties/receipt/anyOf/2/properties/status/type',
                                         keyword: 'type',
                                         params: { type: 'string' },
                                         message: 'must be string',
                                       };
                                       if (vErrors === null) {
-                                        vErrors = [err50];
+                                        vErrors = [err112];
                                       } else {
-                                        vErrors.push(err50);
+                                        vErrors.push(err112);
                                       }
                                       errors++;
                                     }
                                     if (data41 !== 'applied') {
-                                      const err51 = {
+                                      const err113 = {
                                         instancePath: instancePath + '/receipt/status',
                                         schemaPath:
-                                          '#/properties/receipt/anyOf/2/properties/status/const',
+                                          '#/anyOf/0/properties/receipt/anyOf/2/properties/status/const',
                                         keyword: 'const',
                                         params: { allowedValue: 'applied' },
                                         message: 'must be equal to constant',
                                       };
                                       if (vErrors === null) {
-                                        vErrors = [err51];
+                                        vErrors = [err113];
                                       } else {
-                                        vErrors.push(err51);
+                                        vErrors.push(err113);
                                       }
                                       errors++;
                                     }
-                                    var valid17 = _errs123 === errors;
+                                    var valid18 = _errs125 === errors;
                                   } else {
-                                    var valid17 = true;
+                                    var valid18 = true;
                                   }
-                                  if (valid17) {
+                                  if (valid18) {
                                     if (data38.etag !== undefined) {
                                       let data42 = data38.etag;
-                                      const _errs125 = errors;
-                                      if (errors === _errs125) {
+                                      const _errs127 = errors;
+                                      if (errors === _errs127) {
                                         if (typeof data42 === 'string') {
                                           if (!pattern15.test(data42)) {
-                                            const err52 = {
+                                            const err114 = {
                                               instancePath: instancePath + '/receipt/etag',
                                               schemaPath:
-                                                '#/properties/receipt/anyOf/2/properties/etag/pattern',
+                                                '#/anyOf/0/properties/receipt/anyOf/2/properties/etag/pattern',
                                               keyword: 'pattern',
                                               params: { pattern: '^[a-f0-9]{64}$' },
                                               message:
                                                 'must match pattern "' + '^[a-f0-9]{64}$' + '"',
                                             };
                                             if (vErrors === null) {
-                                              vErrors = [err52];
+                                              vErrors = [err114];
                                             } else {
-                                              vErrors.push(err52);
+                                              vErrors.push(err114);
                                             }
                                             errors++;
                                           }
                                         } else {
-                                          const err53 = {
+                                          const err115 = {
                                             instancePath: instancePath + '/receipt/etag',
                                             schemaPath:
-                                              '#/properties/receipt/anyOf/2/properties/etag/type',
+                                              '#/anyOf/0/properties/receipt/anyOf/2/properties/etag/type',
                                             keyword: 'type',
                                             params: { type: 'string' },
                                             message: 'must be string',
                                           };
                                           if (vErrors === null) {
-                                            vErrors = [err53];
+                                            vErrors = [err115];
                                           } else {
-                                            vErrors.push(err53);
+                                            vErrors.push(err115);
                                           }
                                           errors++;
                                         }
                                       }
-                                      var valid17 = _errs125 === errors;
+                                      var valid18 = _errs127 === errors;
                                     } else {
-                                      var valid17 = true;
+                                      var valid18 = true;
                                     }
-                                    if (valid17) {
+                                    if (valid18) {
                                       if (data38.credentialState !== undefined) {
                                         let data43 = data38.credentialState;
-                                        const _errs127 = errors;
+                                        const _errs129 = errors;
                                         if (typeof data43 !== 'string') {
-                                          const err54 = {
+                                          const err116 = {
                                             instancePath: instancePath + '/receipt/credentialState',
                                             schemaPath:
-                                              '#/properties/receipt/anyOf/2/properties/credentialState/type',
+                                              '#/anyOf/0/properties/receipt/anyOf/2/properties/credentialState/type',
                                             keyword: 'type',
                                             params: { type: 'string' },
                                             message: 'must be string',
                                           };
                                           if (vErrors === null) {
-                                            vErrors = [err54];
+                                            vErrors = [err116];
                                           } else {
-                                            vErrors.push(err54);
+                                            vErrors.push(err116);
                                           }
                                           errors++;
                                         }
                                         if (!(data43 === 'unchanged' || data43 === 'stored')) {
-                                          const err55 = {
+                                          const err117 = {
                                             instancePath: instancePath + '/receipt/credentialState',
                                             schemaPath:
-                                              '#/properties/receipt/anyOf/2/properties/credentialState/enum',
+                                              '#/anyOf/0/properties/receipt/anyOf/2/properties/credentialState/enum',
                                             keyword: 'enum',
                                             params: {
                                               allowedValues:
-                                                schema52.properties.receipt.anyOf[2].properties
-                                                  .credentialState.enum,
+                                                schema52.anyOf[0].properties.receipt.anyOf[2]
+                                                  .properties.credentialState.enum,
                                             },
                                             message: 'must be equal to one of the allowed values',
                                           };
                                           if (vErrors === null) {
-                                            vErrors = [err55];
+                                            vErrors = [err117];
                                           } else {
-                                            vErrors.push(err55);
+                                            vErrors.push(err117);
                                           }
                                           errors++;
                                         }
-                                        var valid17 = _errs127 === errors;
+                                        var valid18 = _errs129 === errors;
                                       } else {
-                                        var valid17 = true;
+                                        var valid18 = true;
                                       }
-                                      if (valid17) {
+                                      if (valid18) {
                                         if (data38.configurationState !== undefined) {
                                           let data44 = data38.configurationState;
-                                          const _errs129 = errors;
+                                          const _errs131 = errors;
                                           if (typeof data44 !== 'string') {
-                                            const err56 = {
+                                            const err118 = {
                                               instancePath:
                                                 instancePath + '/receipt/configurationState',
                                               schemaPath:
-                                                '#/properties/receipt/anyOf/2/properties/configurationState/type',
+                                                '#/anyOf/0/properties/receipt/anyOf/2/properties/configurationState/type',
                                               keyword: 'type',
                                               params: { type: 'string' },
                                               message: 'must be string',
                                             };
                                             if (vErrors === null) {
-                                              vErrors = [err56];
+                                              vErrors = [err118];
                                             } else {
-                                              vErrors.push(err56);
+                                              vErrors.push(err118);
                                             }
                                             errors++;
                                           }
                                           if (data44 !== 'published') {
-                                            const err57 = {
+                                            const err119 = {
                                               instancePath:
                                                 instancePath + '/receipt/configurationState',
                                               schemaPath:
-                                                '#/properties/receipt/anyOf/2/properties/configurationState/const',
+                                                '#/anyOf/0/properties/receipt/anyOf/2/properties/configurationState/const',
                                               keyword: 'const',
                                               params: { allowedValue: 'published' },
                                               message: 'must be equal to constant',
                                             };
                                             if (vErrors === null) {
-                                              vErrors = [err57];
+                                              vErrors = [err119];
                                             } else {
-                                              vErrors.push(err57);
+                                              vErrors.push(err119);
                                             }
                                             errors++;
                                           }
-                                          var valid17 = _errs129 === errors;
+                                          var valid18 = _errs131 === errors;
                                         } else {
-                                          var valid17 = true;
+                                          var valid18 = true;
                                         }
-                                        if (valid17) {
+                                        if (valid18) {
                                           if (data38.opaqueRef !== undefined) {
                                             let data45 = data38.opaqueRef;
-                                            const _errs131 = errors;
-                                            if (errors === _errs131) {
+                                            const _errs133 = errors;
+                                            if (errors === _errs133) {
                                               if (typeof data45 === 'string') {
                                                 if (!pattern216.test(data45)) {
-                                                  const err58 = {
+                                                  const err120 = {
                                                     instancePath:
                                                       instancePath + '/receipt/opaqueRef',
                                                     schemaPath:
-                                                      '#/properties/receipt/anyOf/2/properties/opaqueRef/pattern',
+                                                      '#/anyOf/0/properties/receipt/anyOf/2/properties/opaqueRef/pattern',
                                                     keyword: 'pattern',
                                                     params: {
                                                       pattern: '^credential:[0-9a-f-]{36}$',
@@ -44580,32 +44914,32 @@ function validate45(
                                                       '"',
                                                   };
                                                   if (vErrors === null) {
-                                                    vErrors = [err58];
+                                                    vErrors = [err120];
                                                   } else {
-                                                    vErrors.push(err58);
+                                                    vErrors.push(err120);
                                                   }
                                                   errors++;
                                                 }
                                               } else {
-                                                const err59 = {
+                                                const err121 = {
                                                   instancePath: instancePath + '/receipt/opaqueRef',
                                                   schemaPath:
-                                                    '#/properties/receipt/anyOf/2/properties/opaqueRef/type',
+                                                    '#/anyOf/0/properties/receipt/anyOf/2/properties/opaqueRef/type',
                                                   keyword: 'type',
                                                   params: { type: 'string' },
                                                   message: 'must be string',
                                                 };
                                                 if (vErrors === null) {
-                                                  vErrors = [err59];
+                                                  vErrors = [err121];
                                                 } else {
-                                                  vErrors.push(err59);
+                                                  vErrors.push(err121);
                                                 }
                                                 errors++;
                                               }
                                             }
-                                            var valid17 = _errs131 === errors;
+                                            var valid18 = _errs133 === errors;
                                           } else {
-                                            var valid17 = true;
+                                            var valid18 = true;
                                           }
                                         }
                                       }
@@ -44613,30 +44947,30 @@ function validate45(
                                   }
                                 }
                               } else {
-                                const err60 = {
+                                const err122 = {
                                   instancePath: instancePath + '/receipt',
-                                  schemaPath: '#/properties/receipt/anyOf/2/type',
+                                  schemaPath: '#/anyOf/0/properties/receipt/anyOf/2/type',
                                   keyword: 'type',
                                   params: { type: 'object' },
                                   message: 'must be object',
                                 };
                                 if (vErrors === null) {
-                                  vErrors = [err60];
+                                  vErrors = [err122];
                                 } else {
-                                  vErrors.push(err60);
+                                  vErrors.push(err122);
                                 }
                                 errors++;
                               }
                             }
-                            var _valid5 = _errs120 === errors;
-                            valid15 = valid15 || _valid5;
-                            if (_valid5) {
+                            var _valid6 = _errs122 === errors;
+                            valid16 = valid16 || _valid6;
+                            if (_valid6) {
                               if (props1 !== true) {
                                 props1 = true;
                               }
                             }
-                            const _errs133 = errors;
-                            if (errors === _errs133) {
+                            const _errs135 = errors;
+                            if (errors === _errs135) {
                               if (data38 && typeof data38 == 'object' && !Array.isArray(data38)) {
                                 let missing11;
                                 if (
@@ -44644,70 +44978,70 @@ function validate45(
                                   (data38.opaqueRef === undefined && (missing11 = 'opaqueRef')) ||
                                   (data38.persistence === undefined && (missing11 = 'persistence'))
                                 ) {
-                                  const err61 = {
+                                  const err123 = {
                                     instancePath: instancePath + '/receipt',
-                                    schemaPath: '#/properties/receipt/anyOf/3/required',
+                                    schemaPath: '#/anyOf/0/properties/receipt/anyOf/3/required',
                                     keyword: 'required',
                                     params: { missingProperty: missing11 },
                                     message: "must have required property '" + missing11 + "'",
                                   };
                                   if (vErrors === null) {
-                                    vErrors = [err61];
+                                    vErrors = [err123];
                                   } else {
-                                    vErrors.push(err61);
+                                    vErrors.push(err123);
                                   }
                                   errors++;
                                 } else {
                                   if (data38.status !== undefined) {
                                     let data46 = data38.status;
-                                    const _errs136 = errors;
+                                    const _errs138 = errors;
                                     if (typeof data46 !== 'string') {
-                                      const err62 = {
+                                      const err124 = {
                                         instancePath: instancePath + '/receipt/status',
                                         schemaPath:
-                                          '#/properties/receipt/anyOf/3/properties/status/type',
+                                          '#/anyOf/0/properties/receipt/anyOf/3/properties/status/type',
                                         keyword: 'type',
                                         params: { type: 'string' },
                                         message: 'must be string',
                                       };
                                       if (vErrors === null) {
-                                        vErrors = [err62];
+                                        vErrors = [err124];
                                       } else {
-                                        vErrors.push(err62);
+                                        vErrors.push(err124);
                                       }
                                       errors++;
                                     }
                                     if (data46 !== 'applied') {
-                                      const err63 = {
+                                      const err125 = {
                                         instancePath: instancePath + '/receipt/status',
                                         schemaPath:
-                                          '#/properties/receipt/anyOf/3/properties/status/const',
+                                          '#/anyOf/0/properties/receipt/anyOf/3/properties/status/const',
                                         keyword: 'const',
                                         params: { allowedValue: 'applied' },
                                         message: 'must be equal to constant',
                                       };
                                       if (vErrors === null) {
-                                        vErrors = [err63];
+                                        vErrors = [err125];
                                       } else {
-                                        vErrors.push(err63);
+                                        vErrors.push(err125);
                                       }
                                       errors++;
                                     }
-                                    var valid18 = _errs136 === errors;
+                                    var valid19 = _errs138 === errors;
                                   } else {
-                                    var valid18 = true;
+                                    var valid19 = true;
                                   }
-                                  if (valid18) {
+                                  if (valid19) {
                                     if (data38.opaqueRef !== undefined) {
                                       let data47 = data38.opaqueRef;
-                                      const _errs138 = errors;
-                                      if (errors === _errs138) {
+                                      const _errs140 = errors;
+                                      if (errors === _errs140) {
                                         if (typeof data47 === 'string') {
                                           if (!pattern216.test(data47)) {
-                                            const err64 = {
+                                            const err126 = {
                                               instancePath: instancePath + '/receipt/opaqueRef',
                                               schemaPath:
-                                                '#/properties/receipt/anyOf/3/properties/opaqueRef/pattern',
+                                                '#/anyOf/0/properties/receipt/anyOf/3/properties/opaqueRef/pattern',
                                               keyword: 'pattern',
                                               params: { pattern: '^credential:[0-9a-f-]{36}$' },
                                               message:
@@ -44716,239 +45050,239 @@ function validate45(
                                                 '"',
                                             };
                                             if (vErrors === null) {
-                                              vErrors = [err64];
+                                              vErrors = [err126];
                                             } else {
-                                              vErrors.push(err64);
+                                              vErrors.push(err126);
                                             }
                                             errors++;
                                           }
                                         } else {
-                                          const err65 = {
+                                          const err127 = {
                                             instancePath: instancePath + '/receipt/opaqueRef',
                                             schemaPath:
-                                              '#/properties/receipt/anyOf/3/properties/opaqueRef/type',
+                                              '#/anyOf/0/properties/receipt/anyOf/3/properties/opaqueRef/type',
                                             keyword: 'type',
                                             params: { type: 'string' },
                                             message: 'must be string',
                                           };
                                           if (vErrors === null) {
-                                            vErrors = [err65];
+                                            vErrors = [err127];
                                           } else {
-                                            vErrors.push(err65);
+                                            vErrors.push(err127);
                                           }
                                           errors++;
                                         }
                                       }
-                                      var valid18 = _errs138 === errors;
+                                      var valid19 = _errs140 === errors;
                                     } else {
-                                      var valid18 = true;
+                                      var valid19 = true;
                                     }
-                                    if (valid18) {
+                                    if (valid19) {
                                       if (data38.persistence !== undefined) {
                                         let data48 = data38.persistence;
-                                        const _errs140 = errors;
+                                        const _errs142 = errors;
                                         if (typeof data48 !== 'string') {
-                                          const err66 = {
+                                          const err128 = {
                                             instancePath: instancePath + '/receipt/persistence',
                                             schemaPath:
-                                              '#/properties/receipt/anyOf/3/properties/persistence/type',
+                                              '#/anyOf/0/properties/receipt/anyOf/3/properties/persistence/type',
                                             keyword: 'type',
                                             params: { type: 'string' },
                                             message: 'must be string',
                                           };
                                           if (vErrors === null) {
-                                            vErrors = [err66];
+                                            vErrors = [err128];
                                           } else {
-                                            vErrors.push(err66);
+                                            vErrors.push(err128);
                                           }
                                           errors++;
                                         }
                                         if (!(data48 === 'os' || data48 === 'temporary')) {
-                                          const err67 = {
+                                          const err129 = {
                                             instancePath: instancePath + '/receipt/persistence',
                                             schemaPath:
-                                              '#/properties/receipt/anyOf/3/properties/persistence/enum',
+                                              '#/anyOf/0/properties/receipt/anyOf/3/properties/persistence/enum',
                                             keyword: 'enum',
                                             params: {
                                               allowedValues:
-                                                schema52.properties.receipt.anyOf[3].properties
-                                                  .persistence.enum,
+                                                schema52.anyOf[0].properties.receipt.anyOf[3]
+                                                  .properties.persistence.enum,
                                             },
                                             message: 'must be equal to one of the allowed values',
                                           };
                                           if (vErrors === null) {
-                                            vErrors = [err67];
+                                            vErrors = [err129];
                                           } else {
-                                            vErrors.push(err67);
+                                            vErrors.push(err129);
                                           }
                                           errors++;
                                         }
-                                        var valid18 = _errs140 === errors;
+                                        var valid19 = _errs142 === errors;
                                       } else {
-                                        var valid18 = true;
+                                        var valid19 = true;
                                       }
                                     }
                                   }
                                 }
                               } else {
-                                const err68 = {
+                                const err130 = {
                                   instancePath: instancePath + '/receipt',
-                                  schemaPath: '#/properties/receipt/anyOf/3/type',
+                                  schemaPath: '#/anyOf/0/properties/receipt/anyOf/3/type',
                                   keyword: 'type',
                                   params: { type: 'object' },
                                   message: 'must be object',
                                 };
                                 if (vErrors === null) {
-                                  vErrors = [err68];
+                                  vErrors = [err130];
                                 } else {
-                                  vErrors.push(err68);
+                                  vErrors.push(err130);
                                 }
                                 errors++;
                               }
                             }
-                            var _valid5 = _errs133 === errors;
-                            valid15 = valid15 || _valid5;
-                            if (_valid5) {
+                            var _valid6 = _errs135 === errors;
+                            valid16 = valid16 || _valid6;
+                            if (_valid6) {
                               if (props1 !== true) {
                                 props1 = true;
                               }
                             }
-                            const _errs142 = errors;
-                            if (errors === _errs142) {
+                            const _errs144 = errors;
+                            if (errors === _errs144) {
                               if (data38 && typeof data38 == 'object' && !Array.isArray(data38)) {
                                 let missing12;
                                 if (
                                   (data38.status === undefined && (missing12 = 'status')) ||
                                   (data38.code === undefined && (missing12 = 'code'))
                                 ) {
-                                  const err69 = {
+                                  const err131 = {
                                     instancePath: instancePath + '/receipt',
-                                    schemaPath: '#/properties/receipt/anyOf/4/required',
+                                    schemaPath: '#/anyOf/0/properties/receipt/anyOf/4/required',
                                     keyword: 'required',
                                     params: { missingProperty: missing12 },
                                     message: "must have required property '" + missing12 + "'",
                                   };
                                   if (vErrors === null) {
-                                    vErrors = [err69];
+                                    vErrors = [err131];
                                   } else {
-                                    vErrors.push(err69);
+                                    vErrors.push(err131);
                                   }
                                   errors++;
                                 } else {
                                   if (data38.status !== undefined) {
                                     let data49 = data38.status;
-                                    const _errs145 = errors;
+                                    const _errs147 = errors;
                                     if (typeof data49 !== 'string') {
-                                      const err70 = {
+                                      const err132 = {
                                         instancePath: instancePath + '/receipt/status',
                                         schemaPath:
-                                          '#/properties/receipt/anyOf/4/properties/status/type',
+                                          '#/anyOf/0/properties/receipt/anyOf/4/properties/status/type',
                                         keyword: 'type',
                                         params: { type: 'string' },
                                         message: 'must be string',
                                       };
                                       if (vErrors === null) {
-                                        vErrors = [err70];
+                                        vErrors = [err132];
                                       } else {
-                                        vErrors.push(err70);
+                                        vErrors.push(err132);
                                       }
                                       errors++;
                                     }
                                     if (!(data49 === 'failed' || data49 === 'outcome_unknown')) {
-                                      const err71 = {
+                                      const err133 = {
                                         instancePath: instancePath + '/receipt/status',
                                         schemaPath:
-                                          '#/properties/receipt/anyOf/4/properties/status/enum',
+                                          '#/anyOf/0/properties/receipt/anyOf/4/properties/status/enum',
                                         keyword: 'enum',
                                         params: {
                                           allowedValues:
-                                            schema52.properties.receipt.anyOf[4].properties.status
-                                              .enum,
+                                            schema52.anyOf[0].properties.receipt.anyOf[4].properties
+                                              .status.enum,
                                         },
                                         message: 'must be equal to one of the allowed values',
                                       };
                                       if (vErrors === null) {
-                                        vErrors = [err71];
+                                        vErrors = [err133];
                                       } else {
-                                        vErrors.push(err71);
+                                        vErrors.push(err133);
                                       }
                                       errors++;
                                     }
-                                    var valid19 = _errs145 === errors;
+                                    var valid20 = _errs147 === errors;
                                   } else {
-                                    var valid19 = true;
+                                    var valid20 = true;
                                   }
-                                  if (valid19) {
+                                  if (valid20) {
                                     if (data38.code !== undefined) {
                                       let data50 = data38.code;
-                                      const _errs147 = errors;
-                                      if (errors === _errs147) {
+                                      const _errs149 = errors;
+                                      if (errors === _errs149) {
                                         if (typeof data50 === 'string') {
                                           if (!pattern176.test(data50)) {
-                                            const err72 = {
+                                            const err134 = {
                                               instancePath: instancePath + '/receipt/code',
                                               schemaPath:
-                                                '#/properties/receipt/anyOf/4/properties/code/pattern',
+                                                '#/anyOf/0/properties/receipt/anyOf/4/properties/code/pattern',
                                               keyword: 'pattern',
                                               params: { pattern: '^[a-z0-9_]{1,128}$' },
                                               message:
                                                 'must match pattern "' + '^[a-z0-9_]{1,128}$' + '"',
                                             };
                                             if (vErrors === null) {
-                                              vErrors = [err72];
+                                              vErrors = [err134];
                                             } else {
-                                              vErrors.push(err72);
+                                              vErrors.push(err134);
                                             }
                                             errors++;
                                           }
                                         } else {
-                                          const err73 = {
+                                          const err135 = {
                                             instancePath: instancePath + '/receipt/code',
                                             schemaPath:
-                                              '#/properties/receipt/anyOf/4/properties/code/type',
+                                              '#/anyOf/0/properties/receipt/anyOf/4/properties/code/type',
                                             keyword: 'type',
                                             params: { type: 'string' },
                                             message: 'must be string',
                                           };
                                           if (vErrors === null) {
-                                            vErrors = [err73];
+                                            vErrors = [err135];
                                           } else {
-                                            vErrors.push(err73);
+                                            vErrors.push(err135);
                                           }
                                           errors++;
                                         }
                                       }
-                                      var valid19 = _errs147 === errors;
+                                      var valid20 = _errs149 === errors;
                                     } else {
-                                      var valid19 = true;
+                                      var valid20 = true;
                                     }
                                   }
                                 }
                               } else {
-                                const err74 = {
+                                const err136 = {
                                   instancePath: instancePath + '/receipt',
-                                  schemaPath: '#/properties/receipt/anyOf/4/type',
+                                  schemaPath: '#/anyOf/0/properties/receipt/anyOf/4/type',
                                   keyword: 'type',
                                   params: { type: 'object' },
                                   message: 'must be object',
                                 };
                                 if (vErrors === null) {
-                                  vErrors = [err74];
+                                  vErrors = [err136];
                                 } else {
-                                  vErrors.push(err74);
+                                  vErrors.push(err136);
                                 }
                                 errors++;
                               }
                             }
-                            var _valid5 = _errs142 === errors;
-                            valid15 = valid15 || _valid5;
-                            if (_valid5) {
+                            var _valid6 = _errs144 === errors;
+                            valid16 = valid16 || _valid6;
+                            if (_valid6) {
                               if (props1 !== true) {
                                 props1 = true;
                               }
                             }
-                            const _errs149 = errors;
-                            if (errors === _errs149) {
+                            const _errs151 = errors;
+                            if (errors === _errs151) {
                               if (data38 && typeof data38 == 'object' && !Array.isArray(data38)) {
                                 let missing13;
                                 if (
@@ -44959,124 +45293,124 @@ function validate45(
                                   (data38.configurationState === undefined &&
                                     (missing13 = 'configurationState'))
                                 ) {
-                                  const err75 = {
+                                  const err137 = {
                                     instancePath: instancePath + '/receipt',
-                                    schemaPath: '#/properties/receipt/anyOf/5/required',
+                                    schemaPath: '#/anyOf/0/properties/receipt/anyOf/5/required',
                                     keyword: 'required',
                                     params: { missingProperty: missing13 },
                                     message: "must have required property '" + missing13 + "'",
                                   };
                                   if (vErrors === null) {
-                                    vErrors = [err75];
+                                    vErrors = [err137];
                                   } else {
-                                    vErrors.push(err75);
+                                    vErrors.push(err137);
                                   }
                                   errors++;
                                 } else {
                                   if (data38.status !== undefined) {
                                     let data51 = data38.status;
-                                    const _errs152 = errors;
+                                    const _errs154 = errors;
                                     if (typeof data51 !== 'string') {
-                                      const err76 = {
+                                      const err138 = {
                                         instancePath: instancePath + '/receipt/status',
                                         schemaPath:
-                                          '#/properties/receipt/anyOf/5/properties/status/type',
+                                          '#/anyOf/0/properties/receipt/anyOf/5/properties/status/type',
                                         keyword: 'type',
                                         params: { type: 'string' },
                                         message: 'must be string',
                                       };
                                       if (vErrors === null) {
-                                        vErrors = [err76];
+                                        vErrors = [err138];
                                       } else {
-                                        vErrors.push(err76);
+                                        vErrors.push(err138);
                                       }
                                       errors++;
                                     }
                                     if (!(data51 === 'failed' || data51 === 'outcome_unknown')) {
-                                      const err77 = {
+                                      const err139 = {
                                         instancePath: instancePath + '/receipt/status',
                                         schemaPath:
-                                          '#/properties/receipt/anyOf/5/properties/status/enum',
+                                          '#/anyOf/0/properties/receipt/anyOf/5/properties/status/enum',
                                         keyword: 'enum',
                                         params: {
                                           allowedValues:
-                                            schema52.properties.receipt.anyOf[5].properties.status
-                                              .enum,
+                                            schema52.anyOf[0].properties.receipt.anyOf[5].properties
+                                              .status.enum,
                                         },
                                         message: 'must be equal to one of the allowed values',
                                       };
                                       if (vErrors === null) {
-                                        vErrors = [err77];
+                                        vErrors = [err139];
                                       } else {
-                                        vErrors.push(err77);
+                                        vErrors.push(err139);
                                       }
                                       errors++;
                                     }
-                                    var valid20 = _errs152 === errors;
+                                    var valid21 = _errs154 === errors;
                                   } else {
-                                    var valid20 = true;
+                                    var valid21 = true;
                                   }
-                                  if (valid20) {
+                                  if (valid21) {
                                     if (data38.code !== undefined) {
                                       let data52 = data38.code;
-                                      const _errs154 = errors;
-                                      if (errors === _errs154) {
+                                      const _errs156 = errors;
+                                      if (errors === _errs156) {
                                         if (typeof data52 === 'string') {
                                           if (!pattern176.test(data52)) {
-                                            const err78 = {
+                                            const err140 = {
                                               instancePath: instancePath + '/receipt/code',
                                               schemaPath:
-                                                '#/properties/receipt/anyOf/5/properties/code/pattern',
+                                                '#/anyOf/0/properties/receipt/anyOf/5/properties/code/pattern',
                                               keyword: 'pattern',
                                               params: { pattern: '^[a-z0-9_]{1,128}$' },
                                               message:
                                                 'must match pattern "' + '^[a-z0-9_]{1,128}$' + '"',
                                             };
                                             if (vErrors === null) {
-                                              vErrors = [err78];
+                                              vErrors = [err140];
                                             } else {
-                                              vErrors.push(err78);
+                                              vErrors.push(err140);
                                             }
                                             errors++;
                                           }
                                         } else {
-                                          const err79 = {
+                                          const err141 = {
                                             instancePath: instancePath + '/receipt/code',
                                             schemaPath:
-                                              '#/properties/receipt/anyOf/5/properties/code/type',
+                                              '#/anyOf/0/properties/receipt/anyOf/5/properties/code/type',
                                             keyword: 'type',
                                             params: { type: 'string' },
                                             message: 'must be string',
                                           };
                                           if (vErrors === null) {
-                                            vErrors = [err79];
+                                            vErrors = [err141];
                                           } else {
-                                            vErrors.push(err79);
+                                            vErrors.push(err141);
                                           }
                                           errors++;
                                         }
                                       }
-                                      var valid20 = _errs154 === errors;
+                                      var valid21 = _errs156 === errors;
                                     } else {
-                                      var valid20 = true;
+                                      var valid21 = true;
                                     }
-                                    if (valid20) {
+                                    if (valid21) {
                                       if (data38.credentialState !== undefined) {
                                         let data53 = data38.credentialState;
-                                        const _errs156 = errors;
+                                        const _errs158 = errors;
                                         if (typeof data53 !== 'string') {
-                                          const err80 = {
+                                          const err142 = {
                                             instancePath: instancePath + '/receipt/credentialState',
                                             schemaPath:
-                                              '#/properties/receipt/anyOf/5/properties/credentialState/type',
+                                              '#/anyOf/0/properties/receipt/anyOf/5/properties/credentialState/type',
                                             keyword: 'type',
                                             params: { type: 'string' },
                                             message: 'must be string',
                                           };
                                           if (vErrors === null) {
-                                            vErrors = [err80];
+                                            vErrors = [err142];
                                           } else {
-                                            vErrors.push(err80);
+                                            vErrors.push(err142);
                                           }
                                           errors++;
                                         }
@@ -45087,47 +45421,47 @@ function validate45(
                                             data53 === 'outcome_unknown'
                                           )
                                         ) {
-                                          const err81 = {
+                                          const err143 = {
                                             instancePath: instancePath + '/receipt/credentialState',
                                             schemaPath:
-                                              '#/properties/receipt/anyOf/5/properties/credentialState/enum',
+                                              '#/anyOf/0/properties/receipt/anyOf/5/properties/credentialState/enum',
                                             keyword: 'enum',
                                             params: {
                                               allowedValues:
-                                                schema52.properties.receipt.anyOf[5].properties
-                                                  .credentialState.enum,
+                                                schema52.anyOf[0].properties.receipt.anyOf[5]
+                                                  .properties.credentialState.enum,
                                             },
                                             message: 'must be equal to one of the allowed values',
                                           };
                                           if (vErrors === null) {
-                                            vErrors = [err81];
+                                            vErrors = [err143];
                                           } else {
-                                            vErrors.push(err81);
+                                            vErrors.push(err143);
                                           }
                                           errors++;
                                         }
-                                        var valid20 = _errs156 === errors;
+                                        var valid21 = _errs158 === errors;
                                       } else {
-                                        var valid20 = true;
+                                        var valid21 = true;
                                       }
-                                      if (valid20) {
+                                      if (valid21) {
                                         if (data38.configurationState !== undefined) {
                                           let data54 = data38.configurationState;
-                                          const _errs158 = errors;
+                                          const _errs160 = errors;
                                           if (typeof data54 !== 'string') {
-                                            const err82 = {
+                                            const err144 = {
                                               instancePath:
                                                 instancePath + '/receipt/configurationState',
                                               schemaPath:
-                                                '#/properties/receipt/anyOf/5/properties/configurationState/type',
+                                                '#/anyOf/0/properties/receipt/anyOf/5/properties/configurationState/type',
                                               keyword: 'type',
                                               params: { type: 'string' },
                                               message: 'must be string',
                                             };
                                             if (vErrors === null) {
-                                              vErrors = [err82];
+                                              vErrors = [err144];
                                             } else {
-                                              vErrors.push(err82);
+                                              vErrors.push(err144);
                                             }
                                             errors++;
                                           }
@@ -45137,42 +45471,42 @@ function validate45(
                                               data54 === 'outcome_unknown'
                                             )
                                           ) {
-                                            const err83 = {
+                                            const err145 = {
                                               instancePath:
                                                 instancePath + '/receipt/configurationState',
                                               schemaPath:
-                                                '#/properties/receipt/anyOf/5/properties/configurationState/enum',
+                                                '#/anyOf/0/properties/receipt/anyOf/5/properties/configurationState/enum',
                                               keyword: 'enum',
                                               params: {
                                                 allowedValues:
-                                                  schema52.properties.receipt.anyOf[5].properties
-                                                    .configurationState.enum,
+                                                  schema52.anyOf[0].properties.receipt.anyOf[5]
+                                                    .properties.configurationState.enum,
                                               },
                                               message: 'must be equal to one of the allowed values',
                                             };
                                             if (vErrors === null) {
-                                              vErrors = [err83];
+                                              vErrors = [err145];
                                             } else {
-                                              vErrors.push(err83);
+                                              vErrors.push(err145);
                                             }
                                             errors++;
                                           }
-                                          var valid20 = _errs158 === errors;
+                                          var valid21 = _errs160 === errors;
                                         } else {
-                                          var valid20 = true;
+                                          var valid21 = true;
                                         }
-                                        if (valid20) {
+                                        if (valid21) {
                                           if (data38.opaqueRef !== undefined) {
                                             let data55 = data38.opaqueRef;
-                                            const _errs160 = errors;
-                                            if (errors === _errs160) {
+                                            const _errs162 = errors;
+                                            if (errors === _errs162) {
                                               if (typeof data55 === 'string') {
                                                 if (!pattern216.test(data55)) {
-                                                  const err84 = {
+                                                  const err146 = {
                                                     instancePath:
                                                       instancePath + '/receipt/opaqueRef',
                                                     schemaPath:
-                                                      '#/properties/receipt/anyOf/5/properties/opaqueRef/pattern',
+                                                      '#/anyOf/0/properties/receipt/anyOf/5/properties/opaqueRef/pattern',
                                                     keyword: 'pattern',
                                                     params: {
                                                       pattern: '^credential:[0-9a-f-]{36}$',
@@ -45183,32 +45517,32 @@ function validate45(
                                                       '"',
                                                   };
                                                   if (vErrors === null) {
-                                                    vErrors = [err84];
+                                                    vErrors = [err146];
                                                   } else {
-                                                    vErrors.push(err84);
+                                                    vErrors.push(err146);
                                                   }
                                                   errors++;
                                                 }
                                               } else {
-                                                const err85 = {
+                                                const err147 = {
                                                   instancePath: instancePath + '/receipt/opaqueRef',
                                                   schemaPath:
-                                                    '#/properties/receipt/anyOf/5/properties/opaqueRef/type',
+                                                    '#/anyOf/0/properties/receipt/anyOf/5/properties/opaqueRef/type',
                                                   keyword: 'type',
                                                   params: { type: 'string' },
                                                   message: 'must be string',
                                                 };
                                                 if (vErrors === null) {
-                                                  vErrors = [err85];
+                                                  vErrors = [err147];
                                                 } else {
-                                                  vErrors.push(err85);
+                                                  vErrors.push(err147);
                                                 }
                                                 errors++;
                                               }
                                             }
-                                            var valid20 = _errs160 === errors;
+                                            var valid21 = _errs162 === errors;
                                           } else {
-                                            var valid20 = true;
+                                            var valid21 = true;
                                           }
                                         }
                                       }
@@ -45216,57 +45550,55 @@ function validate45(
                                   }
                                 }
                               } else {
-                                const err86 = {
+                                const err148 = {
                                   instancePath: instancePath + '/receipt',
-                                  schemaPath: '#/properties/receipt/anyOf/5/type',
+                                  schemaPath: '#/anyOf/0/properties/receipt/anyOf/5/type',
                                   keyword: 'type',
                                   params: { type: 'object' },
                                   message: 'must be object',
                                 };
                                 if (vErrors === null) {
-                                  vErrors = [err86];
+                                  vErrors = [err148];
                                 } else {
-                                  vErrors.push(err86);
+                                  vErrors.push(err148);
                                 }
                                 errors++;
                               }
                             }
-                            var _valid5 = _errs149 === errors;
-                            valid15 = valid15 || _valid5;
-                            if (_valid5) {
+                            var _valid6 = _errs151 === errors;
+                            valid16 = valid16 || _valid6;
+                            if (_valid6) {
                               if (props1 !== true) {
                                 props1 = true;
                               }
                             }
-                            if (!valid15) {
-                              const err87 = {
+                            if (!valid16) {
+                              const err149 = {
                                 instancePath: instancePath + '/receipt',
-                                schemaPath: '#/properties/receipt/anyOf',
+                                schemaPath: '#/anyOf/0/properties/receipt/anyOf',
                                 keyword: 'anyOf',
                                 params: {},
                                 message: 'must match a schema in anyOf',
                               };
                               if (vErrors === null) {
-                                vErrors = [err87];
+                                vErrors = [err149];
                               } else {
-                                vErrors.push(err87);
+                                vErrors.push(err149);
                               }
                               errors++;
-                              validate45.errors = vErrors;
-                              return false;
                             } else {
-                              errors = _errs109;
+                              errors = _errs111;
                               if (vErrors !== null) {
-                                if (_errs109) {
-                                  vErrors.length = _errs109;
+                                if (_errs111) {
+                                  vErrors.length = _errs111;
                                 } else {
                                   vErrors = null;
                                 }
                               }
                             }
-                            var valid0 = _errs108 === errors;
+                            var valid1 = _errs110 === errors;
                           } else {
-                            var valid0 = true;
+                            var valid1 = true;
                           }
                         }
                       }
@@ -45279,22 +45611,2044 @@ function validate45(
         }
       }
     } else {
-      validate45.errors = [
-        {
+      const err150 = {
+        instancePath,
+        schemaPath: '#/anyOf/0/type',
+        keyword: 'type',
+        params: { type: 'object' },
+        message: 'must be object',
+      };
+      if (vErrors === null) {
+        vErrors = [err150];
+      } else {
+        vErrors.push(err150);
+      }
+      errors++;
+    }
+  }
+  var _valid0 = _errs1 === errors;
+  valid0 = valid0 || _valid0;
+  if (_valid0) {
+    var props2 = true;
+  }
+  const _errs164 = errors;
+  if (errors === _errs164) {
+    if (data && typeof data == 'object' && !Array.isArray(data)) {
+      let missing14;
+      if (
+        (data.commandId === undefined && (missing14 = 'commandId')) ||
+        (data.originStoreId === undefined && (missing14 = 'originStoreId')) ||
+        (data.scope === undefined && (missing14 = 'scope')) ||
+        (data.kind === undefined && (missing14 = 'kind')) ||
+        (data.modelSettings === undefined && (missing14 = 'modelSettings')) ||
+        (data.state === undefined && (missing14 = 'state')) ||
+        (data.receipt === undefined && (missing14 = 'receipt'))
+      ) {
+        const err151 = {
           instancePath,
-          schemaPath: '#/type',
-          keyword: 'type',
-          params: { type: 'object' },
-          message: 'must be object',
-        },
-      ];
-      return false;
+          schemaPath: '#/anyOf/1/required',
+          keyword: 'required',
+          params: { missingProperty: missing14 },
+          message: "must have required property '" + missing14 + "'",
+        };
+        if (vErrors === null) {
+          vErrors = [err151];
+        } else {
+          vErrors.push(err151);
+        }
+        errors++;
+      } else {
+        if (data.commandId !== undefined) {
+          let data56 = data.commandId;
+          const _errs167 = errors;
+          if (errors === _errs167) {
+            if (typeof data56 === 'string') {
+              if (func1(data56) > 128) {
+                const err152 = {
+                  instancePath: instancePath + '/commandId',
+                  schemaPath: '#/anyOf/1/properties/commandId/maxLength',
+                  keyword: 'maxLength',
+                  params: { limit: 128 },
+                  message: 'must NOT have more than 128 characters',
+                };
+                if (vErrors === null) {
+                  vErrors = [err152];
+                } else {
+                  vErrors.push(err152);
+                }
+                errors++;
+              } else {
+                if (func1(data56) < 1) {
+                  const err153 = {
+                    instancePath: instancePath + '/commandId',
+                    schemaPath: '#/anyOf/1/properties/commandId/minLength',
+                    keyword: 'minLength',
+                    params: { limit: 1 },
+                    message: 'must NOT have fewer than 1 characters',
+                  };
+                  if (vErrors === null) {
+                    vErrors = [err153];
+                  } else {
+                    vErrors.push(err153);
+                  }
+                  errors++;
+                } else {
+                  if (!pattern4.test(data56)) {
+                    const err154 = {
+                      instancePath: instancePath + '/commandId',
+                      schemaPath: '#/anyOf/1/properties/commandId/pattern',
+                      keyword: 'pattern',
+                      params: { pattern: '^[A-Za-z0-9_-]+$' },
+                      message: 'must match pattern "' + '^[A-Za-z0-9_-]+$' + '"',
+                    };
+                    if (vErrors === null) {
+                      vErrors = [err154];
+                    } else {
+                      vErrors.push(err154);
+                    }
+                    errors++;
+                  }
+                }
+              }
+            } else {
+              const err155 = {
+                instancePath: instancePath + '/commandId',
+                schemaPath: '#/anyOf/1/properties/commandId/type',
+                keyword: 'type',
+                params: { type: 'string' },
+                message: 'must be string',
+              };
+              if (vErrors === null) {
+                vErrors = [err155];
+              } else {
+                vErrors.push(err155);
+              }
+              errors++;
+            }
+          }
+          var valid22 = _errs167 === errors;
+        } else {
+          var valid22 = true;
+        }
+        if (valid22) {
+          if (data.originStoreId !== undefined) {
+            let data57 = data.originStoreId;
+            const _errs169 = errors;
+            if (errors === _errs169) {
+              if (typeof data57 === 'string') {
+                if (func1(data57) > 128) {
+                  const err156 = {
+                    instancePath: instancePath + '/originStoreId',
+                    schemaPath: '#/anyOf/1/properties/originStoreId/maxLength',
+                    keyword: 'maxLength',
+                    params: { limit: 128 },
+                    message: 'must NOT have more than 128 characters',
+                  };
+                  if (vErrors === null) {
+                    vErrors = [err156];
+                  } else {
+                    vErrors.push(err156);
+                  }
+                  errors++;
+                } else {
+                  if (func1(data57) < 1) {
+                    const err157 = {
+                      instancePath: instancePath + '/originStoreId',
+                      schemaPath: '#/anyOf/1/properties/originStoreId/minLength',
+                      keyword: 'minLength',
+                      params: { limit: 1 },
+                      message: 'must NOT have fewer than 1 characters',
+                    };
+                    if (vErrors === null) {
+                      vErrors = [err157];
+                    } else {
+                      vErrors.push(err157);
+                    }
+                    errors++;
+                  } else {
+                    if (!pattern4.test(data57)) {
+                      const err158 = {
+                        instancePath: instancePath + '/originStoreId',
+                        schemaPath: '#/anyOf/1/properties/originStoreId/pattern',
+                        keyword: 'pattern',
+                        params: { pattern: '^[A-Za-z0-9_-]+$' },
+                        message: 'must match pattern "' + '^[A-Za-z0-9_-]+$' + '"',
+                      };
+                      if (vErrors === null) {
+                        vErrors = [err158];
+                      } else {
+                        vErrors.push(err158);
+                      }
+                      errors++;
+                    }
+                  }
+                }
+              } else {
+                const err159 = {
+                  instancePath: instancePath + '/originStoreId',
+                  schemaPath: '#/anyOf/1/properties/originStoreId/type',
+                  keyword: 'type',
+                  params: { type: 'string' },
+                  message: 'must be string',
+                };
+                if (vErrors === null) {
+                  vErrors = [err159];
+                } else {
+                  vErrors.push(err159);
+                }
+                errors++;
+              }
+            }
+            var valid22 = _errs169 === errors;
+          } else {
+            var valid22 = true;
+          }
+          if (valid22) {
+            if (data.scope !== undefined) {
+              let data58 = data.scope;
+              const _errs171 = errors;
+              if (typeof data58 !== 'string') {
+                const err160 = {
+                  instancePath: instancePath + '/scope',
+                  schemaPath: '#/anyOf/1/properties/scope/type',
+                  keyword: 'type',
+                  params: { type: 'string' },
+                  message: 'must be string',
+                };
+                if (vErrors === null) {
+                  vErrors = [err160];
+                } else {
+                  vErrors.push(err160);
+                }
+                errors++;
+              }
+              if (!(data58 === 'user' || data58 === 'workspace')) {
+                const err161 = {
+                  instancePath: instancePath + '/scope',
+                  schemaPath: '#/anyOf/1/properties/scope/enum',
+                  keyword: 'enum',
+                  params: { allowedValues: schema52.anyOf[1].properties.scope.enum },
+                  message: 'must be equal to one of the allowed values',
+                };
+                if (vErrors === null) {
+                  vErrors = [err161];
+                } else {
+                  vErrors.push(err161);
+                }
+                errors++;
+              }
+              var valid22 = _errs171 === errors;
+            } else {
+              var valid22 = true;
+            }
+            if (valid22) {
+              if (data.workspaceId !== undefined) {
+                let data59 = data.workspaceId;
+                const _errs173 = errors;
+                if (errors === _errs173) {
+                  if (typeof data59 === 'string') {
+                    if (func1(data59) > 128) {
+                      const err162 = {
+                        instancePath: instancePath + '/workspaceId',
+                        schemaPath: '#/anyOf/1/properties/workspaceId/maxLength',
+                        keyword: 'maxLength',
+                        params: { limit: 128 },
+                        message: 'must NOT have more than 128 characters',
+                      };
+                      if (vErrors === null) {
+                        vErrors = [err162];
+                      } else {
+                        vErrors.push(err162);
+                      }
+                      errors++;
+                    } else {
+                      if (func1(data59) < 1) {
+                        const err163 = {
+                          instancePath: instancePath + '/workspaceId',
+                          schemaPath: '#/anyOf/1/properties/workspaceId/minLength',
+                          keyword: 'minLength',
+                          params: { limit: 1 },
+                          message: 'must NOT have fewer than 1 characters',
+                        };
+                        if (vErrors === null) {
+                          vErrors = [err163];
+                        } else {
+                          vErrors.push(err163);
+                        }
+                        errors++;
+                      } else {
+                        if (!pattern4.test(data59)) {
+                          const err164 = {
+                            instancePath: instancePath + '/workspaceId',
+                            schemaPath: '#/anyOf/1/properties/workspaceId/pattern',
+                            keyword: 'pattern',
+                            params: { pattern: '^[A-Za-z0-9_-]+$' },
+                            message: 'must match pattern "' + '^[A-Za-z0-9_-]+$' + '"',
+                          };
+                          if (vErrors === null) {
+                            vErrors = [err164];
+                          } else {
+                            vErrors.push(err164);
+                          }
+                          errors++;
+                        }
+                      }
+                    }
+                  } else {
+                    const err165 = {
+                      instancePath: instancePath + '/workspaceId',
+                      schemaPath: '#/anyOf/1/properties/workspaceId/type',
+                      keyword: 'type',
+                      params: { type: 'string' },
+                      message: 'must be string',
+                    };
+                    if (vErrors === null) {
+                      vErrors = [err165];
+                    } else {
+                      vErrors.push(err165);
+                    }
+                    errors++;
+                  }
+                }
+                var valid22 = _errs173 === errors;
+              } else {
+                var valid22 = true;
+              }
+              if (valid22) {
+                if (data.ifMatch !== undefined) {
+                  let data60 = data.ifMatch;
+                  const _errs175 = errors;
+                  if (errors === _errs175) {
+                    if (typeof data60 === 'string') {
+                      if (!pattern15.test(data60)) {
+                        const err166 = {
+                          instancePath: instancePath + '/ifMatch',
+                          schemaPath: '#/anyOf/1/properties/ifMatch/pattern',
+                          keyword: 'pattern',
+                          params: { pattern: '^[a-f0-9]{64}$' },
+                          message: 'must match pattern "' + '^[a-f0-9]{64}$' + '"',
+                        };
+                        if (vErrors === null) {
+                          vErrors = [err166];
+                        } else {
+                          vErrors.push(err166);
+                        }
+                        errors++;
+                      }
+                    } else {
+                      const err167 = {
+                        instancePath: instancePath + '/ifMatch',
+                        schemaPath: '#/anyOf/1/properties/ifMatch/type',
+                        keyword: 'type',
+                        params: { type: 'string' },
+                        message: 'must be string',
+                      };
+                      if (vErrors === null) {
+                        vErrors = [err167];
+                      } else {
+                        vErrors.push(err167);
+                      }
+                      errors++;
+                    }
+                  }
+                  var valid22 = _errs175 === errors;
+                } else {
+                  var valid22 = true;
+                }
+                if (valid22) {
+                  if (data.kind !== undefined) {
+                    let data61 = data.kind;
+                    const _errs177 = errors;
+                    if (typeof data61 !== 'string') {
+                      const err168 = {
+                        instancePath: instancePath + '/kind',
+                        schemaPath: '#/anyOf/1/properties/kind/type',
+                        keyword: 'type',
+                        params: { type: 'string' },
+                        message: 'must be string',
+                      };
+                      if (vErrors === null) {
+                        vErrors = [err168];
+                      } else {
+                        vErrors.push(err168);
+                      }
+                      errors++;
+                    }
+                    if (data61 !== 'model_settings.update') {
+                      const err169 = {
+                        instancePath: instancePath + '/kind',
+                        schemaPath: '#/anyOf/1/properties/kind/const',
+                        keyword: 'const',
+                        params: { allowedValue: 'model_settings.update' },
+                        message: 'must be equal to constant',
+                      };
+                      if (vErrors === null) {
+                        vErrors = [err169];
+                      } else {
+                        vErrors.push(err169);
+                      }
+                      errors++;
+                    }
+                    var valid22 = _errs177 === errors;
+                  } else {
+                    var valid22 = true;
+                  }
+                  if (valid22) {
+                    if (data.modelSettings !== undefined) {
+                      let data62 = data.modelSettings;
+                      const _errs179 = errors;
+                      if (errors === _errs179) {
+                        if (data62 && typeof data62 == 'object' && !Array.isArray(data62)) {
+                          let missing15;
+                          if (
+                            (data62.expectedReadSet === undefined &&
+                              (missing15 = 'expectedReadSet')) ||
+                            (data62.operation === undefined && (missing15 = 'operation'))
+                          ) {
+                            const err170 = {
+                              instancePath: instancePath + '/modelSettings',
+                              schemaPath: '#/anyOf/1/properties/modelSettings/required',
+                              keyword: 'required',
+                              params: { missingProperty: missing15 },
+                              message: "must have required property '" + missing15 + "'",
+                            };
+                            if (vErrors === null) {
+                              vErrors = [err170];
+                            } else {
+                              vErrors.push(err170);
+                            }
+                            errors++;
+                          } else {
+                            if (data62.expectedReadSet !== undefined) {
+                              let data63 = data62.expectedReadSet;
+                              const _errs182 = errors;
+                              if (errors === _errs182) {
+                                if (data63 && typeof data63 == 'object' && !Array.isArray(data63)) {
+                                  let missing16;
+                                  if (
+                                    (data63.userEtag === undefined && (missing16 = 'userEtag')) ||
+                                    (data63.workspaceEtag === undefined &&
+                                      (missing16 = 'workspaceEtag')) ||
+                                    (data63.explicitDigest === undefined &&
+                                      (missing16 = 'explicitDigest')) ||
+                                    (data63.effectiveDigest === undefined &&
+                                      (missing16 = 'effectiveDigest'))
+                                  ) {
+                                    const err171 = {
+                                      instancePath: instancePath + '/modelSettings/expectedReadSet',
+                                      schemaPath:
+                                        '#/anyOf/1/properties/modelSettings/properties/expectedReadSet/required',
+                                      keyword: 'required',
+                                      params: { missingProperty: missing16 },
+                                      message: "must have required property '" + missing16 + "'",
+                                    };
+                                    if (vErrors === null) {
+                                      vErrors = [err171];
+                                    } else {
+                                      vErrors.push(err171);
+                                    }
+                                    errors++;
+                                  } else {
+                                    if (data63.userEtag !== undefined) {
+                                      let data64 = data63.userEtag;
+                                      const _errs185 = errors;
+                                      if (errors === _errs185) {
+                                        if (typeof data64 === 'string') {
+                                          if (!pattern15.test(data64)) {
+                                            const err172 = {
+                                              instancePath:
+                                                instancePath +
+                                                '/modelSettings/expectedReadSet/userEtag',
+                                              schemaPath:
+                                                '#/anyOf/1/properties/modelSettings/properties/expectedReadSet/properties/userEtag/pattern',
+                                              keyword: 'pattern',
+                                              params: { pattern: '^[a-f0-9]{64}$' },
+                                              message:
+                                                'must match pattern "' + '^[a-f0-9]{64}$' + '"',
+                                            };
+                                            if (vErrors === null) {
+                                              vErrors = [err172];
+                                            } else {
+                                              vErrors.push(err172);
+                                            }
+                                            errors++;
+                                          }
+                                        } else {
+                                          const err173 = {
+                                            instancePath:
+                                              instancePath +
+                                              '/modelSettings/expectedReadSet/userEtag',
+                                            schemaPath:
+                                              '#/anyOf/1/properties/modelSettings/properties/expectedReadSet/properties/userEtag/type',
+                                            keyword: 'type',
+                                            params: { type: 'string' },
+                                            message: 'must be string',
+                                          };
+                                          if (vErrors === null) {
+                                            vErrors = [err173];
+                                          } else {
+                                            vErrors.push(err173);
+                                          }
+                                          errors++;
+                                        }
+                                      }
+                                      var valid24 = _errs185 === errors;
+                                    } else {
+                                      var valid24 = true;
+                                    }
+                                    if (valid24) {
+                                      if (data63.workspaceEtag !== undefined) {
+                                        let data65 = data63.workspaceEtag;
+                                        const _errs187 = errors;
+                                        const _errs188 = errors;
+                                        let valid25 = false;
+                                        const _errs189 = errors;
+                                        if (errors === _errs189) {
+                                          if (typeof data65 === 'string') {
+                                            if (!pattern15.test(data65)) {
+                                              const err174 = {
+                                                instancePath:
+                                                  instancePath +
+                                                  '/modelSettings/expectedReadSet/workspaceEtag',
+                                                schemaPath:
+                                                  '#/anyOf/1/properties/modelSettings/properties/expectedReadSet/properties/workspaceEtag/anyOf/0/pattern',
+                                                keyword: 'pattern',
+                                                params: { pattern: '^[a-f0-9]{64}$' },
+                                                message:
+                                                  'must match pattern "' + '^[a-f0-9]{64}$' + '"',
+                                              };
+                                              if (vErrors === null) {
+                                                vErrors = [err174];
+                                              } else {
+                                                vErrors.push(err174);
+                                              }
+                                              errors++;
+                                            }
+                                          } else {
+                                            const err175 = {
+                                              instancePath:
+                                                instancePath +
+                                                '/modelSettings/expectedReadSet/workspaceEtag',
+                                              schemaPath:
+                                                '#/anyOf/1/properties/modelSettings/properties/expectedReadSet/properties/workspaceEtag/anyOf/0/type',
+                                              keyword: 'type',
+                                              params: { type: 'string' },
+                                              message: 'must be string',
+                                            };
+                                            if (vErrors === null) {
+                                              vErrors = [err175];
+                                            } else {
+                                              vErrors.push(err175);
+                                            }
+                                            errors++;
+                                          }
+                                        }
+                                        var _valid7 = _errs189 === errors;
+                                        valid25 = valid25 || _valid7;
+                                        const _errs191 = errors;
+                                        if (data65 !== null) {
+                                          const err176 = {
+                                            instancePath:
+                                              instancePath +
+                                              '/modelSettings/expectedReadSet/workspaceEtag',
+                                            schemaPath:
+                                              '#/anyOf/1/properties/modelSettings/properties/expectedReadSet/properties/workspaceEtag/anyOf/1/type',
+                                            keyword: 'type',
+                                            params: { type: 'null' },
+                                            message: 'must be null',
+                                          };
+                                          if (vErrors === null) {
+                                            vErrors = [err176];
+                                          } else {
+                                            vErrors.push(err176);
+                                          }
+                                          errors++;
+                                        }
+                                        var _valid7 = _errs191 === errors;
+                                        valid25 = valid25 || _valid7;
+                                        if (!valid25) {
+                                          const err177 = {
+                                            instancePath:
+                                              instancePath +
+                                              '/modelSettings/expectedReadSet/workspaceEtag',
+                                            schemaPath:
+                                              '#/anyOf/1/properties/modelSettings/properties/expectedReadSet/properties/workspaceEtag/anyOf',
+                                            keyword: 'anyOf',
+                                            params: {},
+                                            message: 'must match a schema in anyOf',
+                                          };
+                                          if (vErrors === null) {
+                                            vErrors = [err177];
+                                          } else {
+                                            vErrors.push(err177);
+                                          }
+                                          errors++;
+                                        } else {
+                                          errors = _errs188;
+                                          if (vErrors !== null) {
+                                            if (_errs188) {
+                                              vErrors.length = _errs188;
+                                            } else {
+                                              vErrors = null;
+                                            }
+                                          }
+                                        }
+                                        var valid24 = _errs187 === errors;
+                                      } else {
+                                        var valid24 = true;
+                                      }
+                                      if (valid24) {
+                                        if (data63.explicitDigest !== undefined) {
+                                          let data66 = data63.explicitDigest;
+                                          const _errs193 = errors;
+                                          if (errors === _errs193) {
+                                            if (typeof data66 === 'string') {
+                                              if (!pattern15.test(data66)) {
+                                                const err178 = {
+                                                  instancePath:
+                                                    instancePath +
+                                                    '/modelSettings/expectedReadSet/explicitDigest',
+                                                  schemaPath:
+                                                    '#/anyOf/1/properties/modelSettings/properties/expectedReadSet/properties/explicitDigest/pattern',
+                                                  keyword: 'pattern',
+                                                  params: { pattern: '^[a-f0-9]{64}$' },
+                                                  message:
+                                                    'must match pattern "' + '^[a-f0-9]{64}$' + '"',
+                                                };
+                                                if (vErrors === null) {
+                                                  vErrors = [err178];
+                                                } else {
+                                                  vErrors.push(err178);
+                                                }
+                                                errors++;
+                                              }
+                                            } else {
+                                              const err179 = {
+                                                instancePath:
+                                                  instancePath +
+                                                  '/modelSettings/expectedReadSet/explicitDigest',
+                                                schemaPath:
+                                                  '#/anyOf/1/properties/modelSettings/properties/expectedReadSet/properties/explicitDigest/type',
+                                                keyword: 'type',
+                                                params: { type: 'string' },
+                                                message: 'must be string',
+                                              };
+                                              if (vErrors === null) {
+                                                vErrors = [err179];
+                                              } else {
+                                                vErrors.push(err179);
+                                              }
+                                              errors++;
+                                            }
+                                          }
+                                          var valid24 = _errs193 === errors;
+                                        } else {
+                                          var valid24 = true;
+                                        }
+                                        if (valid24) {
+                                          if (data63.effectiveDigest !== undefined) {
+                                            let data67 = data63.effectiveDigest;
+                                            const _errs195 = errors;
+                                            if (errors === _errs195) {
+                                              if (typeof data67 === 'string') {
+                                                if (!pattern15.test(data67)) {
+                                                  const err180 = {
+                                                    instancePath:
+                                                      instancePath +
+                                                      '/modelSettings/expectedReadSet/effectiveDigest',
+                                                    schemaPath:
+                                                      '#/anyOf/1/properties/modelSettings/properties/expectedReadSet/properties/effectiveDigest/pattern',
+                                                    keyword: 'pattern',
+                                                    params: { pattern: '^[a-f0-9]{64}$' },
+                                                    message:
+                                                      'must match pattern "' +
+                                                      '^[a-f0-9]{64}$' +
+                                                      '"',
+                                                  };
+                                                  if (vErrors === null) {
+                                                    vErrors = [err180];
+                                                  } else {
+                                                    vErrors.push(err180);
+                                                  }
+                                                  errors++;
+                                                }
+                                              } else {
+                                                const err181 = {
+                                                  instancePath:
+                                                    instancePath +
+                                                    '/modelSettings/expectedReadSet/effectiveDigest',
+                                                  schemaPath:
+                                                    '#/anyOf/1/properties/modelSettings/properties/expectedReadSet/properties/effectiveDigest/type',
+                                                  keyword: 'type',
+                                                  params: { type: 'string' },
+                                                  message: 'must be string',
+                                                };
+                                                if (vErrors === null) {
+                                                  vErrors = [err181];
+                                                } else {
+                                                  vErrors.push(err181);
+                                                }
+                                                errors++;
+                                              }
+                                            }
+                                            var valid24 = _errs195 === errors;
+                                          } else {
+                                            var valid24 = true;
+                                          }
+                                        }
+                                      }
+                                    }
+                                  }
+                                } else {
+                                  const err182 = {
+                                    instancePath: instancePath + '/modelSettings/expectedReadSet',
+                                    schemaPath:
+                                      '#/anyOf/1/properties/modelSettings/properties/expectedReadSet/type',
+                                    keyword: 'type',
+                                    params: { type: 'object' },
+                                    message: 'must be object',
+                                  };
+                                  if (vErrors === null) {
+                                    vErrors = [err182];
+                                  } else {
+                                    vErrors.push(err182);
+                                  }
+                                  errors++;
+                                }
+                              }
+                              var valid23 = _errs182 === errors;
+                            } else {
+                              var valid23 = true;
+                            }
+                            if (valid23) {
+                              if (data62.operation !== undefined) {
+                                let data68 = data62.operation;
+                                const _errs197 = errors;
+                                const _errs198 = errors;
+                                let valid26 = false;
+                                let passing1 = null;
+                                const _errs199 = errors;
+                                if (errors === _errs199) {
+                                  if (
+                                    data68 &&
+                                    typeof data68 == 'object' &&
+                                    !Array.isArray(data68)
+                                  ) {
+                                    let missing17;
+                                    if (
+                                      (data68.kind === undefined && (missing17 = 'kind')) ||
+                                      (data68.modelId === undefined && (missing17 = 'modelId')) ||
+                                      (data68.enabled === undefined && (missing17 = 'enabled'))
+                                    ) {
+                                      const err183 = {
+                                        instancePath: instancePath + '/modelSettings/operation',
+                                        schemaPath:
+                                          '#/anyOf/1/properties/modelSettings/properties/operation/oneOf/0/required',
+                                        keyword: 'required',
+                                        params: { missingProperty: missing17 },
+                                        message: "must have required property '" + missing17 + "'",
+                                      };
+                                      if (vErrors === null) {
+                                        vErrors = [err183];
+                                      } else {
+                                        vErrors.push(err183);
+                                      }
+                                      errors++;
+                                    } else {
+                                      if (data68.kind !== undefined) {
+                                        let data69 = data68.kind;
+                                        const _errs202 = errors;
+                                        if (typeof data69 !== 'string') {
+                                          const err184 = {
+                                            instancePath:
+                                              instancePath + '/modelSettings/operation/kind',
+                                            schemaPath:
+                                              '#/anyOf/1/properties/modelSettings/properties/operation/oneOf/0/properties/kind/type',
+                                            keyword: 'type',
+                                            params: { type: 'string' },
+                                            message: 'must be string',
+                                          };
+                                          if (vErrors === null) {
+                                            vErrors = [err184];
+                                          } else {
+                                            vErrors.push(err184);
+                                          }
+                                          errors++;
+                                        }
+                                        if (data69 !== 'enabled') {
+                                          const err185 = {
+                                            instancePath:
+                                              instancePath + '/modelSettings/operation/kind',
+                                            schemaPath:
+                                              '#/anyOf/1/properties/modelSettings/properties/operation/oneOf/0/properties/kind/const',
+                                            keyword: 'const',
+                                            params: { allowedValue: 'enabled' },
+                                            message: 'must be equal to constant',
+                                          };
+                                          if (vErrors === null) {
+                                            vErrors = [err185];
+                                          } else {
+                                            vErrors.push(err185);
+                                          }
+                                          errors++;
+                                        }
+                                        var valid27 = _errs202 === errors;
+                                      } else {
+                                        var valid27 = true;
+                                      }
+                                      if (valid27) {
+                                        if (data68.modelId !== undefined) {
+                                          let data70 = data68.modelId;
+                                          const _errs204 = errors;
+                                          if (errors === _errs204) {
+                                            if (typeof data70 === 'string') {
+                                              if (func1(data70) > 128) {
+                                                const err186 = {
+                                                  instancePath:
+                                                    instancePath +
+                                                    '/modelSettings/operation/modelId',
+                                                  schemaPath:
+                                                    '#/anyOf/1/properties/modelSettings/properties/operation/oneOf/0/properties/modelId/maxLength',
+                                                  keyword: 'maxLength',
+                                                  params: { limit: 128 },
+                                                  message: 'must NOT have more than 128 characters',
+                                                };
+                                                if (vErrors === null) {
+                                                  vErrors = [err186];
+                                                } else {
+                                                  vErrors.push(err186);
+                                                }
+                                                errors++;
+                                              } else {
+                                                if (func1(data70) < 1) {
+                                                  const err187 = {
+                                                    instancePath:
+                                                      instancePath +
+                                                      '/modelSettings/operation/modelId',
+                                                    schemaPath:
+                                                      '#/anyOf/1/properties/modelSettings/properties/operation/oneOf/0/properties/modelId/minLength',
+                                                    keyword: 'minLength',
+                                                    params: { limit: 1 },
+                                                    message:
+                                                      'must NOT have fewer than 1 characters',
+                                                  };
+                                                  if (vErrors === null) {
+                                                    vErrors = [err187];
+                                                  } else {
+                                                    vErrors.push(err187);
+                                                  }
+                                                  errors++;
+                                                } else {
+                                                  if (!pattern173.test(data70)) {
+                                                    const err188 = {
+                                                      instancePath:
+                                                        instancePath +
+                                                        '/modelSettings/operation/modelId',
+                                                      schemaPath:
+                                                        '#/anyOf/1/properties/modelSettings/properties/operation/oneOf/0/properties/modelId/pattern',
+                                                      keyword: 'pattern',
+                                                      params: { pattern: '^[A-Za-z0-9_.-]+$' },
+                                                      message:
+                                                        'must match pattern "' +
+                                                        '^[A-Za-z0-9_.-]+$' +
+                                                        '"',
+                                                    };
+                                                    if (vErrors === null) {
+                                                      vErrors = [err188];
+                                                    } else {
+                                                      vErrors.push(err188);
+                                                    }
+                                                    errors++;
+                                                  }
+                                                }
+                                              }
+                                            } else {
+                                              const err189 = {
+                                                instancePath:
+                                                  instancePath + '/modelSettings/operation/modelId',
+                                                schemaPath:
+                                                  '#/anyOf/1/properties/modelSettings/properties/operation/oneOf/0/properties/modelId/type',
+                                                keyword: 'type',
+                                                params: { type: 'string' },
+                                                message: 'must be string',
+                                              };
+                                              if (vErrors === null) {
+                                                vErrors = [err189];
+                                              } else {
+                                                vErrors.push(err189);
+                                              }
+                                              errors++;
+                                            }
+                                          }
+                                          var valid27 = _errs204 === errors;
+                                        } else {
+                                          var valid27 = true;
+                                        }
+                                        if (valid27) {
+                                          if (data68.enabled !== undefined) {
+                                            const _errs206 = errors;
+                                            if (typeof data68.enabled !== 'boolean') {
+                                              const err190 = {
+                                                instancePath:
+                                                  instancePath + '/modelSettings/operation/enabled',
+                                                schemaPath:
+                                                  '#/anyOf/1/properties/modelSettings/properties/operation/oneOf/0/properties/enabled/type',
+                                                keyword: 'type',
+                                                params: { type: 'boolean' },
+                                                message: 'must be boolean',
+                                              };
+                                              if (vErrors === null) {
+                                                vErrors = [err190];
+                                              } else {
+                                                vErrors.push(err190);
+                                              }
+                                              errors++;
+                                            }
+                                            var valid27 = _errs206 === errors;
+                                          } else {
+                                            var valid27 = true;
+                                          }
+                                        }
+                                      }
+                                    }
+                                  } else {
+                                    const err191 = {
+                                      instancePath: instancePath + '/modelSettings/operation',
+                                      schemaPath:
+                                        '#/anyOf/1/properties/modelSettings/properties/operation/oneOf/0/type',
+                                      keyword: 'type',
+                                      params: { type: 'object' },
+                                      message: 'must be object',
+                                    };
+                                    if (vErrors === null) {
+                                      vErrors = [err191];
+                                    } else {
+                                      vErrors.push(err191);
+                                    }
+                                    errors++;
+                                  }
+                                }
+                                var _valid8 = _errs199 === errors;
+                                if (_valid8) {
+                                  valid26 = true;
+                                  passing1 = 0;
+                                  var props3 = true;
+                                }
+                                const _errs208 = errors;
+                                if (errors === _errs208) {
+                                  if (
+                                    data68 &&
+                                    typeof data68 == 'object' &&
+                                    !Array.isArray(data68)
+                                  ) {
+                                    let missing18;
+                                    if (
+                                      (data68.kind === undefined && (missing18 = 'kind')) ||
+                                      (data68.modelId === undefined && (missing18 = 'modelId'))
+                                    ) {
+                                      const err192 = {
+                                        instancePath: instancePath + '/modelSettings/operation',
+                                        schemaPath:
+                                          '#/anyOf/1/properties/modelSettings/properties/operation/oneOf/1/required',
+                                        keyword: 'required',
+                                        params: { missingProperty: missing18 },
+                                        message: "must have required property '" + missing18 + "'",
+                                      };
+                                      if (vErrors === null) {
+                                        vErrors = [err192];
+                                      } else {
+                                        vErrors.push(err192);
+                                      }
+                                      errors++;
+                                    } else {
+                                      if (data68.kind !== undefined) {
+                                        let data72 = data68.kind;
+                                        const _errs211 = errors;
+                                        if (typeof data72 !== 'string') {
+                                          const err193 = {
+                                            instancePath:
+                                              instancePath + '/modelSettings/operation/kind',
+                                            schemaPath:
+                                              '#/anyOf/1/properties/modelSettings/properties/operation/oneOf/1/properties/kind/type',
+                                            keyword: 'type',
+                                            params: { type: 'string' },
+                                            message: 'must be string',
+                                          };
+                                          if (vErrors === null) {
+                                            vErrors = [err193];
+                                          } else {
+                                            vErrors.push(err193);
+                                          }
+                                          errors++;
+                                        }
+                                        if (data72 !== 'default') {
+                                          const err194 = {
+                                            instancePath:
+                                              instancePath + '/modelSettings/operation/kind',
+                                            schemaPath:
+                                              '#/anyOf/1/properties/modelSettings/properties/operation/oneOf/1/properties/kind/const',
+                                            keyword: 'const',
+                                            params: { allowedValue: 'default' },
+                                            message: 'must be equal to constant',
+                                          };
+                                          if (vErrors === null) {
+                                            vErrors = [err194];
+                                          } else {
+                                            vErrors.push(err194);
+                                          }
+                                          errors++;
+                                        }
+                                        var valid28 = _errs211 === errors;
+                                      } else {
+                                        var valid28 = true;
+                                      }
+                                      if (valid28) {
+                                        if (data68.modelId !== undefined) {
+                                          let data73 = data68.modelId;
+                                          const _errs213 = errors;
+                                          if (errors === _errs213) {
+                                            if (typeof data73 === 'string') {
+                                              if (func1(data73) > 128) {
+                                                const err195 = {
+                                                  instancePath:
+                                                    instancePath +
+                                                    '/modelSettings/operation/modelId',
+                                                  schemaPath:
+                                                    '#/anyOf/1/properties/modelSettings/properties/operation/oneOf/1/properties/modelId/maxLength',
+                                                  keyword: 'maxLength',
+                                                  params: { limit: 128 },
+                                                  message: 'must NOT have more than 128 characters',
+                                                };
+                                                if (vErrors === null) {
+                                                  vErrors = [err195];
+                                                } else {
+                                                  vErrors.push(err195);
+                                                }
+                                                errors++;
+                                              } else {
+                                                if (func1(data73) < 1) {
+                                                  const err196 = {
+                                                    instancePath:
+                                                      instancePath +
+                                                      '/modelSettings/operation/modelId',
+                                                    schemaPath:
+                                                      '#/anyOf/1/properties/modelSettings/properties/operation/oneOf/1/properties/modelId/minLength',
+                                                    keyword: 'minLength',
+                                                    params: { limit: 1 },
+                                                    message:
+                                                      'must NOT have fewer than 1 characters',
+                                                  };
+                                                  if (vErrors === null) {
+                                                    vErrors = [err196];
+                                                  } else {
+                                                    vErrors.push(err196);
+                                                  }
+                                                  errors++;
+                                                } else {
+                                                  if (!pattern173.test(data73)) {
+                                                    const err197 = {
+                                                      instancePath:
+                                                        instancePath +
+                                                        '/modelSettings/operation/modelId',
+                                                      schemaPath:
+                                                        '#/anyOf/1/properties/modelSettings/properties/operation/oneOf/1/properties/modelId/pattern',
+                                                      keyword: 'pattern',
+                                                      params: { pattern: '^[A-Za-z0-9_.-]+$' },
+                                                      message:
+                                                        'must match pattern "' +
+                                                        '^[A-Za-z0-9_.-]+$' +
+                                                        '"',
+                                                    };
+                                                    if (vErrors === null) {
+                                                      vErrors = [err197];
+                                                    } else {
+                                                      vErrors.push(err197);
+                                                    }
+                                                    errors++;
+                                                  }
+                                                }
+                                              }
+                                            } else {
+                                              const err198 = {
+                                                instancePath:
+                                                  instancePath + '/modelSettings/operation/modelId',
+                                                schemaPath:
+                                                  '#/anyOf/1/properties/modelSettings/properties/operation/oneOf/1/properties/modelId/type',
+                                                keyword: 'type',
+                                                params: { type: 'string' },
+                                                message: 'must be string',
+                                              };
+                                              if (vErrors === null) {
+                                                vErrors = [err198];
+                                              } else {
+                                                vErrors.push(err198);
+                                              }
+                                              errors++;
+                                            }
+                                          }
+                                          var valid28 = _errs213 === errors;
+                                        } else {
+                                          var valid28 = true;
+                                        }
+                                      }
+                                    }
+                                  } else {
+                                    const err199 = {
+                                      instancePath: instancePath + '/modelSettings/operation',
+                                      schemaPath:
+                                        '#/anyOf/1/properties/modelSettings/properties/operation/oneOf/1/type',
+                                      keyword: 'type',
+                                      params: { type: 'object' },
+                                      message: 'must be object',
+                                    };
+                                    if (vErrors === null) {
+                                      vErrors = [err199];
+                                    } else {
+                                      vErrors.push(err199);
+                                    }
+                                    errors++;
+                                  }
+                                }
+                                var _valid8 = _errs208 === errors;
+                                if (_valid8 && valid26) {
+                                  valid26 = false;
+                                  passing1 = [passing1, 1];
+                                } else {
+                                  if (_valid8) {
+                                    valid26 = true;
+                                    passing1 = 1;
+                                    if (props3 !== true) {
+                                      props3 = true;
+                                    }
+                                  }
+                                  const _errs215 = errors;
+                                  if (errors === _errs215) {
+                                    if (
+                                      data68 &&
+                                      typeof data68 == 'object' &&
+                                      !Array.isArray(data68)
+                                    ) {
+                                      let missing19;
+                                      if (
+                                        (data68.kind === undefined && (missing19 = 'kind')) ||
+                                        (data68.modelId === undefined && (missing19 = 'modelId')) ||
+                                        (data68.reasoningEffort === undefined &&
+                                          (missing19 = 'reasoningEffort'))
+                                      ) {
+                                        const err200 = {
+                                          instancePath: instancePath + '/modelSettings/operation',
+                                          schemaPath:
+                                            '#/anyOf/1/properties/modelSettings/properties/operation/oneOf/2/required',
+                                          keyword: 'required',
+                                          params: { missingProperty: missing19 },
+                                          message:
+                                            "must have required property '" + missing19 + "'",
+                                        };
+                                        if (vErrors === null) {
+                                          vErrors = [err200];
+                                        } else {
+                                          vErrors.push(err200);
+                                        }
+                                        errors++;
+                                      } else {
+                                        if (data68.kind !== undefined) {
+                                          let data74 = data68.kind;
+                                          const _errs218 = errors;
+                                          if (typeof data74 !== 'string') {
+                                            const err201 = {
+                                              instancePath:
+                                                instancePath + '/modelSettings/operation/kind',
+                                              schemaPath:
+                                                '#/anyOf/1/properties/modelSettings/properties/operation/oneOf/2/properties/kind/type',
+                                              keyword: 'type',
+                                              params: { type: 'string' },
+                                              message: 'must be string',
+                                            };
+                                            if (vErrors === null) {
+                                              vErrors = [err201];
+                                            } else {
+                                              vErrors.push(err201);
+                                            }
+                                            errors++;
+                                          }
+                                          if (data74 !== 'effort') {
+                                            const err202 = {
+                                              instancePath:
+                                                instancePath + '/modelSettings/operation/kind',
+                                              schemaPath:
+                                                '#/anyOf/1/properties/modelSettings/properties/operation/oneOf/2/properties/kind/const',
+                                              keyword: 'const',
+                                              params: { allowedValue: 'effort' },
+                                              message: 'must be equal to constant',
+                                            };
+                                            if (vErrors === null) {
+                                              vErrors = [err202];
+                                            } else {
+                                              vErrors.push(err202);
+                                            }
+                                            errors++;
+                                          }
+                                          var valid29 = _errs218 === errors;
+                                        } else {
+                                          var valid29 = true;
+                                        }
+                                        if (valid29) {
+                                          if (data68.modelId !== undefined) {
+                                            let data75 = data68.modelId;
+                                            const _errs220 = errors;
+                                            if (errors === _errs220) {
+                                              if (typeof data75 === 'string') {
+                                                if (func1(data75) > 128) {
+                                                  const err203 = {
+                                                    instancePath:
+                                                      instancePath +
+                                                      '/modelSettings/operation/modelId',
+                                                    schemaPath:
+                                                      '#/anyOf/1/properties/modelSettings/properties/operation/oneOf/2/properties/modelId/maxLength',
+                                                    keyword: 'maxLength',
+                                                    params: { limit: 128 },
+                                                    message:
+                                                      'must NOT have more than 128 characters',
+                                                  };
+                                                  if (vErrors === null) {
+                                                    vErrors = [err203];
+                                                  } else {
+                                                    vErrors.push(err203);
+                                                  }
+                                                  errors++;
+                                                } else {
+                                                  if (func1(data75) < 1) {
+                                                    const err204 = {
+                                                      instancePath:
+                                                        instancePath +
+                                                        '/modelSettings/operation/modelId',
+                                                      schemaPath:
+                                                        '#/anyOf/1/properties/modelSettings/properties/operation/oneOf/2/properties/modelId/minLength',
+                                                      keyword: 'minLength',
+                                                      params: { limit: 1 },
+                                                      message:
+                                                        'must NOT have fewer than 1 characters',
+                                                    };
+                                                    if (vErrors === null) {
+                                                      vErrors = [err204];
+                                                    } else {
+                                                      vErrors.push(err204);
+                                                    }
+                                                    errors++;
+                                                  } else {
+                                                    if (!pattern173.test(data75)) {
+                                                      const err205 = {
+                                                        instancePath:
+                                                          instancePath +
+                                                          '/modelSettings/operation/modelId',
+                                                        schemaPath:
+                                                          '#/anyOf/1/properties/modelSettings/properties/operation/oneOf/2/properties/modelId/pattern',
+                                                        keyword: 'pattern',
+                                                        params: { pattern: '^[A-Za-z0-9_.-]+$' },
+                                                        message:
+                                                          'must match pattern "' +
+                                                          '^[A-Za-z0-9_.-]+$' +
+                                                          '"',
+                                                      };
+                                                      if (vErrors === null) {
+                                                        vErrors = [err205];
+                                                      } else {
+                                                        vErrors.push(err205);
+                                                      }
+                                                      errors++;
+                                                    }
+                                                  }
+                                                }
+                                              } else {
+                                                const err206 = {
+                                                  instancePath:
+                                                    instancePath +
+                                                    '/modelSettings/operation/modelId',
+                                                  schemaPath:
+                                                    '#/anyOf/1/properties/modelSettings/properties/operation/oneOf/2/properties/modelId/type',
+                                                  keyword: 'type',
+                                                  params: { type: 'string' },
+                                                  message: 'must be string',
+                                                };
+                                                if (vErrors === null) {
+                                                  vErrors = [err206];
+                                                } else {
+                                                  vErrors.push(err206);
+                                                }
+                                                errors++;
+                                              }
+                                            }
+                                            var valid29 = _errs220 === errors;
+                                          } else {
+                                            var valid29 = true;
+                                          }
+                                          if (valid29) {
+                                            if (data68.reasoningEffort !== undefined) {
+                                              let data76 = data68.reasoningEffort;
+                                              const _errs222 = errors;
+                                              const _errs223 = errors;
+                                              let valid30 = false;
+                                              const _errs224 = errors;
+                                              if (typeof data76 !== 'string') {
+                                                const err207 = {
+                                                  instancePath:
+                                                    instancePath +
+                                                    '/modelSettings/operation/reasoningEffort',
+                                                  schemaPath:
+                                                    '#/anyOf/1/properties/modelSettings/properties/operation/oneOf/2/properties/reasoningEffort/anyOf/0/type',
+                                                  keyword: 'type',
+                                                  params: { type: 'string' },
+                                                  message: 'must be string',
+                                                };
+                                                if (vErrors === null) {
+                                                  vErrors = [err207];
+                                                } else {
+                                                  vErrors.push(err207);
+                                                }
+                                                errors++;
+                                              }
+                                              if (
+                                                !(
+                                                  data76 === 'none' ||
+                                                  data76 === 'minimal' ||
+                                                  data76 === 'low' ||
+                                                  data76 === 'medium' ||
+                                                  data76 === 'high' ||
+                                                  data76 === 'xhigh' ||
+                                                  data76 === 'max' ||
+                                                  data76 === 'ultar'
+                                                )
+                                              ) {
+                                                const err208 = {
+                                                  instancePath:
+                                                    instancePath +
+                                                    '/modelSettings/operation/reasoningEffort',
+                                                  schemaPath:
+                                                    '#/anyOf/1/properties/modelSettings/properties/operation/oneOf/2/properties/reasoningEffort/anyOf/0/enum',
+                                                  keyword: 'enum',
+                                                  params: {
+                                                    allowedValues:
+                                                      schema52.anyOf[1].properties.modelSettings
+                                                        .properties.operation.oneOf[2].properties
+                                                        .reasoningEffort.anyOf[0].enum,
+                                                  },
+                                                  message:
+                                                    'must be equal to one of the allowed values',
+                                                };
+                                                if (vErrors === null) {
+                                                  vErrors = [err208];
+                                                } else {
+                                                  vErrors.push(err208);
+                                                }
+                                                errors++;
+                                              }
+                                              var _valid9 = _errs224 === errors;
+                                              valid30 = valid30 || _valid9;
+                                              const _errs226 = errors;
+                                              if (data76 !== null) {
+                                                const err209 = {
+                                                  instancePath:
+                                                    instancePath +
+                                                    '/modelSettings/operation/reasoningEffort',
+                                                  schemaPath:
+                                                    '#/anyOf/1/properties/modelSettings/properties/operation/oneOf/2/properties/reasoningEffort/anyOf/1/type',
+                                                  keyword: 'type',
+                                                  params: { type: 'null' },
+                                                  message: 'must be null',
+                                                };
+                                                if (vErrors === null) {
+                                                  vErrors = [err209];
+                                                } else {
+                                                  vErrors.push(err209);
+                                                }
+                                                errors++;
+                                              }
+                                              var _valid9 = _errs226 === errors;
+                                              valid30 = valid30 || _valid9;
+                                              if (!valid30) {
+                                                const err210 = {
+                                                  instancePath:
+                                                    instancePath +
+                                                    '/modelSettings/operation/reasoningEffort',
+                                                  schemaPath:
+                                                    '#/anyOf/1/properties/modelSettings/properties/operation/oneOf/2/properties/reasoningEffort/anyOf',
+                                                  keyword: 'anyOf',
+                                                  params: {},
+                                                  message: 'must match a schema in anyOf',
+                                                };
+                                                if (vErrors === null) {
+                                                  vErrors = [err210];
+                                                } else {
+                                                  vErrors.push(err210);
+                                                }
+                                                errors++;
+                                              } else {
+                                                errors = _errs223;
+                                                if (vErrors !== null) {
+                                                  if (_errs223) {
+                                                    vErrors.length = _errs223;
+                                                  } else {
+                                                    vErrors = null;
+                                                  }
+                                                }
+                                              }
+                                              var valid29 = _errs222 === errors;
+                                            } else {
+                                              var valid29 = true;
+                                            }
+                                          }
+                                        }
+                                      }
+                                    } else {
+                                      const err211 = {
+                                        instancePath: instancePath + '/modelSettings/operation',
+                                        schemaPath:
+                                          '#/anyOf/1/properties/modelSettings/properties/operation/oneOf/2/type',
+                                        keyword: 'type',
+                                        params: { type: 'object' },
+                                        message: 'must be object',
+                                      };
+                                      if (vErrors === null) {
+                                        vErrors = [err211];
+                                      } else {
+                                        vErrors.push(err211);
+                                      }
+                                      errors++;
+                                    }
+                                  }
+                                  var _valid8 = _errs215 === errors;
+                                  if (_valid8 && valid26) {
+                                    valid26 = false;
+                                    passing1 = [passing1, 2];
+                                  } else {
+                                    if (_valid8) {
+                                      valid26 = true;
+                                      passing1 = 2;
+                                      if (props3 !== true) {
+                                        props3 = true;
+                                      }
+                                    }
+                                  }
+                                }
+                                if (!valid26) {
+                                  const err212 = {
+                                    instancePath: instancePath + '/modelSettings/operation',
+                                    schemaPath:
+                                      '#/anyOf/1/properties/modelSettings/properties/operation/oneOf',
+                                    keyword: 'oneOf',
+                                    params: { passingSchemas: passing1 },
+                                    message: 'must match exactly one schema in oneOf',
+                                  };
+                                  if (vErrors === null) {
+                                    vErrors = [err212];
+                                  } else {
+                                    vErrors.push(err212);
+                                  }
+                                  errors++;
+                                } else {
+                                  errors = _errs198;
+                                  if (vErrors !== null) {
+                                    if (_errs198) {
+                                      vErrors.length = _errs198;
+                                    } else {
+                                      vErrors = null;
+                                    }
+                                  }
+                                }
+                                var valid23 = _errs197 === errors;
+                              } else {
+                                var valid23 = true;
+                              }
+                            }
+                          }
+                        } else {
+                          const err213 = {
+                            instancePath: instancePath + '/modelSettings',
+                            schemaPath: '#/anyOf/1/properties/modelSettings/type',
+                            keyword: 'type',
+                            params: { type: 'object' },
+                            message: 'must be object',
+                          };
+                          if (vErrors === null) {
+                            vErrors = [err213];
+                          } else {
+                            vErrors.push(err213);
+                          }
+                          errors++;
+                        }
+                      }
+                      var valid22 = _errs179 === errors;
+                    } else {
+                      var valid22 = true;
+                    }
+                    if (valid22) {
+                      if (data.providerSettings !== undefined) {
+                        const _errs228 = errors;
+                        const err214 = {
+                          instancePath: instancePath + '/providerSettings',
+                          schemaPath: '#/anyOf/1/properties/providerSettings/not',
+                          keyword: 'not',
+                          params: {},
+                          message: 'must NOT be valid',
+                        };
+                        if (vErrors === null) {
+                          vErrors = [err214];
+                        } else {
+                          vErrors.push(err214);
+                        }
+                        errors++;
+                        var valid22 = _errs228 === errors;
+                      } else {
+                        var valid22 = true;
+                      }
+                      if (valid22) {
+                        if (data.state !== undefined) {
+                          let data78 = data.state;
+                          const _errs230 = errors;
+                          if (typeof data78 !== 'string') {
+                            const err215 = {
+                              instancePath: instancePath + '/state',
+                              schemaPath: '#/anyOf/1/properties/state/type',
+                              keyword: 'type',
+                              params: { type: 'string' },
+                              message: 'must be string',
+                            };
+                            if (vErrors === null) {
+                              vErrors = [err215];
+                            } else {
+                              vErrors.push(err215);
+                            }
+                            errors++;
+                          }
+                          if (data78 !== 'applied') {
+                            const err216 = {
+                              instancePath: instancePath + '/state',
+                              schemaPath: '#/anyOf/1/properties/state/const',
+                              keyword: 'const',
+                              params: { allowedValue: 'applied' },
+                              message: 'must be equal to constant',
+                            };
+                            if (vErrors === null) {
+                              vErrors = [err216];
+                            } else {
+                              vErrors.push(err216);
+                            }
+                            errors++;
+                          }
+                          var valid22 = _errs230 === errors;
+                        } else {
+                          var valid22 = true;
+                        }
+                        if (valid22) {
+                          if (data.receipt !== undefined) {
+                            let data79 = data.receipt;
+                            const _errs232 = errors;
+                            if (errors === _errs232) {
+                              if (data79 && typeof data79 == 'object' && !Array.isArray(data79)) {
+                                let missing20;
+                                if (
+                                  (data79.status === undefined && (missing20 = 'status')) ||
+                                  (data79.etag === undefined && (missing20 = 'etag')) ||
+                                  (data79.postReadSet === undefined && (missing20 = 'postReadSet'))
+                                ) {
+                                  const err217 = {
+                                    instancePath: instancePath + '/receipt',
+                                    schemaPath: '#/anyOf/1/properties/receipt/required',
+                                    keyword: 'required',
+                                    params: { missingProperty: missing20 },
+                                    message: "must have required property '" + missing20 + "'",
+                                  };
+                                  if (vErrors === null) {
+                                    vErrors = [err217];
+                                  } else {
+                                    vErrors.push(err217);
+                                  }
+                                  errors++;
+                                } else {
+                                  if (data79.status !== undefined) {
+                                    let data80 = data79.status;
+                                    const _errs235 = errors;
+                                    if (typeof data80 !== 'string') {
+                                      const err218 = {
+                                        instancePath: instancePath + '/receipt/status',
+                                        schemaPath:
+                                          '#/anyOf/1/properties/receipt/properties/status/type',
+                                        keyword: 'type',
+                                        params: { type: 'string' },
+                                        message: 'must be string',
+                                      };
+                                      if (vErrors === null) {
+                                        vErrors = [err218];
+                                      } else {
+                                        vErrors.push(err218);
+                                      }
+                                      errors++;
+                                    }
+                                    if (data80 !== 'applied') {
+                                      const err219 = {
+                                        instancePath: instancePath + '/receipt/status',
+                                        schemaPath:
+                                          '#/anyOf/1/properties/receipt/properties/status/const',
+                                        keyword: 'const',
+                                        params: { allowedValue: 'applied' },
+                                        message: 'must be equal to constant',
+                                      };
+                                      if (vErrors === null) {
+                                        vErrors = [err219];
+                                      } else {
+                                        vErrors.push(err219);
+                                      }
+                                      errors++;
+                                    }
+                                    var valid31 = _errs235 === errors;
+                                  } else {
+                                    var valid31 = true;
+                                  }
+                                  if (valid31) {
+                                    if (data79.etag !== undefined) {
+                                      let data81 = data79.etag;
+                                      const _errs237 = errors;
+                                      if (errors === _errs237) {
+                                        if (typeof data81 === 'string') {
+                                          if (!pattern15.test(data81)) {
+                                            const err220 = {
+                                              instancePath: instancePath + '/receipt/etag',
+                                              schemaPath:
+                                                '#/anyOf/1/properties/receipt/properties/etag/pattern',
+                                              keyword: 'pattern',
+                                              params: { pattern: '^[a-f0-9]{64}$' },
+                                              message:
+                                                'must match pattern "' + '^[a-f0-9]{64}$' + '"',
+                                            };
+                                            if (vErrors === null) {
+                                              vErrors = [err220];
+                                            } else {
+                                              vErrors.push(err220);
+                                            }
+                                            errors++;
+                                          }
+                                        } else {
+                                          const err221 = {
+                                            instancePath: instancePath + '/receipt/etag',
+                                            schemaPath:
+                                              '#/anyOf/1/properties/receipt/properties/etag/type',
+                                            keyword: 'type',
+                                            params: { type: 'string' },
+                                            message: 'must be string',
+                                          };
+                                          if (vErrors === null) {
+                                            vErrors = [err221];
+                                          } else {
+                                            vErrors.push(err221);
+                                          }
+                                          errors++;
+                                        }
+                                      }
+                                      var valid31 = _errs237 === errors;
+                                    } else {
+                                      var valid31 = true;
+                                    }
+                                    if (valid31) {
+                                      if (data79.postReadSet !== undefined) {
+                                        let data82 = data79.postReadSet;
+                                        const _errs239 = errors;
+                                        if (errors === _errs239) {
+                                          if (
+                                            data82 &&
+                                            typeof data82 == 'object' &&
+                                            !Array.isArray(data82)
+                                          ) {
+                                            let missing21;
+                                            if (
+                                              (data82.userEtag === undefined &&
+                                                (missing21 = 'userEtag')) ||
+                                              (data82.workspaceEtag === undefined &&
+                                                (missing21 = 'workspaceEtag')) ||
+                                              (data82.explicitDigest === undefined &&
+                                                (missing21 = 'explicitDigest')) ||
+                                              (data82.effectiveDigest === undefined &&
+                                                (missing21 = 'effectiveDigest'))
+                                            ) {
+                                              const err222 = {
+                                                instancePath: instancePath + '/receipt/postReadSet',
+                                                schemaPath:
+                                                  '#/anyOf/1/properties/receipt/properties/postReadSet/required',
+                                                keyword: 'required',
+                                                params: { missingProperty: missing21 },
+                                                message:
+                                                  "must have required property '" + missing21 + "'",
+                                              };
+                                              if (vErrors === null) {
+                                                vErrors = [err222];
+                                              } else {
+                                                vErrors.push(err222);
+                                              }
+                                              errors++;
+                                            } else {
+                                              if (data82.userEtag !== undefined) {
+                                                let data83 = data82.userEtag;
+                                                const _errs242 = errors;
+                                                if (errors === _errs242) {
+                                                  if (typeof data83 === 'string') {
+                                                    if (!pattern15.test(data83)) {
+                                                      const err223 = {
+                                                        instancePath:
+                                                          instancePath +
+                                                          '/receipt/postReadSet/userEtag',
+                                                        schemaPath:
+                                                          '#/anyOf/1/properties/receipt/properties/postReadSet/properties/userEtag/pattern',
+                                                        keyword: 'pattern',
+                                                        params: { pattern: '^[a-f0-9]{64}$' },
+                                                        message:
+                                                          'must match pattern "' +
+                                                          '^[a-f0-9]{64}$' +
+                                                          '"',
+                                                      };
+                                                      if (vErrors === null) {
+                                                        vErrors = [err223];
+                                                      } else {
+                                                        vErrors.push(err223);
+                                                      }
+                                                      errors++;
+                                                    }
+                                                  } else {
+                                                    const err224 = {
+                                                      instancePath:
+                                                        instancePath +
+                                                        '/receipt/postReadSet/userEtag',
+                                                      schemaPath:
+                                                        '#/anyOf/1/properties/receipt/properties/postReadSet/properties/userEtag/type',
+                                                      keyword: 'type',
+                                                      params: { type: 'string' },
+                                                      message: 'must be string',
+                                                    };
+                                                    if (vErrors === null) {
+                                                      vErrors = [err224];
+                                                    } else {
+                                                      vErrors.push(err224);
+                                                    }
+                                                    errors++;
+                                                  }
+                                                }
+                                                var valid32 = _errs242 === errors;
+                                              } else {
+                                                var valid32 = true;
+                                              }
+                                              if (valid32) {
+                                                if (data82.workspaceEtag !== undefined) {
+                                                  let data84 = data82.workspaceEtag;
+                                                  const _errs244 = errors;
+                                                  const _errs245 = errors;
+                                                  let valid33 = false;
+                                                  const _errs246 = errors;
+                                                  if (errors === _errs246) {
+                                                    if (typeof data84 === 'string') {
+                                                      if (!pattern15.test(data84)) {
+                                                        const err225 = {
+                                                          instancePath:
+                                                            instancePath +
+                                                            '/receipt/postReadSet/workspaceEtag',
+                                                          schemaPath:
+                                                            '#/anyOf/1/properties/receipt/properties/postReadSet/properties/workspaceEtag/anyOf/0/pattern',
+                                                          keyword: 'pattern',
+                                                          params: { pattern: '^[a-f0-9]{64}$' },
+                                                          message:
+                                                            'must match pattern "' +
+                                                            '^[a-f0-9]{64}$' +
+                                                            '"',
+                                                        };
+                                                        if (vErrors === null) {
+                                                          vErrors = [err225];
+                                                        } else {
+                                                          vErrors.push(err225);
+                                                        }
+                                                        errors++;
+                                                      }
+                                                    } else {
+                                                      const err226 = {
+                                                        instancePath:
+                                                          instancePath +
+                                                          '/receipt/postReadSet/workspaceEtag',
+                                                        schemaPath:
+                                                          '#/anyOf/1/properties/receipt/properties/postReadSet/properties/workspaceEtag/anyOf/0/type',
+                                                        keyword: 'type',
+                                                        params: { type: 'string' },
+                                                        message: 'must be string',
+                                                      };
+                                                      if (vErrors === null) {
+                                                        vErrors = [err226];
+                                                      } else {
+                                                        vErrors.push(err226);
+                                                      }
+                                                      errors++;
+                                                    }
+                                                  }
+                                                  var _valid10 = _errs246 === errors;
+                                                  valid33 = valid33 || _valid10;
+                                                  const _errs248 = errors;
+                                                  if (data84 !== null) {
+                                                    const err227 = {
+                                                      instancePath:
+                                                        instancePath +
+                                                        '/receipt/postReadSet/workspaceEtag',
+                                                      schemaPath:
+                                                        '#/anyOf/1/properties/receipt/properties/postReadSet/properties/workspaceEtag/anyOf/1/type',
+                                                      keyword: 'type',
+                                                      params: { type: 'null' },
+                                                      message: 'must be null',
+                                                    };
+                                                    if (vErrors === null) {
+                                                      vErrors = [err227];
+                                                    } else {
+                                                      vErrors.push(err227);
+                                                    }
+                                                    errors++;
+                                                  }
+                                                  var _valid10 = _errs248 === errors;
+                                                  valid33 = valid33 || _valid10;
+                                                  if (!valid33) {
+                                                    const err228 = {
+                                                      instancePath:
+                                                        instancePath +
+                                                        '/receipt/postReadSet/workspaceEtag',
+                                                      schemaPath:
+                                                        '#/anyOf/1/properties/receipt/properties/postReadSet/properties/workspaceEtag/anyOf',
+                                                      keyword: 'anyOf',
+                                                      params: {},
+                                                      message: 'must match a schema in anyOf',
+                                                    };
+                                                    if (vErrors === null) {
+                                                      vErrors = [err228];
+                                                    } else {
+                                                      vErrors.push(err228);
+                                                    }
+                                                    errors++;
+                                                  } else {
+                                                    errors = _errs245;
+                                                    if (vErrors !== null) {
+                                                      if (_errs245) {
+                                                        vErrors.length = _errs245;
+                                                      } else {
+                                                        vErrors = null;
+                                                      }
+                                                    }
+                                                  }
+                                                  var valid32 = _errs244 === errors;
+                                                } else {
+                                                  var valid32 = true;
+                                                }
+                                                if (valid32) {
+                                                  if (data82.explicitDigest !== undefined) {
+                                                    let data85 = data82.explicitDigest;
+                                                    const _errs250 = errors;
+                                                    if (errors === _errs250) {
+                                                      if (typeof data85 === 'string') {
+                                                        if (!pattern15.test(data85)) {
+                                                          const err229 = {
+                                                            instancePath:
+                                                              instancePath +
+                                                              '/receipt/postReadSet/explicitDigest',
+                                                            schemaPath:
+                                                              '#/anyOf/1/properties/receipt/properties/postReadSet/properties/explicitDigest/pattern',
+                                                            keyword: 'pattern',
+                                                            params: { pattern: '^[a-f0-9]{64}$' },
+                                                            message:
+                                                              'must match pattern "' +
+                                                              '^[a-f0-9]{64}$' +
+                                                              '"',
+                                                          };
+                                                          if (vErrors === null) {
+                                                            vErrors = [err229];
+                                                          } else {
+                                                            vErrors.push(err229);
+                                                          }
+                                                          errors++;
+                                                        }
+                                                      } else {
+                                                        const err230 = {
+                                                          instancePath:
+                                                            instancePath +
+                                                            '/receipt/postReadSet/explicitDigest',
+                                                          schemaPath:
+                                                            '#/anyOf/1/properties/receipt/properties/postReadSet/properties/explicitDigest/type',
+                                                          keyword: 'type',
+                                                          params: { type: 'string' },
+                                                          message: 'must be string',
+                                                        };
+                                                        if (vErrors === null) {
+                                                          vErrors = [err230];
+                                                        } else {
+                                                          vErrors.push(err230);
+                                                        }
+                                                        errors++;
+                                                      }
+                                                    }
+                                                    var valid32 = _errs250 === errors;
+                                                  } else {
+                                                    var valid32 = true;
+                                                  }
+                                                  if (valid32) {
+                                                    if (data82.effectiveDigest !== undefined) {
+                                                      let data86 = data82.effectiveDigest;
+                                                      const _errs252 = errors;
+                                                      if (errors === _errs252) {
+                                                        if (typeof data86 === 'string') {
+                                                          if (!pattern15.test(data86)) {
+                                                            const err231 = {
+                                                              instancePath:
+                                                                instancePath +
+                                                                '/receipt/postReadSet/effectiveDigest',
+                                                              schemaPath:
+                                                                '#/anyOf/1/properties/receipt/properties/postReadSet/properties/effectiveDigest/pattern',
+                                                              keyword: 'pattern',
+                                                              params: { pattern: '^[a-f0-9]{64}$' },
+                                                              message:
+                                                                'must match pattern "' +
+                                                                '^[a-f0-9]{64}$' +
+                                                                '"',
+                                                            };
+                                                            if (vErrors === null) {
+                                                              vErrors = [err231];
+                                                            } else {
+                                                              vErrors.push(err231);
+                                                            }
+                                                            errors++;
+                                                          }
+                                                        } else {
+                                                          const err232 = {
+                                                            instancePath:
+                                                              instancePath +
+                                                              '/receipt/postReadSet/effectiveDigest',
+                                                            schemaPath:
+                                                              '#/anyOf/1/properties/receipt/properties/postReadSet/properties/effectiveDigest/type',
+                                                            keyword: 'type',
+                                                            params: { type: 'string' },
+                                                            message: 'must be string',
+                                                          };
+                                                          if (vErrors === null) {
+                                                            vErrors = [err232];
+                                                          } else {
+                                                            vErrors.push(err232);
+                                                          }
+                                                          errors++;
+                                                        }
+                                                      }
+                                                      var valid32 = _errs252 === errors;
+                                                    } else {
+                                                      var valid32 = true;
+                                                    }
+                                                  }
+                                                }
+                                              }
+                                            }
+                                          } else {
+                                            const err233 = {
+                                              instancePath: instancePath + '/receipt/postReadSet',
+                                              schemaPath:
+                                                '#/anyOf/1/properties/receipt/properties/postReadSet/type',
+                                              keyword: 'type',
+                                              params: { type: 'object' },
+                                              message: 'must be object',
+                                            };
+                                            if (vErrors === null) {
+                                              vErrors = [err233];
+                                            } else {
+                                              vErrors.push(err233);
+                                            }
+                                            errors++;
+                                          }
+                                        }
+                                        var valid31 = _errs239 === errors;
+                                      } else {
+                                        var valid31 = true;
+                                      }
+                                    }
+                                  }
+                                }
+                              } else {
+                                const err234 = {
+                                  instancePath: instancePath + '/receipt',
+                                  schemaPath: '#/anyOf/1/properties/receipt/type',
+                                  keyword: 'type',
+                                  params: { type: 'object' },
+                                  message: 'must be object',
+                                };
+                                if (vErrors === null) {
+                                  vErrors = [err234];
+                                } else {
+                                  vErrors.push(err234);
+                                }
+                                errors++;
+                              }
+                            }
+                            var valid22 = _errs232 === errors;
+                          } else {
+                            var valid22 = true;
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    } else {
+      const err235 = {
+        instancePath,
+        schemaPath: '#/anyOf/1/type',
+        keyword: 'type',
+        params: { type: 'object' },
+        message: 'must be object',
+      };
+      if (vErrors === null) {
+        vErrors = [err235];
+      } else {
+        vErrors.push(err235);
+      }
+      errors++;
+    }
+  }
+  var _valid0 = _errs164 === errors;
+  valid0 = valid0 || _valid0;
+  if (_valid0) {
+    if (props2 !== true) {
+      props2 = true;
+    }
+  }
+  if (!valid0) {
+    const err236 = {
+      instancePath,
+      schemaPath: '#/anyOf',
+      keyword: 'anyOf',
+      params: {},
+      message: 'must match a schema in anyOf',
+    };
+    if (vErrors === null) {
+      vErrors = [err236];
+    } else {
+      vErrors.push(err236);
+    }
+    errors++;
+    validate45.errors = vErrors;
+    return false;
+  } else {
+    errors = _errs0;
+    if (vErrors !== null) {
+      if (_errs0) {
+        vErrors.length = _errs0;
+      } else {
+        vErrors = null;
+      }
     }
   }
   validate45.errors = vErrors;
+  evaluated0.props = props2;
   return errors === 0;
 }
-validate45.evaluated = { props: true, dynamicProps: false, dynamicItems: false };
+validate45.evaluated = { dynamicProps: true, dynamicItems: false };
 var response_SessionExportManifest = validate46;
 var schema53 = {
   $schema: 'https://json-schema.org/draft/2020-12/schema',
@@ -47157,7 +49511,7 @@ var schema56 = {
   ],
   additionalProperties: true,
 };
-var pattern241 = new RegExp(
+var pattern257 = new RegExp(
   '^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$',
   'u',
 );
@@ -47524,7 +49878,7 @@ function validate50(
                               ];
                               return false;
                             } else {
-                              if (!pattern241.test(data7)) {
+                              if (!pattern257.test(data7)) {
                                 validate50.errors = [
                                   {
                                     instancePath: instancePath + '/contentBase64',
@@ -83127,7 +85481,7 @@ var schema70 = {
   ],
   additionalProperties: true,
 };
-var pattern444 = new RegExp('^[0-9a-f]{64}$', 'u');
+var pattern460 = new RegExp('^[0-9a-f]{64}$', 'u');
 function validate67(
   data,
   { instancePath = '', parentData, parentDataProperty, rootData = data, dynamicAnchors = {} } = {},
@@ -83277,7 +85631,7 @@ function validate67(
               const _errs6 = errors;
               if (errors === _errs6) {
                 if (typeof data2 === 'string') {
-                  if (!pattern444.test(data2)) {
+                  if (!pattern460.test(data2)) {
                     validate67.errors = [
                       {
                         instancePath: instancePath + '/pageIdentity',
@@ -91610,8 +93964,8 @@ var schema76 = {
     },
   },
 };
-var pattern514 = new RegExp('^file:\\/\\/.*', 'u');
-var pattern515 = new RegExp('^input-file-[A-Za-z0-9_-]{1,100}$', 'u');
+var pattern530 = new RegExp('^file:\\/\\/.*', 'u');
+var pattern531 = new RegExp('^input-file-[A-Za-z0-9_-]{1,100}$', 'u');
 var wrapper10 = { validate: validate75 };
 function validate75(
   data,
@@ -94643,7 +96997,7 @@ function validate74(
                                                                           return false;
                                                                         } else {
                                                                           if (
-                                                                            !pattern514.test(data40)
+                                                                            !pattern530.test(data40)
                                                                           ) {
                                                                             validate74.errors = [
                                                                               {
@@ -94777,7 +97131,7 @@ function validate74(
                                                                                 'string'
                                                                               ) {
                                                                                 if (
-                                                                                  !pattern515.test(
+                                                                                  !pattern531.test(
                                                                                     data42,
                                                                                   )
                                                                                 ) {
@@ -113937,7 +116291,7 @@ function validate91(
                                                                                       errors++;
                                                                                     } else {
                                                                                       if (
-                                                                                        !pattern514.test(
+                                                                                        !pattern530.test(
                                                                                           data35,
                                                                                         )
                                                                                       ) {
@@ -114124,7 +116478,7 @@ function validate91(
                                                                                             'string'
                                                                                           ) {
                                                                                             if (
-                                                                                              !pattern515.test(
+                                                                                              !pattern531.test(
                                                                                                 data37,
                                                                                               )
                                                                                             ) {
@@ -118146,7 +120500,7 @@ function validate91(
                                                                                       errors++;
                                                                                     } else {
                                                                                       if (
-                                                                                        !pattern514.test(
+                                                                                        !pattern530.test(
                                                                                           data68,
                                                                                         )
                                                                                       ) {
@@ -118336,7 +120690,7 @@ function validate91(
                                                                                             'string'
                                                                                           ) {
                                                                                             if (
-                                                                                              !pattern515.test(
+                                                                                              !pattern531.test(
                                                                                                 data70,
                                                                                               )
                                                                                             ) {
@@ -125582,7 +127936,7 @@ function validate95(
                                                                                       errors++;
                                                                                     } else {
                                                                                       if (
-                                                                                        !pattern514.test(
+                                                                                        !pattern530.test(
                                                                                           data35,
                                                                                         )
                                                                                       ) {
@@ -125769,7 +128123,7 @@ function validate95(
                                                                                             'string'
                                                                                           ) {
                                                                                             if (
-                                                                                              !pattern515.test(
+                                                                                              !pattern531.test(
                                                                                                 data37,
                                                                                               )
                                                                                             ) {
@@ -129791,7 +132145,7 @@ function validate95(
                                                                                       errors++;
                                                                                     } else {
                                                                                       if (
-                                                                                        !pattern514.test(
+                                                                                        !pattern530.test(
                                                                                           data68,
                                                                                         )
                                                                                       ) {
@@ -129981,7 +132335,7 @@ function validate95(
                                                                                             'string'
                                                                                           ) {
                                                                                             if (
-                                                                                              !pattern515.test(
+                                                                                              !pattern531.test(
                                                                                                 data70,
                                                                                               )
                                                                                             ) {
@@ -150503,7 +152857,7 @@ function validate111(
                                                                             return false;
                                                                           } else {
                                                                             if (
-                                                                              !pattern514.test(
+                                                                              !pattern530.test(
                                                                                 data107,
                                                                               )
                                                                             ) {
@@ -150651,7 +153005,7 @@ function validate111(
                                                                                   'string'
                                                                                 ) {
                                                                                   if (
-                                                                                    !pattern515.test(
+                                                                                    !pattern531.test(
                                                                                       data109,
                                                                                     )
                                                                                   ) {
@@ -175264,7 +177618,7 @@ function validate137(
                                                         ];
                                                         return false;
                                                       } else {
-                                                        if (!pattern514.test(data26)) {
+                                                        if (!pattern530.test(data26)) {
                                                           validate137.errors = [
                                                             {
                                                               instancePath:
@@ -175358,7 +177712,7 @@ function validate137(
                                                           const _errs67 = errors;
                                                           if (errors === _errs67) {
                                                             if (typeof data28 === 'string') {
-                                                              if (!pattern515.test(data28)) {
+                                                              if (!pattern531.test(data28)) {
                                                                 validate137.errors = [
                                                                   {
                                                                     instancePath:
@@ -179817,7 +182171,7 @@ function validate139(
                     ];
                     return false;
                   } else {
-                    if (!pattern514.test(data1)) {
+                    if (!pattern530.test(data1)) {
                       validate139.errors = [
                         {
                           instancePath: instancePath + '/uri',
@@ -179881,7 +182235,7 @@ function validate139(
                       const _errs9 = errors;
                       if (errors === _errs9) {
                         if (typeof data3 === 'string') {
-                          if (!pattern515.test(data3)) {
+                          if (!pattern531.test(data3)) {
                             validate139.errors = [
                               {
                                 instancePath: instancePath + '/reference/id',
@@ -180800,7 +183154,7 @@ function validate140(
                     const _errs12 = errors;
                     if (errors === _errs12) {
                       if (typeof data5 === 'string') {
-                        if (!pattern514.test(data5)) {
+                        if (!pattern530.test(data5)) {
                           validate140.errors = [
                             {
                               instancePath: instancePath + '/uri',
@@ -180862,7 +183216,7 @@ function validate140(
                               const _errs17 = errors;
                               if (errors === _errs17) {
                                 if (typeof data7 === 'string') {
-                                  if (!pattern515.test(data7)) {
+                                  if (!pattern531.test(data7)) {
                                     validate140.errors = [
                                       {
                                         instancePath: instancePath + '/reference/id',
@@ -185163,7 +187517,7 @@ function validate146(
                                                               ];
                                                               return false;
                                                             } else {
-                                                              if (!pattern514.test(data27)) {
+                                                              if (!pattern530.test(data27)) {
                                                                 validate146.errors = [
                                                                   {
                                                                     instancePath:
@@ -185270,7 +187624,7 @@ function validate146(
                                                                 const _errs69 = errors;
                                                                 if (errors === _errs69) {
                                                                   if (typeof data29 === 'string') {
-                                                                    if (!pattern515.test(data29)) {
+                                                                    if (!pattern531.test(data29)) {
                                                                       validate146.errors = [
                                                                         {
                                                                           instancePath:
@@ -195308,7 +197662,7 @@ function validate157(
                                                                                     return false;
                                                                                   } else {
                                                                                     if (
-                                                                                      !pattern514.test(
+                                                                                      !pattern530.test(
                                                                                         data35,
                                                                                       )
                                                                                     ) {
@@ -195469,7 +197823,7 @@ function validate157(
                                                                                           'string'
                                                                                         ) {
                                                                                           if (
-                                                                                            !pattern515.test(
+                                                                                            !pattern531.test(
                                                                                               data37,
                                                                                             )
                                                                                           ) {
@@ -212443,7 +214797,7 @@ function validate184(
 }
 validate184.evaluated = { props: true, dynamicProps: false, dynamicItems: false };
 var request_ConfigurationPatchRequest = validate185;
-var pattern1203 = new RegExp(
+var pattern1219 = new RegExp(
   '^(?!(?:__proto__|constructor|prototype)$)[^\\u0000-\\u001f\\u007f]+$',
   'u',
 );
@@ -213193,7 +215547,7 @@ function validate185(
                                                             }
                                                             errors++;
                                                           } else {
-                                                            if (!pattern1203.test(data8)) {
+                                                            if (!pattern1219.test(data8)) {
                                                               const err8 = {
                                                                 instancePath:
                                                                   instancePath +
@@ -213619,7 +215973,7 @@ function validate185(
                                                             }
                                                             errors++;
                                                           } else {
-                                                            if (!pattern1203.test(data12)) {
+                                                            if (!pattern1219.test(data12)) {
                                                               const err24 = {
                                                                 instancePath:
                                                                   instancePath +
@@ -230574,7 +232928,7 @@ function validate224(
                                               ];
                                               return false;
                                             } else {
-                                              if (!pattern514.test(data19)) {
+                                              if (!pattern530.test(data19)) {
                                                 validate224.errors = [
                                                   {
                                                     instancePath:
@@ -230692,7 +233046,7 @@ function validate224(
                                                   const _errs49 = errors;
                                                   if (errors === _errs49) {
                                                     if (typeof data21 === 'string') {
-                                                      if (!pattern515.test(data21)) {
+                                                      if (!pattern531.test(data21)) {
                                                         validate224.errors = [
                                                           {
                                                             instancePath:
@@ -233420,7 +235774,7 @@ function validate225(
                                               ];
                                               return false;
                                             } else {
-                                              if (!pattern514.test(data19)) {
+                                              if (!pattern530.test(data19)) {
                                                 validate225.errors = [
                                                   {
                                                     instancePath:
@@ -233538,7 +235892,7 @@ function validate225(
                                                   const _errs49 = errors;
                                                   if (errors === _errs49) {
                                                     if (typeof data21 === 'string') {
-                                                      if (!pattern515.test(data21)) {
+                                                      if (!pattern531.test(data21)) {
                                                         validate225.errors = [
                                                           {
                                                             instancePath:
@@ -240352,7 +242706,7 @@ function validate238(
                                                   ];
                                                   return false;
                                                 } else {
-                                                  if (!pattern514.test(data21)) {
+                                                  if (!pattern530.test(data21)) {
                                                     validate238.errors = [
                                                       {
                                                         instancePath:
@@ -240476,7 +242830,7 @@ function validate238(
                                                       const _errs53 = errors;
                                                       if (errors === _errs53) {
                                                         if (typeof data23 === 'string') {
-                                                          if (!pattern515.test(data23)) {
+                                                          if (!pattern531.test(data23)) {
                                                             validate238.errors = [
                                                               {
                                                                 instancePath:
@@ -241790,7 +244144,7 @@ var schema207 = {
   required: ['expectedStoreId', 'id', 'name', 'mediaType', 'data'],
   additionalProperties: false,
 };
-var pattern1428 = new RegExp('^[A-Za-z0-9+/]*={0,2}$', 'u');
+var pattern1444 = new RegExp('^[A-Za-z0-9+/]*={0,2}$', 'u');
 function validate241(
   data,
   { instancePath = '', parentData, parentDataProperty, rootData = data, dynamicAnchors = {} } = {},
@@ -242088,7 +244442,7 @@ function validate241(
                             ];
                             return false;
                           } else {
-                            if (!pattern1428.test(data4)) {
+                            if (!pattern1444.test(data4)) {
                               validate241.errors = [
                                 {
                                   instancePath: instancePath + '/data',

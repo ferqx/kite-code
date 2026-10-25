@@ -889,3 +889,188 @@ test('user MCP intents and receipts remain closed and cannot gain Workspace or c
     await f.close();
   }
 });
+
+test('model applied postReadSet is a closed durable successor proof and cannot decorate other purposes or terminal states', async () => {
+  const f = await fixture();
+  const expectedReadSet = {
+    userEtag: 'a'.repeat(64),
+    workspaceEtag: null,
+    explicitDigest: 'b'.repeat(64),
+    effectiveDigest: 'c'.repeat(64),
+  };
+  const postReadSet = {
+    ...expectedReadSet,
+    userEtag: 'd'.repeat(64),
+    effectiveDigest: 'e'.repeat(64),
+  };
+  const safeRequest = {
+    scope: 'user',
+    ifMatch: expectedReadSet.userEtag,
+    operationCount: 1,
+    modelSettings: {
+      expectedReadSet,
+      operation: { kind: 'enabled', modelId: 'model-b', enabled: true },
+    },
+  };
+  const begin = (
+    commandId: string,
+    request: Json = safeRequest,
+    kind: 'config.user.write' | 'config.workspace.write' = 'config.user.write',
+  ) => ({
+    expectedStoreId: f.expectedStoreId,
+    subjectId: 'owner',
+    commandId,
+    kind,
+    scope: kind === 'config.user.write' ? 'user' : 'workspace-owned',
+    requestDigest: f.digest(request),
+    safeRequest: request,
+  });
+  const finish = (
+    input: ReturnType<typeof begin>,
+    receipt: Json,
+    state: 'applied' | 'failed' | 'outcome_unknown' = 'applied',
+  ) =>
+    f.store.finishHostMutation({
+      expectedStoreId: input.expectedStoreId,
+      subjectId: input.subjectId,
+      commandId: input.commandId,
+      requestDigest: input.requestDigest,
+      state,
+      receipt,
+    });
+  try {
+    const input = begin('successor-proof');
+    await f.store.beginHostMutation(input);
+    const value = { status: 'applied', etag: postReadSet.userEtag, postReadSet };
+    const saved = await finish(input, value);
+    expect(saved.receipt).toEqual(value);
+    expect(await finish(input, structuredClone(value))).toEqual(saved);
+    const reader = await openSqliteStore({ ...f.profile, mode: 'readonly' });
+    try {
+      expect(
+        (
+          await reader.getHostMutation({
+            expectedStoreId: f.expectedStoreId,
+            subjectId: 'owner',
+            commandId: input.commandId,
+          })
+        )?.receipt,
+      ).toEqual(value);
+    } finally {
+      await reader.close();
+    }
+    await rejected(
+      finish(input, { ...value, postReadSet: { ...postReadSet, effectiveDigest: 'f'.repeat(64) } }),
+      'host_mutation_terminal_conflict',
+    );
+    const old = begin('old-receipt');
+    await f.store.beginHostMutation(old);
+    expect((await finish(old, { status: 'applied', etag: postReadSet.userEtag })).receipt).toEqual({
+      status: 'applied',
+      etag: postReadSet.userEtag,
+    });
+    const malformed: Json[] = [
+      null,
+      [],
+      {},
+      { ...postReadSet, secret: 'private' },
+      {
+        userEtag: postReadSet.userEtag,
+        workspaceEtag: null,
+        explicitDigest: postReadSet.explicitDigest,
+      },
+      { ...postReadSet, effectiveDigest: 'malformed' },
+      { ...postReadSet, explicitDigest: 4 },
+      { ...postReadSet, userEtag: 'A'.repeat(64) },
+      { ...postReadSet, userEtag: 'f'.repeat(64) },
+      { ...postReadSet, workspaceEtag: 'f'.repeat(64) },
+    ];
+    for (const [index, proof] of malformed.entries()) {
+      const row = begin(`bad-proof-${index}`);
+      await f.store.beginHostMutation(row);
+      await rejected(
+        finish(row, { status: 'applied', etag: postReadSet.userEtag, postReadSet: proof }),
+        'invalid_host_mutation',
+      );
+      expect(
+        (
+          await f.store.getHostMutation({
+            expectedStoreId: f.expectedStoreId,
+            subjectId: 'owner',
+            commandId: row.commandId,
+          })
+        )?.state,
+      ).toBe('pending');
+    }
+    for (const state of ['failed', 'outcome_unknown'] as const) {
+      const row = begin(`bad-state-${state}`);
+      await f.store.beginHostMutation(row);
+      await rejected(
+        finish(
+          row,
+          {
+            status: state,
+            code: 'configuration_conflict',
+            etag: postReadSet.userEtag,
+            postReadSet,
+          },
+          state,
+        ),
+        'invalid_host_mutation',
+      );
+    }
+    const plain = begin('plain-config', {
+      scope: 'user',
+      ifMatch: expectedReadSet.userEtag,
+      operationCount: 1,
+    });
+    await f.store.beginHostMutation(plain);
+    await rejected(finish(plain, value), 'invalid_host_mutation');
+    const provider = begin('provider-config', {
+      scope: 'user',
+      ifMatch: expectedReadSet.userEtag,
+      operationCount: 1,
+      providerSettings: {
+        expectedReadSet,
+        operation: {
+          provider: 'compatible',
+          connectionId: null,
+          baseURL: 'https://provider.invalid/v1',
+          modelNames: ['model'],
+          credential: 'none',
+        },
+      },
+    });
+    await f.store.beginHostMutation(provider);
+    await rejected(
+      finish(provider, { ...value, credentialState: 'unchanged', configurationState: 'published' }),
+      'invalid_host_mutation',
+    );
+    await f.store.createWorkspace({
+      expectedStoreId: f.expectedStoreId,
+      id: 'workspace-owned',
+      rootUri: 'file:///proof-workspace',
+      name: 'Owned',
+    });
+    const workspaceRequest = {
+      ...safeRequest,
+      scope: 'workspace',
+      workspaceId: 'workspace-owned',
+      ifMatch: 'f'.repeat(64),
+      modelSettings: {
+        ...safeRequest.modelSettings,
+        expectedReadSet: { ...expectedReadSet, workspaceEtag: 'f'.repeat(64) },
+      },
+    };
+    const workspace = begin('workspace-proof', workspaceRequest, 'config.workspace.write');
+    await f.store.beginHostMutation(workspace);
+    await rejected(finish(workspace, value), 'invalid_host_mutation');
+    const workspaceProof = { ...postReadSet, workspaceEtag: 'f'.repeat(64) };
+    expect((await finish(workspace, { ...value, postReadSet: workspaceProof })).receipt).toEqual({
+      ...value,
+      postReadSet: workspaceProof,
+    });
+  } finally {
+    await f.close();
+  }
+});

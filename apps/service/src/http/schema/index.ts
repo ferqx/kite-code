@@ -440,6 +440,52 @@ const providerSettingsMarker = z.strictObject({
   expectedReadSet: modelSettingsReadSet,
   operation: providerSettingsOperation,
 });
+const legacyHostMutation = z.object({
+  commandId: id,
+  originStoreId: id,
+  scope: z.enum(['user', 'workspace']),
+  workspaceId: id.optional(),
+  ifMatch: etag.optional(),
+  kind: z.enum([
+    'config.patch',
+    'config.repair',
+    'credential.put',
+    'credential.revoke',
+    'model_settings.update',
+    'provider_settings.update',
+  ]),
+  modelSettings: modelSettingsMarker.optional(),
+  providerSettings: providerSettingsMarker.optional(),
+  state: z.enum(['pending', 'applied', 'failed', 'outcome_unknown']),
+  receipt: z.union([
+    z.strictObject({}),
+    z.strictObject({ status: z.literal('applied'), etag }),
+    z.strictObject({
+      status: z.literal('applied'),
+      etag,
+      credentialState: z.enum(['unchanged', 'stored']),
+      configurationState: z.literal('published'),
+      opaqueRef: opaqueCredentialRef.optional(),
+    }),
+    z.strictObject({
+      status: z.literal('applied'),
+      opaqueRef: opaqueCredentialRef,
+      persistence: z.enum(['os', 'temporary']),
+    }),
+    z.strictObject({
+      status: z.enum(['failed', 'outcome_unknown']),
+      code: z.string().regex(/^[a-z0-9_]{1,128}$/),
+    }),
+    z.strictObject({
+      status: z.enum(['failed', 'outcome_unknown']),
+      code: z.string().regex(/^[a-z0-9_]{1,128}$/),
+      credentialState: z.enum(['unchanged', 'stored', 'outcome_unknown']),
+      configurationState: z.enum(['not_attempted', 'outcome_unknown']),
+      opaqueRef: opaqueCredentialRef.optional(),
+    }),
+  ]),
+});
+
 export const schemas = {
   InputImage: inputImage,
   InputFileReference: inputFileReference,
@@ -925,51 +971,22 @@ export const schemas = {
     secret: z.string().min(1).max(65536),
   }),
   CredentialRevokeRequest: z.strictObject({ commandId: id, expectedStoreId: id }),
-  HostMutation: z.object({
-    commandId: id,
-    originStoreId: id,
-    scope: z.enum(['user', 'workspace']),
-    workspaceId: id.optional(),
-    ifMatch: etag.optional(),
-    kind: z.enum([
-      'config.patch',
-      'config.repair',
-      'credential.put',
-      'credential.revoke',
-      'model_settings.update',
-      'provider_settings.update',
-    ]),
-    modelSettings: modelSettingsMarker.optional(),
-    providerSettings: providerSettingsMarker.optional(),
-    state: z.enum(['pending', 'applied', 'failed', 'outcome_unknown']),
-    receipt: z.union([
-      z.strictObject({}),
-      z.strictObject({ status: z.literal('applied'), etag }),
-      z.strictObject({
-        status: z.literal('applied'),
-        etag,
-        credentialState: z.enum(['unchanged', 'stored']),
-        configurationState: z.literal('published'),
-        opaqueRef: opaqueCredentialRef.optional(),
-      }),
-      z.strictObject({
-        status: z.literal('applied'),
-        opaqueRef: opaqueCredentialRef,
-        persistence: z.enum(['os', 'temporary']),
-      }),
-      z.strictObject({
-        status: z.enum(['failed', 'outcome_unknown']),
-        code: z.string().regex(/^[a-z0-9_]{1,128}$/),
-      }),
-      z.strictObject({
-        status: z.enum(['failed', 'outcome_unknown']),
-        code: z.string().regex(/^[a-z0-9_]{1,128}$/),
-        credentialState: z.enum(['unchanged', 'stored', 'outcome_unknown']),
-        configurationState: z.enum(['not_attempted', 'outcome_unknown']),
-        opaqueRef: opaqueCredentialRef.optional(),
-      }),
-    ]),
-  }),
+  HostMutation: z.union([
+    legacyHostMutation,
+    legacyHostMutation
+      .extend({
+        kind: z.literal('model_settings.update'),
+        modelSettings: modelSettingsMarker,
+        providerSettings: z.never().optional(),
+        state: z.literal('applied'),
+        receipt: z.strictObject({
+          status: z.literal('applied'),
+          etag,
+          postReadSet: modelSettingsReadSet,
+        }),
+      })
+      .strict(),
+  ]),
   ServiceLifecycle: serviceLifecycle,
   ShutdownServiceRequest: z.strictObject({
     lifecycleVersion: z.literal(1),

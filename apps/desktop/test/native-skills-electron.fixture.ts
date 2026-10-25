@@ -273,7 +273,7 @@ try {
   await panel()
     .getByRole('button', { name: '查看 Refreshed metadata 详情', exact: true })
     .waitFor();
-  await page.getByRole('button', { name: '模型', exact: true }).click();
+  await page.getByRole('button', { name: '提供商与模型', exact: true }).click();
   assert.equal(await panel().count(), 0);
   await skills();
   await complete(306);

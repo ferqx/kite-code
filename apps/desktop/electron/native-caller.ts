@@ -90,6 +90,7 @@ export class NativeCaller {
   private readonly workspaceRemoval: NativeWorkspaceRemovalPort;
   private readonly configuration: NativeConfiguration;
   private readonly inputConfiguration: NativeConfiguration;
+  private readonly generalConfiguration: NativeConfiguration;
   private readonly preparationConfiguration: NativeConfiguration;
   private readonly conversation: NativeConversation;
   private workspaceObservation?: { generation: number; storeId: string; workspaces: Workspace[] };
@@ -518,6 +519,13 @@ export class NativeCaller {
           }
         : undefined;
     this.inputConfiguration = new NativeConfiguration(client, configurationScope);
+    this.generalConfiguration = new NativeConfiguration(
+      client,
+      configurationScope,
+      () => {},
+      undefined,
+      true,
+    );
     this.providers = new NativeProviderSettings(
       client,
       configurationScope,
@@ -649,6 +657,7 @@ export class NativeCaller {
     this.controller.cancelInteractionRead();
     this.callerReads.clear();
     this.configuration.release();
+    this.generalConfiguration.release();
     this.inputConfiguration.release();
     this.providers.release();
     this.mcp.release();
@@ -1746,8 +1755,15 @@ export class NativeCaller {
       case 'state':
         result = this.state();
         break;
+      case 'settings.general.models.read':
+        result = await this.generalConfiguration.read();
+        break;
+      case 'settings.general.models.close':
+        this.generalConfiguration.release();
+        result = null;
+        break;
       case 'settings.models.read':
-        result = await this.configuration.read();
+        result = await this.configuration.read(request.afterCommandId);
         break;
       case 'input.models.read': {
         if (!this.selected) throw new ClientError('native_selection_changed');

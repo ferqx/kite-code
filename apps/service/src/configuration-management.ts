@@ -205,7 +205,13 @@ function publicMutation(
   else if (record.state === 'applied')
     receipt =
       kind.startsWith('config.') || kind === 'model_settings.update'
-        ? { status: 'applied', etag: value.etag! }
+        ? {
+            status: 'applied',
+            etag: value.etag!,
+            ...(kind === 'model_settings.update' && value.postReadSet !== undefined
+              ? { postReadSet: structuredClone(value.postReadSet) }
+              : {}),
+          }
         : { status: 'applied', opaqueRef: value.opaqueRef!, persistence: value.persistence! };
   else if (record.state !== 'pending') receipt = { status: record.state, code: value.code! };
   return {
@@ -937,10 +943,7 @@ export function createConfigurationManagement(options: {
               const defaultModel = effective.models?.find(
                 (model) => model.id === effective.modelId,
               );
-              if (
-                effective.modelId &&
-                (!defaultModel || defaultModel.enabled === false || configured(defaultModel).length)
-              )
+              if (effective.modelId && (!defaultModel || configured(defaultModel).length))
                 throw new AgentError('model_settings_default_unconfigured');
             };
             // Preflight the complete candidate before either publication medium is touched.
@@ -1020,12 +1023,6 @@ export function createConfigurationManagement(options: {
             (model) => model.id === input.operation.modelId,
           );
           if (!selected) throw new AgentError('model_settings_model_missing');
-          if (
-            input.operation.kind === 'enabled' &&
-            !input.operation.enabled &&
-            state.effective.modelId === selected.id
-          )
-            throw new AgentError('model_settings_default_disable_denied');
           if (
             (input.operation.kind === 'default' ||
               (input.operation.kind === 'enabled' && input.operation.enabled)) &&
@@ -1137,6 +1134,7 @@ export function createConfigurationManagement(options: {
                       };
             }
           }
+          let candidateDigest: string | undefined;
           const result = userConfiguration.update({
             ifMatch,
             operations: [edit],
@@ -1147,7 +1145,7 @@ export function createConfigurationManagement(options: {
                 user: candidate,
                 explicit: fresh.explicit,
               });
-              createConfigurationSnapshot(effective);
+              const candidateSnapshot = createConfigurationSnapshot(effective);
               const actual = effective.models?.find((model) => model.id === selected.id);
               if (
                 !actual ||
@@ -1167,15 +1165,29 @@ export function createConfigurationManagement(options: {
               if (
                 effective.modelId !== null &&
                 effective.modelId !== undefined &&
-                (!defaultModel || defaultModel.enabled === false || configured(defaultModel).length)
+                (!defaultModel || configured(defaultModel).length)
               )
                 throw new ConfigurationError('model_settings_default_unconfigured');
+              // Capture this validated publication candidate, never a later dynamic-source read.
+              candidateDigest = candidateSnapshot.digest;
             },
             validatePublication() {
               assertReadSet(input.expectedReadSet);
             },
           });
-          return { etag: result.etag };
+          return {
+            etag: result.etag,
+            ...(candidateDigest === undefined
+              ? {}
+              : {
+                  postReadSet: {
+                    userEtag: result.etag,
+                    workspaceEtag: null,
+                    explicitDigest: input.expectedReadSet.explicitDigest,
+                    effectiveDigest: candidateDigest,
+                  },
+                }),
+          };
         },
       );
     },

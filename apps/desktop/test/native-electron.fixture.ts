@@ -12,9 +12,15 @@ async function openSettings(page: import('playwright').Page) {
       .click();
   const category = page
     .getByRole('navigation', { name: '设置分类', exact: true })
-    .getByRole('button', { name: '模型', exact: true });
+    .getByRole('button', { name: '提供商与模型', exact: true });
   if ((await category.getAttribute('aria-pressed')) !== 'true') await category.click();
 }
+async function openConnectionModels(page: import('playwright').Page, label: string) {
+  const catalog = page.getByRole('button', { name: `管理 ${label} 的模型`, exact: true });
+  await catalog.waitFor();
+  if ((await catalog.getAttribute('aria-expanded')) !== 'true') await catalog.click();
+}
+
 async function closeSettings(page: import('playwright').Page) {
   if (await page.locator('.desktop-settings-dialog').isVisible())
     await page.getByRole('button', { name: '返回应用', exact: true }).click();
@@ -82,22 +88,40 @@ try {
   await page.getByRole('button', { name: 'Native A', exact: true }).waitFor();
   await openSessionTools(page);
   await openSettings(page);
-  const settings = page.getByRole('region', { name: '模型设置' });
-  await settings.getByRole('switch', { name: '启用模型 local', exact: true }).waitFor();
-  expect(
-    await settings.getByRole('switch', { name: '启用模型 local', exact: true }).isChecked(),
-  ).toBe(true);
-  await settings
-    .getByRole('region', { name: '模型提供商 compatible' })
-    .getByText('配置可用', { exact: true })
+  const settings = page.getByRole('region', { name: '提供商与模型设置' });
+  await openConnectionModels(page, 'OpenAI-compatible');
+  await page
+    .getByRole('dialog', { name: 'OpenAI-compatible 的模型管理', exact: true })
+    .getByRole('switch', { name: '启用模型 local', exact: true })
     .waitFor();
+  expect(
+    await page
+      .getByRole('dialog', { name: 'OpenAI-compatible 的模型管理', exact: true })
+      .getByRole('switch', { name: '启用模型 local', exact: true })
+      .isChecked(),
+  ).toBe(true);
+  const localConnection = settings.locator('.provider-instance').filter({
+    has: page.getByRole('button', { name: '管理 OpenAI-compatible 的模型', exact: true }),
+  });
+  await localConnection.waitFor();
+  expect(await localConnection.count()).toBe(1);
+  await page
+    .getByRole('dialog', { name: 'OpenAI-compatible 的模型管理', exact: true })
+    .getByRole('switch', { name: '启用模型 local', exact: true })
+    .waitFor();
+  expect(await settings.locator('.settings-model-current').count()).toBe(0);
+  expect(await settings.getByRole('button', { name: '默认模型', exact: true }).count()).toBe(0);
   expect(await count()).toBe(0);
   await closeSettings(page);
   await page.getByRole('button', { name: 'Native A', exact: true }).click();
   await page.locator('.session-header').getByTitle('Native A', { exact: true }).waitFor();
   await openSessionTools(page);
   await openSettings(page);
-  await settings.getByRole('switch', { name: '启用模型 local', exact: true }).waitFor();
+  await openConnectionModels(page, 'OpenAI-compatible');
+  await page
+    .getByRole('dialog', { name: 'OpenAI-compatible 的模型管理', exact: true })
+    .getByRole('switch', { name: '启用模型 local', exact: true })
+    .waitFor();
   const modelFacts = await page.evaluate(async () =>
     window.kiteNative!.request({
       method: 'settings.models.read',
@@ -108,6 +132,9 @@ try {
   assert.ok(modelFacts && 'models' in modelFacts);
   assert.equal(modelFacts.storeId, storeId);
   assert.equal(modelFacts.workspaceId, undefined);
+  const configuredLocal = modelFacts.models.find((model) => model.id === 'local');
+  assert.equal(configuredLocal?.configured, true);
+  assert.equal(configuredLocal?.enabled, true);
   assert.equal(JSON.stringify(modelFacts).includes(endpoint), false);
   assert.equal(await count(), 0);
   console.log('Native Settings read Node assertions: 6; original scope and zero Model');

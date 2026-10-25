@@ -29,6 +29,7 @@ import {
   type SessionChildTarget,
   SessionPage,
   type SessionPageProps,
+  SettingsNavigationIcon,
   ToolActivity,
 } from '@kite-ai/ui/desktop';
 import { type ReactNode, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
@@ -88,13 +89,12 @@ import {
   nativeModelScope,
   prepareNativeModels,
 } from './native-model-picker';
-import { NativeModelSettings } from './native-model-settings';
 import {
   desktopConversationMessages,
   desktopDirectory,
   desktopMessages,
 } from './native-presentation';
-import { NativeProviderSettings } from './native-provider-settings';
+import { NativeProviderModelSettings } from './native-provider-model-settings';
 import { NativeRecoveryView } from './native-recovery';
 import { NativeExecutionResult } from './native-result';
 import { useNativeScheduledTasks } from './native-scheduled-tasks';
@@ -303,9 +303,9 @@ function NativeDesktopContent({
   const [draft, setDraft] = useState('');
   const [queueFocusKey, setQueueFocusKey] = useState(0);
   const [planMode, setPlanMode] = useState(false);
-  const [settingsPage, setSettingsPage] = useState<
-    'general' | 'models' | 'providers' | 'mcp' | 'skills'
-  >('general');
+  const [settingsPage, setSettingsPage] = useState<'general' | 'providers' | 'mcp' | 'skills'>(
+    'general',
+  );
   const [editor, setEditor] = useState<DesktopEditor>('vscode');
   const [settingsRevision, setSettingsRevision] = useState(0);
   const [, choiceChanged] = useState(0);
@@ -990,7 +990,10 @@ function NativeDesktopContent({
     ['context.compress', 'context.compression.reset'].includes(
       selection?.activeCommand?.kind ?? '',
     );
-  const nextModelReady = resolvedChoice?.identity === choiceIdentity && resolvedChoice.ready;
+  const nextModelReady =
+    resolvedChoice?.identity === choiceIdentity &&
+    resolvedChoice.ready &&
+    !!resolvedChoice.choice?.modelId;
   const preparedPermission = newPermission ?? selection?.permissions?.mode.mode ?? 'auto';
   const attachmentGeneration = state?.generation,
     attachmentSessionId = selection?.session.id,
@@ -1763,6 +1766,7 @@ function NativeDesktopContent({
       newBranch?.workspaceId !== newWorkspace ||
       newBranch.storeId !== directory.storeId ||
       !newModelReady.ready ||
+      !newModelReady.choice?.modelId ||
       (!newDraft.trim() &&
         !imageDrafts.get(newImageScope).length &&
         !imageDrafts.files(newImageScope).length) ||
@@ -3985,6 +3989,7 @@ function NativeDesktopContent({
                 newBranch.storeId !== directory.storeId ||
                 contextBusy ||
                 !newModelReady.ready ||
+                !newModelReady.choice?.modelId ||
                 firstSubmission?.result?.phase === 'unknown',
               inputLabel: '新对话草稿',
               sendLabel: '发送首条消息',
@@ -4330,52 +4335,50 @@ function NativeDesktopContent({
                 <DialogDescription className="sr-only">
                   配置模型、提供商与扩展能力
                 </DialogDescription>
-                <DesktopButton
-                  type="button"
-                  variant="ghost"
-                  className="settings-back"
-                  onClick={() => setSettingsOpen(false)}
-                >
-                  返回应用
-                </DesktopButton>
               </DialogHeader>
               <div className="settings settings-layout desktop-settings">
                 <aside className="settings-sidebar">
                   <nav aria-label="设置分类">
+                    <DesktopButton
+                      type="button"
+                      variant="ghost"
+                      className="settings-back"
+                      onClick={() => setSettingsOpen(false)}
+                    >
+                      <SettingsNavigationIcon name="back" />
+                      <span>返回应用</span>
+                    </DesktopButton>
                     <button
                       type="button"
                       aria-pressed={settingsPage === 'general'}
                       onClick={() => setSettingsPage('general')}
                     >
-                      常规
+                      <SettingsNavigationIcon name="general" />
+                      <span>常规</span>
                     </button>
                     <button
                       type="button"
                       aria-pressed={settingsPage === 'providers'}
                       onClick={() => setSettingsPage('providers')}
                     >
-                      提供商
-                    </button>
-                    <button
-                      type="button"
-                      aria-pressed={settingsPage === 'models'}
-                      onClick={() => setSettingsPage('models')}
-                    >
-                      模型
+                      <SettingsNavigationIcon name="providers" />
+                      <span>提供商与模型</span>
                     </button>
                     <button
                       type="button"
                       aria-pressed={settingsPage === 'mcp'}
                       onClick={() => setSettingsPage('mcp')}
                     >
-                      MCP
+                      <SettingsNavigationIcon name="mcp" />
+                      <span>MCP</span>
                     </button>
                     <button
                       type="button"
                       aria-pressed={settingsPage === 'skills'}
                       onClick={() => setSettingsPage('skills')}
                     >
-                      Skills
+                      <SettingsNavigationIcon name="skills" />
+                      <span>Skills</span>
                     </button>
                   </nav>{' '}
                 </aside>
@@ -4413,22 +4416,22 @@ function NativeDesktopContent({
                       storeId={directory?.storeId}
                       submissions={state?.userMcpSubmissions ?? []}
                     />
-                  ) : settingsPage === 'providers' ? (
-                    <NativeProviderSettings
+                  ) : (
+                    <NativeProviderModelSettings
+                      key={JSON.stringify([
+                        generation.current,
+                        directory?.storeId,
+                        selection?.session.id,
+                        selection?.viewSelection,
+                      ])}
                       panelHost={settingsEditorHost}
                       editorControl={settingsEditorControl}
                       bridge={bridge}
                       generation={generation.current}
                       selection={selection}
-                      submissions={state?.providerSettingsSubmissions ?? []}
-                      onSaved={() => setSettingsRevision((value) => value + 1)}
-                    />
-                  ) : (
-                    <NativeModelSettings
-                      bridge={bridge}
-                      generation={generation.current}
-                      selection={selection}
-                      submissions={state?.modelSettingsSubmissions ?? []}
+                      storeId={directory?.storeId}
+                      providerSubmissions={state?.providerSettingsSubmissions ?? []}
+                      modelSubmissions={state?.modelSettingsSubmissions ?? []}
                       onSaved={() => setSettingsRevision((value) => value + 1)}
                     />
                   )}

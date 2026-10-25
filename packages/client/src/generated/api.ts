@@ -1795,76 +1795,115 @@ export type ConfigurationRepairRequest = {
 };
 export type CredentialPutRequest = { commandId: string; expectedStoreId: string; secret: string };
 export type CredentialRevokeRequest = { commandId: string; expectedStoreId: string };
-export type HostMutation = {
-  commandId: string;
-  originStoreId: string;
-  scope: 'user' | 'workspace';
-  workspaceId?: string;
-  ifMatch?: string;
-  kind:
-    | 'config.patch'
-    | 'config.repair'
-    | 'credential.put'
-    | 'credential.revoke'
-    | 'model_settings.update'
-    | 'provider_settings.update';
-  modelSettings?: {
-    expectedReadSet: {
-      userEtag: string;
-      workspaceEtag: string | null;
-      explicitDigest: string;
-      effectiveDigest: string;
-    };
-    operation:
-      | { kind: 'enabled'; modelId: string; enabled: boolean }
-      | { kind: 'default'; modelId: string }
-      | {
-          kind: 'effort';
-          modelId: string;
-          reasoningEffort:
-            | ('none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max' | 'ultar')
-            | null;
+export type HostMutation =
+  | {
+      commandId: string;
+      originStoreId: string;
+      scope: 'user' | 'workspace';
+      workspaceId?: string;
+      ifMatch?: string;
+      kind:
+        | 'config.patch'
+        | 'config.repair'
+        | 'credential.put'
+        | 'credential.revoke'
+        | 'model_settings.update'
+        | 'provider_settings.update';
+      modelSettings?: {
+        expectedReadSet: {
+          userEtag: string;
+          workspaceEtag: string | null;
+          explicitDigest: string;
+          effectiveDigest: string;
         };
-  };
-  providerSettings?: {
-    expectedReadSet: {
-      userEtag: string;
-      workspaceEtag: string | null;
-      explicitDigest: string;
-      effectiveDigest: string;
-    };
-    operation: {
-      kind?: 'upsert' | 'remove';
-      name?: string;
-      provider: 'openai' | 'deepseek' | 'compatible' | 'ollama' | 'codex';
-      protocol?: 'chat-completions' | 'responses';
-      connectionId: string | null;
-      baseURL: string;
-      modelNames: Array<string>;
-      credential: 'keep' | 'replace' | 'none';
-    };
-  };
-  state: 'pending' | 'applied' | 'failed' | 'outcome_unknown';
-  receipt:
-    | Record<string, never>
-    | { status: 'applied'; etag: string }
-    | {
+        operation:
+          | { kind: 'enabled'; modelId: string; enabled: boolean }
+          | { kind: 'default'; modelId: string }
+          | {
+              kind: 'effort';
+              modelId: string;
+              reasoningEffort:
+                | ('none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max' | 'ultar')
+                | null;
+            };
+      };
+      providerSettings?: {
+        expectedReadSet: {
+          userEtag: string;
+          workspaceEtag: string | null;
+          explicitDigest: string;
+          effectiveDigest: string;
+        };
+        operation: {
+          kind?: 'upsert' | 'remove';
+          name?: string;
+          provider: 'openai' | 'deepseek' | 'compatible' | 'ollama' | 'codex';
+          protocol?: 'chat-completions' | 'responses';
+          connectionId: string | null;
+          baseURL: string;
+          modelNames: Array<string>;
+          credential: 'keep' | 'replace' | 'none';
+        };
+      };
+      state: 'pending' | 'applied' | 'failed' | 'outcome_unknown';
+      receipt:
+        | Record<string, never>
+        | { status: 'applied'; etag: string }
+        | {
+            status: 'applied';
+            etag: string;
+            credentialState: 'unchanged' | 'stored';
+            configurationState: 'published';
+            opaqueRef?: string;
+          }
+        | { status: 'applied'; opaqueRef: string; persistence: 'os' | 'temporary' }
+        | { status: 'failed' | 'outcome_unknown'; code: string }
+        | {
+            status: 'failed' | 'outcome_unknown';
+            code: string;
+            credentialState: 'unchanged' | 'stored' | 'outcome_unknown';
+            configurationState: 'not_attempted' | 'outcome_unknown';
+            opaqueRef?: string;
+          };
+    }
+  | {
+      commandId: string;
+      originStoreId: string;
+      scope: 'user' | 'workspace';
+      workspaceId?: string;
+      ifMatch?: string;
+      kind: 'model_settings.update';
+      modelSettings: {
+        expectedReadSet: {
+          userEtag: string;
+          workspaceEtag: string | null;
+          explicitDigest: string;
+          effectiveDigest: string;
+        };
+        operation:
+          | { kind: 'enabled'; modelId: string; enabled: boolean }
+          | { kind: 'default'; modelId: string }
+          | {
+              kind: 'effort';
+              modelId: string;
+              reasoningEffort:
+                | ('none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max' | 'ultar')
+                | null;
+            };
+      };
+      providerSettings?: never;
+      state: 'applied';
+      receipt: {
         status: 'applied';
         etag: string;
-        credentialState: 'unchanged' | 'stored';
-        configurationState: 'published';
-        opaqueRef?: string;
-      }
-    | { status: 'applied'; opaqueRef: string; persistence: 'os' | 'temporary' }
-    | { status: 'failed' | 'outcome_unknown'; code: string }
-    | {
-        status: 'failed' | 'outcome_unknown';
-        code: string;
-        credentialState: 'unchanged' | 'stored' | 'outcome_unknown';
-        configurationState: 'not_attempted' | 'outcome_unknown';
-        opaqueRef?: string;
+        postReadSet: {
+          userEtag: string;
+          workspaceEtag: string | null;
+          explicitDigest: string;
+          effectiveDigest: string;
+        };
       };
-};
+    };
 export type ServiceLifecycle = {
   lifecycleVersion: 1;
   profile: { dataRoot: string; name: string; accessKey: string };

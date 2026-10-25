@@ -232,9 +232,8 @@ export function NativeModelPicker({
         model.configured &&
         (!protocol.protocol || modelProtocol(model) === protocol.protocol),
     ) ?? [];
-  const requestedId = value.modelId ?? facts?.selectedModelId;
-  const selectedId = requestedId ?? facts?.defaultModelId;
-  const selected = models.find((model) => model.id === selectedId);
+  const requestedId = value.modelId ?? (preparing ? undefined : facts?.selectedModelId);
+  const selected = models.find((model) => model.id === requestedId);
   const supported = selected?.reasoningEffortChoices ?? [];
   const previousEffort = preparing ? undefined : previousSessionEffort(selection, selected?.id);
   const requestEffort = value.reasoningEffort ?? previousEffort;
@@ -349,9 +348,7 @@ export function NativeModelPicker({
       {error && <p role="alert">模型目录不可用：{error}</p>}
       {!reading && !error && !selected && (requestedId || diagnostics) && (
         <p role="alert">
-          {requestedId
-            ? `所选模型 ${requestedId} 当前不可用，请重新选择。`
-            : '没有已启用且配置可用的默认模型，请选择模型。'}
+          {requestedId ? `所选模型 ${requestedId} 当前不可用，请重新选择。` : '请选择模型。'}
         </p>
       )}
       {selected && !allowedEffort && <p role="alert">原临时思考档位当前不可用，请重新选择。</p>}

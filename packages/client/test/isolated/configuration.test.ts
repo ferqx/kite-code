@@ -388,3 +388,119 @@ test('Settings SDK freezes original read-set and operation; altered committed ma
     server.stop(true);
   }
 });
+
+test('model successor proof is optional, exact and bound to applied model receipts on POST and original lookup', async () => {
+  const profile = { dataRoot: '/private-fixture', name: 'successor', accessKey: 'fixed' };
+  const readSet = {
+    userEtag: 'a'.repeat(64),
+    workspaceEtag: null,
+    explicitDigest: 'b'.repeat(64),
+    effectiveDigest: 'c'.repeat(64),
+  };
+  const postReadSet = { ...readSet, userEtag: 'd'.repeat(64), effectiveDigest: 'e'.repeat(64) };
+  const good = {
+    originStoreId: 'store',
+    commandId: 'proof',
+    scope: 'user' as const,
+    ifMatch: readSet.userEtag,
+    kind: 'model_settings.update' as const,
+    modelSettings: {
+      expectedReadSet: readSet,
+      operation: { kind: 'enabled' as const, modelId: 'b', enabled: true },
+    },
+    state: 'applied' as const,
+    receipt: { status: 'applied' as const, etag: postReadSet.userEtag, postReadSet },
+  };
+  let current: unknown = structuredClone(good);
+  let writes = 0;
+  const server = Bun.serve({
+    hostname: '127.0.0.1',
+    port: 0,
+    fetch(request) {
+      if (new URL(request.url).pathname === '/v1/server')
+        return Response.json({
+          instanceId: 'owned',
+          buildId: 'owned',
+          apiMajor: 1,
+          profile,
+          capabilities: ['configuration_management'],
+          dataAvailability: 'available',
+          storeId: 'store',
+        });
+      if (request.method === 'POST') writes++;
+      return Response.json(current);
+    },
+  });
+  const client = createClient({
+    endpoint: server.url.href,
+    token: 'private',
+    expected: { profile, apiMajor: 1, requiredCapabilities: ['configuration_management'] },
+  });
+  try {
+    await client.connect();
+    const intent = {
+      expectedStoreId: 'store',
+      commandId: 'proof',
+      expectedReadSet: readSet,
+      operation: { kind: 'enabled' as const, modelId: 'b', enabled: true },
+    };
+    expect(await client.updateModelSettings('user', intent)).toEqual(good);
+    expect(await client.getHostMutation('proof', { storeId: 'store' })).toEqual(good);
+    const invalid = [
+      {
+        ...good,
+        receipt: { ...good.receipt, postReadSet: { ...postReadSet, userEtag: 'f'.repeat(64) } },
+      },
+      {
+        ...good,
+        receipt: {
+          ...good.receipt,
+          postReadSet: { ...postReadSet, workspaceEtag: 'f'.repeat(64) },
+        },
+      },
+      {
+        ...good,
+        receipt: { ...good.receipt, postReadSet: { ...postReadSet, effectiveDigest: 'BAD' } },
+      },
+      { ...good, receipt: { ...good.receipt, postReadSet: { ...postReadSet, extra: 'hidden' } } },
+      { ...good, receipt: { ...good.receipt, postReadSet: null } },
+      { ...good, kind: 'config.patch', modelSettings: undefined },
+      {
+        ...good,
+        state: 'failed',
+        receipt: { status: 'failed', code: 'configuration_conflict', postReadSet },
+      },
+      {
+        ...good,
+        state: 'outcome_unknown',
+        receipt: {
+          status: 'outcome_unknown',
+          code: 'configuration_publication_uncertain',
+          postReadSet,
+        },
+      },
+    ];
+    for (const value of invalid) {
+      current = value;
+      const error = await client
+        .getHostMutation('proof', { storeId: 'store' })
+        .catch((cause: unknown) => cause);
+      expect((error as { code?: string }).code).toBe('invalid_response');
+    }
+    current = invalid[0];
+    const uncertain = await client
+      .updateModelSettings('user', intent)
+      .catch((cause: unknown) => cause);
+    expect((uncertain as { code?: string }).code).toBe('network_outcome_unknown');
+    expect(writes).toBe(2);
+    current = { ...good, receipt: { status: 'applied', etag: postReadSet.userEtag } };
+    expect((await client.getHostMutation('proof', { storeId: 'store' })).receipt).toEqual({
+      status: 'applied',
+      etag: postReadSet.userEtag,
+    });
+    expect(writes).toBe(2);
+  } finally {
+    client.disposeNetwork();
+    server.stop(true);
+  }
+});

@@ -530,12 +530,34 @@ export class AgentClient {
           (provider
             ? `configurationState,credentialState,etag,${receipt.opaqueRef === undefined ? '' : 'opaqueRef,'}status`
             : configuration
-              ? 'etag,status'
+              ? result.kind === 'model_settings.update' && receipt.postReadSet !== undefined
+                ? 'etag,postReadSet,status'
+                : 'etag,status'
               : 'opaqueRef,persistence,status')
       )
         throw new ClientError('invalid_response');
       if (configuration && typeof receipt.etag !== 'string')
         throw new ClientError('invalid_response');
+      if (receipt.postReadSet !== undefined) {
+        const proof = receipt.postReadSet as Record<string, unknown>;
+        if (
+          result.kind !== 'model_settings.update' ||
+          !proof ||
+          typeof proof !== 'object' ||
+          Array.isArray(proof) ||
+          Object.keys(proof).sort().join(',') !==
+            'effectiveDigest,explicitDigest,userEtag,workspaceEtag' ||
+          ['effectiveDigest', 'explicitDigest', 'userEtag'].some(
+            (key) => typeof proof[key] !== 'string' || !/^[a-f0-9]{64}$/.test(proof[key] as string),
+          ) ||
+          proof.userEtag !== receipt.etag ||
+          (result.scope === 'user'
+            ? proof.workspaceEtag !== null
+            : typeof proof.workspaceEtag !== 'string' ||
+              !/^[a-f0-9]{64}$/.test(proof.workspaceEtag))
+        )
+          throw new ClientError('invalid_response');
+      }
     } else if (
       receipt.status !== result.state ||
       keys !==

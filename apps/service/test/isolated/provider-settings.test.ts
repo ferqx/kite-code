@@ -186,9 +186,10 @@ test('four explicit provider families save actual names, protect default and ret
     });
     await update('enabled', 'enable');
     await update('default', 'default');
-    await expect(update('enabled', 'disable-default', false)).rejects.toMatchObject({
-      code: 'model_settings_default_disable_denied',
-    });
+    expect(await update('enabled', 'disable-default', false)).toMatchObject({ state: 'applied' });
+    const disabledDefault = await f.client.getModelSettings('user', { storeId: f.storeId });
+    expect(disabledDefault.defaultModelId).toBe(model.id);
+    expect(disabledDefault.models.find((entry) => entry.id === model.id)!.enabled).toBe(false);
     await f.client.updateProviderSettings(
       await f.input('second-endpoint', manual('compatible', 'http://127.0.0.1:1235/v1')),
     );

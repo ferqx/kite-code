@@ -24,7 +24,7 @@ import type {
 import { desktopConversationMessages } from '../../src/native-presentation';
 import { prepareDesktopDom, promptValue, setPromptText } from '../native-page-dom.fixture';
 
-const bootstrap = new JSDOM('<div></div>', { pretendToBeVisual: true });
+const bootstrap = new JSDOM('<!doctype html><div></div>', { pretendToBeVisual: true });
 const originals = {
   window: globalThis.window,
   document: globalThis.document,
@@ -76,10 +76,11 @@ function fixture(
     runs?: Run[];
     storeId?: string;
     contextSelectionId?: string;
+    unselectedModel?: boolean;
   } = {},
 ) {
   const fixtureStoreId = options.storeId ?? 'store';
-  const dom = new JSDOM('<div id="root"></div>', {
+  const dom = new JSDOM('<!doctype html><div id="root"></div>', {
     url: 'http://localhost',
     pretendToBeVisual: true,
   });
@@ -89,6 +90,22 @@ function fixture(
     navigator: globalThis.navigator,
   };
   const restore = prepareDesktopDom(dom);
+  // JSDOM 29's deprecated clip numeric parser can throw on Radix's valid zero
+  // rectangle after earlier DOM fixtures. An unset variable's identical fallback
+  // preserves the CSS while the original setter handles it without numeric parsing.
+  const stylePrototype = Object.getPrototypeOf(dom.window.document.createElement('div').style);
+  const clip = Object.getOwnPropertyDescriptor(stylePrototype, 'clip')!;
+  Object.defineProperty(stylePrototype, 'clip', {
+    ...clip,
+    set(value: string) {
+      clip.set!.call(
+        this,
+        value === 'rect(0, 0, 0, 0)'
+          ? 'var(--native-test-clip-zero, rect(0px, 0px, 0px, 0px))'
+          : value,
+      );
+    },
+  });
   Object.assign(globalThis, {
     window: dom.window,
     document: dom.window.document,
@@ -389,6 +406,7 @@ function fixture(
       if (
         input.method === 'conversation.models.read' ||
         input.method === 'input.models.read' ||
+        input.method === 'settings.general.models.read' ||
         input.method === 'settings.models.read'
       ) {
         if (holdModels) {
@@ -408,6 +426,9 @@ function fixture(
           canWrite: false,
           errors: [],
           defaultModelId: 'model',
+          ...(input.method === 'input.models.read' && !options.unselectedModel
+            ? { selectedModelId: 'model' }
+            : {}),
           models: [
             {
               id: 'model',
@@ -509,6 +530,30 @@ function fixture(
       expect(ready()).toBe(true);
     },
     click,
+    chooseModel: async () => {
+      await act(async () => {
+        const trigger = host.querySelector<HTMLButtonElement>('[data-model-trigger]')!;
+        expect(trigger.disabled).toBe(false);
+        trigger.click();
+      });
+      await act(async () => {
+        host.querySelector<HTMLButtonElement>('[aria-label^="选择模型，当前 "]')!.click();
+      });
+      await act(async () => {
+        const model = host.querySelector<HTMLElement>('[aria-label="选择模型 model"]');
+        expect(model).not.toBeNull();
+        model!.click();
+      });
+      expect(host.querySelector('[data-model-trigger]')?.getAttribute('aria-label')).toMatch(
+        /^模型：Model(?:，|$)/,
+      );
+      await act(async () =>
+        host
+          .querySelector('[aria-label="模型与思考程度"]')!
+          .dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true })),
+      );
+      expect(host.querySelector('[aria-label="模型与思考程度"]')).toBeNull();
+    },
     edit,
     input,
     releaseDirectory: () => act(async () => releaseDirectory?.()),
@@ -635,6 +680,7 @@ function fixture(
       await act(async () => root.unmount());
       await new Promise((resolve) => setTimeout(resolve, 0));
       restore();
+      Object.defineProperty(stylePrototype, 'clip', clip);
       Object.assign(globalThis, prior);
       dom.window.close();
     },
@@ -1458,6 +1504,8 @@ for (const { persistBetween, attachmentOnly } of [
     try {
       await act(async () => f.root.render(<NativeDesktop />));
       await f.click('Original A');
+      const restoredModel = f.host.querySelector('[data-model-trigger]');
+      expect(restoredModel?.getAttribute('aria-label')).toMatch(/^模型：Model(?:，|$)/);
       if (attachmentOnly) {
         bridge.fileReferences = () => [
           { name: '补充要求.txt', uri: 'file:///synthetic/steer.txt' },
@@ -1490,8 +1538,11 @@ for (const { persistBetween, attachmentOnly } of [
         expect(f.host.querySelector('.composer-attachment-name')?.textContent).toBe('补充要求.txt');
       }
       await f.edit(firstText, '当前会话私有草稿');
+      expect(f.host.querySelector('[data-model-trigger]')).toBe(restoredModel);
       await f.click('引导当前轮次');
       expect(submitted[0]?.intent.kind).toBe('input.steer');
+      expect(submitted[0]?.intent).toMatchObject({ targetRunId: run.id });
+      expect('modelId' in submitted[0]!.intent).toBe(false);
       if (persistBetween) await f.publishMessages([...original, savedSteer(0)], [run]);
       await f.edit('second explicit steer', '当前会话私有草稿');
       await f.click('引导当前轮次');
@@ -1992,6 +2043,7 @@ test('looking up an original first submission cannot overwrite a later prompt in
       await act(async () => f.root.render(<NativeDesktop />));
       await f.click('在 Workspace 中新建对话');
       await f.edit('original unknown first prompt');
+      await f.chooseModel();
       await f.click('发送首条消息');
       await f.resolve('unknown');
       await f.edit('an intermediate later prompt', '当前会话私有草稿');
@@ -2049,6 +2101,7 @@ for (const receiptSource of ['lookup', 'submit'] as const)
         await act(async () => f.root.render(<NativeDesktop />));
         await f.click('在 Workspace 中新建对话');
         await f.edit('accepted original with a lost handoff read');
+        await f.chooseModel();
         await f.click('发送首条消息');
         const original = await f.resolve(
           receiptSource === 'lookup' ? 'unknown' : 'accepted',
@@ -2108,6 +2161,7 @@ test('a held directory observation cannot block the accepted first Session hando
     await act(async () => f.root.render(<NativeDesktop />));
     await f.click('在 Workspace 中新建对话');
     await f.edit('original accepted message');
+    await f.chooseModel();
     await f.click('发送首条消息');
     const original = await f.resolve('unknown', false);
     await f.until(() => directoryHeld && !!f.input('当前会话私有草稿') && !f.input('新对话草稿'));
@@ -2142,6 +2196,7 @@ test('querying a still unknown first creation cannot restore a preparation draft
     await act(async () => f.root.render(<NativeDesktop />));
     await f.click('在 Workspace 中新建对话');
     await f.edit('unknown first creation prompt');
+    await f.chooseModel();
     await f.click('发送首条消息');
     await f.resolve('unknown', false);
     expect(promptValue(f.input())).toBe('unknown first creation prompt');
@@ -2401,6 +2456,26 @@ test('settings replace the painted page without remounting its draft or re-readi
     const reads = [...conversationReads()];
     await openSettings();
     expect(f.host.querySelector('.desktop-settings-dialog')).not.toBeNull();
+    const navigation = f.host.querySelector('.settings-sidebar nav')!;
+    const back = navigation.querySelector('button.settings-back')!;
+    expect(navigation.firstElementChild).toBe(back);
+    expect(back.textContent).toBe('返回应用');
+    expect(back.querySelector('svg[data-icon="inline-start"][aria-hidden="true"]')).not.toBeNull();
+    expect(f.host.querySelector('.desktop-settings-header button')).toBeNull();
+    const navigationButtons = [...navigation.querySelectorAll('button')];
+    expect(navigationButtons.map((button) => button.textContent)).toEqual([
+      '返回应用',
+      '常规',
+      '提供商与模型',
+      'MCP',
+      'Skills',
+    ]);
+    for (const button of navigationButtons) {
+      expect(
+        button.querySelectorAll('svg[data-icon="inline-start"][aria-hidden="true"]'),
+      ).toHaveLength(1);
+      expect(button.querySelector('svg[tabindex]')).toBeNull();
+    }
     expect(page.style.opacity).toBe('0');
     expect(page.style.pointerEvents).toBe('none');
     expect(page.hasAttribute('inert')).toBe(true);
@@ -2409,18 +2484,68 @@ test('settings replace the painted page without remounting its draft or re-readi
     expect(f.input('当前会话私有草稿')).toBe(input);
     expect(promptValue(input)).toBe('unsent settings draft 雪🙂');
     const modelReads = f.calls.filter((call) => call.method === 'settings.models.read').length;
-    await f.click('模型');
+    await f.click('提供商与模型');
     expect(f.calls.filter((call) => call.method === 'settings.models.read')).toHaveLength(
       modelReads + 1,
     );
-    expect(f.host.querySelector('.settings-models .settings-model-provider')).not.toBeNull();
+    expect(f.host.querySelector('.settings-model-current')).toBeNull();
+    expect(f.host.querySelector('[aria-label="刷新提供商与模型配置"]')).toBeNull();
+    expect(f.host.querySelector('[aria-label="重新读取提供商与模型配置"]')).toBeNull();
+    expect(
+      f.host.querySelectorAll(
+        '[aria-label="默认模型"], [aria-label="选择默认模型"], [aria-label="搜索默认模型"], [aria-label^="设为默认 "]',
+      ),
+    ).toHaveLength(0);
+    expect(f.host.querySelectorAll('[aria-label="提供商列表"]')).toHaveLength(1);
+    expect(f.host.querySelectorAll('[role="switch"][aria-label^="启用模型 "]')).toHaveLength(0);
+    await act(async () =>
+      f.host.querySelector<HTMLButtonElement>('[aria-label="管理 其他模型 的模型"]')!.focus(),
+    );
+    await f.click('管理 其他模型 的模型');
     expect(
       f.host.querySelector<HTMLInputElement>('[role="switch"][aria-label="启用模型 model"]')
         ?.checked,
     ).toBe(true);
-    expect(f.host.querySelector('[aria-label="默认模型"]')?.textContent).toContain(
-      'compatible · Model',
-    );
+    const managerTrigger = f.host.querySelector<HTMLButtonElement>(
+      '[aria-label="管理 其他模型 的模型"]',
+    )!;
+    const manager = f.host.querySelector<HTMLElement>(
+      '[role="dialog"][aria-label="其他模型 的模型管理"]',
+    )!;
+    expect(manager).not.toBeNull();
+    expect(manager.closest('.desktop-settings')).not.toBeNull();
+    expect(
+      manager.querySelector('input[type="search"], select, .connection-models-toolbar'),
+    ).toBeNull();
+    expect(
+      f.host.activeElement === manager.querySelector('[data-slot="scroll-area-viewport"]'),
+    ).toBe(true);
+    expect(f.host.querySelector('.settings-content')!.contains(manager)).toBe(false);
+    await act(async () => {
+      manager.dispatchEvent(
+        new f.dom.window.KeyboardEvent('keydown', {
+          key: 'Escape',
+          bubbles: true,
+          cancelable: true,
+        }),
+      );
+    });
+    await act(async () => new Promise((resolve) => setTimeout(resolve, 0)));
+    expect(f.host.querySelector('[aria-label="其他模型 的模型管理"]')).toBeNull();
+    expect(f.host.querySelector('.desktop-settings-dialog')).not.toBeNull();
+    expect(f.host.activeElement === managerTrigger).toBe(true);
+    await f.click('管理 其他模型 的模型');
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      const outside = f.host.querySelector<HTMLElement>('.settings-sidebar')!;
+      outside.dispatchEvent(
+        new f.dom.window.MouseEvent('pointerdown', { bubbles: true, button: 0 }),
+      );
+      outside.click();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    expect(f.host.querySelector('[aria-label="其他模型 的模型管理"]') === null).toBe(true);
+    expect(f.host.querySelector('.desktop-settings-dialog')).not.toBeNull();
     await f.click('返回应用');
     await act(async () => new Promise((resolve) => setTimeout(resolve, 0)));
     expect(f.host.querySelector('.desktop-settings-dialog')).toBeNull();
@@ -2437,7 +2562,15 @@ test('settings replace the painted page without remounting its draft or re-readi
     expect(f.calls.filter((call) => call.method === 'settings.models.read')).toHaveLength(
       modelReads + 2,
     );
-    expect(f.host.querySelector('.settings-models .settings-model-provider')).not.toBeNull();
+    expect(f.host.querySelector('.settings-model-current')).toBeNull();
+    expect(f.host.querySelector('[aria-label="刷新提供商与模型配置"]')).toBeNull();
+    expect(f.host.querySelector('[aria-label="重新读取提供商与模型配置"]')).toBeNull();
+    expect(
+      f.host.querySelectorAll(
+        '[aria-label="默认模型"], [aria-label="选择默认模型"], [aria-label="搜索默认模型"], [aria-label^="设为默认 "]',
+      ),
+    ).toHaveLength(0);
+    expect(f.host.querySelectorAll('[aria-label="提供商列表"]')).toHaveLength(1);
     await act(async () => {
       f.host.dispatchEvent(
         new f.dom.window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }),
@@ -2485,7 +2618,7 @@ test('provider configuration uses the rightmost settings rail and Escape dismiss
         .find((item) => item.textContent === '设置')!
         .click(),
     );
-    await f.click('提供商');
+    await f.click('提供商与模型');
     await f.click('新增提供商');
     const shell = f.host.querySelector('.desktop-settings')!;
     const main = shell.querySelector('.settings-content')!;
@@ -2502,6 +2635,16 @@ test('provider configuration uses the rightmost settings rail and Escape dismiss
     expect(rail.querySelectorAll('.provider-preset')).toHaveLength(0);
     expect(rail.textContent).not.toContain('更换预设');
     expect(rail.textContent).not.toContain('提供商提交结果');
+    const editSecret = async (value: string) =>
+      act(async () => {
+        const secret = rail.querySelector<HTMLInputElement>('[aria-label="API key"]')!;
+        Object.getOwnPropertyDescriptor(
+          f.dom.window.HTMLInputElement.prototype,
+          'value',
+        )!.set!.call(secret, value);
+        secret.dispatchEvent(new f.dom.window.Event('input', { bubbles: true }));
+      });
+    await editSecret('escape-only-secret');
     const origin = [...main.querySelectorAll<HTMLButtonElement>('button')].find(
       (button) => button.textContent === '新增提供商',
     )!;
@@ -2510,11 +2653,15 @@ test('provider configuration uses the rightmost settings rail and Escape dismiss
     expect(f.host.querySelector('.desktop-settings-dialog')).not.toBeNull();
     expect(f.host.activeElement).toBe(origin);
     await f.click('新增提供商');
-    await f.click('模型');
+    expect(rail.querySelector<HTMLInputElement>('[aria-label="API key"]')!.value).toBe('');
+    await editSecret('navigation-only-secret');
+    await f.click('常规');
     expect(rail.querySelector('form')).toBeNull();
-    await f.click('提供商');
+    await f.click('提供商与模型');
     expect(rail.querySelector('form')).toBeNull();
     await f.click('新增提供商');
+    expect(rail.querySelector<HTMLInputElement>('[aria-label="API key"]')!.value).toBe('');
+    await editSecret('return-only-secret');
     await f.click('返回应用');
     expect(f.host.querySelector('.settings-editor-panel')).toBeNull();
     expect(f.input('当前会话私有草稿')).toBe(input);
@@ -2954,6 +3101,7 @@ test('failed branch verification cannot enable first send from retained project 
     await act(async () => f.root.render(<NativeDesktop />));
     await f.click('新对话');
     await f.edit('unsent draft');
+    await f.chooseModel();
     f.rejectBranch();
     await f.click('新对话');
     expect(f.host.querySelector('[aria-label="项目空间"]')?.textContent).toBe('Workspace');
@@ -2994,6 +3142,7 @@ test('a pending default first space cannot override a later project entry and th
     expect(promptValue(f.input())).toBe('the original draft');
     await f.click('新对话');
     expect(project()).toBe('Workspace');
+    await f.chooseModel();
     await f.click('发送首条消息');
     const send = f.calls.find((call) => call.method === 'conversation.send');
     expect(send?.creation.workspaceId).toBe('w');
@@ -3082,6 +3231,7 @@ test('first send clears and renders original text; late failure cannot steal ano
     await f.click('Original A');
     await f.click('在 Workspace 中新建对话');
     await f.edit('first raw\n雪🙂');
+    await f.chooseModel();
     await act(async () => {
       const send = f.host.querySelector<HTMLButtonElement>('[aria-label="发送首条消息"]')!;
       expect(send).not.toBeNull();
@@ -3140,6 +3290,7 @@ test('a completed first send preserves the scheduled page and returning enters i
     await act(async () => f.root.render(<NativeDesktop />));
     await f.click('在 Workspace 中新建对话');
     await f.edit('late accepted original');
+    await f.chooseModel();
     await f.click('发送首条消息');
     await f.click('安排任务');
     const send = await f.resolve('accepted');
@@ -3196,6 +3347,7 @@ for (const body of ['original first message 雪🙂', '']) {
       }
       expect(f.host.querySelector('.composer-attachment-name')?.textContent).toBe('设计说明.pdf');
       await f.edit(body);
+      await f.chooseModel();
       await f.click('发送首条消息');
       const viewport = f.host.querySelector('.conversation-viewport'),
         pending = f.host.querySelector('.message.user');
@@ -3319,6 +3471,7 @@ test('a saved first-created conversation waits for fresh grouping when its inact
     await act(async () => f.root.render(<NativeDesktop />));
     await f.click('在 Workspace 中新建对话');
     await f.edit('Created first input remains immediate');
+    await f.chooseModel();
     await f.click('发送首条消息');
     expect(f.host.querySelector('.message.user')?.textContent).toContain(
       'Created first input remains immediate',
@@ -3415,6 +3568,7 @@ test('a public first input hands its optimistic bubble to processing then busine
     await f.click('Original A');
     await f.click('在 Workspace 中新建对话');
     await f.edit(text);
+    await f.chooseModel();
     await f.click('发送首条消息');
     expect(f.host.querySelectorAll('.message.user')).toHaveLength(1);
     expect(f.host.querySelector('.message.user')?.textContent).toContain(text);
@@ -3706,6 +3860,7 @@ test('returning to a still-pending first submission enters the created Session w
     await act(async () => f.root.render(<NativeDesktop />));
     await f.click('在 Workspace 中新建对话');
     await f.edit('original pending return');
+    await f.chooseModel();
     await f.click('发送首条消息');
     await f.click('安排任务');
     await f.click('返回新对话');
@@ -3729,6 +3884,7 @@ test('leaving a delayed first selection or history read preserves the newer Sess
       await act(async () => f.root.render(<NativeDesktop />));
       await f.click('在 Workspace 中新建对话');
       await f.edit('original delayed first input');
+      await f.chooseModel();
       await f.click('发送首条消息');
       if (delay === 'selection') f.holdSelection();
       else f.holdHistory();
@@ -3756,6 +3912,7 @@ test('unknown first creation blocks resend and only queries original before an e
     await act(async () => f.root.render(<NativeDesktop />));
     await f.click('在 Workspace 中新建对话');
     await f.edit('unknown raw');
+    await f.chooseModel();
     await f.click('发送首条消息');
     const send = await f.resolve('unknown', false);
     expect(promptValue(f.input())).toBe('unknown raw');
@@ -3794,6 +3951,7 @@ test('a lost retry response restores original text and prevents a second input P
     await act(async () => f.root.render(<NativeDesktop />));
     await f.click('在 Workspace 中新建对话');
     await f.edit('retry original raw');
+    await f.chooseModel();
     await f.click('发送首条消息');
     const original = await f.resolve('failed');
     expect(f.host.querySelector('[role="alertdialog"]')).toBeNull();
@@ -3866,6 +4024,7 @@ test('first Session input stays in its created Session without a separate projec
     expect(f.host.querySelector('[role="dialog"]')).toBeNull();
     expect(f.calls.filter((call) => call.method === 'permission.trust')).toHaveLength(0);
     await f.edit('first input stays in its created Session');
+    await f.chooseModel();
     await f.click('发送首条消息');
     const original = await f.resolve('failed', true, 'workspace_trust_stale');
     expect(f.host.querySelector('[role="alertdialog"]')).toBeNull();
@@ -4248,6 +4407,7 @@ test('first accepted input observes a later rejection before Run creation, keeps
     await f.click('Original A');
     await f.click('在 Workspace 中新建对话');
     await f.edit('你好');
+    await f.chooseModel();
     await f.click('发送首条消息');
     const first = await f.resolve('accepted');
     const saved = f.snapshot();
@@ -4616,6 +4776,128 @@ test('workspace removal shows actionable failures without normal or completed-op
     await f.publishWorkspaceRemovals([], true);
     await f.until(() => text().includes('暂时无法确认空间移除结果'));
     expect(f.calls.some((call) => call.method === 'workspace.remove')).toBe(false);
+  } finally {
+    await f.close();
+  }
+});
+
+for (const page of ['session', 'preparation'] as const) {
+  test(`a first unselected ${page} ignores the configured default, blocks button and Enter, and sends only its explicit picker choice`, async () => {
+    const f = fixture(false, true, 'accept_edits', {
+      withoutSelection: page === 'preparation',
+      unselectedModel: true,
+    });
+    const bridge = f.dom.window.kiteNative! as NativeBridge;
+    const request = bridge.request;
+    bridge.request = async (input) => {
+      const result = await request(input);
+      if (input.method === 'submit')
+        return { sessionId: input.sessionId, intent: input.intent, phase: 'accepted' };
+      return result;
+    };
+    const label = page === 'session' ? '当前会话私有草稿' : '新对话草稿';
+    const sendLabel = page === 'session' ? '发送明确的新轮次' : '发送首条消息';
+    const mutations = () =>
+      f.calls.filter((call) =>
+        ['submit', 'conversation.send', 'caller.prepare', 'createSession'].includes(call.method),
+      );
+    try {
+      await act(async () => f.root.render(<NativeDesktop />));
+      if (page === 'session') await f.click('Original A');
+      await f.edit(`Explicit ${page} choice 雪🙂`, label);
+      const input = f.input(label)!;
+      const trigger = f.host.querySelector('[data-model-trigger]')!;
+      expect(trigger.textContent).toBe('选择模型');
+      expect(f.host.querySelector('.model-effort-summary')).toBeNull();
+      expect(f.host.querySelector<HTMLButtonElement>(`[aria-label="${sendLabel}"]`)!.disabled).toBe(
+        true,
+      );
+      await f.click(sendLabel);
+      await act(async () => {
+        input.focus();
+        input.dispatchEvent(
+          new f.dom.window.KeyboardEvent('keydown', {
+            key: 'Enter',
+            bubbles: true,
+            cancelable: true,
+          }),
+        );
+      });
+      expect(mutations()).toHaveLength(0);
+      expect(f.input(label)).toBe(input);
+      expect(promptValue(input)).toBe(`Explicit ${page} choice 雪🙂`);
+      expect(f.host.querySelector('[data-model-trigger]')).toBe(trigger);
+      await f.chooseModel();
+      expect(f.input(label)).toBe(input);
+      expect(promptValue(input)).toBe(`Explicit ${page} choice 雪🙂`);
+      expect(f.host.querySelector<HTMLButtonElement>(`[aria-label="${sendLabel}"]`)!.disabled).toBe(
+        false,
+      );
+      if (page === 'session')
+        await act(async () => {
+          input.focus();
+          input.dispatchEvent(
+            new f.dom.window.KeyboardEvent('keydown', {
+              key: 'Enter',
+              bubbles: true,
+              cancelable: true,
+            }),
+          );
+        });
+      else await f.click(sendLabel);
+      const sent = f.calls.filter(
+        (call) => call.method === 'submit' || call.method === 'conversation.send',
+      );
+      expect(sent).toHaveLength(1);
+      expect(sent[0]!.intent).toMatchObject({
+        kind: 'run.start',
+        modelId: 'model',
+        content: `Explicit ${page} choice 雪🙂`,
+      });
+      if (page === 'preparation') await f.resolve('accepted');
+    } finally {
+      await f.close();
+    }
+  });
+}
+
+test('a saved Session route restores ahead of a different configured default and preserves its unsent draft across Session changes', async () => {
+  const f = fixture();
+  const bridge = f.dom.window.kiteNative! as NativeBridge;
+  const request = bridge.request;
+  bridge.request = async (input) => {
+    const result = await request(input);
+    if (input.method === 'input.models.read' && result && 'models' in result)
+      return {
+        ...result,
+        defaultModelId: 'other-default',
+        models: [
+          ...result.models,
+          { ...result.models[0]!, id: 'other-default', model: 'Different Default' },
+        ],
+      };
+    return result;
+  };
+  try {
+    await act(async () => f.root.render(<NativeDesktop />));
+    await f.click('Original A');
+    const prompt = f.input('当前会话私有草稿');
+    expect(promptValue(prompt)).toBe('saved A');
+    expect(f.host.querySelector('[data-model-trigger]')?.getAttribute('aria-label')).toMatch(
+      /^模型：Model(?:，|$)/,
+    );
+    await f.edit('unsent saved-route draft 雪🙂', '当前会话私有草稿');
+    await f.click('Other B');
+    expect(promptValue(f.input('当前会话私有草稿'))).toBe('saved B');
+    await f.click('Original A');
+    expect(f.input('当前会话私有草稿')).toBe(prompt);
+    expect(promptValue(prompt)).toBe('unsent saved-route draft 雪🙂');
+    expect(f.host.querySelector('[data-model-trigger]')?.getAttribute('aria-label')).toMatch(
+      /^模型：Model(?:，|$)/,
+    );
+    expect(f.calls.some((call) => ['submit', 'conversation.send'].includes(call.method))).toBe(
+      false,
+    );
   } finally {
     await f.close();
   }

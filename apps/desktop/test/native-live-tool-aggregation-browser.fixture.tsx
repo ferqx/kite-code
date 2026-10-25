@@ -4,6 +4,7 @@ import {
   type Execution,
   type Message,
   type ModelOutputSnapshot,
+  type ModelSettingsView,
   type Run,
 } from '@kite-ai/client';
 import { SessionPage, type Message as ToolMessage } from '@kite-ai/ui/desktop';
@@ -11,7 +12,14 @@ import { useState } from 'react';
 import { flushSync } from 'react-dom';
 import { createRoot } from 'react-dom/client';
 import { NativeDesktop } from '../src/native';
-import type { NativeBridge, NativeRequest } from '../src/native-bridge';
+import type {
+  NativeBridge,
+  NativeEvent,
+  NativeModelSettingsSubmission,
+  NativeProviderSubmission,
+  NativeRequest,
+  NativeResult,
+} from '../src/native-bridge';
 import { nativeRunFact } from '../src/tool-messages-bridge';
 import { backgroundItem } from './background-item.fixture';
 import { sessionSwitchBridge } from './session-switch-bridge.fixture';
@@ -19,6 +27,7 @@ import '../src/native-tailwind.css';
 import '../src/native-startup.css';
 import '@kite-ai/ui/desktop/style.css';
 
+declare const __KITE_FIXTURE_EMPTY_MODEL_CHOICE__: boolean;
 const control = sessionSwitchBridge({ active: true });
 const base = backgroundItem();
 const raw = 'PRIVATE_RAW_RECEIPT_SENTINEL';
@@ -42,6 +51,27 @@ const run: Run = {
   createdAt: Date.now(),
   finishedAt: null,
   reason: null,
+  ...(__KITE_FIXTURE_EMPTY_MODEL_CHOICE__
+    ? {
+        configuration: {
+          modelId: 'model-a',
+          snapshot: {
+            version: 1,
+            digest: 'f'.repeat(64),
+            configuration: {
+              models: [
+                {
+                  id: 'model-a',
+                  provider: 'compatible',
+                  model: 'Model A',
+                  protocol: 'chat-completions',
+                },
+              ],
+            },
+          },
+        },
+      }
+    : {}),
 };
 const executions: Execution[] = [];
 const facts = new Map<string, Execution>();
@@ -71,6 +101,44 @@ const nativeShellMetadataPending: (() => void)[] = [];
 const nativeShellMetadataPages: { entries: unknown[]; modelStatuses: string[] }[] = [];
 const pending: (() => void)[] = [];
 const requests: NativeRequest[] = [];
+export type SettingsFixtureSnapshot = {
+  providerSettingsSubmissions: NativeProviderSubmission[];
+  modelSettingsSubmissions: NativeModelSettingsSubmission[];
+  audit: { method: string; input?: unknown }[];
+  revision: number;
+  defaultModelId: string;
+  models: ModelSettingsView['models'];
+  connection: { name: string; baseURL: string; modelNames: string[] };
+  pending: number;
+  pendingModelReads: number;
+  pendingProviderReads: number;
+  pendingLookups: number;
+  concurrentWrites: number;
+  maxConcurrentWrites: number;
+  receipts: import('@kite-ai/client').HostMutation[];
+};
+let settingsEnabled = false;
+const settingsListeners = new Set<(event: NativeEvent) => void>();
+let settingsState: SettingsFixtureSnapshot | undefined;
+const settingsId = crypto.randomUUID();
+let settingsScope = { generation: 1, selection: 1, storeId: 'store', sessionId: 'a' };
+async function settingsRequest(input?: NativeRequest, action?: string) {
+  const response = await fetch('/native-settings', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ id: settingsId, input, action, scope: settingsScope }),
+  });
+  const result = (await response.json()) as {
+    value?: NativeResult;
+    state: SettingsFixtureSnapshot;
+    error?: { code: string };
+  };
+  settingsState = result.state;
+  for (const listener of settingsListeners)
+    listener({ kind: 'changed', generation: settingsScope.generation });
+  if (result.error) throw Object.assign(Error(result.error.code), { code: result.error.code });
+  return result;
+}
 const modelSnapshots = new Map<string, ModelOutputSnapshot>();
 const modelReaders = new Map<string, Uint8Array>();
 let historyHeld = false;
@@ -107,8 +175,25 @@ function add(index: number) {
 }
 const bridge: NativeBridge = {
   ...control.bridge,
+  watch(listener) {
+    const unwatch = control.bridge.watch(listener);
+    settingsListeners.add(listener);
+    return () => {
+      settingsListeners.delete(listener);
+      unwatch();
+    };
+  },
   async request(request) {
     requests.push(request);
+    if (
+      settingsEnabled &&
+      request.method.startsWith('settings.') &&
+      (request.method.startsWith('settings.models.') ||
+        request.method.startsWith('settings.general.models.') ||
+        request.method.startsWith('settings.providers.'))
+    ) {
+      return (await settingsRequest(request)).value ?? null;
+    }
     if (request.method === 'messages') {
       const selected = request.sessionId === 'a' ? messages : [];
       const page = structuredClone({
@@ -160,14 +245,38 @@ const bridge: NativeBridge = {
     }
     const result = await control.bridge.request(request);
     if (
+      __KITE_FIXTURE_EMPTY_MODEL_CHOICE__ &&
+      request.method === 'input.models.read' &&
+      result &&
+      'models' in result &&
+      'kind' in result &&
+      result.kind === 'settings.models'
+    ) {
+      // This anonymous Session has no persisted explicit route despite its global default.
+      const { selectedModelId: _selectedModelId, ...facts } = result;
+      return facts;
+    }
+    if (
       (request.method === 'attach' || request.method === 'state' || request.method === 'select') &&
       result &&
       'selection' in result &&
       result.selection
     ) {
+      settingsScope = {
+        generation: result.generation,
+        selection: result.selection.viewSelection ?? 0,
+        storeId: result.selection.storeId,
+        sessionId: result.selection.session.id,
+      };
       const selected = result.selection.session.id === 'a';
       return structuredClone({
         ...result,
+        ...(settingsState
+          ? {
+              providerSettingsSubmissions: settingsState.providerSettingsSubmissions,
+              modelSettingsSubmissions: settingsState.modelSettingsSubmissions,
+            }
+          : {}),
         selection: {
           ...result.selection,
           session: {
@@ -291,6 +400,24 @@ const bridge: NativeBridge = {
 };
 export interface LiveAggregationFixture {
   requests: NativeRequest[];
+  settings(
+    action:
+      | 'start'
+      | 'state'
+      | 'hold'
+      | 'release'
+      | 'unknown-next'
+      | 'hold-model-reads'
+      | 'release-model-reads'
+      | 'hold-provider-reads'
+      | 'release-provider-reads'
+      | 'failed-next'
+      | 'failed-read-next'
+      | 'foreign-read-next'
+      | 'hold-lookups'
+      | 'release-lookups'
+      | 'failed-provider-read-next',
+  ): Promise<SettingsFixtureSnapshot>;
   pending(): number;
   add(index: number): void;
   settle(
@@ -338,6 +465,10 @@ declare global {
 }
 window.liveAggregationFixture = {
   requests,
+  async settings(action) {
+    if (action === 'start') settingsEnabled = true;
+    return (await settingsRequest(undefined, action)).state;
+  },
   pending: () => pending.length,
   holdHistory() {
     historyHeld = true;

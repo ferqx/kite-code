@@ -400,7 +400,10 @@ test('approval rows omit redundant pre-dispatch results while preserving indepen
           const root = dom.window.document;
           const approval = root.querySelector('.tool-approval');
           expect(approval?.getAttribute('aria-label') ?? approval?.textContent).toBe(item.approval);
-          if (message.approval?.state === 'approved') {
+          if (
+            message.approval?.state === 'approved' ||
+            (message.approval?.source === 'auto' && message.approval.state === 'rejected')
+          ) {
             expect(approval?.textContent).toBe('');
             expect(approval?.querySelector('svg')).not.toBeNull();
             expect(root.querySelector('button .tool-approval[tabindex]')).toBeNull();

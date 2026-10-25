@@ -15,7 +15,7 @@ function Spinner({
       strokeWidth={2}
       role="status"
       aria-label={ariaLabel}
-      className={cn('size-4 animate-spin', className)}
+      className={cn('size-[var(--ui-icon-size,14px)] animate-spin', className)}
       {...props}
     />
   );

@@ -467,6 +467,7 @@ function receipt(
   value: Json,
   provider = false,
   mcp = false,
+  modelScope?: string,
 ): void {
   if (!value || typeof value !== 'object' || Array.isArray(value))
     throw new AgentError('invalid_host_mutation');
@@ -524,7 +525,9 @@ function receipt(
     ? ['status', 'code', 'etag', 'credentialState', 'configurationState', 'opaqueRef']
     : kind.startsWith('credential.')
       ? ['status', 'code', 'opaqueRef', 'persistence', 'revoked']
-      : ['status', 'code', 'etag'];
+      : modelScope === undefined
+        ? ['status', 'code', 'etag']
+        : ['status', 'code', 'etag', 'postReadSet'];
   if (Object.keys(value).some((key) => !keys.includes(key)) || Object.keys(value).length === 0)
     throw new AgentError('invalid_host_mutation');
   if (value.status !== undefined && value.status !== state)
@@ -536,6 +539,30 @@ function receipt(
     throw new AgentError('invalid_host_mutation');
   if (value.etag !== undefined && (typeof value.etag !== 'string' || value.etag.length > 256))
     throw new AgentError('invalid_host_mutation');
+  if (value.postReadSet !== undefined) {
+    const proof = value.postReadSet;
+    if (
+      !['config.user.write', 'config.workspace.write'].includes(kind) ||
+      modelScope === undefined ||
+      state !== 'applied' ||
+      value.status !== 'applied' ||
+      !proof ||
+      typeof proof !== 'object' ||
+      Array.isArray(proof) ||
+      Object.keys(proof).sort().join(',') !==
+        'effectiveDigest,explicitDigest,userEtag,workspaceEtag' ||
+      ['effectiveDigest', 'explicitDigest', 'userEtag'].some(
+        (key) => typeof proof[key] !== 'string' || !/^[a-f0-9]{64}$/.test(proof[key] as string),
+      ) ||
+      proof.userEtag !== value.etag ||
+      (modelScope === 'user'
+        ? proof.workspaceEtag !== null
+        : modelScope !== 'workspace' ||
+          typeof proof.workspaceEtag !== 'string' ||
+          !/^[a-f0-9]{64}$/.test(proof.workspaceEtag))
+    )
+      throw new AgentError('invalid_host_mutation');
+  }
   if (
     value.opaqueRef !== undefined &&
     (typeof value.opaqueRef !== 'string' || !/^credential:[0-9a-f-]{36}$/.test(value.opaqueRef))
@@ -736,6 +763,10 @@ export function callHostMutation(
           undefined,
         (JSON.parse(String(row.safe_request_json)) as Record<string, Json>).mcpSettings !==
           undefined,
+        (JSON.parse(String(row.safe_request_json)) as Record<string, Json>).modelSettings ===
+          undefined
+          ? undefined
+          : String((JSON.parse(String(row.safe_request_json)) as Record<string, Json>).scope),
       );
     if (row.state !== 'pending') {
       if (row.state !== input.state || row.receipt_json !== canonicalJson(finalReceipt))

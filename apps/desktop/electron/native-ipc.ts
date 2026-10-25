@@ -132,7 +132,9 @@ const fields: Record<NativeRequest['method'], readonly string[]> = {
   'settings.mcp.descriptor.close': ['readId'],
   'interactions.next': ['viewGeneration', 'afterId'],
   'interactions.close': ['viewGeneration'],
-  'settings.models.read': ['scope'],
+  'settings.general.models.read': [],
+  'settings.general.models.close': [],
+  'settings.models.read': ['scope', 'afterCommandId'],
   'input.models.read': [],
   'conversation.models.read': [],
   'conversation.branch': ['workspaceId'],
@@ -526,7 +528,13 @@ export function decodeNativeRequest(value: unknown): NativeRequest {
     throw Error('invalid_native_request');
   if (method === 'settings.models.enabled' && typeof input.enabled !== 'boolean')
     throw Error('invalid_native_request');
-  if (method === 'settings.models.read' && input.scope !== 'user')
+  if (
+    method === 'settings.models.read' &&
+    (input.scope !== 'user' ||
+      (input.afterCommandId !== undefined &&
+        (typeof input.afterCommandId !== 'string' ||
+          !/^[A-Za-z0-9_-]{1,128}$/.test(input.afterCommandId))))
+  )
     throw Error('invalid_native_request');
   if (method === 'settings.providers.save') {
     const operation = record(input.operation);

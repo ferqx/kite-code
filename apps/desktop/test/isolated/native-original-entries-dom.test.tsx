@@ -75,7 +75,7 @@ test('retained General card reads the accurate configuration default and never s
   const bridge = {
     request: async (request: NativeRequest) => {
       requests.push(request);
-      if (request.method !== 'settings.models.read') return null;
+      if (request.method !== 'settings.general.models.read') return null;
       if (phase === 'held') return held;
       if (phase === 'error') throw Error('configuration_unavailable');
       return phase === 'user'
@@ -130,14 +130,12 @@ test('retained General card reads the accurate configuration default and never s
     expect(f.host.querySelector('[role="alert"]')!.textContent).toContain('当前默认模型不可读');
     expect(
       requests.every((request) =>
-        ['settings.models.read', 'settings.models.close'].includes(request.method),
+        ['settings.general.models.read', 'settings.general.models.close'].includes(request.method),
       ),
     ).toBe(true);
-    expect(
-      requests
-        .filter((request) => request.method === 'settings.models.read')
-        .map((request) => request.scope),
-    ).toEqual(['user', 'user', 'user', 'user']);
+    expect(requests.filter((request) => request.method === 'settings.general.models.read')).toEqual(
+      Array.from({ length: 4 }, () => ({ method: 'settings.general.models.read', generation: 1 })),
+    );
   } finally {
     await f.close();
   }

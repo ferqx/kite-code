@@ -8,6 +8,7 @@ import {
   Folder01Icon,
   Globe02Icon,
   Search01Icon,
+  ShieldAlertIcon,
   ShieldCheckIcon,
   TerminalIcon,
   Tick02Icon,
@@ -40,6 +41,7 @@ import {
 } from './components/ui/trace';
 import { useDesktopDiagnostics } from './diagnostics';
 import { FileDiff } from './FileChanges';
+import { cn } from './lib/utils';
 import { statusLabel } from './status';
 import type { Message } from './types';
 import { Button } from './ui';
@@ -472,6 +474,13 @@ function approvalLabel(message: Message): string | undefined {
   }
 }
 
+function approvalIcon(message: Message) {
+  if (message.approval?.state === 'approved') return ShieldCheckIcon;
+  if (message.approval?.source === 'auto' && message.approval.state === 'rejected')
+    return ShieldAlertIcon;
+  return undefined;
+}
+
 function ToolApproval({
   message,
   label,
@@ -484,7 +493,8 @@ function ToolApproval({
   summaryFocused?: boolean;
 }) {
   const [open, setOpen] = useState(false);
-  if (message.approval?.state !== 'approved')
+  const icon = approvalIcon(message);
+  if (!icon)
     return (
       <span className="tool-approval" role="status">
         {label}
@@ -495,12 +505,17 @@ function ToolApproval({
       <Tooltip open={open || summaryFocused} onOpenChange={setOpen}>
         <TooltipTrigger asChild>
           <span
-            className="tool-approval tool-approval-approved"
+            className={cn(
+              'tool-approval tool-approval-icon',
+              message.approval?.state === 'approved'
+                ? 'tool-approval-approved'
+                : 'tool-approval-rejected',
+            )}
             role="img"
             aria-label={label}
             tabIndex={insideSummary ? undefined : 0}
           >
-            <HugeiconsIcon icon={ShieldCheckIcon} aria-hidden="true" />
+            <HugeiconsIcon icon={icon} aria-hidden="true" />
           </span>
         </TooltipTrigger>
         <TooltipContent className="tool-approval-tooltip" side="top" sideOffset={6}>
@@ -1044,7 +1059,7 @@ export function ToolActivity({
             <span className="tool-step-target">{ask ? `· ${target}` : target}</span>
           ))}
       </TraceTitle>
-      {approval && message.approval?.state === 'approved' && (
+      {approval && approvalIcon(message) && (
         <ToolApproval
           message={message}
           label={approval}
@@ -1053,9 +1068,7 @@ export function ToolActivity({
         />
       )}
       {canExpand && <HugeiconsIcon className="tool-activity-chevron" icon={ArrowDown01Icon} />}
-      {approval && message.approval?.state !== 'approved' && (
-        <ToolApproval message={message} label={approval} />
-      )}
+      {approval && !approvalIcon(message) && <ToolApproval message={message} label={approval} />}
       {status && !shell && status !== '成功' && status !== approval && (
         <TraceDescription
           className="tool-activity-state"
