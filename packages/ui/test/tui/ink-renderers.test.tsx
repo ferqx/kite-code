@@ -59,6 +59,48 @@ const tool = (
   summary: '',
   ...extra,
 });
+
+test('generic result previews mark character and line clipping without splitting a Unicode scalar', () => {
+  for (const summary of [
+    `${'x'.repeat(299)}🙂RESULT_TAIL`,
+    `${'x'.repeat(299)}👨‍👩‍👧‍👦RESULT_TAIL`,
+    `first\n${'x'.repeat(199)}🙂RESULT_TAIL`,
+    Array.from({ length: 6 }, (_, index) => `line-${index}`).join('\n'),
+  ]) {
+    const view = render(
+      <ToolCardBlock
+        block={tool({ name: 'planning.read', status: 'done', summary, expanded: true })}
+        columns={120}
+      />,
+    );
+    try {
+      expect(view.lastFrame()).toContain('Ctrl+E');
+      expect(view.lastFrame()).not.toContain('RESULT_TAIL');
+      expect(view.lastFrame()).not.toContain('👨');
+      expect(view.lastFrame()).not.toMatch(
+        /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/u,
+      );
+    } finally {
+      view.unmount();
+    }
+  }
+  const view = render(
+    <ToolCardBlock
+      block={tool({
+        name: 'planning.read',
+        status: 'done',
+        summary: 'x'.repeat(300),
+        expanded: true,
+      })}
+      columns={120}
+    />,
+  );
+  try {
+    expect(view.lastFrame()).not.toContain('Ctrl+E');
+  } finally {
+    view.unmount();
+  }
+});
 test('original Shell card follows five-line tail and retains settled status when collapsed', () => {
   const view = render(
     <ToolCardBlock

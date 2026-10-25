@@ -10,6 +10,7 @@ import {
   nativeToolMessagePageBytes,
   presentableRun,
 } from '../src/tool-messages-bridge';
+import { nativeMcpToolLabel } from './mcp-tool-label';
 import {
   nativeLiveShellInputFact,
   nativeToolMessageEligible,
@@ -358,6 +359,7 @@ export class NativeToolMessages {
       await this.client.verifyConnection({ signal: lease.abort.signal });
       this.check(lease);
       const entries: NativeToolMessagePage['entries'] = [];
+      const labels = new Map<string, Promise<string | undefined>>();
       for (const id of input.executionIds ?? []) {
         const observed = this.liveExecutions().find((execution) => execution.id === id);
         if (
@@ -417,7 +419,31 @@ export class NativeToolMessages {
           sessionId: scope.sessionId,
           commandOffset: input.commandOffsets?.[id] ?? 0,
         });
-        if (fact) entries.push(fact);
+        if (fact) {
+          const key = JSON.stringify([
+            execution.originStoreId,
+            execution.sessionId,
+            execution.definitionId,
+            execution.definitionVersion,
+          ]);
+          if (!labels.has(key))
+            labels.set(
+              key,
+              nativeMcpToolLabel(
+                this.client,
+                execution,
+                scope.storeId,
+                scope.sessionId,
+                lease.abort.signal,
+              ).catch(() => {
+                this.check(lease);
+                return undefined;
+              }),
+            );
+          const label = await labels.get(key);
+          this.check(lease);
+          entries.push(label ? { ...fact, label } : fact);
+        }
       }
       await this.client.verifyConnection({ signal: lease.abort.signal });
       this.check(lease);

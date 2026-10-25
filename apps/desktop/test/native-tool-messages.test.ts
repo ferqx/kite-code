@@ -1,4 +1,5 @@
 import { expect, test } from 'bun:test';
+import { createHash } from 'node:crypto';
 import type { AgentClient, Execution, Message, Run } from '@kite-ai/client';
 import { decodeNativeRequest } from '../electron/native-ipc';
 import { nativeLiveShellInputFact } from '../electron/tool-message-fact';
@@ -157,6 +158,173 @@ test('future known tools keep stable names without borrowing structured semantic
     toolName: undefined,
     title: 'new.tool',
   });
+});
+
+test('plan, validation and MCP display names retain exact versions and generic MCP fallback', () => {
+  for (const [definitionId, title] of [
+    ['files.write_path', '写入用户文件'],
+    ['files.edit_path', '修改用户文件'],
+    ['planning.read', '读取计划'],
+    ['planning.write', '编写计划'],
+    ['planning.review', '请求计划审阅'],
+    ['planning.update', '更新计划'],
+    ['validation.define', '定义验证检查'],
+    ['validation.check', '运行验证'],
+    ['validation.rebind', '关联修复结果'],
+    ['validation.request_waiver', '请求验证豁免'],
+    ['validation.auto_check', '检查文件变更'],
+    ['mcp.tools.search', '搜索 MCP 工具'],
+    ['mcp.resources.list', '列出 MCP 资源'],
+    ['mcp.resources.read', '读取 MCP 资源'],
+  ]) {
+    expect(
+      desktopToolPresentation({ definitionId: definitionId!, definitionVersion: '1' }).title,
+    ).toBe(title);
+    expect(
+      desktopToolPresentation({ definitionId: definitionId!, definitionVersion: 'future' }),
+    ).toMatchObject({ title, toolName: undefined });
+  }
+  const definitionId = `mcp.docs.${'a'.repeat(32)}`;
+  expect(desktopToolPresentation({ definitionId, definitionVersion: 'digest' }).title).toBe(
+    'MCP 工具',
+  );
+  expect(
+    desktopToolMessage(
+      { definitionId, definitionVersion: 'digest', status: 'failed', label: 'MCP · search_docs' },
+      'mcp',
+      'actual failure',
+    ),
+  ).toMatchObject({ title: 'MCP · search_docs', status: 'failed', text: 'actual failure' });
+});
+
+test('Native MCP names come only from exact saved metadata; failed metadata never withdraws an original tool outcome', async () => {
+  const f = fixture();
+  const name = 'search_docs',
+    hash = 'a'.repeat(64),
+    version = 'b'.repeat(64);
+  const definitionId = `mcp.docs.${createHash('sha256').update(JSON.stringify(name)).digest('hex').slice(0, 32)}`;
+  f.add('mcp', 'failed', 'run', definitionId);
+  f.executions.get('execution-mcp')!.definitionVersion = version;
+  const origin = {
+    originStoreId: 'store',
+    sessionId: 's',
+    serverId: 'docs',
+    configDigest: hash,
+    connectionExecutionId: 'connection',
+    publisherExecutionId: 'publisher',
+    generation: 1,
+  };
+  const ref = {
+    id: 'index',
+    hash,
+    size: '100',
+    mediaType: 'application/json; charset=utf-8',
+    scope: { kind: 'execution', id: 'publisher' },
+  };
+  let pageVersion = version,
+    label = name,
+    foreign = false,
+    unavailable = false;
+  const queries: string[] = [];
+  f.client.queryExtension = async (sessionId, extensionId, query) => {
+    expect(sessionId).toBe('s');
+    expect(extensionId).toBe('builtin.mcp');
+    queries.push(query);
+    if (unavailable) throw Error('metadata unavailable');
+    return [
+      {
+        extensionId,
+        contentType:
+          query === 'mcp.tools.snapshots' ? 'builtin.mcp.tools.snapshots' : 'builtin.mcp.tools',
+        contentVersion: 1,
+        summary: 'saved metadata',
+        actions: [],
+        artifactRefs: [],
+        payload:
+          query === 'mcp.tools.snapshots'
+            ? {
+                version: 1,
+                sessionId,
+                items: [
+                  {
+                    recordKey: `tools/${hash}`,
+                    sourceRecordKey: 'source/original',
+                    origin: { ...origin, originStoreId: foreign ? 'foreign' : 'store' },
+                    availability: 'available',
+                    reason: null,
+                    toolCount: 1,
+                    index: ref,
+                  },
+                ],
+                nextAfterKey: null,
+              }
+            : {
+                version: 1,
+                recordKey: `tools/${hash}`,
+                binding: { ...origin, indexDigest: hash },
+                availability: 'available',
+                reason: null,
+                toolCount: 1,
+                startIndex: 0,
+                entries: [
+                  {
+                    index: 0,
+                    definitionId,
+                    definitionVersion: pageVersion,
+                    label,
+                    labelComplete: true,
+                    descriptorHash: hash,
+                    descriptorBytes: '100',
+                    manifest: ref,
+                  },
+                ],
+                nextIndex: null,
+                complete: true,
+                live: false,
+                currentGeneration: null,
+              },
+      },
+    ] as Awaited<ReturnType<AgentClient['queryExtension']>>;
+  };
+  try {
+    expect((await f.list(['mcp'])).entries[0]).toMatchObject({
+      label: 'MCP · search_docs',
+      status: 'failed',
+    });
+    expect(queries).toEqual(['mcp.tools.snapshots', 'mcp.tools']);
+    for (const change of ['version', 'name', 'origin', 'unavailable']) {
+      pageVersion = change === 'version' ? 'c'.repeat(64) : version;
+      label = change === 'name' ? 'forged_name' : name;
+      foreign = change === 'origin';
+      unavailable = change === 'unavailable';
+      const fact = (await f.list(['mcp'])).entries[0]!;
+      expect(fact.status).toBe('failed');
+      expect(fact.label).toBeUndefined();
+    }
+    unavailable = foreign = false;
+    pageVersion = version;
+    label = name;
+    const originalQuery = f.client.queryExtension;
+    let start!: () => void, release!: () => void;
+    const started = new Promise<void>((resolve) => {
+      start = resolve;
+    });
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    f.client.queryExtension = async (...args) => {
+      start();
+      await held;
+      return originalQuery(...args);
+    };
+    const pending = f.list(['mcp']);
+    await started;
+    f.scope = { ...f.scope, viewSelection: 3 };
+    release();
+    await expect(pending).rejects.toMatchObject({ code: 'native_selection_changed' });
+  } finally {
+    f.manager.release();
+  }
 });
 
 test('Web Fetch rows use the supported definition and only a unique original call supplies the URL', async () => {

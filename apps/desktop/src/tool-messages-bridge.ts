@@ -30,6 +30,8 @@ export type NativeToolMessageFact = Pick<
   decisionRefresh?: 'context_refresh_required' | 'capability_refresh_required';
   /** Display only: unique original Model call fields, or its known version's directory default. */
   target?: string;
+  /** Name verified against original saved MCP metadata; display only. */
+  label?: string;
   shellInput?: NativeShellInput;
   /** Exact request owner for a scoped live input; never a result or control capability. */
   inputSource?: { storeId: string; sessionId: string; runId: string; toolCallId: string };

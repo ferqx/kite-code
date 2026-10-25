@@ -3355,7 +3355,7 @@ body {
 }
 .kite-client
   :is(.tool-activity-summary, .tool-activity-step)[data-status="error"]
-  :is(.tool-approval, .file-link, .managed-shell-summary) {
+  :is(.tool-approval:not(.tool-approval-rejected), .file-link, .managed-shell-summary) {
   color: inherit;
 }
 .kite-client .tool-activity-steps {

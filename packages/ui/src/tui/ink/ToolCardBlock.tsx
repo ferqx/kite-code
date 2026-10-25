@@ -335,7 +335,23 @@ function renderShellLines(
   );
 }
 
-function renderToolSummary(summary: string, isError: boolean, dt: { error: string; dim: string }) {
+const summarySegments = new Intl.Segmenter(undefined, { granularity: 'grapheme' });
+function summaryPreview(line: string, limit: number) {
+  if (line.length <= limit) return line;
+  let preview = '';
+  for (const { segment } of summarySegments.segment(line)) {
+    if (preview.length + segment.length > limit) break;
+    preview += segment;
+  }
+  return `${preview}…`;
+}
+
+function renderToolSummary(
+  summary: string,
+  isError: boolean,
+  dt: { error: string; dim: string },
+  translate: InkI18n['t'],
+) {
   const prefix = isError ? '✕ ' : '⎿ ';
   /** Same width as prefix for continuation lines — avoids pure-whitespace collapsing and
    *  fixes a pre-existing 1-column alignment mismatch (was 3 spaces vs 2-char prefix). */
@@ -344,29 +360,23 @@ function renderToolSummary(summary: string, isError: boolean, dt: { error: strin
   const text = summary.trimEnd();
   const lines = text.split('\n');
 
-  if (lines.length <= 1) {
-    return (
-      <Text color={color}>
-        {prefix}
-        {text.slice(0, 300)}
-      </Text>
-    );
-  }
-
   const displayLines = lines.slice(0, MAX_TOOL_LINES);
-  const truncated = lines.length > MAX_TOOL_LINES;
+  const limit = lines.length <= 1 ? 300 : 200;
+  const truncated =
+    lines.length > MAX_TOOL_LINES || displayLines.some((line) => line.length > limit);
 
   return (
     <React.Fragment>
       {displayLines.map((line, i) => (
         <Text key={i} color={color}>
           {i === 0 ? prefix : align}
-          {line.slice(0, 200)}
+          {summaryPreview(line, limit)}
         </Text>
       ))}
       {truncated && (
         <Text color={dt.dim}>
-          {align}... ({lines.length - MAX_TOOL_LINES} more lines)
+          {align}
+          {translate('tool.resultPreviewTruncated')}
         </Text>
       )}
     </React.Fragment>
@@ -873,6 +883,7 @@ export default function ToolCardBlock({ block, awaitingInput, columns = 80 }: To
             block.summary!,
             block.status === 'error' || block.status === 'exhausted',
             dt,
+            translate,
           )}
         </Box>
       )}

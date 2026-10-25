@@ -708,7 +708,7 @@ test('Native readable stage prose separates exploration activities without shari
   }
 });
 
-test('Native tools aggregate unknown definitions but retain Run and Store boundaries', async () => {
+test('Native tools aggregate future versions with stable names and retain Run and Store boundaries', async () => {
   const f = fixture();
   try {
     await f.render();
@@ -726,7 +726,8 @@ test('Native tools aggregate unknown definitions but retain Run and Store bounda
     expect(f.host.textContent).not.toContain('foreign-store');
     expect(f.host.querySelectorAll('.tool-activity-steps')).toHaveLength(0);
     await f.toggle();
-    expect(f.host.textContent).toContain('files.search · 99');
+    expect(f.host.textContent).toContain('搜索内容');
+    expect(f.host.textContent).not.toContain('files.search · 99');
     expect(f.host.querySelector('.tool-activity-steps')?.children).toHaveLength(3);
     expect(f.host.querySelector('.tool-activity-steps')?.textContent).not.toContain(
       'file-execution-3.ts',
@@ -734,7 +735,7 @@ test('Native tools aggregate unknown definitions but retain Run and Store bounda
     expect(f.host.querySelector('.tool-activity-steps')?.textContent).not.toContain(
       'file-execution-4.ts',
     );
-    expect(f.host.querySelector('.tool-activity-steps')?.textContent).toContain('99');
+    expect(f.host.querySelector('.tool-activity-steps')?.textContent).not.toContain('99');
     await f.toggle();
     await f.complete(5, true);
     await f.flush();

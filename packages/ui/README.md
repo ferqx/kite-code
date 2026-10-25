@@ -130,6 +130,10 @@ Composer 的图片卡片保持固定预览区域，接受宿主交付的小尺�
 
 ## 原桌面展示层
 
+工具详情继续在原项下展开，文件差异、Shell、问题与通用结果各自保留已有 reader。公共 [ScrollArea](src/desktop/components/ui/scroll-area.tsx) 的 `chainScroll` 还保护键盘边缘阅读：仅在 viewport 自身接到无修饰 Home／End 时，在原生滚动后将该边缘移入可滚动祖先的可见窗口；若相应展开动画仍在进行，等待其真实结束再核一次当前焦点和边缘。其他按键、焦点转移或卸载使旧定位失效，不拦截子控件、选择快捷键或取消原生默认行为。原400px聚合上限和输出跟随不变。[滚动回归](test/isolated/desktop-file-diff-scroll.test.tsx)核边缘可见性、无重复位移及子控件隔离；实际像素仍由 Desktop 浏览器旅程验证。
+
+TUI [通用工具结果](src/tui/ink/ToolCardBlock.tsx)保留单行300／多行每行200字符、最多五行的有界预览；任一字符或行裁切均显示省略提示与 `Ctrl+E` 完整已保存结果入口，截取沿完整字素边界，不拆开代理对或组合 emoji。未截断内容不显示提示，原结果和执行目录读取保持完整。该规则不改变文件 diff、问答或 Shell 的各自呈现。
+
 `ToolActivity` 的已知 `web_fetch` 使用地球图标、“读取网页”和原目标的网站／路径，省略协议、user-info、query与fragment，过长目标沿原省略与title阅读。准确成功只保留工具行，不挂载结果正文或原记录reader，不提供正文展开；这不修改Tool结果、Artifact或模型输入。失败及unknown仍保各自原详情，`web_timeout`仅补充不推断阶段的中文说明并保原代码。真实failed/rejected子工具的整个标题沿`--destructive`呈现，hover／focus／展开保持；重复结果标签仅供读屏，不参与行布局。聚合标题不因子项失败取得error装饰，unknown／等待／审批提示仍独立表达。DOM回归核同一聚合身份、状态转换、URL隐私与成功正文缺席，真实生产CSS的浏览器回归核整行颜色、目标截断、原因实际可读与原滚动合同。
 
 `ToolActivity` 的 `toolDetailText` 不将 `source:auto/state:approved` 的通过理由混入工具详情；运行、成功、失败与未知结果均沿同一规则，工具原异常及 stdout／stderr 保留。批准盾牌与提示、拒绝／待人工／审批未知原因、原记录和宿主授权事实保持。纯显示筛选不删除 `Message.approval.reason`，也不更改执行状态。[聚合回归](test/isolated/desktop-tool-aggregation.test.tsx)覆盖未知工具、Shell、失败／未知、重读和原错误保留。

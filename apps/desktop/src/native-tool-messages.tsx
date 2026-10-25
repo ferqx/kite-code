@@ -19,6 +19,8 @@ const emptyToolFacts: NativeToolMessageFact[] = [];
 const labels: Record<string, readonly [readonly string[], string]> = {
   'files.read': [['2', '3', '4', '5'], '读取'],
   'files.read_path': [['1', '2'], '读取'],
+  'files.write_path': [['1'], '写入用户文件'],
+  'files.edit_path': [['1'], '修改用户文件'],
   'files.write': [['2', '3'], '写入'],
   'files.edit': [['2'], '修改'],
   'files.glob': [['2', '3'], '查找文件'],
@@ -37,6 +39,18 @@ const labels: Record<string, readonly [readonly string[], string]> = {
   'task.events': [['1'], '等待 Agent 事件'],
   'task.list': [['1'], '列出子 Agent'],
   'task.interrupt': [['1'], '中断子 Agent'],
+  'planning.read': [['1'], '读取计划'],
+  'planning.write': [['1'], '编写计划'],
+  'planning.review': [['1'], '请求计划审阅'],
+  'planning.update': [['1'], '更新计划'],
+  'validation.define': [['1'], '定义验证检查'],
+  'validation.check': [['1'], '运行验证'],
+  'validation.rebind': [['1'], '关联修复结果'],
+  'validation.request_waiver': [['1'], '请求验证豁免'],
+  'validation.auto_check': [['1'], '检查文件变更'],
+  'mcp.tools.search': [['1'], '搜索 MCP 工具'],
+  'mcp.resources.list': [['1'], '列出 MCP 资源'],
+  'mcp.resources.read': [['1'], '读取 MCP 资源'],
 };
 const exploration = new Set([
   'files.read',
@@ -48,10 +62,12 @@ const exploration = new Set([
 
 /** Names follow stable IDs; structured presentation still requires a supported version. */
 export function desktopToolPresentation(
-  fact: Pick<NativeToolMessageFact, 'definitionId' | 'definitionVersion'>,
+  fact: Pick<NativeToolMessageFact, 'definitionId' | 'definitionVersion'> &
+    Pick<Partial<NativeToolMessageFact>, 'label'>,
 ): Pick<DesktopMessage, 'toolName' | 'title' | 'presentation' | 'shell'> {
   const label = labels[fact.definitionId];
   const known = label?.[0].includes(fact.definitionVersion);
+  const mcp = /^mcp\.([A-Za-z0-9_-]{1,128})\.[a-f0-9]{32}$/.test(fact.definitionId);
   return {
     toolName: known
       ? ((
@@ -71,7 +87,7 @@ export function desktopToolPresentation(
           } as Record<string, string>
         )[fact.definitionId] ?? fact.definitionId)
       : undefined,
-    title: label?.[1] ?? fact.definitionId,
+    title: label ? label[1] : mcp ? (fact.label ?? 'MCP 工具') : fact.definitionId,
     ...(known && fact.definitionId.startsWith('shell.')
       ? {
           shell: {
@@ -284,7 +300,7 @@ export function desktopToolMessage(
   fact: Pick<NativeToolMessageFact, 'definitionId' | 'definitionVersion' | 'status' | 'target'> &
     Pick<
       Partial<NativeToolMessageFact>,
-      'ask' | 'authorization' | 'decisionRefresh' | 'shellInput' | 'shellResultVerified'
+      'ask' | 'authorization' | 'decisionRefresh' | 'shellInput' | 'shellResultVerified' | 'label'
     >,
   id: string,
   text: string,

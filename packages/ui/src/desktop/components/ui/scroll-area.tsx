@@ -6,7 +6,7 @@ import { cn } from '../../lib/utils';
 type ScrollAreaProps = React.ComponentPropsWithoutRef<typeof ScrollAreaPrimitive.Root> & {
   orientation?: 'vertical' | 'horizontal' | 'both';
   fade?: 'x' | 'y' | false;
-  /** Continue vertical wheel input in an ancestor when this reader reaches its edge. */
+  /** Continue edge wheel input and keep keyboard-selected reader edges visible in ancestors. */
   chainScroll?: boolean;
   viewportRef?: React.Ref<HTMLDivElement>;
   viewportClassName?: string;
@@ -52,7 +52,15 @@ const ScrollArea = React.forwardRef<
         (delta < 0
           ? node.scrollTop > 0
           : node.scrollTop + node.clientHeight < node.scrollHeight - 1);
+      let frame: number | undefined;
+      let keyboardRevision = 0;
+      const invalidate = () => {
+        keyboardRevision++;
+        if (frame !== undefined) view.cancelAnimationFrame(frame);
+        frame = undefined;
+      };
       const wheel = (event: WheelEvent) => {
+        invalidate();
         if (
           event.defaultPrevented ||
           !event.cancelable ||
@@ -81,7 +89,74 @@ const ScrollArea = React.forwardRef<
         }
       };
       element.addEventListener('wheel', wheel, { passive: false });
-      return () => element.removeEventListener('wheel', wheel);
+      const keydown = (event: KeyboardEvent) => {
+        invalidate();
+        if (
+          event.target !== element ||
+          event.defaultPrevented ||
+          event.ctrlKey ||
+          event.altKey ||
+          event.metaKey ||
+          event.shiftKey ||
+          !['Home', 'End'].includes(event.key)
+        )
+          return;
+        const revision = keyboardRevision;
+        const reveal = () => {
+          if (revision !== keyboardRevision) return;
+          if (frame !== undefined) view.cancelAnimationFrame(frame);
+          // Native Home/End runs first. A newly opening disclosure can still
+          // change the enclosing window, so recheck after its actual animation.
+          frame = view.requestAnimationFrame(() => {
+            frame = undefined;
+            if (
+              revision !== keyboardRevision ||
+              !element.isConnected ||
+              element.ownerDocument.activeElement !== element
+            )
+              return;
+            element.scrollTop = event.key === 'End' ? element.scrollHeight : 0;
+            for (let node = element.parentElement; node; node = node.parentElement) {
+              if (!/^(auto|scroll)$/.test(view.getComputedStyle(node).overflowY)) continue;
+              const inner = element.getBoundingClientRect();
+              const outer = node.getBoundingClientRect();
+              const top = outer.top + node.clientTop;
+              const delta =
+                event.key === 'End' ? inner.bottom - top - node.clientHeight : inner.top - top;
+              if (event.key === 'End' ? delta > 0 : delta < 0) node.scrollTop += delta;
+            }
+          });
+        };
+        const animations: Animation[] = [];
+        for (let node: HTMLElement | null = element; node; node = node.parentElement)
+          animations.push(
+            ...(node.getAnimations?.({ subtree: node === element }) ?? []).filter(
+              (animation) =>
+                animation.timeline === element.ownerDocument.timeline &&
+                Number.isFinite(animation.effect?.getComputedTiming().endTime) &&
+                animation.playState !== 'finished' &&
+                animation.playState !== 'idle',
+            ),
+          );
+        reveal();
+        if (animations.length)
+          void Promise.all(animations.map((animation) => animation.finished.catch(() => {}))).then(
+            reveal,
+          );
+      };
+      element.addEventListener('keydown', keydown);
+      element.addEventListener('blur', invalidate);
+      element.ownerDocument.addEventListener('pointerdown', invalidate, {
+        capture: true,
+        passive: true,
+      });
+      return () => {
+        element.removeEventListener('wheel', wheel);
+        element.removeEventListener('keydown', keydown);
+        element.removeEventListener('blur', invalidate);
+        element.ownerDocument.removeEventListener('pointerdown', invalidate, true);
+        invalidate();
+      };
     }, [chainScroll]);
     return (
       <ScrollAreaPrimitive.Root

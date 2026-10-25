@@ -392,6 +392,13 @@ Main 开始退出和取消退出时通过原固定 event channel 通知 renderer
 
 ## 原工具过程与结果阅读
 
+工具结果沿用户确认的原位展开方案：保留轻量工具行、连续工具聚合与原阅读身份，点击对应项在原位置阅读结果，不新增右侧工具详情页。计划、验证与 MCP 发现／资源工具按稳定 ID 显示可读动作名，结构化解释和对应图标仍需支持的准确版本；未知定义保原名称。正式 MCP 代理在元数据未核实时显示“MCP 工具”，已保存回执通过 [本地名称 reader](electron/mcp-tool-label.ts)读取原 `mcp.tools.snapshots`／`mcp.tools`，核 Store、Session、定义版本、快照绑定及原名称 hash 后显示 `MCP · 原工具名称`。名称预览不完整时沿公共 descriptor reader 读取原完整材料；没有匹配、元数据失败或外来源历史保持通用名称及原结果，不借当前远端目录猜名称。所有查询只读本地保存事实，不连接或调用 MCP；读取关闭及换会话继续取消所属 GET，迟到名称不得发布到新会话。
+
+展开详情的 Home／End 保留内层原生滚动，并让相应首／尾边缘进入外层阅读区的可见窗口，避免聚合内差异滚到底部后末行仍被外层裁住。聚合总高、正文完整性、折叠选择和输入位置仍沿原规则；鼠标滚轮与横向阅读保持原边界交接。
+
+自动审批未通过的盾牌保持原警告色，不被工具行的异常红色继承规则覆盖；真实执行失败、未知和原拒绝原因继续分别保留。
+
+2026-10-25，Windows x64／Bun1.4.3／Chrome155，`c3f384c48` 加本次主目录整合：工具元数据、Native DOM、实时聚合、原记录阅读、共享聚合、滚动和 TUI 渲染七份整文件定向回归分别通过，共111项3377断言；UI／Desktop typecheck通过。整合时两份旧断言仍要求版本后缀，已按用户新确认的名称规则同步，原结果读取、未知状态与来源隔离断言保留。原[工具详情浏览器夹具](test/native-live-tool-aggregation-browser-runner.fixture.ts)的 `tool-details` 在亮色1280px／暗色780px完整通过，逐步观察展开→Home／End→动画结束后的差异完整尾行、Shell手动阅读／继续跟随、11种结果与审批拒绝的hover／键盘／原因展开；1808帧与报告位于本机 `.cache/native-live-tool-aggregation-bMC4t8`。隔离阶段真实裁切、后续滚动等待和警告色失败的原日志保留于 `.cache/tool-output-integration/isolated-logs`，没有删除相关断言或放宽时限。MCP名称另核准确版本／hash、缺来源降级、换会话迟到隔离与同节点展开保持；这里的本地桥接／数据端口测试不代证真实外部MCP、完整安装版Electron或其他平台资格。Web行为及执行授权边界未改。
 [工具呈现](src/native-tool-messages.tsx)按稳定定义ID决定已知工具名称，名称不依赖定义版本白名单；`glob@3/search@5`及后续未知版本继续显示“查找文件／搜索内容”。结构化结果、Shell操作、问答归属和特定探索分类仍按准确受支持版本判断，未知版本保原结果阅读，不从友好名称推断权限或终态。[元数据回归](test/native-tool-messages.test.ts)及[真实组件DOM回归](test/isolated/native-tool-messages-dom.test.tsx)覆盖旧版、当前版和未登记的999版本；完全未知ID继续显示原工具ID，但常规名称同样不附加版本号；准确版本仍保留在原始记录与内部格式核验中。取舍见[连续工具呈现Note](../../.agents/notes/implemented/bug-fix/2026-10-25-native-contiguous-tool-aggregation.md)。
 
 2026-10-25，Windows x64／Bun1.4.3，`d33ac7cec`加名称修复：上述两份完整回归43项1523断言、Desktop typecheck与文档检查通过。隔离生产组件页面逐步观察当前版本→模拟999版本→结果保存→切回，逐项名称始终可读；未知格式保留通用动作摘要，不套用旧结构。临时入口为本机`.cache/tool-version-labels-server.ts`，未来版截图为`.cache/tool-version-names-future.png`；该页面没有连接用户数据、Service或真实工具，不代表完整Electron或权限流程资格。版本升级的明确用户确认规则归[根AGENTS](../../AGENTS.md)，本轮不继续升级工具版本。

@@ -196,6 +196,103 @@ test('tool diff keeps complete lines in a named focusable shared viewport with v
   });
 });
 
+test('Home and End reveal the focused reader edge in enclosing scroll windows without handling child controls', async () => {
+  await withDom(async ({ host, render }) => {
+    await render(
+      <div data-outer style={{ overflowY: 'auto' }}>
+        <ScrollArea chainScroll viewportClassName="detail" viewportProps={{ tabIndex: 0 }}>
+          <button type="button">child control</button>
+          complete result
+        </ScrollArea>
+      </div>,
+    );
+    const outer = host.querySelector<HTMLElement>('[data-outer]')!;
+    const detail = host.querySelector<HTMLElement>('.detail')!;
+    Object.defineProperty(outer, 'clientHeight', { value: 300 });
+    outer.getBoundingClientRect = () => ({ top: 100, bottom: 400 }) as DOMRect;
+    let edge = 'end';
+    detail.getBoundingClientRect = () =>
+      (edge === 'end'
+        ? { top: 140, bottom: 412 - outer.scrollTop }
+        : { top: 88 - outer.scrollTop, bottom: 360 }) as DOMRect;
+    const key = async (target: HTMLElement, options: KeyboardEventInit) => {
+      const event = new target.ownerDocument.defaultView!.KeyboardEvent('keydown', {
+        bubbles: true,
+        cancelable: true,
+        ...options,
+      });
+      await act(async () => {
+        target.dispatchEvent(event);
+        await new Promise((resolve) => setTimeout(resolve, 35));
+      });
+      expect(event.defaultPrevented).toBe(false);
+    };
+    detail.focus();
+    await key(detail, { key: 'End' });
+    expect(outer.scrollTop).toBe(12);
+    await key(detail, { key: 'End' });
+    expect(outer.scrollTop).toBe(12);
+    edge = 'home';
+    outer.scrollTop = 0;
+    await key(detail, { key: 'Home' });
+    expect(outer.scrollTop).toBe(-12);
+    outer.scrollTop = 0;
+    await key(detail, { key: 'Home', shiftKey: true });
+    await key(detail.querySelector('button')!, { key: 'End' });
+    expect(outer.scrollTop).toBe(0);
+    let finish!: () => void;
+    const finished = new Promise<void>((resolve) => {
+      finish = resolve;
+    });
+    outer.getAnimations = () =>
+      [
+        {
+          finished: new Promise(() => {}),
+          timeline: {},
+          playState: 'running',
+          effect: { getComputedTiming: () => ({ endTime: 300 }) },
+        },
+        {
+          finished,
+          timeline: outer.ownerDocument.timeline,
+          playState: 'running',
+          effect: { getComputedTiming: () => ({ endTime: 300 }) },
+        },
+      ] as unknown as Animation[];
+    edge = 'end';
+    await key(detail, { key: 'End' });
+    expect(outer.scrollTop).toBe(12);
+    detail.getBoundingClientRect = () => ({ top: 140, bottom: 447 - outer.scrollTop }) as DOMRect;
+    await act(async () => {
+      finish();
+      await new Promise((resolve) => setTimeout(resolve, 35));
+    });
+    expect(outer.scrollTop).toBe(47);
+    const later = new Promise<void>((resolve) => {
+      finish = resolve;
+    });
+    outer.getAnimations = () =>
+      [
+        {
+          finished: later,
+          timeline: outer.ownerDocument.timeline,
+          playState: 'running',
+          effect: { getComputedTiming: () => ({ endTime: 300 }) },
+        },
+      ] as unknown as Animation[];
+    await key(detail, { key: 'End' });
+    detail.dispatchEvent(
+      new detail.ownerDocument.defaultView!.Event('pointerdown', { bubbles: true }),
+    );
+    detail.getBoundingClientRect = () => ({ top: 140, bottom: 482 - outer.scrollTop }) as DOMRect;
+    await act(async () => {
+      finish();
+      await new Promise((resolve) => setTimeout(resolve, 35));
+    });
+    expect(outer.scrollTop).toBe(47);
+  });
+});
+
 test('file changes retain exact open actions and lazy original detail mounting', async () => {
   await withDom(async ({ host, render, click }) => {
     const opened: string[] = [];

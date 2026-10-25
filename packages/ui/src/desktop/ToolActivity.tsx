@@ -278,6 +278,7 @@ function toolTarget(message: Message): string | undefined {
     case 'list_mcp_resources':
       return argument('server');
     case 'list_mcp_tools':
+    case 'mcp.tools.search':
       return argument('provider');
     case 'read_mcp_resource': {
       const server = argument('server');
@@ -350,6 +351,8 @@ function toolIcon(message: Message) {
       return TerminalIcon;
     case 'edit_file':
     case 'write_file':
+    case 'files.write_path':
+    case 'files.edit_path':
       return Edit02Icon;
     case 'web_fetch':
       return Globe02Icon;
@@ -358,11 +361,22 @@ function toolIcon(message: Message) {
     case 'ask_user':
       return UserQuestion01Icon;
     case 'list_mcp_resources':
+    case 'mcp.resources.list':
       return Folder01Icon;
     case 'write_plan':
     case 'update_plan':
     case 'request_plan_review':
+    case 'planning.read':
+    case 'planning.write':
+    case 'planning.review':
+    case 'planning.update':
       return File01Icon;
+    case 'validation.define':
+    case 'validation.check':
+    case 'validation.rebind':
+    case 'validation.request_waiver':
+    case 'validation.auto_check':
+      return Tick02Icon;
     default:
       return Wrench01Icon;
   }

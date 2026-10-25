@@ -1352,6 +1352,44 @@ const pageFor = (
   })),
 });
 
+test('a verified MCP name replaces its generic title in place without closing the original result', async () => {
+  const f = fixture();
+  const fact = {
+    definitionId: `mcp.docs.${'a'.repeat(32)}`,
+    definitionVersion: 'b'.repeat(64),
+    status: 'failed' as const,
+  };
+  const render = (label?: string) =>
+    act(async () =>
+      f.root.render(
+        <NativeToolMessage
+          message={desktopToolMessage(
+            { ...fact, ...(label ? { label } : {}) },
+            'original-mcp',
+            'ORIGINAL_MCP_ERROR 雪🙂',
+          )}
+        />,
+      ),
+    );
+  try {
+    await render();
+    expect(f.host.textContent).toContain('MCP 工具');
+    const summary = f.host.querySelector<HTMLButtonElement>('.tool-activity-summary')!;
+    await act(async () => summary.click());
+    const viewport = f.host.querySelector('.tool-detail-viewport');
+    expect(f.host.textContent).toContain('ORIGINAL_MCP_ERROR 雪🙂');
+    await render('MCP · search_docs');
+    expect(f.host.textContent).toContain('MCP · search_docs');
+    expect(f.host.textContent).not.toContain(fact.definitionId);
+    expect(f.host.querySelector('.tool-activity-summary')).toBe(summary);
+    expect(summary.getAttribute('aria-expanded')).toBe('true');
+    expect(f.host.querySelector('.tool-detail-viewport')).toBe(viewport);
+    expect(f.host.textContent).toContain('ORIGINAL_MCP_ERROR 雪🙂');
+  } finally {
+    await f.close();
+  }
+});
+
 test('the retained tool UI shows exact failures and unverified Shell original results without claiming acceptance; unknown versions remain literal and escaped', async () => {
   const f = fixture(),
     requests: NativeRequest[] = [];
