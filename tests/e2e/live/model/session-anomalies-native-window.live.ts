@@ -762,7 +762,7 @@ export async function runLiveSessionAnomalies(options: { output: string; checkpo
         tools: ordinaryHostConfigurationDefaults(true, true).tools.map(({ id }) => ({
           id,
           enabled: id === 'files.write',
-          ...(id === 'files.write' ? { definitionVersion: '2' } : {}),
+          ...(id === 'files.write' ? { definitionVersion: '3' } : {}),
         })),
       }),
       { mode: 0o600 },

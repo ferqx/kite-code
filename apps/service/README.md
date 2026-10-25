@@ -366,7 +366,7 @@ Auto 分类只返回准确 invocation、effects 与 `readCheckContext` 的只读
 
 默认工厂通过 `createPermissionManagement({allowModeChanges:true})` 保留运行中的根模式控制，即使注入策略使其余管理操作 `writable:false`，原 `permission.mode` HTTP 入口仍可写；trust 和清除 grants 继续由原宿主边界限制。`host-status` 显示真实持久 mode/default，不再因存在注入策略而清空；无法完整解释的注入 trust 上限继续显示 unavailable。原工厂自身管理器与真实 HTTP 的[配置回归](test/isolated/permission-configuration.test.ts)验证待批切 Full、最终派发前收紧及 Full 不绕过硬拒绝／强制人工；没有另建可写管理器代替被测入口。
 
-`describeCapability` 由当次真实 assembly 产生：选中的 builtin files read/list/glob/search 和 Skill load/resource 是 safe read；files write/edit 是 Workspace write；真实注册但未识别的其他能力是 unknown，缺实际注册则拒绝。实际 `files.read@3`、`files.write/edit/search/glob@2`、`files.list@1` 来自当次定义，配置不能改写它。Shell 仅在下文可信宿主显式选择的执行资格与真实 guardian 下注册；MCP 仅在上文明确 programmatic lifecycle/port 配置下注册。当前六个 files Tools 没有 mkdir，不因权限分类保留可能的未来 ID 就宣称已提供该工具。
+`describeCapability` 由当次真实 assembly 产生：选中的 builtin files read/list/glob/search 和 Skill load/resource 是 safe read；files write/edit 是 Workspace write；真实注册但未识别的其他能力是 unknown，缺实际注册则拒绝。实际 `files.read@5`、`files.write@3`、`files.edit/glob@2`、`files.search@4`、`files.list@1` 来自当次定义，配置不能改写它。Shell 仅在下文可信宿主显式选择的执行资格与真实 guardian 下注册；MCP 仅在上文明确 programmatic lifecycle/port 配置下注册。当前六个 files Tools 没有 mkdir，不因权限分类保留可能的未来 ID 就宣称已提供该工具。
 
 旧 Run 保留原 manifest/definitions 与文件绑定，单纯禁用后续 Tool 配置不等于全局撤权；当前 mode/trust/allowlist 的变化仍会在派发前生效。新 Run 重读配置并封存新目录。默认每次授权允许集合包含实际已选中的静态能力和纯缓存 MCP 动态 Tool/Task Job 目录，不为未注册定义补授权；读取该集合不打开连接。非 Run Action 根据原 Execution/Command 取得准确 Store、Session 与宿主主体，再读取同一控制事实，不采用当前 UI 选择或全局猜测。
 
@@ -431,7 +431,13 @@ read/wait 只读原执行，沿用分页游标、高水位和 gap；wait 超时�
 
 ## 默认 Web Fetch 装配
 
-默认 resolver 通过 [web-fetch-configuration.ts](src/web-fetch-configuration.ts)装配普通 `builtin.web@1` / `web_fetch@1`。`createDefaultProcessConfiguration({webFetch?})` 只接受可信宿主的 network policy/admission 与可选 extractor；缺省开发网络策略为 public，仍逐跳检查全部 DNS 地址、拒绝私有/保留/本机目标并固定真实 socket。显式 off/allowlist 与当前宿主 `admitHop` 继续约束原请求、robots 和每次跳转，普通 Tool 仍独立经过 Core 的当前授权。实际元数据为 `network`/`unknown`、`safeRead:false`，off 为不可用；每个新 Run 封存准确 Tool 版本和非秘密 `snapshot.web`。JSONC 仅选择 Tool 与准确版本，不能提供网络权威、代理 header 或 SSRF 例外。工厂创建不进行 DNS、解析或网络 I/O。
+默认 resolver 通过 [web-fetch-configuration.ts](src/web-fetch-configuration.ts)装配普通 `builtin.web@1` / `web_fetch@1`，缺省网络策略为 public。显式宿主 `createDefaultProcessConfiguration({webFetch?})` 继续独占其 network policy/admission、传输及可选 extractor，不读取自动代理或用户网络覆盖。显式 off/allowlist 与当前宿主 `admitHop` 继续约束原请求、robots 和每次跳转，普通 Tool 独立经过 Core 当前授权；元数据仍为 `network`/`unknown`、`safeRead:false`，off 为不可用。
+
+普通默认宿主在选择含 `web_fetch` 的 Run 时，通过 [web-fetch-proxy.ts](src/web-fetch-proxy.ts)封存当前 HTTP(S)/NO_PROXY 环境（小写优先），无环境代理时读取 Windows HKCU Internet Settings 或 macOS `scutil --proxy` 的手动代理，Linux 使用环境变量；没有登记则直连。系统查询使用固定程序和参数、隐藏窗口、1500ms/64KiB 上限，不执行 PAC/WPAD 或扫描端口。仅用户级 JSONC 可通过 `webFetch.proxy` 选择 auto/direct/无需认证 HTTP(S) 入口，通过 `webFetch.dns` 选择可信 HTTPS wire DNS 服务及公网 bootstrap IP；项目声明明确拒绝。用户配置格式归[手册](../../docs/handbook/features/models-and-configuration.md#网页网络配置)。自动设置不支持或读取失败封存为网页工具的准确失败，不妨碍文件任务；手动配置错误明确阻止绑定，不丢失错误码。
+
+每个 Run 封存非秘密 `snapshot.web.transport`（实际代理、绕过表、DNS 设置、自动 Fake-IP 恢复和 resolver 版本），变更仅影响后续 Run。`snapshot.web.defaultTimeoutMs` 从同一工具工厂取得实际默认总时限60000毫秒，显式调用仍可指定 `timeout_ms`；取消不等待时限到期。冷恢复在凭据读取、模型及 Tool 派发前比较完整 `snapshot.web`；旧默认快照不自动迁移，未保存该默认值的旧 Run 也不会悄悄采用新时限。显式宿主不选择自动传输时保留原传输结构，默认时限独立封存。相同当前配置复用最近工厂及其 robots cache/队列，网络变化后建立新工厂，已有 Run 保留原工厂；不建立无限历史配置缓存。解析 scope 仍归原 binding lease。导入、元数据工厂和 model-only 绑定不发现系统代理、不解析 DNS或建立 socket；登记代理的读取不是目标网络 I/O，目标连接仍只在原 Tool 已批准派发后发生。代理凭据、页面输入和代理 header 不能成为网络权威或 SSRF 例外。
+
+[代理选择测试](test/isolated/web-fetch-configuration.test.ts)覆盖环境优先级、系统手动设置、PAC/协议/认证拒绝和覆盖；[默认 Web 集成测试](test/isolated/default-web-fetch.test.ts)经实际 SQLite/Core、HTTP Service、普通模型 Tool、CONNECT 与完整 Artifact 核零用户代理配置、准确审计、下一 Run 变更、冷恢复零 Provider/Store 效果及项目越权拒绝。底层 IP/TLS/DoH/取消覆盖归 [Web Fetch owner](../../packages/agent/src/tools/web-fetch/README.md)。
 
 正式 Run resolver选择Agent提供的被动 Web binding，工具目录投影继续使用无I/O元数据；实际 parser scope只在授权派发后取得。Run disposer缓存同一结果，独立收尾原 Files assembly和Web scope；一个失败不跳过另一个，原配置错误与清理错误同时保留。Worker登记、封门、取消、原收尾及共享robots／origin队列由Agent负责，Service仅组合接口。没有 `bind` 的custom extractor仍由宿主管理，不借Run关闭权。原执行中清理未知会保已有Run lease；assembly或resolver准备／清理双失败另用Agent公开ConfigurationPreparationCleanupError移交实际资源，Runtime只接收该准确类型并保原配置清理预约与严格门禁。
 
@@ -459,7 +465,7 @@ Native 绑定该 manager 后提供 `permission_controls` capability。读取 mod
 
 [Native HTTP/SDK 权限测试](test/isolated/permission-http.test.ts) 当前 6 项／63 个断言通过，包含真实默认 Store 冷重开、CAS/身份拒绝、零执行副作用、物理丢失写响应后仅查询原命令 ID，以及闭合请求不接受客户端自造主体或范围。mode/trust 的底层读取与默认授权只读取有限 Session 元数据和控制记录，不依赖大历史/Execution 正文；独立测试将 `Runtime.getView` 明确设为禁止仍完成管理链路。
 
-可信宿主还可显式传入 `planning.automaticValidation`，声明准确 mutation definition/version/effects 与 `fileHashChecker`。当前资格仅为 `files.write/edit@2` 的 `workspace_write` 与 `files.read@3` 完整 baseline；这些实际 Tool 必须由普通配置选择，`validation.auto_check@1` 也是普通已选 Tool，不为验证旁路注册或授予能力。已选 mutation 的版本/effect 与真实宿主元数据不一致，或已选 checker 不是准确 safe-read 定义时，在 Provider 前局部拒绝。JSONC 不能启用此策略、替换 checker 或补造 mutation 权威。
+可信宿主还可显式传入 `planning.automaticValidation`，声明准确 mutation definition/version/effects 与 `fileHashChecker`。当前资格仅为 `files.write@3`／`files.edit@2` 的 `workspace_write` 与 `files.read@5` 完整 baseline；这些实际 Tool 必须由普通配置选择，`validation.auto_check@1` 也是普通已选 Tool，不为验证旁路注册或授予能力。已选 mutation 的版本/effect 与真实宿主元数据不一致，或已选 checker 不是准确 safe-read 定义时，在 Provider 前局部拒绝。JSONC 不能启用此策略、替换 checker 或补造 mutation 权威。
 
 这个开关独立于 `requirePlan`/`requiredValidation`：启用后在首次 Model 派发前封存原 `mutation.required` policy/ref，Run snapshot 保存可信映射及当次实际 selection/effects；后来修改调用方 options 不改变它。缺省关闭时普通对话不增加义务。每次实际 mutation 令旧 head 通过事实失效，停止意图触发普通 auto-check，再由 `operations.ensure` 派发准确 Files read；三者分别经过当前权限与原 Store/Execution/source 校验。只有真实完整 hash 检查和当前 head 的 CAS 事实满足原义务，不以管理 Tool 的 succeeded 回执代替验证。移除后续工厂开关不消除旧 Run 封存要求；缺 checker 或撤 trust 不能标 passed。
 

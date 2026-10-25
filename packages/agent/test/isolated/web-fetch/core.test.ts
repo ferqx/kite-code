@@ -1,6 +1,7 @@
 import { expect, test } from 'bun:test';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer, type RequestListener } from 'node:http';
+import { connect, type Socket } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -24,7 +25,7 @@ const finish: Extract<ModelEvent, { type: 'finish' }> = {
 };
 async function setup(
   handler: RequestListener,
-  options: { deny?: boolean; extractor?: WebExtractor; denyHop?: string } = {},
+  options: { deny?: boolean; extractor?: WebExtractor; denyHop?: string; proxy?: boolean } = {},
 ) {
   const root = mkdtempSync(join(tmpdir(), 'kite-web-fetch-'));
   const profile = { dataRoot: join(root, 'data'), profile: 'new' };
@@ -37,12 +38,36 @@ async function setup(
   });
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
   const url = `http://fixture.test:${(server.address() as { port: number }).port}`;
+  const proxy = options.proxy ? createServer() : undefined;
+  const proxySockets = new Set<Socket>(),
+    proxyTargets: string[] = [];
+  proxy?.on('connection', (socket) => {
+    proxySockets.add(socket);
+    socket.on('close', () => proxySockets.delete(socket));
+  });
+  proxy?.on('connect', (request, socket) => {
+    proxyTargets.push(request.url!);
+    const upstream = connect((server.address() as { port: number }).port, '127.0.0.1', () => {
+      socket.write('HTTP/1.1 200 Connection Established\r\n\r\n');
+      socket.pipe(upstream);
+      upstream.pipe(socket);
+    });
+    proxySockets.add(upstream);
+    upstream.on('close', () => proxySockets.delete(upstream));
+    socket.on('close', () => upstream.destroy());
+    socket.on('error', () => upstream.destroy());
+    upstream.on('error', () => socket.destroy());
+  });
+  if (proxy) await new Promise<void>((resolve) => proxy.listen(0, '127.0.0.1', resolve));
   const network = createPinnedWebNetworkPort({
     policy: { mode: 'public' },
-    allowLoopbackForTests: true,
+    allowLoopbackForTests: !options.proxy,
+    ...(proxy
+      ? { proxy: { http: `http://127.0.0.1:${(proxy.address() as { port: number }).port}` } }
+      : {}),
     resolveAddresses: async () => {
       dns++;
-      return [{ address: '127.0.0.1', family: 4 }];
+      return [{ address: options.proxy ? '8.8.8.8' : '127.0.0.1', family: 4 }];
     },
     admitHop: async (hop) => {
       admissions.push(hop.url);
@@ -88,7 +113,7 @@ async function setup(
     title: 'test',
   });
   let command = 0;
-  const run = async (input: unknown) => {
+  const run = async (input: unknown, timeoutMs = 8000) => {
     const fixed = createFixedModel([
       [
         {
@@ -111,7 +136,7 @@ async function setup(
       subjectId: 'owner',
       request: { kind: 'run.start', content },
     });
-    const result = await runtime.waitForCommand(`work${command}`, { timeoutMs: 8000 });
+    const result = await runtime.waitForCommand(`work${command}`, { timeoutMs });
     const receipt = result.receipt as {
       runId: string;
       businessCommandId?: string;
@@ -138,12 +163,9 @@ async function setup(
       snapshot.request.messages.find((message) => message.sourceIds?.includes(businessId)),
     ).toMatchObject({ content, sourceIds: [businessId] });
     if (command > 1) {
-      expect(receipt.businessCommandId).toBeString();
-      expect(businessId).not.toBe(result.id);
-      expect(await store.getCommand(receipt.humanInputCommandId!)).toMatchObject({
-        request: { publicCommandId: result.id, content, originalRequest: result.request },
-        receipt: { state: 'decided', businessCommandId: businessId },
-      });
+      expect(receipt).not.toHaveProperty('businessCommandId');
+      expect(receipt).not.toHaveProperty('humanInputCommandId');
+      expect(businessId).toBe(result.id);
       expect(await store.getCommand(businessId)).toMatchObject({
         status: 'applied',
         request: { content },
@@ -174,14 +196,42 @@ async function setup(
     run,
     counts: () => ({ requests, dns }),
     admissions,
+    proxyTargets,
     close: async () => {
       await runtime.close();
+      for (const socket of proxySockets) socket.destroy();
+      if (proxy) await new Promise<void>((resolve) => proxy.close(() => resolve()));
       server.closeAllConnections();
       await new Promise<void>((resolve) => server.close(() => resolve()));
       rmSync(root, { recursive: true, force: true });
     },
   };
 }
+
+test('ordinary Tool follows public redirects through CONNECT but blocks a redirected private literal before proxy I/O', async () => {
+  const f = await setup(
+    (request, response) => {
+      if (request.url === '/robots.txt') response.end('User-agent: *');
+      else if (request.url === '/start') response.writeHead(302, { location: '/escape' }).end();
+      else response.writeHead(302, { location: 'http://127.0.0.1/private' }).end();
+    },
+    { proxy: true },
+  );
+  try {
+    const result = await f.run({ url: `${f.url}/start` });
+    expect(result.execution?.authorization?.dispatched).toBe(true);
+    expect(result.execution?.result).toMatchObject({
+      outcome: 'failed',
+      content: 'web_destination_denied',
+    });
+    expect(f.counts().requests).toBe(3);
+    expect(f.proxyTargets).toHaveLength(3);
+    expect(f.proxyTargets.every((target) => target.startsWith('8.8.8.8:'))).toBe(true);
+    expect(f.admissions.at(-1)).toBe('http://127.0.0.1/private');
+  } finally {
+    await f.close();
+  }
+});
 test('real Core full HTML parser body flows through original Artifact scope; legal five redirects and explicit max_chars exceed old caps', async () => {
   const body = `BEGIN ${'complete paragraph. '.repeat(10000)} END-OF-FULL-PAGE`;
   let subresources = 0;
@@ -320,6 +370,32 @@ test('ordinary Tool denial and corrupt built parser asset produce zero DNS/socke
     rmSync(root, { recursive: true, force: true });
   }
 }, 20000);
+test('omitting timeout permits a real response beyond the former 15-second deadline', async () => {
+  const f = await setup((request, response) => {
+    if (request.url === '/robots.txt') {
+      response.end('User-agent: *');
+      return;
+    }
+    const timer = setTimeout(() => response.end('COMPLETE_AFTER_OLD_DEADLINE'), 16_000);
+    request.socket.once('close', () => clearTimeout(timer));
+  });
+  try {
+    const result = await f.run({ url: f.url }, 24_000);
+    expect(result.execution?.status).toBe('succeeded');
+    expect(result.execution?.result).toMatchObject({
+      outcome: 'succeeded',
+      content: 'COMPLETE_AFTER_OLD_DEADLINE',
+    });
+    expect(
+      result.model.requests[1]?.messages.some(
+        (message) => message.role === 'tool' && message.content === 'COMPLETE_AFTER_OLD_DEADLINE',
+      ),
+    ).toBe(true);
+  } finally {
+    await f.close();
+  }
+}, 30_000);
+
 test('Tool timeout covers domain queue and live page transfer; cancelled request never becomes a successful body', async () => {
   let pageStarted!: () => void, pageClosed!: () => void;
   const started = new Promise<void>((resolve) => {

@@ -1,6 +1,22 @@
 # Workspace 文件 leaf
 
-默认 Service 已接入准确会话文件适配器；持久取舍见[会话文件决定](../../../../../.agents/notes/implemented/architecture/2026-10-23-persistent-session-files.md)，客户端和发行资格分别见 [Desktop](../../../../../apps/desktop/README.md)与 [Terminal](../../../../../apps/cli/docs/terminal-release.md)。低层 Files 和独立工厂保持原版本；默认宿主的 `files.read@5` 组合以下能力，write/edit 仍为版本 2。
+默认 Service 已接入准确会话文件适配器；持久取舍见[会话文件决定](../../../../../.agents/notes/implemented/architecture/2026-10-23-persistent-session-files.md)，客户端和发行资格分别见 [Desktop](../../../../../apps/desktop/README.md)与 [Terminal](../../../../../apps/cli/docs/terminal-release.md)。默认宿主的 `files.read@5` 组合以下能力，`files.write@3` 新建时补齐工作区父目录，edit 保持版本 2。
+
+## 新建文件的父目录与失败反馈
+
+`createWorkspaceFiles.write` 只在 `base:null` 时通过原 `withParent` 逐段打开父链，准确 `ENOENT` 后才调用 native `create-directory`。新目录继续绑定原父句柄；POSIX 使用 cap-std 单组件创建、0700 和 no-follow 重开，Windows 使用原父 HANDLE 的 create-only `NtCreateFile`、本人私有 DACL 及原身份核对。`EEXIST` 只允许在同一父对象上 no-follow 重开一次；文件、链接、别名、受保护路径及 owner 检查不会因已审批而放宽。原生 ABI 升为 `kite-files:2/cap-std:4.0.3`，需重建 companion 并重启已加载旧模块的宿主。
+
+覆盖、edit、原字节 restore/remove 和绝对外部工具不补齐缺失父目录。创建后发生已知失败可以留下空目录；不自动删除或修改已有目录权限，不把目录纳入文件检查点恢复。句柄取得／关闭无法确认沿 `file_publish_outcome_unknown` 进入原 unknown 链路，禁止自动重放。检查点记录保留旧 `files.write@2`／`files.edit@2` 来源，并准确接受新增 `files.write@3`，不把旧审批变成新版本授权。
+
+普通写入／编辑失败的 `content` 和 `details.next_action` 给出原因与下一步，`details.code/path` 保留准确码和原请求目标；`ENOENT` 不再被解释为空工作区不可用，`EACCES` 明示审批不覆盖系统权限。描述与失败结果都要求先纠正原因再尝试，未新增按重复次数拒绝调用的规则。安全取舍见[父目录创建决定](../../../../../.agents/notes/implemented/bug-fix/2026-10-25-safe-write-parent-directories.md)。
+
+验证使用 [tool-paths](../../../test/isolated/files/tool-paths.test.ts)、[native-addon](../../../test/isolated/files/native-addon.test.ts)、[recovery-primitives](../../../test/isolated/files/recovery-primitives.test.ts)、[capture](../../../test/isolated/file-checkpoints/capture.test.ts) 与 crate 真实故障测试；结果范围为本机 Windows 和另行注明的目标编译，不推定完整客户端／安装或其他平台运行资格。
+
+2026-10-25，Windows x64／Bun1.4.3／Rust1.97.1、`3dc3a941f` 加本任务未提交改动：tool-paths、native-addon、recovery-primitives、path-files、windows、change-preview、native-packaged 七个 Files 叶共36项通过，capture 整文件21项通过。最后一次 `bun test --timeout=30000` 对 capture＋tool-paths 为27项404断言通过，对 change-preview＋path-files＋Service runtime-assets 为20项322断言通过。前者核真实版本2来源仍可恢复、版本3嵌套创建、准确失败交给下一 Model、取消、并发改绑和 unknown；后者核外部范围、快照与保护边界。
+
+默认 Service 的 files-native-boundary、file-checkpoint-default、auto-configuration、planning-configuration 和 automatic-validation-configuration 整文件均通过；其中 planning 为16项272断言。crate 的 `cargo test --locked --lib -- --test-threads=1` 为5项通过，包含实际目录已创建但取得结果未知时保留原父链且不重试。Linux GNU／macOS ARM64 的 `cargo check --locked --target ...` 通过，只证明目标编译。根、Agent 和 Service typecheck，变更 TS 的 Biome、文档结构／影响、core boundary 和公开 API 检查均已核对。
+
+同日后续已修复此前保留的三个回归失败：[automatic-validation](../../../test/isolated/business/automatic-validation.test.ts) 的 Rewind 按当前普通输入合同核原 `run.start` Command、Run 与 Model 消息来源，并保留文件基线不变、仅一次写入及旧验证历史不重放；[per-run-planning-configuration](../../../../../apps/service/test/isolated/per-run-planning-configuration.test.ts) 的新冷恢复配置先绑定真实 Runtime，再核配置漂移在凭据／Model 读取前拒绝且 Store 游标不变；[automatic-validation-nested-tools](../../../../../apps/service/test/isolated/automatic-validation-nested-tools.test.ts) 显式持有并在 Service 收束后关闭夹具自建的 WorkspaceFiles，关闭成功才清理目录，保留原超时与失败证据规则。`bun test --timeout=30000` 对这三个完整文件同次20项196断言通过。只修正测试断言与资源归属，生产输入、恢复授权和关闭实现未改；当前 Desktop 窗口的完整过程、正式制品重建安装和其他平台运行资格仍未验收。
 
 ## 会话文件与 PDF
 
@@ -101,7 +117,7 @@ read 请求的固定效果是安全 `read`；write/edit 是 `external`。请求�
 
 同轮相邻验证覆盖9个叶文件、63个不同用例，包括 [native path lifetime](../../../test/isolated/files/native-path-lifetime.test.ts) 在真实 `NtSetInformationFile(FileRenameInformation=10)` 前强制 GC，保原 rename／disposition 的借用内存。首轮与三个 typecheck 并行时，一个旧检查点恢复用例触发5秒超时；资源释放后单独重跑 capture 整文件19项267断言全部通过，该用例4.31秒，没有提高时限或修改恢复实现。其余44项在首轮全部通过；Agent／Service／Desktop typecheck、文档、测试归属与执行边界检查通过。这些分批结果不写成单次全套通过。
 
-低层 `WorkspaceFiles.read(path,{offset?,limit?})` 缺省返回完整 UTF-8 正文，offset 从 1 开始；省略 limit 读取全部剩余行，显式 limit 按行选择。页内容保留 BOM/CRLF/最终换行，并返回 fromLine/toLine/totalLines/nextOffset；超出末尾返回空正文和 null toLine，空文件为 0 行。每页仍读取并校验完整字节，以完整 SHA256/字节大小/device/inode 建立基线，绝不以页正文替代文件基线。read Tool 版本为 4，缺省页为 200 行，write/edit/search/glob 为 2，list 为 1；旧 schema/执行历史保持自己的版本。非法 UTF-8 明确错误；BOM 与 CRLF 保留，写入不进行编码猜测。`write` 的 `base` 必填，null 只准创建，其他值必须与当前完整字节和文件对象完全一致。`edit` 使用同一基线，并要求非重叠字面匹配数量精确等于 occurrences。写入先在同一目录创建独有临时文件、写全并同步，再次验证基线，最后原子替换或 create-only 发布并核实原对象。POSIX 使用文件 fsync、create-only hardlink 和目录 fsync；Windows 的同步与发布边界见下节。失败不保证没有效果，例如原子发布后的同步或外部改写可能导致错误。
+低层 `WorkspaceFiles.read(path,{offset?,limit?})` 缺省返回完整 UTF-8 正文，offset 从 1 开始；省略 limit 读取全部剩余行，显式 limit 按行选择。页内容保留 BOM/CRLF/最终换行，并返回 fromLine/toLine/totalLines/nextOffset；超出末尾返回空正文和 null toLine，空文件为 0 行。每页仍读取并校验完整字节，以完整 SHA256/字节大小/device/inode 建立基线，绝不以页正文替代文件基线。read Tool 版本为 4，缺省页为 200 行，write 为 3，edit/glob 为 2，search 为 4，list 为 1；旧 schema/执行历史保持自己的版本。非法 UTF-8 明确错误；BOM 与 CRLF 保留，写入不进行编码猜测。`write` 的 `base` 必填，null 只准创建，其他值必须与当前完整字节和文件对象完全一致。`edit` 使用同一基线，并要求非重叠字面匹配数量精确等于 occurrences。写入先在同一目录创建独有临时文件、写全并同步，再次验证基线，最后原子替换或 create-only 发布并核实原对象。POSIX 使用文件 fsync、create-only hardlink 和目录 fsync；Windows 的同步与发布边界见下节。失败不保证没有效果，例如原子发布后的同步或外部改写可能导致错误。
 
 POSIX 使用目录 FD 与 no-follow openat 逐段锚定路径，macOS 调用非 variadic `__openat`。相对路径禁止 `..`、`.`、绝对路径和反斜线；根与目标链均不跟随符号链接，不读取设备/FIFO/目录作为正文。根目录替换后原对象不被重新解释成另一权限目标。临时文件清理不会覆盖原发布结果。目录描述符设置 close-on-exec。Windows x64 的独立原 HANDLE 后端见下节，其他不支持的平台仍明确 `file_platform_unsupported`。
 
@@ -139,7 +155,7 @@ glob/search 的原生操作仍绑定原根及 FD 链；遍历每64项或累计8m
 
 普通 UTF-8 write/edit 在最后一次基线验证保存实际完整 preimage，publish/fsync 后读取实际 postimage，并核其完整内容和发布 FD 的 dev/inode；确认漂移保留 `file_publish_outcome_unknown`。成功 [FileSnapshot](../files.ts)带 `change`，由迁入的原 [共同前后缀行差异](../files-diff.ts)生成行号与增删内容。新建或内容不变展示真实写入内容；不是 Git diff、LCS 或 Shell/外部编辑捕获。每次操作独立保存，不合并为累计贡献。
 
-[Tool wrapper](../files-tools.ts)保持 write/edit 版本2及原 Model 的 `path/baseline` 字段，将可选中立 `FileChangePreview` 放入 `ToolResult.details.fileChange`：version1、format、path、before/after 完整 baseline、text 和 truncated。预览最多65536 UTF-8 bytes，截在完整字符边界；这个额度只限制展示 receipt，不限制文件 IO、完整 baseline、Model 读写正文或 Artifact。before/after capture 最后保存失败和派发后确认失败仍 unknown，不发布可用成功预览；read/search/glob、字节恢复及未装配该预览的工具不伪造记录。消费者须核原 succeeded Execution/Run/结果 revision，旧或未知格式明确不可读。
+[Tool wrapper](../files-tools.ts)使用 write 版本3／edit 版本2及原 Model 的 `path/baseline` 字段，将可选中立 `FileChangePreview` 放入 `ToolResult.details.fileChange`：version1、format、path、before/after 完整 baseline、text 和 truncated。预览最多65536 UTF-8 bytes，截在完整字符边界；这个额度只限制展示 receipt，不限制文件 IO、完整 baseline、Model 读写正文或 Artifact。before/after capture 最后保存失败和派发后确认失败仍 unknown，不发布可用成功预览；read/search/glob、字节恢复及未装配该预览的工具不伪造记录。消费者须核原 succeeded Execution/Run/结果 revision，旧或未知格式明确不可读。
 
 read/write/edit 的 Model JSON 结果另带当前真实 `executionId/runId`，供计划 receipt 等消费者定位准确保存记录；ID 本身不证明成功、授权、验证结果或 Workspace checkpoint。消费者仍须读取并核准确原定义、Run／Session／Store、终态和结果 revision，不能用同名 call 或最新执行替换。
 

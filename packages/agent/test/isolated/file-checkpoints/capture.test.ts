@@ -35,6 +35,8 @@ const finish: ModelEvent = {
 async function fixture(
   mode:
     | 'normal'
+    | 'nested-create'
+    | 'legacy-write'
     | 'no-boundary'
     | 'after-fail'
     | 'after-cas'
@@ -172,7 +174,16 @@ async function fixture(
       const step = stage++;
       const input =
         step === 2
-          ? { path: generation ? 'created-next' : 'created', base: null, content: 'created\r\n' }
+          ? {
+              path:
+                mode === 'nested-create'
+                  ? 'examples/nested/created'
+                  : generation
+                    ? 'created-next'
+                    : 'created',
+              base: null,
+              content: 'created\r\n',
+            }
           : {
               path: 'original',
               base: (await checkpoint.files.read('original')).baseline,
@@ -214,6 +225,10 @@ async function fixture(
         ),
       }
     : { ...checkpoint.extension };
+  if (mode === 'legacy-write')
+    extension.tools = extension.tools!.map((tool) =>
+      tool.id === 'files.write' ? { ...tool, version: '2' } : tool,
+    );
   if (mode === 'after-fail')
     extension.tools = extension.tools!.map((tool) =>
       tool.id === 'files.write'
@@ -508,6 +523,59 @@ async function fixture(
     },
   };
 }
+
+test('saved version 2 file sources remain readable and recoverable with the expanded source schema', async () => {
+  const f = await fixture('legacy-write');
+  try {
+    await f.run();
+    const id = await earliestPoint(f);
+    const point = await f.checkpoint.readPoint(f.read, id);
+    expect(point.files.every((file) => file.first!.source.definitionVersion === '2')).toBe(true);
+    await invokeRestore(f, id);
+    await f.runtime.waitForCommand('restore');
+    expect((await f.checkpoint.readRestoreIntent(f.read, id, 'restore-real'))!.value).toMatchObject(
+      { phase: 'restored' },
+    );
+    expect(readFileSync(join(f.workspace, 'original'))).toEqual(f.original);
+    expect(existsSync(join(f.workspace, 'created'))).toBe(false);
+  } finally {
+    await f.close();
+  }
+});
+
+test('nested create receipts retain recoverable file preimages and restore leaves directory scaffolding intact', async () => {
+  const f = await fixture('nested-create');
+  try {
+    await f.run();
+    const writes = (await f.store.getView('s')).executions.filter(
+      (execution) => execution.kind === 'tool',
+    );
+    expect(writes.map((execution) => execution.status)).toEqual([
+      'succeeded',
+      'succeeded',
+      'succeeded',
+    ]);
+    expect(writes.map((execution) => execution.definitionVersion)).toEqual(['3', '3', '3']);
+    const points = await f.checkpoint.listPoints(f.read);
+    const id = points.items[0]!.checkpoint.id;
+    const point = await f.checkpoint.readPoint(f.read, id);
+    const created = point.files.find((file) => file.path === 'examples/nested/created')!;
+    expect(created.first!.baseline).toBeNull();
+    expect(created.last!.baseline.hash).toBe(bytesDigest(Buffer.from('created\r\n')));
+    expect(readFileSync(join(f.workspace, 'examples/nested/created'), 'utf8')).toBe('created\r\n');
+    const preview = await f.checkpoint.preview(f.read, id);
+    expect(preview.files.find((file) => file.path === created.path)!.status).toBe('remove');
+    await invokeRestore(f, id);
+    await f.runtime.waitForCommand('restore');
+    const restored = await f.checkpoint.readRestoreIntent(f.read, id, 'restore-real');
+    expect(restored!.value).toMatchObject({ phase: 'restored' });
+    expect(existsSync(join(f.workspace, created.path))).toBe(false);
+    expect(existsSync(join(f.workspace, 'examples/nested'))).toBe(true);
+    expect(readFileSync(join(f.workspace, 'original'))).toEqual(f.original);
+  } finally {
+    await f.close();
+  }
+});
 
 test('actual Files Tool receipts seal first full preimage and last postimage; readonly preview and blocked intent have zero effect', async () => {
   const f = await fixture();

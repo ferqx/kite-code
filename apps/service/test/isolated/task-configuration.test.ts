@@ -136,7 +136,7 @@ async function fixture(
       ...(options.defaultRole ? ['files.write'] : []),
     ].map((id) => ({
       id,
-      definitionVersion: id === 'files.read' ? '5' : id === 'files.write' ? '2' : '1',
+      definitionVersion: id === 'files.read' ? '5' : id === 'files.write' ? '3' : '1',
     })),
   };
   writeFileSync(configurationPath, JSON.stringify(configuration));

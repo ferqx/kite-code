@@ -21,6 +21,7 @@ pub(crate) fn io_error(error: std::io::Error) -> Error {
         std::io::ErrorKind::NotFound => "ENOENT",
         std::io::ErrorKind::AlreadyExists => "EEXIST",
         std::io::ErrorKind::NotADirectory => "ENOTDIR",
+        std::io::ErrorKind::PermissionDenied => "EACCES",
         _ => "file_io_failed",
     };
     fail(&format!("{code}:{}", error.raw_os_error().unwrap_or(0)))
@@ -136,5 +137,5 @@ impl NativeFiles {
 
 #[napi]
 pub fn backend_version() -> &'static str {
-    "kite-files:1/cap-std:4.0.3"
+    "kite-files:2/cap-std:4.0.3"
 }

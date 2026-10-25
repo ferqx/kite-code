@@ -20,6 +20,7 @@ import { workflowCompilerAssets } from '@kite-ai/agent/skill-workflow';
 import { openSqliteStore } from '@kite-ai/agent/sqlite';
 import { privateDirectory } from '@kite-ai/agent/windows-path-security';
 import { createDefaultProcessConfiguration } from '../../src/configuration';
+import { initializeLivePermissionFixture } from '../fixtures/live-permission-fixture';
 
 test('actual default Service keeps native and compiler assets protected in Full while an ordinary external file remains readable', async () => {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-files-native-service-')));
@@ -142,6 +143,16 @@ test('actual default Service keeps native and compiler assets protected in Full 
       subjectId: 'owner',
       title: 'native',
     });
+    await initializeLivePermissionFixture({
+      runtime,
+      profile,
+      expectedStoreId,
+      sessionId: 's',
+      workspaceId: 'w',
+      subjectId: 'owner',
+      mode: 'full',
+      trusted: true,
+    });
     await runtime.submitCommand({
       expectedStoreId,
       sessionId: 's',
@@ -155,7 +166,7 @@ test('actual default Service keeps native and compiler assets protected in Full 
     await runtime.waitForCommand('work', { timeoutMs: 10000 });
     const tools = (await store.listExecutions('s')).filter((row) => row.kind === 'tool');
     expect(tools).toHaveLength(4 + compilerAssets.length * 2);
-    expect(tools[0]!.status).toBe('succeeded');
+    expect(tools[0]!.status, JSON.stringify(tools[0]!.result)).toBe('succeeded');
     expect((tools[0]!.result as { content: string }).content).toContain(
       'complete external ordinary text',
     );

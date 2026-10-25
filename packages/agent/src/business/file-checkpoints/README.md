@@ -10,7 +10,7 @@
 
 `readBoundary(actualToolContext,actualPublicExecution)` 返回 `{boundary,modelExecutionId,modelInputHash}`。boundary 保存实际 Store/W/S/Run 和原 Run 的不可变 selection，live 捕获还须与当前 Session selection 相同；`triggerMessageId/triggerSeq` 是本次 Model 实际消费的最后 User 输入，其之前完整恢复边界为 `messageId/messageSeq`，首次输入之前为 null/0。宿主从原 Tool 的真实 Model decisionSource、成功 Model 的完整 sealed input 和准确来源映射取得这些事实。Model input、JSONC、known IDs/hash、有限 view 不替代证明；缺 callback 拒绝 capture，零文件修改。point ID 只哈希 boundary，不含某一次 Model proof，避免同一输入的连续 Model 创建多个首 preimage 窗口。
 
-leaf 再核原 Tool 的 Session/Run/Store、`files.write|files.edit@2`、attempt/inputDigest 与活跃原 Run。dispatching/running 可捕获，planned 不可。每个 first/last/pending Source 保存实际 Tool/Run/definition/version/attempt/inputDigest 和原 Model ID/full input hash。context signal 和 namespace writer 继续核 owner/祖先，不扩大权限。
+leaf 再核原 Tool 的 Session/Run/Store、`files.write@2|3`／`files.edit@2`、attempt/inputDigest 与活跃原 Run。dispatching/running 可捕获，planned 不可。每个 first/last/pending Source 保存实际 Tool/Run/definition/version/attempt/inputDigest 和原 Model ID/full input hash。context signal 和 namespace writer 继续核 owner/祖先，不扩大权限。
 
 capture 注入时 write/edit 声明 Workspace serial key `files.mutation`，宿主必须装配现有 public Workspace OS-lock backend；缺失明确 workspace_resource_lock_unavailable。锁覆盖捕获→mutation→封存，不锁任意外部 editor。普通未注入 Tools 不新增资源声明。可信 protectedPaths 使用 Files 原语的闭合相对路径组件 prefix，不由 Model/JSONC/HTTP提供。
 
@@ -21,6 +21,8 @@ capture 注入时 write/edit 声明 Workspace serial key `files.mutation`，宿�
 immutable `checkpoint/<id>/point` 保存原 boundary 与物理 root device/inode；path record `checkpoint/<id>/file/<pathsha>` 保存 confirmed first、confirmed last 和 pending candidate。before 完整检查 baseline，将 existing file 原始 bytes 通过原 Tool execution-scoped publisher 保存为 immutable `application/octet-stream` Artifact；create-only 原 baseline/Artifact 为 null。candidate 持久 pending 后才修改文件，真实发布且 after 封存成功后才提升 first/last。失败首次 attempt 不冒 confirmed preimage，pending/crash/unknown 不冒可恢复。
 
 完整 binary/BOM/CRLF bytes/hash/size 保留，普通 Files Tool 仍按原 UTF-8 修改合同执行。没有截断或用 preview 代替正文。只捕获接入的 Files write/edit；Shell 和外部改动不宣称归档。
+
+`files.write@3` 新建文件可补齐缺失的工作区父目录；before 的缺失目标仍封存为 null preimage，成功后记录实际完整文件。恢复删除新文件时保留父目录，目录不在文件 journal 范围，也不因失败自动回滚。原 byte restore 不创建父目录；目录取得／关闭未知继续保留 unknown/pending，不把它当成无效果失败。
 
 mutable head 在 journal 前置 pending，成功 idle，未知保留 unknown/pending。所有写采用原 expectedRevision CAS；readPoint 在完整 path 分页前后核 head revision/value，漂移返回 checkpoint_refresh_required。不是跨记录单事务，任何中间封存失败保不可恢复事实。文件已发布后的 capture/seal/CAS failure 使用 file_publish_outcome_unknown/Tool outcome_unknown，不能说无效果 failed。
 

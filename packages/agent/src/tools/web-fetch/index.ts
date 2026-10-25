@@ -24,6 +24,7 @@ export {
   type WebNetworkPort,
 } from './network';
 export const webFetchExtensionId = 'builtin.web';
+const defaultTimeoutMs = 60_000;
 async function sha256(value: string) {
   return Array.from(
     new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(value))),
@@ -104,6 +105,7 @@ export function createWebFetchBindingFactory(options: {
   const extractor = options.extractor ?? createPassiveWebExtractor();
   const configured = { ...options, extractor };
   return {
+    defaultTimeoutMs,
     extension: createWebFetchDefinition(configured, state),
     bind() {
       let scope: ReturnType<NonNullable<WebExtractor['bind']>> | undefined;
@@ -187,7 +189,7 @@ function createWebFetchDefinition(
             timeout_ms: {
               type: 'integer',
               minimum: 1,
-              description: 'Request deadline in milliseconds; defaults to 15000.',
+              description: `Request deadline in milliseconds; defaults to ${defaultTimeoutMs}.`,
             },
           },
         },
@@ -214,7 +216,7 @@ function createWebFetchDefinition(
           const execution = await context.getExecution(context.executionId);
           if (!execution?.originStoreId)
             return { outcome: 'failed', content: 'web_execution_unavailable' };
-          const deadline = timeLimit(context.signal, Number(input.timeout_ms ?? 15000));
+          const deadline = timeLimit(context.signal, Number(input.timeout_ms ?? defaultTimeoutMs));
           async function get(
             url: string,
             resource: 'page' | 'robots',

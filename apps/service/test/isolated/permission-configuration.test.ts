@@ -151,7 +151,7 @@ async function fixture(
     revision: 'host-1',
     allowed: [
       { kind: 'model', definitionId: 'local', definitionVersion: '1' },
-      { kind: 'tool', definitionId: 'files.write', definitionVersion: '2' },
+      { kind: 'tool', definitionId: 'files.write', definitionVersion: '3' },
       { kind: 'tool', definitionId: 'files.read', definitionVersion: '5' },
     ],
   };
@@ -528,7 +528,7 @@ test('old default Run keeps actual selected definitions across JSONC disable, wh
       expect(oldRun.configuration).toMatchObject({
         tools: [
           { id: 'ask_user', version: '1', extensionId: 'builtin.ask-user' },
-          { id: 'files.write', version: '2', extensionId: 'builtin.files' },
+          { id: 'files.write', version: '3', extensionId: 'builtin.files' },
         ],
       });
       await f.run('new-work', 'New task: explicit file task');

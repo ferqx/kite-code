@@ -149,7 +149,7 @@ async function fixture(script: (step: number, f: Fixture) => Promise<Call>) {
     ],
     tools: [
       { id: 'files.read', definitionVersion: '5' },
-      { id: 'files.write', definitionVersion: '2' },
+      { id: 'files.write', definitionVersion: '3' },
     ],
   };
   const configurationPath = join(profile.profilePath, 'config.jsonc');
@@ -166,7 +166,7 @@ async function fixture(script: (step: number, f: Fixture) => Promise<Call>) {
         allowed: [
           { kind: 'model', definitionId: 'local', definitionVersion: '1' },
           { kind: 'tool', definitionId: 'files.read', definitionVersion: '5' },
-          { kind: 'tool', definitionId: 'files.write', definitionVersion: '2' },
+          { kind: 'tool', definitionId: 'files.write', definitionVersion: '3' },
           ...['planning.read', 'planning.write', 'planning.review', 'planning.update'].map(
             (id) => ({
               kind: 'tool' as const,
@@ -456,7 +456,7 @@ test('actual Service per-Run planning blocks Full writes before approval, permit
       runId: run.id,
       originStoreId: f.expectedStoreId,
       rootWorkCommandId: 'work',
-      definitionVersion: '2',
+      definitionVersion: '3',
     });
     expect(progress).toMatchObject({
       runId: run.id,
@@ -466,7 +466,7 @@ test('actual Service per-Run planning blocks Full writes before approval, permit
       steps: {
         a: {
           status: 'completed',
-          receipt: { executionId: file.id, definitionId: 'files.write', definitionVersion: '2' },
+          receipt: { executionId: file.id, definitionId: 'files.write', definitionVersion: '3' },
         },
       },
     });
@@ -616,12 +616,15 @@ test('closed business envelopes preserve original Workflow input; malformed inte
     const run = await f.done();
     const original = (await f.store.getCommand(run.originCommandId))!;
     const before = f.credentialReads;
+    const beforeModels = { normal: f.normal.length, reviews: f.reviews.length };
+    const beforeCursor = (await f.store.getMetadata()).lastChangeCursor;
     const changed = createDefaultProcessConfiguration({
       userConfigurationPath: f.profile.profilePath + '/config.jsonc',
       profile: f.profile,
       credentialBackend: f.credentialBackend,
       planning: { allowWaiver: true },
     });
+    changed.permissionManagement?.(f.runtime);
     let rejected: unknown;
     try {
       await changed.resolveRecoveryRunConfiguration!({
@@ -636,6 +639,8 @@ test('closed business envelopes preserve original Workflow input; malformed inte
     }
     expect((rejected as { code: string }).code).toBe('recovery_configuration_changed');
     expect(f.credentialReads).toBe(before);
+    expect({ normal: f.normal.length, reviews: f.reviews.length }).toEqual(beforeModels);
+    expect((await f.store.getMetadata()).lastChangeCursor).toBe(beforeCursor);
     const reopened = await f.host.resolveRecoveryRunConfiguration!({
       command: original,
       run,

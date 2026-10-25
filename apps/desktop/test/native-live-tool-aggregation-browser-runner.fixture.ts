@@ -3118,7 +3118,7 @@ try {
         if (entry.kind === 'read')
           assert.equal(
             output,
-            'Native read 原输出\n第二行 👩‍💻\nNative stderr\n',
+            'Native read 原输出\n第二行 👩\nNative stderr\n',
             'Native read output order/content differs',
           );
         if (entry.kind === 'execute-failed')
@@ -4314,6 +4314,11 @@ try {
             ),
           );
         const normal = await inspect();
+        const rowError = (await itemSummary.getAttribute('data-status')) === 'error';
+        assert.ok(
+          !(await item.textContent())?.includes('MATRIX_APPROVAL_SUCCESS_REASON_MUST_STAY_HIDDEN'),
+          `${entry.definitionId}: approved explanation visible in closed item`,
+        );
         const approvalLabels = normal.filter((label) => label.approval);
         const executionLabels = normal.filter((label) => !label.approval);
         assert.deepEqual(
@@ -4330,7 +4335,7 @@ try {
           assert.equal(label.fontSize, '13px', `${entry.definitionId}: status font differs`);
           assert.equal(
             label.color,
-            !label.approval && entry.issue ? colors.destructive : colors.muted,
+            rowError || (!label.approval && entry.issue) ? colors.destructive : colors.muted,
             `${entry.definitionId}: status color differs`,
           );
         }
@@ -4357,6 +4362,12 @@ try {
               (await item.textContent())?.includes(entry.reason),
               `${entry.definitionId}: original reason missing after disclosure`,
             );
+          assert.ok(
+            !(await item.textContent())?.includes(
+              'MATRIX_APPROVAL_SUCCESS_REASON_MUST_STAY_HIDDEN',
+            ),
+            `${entry.definitionId}: approved explanation visible in expanded item`,
+          );
           await stage(`matrix-${entry.definitionId.replaceAll('.', '-')}`);
           await itemSummary.click();
           await page.waitForTimeout(280);
@@ -4372,6 +4383,110 @@ try {
           hovered: await inspect(),
           expanded,
         });
+      }
+      const webRows = steps
+        .locator('.tool-activity')
+        .filter({ has: page.getByText('读取网页', { exact: true }) });
+      assert.equal(await webRows.count(), 6, 'Web rows lost their known presentation');
+      assert.notEqual(
+        await summary.getAttribute('data-status'),
+        'error',
+        'a failed child colored the aggregate as a failure',
+      );
+      const webVisual = [];
+      for (let index = 0; index < 6; index++) {
+        const item = webRows.nth(index),
+          header = item.locator(':scope > .tool-activity-summary');
+        await header.scrollIntoViewIfNeeded();
+        await page.mouse.move(1, 1);
+        const inspect = () =>
+          header.evaluate((node) => ({
+            text: node.textContent,
+            error: node.getAttribute('data-status') === 'error',
+            color: getComputedStyle(node).color,
+            parts: [
+              ...node.querySelectorAll(
+                '.tool-label,.tool-step-target,.tool-approval,.tool-activity-chevron',
+              ),
+            ].map((part) => getComputedStyle(part).color),
+            status: [...node.querySelectorAll('.tool-activity-state')].map((part) => ({
+              hidden: part.classList.contains('sr-only'),
+              width: part.getBoundingClientRect().width,
+              text: part.textContent,
+            })),
+          }));
+        const normal = await inspect();
+        assert.ok(normal.text?.includes('github.com/'), 'Web row omitted its site/path');
+        assert.ok(
+          !normal.text?.includes('web_fetch') &&
+            !normal.text?.includes('WEB_QUERY') &&
+            !normal.text?.includes('WEB_FRAGMENT'),
+          'Web row leaked internal title or URL secrets',
+        );
+        if (index === 5) {
+          assert.equal(normal.error, true);
+          assert.equal(normal.color, colors.destructive);
+          assert.ok(
+            normal.parts.every((color) => color === colors.destructive),
+            'failed Web row did not color its entire heading',
+          );
+          assert.ok(
+            normal.status.every((status) => status.hidden && status.width <= 1),
+            'failed Web row retained a visible status suffix',
+          );
+          await stage('web-failed-closed');
+          await header.hover();
+          assert.equal(
+            (await inspect()).color,
+            colors.destructive,
+            'hover erased Web failure color',
+          );
+          await stage('web-failed-hover');
+          await header.click();
+          assert.ok((await item.textContent())?.includes('网页读取超时'));
+          assert.ok((await item.textContent())?.includes('web_timeout'));
+          assert.ok(!(await item.textContent())?.includes('WEB_APPROVAL_REASON_MUST_STAY_HIDDEN'));
+          assert.equal(
+            (await inspect()).color,
+            colors.destructive,
+            'open erased Web failure color',
+          );
+          await stage('web-failed-open');
+          await viewport.focus();
+          await page.keyboard.press('End');
+          await page.waitForTimeout(120);
+          const reason = item.getByRole('region', { name: '工具异常详情', exact: true });
+          const geometry = await reason.evaluate((node) => {
+            const bounds = node.getBoundingClientRect();
+            const clip = node.closest('.tool-activity-viewport')!.getBoundingClientRect();
+            return {
+              top: bounds.top,
+              bottom: bounds.bottom,
+              clipTop: clip.top,
+              clipBottom: clip.bottom,
+            };
+          });
+          assert.ok(
+            geometry.top >= geometry.clipTop - 0.5 && geometry.bottom <= geometry.clipBottom + 0.5,
+            `Web timeout explanation is not readable after scrolling: ${JSON.stringify(geometry)}`,
+          );
+          await stage('web-failed-reason-visible');
+          await header.click();
+          await stage('web-failed-reclosed');
+        } else {
+          assert.equal(normal.error, false, 'successful Web request was colored as a failure');
+          assert.equal(
+            await header.getAttribute('aria-expanded'),
+            null,
+            'successful Web request still opens page content',
+          );
+          assert.equal(
+            await item.locator('.tool-activity-content').count(),
+            0,
+            'successful Web request retained page body',
+          );
+        }
+        webVisual.push(normal);
       }
       const final = await aggregate.evaluate((node) => {
         const header = node.querySelector('.tool-activity-summary')!.getBoundingClientRect();
@@ -4446,6 +4561,7 @@ try {
           approvalTail,
           colors,
           approvalMatrix,
+          webVisual,
         },
       });
       await Bun.write(path.join(artifact, 'report.json'), JSON.stringify(report, null, 2));

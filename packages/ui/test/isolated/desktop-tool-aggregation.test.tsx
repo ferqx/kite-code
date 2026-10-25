@@ -709,6 +709,94 @@ test('finished activity describes the combined actions once without a tool count
   }
 });
 
+test('automatic approval success reasons stay hidden through execution, failure, unknown and restored tool details', async () => {
+  const approvedReason = 'AUTO_APPROVAL_SUCCESS_REASON_MUST_NOT_RENDER';
+  const cases: Message[] = [
+    {
+      ...tool('fetch', 'failed'),
+      toolName: undefined,
+      title: 'web_fetch · 1',
+      text: 'web_destination_denied',
+    },
+    {
+      ...tool('shell', 'failed'),
+      toolName: 'shell_execute',
+      text: 'actual command failed',
+      toolResult: { ok: false, status: 'error', stderr: 'ACTUAL_SHELL_FAILURE' },
+    },
+    { ...tool('unknown', 'unknown'), text: 'ACTUAL_UNKNOWN_OUTCOME', settled: true },
+    { ...tool('running', 'running') },
+    { ...tool('done', 'completed'), text: 'ACTUAL_SUCCESS' },
+  ];
+  const messages: Message[] = cases.map((message) => ({
+    ...message,
+    approval: { source: 'auto', state: 'approved', reason: approvedReason },
+  }));
+  await withConversation(async ({ host, render, click }) => {
+    await render(messages);
+    await click(summary(host));
+    expect(host.querySelectorAll('.tool-approval-approved')).toHaveLength(messages.length);
+    expect(host.textContent).not.toContain(approvedReason);
+    for (const index of [0, 1, 2]) {
+      const item = host.querySelector('.tool-activity-steps')!.children[index]!;
+      await click(item.querySelector('.tool-activity-summary')!);
+      expect(item.textContent).toContain(
+        ['web_destination_denied', 'ACTUAL_SHELL_FAILURE', 'ACTUAL_UNKNOWN_OUTCOME'][index]!,
+      );
+      expect(host.textContent).not.toContain(approvedReason);
+    }
+    await render(structuredClone(messages));
+    expect(host.textContent).toContain('web_destination_denied');
+    expect(host.textContent).not.toContain(approvedReason);
+    expect(messages.every((message) => message.approval?.reason === approvedReason)).toBe(true);
+  });
+});
+
+test('Web Fetch rows distinguish site paths, keep failed status accessible without a visible suffix, and retain the individual timeout reason', async () => {
+  const web: Message = {
+    ...tool('web', 'running'),
+    toolName: 'web_fetch',
+    title: 'web_fetch · 1',
+    target: 'https://github.com/AppFlowy-IO/AppFlowy?token=PRIVATE_QUERY#PRIVATE_FRAGMENT',
+    presentation: undefined,
+    settled: false,
+  };
+  await withConversation(async ({ host, render, click }) => {
+    await render([web]);
+    const aggregate = host.querySelector('.tool-activity-aggregate');
+    await click(summary(host));
+    const inner = () => host.querySelector('.tool-activity-steps .tool-activity-summary')!;
+    const line = inner();
+    expect(line.textContent).toContain('读取网页');
+    expect(line.textContent).toContain('github.com/AppFlowy-IO/AppFlowy');
+    expect(line.textContent).not.toContain('web_fetch');
+    expect(line.textContent).not.toContain('PRIVATE_');
+    expect(line.getAttribute('data-status')).toBe('running');
+    await render([{ ...web, status: 'failed', settled: true, text: 'web_timeout' }]);
+    const failed = inner();
+    expect(host.querySelector('.tool-activity-aggregate')).toBe(aggregate);
+    expect(failed.getAttribute('data-status')).toBe('error');
+    expect(summary(host).getAttribute('data-status')).not.toBe('error');
+    expect(failed.querySelector('.tool-activity-state')?.classList.contains('sr-only')).toBe(true);
+    expect(failed.closest('article')?.getAttribute('aria-label')).toContain('失败');
+    await click(failed);
+    expect(host.textContent).toContain('网页读取超时');
+    expect(host.textContent).toContain('web_timeout');
+    await render([{ ...web, status: 'unknown', settled: true, text: 'ACTUAL_UNKNOWN' }]);
+    expect(inner().getAttribute('data-status')).not.toBe('error');
+    expect(inner().querySelector('.tool-activity-state')?.classList.contains('sr-only')).toBe(
+      false,
+    );
+    expect(host.textContent).toContain('结果未知');
+    await render([{ ...web, status: 'completed', settled: true, text: 'COMPLETE_WEB_BODY' }]);
+    expect(inner().getAttribute('data-status')).not.toBe('error');
+    expect(inner().querySelector('.tool-activity-state')).toBeNull();
+    expect(inner().hasAttribute('aria-expanded')).toBe(false);
+    expect(inner().querySelector('.tool-activity-chevron')).toBeNull();
+    expect(host.textContent).not.toContain('COMPLETE_WEB_BODY');
+  });
+});
+
 test('each failed or refused tool exposes its complete error only through its own retained disclosure', async () => {
   const longError = `READ_ERROR_BEGIN\n${'完整错误正文🙂'.repeat(80)}\nREAD_ERROR_END`;
   const messages: Message[] = [

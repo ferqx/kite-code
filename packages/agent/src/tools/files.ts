@@ -247,11 +247,13 @@ export function createWorkspaceFiles(options: {
     work: (parent: number, name: string) => T,
     strict = false,
     mutation = false,
+    createParents = false,
   ): T {
     check();
     const parts = segments(path);
     if (!parts.length) fail('file_path_invalid');
-    if ((strict || protectReads) && isProtected(parts.join('/'))) fail('file_path_protected');
+    if ((strict || protectReads || createParents) && isProtected(parts.join('/')))
+      fail('file_path_protected');
     if (strict) io.verifyOwner(rootFd);
     const opened: number[] = [];
     let fd = rootFd;
@@ -259,25 +261,68 @@ export function createWorkspaceFiles(options: {
     let result: T | undefined;
     let failed = false;
     let failure: unknown;
+    let parentCreationAttempted = false;
+    let parentPath: string | undefined;
     try {
-      for (const part of parts.slice(0, -1)) {
-        fd = io.openAt(fd, part, 'directory', strict);
+      for (const [index, part] of parts.slice(0, -1).entries()) {
+        parentPath = parts.slice(0, index + 1).join('/');
+        const parent = fd;
+        let created = false;
+        try {
+          fd = io.openAt(parent, part, 'directory', strict);
+        } catch (error) {
+          if (!createParents || !missing(error)) throw error;
+          parentCreationAttempted = true;
+          try {
+            fd = io.openAt(parent, part, 'create-directory', true);
+          } catch (creationError) {
+            // Another writer may have created it. Reopen once through the same no-follow owner.
+            if (!(creationError instanceof AgentError) || creationError.code !== 'EEXIST')
+              throw creationError;
+            fd = io.openAt(parent, part, 'directory', true);
+          }
+          created = true;
+        }
         opened.push(fd);
-        if (strict) io.verifyOwner(fd);
+        if (created) io.sync(parent);
+        if (strict || created) io.verifyOwner(fd);
+        if (createParents) {
+          const stat = io.stat(fd);
+          if (!stat.isDirectory()) fail('ENOTDIR');
+        }
       }
+      parentPath = undefined;
       result = work(fd, parts.at(-1)!);
       completed = true;
     } catch (error) {
       failed = true;
-      failure = error;
+      failure =
+        parentCreationAttempted &&
+        error instanceof AgentError &&
+        error.code === 'file_close_unknown'
+          ? new AgentError(
+              'file_publish_outcome_unknown',
+              'Parent directory creation could not be confirmed. Do not repeat this write; inspect the original execution and filesystem outcome first.',
+            )
+          : parentPath && error instanceof AgentError
+            ? new AgentError(
+                error.code,
+                `${error.code}: Parent directory ${JSON.stringify(parentPath)} for ${JSON.stringify(path)} could not be opened${createParents ? ' or created' : ''}.`,
+              )
+            : error;
     } finally {
       for (const child of opened.reverse()) {
         try {
           io.closeHandle(child);
         } catch (error) {
-          if (!failed) {
+          if (
+            !failed ||
+            (parentCreationAttempted &&
+              error instanceof AgentError &&
+              error.code === 'file_close_unknown')
+          ) {
             failure =
-              completed && mutation
+              (completed && mutation) || parentCreationAttempted
                 ? new AgentError('file_publish_outcome_unknown', 'parent_close_unknown')
                 : error;
             failed = true;
@@ -564,6 +609,7 @@ export function createWorkspaceFiles(options: {
       },
       false,
       true,
+      input.base === null,
     );
   }
   function byteLimit(value: number): number {

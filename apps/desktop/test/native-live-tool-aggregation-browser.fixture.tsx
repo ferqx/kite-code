@@ -362,7 +362,10 @@ const bridge: NativeBridge = {
                       definitionVersion: execution.definitionVersion,
                       status: execution.status,
                       resultRevision: execution.resultRevision,
-                      target: `fixture-target-${execution.id}`,
+                      target:
+                        execution.definitionId === 'web_fetch'
+                          ? (execution.toolInput as { url: string }).url
+                          : `fixture-target-${execution.id}`,
                       ...(execution.authorization
                         ? { authorization: execution.authorization }
                         : {}),
@@ -557,7 +560,7 @@ window.liveAggregationFixture = {
     const shellId = operation === 'execute' ? `native-${kind}` : 'native-main';
     const command =
       operation === 'execute' || operation === 'launch'
-        ? `python3 - <<'PY'\n${kind === 'execute' || kind === 'execute-large' || kind === 'execute-live' ? Array.from({ length: kind === 'execute-large' ? 1200 : 320 }, (_, index) => `# 原命令 👩‍💻 ${index} 保持完整字节和多行\n`).join('') : ''}print('Native Shell 中文 👩‍💻')\nPY`
+        ? `python3 - <<'PY'\n${kind === 'execute' || kind === 'execute-large' || kind === 'execute-live' ? Array.from({ length: kind === 'execute-large' ? 1200 : 320 }, (_, index) => `# 原命令 👩 ${index} 保持完整字节和多行\n`).join('') : ''}print('Native Shell 中文 👩')\nPY`
         : undefined;
     const id = `native-shell-${kind}`;
     const input: Record<string, string | number> = command
@@ -684,7 +687,7 @@ window.liveAggregationFixture = {
     const stdout =
       kind === 'execute-model-late'
         ? `${Array.from({ length: 40 }, (_, index) => `匿名迟到Model输出 ${index + 1}`).join('\n')}\nNATIVE_LATE_MODEL_OUTPUT_END\n`
-        : `Native ${kind} 原输出\n第二行 👩‍💻\n`;
+        : `Native ${kind} 原输出\n第二行 👩\n`;
     const stderr =
       kind === 'execute-failed'
         ? 'NATIVE_REAL_FAILURE_REASON\n'
@@ -872,7 +875,13 @@ window.liveAggregationFixture = {
         index: 12,
         key: 'auto-approved-running',
         executionStatus: 'running',
-        authorization: auto(12, true, 'succeeded', 'approve_once', 'approved'),
+        authorization: auto(
+          12,
+          true,
+          'succeeded',
+          'approve_once',
+          'MATRIX_APPROVAL_SUCCESS_REASON_MUST_STAY_HIDDEN',
+        ),
         approval: '已自动批准',
         status: '执行中',
         issue: false,
@@ -881,7 +890,13 @@ window.liveAggregationFixture = {
         index: 13,
         key: 'auto-approved-failed',
         executionStatus: 'failed',
-        authorization: auto(13, true, 'succeeded', 'approve_once', 'approved'),
+        authorization: auto(
+          13,
+          true,
+          'succeeded',
+          'approve_once',
+          'MATRIX_APPROVAL_SUCCESS_REASON_MUST_STAY_HIDDEN',
+        ),
         approval: '已自动批准',
         status: '失败',
         issue: true,
@@ -891,7 +906,13 @@ window.liveAggregationFixture = {
         index: 14,
         key: 'approved-unknown',
         executionStatus: 'outcome_unknown',
-        authorization: auto(14, true, 'succeeded', 'approve_once', 'approved'),
+        authorization: auto(
+          14,
+          true,
+          'succeeded',
+          'approve_once',
+          'MATRIX_APPROVAL_SUCCESS_REASON_MUST_STAY_HIDDEN',
+        ),
         approval: '已自动批准',
         status: '结果未知',
         issue: true,
@@ -919,7 +940,13 @@ window.liveAggregationFixture = {
         index: 17,
         key: 'auto-approved-success',
         executionStatus: 'succeeded',
-        authorization: auto(17, true, 'succeeded', 'approve_once', 'approved'),
+        authorization: auto(
+          17,
+          true,
+          'succeeded',
+          'approve_once',
+          'MATRIX_APPROVAL_SUCCESS_REASON_MUST_STAY_HIDDEN',
+        ),
         approval: '已自动批准',
         status: '',
         issue: false,
@@ -947,6 +974,22 @@ window.liveAggregationFixture = {
       const approvalCase = matrix.find((entry) => entry.index === index);
       execution.status = index === 2 || index === 4 ? 'failed' : 'succeeded';
       execution.resultRevision = '1';
+      const webIndex = index >= 29 && index <= 34 ? index - 29 : undefined;
+      if (webIndex !== undefined) {
+        execution.definitionId = 'web_fetch';
+        execution.definitionVersion = '1';
+        execution.toolInput = {
+          url: `https://github.com/${['ollama/ollama', 'immich-app/immich', 'n8n-io/n8n', 'astral-sh/uv', 'open-webui/open-webui', 'AppFlowy-IO/AppFlowy'][webIndex]}?token=WEB_QUERY_MUST_STAY_PRIVATE#WEB_FRAGMENT_PRIVATE`,
+        };
+        execution.status = webIndex === 5 ? 'failed' : 'succeeded';
+        execution.authorization = auto(
+          index,
+          true,
+          'succeeded',
+          'approve_once',
+          'WEB_APPROVAL_REASON_MUST_STAY_HIDDEN',
+        );
+      }
       if (approvalCase) {
         execution.definitionId = `approval.fixture.${approvalCase.key}`;
         execution.definitionVersion = '1';
@@ -966,7 +1009,12 @@ window.liveAggregationFixture = {
         seq: String(messages.length + 1),
         sourceIds: [execution.id],
         toolCallId: execution.toolCallId,
-        content: index === 2 ? error : (approvalCase?.reason ?? 'Tool completed.'),
+        content:
+          index === 2
+            ? error
+            : webIndex === 5
+              ? 'web_timeout'
+              : (approvalCase?.reason ?? 'Tool completed.'),
       });
     }
     control.publish();
@@ -1132,7 +1180,7 @@ function ToolScrollIslandPage() {
   const [shellScenario, setShellScenario] =
     useState<Parameters<ToolScrollIsland['shellScenario']>[0]>('execute-running');
   const [grouped, setGrouped] = useState(false);
-  const command = `python3 - <<'PY'\nfrom pathlib import Path\nprint("中文 👩‍💻 Shell 原命令")\nprint(Path('fixture-output.txt'))\nPY`;
+  const command = `python3 - <<'PY'\nfrom pathlib import Path\nprint("中文 👩 Shell 原命令")\nprint(Path('fixture-output.txt'))\nPY`;
   const diff = `DIFF_FULL_START\n${Array.from({ length: 95 }, (_, index) => `${index % 2 ? '+' : '-'} ${index + 1} ${'wide_diff_column_'.repeat(35)}`).join('\n')}\nDIFF_FULL_END`;
   window.toolScrollIsland = {
     appendShell() {

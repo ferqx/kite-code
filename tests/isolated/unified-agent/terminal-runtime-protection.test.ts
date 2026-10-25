@@ -132,7 +132,7 @@ test('actual candidate default paired and daemon children protect closure and re
       modelId: 'fixed',
       tools: [
         { id: 'files.read', definitionVersion: '4' },
-        { id: 'files.write', definitionVersion: '2' },
+        { id: 'files.write', definitionVersion: '3' },
       ],
       models: [
         { id: 'fixed', provider: 'compatible', model: 'fixed', baseURL: `${provider.url.href}v1` },

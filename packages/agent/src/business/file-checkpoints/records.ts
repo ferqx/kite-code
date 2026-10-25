@@ -32,16 +32,22 @@ export const baselineSchema = object({
   device: decimal,
   inode: decimal,
 });
-const source = object({
-  executionId: id,
-  runId: id,
-  definitionId: { enum: ['files.write', 'files.edit'] },
-  definitionVersion: { const: '2' },
-  attempt: { type: 'integer', minimum: 1, maximum: Number.MAX_SAFE_INTEGER },
-  inputDigest: hash,
-  modelExecutionId: id,
-  modelInputHash: hash,
-});
+const source: JsonSchema = {
+  ...object({
+    executionId: id,
+    runId: id,
+    definitionId: { enum: ['files.write', 'files.edit'] },
+    definitionVersion: { enum: ['2', '3'] },
+    attempt: { type: 'integer', minimum: 1, maximum: Number.MAX_SAFE_INTEGER },
+    inputDigest: hash,
+    modelExecutionId: id,
+    modelInputHash: hash,
+  }),
+  anyOf: [
+    { properties: { definitionVersion: { const: '2' } } },
+    { properties: { definitionId: { const: 'files.write' }, definitionVersion: { const: '3' } } },
+  ],
+};
 const artifact = object({
   id: text,
   mediaType: { const: 'application/octet-stream' },

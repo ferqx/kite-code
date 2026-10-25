@@ -1,6 +1,7 @@
 import { expect, test } from 'bun:test';
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
+import { connect, type Socket } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -15,7 +16,7 @@ import { createDefaultProcessConfiguration } from '../../src/configuration';
 import { createPermissionManagement } from '../../src/permission-management';
 
 const fullBody = `complete-default-web-BEGIN\n${'actual public Tool body. '.repeat(5000)}\ncomplete-default-web-END`;
-async function fixture(off = false) {
+async function fixture(off = false, automatic = false) {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-default-web-')));
   const workspace = join(root, 'workspace');
   mkdirSync(workspace);
@@ -28,6 +29,7 @@ async function fixture(off = false) {
   const admissions: { allowed: boolean; revision: string }[] = [];
   let dns = 0,
     admitted = true;
+  let credentialReads = 0;
   const web = createServer(async (request, response) => {
     webRequests.push(`${request.headers.host}${request.url}`);
     const audit = await store.listExtensionRecords({
@@ -58,7 +60,32 @@ async function fixture(off = false) {
   });
   await new Promise<void>((resolve) => web.listen(0, '127.0.0.1', resolve));
   const webPort = (web.address() as { port: number }).port;
-  const url = `http://fixture.test:${webPort}`;
+  const url = `http://${automatic ? '8.8.8.8' : 'fixture.test'}:${webPort}`;
+  const proxySockets = new Set<Socket>(),
+    proxyTargets: string[] = [];
+  const proxy = automatic ? createServer() : undefined;
+  proxy?.on('connection', (socket) => {
+    proxySockets.add(socket);
+    socket.on('close', () => proxySockets.delete(socket));
+  });
+  proxy?.on('connect', (request, socket, head) => {
+    proxyTargets.push(request.url!);
+    const upstream = connect(webPort, '127.0.0.1', () => {
+      socket.write('HTTP/1.1 200 Connection Established\r\n\r\n');
+      if (head.length) upstream.write(head);
+      socket.pipe(upstream);
+      upstream.pipe(socket);
+    });
+    proxySockets.add(upstream);
+    upstream.on('close', () => proxySockets.delete(upstream));
+    socket.on('close', () => upstream.destroy());
+    socket.on('error', () => upstream.destroy());
+    upstream.on('error', () => socket.destroy());
+  });
+  if (proxy) await new Promise<void>((resolve) => proxy.listen(0, '127.0.0.1', resolve));
+  const proxyEndpoint = proxy
+    ? `http://127.0.0.1:${(proxy.address() as { port: number }).port}`
+    : '';
   let target = `${url}/redirect`;
   let currentInput = 'work-1';
   const requests: {
@@ -109,6 +136,7 @@ async function fixture(off = false) {
         provider: 'compatible',
         model: 'local',
         baseURL: `http://127.0.0.1:${provider.port}/v1`,
+        ...(automatic ? { credentialRef: 'credential:12345678-1234-1234-1234-123456789abc' } : {}),
       },
     ],
     tools: [{ id: 'web_fetch', definitionVersion: '1' }],
@@ -122,24 +150,37 @@ async function fixture(off = false) {
   const host = createDefaultProcessConfiguration({
     userConfigurationPath: `${profile.profilePath}/config.jsonc`,
     profile,
-    webFetch: {
-      network: {
-        policy,
-        allowLoopbackForTests: true,
-        resolveAddresses: async () => {
-          dns++;
-          return [{ address: '127.0.0.1', family: 4 }];
-        },
-        admitHop: async () => {
-          const decision = {
-            allowed: admitted,
-            revision: admitted ? 'resources-current-1' : 'resources-revoked-2',
-          };
-          admissions.push(decision);
-          return decision;
-        },
+    credentialBackend: {
+      kind: 'temporary',
+      put: async () => {},
+      remove: async () => {},
+      resolve: async () => {
+        credentialReads++;
+        return 'isolated-web-fixture-key';
       },
     },
+    ...(!automatic
+      ? {
+          webFetch: {
+            network: {
+              policy,
+              allowLoopbackForTests: true,
+              resolveAddresses: async () => {
+                dns++;
+                return [{ address: '127.0.0.1', family: 4 }];
+              },
+              admitHop: async () => {
+                const decision = {
+                  allowed: admitted,
+                  revision: admitted ? 'resources-current-1' : 'resources-revoked-2',
+                };
+                admissions.push(decision);
+                return decision;
+              },
+            },
+          },
+        }
+      : {}),
     permissions: {
       authorize: async () => ({
         allowed: true,
@@ -229,6 +270,11 @@ async function fixture(off = false) {
   let id = 0;
   return {
     root,
+    workspace,
+    profile,
+    host,
+    proxyEndpoint,
+    proxyTargets,
     store,
     runtime,
     client,
@@ -241,6 +287,7 @@ async function fixture(off = false) {
     admissions,
     expectedStoreId,
     counts: () => ({ dns, network: webRequests.length, provider: requests.length }),
+    credentialReads: () => credentialReads,
     setAdmitted: (value: boolean) => {
       admitted = value;
     },
@@ -302,6 +349,8 @@ async function fixture(off = false) {
     },
     async close() {
       await service.close();
+      for (const socket of proxySockets) socket.destroy();
+      if (proxy) await new Promise<void>((resolve) => proxy.close(() => resolve()));
       provider.stop(true);
       web.closeAllConnections();
       await new Promise<void>((resolve) => web.close(() => resolve()));
@@ -440,3 +489,123 @@ test('JSONC cannot set Web resource options or stale definition versions; failur
     await f.close();
   }
 }, 15000);
+
+test('default Service needs no proxy configuration, freezes the discovered exit and refuses cold transport drift before Provider or Store effects', async () => {
+  const keys = [
+    'HTTP_PROXY',
+    'http_proxy',
+    'HTTPS_PROXY',
+    'https_proxy',
+    'NO_PROXY',
+    'no_proxy',
+  ] as const;
+  const saved = Object.fromEntries(keys.map((key) => [key, process.env[key]]));
+  const f = await fixture(false, true);
+  try {
+    for (const key of keys) delete process.env[key];
+    process.env.HTTP_PROXY = process.env.HTTPS_PROXY = f.proxyEndpoint;
+    process.env.NO_PROXY = '127.0.0.1,localhost';
+    const result = await f.run();
+    expect(result.execution?.status).toBe('succeeded');
+    expect(f.proxyTargets.length).toBeGreaterThanOrEqual(4);
+    expect(f.proxyTargets.every((target) => target.startsWith('8.8.8.8:'))).toBe(true);
+    const run = (await f.store.getRun(result.run!.id))!;
+    const snapshot = (run.configuration as { snapshot: { web: { transport: unknown } } }).snapshot
+      .web;
+    expect(snapshot.transport).toMatchObject({
+      proxy: { http: f.proxyEndpoint, https: f.proxyEndpoint, noProxy: '127.0.0.1,localhost' },
+      recoverFakeIp: true,
+    });
+    const command = (await f.store.getCommand(run.originCommandId))!;
+    const session = (await f.store.getSession('s'))!,
+      workspace = (await f.store.getWorkspace('w'))!;
+    const recovery = { command, run, session, workspace, signal: new AbortController().signal };
+    const cursor = (await f.store.getMetadata()).lastChangeCursor,
+      provider = f.requests.length,
+      network = f.webRequests.length;
+    const credentials = f.credentialReads();
+    expect(credentials).toBeGreaterThan(0);
+    process.env.NO_PROXY = '127.0.0.1,localhost,never.fixture.test';
+    let rejected: unknown;
+    try {
+      await f.host.resolveRecoveryRunConfiguration!(recovery);
+    } catch (error) {
+      rejected = error;
+    }
+    expect(rejected).toMatchObject({ code: 'recovery_configuration_changed' });
+    expect((await f.store.getMetadata()).lastChangeCursor).toBe(cursor);
+    expect(f.requests.length).toBe(provider);
+    expect(f.webRequests.length).toBe(network);
+    expect(f.credentialReads()).toBe(credentials);
+    const next = await f.run('/complete');
+    expect(next.execution?.status).toBe('succeeded');
+    expect(
+      (
+        next.run!.configuration as {
+          snapshot: { web: { transport: { proxy: { noProxy: string } } } };
+        }
+      ).snapshot.web.transport.proxy.noProxy,
+    ).toBe('127.0.0.1,localhost,never.fixture.test');
+    expect(snapshot.transport).toMatchObject({ proxy: { noProxy: '127.0.0.1,localhost' } });
+    process.env.NO_PROXY = '127.0.0.1,localhost';
+    const reopened = await f.host.resolveRecoveryRunConfiguration!(recovery);
+    expect((reopened.snapshot as { web: unknown }).web).toEqual(snapshot);
+    await reopened.dispose?.();
+    const legacyRun = structuredClone(run);
+    const legacyWeb = (legacyRun.configuration as { snapshot: { web: Record<string, unknown> } })
+      .snapshot.web;
+    delete legacyWeb.defaultTimeoutMs;
+    const legacyCredentials = f.credentialReads(),
+      legacyProvider = f.requests.length;
+    const legacyCursor = (await f.store.getMetadata()).lastChangeCursor;
+    let legacyRejected: unknown;
+    try {
+      await f.host.resolveRecoveryRunConfiguration!({ ...recovery, run: legacyRun });
+    } catch (error) {
+      legacyRejected = error;
+    }
+    expect(legacyRejected).toMatchObject({ code: 'recovery_configuration_changed' });
+    expect(f.credentialReads()).toBe(legacyCredentials);
+    expect(f.requests.length).toBe(legacyProvider);
+    expect((await f.store.getMetadata()).lastChangeCursor).toBe(legacyCursor);
+    process.env.HTTPS_PROXY = 'socks5://127.0.0.1:1080';
+    const unavailable = await f.run('/complete');
+    expect(unavailable.command.status).toBe('applied');
+    expect(unavailable.execution?.result).toMatchObject({
+      outcome: 'failed',
+      content: 'web_proxy_protocol_unsupported',
+    });
+    Object.assign(f.configuration, { webFetch: { proxy: f.proxyEndpoint } });
+    f.save();
+    const manual = await f.run('/complete');
+    expect(manual.execution?.status).toBe('succeeded');
+    Object.assign(f.configuration, { webFetch: { proxy: 'socks5://127.0.0.1:1080' } });
+    f.save();
+    const invalidBefore = f.requests.length;
+    const invalidCredentials = f.credentialReads();
+    const invalid = await f.run('/complete');
+    expect(invalid.command.status).toBe('rejected');
+    expect(JSON.stringify(invalid.publicCommand.receipt)).toContain(
+      'web_proxy_protocol_unsupported',
+    );
+    expect(f.requests.length).toBe(invalidBefore);
+    expect(f.credentialReads()).toBe(invalidCredentials);
+    process.env.HTTPS_PROXY = f.proxyEndpoint;
+    writeFileSync(
+      join(f.workspace, 'kite-agent.jsonc'),
+      JSON.stringify({ webFetch: { proxy: 'direct' } }),
+    );
+    const before = f.requests.length;
+    const denied = await f.run();
+    expect(denied.command.status).toBe('rejected');
+    expect(JSON.stringify(denied.publicCommand.receipt)).toContain('web_configuration_user_only');
+    expect(f.requests.length).toBe(before);
+  } finally {
+    for (const key of keys) {
+      const value = saved[key];
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+    await f.close();
+  }
+}, 25000);

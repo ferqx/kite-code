@@ -70,7 +70,7 @@ import { workflowCompilerAssets } from '@kite-ai/agent/skill-workflow';
 import { KnowledgeReadCleanupError } from '@kite-ai/agent/sources';
 import { sqliteStorageAssets } from '@kite-ai/agent/sqlite';
 import { createDefaultTaskRequestClassifier } from '@kite-ai/agent/task';
-import { webExtractorAssets } from '@kite-ai/agent/web-fetch';
+import { WebFetchError, webExtractorAssets } from '@kite-ai/agent/web-fetch';
 import {
   createCompatibleModelBinding,
   createSdkModelAdapter,
@@ -129,6 +129,7 @@ import {
   createWebFetchConfiguration,
   type WebFetchConfigurationOptions,
 } from './web-fetch-configuration';
+import { resolveWebTransport } from './web-fetch-proxy';
 
 export type { ShellConfigurationOptions } from '@kite-ai/agent/permissions/shell';
 export type { ChildRole } from './child-configuration';
@@ -540,6 +541,7 @@ export function createDefaultProcessConfiguration(options: {
     },
   );
   const webTools = new Map((web.extension.tools ?? []).map((tool) => [tool.id, tool]));
+  let automaticWeb = web;
   const mcpManagement = createMcpManagement({
     userConfigurationPath: userConfiguration.path,
     runtime: () => {
@@ -814,6 +816,7 @@ export function createDefaultProcessConfiguration(options: {
       workflowSnapshot: Json;
       planningSnapshot: Json;
       mcpSourceSnapshot: Json;
+      webSnapshot: Json;
       runIdentity: { runId: string; sessionId: string };
     },
   ) => {
@@ -841,6 +844,8 @@ export function createDefaultProcessConfiguration(options: {
         throw new ConfigurationError('workspace_configuration_unavailable');
       }
       const project = readConfigurationFile({ path: join(root, 'kite-agent.jsonc') }).value;
+      if (project.webFetch !== undefined)
+        throw new ConfigurationError('web_configuration_user_only');
       const current = explicitConfiguration(explicit);
       const request = command.request as { modelId?: string; reasoningEffort?: ReasoningEffort };
       if (selection) current.modelId = selection.modelId;
@@ -1064,6 +1069,7 @@ export function createDefaultProcessConfiguration(options: {
         allowedCapabilities: options.allowedToolCapabilities,
       });
       let webBinding: ReturnType<typeof web.bind> | undefined;
+      let runWeb = web;
       let workflowResource: Awaited<ReturnType<typeof createWorkflowConfiguration>> | undefined;
       let disposal: Promise<void> | undefined;
       const dispose = () =>
@@ -1086,7 +1092,25 @@ export function createDefaultProcessConfiguration(options: {
       try {
         assembly.extensions.push(...shell.extensions);
         if (toolIds.some((id) => webTools.has(id))) {
-          webBinding = web.bind();
+          if (!options.webFetch) {
+            const { unavailableReason, ...transport } = await resolveWebTransport(user.webFetch);
+            const candidate = createWebFetchConfiguration({
+              ...(unavailableReason ? { unavailableReason } : {}),
+              network: {
+                policy: { mode: 'public' },
+                admitHop: async () => ({ allowed: true, revision: 'default-public-network-1' }),
+                ...transport,
+              },
+            });
+            if (
+              planningSnapshotDigest(candidate.snapshot as unknown as Json) !==
+              planningSnapshotDigest(automaticWeb.snapshot as unknown as Json)
+            )
+              automaticWeb = candidate;
+            runWeb = automaticWeb;
+          } else if (user.webFetch !== undefined)
+            throw new ConfigurationError('web_configuration_host_owned');
+          webBinding = runWeb.bind();
           assembly.extensions.push(webBinding.extension);
         }
         const workflowCapabilities = workflowCapabilitiesFor(assembly);
@@ -1184,6 +1208,9 @@ export function createDefaultProcessConfiguration(options: {
         if (
           recovery &&
           (snapshot.digest !== recovery.digest ||
+            planningSnapshotDigest(
+              (assembly.toolIds.includes('web_fetch') ? runWeb.snapshot : null) as unknown as Json,
+            ) !== planningSnapshotDigest(recovery.webSnapshot) ||
             workflowSnapshotDigest(workflow.snapshot as unknown as Json) !==
               workflowSnapshotDigest(recovery.workflowSnapshot) ||
             !recovery.planningSnapshot ||
@@ -1685,7 +1712,7 @@ export function createDefaultProcessConfiguration(options: {
             mcp: { ...selectedMcp.snapshot, sources: selectedSources.snapshot },
             shell: shell.snapshot,
             pathFiles: pathFiles.snapshot,
-            web: assembly.toolIds.includes('web_fetch') ? web.snapshot : null,
+            web: assembly.toolIds.includes('web_fetch') ? runWeb.snapshot : null,
             task: {
               ...task.snapshot,
               tools: task.snapshot.tools.filter((tool) => assembly.toolIds.includes(tool.id)),
@@ -1761,7 +1788,9 @@ export function createDefaultProcessConfiguration(options: {
         });
       if (error instanceof AgentError) throw error;
       throw new AgentError(
-        error instanceof ConfigurationError ? error.code : 'configuration_unavailable',
+        error instanceof ConfigurationError || error instanceof WebFetchError
+          ? error.code
+          : 'configuration_unavailable',
       );
     }
   };
@@ -1882,6 +1911,7 @@ export function createDefaultProcessConfiguration(options: {
         signal: input.signal,
         workflowSnapshot: snapshot.skillWorkflow ?? null,
         planningSnapshot: snapshot.planning ?? null,
+        webSnapshot: snapshot.web ?? null,
         runIdentity: { runId: input.run.id, sessionId: input.run.sessionId },
         mcpSourceSnapshot:
           snapshot.mcp && typeof snapshot.mcp === 'object' && !Array.isArray(snapshot.mcp)

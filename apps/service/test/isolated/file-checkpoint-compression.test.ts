@@ -131,7 +131,7 @@ for (const collision of ['published-summary', 'generated-instruction'] as const)
         ],
         tools: [
           { id: 'files.read', definitionVersion: '5' },
-          { id: 'files.write', definitionVersion: '2' },
+          { id: 'files.write', definitionVersion: '3' },
         ],
       }),
     );
@@ -411,7 +411,7 @@ for (const collision of ['published-summary', 'generated-instruction'] as const)
       expect(tool).toMatchObject({
         kind: 'tool',
         definitionId: 'files.write',
-        definitionVersion: '2',
+        definitionVersion: '3',
         status: 'succeeded',
         originStoreId: storeId,
         sessionId: 's',
@@ -463,7 +463,7 @@ for (const collision of ['published-summary', 'generated-instruction'] as const)
       expect(records.every((record) => record.originStoreId === storeId)).toBe(true);
       expect(captured.first!.baseline!.hash).toBe(hash(original));
       expect(captured.first!.baseline!.size).toBe(original.length);
-      expect(source.definitionVersion).toBe('2');
+      expect(source.definitionVersion).toBe('3');
       const preview = (
         await client.queryExtension('s', 'builtin.files', 'files.checkpoint.detail', {
           pointId: point.id,

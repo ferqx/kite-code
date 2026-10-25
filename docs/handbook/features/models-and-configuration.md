@@ -20,6 +20,24 @@ Provider 凭据通过实际支持的配置和认证入口维护，不在手册�
 
 删除提供商时，若其模型仍被全局默认引用，删除确认会继续阻止提交。统一设置页不提供默认模型改选入口；可先在 `~/.kite-code/kite-code.jsonc` 中将顶层 `model` 改为其他已启用模型的 `提供商别名:模型名`，使用 `models`/`modelId` 装配格式的配置则将 `modelId` 改为其他已启用模型的准确 ID，再关闭并重新打开设置核对。输入区的手动选择和模型禁用均不改写该默认引用；删除不会自动清除或替换默认模型。
 
+## 网页网络配置
+
+通常无需配置，`web_fetch` 默认自动适配[系统代理与 Fake-IP DNS](tools-and-approvals.md)。网络选择在每轮运行开始时固定；更改系统或环境代理后，新运行采用新设置，活动运行继续使用原设置。冷恢复发现出口或解析配置变化时报告 `recovery_configuration_changed`，需恢复原设置或开始新任务。
+
+特殊环境可在用户级 `~/.kite-code/kite-code.jsonc` 添加 `webFetch`。项目 `kite-agent.jsonc`、模型工具参数和网页内容不能选择代理、DNS 或安全例外。以下为备用配置，省略 `webFetch` 或设置 `"proxy": "auto"` 即恢复自动选择：
+
+```jsonc
+{
+  "webFetch": {
+    "proxy": "http://127.0.0.1:7890"
+  }
+}
+```
+
+`proxy` 也可设为 `"direct"` 强制直连；它只控制传输出口，Fake-IP 的安全解析仍启用。地址只支持无需认证的 HTTP/HTTPS 代理，不填写用户名、密码、路径或查询参数。手动代理使用同一入口处理 HTTP/HTTPS 目标。企业网络需要指定其他可信解析服务时，可加 `"dns": {"url":"https://resolver.example/dns-query","addresses":["真实公网 IP"]}`；地址须填写该服务的公网字面 IP，URL 不含查询或片段，服务支持标准 DNS wire POST 和有效 HTTPS 证书。显式 DNS 用于所有非字面目标；全部结果仍检查私网、保留地址及地址族。
+
+`web_proxy_connect_failed` 表示代理连接或 CONNECT 被拒绝；`web_proxy_auth_unsupported`、`web_proxy_protocol_unsupported`、`web_proxy_pac_unsupported` 分别表示不支持的认证、协议或 PAC 设置；`web_proxy_discovery_failed` 表示系统设置读取失败。`web_dns_unavailable` 表示解析失败，`web_destination_denied` 表示真实目标地址不符合公网要求，`web_tls_failed` 表示代理隧道内的目标 TLS 校验失败。先修复对应网络设置再重试；重复同一 URL 或再次批准不会解决这些失败。远端 HTTP 拒绝仍为 `web_http_failed`，与本机代理审批是不同原因。
+
 ## ChatGPT / Codex 本机自动接入
 
 正式 CLI/TUI 和 Native 宿主自动读取 `CODEX_HOME/auth.json`；未设置 `CODEX_HOME` 时使用 `~/.codex/auth.json`。`CODEX_HOME` 必须是绝对路径；无效目录不会影响已有手动提供商与普通工具。只接纳 Codex 的 ChatGPT 登录缓存；API key 登录继续通过普通 OpenAI 连接使用。当前读取路径支持文件缓存，系统凭据库和仅存在于进程内的登录态不在此范围。

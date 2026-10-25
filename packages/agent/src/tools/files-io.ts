@@ -21,7 +21,7 @@ export interface WorkspaceFileIo {
   openAt(
     parent: number,
     name: string,
-    kind: 'directory' | 'read' | 'temporary',
+    kind: 'directory' | 'create-directory' | 'read' | 'temporary',
     strict?: boolean,
   ): number;
   read(id: number, bytes: Uint8Array): number;

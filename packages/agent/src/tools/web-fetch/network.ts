@@ -3,16 +3,13 @@ import { Agent as HttpAgent, request as httpRequest } from 'node:http';
 import { Agent as HttpsAgent, request as httpsRequest } from 'node:https';
 import { isIP } from 'node:net';
 import { createBrotliDecompress, createGunzip, createInflate } from 'node:zlib';
+import { defaultWebDns, fakeIp, resolveWebDns, type WebDnsSettings } from './dns';
+import { parsingLimit, WebFetchError } from './network-errors';
+import { openProxyTunnel, proxyUrl, selectedProxy, type WebProxySettings } from './proxy';
 
-export const parsingLimit = 5_000_000;
-export class WebFetchError extends Error {
-  readonly code: string;
-  constructor(code: string) {
-    super(code);
-    this.code = code;
-    this.name = 'WebFetchError';
-  }
-}
+export type { WebDnsSettings } from './dns';
+export { parsingLimit, WebFetchError } from './network-errors';
+export type { WebProxySettings } from './proxy';
 export interface WebHop {
   readonly originalUrl: string;
   readonly url: string;
@@ -55,6 +52,13 @@ export interface PinnedWebNetworkOptions {
   ) => Promise<readonly { address: string; family: 4 | 6 }[]>;
   /** Explicit test qualification. Never accepted from JSONC or Tool input. */
   readonly allowLoopbackForTests?: boolean;
+  /** Host-selected exit only. Never supplied by a page or model Tool input. */
+  readonly proxy?: WebProxySettings;
+  readonly dnsOverHttps?: WebDnsSettings;
+  /** Default Service opts in; low-level custom hosts retain their original DNS policy. */
+  readonly recoverFakeIp?: boolean;
+  /** Trusted host CA, including isolated TLS fixtures. Certificate and hostname checks stay on. */
+  readonly certificateAuthority?: string;
 }
 export function webUrl(value: string): URL {
   let url: URL;
@@ -119,8 +123,33 @@ async function abortable<T>(promise: Promise<T>, signal: AbortSignal): Promise<T
     promise.then(resolve, reject).finally(() => signal.removeEventListener('abort', abort));
   });
 }
-/** One real socket per hop. No proxy/environment headers and no implicit redirect/fetch fallback. */
+/** One owned connection per hop; exits are explicit host selections, never ambient here. */
 export function createPinnedWebNetworkPort(options: PinnedWebNetworkOptions): WebNetworkPort {
+  options = {
+    ...options,
+    ...(options.proxy
+      ? {
+          proxy: Object.freeze({
+            ...options.proxy,
+            ...(options.proxy.http ? { http: proxyUrl(options.proxy.http) } : {}),
+            ...(options.proxy.https ? { https: proxyUrl(options.proxy.https) } : {}),
+          }),
+        }
+      : {}),
+    ...(options.dnsOverHttps ? { dnsOverHttps: structuredClone(options.dnsOverHttps) } : {}),
+  };
+  const dns = options.dnsOverHttps ?? defaultWebDns;
+  const dnsUrl = webUrl(dns.url);
+  if (
+    dnsUrl.protocol !== 'https:' ||
+    dnsUrl.search ||
+    dns.url.includes('#') ||
+    !Array.isArray(dns.addresses) ||
+    !dns.addresses.length ||
+    dns.addresses.length > 8 ||
+    dns.addresses.some((address) => !publicAddress(address, false))
+  )
+    throw new WebFetchError('web_dns_configuration_invalid');
   const policy = structuredClone(options.policy);
   if (
     !['off', 'public', 'allowlist'].includes(policy.mode) ||
@@ -167,12 +196,66 @@ export function createPinnedWebNetworkPort(options: PinnedWebNetworkOptions): We
       try {
         addresses = isIP(hostname)
           ? [{ address: hostname, family: isIP(hostname) as 4 | 6 }]
-          : await abortable(resolve(hostname), signal);
+          : options.dnsOverHttps
+            ? []
+            : await abortable(resolve(hostname), signal);
       } catch {
         signal.throwIfAborted();
         throw new WebFetchError('web_dns_unavailable');
       }
       signal.throwIfAborted();
+      if (
+        !isIP(hostname) &&
+        (options.dnsOverHttps ||
+          (options.recoverFakeIp &&
+            addresses.length > 0 &&
+            addresses.length <= 64 &&
+            addresses.every(
+              (value) => isIP(value.address) === value.family && fakeIp(value.address),
+            )))
+      ) {
+        addresses = await resolveWebDns(hostname, async (body) => {
+          const response = await requestPinned(
+            dnsUrl,
+            dns.addresses[0]!,
+            signal,
+            options.proxy,
+            options.certificateAuthority,
+            {
+              method: 'POST',
+              headers: {
+                accept: 'application/dns-message',
+                'content-type': 'application/dns-message',
+                'content-length': String(body.byteLength),
+              },
+              body,
+            },
+          );
+          if (
+            response.status !== 200 ||
+            response.contentType.split(';')[0]!.trim().toLowerCase() !== 'application/dns-message'
+          ) {
+            await response.body.cancel();
+            throw new WebFetchError('web_dns_unavailable');
+          }
+          const reader = response.body.getReader(),
+            chunks: Uint8Array[] = [];
+          let size = 0;
+          try {
+            for (;;) {
+              const next = await reader.read();
+              if (next.done) break;
+              size += next.value.byteLength;
+              if (size > 65535) throw new WebFetchError('web_dns_unavailable');
+              chunks.push(next.value);
+            }
+            return Buffer.concat(chunks);
+          } finally {
+            await reader.cancel().catch(() => {});
+            reader.releaseLock();
+          }
+        });
+      }
       if (
         !addresses.length ||
         addresses.length > 64 ||
@@ -187,135 +270,171 @@ export function createPinnedWebNetworkPort(options: PinnedWebNetworkOptions): We
           signal,
         );
       signal.throwIfAborted();
-      const agentOptions = { keepAlive: false, proxyEnv: {} };
-      const agent =
-        url.protocol === 'https:' ? new HttpsAgent(agentOptions) : new HttpAgent(agentOptions);
-      return new Promise<WebResponse>((resolveResponse, reject) => {
-        let cleanBody: (() => void) | undefined;
-        const request = (url.protocol === 'https:' ? httpsRequest : httpRequest)(
-          url,
-          {
-            agent,
-            method: 'GET',
-            headers: {
-              host: url.host,
-              accept: 'text/html,text/plain,application/json;q=0.9,*/*;q=0.5',
-              'accept-encoding': 'gzip,deflate,br',
-              'user-agent': 'KiteCode/1.0 WebFetchBot',
-            },
-            servername: hostname,
-            rejectUnauthorized: true,
-            lookup: (_hostname, lookupOptions, callback) => {
-              if (lookupOptions.all)
-                (
-                  callback as unknown as (
-                    error: null,
-                    values: { address: string; family: number }[],
-                  ) => void
-                )(null, [pinned]);
-              else callback(null, pinned.address, pinned.family);
-            },
-          },
-          (incoming) => {
-            const encoding = String(
-              incoming.headers['content-encoding'] ?? 'identity',
-            ).toLowerCase();
-            const source =
-              encoding === 'gzip'
-                ? incoming.pipe(createGunzip())
-                : encoding === 'deflate'
-                  ? incoming.pipe(createInflate())
-                  : encoding === 'br'
-                    ? incoming.pipe(createBrotliDecompress())
-                    : incoming;
-            let finished = false,
-              size = 0;
-            const cleanup = () => {
-              streamAbort?.();
-              signal.removeEventListener('abort', abort);
-              source.destroy();
-              incoming.destroy();
-              request.destroy();
-              agent.destroy();
-            };
-            cleanBody = cleanup;
-            const stream = new ReadableStream<Uint8Array>({
-              start(controller) {
-                const fail = () => {
-                  if (!finished) {
-                    finished = true;
-                    controller.error(new WebFetchError('web_response_failed'));
-                  }
-                  cleanup();
-                };
-                source.on('data', (chunk: Buffer) => {
-                  if (finished) return;
-                  size += chunk.byteLength;
-                  if (size > parsingLimit) {
-                    finished = true;
-                    controller.error(new WebFetchError('web_response_too_large'));
-                    cleanup();
-                    return;
-                  }
-                  controller.enqueue(new Uint8Array(chunk));
-                  if ((controller.desiredSize ?? 0) <= 0) source.pause();
-                });
-                source.once('end', () => {
-                  if (!finished) {
-                    finished = true;
-                    controller.close();
-                  }
-                  cleanup();
-                });
-                source.once('error', fail);
-                incoming.once('aborted', fail);
-                incoming.once('error', fail);
-                signal.addEventListener('abort', fail, { once: true });
-                streamAbort = () => signal.removeEventListener('abort', fail);
-                if (signal.aborted) fail();
-              },
-              pull() {
-                source.resume();
-              },
-              cancel() {
-                finished = true;
-                cleanup();
-              },
-            });
-            if (!['identity', 'gzip', 'deflate', 'br'].includes(encoding)) {
-              cleanup();
-              reject(new WebFetchError('web_encoding_unsupported'));
-              return;
-            }
-            resolveResponse({
-              status: incoming.statusCode ?? 500,
-              contentType: String(incoming.headers['content-type'] ?? 'text/plain'),
-              ...(incoming.headers.location ? { location: incoming.headers.location } : {}),
-              body: stream,
-              addresses: captured,
-              admissionRevision: admission.revision,
-            });
-          },
-        );
-        let streamAbort: (() => void) | undefined;
-        const abort = () => {
-          cleanBody?.();
-          request.destroy();
-          agent.destroy();
-          reject(signal.reason ?? new WebFetchError('web_cancelled'));
-        };
-        signal.addEventListener('abort', abort, { once: true });
-        request.once('error', () => {
-          agent.destroy();
-          reject(new WebFetchError('web_request_failed'));
-        });
-        request.once('close', () => {
-          signal.removeEventListener('abort', abort);
-          agent.destroy();
-        });
-        if (signal.aborted) abort();
-        else request.end();
-      });
+      const response = await requestPinned(
+        url,
+        pinned.address,
+        signal,
+        options.proxy,
+        options.certificateAuthority,
+      );
+      return { ...response, addresses: captured, admissionRevision: admission.revision };
     },
   };
+}
+
+async function requestPinned(
+  url: URL,
+  address: string,
+  signal: AbortSignal,
+  proxy?: WebProxySettings,
+  ca?: string,
+  extra?: { method: string; headers: Record<string, string>; body: Uint8Array },
+) {
+  signal.throwIfAborted();
+  const hostname = url.hostname.replace(/^\[|\]$/g, '');
+  const pinned = { address, family: isIP(address) };
+  const gateway = selectedProxy(proxy, url);
+  const tunnel = gateway ? await openProxyTunnel(gateway, url, address, signal, ca) : undefined;
+  if (signal.aborted) {
+    tunnel?.destroy();
+    signal.throwIfAborted();
+  }
+  const agentOptions = { keepAlive: false, proxyEnv: {} };
+  const agent =
+    url.protocol === 'https:'
+      ? new HttpsAgent({ ...agentOptions, ...(ca ? { ca } : {}) })
+      : new HttpAgent(agentOptions);
+  if (tunnel)
+    agent.createConnection = (_options, callback) => {
+      callback?.(null, tunnel);
+      return tunnel;
+    };
+  return new Promise<Omit<WebResponse, 'addresses' | 'admissionRevision'>>(
+    (resolveResponse, reject) => {
+      let cleanBody: (() => void) | undefined;
+      const request = (url.protocol === 'https:' ? httpsRequest : httpRequest)(
+        url,
+        {
+          agent,
+          method: extra?.method ?? 'GET',
+          headers: {
+            host: url.host,
+            accept: 'text/html,text/plain,application/json;q=0.9,*/*;q=0.5',
+            'accept-encoding': 'gzip,deflate,br',
+            'user-agent': 'KiteCode/1.0 WebFetchBot',
+            ...extra?.headers,
+          },
+          servername: hostname,
+          rejectUnauthorized: true,
+          lookup: (_hostname, lookupOptions, callback) => {
+            if (lookupOptions.all)
+              (
+                callback as unknown as (
+                  error: null,
+                  values: { address: string; family: number }[],
+                ) => void
+              )(null, [pinned]);
+            else callback(null, pinned.address, pinned.family);
+          },
+        },
+        (incoming) => {
+          const encoding = String(incoming.headers['content-encoding'] ?? 'identity').toLowerCase();
+          const source =
+            encoding === 'gzip'
+              ? incoming.pipe(createGunzip())
+              : encoding === 'deflate'
+                ? incoming.pipe(createInflate())
+                : encoding === 'br'
+                  ? incoming.pipe(createBrotliDecompress())
+                  : incoming;
+          let finished = false,
+            size = 0;
+          const cleanup = () => {
+            streamAbort?.();
+            signal.removeEventListener('abort', abort);
+            source.destroy();
+            incoming.destroy();
+            request.destroy();
+            agent.destroy();
+            tunnel?.destroy();
+          };
+          cleanBody = cleanup;
+          const stream = new ReadableStream<Uint8Array>({
+            start(controller) {
+              const fail = () => {
+                if (!finished) {
+                  finished = true;
+                  controller.error(new WebFetchError('web_response_failed'));
+                }
+                cleanup();
+              };
+              source.on('data', (chunk: Buffer) => {
+                if (finished) return;
+                size += chunk.byteLength;
+                if (size > parsingLimit) {
+                  finished = true;
+                  controller.error(new WebFetchError('web_response_too_large'));
+                  cleanup();
+                  return;
+                }
+                controller.enqueue(new Uint8Array(chunk));
+                if ((controller.desiredSize ?? 0) <= 0) source.pause();
+              });
+              source.once('end', () => {
+                if (!finished) {
+                  finished = true;
+                  controller.close();
+                }
+                cleanup();
+              });
+              source.once('error', fail);
+              incoming.once('aborted', fail);
+              incoming.once('error', fail);
+              signal.addEventListener('abort', fail, { once: true });
+              streamAbort = () => signal.removeEventListener('abort', fail);
+              if (signal.aborted) fail();
+            },
+            pull() {
+              source.resume();
+            },
+            cancel() {
+              finished = true;
+              cleanup();
+            },
+          });
+          if (!['identity', 'gzip', 'deflate', 'br'].includes(encoding)) {
+            cleanup();
+            reject(new WebFetchError('web_encoding_unsupported'));
+            return;
+          }
+          resolveResponse({
+            status: incoming.statusCode ?? 500,
+            contentType: String(incoming.headers['content-type'] ?? 'text/plain'),
+            ...(incoming.headers.location ? { location: incoming.headers.location } : {}),
+            body: stream,
+          });
+        },
+      );
+      let streamAbort: (() => void) | undefined;
+      const abort = () => {
+        cleanBody?.();
+        request.destroy();
+        agent.destroy();
+        tunnel?.destroy();
+        reject(signal.reason ?? new WebFetchError('web_cancelled'));
+      };
+      signal.addEventListener('abort', abort, { once: true });
+      request.once('error', () => {
+        agent.destroy();
+        tunnel?.destroy();
+        reject(new WebFetchError('web_request_failed'));
+      });
+      request.once('close', () => {
+        signal.removeEventListener('abort', abort);
+        agent.destroy();
+      });
+      if (signal.aborted) abort();
+      else request.end(extra?.body);
+    },
+  );
 }

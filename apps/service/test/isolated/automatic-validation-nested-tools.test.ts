@@ -22,7 +22,7 @@ test('HTTP Run automatically verifies nested ordinary file Tools with persistent
   const planning = createPlanningValidation({
     automaticValidation: {
       mutations: [
-        { definitionId: 'files.write', definitionVersion: '2', effects: ['workspace_write'] },
+        { definitionId: 'files.write', definitionVersion: '3', effects: ['workspace_write'] },
         { definitionId: 'files.edit', definitionVersion: '2', effects: ['workspace_write'] },
       ],
       fileHashChecker: { definitionId: 'files.read', definitionVersion: '4' },
@@ -30,7 +30,8 @@ test('HTTP Run automatically verifies nested ordinary file Tools with persistent
   });
   const counts = { models: 0, wrappers: 0, writes: 0, edits: 0, reads: 0 };
   const finalContent = 'unchanged first line\nverified complete second line🙂\nFINAL_TAIL\n';
-  const fileTools = createFileTools(createWorkspaceFiles({ root: workspace })).map((tool) => ({
+  const files = createWorkspaceFiles({ root: workspace });
+  const fileTools = createFileTools(files).map((tool) => ({
     ...tool,
     async execute(input: Json, context: Parameters<typeof tool.execute>[1]) {
       if (tool.id === 'files.write') counts.writes++;
@@ -56,7 +57,7 @@ test('HTTP Run automatically verifies nested ordinary file Tools with persistent
             request: {
               kind: 'tool',
               definitionId: 'files.write',
-              definitionVersion: '2',
+              definitionVersion: '3',
               input: {
                 path: 'result.txt',
                 content: 'unchanged first line\nbefore\nFINAL_TAIL\n',
@@ -276,7 +277,10 @@ test('HTTP Run automatically verifies nested ordinary file Tools with persistent
     let closed = false;
     try {
       await Promise.race([
-        service.close(),
+        (async () => {
+          await service.close();
+          await files.close();
+        })(),
         new Promise<never>((_, reject) => {
           timer = setTimeout(
             () => reject(new Error(`nested_automatic_cleanup_timeout:${root}`)),

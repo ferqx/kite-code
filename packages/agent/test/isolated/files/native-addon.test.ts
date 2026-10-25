@@ -7,6 +7,7 @@ import {
   readFileSync,
   realpathSync,
   rmSync,
+  statSync,
   symlinkSync,
   writeFileSync,
 } from 'node:fs';
@@ -74,6 +75,39 @@ test('Node-API capability preserves native publication, complete bytes and prote
     expect(existsSync(join(root, 'Exact.txt'))).toBe(false);
     io.close();
     expect(() => io.verifyRoot()).toThrow('file_closed');
+  } finally {
+    io.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('native directory creation is create-only, private and anchored without following existing links', () => {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-native-parent-')));
+  const io = createNativeWorkspaceFileIo(root, ['protected'], false);
+  try {
+    const parent = io.openAt(io.root, 'created', 'create-directory', true);
+    expect(io.stat(parent).isDirectory()).toBe(true);
+    io.verifyOwner(parent);
+    if (process.platform === 'win32')
+      defaultWindowsPathSecurity()!.verifyDirectory(join(root, 'created'));
+    else expect(statSync(join(root, 'created')).mode & 0o777).toBe(0o700);
+    expect(() => io.openAt(io.root, 'created', 'create-directory', true)).toThrow('EEXIST');
+    expect(() => io.openAt(io.root, 'protected', 'create-directory', true)).toThrow(
+      'file_path_protected',
+    );
+    expect(existsSync(join(root, 'protected'))).toBe(false);
+    const child = io.openAt(parent, 'nested', 'create-directory', true);
+    io.verifyOwner(child);
+    expect(io.stat(child).isDirectory()).toBe(true);
+    io.closeHandle(child);
+    io.closeHandle(parent);
+    symlinkSync(
+      join(root, 'created'),
+      join(root, 'link'),
+      process.platform === 'win32' ? 'junction' : 'dir',
+    );
+    expect(() => io.openAt(io.root, 'link', 'create-directory', true)).toThrow();
+    expect(() => io.openAt(io.root, 'link', 'directory', true)).toThrow();
   } finally {
     io.close();
     rmSync(root, { recursive: true, force: true });

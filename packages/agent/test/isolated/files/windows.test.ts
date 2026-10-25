@@ -51,7 +51,7 @@ nativeTest(
     try {
       expect(createFileTools(f.files).map((tool) => [tool.id, tool.version])).toEqual([
         ['files.read', '4'],
-        ['files.write', '2'],
+        ['files.write', '3'],
         ['files.edit', '2'],
         ['files.list', '1'],
         ['files.glob', '2'],
@@ -95,7 +95,7 @@ nativeTest(
         paths: ['Exact.txt'],
         next: null,
       });
-      expect(await f.files.search({ text: 'changed' })).toEqual({
+      expect(await f.files.search({ text: 'changed', mode: 'content' })).toMatchObject({
         matches: [{ path: 'Exact.txt', line: 2, content: 'changed changed\r' }],
         next: null,
       });
@@ -145,7 +145,7 @@ nativeTest(
             type: 'tool_call',
             id: 'read',
             name: 'read_file',
-            arguments: JSON.stringify({ path: join(workspace, 'large.txt') }),
+            arguments: JSON.stringify({ path: join(workspace, 'large.txt'), max_lines: 120002 }),
           },
           { ...finish, reason: 'tool_calls' },
         ],
@@ -225,7 +225,7 @@ nativeTest(
           (message) => message.role === 'tool' && message.content.endsWith(content),
         ),
       ).toBe(true);
-      expect((await files.read('large.txt')).content).toBe(content);
+      expect((await files.read('large.txt', { limit: 120002 })).content).toBe(content);
     } catch (error) {
       failed = true;
       failure = error;

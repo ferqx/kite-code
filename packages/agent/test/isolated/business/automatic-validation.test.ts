@@ -46,7 +46,7 @@ async function fixture(
       : {
           automaticValidation: {
             mutations: [
-              { definitionId: 'files.write', definitionVersion: '2', effects: ['workspace_write'] },
+              { definitionId: 'files.write', definitionVersion: '3', effects: ['workspace_write'] },
               { definitionId: 'files.edit', definitionVersion: '2', effects: ['workspace_write'] },
             ],
             fileHashChecker: { definitionId: 'files.read', definitionVersion: '4' },
@@ -492,7 +492,7 @@ test('a checker paused after its actual read cannot overwrite a newly registered
       callId: 'late',
       kind: 'tool',
       definitionId: 'files.write',
-      definitionVersion: '2',
+      definitionVersion: '3',
       input: { path: 'later.txt', content: 'later', base: null },
       decisionSource: { kind: 'model_decision', modelExecutionId: model.id, sources: [] },
     });
@@ -640,6 +640,7 @@ test('Rewind retains original verified history without replaying it into a fresh
       oldRef = mutationRef(old),
       session = await f.store.getSession('s');
     const beforeReads = f.reads;
+    const beforeFile = await f.files.read('out.txt');
     await f.runtime.selectContext({
       expectedStoreId: f.metadata.storeId,
       commandId: 'rewind',
@@ -660,31 +661,13 @@ test('Rewind retains original verified history without replaying it into a fresh
       status: 'applied',
       request: { kind: 'run.start', content: 'New task: new explicit work' },
     });
-    const receipt = next.receipt as {
-      runId: string;
-      businessCommandId: string;
-      humanInputCommandId: string;
-    };
-    expect(receipt.businessCommandId).toBeString();
-    expect(receipt.businessCommandId).not.toBe('new');
-    expect(await f.store.getCommand(receipt.humanInputCommandId)).toMatchObject({
-      kind: 'human.input',
-      request: {
-        content: 'New task: new explicit work',
-        publicCommandId: 'new',
-        originalRequest: next.request,
-      },
-    });
-    expect(await f.store.getCommand(receipt.businessCommandId)).toMatchObject({
-      kind: 'input.follow_up',
-      status: 'applied',
-      request: { content: 'New task: new explicit work', afterRunId: old.id },
-      receipt: { runId: receipt.runId },
-    });
+    expect(next.receipt).toEqual({ runId: expect.any(String) });
+    const receipt = next.receipt as { runId: string };
     const run = await f.store.getRun(receipt.runId);
     expect(run).toMatchObject({
-      originCommandId: receipt.businessCommandId,
+      originCommandId: next.id,
       rootWorkCommandId: 'new',
+      rootWorkSeq: next.seq,
     });
     expect(run!.status).toBe('completed');
     expect(run!.id).not.toBe(old.id);
@@ -703,8 +686,14 @@ test('Rewind retains original verified history without replaying it into a fresh
     expect(
       input.request.messages.find((message) => message.content === 'New task: new explicit work')
         ?.sourceIds,
-    ).toEqual([receipt.businessCommandId]);
+    ).toEqual([next.id]);
     expect(f.reads).toBe(beforeReads);
+    expect((await f.files.read('out.txt')).baseline).toEqual(beforeFile.baseline);
+    expect(
+      (await f.store.listExecutions('s')).filter(
+        (execution) => execution.definitionId === 'files.write',
+      ),
+    ).toHaveLength(1);
     const history = await f.store.listMutationFacts({
       expectedStoreId: f.metadata.storeId,
       requirement: oldRef,

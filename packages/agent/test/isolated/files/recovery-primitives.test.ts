@@ -317,6 +317,102 @@ test('native sync and close boundary failures distinguish zero publication, comm
   );
 });
 
+test('parent creation races, access denial and unknown handles keep accurate outcomes and next actions', () => {
+  const entry = new URL('../../../src/files.ts', import.meta.url).href;
+  const binding = fileURLToPath(new URL('../../../src/files-native-binding.ts', import.meta.url));
+  const types = new URL('../../../src/storage/types.ts', import.meta.url).href;
+  const child = Bun.spawnSync(
+    [
+      process.execPath,
+      '--eval',
+      `
+    import {mock} from 'bun:test';
+    import * as fs from 'node:fs';
+    import {tmpdir} from 'node:os';
+    import {join} from 'node:path';
+    import {AgentError} from ${JSON.stringify(types)};
+    import {createNativeWorkspaceFileIo} from ${JSON.stringify(pathToFileURL(binding).href)};
+    const actualNative = createNativeWorkspaceFileIo;
+    const root = fs.realpathSync(fs.mkdtempSync(join(tmpdir(),'kite-parent-races-')));
+    let mode = '', workspace = '', outside = '', createdCount = 0;
+    mock.module(${JSON.stringify(binding)}, () => ({createNativeWorkspaceFileIo(...args) {
+      const io = actualNative(...args);
+      return {...io, openAt(parent, name, kind, strict) {
+        if(kind === 'create-directory') {
+          createdCount++;
+          if(mode === 'race-dir') { mode = ''; fs.mkdirSync(join(workspace,name)); }
+          if(mode === 'race-link') { mode = ''; fs.symlinkSync(outside,join(workspace,name),process.platform==='win32'?'junction':'dir'); }
+          if(mode === 'denied' || (mode === 'partial' && createdCount === 2)) throw new AgentError('EACCES');
+          if(mode === 'unknown') { const id = io.openAt(parent,name,kind,strict); io.closeHandle(id); throw new AgentError('file_close_unknown'); }
+        }
+        return io.openAt(parent,name,kind,strict);
+      }};
+    }}));
+    const {createWorkspaceFiles, createFileTools} = await import(${JSON.stringify(entry)});
+    const facts=[];
+    try {
+      for (const scenario of ['race-dir','race-link','denied','partial','unknown']) {
+        mode=scenario; createdCount=0;
+        workspace=join(root,scenario); fs.mkdirSync(workspace);
+        outside=join(root,scenario+'-outside'); fs.mkdirSync(outside);
+        const files=createWorkspaceFiles({root:workspace});
+        try {
+          const result=await createFileTools(files).find(t=>t.id==='files.write').execute(
+            {path:'first/second/file.txt',base:null,content:'created'},
+            {signal:new AbortController().signal,executionId:'tool',runId:'run'});
+          facts.push({scenario,outcome:result.outcome,code:result.details?.code,content:result.content,createdCount,
+            file:fs.existsSync(join(workspace,'first/second/file.txt')),parent:fs.existsSync(join(workspace,'first')),
+            outside:fs.readdirSync(outside)});
+        } finally {await files.close();}
+      }
+      console.log(JSON.stringify(facts));
+    } finally {fs.rmSync(root,{recursive:true,force:true});}
+  `,
+    ],
+    { stdout: 'pipe', stderr: 'pipe' },
+  );
+  expect(child.exitCode, child.stderr.toString()).toBe(0);
+  const facts = JSON.parse(child.stdout.toString());
+  expect(facts[0]).toMatchObject({
+    scenario: 'race-dir',
+    outcome: 'succeeded',
+    file: true,
+    outside: [],
+  });
+  expect(facts[1]).toMatchObject({
+    scenario: 'race-link',
+    outcome: 'failed',
+    file: false,
+    outside: [],
+  });
+  expect(facts[2]).toMatchObject({
+    scenario: 'denied',
+    outcome: 'failed',
+    code: 'EACCES',
+    file: false,
+    parent: false,
+    createdCount: 1,
+  });
+  expect(facts[2].content).toContain('Tool approval does not override filesystem permissions');
+  expect(facts[3]).toMatchObject({
+    scenario: 'partial',
+    outcome: 'failed',
+    code: 'EACCES',
+    file: false,
+    parent: true,
+  });
+  expect(facts[3].content).toContain('parent directories may remain');
+  expect(facts[4]).toMatchObject({
+    scenario: 'unknown',
+    outcome: 'outcome_unknown',
+    code: 'file_publish_outcome_unknown',
+    file: false,
+    parent: true,
+    createdCount: 1,
+  });
+  expect(facts[4].content).toContain('Do not repeat the write');
+});
+
 test('built public byte leaf executes outside the source tree with exact restore/remove facts', async () => {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'kite-built-files-recovery-')));
   try {

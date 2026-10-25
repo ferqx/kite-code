@@ -265,7 +265,7 @@ try {
     configPath,
     configuration([
       { id: 'files.read', definitionVersion: '4' },
-      { id: 'files.write', definitionVersion: '2' },
+      { id: 'files.write', definitionVersion: '3' },
     ]),
     { mode: 0o600 },
   );

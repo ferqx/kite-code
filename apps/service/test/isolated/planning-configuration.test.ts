@@ -130,7 +130,7 @@ async function fixture(
     tools: toolIds.map((id) => ({
       id,
       definitionVersion:
-        id === 'files.read' ? '5' : ['files.write', 'files.edit'].includes(id) ? '2' : '1',
+        id === 'files.read' ? '5' : id === 'files.write' ? '3' : id === 'files.edit' ? '2' : '1',
     })),
     planning: { requirePlan: true },
   };
@@ -157,9 +157,11 @@ async function fixture(
                       definitionVersion:
                         id === 'files.read'
                           ? '5'
-                          : ['files.write', 'files.edit'].includes(id)
-                            ? '2'
-                            : '1',
+                          : id === 'files.write'
+                            ? '3'
+                            : id === 'files.edit'
+                              ? '2'
+                              : '1',
                     })),
                   ...['planning.write', 'planning.review', 'planning.update'].map((id) => ({
                     kind: 'job' as const,
@@ -993,7 +995,7 @@ test('requirePlan initializes before first real Provider call; user review and a
       runId: done.run!.id,
       originStoreId: f.base.expectedStoreId,
       rootWorkCommandId: 'work',
-      definitionVersion: '2',
+      definitionVersion: '3',
     });
     expect(progress).toMatchObject({
       runId: done.run!.id,
@@ -1003,7 +1005,7 @@ test('requirePlan initializes before first real Provider call; user review and a
       steps: {
         a: {
           status: 'completed',
-          receipt: { executionId: file.id, definitionId: 'files.write', definitionVersion: '2' },
+          receipt: { executionId: file.id, definitionId: 'files.write', definitionVersion: '3' },
         },
       },
     });

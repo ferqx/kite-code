@@ -8,14 +8,16 @@ import { type createPassiveWebExtractor, webExtractorAsset } from '@kite-ai/agen
 
 test('formal built public entry selects package Worker asset/hash; source path has no parser fallback and mismatching captured identity fails', async () => {
   const path = webExtractorAsset();
-  expect(path.endsWith('/dist/tools/web-fetch/extractor-worker.js')).toBe(true);
+  expect(path.replaceAll('\\', '/').endsWith('/dist/tools/web-fetch/extractor-worker.js')).toBe(
+    true,
+  );
   const hash = createHash('sha256').update(readFileSync(path)).digest('hex');
   expect(readFileSync(path.replace('.js', '.sha256'), 'utf8').trim()).toBe(hash);
   const built = await import(resolve(import.meta.dir, '../../../dist/tools/web-fetch/index.js'));
   expect(built.webExtractorAsset()).toBe(path);
   const storage = sqliteStorageAssets();
   expect(storage.preload.pathname.endsWith('/storage/worker/observer-preload.ts')).toBe(true);
-  expect(storage.observerModules.map((module) => module.pathname)).toEqual([
+  expect(storage.observerModules.map((module) => fileURLToPath(module))).toEqual([
     fileURLToPath(new URL('../../../src/platform/process/owned-worker.ts', import.meta.url)),
     fileURLToPath(
       new URL('../../../src/platform/process/worker-thread.darwin.ts', import.meta.url),

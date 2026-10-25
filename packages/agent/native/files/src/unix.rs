@@ -1,6 +1,8 @@
 use crate::{DirectoryEntry, FileStat, fail, io_error};
 use cap_fs_ext::{DirExt, FollowSymlinks, OpenOptionsFollowExt};
-use cap_std::fs::{Dir, File, Metadata, MetadataExt, OpenOptions, OpenOptionsExt};
+use cap_std::fs::{
+    Dir, DirBuilder, DirBuilderExt, File, Metadata, MetadataExt, OpenOptions, OpenOptionsExt,
+};
 use napi::Result;
 use std::collections::BTreeMap;
 use std::fs;
@@ -256,11 +258,24 @@ impl Owner {
         if name != "." || kind != "directory" {
             component(&name)?;
         }
-        if (strict || self.protect_reads) && self.protected(parent, &name)? {
+        if (strict || self.protect_reads || kind == "create-directory")
+            && self.protected(parent, &name)?
+        {
             return Err(fail("file_path_protected"));
         }
+        if kind == "create-directory" {
+            // One component under the retained parent; never ambient mkdir_all or a followed link.
+            self.verify_owner(parent)?;
+            let mut builder = DirBuilder::new();
+            builder.mode(0o700);
+            self.entry(parent)?
+                .object
+                .dir()?
+                .create_dir_with(&name, &builder)
+                .map_err(io_error)?;
+        }
         let dir = self.entry(parent)?.object.dir()?;
-        let object = if kind == "directory" {
+        let object = if kind == "directory" || kind == "create-directory" {
             Object::Directory(ManuallyDrop::new(
                 dir.open_dir_nofollow(&name).map_err(io_error)?,
             ))

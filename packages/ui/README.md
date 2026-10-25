@@ -130,6 +130,16 @@ Composer 的图片卡片保持固定预览区域，接受宿主交付的小尺�
 
 ## 原桌面展示层
 
+`ToolActivity` 的已知 `web_fetch` 使用地球图标、“读取网页”和原目标的网站／路径，省略协议、user-info、query与fragment，过长目标沿原省略与title阅读。准确成功只保留工具行，不挂载结果正文或原记录reader，不提供正文展开；这不修改Tool结果、Artifact或模型输入。失败及unknown仍保各自原详情，`web_timeout`仅补充不推断阶段的中文说明并保原代码。真实failed/rejected子工具的整个标题沿`--destructive`呈现，hover／focus／展开保持；重复结果标签仅供读屏，不参与行布局。聚合标题不因子项失败取得error装饰，unknown／等待／审批提示仍独立表达。DOM回归核同一聚合身份、状态转换、URL隐私与成功正文缺席，真实生产CSS的浏览器回归核整行颜色、目标截断、原因实际可读与原滚动合同。
+
+`ToolActivity` 的 `toolDetailText` 不将 `source:auto/state:approved` 的通过理由混入工具详情；运行、成功、失败与未知结果均沿同一规则，工具原异常及 stdout／stderr 保留。批准盾牌与提示、拒绝／待人工／审批未知原因、原记录和宿主授权事实保持。纯显示筛选不删除 `Message.approval.reason`，也不更改执行状态。[聚合回归](test/isolated/desktop-tool-aggregation.test.tsx)覆盖未知工具、Shell、失败／未知、重读和原错误保留。
+
+2026-10-25，Windows x64／Bun1.4.3，网页行与失败颜色这一轮：聚合／Native metadata／Native DOM 三文件66项／2519断言通过；页面13项／95断言及按原隔离方式单独运行的Sidebar9项／332断言通过，UI／Desktop类型、定向Biome、文档与边界检查通过。实际Chrome155在浅1280／深780px验证6个网页结果、成功正文不挂载、失败整行颜色与隐藏的重复标签、11种审批／结果、展开收起、原原因实际可见、键盘／滚轮／拖动及边界传递；25145份DOM／几何采样、10233帧中无页面错误，标题、外层阅读和输入区稳定，已人工复看关闭、悬停、展开及原因可见阶段。报告与逐阶段截图归`.cache/native-live-tool-aggregation-xG4M8P`。过程中实际发现收起的侧栏拖拽柄仍造成父面板2px横向溢出；仅在`data-open=false`时裁切其内容，修复键盘焦点带动整个内容区横移，展开柄和拖拽保持。原失败记录在`.cache/native-live-tool-aggregation-e7SSd5`／`.cache/native-live-tool-aggregation-ZsvQhY`；不放宽原精确几何断言。上述为隔离生产组件及受控metadata验证，不代表重新构建并验收完整安装版。
+
+2026-10-25，Windows x64／Bun1.4.3／Chrome155、`3dc3a941f` 加本轮改动：共享聚合、Native metadata、Native 工具 DOM 与 Web Fetch network 四个完整文件66项／2510断言通过。原 long-group 浏览器 runner 使用实际 Native／共享组件与生产 CSS，在浅色1280px、深色780px两组逐步观察折叠、悬停、展开、关闭、11种审批／执行状态、键盘滚动及边界传递；20672份 DOM／几何采样、7328帧中均无自动批准理由混入可见工具正文，真实失败／unknown及拒绝全文保留，标题和输入区位置稳定、外层阅读位置保持，无页面错误。截图及报告在 `.cache/native-live-tool-aggregation-IhHAZ3`，没有读取用户 Store或发送真实任务，不代表完整安装版验收。
+
+额外 tool-details 场景在嵌套文件差异尾部发现既有裁切：末行下缘546.875px而外层可见下缘535.1875px。隔离构建临时还原本次通过理由筛选前的逻辑后，得到相同几何失败；该场景与本次审批展示无关，未计为通过。保留原 [browser runner](../../apps/desktop/test/native-live-tool-aggregation-browser-runner.fixture.ts) 断言和两个证据目录 `.cache/native-live-tool-aggregation-J21EC6`／`.cache/native-live-tool-aggregation-M7ihds`，未放宽差异阅读规则。
+
 Conversation 的 `systemKind:agent_result` 只消费宿主已确认实际触发父续跑的 `agentResult`，与普通消息共用 MessageItem 和输入气泡样式，增加“〔名称〕Agent 发送”头部，正文显示实际 Markdown 和非成功状态。父原轮 active 接纳不由宿主投影为此类消息，UI 也不按当前 Run 是否活动再过滤已确认的唤醒消息。独立消息边界不被相邻过程分组吸入，默认折叠及冷读仍保留正文，且不取得用户输入、助手最终回复或复制资格。同一 Turn 如被独立消息分段，整轮最终耗时仅在最后一段显示。`renderMessageContent` 仍由宿主提供准确详情入口，正文完整性由 `contentComplete` 明示。真实来源与读取由 [Desktop](../../apps/desktop/README.md#native-当前会话环境信息与子详情)及 Store 负责，UI 不根据名称、正文或子 Agent 状态制造消息。
 
 普通邮件使用 `systemKind:agent_message` 和宿主验证的 `agentMessage`，沿原接收 Run 的 turnId 留在同一处理过程。原 MessageItem／MessageContent 显示“〔名称〕Agent 发送”、完整 Markdown 和正文不可读状态；它没有独立气泡、用户输入、工具执行或助手最终回复的身份，正文中的批准文字也不生成操作入口。`data-agent-message-id` 沿原 mail ID，终态及冷历史保持同一份正文和一段过程；最终结果的独立消息边界保持上述规则。[共享邮件 DOM](test/isolated/desktop-agent-activity.test.tsx)与 [Native 投影 DOM](../../apps/desktop/test/isolated/native-transcript-dom.test.tsx)分别核来源、正文、失败状态和活动→完成→冷历史的分组、单耗时与复制边界。

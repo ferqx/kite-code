@@ -3,7 +3,11 @@ import type { AgentClient, Execution, Message, Run } from '@kite-ai/client';
 import { decodeNativeRequest } from '../electron/native-ipc';
 import { nativeLiveShellInputFact } from '../electron/tool-message-fact';
 import { NativeToolMessages } from '../electron/tool-messages';
-import { authorizationApproval, desktopToolMessage } from '../src/native-tool-messages';
+import {
+  authorizationApproval,
+  desktopToolMessage,
+  desktopToolPresentation,
+} from '../src/native-tool-messages';
 import {
   type NativeToolMessageScope,
   nativeShellCommandChunkBytes,
@@ -107,6 +111,44 @@ function fixture() {
     },
   };
 }
+
+test('current and saved workspace write versions retain their known Native presentation', () => {
+  for (const definitionVersion of ['2', '3'])
+    expect(
+      desktopToolPresentation({ definitionId: 'files.write', definitionVersion }),
+    ).toMatchObject({ toolName: 'write_file', title: '写入' });
+  expect(
+    desktopToolPresentation({ definitionId: 'files.write', definitionVersion: 'future' }),
+  ).toMatchObject({ title: 'files.write · future', toolName: undefined });
+});
+
+test('Web Fetch rows use the supported definition and only a unique original call supplies the URL', async () => {
+  expect(
+    desktopToolPresentation({ definitionId: 'web_fetch', definitionVersion: '1' }),
+  ).toMatchObject({ toolName: 'web_fetch', title: '读取网页' });
+  expect(
+    desktopToolPresentation({ definitionId: 'web_fetch', definitionVersion: 'future' }),
+  ).toMatchObject({ toolName: undefined, title: 'web_fetch · future' });
+  const f = fixture();
+  try {
+    for (const id of ['verified', 'future', 'missing']) {
+      f.add(id, 'failed', id, 'web_fetch');
+      f.messages.get(`call-${id}`)!.toolCalls![0]!.arguments = JSON.stringify({
+        url: 'https://github.com/AppFlowy-IO/AppFlowy',
+      });
+    }
+    f.executions.get('execution-future')!.definitionVersion = 'future';
+    f.messages.delete('call-missing');
+    expect(
+      (await f.list(['verified', 'future', 'missing'])).entries.map((fact) => fact.target),
+    ).toEqual(['https://github.com/AppFlowy-IO/AppFlowy', undefined, undefined]);
+    const duplicate = { ...f.messages.get('call-verified')!, id: 'duplicate', seq: '1' };
+    f.messages.set('duplicate', duplicate);
+    expect((await f.list(['verified'])).entries[0]!.target).toBeUndefined();
+  } finally {
+    f.manager.release();
+  }
+});
 
 test('cache samples use immutable original Model receipts beyond the View, retain sealed origins and reject invented token pairs', async () => {
   const f = fixture();

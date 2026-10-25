@@ -116,14 +116,18 @@ test('failed baselines and uncertain post-publication capture never save a succe
       context,
     );
     expect(unknown.outcome).toBe('outcome_unknown');
-    expect(unknown.details).toEqual({ code: 'file_publish_outcome_unknown' });
+    expect(unknown.details).toMatchObject({
+      code: 'file_publish_outcome_unknown',
+      path: 'published',
+    });
+    expect(unknown.content).toContain('Do not repeat the write');
     expect(readFileSync(join(f.root, 'published'), 'utf8')).toBe('actual published');
     const failed = await tool.execute(
       { path: 'published', base: null, content: 'must not replace' },
       context,
     );
     expect(failed.outcome).toBe('failed');
-    expect(failed.details).toEqual({ code: 'file_baseline_conflict' });
+    expect(failed.details).toEqual({ code: 'file_baseline_conflict', path: 'published' });
     expect(failed.content).toContain('This invocation did not publish');
     expect(failed.content).toContain('does not report the current file content');
     expect(failed.content).toContain('Other successful operations are not rolled back');
@@ -153,7 +157,7 @@ test('a stale edit reports its own rejected effect without claiming the historic
       { signal: new AbortController().signal } as Parameters<typeof tool.execute>[1],
     );
     expect(result.outcome).toBe('failed');
-    expect(result.details).toEqual({ code: 'file_baseline_conflict' });
+    expect(result.details).toEqual({ code: 'file_baseline_conflict', path: 'shared' });
     expect(result.content).toContain('Earlier read content is historical');
     expect(result.content).toContain('baseline describes the complete file identity and version');
     expect(result.content).toContain('does not prove that another edit targeted the same text');
@@ -187,7 +191,7 @@ test('a stale edit reports its own rejected effect without claiming the historic
       { signal: new AbortController().signal } as Parameters<typeof captured.execute>[1],
     );
     expect(unknown.outcome).toBe('outcome_unknown');
-    expect(unknown.details).toEqual({ code: 'file_publish_outcome_unknown' });
+    expect(unknown.details).toMatchObject({ code: 'file_publish_outcome_unknown', path: 'shared' });
     expect(unknown.content).not.toContain('did not publish');
     expect(readFileSync(join(f.root, 'shared'), 'utf8')).toBe('A=1\r\nB=1\r\n');
   } finally {
@@ -307,7 +311,7 @@ test('real Core saves the preview in original Execution receipts; repeated call 
         runId: message.runId,
         kind: 'tool',
         definitionId: 'files.write',
-        definitionVersion: '2',
+        definitionVersion: '3',
         status: 'succeeded',
       });
       const result = execution.result as unknown as {

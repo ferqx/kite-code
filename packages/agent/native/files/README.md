@@ -24,6 +24,8 @@ cap-std 本身不是本项目全部安全规则的替代：其 Windows metadata 
 
 Windows 的目录身份核实不是 POSIX directory fsync，不作断电持久性承诺；末次 baseline 复核与非合作编辑器之间仍不是原子 filesystem CAS。普通 Workspace 的既有 ACL 不修改。严格外部路径、字节恢复和普通 Workspace 默认读取保持原差别。
 
+ABI `kite-files:2/cap-std:4.0.3` 增加内部 `create-directory` 打开种类，只创建原父能力下的单个新目录。POSIX 用 `create_dir_with(0700)` 后 no-follow 打开；Windows 以 `FILE_CREATE` 取得原目录 HANDLE，使用本人私有 DACL，先登记再核身份，取得未知保原父链。既有目录冲突返回 `EEXIST`，不在 native 内跟随或重试。上层仅对新建工作区文件补父目录，详细范围和失败语义归 [Files owner](../../src/tools/files/README.md#新建文件的父目录与失败反馈)。系统权限拒绝保留 `EACCES`，不再混为一般 IO 错误。
+
 ## 构建与验证
 
 在本目录执行 `cargo test --locked --lib` 验证 Windows 真实8.3根别名拒绝、取得后确认未知与关闭未知保原父链／不重试，以及实际发布后确认失败。故障口只在 Rust `cfg(test)` 制品内存在，普通 Node-API ABI 没有开启参数。

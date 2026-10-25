@@ -11,6 +11,8 @@
 
 V1.3 正式 Service 的 Files 工具及检查点恢复沿 `@kite-ai/agent/files`、原 Core 派发和可信 Workspace scope，不调用下方旧 `WorkspaceFilesystemProvider`。共享六工具、完整正文、baseline、预览及 restore／remove 的当前合同归 [Files owner](../../packages/agent/src/tools/files/README.md)。[平台分派](../../packages/agent/src/tools/files-io.ts)现接 POSIX 原 FD 和 Windows x64 原 HANDLE；Windows 不改普通 Workspace 既有 DACL，拒绝 reparse／名称等价绕过，实际原生和安装版资格仍未完成。
 
+`files.write@3` 的 create-only 工作区写入可以在原父能力下逐组件创建缺失目录；不使用 ambient recursive mkdir，不越过链接／保护边界，不改已有 ACL。外部写入、覆盖、编辑和 byte recovery 不扩张目录创建范围；新建目录不归文件恢复删除。取得／关闭不确定仍进入原 unknown 而不重放，当前机制、验证和原生 ABI 归上述 Files owner。
+
 当前验证使用[现有隔离 runner](../../scripts/test-plan.ts)，按[默认执行与隔离](../../tests/README.md#默认执行与隔离)独立运行 `packages/agent/test/isolated/files` 及 Service 原 Files／checkpoint 完整文件；Windows 原生用例必须在 actual win32 运行，不因 backend unavailable 而 skip。Windows file flush／目录身份核对不宣称 POSIX directory fsync或断电持久性，来源和 unknown 约束不变。本文下方保留历史 Provider 机制与仍适用的安全经验，不能把旧生产权威或测试当成新入口的运行证明。
 
 ## 设计目标

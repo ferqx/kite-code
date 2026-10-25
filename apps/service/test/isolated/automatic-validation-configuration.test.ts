@@ -15,7 +15,7 @@ import { createDefaultProcessConfiguration } from '../../src/configuration';
 
 const policy: NonNullable<PlanningOptions['automaticValidation']> = {
   mutations: [
-    { definitionId: 'files.write', definitionVersion: '2', effects: ['workspace_write'] },
+    { definitionId: 'files.write', definitionVersion: '3', effects: ['workspace_write'] },
     { definitionId: 'files.edit', definitionVersion: '2', effects: ['workspace_write'] },
   ],
   fileHashChecker: { definitionId: 'files.read', definitionVersion: '5' },
@@ -100,7 +100,7 @@ async function fixture(options: {
       ],
       tools: tools.map((id) => ({
         id,
-        definitionVersion: id === 'files.read' ? '5' : id === 'files.write' ? '2' : '1',
+        definitionVersion: id === 'files.read' ? '5' : id === 'files.write' ? '3' : '1',
       })),
       // This document is deliberately not an authority to enable requirements.
       planning: { automaticValidation: policy },
@@ -289,7 +289,7 @@ test('trusted automatic validation initializes without plan flags, runs the real
       mutations: [
         {
           definitionId: 'files.write',
-          definitionVersion: '2',
+          definitionVersion: '3',
           effects: ['workspace_write'],
           actualEffects: ['workspace_write'],
           selected: true,
@@ -489,7 +489,7 @@ test('revoking persistent trust after the actual mutation denies the checker and
 test('a selected mutation with a mismatched host definition or effect cannot silently bypass its obligation', async () => {
   for (const mutation of [
     { definitionId: 'files.write', definitionVersion: '1', effects: ['workspace_write'] as const },
-    { definitionId: 'files.write', definitionVersion: '2', effects: ['unknown'] as const },
+    { definitionId: 'files.write', definitionVersion: '3', effects: ['unknown'] as const },
   ]) {
     const f = await fixture({
       automaticValidation: { mutations: [mutation], fileHashChecker: policy.fileHashChecker },

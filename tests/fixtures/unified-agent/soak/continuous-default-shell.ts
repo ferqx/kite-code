@@ -212,7 +212,7 @@ export async function openDefaultShellContinuousFixture(root: string, candidateR
           },
         ],
         tools: [
-          { id: 'files.write', definitionVersion: '2' },
+          { id: 'files.write', definitionVersion: '3' },
           ...['task.spawn', 'task.events', 'shell.launch', 'shell.wait'].map((id) => ({
             id,
             definitionVersion: '1',

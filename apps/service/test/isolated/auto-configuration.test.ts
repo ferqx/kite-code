@@ -130,7 +130,7 @@ async function fixture(decision: CheckResponse = 'approve_once') {
       baseURL: `http://127.0.0.1:${provider.port}/v1`,
       options: { temperature: 0.25 },
     })),
-    tools: [{ id: 'files.write', definitionVersion: '2' }],
+    tools: [{ id: 'files.write', definitionVersion: '3' }],
   };
   writeFileSync(configurationPath, JSON.stringify(configuration));
   let policy: PermissionPolicySnapshot = {
@@ -140,7 +140,7 @@ async function fixture(decision: CheckResponse = 'approve_once') {
     allowed: [
       { kind: 'model', definitionId: 'a', definitionVersion: '1' },
       { kind: 'model', definitionId: 'b', definitionVersion: '1' },
-      { kind: 'tool', definitionId: 'files.write', definitionVersion: '2' },
+      { kind: 'tool', definitionId: 'files.write', definitionVersion: '3' },
     ],
   };
   const host = createDefaultProcessConfiguration({
@@ -352,7 +352,7 @@ test('default Auto uses the selected actual SDK route and one tool-free durable 
     expect(JSON.stringify(f.checks[0]!.payload)).toContain(task);
     expect(f.checks[0]!.payload.target).toMatchObject({
       definitionId: 'files.write',
-      definitionVersion: '2',
+      definitionVersion: '3',
       input: { path: 'work.txt', base: null },
     });
     const executions = await f.store.listExecutions('s');
@@ -495,15 +495,20 @@ test('default Auto cannot check past untrusted, missing allowlist, policy revoca
   }
 }, 30000);
 
-test('Auto rejection stops the original work, preserving a real check result and zero file effects', async () => {
+test('Auto rejection preserves the denied tool result and allows the Model to finish without file effects', async () => {
   const f = await fixture('reject');
   try {
     await f.run();
     await f.done();
     expect(existsSync(join(f.workspace, 'work.txt'))).toBe(false);
     expect(f.checks).toHaveLength(1);
-    expect(f.normalRequests).toHaveLength(1);
-    expect((await f.runtime.getView('s')).runs[0]!.status).toBe('cancelled');
+    expect(f.normalRequests).toHaveLength(2);
+    expect((await f.runtime.getView('s')).runs[0]!.status).toBe('completed');
+    expect(
+      (await f.store.listExecutions('s')).find(
+        (execution) => execution.definitionId === 'files.write',
+      )!.status,
+    ).toBe('failed');
     expect(
       (await f.client.listInteractions('s', { storeId: f.expectedStoreId })).interactions,
     ).toHaveLength(0);

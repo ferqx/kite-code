@@ -363,7 +363,10 @@ export function createPlanningValidation(
       !boundary.executionId ||
       boundary.sessionId !== read.sessionId ||
       !['files.write', 'files.edit'].includes(boundary.definitionId ?? '') ||
-      boundary.definitionVersion !== '2'
+      !(
+        boundary.definitionVersion === '2' ||
+        (boundary.definitionId === 'files.write' && boundary.definitionVersion === '3')
+      )
     )
       return false;
     const actual = await read.getExecution(boundary.executionId);

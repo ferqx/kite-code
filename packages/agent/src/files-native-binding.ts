@@ -6,7 +6,7 @@ import { assertNoSymlinkPath } from './platform/profile-identity';
 import { AgentError } from './storage/types';
 import type { WorkspaceFileIo } from './tools/files-io';
 
-export const filesNativeAbi = 'kite-files:1/cap-std:4.0.3';
+export const filesNativeAbi = 'kite-files:2/cap-std:4.0.3';
 /** Trusted assembly protection, including the loader chunk and every native companion asset. */
 export function filesNativeAssets(): readonly URL[] {
   return [new URL(import.meta.url), new URL('./native/files', import.meta.url)];
@@ -87,7 +87,7 @@ function native<T>(work: () => T): T {
     return work();
   } catch (error) {
     if (error instanceof AgentError) throw error;
-    const match = /^(file_[a-z_]+|ENOENT|ENOTDIR|EEXIST)(?::(-?\d+))?$/.exec(
+    const match = /^(file_[a-z_]+|ENOENT|ENOTDIR|EEXIST|EACCES|EPERM)(?::(-?\d+))?$/.exec(
       (error as Error).message,
     );
     throw Object.assign(
@@ -125,7 +125,7 @@ export function createNativeWorkspaceFileIo(
     openAt: (
       parent: number,
       name: string,
-      kind: 'directory' | 'read' | 'temporary',
+      kind: 'directory' | 'create-directory' | 'read' | 'temporary',
       strict = false,
     ) => native(() => owner.openAt(parent, name, kind, strict)),
     read(id: number, bytes: Uint8Array) {

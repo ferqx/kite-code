@@ -57,7 +57,7 @@ export function createPathFileTools(boundaryInput: PathFileBoundary) {
             : 'edit_user_file',
     },
     version: template.id === 'files.read' ? '2' : '1',
-    description: `${template.description.split(' Paths are ')[0]} Use a canonical absolute user-file path with exact target permission. External file modifications are outside workspace checkpoints.`,
+    description: `${template.id === 'files.write' ? 'Create or replace a complete UTF-8 user file. Pass base=null only to create a new file; replacement requires the exact complete-file baseline. Supply exactly one of content or content_artifact. Correct a reported failure before another attempt; never replay an unknown effect.' : template.description.split(' Paths are ')[0]} Use a canonical absolute user-file path with exact target permission. The physical parent directory must already exist; external writes never create parent directories. External file modifications are outside workspace checkpoints.`,
     inputSchema: {
       ...template.inputSchema,
       properties: {

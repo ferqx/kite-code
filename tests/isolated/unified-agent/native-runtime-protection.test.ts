@@ -122,7 +122,7 @@ test.skipIf(process.platform !== 'darwin')(
         ],
         tools: [
           { id: 'files.read', definitionVersion: '4' },
-          { id: 'files.write', definitionVersion: '2' },
+          { id: 'files.write', definitionVersion: '3' },
         ],
       });
       writeFileSync(join(profile.profilePath, 'config.jsonc'), config, { mode: 0o600 });

@@ -19,7 +19,7 @@ const emptyToolFacts: NativeToolMessageFact[] = [];
 const labels: Record<string, readonly [readonly string[], string]> = {
   'files.read': [['2', '3', '4', '5'], '读取'],
   'files.read_path': [['1', '2'], '读取'],
-  'files.write': [['2'], '写入'],
+  'files.write': [['2', '3'], '写入'],
   'files.edit': [['2'], '修改'],
   'files.glob': [['2'], '查找文件'],
   'files.search': [['2', '3', '4'], '搜索内容'],
@@ -30,6 +30,7 @@ const labels: Record<string, readonly [readonly string[], string]> = {
   'shell.wait': [['1'], '等待后台 Shell'],
   'shell.stop': [['1'], '请求停止后台 Shell'],
   ask_user: [['1'], '询问用户'],
+  web_fetch: [['1'], '读取网页'],
   'task.spawn': [['1'], '创建子 Agent'],
   'task.follow_up': [['1'], '继续子 Agent'],
   'task.message': [['1'], '发送 Agent 消息'],

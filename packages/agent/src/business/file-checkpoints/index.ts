@@ -127,7 +127,10 @@ function source(
     !['dispatching', 'running'].includes(actual.status) ||
     !actual.runId ||
     !['files.write', 'files.edit'].includes(actual.definitionId ?? '') ||
-    actual.definitionVersion !== '2' ||
+    !(
+      actual.definitionVersion === '2' ||
+      (actual.definitionId === 'files.write' && actual.definitionVersion === '3')
+    ) ||
     !actual.attempt ||
     !actual.inputDigest
   )

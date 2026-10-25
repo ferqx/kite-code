@@ -64,17 +64,19 @@ function target(
   )
     return '.';
   const key =
-    definitionId === 'shell.launch' || definitionId === 'shell.execute'
-      ? 'command'
-      : definitionId.startsWith('shell.')
-        ? 'shellId'
-        : definitionId === 'files.glob'
-          ? 'pattern'
-          : definitionId === 'files.search'
-            ? 'text'
-            : definitionId.startsWith('files.')
-              ? 'path'
-              : undefined;
+    definitionId === 'web_fetch' && definitionVersion === '1'
+      ? 'url'
+      : definitionId === 'shell.launch' || definitionId === 'shell.execute'
+        ? 'command'
+        : definitionId.startsWith('shell.')
+          ? 'shellId'
+          : definitionId === 'files.glob'
+            ? 'pattern'
+            : definitionId === 'files.search'
+              ? 'text'
+              : definitionId.startsWith('files.')
+                ? 'path'
+                : undefined;
   const target = key ? input?.[key] : undefined;
   // A request target remains text; even a known Files request does not grant a file action.
   if (typeof target !== 'string') return undefined;

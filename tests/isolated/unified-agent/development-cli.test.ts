@@ -595,7 +595,7 @@ test('actual development wrapper new argv binds original Work, cold caller, File
         ],
         tools: [
           { id: 'files.read', definitionVersion: '5' },
-          { id: 'files.write', definitionVersion: '2' },
+          { id: 'files.write', definitionVersion: '3' },
         ],
       }),
       { mode: 0o600 },

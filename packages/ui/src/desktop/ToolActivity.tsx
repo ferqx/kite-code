@@ -71,7 +71,9 @@ const TOOL_LABELS: Record<string, string> = {
 function toolTitle(message: Message): string {
   if (
     message.toolName &&
-    ['read_file', 'edit_file', 'write_file', 'shell_execute'].includes(message.toolName)
+    ['read_file', 'edit_file', 'write_file', 'shell_execute', 'web_fetch'].includes(
+      message.toolName,
+    )
   )
     return TOOL_LABELS[message.toolName]!;
   const title = message.title?.trim();
@@ -239,6 +241,17 @@ function shellTitle(message: Message): string {
 }
 
 function toolTarget(message: Message): string | undefined {
+  if (message.toolName === 'web_fetch') {
+    const raw = message.target ?? message.arguments?.url;
+    if (typeof raw !== 'string') return undefined;
+    try {
+      const url = new URL(raw);
+      if (!['http:', 'https:'].includes(url.protocol)) return undefined;
+      return url.host + (url.pathname === '/' ? '' : url.pathname);
+    } catch {
+      return undefined;
+    }
+  }
   if (message.target !== undefined) return message.target;
   const argument = (name: string) =>
     typeof message.arguments?.[name] === 'string' ? message.arguments[name] : undefined;
@@ -252,8 +265,6 @@ function toolTarget(message: Message): string | undefined {
     case 'search_files':
     case 'glob':
       return argument('pattern');
-    case 'web_fetch':
-      return argument('url');
     case 'shell_execute':
       return argument('command');
     case 'write_plan':
@@ -300,7 +311,10 @@ function hasToolIssue(message: Message): boolean {
 function toolDetailText(message: Message, includeProgress = false): string {
   const parts: string[] = [];
   for (const value of [
-    hasToolIssue(message) ? message.approval?.reason : undefined,
+    hasToolIssue(message) &&
+    !(message.approval?.source === 'auto' && message.approval.state === 'approved')
+      ? message.approval?.reason
+      : undefined,
     message.toolResult?.stderr ?? (includeProgress ? message.toolProgress?.stderr : undefined),
     message.toolResult?.stdout ?? (includeProgress ? message.toolProgress?.stdout : undefined),
     message.text,
@@ -310,7 +324,10 @@ function toolDetailText(message: Message, includeProgress = false): string {
       if (value.includes(parts[index]!)) parts.splice(index, 1);
     parts.push(value);
   }
-  return parts.join('\n');
+  const content = parts.join('\n');
+  return message.toolName === 'web_fetch' && content.trim() === 'web_timeout'
+    ? `网页读取超时，网络请求或页面解析未在本次时限内完成。\n${content}`
+    : content;
 }
 
 function toolIcon(message: Message) {
@@ -852,7 +869,7 @@ export function ToolRow({
             {approval && <ToolApproval message={message} label={approval} />}
             {status && status !== '成功' && status !== approval && (
               <TraceDescription
-                className="tool-step-status"
+                className={`tool-step-status${traceStatus(message) === 'error' ? ' sr-only' : ''}`}
                 data-status={executionUnconfirmed(message) ? undefined : message.status}
               >
                 {status}
@@ -954,12 +971,16 @@ export function ToolActivity({
   );
   const childIssue = childProcess && issues.length > 0;
   const itemIssue = !grouped && (hasToolIssue(message) || childIssue);
+  const webSuccess =
+    !grouped && message.toolName === 'web_fetch' && message.status === 'completed' && !itemIssue;
   const detailLabel = itemIssue ? '工具异常详情' : '工具详情';
   // A failed original Tool receipt always keeps its own failure presentation.
   const agent = !grouped && !itemIssue && message.status !== 'cancelled' ? childAgent : undefined;
   const open = expanded ?? false;
   const children =
-    agent || grouped ? [] : messages.map((item) => renderChildren(item.id.slice(5), true));
+    agent || grouped || webSuccess
+      ? []
+      : messages.map((item) => renderChildren(item.id.slice(5), true));
   const approval = grouped ? undefined : approvalLabel(message);
   const pendingReview = messages.some(
     (item) => !executionUnconfirmed(item) && !item.settled && automaticChecking(item),
@@ -967,7 +988,7 @@ export function ToolActivity({
   const summaryTraceStatus =
     running || pendingReview
       ? 'running'
-      : messages.some((item) => traceStatus(item) === 'error')
+      : !grouped && messages.some((item) => traceStatus(item) === 'error')
         ? 'error'
         : messages.some((item) => traceStatus(item) === 'pending')
           ? 'pending'
@@ -975,6 +996,7 @@ export function ToolActivity({
   const hasDiff = edit && message.changeConfirmed && !!message.toolResult;
   const canExpand =
     !agent &&
+    !webSuccess &&
     (grouped || itemIssue || message.status !== 'not_executed') &&
     (!read || itemIssue) &&
     (!edit || hasDiff || itemIssue) &&
@@ -1057,7 +1079,12 @@ export function ToolActivity({
           (shell ? (
             <code className="tool-command tool-label">{shortCommand}</code>
           ) : (
-            <span className="tool-step-target">{ask ? `· ${target}` : target}</span>
+            <span
+              className="tool-step-target"
+              title={message.toolName === 'web_fetch' ? target : undefined}
+            >
+              {ask ? `· ${target}` : target}
+            </span>
           ))}
       </TraceTitle>
       {approval && approvalIcon(message) && (
@@ -1072,7 +1099,7 @@ export function ToolActivity({
       {approval && !approvalIcon(message) && <ToolApproval message={message} label={approval} />}
       {status && !shell && status !== '成功' && status !== approval && (
         <TraceDescription
-          className="tool-activity-state"
+          className={`tool-activity-state${traceStatus(message) === 'error' ? ' sr-only' : ''}`}
           data-status={issues.length ? 'issue' : 'neutral'}
           role="status"
         >
@@ -1174,7 +1201,7 @@ export function ToolActivity({
               {approval && <ToolApproval message={message} label={approval} />}
               {status && status !== '成功' && status !== approval && (
                 <TraceDescription
-                  className="tool-step-status"
+                  className={`tool-step-status${traceStatus(message) === 'error' ? ' sr-only' : ''}`}
                   data-status={executionUnconfirmed(message) ? undefined : message.status}
                 >
                   {status}
@@ -1193,7 +1220,7 @@ export function ToolActivity({
             <div>{heading}</div>
           </TraceLine>
         )}
-        {!agent && (
+        {!agent && !webSuccess && (
           <TraceCollapsibleContent className="tool-activity-content">
             {grouped && (
               <ScrollArea

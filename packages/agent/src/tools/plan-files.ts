@@ -93,7 +93,10 @@ export function withPlanFileTools(options: {
     async isPlanFileEdit(request: AuthorizationRequest) {
       if (
         request.kind !== 'tool' ||
-        request.definitionVersion !== '2' ||
+        !(
+          request.definitionVersion === '2' ||
+          (request.definitionId === 'files.write' && request.definitionVersion === '3')
+        ) ||
         !['files.write', 'files.edit'].includes(request.definitionId)
       )
         return false;

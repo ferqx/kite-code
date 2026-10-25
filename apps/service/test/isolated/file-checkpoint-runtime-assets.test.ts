@@ -88,7 +88,7 @@ function fixture() {
     kind: 'tool',
     status: 'dispatching',
     definitionId: 'files.write',
-    definitionVersion: '2',
+    definitionVersion: '3',
     attempt: 1,
     input: {} as Json,
     result: null as Json,
@@ -298,6 +298,7 @@ function fixture() {
         tool = {
           ...tool,
           definitionId: id,
+          definitionVersion: id === 'files.write' ? '3' : '2',
           input,
           inputDigest: hash(canonical(input)),
           status: 'dispatching',
@@ -359,6 +360,10 @@ test('pure default Files metadata does not resolve Runtime or filesystem assets 
   expect(actual.migrations.map((migration) => migration.pathname.split('/').at(-1))).toEqual([
     '0001-baseline.sql',
     '0002-recovery-audit.sql',
+    '0003-session-reconciliation.sql',
+    '0004-pending-input-order.sql',
+    '0005-authorization-check.sql',
+    '0006-input-file-imports.sql',
   ]);
 });
 
@@ -468,7 +473,7 @@ test('profile protection canonicalizes actual ancestor aliases; assets containin
   const f = fixture();
   try {
     const alias = join(f.root, 'alias');
-    symlinkSync(f.workspace, alias);
+    symlinkSync(f.workspace, alias, process.platform === 'win32' ? 'junction' : 'dir');
     mkdirSync(join(f.workspace, 'private-data'));
     writeFileSync(join(f.workspace, 'private-data', 'secret'), 'original private bytes');
     writeFileSync(join(f.workspace, 'private-data-neighbor'), 'neighbor');
@@ -492,7 +497,13 @@ test('profile protection canonicalizes actual ancestor aliases; assets containin
       const result = await profileTools.find((tool) => tool.id === id)!.execute(input, f.context);
       expect(result.outcome).toBe('succeeded');
       expect(result.content).not.toContain('secret');
-      expect(result.content).not.toContain('original private bytes');
+      if (id === 'files.search') {
+        const search = JSON.parse(result.content);
+        expect(search.query.text).toBe('original private bytes');
+        expect(search.files).toEqual([]);
+        expect(search.matches).toEqual([]);
+        expect(search.stats.matchedFiles).toBe(0);
+      } else expect(result.content).not.toContain('original private bytes');
       expect(result.content).not.toContain('"private-data"');
     }
     for (const assets of [

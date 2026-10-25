@@ -75,7 +75,7 @@ test('default paired Files captures actual two-Run Model boundaries and complete
       models: [model],
       tools: [
         { id: 'files.read', definitionVersion: '5' },
-        { id: 'files.write', definitionVersion: '2' },
+        { id: 'files.write', definitionVersion: '3' },
       ],
     }),
   );
@@ -296,7 +296,7 @@ test('default paired Files captures actual two-Run Model boundaries and complete
     expect(captured.state).toBe('captured');
     expect(captured.first!.baseline!.hash).toBe(hash(original));
     expect(captured.first!.baseline!.size).toBe(original.length);
-    expect(captured.first!.source.definitionVersion).toBe('2');
+    expect(captured.first!.source.definitionVersion).toBe('3');
     const source = captured.first!.source,
       tool = await reader.getExecution(source.executionId),
       model = await client.getModelInput('s', source.modelExecutionId);
@@ -304,7 +304,7 @@ test('default paired Files captures actual two-Run Model boundaries and complete
       kind: 'tool',
       status: 'succeeded',
       definitionId: 'files.write',
-      definitionVersion: '2',
+      definitionVersion: '3',
       originStoreId: storeId,
       sessionId: 's',
       runId: firstRunId,

@@ -13,6 +13,8 @@
 
 正式 Service/Client 经唯一 Agent 的原权限、人工/模型交互和最终 dispatch 事务执行。界面三策略为 `accept_edits` 请求批准、`auto` 自动审核、`full` 完全访问；正式类型、HTTP/IPC、持久控制和调用者均已退役 raw `ask`，旧输入/控制记录失败关闭，不映射为其他模式。正式 Shell 的范围请求与 `web_fetch` network 描述均经该链，固定危险拒绝先于所有模式；Scope 来自可信宿主描述与最终接纳快照，调用输入不能签发 grant。原审核拒绝原因由公共 Execution 的 `authorization.check`（旧记录为 `authorization.review`）与 Tool `result.details.reason` 保存，TUI 结果读取和 Native 原回执可展示，私有适配器错误正文不进入该 reason。实际产品、owner 与验证归[手册](../handbook/features/tools-and-approvals.md)、[Service](../../apps/service/README.md#默认-shell-装配)与[切片](../plans/shell-permission-scopes.md)。
 
+默认 `web_fetch` 的代理自动适配只选择传输出口，不授予网络权限：用户级设置、继承环境及系统已登记代理由 Service 封存到原 Run；项目、Tool 输入及页面不能修改它们。全部 Fake-IP DNS 才触发可信 HTTPS 解析，真实地址及每次跳转仍接受全候选公网检查。CONNECT 固定已验证 IP，保留原 Host、TLS 名称和证书校验；禁止代理失败后隐式直连。冷恢复先比较 `snapshot.web`，出口、解析策略或宿主资源策略变化先于凭据读取和模型派发失败；旧默认 Run 不会悄悄升级到新网络选择。具体范围与测试归 [Web Fetch owner](../../packages/agent/src/tools/web-fetch/README.md)。
+
 准确同 Store 原 Run 显式接续中，可核实的已结算私有审核 fencing 与零派发目标在同一事务交接；原回执、请求、输出凭据和独立人工审批保持，不生成新授权或重复审核。新检查的原目标、检查 Model 及当前权限仍须核对准确代次和封存绑定；旧审核历史另外核原 carrier／唯一 child Model 的相等代次与原闭包。身份失真整项回滚，冷记录不创建新检查；边界归[Store owner](../../packages/agent/src/storage/README.md#原-active-run-的显式恢复)。
 
 同一根会话下，child/grandchild 的工具审批模式动态读取根当前 applied `permission.mode` 与 revision，不冻结为创建时父模式。默认和可信注入的 child policy 都与当前根策略及原 capability ceiling 相交；局部根变更不修改其他根或用户默认。真实 `accept_edits/auto/full` 双向变化会唤醒原人工审批、自动权限检查、资源等待和未派发队列，准确原动作按新策略重新判断。Full 不能解除只读预设、工具交集、信任、明确拒绝/取消、工作控制和 unknown fence。

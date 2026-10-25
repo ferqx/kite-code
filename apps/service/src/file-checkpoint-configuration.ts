@@ -305,7 +305,10 @@ export function createDefaultFileCheckpointConfiguration(options: {
       source?.kind !== 'model_decision' ||
       tool.kind !== 'tool' ||
       !['files.write', 'files.edit'].includes(tool.definitionId) ||
-      tool.definitionVersion !== '2' ||
+      !(
+        tool.definitionVersion === '2' ||
+        (tool.definitionId === 'files.write' && tool.definitionVersion === '3')
+      ) ||
       tool.sessionId !== session.id ||
       tool.originStoreId !== (expected?.boundary.storeId ?? storeId) ||
       tool.originCommandId !== command.id ||

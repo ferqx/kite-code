@@ -388,6 +388,8 @@ Main 开始退出和取消退出时通过原固定 event channel 通知 renderer
 
 ## 原工具过程与结果阅读
 
+Native 对 `web_fetch@1` 沿准确版本表投影“读取网页”及网页图标；Main 的 [tool-message-fact](electron/tool-message-fact.ts)只从唯一、同来源、完整的原调用提取 `url` 到既有有界 `target` 字段，缺失、冲突或未来版本不借结果标题补目标。[metadata 回归](test/native-tool-messages.test.ts)核这条边界。实际展示由[共享工具 owner](../../packages/ui/README.md#原桌面展示层)负责：网站／路径省略查询等敏感部分，成功不展示网页正文，失败只将具体工具行标红、聚合标题保持普通颜色，原异常仍可单独展开。仅改变读取与呈现，不修改普通 Tool、授权、网络超时、结果或模型正文。Native DOM 与原 long-group 浏览器 fixture 沿相同生产组件核准入事实、逐项开合、成功正文缺席、失败标题颜色和真实异常阅读；测试只在隔离夹具中开启，不添加普通客户端调试入口。
+
 工具阅读区启用共享 ScrollArea 的纵向边界交接：内层仍能滚动时保留原生滚动，到顶／到底或没有溢出时交给最近可滚动祖先。2026-10-25，Windows x64／Chrome155.0.8059.85 的[长聚合浏览器夹具](test/native-live-tool-aggregation-browser-runner.fixture.ts)在亮色1280px与暗色780px通过原内部滚动、长异常全文、键盘、开合及新增上下边界断言；实际逐步观察内层→外层→反向回顶，输入区保持固定。过程帧与报告在本机 `.cache/native-live-tool-aggregation-3KpaNM`；无页面错误。该页面消费生产组件和隔离 NativeBridge，不代证完整 Electron 或其他平台。输入／Native DOM 与共享 UI 的五文件定向组合130项通过；追加来源隔离与卸载监听清理后，Native输入83项及滚动文件3项分别复验通过。Agent、UI、Desktop类型、定向Biome、文档、统一边界和测试归属检查通过；Biome保留输入测试原有两项字符串拼接提示。
 
 [工具消息适配器](src/native-tool-messages.tsx)为准确 `task.spawn`／`task.follow_up`／`task.message`／`task.events`／`task.list`／`task.interrupt` v1 提供可读标签，未知版本保原 ID／version。创建／追问工具终态只表示这次调用结束，不将其当作 child 业务完成。现有准确授权投影继续优先人工 pending，批准与执行效果分开；[工具 DOM 回归](test/isolated/native-tool-messages-dom.test.tsx)验证新标签及未来版本保守展示。
@@ -583,6 +585,8 @@ Chrome155.0.8059.85的最终四组800／1280px、深浅主题及减少动态效�
 2026-10-22 在 `761405f5e` 加本次差量、macOS／Bun1.4.2／Electron44.3.0 上，以 `bun test --parallel=1 --max-concurrency=1 /Users/chenchao/Code/ai/kite-code/apps/desktop/test/isolated/native-collaboration-bundle.test.ts` 执行上述窗口整文件：1项／43条 Bun 断言及 driver 过程断言通过，33.37秒，18次受控 Provider 请求；同时保留内部权限检查及标题生成不计入真实 child 目录的原断言。过程截图已逐张观察；正常退出和原候选清理均无强制终止或残留，冷重开无模型重放。实际 report、日志、截图与冷授权目录保存在 `dist/acceptance/child-session-approval-f34f97ba-6028-4ced-9842-9557b3b5094d`，测试成功后清理临时候选，只保留有限证据。该结果覆盖本机受控 Electron／Shell 链路，不取得付费 Provider、其他平台或签名安装资格。
 
 公共 Execution 的可选 `authorization` 是 [Store 只读观察](../../packages/agent/src/storage/README.md#只读授权观察)，只表达原 reviewer、人工答案、accepted decision 与派发事实。Native 将它映射到原 ToolActivity 的审批标签，分别显示“已提交批准，待核对”“已人工批准”、自动批准／拒绝／等待或结果未知；停止后保留可核对的已有记录。批准不覆盖工具的真实失败、取消或未知状态，也不授予执行权限。每项当前待批状态仍以实际 Interaction 为准；Auto 转人工时保留原审查原因。
+
+自动批准通过理由不进入工具展开正文，真实执行失败和结果未知只展示各自异常；原授权事实和盾牌提示仍保留，拒绝及转人工原因不受影响。显示规则、逐状态回归与实际浏览器过程证据归 [共享 UI](../../packages/ui/README.md#原桌面展示层)。Native 的已知写入展示同时支持保存的 `files.write@2` 和当前 `@3`，两者均显示“写入”；未来未识别版本仍使用原定义／版本文字，不推断能力或执行结果。
 
 普通 root／child 工具审批都与父 Composer、权限选择器并存，待批时可切 Auto／Full 使原未派发工具重新判断。`nativeRootInteractionBlocksComposer` 只为准确当前根的 question、plan_review 与 MCP 特殊审批隐藏输入，仍核原 Store、父 Session、准确 Execution 与活动 Run；runless 原交互核准确原执行，不以 rootSessionId 或 waiting 文案推断。共享 SessionPage 的 `interactionHidesPrompt` 缺省保持，Native 对普通工具审批明确保留 Composer。实际输入、单轮准入及模式复核继续由原 Runtime 决定。
 

@@ -531,13 +531,16 @@ impl Owner {
             component(&name)?;
         }
         self.verify(parent)?;
+        if kind == "create-directory" {
+            self.verify_owner(parent)?;
+        }
         let entry = self.entry(parent)?;
         let path = if name == "." {
             entry.path.clone()
         } else {
             child(&entry.path, &name)
         };
-        if (strict || self.protect_reads) && self.protected(&path) {
+        if (strict || self.protect_reads || kind == "create-directory") && self.protected(&path) {
             return Err(fail("file_path_protected"));
         }
         entry.object.dir()?;
@@ -558,10 +561,19 @@ impl Owner {
                 null_mut(),
                 false,
             )?))),
-            "temporary" => {
-                let text: Vec<u16> = format!("O:{}D:P(A;;FA;;;{})\0", self.sid, self.sid)
-                    .encode_utf16()
-                    .collect();
+            "temporary" | "create-directory" => {
+                let text: Vec<u16> = format!(
+                    "O:{}D:P(A;{};FA;;;{})\0",
+                    self.sid,
+                    if kind == "create-directory" {
+                        "OICI"
+                    } else {
+                        ""
+                    },
+                    self.sid
+                )
+                .encode_utf16()
+                .collect();
                 let mut descriptor = null_mut();
                 check(unsafe {
                     ConvertStringSecurityDescriptorToSecurityDescriptorW(
@@ -575,16 +587,20 @@ impl Owner {
                     entry.object.raw(),
                     &name,
                     0x13019f,
-                    Some(false),
+                    Some(kind == "create-directory"),
                     descriptor,
                     true,
                 );
                 // Register the actual created resource before any further fallible check.
                 let result = result.and_then(|file| {
                     self.add(
-                        Object::File(ManuallyDrop::new(File::from_std(file))),
+                        if kind == "create-directory" {
+                            Object::Directory(ManuallyDrop::new(Dir::from_std_file(file)))
+                        } else {
+                            Object::File(ManuallyDrop::new(File::from_std(file)))
+                        },
                         path.clone(),
-                        true,
+                        kind == "temporary",
                     )
                 });
                 if let Err(error) = free(descriptor.cast()) {
@@ -1036,6 +1052,33 @@ mod tests {
             owner.entries.get_mut(&id).unwrap().object.forget();
         }
         owner.entries.remove(&id);
+        owner.uncertain = false;
+        owner.close().unwrap();
+        fs::remove_dir_all(root).unwrap();
+    }
+    #[test]
+    fn unconfirmed_directory_creation_retains_ancestors_and_is_not_retried() {
+        let root = root("directory-open");
+        let mut owner = Owner::new(root.to_string_lossy().into(), vec![], false).unwrap();
+        FAIL_OPEN_CONFIRMATION.with(|value| value.set(true));
+        let error = owner
+            .open_at(
+                owner.root(),
+                "created".into(),
+                "create-directory".into(),
+                true,
+            )
+            .unwrap_err();
+        assert_eq!(error.reason, "file_close_unknown");
+        assert!(root.join("created").is_dir());
+        let attempts = CLOSE_ATTEMPTS.with(|n| n.get());
+        assert_eq!(owner.close().unwrap_err().reason, "file_close_unknown");
+        assert_eq!(CLOSE_ATTEMPTS.with(|n| n.get()), attempts);
+        assert!(owner.entries.contains_key(&owner.root()));
+        assert!(fs::rename(&root, root.with_extension("moved")).is_err());
+        // Only this test resolves the injected uncertainty using its original HANDLE.
+        let handle = UNRELEASED.lock().unwrap().pop().unwrap() as HANDLE;
+        assert_ne!(unsafe { CloseHandle(handle) }, 0);
         owner.uncertain = false;
         owner.close().unwrap();
         fs::remove_dir_all(root).unwrap();

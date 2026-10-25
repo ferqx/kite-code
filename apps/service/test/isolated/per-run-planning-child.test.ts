@@ -173,7 +173,7 @@ async function fixture(
     })),
     tools: [
       { id: 'files.read', definitionVersion: '5' },
-      { id: 'files.write', definitionVersion: '2' },
+      { id: 'files.write', definitionVersion: '3' },
       ...['task.spawn', 'task.events', 'task.list'].map((id) => ({ id, definitionVersion: '1' })),
       ...(scenario === 'pending_job'
         ? ['shell.launch', 'validation.define', 'validation.check'].map((id) => ({
@@ -235,7 +235,7 @@ async function fixture(
           { kind: 'job', definitionId: 'agent/worker', definitionVersion: '1' },
           { kind: 'job', definitionId: 'shell.command', definitionVersion: '1' },
           { kind: 'tool', definitionId: 'files.read', definitionVersion: '5' },
-          { kind: 'tool', definitionId: 'files.write', definitionVersion: '2' },
+          { kind: 'tool', definitionId: 'files.write', definitionVersion: '3' },
           ...['planning.read', 'planning.write', 'planning.review', 'planning.update'].map(
             (id) => ({
               kind: 'tool' as const,
