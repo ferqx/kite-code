@@ -662,6 +662,7 @@ function useNativeLiveShellInputs({
     retryRevision,
     failed: false,
     facts: new Map<string, NativeToolMessageFact | undefined>(),
+    commandPending: new Set<string>(),
     keys: new Map<string, string>(),
   });
   const [state, setState] = useState<{
@@ -678,7 +679,14 @@ function useNativeLiveShellInputs({
   useEffect(() => {
     const { selection, targets, generation, historyEpoch } = latest.current;
     if (cache.current.scope !== scope || cache.current.retryRevision !== retryRevision)
-      cache.current = { scope, retryRevision, failed: false, facts: new Map(), keys: new Map() };
+      cache.current = {
+        scope,
+        retryRevision,
+        failed: false,
+        facts: new Map(),
+        commandPending: new Set(),
+        keys: new Map(),
+      };
     const current = cache.current;
     const publish = () =>
       setState({
@@ -705,9 +713,12 @@ function useNativeLiveShellInputs({
         execution.definitionVersion,
         selection.executions.find((item) => item.id === execution.id)?.toolCallId,
       ]);
+    // A changed target list cancels this effect and discards its local fragments.
+    // Restart incomplete commands at offset zero; complete siblings stay cached.
     const pending = targets.filter(
       (target) =>
         !current.facts.has(target.execution.id) ||
+        current.commandPending.has(target.execution.id) ||
         current.keys.get(target.execution.id) !== key(target.execution),
     );
     void (async () => {
@@ -786,6 +797,8 @@ function useNativeLiveShellInputs({
               } else if (commandOffsets?.[`native-execution:${id}`] !== undefined)
                 throw Error('tool_message_command_offset_invalid');
               current.facts.set(id, fact);
+              if (Object.hasOwn(next, `native-execution:${id}`)) current.commandPending.add(id);
+              else current.commandPending.delete(id);
               current.keys.set(id, key(item.execution));
             }
             publish();
@@ -798,6 +811,7 @@ function useNativeLiveShellInputs({
           if (!active) return;
           current.failed = true;
           for (const item of batch) {
+            current.commandPending.delete(item.execution.id);
             if (
               !current.facts.has(item.execution.id) ||
               current.keys.get(item.execution.id) !== key(item.execution)
