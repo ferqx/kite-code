@@ -2,6 +2,7 @@ import { expect, test } from 'bun:test';
 import { createServer, type Server } from 'node:http';
 import { createServer as createSecureServer } from 'node:https';
 import { connect, type Socket } from 'node:net';
+import { gzipSync } from 'node:zlib';
 import {
   createPinnedWebNetworkPort,
   type PinnedWebNetworkOptions,
@@ -75,7 +76,11 @@ async function fixture(secureProxy = false) {
             .writeHead(200, { 'content-type': 'application/dns-message' })
             .end(dnsAnswer(body, dnsAddress));
       });
-    } else if (request.url === '/wait') response.write('waiting');
+    } else if (request.url === '/gzip')
+      response
+        .writeHead(200, { 'content-encoding': 'gzip', connection: 'keep-alive' })
+        .end(gzipSync(Buffer.alloc(4_000_000, 65)));
+    else if (request.url === '/wait') response.write('waiting');
     else response.end('verified socket');
   };
   const plain = createServer(handler),
@@ -359,6 +364,55 @@ test('proxy refusal has no direct retry and abort releases a stalled CONNECT wit
     expect(f.sockets.size).toBe(0);
   } finally {
     await f.close();
+  }
+});
+test('cancelled decoded bodies settle through HTTP and HTTPS CONNECT without cancelling a sibling', async () => {
+  for (const secureProxy of [false, true]) {
+    const f = await fixture(secureProxy);
+    try {
+      const port = createPinnedWebNetworkPort({
+        ...options(),
+        proxy: f.settings,
+        certificateAuthority: certificate,
+      });
+      for (const protocol of ['http', 'https']) {
+        const abort = new AbortController();
+        const response = await port.request(binding(`${protocol}://fixture.test/gzip`), {
+          signal: abort.signal,
+        });
+        const reader = response.body.getReader();
+        let timer: ReturnType<typeof setTimeout> | undefined;
+        try {
+          await reader.read();
+          const consumed = (async () => {
+            while (!(await reader.read()).done) {}
+          })();
+          const sibling = port.request(binding(`${protocol}://fixture.test/body`), {
+            signal: signal(),
+          });
+          abort.abort(new Error('owned_cancel'));
+          await failure(
+            Promise.race([
+              consumed,
+              new Promise<never>((_, reject) => {
+                timer = setTimeout(() => reject(new Error('cancelled_body_did_not_settle')), 1000);
+              }),
+            ]),
+            'web_response_failed',
+          );
+          expect(await new Response((await sibling).body).text()).toBe('verified socket');
+        } finally {
+          clearTimeout(timer);
+          await reader.cancel().catch(() => {});
+          reader.releaseLock();
+        }
+      }
+      const deadline = Date.now() + 1000;
+      while (f.sockets.size && Date.now() < deadline) await Bun.sleep(5);
+      expect(f.sockets.size).toBe(0);
+    } finally {
+      await f.close();
+    }
   }
 });
 test('wire DNS rejects forged identities, private results stay visible to the caller gate', async () => {

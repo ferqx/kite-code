@@ -64,6 +64,8 @@ export function windowsWebProxy(output: string): Proxy {
 export function macWebProxy(output: string): Proxy {
   const read = (key: string) =>
     new RegExp(`^\\s*${key}\\s*:\\s*(.*?)\\s*$`, 'mi').exec(output)?.[1];
+  // Do not turn an enabled unsupported exit into direct traffic, including mixed settings.
+  if (read('SOCKSEnable') === '1') throw new WebFetchError('web_proxy_protocol_unsupported');
   const routes: { http?: string; https?: string; noProxy?: string } = {};
   for (const [prefix, key] of [
     ['HTTP', 'http'],

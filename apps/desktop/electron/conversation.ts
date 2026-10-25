@@ -10,6 +10,7 @@ import type {
   NativeCreation,
   NativeRequest,
 } from '../src/native-bridge';
+import { promptTextForSend } from '../src/prompt-text';
 import { callerDigest, callerTextDigest, type NativeCallerJournal } from './caller-journal';
 import { queryBranch, switchBranch } from './git';
 import type { NativeProcessOwner } from './native-processes';
@@ -166,6 +167,16 @@ export class NativeConversation {
     };
   }
   send(request: Send): Promise<NativeConversationResult> {
+    if (
+      request.draftLineEndings !== undefined &&
+      (typeof request.intent.content !== 'string' ||
+        typeof request.draftLineEndings !== 'string' ||
+        !/^[\r\n]*$/u.test(request.draftLineEndings) ||
+        promptTextForSend(request.intent.content + request.draftLineEndings) !==
+          request.intent.content ||
+        Buffer.byteLength(request.intent.content + request.draftLineEndings) > 1048576)
+    )
+      throw new ClientError('invalid_native_request');
     const previous = this.entries.get(request.intent.commandId);
     if (previous) {
       if (callerDigest(previous.request) !== callerDigest(request))
@@ -281,7 +292,11 @@ export class NativeConversation {
         rootSessionId: request.creation.sessionId,
       };
       const original = this.data().read(draftScope);
-      const draft = this.data().save(draftScope, original.revision, request.intent.content);
+      const draft = this.data().save(
+        draftScope,
+        original.revision,
+        request.intent.content + (request.draftLineEndings ?? ''),
+      );
       let first = false;
       const creation =
         savedCreation ??

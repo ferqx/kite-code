@@ -23,6 +23,7 @@ import {
   nativeWindowAppearanceChannel,
   nativeWindowMaximizeChannel,
 } from '../src/native-bridge';
+import { promptTextForSend } from '../src/prompt-text';
 import { parseNativeMcpOperation, parseNativeUserMcpOperation } from './mcp-input';
 import type { NativeCaller } from './native-caller';
 import { parseScheduledTaskInput } from './scheduled-tasks';
@@ -141,6 +142,7 @@ const fields: Record<NativeRequest['method'], readonly string[]> = {
   'conversation.send': [
     'creation',
     'intent',
+    'draftLineEndings',
     'permissionMode',
     'targetBranch',
     'imageIds',
@@ -869,6 +871,17 @@ export function decodeNativeRequest(value: unknown): NativeRequest {
     throw Error('invalid_native_request');
   if (method === 'conversation.send') {
     const creation = record(input.creation);
+    if (input.draftLineEndings !== undefined) {
+      const intent = record(input.intent);
+      if (
+        typeof intent.content !== 'string' ||
+        typeof input.draftLineEndings !== 'string' ||
+        !/^[\r\n]*$/u.test(input.draftLineEndings) ||
+        promptTextForSend(intent.content + input.draftLineEndings) !== intent.content ||
+        Buffer.byteLength(intent.content + input.draftLineEndings) > 1048576
+      )
+        throw Error('invalid_native_request');
+    }
     exact(creation, ['commandId', 'sessionId', 'workspaceId', 'expectedStoreId', 'title']);
     if (
       ![

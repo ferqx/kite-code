@@ -1,4 +1,10 @@
-import { ClientError, type Message, type ModelOutputSnapshot } from '@kite-ai/client';
+import {
+  ClientError,
+  type Execution,
+  type Message,
+  type ModelOutputSnapshot,
+  type Run,
+} from '@kite-ai/client';
 import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { SafeMessageMarkdown } from './markdown';
 
@@ -10,6 +16,8 @@ export interface ModelOutputMessageProps {
   readonly autoRead?: boolean;
   /** Host opt-in to a read-only retry after an automatic body read fails. */
   readonly autoReadRetry?: boolean;
+  /** Exact execution/owning Run observation only requests a fresh read; it proves no output. */
+  readonly terminalObserved?: boolean;
   /** Paused retained display cannot read or publish current copy content. */
   readonly readActive?: boolean;
   /** Explicit diagnostic host opt-in; ordinary conversation reading excludes raw reasoning. */
@@ -30,6 +38,37 @@ export interface ModelOutputMessageProps {
   /** Host presentation of the same preview or verified body; reading semantics stay here. */
   readonly renderText?: (content: string, verifiedSnapshot?: ModelOutputSnapshot) => ReactNode;
 }
+const terminalOutput = (status: ModelOutputSnapshot['status'] | undefined) =>
+  status !== undefined && !['planned', 'dispatching', 'running'].includes(status);
+
+/** A bounded view may omit the Model; its exact owning Run can still trigger revalidation. */
+export function modelOutputTerminalObserved(
+  message: Message,
+  executions: readonly Pick<Execution, 'id' | 'sessionId' | 'runId' | 'kind' | 'status'>[],
+  runs: readonly Pick<Run, 'id' | 'sessionId' | 'status'>[],
+) {
+  if (!message.outputBody || message.outputBody.complete) return false;
+  const sessionId = message.originMessage?.sessionId ?? message.sessionId;
+  const runId = message.originMessage ? message.originMessage.runId : message.runId;
+  if (runId === null) return false;
+  return (
+    executions.some(
+      (execution) =>
+        execution.id === message.outputBody!.executionId &&
+        execution.sessionId === sessionId &&
+        execution.runId === runId &&
+        execution.kind === 'model' &&
+        terminalOutput(execution.status),
+    ) ||
+    runs.some(
+      (run) =>
+        run.id === runId &&
+        run.sessionId === sessionId &&
+        ['completed', 'failed', 'cancelled', 'interrupted'].includes(run.status),
+    )
+  );
+}
+
 function validateSnapshot(
   snapshot: ModelOutputSnapshot,
   message: Message,
@@ -66,6 +105,7 @@ export function ModelOutputMessage({
   suspended = false,
   autoRead = false,
   autoReadRetry = false,
+  terminalObserved = false,
   readActive = true,
   showReasoning = false,
   canReadRestoredOrigin = false,
@@ -105,6 +145,7 @@ export function ModelOutputMessage({
   callbacks.current = { onRead, onContent, onClose };
   const request = useRef<AbortController | undefined>(undefined),
     generation = useRef(0);
+  const terminalRefresh = useRef<{ identity: string; pending: boolean } | undefined>(undefined);
   const [loaded, setLoaded] = useState<{ identity: string; snapshot: ModelOutputSnapshot }>();
   const [loading, setLoading] = useState(false),
     [error, setError] = useState<string>();
@@ -151,6 +192,7 @@ export function ModelOutputMessage({
       generation.current++;
       request.current?.abort();
       request.current = undefined;
+      if (terminalRefresh.current?.pending) terminalRefresh.current = undefined;
       callbacks.current.onContent?.(undefined);
     };
   }, [identity, suspended, verifiedSnapshot, readActive]);
@@ -236,9 +278,43 @@ export function ModelOutputMessage({
     canReadRestoredOrigin,
     identity,
   ]);
+  const canRead = !!onRead;
   useEffect(() => {
-    if (autoRead && !full && !error) void read();
-  }, [autoRead, full, error, read]);
+    if (
+      autoRead &&
+      terminalObserved &&
+      body &&
+      !body.complete &&
+      body.readAvailability !== 'unsupported' &&
+      canRead &&
+      readActive &&
+      !suspended &&
+      !admittedSnapshot &&
+      !terminalOutput(full?.status) &&
+      terminalRefresh.current?.identity !== identity
+    ) {
+      const refresh = { identity, pending: true };
+      terminalRefresh.current = refresh;
+      generation.current++;
+      request.current?.abort();
+      request.current = undefined;
+      void read().finally(() => {
+        refresh.pending = false;
+      });
+    } else if (autoRead && !full && !error) void read();
+  }, [
+    autoRead,
+    terminalObserved,
+    body,
+    canRead,
+    readActive,
+    suspended,
+    admittedSnapshot,
+    full,
+    identity,
+    error,
+    read,
+  ]);
   const render = (content: string) =>
     renderText ? (
       <div className="message-markdown">{renderText(content, full)}</div>
@@ -265,10 +341,7 @@ export function ModelOutputMessage({
               : '回复预览（回复未完成）'}
         </p>
       )}
-      {autoRead &&
-        !body.complete &&
-        full &&
-        !['planned', 'dispatching', 'running'].includes(full.status) && <p>回复未完成</p>}
+      {autoRead && !body.complete && full && terminalOutput(full.status) && <p>回复未完成</p>}
       {render(full?.output.content ?? message.content)}
       {!autoRead && !full && (
         <button

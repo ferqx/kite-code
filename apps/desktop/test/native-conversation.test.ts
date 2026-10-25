@@ -68,7 +68,7 @@ test('formal Native transcript preserves the explicit final-only copy contract f
   expect(projection.messages.find((entry) => entry.id === 'final')?.finalReply).toBe(true);
   expect(projection.messages.find((entry) => entry.id === 'final')?.copyText).toBe(final);
 });
-function fixture(protectMissingUserDirectory = false) {
+function fixture(protectMissingUserDirectory = false, savedText = text) {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'native-conversation-')));
   const data = memoryPrivateData(),
     drafts = new Map<string, NativeDraft>();
@@ -213,7 +213,7 @@ function fixture(protectMissingUserDirectory = false) {
       creates++;
       expect(
         data.read({ storeId: 'store', workspaceId: 'w', rootSessionId: input.sessionId }).content,
-      ).toBe(text);
+      ).toBe(savedText);
       commands.set(input.commandId, {
         id: input.commandId,
         sessionId: input.sessionId,
@@ -357,6 +357,121 @@ test('first send saves original text, reuses creation/permission/input callers a
     expect(f.data.modelRoute('store', 'new-session')).toBe('model');
     expect(await f.caller.invoke(f.request)).toEqual(result);
     expect(f.counts()).toMatchObject({ creates: 1, starts: 1, modes: 1, trusts: 1 });
+  } finally {
+    await f.close();
+  }
+});
+
+test.each([
+  'permission',
+  'creation',
+  'input',
+] as const)('first-send %s failure retains exact draft line endings through a fresh Main caller without replay', async (stage) => {
+  const draftLineEndings = '\r\n\n\r\n',
+    raw = text + draftLineEndings,
+    f = fixture(false, raw);
+  let cold: NativeCaller | undefined;
+  try {
+    await f.ready();
+    if (stage === 'permission') f.failPermission(true);
+    else if (stage === 'creation') f.loseCreate();
+    else f.loseStart();
+    const request = { ...f.request, draftLineEndings };
+    expect(decodeNativeRequest(request)).toEqual(request);
+    const result = await f.caller.invoke(request);
+    expect(result).toMatchObject({
+      phase: stage === 'permission' ? 'failed' : 'unknown',
+      stage: stage === 'creation' ? 'create' : stage,
+    });
+    const counts = f.counts();
+    expect(await f.caller.invoke(request)).toEqual(result);
+    expect(f.counts()).toEqual(counts);
+    await expect(f.caller.invoke({ ...request, draftLineEndings: '\n' })).rejects.toMatchObject({
+      code: 'caller_intent_conflict',
+    });
+    if (stage === 'input')
+      expect(f.data.callers()[0]?.intent).toMatchObject({
+        request: f.request.intent,
+        draft: { revision: '1', textDigest: callerTextDigest(raw) },
+      });
+    await f.caller.close();
+    cold = new NativeCaller(f.port, () => {}, f.data);
+    await cold.invoke({ method: 'attach' });
+    await cold.invoke({ method: 'directory', generation: 1 });
+    await cold.invoke({ method: 'select', generation: 1, sessionId: 'new-session' });
+    expect(
+      await cold.invoke({ method: 'draft.read', generation: 1, sessionId: 'new-session' }),
+    ).toMatchObject({ content: raw, revision: 1 });
+    expect(f.counts()).toEqual(counts);
+  } finally {
+    await cold?.close();
+    await f.close();
+  }
+});
+
+test.each([
+  text,
+  '',
+])('first-send accepted input keeps normalized immutable content and a raw draft proof: %j', async (content) => {
+  const draftLineEndings = '\r\n\n\r',
+    raw = content + draftLineEndings,
+    f = fixture(false, raw);
+  try {
+    await f.ready();
+    const request = {
+      ...f.request,
+      intent: {
+        ...f.request.intent,
+        content,
+        ...(content ? {} : { files: [{ name: 'owned.txt', uri: 'file:///owned.txt' }] }),
+      },
+      draftLineEndings,
+    };
+    expect(decodeNativeRequest(request)).toEqual(request);
+    expect(await f.caller.invoke(request)).toMatchObject({ phase: 'accepted' });
+    expect(f.data.callers()[0]?.intent).toMatchObject({
+      request: request.intent,
+      draft: { revision: '1', textDigest: callerTextDigest(raw) },
+    });
+    expect(f.data.callers()[0]?.intent.request).toEqual(request.intent);
+    expect(f.counts()).toMatchObject({ creates: 1, starts: 1 });
+  } finally {
+    await f.close();
+  }
+});
+
+test('first-send private draft suffix rejects changed content and excess bytes without duplicating a long prompt', async () => {
+  const f = fixture();
+  try {
+    await f.ready();
+    for (const draftLineEndings of ['not line endings', '\n ', null, 1]) {
+      const request = { ...f.request, draftLineEndings } as unknown as NativeRequest;
+      expect(() => decodeNativeRequest(request)).toThrow('invalid_native_request');
+      await expect(f.caller.invoke(request)).rejects.toMatchObject({
+        code: 'invalid_native_request',
+      });
+    }
+    const untrimmed = {
+      ...f.request,
+      intent: { ...f.request.intent, content: `${text}\n` },
+      draftLineEndings: '\n',
+    };
+    expect(() => decodeNativeRequest(untrimmed)).toThrow('invalid_native_request');
+    await expect(f.caller.invoke(untrimmed)).rejects.toMatchObject({
+      code: 'invalid_native_request',
+    });
+    const oversized = { ...f.request, draftLineEndings: '\n'.repeat(1048576) };
+    expect(() => decodeNativeRequest(oversized)).toThrow('native_request_too_large');
+    await expect(f.caller.invoke(oversized)).rejects.toMatchObject({
+      code: 'invalid_native_request',
+    });
+    const long = {
+      ...f.request,
+      intent: { ...f.request.intent, content: '雪'.repeat(200000) },
+      draftLineEndings: '\r\n',
+    };
+    expect(decodeNativeRequest(long)).toEqual(long);
+    expect(f.counts()).toEqual({ creates: 0, starts: 0, modes: 0, trusts: 0, gets: 0 });
   } finally {
     await f.close();
   }

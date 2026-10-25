@@ -361,6 +361,10 @@ P3 的 `InteractionCard` 直接消费生成的 Interaction：真实来源 Sessio
 
 普通 Native／Web 聊天启用共享 `autoRead`：在当前可读视图内自动沿原 reader 获取已保存完整正文，不显示“回复预览”“完整回复”标题、查看／收起按钮或原始工具调用详情。流式正文与尚未核实的预览原位保留，完整读取及 Store／Session／Run／Execution／字节验证通过后才交付全文复制资格；暂停、切换与晚回包仍受原门禁约束。“回复未完成”须由当前身份已核实的终态snapshot与不完整输出共同支持；planned／dispatching／running的流式前缀和读取中间状态不插入此提示，避免首段出现后再移除提示造成上下跳动。failed／cancelled／outcome_unknown及已终止但输出仍不完整的记录保留该提示。读取失败保留原文和错误说明；缺省不显示重试按钮，Native 沿用缺省。Web 显式启用 `autoReadRetry` 后才提供“重新读取”，仅沿原 reader 和原身份重新核验；暂停时仍受 `readActive`／`suspended` 门禁约束。不自动重复读取、更换身份或重新提交任务；无 reader 或不支持格式时保留必要不可用说明。专用 reader 不启用此选项时继续保留显式打开／关闭及原门禁，原 reasoning 仍只供明确诊断宿主查看。
 
+当最后一次全文读取仍为running、随后取消／失败且正文未增加时，Native／Web以`modelOutputTerminalObserved`核准确Model或原所属Run的终态，向自动reader提供`terminalObserved`。这只是一次重新核验的提示，不授予正文、复制或未完成警告资格；Model不在有界View时可用已有准确Run事实，缺失或其他来源不推断终态。旧非终态读取的lease被撤销，迟到响应受原代次隔离；同一正文身份只完成一次终态刷新，失败不轮询，暂停中断的刷新可在恢复准入后继续。提示仍须由新读取并校验通过的终态snapshot产生。
+
+2026-10-25，Linux x64／Bun1.4.3，`3dc3a941f`加审查修复工作树：上述生命周期缺口先由共享reader与实际WebPage的onRead路径回归复现，再核取消时正文／DOM身份不变、Model缺席时原Run终态接管、迟到隔离、暂停恢复、身份冲突与零重复GET。验证沿原[Model output DOM](test/model-output.test.tsx)及[Web页面](../../apps/web/test/page.test.tsx)，不代表真实浏览器绘制或安装版Electron资格。
+
 宿主已经完成公共 Client 的 EOF／SHA／UTF-8 验证时，可直接提供 `verifiedSnapshot`，组件仍核同一 Store／Session／Run／Execution、complete、正文／reasoning字节数和toolCalls，再呈现原正文或已保存的未完成前缀。关闭后可本地重开，不重复下载；宿主替换 snapshot、暂停、身份替换和卸载均撤销旧读取。该 prop 不接受未验证 transport 数据，也不赋予组件网络或执行权。
 
 桌面 `SessionPage` 的[阅读状态缓存](src/desktop/reading-state.ts)只保存滚动与展开数据，最多32项、256KiB估算载荷、每项512个展开ID；保存时裁剪当前消息中已不存在的展开项。`Conversation`一次建立各轮运行工具和thinking集合，避免每轮重扫全部消息。缺省切换仍卸载原消息DOM和effect；Native 通过可选 `conversationCache` 启用下述有界停用树，不保活全部会话；[阅读缓存回归](test/desktop-reading-state.test.ts)核容量、淘汰和裁剪。恢复时，原轮次过程与工具层分别用 `data-restored-expanded` 跳过自己的展开动画，包括未显式选择但默认展开的活动轮次；后续手动开合清除本层恢复标记，父层标记不抑制嵌套工具的手动动画。[轮次回归](test/desktop-reasoning-turns.test.tsx)与[Native 往返回归](../../apps/desktop/test/isolated/native-history-presentation-dom.test.tsx)核恢复和手动选择。

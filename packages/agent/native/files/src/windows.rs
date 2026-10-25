@@ -860,6 +860,10 @@ impl Owner {
         Ok(entries)
     }
     fn close_id(&mut self, id: u32) -> Result<()> {
+        // Acquisition and close uncertainty both pin every original relative parent.
+        if self.uncertain {
+            return Err(fail("file_close_unknown"));
+        }
         let entry = self
             .entries
             .get_mut(&id)
@@ -1025,8 +1029,16 @@ mod tests {
     fn close_unknown_keeps_parents_and_never_retries_the_uncertain_original() {
         let root = root("close");
         let mut owner = Owner::new(root.to_string_lossy().into(), vec![], false).unwrap();
+        let parent = owner
+            .open_at(
+                owner.root(),
+                "parent".into(),
+                "create-directory".into(),
+                true,
+            )
+            .unwrap();
         let id = owner
-            .open_at(owner.root(), "temporary".into(), "temporary".into(), false)
+            .open_at(parent, "temporary".into(), "temporary".into(), false)
             .unwrap();
         let handle = owner.entry(id).unwrap().object.raw();
         FAIL_CLOSE.with(|value| value.set(handle as usize));
@@ -1035,8 +1047,13 @@ mod tests {
             "file_close_unknown"
         );
         let attempts = CLOSE_ATTEMPTS.with(|n| n.get());
+        assert_eq!(
+            owner.close_handle(parent).unwrap_err().reason,
+            "file_close_unknown"
+        );
         assert_eq!(owner.close().unwrap_err().reason, "file_close_unknown");
         assert_eq!(CLOSE_ATTEMPTS.with(|n| n.get()), attempts);
+        assert!(owner.entries.contains_key(&parent));
         assert!(owner.entries.contains_key(&owner.root()));
         assert!(
             owner
@@ -1060,22 +1077,47 @@ mod tests {
     fn unconfirmed_directory_creation_retains_ancestors_and_is_not_retried() {
         let root = root("directory-open");
         let mut owner = Owner::new(root.to_string_lossy().into(), vec![], false).unwrap();
-        FAIL_OPEN_CONFIRMATION.with(|value| value.set(true));
-        let error = owner
+        let parent = owner
             .open_at(
                 owner.root(),
-                "created".into(),
+                "parent".into(),
                 "create-directory".into(),
                 true,
             )
+            .unwrap();
+        let root_handle = owner.entry(owner.root()).unwrap().object.raw();
+        FAIL_OPEN_CONFIRMATION.with(|value| value.set(true));
+        let error = owner
+            .open_at(parent, "created".into(), "create-directory".into(), true)
             .unwrap_err();
         assert_eq!(error.reason, "file_close_unknown");
-        assert!(root.join("created").is_dir());
+        assert!(root.join("parent/created").is_dir());
         let attempts = CLOSE_ATTEMPTS.with(|n| n.get());
+        assert_eq!(
+            owner.close_handle(parent).unwrap_err().reason,
+            "file_close_unknown"
+        );
         assert_eq!(owner.close().unwrap_err().reason, "file_close_unknown");
         assert_eq!(CLOSE_ATTEMPTS.with(|n| n.get()), attempts);
         assert!(owner.entries.contains_key(&owner.root()));
+        assert!(owner.entries.contains_key(&parent));
         assert!(fs::rename(&root, root.with_extension("moved")).is_err());
+        drop(owner);
+        assert_eq!(CLOSE_ATTEMPTS.with(|n| n.get()), attempts);
+        let mut owner = {
+            let mut retained = RETAINED.lock().unwrap();
+            let index = retained
+                .iter()
+                .position(|owner| {
+                    owner
+                        .entries
+                        .get(&owner.root())
+                        .is_some_and(|entry| entry.object.raw() == root_handle)
+                })
+                .unwrap();
+            retained.remove(index)
+        };
+        assert!(owner.entries.contains_key(&parent));
         // Only this test resolves the injected uncertainty using its original HANDLE.
         let handle = UNRELEASED.lock().unwrap().pop().unwrap() as HANDLE;
         assert_ne!(unsafe { CloseHandle(handle) }, 0);

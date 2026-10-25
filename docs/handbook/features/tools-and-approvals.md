@@ -101,7 +101,7 @@ Windows x64 本地 Workspace 的六文件工具及检查点原字节恢复已接
 
 默认本机宿主的网页工具无需填写代理配置：优先读取大小写 `HTTP_PROXY`、`HTTPS_PROXY` 和 `NO_PROXY`（小写优先），没有 HTTP(S) 环境代理时读取 Windows 当前用户或 macOS 已登记的手动系统代理；Linux 使用环境变量。没有代理则直连。`NO_PROXY` 只选择是否绕过代理，不能允许访问私网。系统 DNS 的全部候选都是已识别的 Fake-IP（`198.18.0.0/15`、`2001:2::/48`）时，自动经相同出口向 Cloudflare 发起加密 DNS 查询，检查得到的全部真实 IP 后再连接；正常 DNS、混合地址或私网目标不会借此绕过检查。查询仅包含目标域名，不发送网页路径或正文。
 
-代理只接收已检查的目标 IP；网页原域名仍用于 Host、TLS 名称与证书验证。每次重定向重新检查，不扫描本机端口、不自动执行 PAC/WPAD，也不会在代理失败后悄悄切换为直连。当前支持无需认证的 HTTP/HTTPS CONNECT 代理，不支持 SOCKS、代理账户认证或 PAC；遇到这些设置会明确报告对应网页工具失败，其他工具仍可使用。特殊网络的备用设置见[网页网络配置](models-and-configuration.md#网页网络配置)。
+代理只接收已检查的目标 IP；网页原域名仍用于 Host、TLS 名称与证书验证。每次重定向重新检查，不扫描本机端口、不自动执行 PAC/WPAD，也不会在代理失败后悄悄切换为直连。当前支持无需认证的 HTTP/HTTPS CONNECT 代理，不支持 SOCKS、代理账户认证或 PAC；遇到这些设置会明确报告对应网页工具失败，其他工具仍可使用。自动读取 macOS 设置发现已启用 SOCKS 时，即使同时登记 HTTP/HTTPS 代理也明确失败；可在用户配置显式选择受支持的 HTTP(S) 入口，而不是自动猜测混合设置的路由。特殊网络的备用设置见[网页网络配置](models-and-configuration.md#网页网络配置)。
 
 [TUI 审批](../clients/tui/guides/approvals-and-questions.md)提供交互入口；Web 只读查看，不回答审批。
 
