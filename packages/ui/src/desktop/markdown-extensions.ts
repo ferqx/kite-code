@@ -59,7 +59,10 @@ export function desktopMarkdownSemantics({ prefix }: { prefix: string }) {
       node.children!.unshift({
         type: 'element',
         tagName: 'p',
-        properties: { className: ['markdown-alert-title'] },
+        properties: {
+          className: ['markdown-alert-title'],
+          'data-alert': marker[1]!.toLowerCase(),
+        },
         children: [{ type: 'text', value: alerts[marker[1]!]! }],
       });
       if (paragraph && !textContent(paragraph))

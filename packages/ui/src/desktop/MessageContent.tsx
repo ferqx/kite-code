@@ -1,3 +1,11 @@
+import {
+  Alert02Icon,
+  AlertCircleIcon,
+  BulbIcon,
+  InformationCircleIcon,
+  Notification01Icon,
+} from '@hugeicons/core-free-icons';
+import { HugeiconsIcon } from '@hugeicons/react';
 import type { ComponentPropsWithoutRef } from 'react';
 import {
   createContext,
@@ -83,6 +91,29 @@ function segmentLongTextNodes({ source }: { source: string }) {
 }
 
 const FileLinkContext = createContext<((path: string) => void) | undefined>(undefined);
+
+const alertIcons = new Map([
+  ['note', InformationCircleIcon],
+  ['tip', BulbIcon],
+  ['important', Notification01Icon],
+  ['warning', Alert02Icon],
+  ['caution', AlertCircleIcon],
+]);
+
+function MarkdownParagraph({
+  children,
+  node,
+  ...props
+}: ComponentPropsWithoutRef<'p'> & ExtraProps) {
+  const kind = node?.properties?.['data-alert'];
+  const icon = typeof kind === 'string' ? alertIcons.get(kind) : undefined;
+  return (
+    <p {...props}>
+      {icon && <HugeiconsIcon icon={icon} className="markdown-alert-icon" aria-hidden="true" />}
+      {children}
+    </p>
+  );
+}
 
 function MarkdownLink({
   href,
@@ -269,6 +300,7 @@ const MarkdownDocument = memo(
         components={{
           ...incrementalMarkdownComponents,
           a: MarkdownLink,
+          p: MarkdownParagraph,
           pre: MarkdownCodeBlock,
           table: MarkdownTable,
           // Message bodies must not fetch remote images or interpret local paths as web assets.

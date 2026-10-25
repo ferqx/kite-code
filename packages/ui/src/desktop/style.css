@@ -93,6 +93,10 @@ body {
   --attention-background: #f5e6c8;
   --attention-foreground: #714700;
   --conversation-text-size: var(--ui-text-size);
+  --markdown-code-background: color-mix(in srgb, var(--foreground) 5%, transparent);
+  --markdown-inline-code-background: color-mix(in srgb, var(--foreground) 7%, transparent);
+  --markdown-inline-code-radius: 4px;
+  --markdown-link-color: #386fba;
   --conversation-inline-padding: 28px;
   --conversation-scrollbar-width: 10px;
   --scrollbar-thumb: #b8b8b8;
@@ -2116,6 +2120,7 @@ body {
   --primary-foreground: #1c1c1c;
   --diagram-accent: #9aafe6;
   --diagram-secondary: #85b9b2;
+  --markdown-link-color: #6487bf;
   --destructive: #e0a198;
   --permission-full-foreground: #fb923c;
   --success: #82c9a0;
@@ -2478,17 +2483,16 @@ body {
   border-inline-start: 2px solid var(--markdown-rule);
   border-radius: 0;
   background: transparent;
-  color: var(--muted-foreground);
+  color: color-mix(in srgb, var(--foreground) 85%, var(--background));
 }
 .kite-client .typeset-chat blockquote > * + * {
   margin-block-start: 0.7em;
 }
 .kite-client .typeset-chat :not(pre) > code {
-  padding: 0.05em 0.2em;
+  padding: 0.1em 0.35em;
   border: 0;
-  border-block-end: 1px solid var(--markdown-rule);
-  border-radius: 0;
-  background: transparent;
+  border-radius: var(--markdown-inline-code-radius);
+  background: var(--markdown-inline-code-background);
   color: inherit;
   font-family: var(--typeset-font-mono, ui-monospace), Consolas, monospace;
   font-size: 0.875em;
@@ -2501,9 +2505,9 @@ body {
   max-height: 520px;
   padding: 14px 16px;
   overflow: auto;
-  border: 1px solid var(--border);
+  border: 0;
   border-radius: var(--radius);
-  background: transparent;
+  background: var(--markdown-code-background);
   color: var(--foreground);
   font-family: var(--typeset-font-mono, ui-monospace), Consolas, monospace;
   font-size: 0.875em;
@@ -2524,18 +2528,21 @@ body {
   white-space: inherit;
   overflow-wrap: inherit;
 }
-/* Outline and header rule define the block; PRE keeps the original reading limits. */
+/* One code surface; PRE keeps the original scrolling and keyboard focus behavior. */
 .kite-client .typeset-chat .markdown-code-block {
-  border: 1px solid var(--border);
+  border: 0;
   border-radius: var(--radius);
-  background: transparent;
+  background: var(--markdown-code-background);
   color: var(--foreground);
   font-size: inherit;
+}
+.kite-client .typeset-chat .markdown-code-block:has(.markdown-diagram) {
+  background: transparent;
 }
 .kite-client .markdown-code-block [data-slot="code-block-header"] {
   min-height: 36px;
   padding: 6px 16px;
-  border-bottom: 1px solid var(--border);
+  border: 0;
   color: var(--muted-foreground);
 }
 .kite-client .markdown-code-block [data-slot="code-block-title"] {
@@ -2592,12 +2599,14 @@ body {
 .kite-client .typeset-chat table > :last-child > tr:last-child > :where(th, td) {
   border-block-end: 0;
 }
-.kite-client .typeset-chat :where(a, .file-link) {
-  text-decoration-color: color-mix(in srgb, currentColor 40%, transparent);
+.kite-client .typeset-chat :is(a, .file-link) {
+  color: var(--markdown-link-color);
+  text-decoration-line: none;
   text-underline-offset: 3px;
   text-decoration-thickness: 1px;
 }
-.kite-client .typeset-chat :where(a, .file-link):hover {
+.kite-client .typeset-chat :is(a, .file-link):is(:hover, :focus-visible) {
+  text-decoration-line: underline;
   text-decoration-color: currentColor;
 }
 .kite-client .typeset-chat hr {
@@ -2619,15 +2628,40 @@ body {
 }
 
 .kite-client .typeset-chat .markdown-alert {
+  --markdown-alert-accent: color-mix(in srgb, var(--diagram-accent) 85%, var(--foreground));
+  padding: 12px 16px;
+  border: 0;
+  border-radius: var(--button-radius);
+  background: color-mix(in srgb, var(--markdown-alert-accent) 9%, transparent);
   color: inherit;
 }
+.kite-client .typeset-chat .markdown-alert > * + * {
+  margin-block-start: 0.4em;
+}
 .kite-client .typeset-chat .markdown-alert-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--markdown-alert-accent);
   font-size: 0.9em;
   font-weight: 600;
 }
-.kite-client .typeset-chat .markdown-alert[data-alert="warning"],
+.kite-client .markdown-alert-icon {
+  width: 16px;
+  height: 16px;
+  flex: none;
+}
+.kite-client .typeset-chat .markdown-alert[data-alert="tip"] {
+  --markdown-alert-accent: color-mix(in srgb, var(--success) 85%, var(--foreground));
+}
+.kite-client .typeset-chat .markdown-alert[data-alert="important"] {
+  --markdown-alert-accent: color-mix(in srgb, var(--diagram-secondary) 85%, var(--foreground));
+}
+.kite-client .typeset-chat .markdown-alert[data-alert="warning"] {
+  --markdown-alert-accent: var(--attention-foreground);
+}
 .kite-client .typeset-chat .markdown-alert[data-alert="caution"] {
-  border-inline-start-color: var(--destructive);
+  --markdown-alert-accent: var(--destructive);
 }
 .kite-client .markdown-source-toggle {
   padding: 2px 6px;
@@ -5013,21 +5047,22 @@ body {
   margin: 4px 0;
   padding-left: 10px;
   border-left: 2px solid var(--border);
-  color: var(--muted-foreground);
+  color: color-mix(in srgb, var(--foreground) 85%, var(--background));
 }
 .kite-client .prompt-code-block {
   display: block;
   margin: 4px 0;
   padding: 6px 8px;
-  border: 1px solid var(--border);
-  background: transparent;
+  border: 0;
+  background: var(--markdown-code-background);
   border-radius: var(--radius);
   font: 14px / 20px var(--font-geist-mono, monospace);
 }
 .kite-client .prompt-inline-code {
-  padding: 1px 3px;
-  border-block-end: 1px solid color-mix(in srgb, var(--foreground) 24%, transparent);
-  background: transparent;
+  padding: 1px 4px;
+  border: 0;
+  border-radius: var(--markdown-inline-code-radius);
+  background: var(--markdown-inline-code-background);
   font: 14px / 20px var(--font-geist-mono, monospace);
 }
 .kite-client ul.prompt-list {
@@ -5044,9 +5079,12 @@ body {
   margin: 0;
 }
 .kite-client .prompt-file-link {
-  color: inherit;
-  text-decoration: underline;
+  color: var(--markdown-link-color);
+  text-decoration: none;
   text-underline-offset: 3px;
+}
+.kite-client .prompt-file-link:is(:hover, :focus-visible) {
+  text-decoration: underline;
 }
 .kite-client .composer-attach {
   width: 32px;
